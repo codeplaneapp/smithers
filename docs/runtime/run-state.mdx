@@ -66,6 +66,12 @@ run row says `waiting-event` but no node does, `runState.blocked.kind` is
 detailed unblock command and may report other blockers such as
 `retries-exhausted` or `dependency-failed`.
 </Warning>
+
+When a fail-closed composite such as `<TryCatchFinally>` terminates a run, its
+run-level `SCHEDULER_ERROR` includes the nearest completed output row's
+`summary` and `blockers` fields. The leaf diagnostic is therefore visible in
+`up`, `inspect`, and autopsy output without a separate node/output lookup.
+
 <Warning>
 **`succeeded`/`finished` can mask failed child agents.** Run-level status is binary (`finished` or `failed`); a run fails only on an *unhandled* task failure. Two classes of failed children don't count as run-level failures: tasks marked [`continueOnFail`](/components/task), and agent tasks failing with a *transient* error (rate limits, timeouts, aborts: `SESSION_ERROR`, `TASK_TIMEOUT`, `TASK_HEARTBEAT_TIMEOUT`, `TASK_ABORTED`, or `failureRetryable`). A fan-out where most agents hit provider rate limits can still report `finished` → `succeeded`.
 

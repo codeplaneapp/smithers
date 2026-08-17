@@ -217,6 +217,7 @@ export { getSmithersErrorDocsUrl } from "@smthrs/errors/getSmithersErrorDocsUrl"
 export { isKnownSmithersErrorCode } from "@smthrs/errors/isKnownSmithersErrorCode";
 export { isSmithersError } from "@smthrs/errors/isSmithersError";
 export { knownSmithersErrorCodes } from "@smthrs/errors/knownSmithersErrorCodes";
+export { createIsolatedClone, gitDirtyPaths, isolatedCloneEnvironment, listGitRefs } from "@smthrs/vcs";
 // Components
 export {
   Approval,

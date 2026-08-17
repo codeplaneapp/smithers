@@ -63,7 +63,7 @@ export class GeminiAgent extends BaseCliAgent {
    * @param {GeminiAgentOptions} [opts]
    */
   constructor(opts = {}) {
-    super(opts);
+    super(opts, "GeminiAgent");
     this.opts = opts;
     this.capabilities = createGeminiCapabilityRegistry(opts);
   }

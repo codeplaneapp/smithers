@@ -71,6 +71,7 @@ export { Smithers, approveNode, closeSingleRunnerRuntime, denyNode, fragment, ge
 export { SmithersDb, loadOutputs, loadOutputsEffect } from '@smthrs/db';
 import { SmithersDb } from '@smthrs/db/adapter';
 export { camelToSnake } from '@smthrs/db/utils/camelToSnake';
+export { createIsolatedClone, gitDirtyPaths, isolatedCloneEnvironment, listGitRefs } from '@smthrs/vcs';
 export { ensureSmithersTables } from '@smthrs/db/ensure';
 export { errorToJson } from '@smthrs/errors/errorToJson';
 export { executeChildWorkflow } from '@smthrs/engine/child-workflow';

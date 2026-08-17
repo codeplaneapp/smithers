@@ -521,8 +521,9 @@ declare function extractUsageFromOutput(raw: string): CliUsageInfo$1 | undefined
 declare class BaseCliAgent {
     /**
      * @param {BaseCliAgentOptions} opts
+     * @param {string} [agentName]
      */
-    constructor(opts: BaseCliAgentOptions$1);
+    constructor(opts: BaseCliAgentOptions$1, agentName?: string);
     version: string;
     /** @type {Record<string, unknown>} */
     tools: Record<string, unknown>;

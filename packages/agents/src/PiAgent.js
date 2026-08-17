@@ -92,7 +92,7 @@ export class PiAgent extends BaseCliAgent {
    * @param {PiAgentOptions} [opts]
    */
   constructor(opts = {}) {
-    super(opts);
+    super(opts, "PiAgent");
     this.opts = opts;
     this.capabilities = createPiCapabilityRegistry(opts);
   }

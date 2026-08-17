@@ -18,6 +18,92 @@ declare function findVcsRoot(startDir: string): {
     root: string;
 } | null;
 
+type StreamingProcessResult$1 = {
+    code: number;
+    signal: NodeJS.Signals | null;
+    stdout: string;
+    stderr: string;
+};
+type GitRef$1 = {
+    name: string;
+    objectId: string;
+};
+type IsolatedCloneManifest = {
+    version: 1;
+    sourceCommit: string;
+    dirtyPaths: string[];
+    patch: {
+        file: string;
+        sha256: string;
+    };
+    bundle: {
+        file: string;
+        sha256: string;
+    };
+    freshImportVerified: true;
+};
+type BundleHandoff = {
+    patchPath: string;
+    bundlePath: string;
+    manifestPath: string;
+    manifest: IsolatedCloneManifest;
+};
+type IsolatedCloneCapsule$1 = {
+    path: string;
+    commit: string;
+    marker: {
+        version: 1;
+        nonce: string;
+        source: string;
+        commit: string;
+        createdAt: string;
+    };
+    run(command: string, args?: string[], options?: {
+        env?: Record<string, string | undefined>;
+    }): Promise<StreamingProcessResult$1>;
+    emitBundle(options: {
+        outputDir: string;
+        name?: string;
+    }): Promise<BundleHandoff>;
+    cleanup(): Promise<void>;
+};
+
+/** @param {NodeJS.ProcessEnv} ambient @param {Record<string, string | undefined>} [overrides] */
+declare function isolatedCloneEnvironment(ambient?: NodeJS.ProcessEnv, overrides?: Record<string, string | undefined>): NodeJS.ProcessEnv;
+/**
+ * Spawn a process with streamed stdio. Captured output has no execFileSync
+ * maxBuffer ceiling; callers may instead stream stdout directly to a file.
+ * @param {string} command
+ * @param {string[]} args
+ * @param {{ cwd?: string, env?: NodeJS.ProcessEnv, stdin?: string, stdoutFile?: string }} [options]
+ * @returns {Promise<StreamingProcessResult>}
+ */
+declare function runStreamingProcess(command: string, args: string[], options?: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    stdin?: string;
+    stdoutFile?: string;
+}): Promise<StreamingProcessResult>;
+/** @param {string} repo @returns {Promise<GitRef[]>} */
+declare function listGitRefs(repo: string): Promise<GitRef[]>;
+/** @param {string} repo @returns {Promise<string[]>} */
+declare function gitDirtyPaths(repo: string): Promise<string[]>;
+/**
+ * Create a standalone detached clone at an exact commit. The source working
+ * tree, index, refs, bookmarks, and later HEAD movement are deliberately not
+ * part of the contract; only `at^{commit}` must be readable while cloning.
+ * @param {{ repo: string, at: string, destination?: string }} options
+ * @returns {Promise<IsolatedCloneCapsule>}
+ */
+declare function createIsolatedClone(options: {
+    repo: string;
+    at: string;
+    destination?: string;
+}): Promise<IsolatedCloneCapsule>;
+type GitRef = GitRef$1;
+type IsolatedCloneCapsule = IsolatedCloneCapsule$1;
+type StreamingProcessResult = StreamingProcessResult$1;
+
 type WorkspaceResult$1 = {
     success: boolean;
     error?: string;
@@ -286,4 +372,4 @@ type VcsToolingStatus = {
     ok: boolean;
 };
 
-export { type JjRevertResult, type RunJjOptions, type RunJjResult, type VcsToolingStatus, type WorkspaceAddOptions, type WorkspaceInfo, type WorkspaceResult, type WorkspaceSnapshot, captureWorkspaceSnapshot, findVcsRoot, getJjPointer, isJjRepo, parseWorkspaceSnapshot, resolveBundledJjPath, resolveGitBinary, resolveJjBinary, revertToJjPointer, runJj, runsVersion, vcsToolingStatus, workspaceAdd, workspaceClose, workspaceList };
+export { type GitRef, type IsolatedCloneCapsule, type JjRevertResult, type RunJjOptions, type RunJjResult, type StreamingProcessResult, type VcsToolingStatus, type WorkspaceAddOptions, type WorkspaceInfo, type WorkspaceResult, type WorkspaceSnapshot, captureWorkspaceSnapshot, createIsolatedClone, findVcsRoot, getJjPointer, gitDirtyPaths, isJjRepo, isolatedCloneEnvironment, listGitRefs, parseWorkspaceSnapshot, resolveBundledJjPath, resolveGitBinary, resolveJjBinary, revertToJjPointer, runJj, runStreamingProcess, runsVersion, vcsToolingStatus, workspaceAdd, workspaceClose, workspaceList };

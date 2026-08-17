@@ -7622,7 +7622,7 @@ const { Workflow, smithers, outputs } = createSmithers({
 const sol = new CodexAgent({ model: "gpt-5.6-sol" });
 const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
 const terra = new CodexAgent({ model: "gpt-5.6-terra" });
-const luna = new CodexAgent({ model: "gpt-5.6-luna", model_reasoning_effort: "high" });
+const luna = new CodexAgent({ model: "gpt-5.6-luna", effort: "high" });
 
 export default smithers((ctx) => {
   // The schema default is applied before runtime and static graph rendering.
@@ -8394,9 +8394,9 @@ Every agent task produces a reusable session snapshot. `fork` starts a new task 
 
 > The rules that repeatedly cost authoring runs when learned at runtime instead of before render. Read this before hand-authoring a workflow.
 
-These five rules keep biting workflow-authoring agents at runtime, hours after
+These six rules keep biting workflow-authoring agents at runtime, hours after
 writing a workflow, instead of surfacing at the first `bunx smthrs graph`.
-Each is documented elsewhere in full; this page collects all five in one read
+Each is documented elsewhere in full; this page collects all six in one read
 before you write JSX, instead of hitting them one at a time across failed
 runs. See
 [the postmortem](https://github.com/smithersai/smithers/blob/main/research/workflow-authoring-friction-postmortem.md)
@@ -8510,6 +8510,20 @@ green-looking in the repo indefinitely while contributing zero coverage.
 `node scripts/check-smithers-test-script.mjs` (part of the root `pnpm test`
 gate) catches this; run it after adding a test file, or just add the path
 yourself.
+
+## 6. Use the isolated-clone helper; do not gate a hot source tree
+
+For bundle-producing work, call `createIsolatedClone({ repo, at })` from
+`smthrs` or `@smthrs/vcs`. Only the pinned commit must remain available while
+the clone is created. Do not repeatedly assert equality of the shared working
+tree, index, refs, JJ bookmarks, or object inventory: concurrent work can
+legitimately change all of them after isolation.
+
+Use `clone.run()` so commands execute at the clone root with the documented
+scrubbed environment, then `clone.emitBundle()` for a patch, Git bundle,
+manifest, and fresh-import proof. JJ-colocated repos can have multi-megabyte
+ref inventories; use `listGitRefs()` rather than synchronous `git for-each-ref`
+with Node's default `maxBuffer`. See [VCS Helper Reference](/reference/vcs-helpers).
 
 ## See also
 
@@ -8789,6 +8803,12 @@ type WorkflowViewDefinition = {
 type SmithersWorkflowOptions = {
   alertPolicy?: SmithersAlertPolicy;
   cache?: boolean;
+  environment?: {
+    inherit?: boolean;
+    allow?: string[]; // exact names or PREFIX* patterns
+    deny?: string[];  // exact names or PREFIX* patterns
+    set?: Record<string, string>;
+  };
   // Explicit workflow-level output schema/table used to populate
   // RunResult.output (and therefore a parent <Subflow>'s child result).
   // Defaults to the schema key literally named `output`.
@@ -10462,7 +10482,7 @@ type KnownSmithersErrorCode =
   | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "TASK_EMPTY_PROMPT" | "WORKFLOW_RENDER_FAILED" | "DUPLICATE_ID" | "NESTED_LOOP"
   | "WORKTREE_EMPTY_PATH" | "MDX_PRELOAD_INACTIVE" | "CONTEXT_OUTSIDE_WORKFLOW"
   | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "BOUND_STALE" | "ASPECT_BUDGET_EXCEEDED" | "APPROVAL_OUTSIDE_TASK"
-  | "APPROVAL_OPTIONS_REQUIRED" | "WORKFLOW_MISSING_DEFAULT" | "WORKFLOW_NOT_BUILT"
+  | "APPROVAL_OPTIONS_REQUIRED" | "WORKFLOW_MISSING_DEFAULT" | "WORKFLOW_NOT_BUILT" | "WORKFLOW_FILE_NOT_FOUND"
   | "TOOL_PATH_INVALID" | "TOOL_PATH_ESCAPE" | "TOOL_FILE_TOO_LARGE" | "TOOL_CONTENT_TOO_LARGE"
   | "TOOL_PATCH_TOO_LARGE" | "TOOL_PATCH_FAILED" | "TOOL_NETWORK_DISABLED"
   | "TOOL_GIT_REMOTE_DISABLED" | "TOOL_COMMAND_FAILED" | "TOOL_GREP_FAILED"
@@ -11309,6 +11329,7 @@ connection setup problems aren't hidden behind unrelated source-store errors.
 | Code | When | Details |
 |---|---|---|
 | `INVALID_EVENTS_OPTIONS` | The smithers events command receives invalid filter options. | -- |
+| `WORKFLOW_FILE_NOT_FOUND` | A path-like workflow argument does not exist at the path resolved from the operator working directory. | `{ given, resolved }` |
 | `WORKFLOW_EXISTS` | The workflow creation CLI refuses to overwrite an existing workflow file. | -- |
 | `CLI_DB_NOT_FOUND` | A CLI command cannot find a nearby `smithers.db` file. | -- |
 | `CLI_AGENT_UNSUPPORTED` | The ask command selects an agent integration Smithers doesn't support in that mode. | -- |
@@ -11773,7 +11794,56 @@ import {
   resolveGitBinary,
   resolveJjBinary,
   vcsToolingStatus,
+  createIsolatedClone,
+  listGitRefs,
+  gitDirtyPaths,
 } from "@smthrs/vcs";
+```
+
+`createIsolatedClone`, `listGitRefs`, and `gitDirtyPaths` are also exported by
+the root `smthrs` facade.
+
+## Isolated clone and bundle handoff
+
+`createIsolatedClone({ repo, at, destination? })` creates a standalone,
+detached clone at exactly `at^{commit}`. It removes remotes and refs, rejects
+Git alternates, writes a nonce ownership marker, and will only clean a clone
+whose marker still matches.
+
+```ts
+const clone = await createIsolatedClone({ repo: sharedRepo, at: expectedHead });
+try {
+  await clone.run("pnpm", ["test"]);
+  const handoff = await clone.emitBundle({ outputDir: artifacts, name: "wave-2" });
+} finally {
+  await clone.cleanup();
+}
+```
+
+The hot-tree contract is deliberately narrow: `expectedHead^{commit}` must be
+readable while the clone is created. The source working tree, index, refs, JJ
+bookmarks, object inventory, and later HEAD movement may change; they are not
+quiescence gates. The clone is the isolation boundary. The emitted patch,
+bundle, and JSON manifest are adoption evidence, and `emitBundle()` verifies
+them in a fresh repository before returning. Land a handoff into a shared tree
+only in a short serialized adoption step.
+
+`clone.run()` always uses the clone root as `cwd`. It inherits only `PATH`,
+`HOME`, temp-directory, user/shell, and locale variables, plus explicit `env`
+overrides. Ambient `GIT_*`, `SMITHERS_HOME`, and other `SMITHERS_*` variables
+are absent unless explicitly supplied.
+
+## Large Git inventories
+
+`listGitRefs(repo)` and `gitDirtyPaths(repo)` use streamed child-process output,
+so they do not have Node's synchronous 1 MB `maxBuffer` ceiling. This matters
+for JJ-colocated repositories, where tens of thousands of refs can produce
+multi-megabyte output. Do not replace these helpers with `execFileSync("git",
+["for-each-ref"])` using its default buffer.
+
+```ts
+const refs = await listGitRefs(repo);
+const dirtyPaths = await gitDirtyPaths(repo);
 ```
 
 Direct JJ helper calls need a platform layer:
@@ -14218,6 +14288,12 @@ run row says `waiting-event` but no node does, `runState.blocked.kind` is
 detailed unblock command and may report other blockers such as
 `retries-exhausted` or `dependency-failed`.
 </Warning>
+
+When a fail-closed composite such as `<TryCatchFinally>` terminates a run, its
+run-level `SCHEDULER_ERROR` includes the nearest completed output row's
+`summary` and `blockers` fields. The leaf diagnostic is therefore visible in
+`up`, `inspect`, and autopsy output without a separate node/output lookup.
+
 <Warning>
 **`succeeded`/`finished` can mask failed child agents.** Run-level status is binary (`finished` or `failed`); a run fails only on an *unhandled* task failure. Two classes of failed children don't count as run-level failures: tasks marked [`continueOnFail`](/components/task), and agent tasks failing with a *transient* error (rate limits, timeouts, aborts: `SESSION_ERROR`, `TASK_TIMEOUT`, `TASK_HEARTBEAT_TIMEOUT`, `TASK_ABORTED`, or `failureRetryable`). A fan-out where most agents hit provider rate limits can still report `finished` → `succeeded`.
 

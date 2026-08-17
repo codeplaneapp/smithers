@@ -1,5 +1,5 @@
 import * as effect from 'effect';
-import { Context, Layer, Effect, Schedule } from 'effect';
+import { Effect, Context, Layer, Schedule } from 'effect';
 import * as _smthrs_graph from '@smthrs/graph';
 import { TaskDescriptor as TaskDescriptor$4, WorkflowGraph } from '@smthrs/graph';
 import { TaskDescriptor as TaskDescriptor$5 } from '@smthrs/graph/TaskDescriptor';
@@ -357,6 +357,19 @@ type SmithersWorkflowOutputTarget = {
 type SmithersWorkflowOptions$1 = {
     alertPolicy?: SmithersAlertPolicy$1;
     cache?: boolean;
+    /**
+     * Environment visible while the CLI renders and executes this workflow.
+     * Module top-level evaluation occurs before this declaration can be read.
+     * Ambient variables are inherited by default. `inherit: false` starts empty;
+     * `allow` then copies exact names or `PREFIX*` matches, `deny` removes exact
+     * names or prefix matches, and `set` is applied last.
+     */
+    environment?: {
+        inherit?: boolean;
+        allow?: string[];
+        deny?: string[];
+        set?: Record<string, string>;
+    };
     /**
      * Per-workflow opt-out for the default-on post-failure autopsy. When `false`,
      * a failure of this workflow never auto-launches the `post-failure` autopsy.
