@@ -950,8 +950,12 @@ describe("durable agent checkpoints", () => {
     TIMEOUT_MS,
   );
 
+  // #1610: the retry used to resume the failed attempt's own native session.
+  // That pointer names a conversation the CLI has usually already dropped, so
+  // the retry died instantly with AGENT_SESSION_LOST. A fresh session reseeded
+  // from the fork source costs conversation context, never work.
   test(
-    "a forked hybrid retry resumes its own native session instead of reseeding the source checkpoint",
+    "a forked hybrid retry reseeds the source checkpoint instead of resuming the failed attempt's session",
     async () => {
       const { smithers, outputs, cleanup } = createTestSmithers(outputSchemas);
       const targetCalls = [];
@@ -1007,8 +1011,9 @@ describe("durable agent checkpoints", () => {
         expect(targetCalls[0].resumeCheckpoint).toEqual(checkpoint("source"));
         expect(targetCalls[0].checkpointMode).toBe("fork");
         expect(targetCalls[0].resumeSession).toBeUndefined();
-        expect(targetCalls[1].resumeCheckpoint).toBeUndefined();
-        expect(targetCalls[1].resumeSession).toBe("target-session");
+        expect(targetCalls[1].resumeSession).toBeUndefined();
+        expect(targetCalls[1].resumeCheckpoint).toEqual(checkpoint("source"));
+        expect(targetCalls[1].checkpointMode).toBe("fork");
       } finally {
         cleanup();
       }

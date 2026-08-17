@@ -787,9 +787,12 @@ describe("engine internals: durability, options and graph helpers", () => {
         agentResume: "stale-session",
       }),
     };
+    // Live, not failed: this case is about the reset boundary deciding which
+    // attempts are ELIGIBLE. Whether an eligible attempt's pointer is usable is
+    // a separate rule (#1610) covered by the next test.
     const fresh = {
       attempt: 1,
-      state: "failed",
+      state: "in-progress",
       startedAtMs: 1_100,
       heartbeatDataJson: JSON.stringify({ agentResume: "fresh-session" }),
       metaJson: JSON.stringify({ agentEngine: "cli", agentResume: "fresh-session" }),
@@ -799,6 +802,45 @@ describe("engine internals: durability, options and graph helpers", () => {
       mode: "native-cli",
       resume: "fresh-session",
     });
+  });
+
+  test("resume pointers from failed or cancelled attempts are never offered as a continuation", () => {
+    // #1610: the conversation an unsuccessful attempt named is usually already
+    // gone, so reusing the pointer kills the next attempt with
+    // AGENT_SESSION_LOST and burns a retry doing no work.
+    const attemptWith = (state, meta) => ({ attempt: 1, state, startedAtMs: 100, metaJson: JSON.stringify(meta) });
+    const nativeMeta = { agentEngine: "cli", agentResume: "dead-session" };
+    const conversationMeta = { agentEngine: "cli", agentConversation: [{ role: "user", content: "hi" }] };
+
+    expect(I.findHijackContinuation([attemptWith("failed", nativeMeta)], "cli")).toBeUndefined();
+    expect(I.findHijackContinuation([attemptWith("cancelled", nativeMeta)], "cli")).toBeUndefined();
+    expect(I.findHijackContinuation([attemptWith("failed", conversationMeta)], "cli")).toBeUndefined();
+    // A successful attempt's pointer stays usable, and so does a live one.
+    expect(I.findHijackContinuation([attemptWith("finished", nativeMeta)], "cli")).toEqual({
+      mode: "native-cli",
+      resume: "dead-session",
+    });
+    expect(I.findHijackContinuation([attemptWith("in-progress", nativeMeta)], "cli")).toEqual({
+      mode: "native-cli",
+      resume: "dead-session",
+    });
+    // A hand-off is exempt: that attempt was cancelled BY the hand-off and a
+    // human is sitting in the session it names.
+    expect(
+      I.findHijackContinuation(
+        [attemptWith("cancelled", { ...nativeMeta, hijackHandoff: { engine: "cli", resume: "handoff-session" } })],
+        "cli",
+      ),
+    ).toEqual({ mode: "native-cli", resume: "handoff-session" });
+    // An older successful attempt is not resurrected by a newer failed one:
+    // history is walked newest-first and the failed row simply contributes
+    // nothing, so the succeeded pointer behind it is still the newest usable.
+    expect(
+      I.findHijackContinuation(
+        [attemptWith("failed", nativeMeta), { ...attemptWith("finished", { agentEngine: "cli", agentResume: "ok" }) }],
+        "cli",
+      ),
+    ).toEqual({ mode: "native-cli", resume: "ok" });
   });
 
   test("retry hydration accepts current durable state and ignores stale or legacy deadlines", () => {
