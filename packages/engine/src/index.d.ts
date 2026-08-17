@@ -567,9 +567,10 @@ declare function stableJson(input: unknown): any;
  * @template T
  * @param {string} key
  * @param {() => Promise<T>} execute
+ * @param {AbortSignal} signal
  * @returns {Promise<T>}
  */
-declare function withWorkflowToolSlot<T>(key: string, execute: () => Promise<T>): Promise<T>;
+declare function withWorkflowToolSlot<T>(key: string, execute: () => Promise<T>, signal: AbortSignal): Promise<T>;
 
 /**
  * Watch markdown artifacts under `.smithers/{tickets,plans,specs,proposals}` and

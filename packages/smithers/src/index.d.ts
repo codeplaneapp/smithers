@@ -509,7 +509,6 @@ type DefinedToolContext = ToolContext & {
   idempotencyKey: string | null;
   toolName: string;
   toolCallSeq: number;
-  toolUseId?: string;
   sideEffect: boolean;
   idempotent: boolean;
 };
