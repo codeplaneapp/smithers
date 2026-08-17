@@ -25,7 +25,7 @@
   "scripts": {
     "test": "bun test --timeout=120000 --max-concurrency=1 tests/monitor-shell-controls.test.tsx && bun ./scripts/run-test-shards.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "tsup --dts-only",
+    "build": "node --max-old-space-size=8192 ../../node_modules/tsup/dist/cli-default.js --dts-only",
     "build:ui": "node scripts/build-ui.mjs",
     "prepack": "node scripts/build-ui.mjs"
   },
