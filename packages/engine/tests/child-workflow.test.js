@@ -164,6 +164,72 @@ describe("child workflow helpers", () => {
     }
   });
 
+  test("refuses to launch a new child once the parent has a durable cancel request", async () => {
+    const { smithers, cleanup } = createTestSmithers(outputSchemas);
+    try {
+      const childWorkflow = smithers(() => null);
+      ensureSmithersTables(childWorkflow.db);
+      const adapter = new SmithersDb(childWorkflow.db);
+      // A cancellation landed but the parent engine has not polled it yet:
+      // without the fence it could still create a fresh ACTIVE descendant the
+      // cascade already walked past (#972).
+      await adapter.insertRun({
+        runId: "parent-run",
+        workflowName: "parent",
+        status: "running",
+        createdAtMs: Date.now(),
+        cancelRequestedAtMs: Date.now(),
+      });
+      const runtime = makeRuntime({ db: childWorkflow.db });
+      let launched = false;
+      const bridgeRuntime = {
+        executeChildWorkflow: async (_workflow, opts) => {
+          launched = true;
+          return { runId: opts.runId, status: "finished", output: [] };
+        },
+      };
+
+      await expect(
+        withTaskRuntime(runtime, () =>
+          withWorkflowMakeBridgeRuntime(bridgeRuntime, () =>
+            executeChildWorkflow(childWorkflow, { workflow: childWorkflow }),
+          ),
+        ),
+      ).rejects.toThrow("was cancelled before child workflow");
+      expect(launched).toBe(false);
+      expect(await adapter.getRun("parent-run:child:step:2")).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("refuses to launch a new child once the parent is terminally cancelled", async () => {
+    const { smithers, cleanup } = createTestSmithers(outputSchemas);
+    try {
+      const childWorkflow = smithers(() => null);
+      ensureSmithersTables(childWorkflow.db);
+      const adapter = new SmithersDb(childWorkflow.db);
+      await adapter.insertRun({
+        runId: "parent-run",
+        workflowName: "parent",
+        status: "cancelled",
+        createdAtMs: Date.now(),
+        finishedAtMs: Date.now(),
+      });
+      const runtime = makeRuntime({ db: childWorkflow.db });
+
+      await expect(
+        withTaskRuntime(runtime, () =>
+          withWorkflowMakeBridgeRuntime({ executeChildWorkflow: async () => ({}) }, () =>
+            executeChildWorkflow(childWorkflow, { workflow: childWorkflow }),
+          ),
+        ),
+      ).rejects.toThrow("was cancelled before child workflow");
+    } finally {
+      cleanup();
+    }
+  });
+
   test("rejects an unreadable generated child run id before persistence", async () => {
     const { smithers, db, cleanup } = createTestSmithers(outputSchemas);
     try {

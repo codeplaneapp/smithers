@@ -19,9 +19,12 @@ export async function computeRunStateFromRow(adapter, run, options = {}) {
   let pendingEvent = null;
   let parkedEventBlock = null;
   let sandboxHeartbeats = [];
+  let failedChildren = 0;
   const warnings = await loadRunStateWarnings(adapter, run.runId);
 
-  if (run.status === "waiting-approval") {
+  if (run.status === "finished") {
+    failedChildren = await loadFailedChildren(adapter, run.runId);
+  } else if (run.status === "waiting-approval") {
     pendingApproval = await loadPendingApproval(adapter, run.runId);
   } else if (run.status === "waiting-timer") {
     pendingTimer = await loadPendingTimer(adapter, run.runId);
@@ -46,9 +49,30 @@ export async function computeRunStateFromRow(adapter, run, options = {}) {
     parkedEventBlock,
     sandboxHeartbeats,
     warnings,
+    failedChildren,
     now: options.now,
     staleThresholdMs: options.staleThresholdMs,
   });
+}
+
+/**
+ * Read the authoritative tolerated-failure count persisted by the engine.
+ * Historical and malformed events intentionally map to clean success.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ */
+async function loadFailedChildren(adapter, runId) {
+  if (typeof adapter.listEventsByType !== "function") return 0;
+  const rows = await adapter.listEventsByType(runId, "RunFinished");
+  const payloadJson = rows.at(-1)?.payloadJson;
+  if (typeof payloadJson !== "string") return 0;
+  try {
+    const failedChildren = JSON.parse(payloadJson)?.failedChildren;
+    return Number.isSafeInteger(failedChildren) && failedChildren > 0 ? failedChildren : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**

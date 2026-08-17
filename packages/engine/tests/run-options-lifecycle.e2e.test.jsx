@@ -4,6 +4,7 @@ import { SmithersDb, Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { computeRunState } from "@smthrs/db/runState";
 import { Effect } from "effect";
 
 // Mirrors RUN_WORKFLOW_RUN_ID_MAX_LENGTH / RUN_WORKFLOW_WORKFLOW_PATH_MAX_LENGTH
@@ -67,6 +68,7 @@ describe("runWorkflow runId option", () => {
         expect(run?.runId).toBe(runId);
         expect(run?.status).toBe("finished");
         expect(result.failedChildren).toBeUndefined();
+        expect((await computeRunState(adapter, runId)).state).toBe("succeeded");
       } finally {
         cleanup();
       }
@@ -355,6 +357,40 @@ describe("runWorkflow failed-children reporting", () => {
         expect(finished).toHaveLength(1);
         const payload = JSON.parse(finished[0]?.payloadJson ?? "{}");
         expect(payload.failedChildren).toBe(1);
+        expect((await computeRunState(adapter, runId)).state).toBe("succeeded-with-failures");
+      } finally {
+        runtime.cleanup();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "an unhandled child failure remains a failed run",
+    async () => {
+      const runtime = createTestSmithers(outputSchemas);
+      ensureSmithersTables(runtime.db);
+      const adapter = new SmithersDb(runtime.db);
+      try {
+        const failingAgent = {
+          id: "required-failing-agent",
+          tools: {},
+          async generate() {
+            return { output: { invalid: true } };
+          },
+        };
+        const workflow = runtime.smithers(() => (
+          <Workflow name="required-failure-reporting">
+            <Task id="required" output={runtime.outputs.outputA} agent={failingAgent} noRetry>
+              This failure is not tolerated.
+            </Task>
+          </Workflow>
+        ));
+        const runId = "required-failure-run";
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
+        expect(result.status).toBe("failed");
+        expect(result.failedChildren).toBeUndefined();
+        expect((await computeRunState(adapter, runId)).state).toBe("failed");
       } finally {
         runtime.cleanup();
       }

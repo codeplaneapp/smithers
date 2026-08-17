@@ -165,6 +165,39 @@ describe("DB migration edges", () => {
     }
   });
 
+  // 0043 exists to label the Postgres note tables as staged-but-unserved.
+  // SQLite is the dialect that actually serves notes and has no COMMENT ON, so
+  // the migration must be inert here — recorded in the ledger (it is the schema
+  // head) but creating nothing.
+  test("0043 is recorded as postgres-only on sqlite and changes no tables", () => {
+    const { sqlite, db } = setupMemoryDb();
+    try {
+      const before = sqlite
+        .query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        .all()
+        .map((row) => row.name);
+      const row = migrationRows(sqlite).find((entry) => entry.id === "0043_memory_notes_postgres_staged");
+      expect(row).toBeDefined();
+      expect(JSON.parse(row.details_json)).toEqual({ skipped: "postgres_only" });
+      ensureSmithersTables(db);
+      expect(
+        sqlite
+          .query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+          .all()
+          .map((entry) => entry.name),
+      ).toEqual(before);
+      // The head the migrate CLI reports back as `schemaVersion`.
+      expect(sqlite.query("SELECT id FROM _smithers_schema_migrations ORDER BY id DESC LIMIT 1").get().id).toBe(
+        "0043_memory_notes_postgres_staged",
+      );
+      // Notes still work on sqlite: the tables 0023 created are untouched.
+      expect(before).toContain("_smithers_memory_notes");
+      expect(before).toContain("_smithers_memory_note_supersessions");
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("0037 repairs missing agent checkpoint tables and index idempotently", () => {
     const { sqlite, db } = setupMemoryDb();
     try {

@@ -3,9 +3,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createSmithers } from "smthrs";
+import { createSmithers, runWorkflow } from "smthrs";
+import { getTaskRuntime } from "@smthrs/driver/task-runtime";
 import { retryTask } from "@smthrs/time-travel/retry-task";
 import { z } from "zod";
+import { Effect } from "effect";
 import { Gateway } from "../src/gateway.js";
 import { sleep } from "../../smithers/tests/helpers.js";
 
@@ -65,6 +67,30 @@ function createSequencedWorkflow(dbPath) {
     releases,
     taskInvocations: () => taskInvocations,
   };
+}
+
+function createParkableWorkflow(dbPath) {
+  const api = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
+  const started = deferred();
+  let invocations = 0;
+  const workflow = api.smithers(() => (
+    <api.Workflow name="parkable">
+      <api.Task id="work" output={api.outputs.out}>
+        {async () => {
+          invocations += 1;
+          if (invocations > 1) return { value: 2 };
+          const signal = getTaskRuntime()?.signal;
+          started.resolve();
+          await new Promise((_, reject) => {
+            const abort = () => reject(signal?.reason ?? new Error("aborted"));
+            if (signal?.aborted) abort();
+            else signal?.addEventListener("abort", abort, { once: true });
+          });
+        }}
+      </api.Task>
+    </api.Workflow>
+  ));
+  return { workflow, started, invocations: () => invocations };
 }
 
 describe("gateway run-id ownership", () => {
@@ -251,6 +277,45 @@ describe("gateway run-id ownership", () => {
     expect(startCalls).toBe(0);
     expect(gateway.inflightResumes.has("closing-resume")).toBe(false);
   });
+
+  test("close parks an in-process hosted run durably and it resumes", async () => {
+    dbPath = makeDbPath("close-parks");
+    const parkable = createParkableWorkflow(dbPath);
+    gateway = new Gateway({ heartbeatMs: 1000 });
+    gateway.register("parkable", parkable.workflow);
+    const runId = "gateway-close-parks";
+
+    await gateway.startRun("parkable", {}, AUTH, runId);
+    await parkable.started.promise;
+    await gateway.close();
+
+    const adapter = gateway.adapterForWorkflow(parkable.workflow);
+    expect(await adapter.getRun(runId)).toMatchObject({
+      status: "paused",
+      finishedAtMs: null,
+      heartbeatAtMs: null,
+      runtimeOwnerId: null,
+      pauseRequestedAtMs: null,
+    });
+    expect((await Effect.runPromise(runWorkflow(parkable.workflow, { input: {}, runId, resume: true }))).status).toBe(
+      "finished",
+    );
+    expect(parkable.invocations()).toBe(2);
+  }, 10_000);
+
+  test("close with killRuns preserves destructive teardown", async () => {
+    dbPath = makeDbPath("close-kills");
+    const parkable = createParkableWorkflow(dbPath);
+    gateway = new Gateway({ heartbeatMs: 1000 });
+    gateway.register("parkable", parkable.workflow);
+    const runId = "gateway-close-kills";
+
+    await gateway.startRun("parkable", {}, AUTH, runId);
+    await parkable.started.promise;
+    await gateway.close({ killRuns: true });
+
+    expect(await gateway.adapterForWorkflow(parkable.workflow).getRun(runId)).toMatchObject({ status: "cancelled" });
+  }, 10_000);
 
   test("an older settling invocation preserves newer same-run tracking", async () => {
     dbPath = makeDbPath("owned-cleanup-replacement");
