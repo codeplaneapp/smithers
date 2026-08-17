@@ -16593,6 +16593,17 @@ pass `{ namespace }` to stay namespace-local on a shared backend. See
 [`examples/incident-runbook-memory.jsx`](https://github.com/smithersai/smithers/blob/main/examples/incident-runbook-memory.jsx)
 for the full recall → triage → bank → distill → ratify loop.
 
+Notes are a **SQLite-only** capability: the note + supersession-edge write needs
+one synchronous transaction and search needs FTS5, neither of which the Postgres
+path provides. `saveNote`, `enableNoteSearch`, `searchNotes`, and the
+transactional `deleteThread` fail loud against a Postgres/PGlite handle rather
+than degrading. The Postgres schema still carries `_smithers_memory_notes` and
+`_smithers_memory_note_supersessions` for dialect parity, labelled *staged, not
+served* by migration `0043_memory_notes_postgres_staged`. Under Bun, a Postgres
+or PGlite workspace still gets notes: `openSmithersBackend` keeps memory in the
+`.smithers/smithers.db` sqlite sidecar it opens alongside the main database. Under
+Node there is no sqlite at all. See Node runtime.
+
 ## Processors
 
 Maintenance jobs you run periodically:

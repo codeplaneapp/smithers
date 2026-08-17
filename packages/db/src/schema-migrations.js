@@ -851,6 +851,46 @@ async function installSnapshotTriggersPostgres(pgConn) {
 }
 
 /**
+ * The Postgres memory-note tables carry this comment verbatim so their
+ * staged-but-unserved status is visible wherever an operator actually looks at
+ * the schema (`\d+ _smithers_memory_notes`, `obj_description`, a `pg_dump`)
+ * instead of only in Smithers' source. 0001/0023 create the tables on Postgres
+ * for dialect parity; no runtime writes them.
+ */
+const MEMORY_NOTES_POSTGRES_STAGED_COMMENT =
+  "STAGED, NOT SERVED: Smithers serves memory notes only from the sqlite backend " +
+  "(bun:sqlite synchronous transactions for note+edge atomicity, FTS5 for search). " +
+  "On a Postgres/PGlite store openSmithersBackend keeps memory in the " +
+  ".smithers/smithers.db sqlite sidecar, and MemoryStore rejects saveNote, " +
+  "enableNoteSearch, searchNotes, and deleteThread against this database. These " +
+  "tables exist for dialect parity only (created by 0001_current_tables / " +
+  "0023_add_memory_notes, labelled by 0043_memory_notes_postgres_staged).";
+
+const MEMORY_NOTE_TABLES = ["_smithers_memory_notes", "_smithers_memory_note_supersessions"];
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function quotePostgresLiteral(value) {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+/**
+ * @param {{ query: (config: { text: string; values?: readonly unknown[] }) => Promise<{ rows?: readonly Record<string, unknown>[] }> }} pgConn
+ * @param {string} table
+ * @returns {Promise<string | null>}
+ */
+async function tableCommentPostgres(pgConn, table) {
+  const result = await pgConn.query({
+    text: "SELECT obj_description(c.oid, 'pg_class') AS comment FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = current_schema() AND c.relname = $1 LIMIT 1",
+    values: [table],
+  });
+  const comment = result.rows?.[0]?.comment;
+  return typeof comment === "string" ? comment : null;
+}
+
+/**
  * @param {{ query: (config: { text: string; values?: readonly unknown[] }) => Promise<{ rows?: readonly Record<string, unknown>[] }> }} pgConn
  * @param {string} table
  */
@@ -2471,6 +2511,45 @@ function buildMigrations(context) {
           }
         }
         return { table: "_smithers_runs", addedColumns };
+      },
+    },
+    {
+      // Metadata only: 0023 (and, on a fresh database, 0001) creates
+      // `_smithers_memory_notes` / `_smithers_memory_note_supersessions` on
+      // Postgres, but MemoryStore serves notes only from bun:sqlite. Deleting
+      // that DDL would not remove the tables — 0001 creates every current table
+      // on a fresh Postgres store, and existing deployments already hold them —
+      // so instead label them in the catalog. An operator reading the schema
+      // sees the tables are staged, not served, without reading Smithers'
+      // source. Re-runs are self-healing: a dropped comment is restored on the
+      // next boot without touching a single row.
+      id: "0043_memory_notes_postgres_staged",
+      name: "Label the Postgres memory-note tables as staged but unserved",
+      checksum: checksumForStatements(
+        MEMORY_NOTE_TABLES.map((table) => `COMMENT ON TABLE ${table} IS ${MEMORY_NOTES_POSTGRES_STAGED_COMMENT}`),
+      ),
+      // SQLite is the dialect that serves notes, and it has no COMMENT ON;
+      // there is nothing to label. Report the reason into the ledger rather
+      // than claiming the schema already matched.
+      isApplied: () => false,
+      up: () => ({ skipped: "postgres_only" }),
+      isAppliedPostgres: async (pgConn) => {
+        for (const table of MEMORY_NOTE_TABLES) {
+          if (!(await tableExistsPostgres(pgConn, table))) continue;
+          if ((await tableCommentPostgres(pgConn, table)) !== MEMORY_NOTES_POSTGRES_STAGED_COMMENT) return false;
+        }
+        return true;
+      },
+      upPostgres: async (pgConn) => {
+        const tables = [];
+        for (const table of MEMORY_NOTE_TABLES) {
+          if (!(await tableExistsPostgres(pgConn, table))) continue;
+          await pgConn.query({
+            text: `COMMENT ON TABLE ${quoteIdentifier(table)} IS ${quotePostgresLiteral(MEMORY_NOTES_POSTGRES_STAGED_COMMENT)}`,
+          });
+          tables.push(table);
+        }
+        return { tables, staged: true };
       },
     },
   ];
