@@ -506,9 +506,15 @@ export function createSmithers(schemas, opts) {
   // Calling close() ourselves lets sqlite3 finalize everything gracefully.
   //
   // `close` is also exposed on the returned API so a caller that opens many
-  // short-lived databases (notably test suites) can release the fds, the WAL
-  // and `-shm` mappings, and the sqlite3 locking state at the end of each
-  // fixture instead of holding every handle open until the process exits.
+  // short-lived databases (notably test suites) can retire them at the end of
+  // each fixture instead of holding every handle until the process exits.
+  // Note what that does NOT buy: `Database.close()` is `sqlite3_close_v2`, so
+  // the connection only unwinds once its last prepared statement is finalized,
+  // and Drizzle leaves one unreachable statement per database behind. The fds,
+  // the `-shm` mapping and the locking state therefore come back on the next
+  // full collection, not on this call. Forcing that collection is the caller's
+  // decision — a library has no business imposing a stop-the-world GC — so it
+  // is documented on the API type rather than done here.
   let dbClosed = false;
   const closeDb = () => {
     if (dbClosed) return;

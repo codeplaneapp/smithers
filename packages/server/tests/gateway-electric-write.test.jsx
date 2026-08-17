@@ -4,12 +4,12 @@
 // enforces scope, returns a null txid rather than a fabricated one (the prior
 // out-of-band BEGIN/COMMIT raced the storage semaphore), and does NOT take a
 // global DB lock — a concurrent RPC interleaves cleanly while a write runs.
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
-import { createSmithers } from "smthrs";
+import { closeTrackedSmithers, createTrackedSmithers as createSmithers } from "./fixtures/tracked-smithers.js";
 import {
   Gateway,
   GATEWAY_RPC_MAX_ARRAY_LENGTH,
@@ -17,6 +17,8 @@ import {
   GATEWAY_RPC_MAX_STRING_LENGTH,
 } from "../src/gateway.js";
 import { sleep } from "../../smithers/tests/helpers.js";
+
+afterAll(closeTrackedSmithers);
 
 function getPort(server) {
   const addr = server.address();
