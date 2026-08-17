@@ -23,14 +23,28 @@ const generated = await import(new URL("../apps/cli/src/seeded-workflow-pack.gen
 const initFiles = generated.GENERATED_SEEDED_FILES;
 const initBytes = initFiles.reduce((total, file) => total + Buffer.byteLength(file.contents), 0);
 
-// npm ships as npm.cmd on Windows, which spawnSync cannot resolve from a bare
-// "npm" without a shell, so the check failed there with ENOENT.
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const packed = spawnSync(npmCommand, ["pack", "--dry-run", "--json", "--ignore-scripts"], {
-  cwd: resolve(root, "apps/cli"),
-  encoding: "utf8",
-  timeout: 120_000,
-});
+// npm on Windows is npm.cmd. A bare "npm" fails ENOENT because spawnSync does
+// not apply PATHEXT, and naming npm.cmd directly fails EINVAL because Node
+// refuses to spawn .cmd/.bat without a shell (the CVE-2024-27980 mitigation).
+// A shell is therefore required on win32; every argument here is a fixed flag,
+// so there is nothing to quote.
+// Passing an args array together with shell:true is deprecated (DEP0190), so
+// Windows gets the command as one pre-composed string instead. The flags are
+// fixed literals, so there is nothing to quote or escape.
+const packArgs = ["pack", "--dry-run", "--json", "--ignore-scripts"];
+const onWindows = process.platform === "win32";
+const packed = onWindows
+  ? spawnSync(`npm ${packArgs.join(" ")}`, {
+      cwd: resolve(root, "apps/cli"),
+      encoding: "utf8",
+      timeout: 120_000,
+      shell: true,
+    })
+  : spawnSync("npm", packArgs, {
+      cwd: resolve(root, "apps/cli"),
+      encoding: "utf8",
+      timeout: 120_000,
+    });
 if (packed.error || packed.status !== 0) {
   throw new Error(`npm pack --dry-run failed: ${packed.error?.message ?? packed.stderr ?? `exit ${packed.status}`}`);
 }
