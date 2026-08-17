@@ -6367,6 +6367,75 @@ child has its own `input` schema and `ctx.input`, populated from the parent's
 
 ---
 
+## Workflow tools
+
+> Give an agent a workflow as a durable, Zod-validated callable tool.
+
+`workflowTool` adapts a Smithers workflow to the same AI SDK tool contract used
+by `defineTool`, MCP tools, and OpenAPI tools. It is intended for in-process SDK
+agents such as `OpenAIAgent` and `AnthropicAgent`.
+
+```tsx
+import { OpenAIAgent, workflowTool } from "smthrs";
+
+const research = workflowTool({
+  name: "research_topic",
+  description: "Research a topic with the durable research workflow.",
+  workflow: researchWorkflow,
+});
+
+const agent = new OpenAIAgent({
+  model: "gpt-5-mini",
+  tools: { research_topic: research },
+});
+```
+
+## Input and result
+
+The child workflow's existing Zod `input` schema is the tool parameter schema.
+There is no second schema to keep synchronized. A workflow with no input schema
+gets a strict empty-object schema, so the agent calls it with `{}`. A successful
+call returns the workflow's declared `RunResult.output`.
+
+## Durable child run
+
+Each distinct parsed input creates a real child run through the same executor as
+`<Subflow mode="childRun">`. The child is visible in the run tree, has
+`parentRunId` set to the calling run, and records `startedBy.harness` as
+`smithers-workflow-tool`. Repeating the same tool call in the same task and
+iteration uses the same input-derived child run ID, so retries attach or resume
+instead of duplicating work.
+
+The agent task holds one parent scheduler slot while its child runs. Parallel
+workflow-tool calls from that task are serialized, so they remain one admitted
+subtree and cannot bypass the parent's concurrency budget.
+
+## Pauses and human decisions
+
+The call waits while the child is actively executing. If the child parks for an
+approval, human request, event, timer, quota, or explicit pause, the tool returns
+an immediate `WORKFLOW_TOOL_SUSPENDED` error to the agent. The error includes
+the child run ID and status. Resolve the request against that child run, then
+retry the calling task to resume it. The tool never polls a parked child
+forever. The whole invocation, including its local queue wait, is bounded by
+`timeoutMs`, which defaults to 5 minutes, and by the calling task's
+cancellation and timeout signals.
+
+Failed and cancelled children become `WORKFLOW_TOOL_CHILD_FAILED` tool errors.
+The agent receives the child run ID, terminal status, and a bounded public error
+code and summary when available. Stacks, causes, and internal metadata are not
+copied into the tool error.
+
+## Recursion
+
+Nested workflow-tool calls carry a durable depth counter. The default maximum
+depth is 4 and `maxDepth` accepts 1 through 32. Crossing the limit raises
+`WORKFLOW_TOOL_DEPTH_EXCEEDED` before another child starts.
+
+See the runnable [`examples/workflow-tool.tsx`](https://github.com/smithersai/smithers/blob/main/examples/workflow-tool.tsx).
+
+---
+
 ## <ContinueAsNew>
 
 > Close the current run; start a fresh one with optional carried state.
@@ -8842,6 +8911,7 @@ interface SmithersWorkflow<Schema = unknown> {
   readonly db?: unknown;
   readonly build: (ctx: SmithersCtx<Schema>) => JSX.Element;
   readonly opts: SmithersWorkflowOptions;
+  readonly inputSchema?: import("zod").ZodTypeAny;
   readonly memoryService?: import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService;
   readonly schemaRegistry?: Map<string, SchemaRegistryEntry>;
   readonly zodToKeyName?: Map<import("zod").ZodObject<import("zod").ZodRawShape>, string>;
@@ -10544,6 +10614,8 @@ type KnownSmithersErrorCode =
   | "TASK_FORK_SESSION_UNAVAILABLE" | "TASK_FORK_CHECKPOINT_INCOMPATIBLE" | "TASK_FORK_CYCLE"
   | "RUN_NOT_FOUND" | "NODE_NOT_FOUND" | "INVALID_EVENTS_OPTIONS"
   | "SANDBOX_BUNDLE_INVALID" | "SANDBOX_BUNDLE_TOO_LARGE" | "WORKFLOW_EXECUTION_FAILED"
+  | "WORKFLOW_TOOL_CHILD_FAILED" | "WORKFLOW_TOOL_SUSPENDED"
+  | "WORKFLOW_TOOL_DEPTH_EXCEEDED" | "WORKFLOW_TOOL_TIMEOUT"
   | "SANDBOX_EXECUTION_FAILED" | "TASK_HEARTBEAT_TIMEOUT" | "AGENT_WORKER_EXITED" | "HEARTBEAT_PAYLOAD_TOO_LARGE"
   | "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE" | "TASK_ABORTED" | "RUN_CANCELLED" | "RUN_NOT_RESUMABLE"
   | "RUN_OWNER_ALIVE" | "RUN_STILL_RUNNING" | "RUN_RESUME_CLAIM_LOST" | "RUN_RESUME_CLAIM_FAILED"
@@ -11265,6 +11337,10 @@ try {
 | `SANDBOX_BUNDLE_INVALID` | A sandbox bundle fails validation (missing README, invalid manifest, etc.). | `{ bundlePath }` |
 | `SANDBOX_BUNDLE_TOO_LARGE` | A sandbox bundle exceeds the maximum allowed size. | `{ bundlePath, maxBytes }` |
 | `WORKFLOW_EXECUTION_FAILED` | A child or builder workflow exits unsuccessfully without surfacing a typed error payload. | `{ status }` |
+| `WORKFLOW_TOOL_CHILD_FAILED` | A workflow invoked by an agent tool ends unsuccessfully. | `{ toolName, childRunId, status, childError? }` |
+| `WORKFLOW_TOOL_SUSPENDED` | A workflow invoked by an agent tool parks for approval, human input, an event, a timer, quota, or an explicit pause. | `{ toolName, childRunId, status }` |
+| `WORKFLOW_TOOL_DEPTH_EXCEEDED` | Nested workflow-tool calls exceed the configured recursion depth. | `{ toolName, maxDepth, parentRunId }` |
+| `WORKFLOW_TOOL_TIMEOUT` | A workflow invoked by an agent tool exceeds its wall-time limit. | `{ toolName, childRunId, timeoutMs }` |
 | `SANDBOX_EXECUTION_FAILED` | Sandbox setup or execution fails before a more specific sandbox error can be emitted. | `{ sandboxId, runId?, maxConcurrent?, activeSandboxCount? }` |
 | `TASK_HEARTBEAT_TIMEOUT` | A task heartbeat timeout expires while the task is still running. | `{ nodeId, iteration, attempt, timeoutMs, staleForMs, lastHeartbeatAtMs }` |
 | `AGENT_WORKER_EXITED` | A spawned agent worker process exits without the attempt reaching a terminal state. The attempt fails and feeds the normal retry / `fallbackAgents` chain. | `{ nodeId, iteration, attempt, pid, exitCode, signal, attemptRunningForMs, sinceWorkerExitMs, graceMs }` |

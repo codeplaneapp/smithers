@@ -208,6 +208,8 @@
 /** @typedef {import("@smthrs/components").WaitForEventProps} WaitForEventProps */
 /** @typedef {import("@smthrs/components").WorkflowViewBootProps} WorkflowViewBootProps */
 /** @typedef {import("@smthrs/components").WorkflowViewProps} WorkflowViewProps */
+/** @typedef {import("@smthrs/engine").WorkflowTool} WorkflowTool */
+/** @typedef {import("@smthrs/engine").WorkflowToolOptions} WorkflowToolOptions */
 /**
  * @template T
  * @typedef {import("@smthrs/memory").WorkingMemoryConfig<T>} WorkingMemoryConfig
@@ -417,6 +419,7 @@ export {
   runWorkflow,
   Smithers,
   workflow,
+  workflowTool,
 } from "@smthrs/engine";
 export { resolveWorktreePath } from "@smthrs/graph";
 export { signalRun } from "@smthrs/engine/signals";

@@ -90,6 +90,7 @@ const CORE_PAGES = [
   "components/sandbox.mdx",
   "components/sandbox-providers.mdx",
   "components/subflow.mdx",
+  "components/workflow-tool.mdx",
   "components/continue-as-new.mdx",
   "components/super-smithers.mdx",
   "components/aspects.mdx",

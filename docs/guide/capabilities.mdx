@@ -105,6 +105,7 @@ stops it instead of burning the retry budget.
 | "Publish our pack so other teams can install it." | `bunx smthrs share` opens the pull request for you. |
 | "Update the packs we've installed." | `bunx smthrs packs update`. |
 | "Copy the built-in implement workflow into the repo so we can customize it." | `bunx smthrs eject` copies the workflow plus its UI, prompts, and libraries. |
+| "Let this agent call our research workflow like a tool." | `workflowTool({ name, workflow })` derives parameters from the workflow input schema and runs each call as an attributed child run ([Workflow tools](/components/workflow-tool)). |
 | "Upgrade Smithers itself." | `bunx smthrs update`, or `upgrade` for the agent-assisted path. |
 
 ## Quick jobs, no workflow
