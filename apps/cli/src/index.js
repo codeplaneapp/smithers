@@ -33,7 +33,7 @@ import { classifyRunDriverLiveness, describeLiveDriverRefusal } from "@smthrs/en
 import { signalRun } from "@smthrs/engine/signals";
 import { loadInput, loadOutputs } from "@smthrs/db/snapshot";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
-import { runCancellationSourceFromRow, SmithersDb } from "@smthrs/db/adapter";
+import { runCancellationSourceFromRow, SmithersDb, stripImmutableRunFields } from "@smthrs/db/adapter";
 import { computeRunStateFromRow, deriveRunState } from "@smthrs/db/runState";
 import { parseStateKey } from "@smthrs/scheduler/parseStateKey";
 import { normalizeRunStartedBy, SmithersCtx } from "@smthrs/driver";
@@ -486,8 +486,12 @@ async function restoreRetryTaskState(adapter, snapshot, resumeClaim) {
             );
           }
         }
-        const { runId: _runId, ...runPatch } = runSnapshot.run;
-        yield* adapter.updateRunEffect(runSnapshot.run.runId, runPatch);
+        // getRun returns the full row, including the identity/immutable
+        // fields (runId, owner, app). Replaying them as a patch trips
+        // validateRunPatch's ownership-immutability guard and aborts the
+        // whole rollback transaction, so strip them first. They are immutable
+        // by design, so the snapshot's values already equal the live row's.
+        yield* adapter.updateRunEffect(runSnapshot.run.runId, stripImmutableRunFields(runSnapshot.run));
       }
       return true;
     }),

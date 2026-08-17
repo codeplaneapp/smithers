@@ -586,6 +586,29 @@ function validateRunRow(row) {
   validateOptionalPositiveTimestamp(r, "hijackRequestedAtMs");
 }
 /**
+ * Run-row fields that can never appear in an `updateRun` patch: `runId` is
+ * the row's identity, and `owner`/`app` are fixed at insert time
+ * (validateRunPatch below rejects them). Full-row restore paths — the
+ * retry-task rollback in the CLI — snapshot `getRun` and replay the row as a
+ * patch, so they must strip these fields first; keeping the list here, next
+ * to the validator that enforces it, means the next immutable column is added
+ * in exactly one place.
+ */
+export const DB_RUN_IMMUTABLE_FIELDS = ["runId", "owner", "app"];
+
+/**
+ * Remove the identity/immutable fields from a full run row so the remainder
+ * is a legal `updateRun` patch. Because the stripped fields are immutable,
+ * the snapshot's values necessarily equal the live row's, so dropping them
+ * loses nothing.
+ * @param {Record<string, unknown>} row
+ * @returns {Record<string, unknown>}
+ */
+export function stripImmutableRunFields(row) {
+  return Object.fromEntries(Object.entries(row).filter(([key]) => !DB_RUN_IMMUTABLE_FIELDS.includes(key)));
+}
+
+/**
  * @param {unknown} patch
  * @returns {void}
  */
