@@ -8921,7 +8921,11 @@ const cli = Cli.create({
         // its engine can never be auto-resumed (it was skipped forever with
         // "workflow file not found at (missing path)").
         let builtinResumeGoalArgs = [goal];
-        if (Buffer.byteLength(goal, "utf8") > 64 * 1024) {
+        // Same ceiling the launch path enforces on an inline goal. A goal that
+        // launches but is re-inlined into the resume argv above the CLI's own
+        // limit is a run that executes once and can never be resumed, so both
+        // sides read one constant.
+        if (Buffer.byteLength(goal, "utf8") > CLI_TEXT_ARGUMENT_MAX_LENGTH) {
           const smithersHome =
             process.env.SMITHERS_HOME ||
             (process.env.HOME ? resolve(process.env.HOME, ".smithers") : resolve(taskCwd, ".smithers"));
@@ -9644,7 +9648,20 @@ const cli = Cli.create({
             ...summary,
           });
         }
-        await runPromise(supervisorLoopEffect(supervisorOptions), { signal: abort.signal });
+        const loopSummary = await runPromise(supervisorLoopEffect(supervisorOptions), { signal: abort.signal });
+        // Giving up is a failure of unattended recovery, not a clean stop: the
+        // supervised runs are abandoned and marked failed. Exiting 0 here made
+        // that invisible to whatever supervises the supervisor.
+        if (loopSummary.gaveUpRunIds.length > 0) {
+          return fail({
+            code: "SUPERVISOR_GAVE_UP",
+            message:
+              `Supervisor gave up on ${loopSummary.gaveUpRunIds.join(", ")}: ` +
+              "consecutive auto-resumes died before activation. Each run is marked failed with AUTO_RESUME_GAVE_UP " +
+              "diagnostics and a durable alert; inspect with `smithers alerts` and resume manually once the startup failure is fixed.",
+            exitCode: 1,
+          });
+        }
         return c.ok({ status: "stopped" });
       } catch (error) {
         if (abort.signal.aborted) {
