@@ -2148,7 +2148,13 @@ declare class Gateway {
         workflowName?: string;
         workflowPath?: string;
     }, registeredKeys: Set<string>, fallbackKey: string): string;
-    /** @param {Record<string, unknown>} run */
+    /**
+     * Insertion-ordered LRU: every list/snapshot call feeds this map a page of
+     * rows, so an unbounded map would grow with total run history. Re-setting on
+     * every observation keeps live runs at the young end, and a run evicted from
+     * the cold end is re-resolved from the store on its next authorization.
+     * @param {Record<string, unknown>} run
+     */
     rememberRunOwnership(run: Record<string, unknown>): void;
     /**
      * Scope checks answer whether a method may act; this ownership check then
@@ -2187,8 +2193,19 @@ declare class Gateway {
      * @param {number} [offset] Rows to skip after the newest-first sort (server-side pagination).
      * @param {boolean} [includeSystem] Include internal and historical unstamped runs.
      * @param {string} [parentRunId] Return only direct children of this run.
+     * @param {{ ownership?: { owner: string; app: string }; includeUnowned?: boolean; unownedOnly?: boolean }} [ownershipOptions]
+     *   Tenant confinement for the underlying store query. Callers must derive
+     *   this from the authenticated connection (see `ownershipListOptions`);
+     *   defaulting to `{}` is the unscoped, single-tenant behavior.
      */
-    listRunsAcrossWorkflows(limit?: number, status?: string, workflow?: string, offset?: number, includeSystem?: boolean, parentRunId?: string, ownershipOptions?: {}): Promise<any[]>;
+    listRunsAcrossWorkflows(limit?: number, status?: string, workflow?: string, offset?: number, includeSystem?: boolean, parentRunId?: string, ownershipOptions?: {
+        ownership?: {
+            owner: string;
+            app: string;
+        };
+        includeUnowned?: boolean;
+        unownedOnly?: boolean;
+    }): Promise<any[]>;
     /**
      * Cross-run memory facts for the `listMemoryFacts` RPC. Memory is global (keyed
      * by namespace+key, not per-run), so iterate each DISTINCT workflow DB exactly

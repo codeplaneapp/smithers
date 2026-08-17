@@ -1435,7 +1435,7 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
       expect(rows.every((row) => String(row.comment).startsWith("STAGED, NOT SERVED"))).toBe(true);
     });
 
-    test("0043 is the recorded schema head", async () => {
+    test("0044 is the recorded schema head", async () => {
       const head = await client.query("SELECT id FROM _smithers_schema_migrations ORDER BY id DESC LIMIT 1");
       expect(head.rows[0].id).toBe("0044_run_ownership");
     });

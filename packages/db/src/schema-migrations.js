@@ -2608,7 +2608,7 @@ function buildMigrations(context) {
             addedColumns.push(column);
           }
         }
-        await pgConn.query({ text: CREATE_RUN_OWNERSHIP_INDEX_SQL });
+        await pgConn.query({ text: translateDdl(POSTGRES, CREATE_RUN_OWNERSHIP_INDEX_SQL) });
         return { table: "_smithers_runs", addedColumns, index: RUN_OWNERSHIP_INDEX };
       },
     },

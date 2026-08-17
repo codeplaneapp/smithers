@@ -116,6 +116,77 @@ describe("Gateway run ownership isolation", () => {
     expect(await adapter.getRun(runId)).toMatchObject({ owner: "alice", app: "arb" });
   });
 
+  // #785 class: the app header is the second half of the tenant key, so an
+  // operator who explicitly enumerated three trusted headers must not have a
+  // fourth one silently start being honored by their (unchanged) proxy.
+  test("trusted-proxy mode honors the app header only when it is explicitly allow-listed", async () => {
+    dbPath = join(tmpdir(), `smithers-owner-proxy-${crypto.randomUUID()}.db`);
+    const workflow = workflowAt(dbPath);
+
+    const listWith = async (runId, trustedHeaders) => {
+      const local = new Gateway({
+        auth: {
+          mode: "trusted-proxy",
+          trustedProxies: ["127.0.0.1"],
+          ...(trustedHeaders ? { trustedHeaders } : {}),
+        },
+      });
+      local.register("owned", workflow);
+      const adapter = local.adapterForWorkflow(workflow);
+      await adapter.insertRun({
+        runId,
+        workflowName: "owned",
+        status: "running",
+        createdAtMs: 1,
+        owner: "alice",
+        app: "arb",
+      });
+      const server = await local.listen({ port: 0, host: "127.0.0.1" });
+      try {
+        const response = await fetch(`http://127.0.0.1:${portOf(server)}/v1/rpc/listRuns`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-user-id": "alice",
+            "x-user-scopes": "run:read",
+            "x-user-role": "operator",
+            "x-app-id": "arb",
+          },
+          body: JSON.stringify({ filter: { includeSystem: true } }),
+        });
+        const body = await response.json();
+        return body.payload.map((run) => run.runId);
+      } finally {
+        await local.close();
+      }
+    };
+
+    // Omitted trustedHeaders => every default applies, including the app header.
+    expect(await listWith("proxy-default", undefined)).toContain("proxy-default");
+    // Explicit three-entry allow-list => x-app-id is ignored, the identity is
+    // missing its app half, and the caller falls back to unowned runs only.
+    expect(await listWith("proxy-three", ["x-user-id", "x-user-scopes", "x-user-role"])).not.toContain("proxy-three");
+    // Explicit fourth entry => honored again, under the operator's own name.
+    expect(await listWith("proxy-four", ["x-user-id", "x-user-scopes", "x-user-role", "x-app-id"])).toContain(
+      "proxy-four",
+    );
+  });
+
+  test("the ownership cache stays bounded without evicting a run the gateway is driving", () => {
+    const local = new Gateway({});
+    local.activeRuns.set("live-run", {});
+    local.rememberRunOwnership({ runId: "live-run", owner: "alice", app: "arb" });
+    for (let index = 0; index < 12_000; index += 1) {
+      local.rememberRunOwnership({ runId: `cold-${index}`, owner: "alice", app: "arb" });
+    }
+    expect(local.runOwnershipById.size).toBeLessThanOrEqual(10_000);
+    // The oldest entry, but live: eviction must walk past it.
+    expect(local.runOwnershipById.get("live-run")).toEqual({ owner: "alice", app: "arb" });
+    // The newest cold entries are the ones that survived.
+    expect(local.runOwnershipById.has("cold-11999")).toBe(true);
+    expect(local.runOwnershipById.has("cold-0")).toBe(false);
+  });
+
   test("unowned legacy rows and an auth identity without app keep the single-tenant behavior", async () => {
     dbPath = join(tmpdir(), `smithers-owner-legacy-${crypto.randomUUID()}.db`);
     const workflow = workflowAt(dbPath);

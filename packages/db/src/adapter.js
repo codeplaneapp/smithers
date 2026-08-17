@@ -53,6 +53,7 @@ function approvalTarget(row) {
   return { nodeId: row.nodeId, iteration: row.iteration };
 }
 import {
+  assertMaxStringLength,
   assertOptionalStringMaxLength,
   assertPositiveFiniteInteger,
   assertPositiveFiniteNumber,
@@ -166,6 +167,18 @@ async function pruneOrphanedAgentCheckpointContentsPage(storage, options) {
 export const DB_RUN_ID_MAX_LENGTH = 256;
 export const DB_RUN_WORKFLOW_NAME_MAX_LENGTH = 256;
 export const DB_RUN_OWNERSHIP_KEY_MAX_LENGTH = 256;
+/**
+ * Ownership filters are an isolation boundary: a partially-supplied pair would
+ * silently widen the query, so both halves must be present, non-blank strings.
+ * @param {{ owner: string; app: string }} ownership
+ */
+function assertOwnershipFilter(ownership) {
+  assertMaxStringLength("owner", ownership.owner, DB_RUN_OWNERSHIP_KEY_MAX_LENGTH);
+  assertMaxStringLength("app", ownership.app, DB_RUN_OWNERSHIP_KEY_MAX_LENGTH);
+  if (!ownership.owner.trim() || !ownership.app.trim()) {
+    throw new SmithersErrorClass("INVALID_INPUT", "Run owner and app must be non-empty strings.");
+  }
+}
 export const DB_RUN_ALLOWED_STATUSES = [
   "running",
   "waiting-approval",
@@ -1694,11 +1707,7 @@ export class SmithersDb {
    */
   getRun(runId, ownership) {
     if (ownership) {
-      assertOptionalStringMaxLength("owner", ownership.owner, DB_RUN_OWNERSHIP_KEY_MAX_LENGTH);
-      assertOptionalStringMaxLength("app", ownership.app, DB_RUN_OWNERSHIP_KEY_MAX_LENGTH);
-      if (!ownership.owner.trim() || !ownership.app.trim()) {
-        throw new SmithersErrorClass("INVALID_INPUT", "Run owner and app must be non-empty strings.");
-      }
+      assertOwnershipFilter(ownership);
     }
     return this.read(`get run ${runId}`, async () => {
       return this.internalStorage.queryOne(
@@ -1844,6 +1853,12 @@ export class SmithersDb {
    * @returns {RunnableEffect<RunRow[], SmithersError>}
    */
   listRuns(limit = 50, status, workflow, options = {}) {
+    // Validate before entering `read`, which would otherwise re-wrap the typed
+    // INVALID_INPUT as an opaque DB_QUERY_FAILED — `getRun` reports the same
+    // bad filter synchronously and the two must not disagree.
+    if (options.ownership) {
+      assertOwnershipFilter(options.ownership);
+    }
     return this.read(`list runs ${status ?? "all"}`, async () => {
       const clauses = [];
       const params = [];
@@ -1865,11 +1880,6 @@ export class SmithersDb {
         params.push(options.parentRunId);
       }
       if (options.ownership) {
-        assertOptionalStringMaxLength("owner", options.ownership.owner, DB_RUN_OWNERSHIP_KEY_MAX_LENGTH);
-        assertOptionalStringMaxLength("app", options.ownership.app, DB_RUN_OWNERSHIP_KEY_MAX_LENGTH);
-        if (!options.ownership.owner.trim() || !options.ownership.app.trim()) {
-          throw new SmithersErrorClass("INVALID_INPUT", "Run owner and app must be non-empty strings.");
-        }
         clauses.push(
           options.includeUnowned
             ? "((owner = ? AND app = ?) OR (owner IS NULL AND app IS NULL))"

@@ -62,6 +62,27 @@ describe("run ownership", () => {
     expect(await adapter.getRun("parent")).toMatchObject({ owner: "alice", app: "arb" });
   });
 
+  test("a half-supplied ownership filter is a typed error, never a silently widened query", async () => {
+    const { adapter } = setup();
+    await adapter.insertRun(run("a", { owner: "alice", app: "arb" }));
+    for (const ownership of [{ owner: "alice" }, { app: "arb" }, { owner: "alice", app: "  " }, {}]) {
+      let error;
+      try {
+        await adapter.getRun("a", ownership);
+      } catch (cause) {
+        error = cause;
+      }
+      expect(error?.code).toBe("INVALID_INPUT");
+      error = undefined;
+      try {
+        await adapter.listRuns(50, undefined, undefined, { ownership });
+      } catch (cause) {
+        error = cause;
+      }
+      expect(error?.code).toBe("INVALID_INPUT");
+    }
+  });
+
   test("owner/app filtering is backed by the composite index", async () => {
     const { sqlite } = setup();
     const indexes = sqlite

@@ -649,6 +649,12 @@ export const GATEWAY_RPC_ERRORS = {
     httpStatus: 409,
     description: "The run is not currently active and cannot be cancelled.",
   },
+  CONFLICT: {
+    version: SMITHERS_API_VERSION,
+    code: "CONFLICT",
+    httpStatus: 409,
+    description: "The requested run id is already taken by an existing run.",
+  },
   CronNotFound: {
     version: SMITHERS_API_VERSION,
     code: "CronNotFound",
@@ -874,7 +880,7 @@ export const GATEWAY_RPC_DEFINITIONS = [
       },
       ["runId", "workflow", "system"],
     ),
-    errors: ["InvalidRequest", "InvalidInput", "Unauthorized", "Forbidden", "Internal"],
+    errors: ["InvalidRequest", "InvalidInput", "Unauthorized", "Forbidden", "CONFLICT", "Internal"],
     exampleRequest: {
       workflow: "deploy",
       input: { sha: "abc123" },
@@ -921,7 +927,7 @@ export const GATEWAY_RPC_DEFINITIONS = [
       },
       ["runId", "won", "status", "repaired"],
     ),
-    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RUN_NOT_ACTIVE", "Internal"],
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "RUN_NOT_ACTIVE", "Internal"],
     exampleRequest: { runId: "run_01" },
     exampleResponse: {
       runId: "run_01",

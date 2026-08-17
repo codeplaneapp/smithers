@@ -2334,6 +2334,11 @@ function shouldDeliverEvent(connection, runId) {
   return connection.subscribedRuns.has(runId);
 }
 
+// Bounds the ownership cache fed by every run list/snapshot page. Sized well
+// above any plausible concurrently-live run count so eviction only ever reaches
+// cold history, which re-resolves from the store on demand.
+const RUN_OWNERSHIP_CACHE_MAX_ENTRIES = 10_000;
+
 const RUN_SCOPED_GATEWAY_METHODS = new Set([
   "runs.descendants",
   "listRunDescendants",
@@ -7847,14 +7852,15 @@ a { color: var(--brand); }</style>
         };
       }
       // Origin allow-list is enforced uniformly above (#446).
-      const [
-        userHeader = "x-user-id",
-        scopesHeader = "x-user-scopes",
-        roleHeader = "x-user-role",
-        appHeader = "x-app-id",
-      ] = (this.auth.trustedHeaders ?? []).map((value) => value.toLowerCase());
+      const configuredHeaders = (this.auth.trustedHeaders ?? []).map((value) => value.toLowerCase());
+      const [userHeader = "x-user-id", scopesHeader = "x-user-scopes", roleHeader = "x-user-role"] = configuredHeaders;
+      // The app header is the second half of the tenant key, so it is only
+      // read when the operator actually allow-listed it: an explicit
+      // `trustedHeaders` that stops at the role header must not silently start
+      // trusting an `x-app-id` their proxy never strips (#785 class of bug).
+      const appHeader = configuredHeaders.length > 0 ? configuredHeaders[3] : "x-app-id";
       const userId = asString(req.headers[userHeader]);
-      const appId = asString(req.headers[appHeader]);
+      const appId = appHeader ? asString(req.headers[appHeader]) : undefined;
       const scopesValue = asString(req.headers[scopesHeader]);
       const role = asString(req.headers[roleHeader]) ?? this.auth.defaultRole ?? "operator";
       // Fail CLOSED when the trusted proxy omits the scopes header: falling
@@ -8379,6 +8385,13 @@ a { color: var(--brand); }</style>
   }
   broadcastEvent(event, payload) {
     const runId = eventRunId(payload);
+    // Keep a run that is actively emitting at the young end of the ownership
+    // LRU so a long-lived run cannot be evicted by unrelated list traffic.
+    if (runId && this.runOwnershipById?.has(runId)) {
+      const cached = this.runOwnershipById.get(runId);
+      this.runOwnershipById.delete(runId);
+      this.runOwnershipById.set(runId, cached);
+    }
     const browserSessionId = eventBrowserSessionId(event, payload);
     this.stateVersion += 1;
     const runFrame = this.appendRunEventWindow(event, payload, this.stateVersion);
@@ -8523,12 +8536,33 @@ a { color: var(--brand); }</style>
     }
     return fallbackKey;
   }
-  /** @param {Record<string, unknown>} run */
+  /**
+   * Insertion-ordered LRU: every list/snapshot call feeds this map a page of
+   * rows, so an unbounded map would grow with total run history. Re-setting on
+   * every observation keeps live runs at the young end, and a run evicted from
+   * the cold end is re-resolved from the store on its next authorization.
+   * @param {Record<string, unknown>} run
+   */
   rememberRunOwnership(run) {
     this.runOwnershipById ??= new Map();
     const owner = asString(run.owner);
     const app = asString(run.app);
+    this.runOwnershipById.delete(run.runId);
     this.runOwnershipById.set(run.runId, owner && app ? { owner, app } : owner || app ? false : null);
+    while (this.runOwnershipById.size > RUN_OWNERSHIP_CACHE_MAX_ENTRIES) {
+      // Never evict a run this gateway is currently driving: its next event
+      // would broadcast against an empty cache entry and be denied to every
+      // tenant subscriber. Live runs are bounded by concurrency, so a pass
+      // that finds only live entries simply stops growing the cache down.
+      let evicted = false;
+      for (const runId of this.runOwnershipById.keys()) {
+        if (this.activeRuns?.has(runId)) continue;
+        this.runOwnershipById.delete(runId);
+        evicted = true;
+        break;
+      }
+      if (!evicted) break;
+    }
   }
   /**
    * Scope checks answer whether a method may act; this ownership check then
@@ -8601,6 +8635,10 @@ a { color: var(--brand); }</style>
    * @param {number} [offset] Rows to skip after the newest-first sort (server-side pagination).
    * @param {boolean} [includeSystem] Include internal and historical unstamped runs.
    * @param {string} [parentRunId] Return only direct children of this run.
+   * @param {{ ownership?: { owner: string; app: string }; includeUnowned?: boolean; unownedOnly?: boolean }} [ownershipOptions]
+   *   Tenant confinement for the underlying store query. Callers must derive
+   *   this from the authenticated connection (see `ownershipListOptions`);
+   *   defaulting to `{}` is the unscoped, single-tenant behavior.
    */
   async listRunsAcrossWorkflows(
     limit = 50,

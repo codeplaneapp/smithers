@@ -114,6 +114,8 @@ const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
       { name: "parentRunId", in: "query", description: "Optional direct parent run id filter.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "parentRunId") },
       { name: "limit", in: "query", description: "Maximum number of runs.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "limit") },
       { name: "offset", in: "query", description: "Rows to skip after the newest-first sort; a safe non-negative integer.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "offset") },
+      { name: "owner", in: "query", description: "Admin-only run owner filter; must be paired with app.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "owner") },
+      { name: "app", in: "query", description: "Admin-only run application filter; must be paired with owner.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "app") },
     ],
   },
   { method: "post", path: "/v1/api/runs", operationId: "apiLaunchRun", summary: "Launch a run.", rpcMethod: "launchRun", requiredScope: scopeForRpc("launchRun"), requestSchema: launchRunRpc.requestSchema, responseSchema: launchRunRpc.responseSchema, mutation: true },

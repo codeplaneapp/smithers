@@ -11372,6 +11372,7 @@ JSON response codes, not `SmithersErrorInstance` objects.
 | `RUN_ALREADY_EXISTS` | 409 | Run ID already exists |
 | `RUN_NOT_FOUND` | 404 | No run with given ID |
 | `RUN_NOT_ACTIVE` | 409 | Run not active (cannot cancel) |
+| `CONFLICT` | 409 | Gateway `launchRun` was given a `runId` that an existing run already holds. Ownership never widens an id: a run id taken by another tenant conflicts the same way one of your own does. See Gateway run ownership. |
 | `NOT_FOUND` | 404 | Route or resource not found |
 | `DB_NOT_CONFIGURED` | 400 | Server database not configured |
 
@@ -17269,8 +17270,7 @@ inherit the source run's pair.
 For owned runs, the Gateway provides **isolation**, not merely list scoping.
 It applies the existing method scope check first, then requires an exact
 `(owner, app)` match for non-admin requests. A foreign run id is answered as
-`RunNotFound`, including when guessed directly. Reusing an existing id for a
-launch is rejected with `CONFLICT`. `role: "admin"` (and internal `system`
+`RunNotFound`, including when guessed directly. `role: "admin"` (and internal `system`
 execution) is the explicit cross-owner bypass. `listRuns` accepts an exact
 `owner`/`app` filter for admin and unauthenticated trusted-local callers; tenant
 callers are automatically limited to their own pair. The composite
@@ -17290,10 +17290,24 @@ Migration leaves existing runs with `owner = NULL, app = NULL`. These legacy
 unowned runs keep their previous shared read/control behavior, including for
 authenticated callers, so upgrading a single-tenant deployment is invisible.
 This means a database containing unowned runs is not retroactively isolated.
+
+One launch behavior does change for everyone, owned or not. `launchRun` with an
+`options.runId` that an existing run already holds is now rejected with
+`CONFLICT` instead of re-driving that run, because re-driving someone else's id
+is exactly how a tenant would otherwise take over a foreign run. Use
+`resumeRun` to continue an existing run, and a fresh id to start a new one.
+
+Unowned runs are not only a migration artifact. Cron- and webhook-triggered
+launches execute as the Gateway's own `system` identity, which carries no
+`(owner, app)` pair, so the runs they create are unowned and therefore readable
+and controllable by every tenant. Isolate those triggers per tenant by running a
+Gateway per tenant, or launch from a tenant-authenticated client instead.
+
 Before relying on tenant isolation, configure both identity dimensions, ensure
 new launches go through the Gateway, restrict local store/CLI/MCP access to
-operators, and either retain legacy runs as intentionally shared or migrate
-them to an explicit pair.
+operators, keep cron/webhook triggers out of tenant-visible deployments, and
+either retain legacy runs as intentionally shared or migrate them to an explicit
+pair.
 
 ## Live browser viewer
 
@@ -17921,8 +17935,13 @@ back to `defaultScopes` and then `[]`. Trusted-proxy auth reads
 `trustedHeaders` as `[user, scopes, role, app]`; missing role falls back to
 `defaultRole` and then `operator`, and missing scopes fall back to
 `defaultScopes`, or the request is rejected when no `defaultScopes` is
-configured. Those headers are only read at all when the request's transport
-peer matches `trustedProxies` (see below).
+configured. The app header is read only when `trustedHeaders` is omitted
+entirely (all four defaults apply) or explicitly lists a fourth entry — an
+existing three-entry allow-list never starts trusting `x-app-id`, so a proxy
+that does not strip it cannot be used to claim a different app. A caller whose
+identity is missing either half of the pair sees only unowned runs. Those
+headers are only read at all when the request's transport peer matches
+`trustedProxies` (see below).
 
 ### Trusted-proxy trust boundary
 
