@@ -69,5 +69,10 @@ export type ReconcileGitHubListenersOptions = {
   allowDelete?: boolean;
   token?: string;
   apiBaseUrl?: string;
+  /**
+   * Replaces the ambient environment outright (not layered over it) for both
+   * webhook secrets and GitHub credentials, so an ambient `GITHUB_TOKEN`
+   * cannot decide which account a repository's webhooks are created under.
+   */
   env?: Record<string, string | undefined>;
 };

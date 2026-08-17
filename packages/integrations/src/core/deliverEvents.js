@@ -135,7 +135,21 @@ export function deliverEvent(adapter, event, options) {
         return delivered;
       });
       const heartbeat = Effect.repeat(renewClaim, CLAIM_HEARTBEAT_SCHEDULE).pipe(Effect.flatMap(() => Effect.never));
-      const delivered = yield* Effect.raceFirst(fanout, heartbeat);
+      // `onDelivery` runs while the claim is still pending, so a failing hook
+      // releases the claim and the provider's redelivery retries it. Completing
+      // first would mark the event done and dedupe the retry away, silently
+      // losing the launch. Callers must therefore keep `onDelivery` idempotent
+      // (derive a deterministic run id) in case completion later fails.
+      const { delivered, action } = yield* Effect.raceFirst(
+        Effect.gen(function* () {
+          const runIds = yield* fanout;
+          return {
+            delivered: runIds,
+            action: options?.onDelivery ? yield* options.onDelivery({ runIds }) : undefined,
+          };
+        }),
+        heartbeat,
+      );
       const completed = yield* adapter.completeIntegrationDelivery(
         canonicalEvent.source,
         canonicalEvent.dedupeKey,
@@ -164,7 +178,6 @@ export function deliverEvent(adapter, event, options) {
         },
         "integrations:deliver",
       );
-      const action = options?.onDelivery ? yield* options.onDelivery({ runIds: delivered }) : undefined;
       return action === undefined
         ? { deduped: false, runIds: delivered }
         : { deduped: false, runIds: delivered, action };

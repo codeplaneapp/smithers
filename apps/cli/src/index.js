@@ -6262,7 +6262,12 @@ async function runGatewayCommand(options) {
     if (listenerRegistry) {
       let listenerWatchTimer;
       let listenerReconcileInFlight = Promise.resolve();
-      const watcher = watch(listenerRegistryPath, { persistent: false }, () => {
+      // Watch the directory, not the file: editors and `jj`/`git` checkouts
+      // replace `listeners.json` by rename, which permanently detaches a
+      // file-level watch and would silently stop reconciling after one edit.
+      const listenerRegistryFile = basename(listenerRegistryPath);
+      const watcher = watch(dirname(listenerRegistryPath), { persistent: false }, (_type, filename) => {
+        if (filename && basename(filename) !== listenerRegistryFile) return;
         if (listenerWatchTimer) clearTimeout(listenerWatchTimer);
         listenerWatchTimer = setTimeout(() => {
           listenerReconcileInFlight = listenerReconcileInFlight.then(async () => {
@@ -8667,6 +8672,21 @@ function applyListenerIngressConfig(gateway, listenerRegistry, env = process.env
       );
     }
     entry.webhook = { secret, source: "github" };
+  }
+  // A declared listener whose workflow is not registered still gets a real
+  // webhook created on the repository, and every delivery to it 404s. Name the
+  // gap instead of silently dropping the events the user asked to react to.
+  const unroutable = [
+    ...new Set(
+      listenerRegistry.listeners
+        .filter((listener) => !gateway.workflows.has(listener.workflow))
+        .map((listener) => listener.workflow),
+    ),
+  ];
+  if (unroutable.length > 0) {
+    process.stderr.write(
+      `[smithers] Declared listeners target unregistered workflow(s): ${unroutable.join(", ")}. Deliveries to their callback URLs will be rejected until the workflow exists.\n`,
+    );
   }
 }
 const cli = Cli.create({

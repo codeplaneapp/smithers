@@ -59,6 +59,34 @@ describe("deliverEvent", () => {
     const signals = await adapter.listSignals("run-1", { signalName: EVENT_NAME });
     expect(signals).toHaveLength(1);
   });
+  test("a failing onDelivery hook leaves the claim retryable instead of deduping the launch away", async () => {
+    const { adapter } = createTestAdapter();
+    await seedWaitingEventRun(adapter, {
+      runId: "run-1",
+      signalName: EVENT_NAME,
+      correlationId: "corr-1",
+    });
+    let attempts = 0;
+    const onDelivery = () =>
+      Effect.suspend(() => {
+        attempts += 1;
+        return attempts === 1
+          ? Effect.fail(new IntegrationError("delivery-failed", "launch failed"))
+          : Effect.succeed({ runId: "launched-run" });
+      });
+    await expect(Effect.runPromise(deliverEvent(adapter, makeEvent(), { onDelivery }))).rejects.toThrow(
+      /launch failed/,
+    );
+    // The provider redelivers: the event must NOT be deduped, because the
+    // launch it was responsible for never happened.
+    const retried = await Effect.runPromise(deliverEvent(adapter, makeEvent(), { onDelivery }));
+    expect(retried.deduped).toBe(false);
+    expect(retried.action).toEqual({ runId: "launched-run" });
+    expect(attempts).toBe(2);
+    const settled = await Effect.runPromise(deliverEvent(adapter, makeEvent(), { onDelivery }));
+    expect(settled.deduped).toBe(true);
+    expect(attempts).toBe(2);
+  });
   test("does not match runs waiting on a different event or correlationId", async () => {
     const { adapter } = createTestAdapter();
     await seedWaitingEventRun(adapter, {

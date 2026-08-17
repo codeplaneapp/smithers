@@ -57,6 +57,34 @@ describe("GitHub listener registry", () => {
       ),
     ).toThrow(/listeners\[0\]\.repository|repository/);
     expect(() => parseListenerRegistry(registry([listener(), listener()]))).toThrow(/duplicate listener id/);
+    // The Gateway route is /^\/webhooks\/([^/]+)$/, so a trailing slash names
+    // a path GitHub could only ever get a 404 from.
+    expect(() =>
+      parseListenerRegistry(registry([listener({ callbackUrl: "https://gateway.example/webhooks/github-issues/" })])),
+    ).toThrow(/path must be \/webhooks\/github-issues/);
+  });
+
+  test("reports each unowned hook once per repository, never twice and never beside its conflict", () => {
+    const listeners = [
+      listener({ id: "one", workflow: "one", callbackUrl: "https://gateway.example/webhooks/one" }),
+      listener({ id: "two", workflow: "two", callbackUrl: "https://gateway.example/webhooks/two" }),
+    ];
+    const actions = planGitHubListenerReconciliation({
+      registry: registry(listeners),
+      state: { version: 1, github: [] },
+      hooksByRepository: {
+        "acme/app": [
+          hook({ id: 7, config: { url: "https://someone.example/hook" } }),
+          hook({ id: 8, config: { url: "https://gateway.example/webhooks/two" } }),
+        ],
+      },
+    });
+    expect(actions.filter((action) => action.action === "leave")).toEqual([
+      expect.objectContaining({ hookId: 7, repository: "acme/app" }),
+    ]);
+    expect(actions.filter((action) => action.action === "conflict")).toEqual([
+      expect.objectContaining({ hookId: 8, listenerId: "two" }),
+    ]);
   });
 
   test("plans create, update, delete, idempotent noop, conflict, and leaves unowned hooks alone", () => {
@@ -221,9 +249,19 @@ describe("GitHub listener reconciliation over the real REST client", () => {
     roots.push(root);
     mkdirSync(join(root, ".smithers"));
     writeFileSync(join(root, ".smithers/listeners.json"), JSON.stringify(registry()));
-    await expect(reconcileGitHubListeners({ workspaceRoot: root, token: "", env: {} })).rejects.toThrow(
-      /requires SMITHERS_GITHUB_TOKEN/,
-    );
+    // An explicit `env` replaces the ambient one: a GITHUB_TOKEN that happens
+    // to be exported must never silently pick the account whose repository
+    // webhooks get mutated.
+    const ambientToken = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = "ambient-token-must-not-be-used";
+    try {
+      await expect(reconcileGitHubListeners({ workspaceRoot: root, token: "", env: {} })).rejects.toThrow(
+        /requires SMITHERS_GITHUB_TOKEN/,
+      );
+    } finally {
+      if (ambientToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = ambientToken;
+    }
     await expect(
       reconcileGitHubListeners({ workspaceRoot: root, token: "present", apply: true, env: {} }),
     ).rejects.toThrow(/TEST_GITHUB_WEBHOOK_SECRET/);

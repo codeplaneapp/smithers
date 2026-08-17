@@ -15,7 +15,7 @@ import { Effect } from "effect";
 import { z } from "zod";
 import { IntegrationError } from "../core/IntegrationError.js";
 import { makeGitHubClient } from "./GitHubClient.js";
-import { resolveGitHubConfig } from "./config.js";
+import { DEFAULT_GITHUB_API_BASE_URL, resolveGitHubConfig } from "./config.js";
 
 export const DEFAULT_LISTENER_REGISTRY_PATH = ".smithers/listeners.json";
 export const DEFAULT_LISTENER_STATE_PATH = ".smithers/listeners.state.json";
@@ -65,7 +65,9 @@ export const listenerRegistrySchema = z
         });
       }
       ids.add(listener.id);
-      const route = new URL(listener.callbackUrl).pathname.replace(/\/+$/, "");
+      // Compared exactly: the Gateway route is /^\/webhooks\/([^/]+)$/, so a
+      // tolerated trailing slash would produce a hook GitHub can only 404 on.
+      const route = new URL(listener.callbackUrl).pathname;
       if (route !== `/webhooks/${encodeURIComponent(listener.workflow)}`) {
         context.addIssue({
           code: "custom",
@@ -255,25 +257,54 @@ export function planGitHubListenerReconciliation(input) {
         });
     }
   }
-  for (const listener of input.registry.listeners) {
-    for (const hook of hooksFor(listener.repository)) {
-      const key = `${listener.repository}:${hook.id}`;
-      if (!ownedHookKeys.has(key) && hook.config?.url !== listener.callbackUrl) {
-        actions.push({
-          action: "leave",
-          listenerId: null,
-          repository: listener.repository,
-          hookId: hook.id,
-          reason: "GitHub hook is not owned by this workspace",
-          destructive: false,
-        });
-      }
+  // Report each unowned hook once per repository, not once per declared
+  // listener in that repository, and never alongside the `conflict` entry that
+  // already accounts for it.
+  const conflictHookKeys = new Set(
+    actions
+      .filter((action) => action.action === "conflict" && action.hookId !== null)
+      .map((action) => `${action.repository}:${action.hookId}`),
+  );
+  for (const repository of new Set(input.registry.listeners.map((listener) => listener.repository))) {
+    for (const hook of hooksFor(repository)) {
+      const key = `${repository}:${hook.id}`;
+      if (ownedHookKeys.has(key) || conflictHookKeys.has(key)) continue;
+      actions.push({
+        action: "leave",
+        listenerId: null,
+        repository,
+        hookId: hook.id,
+        reason: "GitHub hook is not owned by this workspace",
+        destructive: false,
+      });
     }
   }
   return actions;
 }
 
 const splitRepository = (repository) => repository.split("/").map(encodeURIComponent).join("/");
+
+/**
+ * `options.env` replaces the ambient environment outright rather than layering
+ * over it. Reconciliation mutates a real repository, so an explicitly supplied
+ * environment must never let an ambient `GITHUB_TOKEN` pick the account that
+ * the webhooks are created under.
+ * @param {ReconcileGitHubListenersOptions} options
+ * @param {Record<string, string | undefined>} env
+ * @returns {{ token: string | undefined; apiBaseUrl: string }}
+ */
+function resolveListenerGitHubConfig(options, env) {
+  if (!options.env) {
+    const resolved = resolveGitHubConfig({ token: options.token, apiBaseUrl: options.apiBaseUrl });
+    return { token: resolved.token, apiBaseUrl: resolved.apiBaseUrl };
+  }
+  const firstNonEmpty = (candidates) =>
+    candidates.find((candidate) => typeof candidate === "string" && candidate.trim().length > 0)?.trim();
+  return {
+    token: firstNonEmpty([options.token, env.SMITHERS_GITHUB_TOKEN, env.GITHUB_TOKEN]),
+    apiBaseUrl: firstNonEmpty([options.apiBaseUrl, env.SMITHERS_GITHUB_API_BASE_URL]) ?? DEFAULT_GITHUB_API_BASE_URL,
+  };
+}
 
 function permissionError(repository, cause) {
   const status = cause?.details?.status;
@@ -300,14 +331,14 @@ export async function reconcileGitHubListeners(options = {}) {
   const statePath = resolve(workspaceRoot, DEFAULT_LISTENER_STATE_PATH);
   const registry = options.registry ?? readListenerRegistry(workspaceRoot);
   const state = readListenerOwnershipState(workspaceRoot);
-  const resolved = resolveGitHubConfig({ token: options.token, apiBaseUrl: options.apiBaseUrl });
+  const env = options.env ?? process.env;
+  const resolved = resolveListenerGitHubConfig(options, env);
   if (!resolved.token) {
     throw new IntegrationError(
       "credentials-missing",
       "GitHub listener reconciliation requires SMITHERS_GITHUB_TOKEN (or GITHUB_TOKEN) with fine-grained Webhooks read/write permission or classic admin:repo_hook access.",
     );
   }
-  const env = options.env ?? process.env;
   const secrets = new Map();
   const digests = new Map();
   for (const listener of registry.listeners) {
