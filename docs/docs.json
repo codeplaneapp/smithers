@@ -351,6 +351,7 @@
               "integrations/nanocodex",
               "integrations/sdk-agents",
               "integrations/mcp-toolset",
+              "integrations/embedded-engine",
               "integrations/server",
               "integrations/serve",
               "integrations/telegram",

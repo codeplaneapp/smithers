@@ -212,7 +212,7 @@ export class ClaudeCodeAgent extends BaseCliAgent {
     if (Object.keys(parentEnvOverrides).length > 0) {
       opts = { ...opts, env: { ...parentEnvOverrides, ...opts.env } };
     }
-    super(opts);
+    super(opts, "ClaudeCodeAgent");
     this.opts = opts;
     this.capabilities = createClaudeCodeCapabilityRegistry(opts);
   }

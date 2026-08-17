@@ -345,6 +345,11 @@ export const smithersErrorDefinitions = {
     category: "components",
     when: "A workflow's default export is a raw component or JSX element instead of the object returned by `smithers(...)`.",
   },
+  WORKFLOW_FILE_NOT_FOUND: {
+    category: "cli",
+    when: "A path-like workflow argument does not exist at the path resolved from the operator working directory.",
+    details: "{ given, resolved }",
+  },
   TOOL_PATH_INVALID: {
     category: "tools",
     when: "A filesystem tool receives a non-string path.",

@@ -20,6 +20,7 @@ export function fromTaggedErrorPayload(payload) {
         message: payload.message,
         details: payload.details,
         name: payload.name,
+        ...(payload.cause === undefined ? {} : { cause: payload.cause }),
       });
     case "TaskTimeout":
       return new TaskTimeout({
@@ -27,6 +28,7 @@ export function fromTaggedErrorPayload(payload) {
         nodeId: payload.nodeId,
         attempt: payload.attempt,
         timeoutMs: payload.timeoutMs,
+        ...(payload.cause === undefined ? {} : { cause: payload.cause }),
       });
     case "TaskHeartbeatTimeout":
       return new TaskHeartbeatTimeout({
@@ -37,32 +39,38 @@ export function fromTaggedErrorPayload(payload) {
         timeoutMs: payload.timeoutMs,
         staleForMs: payload.staleForMs,
         lastHeartbeatAtMs: payload.lastHeartbeatAtMs,
+        ...(payload.cause === undefined ? {} : { cause: payload.cause }),
       });
     case "RunNotFound":
       return new RunNotFound({
         message: payload.message,
         runId: payload.runId,
+        ...(payload.cause === undefined ? {} : { cause: payload.cause }),
       });
     case "InvalidInput":
       return new InvalidInput({
         message: payload.message,
         details: payload.details,
+        ...(payload.cause === undefined ? {} : { cause: payload.cause }),
       });
     case "DbWriteFailed":
       return new DbWriteFailed({
         message: payload.message,
         details: payload.details,
+        ...(payload.cause === undefined ? {} : { cause: payload.cause }),
       });
     case "AgentCliError":
       return new AgentCliError({
         message: payload.message,
         details: payload.details,
+        ...(payload.cause === undefined ? {} : { cause: payload.cause }),
       });
     case "WorkflowFailed":
       return new WorkflowFailed({
         message: payload.message,
         details: payload.details,
         status: payload.status,
+        ...(payload.cause === undefined ? {} : { cause: payload.cause }),
       });
   }
 }

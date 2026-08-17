@@ -11,6 +11,8 @@ export type DeriveRunStateInput = {
   sandboxHeartbeats?: ReadonlyArray<number>;
   /** Durable operator warnings associated with the run. */
   warnings?: ReadonlyArray<RunStateWarning>;
+  /** Tolerated child failures persisted on the terminal `RunFinished` event. */
+  failedChildren?: number;
   now?: number;
   staleThresholdMs?: number;
   /** Grace window (ms) past a timer's wake time before it is flagged overdue. */

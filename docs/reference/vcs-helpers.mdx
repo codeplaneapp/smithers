@@ -35,7 +35,56 @@ import {
   resolveGitBinary,
   resolveJjBinary,
   vcsToolingStatus,
+  createIsolatedClone,
+  listGitRefs,
+  gitDirtyPaths,
 } from "@smthrs/vcs";
+```
+
+`createIsolatedClone`, `listGitRefs`, and `gitDirtyPaths` are also exported by
+the root `smthrs` facade.
+
+## Isolated clone and bundle handoff
+
+`createIsolatedClone({ repo, at, destination? })` creates a standalone,
+detached clone at exactly `at^{commit}`. It removes remotes and refs, rejects
+Git alternates, writes a nonce ownership marker, and will only clean a clone
+whose marker still matches.
+
+```ts
+const clone = await createIsolatedClone({ repo: sharedRepo, at: expectedHead });
+try {
+  await clone.run("pnpm", ["test"]);
+  const handoff = await clone.emitBundle({ outputDir: artifacts, name: "wave-2" });
+} finally {
+  await clone.cleanup();
+}
+```
+
+The hot-tree contract is deliberately narrow: `expectedHead^{commit}` must be
+readable while the clone is created. The source working tree, index, refs, JJ
+bookmarks, object inventory, and later HEAD movement may change; they are not
+quiescence gates. The clone is the isolation boundary. The emitted patch,
+bundle, and JSON manifest are adoption evidence, and `emitBundle()` verifies
+them in a fresh repository before returning. Land a handoff into a shared tree
+only in a short serialized adoption step.
+
+`clone.run()` always uses the clone root as `cwd`. It inherits only `PATH`,
+`HOME`, temp-directory, user/shell, and locale variables, plus explicit `env`
+overrides. Ambient `GIT_*`, `SMITHERS_HOME`, and other `SMITHERS_*` variables
+are absent unless explicitly supplied.
+
+## Large Git inventories
+
+`listGitRefs(repo)` and `gitDirtyPaths(repo)` use streamed child-process output,
+so they do not have Node's synchronous 1 MB `maxBuffer` ceiling. This matters
+for JJ-colocated repositories, where tens of thousands of refs can produce
+multi-megabyte output. Do not replace these helpers with `execFileSync("git",
+["for-each-ref"])` using its default buffer.
+
+```ts
+const refs = await listGitRefs(repo);
+const dirtyPaths = await gitDirtyPaths(repo);
 ```
 
 Direct JJ helper calls need a platform layer:

@@ -19,7 +19,9 @@ export type RunResult = {
    * `> 0`) only on a `finished` result that tolerated at least one failure
    * (a {@link https://smithers.sh/components/task `continueOnFail`} task, or an
    * agent task that failed transiently: rate limit, timeout, abort). A binary
-   * `finished` status would otherwise read as a clean success. See
+   * `finished` status would otherwise read as a clean success. Persisted
+   * finished runs with this signal derive as `succeeded-with-failures`, while
+   * retaining the compatible terminal lifecycle status `finished`. See
    * `docs/runtime/run-state.mdx`.
    */
   readonly failedChildren?: number;

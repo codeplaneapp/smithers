@@ -297,7 +297,7 @@ export class KimiAgent extends BaseCliAgent {
    * @param {KimiAgentOptions} [opts]
    */
   constructor(opts = {}) {
-    super(opts);
+    super(opts, "KimiAgent");
     this.opts = opts;
     this.capabilities = createKimiCapabilityRegistry(opts);
   }

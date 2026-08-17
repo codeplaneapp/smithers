@@ -70,7 +70,7 @@ export class PoolAgent extends BaseCliAgent {
    * @param {PoolAgentOptions} [opts]
    */
   constructor(opts = {}) {
-    super({ ...opts, yolo: opts.yolo ?? true }); // pool uses --unsafe-auto-allow for non-interactive
+    super({ ...opts, yolo: opts.yolo ?? true }, "PoolAgent"); // pool uses --unsafe-auto-allow for non-interactive
     this.opts = opts;
     this.capabilities = createPoolCapabilityRegistry(opts);
   }

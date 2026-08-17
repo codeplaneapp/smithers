@@ -44,7 +44,7 @@ export class OmpAgent extends BaseCliAgent {
   cliEngine = "omp";
   issuedSessionId;
   constructor(opts = {}) {
-    super({ ...opts, yolo: opts.yolo ?? opts.autoApprove ?? false });
+    super({ ...opts, yolo: opts.yolo ?? opts.autoApprove ?? false }, "OmpAgent");
     this.opts = opts;
     this.capabilities = createOmpCapabilityRegistry(opts);
   }

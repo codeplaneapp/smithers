@@ -11,6 +11,7 @@ import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
 import { getWorkflowMakeBridgeRuntime } from "./effect/workflow-make-bridge.js";
 import { isWorkflowFileRef, loadWorkflowFileRef } from "./workflow-file.js";
 import { buildValidatedChildRunId } from "./child-run-id.js";
+import { getLifecycleTaskLease } from "./lifecycle-concurrency.js";
 /** @typedef {import("./ChildWorkflowDefinition.ts").ChildWorkflowDefinition} ChildWorkflowDefinition */
 /** @typedef {import("./ChildWorkflowExecuteOptions.ts").ChildWorkflowExecuteOptions} ChildWorkflowExecuteOptions */
 /** @typedef {import("@smthrs/driver/RunResult").RunResult} RunResult */
@@ -68,6 +69,42 @@ async function loadParentRunContext(db, parentRunId) {
   } catch {
     return {};
   }
+}
+/**
+ * Fence child creation against a cancellation already in flight (#972).
+ *
+ * The engine only learns about a durable cancel request by polling, so there
+ * is a window between `cancel_requested_at_ms` landing and the parent's
+ * cancel watcher aborting in which the parent could still launch a brand-new
+ * child run — a fresh ACTIVE descendant that the cascade already walked past.
+ * Re-reading the parent immediately before launch closes that window: the
+ * child is never created, so there is nothing left to race.
+ *
+ * A parent row that cannot be read (a child given an explicit parentRunId that
+ * lives in another store) is not treated as cancelled.
+ *
+ * @param {unknown} db
+ * @param {string} parentRunId
+ * @param {string} childRunId
+ * @returns {Promise<void>}
+ */
+async function assertParentRunNotCancelled(db, parentRunId, childRunId) {
+  /** @type {import("@smthrs/db/adapter").RunRow | undefined} */
+  let parentRun;
+  try {
+    parentRun = await new SmithersDb(/** @type {any} */ (db)).getRun(parentRunId);
+  } catch {
+    return;
+  }
+  if (!parentRun) return;
+  const cancelled =
+    parentRun.cancelRequestedAtMs != null || parentRun.status === "cancelled" || parentRun.status === "canceled";
+  if (!cancelled) return;
+  throw new SmithersError(
+    "RUN_CANCELLED",
+    `Run ${parentRunId} was cancelled before child workflow ${childRunId} could start`,
+    { runId: parentRunId, childRunId },
+  );
 }
 /**
  * @param {unknown} value
@@ -286,6 +323,8 @@ function resolveChildWorkflow(definition, parentWorkflow) {
  */
 export async function executeChildWorkflow(parentWorkflow, options) {
   const runtime = requireTaskRuntime();
+  const lifecycleLease = getLifecycleTaskLease();
+  const runWithoutParentSlots = (execute) => (lifecycleLease ? lifecycleLease.runChild(execute) : execute());
   const acceptWorkflowChange = /** @type {any} */ (runtime).acceptWorkflowChange === true;
   let definition = options.workflow;
   let workflowPath = options.workflowPath;
@@ -337,7 +376,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
     // still executing this child. Launching a second engine would duplicate
     // the fan-out, so attach: wait for the in-flight child to settle and
     // preserve whatever terminal state it reaches.
-    const settled = await waitForChildRunToSettle(adapter, childRunId, signal);
+    const settled = await runWithoutParentSlots(() => waitForChildRunToSettle(adapter, childRunId, signal));
     if (settled && TERMINAL_CHILD_RUN_STATUSES.has(settled.status)) {
       return loadPreservedChildResult(childWorkflow, childRunId, /** @type {RunResult["status"]} */ (settled.status));
     }
@@ -345,57 +384,64 @@ export async function executeChildWorkflow(parentWorkflow, options) {
     // pid) or parked it — fall through to a durable resume of the same id.
   }
   const resume = Boolean(existingChildRun);
+  // Last durable check before a new engine starts: a cancellation that landed
+  // while we probed must not gain a new active descendant.
+  await assertParentRunNotCancelled(parentWorkflow?.db ?? runtime.db, parentRunId, childRunId);
   const bridgeRuntime = getWorkflowMakeBridgeRuntime();
   if (bridgeRuntime) {
-    const result = await bridgeRuntime.executeChildWorkflow(childWorkflow, {
-      input,
-      runId: childRunId,
-      // Effect Workflow memoizes completed executions process-locally by
-      // execution id. The durable run id remains stable; only the internal
-      // bridge execution gets a retry-specific key after an in-place reset.
-      ...(automaticFailedRetry ? { bridgeExecutionId: `${childRunId}:retry:${runtime.attempt}` } : {}),
-      resume,
-      acceptWorkflowChange,
-      parentRunId,
-      ...((options.startedBy ?? parentContext.startedBy)
-        ? { startedBy: options.startedBy ?? parentContext.startedBy }
-        : {}),
-      config: childConfig,
-      rootDir: options.rootDir,
-      workflowPath,
-      allowNetwork: options.allowNetwork,
-      maxOutputBytes: options.maxOutputBytes,
-      maxAgentCheckpointBytes: options.maxAgentCheckpointBytes,
-      toolTimeoutMs: options.toolTimeoutMs,
-      signal,
-      pauseSignal,
-    });
+    const result = await runWithoutParentSlots(() =>
+      bridgeRuntime.executeChildWorkflow(childWorkflow, {
+        input,
+        runId: childRunId,
+        // Effect Workflow memoizes completed executions process-locally by
+        // execution id. The durable run id remains stable; only the internal
+        // bridge execution gets a retry-specific key after an in-place reset.
+        ...(automaticFailedRetry ? { bridgeExecutionId: `${childRunId}:retry:${runtime.attempt}` } : {}),
+        resume,
+        acceptWorkflowChange,
+        parentRunId,
+        ...((options.startedBy ?? parentContext.startedBy)
+          ? { startedBy: options.startedBy ?? parentContext.startedBy }
+          : {}),
+        config: childConfig,
+        rootDir: options.rootDir,
+        workflowPath,
+        allowNetwork: options.allowNetwork,
+        maxOutputBytes: options.maxOutputBytes,
+        maxAgentCheckpointBytes: options.maxAgentCheckpointBytes,
+        toolTimeoutMs: options.toolTimeoutMs,
+        signal,
+        pauseSignal,
+      }),
+    );
     return {
       ...result,
       output: normalizeChildOutput(result),
     };
   }
   const { runWorkflow } = await import("./engine.js");
-  const result = await Effect.runPromise(
-    runWorkflow(childWorkflow, {
-      input,
-      runId: childRunId,
-      resume,
-      acceptWorkflowChange,
-      parentRunId,
-      ...((options.startedBy ?? parentContext.startedBy)
-        ? { startedBy: options.startedBy ?? parentContext.startedBy }
-        : {}),
-      config: childConfig,
-      rootDir: options.rootDir,
-      workflowPath,
-      allowNetwork: options.allowNetwork,
-      maxOutputBytes: options.maxOutputBytes,
-      maxAgentCheckpointBytes: options.maxAgentCheckpointBytes,
-      toolTimeoutMs: options.toolTimeoutMs,
-      signal,
-      pauseSignal,
-    }),
+  const result = await runWithoutParentSlots(() =>
+    Effect.runPromise(
+      runWorkflow(childWorkflow, {
+        input,
+        runId: childRunId,
+        resume,
+        acceptWorkflowChange,
+        parentRunId,
+        ...((options.startedBy ?? parentContext.startedBy)
+          ? { startedBy: options.startedBy ?? parentContext.startedBy }
+          : {}),
+        config: childConfig,
+        rootDir: options.rootDir,
+        workflowPath,
+        allowNetwork: options.allowNetwork,
+        maxOutputBytes: options.maxOutputBytes,
+        maxAgentCheckpointBytes: options.maxAgentCheckpointBytes,
+        toolTimeoutMs: options.toolTimeoutMs,
+        signal,
+        pauseSignal,
+      }),
+    ),
   );
   return {
     ...result,

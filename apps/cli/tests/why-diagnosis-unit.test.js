@@ -1098,6 +1098,21 @@ describe("loop exhaustion naming (#1464 AWF-1)", () => {
     const diagnosis = await diagnose(adapter);
     expect(diagnosis.summary).toBe("Run is finished, nothing is blocked.");
   });
+
+  test("a finished run with tolerated failures does not claim clean success", async () => {
+    const adapter = makeAdapter({
+      run: runRow({ status: "finished", finishedAtMs: NOW - 1_000 }),
+    });
+    adapter.listEventsByTypeEffect = (_runId, type) =>
+      Effect.succeed(
+        type === "RunFinished"
+          ? [{ seq: 1, type: "RunFinished", payloadJson: JSON.stringify({ failedChildren: 2 }) }]
+          : [],
+      );
+    const diagnosis = await diagnose(adapter);
+    expect(diagnosis.summary).toContain("2 tolerated failed children");
+    expect(diagnosis.summary).not.toContain("nothing is blocked");
+  });
 });
 
 describe("stall and recovery affordances (#1500)", () => {

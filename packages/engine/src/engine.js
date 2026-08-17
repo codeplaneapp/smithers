@@ -120,6 +120,13 @@ import { AlertRuntime } from "./alert-runtime.js";
 import { attachSandboxComputeFns, attachSubflowComputeFns, getSubflowChildRunId } from "./task-compute-fns.js";
 import { SUBFLOW_RUN_LINEAGE_MAX_ROWS, subflowRunLineage } from "@smthrs/graph/subflow-run-lineage";
 import { buildCacheScopeIdentity, isFreshCacheRow, normalizeCacheScope } from "./cache-policy.js";
+import {
+  createFixedLifecycleConcurrencyScope,
+  createLifecycleTaskLease,
+  getLifecycleChildScopes,
+  withLifecycleChildScopes,
+  withLifecycleTaskLease,
+} from "./lifecycle-concurrency.js";
 import { RETRY_STATE_META_KEY, stampDurableRetryState } from "./effect/retry-state.js";
 import { runWorkflowWithMakeBridge } from "./effect/workflow-make-bridge.js";
 import {
@@ -1534,8 +1541,10 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch, owner) 
           runJj(["rebase", "-d", base], { cwd: worktreePath }).pipe(Effect.provide(getPlatformLayer())),
         );
         if (rebaseRes.code !== 0) {
-          console.warn(
-            `[smithers] worktree sync: jj rebase -d ${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`,
+          logWarning(
+            "worktree sync rebase failed",
+            { vcs: "jj", base, exitCode: rebaseRes.code, error: rebaseRes.stderr || "unknown error" },
+            "engine:worktree",
           );
         } else {
           syncCache.recordRebase(worktreePath, baseTip);
@@ -1553,8 +1562,10 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch, owner) 
       if (syncCache.shouldRebase(worktreePath, baseTip)) {
         const rebaseRes = await runGitCommand(worktreePath, ["rebase", `origin/${base}`]);
         if (rebaseRes.code !== 0) {
-          console.warn(
-            `[smithers] worktree sync: git rebase origin/${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`,
+          logWarning(
+            "worktree sync rebase failed",
+            { vcs: "git", base, exitCode: rebaseRes.code, error: rebaseRes.stderr || "unknown error" },
+            "engine:worktree",
           );
         } else {
           syncCache.recordRebase(worktreePath, baseTip);
@@ -1711,8 +1722,10 @@ async function reapFinishedRunWorktrees(adapter, runId, rootDir, keepWorktrees) 
       );
     }
     for (const entry of retained) {
-      console.warn(
-        `[smithers] keeping worktree ${entry.path}: it holds uncommitted or unpushed work. Reclaim it with \`smithers worktree prune --force\` once the work is saved.`,
+      logWarning(
+        "keeping worktree with unsaved work",
+        { runId, path: entry.path, recovery: "smithers worktree prune --force" },
+        "engine:worktree",
       );
     }
   } catch {
@@ -9290,6 +9303,10 @@ async function runWorkflowBodyDriver(workflow, opts) {
   ensureSmithersTables(db);
   const adapter = new SmithersDb(db);
   const runId = opts.runId ?? crypto.randomUUID();
+  // Only executeChildWorkflow enters this context. A detached run may still
+  // persist parentRunId for lineage, but it deliberately receives no parent
+  // admission scopes.
+  const inheritedLifecycleScopes = getLifecycleChildScopes();
   const schema = resolveSchema(db);
   const inputTable = schema.input;
   if (!inputTable) {
@@ -9450,11 +9467,16 @@ async function runWorkflowBodyDriver(workflow, opts) {
   const taskWaiters = [];
   // `let`: replaced before tasks start when a resumed run restores a
   // persisted `--max-concurrency` pin that this invocation's opts lack.
+  let maxConcurrencyExplicit = opts.maxConcurrency !== undefined;
+  let descendantRunSaturationWarned = false;
   let slotGovernor = createSlotGovernor(maxConcurrency, {
-    explicit: opts.maxConcurrency !== undefined,
+    explicit: maxConcurrencyExplicit,
   });
-  /** @param {number} priority */
-  const acquireTaskSlot = async (priority) => {
+  /**
+   * @param {number} priority
+   * @param {string} [requestingRunId]
+   */
+  const acquireTaskSlot = async (priority, requestingRunId = runId) => {
     if (activeTaskCount < maxConcurrency) {
       activeTaskCount += 1;
       return;
@@ -9463,17 +9485,32 @@ async function runWorkflowBodyDriver(workflow, opts) {
     if (decision.warn) {
       logWarning(decision.warn, { runId, maxConcurrency, waiting: taskWaiters.length + 1 }, "engine:concurrency");
     }
+    const saturationEvents = [];
     if (decision.saturation) {
-      await Effect.runPromise(
-        eventBus.emitEventWithPersist({
-          type: "RunConcurrencySaturated",
-          runId,
-          requestedDemand: decision.saturation.requestedDemand,
-          effectiveCap: decision.saturation.effectiveCap,
-          remediationCommand: decision.saturation.remediationCommand,
-          timestampMs: nowMs(),
-        }),
-      );
+      saturationEvents.push({
+        type: "RunConcurrencySaturated",
+        runId,
+        requestedDemand: decision.saturation.requestedDemand,
+        effectiveCap: decision.saturation.effectiveCap,
+        remediationCommand: decision.saturation.remediationCommand,
+        ...(requestingRunId === runId ? {} : { descendantRunId: requestingRunId }),
+        budget: "run",
+        timestampMs: nowMs(),
+      });
+    }
+    if (maxConcurrencyExplicit && requestingRunId !== runId && !descendantRunSaturationWarned) {
+      descendantRunSaturationWarned = true;
+      const requestedDemand = activeTaskCount + taskWaiters.length + 1;
+      saturationEvents.push({
+        type: "RunConcurrencySaturated",
+        runId,
+        requestedDemand,
+        effectiveCap: maxConcurrency,
+        remediationCommand: `smithers up --max-concurrency ${requestedDemand}`,
+        descendantRunId: requestingRunId,
+        budget: "run",
+        timestampMs: nowMs(),
+      });
     }
     if (decision.raiseTo !== null) {
       const previousCap = maxConcurrency;
@@ -9485,49 +9522,139 @@ async function runWorkflowBodyDriver(workflow, opts) {
         { runId, previousMaxConcurrency: previousCap, maxConcurrency, demand },
         "engine:concurrency",
       );
-      // Hand freed capacity to the tasks that queued first; each resolved
-      // waiter increments activeTaskCount when it resumes (the same
-      // handoff releaseTaskSlot uses), so count them against capacity
-      // here rather than re-reading activeTaskCount.
-      let capacity = maxConcurrency - activeTaskCount;
-      while (capacity > 0 && taskWaiters.length > 0) {
+      // Hand new capacity to the tasks that queued first. Resolving a waiter
+      // transfers a slot, so reserve that slot before waking it.
+      while (activeTaskCount < maxConcurrency && taskWaiters.length > 0) {
         const next = taskWaiters.shift();
+        activeTaskCount += 1;
         next?.resolve();
-        capacity -= 1;
       }
-      if (capacity > 0) {
+      if (activeTaskCount < maxConcurrency) {
         activeTaskCount += 1;
         return;
       }
     }
-    await new Promise((resolveWaiter) => {
+    let transferred = false;
+    let resolveWaiter = () => {};
+    const waitPromise = new Promise((resolve) => {
+      resolveWaiter = resolve;
+    });
+    const waiter = {
+      priority,
+      resolve: () => {
+        transferred = true;
+        resolveWaiter();
+      },
+    };
+    // Enqueue before persisting diagnostics: an active task may release while
+    // that I/O is in flight, and its slot must not be lost.
+    {
       // Insert after every waiter with priority >= ours: higher priority
       // moves ahead of lower, equal priority stays FIFO.
       let index = taskWaiters.length;
       while (index > 0 && taskWaiters[index - 1].priority < priority) {
         index -= 1;
       }
-      taskWaiters.splice(index, 0, { priority, resolve: resolveWaiter });
-    });
-    activeTaskCount += 1;
+      taskWaiters.splice(index, 0, waiter);
+    }
+    try {
+      for (const event of saturationEvents) {
+        await Effect.runPromise(eventBus.emitEventWithPersist(event));
+      }
+    } catch (error) {
+      if (transferred) {
+        releaseTaskSlot();
+      } else {
+        const index = taskWaiters.indexOf(waiter);
+        if (index >= 0) taskWaiters.splice(index, 1);
+      }
+      throw error;
+    }
+    await waitPromise;
   };
   const releaseTaskSlot = () => {
-    activeTaskCount = Math.max(0, activeTaskCount - 1);
     const next = taskWaiters.shift();
-    next?.resolve();
+    if (next) {
+      next.resolve();
+    } else {
+      activeTaskCount = Math.max(0, activeTaskCount - 1);
+    }
+  };
+  const runConcurrencyScope = {
+    ownerRunId: runId,
+    acquire: acquireTaskSlot,
+    release: releaseTaskSlot,
+  };
+  /** @type {Map<string, ReturnType<typeof createFixedLifecycleConcurrencyScope>>} */
+  const subtreeLifecycleScopes = new Map();
+  /**
+   * A subtree scope keeps its established in-run direct-child semantics in
+   * the scheduler. It is additionally inherited by lifecycle child runs so
+   * their task fan-out cannot multiply the parent's declared subtree width.
+   * @param {TaskDescriptor} task
+   */
+  const lifecycleSubtreeScopeFor = (task) => {
+    if (!task.subtreeGroupId || task.subtreeMax == null) return undefined;
+    const key = `${task.subtreeGroupId}\u0000${task.subtreeMax}`;
+    const existing = subtreeLifecycleScopes.get(key);
+    if (existing) return existing;
+    let warned = false;
+    const scope = createFixedLifecycleConcurrencyScope({
+      ownerRunId: runId,
+      cap: task.subtreeMax,
+      onWait: async (active, waiting, requestingRunId) => {
+        if (warned) return;
+        warned = true;
+        await Effect.runPromise(
+          eventBus.emitEventWithPersist({
+            type: "RunConcurrencySaturated",
+            runId,
+            requestedDemand: active + waiting,
+            effectiveCap: task.subtreeMax,
+            remediationCommand: `Increase subtreeConcurrency for ${task.subtreeGroupId}`,
+            descendantRunId: requestingRunId,
+            budget: "subtree",
+            subtreeGroupId: task.subtreeGroupId,
+            timestampMs: nowMs(),
+          }),
+        );
+      },
+    });
+    subtreeLifecycleScopes.set(key, scope);
+    return scope;
   };
   /**
    * @template A
    * @param {() => Promise<A>} execute
-   * @param {number} priority
+   * @param {TaskDescriptor} task
    * @returns {Promise<A>}
    */
-  const withTaskSlot = async (execute, priority) => {
-    await acquireTaskSlot(priority);
+  const withTaskSlot = async (execute, task) => {
+    const priority = descriptorPriority(task);
+    const heldScopes = [...inheritedLifecycleScopes, runConcurrencyScope];
+    let acquired = 0;
     try {
-      return await execute();
+      for (const scope of heldScopes) {
+        await scope.acquire(priority, runId);
+        acquired += 1;
+      }
+      const subtreeScope = lifecycleSubtreeScopeFor(task);
+      const childScopes = subtreeScope ? [...heldScopes, subtreeScope] : heldScopes;
+      const lease = createLifecycleTaskLease({
+        heldScopes,
+        childScopes,
+        priority,
+        requestingRunId: runId,
+      });
+      // The inherited scope context is consumed by this engine. Clear it
+      // inside ordinary task callbacks so a direct runWorkflow(...,
+      // { parentRunId }) remains detached; executeChildWorkflow re-enters it
+      // explicitly through the lease above.
+      return await withLifecycleChildScopes([], () => withLifecycleTaskLease(lease, execute));
     } finally {
-      releaseTaskSlot();
+      for (let index = acquired - 1; index >= 0; index -= 1) {
+        heldScopes[index].release();
+      }
     }
   };
   const waitForAbortedTasksToSettle = async () => {
@@ -10330,7 +10457,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
       } finally {
         activeDriverTaskKeys.delete(taskKey);
       }
-    }, descriptorPriority(task));
+    }, task);
   /**
    * @param {WorkflowGraph} graph
    * @param {RenderContext["trigger"]} [trigger]
@@ -10806,6 +10933,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const pinnedMaxConcurrency = opts.maxConcurrency === undefined ? readPinnedMaxConcurrency(existingConfig) : null;
     if (pinnedMaxConcurrency !== null) {
       maxConcurrency = pinnedMaxConcurrency;
+      maxConcurrencyExplicit = true;
       slotGovernor = createSlotGovernor(maxConcurrency, { explicit: true });
     }
     logInfo(

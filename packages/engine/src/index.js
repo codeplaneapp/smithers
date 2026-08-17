@@ -16,6 +16,7 @@ export * from "./alert-runtime.js";
 export * from "./listSmithersWorktrees.js";
 export * from "./reapWorktrees.js";
 export * from "./approvals.js";
+export * from "./cancel-subtree.js";
 export * from "./child-workflow.js";
 export * from "./events.js";
 export * from "./workflow-file.js";

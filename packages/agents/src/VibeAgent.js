@@ -50,7 +50,7 @@ export class VibeAgent extends BaseCliAgent {
    * @param {VibeAgentOptions} [opts]
    */
   constructor(opts = {}) {
-    super({ ...opts, yolo: opts.yolo ?? false });
+    super({ ...opts, yolo: opts.yolo ?? false }, "VibeAgent");
     this.opts = opts;
     this.capabilities = createVibeCapabilityRegistry(opts);
   }

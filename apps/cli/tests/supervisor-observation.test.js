@@ -798,6 +798,7 @@ describe("gateway observation source — streamed activity", () => {
 describe("gateway pure helpers", () => {
   test("deriveDerivedStatusFromRunState renames succeeded -> finished", () => {
     expect(deriveDerivedStatusFromRunState({ state: "succeeded" }, "running")).toBe("finished");
+    expect(deriveDerivedStatusFromRunState({ state: "succeeded-with-failures" }, "running")).toBe("finished");
     expect(deriveDerivedStatusFromRunState({ state: "running" }, "x")).toBe("running");
     // no runState -> fall back to persisted status, with the rename applied.
     expect(deriveDerivedStatusFromRunState(undefined, "succeeded")).toBe("finished");

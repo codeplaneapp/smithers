@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { Effect, Metric } from "effect";
 import { ignoreSyncError } from "./interop.js";
 import { toSmithersError } from "@smthrs/errors/toSmithersError";
@@ -88,6 +88,123 @@ function truncateToBytes(text, maxBytes, keep = "head") {
   return buf.subarray(0, end).toString("utf8");
 }
 /**
+ * Windows tree-kill argv. `/T` takes the whole descendant tree and `/F`
+ * forces it, which is the only reliable way to reach grandchildren on win32
+ * (there are no process groups to signal).
+ *
+ * @param {number} pid
+ * @returns {string[]}
+ */
+export function taskkillArgs(pid) {
+  return ["/PID", String(pid), "/T", "/F"];
+}
+/** Default grace before a process tree that ignored SIGTERM is SIGKILLed. */
+export const DEFAULT_PROCESS_TREE_KILL_GRACE_MS = 2_000;
+const PROCESS_TREE_KILL_POLL_MS = 50;
+/**
+ * @param {number} pid
+ * @returns {boolean}
+ */
+function defaultIsPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return /** @type {{ code?: string }} */ (error)?.code === "EPERM";
+  }
+}
+/**
+ * @param {number} ms
+ * @returns {Promise<void>}
+ */
+function delay(ms) {
+  return new Promise((resolvePromise) => {
+    setTimeout(resolvePromise, ms);
+  });
+}
+/**
+ * Terminate a process AND its whole descendant tree by pid — the pid-addressed
+ * sibling of {@link killChildTree}, for callers that only recorded a pid
+ * (durable owner rows, the agent-process registry) instead of holding the
+ * `ChildProcess` handle. Both share {@link taskkillArgs} so win32 tree
+ * termination behaves identically whichever entry point is used.
+ *
+ * Platform behaviour:
+ * - win32: `taskkill /T /F` reaps the tree; there is nothing to escalate to.
+ * - POSIX: SIGTERM the process GROUP first (agent CLIs and detached owners are
+ *   spawned as group leaders, so the group is the tree), fall back to the bare
+ *   pid when the target is not a group leader, then escalate to SIGKILL if it
+ *   outlives the grace window.
+ *
+ * Refuses to signal our own pid or our own process group — a group kill there
+ * would take the caller down with the target.
+ *
+ * @param {number | null | undefined} pid
+ * @param {{
+ *   graceMs?: number;
+ *   platform?: NodeJS.Platform;
+ *   kill?: (pid: number, signal: string) => void;
+ *   alive?: (pid: number) => boolean;
+ *   runTaskkill?: (pid: number) => boolean;
+ *   getpgrp?: () => number | null;
+ * }} [options]
+ * @returns {Promise<{ terminated: boolean; skipped: boolean; escalated: boolean }>}
+ */
+export async function killProcessTree(pid, options = {}) {
+  const graceMs = options.graceMs ?? DEFAULT_PROCESS_TREE_KILL_GRACE_MS;
+  const platform = options.platform ?? process.platform;
+  const kill = options.kill ?? ((target, signal) => process.kill(target, signal));
+  const alive = options.alive ?? defaultIsPidAlive;
+  const runTaskkill =
+    options.runTaskkill ??
+    ((target) => spawnSync("taskkill", taskkillArgs(target), { stdio: "ignore", windowsHide: true }).status === 0);
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0 || pid === process.pid) {
+    return { terminated: false, skipped: true, escalated: false };
+  }
+  if (platform === "win32") {
+    const ok = runTaskkill(pid);
+    return { terminated: ok || !alive(pid), skipped: false, escalated: false };
+  }
+  const getpgrp = options.getpgrp ?? (typeof process.getpgrp === "function" ? () => process.getpgrp() : () => null);
+  if (getpgrp() === pid) {
+    return { terminated: false, skipped: true, escalated: false };
+  }
+  /**
+   * @param {string} signal
+   * @returns {boolean} whether any signal was delivered
+   */
+  const signalGroupThenPid = (signal) => {
+    try {
+      kill(-pid, signal);
+      return true;
+    } catch {
+      // Not a group leader (or the group is already gone) — try the pid.
+    }
+    try {
+      kill(pid, signal);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!signalGroupThenPid("SIGTERM")) {
+    return { terminated: !alive(pid), skipped: false, escalated: false };
+  }
+  const deadline = Date.now() + Math.max(0, graceMs);
+  while (alive(pid) && Date.now() < deadline) {
+    await delay(PROCESS_TREE_KILL_POLL_MS);
+  }
+  if (!alive(pid)) {
+    return { terminated: true, skipped: false, escalated: false };
+  }
+  signalGroupThenPid("SIGKILL");
+  const killDeadline = Date.now() + Math.max(graceMs, 500);
+  while (alive(pid) && Date.now() < killDeadline) {
+    await delay(PROCESS_TREE_KILL_POLL_MS);
+  }
+  return { terminated: !alive(pid), skipped: false, escalated: true };
+}
+/**
  * @param {import("node:child_process").ChildProcess} child
  * @param {boolean} detached
  */
@@ -97,7 +214,7 @@ export function killChildTree(child, detached) {
     return;
   }
   if (process.platform === "win32") {
-    const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+    const killer = spawn("taskkill", taskkillArgs(child.pid), {
       stdio: "ignore",
       windowsHide: true,
     });
