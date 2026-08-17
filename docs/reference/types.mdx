@@ -263,6 +263,7 @@ type SmithersErrorReport = {
 type RunOptions = {
   runId?: string;
   parentRunId?: string | null;
+  ownership?: { owner: string; app: string };  // durable tenant key; child runs always inherit the exact pair
   input: Record<string, unknown>;
   maxConcurrency?: number;          // default 4; run cap shared with lifecycle-linked descendant tasks
   maxConcurrencyPinned?: boolean;   // internal/runtime proof that the value was explicitly persisted

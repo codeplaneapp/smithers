@@ -815,7 +815,7 @@ type OutputSchemaDescriptor = {
 Gateway v1 RPC errors use stable code strings and HTTP status mappings:
 
 ```toon
-errors[27]{code,http}:
+errors[28]{code,http}:
   InvalidRequest,400
   InvalidInput,400
   Unauthorized,401
@@ -823,6 +823,7 @@ errors[27]{code,http}:
   RunNotFound,404
   ScoreNotFound,404
   RUN_NOT_ACTIVE,409
+  CONFLICT,409
   CronNotFound,404
   TicketNotFound,404
   NodeNotFound,404
@@ -1106,26 +1107,28 @@ type GatewayAuthConfig =
       mode: "trusted-proxy";
       trustedProxies: string[];      // REQUIRED: peer IPs / CIDR blocks, or "unix"
       allowedOrigins?: string[];     // default [] (no Origin allowlist)
-      trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role","x-app-id"]
+      trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
       defaultRole?: string;          // default "operator"
       defaultScopes?: string[];      // trusted-proxy: used when the scopes header is absent, else the request is rejected
     };
 ```
 
-JWT auth reads scopes from `scope`, role from `role`, user id from `sub`, and app
-id from `app` unless the `*Claim` options override those claim names. Missing JWT
-role falls back to `defaultRole` and then `operator`; missing JWT scopes fall
-back to `defaultScopes` and then `[]`. Trusted-proxy auth reads
-`trustedHeaders` as `[user, scopes, role, app]`; missing role falls back to
+JWT auth reads scopes from `scope`, role from `role`, and user id from `sub`
+unless the `*Claim` options override those claim names. The app half of the
+tenant key comes from the `app` claim (`appClaim` overrides that name). Missing
+JWT role falls back to `defaultRole` and then `operator`; missing JWT scopes
+fall back to `defaultScopes` and then `[]`. Trusted-proxy auth reads
+`trustedHeaders` as `[user, scopes, role]`; missing role falls back to
 `defaultRole` and then `operator`, and missing scopes fall back to
 `defaultScopes`, or the request is rejected when no `defaultScopes` is
-configured. The app header is read only when `trustedHeaders` is omitted
-entirely (all four defaults apply) or explicitly lists a fourth entry — an
-existing three-entry allow-list never starts trusting `x-app-id`, so a proxy
-that does not strip it cannot be used to claim a different app. A caller whose
-identity is missing either half of the pair sees only unowned runs. Those
-headers are only read at all when the request's transport peer matches
-`trustedProxies` (see below).
+configured. The app header defaults to `x-app-id` and is honored only when
+`trustedHeaders` is omitted entirely (all four defaults apply) or explicitly
+names a fourth entry: an existing three-entry allow-list never starts trusting
+`x-app-id`, so a proxy that does not strip that header cannot be used to claim
+a different app half of the tenant key. Ownership requires both halves of the
+`(user, app)` pair, so a caller whose identity supplies only one half is not
+partially trusted and sees only unowned runs. Those headers are only read at
+all when the request's transport peer matches `trustedProxies` (see below).
 
 ### Trusted-proxy trust boundary
 
