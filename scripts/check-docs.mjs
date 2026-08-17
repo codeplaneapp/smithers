@@ -1267,8 +1267,14 @@ function checkGatewayCancelRunDocsMatchRuntimeErrors() {
     [serverSource, 'return responseError(frame.id, "RUN_NOT_ACTIVE", "Run is not currently active");'],
     [GATEWAY_RPC_TYPES, '| "RUN_NOT_ACTIVE"'],
     [GATEWAY_RPC_INDEX, 'RUN_NOT_ACTIVE: { version: SMITHERS_API_VERSION, code: "RUN_NOT_ACTIVE", httpStatus: 409'],
-    [GATEWAY_RPC_INDEX, 'errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RUN_NOT_ACTIVE", "Internal"],'],
-    [cancelRunDoc, "include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RUN_NOT_ACTIVE`, and `Internal`"],
+    [
+      GATEWAY_RPC_INDEX,
+      'errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "RUN_NOT_ACTIVE", "Internal"],',
+    ],
+    [
+      cancelRunDoc,
+      "include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `RUN_NOT_ACTIVE`, and `Internal`",
+    ],
     [cancelRunDoc, "`RUN_NOT_ACTIVE` means the run is not currently active"],
     [GATEWAY_INTEGRATION, "RUN_NOT_ACTIVE,409"],
   ];
