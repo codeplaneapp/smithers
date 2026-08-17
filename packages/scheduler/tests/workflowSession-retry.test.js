@@ -118,6 +118,31 @@ describe("makeWorkflowSession retry classification", () => {
     });
   });
 
+  test("dispatches a hydrated exhausted task when durable repair remains", () => {
+    const descriptor = makeAgentDescriptor({
+      retries: 0,
+      repair: {
+        agent: { id: "repair" },
+        outputTable: null,
+        outputTableName: "repair",
+        retries: 0,
+        timeoutMs: null,
+        heartbeatTimeoutMs: null,
+      },
+    });
+    const session = makeWorkflowSession({
+      initialRetryCounts: new Map([["agent-task::0", 1]]),
+      initialTaskFailures: new Map([
+        ["agent-task::0", { error: { message: "old terminal failure" }, recoveryCommand: "retry manually" }],
+      ]),
+    });
+
+    expect(Effect.runSync(session.submitGraph(makeGraph(descriptor)))).toEqual({
+      _tag: "Execute",
+      tasks: [descriptor],
+    });
+  });
+
   test("drops the recorded marker after a new attempt runs", () => {
     const descriptor = makeAgentDescriptor({ retries: 1 });
     const session = makeWorkflowSession({

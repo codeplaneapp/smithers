@@ -107,9 +107,15 @@ const isRetriableTaskFailure = (error) => error instanceof RetriableTaskFailure;
  * @returns {string}
  */
 export const makeTaskBridgeKey = (adapter, workflowName, runId, desc) =>
-  ["smithers-task-bridge", getAdapterNamespace(adapter), workflowName, runId, desc.nodeId, String(desc.iteration)].join(
-    ":",
-  );
+  [
+    "smithers-task-bridge",
+    getAdapterNamespace(adapter),
+    workflowName,
+    runId,
+    desc.nodeId,
+    String(desc.iteration),
+    desc.meta?.__taskRepairRetry === true ? "post-repair" : "normal",
+  ].join(":");
 /**
  * @param {_SmithersDb} adapter
  * @param {string} workflowName

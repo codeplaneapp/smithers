@@ -215,7 +215,7 @@ export function createTaskComponent({ applyCliToolAllowlist }) {
    * @returns {React.ReactElement | null}
    */
   return function Task(props) {
-    const { children, agent, fallbackAgent, deps, depsOptional, ...rest } = props;
+    const { children, agent, fallbackAgent, repair, deps, depsOptional, ...rest } = props;
     const taskContext = props.smithersContext ?? SmithersContext;
     const ctx = React.useContext(taskContext);
     const aspectCtx = React.useContext(AspectContext);
@@ -259,6 +259,14 @@ export function createTaskComponent({ applyCliToolAllowlist }) {
       : agentChain
         ? applyCliToolAllowlist(agentChain, effectiveAllowTools)
         : agentChain;
+    const restrictedRepair = repair
+      ? {
+          ...repair,
+          agent: Array.isArray(repair.agent)
+            ? repair.agent.map((entry) => applyCliToolAllowlist(entry, effectiveAllowTools))
+            : applyCliToolAllowlist(repair.agent, effectiveAllowTools),
+        }
+      : undefined;
     const nextDependsOn = mergeDependsOn(rest.dependsOn, depNodeIds);
     const hasFunctionChild = typeof children === "function";
     // Agent children are prompt render functions and must resolve while the
@@ -283,6 +291,7 @@ export function createTaskComponent({ applyCliToolAllowlist }) {
           dependsOn: nextDependsOn,
           waitAsync: rest.async === true,
           agent: restrictedAgentChain,
+          repair: restrictedRepair,
           __smithersKind: "agent",
           ...aspectMeta,
           ...memoryMeta,
@@ -297,6 +306,7 @@ export function createTaskComponent({ applyCliToolAllowlist }) {
         waitAsync: rest.async === true,
         __smithersKind: "compute",
         __smithersComputeFn: deps ? () => children(resolvedDeps ?? Object.create(null)) : children,
+        repair: restrictedRepair,
         ...aspectMeta,
         ...memoryMeta,
       };
@@ -309,6 +319,7 @@ export function createTaskComponent({ applyCliToolAllowlist }) {
       __smithersKind: "static",
       __smithersPayload: childValue,
       __payload: childValue,
+      repair: restrictedRepair,
       ...aspectMeta,
       ...memoryMeta,
     };

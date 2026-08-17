@@ -502,6 +502,38 @@ describe("extractGraph", () => {
       expect(task.retryPolicy).toEqual(policy);
     });
 
+    test("extracts one bounded repair task", () => {
+      const agent = { generate: async () => ({}) };
+      const repairOutput = z.object({ repaired: z.boolean() });
+      const task = extractGraph(
+        hostEl("smithers:task", {
+          id: "t1",
+          output: "t",
+          repair: { agent, output: repairOutput, instructions: "Create the missing file", retries: 1 },
+        }),
+      ).tasks[0];
+      expect(task.repair).toMatchObject({
+        agent,
+        outputRef: repairOutput,
+        instructions: "Create the missing file",
+        retries: 1,
+        retryPolicy: { backoff: "exponential", initialDelayMs: 1000 },
+      });
+    });
+
+    test("rejects ambiguous repair plus continueOnFail", () => {
+      expect(() =>
+        extractGraph(
+          hostEl("smithers:task", {
+            id: "t1",
+            output: "t",
+            continueOnFail: true,
+            repair: { agent: { generate: async () => ({}) }, output: "repair" },
+          }),
+        ),
+      ).toThrow("cannot combine repair with continueOnFail");
+    });
+
     test("noRetry wins over explicit retries but keeps an explicit retryPolicy", () => {
       const policy = { backoff: "fixed", initialDelayMs: 10 };
       const task = extractGraph(

@@ -803,6 +803,19 @@ type InferDeps<D extends DepsSpec> = {
   [K in keyof D]: D[K] extends string ? unknown : InferOutputEntry<D[K]>;
 };
 
+type TaskRepair = {
+  agent: AgentLike | AgentLike[];
+  output: OutputTarget;
+  outputSchema?: import("zod").ZodObject<any>;
+  instructions?: string;
+  retries?: number;
+  retryPolicy?: RetryPolicy;
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  heartbeatTimeout?: number;
+  maxSchemaRetries?: number;
+};
+
 type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSpec = {}> = {
   key?: string;
   id: string;
@@ -826,6 +839,7 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   noRetry?: boolean;
   retries?: number;                 // default Infinity (set 0 to disable)
   retryPolicy?: RetryPolicy;
+  repair?: TaskRepair;
   continueOnFail?: boolean;
   cache?: CachePolicy;
   scorers?: ScorersMap;

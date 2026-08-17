@@ -197,6 +197,7 @@
 /** @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("@smthrs/memory").TaskMemoryConfig} TaskMemoryConfig */
 /** @typedef {import("@smthrs/components").TaskProps} TaskProps */
+/** @typedef {import("@smthrs/components").TaskRepair} TaskRepair */
 /** @typedef {import("@smthrs/components").TimerProps} TimerProps */
 /** @typedef {import("@smthrs/time-travel/timetravel").TimeTravelOptions} TimeTravelOptions */
 /** @typedef {import("@smthrs/time-travel/timetravel").TimeTravelResult} TimeTravelResult */

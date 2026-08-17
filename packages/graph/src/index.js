@@ -29,6 +29,7 @@
 /** @typedef {import("./TaskDescriptor.ts").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("./TaskAspects.ts").TaskAspects} TaskAspects */
 /** @typedef {import("./TaskMemoryConfig.ts").TaskMemoryConfig} TaskMemoryConfig */
+/** @typedef {import("./types.ts").TaskRepairDescriptor} TaskRepairDescriptor */
 /** @typedef {import("./WorkflowGraph.ts").WorkflowGraph} WorkflowGraph */
 /** @typedef {import("./XmlElement.ts").XmlElement} XmlElement */
 /** @typedef {import("./XmlNode.ts").XmlNode} XmlNode */

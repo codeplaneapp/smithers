@@ -1135,6 +1135,19 @@ export function makeWorkflowSession(options = {}) {
     if (!state.graph) {
       return { _tag: "Wait", reason: { _tag: "ExternalTrigger" } };
     }
+    // A terminal failure with a declared repair remains executable after a
+    // crash. Hydration normally makes exhausted failures fail immediately,
+    // but the engine still has one durable recovery phase to run (or resume)
+    // for these descriptors.
+    for (const [key] of state.restoredTaskFailures) {
+      const taskState = state.states.get(key);
+      if (taskState !== "failed" && taskState !== "stalled") continue;
+      const parsed = parseStateKey(key);
+      const descriptor = findDescriptor(state.descriptors, parsed.nodeId, parsed.iteration);
+      if (descriptor?.repair) {
+        state.states.set(key, "pending");
+      }
+    }
     cascadeQuarantinedFailures();
     const schedule = computeSchedule();
     if (schedule.fatalError) {

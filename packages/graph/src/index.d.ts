@@ -1,4 +1,4 @@
-import { AgentLike as AgentLike$1, ApprovalOption as ApprovalOption$1, CachePolicy as CachePolicy$1, ExtractGraph as ExtractGraph$1, ExtractOptions as ExtractOptions$1, GraphSnapshot as GraphSnapshot$1, HostElement as HostElement$1, HostNode as HostNode$1, HostText as HostText$1, MemoryNamespace as MemoryNamespace$1, MemoryNamespaceKind as MemoryNamespaceKind$1, RetryPolicy as RetryPolicy$1, SamplingConfig as SamplingConfig$1, ScoreResult as ScoreResult$1, Scorer as Scorer$1, ScorerBinding as ScorerBinding$1, ScorerFn as ScorerFn$1, ScorerInput as ScorerInput$1, ScorersMap as ScorersMap$1, TaskAspects as TaskAspects$1, TaskDescriptor as TaskDescriptor$1, TaskMemoryConfig as TaskMemoryConfig$1, WorkflowGraph as WorkflowGraph$1, XmlElement as XmlElement$1, XmlNode as XmlNode$1, XmlText as XmlText$1 } from './types.js';
+import { AgentLike as AgentLike$1, ApprovalOption as ApprovalOption$1, CachePolicy as CachePolicy$1, ExtractGraph as ExtractGraph$1, ExtractOptions as ExtractOptions$1, GraphSnapshot as GraphSnapshot$1, HostElement as HostElement$1, HostNode as HostNode$1, HostText as HostText$1, MemoryNamespace as MemoryNamespace$1, MemoryNamespaceKind as MemoryNamespaceKind$1, RetryPolicy as RetryPolicy$1, SamplingConfig as SamplingConfig$1, ScoreResult as ScoreResult$1, Scorer as Scorer$1, ScorerBinding as ScorerBinding$1, ScorerFn as ScorerFn$1, ScorerInput as ScorerInput$1, ScorersMap as ScorersMap$1, TaskAspects as TaskAspects$1, TaskDescriptor as TaskDescriptor$1, TaskMemoryConfig as TaskMemoryConfig$1, TaskRepairDescriptor as TaskRepairDescriptor$1, WorkflowGraph as WorkflowGraph$1, XmlElement as XmlElement$1, XmlNode as XmlNode$1, XmlText as XmlText$1 } from './types.js';
 import { ProofBinding as ProofBinding$1 } from './ProofBinding.js';
 import { ClaudeWorkflowPhasePlan as ClaudeWorkflowPhasePlan$1 } from './ClaudeWorkflowPhasePlan.js';
 import { ClaudeWorkflowPhase as ClaudeWorkflowPhase$1 } from './ClaudeWorkflowPhase.js';
@@ -41,9 +41,10 @@ type ScorersMap = ScorersMap$1;
 type TaskDescriptor = TaskDescriptor$1;
 type TaskAspects = TaskAspects$1;
 type TaskMemoryConfig = TaskMemoryConfig$1;
+type TaskRepairDescriptor = TaskRepairDescriptor$1;
 type WorkflowGraph = WorkflowGraph$1;
 type XmlElement = XmlElement$1;
 type XmlNode = XmlNode$1;
 type XmlText = XmlText$1;
 
-export type { AgentLike, ApprovalOption, CachePolicy, ClaudeWorkflowNodeKind, ClaudeWorkflowNodePhase, ClaudeWorkflowPhase, ClaudeWorkflowPhasePlan, ExtractGraph, ExtractOptions, GraphSnapshot, HostElement, HostNode, HostText, MemoryNamespace, MemoryNamespaceKind, ProofBinding, RetryPolicy, SamplingConfig, ScoreResult, Scorer, ScorerBinding, ScorerFn, ScorerInput, ScorersMap, TaskAspects, TaskDescriptor, TaskMemoryConfig, WorkflowGraph, XmlElement, XmlNode, XmlText };
+export type { AgentLike, ApprovalOption, CachePolicy, ClaudeWorkflowNodeKind, ClaudeWorkflowNodePhase, ClaudeWorkflowPhase, ClaudeWorkflowPhasePlan, ExtractGraph, ExtractOptions, GraphSnapshot, HostElement, HostNode, HostText, MemoryNamespace, MemoryNamespaceKind, ProofBinding, RetryPolicy, SamplingConfig, ScoreResult, Scorer, ScorerBinding, ScorerFn, ScorerInput, ScorersMap, TaskAspects, TaskDescriptor, TaskMemoryConfig, TaskRepairDescriptor, WorkflowGraph, XmlElement, XmlNode, XmlText };

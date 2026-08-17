@@ -128,6 +128,52 @@ For anything the platform cannot classify, declare it yourself with `retryPolicy
 - **Quota failures don't advance the rung.** A provider quota wall says nothing about the agent's health, so quota-failed attempts are discounted when picking the rung - otherwise one Codex quota blip would silently demote every task onto its fallback for the rest of the run.
 - **A run-wide breaker for dead agents.** An agent that fails preflight (e.g. a 401 from a bad API key) is disabled run-wide and selection skips it - a per-agent circuit breaker in the [Hystrix](https://resilience4j.readme.io/docs/circuitbreaker) sense, so a documented fallback actually engages instead of every task dying on the broken rung first.
 
+### Repair after terminal failure
+
+Retries and agent fallbacks repeat the same work. They cannot create a missing
+file, repair a drifted generated artifact, or restore another precondition.
+Declare `repair` when a separate bounded task should change that state:
+
+```tsx
+<Task
+  id="publish"
+  output={outputs.publication}
+  retries={2}
+  agent={fallbackAgents({ seed: ctx.runId })}
+  repair={{
+    agent: repairAgent,
+    output: outputs.repair,
+    instructions: "Repair only the missing publication inputs.",
+  }}
+>
+  Publish the prepared artifacts.
+</Task>
+```
+
+The unit is a repair task, not a fallback result. The original retry policy and
+agent chain run first. Only a terminal failure triggers repair. After repair
+succeeds, Smithers gives the original task one fresh attempt starting at the
+first agent in its chain. This keeps `fallbackAgents` responsible for a
+different agent doing the same work and keeps `repair` responsible for changing
+the precondition.
+
+The repair receives the terminal error, all durable attempt summaries, the
+original task's prompt or payload, resolved workflow input and dependency
+outputs, and the active workspace path and branch. Each attempt summary includes
+timing, state, error, and the jj pointer. Its result is validated and persisted
+through the declared Zod output target. It runs in the same workspace as the
+failed task.
+
+Repair is bounded and durable. The default is one repair attempt; a finite
+`repair.retries` can raise that limit. A failed repair produces
+`TASK_REPAIR_FAILED` and never invokes another repair. A failed post-repair
+original attempt also terminates without another recovery round. Repair nodes,
+attempts, and outputs use the normal durable engine rows, so a crash during
+repair resumes the same recovery phase.
+
+`continueOnFail` is a different choice: it accepts the failure and continues.
+Smithers rejects a task that declares both `repair` and `continueOnFail`.
+
 ### Quota exhaustion: park, don't burn
 
 When an agent CLI hits a usage limit, `BaseCliAgent` classifies it (pattern-matching the provider's limit banner, extracting `quotaResetAtMs` when the message names a reset time) and the engine treats it as a **non-attempt**: the failure does not consume retry budget, and the run parks in `waiting-quota` instead of grinding its retries to zero against a wall that won't move. The gateway's sweep (or `bunx smthrs supervise`) resumes the run once the reset time elapses. This is the DLQ insight applied to quotas: don't redeliver into a known-dead consumer.
@@ -203,6 +249,7 @@ The same commands appear as next-step actions when `bunx smthrs up` reports a fa
 - Error classification is built in (quota, preflight/auth, heartbeat, timeout, `ENOENT` preconditions, hard size caps). Instead of Temporal-style `nonRetryableErrorTypes`, per-task control is a `retryPolicy.retryable` flag or predicate.
 - Stall detection is per node and per iteration, keyed on consecutive identical signatures. An error that alternates between two messages never stalls; bound those tasks with `retries` as well.
 - Retries cannot detect a *plausible wrong answer*. That is what `scorers`, review tasks, and approval gates are for - a retry policy is not a quality gate.
+- Repair does not synthesize a plan, approve risky changes, constrain paths, or choose an agent automatically. The workflow author declares the repair agent, instructions, output contract, and finite budget.
 
 ## See also
 
