@@ -63,6 +63,7 @@ async function tallyNodeStates(adapter, runId) {
         t.working += 1;
         break;
       case "failed":
+      case "stalled":
         t.failed += 1;
         break;
       case "finished":
