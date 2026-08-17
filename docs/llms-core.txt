@@ -6726,6 +6726,18 @@ Both use the graph resolver, so they match the path Smithers gives worker tasks.
   symlink node_modules from, or write into, the parent checkout. An install through a shared
   node_modules link rewrites the parent checkout's workspace links to point into the
   worktree, all of which dangle once the worktree is removed.
+- **A sandboxed agent cannot commit inside a worktree.** A jj workspace (and a git worktree)
+  keeps its object store in the *parent* checkout, so a `CodexAgent` with
+  `sandbox: "workspace-write"` can edit the lane's files but every `jj`/`git` commit fails
+  with a permission error on metadata outside its writable root. The lane then looks alive
+  for hours while the agent burns its context retrying version control, and the workflow
+  sees no commits to review, gate, or land. Give commit-capable lane agents
+  `sandbox: "danger-full-access"` and constrain them with the prompt instead (work only in
+  the supplied worktree, never push, never move the base branch), then re-gate every diff in
+  a serialized land step before the base branch moves. `ClaudeCodeAgent` is unaffected.
+  Diagnose a suspected case with `jj diff --from <baseBranch> --to @ --summary` run *inside*
+  the lane, without `--ignore-working-copy`. That flag hides uncommitted edits and makes a
+  working lane look idle.
 - **Worktree lanes are disposable, including ignored files.** Reaping deletes the lane
   directory after the run ends. Commit anything valuable or copy it outside the lane first.
 - **jj continuously snapshots a worktree's working copy onto its bookmark.** A compute
