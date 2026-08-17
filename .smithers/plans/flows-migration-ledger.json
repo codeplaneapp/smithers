@@ -1,0 +1,489 @@
+{
+ "missionTitle": "Flows migration",
+ "summary": "22 lanes across four stages. Stage 0 carries the flows-side features later stages consume (RunControl, Checkpoint capability, pg/pglite dialect) because smithers installs the published alpha. The package-name collision needs no rename: flows keeps the bare names by decision 84fd9eb5bd29, and a workspace package coexists with a same-named registry package under pnpm, so the alpha simply never takes the latest dist-tag. Stage 1.4 and 1.5 are merged since both land at the wait/wake seam.",
+ "stages": [
+  {
+   "id": "0",
+   "title": "Prerequisites",
+   "goal": "Land everything stages 1-3 are blocked on: the package-name rename and alpha publish train in the flows repo, the Effect rc.108 substrate bump in smithers, the cross-engine parity harness, and the two flows-side features (RunControl, Checkpoint capability) that stage 1 consumes from the published alpha. The rename and the effect bump come first because every other lane builds on them. flows keeps the bare @smthrs/* names; no rename lane exists.",
+   "checks": [
+    "pnpm typecheck",
+    "node scripts/check-single-effect-version.mjs"
+   ],
+   "lanes": [
+    {
+     "slug": "effect-rc108-bump",
+     "title": "Bump smithers to effect 4.0.0-rc.108",
+     "goal": "Spec 0.3. Move every smithers manifest pinned to effect@4.0.0-beta.105 (at least packages/{memory,driver,scheduler,agents,server,scorers,openapi,integrations,testing,components}) to exactly 4.0.0-rc.108, matching flows, and fix the fallout in packages/engine/src/effect/* (activity bridge, compute-task bridge, deferred-state bridge, entity worker, single runner, builder, RPC schema). Refresh both pnpm-lock.yaml and bun.lock in the same commit. Acceptance: check-single-effect-version reports one version, pnpm typecheck is green, and the engine, scheduler, and agents suites (including the engine effect-bridge internals tests) pass.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/",
+      "apps/",
+      "pnpm-lock.yaml",
+      "bun.lock"
+     ],
+     "checks": [
+      "pnpm install --frozen-lockfile",
+      "node scripts/check-single-effect-version.mjs",
+      "pnpm typecheck",
+      "pnpm -C packages/engine test",
+      "pnpm -C packages/scheduler test",
+      "pnpm -C packages/agents test"
+     ],
+     "dependsOn": []
+    },
+    {
+     "slug": "alpha-release-train",
+     "title": "Alpha publish train and the dist-tag naming policy",
+     "goal": "Spec 0.2 and 0.1. flows keeps the bare @smthrs/* names: commit 84fd9eb5bd29 (2026-08-18) dropped the -next suffix deliberately because flows is the tree now. There is NO rename lane and you must not rename anything. Land the CI release train that publishes the engine and agent groups as 0.1.0-alpha.N under the `alpha` dist-tag, never `latest`, so @smthrs/engine@latest keeps resolving to smithers 0.35.0 for existing users through the whole transition: extend scripts/pack-release.mjs and .github/workflows/release.yml for the alpha line, and make the publish step fail loudly if it would move `latest` on any name smithers currently owns (@smthrs/engine, gateway, memory, sandbox, scorers, testing, time-travel). Add scripts/verify-alpha-install.mjs: a scratch-consumer script that creates a temp package, installs the alpha (from the registry, or from pnpm pack tarballs in --local mode), and runs the flows quick-start program. It must also prove the coexistence the migration depends on, which is already measured and true: a pnpm workspace containing a package named @smthrs/engine can simultaneously depend on the registry's @smthrs/engine, the workspace copy wins the bare specifier, and the registry copy is reachable under an alias (\"@flows/engine\": \"npm:@smthrs/engine@<alpha>\"). HUMAN-TASKS.md H1-H4 (npm org access, tokens, CI secrets) stay maintainer tasks; this lane makes the train runnable the moment they are done. Acceptance: the local-mode verification script passes against pnpm pack output, and the dist-tag guard is proven by a test that fails when the publish step targets `latest`.",
+     "repo": "flows",
+     "scopes": [
+      "scripts/",
+      ".github/",
+      "package.json",
+      "HUMAN-TASKS.md",
+      "docs/"
+     ],
+     "checks": [
+      "pnpm install --frozen-lockfile",
+      "node scripts/verify-alpha-install.mjs --local",
+      "pnpm lint"
+     ],
+     "dependsOn": []
+    },
+    {
+     "slug": "flows-runcontrol",
+     "title": "flows RunControl, attribution, and Continued terminal",
+     "goal": "Close flows gap-analysis sections 4 and 5, which spec stages 1.4 and 1.1 consume: a small RunControl service that journals an attributed control event (actor, reason) and flips DurableEngineState for pause and cancel, with hijack shipping as an alternative RunControl implementation provided by a Layer; plus the Continued terminal status/journal event that closes a parent run, with automatic lineage recording from ordinary execution. Touch packages/engine-store (RunDriver, DurableEngineState), packages/run-store, packages/journal, and export through packages/flows. Acceptance: pause and hijack fault cases with attribution asserted, a restart-lineage fault case, and the existing engine-store, run-store, and journal suites green.",
+     "repo": "flows",
+     "scopes": [
+      "packages/engine-store/",
+      "packages/run-store/",
+      "packages/journal/",
+      "packages/flows/",
+      "packages/control/"
+     ],
+     "checks": [
+      "pnpm -C packages/engine-store test",
+      "pnpm -C packages/run-store test",
+      "pnpm -C packages/journal test"
+     ],
+     "dependsOn": []
+    },
+    {
+     "slug": "flows-checkpoint-capability",
+     "title": "flows layer-gated Checkpoint host capability",
+     "goal": "Close flows gap-analysis section 6, which spec stage 1.6 consumes: a layer-gated Checkpoint host capability (makeNoop for the browser) that snapshots agent-session and worktree state at step boundaries under an injected trigger policy, with whole-tree change detection via the jj package, invoked by the owning runtime at step boundaries rather than an engine-wide plugin hook, and wired to the existing time-travel stores. Acceptance: a test proving a step-boundary snapshot is restorable through the time-travel stores, existing engine-store and time-travel suites green, and the browser bundle check still green.",
+     "repo": "flows",
+     "scopes": [
+      "packages/engine-store/",
+      "packages/time-travel/",
+      "packages/jj/",
+      "packages/flows/",
+      "packages/sandbox/",
+      "packages/kernel/"
+     ],
+     "checks": [
+      "pnpm -C packages/engine-store test",
+      "pnpm -C packages/time-travel test",
+      "node scripts/browser-check.mjs"
+     ],
+     "dependsOn": [
+      "flows-runcontrol"
+     ]
+    },
+    {
+     "slug": "flows-pg-dialect",
+     "title": "Postgres and PGlite database layers for flows",
+     "goal": "Spec 0.4, flows side. flows ships one SQL backend (SQLite over @effect/sql-sqlite-node) and every migration set is SQLite-flavoured DDL, but smithers supports PGlite and Postgres, so stage 1 cannot flip default-on for those workspaces until this lands. Execute the three steps written in docs/architecture/smithers-replacement-gaps.md new-gap 4, in order: (i) add packages/database/src/pg and packages/database/src/pglite layers over @effect/sql-pg and @effect/sql-pglite; the write-retry classifier is already dialect-blind and must stay that way. (ii) split the SQLite-specific DDL in the migration ladders behind a dialect parameter on Migrations.run, and port the statements that live outside the ladder entirely, using the inventory in packages/engine-store/src/internal/EngineStateSchema.ts; the flows_run_parents_gc trigger is the blocker and needs CREATE FUNCTION ... RETURNS trigger plus CREATE TRIGGER ... EXECUTE FUNCTION on Postgres. Everything in DurableEngineState.make is piped through Effect.orDie, so an unported statement is a layer-construction defect, not a recoverable error. (iii) run the existing journal and engine-store suites against the PGlite layer as a second backend, which is the only honest proof of parity. Acceptance: the journal and engine-store suites pass on both SQLite and PGlite, and the out-of-ladder DDL catalog test still matches the inventory.",
+     "repo": "flows",
+     "scopes": [
+      "packages/database/",
+      "packages/journal/",
+      "packages/run-store/",
+      "packages/step-cache/",
+      "packages/engine-store/",
+      "packages/flows/"
+     ],
+     "checks": [
+      "pnpm -C packages/database test",
+      "pnpm -C packages/journal test",
+      "pnpm -C packages/engine-store test"
+     ],
+     "dependsOn": []
+    },
+    {
+     "slug": "parity-harness",
+     "title": "Cross-engine parity harness in e2e/parity",
+     "goal": "Spec 0.5. Create e2e/parity in smithers: a fixture set of workflows that runs on a selectable engine and asserts identical node states, output rows, event projections, and terminal verdicts; port the e2e/faults cases into it as parity fixtures. In this lane the suite runs the legacy engine only and commits its recorded results as the fixture oracle; the flows engine plugs into the same selector in stage 1.3. This suite is the objective gate for every later lane: no stage 1-3 lane is accepted while it is red. Acceptance: bun test e2e/parity green on the legacy engine with oracles committed.",
+     "repo": "smithers",
+     "scopes": [
+      "e2e/"
+     ],
+     "checks": [
+      "pnpm -C e2e typecheck",
+      "bun test e2e/parity"
+     ],
+     "dependsOn": [
+      "effect-rc108-bump"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1",
+   "title": "flows as the underlying engine",
+   "goal": "Swap the runtime under the existing product in flows' recommended order: storage first, loop second, control third, time travel last, everything behind SMITHERS_ENGINE=flows until the final lane flips the default and deletes packages/scheduler and packages/driver. The parity harness gates every lane.",
+   "checks": [
+    "pnpm typecheck",
+    "bun test e2e/parity"
+   ],
+   "lanes": [
+    {
+     "slug": "db-adapter-compat",
+     "title": "Storage swap behind an adapter-compat module",
+     "goal": "Spec 1.1. Replace packages/db/src/adapter.js's insertEventWithNextSeq, claimRunForResume, and the attempt tables with the flows Journal, RunStore, and AttemptStore behind a compat module that preserves adapter.js's call signatures. Include the event-shape translator (smithers event rows to journal producer events, both directions) and a one-shot migration for live runs. SQLite workspaces only; PGlite/Postgres workspaces keep the legacy adapter.js path per the stage 0.4 decision. Acceptance: db and engine suites green, parity harness green on SQLite.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/db/",
+      "packages/engine/",
+      "pnpm-lock.yaml",
+      "bun.lock"
+     ],
+     "checks": [
+      "pnpm -C packages/db test",
+      "pnpm -C packages/engine test",
+      "bun test e2e/parity",
+      "pnpm typecheck"
+     ],
+     "dependsOn": []
+    },
+    {
+     "slug": "graph-plan-compiler",
+     "title": "Graph to Plan compiler (packages/flows-compile)",
+     "goal": "Spec 1.2. New package packages/flows-compile: compile GraphSnapshot from @smthrs/graph's extractGraph into a flows plan keyed action graph plus flow definitions. Agent task becomes a harness AgentStep action; compute task becomes an action whose body runs the computeFn; static task becomes a sealed constant step; dependsOn/needs/deps become plan edges with the rest derived from content. Carry smithers node IDs as annotations so the gateway, UI, and CLI keep addressing nodes by the IDs they already show while step identity is the flows content hash. Acceptance: committed golden plan snapshots for the fixture workflows are green, parity harness green.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/flows-compile/",
+      "pnpm-workspace.yaml",
+      "pnpm-lock.yaml",
+      "bun.lock"
+     ],
+     "checks": [
+      "pnpm -C packages/flows-compile test",
+      "pnpm typecheck"
+     ],
+     "dependsOn": []
+    },
+    {
+     "slug": "dual-engine-routing",
+     "title": "Dual-engine routing with SQLite-only guard",
+     "goal": "Spec 1.3 plus the stage 0.4 decision's implementation. createWorkflowSession takes an engine selector honoring SMITHERS_ENGINE=flows: new runs execute on FlowEngine plus DurableEngineState, runs already in flight finish on the legacy loop. Storage and engine wiring comes from the flows NodeRuntime subpath; smithers supplies host services, the capability kernel, and the registration-before-resume guarantee through that layer's registerFlows phase. The flows engine is default-off and refuses to enable on a non-SQLite workspace with a clear error naming the dialect gap. Acceptance: parity harness green on both engines, a restart test that resumes a flows run after process death, and a test that enabling on a PGlite/Postgres workspace fails with the refusal message.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/engine/",
+      "packages/smithers/",
+      "e2e/",
+      "pnpm-lock.yaml",
+      "bun.lock"
+     ],
+     "checks": [
+      "pnpm -C packages/engine test",
+      "bun test e2e/parity",
+      "pnpm typecheck"
+     ],
+     "dependsOn": [
+      "db-adapter-compat",
+      "graph-plan-compiler"
+     ]
+    },
+    {
+     "slug": "waiting-runcontrol-quota",
+     "title": "Waiting taxonomy, RunControl verbs, injected classifiers",
+     "goal": "Spec 1.4 and 1.5, merged because both live at the same wait/wake seam. Route approvals, timers, events, and quota parks through FlowRuntime.annotateWaiting with { reason, wakeAt?, token? } instead of engine.js's inline waiting states; make smithers pause, cancel, and steer thin calls onto the flows RunControl landed in stage 0; delete apps/cli/src/supervisor.js's claim-by-proxy process, relying on the flows run driver's own heartbeat sweep of stale-running rows, released rows, and due wakes. Keep provider quota and transient error classification in smithers as injected services at the wait/wake seam (classifyError, resolveRetry); quota errors park with a wakeAt and wake through the durable clock. Acceptance: restart-waiting fault cases green, a pause and a hijack case with attribution asserted, and one park-then-wake fault case per provider family.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/engine/",
+      "apps/cli/",
+      "e2e/"
+     ],
+     "checks": [
+      "pnpm -C packages/engine test",
+      "pnpm -C e2e test:faults",
+      "bun test e2e/parity",
+      "pnpm typecheck"
+     ],
+     "dependsOn": [
+      "dual-engine-routing"
+     ]
+    },
+    {
+     "slug": "checkpoints-timetravel",
+     "title": "Checkpoints and time travel onto flows",
+     "goal": "Spec 1.6, smithers half (the flows Checkpoint capability landed in stage 0). Move snapshot-hook, restore, revert, rewind, and the smithers worktree lanes onto the flows Checkpoint host capability and the flows time-travel stores, with smithers supplying the injected trigger policy that decides when a snapshot fires. Touch apps/cli (the snapshot-hook, restore, revert, rewind, worktree commands), packages/time-travel, and packages/vcs. Acceptance: the existing time-travel CLI suites green when run against the flows engine.",
+     "repo": "smithers",
+     "scopes": [
+      "apps/cli/",
+      "packages/time-travel/",
+      "packages/vcs/",
+      "pnpm-lock.yaml",
+      "bun.lock"
+     ],
+     "checks": [
+      "pnpm -C packages/time-travel test",
+      "pnpm -C apps/cli test",
+      "pnpm typecheck"
+     ],
+     "dependsOn": [
+      "waiting-runcontrol-quota"
+     ]
+    },
+    {
+     "slug": "default-on-delete",
+     "title": "Flip default to flows, delete scheduler and driver",
+     "goal": "Spec 1.7. Flip the engine default to flows for SQLite workspaces (the non-SQLite refusal guard stays until flows lands its accepted PGlite/Postgres dialect gap), keep the legacy loop behind an explicit flag for one release, and delete the subsumed internals in packages/scheduler and packages/driver plus their workspace wiring. Acceptance: full pnpm test, pnpm -C e2e test, and the parity harness with the legacy engine's recorded fixtures as the oracle, all green.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/engine/",
+      "packages/scheduler/",
+      "packages/driver/",
+      "packages/smithers/",
+      "pnpm-workspace.yaml",
+      "pnpm-lock.yaml",
+      "bun.lock"
+     ],
+     "checks": [
+      "pnpm test",
+      "pnpm -C e2e test",
+      "bun test e2e/parity"
+     ],
+     "dependsOn": [
+      "waiting-runcontrol-quota",
+      "checkpoints-timetravel"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "2",
+   "title": "The agent primitive replaces the Vercel AI SDK",
+   "goal": "Adopt the flows model seam and harness contract, port every first-class agent to a flows harness adapter with its existing tests as the gate, make the cell loop the built-in in-process agent, and move usage, quota routing, and scorers onto model events. Ends with no manifest depending on ai or @ai-sdk/*.",
+   "checks": [
+    "pnpm -C packages/agents test",
+    "pnpm typecheck"
+   ],
+   "lanes": [
+    {
+     "slug": "model-seam",
+     "title": "Adopt the flows model provider seam",
+     "goal": "Spec 2.1. Adopt the flows model package as the one provider seam: Model.stream(request) returns a stream of ModelEvent and cancellation is fiber interruption, using its shipped Anthropic Messages, OpenAI Responses, and OpenAI-compatible protocols with auth, framing, routing, and tool streaming. Remove ai and @ai-sdk/* from packages/{engine,agents,tool-context,openapi,agent-eliza} and apps/smithers, refreshing both lockfiles. Acceptance: the agent suites green, a live smoke call per provider family, and no manifest in the touched packages depending on ai or @ai-sdk/*.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/engine/",
+      "packages/agents/",
+      "packages/tool-context/",
+      "packages/openapi/",
+      "packages/agent-eliza/",
+      "apps/smithers/",
+      "pnpm-lock.yaml",
+      "bun.lock"
+     ],
+     "checks": [
+      "pnpm -C packages/agents test",
+      "pnpm -C packages/engine test",
+      "pnpm -C packages/openapi test",
+      "pnpm typecheck"
+     ],
+     "dependsOn": []
+    },
+    {
+     "slug": "harness-contract",
+     "title": "Harness contract with bidirectional AgentLike adapter",
+     "goal": "Spec 2.2. Adopt Harness.run(step, host) returning a stream of AgentEvent as the agent contract, and map smithers' AgentLike in packages/agents onto it with a bidirectional adapter so existing workflows and third-party agents keep working unchanged during the port. Acceptance: the adapter round-trips every event kind, proven by the agent contract tests.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/agents/",
+      "pnpm-lock.yaml",
+      "bun.lock"
+     ],
+     "checks": [
+      "pnpm -C packages/agents test",
+      "pnpm typecheck"
+     ],
+     "dependsOn": [
+      "model-seam"
+     ]
+    },
+    {
+     "slug": "port-cli-agents",
+     "title": "Port CLI-driven agents to harness adapters",
+     "goal": "Spec 2.3, first group (the spec's one-lane-per-adapter is compressed to two grouped lanes to fit the stage cap): port the CLI-driven first-class agents \u2014 ClaudeCode, Codex, Gemini, OpenCode, Amp, Cursor, Grok, Kimi, Hermes, HermesCli, Antigravity, Omp, OpenClaw, Pi, Nanocodex, Forge \u2014 from AgentLike to flows harness adapters using the stage's bidirectional adapter. Acceptance: every listed adapter's existing test suite green.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/agents/"
+     ],
+     "checks": [
+      "pnpm -C packages/agents test"
+     ],
+     "dependsOn": [
+      "harness-contract"
+     ]
+    },
+    {
+     "slug": "port-api-agents-pool",
+     "title": "Port API agents, PoolAgent, and fallbackAgents",
+     "goal": "Spec 2.3, second group: port the Anthropic and OpenAI agents onto model-seam-backed harness adapters, plus PoolAgent and fallbackAgents. The seat pool must keep working verbatim: nine seats, seed: ctx.runId. Acceptance: their existing tests green plus a determinism test asserting the seat assignment for a fixed runId is unchanged from the legacy pool.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/agents/"
+     ],
+     "checks": [
+      "pnpm -C packages/agents test"
+     ],
+     "dependsOn": [
+      "port-cli-agents"
+     ]
+    },
+    {
+     "slug": "cell-loop-agent",
+     "title": "Cell loop as the built-in in-process agent",
+     "goal": "Spec 2.4. Make the cell path (CellTurn composed by the flows engine-harness CellHarness) the built-in in-process agent, replacing the AI SDK loop in packages/agents. Tools come from the flows std package (Read, Write, Edit, Bash, Grep, Glob, Ls, ApplyPatch, WebFetch, WebSearch, LSP), with smithers' MCP toolsets and document-parsing tools bridged as flow tools. Acceptance: an agent task that edits files, runs a command, and reports structured output succeeds on the cell loop only.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/agents/",
+      "packages/tool-context/",
+      "pnpm-lock.yaml",
+      "bun.lock"
+     ],
+     "checks": [
+      "pnpm -C packages/agents test",
+      "pnpm -C packages/tool-context test",
+      "pnpm typecheck"
+     ],
+     "dependsOn": [
+      "port-api-agents-pool"
+     ]
+    },
+    {
+     "slug": "usage-scorers",
+     "title": "Usage, quota routing, and scorers on model events",
+     "goal": "Spec 2.5. Make smithers usage, quota routing, and the scorers read flows model events instead of AI SDK usage objects, touching packages/usage, packages/scorers, and the apps/cli usage command. Acceptance: smithers usage --run totals match the legacy numbers on a replayed fixture run, and the usage and scorers suites are green.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/usage/",
+      "packages/scorers/",
+      "apps/cli/"
+     ],
+     "checks": [
+      "pnpm -C packages/usage test",
+      "pnpm -C packages/scorers test",
+      "pnpm typecheck"
+     ],
+     "dependsOn": [
+      "model-seam"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "3",
+   "title": "flows becomes the API",
+   "goal": "Promote the flows authoring API through the smithers facade, ship flows-react as the React render-loop driver with agent-decided re-render, keep the roughly 200 pack workflows running through flows-react/compat plus a codemod, and rewrite the docs and bundles around the flows API.",
+   "checks": [
+    "pnpm typecheck",
+    "node scripts/check-docs.mjs",
+    "node scripts/check-llms.mjs"
+   ],
+   "lanes": [
+    {
+     "slug": "promote-flows-api",
+     "title": "Promote the flows authoring API through the facade",
+     "goal": "Spec 3.1. Make the flows API the documented way to write a workflow: export Action, Flow, Interpreter, the flows core node builders, and the flows patterns package's higher-order shapes (Debate, Panel, MapReduce, ReviewLoop, Escalation, Recursion, WithApproval, WithCache, WithRetry) through the packages/smithers facade per the facade rule (implement in the owning package, export here), with a runnable example in examples/. Acceptance: facade exports typecheck, check:dts green, and the example executes on the flows engine.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/smithers/",
+      "examples/",
+      "pnpm-lock.yaml",
+      "bun.lock"
+     ],
+     "checks": [
+      "pnpm -C packages/smithers test",
+      "pnpm typecheck",
+      "node scripts/check-dts.mjs"
+     ],
+     "dependsOn": []
+    },
+    {
+     "slug": "flows-react",
+     "title": "Promote flows-compile to the flows-react package",
+     "goal": "Spec 3.2. Promote packages/flows-compile to the public flows-react package: React renders JSX, the reconciler builds the host tree, extractGraph produces a graph, the stage 1.2 compiler turns it into a plan, the engine executes it, outputs land, and the render loop runs again \u2014 the seam specified in .smithers/specs/effect-react-library.md and effect-react-integration.md with flows as the core. Acceptance: the package builds and renders-and-executes the fixture workflows end to end on the flows engine.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/flows-react/",
+      "packages/flows-compile/",
+      "packages/react-reconciler/",
+      "pnpm-workspace.yaml",
+      "pnpm-lock.yaml",
+      "bun.lock"
+     ],
+     "checks": [
+      "pnpm -C packages/flows-react test",
+      "pnpm typecheck"
+     ],
+     "dependsOn": []
+    },
+    {
+     "slug": "agent-rerender",
+     "title": "Agent-decided re-render as the default loop",
+     "goal": "Spec 3.3. Expose the flows harness dynamic-node translation (Elaborate, Plan, Cell sealed model steps and child plans) as the flows-react loop driver, so each render pass's continuation is chosen by an agent rather than a fixed until and maxIterations, generalizing the monitor narrator and Trellis approximation into the default loop. Acceptance: a fixture workflow whose loop continuation is agent-decided runs to completion with the decision recorded in the journal.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/flows-react/"
+     ],
+     "checks": [
+      "pnpm -C packages/flows-react test",
+      "pnpm typecheck"
+     ],
+     "dependsOn": [
+      "flows-react"
+     ]
+    },
+    {
+     "slug": "compat-codemod",
+     "title": "flows-react/compat and the pack codemod",
+     "goal": "Spec 3.4. Ship the current JSX surface (Task, Sequence, Parallel, Loop, Branch, Approval, Worktree, Subflow, and the rest) as flows-react/compat so the roughly 200 workflows in .smithers/workflows keep running, plus a codemod that moves the shipped pack onto the flows-react API. Acceptance: the .smithers workflow tests green and a graph render of every pack workflow identical on both APIs.",
+     "repo": "smithers",
+     "scopes": [
+      "packages/flows-react/",
+      ".smithers/",
+      "scripts/"
+     ],
+     "checks": [
+      "pnpm -C .smithers test",
+      "pnpm typecheck"
+     ],
+     "dependsOn": [
+      "agent-rerender"
+     ]
+    },
+    {
+     "slug": "docs-bundles",
+     "title": "Docs rewrite and regenerated bundles",
+     "goal": "Spec 3.5. Rewrite docs/ around the flows authoring API, move the smithers JSX pages to a compatibility section, and regenerate the LLM bundles with pnpm docs:llms. Acceptance: check-docs and check-llms both green.",
+     "repo": "smithers",
+     "scopes": [
+      "docs/"
+     ],
+     "checks": [
+      "node scripts/check-docs.mjs",
+      "node scripts/check-llms.mjs"
+     ],
+     "dependsOn": [
+      "promote-flows-api",
+      "compat-codemod"
+     ]
+    }
+   ]
+  }
+ ]
+}

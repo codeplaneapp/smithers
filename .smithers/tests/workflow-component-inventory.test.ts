@@ -187,6 +187,7 @@ const workflowOwners = {
   "./tests/authoring-benchmark-workflow.test.ts": ["authoring-benchmark.tsx"],
   "./tests/api-ab-benchmark.test.tsx": ["api-ab-benchmark.tsx"],
   "./tests/finish-campaigns.test.tsx": ["finish-campaigns.tsx"],
+  "./tests/flows-migration.test.tsx": ["flows-migration.tsx"],
   "./tests/build-agentic-ui-library.test.tsx": ["build-agentic-ui-library.tsx"],
   "./tests/converge-agentic-ui-library.test.tsx": ["converge-agentic-ui-library.tsx"],
   "./tests/finish-agentic-ui-library.test.tsx": ["finish-agentic-ui-library.tsx"],
