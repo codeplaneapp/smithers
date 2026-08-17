@@ -72,7 +72,7 @@ export class GrokAgent extends BaseCliAgent {
 
   /** @param {GrokAgentOptions} [opts] */
   constructor(opts = {}) {
-    super(opts);
+    super(opts, "GrokAgent");
     this.opts = opts;
     this.capabilities = createGrokCapabilityRegistry(opts);
   }
