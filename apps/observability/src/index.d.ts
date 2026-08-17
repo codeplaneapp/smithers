@@ -223,6 +223,12 @@ type SmithersEvent$2 = {
     requestedDemand: number;
     effectiveCap: number;
     remediationCommand: string;
+    /** Present when a lifecycle-linked descendant caused the owner's budget to saturate. */
+    descendantRunId?: string;
+    /** Which owner budget bound admission. Historical events omit this. */
+    budget?: "run" | "subtree";
+    /** Present when `budget` is `subtree`. */
+    subtreeGroupId?: string;
     timestampMs: number;
 } | {
     type: "RunFinished";
