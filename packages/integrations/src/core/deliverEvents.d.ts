@@ -15,11 +15,17 @@ import './CursorStoreTypes.js';
  *
  * @param {SmithersDb} adapter
  * @param {ExternalEvent} event
- * @returns {Effect.Effect<{ deduped: boolean; runIds: string[] }, import("@smthrs/errors/SmithersError").SmithersError>}
+ * @param {{ onDelivery?: (result: { runIds: string[] }) => Effect.Effect<unknown, import("@smthrs/errors/SmithersError").SmithersError> }} [options]
+ * @returns {Effect.Effect<{ deduped: boolean; runIds: string[]; action?: unknown }, import("@smthrs/errors/SmithersError").SmithersError>}
  */
-declare function deliverEvent(adapter: SmithersDb, event: ExternalEvent): Effect.Effect<{
+declare function deliverEvent(adapter: SmithersDb, event: ExternalEvent, options?: {
+    onDelivery?: (result: {
+        runIds: string[];
+    }) => Effect.Effect<unknown, _smthrs_errors_SmithersError.SmithersError>;
+}): Effect.Effect<{
     deduped: boolean;
     runIds: string[];
+    action?: unknown;
 }, _smthrs_errors_SmithersError.SmithersError>;
 /**
  * Drain an EventSource into the delivery pipeline. Poll batches are delivered

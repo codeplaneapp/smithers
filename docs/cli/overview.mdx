@@ -274,7 +274,7 @@ See [Time-travel API](/reference/time-travel) and [Revert](/runtime/revert) for 
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[113]:
+commands[114]:
   - name: add
     purpose: Install a workflow pack from GitHub, npm, or a local file
     args[1]{name,type,required,desc}:
@@ -473,14 +473,23 @@ commands[113]:
     purpose: Serve the multi-run Gateway RPC/WS control plane for workspace run state (one singleton per workspace; a second start refuses); unlike up --serve, this is not tied to one run
     args[1]{name,type,required,desc}:
       action,enum,false,Manage the running singleton instead of serving: status | stop
-    flags[7]{name,short,type,default,desc}:
+    flags[10]{name,short,type,default,desc}:
       host,H,string,127.0.0.1,Gateway bind address
       port,p,number,7331,Preferred port (falls back to an ephemeral port when taken; clients discover the verified URL with gateway status)
       backend,,enum,,Storage behind this workspace Gateway; a boot/deployment choice, not a client run-lookup flag (sqlite|pglite|postgres)
       auth-token,,string,,Bearer token for HTTP/WS auth (or SMITHERS_API_KEY); required for a non-loopback host
       mint-token,,boolean,false,Mint a random bearer; require it on every request and record it only in the 0600 runtime state file
       insecure,,boolean,false,Allow a non-loopback host with NO auth (dangerous)
+      kill-runs,,boolean,false,With gateway stop cancel gateway-hosted runs instead of parking them for resume
+      apply-listeners,,boolean,false,Apply declared listener creates and updates on boot and registry changes (otherwise plan only)
+      delete-listeners,,boolean,false,Also delete owned hooks removed from the registry; requires --apply-listeners
       idle-timeout,,number,,Exit after this many ms with no clients, in-flight runs, or registered schedules (0 = stay up; autostarted daemons set this automatically); overridable via SMITHERS_GATEWAY_IDLE_MS
+  - name: listeners
+    purpose: Plan or explicitly apply the .smithers/listeners.json GitHub webhook declaration
+    args[1]{name,type,required,desc}:
+      action,enum,false,Plan by default; use apply to mutate GitHub
+    flags[1]{name,short,type,default,desc}:
+      delete,,boolean,false,With apply delete owned hooks removed from the registry
   - name: monitor
     purpose: Open the Smithers Monitor. A built-in oneshot opens its dedicated live transcript, honest steering delivery, restart, and attachment-scoped cheap narrator controls. Other runs use the all-runs workspace view. Resolves the workspace's singleton gateway (--gateway probe, then runtime-state discovery, then legacy port probe, then autostart) and opens the browser
     args[1]{name,type,required,desc}:

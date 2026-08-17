@@ -497,6 +497,20 @@ export const smithersErrorDefinitions = {
     category: "cli",
     when: "The ask command selects an agent integration that Smithers does not support in that mode.",
   },
+  LISTENER_CREDENTIALS_MISSING: {
+    category: "integrations",
+    when: "A declared listener workflow names a webhook secret environment variable that is not set.",
+    details: "{ workflow, secretEnv }",
+  },
+  LISTENER_RECONCILE_FAILED: {
+    category: "integrations",
+    when: "The listeners CLI encounters an unexpected reconciliation failure outside a typed integration error.",
+  },
+  INTEGRATION_ERROR: {
+    category: "integrations",
+    when: "An integration source, delivery, or listener reconciliation operation fails.",
+    details: "{ reason, ...providerSafeDetails }",
+  },
   PI_HTTP_ERROR: {
     category: "integrations",
     when: "The Pi or server integration receives a non-success HTTP response from Smithers.",

@@ -24,9 +24,10 @@ const CLAIM_HEARTBEAT_SCHEDULE = Schedule.spaced("10 seconds");
  *
  * @param {SmithersDb} adapter
  * @param {ExternalEvent} event
- * @returns {Effect.Effect<{ deduped: boolean; runIds: string[] }, import("@smthrs/errors/SmithersError").SmithersError>}
+ * @param {{ onDelivery?: (result: { runIds: string[] }) => Effect.Effect<unknown, import("@smthrs/errors/SmithersError").SmithersError> }} [options]
+ * @returns {Effect.Effect<{ deduped: boolean; runIds: string[]; action?: unknown }, import("@smthrs/errors/SmithersError").SmithersError>}
  */
-export function deliverEvent(adapter, event) {
+export function deliverEvent(adapter, event, options) {
   return Effect.gen(function* () {
     const ownerToken = randomUUID();
     const claimRow = {
@@ -163,7 +164,10 @@ export function deliverEvent(adapter, event) {
         },
         "integrations:deliver",
       );
-      return { deduped: false, runIds: delivered };
+      const action = options?.onDelivery ? yield* options.onDelivery({ runIds: delivered }) : undefined;
+      return action === undefined
+        ? { deduped: false, runIds: delivered }
+        : { deduped: false, runIds: delivered, action };
     });
     return yield* delivery.pipe(
       Effect.onExit((exit) =>
