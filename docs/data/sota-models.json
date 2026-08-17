@@ -1,6 +1,6 @@
 {
-  "version": 8,
-  "updatedAt": "2026-07-29",
+  "version": 9,
+  "updatedAt": "2026-08-17",
   "policy": [
     "Only models with exact usable ids confirmed by provider documentation enter the default registry; marketing-only names and previews without usable ids wait.",
     "Research previews with real availability (e.g. gpt-5.3-codex-spark on ChatGPT Pro) may enter with status sota for their niche, noted in the description.",
@@ -18,7 +18,8 @@
       "sol": "codexSol",
       "opus": "opus",
       "fable": "fable",
-      "sonnet": "sonnet"
+      "sonnet": "sonnet",
+      "grok": "grok"
     },
     "intro": "As of registry v7 (Claude Opus 5's 2026-07-24 launch), Claude does the building and the gating and GPT-5.6 does the checking. Opus 5 is the default implementer; its launch benchmarks put it ahead of GPT-5.6 Sol on agentic coding (Frontier-Bench v0.1 43.3% vs 34.4%) at lower output cost ($25 vs $30 per million tokens), and it also holds orchestration and gating (scope, choosing direction, whether work progresses, whether it is done). [OpenAI's GPT-5.6 family](https://openai.com/index/gpt-5-6/) keeps the checking seats: Sol for final code review and second opinions, Terra for validation and structured, tool-heavy checking, Luna for trivial cheap passes; maintainer experience is that the 5.6 tiers are strong reviewers but poor gatekeepers.",
     "workflowDefault": "Implementation runs on Claude Opus 5: start substantial work there, escalating to Fable 5 only for the most ambitious, longest-horizon builds. Codex checks the work: Sol takes final code review and second opinions on the hardest changes, Terra takes validation, structured checking, and explicitly tool-heavy verification, and Luna is reserved for trivial, minimal-risk work (tiny scoped edits, mechanical transforms, quick lookups, high-volume cheap passes) and research-style gathering; neither Terra nor Luna should carry substantial implementation now that Opus 5 outbenchmarks Sol on agentic coding at lower cost. Orchestration and gating decisions (scope, choosing direction, judging progress, deciding whether something is done, approving or denying gates) also stay on Claude (Opus 5 at medium reasoning effort by default, Fable 5 for planning and for calls where you deliberately want Anthropic's strongest judgment) and never go to GPT-5.6 Sol or Terra, whose findings feed the Claude orchestrator's decision. Agent arrays are sequential fallback chains: a later provider is attempted only when an earlier one is unavailable or fails. An explicitly constructed provider agent is a deliberate choice and can run even when Codex is healthy.",
@@ -204,6 +205,17 @@
       "badges": ["best-ui"],
       "roles": ["ui", "implement", "cheapFast"],
       "description": "Google's best price-to-performance model and the best non-Codex fallback for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. Smithers can use it for UI work when its provider-specific route is configured; it is not a universal fallback policy."
+    },
+    {
+      "id": "grok-4.6",
+      "slot": "grok",
+      "provider": "xai",
+      "name": "Grok 4.6",
+      "status": "current",
+      "engines": ["grok"],
+      "badges": [],
+      "roles": [],
+      "description": "xAI's current Grok Build default and latest frontier model. Smithers uses this exact id for the Grok CLI and oneshot fallback rung; the CLI also accepts API-key authentication through XAI_API_KEY. See the official Grok Build model catalog and CLI documentation."
     },
     {
       "id": "gemini-3.1-pro-preview",

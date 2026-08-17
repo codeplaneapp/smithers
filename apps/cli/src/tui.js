@@ -21,7 +21,7 @@ import { computeRunStateFromRow } from "@smthrs/db/runState";
 import { DETACHED_RUN_LOG_FILE_ENV } from "./detachedRunLogEnv.js";
 import { reapDetachedRunLogs } from "./reapDetachedRunLogs.js";
 import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
-import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
+import { sanitizeTerminalText } from "./sanitizeTerminalText.js";
 import { smithersRuntimeSpawn } from "./node-loader/smithersRuntimeSpawn.js";
 
 export { formatStreamText } from "./tui-format.js";
@@ -1438,6 +1438,7 @@ export function monitorUnavailableFailure(runId, logFile) {
     code: "TUI_MONITOR_UNAVAILABLE",
     message:
       "The run monitor package (@smthrs/tui) could not be resolved, so the full-screen monitor can't launch. " +
+      "Install it with `npm install -D @smthrs/tui` or `bun add -d @smthrs/tui`. " +
       `The run is still running detached; watch it with \`smithers ps\` / \`smithers inspect ${runId}\` or see ${logFile}.`,
     exitCode: 1,
     runId,

@@ -18,7 +18,7 @@ type UnknownAccount$1 = {
  * authenticated by a CLI config directory; API providers are authenticated by
  * an API key.
  */
-type AccountProvider$1 = "claude-code" | "antigravity" | "codex" | "kimi" | "anthropic-api" | "openai-api" | "gemini-api";
+type AccountProvider$1 = "claude-code" | "antigravity" | "codex" | "kimi" | "grok" | "anthropic-api" | "openai-api" | "gemini-api" | "xai-api";
 
 /**
  * A single registered account. Either `configDir` (subscription providers) or
@@ -32,12 +32,12 @@ type Account$2 = {
     provider: AccountProvider$1;
     /**
      * Absolute path to the per-account CLI config directory. Set for
-     * subscription providers (claude-code, antigravity, codex, kimi).
+     * subscription providers (claude-code, antigravity, codex, kimi, grok).
      */
     configDir?: string;
     /**
      * Raw API key. Set for API providers (anthropic-api, openai-api,
-     * gemini-api). Stored in plaintext in `~/.smithers/accounts.json` (mode 600).
+     * gemini-api, xai-api). Stored in plaintext in `~/.smithers/accounts.json` (mode 600).
      * For stricter handling, set this to the empty string and override at
      * runtime via the matching env var.
      */
@@ -201,6 +201,32 @@ declare function removeAccount(label: string, options?: {
 declare function accountToProviderEnv(account: Account$2): Record<string, string>;
 
 /**
+ * Builds an RFC 6749 authorization-code request URL with RFC 7636 PKCE parameters.
+ *
+ * @param {{
+ *     authorizationEndpoint: string;
+ *     clientId: string;
+ *     redirectUri: string;
+ *     state: string;
+ *     codeChallenge: string;
+ *     scope?: string | readonly string[];
+ *     codeChallengeMethod?: "S256" | "plain";
+ *     extraParams?: Record<string, string>;
+ * }} request
+ * @returns {string}
+ */
+declare function buildAuthorizationUrl(request: {
+    authorizationEndpoint: string;
+    clientId: string;
+    redirectUri: string;
+    state: string;
+    codeChallenge: string;
+    scope?: string | readonly string[];
+    codeChallengeMethod?: "S256" | "plain";
+    extraParams?: Record<string, string>;
+}): string;
+
+/**
  * Parses a raw JSON string into a validated AccountsFile. Throws SmithersError
  * with code `ACCOUNTS_FILE_INVALID` if the file itself is unparseable or has the
  * wrong top-level shape. Tolerates missing accounts.json (caller passes an empty
@@ -224,18 +250,23 @@ declare const API_KEY_PROVIDERS: Set<string>;
 declare const VALID_PROVIDERS: Set<string>;
 
 /**
- * Builds an RFC 6749 authorization-code request URL with RFC 7636 PKCE parameters.
+ * Stable agent id for an agent instance backed by a registered account, so
+ * usage attribution (`smithers usage`, `inspect --pool`) can map attempts back
+ * to the account label. Canonical home of the `smithers-account:` prefix; the
+ * CLI's `registered-agent-id.js` re-exports it.
+ *
+ * @param {string} label
+ * @returns {string}
  */
-declare function buildAuthorizationUrl(request: {
-    authorizationEndpoint: string;
-    clientId: string;
-    redirectUri: string;
-    state: string;
-    codeChallenge: string;
-    scope?: string | readonly string[];
-    codeChallengeMethod?: "S256" | "plain";
-    extraParams?: Record<string, string>;
-}): string;
+declare function registeredAgentId(label: string): string;
+/**
+ * Inverse of {@link registeredAgentId}: extract the account label from an
+ * agent id, or `undefined` when the id is not account-backed.
+ *
+ * @param {unknown} agentId
+ * @returns {string | undefined}
+ */
+declare function registeredAgentLabel(agentId: unknown): string | undefined;
 
 /**
  * Creates an RFC 7636 PKCE code_verifier using high-entropy random bytes.
@@ -268,4 +299,4 @@ type AccountProvider = AccountProvider$1;
 type AccountsFile = AccountsFile$1;
 type UnknownAccount = UnknownAccount$1;
 
-export { API_KEY_PROVIDERS, type Account, type AccountProvider, type AccountsFile, SUBSCRIPTION_PROVIDERS, type UnknownAccount, VALID_PROVIDERS, accountToProviderEnv, accountsFilePath, accountsRoot, addAccount, buildAuthorizationUrl, createCodeVerifier, createPkcePair, defaultConfigDir, deriveCodeChallenge, getAccount, listAccounts, parseAccountsFile, readAccounts, removeAccount, withAccountsLock, writeAccounts };
+export { API_KEY_PROVIDERS, type Account, type AccountProvider, type AccountsFile, SUBSCRIPTION_PROVIDERS, type UnknownAccount, VALID_PROVIDERS, accountToProviderEnv, accountsFilePath, accountsRoot, addAccount, buildAuthorizationUrl, createCodeVerifier, createPkcePair, defaultConfigDir, deriveCodeChallenge, getAccount, listAccounts, parseAccountsFile, readAccounts, registeredAgentId, registeredAgentLabel, removeAccount, withAccountsLock, writeAccounts };

@@ -7,7 +7,7 @@
  */
 
 import { parseAgentEvent } from "./chat.js";
-import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
+import { sanitizeTerminalText } from "./sanitizeTerminalText.js";
 
 /** Fixed height of the activity body (excluding separator / label). */
 export const ACTIVITY_STRIP_LINES = 4;

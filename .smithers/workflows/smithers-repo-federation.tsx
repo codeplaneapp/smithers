@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: authored
 // smithers-metadata-version: 1
 // smithers-display-name: Smithers Repo Federation
 // smithers-description: Split the smithers monorepo into 10 standalone public repos plus multi/plue/awesome-smithers PR lanes, strip smithers to a runtime kernel, and land it behind manifest/publish/merge approval gates.

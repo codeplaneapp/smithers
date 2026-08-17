@@ -234,6 +234,30 @@ value to `failed` or `running`; preserve it for diagnostics and treat an
 unknown `waiting-*` value as suspended and nonterminal.
 </Warning>
 
+## External integration events
+
+External provider deliveries are durable workflow signals, not
+`SmithersEvent` lifecycle variants. GitHub webhook delivery names use these
+forms:
+
+```text
+integration:github:issues
+integration:github:issues.opened
+integration:github:issue_comment
+integration:github:issue_comment.created
+integration:github:pull_request
+integration:github:pull_request.opened
+integration:github:pull_request_review
+integration:github:pull_request_review_comment
+```
+
+When GitHub supplies an action, Smithers emits both the base and action-specific
+name. Correlation IDs are emitted from most specific to broadest:
+`owner/repo#number`, `owner/repo`, then no correlation. Each variant includes
+the original provider payload and a dedupe key based on
+`X-GitHub-Delivery`, event name, and correlation. See
+[Declarative GitHub Listeners](/integrations/github-listeners).
+
 ## Event Variants
 
 Discriminate on the `type` field, e.g. `event.type === "NodeFailed"`, to handle specific lifecycle moments.

@@ -179,6 +179,16 @@ describe("generateAgentsTs (account-driven)", () => {
     expect(activePoolProviders(generated, "orchestrator").slice(0, 2)).toEqual(["claudeAccountPool", "openaiProdSol"]);
   });
 
+  test("xAI API accounts isolate Grok state and keep the key out of generated source", () => {
+    const env = newSmithersHome();
+    addAccount({ label: "xai-prod", provider: "xai-api", apiKey: "xai-secret" }, { env });
+    const generated = generateAgentsTs(env);
+    expect(generated).not.toContain("xai-secret");
+    expect(generated).toContain('apiKey: registeredAccountApiKey("xai-prod")');
+    expect(generated).toContain('"accounts", "xai-prod")');
+    expect(generated).toMatch(/grok:\s*\[\s*providers\.xaiProd,\s*\]/);
+  });
+
   test("does not serialize both configDir and apiKey for malformed account entries", () => {
     const env = newSmithersHome();
     writeFileSync(

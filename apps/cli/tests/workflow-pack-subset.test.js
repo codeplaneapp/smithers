@@ -64,64 +64,13 @@ test("the curated contract cannot be narrowed by a removed selectedWorkflows opt
   expect(workflows).not.toContain("hello.tsx");
 }, 30_000);
 
-test("fresh DDD source and helper inventory are portable to arbitrary repositories", () => {
-  const { pack } = freshPack();
-  const helpers = readdirSync(join(pack, "lib", "ddd")).sort();
-  expect(helpers).toEqual([
-    "auditInputs.ts",
-    "build.ts",
-    "dddRoot.ts",
-    "featuresSchema.ts",
-    "generateSpecDocs.ts",
-    "generateUiModules.ts",
-    "triageCandidates.ts",
-    "validateFeatures.ts",
-  ]);
-
-  const installed = [
-    readFileSync(join(pack, "workflows", "docs-driven-development.tsx"), "utf8"),
-    ...helpers.map((file) => readFileSync(join(pack, "lib", "ddd", file), "utf8")),
-    ...readdirSync(join(pack, "ui"))
-      .filter((file) => file === "docs-driven-development.tsx" || file.startsWith("ddd-"))
-      .map((file) => readFileSync(join(pack, "ui", file), "utf8")),
-  ].join("\n");
-  for (const forbidden of [
-    "ddd-generate-docs",
-    "ddd-bug-scan",
-    "ddd-app-v2",
-    "../lib/ddd/dddAgents",
-    "useClaudeForPlanning",
-    "Codex Luna",
-    "Codex Sol",
-    "Claude is",
-    "Author workflows",
-    "Run & observe",
-    "Recover & replay",
-    "Ship & review",
-  ]) {
-    expect(installed).not.toContain(forbidden);
-  }
-  expect(installed).toContain("Cargo.toml");
-  expect(installed).toContain("pyproject.toml");
-  expect(installed).toContain("go.mod");
-  expect(installed).toContain("RELATIVE_FILE_PATH_RE");
-}, 30_000);
-
 test("fresh pack includes real UI closures rather than generated render shims", () => {
   const { pack } = freshPack();
   const ui = new Set(readdirSync(join(pack, "ui")));
-  for (const entry of [
-    "create-workflow.tsx",
-    "create-skill.tsx",
-    "docs-driven-development.tsx",
-    "cw-editor.tsx",
-    "cw-graph.tsx",
-    "ddd-shared.tsx",
-  ]) {
+  for (const entry of ["create-workflow.tsx", "create-skill.tsx", "cw-editor.tsx", "cw-graph.tsx"]) {
     expect(ui.has(entry), entry).toBe(true);
   }
   expect(readFileSync(join(pack, "ui", "create-workflow.tsx"), "utf8")).toContain("useGatewayApprovals");
-  expect(readFileSync(join(pack, "ui", "docs-driven-development.tsx"), "utf8")).toContain("useGatewayRunTree");
 }, 30_000);
 
 test("add remains runnable while hidden from the default workflow listing", () => {

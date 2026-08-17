@@ -88,9 +88,8 @@ That scaffolds `.smithers/` with files such as:
 
 | Directory / File | Contents |
 |---|---|
-| `.smithers/workflows/` | Public `create-workflow`, `create-skill`, and `docs-driven-development`, plus hidden system `init`, `post-failure`, and `upgrade` |
+| `.smithers/workflows/` | Public `create-workflow` and `create-skill`, plus the hidden system workflows needed by init, recovery, packs, evals, and upgrades |
 | `.smithers/prompts/` | Prompt templates for the curated authoring workflows |
-| `.smithers/lib/ddd/` | Portable helpers for the docs-driven-development workflow |
 | `.smithers/ui/` | Workflow-owned UIs and their complete local module closure |
 | `.smithers/package.json` | Local workflow project manifest with `smthrs` dependency |
 | `.smithers/tsconfig.json` | TypeScript config for JSX workflow authoring |
@@ -105,6 +104,31 @@ That scaffolds `.smithers/` with files such as:
 
 The 29 former defaults are not installed; they remain complete, copyable graph
 and UI examples under `examples/init-pack/` in the source repository.
+
+The default pack is deliberately compact. Specialized repository-management
+and demonstration workflows such as `docs-driven-development`,
+`smithers-repo-federation`, and `whole-foods-meal-planner` remain in the source
+repository and can be installed from a workflow pack; they are not copied into
+every consumer's `.smithers/` directory.
+
+## Optional CLI Surfaces
+
+The full-screen terminal monitor and code-review renderer are separate because
+their native OpenTUI and Mermaid stacks are not needed by the core runtime or
+ordinary CLI commands. Install only the surface you use:
+
+```bash
+bun add -d @smthrs/tui       # full-screen monitor
+bun add -d @smthrs/review    # smithers review
+```
+
+Without them, Smithers keeps the run alive and reports the exact package to
+install. Non-interactive commands such as `ps`, `inspect`, and `up --detach`
+continue to work.
+
+Likewise, `@smthrs/agents/mcp/createMcpToolset` loads the MCP client lazily. A
+project using that adapter must add `@modelcontextprotocol/sdk`; CLI-only and
+SDK-agent consumers do not pay for it through `@smthrs/agents`.
 
 To overwrite an existing scaffold:
 

@@ -16,10 +16,7 @@ import { initWorkflowPack } from "../src/workflow-pack.js";
 
 // Bespoke UIs mounted by the generated gateway that keep a mount-only
 // descriptor entry (see workflow-ui-descriptors.json) instead of a fully
-// output-verified one. `docs-driven-development` has a real descriptor and a
-// real browser/Gateway check (workflow-ui-all.e2e.test.js), so it is
-// intentionally NOT excluded here — this set only covers UIs that opt out of
-// drift-checking entirely.
+// output-verified one. This set only covers UIs that opt out of drift-checking.
 const DESCRIPTOR_EXCLUDED_WORKFLOWS = new Set([]);
 
 // CI has no agent CLIs/credentials, so agent detection throws NO_USABLE_AGENTS.

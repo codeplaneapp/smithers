@@ -51,6 +51,19 @@ async function postWebhook(port, workflowKey, payload, secret) {
     body,
   });
 }
+async function postGitHubWebhook(port, workflowKey, payload, secret, deliveryId) {
+  const body = JSON.stringify(payload);
+  return fetch(`http://127.0.0.1:${port}/webhooks/${workflowKey}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-github-event": "issues",
+      "x-github-delivery": deliveryId,
+      "x-hub-signature-256": signWebhookPayload(body, secret),
+    },
+    body,
+  });
+}
 /**
  * @param {string} dbPath
  */
@@ -173,6 +186,31 @@ describe("Gateway webhook ingestion", () => {
     expect(metrics).toMatch(receivedPattern);
     expect(metrics).toMatch(rejectedPattern);
   }, 30_000);
+  test("uses the GitHub decoder and durable delivery ledger for registry-backed launches", async () => {
+    const dbPath = makeDbPath("github-source");
+    dbPaths.push(dbPath);
+    const { workflow } = createWebhookTriggerWorkflow(dbPath);
+    gateway = new Gateway();
+    gateway.register("github-issues", workflow, {
+      webhook: { secret: "registry-secret", source: "github" },
+    });
+    server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+    const payload = {
+      action: "opened",
+      issue: { id: 1437, number: 1437 },
+      repository: { full_name: "smithersai/smithers" },
+    };
+    const first = await postGitHubWebhook(port, "github-issues", payload, "registry-secret", "delivery-registry-1");
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+    expect(firstBody.started?.runId).toBeString();
+    const repeated = await postGitHubWebhook(port, "github-issues", payload, "registry-secret", "delivery-registry-1");
+    expect(repeated.status).toBe(200);
+    const repeatedBody = await repeated.json();
+    expect(repeatedBody.started).toBeNull();
+    expect(repeatedBody.deduped).toBe(true);
+  });
   test("delivers matching webhooks as signals to waiting runs", async () => {
     const dbPath = makeDbPath("signal");
     dbPaths.push(dbPath);

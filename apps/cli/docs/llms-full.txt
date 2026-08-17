@@ -185,9 +185,8 @@ That scaffolds `.smithers/` with files such as:
 
 | Directory / File | Contents |
 |---|---|
-| `.smithers/workflows/` | Public `create-workflow`, `create-skill`, and `docs-driven-development`, plus hidden system `init`, `post-failure`, and `upgrade` |
+| `.smithers/workflows/` | Public `create-workflow` and `create-skill`, plus the hidden system workflows needed by init, recovery, packs, evals, and upgrades |
 | `.smithers/prompts/` | Prompt templates for the curated authoring workflows |
-| `.smithers/lib/ddd/` | Portable helpers for the docs-driven-development workflow |
 | `.smithers/ui/` | Workflow-owned UIs and their complete local module closure |
 | `.smithers/package.json` | Local workflow project manifest with `smthrs` dependency |
 | `.smithers/tsconfig.json` | TypeScript config for JSX workflow authoring |
@@ -202,6 +201,31 @@ That scaffolds `.smithers/` with files such as:
 
 The 29 former defaults are not installed; they remain complete, copyable graph
 and UI examples under `examples/init-pack/` in the source repository.
+
+The default pack is deliberately compact. Specialized repository-management
+and demonstration workflows such as `docs-driven-development`,
+`smithers-repo-federation`, and `whole-foods-meal-planner` remain in the source
+repository and can be installed from a workflow pack; they are not copied into
+every consumer's `.smithers/` directory.
+
+## Optional CLI Surfaces
+
+The full-screen terminal monitor and code-review renderer are separate because
+their native OpenTUI and Mermaid stacks are not needed by the core runtime or
+ordinary CLI commands. Install only the surface you use:
+
+```bash
+bun add -d @smthrs/tui       # full-screen monitor
+bun add -d @smthrs/review    # smithers review
+```
+
+Without them, Smithers keeps the run alive and reports the exact package to
+install. Non-interactive commands such as `ps`, `inspect`, and `up --detach`
+continue to work.
+
+Likewise, `@smthrs/agents/mcp/createMcpToolset` loads the MCP client lazily. A
+project using that adapter must add `@modelcontextprotocol/sdk`; CLI-only and
+SDK-agent consumers do not pay for it through `@smthrs/agents`.
 
 To overwrite an existing scaffold:
 
@@ -2882,7 +2906,7 @@ See Time-travel API and Revert for the programmatic surface.
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[113]:
+commands[114]:
   - name: add
     purpose: Install a workflow pack from GitHub, npm, or a local file
     args[1]{name,type,required,desc}:
@@ -3081,14 +3105,23 @@ commands[113]:
     purpose: Serve the multi-run Gateway RPC/WS control plane for workspace run state (one singleton per workspace; a second start refuses); unlike up --serve, this is not tied to one run
     args[1]{name,type,required,desc}:
       action,enum,false,Manage the running singleton instead of serving: status | stop
-    flags[7]{name,short,type,default,desc}:
+    flags[10]{name,short,type,default,desc}:
       host,H,string,127.0.0.1,Gateway bind address
       port,p,number,7331,Preferred port (falls back to an ephemeral port when taken; clients discover the verified URL with gateway status)
       backend,,enum,,Storage behind this workspace Gateway; a boot/deployment choice, not a client run-lookup flag (sqlite|pglite|postgres)
       auth-token,,string,,Bearer token for HTTP/WS auth (or SMITHERS_API_KEY); required for a non-loopback host
       mint-token,,boolean,false,Mint a random bearer; require it on every request and record it only in the 0600 runtime state file
       insecure,,boolean,false,Allow a non-loopback host with NO auth (dangerous)
+      kill-runs,,boolean,false,With gateway stop cancel gateway-hosted runs instead of parking them for resume
+      apply-listeners,,boolean,false,Apply declared listener creates and updates on boot and registry changes (otherwise plan only)
+      delete-listeners,,boolean,false,Also delete owned hooks removed from the registry; requires --apply-listeners
       idle-timeout,,number,,Exit after this many ms with no clients, in-flight runs, or registered schedules (0 = stay up; autostarted daemons set this automatically); overridable via SMITHERS_GATEWAY_IDLE_MS
+  - name: listeners
+    purpose: Plan or explicitly apply the .smithers/listeners.json GitHub webhook declaration
+    args[1]{name,type,required,desc}:
+      action,enum,false,Plan by default; use apply to mutate GitHub
+    flags[1]{name,short,type,default,desc}:
+      delete,,boolean,false,With apply delete owned hooks removed from the registry
   - name: monitor
     purpose: Open the Smithers Monitor. A built-in oneshot opens its dedicated live transcript, honest steering delivery, restart, and attachment-scoped cheap narrator controls. Other runs use the all-runs workspace view. Resolves the workspace's singleton gateway (--gateway probe, then runtime-state discovery, then legacy port probe, then autostart) and opens the browser
     args[1]{name,type,required,desc}:
@@ -3912,10 +3945,9 @@ packs[2]:
       exists: true
   - scope: global
     ...
-workflows[3]:
+workflows[2]:
   - id: create-workflow
   - id: create-skill
-  - id: docs-driven-development
 ```
 
 `ok: true` under `vcs` means jj or git resolved (if `false`, install one; see Installation). A non-empty `workflows[...]` count means the pack is in place. `workflow list` prints the same entries with full metadata.
@@ -9268,7 +9300,7 @@ type AgentToolDescriptor = {
 
 type AgentCapabilityRegistry = {
   version: 1;
-  engine: "claude-code" | "codex" | "cursor" | "antigravity" | "gemini" | "kimi" | "pi" | "omp" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";
+  engine: "claude-code" | "codex" | "cursor" | "antigravity" | "gemini" | "kimi" | "grok" | "pi" | "omp" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";
   runtimeTools: Record<string, AgentToolDescriptor>;
   mcp: {
     bootstrap: "inline-config" | "project-config" | "allow-list" | "unsupported";
@@ -10594,6 +10626,7 @@ type KnownSmithersErrorCode =
   | "AGENT_CLI_ERROR" | "AGENT_QUOTA_EXCEEDED" | "AGENT_CONFIG_INVALID" | "AGENT_RPC_FILE_ARGS" | "AGENT_BUILD_COMMAND" | "AGENT_DIAGNOSTIC_TIMEOUT"
   | "DB_MISSING_COLUMNS" | "DB_REQUIRES_BUN_SQLITE" | "DB_QUERY_FAILED" | "DB_WRITE_FAILED" | "PG_POOL_SATURATED"
   | "SMITHERS_BACKEND_CONFLICT" | "SMITHERS_MIGRATION_REQUIRED"
+  | "LISTENER_CREDENTIALS_MISSING" | "LISTENER_RECONCILE_FAILED" | "INTEGRATION_ERROR"
   | "STORAGE_ERROR" | "INTERNAL_ERROR" | "PROCESS_ABORTED" | "PROCESS_TIMEOUT"
   | "PROCESS_IDLE_TIMEOUT" | "PROCESS_SPAWN_FAILED" | "TASK_RUNTIME_UNAVAILABLE"
   | "SCHEMA_CHANGE_HOT" | "HOT_OVERLAY_FAILED" | "HOT_RELOAD_INVALID_MODULE"
@@ -11439,6 +11472,8 @@ connection setup problems aren't hidden behind unrelated source-store errors.
 | `WORKFLOW_EXISTS` | The workflow creation CLI refuses to overwrite an existing workflow file. | -- |
 | `CLI_DB_NOT_FOUND` | A CLI command cannot find a nearby `smithers.db` file. | -- |
 | `CLI_AGENT_UNSUPPORTED` | The ask command selects an agent integration Smithers doesn't support in that mode. | -- |
+| `LISTENER_CREDENTIALS_MISSING` | A declared listener workflow names a webhook secret environment variable that is not set. | `workflow`, `secretEnv` |
+| `LISTENER_RECONCILE_FAILED` | The listeners CLI encounters an unexpected reconciliation failure outside a typed integration error. | -- |
 
 ## Integrations
 
@@ -11454,6 +11489,7 @@ connection setup problems aren't hidden behind unrelated source-store errors.
 | `ACCOUNT_NOT_FOUND` | An account operation references an unregistered label. | -- |
 | `ACCOUNT_DUPLICATE_LABEL` | An account add operation would create a duplicate label without replace enabled. | -- |
 | `ACCOUNTS_FILE_INVALID` | The accounts.json file isn't valid JSON, or doesn't match the expected account registry schema after tolerant entry filtering. | -- |
+| `INTEGRATION_ERROR` | An integration source, delivery, or listener reconciliation operation fails. Listener reasons include `credentials-missing`, `permission-denied`, and `listener-conflict`. | `reason`, provider-specific safe details |
 
 Unknown legacy account providers are tolerated entry-by-entry. For example, an
 old `"provider": "gemini"` subscription is skipped with a warning naming the
@@ -11629,7 +11665,7 @@ Most applications should import from `smthrs`. The workspace packages below are 
 | `@smthrs/xstate` | XState v5 machines as durable derived control state for workflows: pure folds over output and signal rows | XState |
 | `@smthrs/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | CLI Agents |
 | `@smthrs/agent-eliza` | elizaOS `AgentRuntime` harness for Smithers; opt-in package that owns the `@elizaos/core` dependency | SDK Agents |
-| `@smthrs/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry | CLI Agents, SDK Agents |
+| `@smthrs/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry; its MCP adapter requires an explicit `@modelcontextprotocol/sdk` install | CLI Agents, SDK Agents |
 | `@smthrs/automate-site` | Private Cloudflare Worker deployment for the event-triggered durable workflows marketing site | Ecosystem |
 | `@smthrs/bug-worker` | Private Cloudflare Worker behind `bug.smithers.sh` that receives `smithers bug` reports and stores them in KV | CLI Overview |
 | `@smthrs/components` | JSX workflow components such as `Task`, `Workflow`, `Approval`, `Sandbox`, `Timer`, `Signal`, and control-flow components | Components |
@@ -11666,7 +11702,7 @@ Most applications should import from `smthrs`. The workspace packages below are 
 | `@smthrs/quota-dashboard` | Private Electrobun desktop dashboard for subscription quota headroom across registered Claude Code and Codex seats | CLI Agents |
 | `@smthrs/protocol` | Shared contracts, small value types, and protocol-level errors for cross-package use | Types, Errors |
 | `@smthrs/react-reconciler` | Custom React reconciler, host context, DOM renderer, DevTools preload, driver, and JSX runtime internals | Why React, Render Frame |
-| `@smthrs/review` | Review CLI package for code review, PR posting, and story-form HTML walkthrough generation, exposed through `bunx smthrs review` and the `smithers-review` bin | CLI Overview |
+| `@smthrs/review` | Optional review CLI package for code review, PR posting, and story-form HTML walkthrough generation; install it explicitly before `bunx smthrs review` | CLI Overview |
 | `@smthrs/sandbox` | Sandbox bundle, execute, and transport primitives used by the `Sandbox` component | Sandbox |
 | `@smthrs/scheduler` | Pure workflow state machine: task state, scheduler decisions, retry/cache policies, wait reasons, and workflow session services | Workflow State, Suspend and Resume |
 | `@smthrs/scorers` | Scorer definitions, LLM judges, batch execution, aggregation, persistence schema, and metrics | Evals, Evals Quickstart |
@@ -11682,7 +11718,7 @@ Most applications should import from `smthrs`. The workspace packages below are 
 | `@smthrs/testing` | Workflow simulation, scripted agents, render/task helpers, matchers, and durability scenario harnesses; its optional `smthrs` peer is used only by the shipped watch-pack campaign and by `runWorkflowScenario` when `runWorkflowFn` is not supplied | Testing workflows, Render Frame |
 | `@smthrs/time-travel` | Snapshots, diffs, forks, replay, timelines, VCS tags, rewind locks/audits, and time-travel metrics | Time Travel, Time Travel Quickstart |
 | `@smthrs/tool-context` | AsyncLocalStorage tool-execution context (run/node/idempotency keys, durability snapshot hook) shared by the engine and `smthrs` without a dependency cycle | Execution Model |
-| `@smthrs/tui` | Full-screen OpenTUI + React single-run monitor launched by `bunx smthrs up --interactive`; reuses the gateway-react hooks for live tree, graph, logs, timeline, and hijack views of one run | CLI Overview |
+| `@smthrs/tui` | Optional full-screen OpenTUI + React single-run monitor for `bunx smthrs up --interactive`; install explicitly when that surface is needed | CLI Overview |
 | `@smthrs/tui-ui` | opentui leaf component library for the terminal UI (`StatusPill`, `EmptyState`, `Keybar`, and more): props-in/callbacks-out, mirroring the `@smthrs/ui`/`gateway-ui` vocabulary | CLI Overview |
 | `@smthrs/ui-core` | Isomorphic headless product layer shared by the web app and the terminal UI: pure domain modules, Platform DI interfaces, and view-model hooks, with zero DOM/opentui/react-dom | Custom Workflow UI |
 | `@smthrs/ui-site` | Private Cloudflare Worker deployment for the local Smithers app and AI concierge marketing site | Ecosystem |
@@ -11813,11 +11849,12 @@ Defined in the root `package.json` for development:
 | `generate:init-pack` | `bun scripts/generate-workflow-pack.ts` | Regenerate the local workflow pack used by `bunx smthrs init` |
 | `sota:gen` | `bun scripts/generate-sota.ts` | Render the SOTA model registry (`docs/data/sota-models.json`) into its docs page and CLI module |
 | `sota:research` | `bun scripts/sota-research.ts` | Research whether new SOTA models shipped and rewrite the registry if so (used by the daily cron) |
-| `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-npm-dedupe.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-ui-architecture.mjs && node --test scripts/check-ui-architecture.test.mjs && node scripts/check-no-direct-db-access.mjs && node scripts/check-local-smithers.mjs && node --test scripts/check-local-smithers.test.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-sota.mjs && node scripts/check-dts.mjs && node scripts/check-smithers-test-script.mjs && node --test scripts/qualify-nanocodex-release.test.mjs && bun test scripts/publish-next.test.mjs scripts/release-next-gate.test.mjs scripts/bump.test.mjs scripts/run-workspace-tests-timeout.test.mjs && pnpm -r --no-bail test` | Run UI architecture, docs/config, dependency, direct DB access, llms, SOTA registry, declaration freshness, and Nanocodex release qualification guards; run root script tests and every package test script (no-bail so every failing package is reported) |
+| `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-npm-dedupe.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-installed-footprint.mjs && node scripts/check-ui-architecture.mjs && node --test scripts/check-ui-architecture.test.mjs && node scripts/check-no-direct-db-access.mjs && node scripts/check-local-smithers.mjs && node --test scripts/check-local-smithers.test.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-sota.mjs && node scripts/check-dts.mjs && node scripts/check-smithers-test-script.mjs && node --test scripts/qualify-nanocodex-release.test.mjs && bun test scripts/publish-next.test.mjs scripts/release-next-gate.test.mjs scripts/bump.test.mjs scripts/run-workspace-tests-timeout.test.mjs && pnpm -r --no-bail test` | Run UI architecture, docs/config, dependency, installed-footprint, direct DB access, llms, SOTA registry, declaration freshness, and Nanocodex release qualification guards; run root script tests and every package test script (no-bail so every failing package is reported) |
 | `coverage` | `node scripts/coverage.mjs` | Generate a test coverage report across the workspace |
 | `check:effect` | `node scripts/check-single-effect-version.mjs` | Verify the workspace resolves a single Effect version |
 | `check:npm-dedupe` | `node scripts/check-npm-dedupe.mjs` | Verify published dependency versions are deduplicated |
-| `check:deps` | `node scripts/check-dependency-boundaries.mjs` | Verify package dependency boundaries |
+| `check:deps` | `node scripts/check-dependency-boundaries.mjs && node scripts/check-installed-footprint.mjs` | Verify package dependency boundaries and the installed-footprint budget |
+| `check:footprint` | `node scripts/check-installed-footprint.mjs` | Verify the init pack and packed CLI stay under the installed-footprint budget |
 | `check:ui-architecture` | `node scripts/check-ui-architecture.mjs` | Verify UI package architecture boundaries against the checked-in baseline |
 | `test:ui-architecture` | `node --test scripts/check-ui-architecture.test.mjs` | Run the UI architecture guard self-tests |
 | `check:db-access` | `node scripts/check-no-direct-db-access.mjs` | Verify direct run/store DB access remains confined to the tracked issue #470 baseline |
@@ -14858,11 +14895,11 @@ Artifacts are Smithers JSON records with baseline score, optimized score, improv
 
 ## SOTA models
 
-> The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v8, updated 2026-07-29.
+> The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v9, updated 2026-08-17.
 
 {/* GENERATED FILE. Edit docs/data/sota-models.json, then run `pnpm sota:gen`. */}
 
-**Registry v8** · updated **2026-07-29**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smthrs update` picks the changes up on your machine, and re-running `bunx smthrs init` refreshes installed workflows to the new defaults.
+**Registry v9** · updated **2026-08-17**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smthrs update` picks the changes up on your machine, and re-running `bunx smthrs init` refreshes installed workflows to the new defaults.
 
 ## Badges
 
@@ -15025,6 +15062,14 @@ Google's Pro tier (still preview). Superseded for coding and agentic work by Gem
 current · engines: `antigravity`
 
 Frontier-class performance at a fraction of the cost. The floor of the Gemini lineup for bulk, low-stakes calls.
+
+## xai
+
+### Grok 4.6 (`grok-4.6`)
+
+current · engines: `grok`
+
+xAI's current Grok Build default and latest frontier model. Smithers uses this exact id for the Grok CLI and oneshot fallback rung; the CLI also accepts API-key authentication through XAI_API_KEY. See the official Grok Build model catalog and CLI documentation.
 
 ## Moonshot AI
 
@@ -19428,7 +19473,7 @@ export default smithers((ctx) => (
 ## Available agents
 
 ```toon
-agents[16]{class,cli,modelDefault,hijack,notes}:
+agents[17]{class,cli,modelDefault,hijack,notes}:
   CodexAgent,codex,CLI default,native thread id,OpenAI Codex CLI (codex exec via stdin + JSON stream)
   ClaudeCodeAgent,claude,CLI default,native session id,Anthropic Claude Code CLI
   CursorAgent,cursor-agent,CLI default,not yet,Cursor CLI (cursor-agent --print stream-json)
@@ -19437,6 +19482,7 @@ agents[16]{class,cli,modelDefault,hijack,notes}:
   PiAgent,pi,CLI default,native session id,Pi CLI (text/json/rpc modes + extension UI hooks)
   OmpAgent,omp,CLI default,native session id,Oh My Pi OMP harness (text/json/rpc modes)
   KimiAgent,kimi,CLI default,native session id,Moonshot Kimi CLI (auto-isolates KIMI_SHARE_DIR)
+  GrokAgent,grok,CLI default,not yet,xAI Grok Build CLI (streaming JSON + native session resume)
   ForgeAgent,forge,CLI default,conversation id,Forge CLI (300+ models)
   HermesCliAgent,hermes,CLI default,session id,Nous Research Hermes Agent CLI (hermes -z headless)
   AmpAgent,amp,CLI default,thread id,Amp CLI (--execute headless mode)
@@ -19447,7 +19493,7 @@ agents[16]{class,cli,modelDefault,hijack,notes}:
   NanocodexAgent,smithers-nanocodex,gpt-5.6-sol (default; terra/luna),checkpoint resume,Nanocodex bridge (Linux x64 / macOS arm64)
 ```
 
-CLI binaries must be on `PATH`: `codex`, `cursor-agent`, `claude`, `agy`, `gemini`, `pi`, `omp`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`, `smithers-nanocodex`.
+CLI binaries must be on `PATH`: `codex`, `cursor-agent`, `claude`, `agy`, `gemini`, `pi`, `omp`, `kimi`, `grok`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`, `smithers-nanocodex`.
 
 `HermesCliAgent` drives the Hermes *agent* CLI. It is distinct from `HermesAgent`,
 which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
@@ -20010,6 +20056,46 @@ pinning credentials and session state to `<configDir>` instead of the default
 `~/.kimi/`. It is exactly equivalent to `env: { KIMI_SHARE_DIR: "<configDir>" }`;
 the `configDir` name just keeps the option uniform across agents.
 
+`GrokAgent` wraps xAI's official Grok Build CLI. Smithers uses the CLI adapter,
+not a direct HTTP adapter, because xAI ships a coding-agent CLI with native
+tools, streaming JSON, and resumable sessions. The exact current model id lives
+in the SOTA registry; omit `model` to let the CLI pick
+its default.
+
+```ts
+import { GrokAgent } from "smthrs";
+const grok = new GrokAgent({
+  configDir: "/secure/grok-account", // sets GROK_HOME
+  effort: "high",
+  maxTurns: 20,
+});
+```
+
+The adapter streams text, tool-call lifecycle events, per-session token usage,
+and the terminal session id from `--output-format streaming-json`. It resumes
+with `--resume` and discards dead session ids immediately when Grok reports that
+no matching session exists. Typed tasks use Grok Build's native `--json-schema`
+constraint; Smithers reads the schema-validated `structuredOutput` from the
+terminal event. The protocol does not provide
+enough verified before/after data for Smithers to claim file-diff support.
+
+Authenticate an isolated subscription with:
+
+```sh
+bunx smthrs agents add --provider grok --label grok-main --tmux
+```
+
+This runs `grok login --device-auth` with an isolated `GROK_HOME` and registers
+its `configDir`. For API billing, register `--provider xai-api --api-key ...`;
+Smithers supplies the key only through `XAI_API_KEY`, never argv or events, and
+uses an isolated `GROK_HOME` so ambient subscription credentials cannot win.
+Both account kinds participate in `fallbackAgents()` and oneshot routing.
+Persisted 429 reset times make a limited account sink to the end of its pool.
+
+xAI publishes limits and shows them in its console, but exposes no live account
+usage endpoint. `bunx smthrs usage` therefore reports
+`xAI exposes no live usage endpoint` instead of estimating a quota window.
+
 `ForgeAgent` wraps the Forge CLI and supports 300+ models via provider/model strings. Key additions: `conversationId`, `provider`, `workflow`.
 
 ```ts
@@ -20128,7 +20214,7 @@ Smithers persists the native session or conversation id on each task event. On h
 | `ForgeAgent` | `forge --conversation-id` |
 | `AmpAgent` | `amp threads continue` |
 
-On clean exit the workflow resumes in detached mode. Cursor, Vibe, OpenCode, and OpenClaw stream capture and headless session continuation are documented above, but native `bunx smthrs hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See How it works → Durability and resume.
+On clean exit the workflow resumes in detached mode. Grok, Cursor, Vibe, OpenCode, and OpenClaw stream capture and headless session continuation are documented above, but native `bunx smthrs hijack` support for Grok, Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See How it works → Durability and resume.
 
 ## Notes
 
@@ -20812,6 +20898,14 @@ import {
 ```
 
 `createMcpToolset` is intentionally a deep import from `@smthrs/agents/mcp/createMcpToolset`; it is not re-exported from the top-level `smthrs` facade.
+
+The MCP client SDK is an optional peer of `@smthrs/agents`. Projects using `createMcpToolset` must install it explicitly:
+
+```bash
+bun add @modelcontextprotocol/sdk
+```
+
+Without it, `createMcpToolset` throws an error naming the package to install; consumers that do not use the MCP adapter never install it.
 
 ## Quick Start
 
@@ -23874,6 +23968,30 @@ Consumers should still retain an unknown fallback. Do not convert an unknown
 value to `failed` or `running`; preserve it for diagnostics and treat an
 unknown `waiting-*` value as suspended and nonterminal.
 </Warning>
+
+## External integration events
+
+External provider deliveries are durable workflow signals, not
+`SmithersEvent` lifecycle variants. GitHub webhook delivery names use these
+forms:
+
+```text
+integration:github:issues
+integration:github:issues.opened
+integration:github:issue_comment
+integration:github:issue_comment.created
+integration:github:pull_request
+integration:github:pull_request.opened
+integration:github:pull_request_review
+integration:github:pull_request_review_comment
+```
+
+When GitHub supplies an action, Smithers emits both the base and action-specific
+name. Correlation IDs are emitted from most specific to broadest:
+`owner/repo#number`, `owner/repo`, then no correlation. Each variant includes
+the original provider payload and a dedupe key based on
+`X-GitHub-Delivery`, event name, and correlation. See
+Declarative GitHub Listeners.
 
 ## Event Variants
 

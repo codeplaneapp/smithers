@@ -689,7 +689,17 @@ export type CronRunRequest = {
 export type GatewayAccount = {
   /** Unique account label (the registry key, `--label`). */
   label: string;
-  provider: "claude-code" | "antigravity" | "codex" | "gemini" | "kimi" | "anthropic-api" | "openai-api" | "gemini-api";
+  provider:
+    | "claude-code"
+    | "antigravity"
+    | "codex"
+    | "gemini"
+    | "kimi"
+    | "grok"
+    | "anthropic-api"
+    | "openai-api"
+    | "gemini-api"
+    | "xai-api";
   /** Per-account CLI config dir for subscription providers (absent for api-key accounts). */
   configDir?: string | null;
   /** True when a subscription account has a non-empty config dir. */

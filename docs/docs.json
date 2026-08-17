@@ -353,6 +353,7 @@
               "integrations/embedded-engine",
               "integrations/server",
               "integrations/serve",
+              "integrations/github-listeners",
               "integrations/telegram",
               "integrations/xstate",
               "integrations/gateway",

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "listeners": [
+    {
+      "id": "smithers-issues",
+      "provider": "github",
+      "repository": "smithersai/smithers",
+      "events": ["issues"],
+      "workflow": "github-issue-listener",
+      "callbackUrl": "https://gateway.example.com/webhooks/github-issue-listener",
+      "secretEnv": "SMITHERS_GITHUB_WEBHOOK_SECRET",
+      "active": true
+    }
+  ]
+}

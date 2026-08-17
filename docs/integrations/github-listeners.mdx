@@ -1,0 +1,111 @@
+---
+title: Declarative GitHub Listeners
+description: Declare, plan, apply, and safely remove GitHub issue and pull request webhooks.
+---
+
+Smithers can converge GitHub repository webhooks from one workspace file. It
+uses the existing GitHub webhook decoder, signature verification, delivery
+ledger, and `OnWebhook` components. The registry adds the desired-state control
+loop; it is not a second integration transport.
+
+## Registry
+
+Create `.smithers/listeners.json`:
+
+```json
+{
+  "version": 1,
+  "listeners": [
+    {
+      "id": "repo-issues",
+      "provider": "github",
+      "repository": "acme/app",
+      "events": ["issues", "issue_comment"],
+      "workflow": "github-issue-listener",
+      "callbackUrl": "https://smithers.example.com/webhooks/github-issue-listener",
+      "secretEnv": "SMITHERS_GITHUB_WEBHOOK_SECRET",
+      "active": true
+    }
+  ]
+}
+```
+
+The file is strict Zod-validated JSON. Unknown keys, malformed repositories,
+duplicate IDs, insecure callback URLs, invalid events, and callback paths that
+do not match `/webhooks/<workflow>` fail with field-level errors. Supported
+events are `issues`, `issue_comment`, `pull_request`, `pull_request_review`, and
+`pull_request_review_comment`.
+
+The registry contains an environment variable name, never the secret itself.
+The callback must use public HTTPS and must not contain embedded credentials,
+query parameters, or a fragment.
+
+## Plan and apply
+
+```sh
+bunx smthrs listeners plan
+bunx smthrs listeners apply
+```
+
+Planning is the default and performs no remote mutation. It compares every
+declared listener with GitHub's current hook state and reports creates,
+updates, deletes, conflicts, no-ops, and unowned hooks that will be left alone.
+Repeated reconciliation is idempotent.
+
+`apply` explicitly enables creates and updates. Deletion needs another explicit
+flag:
+
+```sh
+bunx smthrs listeners apply --delete
+```
+
+The workspace Gateway runs the same control loop on boot and whenever the
+registry changes. Gateway startup plans only by default. Pass
+`--apply-listeners` to apply creates and updates automatically. Add
+`--delete-listeners` only after reviewing the plan; it requires
+`--apply-listeners`.
+
+## Ownership and drift
+
+After creating a hook, Smithers records the repository and numeric GitHub hook
+ID in `.smithers/listeners.state.json`. This ownership state contains no token
+or webhook secret. A matching callback URL is not ownership proof.
+
+Smithers updates an owned hook when its callback URL, active state, event set,
+JSON content type, TLS verification setting, or local secret digest differs
+from the declaration. Manual changes to those readable fields are restored on
+the next apply. GitHub does not return webhook secrets, so Smithers cannot
+detect a secret changed directly in GitHub. Change the configured environment
+secret and apply to rotate it.
+
+When a declared row disappears, the plan includes deletion only for the hook
+ID recorded as owned. Hooks without an ownership record are always left alone,
+including hooks with similar settings. If an unowned hook already uses the
+declared callback URL, apply stops with a conflict instead of modifying or
+duplicating it. Losing the state file therefore fails safe: the remote hook is
+treated as unowned.
+
+## Credentials
+
+Set `SMITHERS_GITHUB_TOKEN` or `GITHUB_TOKEN`. A fine-grained token needs
+repository Webhooks read and write permission. A classic token needs
+`admin:repo_hook`. Set every listener's `secretEnv` variable to the shared HMAC
+secret used by GitHub and the Gateway.
+
+Reconciliation resolves all required secrets and lists hooks for every affected
+repository before the first mutation. Missing credentials or repository
+permission stop the whole apply with a clear error. Tokens and secrets are not
+included in plans, state files, events, errors, or logs.
+
+## Delivery
+
+Registry-backed GitHub ingress verifies `X-Hub-Signature-256`, decodes the
+provider payload through `GitHubWebhookSource`, and records the
+`X-GitHub-Delivery` variants in the integration delivery ledger. A GitHub
+redelivery therefore does not signal a waiting run or start a workflow twice.
+Use `OnIssueOpened`, `OnIssueComment`, `OnPullRequest`, or `OnWebhook` to wait
+durably for the decoded event inside a workflow.
+
+Polling, GitHub App installation automation, organization webhooks, adoption of
+pre-existing hooks, and secret drift detection inside GitHub are outside this
+initial scope.

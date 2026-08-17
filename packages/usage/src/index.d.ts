@@ -510,6 +510,15 @@ declare function googleUsage(account: {
 type UsageProbe = UsageProbe$6;
 
 /**
+ * xAI exposes per-session token spend and console-only rate-limit details, but
+ * no live account quota endpoint. Do not turn published tier limits into a
+ * usage estimate: they do not reveal the account's current consumption.
+ *
+ * @returns {Promise<import("./buildUsageReport.js").UsageProbe>}
+ */
+declare function grokUsage(): Promise<UsageProbe$6>;
+
+/**
  * Looks up a published cap by tier id. Returns `undefined` for unknown tiers so
  * the caller can degrade to "unknown" rather than invent a number.
  *
@@ -655,7 +664,7 @@ declare function orderAccountsByUsage(accounts: Account[], options?: {
     tieBreak?: Map<string, number>;
 }): {
     label: string;
-    provider: "claude-code" | "antigravity" | "codex" | "kimi" | "anthropic-api" | "openai-api" | "gemini-api";
+    provider: "claude-code" | "antigravity" | "codex" | "kimi" | "grok" | "anthropic-api" | "openai-api" | "gemini-api" | "xai-api";
     configDir?: string;
     apiKey?: string;
     model?: string;
@@ -714,4 +723,4 @@ type AccountAvailability = {
     reasons: string[];
 };
 
-export { PUBLISHED_CAPS, type UsageReport$6 as UsageReport, type UsageWindow$6 as UsageWindow, accountQuotaBlock, accountQuotaStatePath, accountUsageScore, anthropicHeaderUsage, buildUsageReport, classifyAccountAvailability, claudeKeychainSuffix, claudeOauthUsage, clearAccountQuotaLimit, clearAccountUsageCache, codexWhamUsage, decodeJwtClaims, effectiveUsedPercent, formatRelativeReset, formatUsageReports, getAccountUsage, getUsageForAccounts, googleUsage, humanizeDurationShort, kimiCodeUsage, openaiHeaderUsage, orderAccountsByUsage, parseAnthropicRateLimitHeaders, parseClaudeOauthUsage, parseCodexUsage, parseDurationSeconds, parseKimiUsage, parseOpenAiRateLimitHeaders, publishedCapForTier, readAccountQuotaState, readClaudeCredentials, readCodexCredentials, readKimiCredentials, readUsageCache, recordAccountQuotaLimit, refreshKimiToken, usageCachePath, writeUsageCache };
+export { PUBLISHED_CAPS, type UsageReport$6 as UsageReport, type UsageWindow$6 as UsageWindow, accountQuotaBlock, accountQuotaStatePath, accountUsageScore, anthropicHeaderUsage, buildUsageReport, classifyAccountAvailability, claudeKeychainSuffix, claudeOauthUsage, clearAccountQuotaLimit, clearAccountUsageCache, codexWhamUsage, decodeJwtClaims, effectiveUsedPercent, formatRelativeReset, formatUsageReports, getAccountUsage, getUsageForAccounts, googleUsage, grokUsage, humanizeDurationShort, kimiCodeUsage, openaiHeaderUsage, orderAccountsByUsage, parseAnthropicRateLimitHeaders, parseClaudeOauthUsage, parseCodexUsage, parseDurationSeconds, parseKimiUsage, parseOpenAiRateLimitHeaders, publishedCapForTier, readAccountQuotaState, readClaudeCredentials, readCodexCredentials, readKimiCredentials, readUsageCache, recordAccountQuotaLimit, refreshKimiToken, usageCachePath, writeUsageCache };

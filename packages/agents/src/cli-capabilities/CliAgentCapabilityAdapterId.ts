@@ -5,6 +5,7 @@ export type CliAgentCapabilityAdapterId =
   | "codex"
   | "cursor"
   | "forge"
+  | "grok"
   | "hermes"
   | "kimi"
   | "opencode"

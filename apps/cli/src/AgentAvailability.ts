@@ -13,6 +13,7 @@ export type AgentAvailability = {
     | "openclaw"
     | "pool"
     | "kimi"
+    | "grok"
     | "amp"
     | "vibe"
     | "hermes";
