@@ -103,6 +103,11 @@ type HotReloadOptions$1 = {
 type RunOptions$2 = {
     runId?: string;
     parentRunId?: string | null;
+    /** Optional durable tenant key. Child runs always inherit the exact pair. */
+    ownership?: {
+        owner: string;
+        app: string;
+    };
     input: Record<string, unknown>;
     maxConcurrency?: number;
     /** Internal/runtime proof that maxConcurrency was explicitly persisted for this run. */
@@ -842,6 +847,8 @@ type WorkflowDefinition$1<Schema = unknown> = {
     db?: unknown;
     build: (ctx: WorkflowSmithersCtx<Schema>) => WorkflowElement;
     opts: SmithersWorkflowOptions;
+    /** Zod input contract used for run validation and workflow-tool parameters. */
+    inputSchema?: z.ZodTypeAny;
     /** Memory bridge selected by `openSmithersBackend`, when available. */
     memoryService?: MemoryRuntimeService$1;
     schemaRegistry?: Map<string, SchemaRegistryEntry>;

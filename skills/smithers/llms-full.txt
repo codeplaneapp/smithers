@@ -6435,6 +6435,75 @@ child has its own `input` schema and `ctx.input`, populated from the parent's
 
 ---
 
+## Workflow tools
+
+> Give an agent a workflow as a durable, Zod-validated callable tool.
+
+`workflowTool` adapts a Smithers workflow to the same AI SDK tool contract used
+by `defineTool`, MCP tools, and OpenAPI tools. It is intended for in-process SDK
+agents such as `OpenAIAgent` and `AnthropicAgent`.
+
+```tsx
+import { OpenAIAgent, workflowTool } from "smthrs";
+
+const research = workflowTool({
+  name: "research_topic",
+  description: "Research a topic with the durable research workflow.",
+  workflow: researchWorkflow,
+});
+
+const agent = new OpenAIAgent({
+  model: "gpt-5-mini",
+  tools: { research_topic: research },
+});
+```
+
+## Input and result
+
+The child workflow's existing Zod `input` schema is the tool parameter schema.
+There is no second schema to keep synchronized. A workflow with no input schema
+gets a strict empty-object schema, so the agent calls it with `{}`. A successful
+call returns the workflow's declared `RunResult.output`.
+
+## Durable child run
+
+Each distinct parsed input creates a real child run through the same executor as
+`<Subflow mode="childRun">`. The child is visible in the run tree, has
+`parentRunId` set to the calling run, and records `startedBy.harness` as
+`smithers-workflow-tool`. Repeating the same tool call in the same task and
+iteration uses the same input-derived child run ID, so retries attach or resume
+instead of duplicating work.
+
+The agent task holds one parent scheduler slot while its child runs. Parallel
+workflow-tool calls from that task are serialized, so they remain one admitted
+subtree and cannot bypass the parent's concurrency budget.
+
+## Pauses and human decisions
+
+The call waits while the child is actively executing. If the child parks for an
+approval, human request, event, timer, quota, or explicit pause, the tool returns
+an immediate `WORKFLOW_TOOL_SUSPENDED` error to the agent. The error includes
+the child run ID and status. Resolve the request against that child run, then
+retry the calling task to resume it. The tool never polls a parked child
+forever. The whole invocation, including its local queue wait, is bounded by
+`timeoutMs`, which defaults to 5 minutes, and by the calling task's
+cancellation and timeout signals.
+
+Failed and cancelled children become `WORKFLOW_TOOL_CHILD_FAILED` tool errors.
+The agent receives the child run ID, terminal status, and a bounded public error
+code and summary when available. Stacks, causes, and internal metadata are not
+copied into the tool error.
+
+## Recursion
+
+Nested workflow-tool calls carry a durable depth counter. The default maximum
+depth is 4 and `maxDepth` accepts 1 through 32. Crossing the limit raises
+`WORKFLOW_TOOL_DEPTH_EXCEEDED` before another child starts.
+
+See the runnable [`examples/workflow-tool.tsx`](https://github.com/smithersai/smithers/blob/main/examples/workflow-tool.tsx).
+
+---
+
 ## <ContinueAsNew>
 
 > Close the current run; start a fresh one with optional carried state.
@@ -8894,6 +8963,7 @@ interface SmithersWorkflow<Schema = unknown> {
   readonly db?: unknown;
   readonly build: (ctx: SmithersCtx<Schema>) => JSX.Element;
   readonly opts: SmithersWorkflowOptions;
+  readonly inputSchema?: import("zod").ZodTypeAny;
   readonly memoryService?: import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService;
   readonly schemaRegistry?: Map<string, SchemaRegistryEntry>;
   readonly zodToKeyName?: Map<import("zod").ZodObject<import("zod").ZodRawShape>, string>;
@@ -9099,6 +9169,7 @@ type SmithersErrorReport = {
 type RunOptions = {
   runId?: string;
   parentRunId?: string | null;
+  ownership?: { owner: string; app: string };  // durable tenant key; child runs always inherit the exact pair
   input: Record<string, unknown>;
   maxConcurrency?: number;          // default 4; run cap shared with lifecycle-linked descendant tasks
   maxConcurrencyPinned?: boolean;   // internal/runtime proof that the value was explicitly persisted
@@ -10610,6 +10681,8 @@ type KnownSmithersErrorCode =
   | "TASK_FORK_SESSION_UNAVAILABLE" | "TASK_FORK_CHECKPOINT_INCOMPATIBLE" | "TASK_FORK_CYCLE"
   | "RUN_NOT_FOUND" | "NODE_NOT_FOUND" | "INVALID_EVENTS_OPTIONS"
   | "SANDBOX_BUNDLE_INVALID" | "SANDBOX_BUNDLE_TOO_LARGE" | "WORKFLOW_EXECUTION_FAILED"
+  | "WORKFLOW_TOOL_CHILD_FAILED" | "WORKFLOW_TOOL_SUSPENDED"
+  | "WORKFLOW_TOOL_DEPTH_EXCEEDED" | "WORKFLOW_TOOL_TIMEOUT"
   | "SANDBOX_EXECUTION_FAILED" | "TASK_HEARTBEAT_TIMEOUT" | "AGENT_WORKER_EXITED" | "HEARTBEAT_PAYLOAD_TOO_LARGE"
   | "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE" | "TASK_ABORTED" | "RUN_CANCELLED" | "RUN_NOT_RESUMABLE"
   | "RUN_OWNER_ALIVE" | "RUN_STILL_RUNNING" | "RUN_RESUME_CLAIM_LOST" | "RUN_RESUME_CLAIM_FAILED"
@@ -11332,6 +11405,10 @@ try {
 | `SANDBOX_BUNDLE_INVALID` | A sandbox bundle fails validation (missing README, invalid manifest, etc.). | `{ bundlePath }` |
 | `SANDBOX_BUNDLE_TOO_LARGE` | A sandbox bundle exceeds the maximum allowed size. | `{ bundlePath, maxBytes }` |
 | `WORKFLOW_EXECUTION_FAILED` | A child or builder workflow exits unsuccessfully without surfacing a typed error payload. | `{ status }` |
+| `WORKFLOW_TOOL_CHILD_FAILED` | A workflow invoked by an agent tool ends unsuccessfully. | `{ toolName, childRunId, status, childError? }` |
+| `WORKFLOW_TOOL_SUSPENDED` | A workflow invoked by an agent tool parks for approval, human input, an event, a timer, quota, or an explicit pause. | `{ toolName, childRunId, status }` |
+| `WORKFLOW_TOOL_DEPTH_EXCEEDED` | Nested workflow-tool calls exceed the configured recursion depth. | `{ toolName, maxDepth, parentRunId }` |
+| `WORKFLOW_TOOL_TIMEOUT` | A workflow invoked by an agent tool exceeds its wall-time limit. | `{ toolName, childRunId, timeoutMs }` |
 | `SANDBOX_EXECUTION_FAILED` | Sandbox setup or execution fails before a more specific sandbox error can be emitted. | `{ sandboxId, runId?, maxConcurrent?, activeSandboxCount? }` |
 | `TASK_HEARTBEAT_TIMEOUT` | A task heartbeat timeout expires while the task is still running. | `{ nodeId, iteration, attempt, timeoutMs, staleForMs, lastHeartbeatAtMs }` |
 | `AGENT_WORKER_EXITED` | A spawned agent worker process exits without the attempt reaching a terminal state. The attempt fails and feeds the normal retry / `fallbackAgents` chain. | `{ nodeId, iteration, attempt, pid, exitCode, signal, attemptRunningForMs, sinceWorkerExitMs, graceMs }` |
@@ -11520,6 +11597,7 @@ JSON response codes, not `SmithersErrorInstance` objects.
 | `RUN_ALREADY_EXISTS` | 409 | Run ID already exists |
 | `RUN_NOT_FOUND` | 404 | No run with given ID |
 | `RUN_NOT_ACTIVE` | 409 | Run not active (cannot cancel) |
+| `CONFLICT` | 409 | Gateway `launchRun` was given a `runId` that an existing run already holds. Ownership never widens an id: a run id taken by another tenant conflicts the same way one of your own does. See Gateway run ownership. |
 | `NOT_FOUND` | 404 | Route or resource not found |
 | `DB_NOT_CONFIGURED` | 400 | Server database not configured |
 
@@ -17504,6 +17582,56 @@ example `{ harness: "openclaw", sessionId: "session-key" }`. It is durable and
 projects as `startedBy` on run list/get rows. It never changes Gateway auth,
 scopes, `auth.triggeredBy`, or cron/webhook source classification.
 
+### Run ownership and tenant isolation
+
+Run ownership is the indexed, persisted pair `(owner, app)`. Both values must
+be present or both absent. Authenticated Gateway launches derive the pair from
+the verified `userId` and `appId`; callers cannot supply different ownership in
+launch options. Child runs, continue-as-new runs, retries, rewinds, and forks
+inherit the source run's pair.
+
+For owned runs, the Gateway provides **isolation**, not merely list scoping.
+It applies the existing method scope check first, then requires an exact
+`(owner, app)` match for non-admin requests. A foreign run id is answered as
+`RunNotFound`, including when guessed directly. `role: "admin"` (and internal `system`
+execution) is the explicit cross-owner bypass. `listRuns` accepts an exact
+`owner`/`app` filter for admin and unauthenticated trusted-local callers; tenant
+callers are automatically limited to their own pair. The composite
+`(owner, app, created_at_ms)` index backs this filter.
+
+Ownership guards cover Gateway reads for run list/get, descendants, events,
+frames, attempts, node states and outputs, diffs, run trees/devtools streams,
+token usage, approvals, scores, and run summaries. They also cover resume,
+retry, pause, cancel, approval/deny, signal, hijack, rewind, and rerun controls.
+Artifacts, durable workspace snapshots, human-request administration, local
+fork commands, CLI commands, and MCP store tools are trusted operator surfaces:
+they access the store directly and intentionally have the same cross-owner
+authority as `role: "admin"`. Do not expose those local surfaces to tenants;
+tenant-facing clients must use the Gateway.
+
+Migration leaves existing runs with `owner = NULL, app = NULL`. These legacy
+unowned runs keep their previous shared read/control behavior, including for
+authenticated callers, so upgrading a single-tenant deployment is invisible.
+This means a database containing unowned runs is not retroactively isolated.
+
+One launch behavior does change for everyone, owned or not. `launchRun` with an
+`options.runId` that an existing run already holds is now rejected with
+`CONFLICT` instead of re-driving that run, because re-driving someone else's id
+is exactly how a tenant would otherwise take over a foreign run. Use
+`resumeRun` to continue an existing run, and a fresh id to start a new one.
+
+Unowned runs are not only a migration artifact. Cron- and webhook-triggered
+launches execute as the Gateway's own `system` identity, which carries no
+`(owner, app)` pair, so the runs they create are unowned and therefore readable
+and controllable by every tenant. Isolate those triggers per tenant by running a
+Gateway per tenant, or launch from a tenant-authenticated client instead.
+
+Before relying on tenant isolation, configure both identity dimensions, ensure
+new launches go through the Gateway, restrict local store/CLI/MCP access to
+operators, keep cron/webhook triggers out of tenant-visible deployments, and
+either retain legacy runs as intentionally shared or migrate them to an explicit
+pair.
+
 ## Live browser viewer
 
 Browser sessions expose a stationary viewer at `/browser/<sessionId>/viewer`.
@@ -17828,7 +17956,7 @@ type OutputSchemaDescriptor = {
 Gateway v1 RPC errors use stable code strings and HTTP status mappings:
 
 ```toon
-errors[27]{code,http}:
+errors[28]{code,http}:
   InvalidRequest,400
   InvalidInput,400
   Unauthorized,401
@@ -17836,6 +17964,7 @@ errors[27]{code,http}:
   RunNotFound,404
   ScoreNotFound,404
   RUN_NOT_ACTIVE,409
+  CONFLICT,409
   CronNotFound,404
   TicketNotFound,404
   NodeNotFound,404
@@ -18088,6 +18217,7 @@ type GatewayTokenGrant = {
   role: string;
   scopes: string[];
   userId?: string;
+  appId?: string;
   tokenId?: string;
   issuedAtMs?: number;
   expiresAtMs?: number;
@@ -18108,6 +18238,7 @@ type GatewayAuthConfig =
       scopesClaim?: string;          // default "scope"
       roleClaim?: string;            // default "role"
       userClaim?: string;            // default "sub"
+      appClaim?: string;             // default "app"
       defaultRole?: string;          // default "operator"
       defaultScopes?: string[];      // default [] when scope claim is absent
       clockSkewSeconds?: number;     // default 60; negative values clamp to 0
@@ -18123,7 +18254,22 @@ type GatewayAuthConfig =
     };
 ```
 
-JWT auth reads scopes from `scope`, role from `role`, and user id from `sub` unless the `*Claim` options override those claim names. Missing JWT role falls back to `defaultRole` and then `operator`; missing JWT scopes fall back to `defaultScopes` and then `[]`. Trusted-proxy auth reads `trustedHeaders` as `[user, scopes, role]`; missing role falls back to `defaultRole` and then `operator`, and missing scopes fall back to `defaultScopes`, or the request is rejected when no `defaultScopes` is configured. Those headers are only read at all when the request's transport peer matches `trustedProxies` (see below).
+JWT auth reads scopes from `scope`, role from `role`, and user id from `sub`
+unless the `*Claim` options override those claim names. The app half of the
+tenant key comes from the `app` claim (`appClaim` overrides that name). Missing
+JWT role falls back to `defaultRole` and then `operator`; missing JWT scopes
+fall back to `defaultScopes` and then `[]`. Trusted-proxy auth reads
+`trustedHeaders` as `[user, scopes, role]`; missing role falls back to
+`defaultRole` and then `operator`, and missing scopes fall back to
+`defaultScopes`, or the request is rejected when no `defaultScopes` is
+configured. The app header defaults to `x-app-id` and is honored only when
+`trustedHeaders` is omitted entirely (all four defaults apply) or explicitly
+names a fourth entry: an existing three-entry allow-list never starts trusting
+`x-app-id`, so a proxy that does not strip that header cannot be used to claim
+a different app half of the tenant key. Ownership requires both halves of the
+`(user, app)` pair, so a caller whose identity supplies only one half is not
+partially trusted and sees only unowned runs. Those headers are only read at
+all when the request's transport peer matches `trustedProxies` (see below).
 
 ### Trusted-proxy trust boundary
 

@@ -78,6 +78,13 @@ const RUN_CANCELLATION_SOURCE_DETAIL_COLUMNS = [
   ["cancel_request_detail", "cancel_request_detail TEXT"],
   ["cancel_request_signal", "cancel_request_signal TEXT"],
 ];
+const RUN_OWNERSHIP_COLUMNS = [
+  ["owner", "owner TEXT"],
+  ["app", "app TEXT"],
+];
+const RUN_OWNERSHIP_INDEX = "_smithers_runs_owner_app_created_idx";
+const CREATE_RUN_OWNERSHIP_INDEX_SQL = `CREATE INDEX IF NOT EXISTS ${RUN_OWNERSHIP_INDEX}
+  ON _smithers_runs (owner, app, created_at_ms DESC)`;
 
 const RUN_OWNED_FOREIGN_KEY_TABLES = [
   {
@@ -1475,6 +1482,10 @@ function buildMigrations(context) {
             skipped += 1;
             continue;
           }
+          if (statement.includes(RUN_OWNERSHIP_INDEX)) {
+            skipped += 1;
+            continue;
+          }
           sqlite.run(statement);
           applied += 1;
         }
@@ -1490,6 +1501,10 @@ function buildMigrations(context) {
             continue;
           }
           if (target === STEERS_TABLE && statement.includes(STEERS_QUEUED_INDEX)) {
+            skipped += 1;
+            continue;
+          }
+          if (statement.includes(RUN_OWNERSHIP_INDEX)) {
             skipped += 1;
             continue;
           }
@@ -2552,6 +2567,51 @@ function buildMigrations(context) {
         return { tables, staged: true };
       },
     },
+    {
+      id: "0044_run_ownership",
+      name: "Add indexed owner and app dimensions to runs",
+      checksum: checksumForStatements([
+        ...RUN_OWNERSHIP_COLUMNS.map(([, definition]) => `ALTER TABLE _smithers_runs ADD COLUMN ${definition}`),
+        CREATE_RUN_OWNERSHIP_INDEX_SQL,
+      ]),
+      isApplied: (sqlite) => {
+        const columns = tableColumnNames(sqlite, "_smithers_runs");
+        return (
+          RUN_OWNERSHIP_COLUMNS.every(([column]) => columns.has(column)) && indexExists(sqlite, RUN_OWNERSHIP_INDEX)
+        );
+      },
+      isAppliedPostgres: async (pgConn) => {
+        const columns = await tableColumnNamesPostgres(pgConn, "_smithers_runs");
+        return (
+          RUN_OWNERSHIP_COLUMNS.every(([column]) => columns.has(column)) &&
+          (await indexExistsPostgres(pgConn, RUN_OWNERSHIP_INDEX))
+        );
+      },
+      up: (sqlite) => {
+        if (!tableExists(sqlite, "_smithers_runs")) {
+          return { table: "_smithers_runs", addedColumns: [], skipped: "missing_table" };
+        }
+        const addedColumns = [];
+        for (const [column, definition] of RUN_OWNERSHIP_COLUMNS) {
+          if (addColumnIfMissing(sqlite, "_smithers_runs", column, definition)) addedColumns.push(column);
+        }
+        sqlite.run(CREATE_RUN_OWNERSHIP_INDEX_SQL);
+        return { table: "_smithers_runs", addedColumns, index: RUN_OWNERSHIP_INDEX };
+      },
+      upPostgres: async (pgConn) => {
+        if (!(await tableExistsPostgres(pgConn, "_smithers_runs"))) {
+          return { table: "_smithers_runs", addedColumns: [], skipped: "missing_table" };
+        }
+        const addedColumns = [];
+        for (const [column, definition] of RUN_OWNERSHIP_COLUMNS) {
+          if (await addColumnIfMissingPostgres(pgConn, "_smithers_runs", column, definition)) {
+            addedColumns.push(column);
+          }
+        }
+        await pgConn.query({ text: translateDdl(POSTGRES, CREATE_RUN_OWNERSHIP_INDEX_SQL) });
+        return { table: "_smithers_runs", addedColumns, index: RUN_OWNERSHIP_INDEX };
+      },
+    },
   ];
 }
 
@@ -2632,6 +2692,12 @@ export async function runSmithersSchemaInitSqliteAsync(storage, context) {
       await storage.execute(`ALTER TABLE _smithers_runs ADD COLUMN ${definition}`);
     }
   }
+  for (const [column, definition] of RUN_OWNERSHIP_COLUMNS) {
+    if (!runColumns.has(column)) {
+      await storage.execute(`ALTER TABLE _smithers_runs ADD COLUMN ${definition}`);
+    }
+  }
+  await storage.execute(CREATE_RUN_OWNERSHIP_INDEX_SQL);
   // External SQLite backends do not run the versioned migration ledger, so the
   // additive column migrations (e.g. 0039 effort on _smithers_attempts) never
   // upgrade a pre-existing table — CREATE TABLE IF NOT EXISTS above is a no-op

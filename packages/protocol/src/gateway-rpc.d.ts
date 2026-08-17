@@ -201,6 +201,11 @@ type RunStartedBy$1 = {
     prompt?: string;
     detected?: true;
 };
+/** Exact persisted tenant key. Both fields are always present together. */
+type RunOwnership$1 = {
+    owner: string;
+    app: string;
+};
 /** Durable attribution for the first caller that cancelled a run. */
 type RunCancellationSource$1 = {
     kind: "signal" | "rpc" | "cli" | "engine";
@@ -228,6 +233,7 @@ type LaunchRunResponse$1 = {
     workflow: string;
     /** Immutable visibility copied from the registered workflow when the run was created. */
     system: boolean;
+    ownership?: RunOwnership$1;
 };
 type ResumeRunRequest$1 = {
     runId: string;
@@ -452,6 +458,10 @@ type ListRunsRequest$1 = {
         parentRunId?: string;
         /** System runs are excluded unless an explicit debug surface opts in. */
         includeSystem?: boolean;
+        /** Admin-only explicit filter; tenant callers are always scoped to their authenticated pair. */
+        owner?: string;
+        /** Must be supplied with `owner`. */
+        app?: string;
     };
 };
 type GatewayRunSummary$1 = Record<string, unknown> & {
@@ -465,6 +475,7 @@ type GatewayRunSummary$1 = Record<string, unknown> & {
     startedBy?: RunStartedBy$1;
     /** Missing only when the run has not been cancelled or attribution was not persisted. */
     cancellationSource?: RunCancellationSource$1;
+    ownership?: RunOwnership$1;
 };
 type GetRunResponse$1 = Record<string, unknown> & {
     runId: string;
@@ -479,6 +490,7 @@ type GetRunResponse$1 = Record<string, unknown> & {
     startedBy?: RunStartedBy$1;
     /** Missing only when the run has not been cancelled or attribution was not persisted. */
     cancellationSource?: RunCancellationSource$1;
+    ownership?: RunOwnership$1;
 };
 type ListRunsResponse$1 = GatewayRunSummary$1[];
 type ListRunDescendantsRequest$1 = {
@@ -803,6 +815,7 @@ type SmithersApiVersion = SmithersApiVersion$1;
 type GatewayRpcErrorCode = GatewayRpcErrorCode$1;
 type GatewayRpcMethod = GatewayRpcMethod$1;
 type RunStartedBy = RunStartedBy$1;
+type RunOwnership = RunOwnership$1;
 type RunCancellationSource = RunCancellationSource$1;
 type LaunchRunRequest = LaunchRunRequest$1;
 type LaunchRunResponse = LaunchRunResponse$1;
@@ -925,4 +938,4 @@ type GatewayRpcErrorDetails = GatewayRpcErrorDetails$1;
 type GatewayEventFrame<Payload = unknown> = GatewayEventFrame$1<Payload>;
 type GatewayResponseFrame<Payload = unknown> = GatewayResponseFrame$1<Payload>;
 
-export type { BrowserActRequest, BrowserActResponse, BrowserAction, BrowserActivityEvent, BrowserActor, BrowserClickAction, BrowserContextRequest, BrowserContextResponse, BrowserContextSlice, BrowserFrameEvent, BrowserJournalEntry, BrowserLocator, BrowserModifier, BrowserOutcome, BrowserPickRequest, BrowserPickResponse, BrowserPoint, BrowserRectangle, BrowserRedaction, BrowserScreenshot, BrowserSelection, BrowserSnapshot, BrowserSource, BrowserSummary, BrowserViewport, CancelRunRequest, CancelRunResponse, CancelledProcess, CancelledRunOutcome, CloseBrowserSessionRequest, CloseBrowserSessionResponse, CreateBrowserSessionRequest, CreateBrowserSessionResponse, CreateTicketRequest, CronCreateRequest, CronDeleteRequest, CronListRequest, CronRunRequest, CrossedEffect, DeleteTicketRequest, EffectBoundaryReport, EffectRevertFailed, EffectRevertFinished, EffectRevertStarted, GatewayAccount, GatewayApprovalSummary, GatewayComparisonScoreRow, GatewayDiffBundle, GatewayDiffPatch, GatewayDocKind, GatewayDocRow, GatewayEventFrame, GatewayMemoryFact, GatewayPrompt, GatewayResponseFrame, GatewayRpcErrorCode, GatewayRpcErrorDetails, GatewayRpcMethod, GatewayRunDescendant, GatewayRunSummary, GatewayScoreDetail, GatewayScoreRow, GatewayTicketRow, GatewayWorkflowSummary, GetDevToolsSnapshotRequest, GetDevToolsSnapshotResponse, GetRunDiffOversizedResponse, GetRunDiffRequest, GetRunDiffResponse, GetRunRequest, GetRunResponse, GetSchemaSignatureRequest, GetSchemaSignatureResponse, GetScoreDetailRequest, GetScoreDetailResponse, HijackRunRequest, HijackRunResponse, LaunchRunRequest, LaunchRunResponse, ListAccountsRequest, ListAccountsResponse, ListApprovalsRequest, ListApprovalsResponse, ListBrowserSessionsResponse, ListDocsRequest, ListDocsResponse, ListMemoryFactsRequest, ListMemoryFactsResponse, ListPromptsRequest, ListPromptsResponse, ListRunDescendantsRequest, ListRunDescendantsResponse, ListRunTokenUsageRequest, ListRunTokenUsageResponse, ListRunsRequest, ListRunsResponse, ListScoresForRunsRequest, ListScoresForRunsResponse, ListScoresRequest, ListScoresResponse, ListTicketsRequest, ListTicketsResponse, ListWorkflowsRequest, ListWorkflowsResponse, NodeRequest, PauseRunRequest, PauseRunResponse, ResumeRunRequest, ResumeRunResponse, RewindRunRequest, RewindRunResponse, RunCancellationSource, RunStartedBy, RunTokenUsageEvent, SideEffectBoundaryCrossed, SmithersApiVersion, StreamDevToolsRequest, StreamRunEventsRequest, StreamRunEventsResponse, SubmitApprovalRequest, SubmitApprovalResponse, SubmitSignalRequest, UpdateTicketRequest, WhatHappenedRequest, WhatHappenedResponse };
+export type { BrowserActRequest, BrowserActResponse, BrowserAction, BrowserActivityEvent, BrowserActor, BrowserClickAction, BrowserContextRequest, BrowserContextResponse, BrowserContextSlice, BrowserFrameEvent, BrowserJournalEntry, BrowserLocator, BrowserModifier, BrowserOutcome, BrowserPickRequest, BrowserPickResponse, BrowserPoint, BrowserRectangle, BrowserRedaction, BrowserScreenshot, BrowserSelection, BrowserSnapshot, BrowserSource, BrowserSummary, BrowserViewport, CancelRunRequest, CancelRunResponse, CancelledProcess, CancelledRunOutcome, CloseBrowserSessionRequest, CloseBrowserSessionResponse, CreateBrowserSessionRequest, CreateBrowserSessionResponse, CreateTicketRequest, CronCreateRequest, CronDeleteRequest, CronListRequest, CronRunRequest, CrossedEffect, DeleteTicketRequest, EffectBoundaryReport, EffectRevertFailed, EffectRevertFinished, EffectRevertStarted, GatewayAccount, GatewayApprovalSummary, GatewayComparisonScoreRow, GatewayDiffBundle, GatewayDiffPatch, GatewayDocKind, GatewayDocRow, GatewayEventFrame, GatewayMemoryFact, GatewayPrompt, GatewayResponseFrame, GatewayRpcErrorCode, GatewayRpcErrorDetails, GatewayRpcMethod, GatewayRunDescendant, GatewayRunSummary, GatewayScoreDetail, GatewayScoreRow, GatewayTicketRow, GatewayWorkflowSummary, GetDevToolsSnapshotRequest, GetDevToolsSnapshotResponse, GetRunDiffOversizedResponse, GetRunDiffRequest, GetRunDiffResponse, GetRunRequest, GetRunResponse, GetSchemaSignatureRequest, GetSchemaSignatureResponse, GetScoreDetailRequest, GetScoreDetailResponse, HijackRunRequest, HijackRunResponse, LaunchRunRequest, LaunchRunResponse, ListAccountsRequest, ListAccountsResponse, ListApprovalsRequest, ListApprovalsResponse, ListBrowserSessionsResponse, ListDocsRequest, ListDocsResponse, ListMemoryFactsRequest, ListMemoryFactsResponse, ListPromptsRequest, ListPromptsResponse, ListRunDescendantsRequest, ListRunDescendantsResponse, ListRunTokenUsageRequest, ListRunTokenUsageResponse, ListRunsRequest, ListRunsResponse, ListScoresForRunsRequest, ListScoresForRunsResponse, ListScoresRequest, ListScoresResponse, ListTicketsRequest, ListTicketsResponse, ListWorkflowsRequest, ListWorkflowsResponse, NodeRequest, PauseRunRequest, PauseRunResponse, ResumeRunRequest, ResumeRunResponse, RewindRunRequest, RewindRunResponse, RunCancellationSource, RunOwnership, RunStartedBy, RunTokenUsageEvent, SideEffectBoundaryCrossed, SmithersApiVersion, StreamDevToolsRequest, StreamRunEventsRequest, StreamRunEventsResponse, SubmitApprovalRequest, SubmitApprovalResponse, SubmitSignalRequest, UpdateTicketRequest, WhatHappenedRequest, WhatHappenedResponse };

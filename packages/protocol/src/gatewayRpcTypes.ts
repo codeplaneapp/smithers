@@ -198,6 +198,9 @@ export type RunStartedBy = {
   detected?: true;
 };
 
+/** Exact persisted tenant key. Both fields are always present together. */
+export type RunOwnership = { owner: string; app: string };
+
 /** Durable attribution for the first caller that cancelled a run. */
 export type RunCancellationSource = {
   kind: "signal" | "rpc" | "cli" | "engine";
@@ -227,6 +230,7 @@ export type LaunchRunResponse = {
   workflow: string;
   /** Immutable visibility copied from the registered workflow when the run was created. */
   system: boolean;
+  ownership?: RunOwnership;
 };
 
 export type ResumeRunRequest = {
@@ -482,6 +486,10 @@ export type ListRunsRequest = {
     parentRunId?: string;
     /** System runs are excluded unless an explicit debug surface opts in. */
     includeSystem?: boolean;
+    /** Admin-only explicit filter; tenant callers are always scoped to their authenticated pair. */
+    owner?: string;
+    /** Must be supplied with `owner`. */
+    app?: string;
   };
 };
 
@@ -496,6 +504,7 @@ export type GatewayRunSummary = Record<string, unknown> & {
   startedBy?: RunStartedBy;
   /** Missing only when the run has not been cancelled or attribution was not persisted. */
   cancellationSource?: RunCancellationSource;
+  ownership?: RunOwnership;
 };
 
 export type GetRunResponse = Record<string, unknown> & {
@@ -511,6 +520,7 @@ export type GetRunResponse = Record<string, unknown> & {
   startedBy?: RunStartedBy;
   /** Missing only when the run has not been cancelled or attribution was not persisted. */
   cancellationSource?: RunCancellationSource;
+  ownership?: RunOwnership;
 };
 
 export type ListRunsResponse = GatewayRunSummary[];

@@ -185,12 +185,15 @@ describe("workflow make contract", () => {
           <Subflow id="child-run" output={outputs.result} workflow={childWorkflow} />
         </Workflow>
       ));
-      const result = await Effect.runPromise(runWorkflow(parentWorkflow, { input: {} }));
+      const result = await Effect.runPromise(
+        runWorkflow(parentWorkflow, { input: {}, ownership: { owner: "alice", app: "engine-test" } }),
+      );
       expect(result.status).toBe("finished");
       const adapter = new SmithersDb(db);
       const childRun = await adapter.getLatestChildRun(result.runId);
       expect(childRun?.parentRunId).toBe(result.runId);
       expect(childRun?.status).toBe("finished");
+      expect(childRun).toMatchObject({ owner: "alice", app: "engine-test" });
     } finally {
       cleanup();
     }

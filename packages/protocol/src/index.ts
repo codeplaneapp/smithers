@@ -22,4 +22,5 @@ export type {
   EffectRevertFinished,
   EffectRevertFailed,
   SideEffectBoundaryCrossed,
+  RunOwnership,
 } from "./gatewayRpcTypes.ts";

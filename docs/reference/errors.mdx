@@ -112,6 +112,10 @@ try {
 | `SANDBOX_BUNDLE_INVALID` | A sandbox bundle fails validation (missing README, invalid manifest, etc.). | `{ bundlePath }` |
 | `SANDBOX_BUNDLE_TOO_LARGE` | A sandbox bundle exceeds the maximum allowed size. | `{ bundlePath, maxBytes }` |
 | `WORKFLOW_EXECUTION_FAILED` | A child or builder workflow exits unsuccessfully without surfacing a typed error payload. | `{ status }` |
+| `WORKFLOW_TOOL_CHILD_FAILED` | A workflow invoked by an agent tool ends unsuccessfully. | `{ toolName, childRunId, status, childError? }` |
+| `WORKFLOW_TOOL_SUSPENDED` | A workflow invoked by an agent tool parks for approval, human input, an event, a timer, quota, or an explicit pause. | `{ toolName, childRunId, status }` |
+| `WORKFLOW_TOOL_DEPTH_EXCEEDED` | Nested workflow-tool calls exceed the configured recursion depth. | `{ toolName, maxDepth, parentRunId }` |
+| `WORKFLOW_TOOL_TIMEOUT` | A workflow invoked by an agent tool exceeds its wall-time limit. | `{ toolName, childRunId, timeoutMs }` |
 | `SANDBOX_EXECUTION_FAILED` | Sandbox setup or execution fails before a more specific sandbox error can be emitted. | `{ sandboxId, runId?, maxConcurrent?, activeSandboxCount? }` |
 | `TASK_HEARTBEAT_TIMEOUT` | A task heartbeat timeout expires while the task is still running. | `{ nodeId, iteration, attempt, timeoutMs, staleForMs, lastHeartbeatAtMs }` |
 | `AGENT_WORKER_EXITED` | A spawned agent worker process exits without the attempt reaching a terminal state. The attempt fails and feeds the normal retry / `fallbackAgents` chain. | `{ nodeId, iteration, attempt, pid, exitCode, signal, attemptRunningForMs, sinceWorkerExitMs, graceMs }` |
@@ -300,6 +304,7 @@ JSON response codes, not `SmithersErrorInstance` objects.
 | `RUN_ALREADY_EXISTS` | 409 | Run ID already exists |
 | `RUN_NOT_FOUND` | 404 | No run with given ID |
 | `RUN_NOT_ACTIVE` | 409 | Run not active (cannot cancel) |
+| `CONFLICT` | 409 | Gateway `launchRun` was given a `runId` that an existing run already holds. Ownership never widens an id: a run id taken by another tenant conflicts the same way one of your own does. See [Gateway run ownership](/integrations/gateway). |
 | `NOT_FOUND` | 404 | Route or resource not found |
 | `DB_NOT_CONFIGURED` | 400 | Server database not configured |
 

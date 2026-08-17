@@ -46,6 +46,8 @@ describe("ensureSmithersTables", () => {
     expect(colNames).toContain("run_id");
     expect(colNames).toContain("status");
     expect(colNames).toContain("created_at_ms");
+    expect(colNames).toContain("owner");
+    expect(colNames).toContain("app");
     const nodeCols = sqlite.query('PRAGMA table_info("_smithers_nodes")').all();
     const nodeColNames = nodeCols.map((c) => c.name);
     expect(nodeColNames).toContain("run_id");
@@ -93,6 +95,7 @@ describe("ensureSmithersTables", () => {
     const runIndexes = sqlite.query('PRAGMA index_list("_smithers_runs")').all();
     const runIndexNames = runIndexes.map((idx) => idx.name);
     expect(runIndexNames).toContain("_smithers_runs_status_heartbeat_idx");
+    expect(runIndexNames).toContain("_smithers_runs_owner_app_created_idx");
     const stateCols = sqlite.query('PRAGMA table_info("_smithers_workspace_states")').all();
     expect(stateCols.map((c) => c.name)).toEqual(
       expect.arrayContaining(["run_id", "jj_cwd", "jj_commit_id", "jj_operation_id", "jj_change_id", "created_at_ms"]),

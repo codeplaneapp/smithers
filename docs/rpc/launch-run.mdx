@@ -9,7 +9,10 @@ apiVersion: v1
 - Scope: `run:write`
 - Transports: HTTP RPC, WebSocket RPC
 - Request: `{ workflow, input?, options? }`
-- Response: `{ runId, workflow }`
+- Response: `{ runId, workflow, system, ownership? }`
+
+`ownership` is the run's durable `{ owner, app }` tenant key, echoed back when
+the caller's authenticated identity carries both halves.
 
 `options.startedBy` is optional durable self-reported provenance, separate from
 the authenticated `auth.triggeredBy` identity: `{ harness?, sessionId?, prompt?,
@@ -18,4 +21,4 @@ the explicit-only prompt is visibly clipped at 8,192 code points. Gateway
 callers supply this object directly; the Gateway does not infer its daemon
 environment.
 
-Errors are versioned as `v1` and include `InvalidRequest`, `InvalidInput`, `Unauthorized`, `Forbidden`, and `Internal`.
+Errors are versioned as `v1` and include `InvalidRequest`, `InvalidInput`, `Unauthorized`, `Forbidden`, `CONFLICT`, and `Internal`. `CONFLICT` means the requested run id is already taken by an existing run.

@@ -21,6 +21,7 @@ export type ToolContext = {
 export type DefinedToolContext = ToolContext & {
   idempotencyKey: string | null;
   toolName: string;
+  toolCallSeq: number;
   sideEffect: boolean;
   idempotent: boolean;
 };

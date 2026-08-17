@@ -160,6 +160,22 @@ paths:
                       system:
                         type: boolean
                         description: "Whether the launched workflow is an internal system workflow."
+                      ownership:
+                        type: object
+                        description: "Exact persisted run ownership pair."
+                        properties:
+                          owner:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated tenant owner key."
+                          app:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated application key."
+                        required:
+                          - owner
+                          - app
+                        additionalProperties: false
                     required:
                       - runId
                       - workflow
@@ -213,6 +229,7 @@ paths:
                           - InvalidInput
                           - Unauthorized
                           - Forbidden
+                          - CONFLICT
                           - Internal
                       message:
                         type: string
@@ -274,6 +291,7 @@ paths:
                           - InvalidInput
                           - Unauthorized
                           - Forbidden
+                          - CONFLICT
                           - Internal
                       message:
                         type: string
@@ -335,6 +353,69 @@ paths:
                           - InvalidInput
                           - Unauthorized
                           - Forbidden
+                          - CONFLICT
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        409:
+          description: "The requested run id is already taken by an existing run."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - InvalidInput
+                          - Unauthorized
+                          - Forbidden
+                          - CONFLICT
                           - Internal
                       message:
                         type: string
@@ -396,6 +477,7 @@ paths:
                           - InvalidInput
                           - Unauthorized
                           - Forbidden
+                          - CONFLICT
                           - Internal
                       message:
                         type: string
@@ -4321,6 +4403,22 @@ paths:
                         required:
                           - kind
                         additionalProperties: false
+                      ownership:
+                        type: object
+                        description: "Exact persisted run ownership pair."
+                        properties:
+                          owner:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated tenant owner key."
+                          app:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated application key."
+                        required:
+                          - owner
+                          - app
+                        additionalProperties: false
                     required:
                       - runId
                       - system
@@ -5187,6 +5285,14 @@ paths:
                         includeSystem:
                           type: boolean
                           description: "Include internal system runs; they are excluded by default."
+                        owner:
+                          type: string
+                          minLength: 1
+                          description: "Admin-only owner filter; must be paired with app."
+                        app:
+                          type: string
+                          minLength: 1
+                          description: "Admin-only application filter; must be paired with owner."
                       required: []
                       additionalProperties: false
                   required: []
@@ -5286,6 +5392,22 @@ paths:
                               description: "Authenticated identity of the first cancellation caller."
                           required:
                             - kind
+                          additionalProperties: false
+                        ownership:
+                          type: object
+                          description: "Exact persisted run ownership pair."
+                          properties:
+                            owner:
+                              type: string
+                              minLength: 1
+                              description: "Authenticated tenant owner key."
+                            app:
+                              type: string
+                              minLength: 1
+                              description: "Authenticated application key."
+                          required:
+                            - owner
+                            - app
                           additionalProperties: false
                       required:
                         - runId
@@ -20766,6 +20888,24 @@ paths:
             minimum: 0
             maximum: 9007199254740991
             description: "Rows to skip after the newest-first sort (server-side pagination); a safe non-negative integer."
+        -
+          name: owner
+          in: query
+          description: "Admin-only run owner filter; must be paired with app."
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            description: "Admin-only owner filter; must be paired with app."
+        -
+          name: app
+          in: query
+          description: "Admin-only run application filter; must be paired with owner."
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            description: "Admin-only application filter; must be paired with owner."
       responses:
         200:
           description: "Gateway REST response."
@@ -20844,6 +20984,22 @@ paths:
                               description: "Authenticated identity of the first cancellation caller."
                           required:
                             - kind
+                          additionalProperties: false
+                        ownership:
+                          type: object
+                          description: "Exact persisted run ownership pair."
+                          properties:
+                            owner:
+                              type: string
+                              minLength: 1
+                              description: "Authenticated tenant owner key."
+                            app:
+                              type: string
+                              minLength: 1
+                              description: "Authenticated application key."
+                          required:
+                            - owner
+                            - app
                           additionalProperties: false
                       required:
                         - runId
@@ -21107,6 +21263,22 @@ paths:
                       system:
                         type: boolean
                         description: "Whether the launched workflow is an internal system workflow."
+                      ownership:
+                        type: object
+                        description: "Exact persisted run ownership pair."
+                        properties:
+                          owner:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated tenant owner key."
+                          app:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated application key."
+                        required:
+                          - owner
+                          - app
+                        additionalProperties: false
                     required:
                       - runId
                       - workflow
@@ -21522,6 +21694,22 @@ paths:
                             description: "Authenticated identity of the first cancellation caller."
                         required:
                           - kind
+                        additionalProperties: false
+                      ownership:
+                        type: object
+                        description: "Exact persisted run ownership pair."
+                        properties:
+                          owner:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated tenant owner key."
+                          app:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated application key."
+                        required:
+                          - owner
+                          - app
                         additionalProperties: false
                     required:
                       - runId
@@ -29732,6 +29920,7 @@ components:
         - RunNotFound
         - ScoreNotFound
         - RUN_NOT_ACTIVE
+        - CONFLICT
         - CronNotFound
         - TicketNotFound
         - NodeNotFound

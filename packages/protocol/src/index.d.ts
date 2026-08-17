@@ -225,6 +225,11 @@ declare const NODE_OUTPUT_ERROR_CODES: readonly ["InvalidRunId", "InvalidNodeId"
 declare const NODE_DIFF_ERROR_CODES: readonly ["InvalidRunId", "InvalidNodeId", "InvalidIteration", "RunNotFound", "NodeNotFound", "AttemptNotFound", "AttemptNotFinished", "VcsError", "WorkingTreeDirty", "DiffTooLarge"];
 declare const JUMP_TO_FRAME_ERROR_CODES: readonly ["InvalidRunId", "InvalidFrameNo", "RunNotFound", "FrameOutOfRange", "ConfirmationRequired", "Busy", "UnsupportedSandbox", "VcsError", "RewindFailed", "TIME_TRAVEL_SIDE_EFFECT_BLOCKED", "RateLimited", "Unauthorized"];
 
+/** Exact persisted tenant key. Both fields are always present together. */
+type RunOwnership = {
+    owner: string;
+    app: string;
+};
 type CrossedEffect = {
     kind: "tool" | "task";
     toolName: string;
@@ -285,4 +290,4 @@ type SideEffectBoundaryCrossed = {
     archivedByOp?: string;
 };
 
-export { type CrossedEffect, DEVTOOLS_ERROR_CODES, DEVTOOLS_PROTOCOL_VERSION, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsDelta, type DevToolsDeltaOp, type DevToolsErrorCode, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, type DevToolsRunState, type DevToolsSnapshot, type EffectBoundaryReport, type EffectRevertFailed, type EffectRevertFinished, type EffectRevertStarted, JUMP_TO_FRAME_ERROR_CODES, type JumpToFrameErrorCode, NODE_DIFF_ERROR_CODES, NODE_OUTPUT_ERROR_CODES, type NodeDiffErrorCode, type NodeOutputErrorCode, type SideEffectBoundaryCrossed };
+export { type CrossedEffect, DEVTOOLS_ERROR_CODES, DEVTOOLS_PROTOCOL_VERSION, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsDelta, type DevToolsDeltaOp, type DevToolsErrorCode, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, type DevToolsRunState, type DevToolsSnapshot, type EffectBoundaryReport, type EffectRevertFailed, type EffectRevertFinished, type EffectRevertStarted, JUMP_TO_FRAME_ERROR_CODES, type JumpToFrameErrorCode, NODE_DIFF_ERROR_CODES, NODE_OUTPUT_ERROR_CODES, type NodeDiffErrorCode, type NodeOutputErrorCode, type RunOwnership, type SideEffectBoundaryCrossed };

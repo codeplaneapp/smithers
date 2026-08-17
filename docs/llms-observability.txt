@@ -441,6 +441,56 @@ example `{ harness: "openclaw", sessionId: "session-key" }`. It is durable and
 projects as `startedBy` on run list/get rows. It never changes Gateway auth,
 scopes, `auth.triggeredBy`, or cron/webhook source classification.
 
+### Run ownership and tenant isolation
+
+Run ownership is the indexed, persisted pair `(owner, app)`. Both values must
+be present or both absent. Authenticated Gateway launches derive the pair from
+the verified `userId` and `appId`; callers cannot supply different ownership in
+launch options. Child runs, continue-as-new runs, retries, rewinds, and forks
+inherit the source run's pair.
+
+For owned runs, the Gateway provides **isolation**, not merely list scoping.
+It applies the existing method scope check first, then requires an exact
+`(owner, app)` match for non-admin requests. A foreign run id is answered as
+`RunNotFound`, including when guessed directly. `role: "admin"` (and internal `system`
+execution) is the explicit cross-owner bypass. `listRuns` accepts an exact
+`owner`/`app` filter for admin and unauthenticated trusted-local callers; tenant
+callers are automatically limited to their own pair. The composite
+`(owner, app, created_at_ms)` index backs this filter.
+
+Ownership guards cover Gateway reads for run list/get, descendants, events,
+frames, attempts, node states and outputs, diffs, run trees/devtools streams,
+token usage, approvals, scores, and run summaries. They also cover resume,
+retry, pause, cancel, approval/deny, signal, hijack, rewind, and rerun controls.
+Artifacts, durable workspace snapshots, human-request administration, local
+fork commands, CLI commands, and MCP store tools are trusted operator surfaces:
+they access the store directly and intentionally have the same cross-owner
+authority as `role: "admin"`. Do not expose those local surfaces to tenants;
+tenant-facing clients must use the Gateway.
+
+Migration leaves existing runs with `owner = NULL, app = NULL`. These legacy
+unowned runs keep their previous shared read/control behavior, including for
+authenticated callers, so upgrading a single-tenant deployment is invisible.
+This means a database containing unowned runs is not retroactively isolated.
+
+One launch behavior does change for everyone, owned or not. `launchRun` with an
+`options.runId` that an existing run already holds is now rejected with
+`CONFLICT` instead of re-driving that run, because re-driving someone else's id
+is exactly how a tenant would otherwise take over a foreign run. Use
+`resumeRun` to continue an existing run, and a fresh id to start a new one.
+
+Unowned runs are not only a migration artifact. Cron- and webhook-triggered
+launches execute as the Gateway's own `system` identity, which carries no
+`(owner, app)` pair, so the runs they create are unowned and therefore readable
+and controllable by every tenant. Isolate those triggers per tenant by running a
+Gateway per tenant, or launch from a tenant-authenticated client instead.
+
+Before relying on tenant isolation, configure both identity dimensions, ensure
+new launches go through the Gateway, restrict local store/CLI/MCP access to
+operators, keep cron/webhook triggers out of tenant-visible deployments, and
+either retain legacy runs as intentionally shared or migrate them to an explicit
+pair.
+
 ## Live browser viewer
 
 Browser sessions expose a stationary viewer at `/browser/<sessionId>/viewer`.
@@ -765,7 +815,7 @@ type OutputSchemaDescriptor = {
 Gateway v1 RPC errors use stable code strings and HTTP status mappings:
 
 ```toon
-errors[27]{code,http}:
+errors[28]{code,http}:
   InvalidRequest,400
   InvalidInput,400
   Unauthorized,401
@@ -773,6 +823,7 @@ errors[27]{code,http}:
   RunNotFound,404
   ScoreNotFound,404
   RUN_NOT_ACTIVE,409
+  CONFLICT,409
   CronNotFound,404
   TicketNotFound,404
   NodeNotFound,404
@@ -1025,6 +1076,7 @@ type GatewayTokenGrant = {
   role: string;
   scopes: string[];
   userId?: string;
+  appId?: string;
   tokenId?: string;
   issuedAtMs?: number;
   expiresAtMs?: number;
@@ -1045,6 +1097,7 @@ type GatewayAuthConfig =
       scopesClaim?: string;          // default "scope"
       roleClaim?: string;            // default "role"
       userClaim?: string;            // default "sub"
+      appClaim?: string;             // default "app"
       defaultRole?: string;          // default "operator"
       defaultScopes?: string[];      // default [] when scope claim is absent
       clockSkewSeconds?: number;     // default 60; negative values clamp to 0
@@ -1060,7 +1113,22 @@ type GatewayAuthConfig =
     };
 ```
 
-JWT auth reads scopes from `scope`, role from `role`, and user id from `sub` unless the `*Claim` options override those claim names. Missing JWT role falls back to `defaultRole` and then `operator`; missing JWT scopes fall back to `defaultScopes` and then `[]`. Trusted-proxy auth reads `trustedHeaders` as `[user, scopes, role]`; missing role falls back to `defaultRole` and then `operator`, and missing scopes fall back to `defaultScopes`, or the request is rejected when no `defaultScopes` is configured. Those headers are only read at all when the request's transport peer matches `trustedProxies` (see below).
+JWT auth reads scopes from `scope`, role from `role`, and user id from `sub`
+unless the `*Claim` options override those claim names. The app half of the
+tenant key comes from the `app` claim (`appClaim` overrides that name). Missing
+JWT role falls back to `defaultRole` and then `operator`; missing JWT scopes
+fall back to `defaultScopes` and then `[]`. Trusted-proxy auth reads
+`trustedHeaders` as `[user, scopes, role]`; missing role falls back to
+`defaultRole` and then `operator`, and missing scopes fall back to
+`defaultScopes`, or the request is rejected when no `defaultScopes` is
+configured. The app header defaults to `x-app-id` and is honored only when
+`trustedHeaders` is omitted entirely (all four defaults apply) or explicitly
+names a fourth entry: an existing three-entry allow-list never starts trusting
+`x-app-id`, so a proxy that does not strip that header cannot be used to claim
+a different app half of the tenant key. Ownership requires both halves of the
+`(user, app)` pair, so a caller whose identity supplies only one half is not
+partially trusted and sees only unowned runs. Those headers are only read at
+all when the request's transport peer matches `trustedProxies` (see below).
 
 ### Trusted-proxy trust boundary
 
