@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
+import { Database } from "bun:sqlite";
 import { reapSandboxRoots } from "../src/reapSandboxRoots.js";
 import { reapUnmanagedScratch } from "../src/reapUnmanagedScratch.js";
 import {
@@ -159,6 +161,101 @@ test(
     expect(existsSync(logFile)).toBe(false);
     expect(existsSync(legacyLogFile)).toBe(false);
     expect(existsSync(sandboxRoot)).toBe(false);
+    const sqlite = new Database(repo.path("smithers.db"), { readonly: true });
+    expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_runs WHERE run_id = ?").get(runId).count).toBe(1);
+    sqlite.close();
+  },
+  CLI_COMMAND_TIMEOUT_MS,
+);
+
+test(
+  "smithers gc compacts legacy snapshots and requires explicit database retention",
+  () => {
+    const repo = createTempRepo();
+    pinSqliteBackend(repo.dir);
+    writeTestWorkflow(repo);
+    const initial = runSmithers(["up", "workflow.tsx", "--run-id", "schema-seed"], {
+      cwd: repo.dir,
+      format: "json",
+      timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+    });
+    expect(initial.exitCode).toBe(0);
+
+    const sqlite = new Database(repo.path("smithers.db"));
+    const insertRun = sqlite.query(
+      `INSERT INTO _smithers_runs
+         (run_id, workflow_name, status, created_at_ms, finished_at_ms)
+       VALUES (?, 'workflow', ?, 1, ?)`,
+    );
+    insertRun.run("old-terminal", "finished", 2);
+    insertRun.run("live-running", "running", null);
+    insertRun.run("live-paused", "paused", null);
+    insertRun.run("live-waiting", "waiting-approval", null);
+    for (const runId of ["old-terminal", "live-running", "live-paused", "live-waiting"]) {
+      sqlite
+        .query(
+          "INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json) VALUES (?, 0, 1, 'test', '{}')",
+        )
+        .run(runId);
+    }
+    const nodesJson = "[]";
+    const outputsJson = '{"answer":42}';
+    const ralphJson = "[]";
+    const inputJson = '{"prompt":"legacy"}';
+    const hash = createHash("sha256")
+      .update(`{"nodes":${nodesJson},"outputs":${outputsJson},"ralph":${ralphJson},"input":${inputJson}}`)
+      .digest("hex");
+    sqlite
+      .query(
+        `INSERT INTO _smithers_snapshots
+           (run_id, frame_no, nodes_json, outputs_json, ralph_json, input_json, content_hash, created_at_ms)
+         VALUES ('live-paused', 0, ?, ?, ?, ?, ?, 1)`,
+      )
+      .run(nodesJson, outputsJson, ralphJson, inputJson, hash);
+    const refsBefore = sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs").get().count;
+    sqlite.close();
+
+    const dryRun = runSmithers(["gc", "--dry-run", "--db-retention-days", "0"], {
+      cwd: repo.dir,
+      format: "json",
+      timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+    });
+    expect(dryRun.exitCode).toBe(0);
+    expect(dryRun.json?.database?.snapshots?.remainingRows).toBe(1);
+    expect(dryRun.json?.database?.retention?.removedRuns.map((run) => run.runId)).toContain("old-terminal");
+    const afterDryRun = new Database(repo.path("smithers.db"));
+    expect(afterDryRun.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs").get().count).toBe(
+      refsBefore,
+    );
+    expect(
+      afterDryRun.query("SELECT COUNT(*) AS count FROM _smithers_runs WHERE run_id = 'old-terminal'").get().count,
+    ).toBe(1);
+    afterDryRun.close();
+
+    const gc = runSmithers(["gc", "--db-retention-days", "0"], {
+      cwd: repo.dir,
+      format: "json",
+      timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+    });
+    expect(gc.exitCode).toBe(0);
+    expect(gc.json?.database?.snapshots).toMatchObject({ migratedRows: 1, remainingRows: 0 });
+    expect(gc.json?.database?.retention?.removedRuns.map((run) => run.runId)).toContain("old-terminal");
+    const afterGc = new Database(repo.path("smithers.db"));
+    expect(
+      afterGc.query("SELECT COUNT(*) AS count FROM _smithers_runs WHERE run_id = 'old-terminal'").get().count,
+    ).toBe(0);
+    expect(
+      afterGc
+        .query("SELECT run_id FROM _smithers_runs WHERE run_id LIKE 'live-%' ORDER BY run_id")
+        .all()
+        .map((row) => row.run_id),
+    ).toEqual(["live-paused", "live-running", "live-waiting"]);
+    expect(
+      afterGc.query("SELECT content_hash FROM _smithers_snapshot_payload_refs WHERE content_hash = ?").get(hash)
+        .content_hash,
+    ).toBe(hash);
+    expect(afterGc.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    afterGc.close();
   },
   CLI_COMMAND_TIMEOUT_MS,
 );

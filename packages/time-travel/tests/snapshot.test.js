@@ -8,6 +8,7 @@ import { gzipSync } from "node:zlib";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { SmithersDb } from "@smthrs/db/adapter";
+import { compactLegacySnapshots } from "@smthrs/db/run-history-gc";
 import {
   captureSnapshot,
   loadSnapshot,
@@ -445,7 +446,10 @@ describe("captureSnapshot", () => {
     );
     const loadMs = performance.now() - loadStart;
     const baseline = new Database(join(dir, "baseline.db"));
-    ensureSmithersTables(drizzle(baseline));
+    const baselineDb = drizzle(baseline);
+    ensureSmithersTables(baselineDb);
+    const baselineAdapter = new SmithersDb(baselineDb);
+    const legacyContentHash = createHash("sha256").update(uncompressed).digest("hex");
     const insert = baseline.query(
       "INSERT INTO _smithers_snapshots (run_id, frame_no, nodes_json, outputs_json, ralph_json, input_json, vcs_pointer, workflow_hash, content_hash, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
     );
@@ -457,17 +461,27 @@ describe("captureSnapshot", () => {
         JSON.stringify(data.outputs),
         JSON.stringify(data.ralph),
         JSON.stringify(data.input),
-        `baseline-${frameNo}`,
+        legacyContentHash,
         frameNo,
       );
     const baselineBytes =
       baseline.query("PRAGMA page_count").get().page_count * baseline.query("PRAGMA page_size").get().page_size;
     const addressedBytes =
       sqlite.query("PRAGMA page_count").get().page_count * sqlite.query("PRAGMA page_size").get().page_size;
+    const migrated = await compactLegacySnapshots(baselineAdapter);
+    baseline.query("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    const migratedReusableBytes =
+      baseline.query("PRAGMA freelist_count").get().freelist_count * baseline.query("PRAGMA page_size").get().page_size;
+    const migratedAllocatedBytes =
+      baseline.query("PRAGMA page_count").get().page_count * baseline.query("PRAGMA page_size").get().page_size;
+    const migratedNetReclaimedBytes = baselineBytes - (migratedAllocatedBytes - migratedReusableBytes);
     console.info(
-      `snapshot benchmark: frames=${frameCount} logicalPayload=${Buffer.byteLength(uncompressed) * frameCount} uniquePayload=${payloads.bytes} baselineSqlite=${baselineBytes} addressedSqlite=${addressedBytes} captureMs=${captureMs.toFixed(2)} loadMs=${loadMs.toFixed(2)}`,
+      `snapshot benchmark: frames=${frameCount} logicalPayload=${Buffer.byteLength(uncompressed) * frameCount} uniquePayload=${payloads.bytes} baselineSqlite=${baselineBytes} addressedSqlite=${addressedBytes} migratedInline=${migrated.clearedInlineBytes} migratedReusable=${migratedReusableBytes} migratedNetReclaimed=${migratedNetReclaimedBytes} captureMs=${captureMs.toFixed(2)} loadMs=${loadMs.toFixed(2)}`,
     );
     expect(addressedBytes).toBeLessThan(baselineBytes * 0.2);
+    expect(migrated).toMatchObject({ migratedRows: frameCount, remainingRows: 0 });
+    expect(migratedReusableBytes).toBeGreaterThan(baselineBytes * 0.75);
+    expect(migratedNetReclaimedBytes).toBeGreaterThan(baselineBytes * 0.8);
     await adapter.deleteSnapshotsAfter("bench", 10);
     expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_contents").get().count).toBe(1);
     await adapter.deleteSnapshotsAfter("bench", -1);
@@ -524,9 +538,11 @@ describe("captureSnapshot", () => {
       )
       .digest("hex");
     sqlite
-      .query(`UPDATE _smithers_snapshots
+      .query(
+        `UPDATE _smithers_snapshots
             SET nodes_json = ?, outputs_json = ?, ralph_json = ?, input_json = ?, content_hash = ?
-            WHERE run_id = 'inline-replace' AND frame_no = 0`)
+            WHERE run_id = 'inline-replace' AND frame_no = 0`,
+      )
       .run(nodesJson, outputsJson, ralphJson, inputJson, contentHash);
     expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs").get().count).toBe(0);
     expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_contents").get().count).toBe(0);
@@ -582,7 +598,7 @@ describe("captureSnapshot", () => {
     expect(list[0].frameNo).toBe(0);
     expect(list[1].frameNo).toBe(1);
   });
-  test("loads legacy inline snapshots without creating payload references", async () => {
+  test("loads legacy inline snapshots before and after resumable content-addressed compaction", async () => {
     const { sqlite, adapter } = createTestDb();
     const data = sampleData({ input: { prompt: "legacy-inline" } });
     const raw = JSON.stringify({ nodes: data.nodes, outputs: data.outputs, ralph: data.ralph, input: data.input });
@@ -602,6 +618,11 @@ describe("captureSnapshot", () => {
     const loaded = await loadSnapshot(adapter, "legacy", 0);
     expect(JSON.parse(loaded.inputJson)).toEqual({ prompt: "legacy-inline" });
     expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs").get().count).toBe(0);
+    expect(await compactLegacySnapshots(adapter)).toMatchObject({ migratedRows: 1, remainingRows: 0 });
+    const restored = await loadSnapshot(adapter, "legacy", 0);
+    expect(restored).toEqual(loaded);
+    expect(JSON.parse(restored.inputJson)).toEqual(data.input);
+    expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs").get().count).toBe(1);
     sqlite.close();
   });
   test("hydrates the preserved compressed prototype without rewriting it", async () => {
