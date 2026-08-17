@@ -13,24 +13,30 @@ safety/side effects, and soak.
 - `faults/` — one file per matrix row, named after the case it covers.
 - `budgets/` — memory and latency budgets, enforced by tests (regressions
   fail; they are not just recorded).
-- `flake-log.md` — running log of observed flakes; gates promotion of a
-  case from nightly soak into the per-PR subset.
+- `fault-matrix.json` — case inventory and PR/nightly promotion tier.
+- `fault-gaps.md` — skipped/simulated integration inventory and cost.
+- `.e2e-flakes/history.json` in CI — rolling per-case flake history.
 
 ## Running
 
 Per-PR subset (must finish under 10 min wall time):
 
 ```sh
-bun test e2e/faults
+pnpm -C e2e test:faults
 ```
 
 Nightly soak (must finish under 2h wall time):
 
 ```sh
-SMITHERS_E2E_SOAK=1 bun test e2e/faults
+pnpm -C e2e test:soak
 ```
 
-Soak-only cases short-circuit when `SMITHERS_E2E_SOAK` is unset.
+Soak-only cases short-circuit when `SMITHERS_E2E_SOAK` is unset. The runner
+measures the whole fault command with a monotonic clock and fails with the
+suite name, configured ceiling, elapsed time, and overage. GitHub job timeouts
+are deliberately longer (20 minutes PR, 150 minutes nightly) so dependency
+setup, builds, and artifact upload cannot preempt the 10-minute/2-hour suite
+assertion on a loaded runner.
 
 ## Budgets
 
@@ -39,14 +45,21 @@ and [`budgets/latency.json`](./budgets/latency.json). Load them in tests via
 `loadBudget` from [`budgets/loadBudget.ts`](./budgets/loadBudget.ts). Update
 the JSON when a budget changes; never silently widen one in test code.
 
-## Flake log
+## Flake tracking and promotion
 
-Every observed flake is recorded in [`flake-log.md`](./flake-log.md). The
-**intended** promotion policy (ticket 0022 meta-testing) is that a fault case
-moves from nightly-only to per-PR only after **0 flakes per 100 CI runs**.
+Every nightly run writes per-case JUnit-derived outcomes to
+`.e2e-flakes/history.json`. The nightly workflow restores and saves that rolling
+file with GitHub Actions cache and uploads both the latest result and history as
+artifacts. A failure or missing result is a flake; a run containing skips is
+incomplete and does not count as a clean run. The rolling window retains the
+latest 100 attempts per case.
 
-Current reality: that nightly/per-PR split and the automated 100-run counter are
-not wired yet — `.github/workflows/faults.yml` runs the whole non-soak matrix
-per-PR via `e2e test:faults`, and the soak cases (28–30) stay `test.skip` unless
-`SMITHERS_E2E_SOAK=1`. The flake log is therefore maintained by hand for now;
-automating the promotion gate is tracked under ticket 0022.
+To promote a case, change its `promotionTier` in `fault-matrix.json` from
+`nightly` to `pr` and remove its nightly-only runtime skip in the same PR. The PR
+workflow compares the manifest with the base branch and fails unless the cached
+history contains 100 consecutive complete passes. A flake or incomplete run
+resets the consecutive counter. The committed markdown flake log is retained
+only for historical notes; CI history is authoritative. The first change that
+introduces `fault-matrix.json` is necessarily grandfathered because its base
+branch has no machine-readable tiers to compare; subsequent promotions are
+gated.

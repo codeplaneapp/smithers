@@ -152,6 +152,8 @@ packages/server/.smithers-root-landing-ui-*/
 
 # GitHub Actions daily canary cache restored locally only when debugging.
 .smithers-canary-state/
+# Fault-matrix rolling CI history and per-run reports.
+.e2e-flakes/
 
 # Stray local screenshots
 /output-fields.png
