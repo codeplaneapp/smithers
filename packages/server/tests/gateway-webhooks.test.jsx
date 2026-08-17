@@ -69,6 +69,40 @@ async function postGitHubWebhook(port, workflowKey, payload, secret, deliveryId)
   });
 }
 /**
+ * Current value of one Prometheus counter sample, or 0 when it is absent.
+ *
+ * Effect's metric registry is a process-global singleton and its counters are
+ * cumulative, so every `Gateway` built in this test process shares one
+ * `smithers_gateway_webhooks_received_total{workflow="github"}` — `/metrics`
+ * reports the whole process's total, not this gateway's. Any earlier test that
+ * posted a `github` webhook (`gateway-webhook-explicit-run-coverage.test.jsx`
+ * posts two) has therefore already advanced it, so asserting an absolute `1`
+ * passes only when this file happens to run first and otherwise burns the full
+ * poll deadline and fails with no SQLite error anywhere near it — the surviving
+ * shard-3 failure in #1577. Assert the DELTA across the request under test,
+ * matching `metricDelta` in serve.test.js and `metricValue` in
+ * streamDevTools.test.tsx.
+ *
+ * @param {string} metrics raw Prometheus exposition text
+ * @param {RegExp} pattern must capture the sample value in group 1
+ * @returns {number}
+ */
+function counterValue(metrics, pattern) {
+  const match = metrics.match(pattern);
+  return match ? Number(match[1]) : 0;
+}
+/**
+ * @param {number} port
+ * @returns {Promise<string>}
+ */
+async function fetchMetrics(port) {
+  return fetch(`http://127.0.0.1:${port}/metrics`).then((res) => res.text());
+}
+const WEBHOOKS_RECEIVED_GITHUB =
+  /smithers_gateway_webhooks_received_total\{[^}]*workflow="github"[^}]*\}\s+(\d+(?:\.\d+)?)/;
+const WEBHOOKS_REJECTED_BAD_SIGNATURE =
+  /smithers_gateway_webhooks_rejected_total\{[^}]*reason="invalid_signature"[^}]*workflow="github"[^}]*\}\s+(\d+(?:\.\d+)?)/;
+/**
  * @param {string} dbPath
  */
 function createWebhookWaitWorkflow(dbPath) {
@@ -156,6 +190,11 @@ describe("Gateway webhook ingestion", () => {
     });
     server = await gateway.listen({ port: 0, host: "127.0.0.1" });
     const port = getPort(server);
+    // Baseline BEFORE the request: the counters are process-global and may
+    // already be non-zero. See counterValue().
+    const metricsBefore = await fetchMetrics(port);
+    const receivedBefore = counterValue(metricsBefore, WEBHOOKS_RECEIVED_GITHUB);
+    const rejectedBefore = counterValue(metricsBefore, WEBHOOKS_REJECTED_BAD_SIGNATURE);
     const payload = JSON.stringify({
       issue: { id: 7 },
       comment: { body: "bad signature" },
@@ -177,20 +216,22 @@ describe("Gateway webhook ingestion", () => {
       },
     });
     // Metric updates run on forked fibers with no ordering guarantee, so poll
-    // until BOTH counters appear instead of sleeping once: a loaded runner can
+    // until BOTH counters advance instead of sleeping once: a loaded runner can
     // schedule the forks late and in either order.
-    const receivedPattern = /smithers_gateway_webhooks_received_total\{[^}]*workflow="github"[^}]*\}\s+1\b/;
-    const rejectedPattern =
-      /smithers_gateway_webhooks_rejected_total\{[^}]*reason="invalid_signature"[^}]*workflow="github"[^}]*\}\s+1\b/;
-    let metrics = "";
+    let received = receivedBefore;
+    let rejected = rejectedBefore;
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
-      metrics = await fetch(`http://127.0.0.1:${port}/metrics`).then((res) => res.text());
-      if (receivedPattern.test(metrics) && rejectedPattern.test(metrics)) break;
+      const metrics = await fetchMetrics(port);
+      received = counterValue(metrics, WEBHOOKS_RECEIVED_GITHUB);
+      rejected = counterValue(metrics, WEBHOOKS_REJECTED_BAD_SIGNATURE);
+      if (received > receivedBefore && rejected > rejectedBefore) break;
       await sleep(50);
     }
-    expect(metrics).toMatch(receivedPattern);
-    expect(metrics).toMatch(rejectedPattern);
+    // Exactly one of each: this request is the only one either counter saw
+    // between the baseline and now, whatever the process-wide totals are.
+    expect(received).toBe(receivedBefore + 1);
+    expect(rejected).toBe(rejectedBefore + 1);
   }, 30_000);
   test("uses the GitHub decoder and durable delivery ledger for registry-backed launches", async () => {
     const dbPath = makeDbPath("github-source");

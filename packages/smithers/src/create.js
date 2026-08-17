@@ -520,6 +520,13 @@ export function createSmithers(schemas, opts) {
     if (dbClosed) return;
     dbClosed = true;
     openSqliteHandles.delete(closeDb);
+    // Evict the hot-reload cache entry too. Under SMITHERS_HOT the cache hands
+    // a re-import the previously opened database, and now that close() is
+    // reachable a caller can retire that database while the entry still points
+    // at it — the next import would then be handed a closed connection. The
+    // key is the same absDbPath the cold path caches under, and the hot path
+    // reuses this exact closure, so deleting it here covers both.
+    hotCache.delete(absDbPath);
     try {
       sqlite.close();
     } catch {}
