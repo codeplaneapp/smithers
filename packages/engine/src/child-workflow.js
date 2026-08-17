@@ -70,6 +70,42 @@ async function loadParentRunContext(db, parentRunId) {
   }
 }
 /**
+ * Fence child creation against a cancellation already in flight (#972).
+ *
+ * The engine only learns about a durable cancel request by polling, so there
+ * is a window between `cancel_requested_at_ms` landing and the parent's
+ * cancel watcher aborting in which the parent could still launch a brand-new
+ * child run — a fresh ACTIVE descendant that the cascade already walked past.
+ * Re-reading the parent immediately before launch closes that window: the
+ * child is never created, so there is nothing left to race.
+ *
+ * A parent row that cannot be read (a child given an explicit parentRunId that
+ * lives in another store) is not treated as cancelled.
+ *
+ * @param {unknown} db
+ * @param {string} parentRunId
+ * @param {string} childRunId
+ * @returns {Promise<void>}
+ */
+async function assertParentRunNotCancelled(db, parentRunId, childRunId) {
+  /** @type {import("@smthrs/db/adapter").RunRow | undefined} */
+  let parentRun;
+  try {
+    parentRun = await new SmithersDb(/** @type {any} */ (db)).getRun(parentRunId);
+  } catch {
+    return;
+  }
+  if (!parentRun) return;
+  const cancelled =
+    parentRun.cancelRequestedAtMs != null || parentRun.status === "cancelled" || parentRun.status === "canceled";
+  if (!cancelled) return;
+  throw new SmithersError(
+    "RUN_CANCELLED",
+    `Run ${parentRunId} was cancelled before child workflow ${childRunId} could start`,
+    { runId: parentRunId, childRunId },
+  );
+}
+/**
  * @param {unknown} value
  * @returns {unknown}
  */
@@ -344,6 +380,9 @@ export async function executeChildWorkflow(parentWorkflow, options) {
     // pid) or parked it — fall through to a durable resume of the same id.
   }
   const resume = Boolean(existingChildRun);
+  // Last durable check before a new engine starts: a cancellation that landed
+  // while we probed must not gain a new active descendant.
+  await assertParentRunNotCancelled(parentWorkflow?.db ?? runtime.db, parentRunId, childRunId);
   const bridgeRuntime = getWorkflowMakeBridgeRuntime();
   if (bridgeRuntime) {
     const result = await bridgeRuntime.executeChildWorkflow(childWorkflow, {
