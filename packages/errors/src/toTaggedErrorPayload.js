@@ -1,4 +1,5 @@
 import { isSmithersTaggedError } from "./isSmithersTaggedError.js";
+import { errorToJson } from "./errorToJson.js";
 /** @typedef {import("./TaggedErrorDetails.ts").TaggedErrorDetails} TaggedErrorDetails */
 
 /** @typedef {import("./SmithersTaggedErrorPayload.ts").SmithersTaggedErrorPayload} SmithersTaggedErrorPayload */
@@ -32,6 +33,7 @@ export function toTaggedErrorPayload(error) {
   if (!isSmithersTaggedError(error)) {
     return undefined;
   }
+  const cause = "cause" in error && error.cause !== undefined ? { cause: errorToJson(error.cause) } : {};
   switch (error._tag) {
     case "TaskAborted":
       return {
@@ -39,6 +41,7 @@ export function toTaggedErrorPayload(error) {
         message: String(error.message),
         details: isRecord(error.details) ? error.details : undefined,
         name: typeof error.name === "string" ? error.name : undefined,
+        ...cause,
       };
     case "TaskTimeout":
       return {
@@ -47,6 +50,7 @@ export function toTaggedErrorPayload(error) {
         nodeId: String(error.nodeId),
         attempt: toFiniteNumber(error.attempt),
         timeoutMs: toFiniteNumber(error.timeoutMs),
+        ...cause,
       };
     case "TaskHeartbeatTimeout":
       return {
@@ -58,30 +62,35 @@ export function toTaggedErrorPayload(error) {
         timeoutMs: toFiniteNumber(error.timeoutMs),
         staleForMs: toFiniteNumber(error.staleForMs),
         lastHeartbeatAtMs: toFiniteNumber(error.lastHeartbeatAtMs),
+        ...cause,
       };
     case "RunNotFound":
       return {
         _tag: "RunNotFound",
         message: String(error.message),
         runId: String(error.runId),
+        ...cause,
       };
     case "InvalidInput":
       return {
         _tag: "InvalidInput",
         message: String(error.message),
         details: isRecord(error.details) ? error.details : undefined,
+        ...cause,
       };
     case "DbWriteFailed":
       return {
         _tag: "DbWriteFailed",
         message: String(error.message),
         details: isRecord(error.details) ? error.details : undefined,
+        ...cause,
       };
     case "AgentCliError":
       return {
         _tag: "AgentCliError",
         message: String(error.message),
         details: isRecord(error.details) ? error.details : undefined,
+        ...cause,
       };
     case "WorkflowFailed":
       return {
@@ -89,6 +98,7 @@ export function toTaggedErrorPayload(error) {
         message: String(error.message),
         details: isRecord(error.details) ? error.details : undefined,
         status: typeof error.status === "number" ? error.status : undefined,
+        ...cause,
       };
   }
 }

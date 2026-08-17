@@ -34,6 +34,11 @@ Nothing in Smithers calls either function for you. Gateway, `up --serve`, and
 the HTTP server deliberately keep the runtime open across many runs, so
 `Gateway.close()` does not close it.
 
+`createExternalSmithersEngine()` is the higher-level exception: its `close()`
+waits for runs started by that instance, closes the database, and closes the
+process-local runtime when the last external engine instance closes. See
+[Embed the engine in Node](/integrations/embedded-engine).
+
 ## Semantics
 
 | Situation | Behavior |

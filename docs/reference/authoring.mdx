@@ -120,6 +120,29 @@ export default smithers((ctx) => (
 ));
 ```
 
+### Workflow environment contract
+
+The optional second argument to `smithers()` controls the environment used
+after module loading, while the CLI renders the graph and runs the engine:
+
+```ts
+export default smithers(build, {
+  environment: {
+    inherit: false,
+    allow: ["PATH", "HOME", "LANG", "LC_*"],
+    deny: ["GIT_*"],
+    set: { CI: "1" },
+  },
+});
+```
+
+Ambient variables are inherited by default. `inherit: false` starts empty;
+`allow` copies exact names or `PREFIX*` matches, `deny` removes matches, and
+`set` wins last. `SMITHERS_HOME` is inherited under the default contract and
+is scrubbed by `inherit: false` unless explicitly allowed or set. Workflow
+module top-level code runs before Smithers can read this declaration, so keep
+environment guards inside the workflow build or tasks.
+
 **Source** [`create.js`](https://github.com/smithersai/smithers/blob/main/packages/smithers/src/create.js) · [`CreateSmithersApi.ts`](https://github.com/smithersai/smithers/blob/main/packages/smithers/src/CreateSmithersApi.ts) · **Tests** [`create-unit.test.js`](https://github.com/smithersai/smithers/blob/main/packages/smithers/tests/create-unit.test.js) · **See also** [Get started](/guide/get-started), [JSX overview](/jsx/overview)
 
 ## createSmithersPostgres
@@ -319,6 +342,12 @@ Build a `SmithersWorkflow` from a plain build function instead of JSX. The
 build function returns a `HostNodeJson` tree mapping 1:1 to what the JSX
 renderer produces, so a workflow can be authored in any language that can
 emit that JSON.
+
+This synchronous compatibility helper owns a `bun:sqlite` database. Plain-Node
+and reusable hosts should use
+[`createExternalSmithersEngine()`](/integrations/embedded-engine), which opens
+PGlite/Postgres asynchronously, injects a host logger, and runs multiple
+workflows before one `close()`.
 
 ```ts
 function createExternalSmithers<S extends Record<string, ZodObject>>(

@@ -1528,7 +1528,7 @@ type UnknownWorkerError = {
     message: string;
 };
 
-type TaggedWorkerError = {
+type TaggedWorkerError = ({
     _tag: "TaskAborted";
     message: string;
     details?: Record<string, unknown>;
@@ -1569,6 +1569,8 @@ type TaggedWorkerError = {
     message: string;
     details?: Record<string, unknown>;
     status?: number;
+}) & {
+    cause?: unknown;
 };
 
 type WorkerTaskError = TaggedWorkerError | UnknownWorkerError;
@@ -1643,17 +1645,20 @@ declare const TaskResult: Schema.Union<readonly [Schema.Struct<{
     readonly _tag: Schema.Literal<"Failure">;
     readonly executionId: Schema.String;
     readonly error: Schema.Union<readonly [Schema.Union<readonly [Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"TaskAborted">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
         readonly name: Schema.optional<Schema.String>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"TaskTimeout">;
         readonly message: Schema.String;
         readonly nodeId: Schema.String;
         readonly attempt: Schema.Number;
         readonly timeoutMs: Schema.Number;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"TaskHeartbeatTimeout">;
         readonly message: Schema.String;
         readonly nodeId: Schema.String;
@@ -1663,22 +1668,27 @@ declare const TaskResult: Schema.Union<readonly [Schema.Struct<{
         readonly staleForMs: Schema.Number;
         readonly lastHeartbeatAtMs: Schema.Number;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"RunNotFound">;
         readonly message: Schema.String;
         readonly runId: Schema.String;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"InvalidInput">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"DbWriteFailed">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"AgentCliError">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"WorkflowFailed">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
@@ -1707,17 +1717,20 @@ declare const TaskWorkerEntity: Entity.Entity<"TaskWorker", Rpc.Rpc<"execute", S
     readonly _tag: Schema.Literal<"Failure">;
     readonly executionId: Schema.String;
     readonly error: Schema.Union<readonly [Schema.Union<readonly [Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"TaskAborted">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
         readonly name: Schema.optional<Schema.String>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"TaskTimeout">;
         readonly message: Schema.String;
         readonly nodeId: Schema.String;
         readonly attempt: Schema.Number;
         readonly timeoutMs: Schema.Number;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"TaskHeartbeatTimeout">;
         readonly message: Schema.String;
         readonly nodeId: Schema.String;
@@ -1727,22 +1740,27 @@ declare const TaskWorkerEntity: Entity.Entity<"TaskWorker", Rpc.Rpc<"execute", S
         readonly staleForMs: Schema.Number;
         readonly lastHeartbeatAtMs: Schema.Number;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"RunNotFound">;
         readonly message: Schema.String;
         readonly runId: Schema.String;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"InvalidInput">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"DbWriteFailed">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"AgentCliError">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"WorkflowFailed">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;

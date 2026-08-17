@@ -28,11 +28,13 @@ export const WorkerTask = Schema.Struct({
   dispatchKind: WorkerDispatchKind,
 });
 const WorkerErrorDetails = Schema.Record(Schema.String, Schema.Unknown);
+const WorkerErrorCause = { cause: Schema.optional(Schema.Unknown) };
 const TaskAbortedError = Schema.Struct({
   _tag: Schema.Literal("TaskAborted"),
   message: Schema.String,
   details: Schema.optional(WorkerErrorDetails),
   name: Schema.optional(Schema.String),
+  ...WorkerErrorCause,
 });
 const TaskTimeoutError = Schema.Struct({
   _tag: Schema.Literal("TaskTimeout"),
@@ -40,6 +42,7 @@ const TaskTimeoutError = Schema.Struct({
   nodeId: Schema.String,
   attempt: Schema.Number,
   timeoutMs: Schema.Number,
+  ...WorkerErrorCause,
 });
 const TaskHeartbeatTimeoutError = Schema.Struct({
   _tag: Schema.Literal("TaskHeartbeatTimeout"),
@@ -50,32 +53,38 @@ const TaskHeartbeatTimeoutError = Schema.Struct({
   timeoutMs: Schema.Number,
   staleForMs: Schema.Number,
   lastHeartbeatAtMs: Schema.Number,
+  ...WorkerErrorCause,
 });
 const RunNotFoundError = Schema.Struct({
   _tag: Schema.Literal("RunNotFound"),
   message: Schema.String,
   runId: Schema.String,
+  ...WorkerErrorCause,
 });
 const InvalidInputError = Schema.Struct({
   _tag: Schema.Literal("InvalidInput"),
   message: Schema.String,
   details: Schema.optional(WorkerErrorDetails),
+  ...WorkerErrorCause,
 });
 const DbWriteFailedError = Schema.Struct({
   _tag: Schema.Literal("DbWriteFailed"),
   message: Schema.String,
   details: Schema.optional(WorkerErrorDetails),
+  ...WorkerErrorCause,
 });
 const AgentCliError = Schema.Struct({
   _tag: Schema.Literal("AgentCliError"),
   message: Schema.String,
   details: Schema.optional(WorkerErrorDetails),
+  ...WorkerErrorCause,
 });
 const WorkflowFailedError = Schema.Struct({
   _tag: Schema.Literal("WorkflowFailed"),
   message: Schema.String,
   details: Schema.optional(WorkerErrorDetails),
   status: Schema.optional(Schema.Number),
+  ...WorkerErrorCause,
 });
 export const TaggedWorkerError = Schema.Union([
   TaskAbortedError,

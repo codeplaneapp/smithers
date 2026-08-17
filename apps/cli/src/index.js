@@ -75,6 +75,7 @@ import { SmithersError } from "@smthrs/errors";
 import { findAndOpenDb, findSmithersDb } from "./find-db.js";
 import { reapOrphanedAgentsOnBoot } from "./reap-orphaned-agents.js";
 import { cliWorkspace } from "./cliWorkspace.js";
+import { applyWorkflowEnvironment } from "./workflow-environment.js";
 import {
   cascadeCancelRun,
   finalizeCancelledOwnedRun,
@@ -3680,6 +3681,18 @@ function resolveWorkflowArg(workflowInput) {
   if (existsSync(asPath)) {
     return workflowInput;
   }
+  const pathLike =
+    isAbsolute(workflowInput) ||
+    workflowInput.includes("/") ||
+    workflowInput.includes("\\") ||
+    /\.(?:[cm]?[jt]sx?|mdx)$/i.test(workflowInput);
+  if (pathLike) {
+    throw new SmithersError(
+      "WORKFLOW_FILE_NOT_FOUND",
+      `Workflow file not found: ${workflowInput} (resolved: ${asPath})`,
+      { given: workflowInput, resolved: asPath },
+    );
+  }
   return resolveWorkflow(workflowInput, process.cwd()).entryFile;
 }
 /**
@@ -3920,9 +3933,11 @@ async function deriveResumeWorkflowPath(runId) {
 async function preflightDetachedLaunch(options) {
   const previousBackend = process.env.SMITHERS_BACKEND;
   let workflow;
+  let restoreWorkflowEnvironment = () => {};
   try {
     if (options.backend) process.env.SMITHERS_BACKEND = options.backend;
     workflow = await loadWorkflowAsync(options.workflowPath);
+    restoreWorkflowEnvironment = applyWorkflowEnvironment(workflow);
     ensureSmithersTables(workflow.db);
     const schema = resolveSchema(workflow.db);
     const inputTable = schema.input;
@@ -3951,6 +3966,7 @@ async function preflightDetachedLaunch(options) {
       throw rendered.failure;
     }
   } finally {
+    restoreWorkflowEnvironment();
     if (workflow) await closeWorkflowBackend(workflow).catch(() => {});
     if (previousBackend === undefined) delete process.env.SMITHERS_BACKEND;
     else process.env.SMITHERS_BACKEND = previousBackend;
@@ -4039,6 +4055,7 @@ const MONITOR_PARENT_POLL_MS = 100;
  * @param {Record<string, unknown>} [launchConfig]
  */
 async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {}) {
+  let restoreWorkflowEnvironment = () => {};
   const detachedLogFile = process.env[DETACHED_RUN_LOG_FILE_ENV];
   startDetachedRunLogRotation({ logFile: detachedLogFile });
   delete process.env[DETACHED_RUN_LOG_FILE_ENV];
@@ -4336,6 +4353,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
       process.env.SMITHERS_BACKEND = options.backend;
     }
     const workflow = await loadWorkflow(workflowPath);
+    restoreWorkflowEnvironment = applyWorkflowEnvironment(workflow);
     // If the workspace has been migrated to pglite (backend.json says pglite)
     // but this workflow was authored with the synchronous createSmithers()
     // bun:sqlite factory, fail loud. Silently swapping its db to the async
@@ -5004,6 +5022,8 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
     return await finishRun(result);
   } catch (err) {
     return fail({ code: "RUN_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+  } finally {
+    restoreWorkflowEnvironment();
   }
 }
 /**
@@ -11894,10 +11914,12 @@ const cli = Cli.create({
     alias: { runId: "r" },
     async run(c) {
       const fail = makeFail(c);
+      let restoreWorkflowEnvironment = () => {};
       try {
         const workflowFile = resolveWorkflowArg(c.args.workflow);
         const resolvedWorkflowPath = resolve(process.cwd(), workflowFile);
         const workflow = await loadWorkflow(workflowFile);
+        restoreWorkflowEnvironment = applyWorkflowEnvironment(workflow);
         ensureSmithersTables(workflow.db);
         const schema = resolveSchema(workflow.db);
         const inputTable = schema.input;
@@ -11969,6 +11991,8 @@ const cli = Cli.create({
           return fail({ code: err.code, message: err.message, exitCode: err.code === "INVALID_INPUT" ? 4 : 1 });
         }
         return fail({ code: "GRAPH_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+      } finally {
+        restoreWorkflowEnvironment();
       }
     },
   })

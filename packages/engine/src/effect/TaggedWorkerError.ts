@@ -1,4 +1,4 @@
-export type TaggedWorkerError =
+export type TaggedWorkerError = (
   | {
       _tag: "TaskAborted";
       message: string;
@@ -43,4 +43,5 @@ export type TaggedWorkerError =
       message: string;
       details?: Record<string, unknown>;
       status?: number;
-    };
+    }
+) & { cause?: unknown };

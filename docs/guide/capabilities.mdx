@@ -28,7 +28,7 @@ embed Smithers in your own server.
 | You say | Smithers runs under the hood |
 | --- | --- |
 | "Ship Smithers logs into our logging stack as JSON, warnings and up." | `SMITHERS_LOG_FORMAT=json` + `SMITHERS_LOG_LEVEL=warn`; formats are `logfmt`, `json`, `pretty`, `string`. |
-| "We embed Smithers in our server and already have a logger. Use ours, not yours." | `createSmithersObservabilityLayer({ installLogger: false })` keeps your own logger installed ([Observability API](/reference/observability)). |
+| "We embed Smithers in Node and already have a logger. Use ours, not yours." | `createExternalSmithersEngine({ logger })` scopes structured engine logs to the host-owned sink ([Embed the engine in Node](/integrations/embedded-engine)). Lower-level Effect hosts can use `createSmithersObservabilityLayer({ installLogger: false })`. |
 | "Mirror every run event and failure into our own sink." | The `onProgress` and `onError` run callbacks, which receive every event and failure report as plain objects. |
 | "Send traces and metrics to our Grafana / Datadog." | OTLP export via `SMITHERS_OTEL_ENABLED=1` + `OTEL_EXPORTER_OTLP_ENDPOINT`; Prometheus text at the server's `GET /metrics`. |
 | "Give me a local dashboard with traces so I can poke around." | `bunx smthrs observability`: a Grafana + Prometheus + Tempo + OTLP collector stack via Docker Compose. |

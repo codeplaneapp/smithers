@@ -1,4 +1,5 @@
 import { Effect, Logger, LogLevel } from "effect";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { getCurrentSmithersTraceAnnotations } from "./getCurrentSmithersTraceAnnotations.js";
 import {
   correlationContextToLogAnnotations,
@@ -17,6 +18,7 @@ const LOG_LEVEL_WARNING = 3;
 const LOG_LEVEL_ERROR = 4;
 const LOG_RUNNER_KEY = Symbol.for("smithers.observability.logRunner");
 const defaultLoggerLayer = Logger.layer([Logger.consoleLogFmt]);
+const runnerStorage = new AsyncLocalStorage();
 
 /**
  * Resolve the minimum imperative log level. The environment value is an
@@ -77,7 +79,21 @@ const defaultRunner = {
 
 /** @returns {SmithersLogRunner} */
 function getLogRunner() {
-  return getRunnerState().runner ?? defaultRunner;
+  return runnerStorage.getStore() ?? getRunnerState().runner ?? defaultRunner;
+}
+
+/**
+ * Scope imperative Smithers logs to one host-owned Effect runner. Unlike
+ * {@link setSmithersLogRunner}, this is concurrency-safe: parallel embedded
+ * engine instances keep their loggers isolated across awaits and timers.
+ *
+ * @template T
+ * @param {SmithersLogRunner} runner
+ * @param {() => T} execute
+ * @returns {T}
+ */
+export function runWithSmithersLogRunner(runner, execute) {
+  return runnerStorage.run(runner, execute);
 }
 
 /**

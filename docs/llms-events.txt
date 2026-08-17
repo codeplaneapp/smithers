@@ -300,7 +300,7 @@ present, it contains `kind` (`signal`, `rpc`, `cli`, or `engine`) plus optional
 | `RunStarted` | `runId`, `timestampMs` |
 | `RunStatusChanged` | `runId`, `status`, `timestampMs` |
 | `RunStateChanged` | `runId`, `before`, `after`, `timestampMs` |
-| `RunConcurrencySaturated` | `runId`, `requestedDemand`, `effectiveCap`, `remediationCommand`, `timestampMs` |
+| `RunConcurrencySaturated` | `runId`, `requestedDemand`, `effectiveCap`, `remediationCommand`, `descendantRunId?`, `budget?`, `subtreeGroupId?`, `timestampMs` |
 | `RunFinished` | `runId`, `failedChildren?`, `failedChildKeys?`, `exhaustedLoops?`, `timestampMs` |
 | `RunFailed` | `runId`, `error`, `timestampMs` |
 | `RunCancelled` | `runId`, `source?`, `timestampMs` |

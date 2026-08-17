@@ -82,6 +82,12 @@ type WorkflowViewDefinition = {
 type SmithersWorkflowOptions = {
   alertPolicy?: SmithersAlertPolicy;
   cache?: boolean;
+  environment?: {
+    inherit?: boolean;
+    allow?: string[]; // exact names or PREFIX* patterns
+    deny?: string[];  // exact names or PREFIX* patterns
+    set?: Record<string, string>;
+  };
   // Explicit workflow-level output schema/table used to populate
   // RunResult.output (and therefore a parent <Subflow>'s child result).
   // Defaults to the schema key literally named `output`.
@@ -258,7 +264,7 @@ type RunOptions = {
   runId?: string;
   parentRunId?: string | null;
   input: Record<string, unknown>;
-  maxConcurrency?: number;          // default 4
+  maxConcurrency?: number;          // default 4; run cap shared with lifecycle-linked descendant tasks
   maxConcurrencyPinned?: boolean;   // internal/runtime proof that the value was explicitly persisted
   requireRerenderOnOutputChange?: boolean;  // default true; re-render the frame on every task completion
   onProgress?: (e: SmithersEvent) => void;
@@ -860,7 +866,7 @@ type ParallelProps = {
   id?: string;
   label?: string;
   maxConcurrency?: number;
-  subtreeConcurrency?: number;
+  subtreeConcurrency?: number; // direct-child cap; inherited by lifecycle-linked child-run tasks
   priority?: number;
   failurePolicy?: "halt" | "quarantine";
   skipIf?: boolean;
@@ -1762,7 +1768,7 @@ type KnownSmithersErrorCode =
   | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "TASK_EMPTY_PROMPT" | "WORKFLOW_RENDER_FAILED" | "DUPLICATE_ID" | "NESTED_LOOP"
   | "WORKTREE_EMPTY_PATH" | "MDX_PRELOAD_INACTIVE" | "CONTEXT_OUTSIDE_WORKFLOW"
   | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "BOUND_STALE" | "ASPECT_BUDGET_EXCEEDED" | "APPROVAL_OUTSIDE_TASK"
-  | "APPROVAL_OPTIONS_REQUIRED" | "WORKFLOW_MISSING_DEFAULT" | "WORKFLOW_NOT_BUILT"
+  | "APPROVAL_OPTIONS_REQUIRED" | "WORKFLOW_MISSING_DEFAULT" | "WORKFLOW_NOT_BUILT" | "WORKFLOW_FILE_NOT_FOUND"
   | "TOOL_PATH_INVALID" | "TOOL_PATH_ESCAPE" | "TOOL_FILE_TOO_LARGE" | "TOOL_CONTENT_TOO_LARGE"
   | "TOOL_PATCH_TOO_LARGE" | "TOOL_PATCH_FAILED" | "TOOL_NETWORK_DISABLED"
   | "TOOL_GIT_REMOTE_DISABLED" | "TOOL_COMMAND_FAILED" | "TOOL_GREP_FAILED"

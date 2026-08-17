@@ -4849,7 +4849,10 @@ type ParallelProps = {
   children** in flight at once; each descendant task counts toward its child.
   A child is in flight from its first task to its last; a freed slot admits
   the next child in document order, and an in-flight child always finishes
-  (even nested tasks) while over-cap siblings wait.
+  (even nested tasks) while over-cap siblings wait. If that child launches a
+  lifecycle-linked workflow, tasks in the child and deeper descendants also
+  draw from this budget; dynamic child-run fan-out therefore stays bounded by
+  the declaring ancestor.
 
 The two diverge once children are subtrees. In a kanban workflow where each
 ticket is a sequence of implement then reviews, `maxConcurrency={4}` bounds
@@ -4904,6 +4907,11 @@ run-level cap still bounds total in-flight tasks.
 - A group completes when all children finish. `continueOnFail` on a failing child `<Task>` (not a `<Parallel>` prop) lets the group proceed past it.
 - Children carry `parallelGroupId`/`parallelMaxConcurrency` in their descriptor; under a subtree cap, descendants also get `subtreeGroupId`, `subtreeChildKey`, and `subtreeMax`.
 - The run-wide cap layers on top of every group cap. Unpinned, it starts at 4 and grows with demand up to `SMITHERS_AUTO_MAX_CONCURRENCY_CEILING` (default 16); a declared `maxConcurrency`/`subtreeConcurrency` can raise that starting point above the ceiling. `--max-concurrency N` pins the cap instead, disabling those raises and holding the run at `N` even above the ceiling. Leaf cap, subtree cap, and run-wide cap must all pass.
+- Lifecycle-linked `<Subflow>` children inherit every ancestor run/subtree
+  admission scope. The awaiting parent task releases its scopes before the
+  child starts and reacquires them after it settles, so inheritance cannot
+  deadlock at `--max-concurrency 1`. A direct `runWorkflow` call with only
+  `parentRunId` records detached lineage and does not inherit.
 
 ---
 
@@ -7656,7 +7664,7 @@ const { Workflow, smithers, outputs } = createSmithers({
 const sol = new CodexAgent({ model: "gpt-5.6-sol" });
 const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
 const terra = new CodexAgent({ model: "gpt-5.6-terra" });
-const luna = new CodexAgent({ model: "gpt-5.6-luna", model_reasoning_effort: "high" });
+const luna = new CodexAgent({ model: "gpt-5.6-luna", effort: "high" });
 
 export default smithers((ctx) => {
   // The schema default is applied before runtime and static graph rendering.
@@ -8427,9 +8435,9 @@ Every agent task produces a reusable session snapshot. `fork` starts a new task 
 
 > The rules that repeatedly cost authoring runs when learned at runtime instead of before render. Read this before hand-authoring a workflow.
 
-These five rules keep biting workflow-authoring agents at runtime, hours after
+These six rules keep biting workflow-authoring agents at runtime, hours after
 writing a workflow, instead of surfacing at the first `bunx smthrs graph`.
-Each is documented elsewhere in full; this page collects all five in one read
+Each is documented elsewhere in full; this page collects all six in one read
 before you write JSX, instead of hitting them one at a time across failed
 runs. See
 [the postmortem](https://github.com/smithersai/smithers/blob/main/research/workflow-authoring-friction-postmortem.md)
@@ -8543,6 +8551,20 @@ green-looking in the repo indefinitely while contributing zero coverage.
 `node scripts/check-smithers-test-script.mjs` (part of the root `pnpm test`
 gate) catches this; run it after adding a test file, or just add the path
 yourself.
+
+## 6. Use the isolated-clone helper; do not gate a hot source tree
+
+For bundle-producing work, call `createIsolatedClone({ repo, at })` from
+`smthrs` or `@smthrs/vcs`. Only the pinned commit must remain available while
+the clone is created. Do not repeatedly assert equality of the shared working
+tree, index, refs, JJ bookmarks, or object inventory: concurrent work can
+legitimately change all of them after isolation.
+
+Use `clone.run()` so commands execute at the clone root with the documented
+scrubbed environment, then `clone.emitBundle()` for a patch, Git bundle,
+manifest, and fresh-import proof. JJ-colocated repos can have multi-megabyte
+ref inventories; use `listGitRefs()` rather than synchronous `git for-each-ref`
+with Node's default `maxBuffer`. See VCS Helper Reference.
 
 
 ---
@@ -8813,6 +8835,12 @@ type WorkflowViewDefinition = {
 type SmithersWorkflowOptions = {
   alertPolicy?: SmithersAlertPolicy;
   cache?: boolean;
+  environment?: {
+    inherit?: boolean;
+    allow?: string[]; // exact names or PREFIX* patterns
+    deny?: string[];  // exact names or PREFIX* patterns
+    set?: Record<string, string>;
+  };
   // Explicit workflow-level output schema/table used to populate
   // RunResult.output (and therefore a parent <Subflow>'s child result).
   // Defaults to the schema key literally named `output`.
@@ -8989,7 +9017,7 @@ type RunOptions = {
   runId?: string;
   parentRunId?: string | null;
   input: Record<string, unknown>;
-  maxConcurrency?: number;          // default 4
+  maxConcurrency?: number;          // default 4; run cap shared with lifecycle-linked descendant tasks
   maxConcurrencyPinned?: boolean;   // internal/runtime proof that the value was explicitly persisted
   requireRerenderOnOutputChange?: boolean;  // default true; re-render the frame on every task completion
   onProgress?: (e: SmithersEvent) => void;
@@ -9591,7 +9619,7 @@ type ParallelProps = {
   id?: string;
   label?: string;
   maxConcurrency?: number;
-  subtreeConcurrency?: number;
+  subtreeConcurrency?: number; // direct-child cap; inherited by lifecycle-linked child-run tasks
   priority?: number;
   failurePolicy?: "halt" | "quarantine";
   skipIf?: boolean;
@@ -10493,7 +10521,7 @@ type KnownSmithersErrorCode =
   | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "TASK_EMPTY_PROMPT" | "WORKFLOW_RENDER_FAILED" | "DUPLICATE_ID" | "NESTED_LOOP"
   | "WORKTREE_EMPTY_PATH" | "MDX_PRELOAD_INACTIVE" | "CONTEXT_OUTSIDE_WORKFLOW"
   | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "BOUND_STALE" | "ASPECT_BUDGET_EXCEEDED" | "APPROVAL_OUTSIDE_TASK"
-  | "APPROVAL_OPTIONS_REQUIRED" | "WORKFLOW_MISSING_DEFAULT" | "WORKFLOW_NOT_BUILT"
+  | "APPROVAL_OPTIONS_REQUIRED" | "WORKFLOW_MISSING_DEFAULT" | "WORKFLOW_NOT_BUILT" | "WORKFLOW_FILE_NOT_FOUND"
   | "TOOL_PATH_INVALID" | "TOOL_PATH_ESCAPE" | "TOOL_FILE_TOO_LARGE" | "TOOL_CONTENT_TOO_LARGE"
   | "TOOL_PATCH_TOO_LARGE" | "TOOL_PATCH_FAILED" | "TOOL_NETWORK_DISABLED"
   | "TOOL_GIT_REMOTE_DISABLED" | "TOOL_COMMAND_FAILED" | "TOOL_GREP_FAILED"
@@ -11340,6 +11368,7 @@ connection setup problems aren't hidden behind unrelated source-store errors.
 | Code | When | Details |
 |---|---|---|
 | `INVALID_EVENTS_OPTIONS` | The smithers events command receives invalid filter options. | -- |
+| `WORKFLOW_FILE_NOT_FOUND` | A path-like workflow argument does not exist at the path resolved from the operator working directory. | `{ given, resolved }` |
 | `WORKFLOW_EXISTS` | The workflow creation CLI refuses to overwrite an existing workflow file. | -- |
 | `CLI_DB_NOT_FOUND` | A CLI command cannot find a nearby `smithers.db` file. | -- |
 | `CLI_AGENT_UNSUPPORTED` | The ask command selects an agent integration Smithers doesn't support in that mode. | -- |
@@ -11480,7 +11509,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 
 | Import path | Entry file | Purpose |
 |---|---|---|
-| `smthrs` | `./src/index.js` | Core API: `createSmithers`, `openSmithersBackend`, components, `runWorkflow`, `renderMdx`, errors |
+| `smthrs` | `./src/index.js` | Core API: `createSmithers`, `openSmithersBackend`, `createExternalSmithersEngine`, components, `runWorkflow`, `renderMdx`, errors |
 | `smthrs/gateway` | `./src/gateway.js` | Gateway server primitives from `@smthrs/server/gateway` |
 | `smthrs/gateway-client` | `./src/gateway-client.js` | Typed client helpers from `@smthrs/gateway-client` |
 | `smthrs/gateway-react` | `./src/gateway-react.js` | React hooks and providers for gateway-backed UIs |
@@ -11546,7 +11575,7 @@ Most applications should import from `smthrs`. The workspace packages below are 
 | `@smthrs/devtools` | Snapshot, tree, diff, node lookup, task collection, and DevTools run-store helpers behind the CLI inspect commands | Debugging, CLI Overview |
 | `@smthrs/driver` | Runtime driver contracts: `RunOptions`, `RunResult`, `RunStatus`, `SmithersCtx`, outputs, task runtime, interop, and child process helpers | Run Workflow, Execution Model |
 | `@smthrs/electric-proxy` | ElectricSQL shape proxy for cloud sync, scoped shape access, rate limits, stripped auth forwarding, and shape metrics | Production Hardening, Gateway |
-| `@smthrs/engine` | Workflow rendering/execution API: `runWorkflow`, `renderFrame`, `workflow`, `Smithers`, `fragment`, signals, and Effect versioning | Render Frame, Run Workflow |
+| `@smthrs/engine` | Workflow rendering/execution API: `runWorkflow`, Node/Bun platform layers, `renderFrame`, `workflow`, `Smithers`, signals, and Effect versioning | Embed the engine in Node, Run Workflow |
 | `@smthrs/errors` | Error definitions, known codes, JSON serialization, docs URLs, and type guards | Errors |
 | `@smthrs/ferric-site` | Private Cloudflare Worker deployment for the Operation Ferric site at `ferric.smithers.sh` (React's runtime rewritten in Rust) | Ecosystem |
 | `@smthrs/gateway` | Stable Gateway RPC contracts, auth scopes, deployment metadata, and generated OpenAPI schema | Gateway, RPC |
@@ -11802,7 +11831,56 @@ import {
   resolveGitBinary,
   resolveJjBinary,
   vcsToolingStatus,
+  createIsolatedClone,
+  listGitRefs,
+  gitDirtyPaths,
 } from "@smthrs/vcs";
+```
+
+`createIsolatedClone`, `listGitRefs`, and `gitDirtyPaths` are also exported by
+the root `smthrs` facade.
+
+## Isolated clone and bundle handoff
+
+`createIsolatedClone({ repo, at, destination? })` creates a standalone,
+detached clone at exactly `at^{commit}`. It removes remotes and refs, rejects
+Git alternates, writes a nonce ownership marker, and will only clean a clone
+whose marker still matches.
+
+```ts
+const clone = await createIsolatedClone({ repo: sharedRepo, at: expectedHead });
+try {
+  await clone.run("pnpm", ["test"]);
+  const handoff = await clone.emitBundle({ outputDir: artifacts, name: "wave-2" });
+} finally {
+  await clone.cleanup();
+}
+```
+
+The hot-tree contract is deliberately narrow: `expectedHead^{commit}` must be
+readable while the clone is created. The source working tree, index, refs, JJ
+bookmarks, object inventory, and later HEAD movement may change; they are not
+quiescence gates. The clone is the isolation boundary. The emitted patch,
+bundle, and JSON manifest are adoption evidence, and `emitBundle()` verifies
+them in a fresh repository before returning. Land a handoff into a shared tree
+only in a short serialized adoption step.
+
+`clone.run()` always uses the clone root as `cwd`. It inherits only `PATH`,
+`HOME`, temp-directory, user/shell, and locale variables, plus explicit `env`
+overrides. Ambient `GIT_*`, `SMITHERS_HOME`, and other `SMITHERS_*` variables
+are absent unless explicitly supplied.
+
+## Large Git inventories
+
+`listGitRefs(repo)` and `gitDirtyPaths(repo)` use streamed child-process output,
+so they do not have Node's synchronous 1 MB `maxBuffer` ceiling. This matters
+for JJ-colocated repositories, where tens of thousands of refs can produce
+multi-megabyte output. Do not replace these helpers with `execFileSync("git",
+["for-each-ref"])` using its default buffer.
+
+```ts
+const refs = await listGitRefs(repo);
+const dirtyPaths = await gitDirtyPaths(repo);
 ```
 
 Direct JJ helper calls need a platform layer:
@@ -13738,6 +13816,12 @@ Providing `opts.maxConcurrency` explicitly pins the cap: it disables automatic
 raises, including declared-width raises, so the run can't exceed the supplied
 value, even though that value can itself be larger than the automatic ceiling.
 
+Lifecycle-linked child workflows (`<Subflow>` / `executeChildWorkflow`) draw
+from the parent's run cap as well as any enclosing `subtreeConcurrency` cap,
+including through nested child runs. The awaiting parent task yields its slot
+while the child runs, so `maxConcurrency: 1` remains deadlock-free. A run that
+only supplies `parentRunId` is detached lineage and keeps an independent cap.
+
 ## Resume
 
 Pass the original `runId` plus `resume: true`: state loads from the configured durable store, completed tasks are skipped, and in-progress attempts older than 15 minutes are abandoned and retried.
@@ -13830,6 +13914,11 @@ function reopenSingleRunnerRuntime(): void;
 Nothing in Smithers calls either function for you. Gateway, `up --serve`, and
 the HTTP server deliberately keep the runtime open across many runs, so
 `Gateway.close()` does not close it.
+
+`createExternalSmithersEngine()` is the higher-level exception: its `close()`
+waits for runs started by that instance, closes the database, and closes the
+process-local runtime when the last external engine instance closes. See
+Embed the engine in Node.
 
 ## Semantics
 
@@ -14244,6 +14333,12 @@ run row says `waiting-event` but no node does, `runState.blocked.kind` is
 detailed unblock command and may report other blockers such as
 `retries-exhausted` or `dependency-failed`.
 </Warning>
+
+When a fail-closed composite such as `<TryCatchFinally>` terminates a run, its
+run-level `SCHEDULER_ERROR` includes the nearest completed output row's
+`summary` and `blockers` fields. The leaf diagnostic is therefore visible in
+`up`, `inspect`, and autopsy output without a separate node/output lookup.
+
 <Warning>
 **`finished` does not always mean clean success.** Run-level lifecycle status is
 binary (`finished` or `failed`); a run fails only on an *unhandled* task
@@ -20270,6 +20365,143 @@ export const claude = useCli
 
 ---
 
+## Embed the Engine in Node
+
+> Construct one reusable Smithers engine in a plain Node host with PGlite or Postgres, host-owned logging, and intact error causes.
+
+`createExternalSmithersEngine()` is the headless integration boundary for a
+long-lived Node service. It opens the normal Smithers database and execution
+engine once, lets the host construct several workflows from `HostNodeJson`, and
+drives any number of runs before one final `close()`.
+
+The complete runnable example is
+[`examples/node-embedded-engine.mjs`](https://github.com/smithersai/smithers/blob/main/examples/node-embedded-engine.mjs).
+Run it with plain Node:
+
+```bash
+node examples/node-embedded-engine.mjs
+```
+
+## Construct once, run many times
+
+```js
+import { createExternalSmithersEngine } from "smthrs";
+import { z } from "zod";
+
+const engine = await createExternalSmithersEngine({
+  schemas: {
+    input: z.object({ label: z.string() }),
+    result: z.object({ value: z.string() }),
+  },
+  agents: {},
+  backend: "pglite",
+  pgliteDataDir: ".smithers/pg",
+  logger: (record) => hostLogger[record.level](record.message, record.annotations),
+});
+
+const workflow = (name, value) =>
+  engine.workflow(
+    () => ({
+      kind: "element",
+      tag: "smithers:workflow",
+      props: {},
+      rawProps: { name },
+      children: [
+        {
+          kind: "element",
+          tag: "smithers:task",
+          props: {},
+          rawProps: {
+            id: name,
+            output: "result",
+            __smithersKind: "static",
+            __smithersPayload: { value },
+          },
+          children: [],
+        },
+      ],
+    }),
+    { output: "result" },
+  );
+
+try {
+  await engine.run(workflow("first", "one"), { input: { label: "first" } });
+  await engine.run(workflow("second", "two"), { input: { label: "second" } });
+} finally {
+  await engine.close();
+}
+```
+
+`engine.workflow()` can be called repeatedly; every returned workflow shares
+the opened backend and the process-local task runtime. `engine.run()` waits for
+one run result. A failed result rejects with a `SmithersError`; its `cause`
+points at the restored run error, whose own nested causes remain available.
+`close()` waits for this instance's active runs, closes its backend, and closes
+the process-local task runtime when the last external engine closes.
+
+## Node storage contract
+
+Node gets the existing Postgres-dialect implementations, not a forked engine:
+
+| Backend | Node configuration | Use |
+| --- | --- | --- |
+| PGlite | Omit `backend` (the Node default), or set `backend: "pglite"`; set `pgliteDataDir` for persistent state | Local development and one-process deployments |
+| Postgres | `backend: "postgres"` plus `connectionString`, `connection`, `SMITHERS_POSTGRES_URL`, or `DATABASE_URL` | Production and multi-process hosts |
+| SQLite | Unsupported under Node; requesting `backend: "sqlite"` throws `DB_REQUIRES_BUN_SQLITE` and names PGlite/Postgres alternatives | Bun-only native `bun:sqlite` path |
+
+Smithers does not add a `node:sqlite` backend here. The durable SQLite adapter,
+Drizzle driver, retry behavior, and migrations currently share the synchronous
+`bun:sqlite` contract. PGlite and Postgres already exercise the same engine
+through its SQL dialect seam and are the supported Node choices.
+
+If a legacy `smithers.db` contains run history, selecting PGlite/Postgres still
+enforces the migration gate; migrate it instead of silently starting an empty
+store.
+
+## Logging
+
+Pass `logger(record)` to route structured `debug`, `info`, `warn`, and `error`
+records into the host. Logger scope follows the run across awaits and timers,
+so concurrent external engine instances do not overwrite one global sink. A
+throwing logger is ignored and cannot fail a run. Pass `logger: false` to silence
+engine logs. `onProgress` and `onError` run callbacks remain available for
+durable events and occurrence-level error reporting.
+
+## Capability boundaries
+
+This facade drives the same engine under Node and Bun. It does not emulate
+Bun-only capabilities:
+
+- Native SQLite fails with `DB_REQUIRES_BUN_SQLITE` under Node.
+- PTY/UI terminal hosting is not part of this headless API; use the Gateway/UI
+  host for interactive terminals.
+- Sandbox and worktree tasks still require their configured provider and local
+  VCS/process capabilities. Existing capability checks fail with the named
+  capability and operation when the host does not supply one.
+
+The older synchronous `createExternalSmithers()` remains a Bun SQLite helper.
+Node embedders should use the async reusable engine.
+
+## Error causes
+
+Tagged errors crossing the process-local worker RPC now carry a JSON-safe
+`cause` payload. The external engine restores serialized error objects into an
+actual `Error`/`SmithersError` chain before wrapping the failed run, so ordinary
+cause walking works:
+
+```js
+try {
+  await engine.run(failingWorkflow, { input });
+} catch (error) {
+  for (let current = error; current; current = current.cause) {
+    hostLogger.error(current.message);
+  }
+}
+```
+
+
+---
+
 ## Nanocodex
 
 > Run the pinned stock Nanocodex agent as a short-lived, checkpoint-aware Smithers worker.
@@ -23645,7 +23877,7 @@ present, it contains `kind` (`signal`, `rpc`, `cli`, or `engine`) plus optional
 | `RunStarted` | `runId`, `timestampMs` |
 | `RunStatusChanged` | `runId`, `status`, `timestampMs` |
 | `RunStateChanged` | `runId`, `before`, `after`, `timestampMs` |
-| `RunConcurrencySaturated` | `runId`, `requestedDemand`, `effectiveCap`, `remediationCommand`, `timestampMs` |
+| `RunConcurrencySaturated` | `runId`, `requestedDemand`, `effectiveCap`, `remediationCommand`, `descendantRunId?`, `budget?`, `subtreeGroupId?`, `timestampMs` |
 | `RunFinished` | `runId`, `failedChildren?`, `failedChildKeys?`, `exhaustedLoops?`, `timestampMs` |
 | `RunFailed` | `runId`, `error`, `timestampMs` |
 | `RunCancelled` | `runId`, `source?`, `timestampMs` |

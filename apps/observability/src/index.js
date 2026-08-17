@@ -134,4 +134,4 @@ export {
   withCurrentCorrelationContext,
 } from "./correlation.js";
 export { updateCurrentCorrelationContext } from "./correlation.js";
-export { logDebug, logInfo, logWarning, logError, setSmithersLogRunner } from "./logging.js";
+export { logDebug, logInfo, logWarning, logError, runWithSmithersLogRunner, setSmithersLogRunner } from "./logging.js";
