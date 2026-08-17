@@ -156,6 +156,7 @@ import { decodeGitHubWebhook } from "@smthrs/integrations/github";
  *   role?: string;
  *   scopes?: string[];
  *   userId?: string | null;
+ *   appId?: string | null;
  *   tokenId?: string | null;
  *   origin?: string;
  *   transport?: GatewayTransport;
@@ -168,6 +169,7 @@ import { decodeGitHubWebhook } from "@smthrs/integrations/github";
  *   role: string;
  *   scopes: string[];
  *   userId: string | null;
+ *   appId: string | null;
  *   subscribedRuns?: Set<string>;
  *   heartbeat?: unknown;
  *   runEventHeartbeatTimer?: ReturnType<typeof setInterval> | null;
@@ -181,6 +183,7 @@ import { decodeGitHubWebhook } from "@smthrs/integrations/github";
  *   role: string;
  *   scopes: string[];
  *   userId?: string | null;
+ *   appId?: string | null;
  *   tokenId?: string | null;
  *   connectionId?: string;
  * }} RunStartAuthContext
@@ -2332,6 +2335,61 @@ function shouldDeliverEvent(connection, runId) {
   }
   return connection.subscribedRuns.has(runId);
 }
+
+// Bounds the ownership cache fed by every run list/snapshot page. Sized well
+// above any plausible concurrently-live run count so eviction only ever reaches
+// cold history, which re-resolves from the store on demand.
+const RUN_OWNERSHIP_CACHE_MAX_ENTRIES = 10_000;
+
+const RUN_SCOPED_GATEWAY_METHODS = new Set([
+  "runs.descendants",
+  "listRunDescendants",
+  "resumeRun",
+  "retryTask",
+  "listNodeStates",
+  "listRunTokenUsage",
+  "runs.get",
+  "getRun",
+  "frames.list",
+  "frames.get",
+  "attempts.list",
+  "attempts.get",
+  "getNodeOutput",
+  "devtools.getNodeOutput",
+  "getNodeDiff",
+  "devtools.getNodeDiff",
+  "getRunDiff",
+  "whatHappened",
+  "getDevToolsSnapshot",
+  "streamRunEvents",
+  "streamDevTools",
+  "listHijackCandidates",
+  "hijackRun",
+  "oneshotMonitorAttach",
+  "oneshotMonitorSteer",
+  "oneshotMonitorRestart",
+  "rewindRun",
+  "jumpToFrame",
+  "devtools.jumpToFrame",
+  "approvals.decide",
+  "submitApproval",
+  "signals.send",
+  "submitSignal",
+  "runs.cancel",
+  "cancelRun",
+  "runs.pause",
+  "pauseRun",
+  "runs.rerun",
+  "listScores",
+  "getScoreDetail",
+]);
+
+/** @param {GatewayRequestContext | null | undefined} connection */
+function authenticatedRunOwnership(connection) {
+  const owner = asString(connection?.userId);
+  const app = asString(connection?.appId);
+  return owner && app ? { owner, app } : null;
+}
 /**
  * @param {unknown} value
  * @param {string} field
@@ -2847,6 +2905,8 @@ export class Gateway {
    */
   preAuthConnections = new Set();
   runRegistry = new Map();
+  /** @type {Map<string, { owner: string; app: string } | null | false>} */
+  runOwnershipById = new Map();
   activeRuns = new Map();
   inflightRuns = new Map();
   /**
@@ -4493,6 +4553,7 @@ a { color: var(--brand); }</style>
       role: null,
       scopes: [],
       userId: null,
+      appId: null,
       tokenId: null,
       subscribedRuns: null,
       devtoolsStreams: null,
@@ -4507,6 +4568,7 @@ a { color: var(--brand); }</style>
     context.role = authResult.role;
     context.scopes = [...authResult.scopes];
     context.userId = authResult.userId ?? null;
+    context.appId = authResult.appId ?? null;
     context.tokenId = authResult.tokenId ?? null;
     if (!hasScope(context.scopes, "listRuns", this.extensions)) {
       const forbidden = responseForbidden(requestId, "listRuns", this.extensions);
@@ -4660,6 +4722,8 @@ a { color: var(--brand); }</style>
             status: queryString(url.searchParams, "status"),
             workflow: queryString(url.searchParams, "workflow"),
             parentRunId: queryString(url.searchParams, "parentRunId"),
+            owner: queryString(url.searchParams, "owner"),
+            app: queryString(url.searchParams, "app"),
             includeSystem:
               queryString(url.searchParams, "includeSystem") === undefined
                 ? undefined
@@ -4991,6 +5055,7 @@ a { color: var(--brand); }</style>
       role: null,
       scopes: [],
       userId: null,
+      appId: null,
       tokenId: null,
       subscribedRuns: null,
       devtoolsStreams: null,
@@ -5021,6 +5086,7 @@ a { color: var(--brand); }</style>
         role: authResult.role,
         scopes: [...authResult.scopes],
         userId: authResult.userId ?? null,
+        appId: authResult.appId ?? null,
         tokenId: authResult.tokenId ?? null,
       };
       this.recordAuthEvent(
@@ -5053,6 +5119,9 @@ a { color: var(--brand); }</style>
         this.executeRpc(context, frame, async () => {
           if (!hasScope(context.scopes, route.method, this.extensions)) {
             return responseForbidden(requestId, route.method, this.extensions);
+          }
+          if (!(await this.authorizeRunScopedRequest(context, route.method, route.params))) {
+            return responseError(requestId, "RunNotFound", "Run not found");
           }
           if (route.direct === "events") {
             return responseOk(requestId, await this.listApiRunEvents(route.params));
@@ -5730,6 +5799,19 @@ a { color: var(--brand); }</style>
     const runId = url.searchParams.get("runId")?.trim();
     if (!runId) {
       endUpgradeWithHttpError(socket, 400, "Bad Request", "runId query parameter is required\n");
+      return;
+    }
+    const ownershipContext = {
+      connectionId: `pty:${runId}`,
+      transport: "ws",
+      role: authResult.role,
+      scopes: [...authResult.scopes],
+      userId: authResult.userId ?? null,
+      appId: authResult.appId ?? null,
+      tokenId: authResult.tokenId ?? null,
+    };
+    if (!(await this.canAccessRunId(ownershipContext, runId))) {
+      endUpgradeWithHttpError(socket, 404, "Not Found", "Run not found\n");
       return;
     }
     const resolved = await this.resolveRun(runId);
@@ -6894,6 +6976,12 @@ a { color: var(--brand); }</style>
     // `resumeRunIfNeeded` before they reach this method.
     const storedRun = options?.resume ? await this.adapterForWorkflow(entry.workflow).getRun(runId) : undefined;
     const system = options?.resume ? runSystemFromRow(storedRun) : Boolean(entry.system);
+    const ownership = options?.resume
+      ? storedRun?.owner && storedRun?.app
+        ? { owner: storedRun.owner, app: storedRun.app }
+        : null
+      : authenticatedRunOwnership(auth);
+    this.rememberRunOwnership({ runId, owner: ownership?.owner ?? null, app: ownership?.app ?? null });
     const abort = new AbortController();
     const record = {
       workflowKey,
@@ -6951,6 +7039,7 @@ a { color: var(--brand); }</style>
         maxOutputBytes: options?.maxOutputBytes,
         toolTimeoutMs: options?.toolTimeoutMs,
         startedBy: options?.startedBy,
+        ...(ownership ? { ownership } : {}),
         signal: abort.signal,
         onProgress: (event) => this.handleSmithersEvent(event),
         cliAgentToolsDefault: this.defaults?.cliAgentTools,
@@ -7054,7 +7143,7 @@ a { color: var(--brand); }</style>
     };
     const inflightPromise = runPromise.then(cleanupOwnedRun, cleanupOwnedRun);
     this.inflightRuns.set(runId, inflightPromise);
-    return { runId, workflow: workflowKey, system };
+    return { runId, workflow: workflowKey, system, ...(ownership ? { ownership } : {}) };
   }
   /**
    * @param {string} runId
@@ -7164,6 +7253,7 @@ a { color: var(--brand); }</style>
       role: null,
       scopes: [],
       userId: null,
+      appId: null,
       tokenId: null,
       subscribedRuns: null,
       devtoolsStreams: new Map(),
@@ -7464,6 +7554,7 @@ a { color: var(--brand); }</style>
     connection.role = authResult.role;
     connection.scopes = [...authResult.scopes];
     connection.userId = authResult.userId ?? null;
+    connection.appId = authResult.appId ?? null;
     connection.tokenId = authResult.tokenId ?? null;
     connection.clientPid = request.client.pid ?? null;
     const previousBrowserSessions = connection.subscribedBrowserSessions ?? new Set();
@@ -7499,16 +7590,17 @@ a { color: var(--brand); }</style>
         role: authResult.role,
         scopes: authResult.scopes,
         userId: authResult.userId ?? null,
+        appId: authResult.appId ?? null,
         tokenId: authResult.tokenId ?? null,
       },
-      snapshot: await this.buildSnapshot(),
+      snapshot: await this.buildSnapshot(connection),
     };
     return responseOk(id, hello);
   }
   /**
    * @param {IncomingMessage} req
    * @param {ConnectRequest} request
-   * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string } | { ok: false; code: string; message: string } >}
+   * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string; appId?: string; tokenId?: string } | { ok: false; code: string; message: string; details?: Record<string, unknown> } >}
    */
   async authenticate(req, request) {
     const tokenFromRequest = "token" in (request.auth ?? {}) ? request.auth.token : null;
@@ -7678,7 +7770,7 @@ a { color: var(--brand); }</style>
   /**
    * @param {IncomingMessage} req
    * @param {string | null} token
-   * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string } | { ok: false; code: string; message: string } >}
+   * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string; appId?: string; tokenId?: string } | { ok: false; code: string; message: string; details?: Record<string, unknown> } >}
    */
   async authenticateRequest(req, token) {
     // DNS-rebinding defense (spec decision 16a), enforced BEFORE the
@@ -7768,6 +7860,7 @@ a { color: var(--brand); }</style>
         role: grant.role,
         scopes: grant.scopes,
         userId: grant.userId,
+        appId: grant.appId,
         tokenId: grant.tokenId ?? createHash("sha256").update(token).digest("hex").slice(0, 16),
       };
     }
@@ -7791,11 +7884,13 @@ a { color: var(--brand); }</style>
       const scopes = parseJwtScopes(verified.payload[this.auth.scopesClaim ?? "scope"]);
       const role = asString(verified.payload[this.auth.roleClaim ?? "role"]) ?? this.auth.defaultRole ?? "operator";
       const userId = asString(verified.payload[this.auth.userClaim ?? "sub"]);
+      const appId = asString(verified.payload[this.auth.appClaim ?? "app"]);
       return {
         ok: true,
         role,
         scopes: scopes.length > 0 ? scopes : [...(this.auth.defaultScopes ?? [])],
         userId: userId ?? undefined,
+        appId: appId ?? undefined,
         tokenId: createHash("sha256").update(token).digest("hex").slice(0, 16),
       };
     }
@@ -7825,10 +7920,15 @@ a { color: var(--brand); }</style>
         };
       }
       // Origin allow-list is enforced uniformly above (#446).
-      const [userHeader = "x-user-id", scopesHeader = "x-user-scopes", roleHeader = "x-user-role"] = (
-        this.auth.trustedHeaders ?? []
-      ).map((value) => value.toLowerCase());
+      const configuredHeaders = (this.auth.trustedHeaders ?? []).map((value) => value.toLowerCase());
+      const [userHeader = "x-user-id", scopesHeader = "x-user-scopes", roleHeader = "x-user-role"] = configuredHeaders;
+      // The app header is the second half of the tenant key, so it is only
+      // read when the operator actually allow-listed it: an explicit
+      // `trustedHeaders` that stops at the role header must not silently start
+      // trusting an `x-app-id` their proxy never strips (#785 class of bug).
+      const appHeader = configuredHeaders.length > 0 ? configuredHeaders[3] : "x-app-id";
       const userId = asString(req.headers[userHeader]);
+      const appId = appHeader ? asString(req.headers[appHeader]) : undefined;
       const scopesValue = asString(req.headers[scopesHeader]);
       const role = asString(req.headers[roleHeader]) ?? this.auth.defaultRole ?? "operator";
       // Fail CLOSED when the trusted proxy omits the scopes header: falling
@@ -7855,6 +7955,7 @@ a { color: var(--brand); }</style>
         role,
         scopes,
         userId: userId ?? undefined,
+        appId: appId ?? undefined,
         tokenId: asString(req.headers["x-smithers-token-id"]) ?? undefined,
       };
     }
@@ -7876,6 +7977,7 @@ a { color: var(--brand); }</style>
       role: null,
       scopes: [],
       userId: null,
+      appId: null,
       tokenId: null,
       subscribedRuns: null,
       devtoolsStreams: null,
@@ -7896,6 +7998,7 @@ a { color: var(--brand); }</style>
         role: authResult.role,
         scopes: [...authResult.scopes],
         userId: authResult.userId ?? null,
+        appId: authResult.appId ?? null,
         tokenId: authResult.tokenId ?? null,
       };
       const body = asObject(await readBody(req, this.maxBodyBytes));
@@ -8017,6 +8120,7 @@ a { color: var(--brand); }</style>
       role: null,
       scopes: [],
       userId: null,
+      appId: null,
       tokenId: null,
       subscribedRuns: null,
       devtoolsStreams: null,
@@ -8052,6 +8156,7 @@ a { color: var(--brand); }</style>
         role: authResult.role,
         scopes: [...authResult.scopes],
         userId: authResult.userId ?? null,
+        appId: authResult.appId ?? null,
         tokenId: authResult.tokenId ?? null,
       };
       this.recordAuthEvent(
@@ -8348,13 +8453,24 @@ a { color: var(--brand); }</style>
   }
   broadcastEvent(event, payload) {
     const runId = eventRunId(payload);
+    // Keep a run that is actively emitting at the young end of the ownership
+    // LRU so a long-lived run cannot be evicted by unrelated list traffic.
+    if (runId && this.runOwnershipById?.has(runId)) {
+      const cached = this.runOwnershipById.get(runId);
+      this.runOwnershipById.delete(runId);
+      this.runOwnershipById.set(runId, cached);
+    }
     const browserSessionId = eventBrowserSessionId(event, payload);
     this.stateVersion += 1;
     const runFrame = this.appendRunEventWindow(event, payload, this.stateVersion);
     void this.queueApiInvalidation(apiCollectionsForGatewayEvent(event));
     let recipientCount = 0;
     for (const connection of this.connections) {
-      if (!connection.authenticated || !shouldDeliverEvent(connection, runId)) {
+      if (
+        !connection.authenticated ||
+        !shouldDeliverEvent(connection, runId) ||
+        !this.canAccessCachedRun(connection, runId)
+      ) {
         continue;
       }
       if (browserSessionId && !connection.subscribedBrowserSessions?.has(browserSessionId)) {
@@ -8392,9 +8508,10 @@ a { color: var(--brand); }</style>
       "gateway:broadcast",
     );
   }
-  async buildSnapshot() {
-    const runs = await this.listRunsAcrossWorkflows(1_000);
-    const approvals = await this.listPendingApprovals();
+  async buildSnapshot(connection) {
+    const ownershipOptions = this.ownershipListOptions(connection);
+    const runs = await this.listRunsAcrossWorkflows(1_000, undefined, undefined, 0, false, undefined, ownershipOptions);
+    const approvals = await this.listPendingApprovals(connection);
     return {
       runs: runs.filter((run) =>
         ["running", "waiting-approval", "waiting-event", "waiting-timer", "paused"].includes(run.status),
@@ -8488,13 +8605,118 @@ a { color: var(--brand); }</style>
     return fallbackKey;
   }
   /**
+   * Insertion-ordered LRU: every list/snapshot call feeds this map a page of
+   * rows, so an unbounded map would grow with total run history. Re-setting on
+   * every observation keeps live runs at the young end, and a run evicted from
+   * the cold end is re-resolved from the store on its next authorization.
+   * @param {Record<string, unknown>} run
+   */
+  rememberRunOwnership(run) {
+    this.runOwnershipById ??= new Map();
+    const owner = asString(run.owner);
+    const app = asString(run.app);
+    this.runOwnershipById.delete(run.runId);
+    this.runOwnershipById.set(run.runId, owner && app ? { owner, app } : owner || app ? false : null);
+    while (this.runOwnershipById.size > RUN_OWNERSHIP_CACHE_MAX_ENTRIES) {
+      // Never evict a run this gateway is currently driving: its next event
+      // would broadcast against an empty cache entry and be denied to every
+      // tenant subscriber. Live runs are bounded by concurrency, so a pass
+      // that finds only live entries simply stops growing the cache down.
+      let evicted = false;
+      for (const runId of this.runOwnershipById.keys()) {
+        if (this.activeRuns?.has(runId)) continue;
+        this.runOwnershipById.delete(runId);
+        evicted = true;
+        break;
+      }
+      if (!evicted) break;
+    }
+  }
+  /**
+   * Scope checks answer whether a method may act; this ownership check then
+   * confines authenticated non-admin callers to their exact tenant pair.
+   * Unowned historical rows retain their pre-migration shared behavior.
+   * @param {GatewayRequestContext} connection
+   * @param {Record<string, unknown>} run
+   */
+  canAccessRun(connection, run) {
+    if (!this.auth || ["admin", "system"].includes(String(connection.role ?? "").toLowerCase())) return true;
+    const owner = asString(run.owner);
+    const app = asString(run.app);
+    if (!owner && !app) return true;
+    const identity = authenticatedRunOwnership(connection);
+    return Boolean(identity && owner === identity.owner && app === identity.app);
+  }
+  /** @param {GatewayRequestContext} connection @param {string | null} runId */
+  canAccessCachedRun(connection, runId) {
+    if (!runId || !this.auth || ["admin", "system"].includes(String(connection.role ?? "").toLowerCase())) {
+      return true;
+    }
+    const cached = this.runOwnershipById?.get(runId);
+    if (cached === null) return true;
+    if (!cached) return false;
+    const identity = authenticatedRunOwnership(connection);
+    return Boolean(identity && cached.owner === identity.owner && cached.app === identity.app);
+  }
+  /** @param {GatewayRequestContext | null | undefined} connection */
+  ownershipListOptions(connection) {
+    if (!connection || !this.auth || ["admin", "system"].includes(String(connection.role ?? "").toLowerCase())) {
+      return {};
+    }
+    const identity = authenticatedRunOwnership(connection);
+    return identity ? { ownership: identity, includeUnowned: true } : { unownedOnly: true };
+  }
+  /** @param {GatewayRequestContext} connection @param {string} runId */
+  async canAccessRunId(connection, runId) {
+    if (!this.auth || ["admin", "system"].includes(String(connection.role ?? "").toLowerCase())) return true;
+    const cached = this.runOwnershipById?.get(runId);
+    if (cached !== undefined) {
+      if (cached === null) return true;
+      const identity = authenticatedRunOwnership(connection);
+      return Boolean(cached && identity && cached.owner === identity.owner && cached.app === identity.app);
+    }
+    const resolved = await this.resolveRun(runId);
+    const run = resolved ? await resolved.adapter.getRun(runId) : null;
+    if (!run) return true;
+    this.rememberRunOwnership(run);
+    return this.canAccessRun(connection, run);
+  }
+  /** @param {GatewayRequestContext} connection @param {string} method @param {Record<string, unknown>} params */
+  async authorizeRunScopedRequest(connection, method, params) {
+    let runIds = [];
+    if (RUN_SCOPED_GATEWAY_METHODS.has(method)) {
+      const runId = asString(params.runId);
+      if (runId) runIds.push(runId);
+    } else if (method === "runs.diff") {
+      runIds = [asString(params.leftRunId), asString(params.rightRunId)].filter(Boolean);
+    } else if (method === "listScoresForRuns" && Array.isArray(params.runIds)) {
+      runIds = params.runIds.filter((value) => typeof value === "string");
+    }
+    for (const runId of runIds) {
+      if (!(await this.canAccessRunId(connection, runId))) return false;
+    }
+    return true;
+  }
+  /**
    * @param {string} [status]
    * @param {string} [workflow]
    * @param {number} [offset] Rows to skip after the newest-first sort (server-side pagination).
    * @param {boolean} [includeSystem] Include internal and historical unstamped runs.
    * @param {string} [parentRunId] Return only direct children of this run.
+   * @param {{ ownership?: { owner: string; app: string }; includeUnowned?: boolean; unownedOnly?: boolean }} [ownershipOptions]
+   *   Tenant confinement for the underlying store query. Callers must derive
+   *   this from the authenticated connection (see `ownershipListOptions`);
+   *   defaulting to `{}` is the unscoped, single-tenant behavior.
    */
-  async listRunsAcrossWorkflows(limit = 50, status, workflow, offset = 0, includeSystem = false, parentRunId) {
+  async listRunsAcrossWorkflows(
+    limit = 50,
+    status,
+    workflow,
+    offset = 0,
+    includeSystem = false,
+    parentRunId,
+    ownershipOptions = {},
+  ) {
     const registeredKeys = new Set(this.workflows.keys());
     const seenAdapters = new Set();
     const byRunId = new Map();
@@ -8508,8 +8730,13 @@ a { color: var(--brand); }</style>
       seenAdapters.add(adapter);
       // Each adapter's query is newest-first LIMIT; overfetch by the offset
       // so the merged window still contains the page being asked for.
-      const rows = await adapter.listRuns(limit + offset, status, workflow, { includeSystem, parentRunId });
+      const rows = await adapter.listRuns(limit + offset, status, workflow, {
+        includeSystem,
+        parentRunId,
+        ...ownershipOptions,
+      });
       for (const row of rows) {
+        this.rememberRunOwnership(row);
         if (byRunId.has(row.runId)) {
           continue;
         }
@@ -9041,7 +9268,7 @@ a { color: var(--brand); }</style>
     this.ticketWatchers.set(dir, watcher);
     return watcher;
   }
-  async listPendingApprovals() {
+  async listPendingApprovals(connection) {
     const approvals = [];
     const registeredKeys = new Set(this.workflows.keys());
     const seenAdapters = new Set();
@@ -9053,7 +9280,7 @@ a { color: var(--brand); }</style>
         continue;
       }
       seenAdapters.add(adapter);
-      const runs = await adapter.listRuns(1_000);
+      const runs = await adapter.listRuns(1_000, undefined, undefined, this.ownershipListOptions(connection));
       const runById = new Map(runs.map((run) => [run.runId, run]));
       const nodeMapsByRunId = new Map();
       const seenApprovalKeys = new Set();
@@ -9063,7 +9290,7 @@ a { color: var(--brand); }</style>
           const approvalKey = `${approval.runId}::${approval.nodeId}::${approval.iteration ?? 0}`;
           if (seenApprovalKeys.has(approvalKey)) continue;
           seenApprovalKeys.add(approvalKey);
-          const approvalRun = runById.get(approval.runId) ?? (await adapter.getRun(approval.runId)) ?? run;
+          const approvalRun = runById.get(approval.runId) ?? run;
           const workflowKey = this.resolveRunWorkflowKey(approvalRun, registeredKeys, entry.key);
           let nodeByKey = nodeMapsByRunId.get(approval.runId);
           if (!nodeByKey) {
@@ -9191,6 +9418,7 @@ a { color: var(--brand); }</style>
       seenAdapters.add(adapter);
       const run = await adapter.getRun(runId);
       if (run) {
+        this.rememberRunOwnership(run);
         // Attribute the run to its TRUE workflow (from its stored key /
         // workflowName), not whichever adapter happened to find the row —
         // critical once workflows share a DB. Resolve the owning entry by
@@ -9577,6 +9805,9 @@ a { color: var(--brand); }</style>
     if (isExtensionMethod(frame.method)) {
       return this.routeExtensionRequest(connection, frame, params);
     }
+    if (!(await this.authorizeRunScopedRequest(connection, frame.method, params))) {
+      return responseError(frame.id, "RunNotFound", "Run not found");
+    }
     switch (frame.method) {
       case "health":
         return responseOk(frame.id, {
@@ -9618,6 +9849,27 @@ a { color: var(--brand); }</style>
         const workflow = asString(filter.workflow);
         const parentRunId = asString(filter.parentRunId);
         const includeSystem = asBoolean(filter.includeSystem) ?? false;
+        const requestedOwner = asString(filter.owner);
+        const requestedApp = asString(filter.app);
+        if (Boolean(requestedOwner) !== Boolean(requestedApp)) {
+          return responseError(frame.id, "INVALID_REQUEST", "owner and app filters must be supplied together");
+        }
+        const admin = !this.auth || ["admin", "system"].includes(String(connection.role ?? "").toLowerCase());
+        const identity = authenticatedRunOwnership(connection);
+        if (
+          !admin &&
+          requestedOwner &&
+          (!identity || requestedOwner !== identity.owner || requestedApp !== identity.app)
+        ) {
+          return responseError(frame.id, "Forbidden", "Run ownership filter is outside the authenticated tenant");
+        }
+        const ownershipOptions = admin
+          ? requestedOwner
+            ? { ownership: { owner: requestedOwner, app: requestedApp } }
+            : {}
+          : identity
+            ? { ownership: identity, includeUnowned: true }
+            : { unownedOnly: true };
         // offset pages the newest-first result server-side; 0 is valid
         // (asOptionalPositiveInt rejects it), so parse non-negative here.
         const offsetRaw = filter.offset;
@@ -9627,7 +9879,15 @@ a { color: var(--brand); }</style>
         }
         return responseOk(
           frame.id,
-          await this.listRunsAcrossWorkflows(limit, status, workflow, offset, includeSystem, parentRunId),
+          await this.listRunsAcrossWorkflows(
+            limit,
+            status,
+            workflow,
+            offset,
+            includeSystem,
+            parentRunId,
+            ownershipOptions,
+          ),
         );
       }
       case "runs.descendants":
@@ -9701,6 +9961,10 @@ a { color: var(--brand); }</style>
           toolTimeoutMs: asNumber(options.toolTimeoutMs),
           ...(startedBy ? { startedBy } : {}),
         };
+        const requestedRunId = asString(params.runId) ?? asString(options.runId);
+        if (requestedRunId && (await this.resolveRun(requestedRunId))) {
+          return responseError(frame.id, "CONFLICT", `Run ${requestedRunId} already exists`);
+        }
         return responseOk(
           frame.id,
           await this.startRun(
@@ -9708,12 +9972,14 @@ a { color: var(--brand); }</style>
             input,
             {
               triggeredBy: connection.userId ?? "gateway",
+              userId: connection.userId,
+              appId: connection.appId,
               scopes: [...connection.scopes],
               role: connection.role ?? "operator",
               tokenId: connection.tokenId ?? null,
               subscribeConnection: connection,
             },
-            asString(params.runId) ?? asString(options.runId) ?? crypto.randomUUID(),
+            requestedRunId ?? crypto.randomUUID(),
             runOptions,
           ),
         );
@@ -9750,6 +10016,8 @@ a { color: var(--brand); }</style>
         }
         await this.resumeRunIfNeeded(runId, resolved.workflowKey, resolved.adapter, {
           triggeredBy: connection.userId ?? "gateway",
+          userId: connection.userId,
+          appId: connection.appId,
           scopes: [...connection.scopes],
           role: connection.role ?? "operator",
           tokenId: connection.tokenId ?? null,
@@ -9807,6 +10075,8 @@ a { color: var(--brand); }</style>
         // run's status back to running.
         await this.resumeRunIfNeeded(runId, resolved.workflowKey, resolved.adapter, {
           triggeredBy: connection.userId ?? "gateway",
+          userId: connection.userId,
+          appId: connection.appId,
           scopes: [...connection.scopes],
           role: connection.role ?? "operator",
           tokenId: connection.tokenId ?? null,
@@ -10463,7 +10733,7 @@ a { color: var(--brand); }</style>
         if (!run) {
           return responseError(frame.id, "RunNotFound", `Run not found: ${runId}`);
         }
-        const ownerId = resolveRunOwnerId(run);
+        const ownerId = asString(run.owner) ?? resolveRunOwnerId(run);
         const isAdmin = (connection.role ?? "").toLowerCase() === "admin";
         const isOwner = Boolean(ownerId && connection.userId && ownerId === connection.userId);
         if (!isAdmin && !isOwner) {
@@ -10527,6 +10797,8 @@ a { color: var(--brand); }</style>
             resumeRunLoop: async () => {
               await this.resumeRunIfNeeded(runId, resolved.workflowKey, resolved.adapter, {
                 triggeredBy: connection.userId ?? "gateway",
+                userId: connection.userId,
+                appId: connection.appId,
                 scopes: [...connection.scopes],
                 role: connection.role ?? "operator",
                 tokenId: connection.tokenId ?? null,
@@ -10582,7 +10854,7 @@ a { color: var(--brand); }</style>
         const runId = asString(params.runId) ?? asString(filter.runId);
         const workflow = asString(params.workflow) ?? asString(filter.workflow);
         const limit = asOptionalPositiveInt(params.limit ?? filter.limit, "limit");
-        let approvals = await this.listPendingApprovals();
+        let approvals = await this.listPendingApprovals(connection);
         if (runId) {
           approvals = approvals.filter((approval) => approval.runId === runId);
         }
@@ -10672,6 +10944,8 @@ a { color: var(--brand); }</style>
         }
         this.resumeRunInBackground(runId, resolved.workflowKey, resolved.adapter, {
           triggeredBy: connection.userId ?? "gateway",
+          userId: connection.userId,
+          appId: connection.appId,
           scopes: [...connection.scopes],
           role: connection.role ?? "operator",
           tokenId: connection.tokenId ?? null,
@@ -10700,6 +10974,8 @@ a { color: var(--brand); }</style>
         );
         await this.resumeRunIfNeeded(runId, resolved.workflowKey, resolved.adapter, {
           triggeredBy: connection.userId ?? "gateway",
+          userId: connection.userId,
+          appId: connection.appId,
           scopes: [...connection.scopes],
           role: connection.role ?? "operator",
           tokenId: connection.tokenId ?? null,
@@ -10951,6 +11227,8 @@ a { color: var(--brand); }</style>
             input,
             {
               triggeredBy: connection.userId ?? "gateway",
+              userId: connection.userId,
+              appId: connection.appId,
               scopes: [...connection.scopes],
               role: connection.role ?? "operator",
               tokenId: connection.tokenId ?? null,

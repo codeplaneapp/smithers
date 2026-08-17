@@ -154,6 +154,9 @@ type SignalRow$1 = {
 type RunRow$1 = {
     runId: string;
     parentRunId: string | null;
+    /** Exact tenant pair when ownership is enabled; both fields are present together. */
+    owner?: string | null;
+    app?: string | null;
     workflowName: string;
     workflowPath: string | null;
     workflowHash: string | null;
@@ -667,6 +670,15 @@ declare class SqlError extends SqlError$1 {
  * @returns {import("@smthrs/observability").RunCancellationSource | undefined}
  */
 declare function runCancellationSourceFromRow(row: Partial<RunRow> | null | undefined): _smthrs_observability.RunCancellationSource | undefined;
+/**
+ * Remove the identity/immutable fields from a full run row so the remainder
+ * is a legal `updateRun` patch. Because the stripped fields are immutable,
+ * the snapshot's values necessarily equal the live row's, so dropping them
+ * loses nothing.
+ * @param {Record<string, unknown>} row
+ * @returns {Record<string, unknown>}
+ */
+declare function stripImmutableRunFields(row: Record<string, unknown>): Record<string, unknown>;
 /** @typedef {import("./adapter/AlertRow.ts").AlertRow} AlertRow */
 /** @typedef {import("./adapter/AlertStatus.ts").AlertStatus} AlertStatus */
 /** @typedef {import("./adapter/AttemptRow.ts").AttemptRow} AttemptRow */
@@ -708,7 +720,18 @@ declare const DB_ALERT_ALLOWED_SEVERITIES: string[];
 declare const DB_ALERT_ALLOWED_STATUSES: string[];
 declare const DB_RUN_ID_MAX_LENGTH: 256;
 declare const DB_RUN_WORKFLOW_NAME_MAX_LENGTH: 256;
+declare const DB_RUN_OWNERSHIP_KEY_MAX_LENGTH: 256;
 declare const DB_RUN_ALLOWED_STATUSES: string[];
+/**
+ * Run-row fields that can never appear in an `updateRun` patch: `runId` is
+ * the row's identity, and `owner`/`app` are fixed at insert time
+ * (validateRunPatch below rejects them). Full-row restore paths — the
+ * retry-task rollback in the CLI — snapshot `getRun` and replay the row as a
+ * patch, so they must strip these fields first; keeping the list here, next
+ * to the validator that enforces it, means the next immutable column is added
+ * in exactly one place.
+ */
+declare const DB_RUN_IMMUTABLE_FIELDS: string[];
 declare class SmithersDb {
     /**
      * @param {BunSQLiteDatabase<Record<string, unknown>>} db
@@ -804,9 +827,12 @@ declare class SmithersDb {
     withTransaction<A>(writeGroup: string, operation: Effect.Effect<A, SmithersError$1>): Promise<A>;
     /**
      * @param {Record<string, unknown>} row
-     * @returns {RunnableEffect<boolean, SmithersError>}
+     * @param {{ rejectExisting?: boolean }} [options]
+     * @returns {RunnableEffect<boolean | void, SmithersError>}
      */
-    insertRun(row: Record<string, unknown>): RunnableEffect<boolean, SmithersError$1>;
+    insertRun(row: Record<string, unknown>, options?: {
+        rejectExisting?: boolean;
+    }): RunnableEffect<boolean | void, SmithersError$1>;
     /**
      * @param {string} runId
      * @param {Record<string, unknown>} patch
@@ -905,9 +931,13 @@ declare class SmithersDb {
     clearRunHijack(runId: string): RunnableEffect<void, SmithersError$1>;
     /**
      * @param {string} runId
+     * @param {{ owner: string; app: string }} [ownership]
      * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
      */
-    getRun(runId: string): RunnableEffect<RunRow | undefined, SmithersError$1>;
+    getRun(runId: string, ownership?: {
+        owner: string;
+        app: string;
+    }): RunnableEffect<RunRow | undefined, SmithersError$1>;
     /**
      * @param {string} runId
      * @returns {RunnableEffect<RunAncestryRow[], SmithersError>}
@@ -930,12 +960,18 @@ declare class SmithersDb {
     /**
      * @param {string} [status]
      * @param {string} [workflow]
-     * @param {{ includeSystem?: boolean; parentRunId?: string }} [options]
+     * @param {{ includeSystem?: boolean; parentRunId?: string; ownership?: { owner: string; app: string }; includeUnowned?: boolean; unownedOnly?: boolean }} [options]
      * @returns {RunnableEffect<RunRow[], SmithersError>}
      */
     listRuns(limit?: number, status?: string, workflow?: string, options?: {
         includeSystem?: boolean;
         parentRunId?: string;
+        ownership?: {
+            owner: string;
+            app: string;
+        };
+        includeUnowned?: boolean;
+        unownedOnly?: boolean;
     }): RunnableEffect<RunRow[], SmithersError$1>;
     /**
      * @param {number} staleBeforeMs
@@ -10687,4 +10723,4 @@ type AgentCheckpointContentRow = AgentCheckpointContentRow$2;
 type AgentCheckpointRefRow = AgentCheckpointRefRow$2;
 type SchemaRegistryEntry = SchemaRegistryEntry$1;
 
-export { type AgentCheckpointContentRow, type AgentCheckpointRefRow, type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type Database, type Dialect, type DocRow, type EvalCaseResultRow, type EvalSuiteRow, type EventHistoryQuery, type ExternalSqliteDescriptor, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type IntegrationDeliveryClaim, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, OUTPUT_PROVENANCE_SEQ, type OutputKey, type OutputSnapshot, POSTGRES, type PendingHumanRequestRow, RUN_DRIVER_HEARTBEAT_STALE_MS, type RalphRow, type RunAncestryRow, type RunDriverLiveness, type RunRow, type RunnableEffect, SQLITE, STEAL_OWNERSHIP_FLAG, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteTransactionState, type SqliteWriteRetryOptions, type StaleRunRecord, type SteerRow, type Table, type TxidCapture, type ZodError, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertNoReservedColumns, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, beginTransactionSql, buildKeyWhere, buildOutputRow, camelToSnake, capturePostgresTransactionTxid, captureTxid, classifyRunDriverLiveness, coerceOutputRowForSnapshot, columnType, compactLegacySnapshots, createTxidCapture, describeLiveDriverRefusal, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, formatRuntimeOwnerId, getAgentOutputSchema, getJsonColumnKeys, getKeyColumns, getSmithersSchemaSignature, getSqlMessageStorage, hasActiveTxidCapture, isPidAlive, isPostgresDb, isRealPostgresAdapter, isRetryableSqliteWriteError, isRunDriverAlive, jsonExtractText, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, loadRunOutputRowsEffect, normalizeFrameEncoding, openDurableSqliteDatabase, parseFrameDelta, parseRuntimeOwnerIdentity, parseRuntimeOwnerPid, pgRowToDrizzle, quoteIdentifier, readProcessStartMs, recordCommittedTxid, retainRunHistory, runCancellationSourceFromRow, runWithTxidCapture, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, shouldCapturePostgresTxid, smithersAgentCheckpointContents, smithersAgentCheckpoints, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersDocs, smithersEvalCases, smithersEvalSuites, smithersEvents, smithersFrames, smithersHumanRequests, smithersIntegrationCursors, smithersIntegrationDeliveries, smithersMemoryFacts, smithersMemoryMessages, smithersMemoryNoteSupersessions, smithersMemoryNotes, smithersMemoryThreads, smithersNodeDiffs, smithersNodes, smithersOutputProvenance, smithersRalph, smithersRuns, smithersSandboxes, smithersSchemaMigrations, smithersScorers, smithersSignals, smithersSteers, smithersTimeTravelAudit, smithersToolCallArchive, smithersToolCalls, smithersVectors, smithersWorkspaceCheckpoints, smithersWorkspaceStates, stripAutoColumns, syncZodTableSchema, syncZodTableSchemaPostgres, translateDdl, translatePlaceholders, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodSchemaColumns, zodToCreateTableSQL, zodToTable };
+export { type AgentCheckpointContentRow, type AgentCheckpointRefRow, type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_IMMUTABLE_FIELDS, DB_RUN_OWNERSHIP_KEY_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type Database, type Dialect, type DocRow, type EvalCaseResultRow, type EvalSuiteRow, type EventHistoryQuery, type ExternalSqliteDescriptor, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type IntegrationDeliveryClaim, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, OUTPUT_PROVENANCE_SEQ, type OutputKey, type OutputSnapshot, POSTGRES, type PendingHumanRequestRow, RUN_DRIVER_HEARTBEAT_STALE_MS, type RalphRow, type RunAncestryRow, type RunDriverLiveness, type RunRow, type RunnableEffect, SQLITE, STEAL_OWNERSHIP_FLAG, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteTransactionState, type SqliteWriteRetryOptions, type StaleRunRecord, type SteerRow, type Table, type TxidCapture, type ZodError, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertNoReservedColumns, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, beginTransactionSql, buildKeyWhere, buildOutputRow, camelToSnake, capturePostgresTransactionTxid, captureTxid, classifyRunDriverLiveness, coerceOutputRowForSnapshot, columnType, compactLegacySnapshots, createTxidCapture, describeLiveDriverRefusal, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, formatRuntimeOwnerId, getAgentOutputSchema, getJsonColumnKeys, getKeyColumns, getSmithersSchemaSignature, getSqlMessageStorage, hasActiveTxidCapture, isPidAlive, isPostgresDb, isRealPostgresAdapter, isRetryableSqliteWriteError, isRunDriverAlive, jsonExtractText, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, loadRunOutputRowsEffect, normalizeFrameEncoding, openDurableSqliteDatabase, parseFrameDelta, parseRuntimeOwnerIdentity, parseRuntimeOwnerPid, pgRowToDrizzle, quoteIdentifier, readProcessStartMs, recordCommittedTxid, retainRunHistory, runCancellationSourceFromRow, runWithTxidCapture, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, shouldCapturePostgresTxid, smithersAgentCheckpointContents, smithersAgentCheckpoints, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersDocs, smithersEvalCases, smithersEvalSuites, smithersEvents, smithersFrames, smithersHumanRequests, smithersIntegrationCursors, smithersIntegrationDeliveries, smithersMemoryFacts, smithersMemoryMessages, smithersMemoryNoteSupersessions, smithersMemoryNotes, smithersMemoryThreads, smithersNodeDiffs, smithersNodes, smithersOutputProvenance, smithersRalph, smithersRuns, smithersSandboxes, smithersSchemaMigrations, smithersScorers, smithersSignals, smithersSteers, smithersTimeTravelAudit, smithersToolCallArchive, smithersToolCalls, smithersVectors, smithersWorkspaceCheckpoints, smithersWorkspaceStates, stripAutoColumns, stripImmutableRunFields, syncZodTableSchema, syncZodTableSchemaPostgres, translateDdl, translatePlaceholders, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodSchemaColumns, zodToCreateTableSQL, zodToTable };

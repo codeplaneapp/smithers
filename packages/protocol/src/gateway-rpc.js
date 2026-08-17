@@ -3,6 +3,7 @@
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcErrorCode} GatewayRpcErrorCode */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcMethod} GatewayRpcMethod */
 /** @typedef {import("./gatewayRpcTypes.ts").RunStartedBy} RunStartedBy */
+/** @typedef {import("./gatewayRpcTypes.ts").RunOwnership} RunOwnership */
 /** @typedef {import("./gatewayRpcTypes.ts").RunCancellationSource} RunCancellationSource */
 /** @typedef {import("./gatewayRpcTypes.ts").LaunchRunRequest} LaunchRunRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").LaunchRunResponse} LaunchRunResponse */

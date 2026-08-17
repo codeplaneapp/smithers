@@ -2652,6 +2652,8 @@ async function continueRunAsNew(params) {
             `INSERT INTO _smithers_runs (
               run_id,
               parent_run_id,
+              owner,
+              app,
               workflow_name,
               workflow_path,
               workflow_hash,
@@ -2669,11 +2671,13 @@ async function continueRunAsNew(params) {
               vcs_revision,
               error_json,
               config_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             targetRunId,
             runId,
+            sourceRun.owner ?? null,
+            sourceRun.app ?? null,
             sourceRun.workflowName ?? "workflow",
             workflowPath ?? sourceRun.workflowPath ?? null,
             runMetadata.workflowHash ?? sourceRun.workflowHash ?? null,
@@ -3459,6 +3463,13 @@ function parseInputWithSchema(inputSchema, input, options) {
 function validateRunOptions(opts) {
   assertOptionalStringMaxLength("runId", opts.runId, RUN_WORKFLOW_RUN_ID_MAX_LENGTH);
   assertOptionalStringMaxLength("workflowPath", opts.workflowPath, RUN_WORKFLOW_WORKFLOW_PATH_MAX_LENGTH);
+  if (opts.ownership) {
+    assertOptionalStringMaxLength("ownership.owner", opts.ownership.owner, 256);
+    assertOptionalStringMaxLength("ownership.app", opts.ownership.app, 256);
+    if (!opts.ownership.owner.trim() || !opts.ownership.app.trim()) {
+      throw new SmithersError("INVALID_INPUT", "ownership.owner and ownership.app must be non-empty strings.");
+    }
+  }
   assertInputObject(opts.input);
   normalizeRunStartedBy(opts.startedBy);
   assertJsonPayloadWithinBounds("input", opts.input, {
@@ -11190,30 +11201,38 @@ async function runWorkflowBodyDriver(workflow, opts) {
     };
     if (!existingRun) {
       await Effect.runPromise(
-        adapter.insertRun({
-          runId,
-          parentRunId: opts.parentRunId ?? null,
-          workflowName: "workflow",
-          workflowPath: resolvedWorkflowPath ?? opts.workflowPath ?? null,
-          workflowHash: runMetadata.workflowHash,
-          status: "running",
-          createdAtMs: nowMs(),
-          startedAtMs: nowMs(),
-          finishedAtMs: null,
-          heartbeatAtMs: nowMs(),
-          runtimeOwnerId,
-          cancelRequestedAtMs: null,
-          hijackRequestedAtMs: null,
-          hijackTarget: null,
-          vcsType: runMetadata.vcsType,
-          vcsRoot: runMetadata.vcsRoot,
-          vcsRevision: runMetadata.vcsRevision,
-          errorJson: null,
-          configJson: runConfigJson,
-        }),
+        adapter.insertRun(
+          {
+            runId,
+            parentRunId: opts.parentRunId ?? null,
+            owner: opts.ownership?.owner ?? null,
+            app: opts.ownership?.app ?? null,
+            workflowName: "workflow",
+            workflowPath: resolvedWorkflowPath ?? opts.workflowPath ?? null,
+            workflowHash: runMetadata.workflowHash,
+            status: "running",
+            createdAtMs: nowMs(),
+            startedAtMs: nowMs(),
+            finishedAtMs: null,
+            heartbeatAtMs: nowMs(),
+            runtimeOwnerId,
+            cancelRequestedAtMs: null,
+            hijackRequestedAtMs: null,
+            hijackTarget: null,
+            vcsType: runMetadata.vcsType,
+            vcsRoot: runMetadata.vcsRoot,
+            vcsRevision: runMetadata.vcsRevision,
+            errorJson: null,
+            configJson: runConfigJson,
+          },
+          { rejectExisting: Boolean(opts.ownership) },
+        ),
       );
       runOwnedByCurrentProcess = true;
     } else if (!opts.resume) {
+      if (opts.ownership) {
+        throw new SmithersError("CONFLICT", `Run ${runId} already exists.`, { runId });
+      }
       await Effect.runPromise(
         adapter.updateRunIfNotCancelled(runId, {
           status: "running",

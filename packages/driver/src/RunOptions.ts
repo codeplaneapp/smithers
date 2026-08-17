@@ -24,6 +24,8 @@ export type HotReloadOptions = {
 export type RunOptions = {
   runId?: string;
   parentRunId?: string | null;
+  /** Optional durable tenant key. Child runs always inherit the exact pair. */
+  ownership?: { owner: string; app: string };
   input: Record<string, unknown>;
   maxConcurrency?: number;
   /** Internal/runtime proof that maxConcurrency was explicitly persisted for this run. */

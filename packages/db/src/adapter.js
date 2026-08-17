@@ -53,6 +53,7 @@ function approvalTarget(row) {
   return { nodeId: row.nodeId, iteration: row.iteration };
 }
 import {
+  assertMaxStringLength,
   assertOptionalStringMaxLength,
   assertPositiveFiniteInteger,
   assertPositiveFiniteNumber,
@@ -165,6 +166,19 @@ async function pruneOrphanedAgentCheckpointContentsPage(storage, options) {
 }
 export const DB_RUN_ID_MAX_LENGTH = 256;
 export const DB_RUN_WORKFLOW_NAME_MAX_LENGTH = 256;
+export const DB_RUN_OWNERSHIP_KEY_MAX_LENGTH = 256;
+/**
+ * Ownership filters are an isolation boundary: a partially-supplied pair would
+ * silently widen the query, so both halves must be present, non-blank strings.
+ * @param {{ owner: string; app: string }} ownership
+ */
+function assertOwnershipFilter(ownership) {
+  assertMaxStringLength("owner", ownership.owner, DB_RUN_OWNERSHIP_KEY_MAX_LENGTH);
+  assertMaxStringLength("app", ownership.app, DB_RUN_OWNERSHIP_KEY_MAX_LENGTH);
+  if (!ownership.owner.trim() || !ownership.app.trim()) {
+    throw new SmithersErrorClass("INVALID_INPUT", "Run owner and app must be non-empty strings.");
+  }
+}
 export const DB_RUN_ALLOWED_STATUSES = [
   "running",
   "waiting-approval",
@@ -552,6 +566,14 @@ function validateRunRow(row) {
   const r = /** @type {Record<string, unknown>} */ (row);
   assertOptionalStringMaxLength("runId", r.runId, DB_RUN_ID_MAX_LENGTH);
   assertOptionalStringMaxLength("parentRunId", r.parentRunId, DB_RUN_ID_MAX_LENGTH);
+  assertOptionalStringMaxLength("owner", r.owner, DB_RUN_OWNERSHIP_KEY_MAX_LENGTH);
+  assertOptionalStringMaxLength("app", r.app, DB_RUN_OWNERSHIP_KEY_MAX_LENGTH);
+  if ((r.owner == null) !== (r.app == null)) {
+    throw new SmithersErrorClass("INVALID_INPUT", "Run owner and app must be set together.");
+  }
+  if (typeof r.owner === "string" && (!r.owner.trim() || !String(r.app).trim())) {
+    throw new SmithersErrorClass("INVALID_INPUT", "Run owner and app must be non-empty strings.");
+  }
   assertOptionalStringMaxLength("workflowName", r.workflowName, DB_RUN_WORKFLOW_NAME_MAX_LENGTH);
   validateRunStatus(r.status);
   validateOptionalPositiveTimestamp(r, "createdAtMs");
@@ -564,6 +586,29 @@ function validateRunRow(row) {
   validateOptionalPositiveTimestamp(r, "hijackRequestedAtMs");
 }
 /**
+ * Run-row fields that can never appear in an `updateRun` patch: `runId` is
+ * the row's identity, and `owner`/`app` are fixed at insert time
+ * (validateRunPatch below rejects them). Full-row restore paths — the
+ * retry-task rollback in the CLI — snapshot `getRun` and replay the row as a
+ * patch, so they must strip these fields first; keeping the list here, next
+ * to the validator that enforces it, means the next immutable column is added
+ * in exactly one place.
+ */
+export const DB_RUN_IMMUTABLE_FIELDS = ["runId", "owner", "app"];
+
+/**
+ * Remove the identity/immutable fields from a full run row so the remainder
+ * is a legal `updateRun` patch. Because the stripped fields are immutable,
+ * the snapshot's values necessarily equal the live row's, so dropping them
+ * loses nothing.
+ * @param {Record<string, unknown>} row
+ * @returns {Record<string, unknown>}
+ */
+export function stripImmutableRunFields(row) {
+  return Object.fromEntries(Object.entries(row).filter(([key]) => !DB_RUN_IMMUTABLE_FIELDS.includes(key)));
+}
+
+/**
  * @param {unknown} patch
  * @returns {void}
  */
@@ -572,6 +617,9 @@ function validateRunPatch(patch) {
   const p = /** @type {Record<string, unknown>} */ (patch);
   if ("workflowName" in p) {
     assertOptionalStringMaxLength("workflowName", p.workflowName, DB_RUN_WORKFLOW_NAME_MAX_LENGTH);
+  }
+  if ("owner" in p || "app" in p) {
+    throw new SmithersErrorClass("INVALID_INPUT", "Run ownership is immutable after creation.");
   }
   if ("status" in p) {
     validateRunStatus(p.status);
@@ -1441,11 +1489,39 @@ export class SmithersDb {
   }
   /**
    * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<boolean, SmithersError>}
+   * @param {{ rejectExisting?: boolean }} [options]
+   * @returns {RunnableEffect<boolean | void, SmithersError>}
    */
-  insertRun(row) {
+  insertRun(row, options = {}) {
     validateRunRow(row);
-    return this.write("insert run", () => this.internalStorage.insertIgnore("_smithers_runs", row));
+    return this.write("insert run", async () => {
+      let persistedRow = row;
+      if (typeof row.parentRunId === "string" && row.parentRunId.length > 0) {
+        const parent = await this.internalStorage.queryOne(
+          "SELECT owner, app FROM _smithers_runs WHERE run_id = ? LIMIT 1",
+          [row.parentRunId],
+        );
+        if (parent) {
+          const parentOwner = parent.owner ?? null;
+          const parentApp = parent.app ?? null;
+          if ((row.owner != null && row.owner !== parentOwner) || (row.app != null && row.app !== parentApp)) {
+            throw new SmithersErrorClass("INVALID_INPUT", "A child run must inherit its parent's owner and app.", {
+              runId: row.runId,
+              parentRunId: row.parentRunId,
+            });
+          }
+          persistedRow = { ...row, owner: parentOwner, app: parentApp };
+        }
+      }
+      if (options.rejectExisting || persistedRow.owner != null) {
+        const inserted = await this.internalStorage.insertIgnoreReturningInserted("_smithers_runs", persistedRow);
+        if (!inserted) {
+          throw new SmithersErrorClass("CONFLICT", `Run ${row.runId} already exists.`, { runId: row.runId });
+        }
+        return;
+      }
+      return this.internalStorage.insertIgnore("_smithers_runs", persistedRow);
+    });
   }
   /**
    * @param {string} runId
@@ -1649,16 +1725,20 @@ export class SmithersDb {
   }
   /**
    * @param {string} runId
+   * @param {{ owner: string; app: string }} [ownership]
    * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
    */
-  getRun(runId) {
+  getRun(runId, ownership) {
+    if (ownership) {
+      assertOwnershipFilter(ownership);
+    }
     return this.read(`get run ${runId}`, async () => {
       return this.internalStorage.queryOne(
         `SELECT *
          FROM _smithers_runs
-         WHERE run_id = ?
+         WHERE run_id = ?${ownership ? " AND owner = ? AND app = ?" : ""}
          LIMIT 1`,
-        [runId],
+        ownership ? [runId, ownership.owner, ownership.app] : [runId],
       );
     });
   }
@@ -1792,10 +1872,16 @@ export class SmithersDb {
   /**
    * @param {string} [status]
    * @param {string} [workflow]
-   * @param {{ includeSystem?: boolean; parentRunId?: string }} [options]
+   * @param {{ includeSystem?: boolean; parentRunId?: string; ownership?: { owner: string; app: string }; includeUnowned?: boolean; unownedOnly?: boolean }} [options]
    * @returns {RunnableEffect<RunRow[], SmithersError>}
    */
   listRuns(limit = 50, status, workflow, options = {}) {
+    // Validate before entering `read`, which would otherwise re-wrap the typed
+    // INVALID_INPUT as an opaque DB_QUERY_FAILED — `getRun` reports the same
+    // bad filter synchronously and the two must not disagree.
+    if (options.ownership) {
+      assertOwnershipFilter(options.ownership);
+    }
     return this.read(`list runs ${status ?? "all"}`, async () => {
       const clauses = [];
       const params = [];
@@ -1815,6 +1901,16 @@ export class SmithersDb {
       if (options.parentRunId) {
         clauses.push("parent_run_id = ?");
         params.push(options.parentRunId);
+      }
+      if (options.ownership) {
+        clauses.push(
+          options.includeUnowned
+            ? "((owner = ? AND app = ?) OR (owner IS NULL AND app IS NULL))"
+            : "owner = ? AND app = ?",
+        );
+        params.push(options.ownership.owner, options.ownership.app);
+      } else if (options.unownedOnly) {
+        clauses.push("owner IS NULL AND app IS NULL");
       }
       const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       if (options.includeSystem === false) {

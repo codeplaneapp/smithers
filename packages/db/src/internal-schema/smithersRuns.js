@@ -2,6 +2,8 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 export const smithersRuns = sqliteTable("_smithers_runs", {
   runId: text("run_id").primaryKey(),
   parentRunId: text("parent_run_id"),
+  owner: text("owner"),
+  app: text("app"),
   workflowName: text("workflow_name").notNull(),
   workflowPath: text("workflow_path"),
   workflowHash: text("workflow_hash"),

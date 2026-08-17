@@ -9117,6 +9117,7 @@ type SmithersErrorReport = {
 type RunOptions = {
   runId?: string;
   parentRunId?: string | null;
+  ownership?: { owner: string; app: string };  // durable tenant key; child runs always inherit the exact pair
   input: Record<string, unknown>;
   maxConcurrency?: number;          // default 4; run cap shared with lifecycle-linked descendant tasks
   maxConcurrencyPinned?: boolean;   // internal/runtime proof that the value was explicitly persisted
@@ -11528,6 +11529,7 @@ JSON response codes, not `SmithersErrorInstance` objects.
 | `RUN_ALREADY_EXISTS` | 409 | Run ID already exists |
 | `RUN_NOT_FOUND` | 404 | No run with given ID |
 | `RUN_NOT_ACTIVE` | 409 | Run not active (cannot cancel) |
+| `CONFLICT` | 409 | Gateway `launchRun` was given a `runId` that an existing run already holds. Ownership never widens an id: a run id taken by another tenant conflicts the same way one of your own does. See [Gateway run ownership](/integrations/gateway). |
 | `NOT_FOUND` | 404 | Route or resource not found |
 | `DB_NOT_CONFIGURED` | 400 | Server database not configured |
 
