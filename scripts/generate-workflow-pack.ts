@@ -38,7 +38,6 @@ const SEEDED_WORKFLOW_IDS = [
   "create-skill",
   // Auto-launched by the monitor's "Create UI" action (system workflow).
   "create-ui",
-  "docs-driven-development",
   // Durable `smithers init` (system workflow — hidden from default listings).
   "init",
   // Auto-launched autopsy for failed runs (system workflow).
@@ -52,8 +51,6 @@ const SEEDED_WORKFLOW_IDS = [
   "add",
   // Guided pack publishing workflow.
   "share-pack",
-  "smithers-repo-federation",
-  "whole-foods-meal-planner",
 ];
 
 type TemplateFile = { path: string; contents: string };
@@ -62,14 +59,7 @@ type TemplateFile = { path: string; contents: string };
  * Seeded ids whose canonical multi-file UI (`.smithers/ui/<id>.tsx` plus its
  * relative sibling modules) ships with the pack.
  */
-const SEEDED_UI_IDS = new Set([
-  "create-workflow",
-  "create-skill",
-  "docs-driven-development",
-  "share-pack",
-  "smithers-repo-federation",
-  "whole-foods-meal-planner",
-]);
+const SEEDED_UI_IDS = new Set(["create-workflow", "create-skill", "share-pack"]);
 
 const DDD_HELPER_FILES = [
   "auditInputs.ts",

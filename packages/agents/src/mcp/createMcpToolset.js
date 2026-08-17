@@ -1,5 +1,3 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { dynamicTool, jsonSchema } from "ai";
 
 /** @typedef {import("./McpServerConfig.ts").McpServerConfig} McpServerConfig */
@@ -20,6 +18,7 @@ import { dynamicTool, jsonSchema } from "ai";
  * @returns {Promise<McpToolset>}
  */
 export async function createMcpToolset(config, options = {}) {
+  const { Client, StdioClientTransport } = await loadMcpSdk();
   const transport = new StdioClientTransport({
     command: config.command,
     args: config.args ?? [],
@@ -63,7 +62,7 @@ export async function createMcpToolset(config, options = {}) {
  * getter returns the PassThrough immediately, so attaching before `connect()`
  * also captures any early startup output.
  *
- * @param {StdioClientTransport} transport
+ * @param {{ stderr?: import("node:stream").Readable }} transport
  * @param {((chunk: string) => void) | undefined} onStderr
  */
 function drainStderr(transport, onStderr) {
@@ -81,6 +80,26 @@ function drainStderr(transport, onStderr) {
   stream.on("error", () => {
     // A stderr stream error must not crash the toolset.
   });
+}
+
+async function loadMcpSdk() {
+  try {
+    const [{ Client }, { StdioClientTransport }] = await Promise.all([
+      import("@modelcontextprotocol/sdk/client/index.js"),
+      import("@modelcontextprotocol/sdk/client/stdio.js"),
+    ]);
+    return { Client, StdioClientTransport };
+  } catch (error) {
+    const code = /** @type {{ code?: string }} */ (error)?.code;
+    const message = error instanceof Error ? error.message : String(error);
+    if (code === "ERR_MODULE_NOT_FOUND" || message.includes("@modelcontextprotocol/sdk")) {
+      throw new Error(
+        "createMcpToolset requires the optional @modelcontextprotocol/sdk package. Install it with `npm install @modelcontextprotocol/sdk` or `bun add @modelcontextprotocol/sdk`, then retry.",
+        { cause: error },
+      );
+    }
+    throw error;
+  }
 }
 
 /**

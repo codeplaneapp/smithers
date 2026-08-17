@@ -9,7 +9,7 @@
  */
 
 import pc from "picocolors";
-import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
+import { sanitizeTerminalText } from "./sanitizeTerminalText.js";
 
 const ESC = "\x1b";
 const ENTER_ALT = `${ESC}[?1049h`;

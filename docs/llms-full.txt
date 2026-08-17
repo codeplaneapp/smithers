@@ -185,9 +185,8 @@ That scaffolds `.smithers/` with files such as:
 
 | Directory / File | Contents |
 |---|---|
-| `.smithers/workflows/` | Public `create-workflow`, `create-skill`, and `docs-driven-development`, plus hidden system `init`, `post-failure`, and `upgrade` |
+| `.smithers/workflows/` | Public `create-workflow` and `create-skill`, plus the hidden system workflows needed by init, recovery, packs, evals, and upgrades |
 | `.smithers/prompts/` | Prompt templates for the curated authoring workflows |
-| `.smithers/lib/ddd/` | Portable helpers for the docs-driven-development workflow |
 | `.smithers/ui/` | Workflow-owned UIs and their complete local module closure |
 | `.smithers/package.json` | Local workflow project manifest with `smthrs` dependency |
 | `.smithers/tsconfig.json` | TypeScript config for JSX workflow authoring |
@@ -202,6 +201,31 @@ That scaffolds `.smithers/` with files such as:
 
 The 29 former defaults are not installed; they remain complete, copyable graph
 and UI examples under `examples/init-pack/` in the source repository.
+
+The default pack is deliberately compact. Specialized repository-management
+and demonstration workflows such as `docs-driven-development`,
+`smithers-repo-federation`, and `whole-foods-meal-planner` remain in the source
+repository and can be installed from a workflow pack; they are not copied into
+every consumer's `.smithers/` directory.
+
+## Optional CLI Surfaces
+
+The full-screen terminal monitor and code-review renderer are separate because
+their native OpenTUI and Mermaid stacks are not needed by the core runtime or
+ordinary CLI commands. Install only the surface you use:
+
+```bash
+bun add -d @smthrs/tui       # full-screen monitor
+bun add -d @smthrs/review    # smithers review
+```
+
+Without them, Smithers keeps the run alive and reports the exact package to
+install. Non-interactive commands such as `ps`, `inspect`, and `up --detach`
+continue to work.
+
+Likewise, `@smthrs/agents/mcp/createMcpToolset` loads the MCP client lazily. A
+project using that adapter must add `@modelcontextprotocol/sdk`; CLI-only and
+SDK-agent consumers do not pay for it through `@smthrs/agents`.
 
 To overwrite an existing scaffold:
 
@@ -3889,10 +3913,9 @@ packs[2]:
       exists: true
   - scope: global
     ...
-workflows[3]:
+workflows[2]:
   - id: create-workflow
   - id: create-skill
-  - id: docs-driven-development
 ```
 
 `ok: true` under `vcs` means jj or git resolved (if `false`, install one; see Installation). A non-empty `workflows[...]` count means the pack is in place. `workflow list` prints the same entries with full metadata.
@@ -11494,7 +11517,7 @@ Most applications should import from `smthrs`. The workspace packages below are 
 | `@smthrs/xstate` | XState v5 machines as durable derived control state for workflows: pure folds over output and signal rows | XState |
 | `@smthrs/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | CLI Agents |
 | `@smthrs/agent-eliza` | elizaOS `AgentRuntime` harness for Smithers; opt-in package that owns the `@elizaos/core` dependency | SDK Agents |
-| `@smthrs/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry | CLI Agents, SDK Agents |
+| `@smthrs/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry; its MCP adapter requires an explicit `@modelcontextprotocol/sdk` install | CLI Agents, SDK Agents |
 | `@smthrs/automate-site` | Private Cloudflare Worker deployment for the event-triggered durable workflows marketing site | Ecosystem |
 | `@smthrs/bug-worker` | Private Cloudflare Worker behind `bug.smithers.sh` that receives `smithers bug` reports and stores them in KV | CLI Overview |
 | `@smthrs/components` | JSX workflow components such as `Task`, `Workflow`, `Approval`, `Sandbox`, `Timer`, `Signal`, and control-flow components | Components |
@@ -11531,7 +11554,7 @@ Most applications should import from `smthrs`. The workspace packages below are 
 | `@smthrs/quota-dashboard` | Private Electrobun desktop dashboard for subscription quota headroom across registered Claude Code and Codex seats | CLI Agents |
 | `@smthrs/protocol` | Shared contracts, small value types, and protocol-level errors for cross-package use | Types, Errors |
 | `@smthrs/react-reconciler` | Custom React reconciler, host context, DOM renderer, DevTools preload, driver, and JSX runtime internals | Why React, Render Frame |
-| `@smthrs/review` | Review CLI package for code review, PR posting, and story-form HTML walkthrough generation, exposed through `bunx smthrs review` and the `smithers-review` bin | CLI Overview |
+| `@smthrs/review` | Optional review CLI package for code review, PR posting, and story-form HTML walkthrough generation; install it explicitly before `bunx smthrs review` | CLI Overview |
 | `@smthrs/sandbox` | Sandbox bundle, execute, and transport primitives used by the `Sandbox` component | Sandbox |
 | `@smthrs/scheduler` | Pure workflow state machine: task state, scheduler decisions, retry/cache policies, wait reasons, and workflow session services | Workflow State, Suspend and Resume |
 | `@smthrs/scorers` | Scorer definitions, LLM judges, batch execution, aggregation, persistence schema, and metrics | Evals, Evals Quickstart |
@@ -11547,7 +11570,7 @@ Most applications should import from `smthrs`. The workspace packages below are 
 | `@smthrs/testing` | Workflow simulation, scripted agents, render/task helpers, matchers, and durability scenario harnesses; its optional `smthrs` peer is used only by the shipped watch-pack campaign and by `runWorkflowScenario` when `runWorkflowFn` is not supplied | Testing workflows, Render Frame |
 | `@smthrs/time-travel` | Snapshots, diffs, forks, replay, timelines, VCS tags, rewind locks/audits, and time-travel metrics | Time Travel, Time Travel Quickstart |
 | `@smthrs/tool-context` | AsyncLocalStorage tool-execution context (run/node/idempotency keys, durability snapshot hook) shared by the engine and `smthrs` without a dependency cycle | Execution Model |
-| `@smthrs/tui` | Full-screen OpenTUI + React single-run monitor launched by `bunx smthrs up --interactive`; reuses the gateway-react hooks for live tree, graph, logs, timeline, and hijack views of one run | CLI Overview |
+| `@smthrs/tui` | Optional full-screen OpenTUI + React single-run monitor for `bunx smthrs up --interactive`; install explicitly when that surface is needed | CLI Overview |
 | `@smthrs/tui-ui` | opentui leaf component library for the terminal UI (`StatusPill`, `EmptyState`, `Keybar`, and more): props-in/callbacks-out, mirroring the `@smthrs/ui`/`gateway-ui` vocabulary | CLI Overview |
 | `@smthrs/ui-core` | Isomorphic headless product layer shared by the web app and the terminal UI: pure domain modules, Platform DI interfaces, and view-model hooks, with zero DOM/opentui/react-dom | Custom Workflow UI |
 | `@smthrs/ui-site` | Private Cloudflare Worker deployment for the local Smithers app and AI concierge marketing site | Ecosystem |

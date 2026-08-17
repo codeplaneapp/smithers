@@ -1319,6 +1319,7 @@ describe("tui helpers", () => {
     expect(monitorStartFailure(new Error("spawn bun ENOENT"), "run-1", "/l.log").message).toContain("spawn bun ENOENT");
     expect(monitorUnavailableFailure("run-1", "/l.log").code).toBe("TUI_MONITOR_UNAVAILABLE");
     expect(monitorUnavailableFailure("run-1", "/l.log").message).toContain("@smthrs/tui");
+    expect(monitorUnavailableFailure("run-1", "/l.log").message).toContain("npm install -D @smthrs/tui");
   });
 
   test("armLaunchCancellation tears the unannounced run down when clack exits the process", () => {

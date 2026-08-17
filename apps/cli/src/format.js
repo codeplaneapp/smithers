@@ -3,7 +3,7 @@
 // @smithers-type-exports-end
 
 import pc from "picocolors";
-import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
+import { sanitizeTerminalText } from "./sanitizeTerminalText.js";
 import { eventCategoryForType } from "./event-categories.js";
 /**
  * Format a timestamp as relative age: "2m ago", "1h ago", "3d ago"

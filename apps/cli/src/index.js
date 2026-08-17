@@ -13992,7 +13992,8 @@ async function main() {
     process.exit(4);
   }
   if (command === "review") {
-    const { runReviewCli } = await import("@smthrs/review/cli");
+    const { loadOptionalReviewCli } = await import("./optional-review.js");
+    const { runReviewCli } = await loadOptionalReviewCli();
     // Forward every arg except the `review` token itself — including any flags
     // that preceded it (e.g. `smithers --help review`), so the review CLI can
     // render its own help instead of eagerly starting a review.
