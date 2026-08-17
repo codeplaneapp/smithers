@@ -83,7 +83,7 @@ node -e "import('smthrs').then(() => console.log('ok'))"
   PGlite run keeps memory in a local sqlite sidecar; under Node there is no
   sqlite, so memory is routed at the run database instead. `MemoryStore` is
   built on a synchronous Drizzle sqlite handle, so on a Postgres-dialect database
-  memory operations fail rather than fall back — `saveNote`, `searchNotes`,
+  memory operations fail rather than fall back: `saveNote`, `searchNotes`,
   `enableNoteSearch`, and `deleteThread` fail loud with `DB_WRITE_FAILED` or
   `DB_QUERY_FAILED`, and the portable fact/thread/message operations surface a
   driver error of their own. That limit already applies to a Bun run that opens
