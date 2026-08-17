@@ -1517,6 +1517,14 @@ import {
 
 `createMcpToolset` is intentionally a deep import from `@smthrs/agents/mcp/createMcpToolset`; it is not re-exported from the top-level `smthrs` facade.
 
+The MCP client SDK is an optional peer of `@smthrs/agents`. Projects using `createMcpToolset` must install it explicitly:
+
+```bash
+bun add @modelcontextprotocol/sdk
+```
+
+Without it, `createMcpToolset` throws an error naming the package to install; consumers that do not use the MCP adapter never install it.
+
 ## Quick Start
 
 ```ts

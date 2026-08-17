@@ -50,10 +50,9 @@ packs[2]:
       exists: true
   - scope: global
     ...
-workflows[3]:
+workflows[2]:
   - id: create-workflow
   - id: create-skill
-  - id: docs-driven-development
 ```
 
 `ok: true` under `vcs` means jj or git resolved (if `false`, install one; see [Installation](/installation)). A non-empty `workflows[...]` count means the pack is in place. `workflow list` prints the same entries with full metadata.

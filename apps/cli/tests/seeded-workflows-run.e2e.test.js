@@ -428,14 +428,11 @@ test("every generated init-pack workflow starts and reaches a valid smoke state 
     "create-skill",
     "create-ui",
     "create-workflow",
-    "docs-driven-development",
     "eval-suite-run",
     "init",
     "post-failure",
     "share-pack",
-    "smithers-repo-federation",
     "upgrade",
-    "whole-foods-meal-planner",
   ]);
 });
 
@@ -455,9 +452,6 @@ for (const id of SEEDED_WORKFLOW_IDS) {
   // smoke harness has no way to seed one. It gets its own dedicated e2e
   // coverage instead: apps/cli/tests/eval-suite-run.e2e.test.js.
   if (id === "eval-suite-run") continue;
-  // These workflows need real operator-specific inputs/backends. Both get
-  // focused graph/typecheck coverage; the meal planner also has workflow tests.
-  if (id === "smithers-repo-federation" || id === "whole-foods-meal-planner") continue;
   if (id === "create-ui") {
     // create-ui's compliance loop became a HARD gate (author must report
     // verified=true and the gate independently checks the served Gateway
@@ -478,25 +472,6 @@ for (const id of SEEDED_WORKFLOW_IDS) {
         expect(result.exitCode).not.toBe(0);
         expect(result.json?.status).toBe("failed");
         expect(JSON.stringify(result.json?.error ?? {})).toContain("RALPH_MAX_REACHED");
-      },
-      SMOKE_TEST_TIMEOUT_MS,
-    );
-    continue;
-  }
-  if (id === "docs-driven-development") {
-    test(
-      `seeded workflow ${id} runs with fake agents and writes spec artifacts`,
-      () => {
-        const { repo, env } = initWorkflowPack();
-        const result = runSmithers(
-          ["workflow", "run", id, "--input", JSON.stringify({ runImplementation: false, maxRounds: 1, maxAgents: 1 })],
-          { cwd: repo.dir, format: "json", env, timeoutMs: SMOKE_COMMAND_TIMEOUT_MS },
-        );
-        expect(result.exitCode).toBe(0);
-        expect(result.json?.status).toBe("finished");
-        expect(repo.exists(".smithers/spec/features.json")).toBe(true);
-        expect(repo.exists(".smithers/spec/content/overview.md")).toBe(true);
-        expect(repo.exists(".smithers/docs-driven-development/bootstrap-latest.json")).toBe(true);
       },
       SMOKE_TEST_TIMEOUT_MS,
     );
