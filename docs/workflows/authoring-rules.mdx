@@ -3,9 +3,9 @@ title: Workflow Authoring Rules
 description: The rules that repeatedly cost authoring runs when learned at runtime instead of before render. Read this before hand-authoring a workflow.
 ---
 
-These five rules keep biting workflow-authoring agents at runtime, hours after
+These six rules keep biting workflow-authoring agents at runtime, hours after
 writing a workflow, instead of surfacing at the first `bunx smthrs graph`.
-Each is documented elsewhere in full; this page collects all five in one read
+Each is documented elsewhere in full; this page collects all six in one read
 before you write JSX, instead of hitting them one at a time across failed
 runs. See
 [the postmortem](https://github.com/smithersai/smithers/blob/main/research/workflow-authoring-friction-postmortem.md)
@@ -119,6 +119,20 @@ green-looking in the repo indefinitely while contributing zero coverage.
 `node scripts/check-smithers-test-script.mjs` (part of the root `pnpm test`
 gate) catches this; run it after adding a test file, or just add the path
 yourself.
+
+## 6. Use the isolated-clone helper; do not gate a hot source tree
+
+For bundle-producing work, call `createIsolatedClone({ repo, at })` from
+`smthrs` or `@smthrs/vcs`. Only the pinned commit must remain available while
+the clone is created. Do not repeatedly assert equality of the shared working
+tree, index, refs, JJ bookmarks, or object inventory: concurrent work can
+legitimately change all of them after isolation.
+
+Use `clone.run()` so commands execute at the clone root with the documented
+scrubbed environment, then `clone.emitBundle()` for a patch, Git bundle,
+manifest, and fresh-import proof. JJ-colocated repos can have multi-megabyte
+ref inventories; use `listGitRefs()` rather than synchronous `git for-each-ref`
+with Node's default `maxBuffer`. See [VCS Helper Reference](/reference/vcs-helpers).
 
 ## See also
 

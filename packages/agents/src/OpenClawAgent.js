@@ -59,7 +59,7 @@ export class OpenClawAgent extends BaseCliAgent {
    * @param {OpenClawAgentOptions} [opts]
    */
   constructor(opts = {}) {
-    super(opts);
+    super(opts, "OpenClawAgent");
     this.opts = opts;
     this.capabilities = createOpenClawCapabilityRegistry();
   }

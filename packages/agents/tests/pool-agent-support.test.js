@@ -203,7 +203,7 @@ process.stdout.write(JSON.stringify({ args: { success: false }, name: "exit", ty
   });
 
   test("reports stderr when pool exits before emitting output", () => {
-    const agent = new PoolAgent({ sessionId: "failed-session" });
+    const agent = new PoolAgent();
     const interpreter = agent.createOutputInterpreter();
 
     expect(interpreter.onStdoutLine?.("")).toEqual([]);

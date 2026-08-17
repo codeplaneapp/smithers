@@ -44,7 +44,7 @@ export class ForgeAgent extends BaseCliAgent {
    * @param {ForgeAgentOptions} [opts]
    */
   constructor(opts = {}) {
-    super(opts);
+    super(opts, "ForgeAgent");
     this.opts = opts;
     this.capabilities = createForgeCapabilityRegistry();
   }

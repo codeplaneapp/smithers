@@ -130,7 +130,7 @@ export class CursorAgent extends BaseCliAgent {
    * @param {CursorAgentOptions} [opts]
    */
   constructor(opts = {}) {
-    super(opts);
+    super(opts, "CursorAgent");
     this.opts = opts;
     this.capabilities = createCursorCapabilityRegistry(opts);
   }

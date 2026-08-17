@@ -67,6 +67,12 @@ run row says `waiting-event` but no node does, `runState.blocked.kind` is
 detailed unblock command and may report other blockers such as
 `retries-exhausted` or `dependency-failed`.
 </Warning>
+
+When a fail-closed composite such as `<TryCatchFinally>` terminates a run, its
+run-level `SCHEDULER_ERROR` includes the nearest completed output row's
+`summary` and `blockers` fields. The leaf diagnostic is therefore visible in
+`up`, `inspect`, and autopsy output without a separate node/output lookup.
+
 <Warning>
 **`finished` does not always mean clean success.** Run-level lifecycle status is
 binary (`finished` or `failed`); a run fails only on an *unhandled* task

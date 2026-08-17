@@ -2603,15 +2603,20 @@ function checkVcsHelperDocsMatchCurrentExports() {
   ]);
   const expectedRuntimeExports = [
     "captureWorkspaceSnapshot",
+    "createIsolatedClone",
     "findVcsRoot",
     "getJjPointer",
+    "gitDirtyPaths",
     "isJjRepo",
+    "isolatedCloneEnvironment",
+    "listGitRefs",
     "parseWorkspaceSnapshot",
     "resolveBundledJjPath",
     "resolveGitBinary",
     "resolveJjBinary",
     "revertToJjPointer",
     "runJj",
+    "runStreamingProcess",
     "runsVersion",
     "vcsToolingStatus",
     "workspaceAdd",
@@ -2666,7 +2671,7 @@ function checkVcsHelperDocsMatchCurrentExports() {
     [VCS_DECLARATIONS, "type WorkspaceSnapshot = {"],
     [
       VCS_DECLARATIONS,
-      "export { type JjRevertResult, type RunJjOptions, type RunJjResult, type VcsToolingStatus, type WorkspaceAddOptions, type WorkspaceInfo, type WorkspaceResult, type WorkspaceSnapshot, captureWorkspaceSnapshot,",
+      "export { type GitRef, type IsolatedCloneCapsule, type JjRevertResult, type RunJjOptions, type RunJjResult, type StreamingProcessResult, type VcsToolingStatus, type WorkspaceAddOptions, type WorkspaceInfo, type WorkspaceResult, type WorkspaceSnapshot, captureWorkspaceSnapshot, createIsolatedClone,",
     ],
     [
       SMITHERS_FACADE_DECLARATIONS,

@@ -360,6 +360,19 @@ type SmithersWorkflowOptions$1 = {
     alertPolicy?: SmithersAlertPolicy$1;
     cache?: boolean;
     /**
+     * Environment visible while the CLI renders and executes this workflow.
+     * Module top-level evaluation occurs before this declaration can be read.
+     * Ambient variables are inherited by default. `inherit: false` starts empty;
+     * `allow` then copies exact names or `PREFIX*` matches, `deny` removes exact
+     * names or prefix matches, and `set` is applied last.
+     */
+    environment?: {
+        inherit?: boolean;
+        allow?: string[];
+        deny?: string[];
+        set?: Record<string, string>;
+    };
+    /**
      * Per-workflow opt-out for the default-on post-failure autopsy. When `false`,
      * a failure of this workflow never auto-launches the `post-failure` autopsy.
      * Use it for workflows that fail deliberately (e.g. fault-injection e2e

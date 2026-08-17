@@ -93,7 +93,7 @@ export class CodexAgent extends BaseCliAgent {
    * @param {CodexAgentOptions} [opts]
    */
   constructor(opts = {}) {
-    super(opts);
+    super(opts, "CodexAgent");
     this.opts = opts;
     this.capabilities = createCodexCapabilityRegistry(opts);
     // Native structured output (`codex exec --output-schema`) constrains the
