@@ -19,6 +19,7 @@ export * from "./approvals.js";
 export * from "./child-workflow.js";
 export * from "./events.js";
 export * from "./workflow-file.js";
+export * from "./workflow-tool.js";
 export * from "./createDocWatcher.js";
 export * from "./getDefinedToolMetadata.js";
 export * from "./human-requests.js";

@@ -7339,6 +7339,20 @@ async function legacyExecuteTask(
                 }
               : {}),
           };
+          /** @type {any} */
+          const agentTaskRuntime = {
+            runId,
+            stepId: desc.nodeId,
+            attempt: attemptNo,
+            iteration: desc.iteration,
+            rootDir: taskRoot,
+            signal: taskSignal,
+            pauseSignal,
+            db,
+            heartbeat: (data) => queueHeartbeat(data),
+            lastHeartbeat: previousHeartbeat,
+            acceptWorkflowChange: toolConfig.acceptWorkflowChange === true,
+          };
           try {
             result = await raceAgentCallAbort(
               runPromisePreservingFailure(
@@ -7413,7 +7427,7 @@ async function legacyExecuteTask(
                           outputSchema: desc.outputSchema,
                         });
                       };
-                      return runWithToolContext(toolCtx, doGenerate);
+                      return withTaskRuntime(agentTaskRuntime, () => runWithToolContext(toolCtx, doGenerate));
                     },
                     catch: (error) => error,
                   }),

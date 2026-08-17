@@ -321,6 +321,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   const parentContext = await loadParentRunContext(parentWorkflow?.db ?? runtime.db, parentRunId);
   const childConfig = {
     ...parentContext.config,
+    ...options.config,
     // Explicit child ids cannot be recognized from the generated `:child:`
     // grammar. Persist workspace lineage so destructive operations still
     // share the parent's rewind lease.
@@ -356,7 +357,9 @@ export async function executeChildWorkflow(parentWorkflow, options) {
       resume,
       acceptWorkflowChange,
       parentRunId,
-      ...(parentContext.startedBy ? { startedBy: parentContext.startedBy } : {}),
+      ...((options.startedBy ?? parentContext.startedBy)
+        ? { startedBy: options.startedBy ?? parentContext.startedBy }
+        : {}),
       config: childConfig,
       rootDir: options.rootDir,
       workflowPath,
@@ -380,7 +383,9 @@ export async function executeChildWorkflow(parentWorkflow, options) {
       resume,
       acceptWorkflowChange,
       parentRunId,
-      ...(parentContext.startedBy ? { startedBy: parentContext.startedBy } : {}),
+      ...((options.startedBy ?? parentContext.startedBy)
+        ? { startedBy: options.startedBy ?? parentContext.startedBy }
+        : {}),
       config: childConfig,
       rootDir: options.rootDir,
       workflowPath,

@@ -1,4 +1,5 @@
 import type { ChildWorkflowDefinition } from "./ChildWorkflowDefinition.ts";
+import type { RunStartedBy } from "@smthrs/driver/RunStartedBy";
 
 export type ChildWorkflowExecuteOptions = {
   workflow: ChildWorkflowDefinition;
@@ -13,4 +14,8 @@ export type ChildWorkflowExecuteOptions = {
   workflowPath?: string;
   signal?: AbortSignal;
   pauseSignal?: AbortSignal;
+  /** Additional durable child-run provenance/configuration. */
+  config?: Record<string, unknown>;
+  /** Override inherited launch attribution for this child. */
+  startedBy?: RunStartedBy;
 };

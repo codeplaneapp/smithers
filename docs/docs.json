@@ -310,6 +310,7 @@
                 "group": "Engine",
                 "pages": [
                   "components/subflow",
+                  "components/workflow-tool",
                   "components/wait-for-event",
                   "components/signal",
                   "components/timer",

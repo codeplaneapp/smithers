@@ -842,6 +842,8 @@ type WorkflowDefinition$1<Schema = unknown> = {
     db?: unknown;
     build: (ctx: WorkflowSmithersCtx<Schema>) => WorkflowElement;
     opts: SmithersWorkflowOptions;
+    /** Zod input contract used for run validation and workflow-tool parameters. */
+    inputSchema?: z.ZodTypeAny;
     /** Memory bridge selected by `openSmithersBackend`, when available. */
     memoryService?: MemoryRuntimeService$1;
     schemaRegistry?: Map<string, SchemaRegistryEntry>;

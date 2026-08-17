@@ -1478,6 +1478,9 @@ importers:
       '@smthrs/vcs':
         specifier: workspace:*
         version: link:../vcs
+      ai:
+        specifier: ^7.0.10
+        version: 7.0.10(zod@4.4.3)
       diff:
         specifier: ^9.0.0
         version: 9.0.0

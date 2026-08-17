@@ -71,15 +71,16 @@ export function defineTool(options) {
       inputSchema: zodSchema(options.schema),
       execute: async (args) => {
         const toolContext = getToolContext();
+        const seq = toolContext ? nextToolSeq(toolContext) : 0;
         const definedContext = {
           ...defaultToolContext(),
           ...toolContext,
           idempotencyKey: getToolIdempotencyKey(toolContext),
           toolName: options.name,
+          toolCallSeq: seq,
           sideEffect,
           idempotent,
         };
-        const seq = toolContext ? nextToolSeq(toolContext) : 0;
         const idempotencyKey = options.execute.length >= 2 ? definedContext.idempotencyKey : null;
         const journalProvenance = {
           kind: "tool",

@@ -23,6 +23,49 @@ import {
 } from "smthrs";
 ```
 
+## workflowTool
+
+Expose a workflow to an SDK agent as a Zod-validated AI SDK tool.
+
+```ts
+function workflowTool<Schema>(options: {
+  name: string;
+  workflow: SmithersWorkflow<Schema>;
+  description?: string;
+  maxDepth?: number;
+  timeoutMs?: number;
+}): Tool<Schema["input"], unknown>;
+```
+
+<ParamField path="name" type="string" required>
+  Tool name. Use 1 to 64 letters, numbers, underscores, or hyphens.
+</ParamField>
+
+<ParamField path="workflow" type="SmithersWorkflow" required>
+  Workflow to run. Its Zod input schema becomes the tool parameter schema and
+  its declared workflow output becomes the successful tool result.
+</ParamField>
+
+<ParamField path="description" type="string">
+  Description shown to the agent. Defaults to the workflow description,
+  readable name, then `Run NAME workflow`.
+</ParamField>
+
+<ParamField path="maxDepth" type="number" default="4">
+  Maximum nested workflow-tool depth. Accepted range: 1 through 32.
+</ParamField>
+
+<ParamField path="timeoutMs" type="number" default="300000">
+  Maximum wall time for one invocation, including its local queue wait.
+  Cancellation of the calling task also cancels the child. Accepted range: 1
+  through 2147483647.
+</ParamField>
+
+The call creates an observable child run and waits for active execution. Parked
+children return `WORKFLOW_TOOL_SUSPENDED` with their run ID instead of blocking.
+See [Workflow tools](/components/workflow-tool) for lifecycle, concurrency,
+failure, and recursion semantics.
+
 ## defineTool
 
 Wrap a Zod-validated `execute` function into a durable AI SDK tool, passed to

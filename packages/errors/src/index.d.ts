@@ -393,7 +393,7 @@ declare namespace smithersErrorDefinitions {
         let details_23: string;
         export { details_23 as details };
     }
-    namespace SANDBOX_EXECUTION_FAILED {
+    namespace WORKFLOW_TOOL_CHILD_FAILED {
         let category_30: string;
         export { category_30 as category };
         let when_30: string;
@@ -401,7 +401,7 @@ declare namespace smithersErrorDefinitions {
         let details_24: string;
         export { details_24 as details };
     }
-    namespace TASK_HEARTBEAT_TIMEOUT {
+    namespace WORKFLOW_TOOL_SUSPENDED {
         let category_31: string;
         export { category_31 as category };
         let when_31: string;
@@ -409,7 +409,7 @@ declare namespace smithersErrorDefinitions {
         let details_25: string;
         export { details_25 as details };
     }
-    namespace AGENT_WORKER_EXITED {
+    namespace WORKFLOW_TOOL_DEPTH_EXCEEDED {
         let category_32: string;
         export { category_32 as category };
         let when_32: string;
@@ -417,7 +417,7 @@ declare namespace smithersErrorDefinitions {
         let details_26: string;
         export { details_26 as details };
     }
-    namespace HEARTBEAT_PAYLOAD_TOO_LARGE {
+    namespace WORKFLOW_TOOL_TIMEOUT {
         let category_33: string;
         export { category_33 as category };
         let when_33: string;
@@ -425,7 +425,7 @@ declare namespace smithersErrorDefinitions {
         let details_27: string;
         export { details_27 as details };
     }
-    namespace HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE {
+    namespace SANDBOX_EXECUTION_FAILED {
         let category_34: string;
         export { category_34 as category };
         let when_34: string;
@@ -433,45 +433,45 @@ declare namespace smithersErrorDefinitions {
         let details_28: string;
         export { details_28 as details };
     }
-    namespace TASK_ABORTED {
+    namespace TASK_HEARTBEAT_TIMEOUT {
         let category_35: string;
         export { category_35 as category };
         let when_35: string;
         export { when_35 as when };
+        let details_29: string;
+        export { details_29 as details };
     }
-    namespace RUN_CANCELLED {
+    namespace AGENT_WORKER_EXITED {
         let category_36: string;
         export { category_36 as category };
         let when_36: string;
         export { when_36 as when };
-        let details_29: string;
-        export { details_29 as details };
+        let details_30: string;
+        export { details_30 as details };
     }
-    namespace RUN_NOT_RESUMABLE {
+    namespace HEARTBEAT_PAYLOAD_TOO_LARGE {
         let category_37: string;
         export { category_37 as category };
         let when_37: string;
         export { when_37 as when };
-        let details_30: string;
-        export { details_30 as details };
+        let details_31: string;
+        export { details_31 as details };
     }
-    namespace RUN_OWNER_ALIVE {
+    namespace HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE {
         let category_38: string;
         export { category_38 as category };
         let when_38: string;
         export { when_38 as when };
-        let details_31: string;
-        export { details_31 as details };
+        let details_32: string;
+        export { details_32 as details };
     }
-    namespace RUN_STILL_RUNNING {
+    namespace TASK_ABORTED {
         let category_39: string;
         export { category_39 as category };
         let when_39: string;
         export { when_39 as when };
-        let details_32: string;
-        export { details_32 as details };
     }
-    namespace RUN_RESUME_CLAIM_LOST {
+    namespace RUN_CANCELLED {
         let category_40: string;
         export { category_40 as category };
         let when_40: string;
@@ -479,7 +479,7 @@ declare namespace smithersErrorDefinitions {
         let details_33: string;
         export { details_33 as details };
     }
-    namespace RUN_RESUME_CLAIM_FAILED {
+    namespace RUN_NOT_RESUMABLE {
         let category_41: string;
         export { category_41 as category };
         let when_41: string;
@@ -487,7 +487,7 @@ declare namespace smithersErrorDefinitions {
         let details_34: string;
         export { details_34 as details };
     }
-    namespace RUN_RESUME_ACTIVATION_FAILED {
+    namespace RUN_OWNER_ALIVE {
         let category_42: string;
         export { category_42 as category };
         let when_42: string;
@@ -495,7 +495,7 @@ declare namespace smithersErrorDefinitions {
         let details_35: string;
         export { details_35 as details };
     }
-    namespace AUTO_RESUME_GAVE_UP {
+    namespace RUN_STILL_RUNNING {
         let category_43: string;
         export { category_43 as category };
         let when_43: string;
@@ -503,7 +503,7 @@ declare namespace smithersErrorDefinitions {
         let details_36: string;
         export { details_36 as details };
     }
-    namespace RUN_HIJACKED {
+    namespace RUN_RESUME_CLAIM_LOST {
         let category_44: string;
         export { category_44 as category };
         let when_44: string;
@@ -511,7 +511,7 @@ declare namespace smithersErrorDefinitions {
         let details_37: string;
         export { details_37 as details };
     }
-    namespace CONTINUATION_STATE_TOO_LARGE {
+    namespace RUN_RESUME_CLAIM_FAILED {
         let category_45: string;
         export { category_45 as category };
         let when_45: string;
@@ -519,475 +519,507 @@ declare namespace smithersErrorDefinitions {
         let details_38: string;
         export { details_38 as details };
     }
-    namespace INVALID_CONTINUATION_STATE {
+    namespace RUN_RESUME_ACTIVATION_FAILED {
         let category_46: string;
         export { category_46 as category };
         let when_46: string;
         export { when_46 as when };
+        let details_39: string;
+        export { details_39 as details };
     }
-    namespace RALPH_MAX_REACHED {
+    namespace AUTO_RESUME_GAVE_UP {
         let category_47: string;
         export { category_47 as category };
         let when_47: string;
         export { when_47 as when };
-        let details_39: string;
-        export { details_39 as details };
+        let details_40: string;
+        export { details_40 as details };
     }
-    namespace SCHEDULER_ERROR {
+    namespace RUN_HIJACKED {
         let category_48: string;
         export { category_48 as category };
         let when_48: string;
         export { when_48 as when };
+        let details_41: string;
+        export { details_41 as details };
     }
-    namespace SESSION_ERROR {
+    namespace CONTINUATION_STATE_TOO_LARGE {
         let category_49: string;
         export { category_49 as category };
         let when_49: string;
         export { when_49 as when };
+        let details_42: string;
+        export { details_42 as details };
     }
-    namespace TASK_STALLED {
+    namespace INVALID_CONTINUATION_STATE {
         let category_50: string;
         export { category_50 as category };
         let when_50: string;
         export { when_50 as when };
-        let details_40: string;
-        export { details_40 as details };
     }
-    namespace TASK_ID_REQUIRED {
+    namespace RALPH_MAX_REACHED {
         let category_51: string;
         export { category_51 as category };
         let when_51: string;
         export { when_51 as when };
+        let details_43: string;
+        export { details_43 as details };
     }
-    namespace TASK_MISSING_OUTPUT {
+    namespace SCHEDULER_ERROR {
         let category_52: string;
         export { category_52 as category };
         let when_52: string;
         export { when_52 as when };
-        let details_41: string;
-        export { details_41 as details };
     }
-    namespace TASK_EMPTY_PROMPT {
+    namespace SESSION_ERROR {
         let category_53: string;
         export { category_53 as category };
         let when_53: string;
         export { when_53 as when };
-        let details_42: string;
-        export { details_42 as details };
     }
-    namespace WORKFLOW_RENDER_FAILED {
+    namespace TASK_STALLED {
         let category_54: string;
         export { category_54 as category };
         let when_54: string;
         export { when_54 as when };
-        let details_43: string;
-        export { details_43 as details };
+        let details_44: string;
+        export { details_44 as details };
     }
-    namespace DUPLICATE_ID {
+    namespace TASK_ID_REQUIRED {
         let category_55: string;
         export { category_55 as category };
         let when_55: string;
         export { when_55 as when };
-        let details_44: string;
-        export { details_44 as details };
     }
-    namespace NESTED_LOOP {
+    namespace TASK_MISSING_OUTPUT {
         let category_56: string;
         export { category_56 as category };
         let when_56: string;
         export { when_56 as when };
+        let details_45: string;
+        export { details_45 as details };
     }
-    namespace WORKTREE_EMPTY_PATH {
+    namespace TASK_EMPTY_PROMPT {
         let category_57: string;
         export { category_57 as category };
         let when_57: string;
         export { when_57 as when };
+        let details_46: string;
+        export { details_46 as details };
     }
-    namespace MDX_PRELOAD_INACTIVE {
+    namespace WORKFLOW_RENDER_FAILED {
         let category_58: string;
         export { category_58 as category };
         let when_58: string;
         export { when_58 as when };
+        let details_47: string;
+        export { details_47 as details };
     }
-    namespace CONTEXT_OUTSIDE_WORKFLOW {
+    namespace DUPLICATE_ID {
         let category_59: string;
         export { category_59 as category };
         let when_59: string;
         export { when_59 as when };
+        let details_48: string;
+        export { details_48 as details };
     }
-    namespace MISSING_OUTPUT {
+    namespace NESTED_LOOP {
         let category_60: string;
         export { category_60 as category };
         let when_60: string;
         export { when_60 as when };
-        let details_45: string;
-        export { details_45 as details };
     }
-    namespace DEP_NOT_SATISFIED {
+    namespace WORKTREE_EMPTY_PATH {
         let category_61: string;
         export { category_61 as category };
         let when_61: string;
         export { when_61 as when };
-        let details_46: string;
-        export { details_46 as details };
     }
-    namespace BOUND_STALE {
+    namespace MDX_PRELOAD_INACTIVE {
         let category_62: string;
         export { category_62 as category };
         let when_62: string;
         export { when_62 as when };
-        let details_47: string;
-        export { details_47 as details };
     }
-    namespace ASPECT_BUDGET_EXCEEDED {
+    namespace CONTEXT_OUTSIDE_WORKFLOW {
         let category_63: string;
         export { category_63 as category };
         let when_63: string;
         export { when_63 as when };
-        let details_48: string;
-        export { details_48 as details };
     }
-    namespace APPROVAL_OUTSIDE_TASK {
+    namespace MISSING_OUTPUT {
         let category_64: string;
         export { category_64 as category };
         let when_64: string;
         export { when_64 as when };
+        let details_49: string;
+        export { details_49 as details };
     }
-    namespace APPROVAL_OPTIONS_REQUIRED {
+    namespace DEP_NOT_SATISFIED {
         let category_65: string;
         export { category_65 as category };
         let when_65: string;
         export { when_65 as when };
+        let details_50: string;
+        export { details_50 as details };
     }
-    namespace WORKFLOW_MISSING_DEFAULT {
+    namespace BOUND_STALE {
         let category_66: string;
         export { category_66 as category };
         let when_66: string;
         export { when_66 as when };
+        let details_51: string;
+        export { details_51 as details };
     }
-    namespace WORKFLOW_NOT_BUILT {
+    namespace ASPECT_BUDGET_EXCEEDED {
         let category_67: string;
         export { category_67 as category };
         let when_67: string;
         export { when_67 as when };
+        let details_52: string;
+        export { details_52 as details };
     }
-    namespace TOOL_PATH_INVALID {
+    namespace APPROVAL_OUTSIDE_TASK {
         let category_68: string;
         export { category_68 as category };
         let when_68: string;
         export { when_68 as when };
     }
-    namespace TOOL_PATH_ESCAPE {
+    namespace APPROVAL_OPTIONS_REQUIRED {
         let category_69: string;
         export { category_69 as category };
         let when_69: string;
         export { when_69 as when };
     }
-    namespace TOOL_FILE_TOO_LARGE {
+    namespace WORKFLOW_MISSING_DEFAULT {
         let category_70: string;
         export { category_70 as category };
         let when_70: string;
         export { when_70 as when };
     }
-    namespace TOOL_CONTENT_TOO_LARGE {
+    namespace WORKFLOW_NOT_BUILT {
         let category_71: string;
         export { category_71 as category };
         let when_71: string;
         export { when_71 as when };
     }
-    namespace TOOL_PATCH_TOO_LARGE {
+    namespace TOOL_PATH_INVALID {
         let category_72: string;
         export { category_72 as category };
         let when_72: string;
         export { when_72 as when };
     }
-    namespace TOOL_PATCH_FAILED {
+    namespace TOOL_PATH_ESCAPE {
         let category_73: string;
         export { category_73 as category };
         let when_73: string;
         export { when_73 as when };
     }
-    namespace TOOL_NETWORK_DISABLED {
+    namespace TOOL_FILE_TOO_LARGE {
         let category_74: string;
         export { category_74 as category };
         let when_74: string;
         export { when_74 as when };
     }
-    namespace TOOL_GIT_REMOTE_DISABLED {
+    namespace TOOL_CONTENT_TOO_LARGE {
         let category_75: string;
         export { category_75 as category };
         let when_75: string;
         export { when_75 as when };
     }
-    namespace TOOL_COMMAND_FAILED {
+    namespace TOOL_PATCH_TOO_LARGE {
         let category_76: string;
         export { category_76 as category };
         let when_76: string;
         export { when_76 as when };
     }
-    namespace TOOL_GREP_FAILED {
+    namespace TOOL_PATCH_FAILED {
         let category_77: string;
         export { category_77 as category };
         let when_77: string;
         export { when_77 as when };
     }
-    namespace AGENT_CLI_ERROR {
+    namespace TOOL_NETWORK_DISABLED {
         let category_78: string;
         export { category_78 as category };
         let when_78: string;
         export { when_78 as when };
     }
-    namespace AGENT_QUOTA_EXCEEDED {
+    namespace TOOL_GIT_REMOTE_DISABLED {
         let category_79: string;
         export { category_79 as category };
         let when_79: string;
         export { when_79 as when };
-        let details_49: string;
-        export { details_49 as details };
     }
-    namespace AGENT_CONFIG_INVALID {
+    namespace TOOL_COMMAND_FAILED {
         let category_80: string;
         export { category_80 as category };
         let when_80: string;
         export { when_80 as when };
     }
-    namespace AGENT_RPC_FILE_ARGS {
+    namespace TOOL_GREP_FAILED {
         let category_81: string;
         export { category_81 as category };
         let when_81: string;
         export { when_81 as when };
     }
-    namespace AGENT_BUILD_COMMAND {
+    namespace AGENT_CLI_ERROR {
         let category_82: string;
         export { category_82 as category };
         let when_82: string;
         export { when_82 as when };
     }
-    namespace AGENT_DIAGNOSTIC_TIMEOUT {
+    namespace AGENT_QUOTA_EXCEEDED {
         let category_83: string;
         export { category_83 as category };
         let when_83: string;
         export { when_83 as when };
+        let details_53: string;
+        export { details_53 as details };
     }
-    namespace ACCOUNT_INVALID {
+    namespace AGENT_CONFIG_INVALID {
         let category_84: string;
         export { category_84 as category };
         let when_84: string;
         export { when_84 as when };
     }
-    namespace ACCOUNT_NOT_FOUND {
+    namespace AGENT_RPC_FILE_ARGS {
         let category_85: string;
         export { category_85 as category };
         let when_85: string;
         export { when_85 as when };
     }
-    namespace ACCOUNT_DUPLICATE_LABEL {
+    namespace AGENT_BUILD_COMMAND {
         let category_86: string;
         export { category_86 as category };
         let when_86: string;
         export { when_86 as when };
     }
-    namespace ACCOUNTS_FILE_INVALID {
+    namespace AGENT_DIAGNOSTIC_TIMEOUT {
         let category_87: string;
         export { category_87 as category };
         let when_87: string;
         export { when_87 as when };
     }
-    namespace DB_MISSING_COLUMNS {
+    namespace ACCOUNT_INVALID {
         let category_88: string;
         export { category_88 as category };
         let when_88: string;
         export { when_88 as when };
     }
-    namespace DB_REQUIRES_BUN_SQLITE {
+    namespace ACCOUNT_NOT_FOUND {
         let category_89: string;
         export { category_89 as category };
         let when_89: string;
         export { when_89 as when };
     }
-    namespace DB_QUERY_FAILED {
+    namespace ACCOUNT_DUPLICATE_LABEL {
         let category_90: string;
         export { category_90 as category };
         let when_90: string;
         export { when_90 as when };
     }
-    namespace DB_WRITE_FAILED {
+    namespace ACCOUNTS_FILE_INVALID {
         let category_91: string;
         export { category_91 as category };
         let when_91: string;
         export { when_91 as when };
     }
-    namespace PG_POOL_SATURATED {
+    namespace DB_MISSING_COLUMNS {
         let category_92: string;
         export { category_92 as category };
         let when_92: string;
         export { when_92 as when };
-        let details_50: string;
-        export { details_50 as details };
     }
-    namespace SMITHERS_MIGRATION_REQUIRED {
+    namespace DB_REQUIRES_BUN_SQLITE {
         let category_93: string;
         export { category_93 as category };
         let when_93: string;
         export { when_93 as when };
-        let details_51: string;
-        export { details_51 as details };
     }
-    namespace SMITHERS_BACKEND_CONFLICT {
+    namespace DB_QUERY_FAILED {
         let category_94: string;
         export { category_94 as category };
         let when_94: string;
         export { when_94 as when };
-        let details_52: string;
-        export { details_52 as details };
     }
-    namespace STORAGE_ERROR {
+    namespace DB_WRITE_FAILED {
         let category_95: string;
         export { category_95 as category };
         let when_95: string;
         export { when_95 as when };
     }
-    namespace INTERNAL_ERROR {
+    namespace PG_POOL_SATURATED {
         let category_96: string;
         export { category_96 as category };
         let when_96: string;
         export { when_96 as when };
+        let details_54: string;
+        export { details_54 as details };
     }
-    namespace PROCESS_ABORTED {
+    namespace SMITHERS_MIGRATION_REQUIRED {
         let category_97: string;
         export { category_97 as category };
         let when_97: string;
         export { when_97 as when };
-        let details_53: string;
-        export { details_53 as details };
+        let details_55: string;
+        export { details_55 as details };
     }
-    namespace PROCESS_TIMEOUT {
+    namespace SMITHERS_BACKEND_CONFLICT {
         let category_98: string;
         export { category_98 as category };
         let when_98: string;
         export { when_98 as when };
-        let details_54: string;
-        export { details_54 as details };
+        let details_56: string;
+        export { details_56 as details };
     }
-    namespace PROCESS_IDLE_TIMEOUT {
+    namespace STORAGE_ERROR {
         let category_99: string;
         export { category_99 as category };
         let when_99: string;
         export { when_99 as when };
-        let details_55: string;
-        export { details_55 as details };
     }
-    namespace PROCESS_SPAWN_FAILED {
+    namespace INTERNAL_ERROR {
         let category_100: string;
         export { category_100 as category };
         let when_100: string;
         export { when_100 as when };
-        let details_56: string;
-        export { details_56 as details };
     }
-    namespace TASK_RUNTIME_UNAVAILABLE {
+    namespace PROCESS_ABORTED {
         let category_101: string;
         export { category_101 as category };
         let when_101: string;
         export { when_101 as when };
+        let details_57: string;
+        export { details_57 as details };
     }
-    namespace SCHEMA_CHANGE_HOT {
+    namespace PROCESS_TIMEOUT {
         let category_102: string;
         export { category_102 as category };
         let when_102: string;
         export { when_102 as when };
+        let details_58: string;
+        export { details_58 as details };
     }
-    namespace HOT_OVERLAY_FAILED {
+    namespace PROCESS_IDLE_TIMEOUT {
         let category_103: string;
         export { category_103 as category };
         let when_103: string;
         export { when_103 as when };
+        let details_59: string;
+        export { details_59 as details };
     }
-    namespace HOT_RELOAD_INVALID_MODULE {
+    namespace PROCESS_SPAWN_FAILED {
         let category_104: string;
         export { category_104 as category };
         let when_104: string;
         export { when_104 as when };
+        let details_60: string;
+        export { details_60 as details };
     }
-    namespace SCORER_FAILED {
+    namespace TASK_RUNTIME_UNAVAILABLE {
         let category_105: string;
         export { category_105 as category };
         let when_105: string;
         export { when_105 as when };
     }
-    namespace WORKFLOW_EXISTS {
+    namespace SCHEMA_CHANGE_HOT {
         let category_106: string;
         export { category_106 as category };
         let when_106: string;
         export { when_106 as when };
     }
-    namespace CLI_DB_NOT_FOUND {
+    namespace HOT_OVERLAY_FAILED {
         let category_107: string;
         export { category_107 as category };
         let when_107: string;
         export { when_107 as when };
     }
-    namespace CLI_AGENT_UNSUPPORTED {
+    namespace HOT_RELOAD_INVALID_MODULE {
         let category_108: string;
         export { category_108 as category };
         let when_108: string;
         export { when_108 as when };
     }
-    namespace PI_HTTP_ERROR {
+    namespace SCORER_FAILED {
         let category_109: string;
         export { category_109 as category };
         let when_109: string;
         export { when_109 as when };
     }
-    namespace EXTERNAL_BUILD_FAILED {
+    namespace WORKFLOW_EXISTS {
         let category_110: string;
         export { category_110 as category };
         let when_110: string;
         export { when_110 as when };
-        let details_57: string;
-        export { details_57 as details };
     }
-    namespace SCHEMA_DISCOVERY_FAILED {
+    namespace CLI_DB_NOT_FOUND {
         let category_111: string;
         export { category_111 as category };
         let when_111: string;
         export { when_111 as when };
-        let details_58: string;
-        export { details_58 as details };
     }
-    namespace OPENAPI_SPEC_LOAD_FAILED {
+    namespace CLI_AGENT_UNSUPPORTED {
         let category_112: string;
         export { category_112 as category };
         let when_112: string;
         export { when_112 as when };
     }
-    namespace OPENAPI_OPERATION_NOT_FOUND {
+    namespace PI_HTTP_ERROR {
         let category_113: string;
         export { category_113 as category };
         let when_113: string;
         export { when_113 as when };
     }
-    namespace OPENAPI_TOOL_EXECUTION_FAILED {
+    namespace EXTERNAL_BUILD_FAILED {
         let category_114: string;
         export { category_114 as category };
         let when_114: string;
         export { when_114 as when };
+        let details_61: string;
+        export { details_61 as details };
     }
-    namespace SINGLE_RUNNER_BUSY {
+    namespace SCHEMA_DISCOVERY_FAILED {
         let category_115: string;
         export { category_115 as category };
         let when_115: string;
         export { when_115 as when };
-        let details_59: string;
-        export { details_59 as details };
+        let details_62: string;
+        export { details_62 as details };
     }
-    namespace SINGLE_RUNNER_CLOSED {
+    namespace OPENAPI_SPEC_LOAD_FAILED {
         let category_116: string;
         export { category_116 as category };
         let when_116: string;
         export { when_116 as when };
-        let details_60: string;
-        export { details_60 as details };
+    }
+    namespace OPENAPI_OPERATION_NOT_FOUND {
+        let category_117: string;
+        export { category_117 as category };
+        let when_117: string;
+        export { when_117 as when };
+    }
+    namespace OPENAPI_TOOL_EXECUTION_FAILED {
+        let category_118: string;
+        export { category_118 as category };
+        let when_118: string;
+        export { when_118 as when };
+    }
+    namespace SINGLE_RUNNER_BUSY {
+        let category_119: string;
+        export { category_119 as category };
+        let when_119: string;
+        export { when_119 as when };
+        let details_63: string;
+        export { details_63 as details };
+    }
+    namespace SINGLE_RUNNER_CLOSED {
+        let category_120: string;
+        export { category_120 as category };
+        let when_120: string;
+        export { when_120 as when };
+        let details_64: string;
+        export { details_64 as details };
     }
 }
 

@@ -148,6 +148,26 @@ export const smithersErrorDefinitions = {
     when: "A child or builder workflow exits unsuccessfully without surfacing a typed error payload.",
     details: "{ status }",
   },
+  WORKFLOW_TOOL_CHILD_FAILED: {
+    category: "engine",
+    when: "A workflow invoked by an agent tool ends unsuccessfully.",
+    details: "{ toolName, childRunId, status, childError? }",
+  },
+  WORKFLOW_TOOL_SUSPENDED: {
+    category: "engine",
+    when: "A workflow invoked by an agent tool parks for approval, human input, an event, a timer, quota, or an explicit pause.",
+    details: "{ toolName, childRunId, status }",
+  },
+  WORKFLOW_TOOL_DEPTH_EXCEEDED: {
+    category: "engine",
+    when: "Nested workflow-tool calls exceed the configured recursion depth.",
+    details: "{ toolName, maxDepth, parentRunId }",
+  },
+  WORKFLOW_TOOL_TIMEOUT: {
+    category: "engine",
+    when: "A workflow invoked by an agent tool exceeds its wall-time limit.",
+    details: "{ toolName, childRunId, timeoutMs }",
+  },
   SANDBOX_EXECUTION_FAILED: {
     category: "engine",
     when: "Sandbox setup or execution fails before a more specific sandbox error can be emitted.",
