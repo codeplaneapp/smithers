@@ -1541,8 +1541,10 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch, owner) 
           runJj(["rebase", "-d", base], { cwd: worktreePath }).pipe(Effect.provide(getPlatformLayer())),
         );
         if (rebaseRes.code !== 0) {
-          console.warn(
-            `[smithers] worktree sync: jj rebase -d ${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`,
+          logWarning(
+            "worktree sync rebase failed",
+            { vcs: "jj", base, exitCode: rebaseRes.code, error: rebaseRes.stderr || "unknown error" },
+            "engine:worktree",
           );
         } else {
           syncCache.recordRebase(worktreePath, baseTip);
@@ -1560,8 +1562,10 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch, owner) 
       if (syncCache.shouldRebase(worktreePath, baseTip)) {
         const rebaseRes = await runGitCommand(worktreePath, ["rebase", `origin/${base}`]);
         if (rebaseRes.code !== 0) {
-          console.warn(
-            `[smithers] worktree sync: git rebase origin/${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`,
+          logWarning(
+            "worktree sync rebase failed",
+            { vcs: "git", base, exitCode: rebaseRes.code, error: rebaseRes.stderr || "unknown error" },
+            "engine:worktree",
           );
         } else {
           syncCache.recordRebase(worktreePath, baseTip);
@@ -1718,8 +1722,10 @@ async function reapFinishedRunWorktrees(adapter, runId, rootDir, keepWorktrees) 
       );
     }
     for (const entry of retained) {
-      console.warn(
-        `[smithers] keeping worktree ${entry.path}: it holds uncommitted or unpushed work. Reclaim it with \`smithers worktree prune --force\` once the work is saved.`,
+      logWarning(
+        "keeping worktree with unsaved work",
+        { runId, path: entry.path, recovery: "smithers worktree prune --force" },
+        "engine:worktree",
       );
     }
   } catch {
