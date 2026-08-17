@@ -25,6 +25,7 @@ type RunState =
   | "failed"
   | "cancelled"
   | "succeeded"
+  | "succeeded-with-failures"
   | "unknown";
 
 type AgentCliActionKind =

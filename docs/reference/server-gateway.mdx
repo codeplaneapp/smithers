@@ -23,10 +23,9 @@ import { startServer, createServeApp, Gateway } from "smthrs";
 ```
 
 <Note>
-`createServeApp` needs a `SmithersDb` adapter and a loaded `SmithersWorkflow`,
-both from your workflow module (`new SmithersDb(workflow.db)`). `Gateway` is
-constructed with `new Gateway(opts)`, then you `register()` workflows and
-`listen()`.
+  `createServeApp` needs a `SmithersDb` adapter and a loaded `SmithersWorkflow`, both from your workflow module (`new
+  SmithersDb(workflow.db)`). `Gateway` is constructed with `new Gateway(opts)`, then you `register()` workflows and
+  `listen()`.
 </Note>
 
 ## startServer
@@ -47,22 +46,21 @@ function startServer(opts?: ServerOptions): import("node:http").Server;
       Database handle. Enables `GET /v1/runs` and approvals listing when set.
     </ParamField>
     <ParamField path="authToken" type="string">
-      Bearer token for every route but `/health`; falls back to
-      `process.env.SMITHERS_API_KEY`, disabled when neither is set.
+      Bearer token for every route but `/health`; falls back to `process.env.SMITHERS_API_KEY`, disabled when neither is
+      set.
     </ParamField>
     <ParamField path="maxBodyBytes" type="number" default="1048576">
       Maximum accepted request body size; larger bodies get `PAYLOAD_TOO_LARGE`.
     </ParamField>
     <ParamField path="rootDir" type="string">
-      Sandbox root workflow paths and tools resolve against; paths outside it
-      are rejected with `WORKFLOW_PATH_OUTSIDE_ROOT`.
+      Sandbox root workflow paths and tools resolve against; paths outside it are rejected with
+      `WORKFLOW_PATH_OUTSIDE_ROOT`.
     </ParamField>
     <ParamField path="allowNetwork" type="boolean" default="false">
       Allow network access from the built-in `bash` tool.
     </ParamField>
     <ParamField path="headersTimeout" type="number" default="30000">
-      Maximum time (ms) the HTTP parser may take to receive complete request
-      headers. Mitigates slowloris.
+      Maximum time (ms) the HTTP parser may take to receive complete request headers. Mitigates slowloris.
     </ParamField>
     <ParamField path="requestTimeout" type="number" default="60000">
       Maximum time (ms) to receive and parse a single request, body included.
@@ -71,10 +69,9 @@ function startServer(opts?: ServerOptions): import("node:http").Server;
 </ParamField>
 
 <ResponseField name="http.Server" type="object">
-  A listening Node `http.Server`, with `headersTimeout`/`requestTimeout`
-  applied to bound slow header/body uploads. Full route table (run
-  start/resume/cancel, SSE events, frames, approvals, signals, `/metrics`)
-  lives in [Server Mode](/integrations/server).
+  A listening Node `http.Server`, with `headersTimeout`/`requestTimeout` applied to bound slow header/body uploads. Full
+  route table (run start/resume/cancel, SSE events, frames, approvals, signals, `/metrics`) lives in [Server
+  Mode](/integrations/server).
 </ResponseField>
 
 ```ts
@@ -112,9 +109,8 @@ function createServeApp(opts: ServeOptions): import("hono").Hono;
       Shared cancellation controller. Aborting it cancels the served run.
     </ParamField>
     <ParamField path="authToken" type="string">
-      Bearer token for every route but `/health`; falls back to
-      `SMITHERS_API_KEY`, disabled when unset. Accepts `Authorization: Bearer`
-      or `x-smithers-key`.
+      Bearer token for every route but `/health`; falls back to `SMITHERS_API_KEY`, disabled when unset. Accepts
+      `Authorization: Bearer` or `x-smithers-key`.
     </ParamField>
     <ParamField path="metrics" type="boolean" default="true">
       Expose `/metrics` (Prometheus exposition).
@@ -123,8 +119,8 @@ function createServeApp(opts: ServeOptions): import("hono").Hono;
 </ParamField>
 
 <ResponseField name="Hono" type="object">
-  A Hono app. Routes (`/health`, run status, SSE events, approvals, signals,
-  `/metrics`) are documented in [Serve Mode](/integrations/serve).
+  A Hono app. Routes (`/health`, run status, SSE events, approvals, signals, `/metrics`) are documented in [Serve
+  Mode](/integrations/serve).
 </ResponseField>
 
 ```ts
@@ -160,13 +156,14 @@ class Gateway {
   register(key: string, workflow: SmithersWorkflow, options?: GatewayRegisterOptions): this;
   extend(namespace: string, definition: unknown): this;
   listen(options?: { port?: number; host?: string; path?: string }): Promise<import("node:http").Server>;
-  close(): Promise<void>;
+  close(options?: { killRuns?: boolean }): Promise<void>;
 }
 ```
 
 `register`, `extend`, and the constructor are chainable. `listen` defaults to
-port `7331`; pass `path` for a Unix socket. `close` aborts active runs, drains
-inflight work, and tears down connections and the scheduler.
+port `7331`; pass `path` for a Unix socket. `close` parks active runs durably as
+`paused`, drains inflight work, and tears down connections and the scheduler.
+Pass `{ killRuns: true }` to cancel active runs instead.
 
 ```ts
 import { Gateway } from "smthrs";
@@ -197,17 +194,14 @@ await gateway.listen({ port: 7331 });
       WebSocket heartbeat interval; also clamps the cron poll interval (1-15s).
     </ParamField>
     <ParamField path="auth" type="GatewayAuthConfig">
-      Authentication mode; omit to leave the gateway unauthenticated. See
-      [auth](#gatewayauthconfig) below.
+      Authentication mode; omit to leave the gateway unauthenticated. See [auth](#gatewayauthconfig) below.
     </ParamField>
     <ParamField path="ui" type="GatewayUiConfig">
-      Custom gateway-level UI; `true` mounts the built-in operator console at
-      `/`. See [UI config](#ui-config) below.
+      Custom gateway-level UI; `true` mounts the built-in operator console at `/`. See [UI config](#ui-config) below.
     </ParamField>
     <ParamField path="workspaceRoot" type="string">
-      Absolute path to the workspace root holding `.smithers/` and
-      `smithers.db`; disk-backed registry reads (e.g. the `listPrompts` RPC)
-      resolve against it. Defaults to `process.cwd()`.
+      Absolute path to the workspace root holding `.smithers/` and `smithers.db`; disk-backed registry reads (e.g. the
+      `listPrompts` RPC) resolve against it. Defaults to `process.cwd()`.
     </ParamField>
     <ParamField path="operatorUi" type="GatewayOperatorUiConfig | false" default='{ path: "/console" }'>
       Built-in operator browser console; set `false` to disable.
@@ -228,15 +222,13 @@ await gateway.listen({ port: 7331 });
       Per-run replay window for run event streams, in frames.
     </ParamField>
     <ParamField path="outOfProcessEventBridge" type="boolean" default="true">
-      Bridges persisted run events from the workspace DB into live streams
-      for runs executed by another process.
+      Bridges persisted run events from the workspace DB into live streams for runs executed by another process.
     </ParamField>
     <ParamField path="outOfProcessEventBridgePollMs" type="number" default="1000">
       Poll interval (ms) for the out-of-process event bridge.
     </ParamField>
     <ParamField path="headersTimeout" type="number" default="30000">
-      Maximum time (ms) to receive complete request headers, applied to the
-      Node HTTP server on `listen()`.
+      Maximum time (ms) to receive complete request headers, applied to the Node HTTP server on `listen()`.
     </ParamField>
     <ParamField path="requestTimeout" type="number" default="60000">
       Maximum time (ms) to receive and parse a single request.
@@ -276,6 +268,7 @@ expose `ctx.auth = { triggeredBy, role, scopes, createdAt }`.
         Revocation time (epoch ms); revoked tokens rejected.
       </ParamField>
     </Expandable>
+
   </ParamField>
   <ParamField path="allowedOrigins" type="string[]" default="[]">
     Origin allowlist (defense-in-depth). `[]` disables the check; when
@@ -441,6 +434,7 @@ chain. A schedule writes a cron row keyed `gateway:<key>`; cron-fired runs get
         JSON path to the sub-payload delivered with the signal.
       </ParamField>
     </Expandable>
+
   </ParamField>
   <ParamField path="run" type="GatewayWebhookRunConfig">
     Start a new run from a verified webhook.
@@ -453,6 +447,7 @@ chain. A schedule writes a cron row keyed `gateway:<key>`; cron-fired runs get
         JSON path to the sub-payload used as run input.
       </ParamField>
     </Expandable>
+
   </ParamField>
 </Expandable>
 
@@ -473,12 +468,11 @@ chain. A schedule writes a cron row keyed `gateway:<key>`; cron-fired runs get
 </ParamField>
 
 <ResponseField name="listen" type="Promise<http.Server>">
-  Resolves once the server is bound and the scheduler and event bridge have
-  started.
+  Resolves once the server is bound and the scheduler and event bridge have started.
 </ResponseField>
 <ResponseField name="close" type="Promise<void>">
-  Aborts active runs, awaits inflight work, closes connections, and stops the
-  scheduler and watchers.
+  Parks active runs durably as `paused`, awaits inflight work, closes connections, and stops the scheduler and watchers.
+  Set `killRuns` to `true` to cancel active runs instead. The drain remains an I/O barrier in both modes.
 </ResponseField>
 
 **Source** [`gateway.js`](https://github.com/smithersai/smithers/blob/main/packages/server/src/gateway.js) · [`GatewayOptions.ts`](https://github.com/smithersai/smithers/blob/main/packages/server/src/GatewayOptions.ts) · [`GatewayAuthConfig.ts`](https://github.com/smithersai/smithers/blob/main/packages/server/src/GatewayAuthConfig.ts) · **Tests** [`gateway.test.jsx`](https://github.com/smithersai/smithers/blob/main/packages/server/tests/gateway.test.jsx) · **See also** [Gateway](/integrations/gateway), [Control-plane deployment](/deployment/control-plane), [`launchRun`](/rpc/launch-run), [Gateway client](/reference/gateway-client)

@@ -10,6 +10,8 @@
 /** @typedef {import("./gatewayRpcTypes.ts").ResumeRunResponse} ResumeRunResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").CancelRunRequest} CancelRunRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").CancelRunResponse} CancelRunResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").CancelledRunOutcome} CancelledRunOutcome */
+/** @typedef {import("./gatewayRpcTypes.ts").CancelledProcess} CancelledProcess */
 /** @typedef {import("./gatewayRpcTypes.ts").PauseRunRequest} PauseRunRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").PauseRunResponse} PauseRunResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").HijackRunRequest} HijackRunRequest */

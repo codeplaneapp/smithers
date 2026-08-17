@@ -133,7 +133,7 @@ type AgentSessionTranscriptEvent = {
 };
 
 type RunStatus = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "finished" | "continued" | "failed" | "cancelled";
-type RunState = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "unknown";
+type RunState = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "succeeded-with-failures" | "unknown";
 type AgentCliActionKind = "turn" | "command" | "tool" | "file_change" | "web_search" | "todo_list" | "reasoning" | "warning" | "note";
 type AgentCliActionPhase = "started" | "updated" | "completed";
 type AgentCliEventLevel = "debug" | "info" | "warning" | "error";

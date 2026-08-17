@@ -205,6 +205,11 @@ type RunAuthContext = {
 | Suspended | `waiting-approval`, `waiting-event`, `waiting-timer`, `waiting-quota`, `paused` | The run is nonterminal and can resume. |
 | Terminal | `finished`, `continued`, `failed`, `cancelled` | This run will not schedule more work. A `continued` run points to its successor through `nextRunId`. |
 
+`RunState` is the derived outcome/health view. A persisted `finished` run maps
+to `succeeded` when clean and `succeeded-with-failures` when its durable
+`RunFinished` event records tolerated child failures. Both are terminal;
+`RunStatus` remains `finished` for compatibility.
+
 `TaskState` is the persisted, detailed lifecycle for an individual task.
 Import it from `@smthrs/scheduler/TaskState`. `NodeStatus` is a
 separate six-value display palette exported by
@@ -313,6 +318,8 @@ type RunResult = {
   readonly output?: unknown;
   readonly error?: unknown;
   readonly nextRunId?: string;      // set when the run continued-as-new
+  readonly failedChildren?: number; // tolerated failures; finished only, omitted when zero
+  readonly failedChildKeys?: readonly string[]; // nodeId::iteration keys
 };
 
 type RunStatus =
@@ -1828,6 +1835,7 @@ type GatewayAuthConfig =
     }
   | {
       mode: "trusted-proxy";
+      trustedProxies: string[];      // REQUIRED: peer IPs / CIDR blocks, or "unix"
       trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
       allowedOrigins?: string[];     // default [] (no Origin allowlist)
       defaultRole?: string;          // default "operator"

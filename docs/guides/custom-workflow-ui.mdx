@@ -485,6 +485,8 @@ The Gateway auth mode determines which branch preserves per-user identity. In `m
 
 The same shape works behind any reverse proxy (Cloudflare, Cloudflare Access, Caddy, nginx, an internal API gateway): terminate session, strip identity headers off the request, set them from the validated session, forward to the Gateway. Trusted-proxy mode is **only safe behind something you control** that strips and rewrites identity headers; the Gateway docs call this out explicitly.
 
+Stripping headers at the proxy is necessary but not sufficient, because it does nothing about a client that skips the proxy entirely. Set `auth.trustedProxies` to the peer addresses, CIDR blocks, or `"unix"` socket the proxy connects from: the Gateway reads identity headers only from those peers, answers `403 UNTRUSTED_PROXY_PEER` to anything else, and refuses to start in trusted-proxy mode without the list. See [Gateway auth](/integrations/gateway).
+
 ## Local dev quick reference
 
 ```bash

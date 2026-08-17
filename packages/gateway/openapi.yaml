@@ -835,7 +835,7 @@ paths:
     post:
       operationId: cancelRun
       summary: "Cancel Run"
-      description: "Cancel an active run."
+      description: "Cancel a run AND every transitive child-workflow descendant as one recursive operation. Time-travel forks are spared; continue-as-new continuations are not."
       tags:
         - "Gateway RPC"
       security:
@@ -957,6 +957,76 @@ paths:
                         required:
                           - kind
                         additionalProperties: false
+                      cancelledAttempts:
+                        type: integer
+                        minimum: 0
+                        description: "Attempts closed across the whole cancelled subtree."
+                      descendants:
+                        type: array
+                        description: "Every descendant the cascade reached, excluding the root run."
+                        items:
+                          type: object
+                          description: "What recursive cancellation did to one run in the cancelled subtree."
+                          properties:
+                            runId:
+                              type: string
+                              description: "Stable run identifier."
+                            depth:
+                              type: integer
+                              minimum: 0
+                              description: "Distance from the requested root run."
+                            action:
+                              type: string
+                              enum:
+                                - cancel-requested
+                                - cancelled
+                                - already-terminal
+                                - missing
+                          required:
+                            - runId
+                            - depth
+                            - action
+                          additionalProperties: false
+                      terminatedOwners:
+                        type: array
+                        description: "Detached owner processes terminated by the cascade."
+                        items:
+                          type: object
+                          description: "A process tree cancellation terminated so work cannot outlive its run."
+                          properties:
+                            runId:
+                              type:
+                                - string
+                                - "null"
+                              description: "Run the process belonged to."
+                            pid:
+                              type: integer
+                              minimum: 1
+                              description: "Terminated process id."
+                          required:
+                            - runId
+                            - pid
+                          additionalProperties: false
+                      terminatedAgents:
+                        type: array
+                        description: "Agent process trees terminated for the cancelled subtree."
+                        items:
+                          type: object
+                          description: "A process tree cancellation terminated so work cannot outlive its run."
+                          properties:
+                            runId:
+                              type:
+                                - string
+                                - "null"
+                              description: "Run the process belonged to."
+                            pid:
+                              type: integer
+                              minimum: 1
+                              description: "Terminated process id."
+                          required:
+                            - runId
+                            - pid
+                          additionalProperties: false
                     required:
                       - runId
                       - won
@@ -980,6 +1050,20 @@ paths:
                     clientPid: 4321
                     requestId: cancelRun-1
                     clientIdentity: user:operator
+                  cancelledAttempts: 2
+                  descendants:
+                    -
+                      runId: run_01:child:review:0
+                      depth: 1
+                      action: cancelled
+                  terminatedOwners:
+                    -
+                      runId: run_01:child:review:0
+                      pid: 4711
+                  terminatedAgents:
+                    -
+                      runId: run_01:child:review:0
+                      pid: 4712
         400:
           description: "The request shape is invalid."
           content:
@@ -1018,6 +1102,7 @@ paths:
                           - InvalidRequest
                           - Unauthorized
                           - Forbidden
+                          - RunNotFound
                           - RUN_NOT_ACTIVE
                           - Internal
                       message:
@@ -1079,6 +1164,7 @@ paths:
                           - InvalidRequest
                           - Unauthorized
                           - Forbidden
+                          - RunNotFound
                           - RUN_NOT_ACTIVE
                           - Internal
                       message:
@@ -1140,6 +1226,69 @@ paths:
                           - InvalidRequest
                           - Unauthorized
                           - Forbidden
+                          - RunNotFound
+                          - RUN_NOT_ACTIVE
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        404:
+          description: "The run does not exist."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
                           - RUN_NOT_ACTIVE
                           - Internal
                       message:
@@ -1201,6 +1350,7 @@ paths:
                           - InvalidRequest
                           - Unauthorized
                           - Forbidden
+                          - RunNotFound
                           - RUN_NOT_ACTIVE
                           - Internal
                       message:
@@ -1262,6 +1412,7 @@ paths:
                           - InvalidRequest
                           - Unauthorized
                           - Forbidden
+                          - RunNotFound
                           - RUN_NOT_ACTIVE
                           - Internal
                       message:
@@ -22293,6 +22444,76 @@ paths:
                         required:
                           - kind
                         additionalProperties: false
+                      cancelledAttempts:
+                        type: integer
+                        minimum: 0
+                        description: "Attempts closed across the whole cancelled subtree."
+                      descendants:
+                        type: array
+                        description: "Every descendant the cascade reached, excluding the root run."
+                        items:
+                          type: object
+                          description: "What recursive cancellation did to one run in the cancelled subtree."
+                          properties:
+                            runId:
+                              type: string
+                              description: "Stable run identifier."
+                            depth:
+                              type: integer
+                              minimum: 0
+                              description: "Distance from the requested root run."
+                            action:
+                              type: string
+                              enum:
+                                - cancel-requested
+                                - cancelled
+                                - already-terminal
+                                - missing
+                          required:
+                            - runId
+                            - depth
+                            - action
+                          additionalProperties: false
+                      terminatedOwners:
+                        type: array
+                        description: "Detached owner processes terminated by the cascade."
+                        items:
+                          type: object
+                          description: "A process tree cancellation terminated so work cannot outlive its run."
+                          properties:
+                            runId:
+                              type:
+                                - string
+                                - "null"
+                              description: "Run the process belonged to."
+                            pid:
+                              type: integer
+                              minimum: 1
+                              description: "Terminated process id."
+                          required:
+                            - runId
+                            - pid
+                          additionalProperties: false
+                      terminatedAgents:
+                        type: array
+                        description: "Agent process trees terminated for the cancelled subtree."
+                        items:
+                          type: object
+                          description: "A process tree cancellation terminated so work cannot outlive its run."
+                          properties:
+                            runId:
+                              type:
+                                - string
+                                - "null"
+                              description: "Run the process belonged to."
+                            pid:
+                              type: integer
+                              minimum: 1
+                              description: "Terminated process id."
+                          required:
+                            - runId
+                            - pid
+                          additionalProperties: false
                     required:
                       - runId
                       - won

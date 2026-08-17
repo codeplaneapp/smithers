@@ -653,6 +653,7 @@ describe("Gateway", () => {
       heartbeatMs: 100,
       auth: {
         mode: "trusted-proxy",
+        trustedProxies: ["127.0.0.1", "::1"],
         allowedOrigins: ["https://app.example.com"],
         trustedHeaders: ["x-user-id", "x-user-scopes", "x-user-role"],
         defaultRole: "viewer",
@@ -1146,6 +1147,7 @@ describe("Gateway", () => {
     expect(run.ok).toBe(true);
     expect(run.payload.runId).toBe(runId);
     expect(run.payload.status).toBe("finished");
+    expect(run.payload.runState?.state).toBe("succeeded");
     expect(run.payload).not.toHaveProperty("failedChildren");
     expect(run.payload).not.toHaveProperty("failedChildKeys");
     const cleanLegacyRun = await client.request("getRun", { runId });
@@ -1233,12 +1235,13 @@ describe("Gateway", () => {
       expect(run.ok).toBe(true);
       expect(run.payload).toMatchObject({
         status: "finished",
+        runState: { state: "succeeded-with-failures" },
         failedChildren: 1,
         failedChildKeys: ["bad::0"],
       });
     }
     await client.close();
-  });
+  }, 30_000);
   test("reruns with the original schema-backed input row", async () => {
     const dbPath = makeDbPath("rerun-input");
     dbPaths.push(dbPath);

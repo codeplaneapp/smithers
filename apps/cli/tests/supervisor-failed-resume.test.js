@@ -138,6 +138,9 @@ describe("supervisor bounded failed-resume recovery (issue #1361)", () => {
     // durable diagnostics instead.
     const giveUpSummary = await poll();
     expect(giveUpSummary.resumedCount).toBe(0);
+    // The poll must report the abandonment: "skipped" alone is indistinguishable
+    // from an ordinary no-op, which is what let the supervisor exit 0.
+    expect(giveUpSummary.gaveUpRunIds).toEqual(["run-loop"]);
     expect(spawned).toHaveLength(3);
     const run = await adapter.getRun("run-loop");
     expect(run?.status).toBe("failed");
@@ -157,11 +160,20 @@ describe("supervisor bounded failed-resume recovery (issue #1361)", () => {
     expect(skips.map((skip) => skip.reason)).toContain("resume-attempts-exhausted");
     const autoResumes = await eventPayloads(adapter, "run-loop", "RunAutoResumed");
     expect(autoResumes.map((event) => event.resumeAttempt)).toEqual([1, 2, 3]);
+    const alerts = await adapter.listAlerts(10);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].policyName).toBe("supervisor_auto_resume_gave_up");
+    expect(alerts[0].runId).toBe("run-loop");
+    expect(alerts[0].severity).toBe("critical");
+    expect(alerts[0].status).toBe("firing");
+    expect(alerts[0].message).toContain("Auto-resume failed 3 consecutive times");
+    expect(JSON.parse(alerts[0].detailsJson ?? "null")?.attempts).toBe(3);
 
     // The failed run leaves the stale-running sweep entirely.
     now += 60_000;
     const idleSummary = await poll();
     expect(idleSummary.staleCount).toBe(0);
+    expect(idleSummary.gaveUpRunIds).toEqual([]);
     expect(spawned).toHaveLength(3);
     sqlite.close();
   });
@@ -197,6 +209,38 @@ describe("supervisor bounded failed-resume recovery (issue #1361)", () => {
     const errorInfo = JSON.parse(run?.errorJson ?? "null");
     expect(errorInfo?.code).toBe("AUTO_RESUME_GAVE_UP");
     expect(errorInfo?.details?.logTail).toBeUndefined();
+    sqlite.close();
+  });
+
+  test("raises the durable give-up alert for a maximum-length run ID", async () => {
+    const { adapter, sqlite } = createTestDb();
+    const runId = "r".repeat(256);
+    await adapter.insertRun(
+      runRow(runId, {
+        runtimeOwnerId: "supervisor:prior#a3",
+      }),
+    );
+
+    const summary = await Effect.runPromise(
+      supervisorPollEffect({
+        adapter,
+        staleThresholdMs: 30_000,
+        supervisorId: "bounds-sup",
+        deps: {
+          now: () => START,
+          workflowExists: () => true,
+          spawnResumeDetached: () => {
+            throw new Error("must NOT spawn once resume attempts are exhausted");
+          },
+        },
+      }),
+    );
+
+    expect(summary.gaveUpRunIds).toEqual([runId]);
+    const alerts = await adapter.listAlerts(10);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].runId).toBe(runId);
+    expect(alerts[0].alertId.length).toBeLessThanOrEqual(256);
     sqlite.close();
   });
 

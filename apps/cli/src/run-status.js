@@ -247,6 +247,7 @@ export function parseFrameDependsOn(xmlJson) {
  *   recentWindowMs?: number;
  *   deps?: Map<string, { dependsOn: string[]; continueOnFail: boolean }> | null;
  *   liveness?: RunStateView | null;
+ *   failedChildren?: number;
  *   exhaustedLoops?: Array<{ id: string; iteration?: number; maxIterations?: number | null }> | null;
  * }} params
  * @returns {RunStatusSummary}
@@ -260,6 +261,7 @@ export function summarizeRunStatus(params) {
     recentWindowMs = RUN_STATUS_RECENT_WINDOW_MS,
     deps = null,
     liveness = null,
+    failedChildren = 0,
     exhaustedLoops = null,
   } = params;
 
@@ -454,6 +456,13 @@ export function summarizeRunStatus(params) {
       const extra =
         exhaustedLoops.length > MAX_BOTTLENECK_NODES ? `, +${exhaustedLoops.length - MAX_BOTTLENECK_NODES} more` : "";
       reason = `run finished, but loop ${loopDescriptions.join(", ")}${extra} exhausted without converging`;
+    } else if (failedChildren > 0 || liveness?.state === "succeeded-with-failures") {
+      verdict = "degraded";
+      const count = failedChildren > 0 ? failedChildren : counts.failed + counts.stalled;
+      reason =
+        count > 0
+          ? `run finished with ${count} tolerated failed ${count === 1 ? "child" : "children"}`
+          : "run finished with tolerated child failures";
     } else {
       verdict = "done";
       reason =
@@ -770,6 +779,10 @@ export async function buildRunStatusSummary(adapter, runId, options = {}) {
       ...ONESHOT_CONTROL_EVENT_TYPES.map((type) => adapter.listEventsByType(runId, type)),
     ]);
   const finishedPayload = parseEventPayloadJson(finishedEvents?.at(-1)?.payloadJson);
+  const failedChildren =
+    Number.isSafeInteger(finishedPayload?.failedChildren) && finishedPayload.failedChildren > 0
+      ? finishedPayload.failedChildren
+      : 0;
   const exhaustedLoops = Array.isArray(finishedPayload?.exhaustedLoops)
     ? finishedPayload.exhaustedLoops.filter((loop) => loop && typeof loop.id === "string")
     : null;
@@ -779,6 +792,7 @@ export async function buildRunStatusSummary(adapter, runId, options = {}) {
     attempts: attempts ?? [],
     deps: parseFrameDependsOn(lastFrame?.xmlJson),
     liveness,
+    failedChildren,
     exhaustedLoops,
     ...(options.nowMs != null ? { nowMs: options.nowMs } : {}),
     ...(options.recentWindowMs != null ? { recentWindowMs: options.recentWindowMs } : {}),

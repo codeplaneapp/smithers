@@ -158,6 +158,7 @@ import {
   makeCancellationAbortReason,
   withCancellationSource,
 } from "./cancellation-attribution.js";
+import { isRunParkAbort } from "./run-parking.js";
 /** @typedef {import("@smthrs/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
 /** @typedef {import("@smthrs/driver/RunOptions").RunOptions} RunOptions */
@@ -9335,6 +9336,45 @@ async function runWorkflowBodyDriver(workflow, opts) {
       ...options,
       attribution: cancellationAttributionFromAbortSignal(runAbortController.signal),
     });
+  const finalizeCurrentRunPark = async () => {
+    await waitForAbortedTasksToSettle();
+    const parked = await Effect.runPromise(
+      adapter.updateRunIfNotCancelledOwned(runId, runtimeOwnerId, {
+        status: "paused",
+        finishedAtMs: null,
+        heartbeatAtMs: null,
+        runtimeOwnerId: null,
+        pauseRequestedAtMs: null,
+        cancelRequestedAtMs: null,
+        hijackRequestedAtMs: null,
+        hijackTarget: null,
+        errorJson: null,
+      }),
+    );
+    if (!parked) {
+      const authoritative = await Effect.runPromise(adapter.getRun(runId));
+      if (
+        authoritative?.status === "cancelled" ||
+        authoritative?.status === "canceled" ||
+        authoritative?.cancelRequestedAtMs
+      ) {
+        const cancellation = await finalizeCurrentRunCancellation();
+        await annotateRunSpan({ status: cancellation.terminalStatus ?? cancellation.status });
+        return { runId, status: cancellation.terminalStatus ?? cancellation.status };
+      }
+      return { runId, status: authoritative?.status ?? "failed" };
+    }
+    await Effect.runPromise(
+      eventBus.emitEventWithPersist({
+        type: "RunStatusChanged",
+        runId,
+        status: "paused",
+        timestampMs: nowMs(),
+      }),
+    );
+    await annotateRunSpan({ status: "paused", parkReason: "host-stopped" });
+    return { runId, status: "paused" };
+  };
   const wakeLock = acquireCaffeinate();
   let alertRuntime = null;
   let runOwnedByCurrentProcess = false;
@@ -10729,6 +10769,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
       return { runId, status: "paused" };
     }
     if (result.status === "cancelled") {
+      if (isRunParkAbort(runAbortController.signal)) {
+        return finalizeCurrentRunPark();
+      }
       const hijackError = hijackState.completion
         ? {
             code: "RUN_HIJACKED",
@@ -11536,6 +11579,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
         },
         "engine:run",
       );
+      if (isRunParkAbort(runAbortController.signal)) {
+        return finalizeCurrentRunPark();
+      }
       const hijackError = hijackState.completion
         ? {
             code: "RUN_HIJACKED",

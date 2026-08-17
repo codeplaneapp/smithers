@@ -65,6 +65,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from "smthrs/ui";
 import { Chip, MonitorToolbar, RunLifecycleControls, RunRailRow, RunsPagination, ToneDot } from "./monitorShell.tsx";
 import { processPatch, type CodeViewItem } from "@pierre/diffs";
@@ -87,7 +91,9 @@ import {
   diagnoseRun,
   diffPatchesOf,
   diffSummaryOf,
+  eventLogViewState,
   eventViewFor,
+  executionTreeViewState,
   filterRuns,
   formatDiffSummary,
   formatDurationMs,
@@ -115,6 +121,7 @@ import {
   nodeAttemptHistoryRowsOf,
   nodeAttemptHistoryView,
   nodeErrorOf,
+  nodeOutputViewState,
   nodeStateRowsOf,
   nodeSummaryEligible,
   nodeTimingsOf,
@@ -130,7 +137,6 @@ import {
   runProgress,
   runsLandingState,
   runUsageChipOf,
-  runsViewState,
   RUNS_PAGE_SIZE,
   scoreRowsOf,
   scoresForNode,
@@ -158,7 +164,9 @@ import {
   type PromScrape,
   type RunRow,
   type MonitorConnectionStatus,
+  type RunsLandingState,
   type RunsTableSort,
+  type RunsViewState,
   type ScoreRow,
   type Tone,
   type TreeNodeLike,
@@ -335,6 +343,9 @@ function ConnectionBadge() {
   const view = connectionViewFor(status);
   return (
     <span className="mon-conn-wrap">
+      <span className="sui-sr-only" role="status" aria-live="polite" aria-atomic="true">
+        Connection status: {view.label}. {view.hint}
+      </span>
       <Badge
         variant={badgeVariantForTone(view.tone)}
         className="mon-conn"
@@ -624,15 +635,18 @@ function ApprovalsInbox({
       <h2 className="mon-kicker">
         Approvals <span className="mon-count">{approvals.length}</span>
       </h2>
-      {approvals.map((approval) => (
-        <ApprovalCard
-          key={approvalKey(approval)}
-          approval={approval}
-          busy={decidingKey === approvalKey(approval)}
-          decide={decide}
-          onSelectRun={onSelectRun}
-        />
-      ))}
+      <ul className="mon-plain-list">
+        {approvals.map((approval) => (
+          <li key={approvalKey(approval)}>
+            <ApprovalCard
+              approval={approval}
+              busy={decidingKey === approvalKey(approval)}
+              decide={decide}
+              onSelectRun={onSelectRun}
+            />
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -683,6 +697,17 @@ function RunListRow({
   );
 }
 
+/**
+ * The runs-list zero states the surfaces share: the ordinary
+ * loading/error/filtered/empty classification plus "connecting", the transport
+ * state that must never be reported as "no runs yet" — nothing has arrived, so
+ * emptiness is a claim the client cannot back.
+ */
+type RunsZeroStateKind = Exclude<RunsViewState, "ready"> | "connecting";
+
+/** Landing states the rail answers with a zero state rather than a banner. */
+const RAIL_ZERO_STATES = new Set<RunsLandingState>(["loading", "error", "empty", "filtered", "connecting"]);
+
 function RunsZeroState({
   state,
   testId,
@@ -692,7 +717,7 @@ function RunsZeroState({
   onResetFilters,
   onRetry,
 }: {
-  state: Exclude<ReturnType<typeof runsViewState>, "ready">;
+  state: RunsZeroStateKind;
   testId: string;
   hero?: boolean;
   totalCount: number;
@@ -711,6 +736,20 @@ function RunsZeroState({
           </Button>
         ) : null}
       </Alert>
+    );
+  }
+  if (state === "connecting") {
+    return (
+      <EmptyState
+        className={hero ? "mon-empty-hero" : undefined}
+        data-testid={testId}
+        data-state={state}
+        role="status"
+        title="Connecting to the Smithers gateway…"
+        description="Runs will appear after the first successful response."
+      >
+        <Skeleton className="mon-state-skeleton" />
+      </EmptyState>
     );
   }
   if (state === "loading") {
@@ -788,14 +827,22 @@ export function RunsRail({
   const banner = connection.banner;
   const lastKnown = connStatus === "offline" && runs.length > 0;
   const blocked = connStatus === "unauthorized";
-  const zeroState = runsViewState({
+  // Transport-aware: a rail deep-linked into a run must not answer "No runs
+  // yet" while the socket is still opening (runsLandingState's contract).
+  const landingState = runsLandingState({
     visibleCount: runs.length,
     totalCount,
     loading,
     queryError: queryError !== undefined,
+    connectionStatus: connStatus,
   });
+  // Offline and unauthorized states already render `banner`, which owns the
+  // surface; everything else that is not "ready" earns a zero state.
+  const zeroState: RunsZeroStateKind | null = RAIL_ZERO_STATES.has(landingState)
+    ? (landingState as RunsZeroStateKind)
+    : null;
   return (
-    <nav className="mon-rail-runs" data-testid="monitor-runs">
+    <nav className="mon-rail-runs" data-testid="monitor-runs" aria-label="Runs">
       {banner ? (
         <Alert variant="destructive" data-testid={`monitor-runs-${connStatus}`}>
           <AlertTitle>{banner.title}</AlertTitle>
@@ -804,7 +851,7 @@ export function RunsRail({
           <AlertDescription>{lastKnown && connection.hint ? connection.hint : banner.detail}</AlertDescription>
         </Alert>
       ) : null}
-      {!banner && zeroState !== "ready" ? (
+      {!banner && zeroState ? (
         <RunsZeroState
           state={zeroState}
           testId="monitor-empty"
@@ -814,7 +861,7 @@ export function RunsRail({
           onRetry={onRetry}
         />
       ) : null}
-      {queryError && zeroState === "ready" && !banner ? (
+      {queryError && !zeroState && !banner ? (
         <Alert variant="destructive" data-testid="monitor-runs-query-error">
           <AlertTitle>Couldn&apos;t refresh runs.</AlertTitle>
           <AlertDescription>{queryError.message}</AlertDescription>
@@ -832,15 +879,18 @@ export function RunsRail({
               {group.title}
               {lastKnown ? " · last-known" : ""} <span className="mon-count">{group.runs.length}</span>
             </h2>
-            {group.runs.map((run) => (
-              <RunListRow
-                key={run.runId}
-                run={run}
-                active={run.runId === selectedRunId}
-                lastKnown={lastKnown}
-                onSelect={onSelect}
-              />
-            ))}
+            <ul className="mon-plain-list mon-run-list">
+              {group.runs.map((run) => (
+                <li key={run.runId}>
+                  <RunListRow
+                    run={run}
+                    active={run.runId === selectedRunId}
+                    lastKnown={lastKnown}
+                    onSelect={onSelect}
+                  />
+                </li>
+              ))}
+            </ul>
           </section>
         ))}
     </nav>
@@ -1046,26 +1096,37 @@ function NeedsYouBand({
       <h2 className="mon-kicker">
         Needs you <span className="mon-count">{needsCount}</span>
       </h2>
-      {approvals.map((approval) => (
-        <ApprovalCard
-          key={approvalKey(approval)}
-          approval={approval}
-          busy={decidingKey === approvalKey(approval)}
-          decide={decide}
-          onSelectRun={onSelectRun}
-        />
-      ))}
-      {parked.slice(0, NEEDS_YOU_ROW_CAP).map((run) => (
-        <NeedsYouRunRow key={run.runId} run={run} onSelectRun={onSelectRun} />
-      ))}
+      <ul className="mon-plain-list">
+        {approvals.map((approval) => (
+          <li key={approvalKey(approval)}>
+            <ApprovalCard
+              approval={approval}
+              busy={decidingKey === approvalKey(approval)}
+              decide={decide}
+              onSelectRun={onSelectRun}
+            />
+          </li>
+        ))}
+        {parked.slice(0, NEEDS_YOU_ROW_CAP).map((run) => (
+          <li key={run.runId}>
+            <NeedsYouRunRow run={run} onSelectRun={onSelectRun} />
+          </li>
+        ))}
+      </ul>
       {parked.length > NEEDS_YOU_ROW_CAP ? (
         <div className="mon-dim mon-needs-more">
           +{parked.length - NEEDS_YOU_ROW_CAP} more waiting — see the table below
         </div>
       ) : null}
-      {recentFailures.slice(0, NEEDS_YOU_ROW_CAP).map((run) => (
-        <NeedsYouRunRow key={run.runId} run={run} onSelectRun={onSelectRun} />
-      ))}
+      {recentFailures.length > 0 ? (
+        <ul className="mon-plain-list">
+          {recentFailures.slice(0, NEEDS_YOU_ROW_CAP).map((run) => (
+            <li key={run.runId}>
+              <NeedsYouRunRow run={run} onSelectRun={onSelectRun} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {recentFailures.length > NEEDS_YOU_ROW_CAP ? (
         <div className="mon-dim mon-needs-more">
           +{recentFailures.length - NEEDS_YOU_ROW_CAP} more failed in the last 24h — filter the table on failed
@@ -1087,24 +1148,27 @@ export function ActiveNowBand({ runs, onSelectRun }: { runs: RunRow[]; onSelectR
         </h2>
       </CardHeader>
       <CardContent>
-        {active.map((run) => (
-          <RowButton
-            className="mon-active-row"
-            data-testid="monitor-active-run-row"
-            key={run.runId}
-            onClick={() => onSelectRun(run.runId)}
-          >
-            <ToneDot tone={toneForStatus(run.status)} pulse={toneForStatus(run.status) === "running"} />
-            <span className="mon-active-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
-            <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
-            <span className="mon-active-progress">
-              <RunProgressCell run={run} />
-            </span>
-            <span className="mon-mono mon-dim mon-active-elapsed">
-              <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />
-            </span>
-          </RowButton>
-        ))}
+        <ul className="mon-plain-list">
+          {active.map((run) => (
+            <li key={run.runId}>
+              <RowButton
+                className="mon-active-row"
+                data-testid="monitor-active-run-row"
+                onClick={() => onSelectRun(run.runId)}
+              >
+                <ToneDot tone={toneForStatus(run.status)} pulse={toneForStatus(run.status) === "running"} />
+                <span className="mon-active-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
+                <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
+                <span className="mon-active-progress">
+                  <RunProgressCell run={run} />
+                </span>
+                <span className="mon-mono mon-dim mon-active-elapsed">
+                  <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />
+                </span>
+              </RowButton>
+            </li>
+          ))}
+        </ul>
       </CardContent>
     </Card>
   );
@@ -1613,20 +1677,6 @@ export function RunsTable({
     connectionStatus: connStatus,
     hasCachedData,
   });
-  if (landingState === "connecting") {
-    return (
-      <EmptyState
-        className="mon-empty-hero"
-        data-testid="monitor-empty-detail"
-        data-state={landingState}
-        role="status"
-        title="Connecting to the Smithers gateway…"
-        description="Runs will appear after the first successful response."
-      >
-        <Skeleton className="mon-state-skeleton" />
-      </EmptyState>
-    );
-  }
   if (landingState === "offline-without-cache") {
     return (
       <Alert
@@ -2418,11 +2468,19 @@ export function ExecutionTree({
     event.preventDefault();
     if (nextKey) setFocusedKey(nextKey);
   };
-  if (!isStatic && error) {
+  const treeState = executionTreeViewState({
+    hasRoot: root !== null && root !== undefined,
+    loading: isLoading,
+    queryError: error !== undefined,
+    isStatic,
+    frameLoading,
+    frameError: frameError !== undefined,
+  });
+  if (treeState === "error") {
     return (
       <Alert variant="destructive" data-testid="monitor-tree-error">
         <AlertTitle>Failed to load the execution tree.</AlertTitle>
-        <AlertDescription>{error.message}</AlertDescription>
+        <AlertDescription>{error?.message ?? "The execution tree query failed."}</AlertDescription>
         {onRetry ? (
           <div className="mon-empty-actions">
             <Chip data-testid="monitor-tree-retry" onClick={onRetry}>
@@ -2433,46 +2491,72 @@ export function ExecutionTree({
       </Alert>
     );
   }
-  if (!isStatic && isLoading) {
+  if (treeState === "loading") {
     return (
-      <EmptyState data-testid="monitor-tree-loading" role="status" title="Loading execution tree…">
+      <EmptyState
+        data-testid="monitor-tree-loading"
+        data-state={treeState}
+        role="status"
+        title="Loading execution tree…"
+        description="Reading this run's nodes from the gateway."
+      >
         <Skeleton className="mon-state-skeleton" />
       </EmptyState>
     );
   }
-  if (!root) {
-    if (frameLoading) {
-      return (
-        <EmptyState data-testid="monitor-frame-loading" role="status" title="Loading frame…">
-          <Skeleton className="mon-state-skeleton" />
-        </EmptyState>
-      );
-    }
-    if (frameError) {
-      return (
-        <Alert variant="destructive" data-testid="monitor-frame-unavailable">
-          <AlertTitle>Frame unavailable.</AlertTitle>
-          <AlertDescription>{frameError.message}</AlertDescription>
-          <div className="mon-empty-actions">
-            {frameOverride?.onRetry ? (
-              <Chip data-testid="monitor-frame-retry" onClick={frameOverride.onRetry}>
-                Retry
-              </Chip>
-            ) : null}
-            {frameOverride?.onReturnToLive ? (
-              <Chip data-testid="monitor-frame-live" onClick={frameOverride.onReturnToLive}>
-                Return to live
-              </Chip>
-            ) : null}
-          </div>
-        </Alert>
-      );
-    }
+  if (treeState === "frame-loading") {
     return (
       <EmptyState
-        data-testid={isStatic ? "monitor-frame-empty" : "monitor-tree-empty"}
-        data-state="empty"
-        title={isStatic ? "No nodes in this frame." : "No nodes recorded yet."}
+        data-testid="monitor-frame-loading"
+        data-state={treeState}
+        role="status"
+        title="Loading frame…"
+        description="Rebuilding the execution tree at this point in the run's history."
+      >
+        <Skeleton className="mon-state-skeleton" />
+      </EmptyState>
+    );
+  }
+  if (treeState === "frame-error") {
+    return (
+      <Alert variant="destructive" data-testid="monitor-frame-unavailable" data-state={treeState}>
+        <AlertTitle>Frame unavailable.</AlertTitle>
+        <AlertDescription>{frameError?.message ?? "This frame could not be rebuilt."}</AlertDescription>
+        <div className="mon-empty-actions">
+          {frameOverride?.onRetry ? (
+            <Chip data-testid="monitor-frame-retry" onClick={frameOverride.onRetry}>
+              Retry
+            </Chip>
+          ) : null}
+          {frameOverride?.onReturnToLive ? (
+            <Chip data-testid="monitor-frame-live" onClick={frameOverride.onReturnToLive}>
+              Return to live
+            </Chip>
+          ) : null}
+        </div>
+      </Alert>
+    );
+  }
+  // Every other rootless state returned above, so this is settled emptiness.
+  if (!root) {
+    const frame = treeState === "frame-empty";
+    return (
+      <EmptyState
+        data-testid={frame ? "monitor-frame-empty" : "monitor-tree-empty"}
+        data-state={treeState}
+        title={frame ? "No nodes in this frame." : "No nodes recorded yet."}
+        description={
+          frame
+            ? "This point in the run's history is before its first node was scheduled."
+            : "Nodes appear here as the engine schedules this run's work."
+        }
+        action={
+          frame && frameOverride?.onReturnToLive ? (
+            <Chip data-testid="monitor-frame-live" onClick={frameOverride.onReturnToLive}>
+              Return to live
+            </Chip>
+          ) : undefined
+        }
       />
     );
   }
@@ -2860,168 +2944,170 @@ function ExecutionPanel({
     }
     return map.size > 0 ? map : undefined;
   }, [predictionTree, usagePrediction]);
+  const executionView = showUsage ? "usage" : showTimeline ? "timeline" : "tree";
+  const selectExecutionView = (view: string): void => {
+    setShowTimeline(view === "timeline");
+    setShowUsage(view === "usage");
+    if (view !== "tree") goLive();
+  };
   return (
     <Card className="mon-tree-panel">
-      <CardHeader className="mon-panel-head">
-        <h2 className="mon-kicker">Execution</h2>
-        {selectedNode && !scrubbing ? <Chip onClick={() => onSelectNode(undefined)}>Clear selection</Chip> : null}
-        <Chip
-          on={showTimeline}
-          data-testid="monitor-timeline-chip"
-          onClick={() => {
-            if (!showTimeline) {
-              goLive();
-              setShowUsage(false);
-            }
-            setShowTimeline((value) => !value);
-          }}
-          title="Every task execution in the order it ran — loops unrolled, one row per iteration"
-        >
-          Timeline
-        </Chip>
-        <Chip
-          on={showUsage}
-          data-testid="monitor-usage-panel-chip"
-          onClick={() => {
-            if (!showUsage) {
-              goLive();
-              setShowTimeline(false);
-            }
-            setShowUsage((value) => !value);
-          }}
-          title="Token burn for this run plus per-account rate limits — measured solid, estimates dimmed"
-        >
-          Usage
-        </Chip>
-        {showDebug ? (
-          <Chip
-            on={scrubbing}
-            data-testid="monitor-frames-chip"
-            onClick={() => {
-              setShowTimeline(false);
-              setShowUsage(false);
-              if (scrubbing) goLive();
-              else setScrubbing(true);
-            }}
-            title="Scrub the execution tree frame by frame instead of following it live"
-          >
-            Frames
-          </Chip>
-        ) : null}
-        {showDebug ? (
-          <Chip
-            on={asXml && !showTimeline}
-            data-testid="monitor-xml-chip"
-            onClick={() => {
-              if (showTimeline) {
+      <Tabs value={executionView} onValueChange={selectExecutionView}>
+        <CardHeader className="mon-panel-head">
+          <h2 className="mon-kicker">Execution</h2>
+          <TabsList aria-label="Execution views">
+            <TabsTrigger value="tree" data-testid="monitor-tree-tab">
+              Tree
+            </TabsTrigger>
+            <TabsTrigger
+              value="timeline"
+              data-testid="monitor-timeline-chip"
+              title="Every task execution in the order it ran — loops unrolled, one row per iteration"
+            >
+              Timeline
+            </TabsTrigger>
+            <TabsTrigger
+              value="usage"
+              data-testid="monitor-usage-panel-chip"
+              title="Token burn for this run plus per-account rate limits — measured solid, estimates dimmed"
+            >
+              Usage
+            </TabsTrigger>
+          </TabsList>
+          {selectedNode && !scrubbing ? <Chip onClick={() => onSelectNode(undefined)}>Clear selection</Chip> : null}
+          {showDebug ? (
+            <Chip
+              on={scrubbing}
+              data-testid="monitor-frames-chip"
+              onClick={() => {
                 setShowTimeline(false);
-                setAsXml(true);
-                return;
-              }
-              setAsXml((value) => !value);
-            }}
-            title="Toggle between the expandable tree and the engine's XML view of the same nodes"
-          >
-            XML
-          </Chip>
-        ) : null}
-        <Chip
-          on={showDebug}
-          data-testid="monitor-debug-chip"
-          onClick={() => {
-            // Folding the tools away also puts them down: back to the live tree.
-            if (showDebug) {
-              goLive();
-              setAsXml(false);
-            }
-            setShowDebug((value) => !value);
-          }}
-          title="Power tools: frame-by-frame time travel and the engine's XML view"
-        >
-          Debug
-        </Chip>
-      </CardHeader>
-      <CardContent>
-        {scrubbing && !showTimeline && !showUsage ? (
-          <div className="mon-scrub" data-testid="monitor-scrub">
-            <Chip
-              onClick={() => step(-1)}
-              disabled={latestFrameNo === undefined || shownFrame <= bounds.min}
-              aria-label="Previous frame"
-            >
-              ◀
-            </Chip>
-            <Input
-              className="mon-scrub-range"
-              data-testid="monitor-frame-slider"
-              type="range"
-              min={bounds.min}
-              max={bounds.max}
-              step={1}
-              value={shownFrame}
-              disabled={latestFrameNo === undefined}
-              onChange={(event) => {
-                if (latestFrameNo === undefined) return;
-                setFrame(clampFrameNo(Number(event.currentTarget.value), latestFrameNo));
+                setShowUsage(false);
+                if (scrubbing) goLive();
+                else setScrubbing(true);
               }}
-              aria-label="Frame"
-            />
-            <Chip
-              onClick={() => step(1)}
-              disabled={latestFrameNo === undefined || shownFrame >= bounds.max}
-              aria-label="Next frame"
+              title="Scrub the execution tree frame by frame instead of following it live"
             >
-              ▶
+              Frames
             </Chip>
-            <span className="mon-mono mon-dim mon-scrub-note">
-              frame {latestFrameNo === undefined ? "… / …" : `${shownFrame} / ${bounds.max}`}
-            </span>
-            {scrubLoading ? <span className="mon-dim mon-scrub-loading">loading…</span> : null}
-            {scrubError && !scrubLoading ? (
-              <span className="mon-dim mon-scrub-note" title={scrubError.message}>
-                frame unavailable
-              </span>
+          ) : null}
+          {showDebug ? (
+            <Chip
+              on={asXml && executionView === "tree"}
+              data-testid="monitor-xml-chip"
+              onClick={() => {
+                if (showTimeline || showUsage) {
+                  setShowTimeline(false);
+                  setShowUsage(false);
+                  setAsXml(true);
+                  return;
+                }
+                setAsXml((value) => !value);
+              }}
+              title="Toggle between the expandable tree and the engine's XML view of the same nodes"
+            >
+              XML
+            </Chip>
+          ) : null}
+          <Chip
+            on={showDebug}
+            data-testid="monitor-debug-chip"
+            onClick={() => {
+              // Folding the tools away also puts them down: back to the live tree.
+              if (showDebug) {
+                goLive();
+                setAsXml(false);
+              }
+              setShowDebug((value) => !value);
+            }}
+            title="Power tools: frame-by-frame time travel and the engine's XML view"
+          >
+            Debug
+          </Chip>
+        </CardHeader>
+        <CardContent>
+          <TabsContent value="tree">
+            {scrubbing ? (
+              <div className="mon-scrub" data-testid="monitor-scrub">
+                <Chip
+                  onClick={() => step(-1)}
+                  disabled={latestFrameNo === undefined || shownFrame <= bounds.min}
+                  aria-label="Previous frame"
+                >
+                  ◀
+                </Chip>
+                <Input
+                  className="mon-scrub-range"
+                  data-testid="monitor-frame-slider"
+                  type="range"
+                  min={bounds.min}
+                  max={bounds.max}
+                  step={1}
+                  value={shownFrame}
+                  disabled={latestFrameNo === undefined}
+                  onChange={(event) => {
+                    if (latestFrameNo === undefined) return;
+                    setFrame(clampFrameNo(Number(event.currentTarget.value), latestFrameNo));
+                  }}
+                  aria-label="Frame"
+                />
+                <Chip
+                  onClick={() => step(1)}
+                  disabled={latestFrameNo === undefined || shownFrame >= bounds.max}
+                  aria-label="Next frame"
+                >
+                  ▶
+                </Chip>
+                <span className="mon-mono mon-dim mon-scrub-note">
+                  frame {latestFrameNo === undefined ? "… / …" : `${shownFrame} / ${bounds.max}`}
+                </span>
+                {scrubLoading ? <span className="mon-dim mon-scrub-loading">loading…</span> : null}
+                {scrubError && !scrubLoading ? (
+                  <span className="mon-dim mon-scrub-note" title={scrubError.message}>
+                    frame unavailable
+                  </span>
+                ) : null}
+                <Chip onClick={goLive} title="Return to the live tree">
+                  Live
+                </Chip>
+              </div>
             ) : null}
-            <Chip onClick={goLive} title="Return to the live tree">
-              Live
-            </Chip>
-          </div>
-        ) : null}
-        {showUsage ? (
-          <UsagePanel usageEvents={usageEvents} usageLoading={usageLoading} usageFailed={usageFailed} />
-        ) : showTimeline ? (
-          <TimelinePanel
-            nodeStates={nodeStates}
-            treeNodes={treeQuery.nodes as TreeNode[]}
-            selectedNode={selectedNode}
-            onSelectNode={onSelectNode}
-          />
-        ) : (
-          <ExecutionTree
-            runId={runId}
-            treeQuery={treeQuery}
-            selectedNodeKey={selectedNode ? treeNodeKey(selectedNode) : undefined}
-            onSelectNode={onSelectNode}
-            autoSelectNodeId={autoSelectNodeId}
-            onAutoSelected={onAutoSelected}
-            onRetry={() => location.reload()}
-            frameOverride={
-              scrubbing
-                ? {
-                    root: scrubTree,
-                    loading: scrubLoading,
-                    error: scrubError,
-                    onRetry: () => void retryScrub(),
-                    onReturnToLive: goLive,
-                  }
-                : undefined
-            }
-            asXml={asXml}
-            durations={durations}
-            tokensById={tokensById}
-          />
-        )}
-      </CardContent>
+            <ExecutionTree
+              runId={runId}
+              treeQuery={treeQuery}
+              selectedNodeKey={selectedNode ? treeNodeKey(selectedNode) : undefined}
+              onSelectNode={onSelectNode}
+              autoSelectNodeId={autoSelectNodeId}
+              onAutoSelected={onAutoSelected}
+              onRetry={() => location.reload()}
+              frameOverride={
+                scrubbing
+                  ? {
+                      root: scrubTree,
+                      loading: scrubLoading,
+                      error: scrubError,
+                      onRetry: () => void retryScrub(),
+                      onReturnToLive: goLive,
+                    }
+                  : undefined
+              }
+              asXml={asXml}
+              durations={durations}
+              tokensById={tokensById}
+            />
+          </TabsContent>
+          <TabsContent value="timeline">
+            <TimelinePanel
+              nodeStates={nodeStates}
+              treeNodes={treeQuery.nodes as TreeNode[]}
+              selectedNode={selectedNode}
+              onSelectNode={onSelectNode}
+            />
+          </TabsContent>
+          <TabsContent value="usage">
+            <UsagePanel usageEvents={usageEvents} usageLoading={usageLoading} usageFailed={usageFailed} />
+          </TabsContent>
+        </CardContent>
+      </Tabs>
     </Card>
   );
 }
@@ -3226,6 +3312,7 @@ function UsagePanel({
 // ---------------------------------------------------------------------------
 
 const FOLLOW_THRESHOLD_PX = 80;
+const EVENT_ANNOUNCE_WINDOW_MS = 750;
 
 type EventView = "notable" | "activity" | "all";
 
@@ -3239,6 +3326,67 @@ const EVENT_VIEW_LABELS: Record<EventView, string> = {
  * buffer. Token-usage totals come from useGatewayRunTokenUsage (full durable
  * scan), not this ring. */
 type RunEventsState = ReturnType<typeof useGatewayRunEvents>;
+
+/** Coalesce a busy stream into at most one polite announcement per window. */
+export function EventBatchAnnouncer({ runId, events }: { runId: string; events: RunEventsState["events"] }) {
+  const [message, setMessage] = useState("");
+  const runRef = useRef<string | undefined>(undefined);
+  const lastSeqRef = useRef(0);
+  const pendingRef = useRef<{ count: number; latest: RunEventsState["events"][number] | undefined }>({
+    count: 0,
+    latest: undefined,
+  });
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const visible = splitHeartbeatEvents(events).rest;
+    const latestSeq = visible.reduce((max, event) => Math.max(max, asNumber(event.seq) ?? 0), 0);
+    if (runRef.current !== runId) {
+      runRef.current = runId;
+      lastSeqRef.current = latestSeq;
+      pendingRef.current = { count: 0, latest: undefined };
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = null;
+      setMessage("");
+      return;
+    }
+
+    const fresh = visible.filter((event) => (asNumber(event.seq) ?? 0) > lastSeqRef.current);
+    lastSeqRef.current = Math.max(lastSeqRef.current, latestSeq);
+    if (fresh.length === 0) return;
+    pendingRef.current.count += fresh.length;
+    pendingRef.current.latest = fresh[fresh.length - 1];
+    if (timerRef.current) return;
+    timerRef.current = setTimeout(() => {
+      const pending = pendingRef.current;
+      const latest = pending.latest ? formatEventLine(pending.latest) : undefined;
+      setMessage(
+        `${pending.count} new ${pending.count === 1 ? "event" : "events"}.${latest ? ` Latest #${latest.seq}: ${latest.name}.` : ""}`,
+      );
+      pendingRef.current = { count: 0, latest: undefined };
+      timerRef.current = null;
+    }, EVENT_ANNOUNCE_WINDOW_MS);
+  }, [events, runId]);
+
+  return (
+    <span
+      className="sui-sr-only"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      data-testid="monitor-events-announcer"
+    >
+      {message}
+    </span>
+  );
+}
 
 export function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEventsState }) {
   const { events: allEvents, lastHeartbeat, streaming, error, loading, refetch, connectionStatus } = eventsState;
@@ -3289,6 +3437,15 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
   };
 
   const hasLastKnownEvents = allEvents.length > 0;
+  // One classification for the list: a pending or failed query is never
+  // reported as emptiness, and a buffer hidden by the view chips reads as
+  // "filtered" (with a way back to All) rather than "no events".
+  const listState = eventLogViewState({
+    visibleCount: events.length,
+    totalCount: allEvents.length,
+    loading,
+    queryError: error !== undefined,
+  });
   const errorState =
     connectionStatus === "unauthorized"
       ? "unauthorized"
@@ -3389,6 +3546,7 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
         >
           {following ? "Following new events." : "Event stream paused."}
         </span>
+        <EventBatchAnnouncer runId={runId} events={allEvents} />
       </CardHeader>
       <CardContent>
         {error ? (
@@ -3414,28 +3572,43 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
           tabIndex={0}
           aria-label={`${EVENT_VIEW_LABELS[view]} event stream`}
           aria-describedby={followStatusId}
-          aria-live={following ? "polite" : "off"}
-          aria-relevant="additions text"
+          aria-live="off"
           aria-atomic={false}
           aria-busy={loading}
         >
-          {events.length === 0 && !error ? (
+          {listState !== "ready" && listState !== "error" ? (
             <li>
               <EmptyState
                 data-testid="monitor-events-state"
-                data-state={loading ? "loading" : allEvents.length === 0 ? "empty" : `filtered-${view}`}
-                role={loading ? "status" : undefined}
+                data-state={listState === "filtered" ? `filtered-${view}` : listState}
+                role={listState === "loading" ? "status" : undefined}
                 title={
-                  loading
+                  listState === "loading"
                     ? "Loading events…"
-                    : allEvents.length === 0
+                    : listState === "empty"
                       ? "No events recorded for this run yet."
                       : view === "notable"
-                        ? "No notable events in this buffer. Switch to Activity or All to inspect other events."
-                        : "No activity events in this buffer. Switch to All to inspect session and heartbeat events."
+                        ? "No notable events in this buffer."
+                        : "No activity events in this buffer."
+                }
+                description={
+                  listState === "loading"
+                    ? "Reading this run's event history from the gateway."
+                    : listState === "empty"
+                      ? "Events stream in here as the engine schedules and runs tasks."
+                      : view === "notable"
+                        ? `Switch to Activity or All to inspect the ${allEvents.length} buffered ${allEvents.length === 1 ? "event" : "events"}.`
+                        : `Switch to All to inspect the ${allEvents.length} buffered session and heartbeat ${allEvents.length === 1 ? "event" : "events"}.`
+                }
+                action={
+                  listState === "filtered" ? (
+                    <Button variant="outline" data-testid="monitor-events-show-all" onClick={() => setView("all")}>
+                      Show all events
+                    </Button>
+                  ) : undefined
                 }
               >
-                {loading ? <Skeleton className="mon-state-skeleton" /> : null}
+                {listState === "loading" ? <Skeleton className="mon-state-skeleton" /> : null}
               </EmptyState>
             </li>
           ) : null}
@@ -4117,6 +4290,14 @@ export function NodeOutputState({
     </Alert>
   ) : null;
 
+  const state = nodeOutputViewState({
+    hasRow: row !== null,
+    loading,
+    queryError: error !== undefined,
+    failed: failure !== null && failure !== undefined,
+    live,
+  });
+  // "ready" is exactly `row !== null`; test the row so it narrows.
   if (row) {
     return (
       <>
@@ -4125,35 +4306,50 @@ export function NodeOutputState({
       </>
     );
   }
-  if (loading) {
+  if (state === "loading") {
     return (
-      <EmptyState data-testid="monitor-output-loading" role="status" title="Loading output…">
+      <EmptyState
+        data-testid="monitor-output-loading"
+        data-state={state}
+        role="status"
+        title="Loading output…"
+        description="Reading this node's structured output from the gateway."
+      >
         <Skeleton className="mon-state-skeleton" />
       </EmptyState>
     );
   }
-  if (errorAlert) return errorAlert;
-  if (failure) {
+  if (state === "error") return errorAlert;
+  if (state === "failed") {
     return (
       <EmptyState
         data-testid="monitor-output-failed"
-        title="The node failed before producing structured output. Failure details are shown above."
+        data-state={state}
+        title="The node failed before producing structured output."
+        description="Failure details are shown above."
       />
     );
   }
-  if (live) {
+  if (state === "live") {
     return (
       <EmptyState
         data-testid="monitor-output-live"
+        data-state={state}
         role="status"
-        title="running — structured output lands here when the node finishes"
+        title="Still running…"
+        description="Structured output lands here when the node finishes."
       >
         <Skeleton className="mon-state-skeleton" />
       </EmptyState>
     );
   }
   return (
-    <EmptyState data-testid="monitor-output-empty" title="This node completed without recording structured output." />
+    <EmptyState
+      data-testid="monitor-output-empty"
+      data-state={state}
+      title="No structured output."
+      description="This node completed without recording structured output."
+    />
   );
 }
 
@@ -4523,6 +4719,11 @@ function NodeInspector({
   onClose: () => void;
 }) {
   const nodeId = node.id ?? treeNodeKey(node);
+  const inspectorRef = useRef<HTMLElement | null>(null);
+  const inspectorTitleId = useId();
+  useEffect(() => {
+    inspectorRef.current?.focus({ preventScroll: true });
+  }, [runId, nodeId]);
   const nodeUsage = useMemo(
     () => (usageEvents ? nodeUsageBreakdown(usageEvents, nodeId) : undefined),
     [usageEvents, nodeId],
@@ -4649,9 +4850,15 @@ function NodeInspector({
     return [...counts.entries()].sort((left, right) => right[1] - left[1]);
   }, [node]);
   return (
-    <aside className="mon-inspector" data-testid="monitor-inspector">
+    <aside
+      ref={inspectorRef}
+      className="mon-inspector"
+      data-testid="monitor-inspector"
+      aria-labelledby={inspectorTitleId}
+      tabIndex={-1}
+    >
       <header className="mon-panel-head">
-        <h2 className="mon-kicker">Node</h2>
+        <span className="mon-kicker">Node inspector</span>
         {nodeFailed ? (
           <Button
             variant={retryArmed ? "destructive" : "outline"}
@@ -4711,7 +4918,9 @@ function NodeInspector({
           data-testid="monitor-hijack-modal"
         />
       ) : null}
-      <div className="mon-inspector-title">{node.cardLabel ?? node.name ?? nodeId}</div>
+      <h2 id={inspectorTitleId} className="mon-inspector-title">
+        {node.cardLabel ?? node.name ?? nodeId}
+      </h2>
       <NodeWhatHappened runId={runId} nodeId={nodeId} iteration={node.iteration ?? 0} status={node.status} />
       <NodeScoreChips nodeId={nodeId} scores={scores} />
       <InspectorSection title="Details" testId="monitor-node-details">
@@ -5129,7 +5338,10 @@ function RunDetail({
   const unhealthy =
     healthState !== undefined &&
     healthState !== labelForStatus(status) &&
-    (healthState === "stale" || healthState === "orphaned" || healthState === "recovering");
+    (healthState === "stale" ||
+      healthState === "orphaned" ||
+      healthState === "recovering" ||
+      healthState === "succeeded-with-failures");
   // ONE progress vocabulary: logical tasks (the health strip's counting),
   // never the node-state summary, which also counts structural container rows.
   // The summary only fills in while the tree is still loading.
@@ -5178,6 +5390,15 @@ function RunDetail({
 
   return (
     <div className="mon-detail" data-testid="monitor-run-detail">
+      <span
+        className="sui-sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="monitor-run-status-announcer"
+      >
+        Run status: {labelForStatus(status)}.
+      </span>
       <Card className="mon-detail-head">
         <div className="mon-detail-title">
           <StatusTag status={status} />
@@ -5374,6 +5595,7 @@ function App() {
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [showMetrics, setShowMetrics] = useState(false);
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inspectorReturnFocusRef = useRef<HTMLElement | null>(null);
 
   const { status: connStatus } = useGatewayConnectionStatus();
   // No offset/cursor in the gateway's ListRunsRequest filter, so fetch a wide
@@ -5418,8 +5640,20 @@ function App() {
     emitSelection(runId, undefined);
   };
   const selectNode = (node: TreeNode | undefined) => {
+    if (node && !selectedNodeKey) {
+      const active = document.activeElement;
+      inspectorReturnFocusRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+    }
     setSelectedNodeKey(node ? treeNodeKey(node) : undefined);
     emitSelection(selectedRunId, node ? (node.id ?? treeNodeKey(node)) : undefined);
+    if (!node) {
+      const returnFocus = inspectorReturnFocusRef.current;
+      inspectorReturnFocusRef.current = null;
+      queueMicrotask(() => {
+        if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+        else document.querySelector<HTMLElement>('[data-testid="monitor-tree"]')?.focus({ preventScroll: true });
+      });
+    }
   };
 
   const showResult = (kind: "ok" | "err", text: string) => {
@@ -5486,9 +5720,14 @@ function App() {
   }, []);
 
   return (
-    <main className={`mon-shell${monitorMode.embed ? " mon-embed" : ""}`} data-testid="monitor-root">
+    <div className={`mon-shell${monitorMode.embed ? " mon-embed" : ""}`} data-testid="monitor-root">
       <WorkflowUiStyles mode="theme" />
       <SmithersUiStyles extra={monitorCss} />
+      {!monitorMode.embed ? (
+        <a className="mon-skip-link" href="#monitor-main">
+          Skip to monitor content
+        </a>
+      ) : null}
       {!monitorMode.embed ? (
         <header className="mon-topbar">
           <div className="mon-brand">
@@ -5509,7 +5748,7 @@ function App() {
             totalCount={allRuns.length}
             showMetrics={showMetrics}
             onToggleMetrics={() => setShowMetrics((value) => !value)}
-            onRefresh={() => void runsQuery.refetch()}
+            onRefresh={runsQuery.refetch}
           />
         </header>
       ) : null}
@@ -5523,7 +5762,7 @@ function App() {
 
       <div className={`mon-body${inspectorOpen ? "" : " mon-body-no-inspector"}${railOpen ? "" : " mon-body-no-rail"}`}>
         {railOpen ? (
-          <div className="mon-rail">
+          <aside className="mon-rail" aria-label="Run navigation">
             <ApprovalsInbox onSelectRun={selectRun} onResult={showResult} />
             <RunsRail
               runs={visibleRuns}
@@ -5536,10 +5775,11 @@ function App() {
               selectedRunId={selectedRunId}
               onSelect={selectRun}
             />
-          </div>
+          </aside>
         ) : null}
 
-        <div className="mon-main">
+        <main id="monitor-main" className="mon-main" tabIndex={-1}>
+          {monitorMode.embed ? <h1 className="sui-sr-only">Smithers Monitor</h1> : null}
           {showMetrics ? (
             <MetricsPanel />
           ) : selectedRunId ? (
@@ -5592,7 +5832,7 @@ function App() {
               ) : null}
             </div>
           )}
-        </div>
+        </main>
 
         {inspectorOpen ? (
           <>
@@ -5607,7 +5847,7 @@ function App() {
           </>
         ) : null}
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -5637,6 +5877,10 @@ export const monitorCss = `
 body { margin: 0; background: var(--bg); color: var(--text); font-size: var(--fs-3); line-height: var(--lh-body); }
 button, input, select { font: inherit; color: inherit; }
 code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-1); padding: 0 var(--sp-1); }
+
+.mon-skip-link { position: fixed; top: var(--sp-2); left: var(--sp-2); z-index: 100; transform: translateY(-200%); padding: var(--sp-2) var(--sp-3); border: 2px solid var(--ring-border); border-radius: var(--r-1); background: var(--surface); color: var(--text); font-weight: 700; }
+.mon-skip-link:focus-visible { transform: translateY(0); outline: none; box-shadow: 0 0 0 3px var(--ring); }
+.mon-plain-list { margin: 0; padding: 0; list-style: none; }
 
 .tone-running { --tone: var(--brand); --tone-soft: var(--brand-soft); --tone-border: var(--brand-border); }
 .tone-ok { --tone: var(--ok); --tone-soft: var(--success-soft); --tone-border: var(--success-border); }
@@ -5707,6 +5951,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-embed .mon-main { height: 100%; padding: var(--sp-4); }
 .mon-embed .mon-inspector { display: none; }
 .mon-inspector { border-left: 1px solid var(--border); overflow-y: auto; padding: var(--panel-pad); animation: mon-in 140ms ease-out; }
+.mon-inspector:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--ring-border); }
 /* Click-outside-to-close backdrop — only visible in the overlay layout. */
 .mon-inspector-backdrop { display: none; }
 @media (max-width: 1160px) {
@@ -5738,6 +5983,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-inbox .mon-kicker { margin-bottom: var(--sp-1); }
 .mon-approval { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
 .mon-approval:first-of-type { border-top: 0; }
+.mon-plain-list > li + li .mon-approval { border-top: 1px solid var(--border); }
 .mon-approval:last-of-type { padding-bottom: 0; }
 .mon-approval-main { display: block; padding: var(--sp-2) var(--sp-3); }
 .mon-approval-main:hover .mon-approval-title { color: var(--brand); }

@@ -728,6 +728,18 @@ function buildMirrorOnProgress(adapter, runId, workflowName, workflowPath, confi
             label: null,
           });
           break;
+        case "NodeStalled":
+          yield* adapter.insertNode({
+            runId: event.runId,
+            nodeId: event.nodeId,
+            iteration: event.iteration,
+            state: "stalled",
+            lastAttempt: event.attempt,
+            updatedAtMs: event.timestampMs,
+            outputTable: "",
+            label: null,
+          });
+          break;
         case "NodeCancelled":
           yield* adapter.insertNode({
             runId: event.runId,

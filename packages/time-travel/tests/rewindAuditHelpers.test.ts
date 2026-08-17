@@ -123,12 +123,44 @@ describe("rewind audit helpers", () => {
 });
 
 describe("expandResetSet", () => {
-  test("falls back to exact keys when reset IDs are not base node IDs", () => {
-    const nodes = {
-      "task-a::0": {},
-      "task-b::1": {},
-    };
+  const nodes = {
+    "task-a::0": {},
+    "task-a::1": {},
+    "task-b::0": {},
+    "task-b::1": {},
+  };
 
+  test("falls back to exact keys when reset IDs are not base node IDs", () => {
     expect(expandResetSet(nodes, ["task-b::1"])).toEqual(["task-b::1"]);
+  });
+
+  test("a base node ID resets every iteration of that node", () => {
+    expect(expandResetSet(nodes, ["task-a"]).toSorted()).toEqual(["task-a::0", "task-a::1"]);
+  });
+
+  // Contract pin: fork resets ONLY the named nodes. `task-b` consumes `task-a`
+  // downstream, and naming `task-a` must never drag it in — callers that want a
+  // dependent re-run name it themselves. Flipping this back to the docstring's
+  // old "full transitive set including all downstream dependents" claim, or to
+  // an "iteration >= min iteration" threshold, fails here.
+  test("never expands to downstream dependents or to peers at the same iteration", () => {
+    expect(expandResetSet(nodes, ["task-a"])).not.toContain("task-b::0");
+    expect(expandResetSet(nodes, ["task-a::0"])).toEqual(["task-a::0"]);
+    expect(expandResetSet(nodes, ["task-a", "task-b"]).toSorted()).toEqual([
+      "task-a::0",
+      "task-a::1",
+      "task-b::0",
+      "task-b::1",
+    ]);
+  });
+
+  test("matches each reset ID independently, mixing base IDs and exact keys", () => {
+    expect(expandResetSet(nodes, ["task-a", "task-b::1"]).toSorted()).toEqual(["task-a::0", "task-a::1", "task-b::1"]);
+  });
+
+  test("ignores reset IDs that match nothing, and an empty reset list", () => {
+    expect(expandResetSet(nodes, [])).toEqual([]);
+    expect(expandResetSet(nodes, ["ghost", "ghost::7"])).toEqual([]);
+    expect(expandResetSet(nodes, ["ghost", "task-b::0"])).toEqual(["task-b::0"]);
   });
 });

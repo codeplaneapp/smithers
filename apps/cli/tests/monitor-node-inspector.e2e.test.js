@@ -234,6 +234,34 @@ browserTest(
       await page.waitForSelector('[data-testid="monitor-inspector"]', { timeout: 30_000 });
       await Promise.all([scopedTranscriptRequest, scopedAttemptRequest, scopedOutputRequest]);
 
+      const inspector = page.locator('[data-testid="monitor-inspector"]');
+      expect(await page.getByRole("complementary", { name: "probe" }).count()).toBe(1);
+      expect(await inspector.getAttribute("aria-labelledby")).not.toBeNull();
+      expect(await inspector.getAttribute("tabindex")).toBe("-1");
+      expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid"))).toBe("monitor-inspector");
+      expect(await page.getByRole("navigation", { name: "Runs" }).count()).toBe(1);
+      expect(await page.locator('[data-testid="monitor-runs"] ul > li [data-testid="monitor-run-row"]').count()).toBe(
+        1,
+      );
+      expect(await page.getByRole("tree", { name: "Execution tree" }).count()).toBe(1);
+
+      // Radix tabs expose one tab stop and arrow-key activation.
+      const treeTab = page.getByRole("tab", { name: "Tree" });
+      const timelineTab = page.getByRole("tab", { name: "Timeline" });
+      expect(await page.getByRole("tablist", { name: "Execution views" }).count()).toBe(1);
+      await treeTab.focus();
+      await page.keyboard.press("ArrowRight");
+      await page.waitForFunction(
+        () => document.querySelector('[data-testid="monitor-timeline-chip"]')?.getAttribute("aria-selected") === "true",
+      );
+      expect(await timelineTab.getAttribute("aria-selected")).toBe("true");
+      await timelineTab.focus();
+      await page.keyboard.press("ArrowLeft");
+      await page.waitForFunction(
+        () => document.querySelector('[data-testid="monitor-tree-tab"]')?.getAttribute("aria-selected") === "true",
+      );
+      expect(await treeTab.getAttribute("aria-selected")).toBe("true");
+
       // Sections are collapsible <details> elements, open by default.
       for (const testId of [
         "monitor-node-details",
@@ -286,6 +314,20 @@ browserTest(
       await promptSection.locator("summary").click();
       expect(await promptSection.evaluate((el) => el.open)).toBe(true);
       await page.waitForSelector('[data-testid="monitor-node-prompt"] .mon-section-body');
+
+      expect((await page.locator('[data-testid="monitor-run-status-announcer"]').textContent()) ?? "").toContain(
+        "Run status:",
+      );
+
+      // Escape closes the complementary inspector and restores the composite
+      // tree focus; Enter can then reopen it without adding per-node tab stops.
+      await inspector.focus();
+      await page.keyboard.press("Escape");
+      await inspector.waitFor({ state: "detached" });
+      expect(await page.evaluate(() => document.activeElement?.getAttribute("role"))).toBe("tree");
+      await page.keyboard.press("Enter");
+      await page.waitForSelector('[data-testid="monitor-inspector"]');
+      expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid"))).toBe("monitor-inspector");
     } finally {
       try {
         await browser?.close();

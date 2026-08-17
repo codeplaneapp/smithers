@@ -91,7 +91,7 @@ Used by `bunx smthrs events --type <category>` and the metrics layer.
 |---|---|
 | `run` | RunAutoResumed, RunAutoResumeSkipped, RunStarted, RunStatusChanged, RunStateChanged, RunConcurrencySaturated, RunFinished, RunFailed, RunCancelled, RunContinuedAsNew, RunHijackRequested, RunHijacked, RetryTaskStarted, RetryTaskFinished, RunForked, ReplayStarted |
 | `frame` | FrameCommitted |
-| `node` | NodePending, NodeStarted, TaskHeartbeat, TaskHeartbeatTimeout, NodeFinished, NodeFailed, NodeCancelled, NodeSkipped, NodeRetrying, NodeWaitingApproval, NodeWaitingTimer |
+| `node` | NodePending, NodeStarted, TaskHeartbeat, TaskHeartbeatTimeout, NodeFinished, NodeFailed, NodeStalled, NodeCancelled, NodeSkipped, NodeRetrying, NodeWaitingApproval, NodeWaitingTimer |
 | `approval` | ApprovalRequested, ApprovalGranted, ApprovalAutoApproved, ApprovalDenied |
 | `tool-call` | ToolCallStarted, ToolCallFinished |
 | `agent` | AgentEvent, AgentTraceEvent, AgentTraceSummary, AgentSessionEvent |
@@ -108,6 +108,10 @@ Used by `bunx smthrs events --type <category>` and the metrics layer.
 | `supervisor` | SupervisorStarted, SupervisorPollCompleted |
 
 `RunStateChanged` is categorized as `run` because the type is part of the public event union, but the current runtime does not emit it; use `RunStatusChanged` from the stream plus `getRun` / `computeRunState` for derived run state.
+
+`RunFinished` persists optional `failedChildren` and `failedChildKeys`. A
+nonzero count keeps lifecycle status `finished` but makes `computeRunState`
+return `succeeded-with-failures`.
 
 `OpenApiToolCalled` is categorized as `openapi` for forward compatibility, but the current OpenAPI tool factory records Effect metrics and log spans rather than emitting that event onto the run event bus.
 

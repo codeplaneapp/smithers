@@ -6,12 +6,26 @@
  * live per-window consumption from each provider's OAuth session.
  */
 
+import { classifyAccountAvailability } from "@smthrs/usage/classifyAccountAvailability";
+
 export type UsageWindow = {
   id: string;
   label: string;
   unit: string;
   usedPercent: number;
   resetsAt: string | null;
+  /** Model family this window caps (e.g. "fable"); unset for account-wide windows. */
+  modelScope?: string;
+};
+
+export type SeatAvailability = {
+  /**
+   * blocked — an account-wide window is exhausted; the seat serves nothing.
+   * degraded — only a model-scoped cap (e.g. Fable weekly) is exhausted.
+   * ok — headroom everywhere. unknown — no windows to judge.
+   */
+  status: "ok" | "degraded" | "blocked" | "unknown";
+  reasons: string[];
 };
 
 export type UsageReport = {
@@ -28,29 +42,58 @@ export type UsageReport = {
 
 export type Seat = {
   label: string;
-  provider: "claude-code" | "codex";
+  provider: string;
   /** Subscription the seat is signed into, when the registry knows it. */
   account: string | null;
   planType: string | null;
   weekly: UsageWindow | null;
   session: UsageWindow | null;
+  /** Model-scoped weekly windows (e.g. the separate Fable cap), if reported. */
+  scoped: UsageWindow[];
+  /** Any remaining windows the fixed rows above do not cover. */
+  extra: UsageWindow[];
+  availability: SeatAvailability;
   /** Set when the seat cannot report — expired token, missing credentials. */
   error: string | null;
 };
 
+export type ProviderGroup = {
+  provider: string;
+  /** Display name, e.g. "Claude Code". */
+  title: string;
+  /** True when the dashboard can start a browser login for this provider. */
+  canLogin: boolean;
+  seats: Seat[];
+};
+
 export type Snapshot = {
   fetchedAt: string;
-  claude: Seat[];
-  codex: Seat[];
-  /** Providers present in the registry that this dashboard does not chart. */
-  otherProviders: { label: string; provider: string; error: string | null }[];
+  groups: ProviderGroup[];
   error: string | null;
 };
 
-/** Providers this dashboard charts. Everything else is listed, not charted. */
-const CHARTED = new Set(["claude-code", "codex"]);
+/**
+ * Every registered provider gets a section. Order is deliberate (the pool's
+ * primary seats first); providers absent from this list still render, appended
+ * in the order the usage report returns them, so a newly supported provider
+ * charts itself with no change here.
+ */
+const PROVIDER_ORDER = ["claude-code", "codex", "kimi", "antigravity", "anthropic-api", "openai-api", "gemini-api"];
 
-function runSmithers(args: string[]): { ok: boolean; stdout: string; stderr: string } {
+const PROVIDER_TITLES: Record<string, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  kimi: "Kimi",
+  antigravity: "Antigravity",
+  "anthropic-api": "Anthropic API",
+  "openai-api": "OpenAI API",
+  "gemini-api": "Gemini API",
+};
+
+/** Providers whose seats are created by a browser login the dashboard can drive. */
+const LOGIN_PROVIDERS = new Set(["claude-code", "codex", "kimi", "antigravity"]);
+
+export function runSmithers(args: string[]): { ok: boolean; stdout: string; stderr: string } {
   const bin = Bun.which("smithers") ?? "smithers";
   const proc = Bun.spawnSync([bin, ...args], {
     stdout: "pipe",
@@ -98,9 +141,7 @@ export function readSnapshot(): Snapshot {
   if (!res.ok && !res.stdout.trim()) {
     return {
       fetchedAt,
-      claude: [],
-      codex: [],
-      otherProviders: [],
+      groups: [],
       error: res.stderr.trim() || "smithers usage failed and produced no output",
     };
   }
@@ -112,38 +153,45 @@ export function readSnapshot(): Snapshot {
   } catch (err) {
     return {
       fetchedAt,
-      claude: [],
-      codex: [],
-      otherProviders: [],
+      groups: [],
       error: `could not parse smithers usage output: ${(err as Error).message}`,
     };
   }
 
   const identities = readAccountIdentities();
-  const claude: Seat[] = [];
-  const codex: Seat[] = [];
-  const otherProviders: Snapshot["otherProviders"] = [];
+  const byProvider = new Map<string, Seat[]>();
 
   for (const report of reports) {
-    if (!CHARTED.has(report.provider)) {
-      otherProviders.push({
-        label: report.accountLabel,
-        provider: report.provider,
-        error: report.error ?? null,
-      });
-      continue;
-    }
     const windows = report.windows ?? [];
+    const weekly = pickWindow(
+      windows.filter((w) => !w.modelScope),
+      (s) => s.includes("week"),
+    );
+    const session = pickWindow(windows, (s) => s.includes("hour") || s.includes("session"));
+    const scoped = windows.filter((w) => w.modelScope);
     const seat: Seat = {
       label: report.accountLabel,
-      provider: report.provider as Seat["provider"],
+      provider: report.provider,
       account: identities.get(report.accountLabel) ?? null,
       planType: report.planType ?? null,
-      weekly: pickWindow(windows, (s) => s.includes("week")),
-      session: pickWindow(windows, (s) => s.includes("hour") || s.includes("session")),
+      weekly,
+      session,
+      scoped,
+      extra: windows.filter((w) => w !== weekly && w !== session && !w.modelScope),
+      availability: report.error
+        ? { status: "unknown", reasons: [] }
+        : classifyAccountAvailability(
+            windows.map((w) => ({
+              ...w,
+              unit: w.unit as "percent" | "count" | "estimated",
+              resetsAt: w.resetsAt ?? undefined,
+            })),
+          ),
       error: report.error ?? null,
     };
-    (report.provider === "codex" ? codex : claude).push(seat);
+    const seats = byProvider.get(report.provider);
+    if (seats) seats.push(seat);
+    else byProvider.set(report.provider, [seat]);
   }
 
   // Most headroom first: the dashboard exists to answer "which seat do I have
@@ -152,8 +200,18 @@ export function readSnapshot(): Snapshot {
     if (!!a.error !== !!b.error) return a.error ? -1 : 1;
     return (a.weekly?.usedPercent ?? 0) - (b.weekly?.usedPercent ?? 0);
   };
-  claude.sort(byHeadroom);
-  codex.sort(byHeadroom);
+  const groups: ProviderGroup[] = [...byProvider.entries()]
+    .sort(([a], [b]) => {
+      const ai = PROVIDER_ORDER.indexOf(a);
+      const bi = PROVIDER_ORDER.indexOf(b);
+      return (ai === -1 ? PROVIDER_ORDER.length : ai) - (bi === -1 ? PROVIDER_ORDER.length : bi);
+    })
+    .map(([provider, seats]) => ({
+      provider,
+      title: PROVIDER_TITLES[provider] ?? provider,
+      canLogin: LOGIN_PROVIDERS.has(provider),
+      seats: seats.sort(byHeadroom),
+    }));
 
-  return { fetchedAt, claude, codex, otherProviders, error: null };
+  return { fetchedAt, groups, error: null };
 }

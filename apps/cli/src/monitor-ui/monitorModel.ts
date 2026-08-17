@@ -615,7 +615,25 @@ export function diagnoseRun(input: {
       fix: "No action needed.",
     };
   }
-  if (status === "finished" || status === "succeeded" || status === "completed") {
+  if (input.healthState === "succeeded-with-failures") {
+    return {
+      tone: "warn",
+      headline: "Finished with failures",
+      detail: failed.length
+        ? `${progress}; ${failed.length} task(s) failed: ${failed
+            .slice(0, 4)
+            .map((task) => task.id)
+            .join(", ")}.${sample}`
+        : `${progress}; the persisted terminal outcome records tolerated child failures.`,
+      fix: `Review the failed nodes; \`smithers retry-task\` + resume if they should complete.`,
+    };
+  }
+  if (
+    status === "finished" ||
+    status === "succeeded" ||
+    status === "succeeded-with-failures" ||
+    status === "completed"
+  ) {
     return failed.length
       ? {
           tone: "warn",
@@ -835,6 +853,7 @@ export const GROUP_TITLES: Record<RunGroup, string> = {
 export function groupForStatus(status: string | undefined): RunGroup {
   const s = normalizeStatus(status);
   if (s.startsWith("waiting") || s === "paused") return "attention";
+  if (s === "succeeded-with-failures") return "attention";
   if (s === "finished" || s === "succeeded") return "completed";
   if (s === "failed" || s === "stale" || s === "orphaned") return "failed";
   if (s === "cancelled" || s === "canceled") return "cancelled";
@@ -980,7 +999,14 @@ export function nodeSummaryEligible(status: string | undefined): boolean {
 
 export function isTerminalStatus(status: string | undefined): boolean {
   const s = normalizeStatus(status);
-  return s === "finished" || s === "succeeded" || s === "failed" || s === "cancelled" || s === "canceled";
+  return (
+    s === "finished" ||
+    s === "succeeded" ||
+    s === "succeeded-with-failures" ||
+    s === "failed" ||
+    s === "cancelled" ||
+    s === "canceled"
+  );
 }
 
 export function isCancellable(status: string | undefined): boolean {
@@ -2153,7 +2179,8 @@ export function opsStats(runs: ReadonlyArray<Record<string, unknown>>, nowMs: nu
       stats.attention += 1;
     }
     if (finishedAtMs !== undefined && finishedAtMs >= dayStartMs && finishedAtMs <= nowMs) {
-      if (status === "finished" || status === "succeeded") stats.completedToday += 1;
+      if (status === "finished" || status === "succeeded" || status === "succeeded-with-failures")
+        stats.completedToday += 1;
       else if (status === "failed") stats.failedToday += 1;
     }
   }
@@ -2412,4 +2439,93 @@ export function runsLandingState(input: {
     loading: input.loading === true,
     queryError: input.queryError === true,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Run-detail panel states: event log, execution tree, node output. Each panel
+// classifies the same way the runs list does — an in-flight or failed query is
+// never reported as emptiness — so the view only has to pick copy, never
+// re-derive which state it is in.
+// ---------------------------------------------------------------------------
+
+export type EventLogViewState = "ready" | "loading" | "error" | "empty" | "filtered";
+
+/**
+ * Classify the event list. "filtered" means the buffer holds events the active
+ * Notable/Activity view hides — the panel owes a way back to All rather than a
+ * bare "no events". A failed query outranks loading here (unlike the runs list)
+ * because the panel's error alert already owns the surface and reporting
+ * emptiness underneath it would be a second, contradictory claim.
+ */
+export function eventLogViewState(options: {
+  visibleCount: number;
+  totalCount: number;
+  loading: boolean;
+  queryError: boolean;
+}): EventLogViewState {
+  if (options.visibleCount > 0) return "ready";
+  if (options.queryError) return "error";
+  if (options.loading) return "loading";
+  if (options.totalCount > 0) return "filtered";
+  return "empty";
+}
+
+export type ExecutionTreeViewState =
+  | "ready"
+  | "loading"
+  | "error"
+  | "empty"
+  | "frame-loading"
+  | "frame-error"
+  | "frame-empty"
+  | "stale-frame-loading"
+  | "stale-frame-error";
+
+/**
+ * Classify the execution tree, live or scrubbed to a historical frame.
+ *
+ * The frame scrubber overrides the live query, so a live error or live loading
+ * only speaks for the live tree. A frame that is still in flight (or that
+ * failed) keeps the previous frame on screen when there is one — the `stale-*`
+ * states, rendered as a notice above real rows — and owns the panel when there
+ * is nothing to keep. Only a settled query with no root is emptiness, and the
+ * static/live split decides whether that reads as "this frame" or "yet".
+ */
+export function executionTreeViewState(input: {
+  hasRoot: boolean;
+  loading: boolean;
+  queryError: boolean;
+  isStatic: boolean;
+  frameLoading: boolean;
+  frameError: boolean;
+}): ExecutionTreeViewState {
+  if (!input.isStatic && input.queryError) return "error";
+  if (!input.isStatic && input.loading) return "loading";
+  if (input.frameLoading) return input.hasRoot ? "stale-frame-loading" : "frame-loading";
+  if (input.frameError) return input.hasRoot ? "stale-frame-error" : "frame-error";
+  if (!input.hasRoot) return input.isStatic ? "frame-empty" : "empty";
+  return "ready";
+}
+
+export type NodeOutputViewState = "ready" | "loading" | "error" | "failed" | "live" | "empty";
+
+/**
+ * Classify a node's structured output. A row that already arrived wins — a
+ * refetch failure is reported as a banner over real data, never as an empty
+ * panel. "empty" — the node finished and simply recorded nothing — is the last
+ * resort, claimed only once no other state explains the missing row.
+ */
+export function nodeOutputViewState(options: {
+  hasRow: boolean;
+  loading: boolean;
+  queryError: boolean;
+  failed: boolean;
+  live: boolean;
+}): NodeOutputViewState {
+  if (options.hasRow) return "ready";
+  if (options.loading) return "loading";
+  if (options.queryError) return "error";
+  if (options.failed) return "failed";
+  if (options.live) return "live";
+  return "empty";
 }

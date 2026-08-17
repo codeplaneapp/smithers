@@ -478,7 +478,12 @@ const revertAttemptDataSchema = z.object({
 const forkRunInputSchema = z.object({
   parentRunId: z.string(),
   frameNo: z.number().int().min(0),
-  resetNodes: z.array(z.string()).optional(),
+  resetNodes: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Node IDs to reset to pending in the fork. Only these nodes reset — downstream dependents keep the parent's finished output, so list them here too. An entry is a node ID (every iteration) or a `nodeId::iteration` key.",
+    ),
   inputOverrides: z.record(z.string(), z.unknown()).optional(),
   branchLabel: z.string().optional(),
   force: z.boolean().default(false),

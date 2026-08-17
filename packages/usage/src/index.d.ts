@@ -22,7 +22,7 @@ type UsageSource = "oauth" | "headers" | "local" | "none";
  * - `estimated` — locally estimated; read `usedPercent`/`used`/`limit`, treat as
  *                 a lower bound, never as authoritative.
  */
-type UsageWindow$5 = {
+type UsageWindow$6 = {
     /** Stable id, e.g. "5h" | "weekly" | "requests-per-min" | "tokens-per-min". */
     id: string;
     /** Human label, e.g. "5-hour session". */
@@ -41,6 +41,12 @@ type UsageWindow$5 = {
     resetsAt?: string;
     /** Share of the plan available to this model-specific window. */
     capPercent?: number;
+    /**
+     * Lowercased model family this window is scoped to (e.g. "fable", "opus",
+     * "sonnet"), for provider limits that cap one model separately from the
+     * all-models window. Unset for account-wide windows.
+     */
+    modelScope?: string;
 };
 
 /**
@@ -58,7 +64,7 @@ type UsageReport$6 = {
     /** Where the numbers came from. */
     source: UsageSource;
     /** Quota windows, possibly empty when `source` is `none`. */
-    windows: UsageWindow$5[];
+    windows: UsageWindow$6[];
     /** Plan/tier label if the provider reports one, e.g. "max", "pro". */
     planType?: string;
     /** Pay-as-you-go credit balance, if the provider reports one (Codex). */
@@ -151,7 +157,7 @@ type UsageReport$3 = UsageReport$6;
  */
 type UsageProbe$6 = {
     source: UsageSource;
-    windows?: UsageWindow$5[] | undefined;
+    windows?: UsageWindow$6[] | undefined;
     planType?: string | undefined;
     credits?: {
         hasCredits: boolean;
@@ -196,13 +202,17 @@ declare function humanizeDurationShort(seconds: number): string;
 /**
  * Normalizes the Claude Code subscription usage payload into usage windows. The
  * payload powers the in-CLI `/usage` view: a 5-hour rolling window, a weekly
- * window, and optional per-model weekly windows.
+ * window, and per-model weekly windows. Model-scoped windows arrive through the
+ * legacy fixed blocks (`seven_day_opus`, `seven_day_sonnet`) on old payloads
+ * and through the generic `limits` array on current ones (which is the only
+ * place a Fable-scoped weekly window ever appears); when both describe the same
+ * window id, the `limits` entry wins.
  *
  * @param {unknown} payload
  * @returns {UsageWindow[]}
  */
-declare function parseClaudeOauthUsage(payload: unknown): UsageWindow$4[];
-type UsageWindow$4 = UsageWindow$5;
+declare function parseClaudeOauthUsage(payload: unknown): UsageWindow$5[];
+type UsageWindow$5 = UsageWindow$6;
 
 /**
  * Normalizes the Codex usage payload (from `GET /backend-api/wham/usage`, or the
@@ -218,7 +228,7 @@ type UsageWindow$4 = UsageWindow$5;
  * @returns {{ windows: UsageWindow[]; planType?: string; credits?: { hasCredits: boolean; unlimited: boolean; balance?: string } }}
  */
 declare function parseCodexUsage(payload: unknown): {
-    windows: UsageWindow$3[];
+    windows: UsageWindow$4[];
     planType?: string;
     credits?: {
         hasCredits: boolean;
@@ -226,7 +236,7 @@ declare function parseCodexUsage(payload: unknown): {
         balance?: string;
     };
 };
-type UsageWindow$3 = UsageWindow$5;
+type UsageWindow$4 = UsageWindow$6;
 
 /**
  * Normalizes the Kimi for Coding usage payload (`GET /coding/v1/usages`) into
@@ -238,10 +248,10 @@ type UsageWindow$3 = UsageWindow$5;
  * @returns {{ windows: UsageWindow[]; planType?: string }}
  */
 declare function parseKimiUsage(payload: unknown): {
-    windows: UsageWindow$2[];
+    windows: UsageWindow$3[];
     planType?: string;
 };
-type UsageWindow$2 = UsageWindow$5;
+type UsageWindow$3 = UsageWindow$6;
 
 /**
  * Parses Anthropic rate-limit response headers into usage windows. Anthropic
@@ -252,8 +262,8 @@ type UsageWindow$2 = UsageWindow$5;
  * @param {(name: string) => string | null | undefined} get
  * @returns {UsageWindow[]}
  */
-declare function parseAnthropicRateLimitHeaders(get: (name: string) => string | null | undefined): UsageWindow$1[];
-type UsageWindow$1 = UsageWindow$5;
+declare function parseAnthropicRateLimitHeaders(get: (name: string) => string | null | undefined): UsageWindow$2[];
+type UsageWindow$2 = UsageWindow$6;
 
 /**
  * Parses OpenAI rate-limit response headers into usage windows. OpenAI's reset
@@ -266,8 +276,8 @@ type UsageWindow$1 = UsageWindow$5;
  * @param {number} [nowMs]
  * @returns {UsageWindow[]}
  */
-declare function parseOpenAiRateLimitHeaders(get: (name: string) => string | null | undefined, nowMs?: number): UsageWindow[];
-type UsageWindow = UsageWindow$5;
+declare function parseOpenAiRateLimitHeaders(get: (name: string) => string | null | undefined, nowMs?: number): UsageWindow$1[];
+type UsageWindow$1 = UsageWindow$6;
 
 /**
  * Parses a Go-style duration string into seconds. OpenAI's rate-limit reset
@@ -654,4 +664,54 @@ declare function orderAccountsByUsage(accounts: Account[], options?: {
 type Account = _smthrs_accounts.Account;
 type UsageReport = UsageReport$6;
 
-export { PUBLISHED_CAPS, type UsageReport$6 as UsageReport, type UsageWindow$5 as UsageWindow, accountQuotaBlock, accountQuotaStatePath, accountUsageScore, anthropicHeaderUsage, buildUsageReport, claudeKeychainSuffix, claudeOauthUsage, clearAccountQuotaLimit, clearAccountUsageCache, codexWhamUsage, decodeJwtClaims, formatRelativeReset, formatUsageReports, getAccountUsage, getUsageForAccounts, googleUsage, humanizeDurationShort, kimiCodeUsage, openaiHeaderUsage, orderAccountsByUsage, parseAnthropicRateLimitHeaders, parseClaudeOauthUsage, parseCodexUsage, parseDurationSeconds, parseKimiUsage, parseOpenAiRateLimitHeaders, publishedCapForTier, readAccountQuotaState, readClaudeCredentials, readCodexCredentials, readKimiCredentials, readUsageCache, recordAccountQuotaLimit, refreshKimiToken, usageCachePath, writeUsageCache };
+/** @typedef {import("./UsageWindow.ts").UsageWindow} UsageWindow */
+/**
+ * @typedef {object} AccountAvailability
+ * @property {"ok" | "degraded" | "blocked" | "unknown"} status
+ *   `blocked` — an account-wide window (5-hour session, weekly all-models) is
+ *   exhausted: the account cannot serve any request until it resets.
+ *   `degraded` — only a model-scoped window (e.g. the Fable weekly cap) is
+ *   exhausted: the account still serves other models.
+ *   `ok` — every reported window has headroom.
+ *   `unknown` — no windows to judge (probe failed or provider reports none).
+ * @property {string[]} reasons Labels of the exhausted windows, blocked first.
+ */
+/**
+ * A window whose reset time has already passed has rolled over; its recorded
+ * utilization describes the previous period, so it reads as fresh (0 used).
+ *
+ * @param {UsageWindow} w
+ * @param {number} nowMs
+ * @returns {number | undefined} effective used percent, undefined when the
+ *   window carries no percent utilization.
+ */
+declare function effectiveUsedPercent(w: UsageWindow, nowMs: number): number | undefined;
+/**
+ * Classifies one account's usage windows into a traffic-light availability:
+ * blocked (rate-limited for everything), degraded (a model-scoped cap such as
+ * the Fable weekly limit is exhausted, other models still work), or ok. Pure —
+ * pass `nowMs` for deterministic tests.
+ *
+ * @param {UsageWindow[]} windows
+ * @param {number} [nowMs]
+ * @returns {AccountAvailability}
+ */
+declare function classifyAccountAvailability(windows: UsageWindow[], nowMs?: number): AccountAvailability;
+type UsageWindow = UsageWindow$6;
+type AccountAvailability = {
+    /**
+     *   `blocked` — an account-wide window (5-hour session, weekly all-models) is
+     *   exhausted: the account cannot serve any request until it resets.
+     *   `degraded` — only a model-scoped window (e.g. the Fable weekly cap) is
+     *   exhausted: the account still serves other models.
+     *   `ok` — every reported window has headroom.
+     *   `unknown` — no windows to judge (probe failed or provider reports none).
+     */
+    status: "ok" | "degraded" | "blocked" | "unknown";
+    /**
+     * Labels of the exhausted windows, blocked first.
+     */
+    reasons: string[];
+};
+
+export { PUBLISHED_CAPS, type UsageReport$6 as UsageReport, type UsageWindow$6 as UsageWindow, accountQuotaBlock, accountQuotaStatePath, accountUsageScore, anthropicHeaderUsage, buildUsageReport, classifyAccountAvailability, claudeKeychainSuffix, claudeOauthUsage, clearAccountQuotaLimit, clearAccountUsageCache, codexWhamUsage, decodeJwtClaims, effectiveUsedPercent, formatRelativeReset, formatUsageReports, getAccountUsage, getUsageForAccounts, googleUsage, humanizeDurationShort, kimiCodeUsage, openaiHeaderUsage, orderAccountsByUsage, parseAnthropicRateLimitHeaders, parseClaudeOauthUsage, parseCodexUsage, parseDurationSeconds, parseKimiUsage, parseOpenAiRateLimitHeaders, publishedCapForTier, readAccountQuotaState, readClaudeCredentials, readCodexCredentials, readKimiCredentials, readUsageCache, recordAccountQuotaLimit, refreshKimiToken, usageCachePath, writeUsageCache };

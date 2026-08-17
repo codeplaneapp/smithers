@@ -1108,6 +1108,13 @@ function checkGatewayAuthDocsMatchRuntimeDefaults() {
     ],
     [serverSource, "const allowedOrigins = this.auth?.allowedOrigins ?? [];"],
     [serverSource, "return !origin || allowedOrigins.includes(origin);"],
+    // #785: trusted-proxy identity headers are gated on the transport peer, and
+    // the mode refuses to start without an enforceable boundary.
+    [serverSource, "if (!this.isTrustedProxyPeer(req)) {"],
+    [serverSource, 'code: "UNTRUSTED_PROXY_PEER",'],
+    [GATEWAY_AUTH_CONFIG_SOURCE, "trustedProxies: string[];"],
+    [GATEWAY_INTEGRATION, 'trustedProxies: string[];      // REQUIRED: peer IPs / CIDR blocks, or "unix"'],
+    [TYPES_REFERENCE, 'trustedProxies: string[];      // REQUIRED: peer IPs / CIDR blocks, or "unix"'],
     [GATEWAY_INTEGRATION, 'scopesClaim?: string;          // default "scope"'],
     [GATEWAY_INTEGRATION, 'roleClaim?: string;            // default "role"'],
     [GATEWAY_INTEGRATION, 'userClaim?: string;            // default "sub"'],
@@ -1267,8 +1274,14 @@ function checkGatewayCancelRunDocsMatchRuntimeErrors() {
     [serverSource, 'return responseError(frame.id, "RUN_NOT_ACTIVE", "Run is not currently active");'],
     [GATEWAY_RPC_TYPES, '| "RUN_NOT_ACTIVE"'],
     [GATEWAY_RPC_INDEX, 'RUN_NOT_ACTIVE: { version: SMITHERS_API_VERSION, code: "RUN_NOT_ACTIVE", httpStatus: 409'],
-    [GATEWAY_RPC_INDEX, 'errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RUN_NOT_ACTIVE", "Internal"],'],
-    [cancelRunDoc, "include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RUN_NOT_ACTIVE`, and `Internal`"],
+    [
+      GATEWAY_RPC_INDEX,
+      'errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "RUN_NOT_ACTIVE", "Internal"],',
+    ],
+    [
+      cancelRunDoc,
+      "include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `RUN_NOT_ACTIVE`, and `Internal`",
+    ],
     [cancelRunDoc, "`RUN_NOT_ACTIVE` means the run is not currently active"],
     [GATEWAY_INTEGRATION, "RUN_NOT_ACTIVE,409"],
   ];

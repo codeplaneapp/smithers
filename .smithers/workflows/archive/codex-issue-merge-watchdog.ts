@@ -243,6 +243,7 @@ export function knownStateDecision(
   const value = envelope?.data ?? envelope;
   const state = inspectState(inspect);
   const unhealthy = value?.runState?.unhealthy ?? value?.unhealthy;
+  if (state === "succeeded-with-failures") return null;
   if (unhealthy && (["paused"].includes(state) || state.startsWith("waiting-"))) {
     const kind = String(unhealthy?.kind ?? "reported-unhealthy");
     return {

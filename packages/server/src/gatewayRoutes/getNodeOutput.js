@@ -243,6 +243,7 @@ export async function getNodeOutputRoute(params) {
     const latestAttempt = Array.isArray(attempts) ? attempts[0] : undefined;
     const failed =
       node.state === "failed" ||
+      node.state === "stalled" ||
       latestAttempt?.state === "failed" ||
       (typeof latestAttempt?.errorJson === "string" && latestAttempt.errorJson.length > 0);
 
