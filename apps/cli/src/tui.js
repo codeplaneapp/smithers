@@ -67,6 +67,7 @@ const STATE_BADGE = {
   recovering: pc.cyan,
   failed: pc.red,
   succeeded: pc.green,
+  "succeeded-with-failures": pc.yellow,
   cancelled: pc.dim,
 };
 
@@ -87,7 +88,7 @@ const NODE_STATUS = {
 };
 
 // Run states at which the live loop stops watching (nothing will change without us).
-const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled", "waiting-approval"]);
+const TERMINAL_STATES = new Set(["succeeded", "succeeded-with-failures", "failed", "cancelled", "waiting-approval"]);
 const STOP_STATES = new Set([...TERMINAL_STATES, "stale", "orphaned"]);
 
 const cols = () => process.stdout.columns || 80;

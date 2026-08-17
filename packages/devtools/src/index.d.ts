@@ -1,3 +1,122 @@
+/**
+ * Discriminated union of Smithers engine events that {@link DevToolsRunStore}
+ * understands when reducing engine state. Any other `type` value flows through
+ * the open-ended tail so future event kinds can be added without changes to
+ * consumers.
+ */
+type DevToolsEngineEvent$2 = RunStartedEvent | RunFinishedEvent | RunFailedEvent | RunCancelledEvent | FrameCommittedEvent | NodePendingEvent | NodeStartedEvent | NodeFinishedEvent | NodeFailedEvent | NodeStalledEvent | NodeCancelledEvent | NodeSkippedEvent | NodeRetryingEvent | NodeWaitingApprovalEvent | NodeWaitingEventEvent | NodeWaitingTimerEvent | ToolCallStartedEvent | ToolCallFinishedEvent | UnknownEngineEvent;
+type RunEventBase = {
+    runId: string;
+    timestampMs: number;
+};
+type NodeEventBase = RunEventBase & {
+    nodeId: string;
+    iteration: number;
+};
+type RunCancellationSource$1 = {
+    kind: "signal" | "rpc" | "cli" | "engine";
+    detail?: string;
+    signal?: string;
+    clientPid?: number;
+    requestId?: string;
+    clientIdentity?: string;
+};
+type RunStartedEvent = RunEventBase & {
+    type: "RunStarted";
+};
+type RunFinishedEvent = RunEventBase & {
+    type: "RunFinished";
+    failedChildren?: number;
+    failedChildKeys?: readonly string[];
+    /** Loops that exited via return-last with `until` still false (#1464 AWF-1). */
+    exhaustedLoops?: readonly {
+        id: string;
+        iteration: number;
+        maxIterations: number | null;
+    }[];
+};
+type RunFailedEvent = RunEventBase & {
+    type: "RunFailed";
+    error?: unknown;
+};
+type RunCancelledEvent = RunEventBase & {
+    type: "RunCancelled";
+    /** Missing only on historical or unattributed cancellation events. */
+    source?: RunCancellationSource$1;
+};
+type FrameCommittedEvent = RunEventBase & {
+    type: "FrameCommitted";
+    frameNo: number;
+    trigger?: {
+        reason: string;
+        nodeId?: string;
+        iteration?: number;
+    };
+};
+type NodePendingEvent = NodeEventBase & {
+    type: "NodePending";
+};
+type NodeStartedEvent = NodeEventBase & {
+    type: "NodeStarted";
+    attempt: number;
+};
+type NodeFinishedEvent = NodeEventBase & {
+    type: "NodeFinished";
+    attempt: number;
+};
+type NodeFailedEvent = NodeEventBase & {
+    type: "NodeFailed";
+    attempt: number;
+    error?: unknown;
+};
+type NodeStalledEvent = NodeEventBase & {
+    type: "NodeStalled";
+    attempt: number;
+    identicalFailures: number;
+    signature: string;
+    error?: unknown;
+};
+type NodeCancelledEvent = NodeEventBase & {
+    type: "NodeCancelled";
+};
+type NodeSkippedEvent = NodeEventBase & {
+    type: "NodeSkipped";
+};
+type NodeRetryingEvent = NodeEventBase & {
+    type: "NodeRetrying";
+    attempt: number;
+};
+type NodeWaitingApprovalEvent = NodeEventBase & {
+    type: "NodeWaitingApproval";
+};
+type NodeWaitingEventEvent = NodeEventBase & {
+    type: "NodeWaitingEvent";
+};
+type NodeWaitingTimerEvent = NodeEventBase & {
+    type: "NodeWaitingTimer";
+};
+type ToolCallStartedEvent = NodeEventBase & {
+    type: "ToolCallStarted";
+    toolName: string;
+    seq: number;
+};
+type ToolCallFinishedEvent = NodeEventBase & {
+    type: "ToolCallFinished";
+    toolName: string;
+    seq: number;
+    status?: string;
+};
+/**
+ * Open tail: any future engine event with the minimal shape we require
+ * (`type` + `runId` + `timestampMs`). The store ignores unknown `type`s but
+ * still records them in `run.events`.
+ */
+type UnknownEngineEvent = {
+    type: string;
+    runId: string;
+    timestampMs: number;
+} & Record<string, unknown>;
+
 type SmithersNodeType$2 = "workflow" | "task" | "sequence" | "parallel" | "merge-queue" | "branch" | "loop" | "worktree" | "approval" | "timer" | "subflow" | "wait-for-event" | "saga" | "try-catch" | "fragment" | "unknown";
 
 type DevToolsNode$7 = {
@@ -86,126 +205,7 @@ type TaskExecutionState$3 = {
     }>;
 };
 
-/**
- * Discriminated union of Smithers engine events that {@link DevToolsRunStore}
- * understands when reducing engine state. Any other `type` value flows through
- * the open-ended tail so future event kinds can be added without changes to
- * consumers.
- */
-type DevToolsEngineEvent$2 = RunStartedEvent | RunFinishedEvent | RunFailedEvent | RunCancelledEvent | FrameCommittedEvent | NodePendingEvent | NodeStartedEvent | NodeFinishedEvent | NodeFailedEvent | NodeStalledEvent | NodeCancelledEvent | NodeSkippedEvent | NodeRetryingEvent | NodeWaitingApprovalEvent | NodeWaitingEventEvent | NodeWaitingTimerEvent | ToolCallStartedEvent | ToolCallFinishedEvent | UnknownEngineEvent;
-type RunEventBase = {
-    runId: string;
-    timestampMs: number;
-};
-type NodeEventBase = RunEventBase & {
-    nodeId: string;
-    iteration: number;
-};
-type RunCancellationSource = {
-    kind: "signal" | "rpc" | "cli" | "engine";
-    detail?: string;
-    signal?: string;
-    clientPid?: number;
-    requestId?: string;
-    clientIdentity?: string;
-};
-type RunStartedEvent = RunEventBase & {
-    type: "RunStarted";
-};
-type RunFinishedEvent = RunEventBase & {
-    type: "RunFinished";
-    failedChildren?: number;
-    failedChildKeys?: readonly string[];
-    /** Loops that exited via return-last with `until` still false (#1464 AWF-1). */
-    exhaustedLoops?: readonly {
-        id: string;
-        iteration: number;
-        maxIterations: number | null;
-    }[];
-};
-type RunFailedEvent = RunEventBase & {
-    type: "RunFailed";
-    error?: unknown;
-};
-type RunCancelledEvent = RunEventBase & {
-    type: "RunCancelled";
-    /** Missing only on historical or unattributed cancellation events. */
-    source?: RunCancellationSource;
-};
-type FrameCommittedEvent = RunEventBase & {
-    type: "FrameCommitted";
-    frameNo: number;
-    trigger?: {
-        reason: string;
-        nodeId?: string;
-        iteration?: number;
-    };
-};
-type NodePendingEvent = NodeEventBase & {
-    type: "NodePending";
-};
-type NodeStartedEvent = NodeEventBase & {
-    type: "NodeStarted";
-    attempt: number;
-};
-type NodeFinishedEvent = NodeEventBase & {
-    type: "NodeFinished";
-    attempt: number;
-};
-type NodeFailedEvent = NodeEventBase & {
-    type: "NodeFailed";
-    attempt: number;
-    error?: unknown;
-};
-type NodeStalledEvent = NodeEventBase & {
-    type: "NodeStalled";
-    attempt: number;
-    identicalFailures: number;
-    signature: string;
-    error?: unknown;
-};
-type NodeCancelledEvent = NodeEventBase & {
-    type: "NodeCancelled";
-};
-type NodeSkippedEvent = NodeEventBase & {
-    type: "NodeSkipped";
-};
-type NodeRetryingEvent = NodeEventBase & {
-    type: "NodeRetrying";
-    attempt: number;
-};
-type NodeWaitingApprovalEvent = NodeEventBase & {
-    type: "NodeWaitingApproval";
-};
-type NodeWaitingEventEvent = NodeEventBase & {
-    type: "NodeWaitingEvent";
-};
-type NodeWaitingTimerEvent = NodeEventBase & {
-    type: "NodeWaitingTimer";
-};
-type ToolCallStartedEvent = NodeEventBase & {
-    type: "ToolCallStarted";
-    toolName: string;
-    seq: number;
-};
-type ToolCallFinishedEvent = NodeEventBase & {
-    type: "ToolCallFinished";
-    toolName: string;
-    seq: number;
-    status?: string;
-};
-/**
- * Open tail: any future engine event with the minimal shape we require
- * (`type` + `runId` + `timestampMs`). The store ignores unknown `type`s but
- * still records them in `run.events`.
- */
-type UnknownEngineEvent = {
-    type: string;
-    runId: string;
-    timestampMs: number;
-} & Record<string, unknown>;
-
-type RunState = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "unknown";
+type RunState = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "succeeded-with-failures" | "unknown";
 type ReasonBlocked = {
     kind: "approval";
     nodeId: string;
@@ -613,5 +613,6 @@ type SnapshotSerializerWarning = SnapshotSerializerWarning$1;
 type DevToolsSnapshotV1 = DevToolsSnapshotV1$3;
 type DevToolsDelta = DevToolsDelta$3;
 type DevToolsDeltaOp = DevToolsDeltaOp$1;
+type RunCancellationSource = RunCancellationSource$1;
 
 export { type DevToolsDelta, type DevToolsDeltaOp, type DevToolsEventBus, type DevToolsEventHandler, type DevToolsNode, DevToolsRunStore, type DevToolsRunStoreOptions, type DevToolsSnapshot, type DevToolsSnapshotV1, InvalidDeltaError, type RunCancellationSource, type RunExecutionState, SMITHERS_NODE_ICONS, SNAPSHOT_SERIALIZER_DEFAULT_MAX_DEPTH, SmithersDevToolsCore, type SmithersDevToolsOptions, type SmithersNodeType, type SnapshotSerializerOptions, type SnapshotSerializerWarning, type TaskExecutionState, applyDelta, buildSnapshot, collectTasks, countNodes, diffSnapshots, findNodeById, printTree, snapshotSerialize };

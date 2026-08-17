@@ -27,6 +27,7 @@ describe("statusClass", () => {
     expect(statusClass("waiting-quota")).toBe("warn");
     expect(statusClass("continued")).toBe("ok");
     expect(statusClass("succeeded")).toBe("ok");
+    expect(statusClass("succeeded-with-failures")).toBe("warn");
     expect(statusClass("produced")).toBe("ok");
     // A user cancel is a neutral outcome, not a failure -- muted, matching
     // the styleguide badge vocabulary and gateway-ui's RunEventLog.
@@ -66,6 +67,7 @@ describe("formatStatus", () => {
     expect(formatStatus("waiting-quota")).toBe("Waiting on quota");
     expect(formatStatus("continued")).toBe("Continued");
     expect(formatStatus("succeeded")).toBe("Complete");
+    expect(formatStatus("succeeded-with-failures")).toBe("Completed with failures");
     expect(formatStatus("stale")).toBe("Stale");
     expect(formatStatus("orphaned")).toBe("Orphaned");
     expect(formatStatus("recovering")).toBe("Recovering");
@@ -86,6 +88,7 @@ describe("isTerminalRunStatus", () => {
     expect(isTerminalRunStatus("skipped")).toBe(true);
     expect(isTerminalRunStatus("continued")).toBe(true);
     expect(isTerminalRunStatus("succeeded")).toBe(true);
+    expect(isTerminalRunStatus("succeeded-with-failures")).toBe(true);
   });
 
   test("pins terminality across the DB run vocabulary", () => {

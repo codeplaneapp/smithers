@@ -31,7 +31,7 @@ const FAILED_STATES = new Set(["failed", "stalled", "errored", "error", "stale",
  * red, so a deliberate cancel doesn't read as an error. Kept out of FAILED_STATES.
  */
 const CANCELLED_STATES = new Set(["cancelled", "canceled"]);
-const DONE_STATES = new Set(["succeeded", "finished", "completed", "ok", "continued"]);
+const DONE_STATES = new Set(["succeeded", "succeeded-with-failures", "finished", "completed", "ok", "continued"]);
 
 export function isRunningStatus(status: string): boolean {
   return RUNNING_STATES.has(status);

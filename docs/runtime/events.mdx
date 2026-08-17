@@ -109,6 +109,10 @@ Used by `bunx smthrs events --type <category>` and the metrics layer.
 
 `RunStateChanged` is categorized as `run` because the type is part of the public event union, but the current runtime does not emit it; use `RunStatusChanged` from the stream plus `getRun` / `computeRunState` for derived run state.
 
+`RunFinished` persists optional `failedChildren` and `failedChildKeys`. A
+nonzero count keeps lifecycle status `finished` but makes `computeRunState`
+return `succeeded-with-failures`.
+
 `OpenApiToolCalled` is categorized as `openapi` for forward compatibility, but the current OpenAPI tool factory records Effect metrics and log spans rather than emitting that event onto the run event bus.
 
 ## Effect reverts
