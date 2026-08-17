@@ -8,6 +8,8 @@ export type AccountProvider =
   | "antigravity"
   | "codex"
   | "kimi"
+  | "grok"
   | "anthropic-api"
   | "openai-api"
-  | "gemini-api";
+  | "gemini-api"
+  | "xai-api";

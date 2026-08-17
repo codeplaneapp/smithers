@@ -156,6 +156,17 @@ describe("oneshot model chain", () => {
       model: "kimi-for-coding/k3",
     });
   });
+  test("routes the Grok SOTA slot through the Grok engine", () => {
+    const grokOnly = [availability("grok")];
+    expect(resolveOneshotChain(grokOnly, { model: "grok" })[0]).toEqual({
+      engine: "grok",
+      model: SOTA_SLOTS.grok,
+    });
+    expect(resolveOneshotChain(grokOnly, { model: SOTA_SLOTS.grok })[0]).toEqual({
+      engine: "grok",
+      model: SOTA_SLOTS.grok,
+    });
+  });
 });
 
 describe("oneshot task-aware routing", () => {
@@ -303,6 +314,43 @@ test("oneshot accepts a registered Kimi account and uses its config directory", 
   expect(body.chain[0]).toEqual({ engine: "kimi", model: "kimi-code/k3" });
   // Spawns the real CLI: a cold `bun run` of the full entry point is ~6s, well
   // past bun's 5s default.
+}, 60_000);
+
+test("oneshot accepts a registered Grok account and uses its config directory", async () => {
+  const home = temp("smithers-oneshot-grok-account-");
+  const binDir = createExecutableDir();
+  writeExecutable(binDir, "grok", `#!${process.execPath}\nprocess.stdout.write("grok test\\n");\n`);
+  const smithersHome = join(home, ".smithers");
+  const configDir = join(smithersHome, "accounts", "grok-1");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "auth.json"), JSON.stringify({ token: "test-only" }) + "\n");
+  writeFileSync(
+    join(smithersHome, "accounts.json"),
+    JSON.stringify({
+      version: 1,
+      accounts: [
+        { label: "grok-1", provider: "grok", configDir },
+        { label: "xai-1", provider: "xai-api", apiKey: "xai-test-only" },
+      ],
+    }) + "\n",
+  );
+  const env = {
+    ...process.env,
+    HOME: home,
+    SMITHERS_HOME: smithersHome,
+    PATH: `${binDir}${delimiter}${process.env.PATH}`,
+  };
+  const detections = detectAvailableAgents(env, { cwd: home });
+  const grok = detections.find((entry) => entry.id === "grok");
+  expect(grok?.usable).toBe(true);
+  expect(grok?.registeredAccountLabels).toEqual(["grok-1", "xai-1"]);
+  const selected = await selectOneshotAgents(detections, { cwd: home, agent: "grok", env });
+  const subscription = selected.agents.find((agent) => agent.id === "smithers-account:grok-1");
+  const api = selected.agents.find((agent) => agent.id === "smithers-account:xai-1");
+  expect(subscription.opts.configDir).toBe(configDir);
+  expect(api.opts.configDir).toBe(join(smithersHome, "accounts", "xai-1"));
+  expect(api.opts.apiKey).toBe("xai-test-only");
+  expect(selected.chain[0]).toEqual({ engine: "grok", model: SOTA_SLOTS.grok });
 }, 60_000);
 
 test("oneshot accepts a registered Claude account and uses its config directory", async () => {

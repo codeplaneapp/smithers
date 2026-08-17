@@ -31,12 +31,19 @@ export function accountToProviderEnv(account) {
         throw new SmithersError("ACCOUNT_INVALID", `kimi account "${account.label}" missing configDir`);
       }
       return { KIMI_SHARE_DIR: account.configDir };
+    case "grok":
+      if (!account.configDir) {
+        throw new SmithersError("ACCOUNT_INVALID", `grok account "${account.label}" missing configDir`);
+      }
+      return { GROK_HOME: account.configDir };
     case "anthropic-api":
       return account.apiKey ? { ANTHROPIC_API_KEY: account.apiKey } : {};
     case "openai-api":
       return account.apiKey ? { OPENAI_API_KEY: account.apiKey } : {};
     case "gemini-api":
       return account.apiKey ? { GEMINI_API_KEY: account.apiKey } : {};
+    case "xai-api":
+      return account.apiKey ? { XAI_API_KEY: account.apiKey } : {};
     default:
       const exhaustive = /** @type {never} */ (account.provider);
       throw new SmithersError("ACCOUNT_INVALID", `unknown provider: ${exhaustive}`);

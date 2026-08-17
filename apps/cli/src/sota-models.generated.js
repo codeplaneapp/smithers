@@ -4,9 +4,9 @@
 // default. Code refers to stable slots (codexSol, codexTerra, codex, ...) so a model
 // bump is a registry edit, not a code change. See docs/reference/sota-models.mdx.
 
-export const SOTA_REGISTRY_VERSION = 8;
+export const SOTA_REGISTRY_VERSION = 9;
 
-export const SOTA_REGISTRY_UPDATED_AT = "2026-07-29";
+export const SOTA_REGISTRY_UPDATED_AT = "2026-08-17";
 
 /** Stable handle → current best model id for that seat. */
 export const SOTA_SLOTS = Object.freeze({
@@ -20,6 +20,7 @@ export const SOTA_SLOTS = Object.freeze({
   "codexMini": "gpt-5.4-mini",
   "spark": "gpt-5.3-codex-spark",
   "gemini": "gemini-3.5-flash",
+  "grok": "grok-4.6",
   "geminiPro": "gemini-3.1-pro-preview",
   "kimi": "kimi-k2.7-code",
   "kimiFlagship": "kimi-k2.6"
@@ -278,6 +279,19 @@ export const SOTA_MODELS = Object.freeze([
       "cheapFast"
     ],
     "description": "Google's best price-to-performance model and the best non-Codex fallback for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. Smithers can use it for UI work when its provider-specific route is configured; it is not a universal fallback policy."
+  },
+  {
+    "id": "grok-4.6",
+    "slot": "grok",
+    "provider": "xai",
+    "name": "Grok 4.6",
+    "status": "current",
+    "engines": [
+      "grok"
+    ],
+    "badges": [],
+    "roles": [],
+    "description": "xAI's current Grok Build default and latest frontier model. Smithers uses this exact id for the Grok CLI and oneshot fallback rung; the CLI also accepts API-key authentication through XAI_API_KEY. See the official Grok Build model catalog and CLI documentation."
   },
   {
     "id": "gemini-3.1-pro-preview",

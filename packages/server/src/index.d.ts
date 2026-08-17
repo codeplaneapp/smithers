@@ -2168,7 +2168,7 @@ declare class Gateway {
      */
     registeredAccountsFromRegistry(): {
         label: string;
-        provider: "claude-code" | "antigravity" | "codex" | "kimi" | "anthropic-api" | "openai-api" | "gemini-api";
+        provider: "claude-code" | "antigravity" | "codex" | "kimi" | "grok" | "anthropic-api" | "openai-api" | "gemini-api" | "xai-api";
         configDir?: string;
         apiKey?: string;
         model?: string;

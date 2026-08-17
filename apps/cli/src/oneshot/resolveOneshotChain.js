@@ -22,11 +22,12 @@ const SLOTS = Object.freeze({
   terra: SOTA_SLOTS.codexTerra,
   luna: SOTA_SLOTS.codex,
   kimi: ONESHOT_KIMI_MODEL,
+  grok: SOTA_SLOTS.grok,
   fable: SOTA_SLOTS.fable,
   opus: SOTA_SLOTS.opus,
   sonnet: SOTA_SLOTS.sonnet,
 });
-const ALLOWED = ["claude", "codex", "kimi", "opencode", "pi"];
+const ALLOWED = ["claude", "codex", "grok", "kimi", "opencode", "pi"];
 
 function providerNamesFromJson(path) {
   try {
@@ -71,6 +72,7 @@ function engineForCanonicalModel(model, usable) {
     return "codex";
   if (model.startsWith("kimi-for-coding/")) return "opencode";
   if (model.startsWith("kimi-")) return "kimi";
+  if (model.startsWith("grok-")) return "grok";
   if (model.startsWith("anthropic/")) return "opencode";
   if (model.startsWith("claude-")) return usable.has("claude") ? "claude" : "opencode";
   return undefined;
@@ -99,6 +101,7 @@ export function resolveOneshotChain(detections, options = {}) {
     if ([SOTA_SLOTS.codexSol, SOTA_SLOTS.codexTerra, SOTA_SLOTS.codex].includes(requestedModel))
       requestedEngine = "codex";
     else if (requestedModel === ONESHOT_KIMI_MODEL) requestedEngine = "kimi";
+    else if (requestedModel === SOTA_SLOTS.grok) requestedEngine = "grok";
     else if ([SOTA_SLOTS.fable, SOTA_SLOTS.opus, SOTA_SLOTS.sonnet].includes(requestedModel))
       requestedEngine = usable.has("claude") ? "claude" : "opencode";
     else requestedEngine = engineForCanonicalModel(requestedModel, usable);
@@ -145,6 +148,7 @@ export function resolveOneshotChain(detections, options = {}) {
   const general = [
     ...(claudeEngine ? [claudeSpec(SOTA_SLOTS.opus)] : []),
     ...(usable.has("codex") ? [{ engine: "codex", model: SOTA_SLOTS.codexSol }] : []),
+    ...(usable.has("grok") ? [{ engine: "grok", model: SOTA_SLOTS.grok }] : []),
     ...(usable.has("kimi") ? [{ engine: "kimi", model: ONESHOT_KIMI_MODEL }] : []),
     ...(claudeEngine ? [claudeSpec(SOTA_SLOTS.fable)] : []),
     ...(usable.has("pi") && capabilities.piKimi ? [piSpec] : []),
@@ -159,6 +163,7 @@ export function resolveOneshotChain(detections, options = {}) {
       : []),
     ...(usable.has("pi") && capabilities.piKimi ? [piSpec] : []),
     ...(usable.has("kimi") ? [{ engine: "kimi", model: ONESHOT_KIMI_MODEL }] : []),
+    ...(usable.has("grok") ? [{ engine: "grok", model: SOTA_SLOTS.grok }] : []),
     ...(claudeEngine ? [claudeSpec(SOTA_SLOTS.opus), claudeSpec(SOTA_SLOTS.fable)] : []),
     ...(usable.has("codex") ? [{ engine: "codex", model: SOTA_SLOTS.codexSol }] : []),
   ];

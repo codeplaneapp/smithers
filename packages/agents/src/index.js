@@ -30,6 +30,7 @@
  * @typedef {import("./HermesAgentOptions.ts").HermesAgentOptions<CALL_OPTIONS, TOOLS>} HermesAgentOptions
  */
 /** @typedef {import("./HermesCliAgentOptions.ts").HermesCliAgentOptions} HermesCliAgentOptions */
+/** @typedef {import("./GrokAgentOptions.ts").GrokAgentOptions} GrokAgentOptions */
 /** @typedef {import("./OpenClawAgentOptions.ts").OpenClawAgentOptions} OpenClawAgentOptions */
 /** @typedef {import("./PiAgentOptions.ts").PiAgentOptions} PiAgentOptions */
 /** @typedef {import("./CursorAgentOptions.ts").CursorAgentOptions} CursorAgentOptions */
@@ -103,6 +104,7 @@ export { GeminiAgent } from "./GeminiAgent.js";
 export { PiAgent } from "./PiAgent.js";
 export { OmpAgent, createOmpCapabilityRegistry } from "./OmpAgent.js";
 export { KimiAgent } from "./KimiAgent.js";
+export { GrokAgent, createGrokCapabilityRegistry } from "./GrokAgent.js";
 export { ForgeAgent } from "./ForgeAgent.js";
 export { OpenCodeAgent } from "./OpenCodeAgent.js";
 export { VibeAgent } from "./VibeAgent.js";

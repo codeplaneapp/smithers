@@ -29,6 +29,7 @@ const CREDENTIAL_PROBES = {
     existsSync(join(configDir, ".credentials.json")) || claudeStateShowsLogin(join(configDir, ".claude.json")),
   codex: (configDir) => existsSync(join(configDir, "auth.json")),
   kimi: (configDir) => existsSync(join(configDir, "credentials.json")) || existsSync(join(configDir, "auth.json")),
+  grok: (configDir) => existsSync(join(configDir, "auth.json")),
   antigravity: (configDir) =>
     existsSync(join(configDir, "oauth_creds.json")) || existsSync(join(configDir, "credentials.json")),
 };

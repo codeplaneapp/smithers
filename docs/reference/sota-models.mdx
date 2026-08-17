@@ -1,11 +1,11 @@
 ---
 title: "SOTA models"
-description: "The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v8, updated 2026-07-29."
+description: "The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v9, updated 2026-08-17."
 ---
 
 {/* GENERATED FILE. Edit docs/data/sota-models.json, then run `pnpm sota:gen`. */}
 
-**Registry v8** · updated **2026-07-29**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smthrs update` picks the changes up on your machine, and re-running `bunx smthrs init` refreshes installed workflows to the new defaults.
+**Registry v9** · updated **2026-08-17**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smthrs update` picks the changes up on your machine, and re-running `bunx smthrs init` refreshes installed workflows to the new defaults.
 
 ## Badges
 
@@ -168,6 +168,14 @@ Google's Pro tier (still preview). Superseded for coding and agentic work by Gem
 current · engines: `antigravity`
 
 Frontier-class performance at a fraction of the cost. The floor of the Gemini lineup for bulk, low-stakes calls.
+
+## xai
+
+### Grok 4.6 (`grok-4.6`)
+
+current · engines: `grok`
+
+xAI's current Grok Build default and latest frontier model. Smithers uses this exact id for the Grok CLI and oneshot fallback rung; the CLI also accepts API-key authentication through XAI_API_KEY. See the official Grok Build model catalog and CLI documentation.
 
 ## Moonshot AI
 

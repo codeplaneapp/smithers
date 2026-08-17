@@ -9231,7 +9231,7 @@ type AgentToolDescriptor = {
 
 type AgentCapabilityRegistry = {
   version: 1;
-  engine: "claude-code" | "codex" | "cursor" | "antigravity" | "gemini" | "kimi" | "pi" | "omp" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";
+  engine: "claude-code" | "codex" | "cursor" | "antigravity" | "gemini" | "kimi" | "grok" | "pi" | "omp" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";
   runtimeTools: Record<string, AgentToolDescriptor>;
   mcp: {
     bootstrap: "inline-config" | "project-config" | "allow-list" | "unsupported";
@@ -14806,11 +14806,11 @@ Artifacts are Smithers JSON records with baseline score, optimized score, improv
 
 ## SOTA models
 
-> The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v8, updated 2026-07-29.
+> The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v9, updated 2026-08-17.
 
 {/* GENERATED FILE. Edit docs/data/sota-models.json, then run `pnpm sota:gen`. */}
 
-**Registry v8** · updated **2026-07-29**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smthrs update` picks the changes up on your machine, and re-running `bunx smthrs init` refreshes installed workflows to the new defaults.
+**Registry v9** · updated **2026-08-17**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smthrs update` picks the changes up on your machine, and re-running `bunx smthrs init` refreshes installed workflows to the new defaults.
 
 ## Badges
 
@@ -14973,6 +14973,14 @@ Google's Pro tier (still preview). Superseded for coding and agentic work by Gem
 current · engines: `antigravity`
 
 Frontier-class performance at a fraction of the cost. The floor of the Gemini lineup for bulk, low-stakes calls.
+
+## xai
+
+### Grok 4.6 (`grok-4.6`)
+
+current · engines: `grok`
+
+xAI's current Grok Build default and latest frontier model. Smithers uses this exact id for the Grok CLI and oneshot fallback rung; the CLI also accepts API-key authentication through XAI_API_KEY. See the official Grok Build model catalog and CLI documentation.
 
 ## Moonshot AI
 
@@ -19376,7 +19384,7 @@ export default smithers((ctx) => (
 ## Available agents
 
 ```toon
-agents[16]{class,cli,modelDefault,hijack,notes}:
+agents[17]{class,cli,modelDefault,hijack,notes}:
   CodexAgent,codex,CLI default,native thread id,OpenAI Codex CLI (codex exec via stdin + JSON stream)
   ClaudeCodeAgent,claude,CLI default,native session id,Anthropic Claude Code CLI
   CursorAgent,cursor-agent,CLI default,not yet,Cursor CLI (cursor-agent --print stream-json)
@@ -19385,6 +19393,7 @@ agents[16]{class,cli,modelDefault,hijack,notes}:
   PiAgent,pi,CLI default,native session id,Pi CLI (text/json/rpc modes + extension UI hooks)
   OmpAgent,omp,CLI default,native session id,Oh My Pi OMP harness (text/json/rpc modes)
   KimiAgent,kimi,CLI default,native session id,Moonshot Kimi CLI (auto-isolates KIMI_SHARE_DIR)
+  GrokAgent,grok,CLI default,not yet,xAI Grok Build CLI (streaming JSON + native session resume)
   ForgeAgent,forge,CLI default,conversation id,Forge CLI (300+ models)
   HermesCliAgent,hermes,CLI default,session id,Nous Research Hermes Agent CLI (hermes -z headless)
   AmpAgent,amp,CLI default,thread id,Amp CLI (--execute headless mode)
@@ -19395,7 +19404,7 @@ agents[16]{class,cli,modelDefault,hijack,notes}:
   NanocodexAgent,smithers-nanocodex,gpt-5.6-sol (default; terra/luna),checkpoint resume,Nanocodex bridge (Linux x64 / macOS arm64)
 ```
 
-CLI binaries must be on `PATH`: `codex`, `cursor-agent`, `claude`, `agy`, `gemini`, `pi`, `omp`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`, `smithers-nanocodex`.
+CLI binaries must be on `PATH`: `codex`, `cursor-agent`, `claude`, `agy`, `gemini`, `pi`, `omp`, `kimi`, `grok`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`, `smithers-nanocodex`.
 
 `HermesCliAgent` drives the Hermes *agent* CLI. It is distinct from `HermesAgent`,
 which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
@@ -19958,6 +19967,46 @@ pinning credentials and session state to `<configDir>` instead of the default
 `~/.kimi/`. It is exactly equivalent to `env: { KIMI_SHARE_DIR: "<configDir>" }`;
 the `configDir` name just keeps the option uniform across agents.
 
+`GrokAgent` wraps xAI's official Grok Build CLI. Smithers uses the CLI adapter,
+not a direct HTTP adapter, because xAI ships a coding-agent CLI with native
+tools, streaming JSON, and resumable sessions. The exact current model id lives
+in the SOTA registry; omit `model` to let the CLI pick
+its default.
+
+```ts
+import { GrokAgent } from "smthrs";
+const grok = new GrokAgent({
+  configDir: "/secure/grok-account", // sets GROK_HOME
+  effort: "high",
+  maxTurns: 20,
+});
+```
+
+The adapter streams text, tool-call lifecycle events, per-session token usage,
+and the terminal session id from `--output-format streaming-json`. It resumes
+with `--resume` and discards dead session ids immediately when Grok reports that
+no matching session exists. Typed tasks use Grok Build's native `--json-schema`
+constraint; Smithers reads the schema-validated `structuredOutput` from the
+terminal event. The protocol does not provide
+enough verified before/after data for Smithers to claim file-diff support.
+
+Authenticate an isolated subscription with:
+
+```sh
+bunx smthrs agents add --provider grok --label grok-main --tmux
+```
+
+This runs `grok login --device-auth` with an isolated `GROK_HOME` and registers
+its `configDir`. For API billing, register `--provider xai-api --api-key ...`;
+Smithers supplies the key only through `XAI_API_KEY`, never argv or events, and
+uses an isolated `GROK_HOME` so ambient subscription credentials cannot win.
+Both account kinds participate in `fallbackAgents()` and oneshot routing.
+Persisted 429 reset times make a limited account sink to the end of its pool.
+
+xAI publishes limits and shows them in its console, but exposes no live account
+usage endpoint. `bunx smthrs usage` therefore reports
+`xAI exposes no live usage endpoint` instead of estimating a quota window.
+
 `ForgeAgent` wraps the Forge CLI and supports 300+ models via provider/model strings. Key additions: `conversationId`, `provider`, `workflow`.
 
 ```ts
@@ -20076,7 +20125,7 @@ Smithers persists the native session or conversation id on each task event. On h
 | `ForgeAgent` | `forge --conversation-id` |
 | `AmpAgent` | `amp threads continue` |
 
-On clean exit the workflow resumes in detached mode. Cursor, Vibe, OpenCode, and OpenClaw stream capture and headless session continuation are documented above, but native `bunx smthrs hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See How it works → Durability and resume.
+On clean exit the workflow resumes in detached mode. Grok, Cursor, Vibe, OpenCode, and OpenClaw stream capture and headless session continuation are documented above, but native `bunx smthrs hijack` support for Grok, Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See How it works → Durability and resume.
 
 ## Notes
 

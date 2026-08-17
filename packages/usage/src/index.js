@@ -22,6 +22,7 @@ export { kimiCodeUsage } from "./kimiCodeUsage.js";
 export { anthropicHeaderUsage } from "./anthropicHeaderUsage.js";
 export { openaiHeaderUsage } from "./openaiHeaderUsage.js";
 export { googleUsage } from "./googleUsage.js";
+export { grokUsage } from "./grokUsage.js";
 export { usageCachePath, readUsageCache, writeUsageCache, clearAccountUsageCache } from "./usageCache.js";
 export {
   accountQuotaStatePath,

@@ -113,6 +113,7 @@
  * @typedef {import("@smthrs/agents").HermesAgentOptions<CALL_OPTIONS, TOOLS>} HermesAgentOptions
  */
 /** @typedef {import("@smthrs/agents").HermesCliAgentOptions} HermesCliAgentOptions */
+/** @typedef {import("@smthrs/agents").GrokAgentOptions} GrokAgentOptions */
 /** @typedef {import("@smthrs/agents").OpenClawAgentOptions} OpenClawAgentOptions */
 /** @typedef {import("@smthrs/agents").NanocodexAgentOptions} NanocodexAgentOptions */
 /** @typedef {import("@smthrs/agents").NanocodexGenerateOptions} NanocodexGenerateOptions */
@@ -370,6 +371,8 @@ export {
   OmpAgent,
   createOmpCapabilityRegistry,
   KimiAgent,
+  GrokAgent,
+  createGrokCapabilityRegistry,
   ForgeAgent,
   VibeAgent,
   OpenCodeAgent,

@@ -1,5 +1,5 @@
 import { resolveOneshotChain } from "./resolveOneshotChain.js";
-import { listAccounts } from "@smthrs/accounts";
+import { defaultConfigDir, listAccounts } from "@smthrs/accounts";
 import { orderAccountsByUsage } from "@smthrs/usage";
 import { registeredAgentId } from "../registered-agent-id.js";
 
@@ -7,10 +7,11 @@ const ACCOUNT_PROVIDERS = {
   claude: new Set(["claude-code", "anthropic-api"]),
   codex: new Set(["codex", "openai-api"]),
   kimi: new Set(["kimi"]),
+  grok: new Set(["grok", "xai-api"]),
 };
 
-/** @param {{ engine: string; model: string; provider?: string }} spec @param {string} cwd @param {{ configDir?: string; apiKey?: string } | undefined} account */
-async function createAgent(spec, cwd, account) {
+/** @param {{ engine: string; model: string; provider?: string }} spec @param {string} cwd @param {import("@smthrs/accounts").Account | undefined} account @param {NodeJS.ProcessEnv} env */
+async function createAgent(spec, cwd, account, env) {
   const { engine, model } = spec;
   const identity = account ? { id: registeredAgentId(account.label) } : {};
   if (engine === "codex") {
@@ -32,6 +33,20 @@ async function createAgent(spec, cwd, account) {
       model,
       ...identity,
       ...(account?.configDir ? { configDir: account.configDir } : {}),
+    });
+  }
+  if (engine === "grok") {
+    const { GrokAgent } = await import("@smthrs/agents/GrokAgent");
+    return new GrokAgent({
+      cwd,
+      model,
+      ...identity,
+      ...(account?.provider === "xai-api"
+        ? { configDir: defaultConfigDir(account.label, env) }
+        : account?.configDir
+          ? { configDir: account.configDir }
+          : {}),
+      ...(account?.apiKey ? { apiKey: account.apiKey } : {}),
     });
   }
   if (engine === "pi") {
@@ -75,9 +90,9 @@ async function createAgent(spec, cwd, account) {
 async function createAgentsForSpec(spec, cwd, accounts, env) {
   const providers = ACCOUNT_PROVIDERS[spec.engine];
   const matching = providers ? accounts.filter((account) => providers.has(account.provider)) : [];
-  if (matching.length === 0) return [await createAgent(spec, cwd, undefined)];
+  if (matching.length === 0) return [await createAgent(spec, cwd, undefined, env)];
   const ordered = orderAccountsByUsage(matching, { env, modelFor: () => spec.model });
-  return Promise.all(ordered.map((account) => createAgent(spec, cwd, account)));
+  return Promise.all(ordered.map((account) => createAgent(spec, cwd, account, env)));
 }
 
 /**

@@ -24,7 +24,7 @@ export type CliAgentSurfaceManifestEntry = {
   displayName: string;
   binary: string;
   packageExport: string;
-  defaultOutputFormat: "text" | "json" | "stream-json" | "rpc";
+  defaultOutputFormat: "text" | "json" | "stream-json" | "streaming-json" | "rpc";
   docsUrls: string[];
   emittedFlags: string[];
   supportedFlags: string[];

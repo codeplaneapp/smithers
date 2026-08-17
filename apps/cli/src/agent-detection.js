@@ -211,6 +211,23 @@ const DETECTORS = [
     setupHint: "Install the Kimi CLI and run `kimi login`.",
   },
   {
+    id: "grok",
+    displayName: "Grok Build",
+    binary: "grok",
+    authSignals: (homeDir, env) => {
+      const grokHome = env.GROK_HOME ? resolve(env.GROK_HOME) : join(homeDir, ".grok");
+      return [join(grokHome, "auth.json")];
+    },
+    apiKeys: ["XAI_API_KEY"],
+    availabilityProbe: (homeDir, env) => {
+      if (env.XAI_API_KEY) return passProbe("$XAI_API_KEY is set");
+      const grokHome = env.GROK_HOME ? resolve(env.GROK_HOME) : join(homeDir, ".grok");
+      if (jsonFileHasContent(join(grokHome, "auth.json"))) return passProbe("Grok auth.json contains credentials");
+      return failProbe("Grok credentials are missing or empty");
+    },
+    setupHint: "Install Grok Build and run `grok login`.",
+  },
+  {
     id: "amp",
     displayName: "Amp",
     binary: "amp",
@@ -313,14 +330,15 @@ const ACCOUNT_PROVIDERS_BY_DETECTOR = {
   codex: new Set(["codex", "openai-api"]),
   antigravity: new Set(["antigravity"]),
   kimi: new Set(["kimi"]),
+  grok: new Set(["grok", "xai-api"]),
 };
 const ROLE_PREFERENCES = {
-  spec: ["claude", "codex", "opencode", "openclaw", "openrouter", "antigravity", "amp", "kimi", "cursor"],
-  research: ["codex", "kimi", "antigravity", "opencode", "claude", "openclaw", "cursor", "openrouter"],
-  plan: ["claude", "codex", "kimi", "opencode", "openclaw", "cursor", "openrouter"],
-  implement: ["claude", "codex", "kimi", "antigravity", "opencode", "openclaw", "openrouter", "cursor"],
-  validate: ["codex", "claude", "kimi", "antigravity", "opencode", "openclaw", "cursor", "openrouter"],
-  review: ["codex", "claude", "kimi", "amp", "opencode", "openclaw", "openrouter", "cursor"],
+  spec: ["claude", "codex", "grok", "opencode", "openclaw", "openrouter", "antigravity", "amp", "kimi", "cursor"],
+  research: ["codex", "grok", "kimi", "antigravity", "opencode", "claude", "openclaw", "cursor", "openrouter"],
+  plan: ["claude", "codex", "grok", "kimi", "opencode", "openclaw", "cursor", "openrouter"],
+  implement: ["claude", "codex", "grok", "kimi", "antigravity", "opencode", "openclaw", "openrouter", "cursor"],
+  validate: ["codex", "claude", "grok", "kimi", "antigravity", "opencode", "openclaw", "cursor", "openrouter"],
+  review: ["codex", "claude", "grok", "kimi", "amp", "opencode", "openclaw", "openrouter", "cursor"],
 };
 const AGENT_VARIANTS = [
   {
@@ -409,12 +427,22 @@ const LOCAL_SCAFFOLDED_PROVIDER_FILES = {
 const TIER_PREFERENCES = {
   cheapFast: {
     codexVariant: "codexLuna",
-    order: ["codexLuna", "claudeSonnet", "kimi", "vibe", "antigravity", "openclaw", "pi", "cursor"],
+    order: ["codexLuna", "claudeSonnet", "grok", "kimi", "vibe", "antigravity", "openclaw", "pi", "cursor"],
     maxSize: 3,
   },
   research: {
     codexVariant: "codexLuna",
-    order: ["codexLuna", "kimi", "antigravity", "opencode", "claudeSonnet", "openclaw", "cursor", DEFAULT_PROVIDER_ID],
+    order: [
+      "codexLuna",
+      "grok",
+      "kimi",
+      "antigravity",
+      "opencode",
+      "claudeSonnet",
+      "openclaw",
+      "cursor",
+      DEFAULT_PROVIDER_ID,
+    ],
     maxSize: 3,
   },
   implement: {
@@ -423,6 +451,7 @@ const TIER_PREFERENCES = {
       "claudeOpus",
       "codexTerra",
       "claudeSonnet",
+      "grok",
       "kimi",
       "antigravity",
       "claude",
@@ -439,6 +468,7 @@ const TIER_PREFERENCES = {
     order: [
       "codexTerra",
       "claudeSonnet",
+      "grok",
       "kimi",
       "antigravity",
       "opencode",
@@ -454,6 +484,7 @@ const TIER_PREFERENCES = {
     order: [
       "codexTerra",
       "claudeSonnet",
+      "grok",
       "kimi",
       "antigravity",
       "opencode",
@@ -469,6 +500,7 @@ const TIER_PREFERENCES = {
     order: [
       "codexTerra",
       "claudeSonnet",
+      "grok",
       "kimi",
       "antigravity",
       "opencode",
@@ -490,6 +522,7 @@ const TIER_PREFERENCES = {
       DEFAULT_PROVIDER_ID,
       "antigravity",
       "amp",
+      "grok",
       "kimi",
       ,
       "cursor",
@@ -503,6 +536,7 @@ const TIER_PREFERENCES = {
       "claude",
       "claudeOpus",
       "claudeSonnet",
+      "grok",
       "kimi",
       "amp",
       "opencode",
@@ -520,6 +554,7 @@ const TIER_PREFERENCES = {
       "claudeOpus",
       "codexSol",
       "claudeSonnet",
+      "grok",
       "kimi",
       "opencode",
       "openclaw",
@@ -530,7 +565,7 @@ const TIER_PREFERENCES = {
   },
   orchestrator: {
     codexVariant: "codexSol",
-    order: ["claudeOpus", "claude", "kimi", "codexSol", "opencode", "openclaw", "cursor", DEFAULT_PROVIDER_ID],
+    order: ["claudeOpus", "claude", "grok", "kimi", "codexSol", "opencode", "openclaw", "cursor", DEFAULT_PROVIDER_ID],
     maxSize: 3,
   },
 };
@@ -571,6 +606,10 @@ const CONSTRUCTORS = {
   kimi: {
     importName: "KimiAgent",
     expr: `new SmithersKimiAgent({ model: "${SOTA_SLOTS.kimi}" })`,
+  },
+  grok: {
+    importName: "GrokAgent",
+    expr: `new SmithersGrokAgent({ model: "${SOTA_SLOTS.grok}" })`,
   },
   amp: {
     importName: "AmpAgent",
@@ -1170,9 +1209,11 @@ const ACCOUNT_PROVIDER_CLASSES = {
   antigravity: "AntigravityAgent",
   codex: "CodexAgent",
   kimi: "KimiAgent",
+  grok: "GrokAgent",
   "anthropic-api": "ClaudeCodeAgent",
   "openai-api": "CodexAgent",
   "gemini-api": "OpenAIAgent",
+  "xai-api": "GrokAgent",
 };
 
 /**
@@ -1188,6 +1229,8 @@ const ACCOUNT_PROVIDER_POOL = {
   "openai-api": "codex",
   "gemini-api": "gemini",
   kimi: "kimi",
+  grok: "grok",
+  "xai-api": "grok",
 };
 
 /**
@@ -1202,6 +1245,8 @@ const ACCOUNT_PROVIDER_DEFAULT_MODEL = {
   "openai-api": SOTA_SLOTS.codex,
   "gemini-api": SOTA_SLOTS.gemini,
   kimi: SOTA_SLOTS.kimi,
+  grok: SOTA_SLOTS.grok,
+  "xai-api": SOTA_SLOTS.grok,
 };
 
 const CODEX_TIER_MODEL = {
@@ -1304,7 +1349,14 @@ function renderAccountProviderVariantLine(account, homeDir, providerId, modelOve
     opts.push(`config: { model_reasoning_effort: ${JSON.stringify(reasoningEffort)} }`);
   }
   if (account.configDir) opts.push(`configDir: ${pathLiteral(account.configDir, homeDir)}`);
-  else if (account.apiKey) opts.push(`apiKey: registeredAccountApiKey(${JSON.stringify(account.label)})`);
+  else if (account.apiKey) {
+    if (account.provider === "xai-api") {
+      opts.push(
+        `configDir: path.join(process.env.SMITHERS_HOME || path.join(process.env.HOME || homedir(), ".smithers"), "accounts", ${JSON.stringify(account.label)})`,
+      );
+    }
+    opts.push(`apiKey: registeredAccountApiKey(${JSON.stringify(account.label)})`);
+  }
   if (account.provider === "codex" || account.provider === "openai-api") {
     opts.push("skipGitRepoCheck: true");
   }

@@ -66,6 +66,30 @@ test("agents add for an api-key provider stores the key", () => {
   });
 });
 
+test("agents add and list support Grok subscription and xAI API accounts", () => {
+  const repo = createTempRepo();
+  const home = newSmithersHome();
+  const subscription = runSmithers(["agents", "add", "--provider", "grok", "--label", "grok-main", "--skip-login"], {
+    cwd: repo.dir,
+    format: "json",
+    env: { SMITHERS_HOME: home },
+  });
+  const api = runSmithers(["agents", "add", "--provider", "xai-api", "--label", "xai-api-1", "--api-key", "xai-test"], {
+    cwd: repo.dir,
+    format: "json",
+    env: { SMITHERS_HOME: home },
+  });
+  expect(subscription.exitCode).toBe(0);
+  expect(api.exitCode).toBe(0);
+  const listed = runSmithers(["agents", "list"], {
+    cwd: repo.dir,
+    format: "json",
+    env: { SMITHERS_HOME: home },
+  });
+  expect(listed.exitCode).toBe(0);
+  expect(listed.json.accounts.map((account) => account.provider).sort()).toEqual(["grok", "xai-api"]);
+});
+
 test("agents add never embeds a registered API key in generated source", () => {
   const repo = createTempRepo();
   const home = newSmithersHome();
