@@ -179,24 +179,26 @@ describe("killProcessTree — win32 taskkill branch", () => {
     expect(taskkillArgs(1234)).toEqual(["/PID", "1234", "/T", "/F"]);
   });
 
-  // On real Windows `spawnSync("taskkill")` resolves the actual taskkill.exe,
-  // so the shim harness only runs from POSIX. Real win32 coverage comes from
+  // Asserted through the injectable `runTaskkill` seam rather than a PATH shim.
+  // A shim depends on `spawnSync` resolving a bare `taskkill` out of a mutated
+  // process.env.PATH, which does not hold under the instrumented coverage run
+  // and made this test fail there while passing everywhere else. The argv shape
+  // is pinned by the `taskkillArgs` test above; real win32 wiring is covered by
   // the platform e2e suites.
-  test.skipIf(process.platform === "win32")("runs taskkill /T /F and reports the tree terminated", async () => {
-    const dir = makeTempDir();
-    const argsFile = join(dir, "args.txt");
-    const shim = join(dir, "taskkill");
-    writeFileSync(shim, `#!/bin/sh\nprintf '%s ' "$@" > "${argsFile}"\nexit 0\n`);
-    chmodSync(shim, 0o755);
-    const previousPath = process.env.PATH;
-    process.env.PATH = `${dir}:${previousPath}`;
-    try {
-      const outcome = await killProcessTree(999_999, { platform: "win32", alive: () => false });
-      expect(outcome).toEqual({ terminated: true, skipped: false, escalated: false });
-      expect(readFileSync(argsFile, "utf8").trim()).toBe("/PID 999999 /T /F");
-    } finally {
-      process.env.PATH = previousPath;
-    }
+  test("runs taskkill /T /F and reports the tree terminated", async () => {
+    /** @type {number[]} */
+    const killed = [];
+    const outcome = await killProcessTree(999_999, {
+      platform: "win32",
+      alive: () => false,
+      runTaskkill: (target) => {
+        killed.push(target);
+        return true;
+      },
+    });
+    expect(outcome).toEqual({ terminated: true, skipped: false, escalated: false });
+    expect(killed).toEqual([999_999]);
+    expect(taskkillArgs(killed[0])).toEqual(["/PID", "999999", "/T", "/F"]);
   });
 
   test("a failing taskkill still reports terminated when the pid is verifiably gone", async () => {
