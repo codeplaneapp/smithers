@@ -266,23 +266,6 @@ const cancelledProcess = objectSchema(
   ["runId", "pid"],
   "A process tree cancellation terminated so work cannot outlive its run.",
 );
-const cancelledRunOutcome = objectSchema(
-  {
-    runId,
-    depth: integerSchema("Distance from the requested root run.", 0),
-    action: { type: "string", enum: ["cancel-requested", "cancelled", "already-terminal", "missing"] },
-  },
-  ["runId", "depth", "action"],
-  "What recursive cancellation did to one run in the cancelled subtree.",
-);
-const cancelledProcess = objectSchema(
-  {
-    runId: { type: ["string", "null"], description: "Run the process belonged to." },
-    pid: integerSchema("Terminated process id.", 1),
-  },
-  ["runId", "pid"],
-  "A process tree cancellation terminated so work cannot outlive its run.",
-);
 const runDescendant = objectSchema(
   {
     runId,
