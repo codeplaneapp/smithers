@@ -46,6 +46,19 @@ and no Smithers graph, durable run state, delegation, or fresh reviewer. Label
 it `Smithers (single session)`, not `Smithers orchestrated` and not literally
 one model request.
 
+The pinned adapter is not usable as Arm A unmodified, and the required patch is
+not only the eliza-side one. `harnesses/smithers/smithers_adapter/terminal_bench.py`
+runs the hidden test script every time the model signals completion, and on
+failure feeds the grader's own output back into the conversation as
+`Task verification FAILED ... Test output: ... Please fix the issue and try
+again`, looping up to `max_iterations` of 20. That is oracle feedback: it turns
+Arm A into repeated attempts against the hidden tests rather than one graded
+attempt, and it violates this study's own rule that hidden tests run once after
+the agent stops. Arm A must be patched to stop on the model's completion signal
+without consulting the grader, and to run the test script exactly once at the
+end. Reporting the pinned adapter's score as a single-session baseline would
+inflate the baseline and make any Arm B improvement look smaller than it is.
+
 ### Arm B: Smithers orchestrated
 
 Run one durable Smithers workflow per task against the same container:
@@ -74,9 +87,12 @@ No paid pilot starts until an upstream branch satisfies these checks:
   task's `max_agent_timeout_sec`, or prove the effective deadline is identical
   for both arms; the pinned runner still wraps `solve_task` at 300 seconds by
   default even when task metadata allows 900 seconds or more;
-- remove all evaluator-answer extraction and automatic repair. The pinned
-  eliza adapter reads an expected answer from test output and writes it into
-  `/app/answer.txt`; neither arm may see hidden test output before final grade;
+- remove all evaluator-answer extraction, mid-run grader consultation, and
+  automatic repair from both adapters. The pinned eliza adapter reads an
+  expected answer out of failing test output and writes it straight into
+  `/app/answer.txt`; the pinned Smithers adapter re-runs the hidden test script
+  mid-loop and returns its output to the model as repair feedback. Both leak
+  the grader, and neither arm may see hidden test output before final grade;
 - run exactly one final grader invocation per cell and equalize model-step,
   repair, timeout, network, and retry rules;
 - verify the corpus count and hash, build every Docker task, and prove oracle

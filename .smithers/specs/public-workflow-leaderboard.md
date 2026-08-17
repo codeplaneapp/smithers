@@ -52,8 +52,8 @@ deterministic assertions, LLM judges, batch execution, cost estimation, and
 aggregation. `evals/` already has JSONL cases, real workflow execution,
 deterministic verification where possible, panel judging, and scorecards. The
 seeded-bug review eval is especially reusable: its scorer measures precision,
-recall, anchor accuracy, and severity calibration over labeled bugs and clean
-controls.
+recall, F1, anchor accuracy, and severity calibration over labeled bugs and
+clean controls.
 
 Those components do not provide submission provenance, untrusted-code
 isolation, secret holdouts, confidence intervals, moderation, appeals, or
@@ -115,6 +115,12 @@ the organizer must author a small private set with the same labeled bug classes
 and clean controls before opening submissions. Rank by F1 over planted findings
 and false positives, then by API-equivalent cost, then wall time. Use three
 repetitions per held-out case and publish all run receipts after the round.
+
+`scoreCorpus` now emits that F1 alongside precision and recall, so a published
+rank is recomputable from a committed receipt without a leaderboard-specific
+scorer. F1 is also the only one of the three a silent entry cannot game:
+reporting no findings at all scores perfect precision under the scorer's
+empty-denominator convention, and scores zero F1.
 
 This pilot is worth shipping because every workflow solves the same problem,
 the primary score is deterministic, clean controls penalize spam findings, and
