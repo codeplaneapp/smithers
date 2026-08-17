@@ -90,6 +90,7 @@ import {
   eventLogViewState,
   eventViewFor,
   executionTreeViewState,
+  failedDescendantCount,
   filterRuns,
   formatDiffSummary,
   formatDurationMs,
@@ -101,7 +102,6 @@ import {
   frameScrubBounds,
   groupForStatus,
   groupRuns,
-  hasFailedDescendant,
   histogramStats,
   isCancellable,
   isPausable,
@@ -670,7 +670,8 @@ function RunListRow({
       name={`${run.workflowKey ?? "unknown"}${startedBy?.harness ? ` · ${startedBy.harness}` : ""}${lastKnown ? " · last-known" : ""}`}
       title={`${run.workflowKey ?? "unknown workflow"}${startedLabel}${startedBy?.detected ? " · auto-detected" : ""}`}
       shortId={shortRunId(run.runId)}
-      tone={tone}
+      status={run.status}
+      statusLabel={lastKnown ? `${labelForStatus(run.status)}, last-known` : labelForStatus(run.status)}
       pulse={!lastKnown && tone === "running"}
       when={
         lastKnown ? (
@@ -2010,6 +2011,12 @@ function XmlRow({
           <span className="mon-xml-attr-name">iteration</span>=<span className="mon-xml-str">"{node.iteration}"</span>
         </span>
       ) : null}
+      {typeof node.attempt === "number" && node.attempt > 0 ? (
+        <span className="mon-xml-attr">
+          {" "}
+          <span className="mon-xml-attr-name">attempt</span>=<span className="mon-xml-str">"{node.attempt}"</span>
+        </span>
+      ) : null}
       <span className="mon-xml-punct">{children.length === 0 ? " />" : expanded ? ">" : ""}</span>
       {children.length > 0 && !expanded ? (
         <span className="mon-xml-punct">
@@ -2127,7 +2134,7 @@ function TreeRow({
   const kindKey = (node.kind ?? "").toLowerCase();
   const glyph = KIND_GLYPHS[kindKey] ?? "○";
   const agentName = isRecord(node.agent) ? asString(node.agent.name) : asString(node.agent);
-  const failedBelow = !expanded && hasFailedDescendant(node);
+  const failedBelow = expanded ? 0 : failedDescendantCount(node);
   // Containers read quieter than real tasks: dimmer name, and no status pill
   // unless the state is worth interrupting for (running/waiting/failed).
   const isContainer = !LEAF_KINDS.has(kindKey) && children.length > 0;
@@ -2192,11 +2199,42 @@ function TreeRow({
             {glyph}
           </span>
           <span className="mon-tree-name">{node.cardLabel ?? node.name ?? node.id ?? key}</span>
-          {agentName ? <span className="mon-chip">{agentName}</span> : null}
-          {typeof node.iteration === "number" && node.iteration > 0 ? (
-            <span className="mon-chip mon-dim">#{node.iteration}</span>
+          <Badge variant="outline" className="mon-tree-kind" aria-hidden="true">
+            {kindKey || "node"}
+          </Badge>
+          {agentName ? (
+            <Badge variant="secondary" className="mon-tree-agent">
+              {agentName}
+            </Badge>
           ) : null}
-          {failedBelow ? <ToneDot tone="failed" /> : null}
+          {typeof node.iteration === "number" && node.iteration > 0 ? (
+            <Badge variant="muted" className="mon-tree-iteration">
+              iteration {node.iteration}
+            </Badge>
+          ) : null}
+          {typeof node.attempt === "number" && node.attempt > 0 ? (
+            <Badge
+              variant={node.attempt > 1 ? "warning" : "muted"}
+              className="mon-tree-attempt"
+              title={
+                typeof node.maxAttempts === "number"
+                  ? `Attempt ${node.attempt} of ${node.maxAttempts}${node.attempt > 1 ? ` · retry ${node.attempt - 1}` : ""}`
+                  : `Attempt ${node.attempt}${node.attempt > 1 ? ` · retry ${node.attempt - 1}` : ""}`
+              }
+            >
+              a{node.attempt}
+              {typeof node.maxAttempts === "number" ? `/${node.maxAttempts}` : ""}
+            </Badge>
+          ) : null}
+          {failedBelow > 0 ? (
+            <Badge
+              variant="destructive"
+              className="mon-tree-failure-rollup"
+              aria-label={`${failedBelow} failed ${failedBelow === 1 ? "descendant" : "descendants"}`}
+            >
+              {failedBelow} failed
+            </Badge>
+          ) : null}
           {durationMs !== undefined ? (
             <span className="mon-mono mon-dim mon-tree-duration">{formatDurationMs(durationMs)}</span>
           ) : null}
@@ -2756,7 +2794,7 @@ export function TimelinePanel({
             <span className="mon-timeline-node" title={entry.label ?? entry.nodeId}>
               {entry.nodeId}
             </span>
-            {entry.iteration > 0 ? <span className="mon-chip mon-dim">#{entry.iteration}</span> : null}
+            {entry.iteration > 0 ? <Badge variant="muted">iteration {entry.iteration}</Badge> : null}
             {entry.lastAttempt != null ? (
               <span className="mon-dim mon-mono mon-timeline-attempt" title={`latest attempt ${entry.lastAttempt}`}>
                 a{entry.lastAttempt}
@@ -5331,7 +5369,11 @@ function RunDetail({
           {customUiUrl ? (
             <Dialog open={showCustomUi} onOpenChange={setShowCustomUi}>
               <DialogTrigger asChild>
-                <Button variant="outline" title={`Open this workflow's custom UI (${customUiPath})`}>
+                <Button
+                  variant="outline"
+                  data-testid="monitor-open-ui"
+                  title={`Open this workflow's custom UI (${customUiPath})`}
+                >
                   Open UI
                 </Button>
               </DialogTrigger>
@@ -5769,9 +5811,6 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-toggle { color: var(--muted); font-size: var(--fs-1); font-weight: 600; }
 .mon-toggle.is-on { color: var(--brand); border-color: var(--brand-border); background: var(--brand-soft); }
 
-/* Non-interactive label chips (agent names, #iteration, score chips). */
-.mon-chip { display: inline-flex; align-items: center; gap: var(--sp-1); height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); font-size: var(--fs-1); font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--muted); white-space: nowrap; }
-
 .mon-kicker { margin: 0; font-size: var(--fs-1); line-height: var(--lh-tight); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .mon-kicker-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .mon-child-rollup { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
@@ -5799,15 +5838,15 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 
 .mon-banner-app { margin: var(--sp-2) var(--sp-4) 0; }
 
-.mon-body { display: grid; grid-template-columns: 320px minmax(420px, 1fr) minmax(0, 380px); flex: 1; overflow: hidden; }
+.mon-body { display: grid; grid-template-columns: 320px minmax(0, 1fr) minmax(0, 380px); flex: 1; min-width: 0; overflow: hidden; }
 /* No node selected: the inspector column collapses instead of reserving ~380px of dead gutter. */
-.mon-body-no-inspector { grid-template-columns: 320px minmax(420px, 1fr); }
+.mon-body-no-inspector { grid-template-columns: 320px minmax(0, 1fr); }
 /* Overview: no rail (the table owns the run list), main takes the row. */
 .mon-body-no-rail { grid-template-columns: minmax(420px, 1fr) minmax(0, 380px); }
 .mon-body-no-rail.mon-body-no-inspector { grid-template-columns: minmax(0, 1fr); }
 .mon-overview { max-width: 1160px; margin: 0 auto; width: 100%; }
-.mon-rail { border-right: 1px solid var(--border); overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
-.mon-main { overflow-y: auto; padding: var(--sp-4); }
+.mon-rail { min-width: 0; border-right: 1px solid var(--border); overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
+.mon-main { min-width: 0; overflow-y: auto; padding: var(--sp-4); }
 .mon-embed .mon-body { display: block; }
 .mon-embed .mon-main { height: 100%; padding: var(--sp-4); }
 .mon-embed .mon-inspector { display: none; }
@@ -5815,7 +5854,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 /* Click-outside-to-close backdrop — only visible in the overlay layout. */
 .mon-inspector-backdrop { display: none; }
 @media (max-width: 1160px) {
-  .mon-body, .mon-body-no-inspector { grid-template-columns: 300px 1fr; }
+  .mon-body, .mon-body-no-inspector { grid-template-columns: 300px minmax(0, 1fr); }
   .mon-body-no-rail, .mon-body-no-rail.mon-body-no-inspector { grid-template-columns: minmax(0, 1fr); }
   .mon-inspector { position: fixed; right: 0; top: 0; bottom: 0; width: min(420px, 90vw); background: var(--bg); box-shadow: -12px 0 36px rgb(var(--shadow-rgb) / 0.14); z-index: 10; }
   .mon-inspector-backdrop { display: block; position: fixed; inset: 0; z-index: 9; background: rgb(var(--shadow-rgb) / 0.35); }
@@ -5864,7 +5903,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-run-group .mon-kicker { padding: 0 var(--sp-1) var(--sp-1); }
 /* Rail rows are shared RowButtons; only the internal layout is monitor-specific. */
 .mon-run-row { justify-content: flex-start; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
-.mon-run-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-run-name { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mon-run-when { margin-left: auto; font-size: var(--fs-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* Landing runs table: fills the main column; the table body scrolls inside the
@@ -5915,6 +5954,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 
 .mon-tree { overflow-x: auto; }
 .mon-tree-item { min-width: max-content; }
+.mon-tree [role="group"] { border-left: 1px solid var(--border); }
 .mon-tree-row { display: flex; align-items: center; border-radius: var(--r-1); }
 .mon-tree:focus-visible .mon-tree-item[data-focused='true'] > .mon-tree-row,
 .mon-tree:focus-visible .mon-tree-item[data-focused='true'] > .mon-xml-row { box-shadow: inset 0 0 0 2px var(--ring-border); }
@@ -5922,6 +5962,8 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-tree-main { justify-content: flex-start; gap: var(--sp-2); flex: 1; min-width: 0; padding: var(--sp-1) var(--sp-2); }
 .mon-tree-glyph { flex: none; width: 14px; text-align: center; cursor: help; }
 .mon-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-tree-kind, .mon-tree-agent, .mon-tree-iteration, .mon-tree-attempt, .mon-tree-failure-rollup { flex: none; }
+.mon-tree-kind { color: var(--muted); }
 /* Containers (sequence/parallel/loop…) group tasks — they read quieter so
    the tree scans like a task list interrupted only where structure matters. */
 .mon-tree-container .mon-tree-name { color: var(--muted); font-weight: 400; }
@@ -5983,7 +6025,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-timeline { display: flex; flex-direction: column; overflow-y: auto; max-height: 60vh; }
 .mon-timeline-row { justify-content: flex-start; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); font-size: var(--fs-2); }
 .mon-timeline-node { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mon-timeline-row .mon-chip { flex: none; }
+.mon-timeline-row .sui-badge { flex: none; }
 .mon-timeline-attempt { flex: none; }
 .mon-timeline-right { display: flex; align-items: baseline; gap: var(--sp-3); margin-left: auto; flex: none; }
 .mon-timeline-duration { font-variant-numeric: tabular-nums; }

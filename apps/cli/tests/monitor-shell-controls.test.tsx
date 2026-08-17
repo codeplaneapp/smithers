@@ -7,21 +7,13 @@
  * Real react-dom under happy-dom (the packages/ui radix-interaction
  * convention) driving the monitor's own shell components — no mocking of the
  * unit under test. The DOM must exist before radix-ui loads (it decides
- * whether layout effects run at module-load time), so registration happens
- * first and everything DOM-dependent is imported dynamically after it. The
- * package test script runs this file in its own Bun process so earlier React
- * imports cannot poison that ordering and happy-dom cannot leak into CLI tests.
+ * whether layout effects run at module-load time), so bunfig registers
+ * happy-dom in preload-monitor-dom.ts before this module is evaluated. The
+ * package test script runs this file in its own Bun process so happy-dom cannot
+ * leak into the shared CLI test shards.
  */
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-
-// happy-dom replaces fetch with a node:http one; keep bun's native fetch so
-// unrelated network-using tests in the same process stay on the real stack.
-const nativeFetch = globalThis.fetch;
-const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
-GlobalRegistrator.register({ url: "http://localhost/monitor" });
-globalThis.fetch = nativeFetch;
 
 const { act, useState } = await import("react");
 const { createRoot } = await import("react-dom/client");
@@ -54,23 +46,8 @@ const {
 } = await import("../src/monitor-ui/monitor.tsx");
 const monitorSource = readFileSync(new URL("../src/monitor-ui/monitor.tsx", import.meta.url), "utf8");
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
 let container: HTMLElement | undefined;
 let root: Root | undefined;
-
-afterAll(async () => {
-  try {
-    await GlobalRegistrator.unregister();
-  } finally {
-    globalThis.fetch = nativeFetch;
-    if (previousReactActEnvironment === undefined) {
-      delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
-    } else {
-      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = previousReactActEnvironment;
-    }
-  }
-});
 
 afterEach(async () => {
   if (root) {
@@ -1420,6 +1397,80 @@ function directTreeItems(group: Element): HTMLElement[] {
 }
 
 describe("execution tree accessibility", () => {
+  test("labels node kinds, iterations, retries, and collapsed descendant failures", async () => {
+    const failedA = {
+      key: "failed-a#2",
+      id: "failed-a",
+      name: "Failed A",
+      kind: "task",
+      status: "failed",
+      iteration: 2,
+      attempt: 3,
+      maxAttempts: 4,
+      children: [],
+    };
+    const parallel = {
+      key: "parallel#0",
+      id: "parallel",
+      name: "Parallel work",
+      kind: "parallel",
+      status: "finished",
+      children: [failedA, { ...failedA, key: "failed-b#0", id: "failed-b", name: "Failed B", iteration: 0 }],
+    };
+    const sequence = {
+      key: "sequence#0",
+      id: "sequence",
+      name: "Sequence",
+      kind: "sequence",
+      status: "finished",
+      children: [parallel],
+    };
+    const rootNode = {
+      key: "workflow#0",
+      id: "workflow",
+      name: "Workflow",
+      kind: "workflow",
+      status: "failed",
+      children: [sequence],
+    };
+    await render(
+      <ExecutionTree
+        runId="run-retries"
+        treeQuery={{
+          root: rootNode,
+          nodes: [rootNode, sequence, parallel, ...parallel.children],
+          status: "failed",
+          isLoading: false,
+          error: undefined,
+        }}
+        selectedNodeKey={undefined}
+        onSelectNode={() => {}}
+      />,
+    );
+
+    const tree = byTestId("monitor-tree");
+    const failedItem = [...tree.querySelectorAll<HTMLElement>('[role="treeitem"]')].find((item) =>
+      item.getAttribute("aria-label")?.startsWith("Failed A,"),
+    )!;
+    expect(failedItem.getAttribute("aria-label")).toContain("iteration 2");
+    expect(failedItem.getAttribute("aria-label")).toContain("attempt 3 of 4");
+    expect(failedItem.querySelector(".mon-tree-kind")?.textContent).toBe("task");
+    expect(failedItem.querySelector(".mon-tree-iteration")?.textContent).toBe("iteration 2");
+    expect(failedItem.querySelector(".mon-tree-attempt")?.textContent).toBe("a3/4");
+    expect(failedItem.querySelector(".mon-tree-attempt")?.getAttribute("title")).toContain("retry 2");
+
+    const parallelItem = [...tree.querySelectorAll<HTMLElement>('[role="treeitem"]')].find((item) =>
+      item.getAttribute("aria-label")?.startsWith("Parallel work,"),
+    )!;
+    expect(parallelItem.querySelector(".mon-tree-kind")?.textContent).toBe("parallel");
+    await click(parallelItem.querySelector('[data-testid="monitor-tree-toggle"]')!);
+    expect(parallelItem.getAttribute("aria-expanded")).toBe("false");
+    const rollup = parallelItem.querySelector(".mon-tree-failure-rollup")!;
+    expect(rollup.textContent).toBe("2 failed");
+    expect(rollup.getAttribute("aria-label")).toBe("2 failed descendants");
+    expect(rollup.className).toContain("sui-badge-destructive");
+  });
+
   test("exposes a complete tree hierarchy and supports the APG keyboard model", async () => {
     const selected: string[] = [];
     await render(<AccessibleTreeHarness onSelect={(nodeId) => selected.push(nodeId)} />);
@@ -1792,6 +1843,7 @@ describe("MonitorToolbar", () => {
     expect(filter.tagName).toBe("INPUT");
     expect(filter.getAttribute("data-slot")).toBe("input");
     expect(filter.className).toContain("sui-input");
+    expect(filter.getAttribute("aria-label")).toBe("Search runs");
 
     for (const testId of ["monitor-status-filter", "monitor-workflow-filter"]) {
       const trigger = byTestId(testId);
@@ -1972,7 +2024,8 @@ describe("RunRailRow", () => {
         name="hello"
         title="hello"
         shortId="run-42"
-        tone="running"
+        status="running"
+        statusLabel="running"
         pulse
         when="3m ago"
         active={active}
@@ -1991,7 +2044,8 @@ describe("RunRailRow", () => {
     expect(el.getAttribute("data-active")).toBe("true");
     expect(el.getAttribute("data-run-id")).toBe("run-42");
     expect(el.getAttribute("aria-current")).toBe("true");
-    expect(el.getAttribute("aria-label")).toBe("hello, run run-42");
+    expect(el.getAttribute("aria-label")).toBe("hello, running, run run-42");
+    expect(el.querySelector('[data-slot="badge"]')?.textContent).toContain("Running");
   });
 
   test("inactive rows drop data-active, stay focusable, and select on click", async () => {
@@ -2000,7 +2054,7 @@ describe("RunRailRow", () => {
     const el = byTestId("monitor-run-row");
     expect(el.getAttribute("data-active")).toBeNull();
     expect(el.getAttribute("aria-current")).toBeNull();
-    expect(el.getAttribute("aria-label")).toBe("hello, run run-42");
+    expect(el.getAttribute("aria-label")).toBe("hello, running, run run-42");
     await act(async () => el.focus());
     expect(document.activeElement).toBe(el);
     await click(el);
