@@ -305,6 +305,7 @@ import {
 } from "./update-check.js";
 import { SOTA_REGISTRY_VERSION } from "./sota-models.generated.js";
 import { reportReplayResult } from "./reportReplayResult.js";
+import { parseResetNodeList } from "./parseResetNodeList.js";
 import { renderEffectBoundaryReport } from "./renderEffectBoundaryReport.js";
 import { buildClaudeMirrorTick } from "./claude-mirror/buildClaudeMirrorTick.js";
 import { buildClaudeNodeWait } from "./claude-mirror/buildClaudeNodeWait.js";
@@ -9003,7 +9004,11 @@ const cli = Cli.create({
         // its engine can never be auto-resumed (it was skipped forever with
         // "workflow file not found at (missing path)").
         let builtinResumeGoalArgs = [goal];
-        if (Buffer.byteLength(goal, "utf8") > 64 * 1024) {
+        // Same ceiling the launch path enforces on an inline goal. A goal that
+        // launches but is re-inlined into the resume argv above the CLI's own
+        // limit is a run that executes once and can never be resumed, so both
+        // sides read one constant.
+        if (Buffer.byteLength(goal, "utf8") > CLI_TEXT_ARGUMENT_MAX_LENGTH) {
           const smithersHome =
             process.env.SMITHERS_HOME ||
             (process.env.HOME ? resolve(process.env.HOME, ".smithers") : resolve(taskCwd, ".smithers"));
@@ -9726,7 +9731,20 @@ const cli = Cli.create({
             ...summary,
           });
         }
-        await runPromise(supervisorLoopEffect(supervisorOptions), { signal: abort.signal });
+        const loopSummary = await runPromise(supervisorLoopEffect(supervisorOptions), { signal: abort.signal });
+        // Giving up is a failure of unattended recovery, not a clean stop: the
+        // supervised runs are abandoned and marked failed. Exiting 0 here made
+        // that invisible to whatever supervises the supervisor.
+        if (loopSummary.gaveUpRunIds.length > 0) {
+          return fail({
+            code: "SUPERVISOR_GAVE_UP",
+            message:
+              `Supervisor gave up on ${loopSummary.gaveUpRunIds.join(", ")}: ` +
+              "consecutive auto-resumes died before activation. Each run is marked failed with AUTO_RESUME_GAVE_UP " +
+              "diagnostics and a durable alert; inspect with `smithers alerts` and resume manually once the startup failure is fixed.",
+            exitCode: 1,
+          });
+        }
         return c.ok({ status: "stopped" });
       } catch (error) {
         if (abort.signal.aborted) {
@@ -12301,7 +12319,12 @@ const cli = Cli.create({
     options: z.object({
       runId: z.string().describe("Source run ID to replay from"),
       frame: z.number().int().describe("Frame number to fork from"),
-      node: z.string().optional().describe("Node ID to reset to pending"),
+      node: z
+        .string()
+        .optional()
+        .describe(
+          "Node ID to reset to pending; comma-separate ids to reset several (dependents are not reset for you)",
+        ),
       input: z.string().optional().describe("Input overrides as JSON string"),
       label: z.string().optional().describe("Branch label for the fork"),
       restoreVcs: z.boolean().default(false).describe("Restore jj filesystem state to the source frame's revision"),
@@ -12317,7 +12340,7 @@ const cli = Cli.create({
           const parsedOverrides = tryParseJsonInput(c.options.input, "input");
           if (!parsedOverrides.ok) return fail(parsedOverrides.error);
           const inputOverrides = parsedOverrides.value;
-          const resetNodes = c.options.node ? [c.options.node] : undefined;
+          const resetNodes = parseResetNodeList(c.options.node);
           const resolvedReplayWorkflowPath = resolve(c.args.workflow);
           const result = await replayFromCheckpoint(adapter, {
             parentRunId: c.options.runId,
@@ -12586,7 +12609,12 @@ const cli = Cli.create({
     options: z.object({
       runId: z.string().describe("Source run ID"),
       frame: z.number().int().describe("Frame number to fork from"),
-      resetNode: z.string().optional().describe("Node ID to reset to pending"),
+      resetNode: z
+        .string()
+        .optional()
+        .describe(
+          "Node ID to reset to pending; comma-separate ids to reset several (dependents are not reset for you)",
+        ),
       input: z.string().optional().describe("Input overrides as JSON string"),
       label: z.string().optional().describe("Branch label"),
       run: z.boolean().default(false).describe("Immediately start the forked run"),
@@ -12602,7 +12630,7 @@ const cli = Cli.create({
           const parsedOverrides = tryParseJsonInput(c.options.input, "input");
           if (!parsedOverrides.ok) return fail(parsedOverrides.error);
           const inputOverrides = parsedOverrides.value;
-          const resetNodes = c.options.resetNode ? [c.options.resetNode] : undefined;
+          const resetNodes = parseResetNodeList(c.options.resetNode);
           const resolvedForkWorkflowPath = resolve(c.args.workflow);
           const result = await forkRun(adapter, {
             parentRunId: c.options.runId,

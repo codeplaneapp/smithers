@@ -1828,6 +1828,7 @@ type GatewayAuthConfig =
     }
   | {
       mode: "trusted-proxy";
+      trustedProxies: string[];      // REQUIRED: peer IPs / CIDR blocks, or "unix"
       trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
       allowedOrigins?: string[];     // default [] (no Origin allowlist)
       defaultRole?: string;          // default "operator"

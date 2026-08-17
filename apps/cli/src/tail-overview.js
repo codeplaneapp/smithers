@@ -22,6 +22,7 @@ export const ATTENTION_STATES = new Set([
   "waiting-event",
   "waiting-timer",
   "failed",
+  "stalled",
 ]);
 
 /** Node count above which the per-node list is trimmed to attention-worthy nodes and a queue summary line is added. */
@@ -71,6 +72,8 @@ export function overviewStateLabel(state) {
       return "done";
     case "failed":
       return "failed";
+    case "stalled":
+      return "stalled";
     case "cancelled":
       return "cancelled";
     case "skipped":
@@ -93,6 +96,7 @@ export function colorOverviewState(state, label) {
     case "waiting-event":
       return pc.yellow(label);
     case "failed":
+    case "stalled":
       return pc.red(label);
     case "finished":
       return pc.green(label);
@@ -145,6 +149,8 @@ export function buildDigestInputFromOverview(input) {
       attentionLines.push(`${n.nodeId} blocked`);
     } else if (n.state === "failed") {
       attentionLines.push(`${n.nodeId} failed`);
+    } else if (n.state === "stalled") {
+      attentionLines.push(`${n.nodeId} stalled`);
     }
   }
   const nowMs = typeof input.nowMs === "number" ? input.nowMs : Date.now();
@@ -182,6 +188,7 @@ export function tallyNodes(nodes) {
         counts.blocked += 1;
         break;
       case "failed":
+      case "stalled":
         counts.failed += 1;
         break;
       case "finished":
@@ -242,7 +249,7 @@ export function buildOverviewBlock(input) {
   const listedBase = many ? nodes.filter((n) => ATTENTION_STATES.has(String(n.state ?? ""))) : nodes;
   const rank = (state) => {
     const s = String(state ?? "");
-    if (s === "failed") return 0;
+    if (s === "failed" || s === "stalled") return 0;
     if (s === "waiting-approval" || s === "waiting-event") return 1;
     if (s === "in-progress") return 2;
     if (s === "waiting-timer" || s === "pending") return 3;
@@ -306,14 +313,15 @@ export function buildOverviewBlock(input) {
   }
   const activeRun = OVERVIEW_ACTIVE_RUN_STATES.has(String(input.status ?? ""));
   for (const n of nodes) {
-    if (n.state === "failed" && ctas.length < MAX_OVERVIEW_CTAS) {
+    if ((n.state === "failed" || n.state === "stalled") && ctas.length < MAX_OVERVIEW_CTAS) {
+      const verb = n.state === "stalled" ? "stalled" : "failed";
       if (activeRun) {
-        ctas.push(`  ▶ steer    ${n.nodeId} failed — in its node tab press s to steer · h to hijack, or run:`);
+        ctas.push(`  ▶ steer    ${n.nodeId} ${verb} — in its node tab press s to steer · h to hijack, or run:`);
         ctas.push(
           `             ${pc.dim(`smithers steer ${input.runId} --node ${n.nodeId} "…"  ·  smithers steer ${input.runId} --node ${n.nodeId} --takeover`)}`,
         );
       } else {
-        ctas.push(`  ▶ hijack   ${n.nodeId} failed — smithers steer ${input.runId} --node ${n.nodeId} --takeover`);
+        ctas.push(`  ▶ hijack   ${n.nodeId} ${verb} — smithers steer ${input.runId} --node ${n.nodeId} --takeover`);
       }
     }
   }

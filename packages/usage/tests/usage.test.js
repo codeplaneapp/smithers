@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import {
   buildUsageReport,
   claudeOauthUsage,
+  classifyAccountAvailability,
   decodeJwtClaims,
   formatRelativeReset,
   formatUsageReports,
@@ -105,11 +106,149 @@ describe("parseClaudeOauthUsage", () => {
       usedPercent: 70,
       resetsAt: "2026-08-18T00:00:00Z",
       capPercent: 50,
+      modelScope: "fable",
     });
   });
   test("tolerates junk", () => {
     expect(parseClaudeOauthUsage(null)).toEqual([]);
     expect(parseClaudeOauthUsage({ five_hour: { utilization: "x" } })).toEqual([]);
+  });
+  test("marks legacy per-model windows with modelScope", () => {
+    const windows = parseClaudeOauthUsage({
+      seven_day_opus: { utilization: 5, resets_at: isoIn(86400) },
+      seven_day_sonnet: { utilization: 7 },
+    });
+    expect(windows).toEqual([
+      {
+        id: "weekly-opus",
+        label: "weekly (Opus)",
+        unit: "percent",
+        usedPercent: 5,
+        resetsAt: isoIn(86400),
+        modelScope: "opus",
+      },
+      {
+        id: "weekly-sonnet",
+        label: "weekly (Sonnet)",
+        unit: "percent",
+        usedPercent: 7,
+        resetsAt: undefined,
+        modelScope: "sonnet",
+      },
+    ]);
+  });
+  test("parses the generic limits array, including model-scoped weekly caps", () => {
+    // Current payload shape: the fixed seven_day_* blocks are null and the
+    // Fable weekly cap only exists as a weekly_scoped entry of `limits`.
+    const windows = parseClaudeOauthUsage({
+      five_hour: { utilization: 4, resets_at: null },
+      seven_day: { utilization: 58, resets_at: isoIn(86400) },
+      seven_day_opus: null,
+      seven_day_sonnet: null,
+      tangelo: null,
+      limits: [
+        { kind: "session", group: "session", percent: 4, resets_at: null, scope: null },
+        { kind: "weekly_all", group: "weekly", percent: 58, resets_at: isoIn(86400), scope: null },
+        {
+          kind: "weekly_scoped",
+          group: "weekly",
+          percent: 100,
+          resets_at: isoIn(90000),
+          scope: { model: { id: null, display_name: "Fable" }, surface: null },
+        },
+      ],
+    });
+    expect(windows.map((w) => w.id)).toEqual(["5h", "weekly", "weekly-fable"]);
+    expect(windows[2]).toEqual({
+      id: "weekly-fable",
+      label: "weekly (Fable)",
+      unit: "percent",
+      usedPercent: 100,
+      resetsAt: isoIn(90000),
+      modelScope: "fable",
+    });
+  });
+  test("limits entries win over legacy blocks with the same id", () => {
+    const windows = parseClaudeOauthUsage({
+      seven_day: { utilization: 55, resets_at: isoIn(1000) },
+      limits: [{ kind: "weekly_all", percent: 100, resets_at: isoIn(86400), scope: null }],
+    });
+    expect(windows).toEqual([
+      { id: "weekly", label: "weekly", unit: "percent", usedPercent: 100, resetsAt: isoIn(86400) },
+    ]);
+  });
+  test("keeps the known plan cap when the limits array restates the Fable window", () => {
+    const windows = parseClaudeOauthUsage({
+      seven_day_fable: { utilization: 70, resets_at: isoIn(86400) },
+      limits: [
+        {
+          kind: "weekly_scoped",
+          percent: 81,
+          resets_at: isoIn(90000),
+          scope: { model: { id: null, display_name: "Fable" } },
+        },
+      ],
+    });
+    expect(windows).toEqual([
+      {
+        id: "weekly-fable",
+        label: "weekly (Fable)",
+        unit: "percent",
+        usedPercent: 81,
+        resetsAt: isoIn(90000),
+        modelScope: "fable",
+        capPercent: 50,
+      },
+    ]);
+  });
+  test("skips malformed and unknown limits entries", () => {
+    const windows = parseClaudeOauthUsage({
+      limits: [
+        { kind: "weekly_scoped", percent: 10, scope: { model: { display_name: null } } },
+        { kind: "weekly_scoped", percent: 10, scope: null },
+        { kind: "weekly_all", percent: "x" },
+        { kind: "mystery", percent: 10 },
+        null,
+        "junk",
+      ],
+    });
+    expect(windows).toEqual([]);
+  });
+});
+
+describe("classifyAccountAvailability", () => {
+  const weekly = (used, resetsAt) => ({ id: "weekly", label: "weekly", unit: "percent", usedPercent: used, resetsAt });
+  const fable = (used, resetsAt) => ({
+    id: "weekly-fable",
+    label: "weekly (Fable)",
+    unit: "percent",
+    usedPercent: used,
+    resetsAt,
+    modelScope: "fable",
+  });
+  test("ok when every window has headroom", () => {
+    expect(classifyAccountAvailability([weekly(58, isoIn(86400)), fable(80, isoIn(86400))], NOW)).toEqual({
+      status: "ok",
+      reasons: [],
+    });
+  });
+  test("blocked when an account-wide window is exhausted", () => {
+    expect(classifyAccountAvailability([weekly(100, isoIn(86400)), fable(80, isoIn(86400))], NOW)).toEqual({
+      status: "blocked",
+      reasons: ["weekly exhausted"],
+    });
+  });
+  test("degraded when only a model-scoped window is exhausted", () => {
+    expect(classifyAccountAvailability([weekly(58, isoIn(86400)), fable(100, isoIn(86400))], NOW)).toEqual({
+      status: "degraded",
+      reasons: ["weekly (Fable) exhausted"],
+    });
+  });
+  test("an elapsed reset reads as a fresh window", () => {
+    expect(classifyAccountAvailability([weekly(100, isoIn(-60))], NOW)).toEqual({ status: "ok", reasons: [] });
+  });
+  test("unknown without windows", () => {
+    expect(classifyAccountAvailability([], NOW)).toEqual({ status: "unknown", reasons: [] });
   });
 });
 

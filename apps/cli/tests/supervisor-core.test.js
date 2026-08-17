@@ -217,6 +217,7 @@ describe("supervisor poll core", () => {
       skippedCount: 0,
       durationMs: 0,
       wouldResumeRunIds: [],
+      gaveUpRunIds: [],
     });
     expect(resumed).toEqual(["run-stale"]);
     expect(await listEventTypes(adapter, "run-stale")).toContain("RunAutoResumed");

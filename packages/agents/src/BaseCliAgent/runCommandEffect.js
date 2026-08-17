@@ -28,9 +28,12 @@ export function runCommandEffect(command, args, options) {
     onStderr,
     onProcess,
   } = options;
-  const invocation = parentDeathCommand(command, args);
+  const invocation = parentDeathCommand(command, args, true, cwd);
   return spawnCaptureEffect(invocation.command, invocation.args, {
-    cwd,
+    // The watchdog runs in its own package directory, not the agent's cwd, so a
+    // `bunfig.toml` in the target repo cannot preload into it (#1546). It hands
+    // `cwd` to the agent process itself.
+    cwd: invocation.cwd ?? cwd,
     env,
     input,
     signal,

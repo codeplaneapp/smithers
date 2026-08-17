@@ -5,7 +5,7 @@
 /** @typedef {import("./TaskExecutionState.ts").TaskExecutionState} TaskExecutionState */
 
 const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled"]);
-const TERMINAL_TASK_STATUSES = new Set(["finished", "failed", "cancelled", "skipped"]);
+const TERMINAL_TASK_STATUSES = new Set(["finished", "failed", "stalled", "cancelled", "skipped"]);
 
 /** Default cap on retained runs before the oldest is FIFO-evicted. */
 const DEFAULT_MAX_RUNS_RETAINED = 500;
@@ -245,6 +245,20 @@ export class DevToolsRunStore {
         refreshRunWaitingStatus(run);
         if (verbose) {
           console.log(`❌ [smithers-devtools] Task failed: ${event.nodeId}`);
+        }
+        break;
+      }
+      case "NodeStalled": {
+        // Follows the NodeFailed for the same attempt: the node is terminal
+        // now, so only the verdict label changes (#1500).
+        const task = this.ensureTask(run, event.nodeId, event.iteration);
+        task.status = "stalled";
+        task.attempt = event.attempt;
+        task.finishedAt = event.timestampMs;
+        task.error = event.error;
+        refreshRunWaitingStatus(run);
+        if (verbose) {
+          console.log(`❌ [smithers-devtools] Task stalled: ${event.nodeId}`);
         }
         break;
       }

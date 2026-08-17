@@ -27,4 +27,10 @@ export type UsageWindow = {
   resetsAt?: string;
   /** Share of the plan available to this model-specific window. */
   capPercent?: number;
+  /**
+   * Lowercased model family this window is scoped to (e.g. "fable", "opus",
+   * "sonnet"), for provider limits that cap one model separately from the
+   * all-models window. Unset for account-wide windows.
+   */
+  modelScope?: string;
 };

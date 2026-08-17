@@ -57,7 +57,31 @@ export const PAGE_HTML = /* html */ `<!doctype html>
   .seat {
     background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px;
   }
+  .seat.ok { border-color: var(--ok); box-shadow: inset 0 0 0 1px var(--ok); }
+  .seat.degraded { border-color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
+  .seat.blocked { border-color: var(--hot); box-shadow: inset 0 0 0 1px var(--hot); }
   .seat.err { border-color: var(--dead); }
+  .status { font-size: 10.5px; margin-top: 7px; }
+  .status.degraded { color: var(--warn); }
+  .status.blocked { color: var(--hot); }
+  .legend { color: var(--muted); font-size: 10.5px; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin: 0 3px 0 8px; }
+  h2 { display: flex; align-items: center; gap: 8px; }
+  h2 button { font-size: 10.5px; padding: 2px 8px; text-transform: none; letter-spacing: normal; }
+  .seat-top .spacer { flex: 1; }
+  .seat-top .act {
+    font-size: 10px; padding: 1px 6px; border-radius: 5px; cursor: pointer;
+    color: var(--muted); background: transparent; border: 1px solid var(--line);
+  }
+  .seat-top .act:hover { color: var(--hot); border-color: var(--hot); }
+  .seat-top .act.login:hover { color: var(--accent); border-color: var(--accent); }
+  .job {
+    background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+    border: 1px solid var(--accent); border-radius: 8px;
+    padding: 8px 11px; margin-bottom: 9px; font-size: 12px;
+  }
+  .job code { font-size: 11px; }
+  .job .tail { color: var(--muted); font-size: 10.5px; margin-top: 3px; }
   .seat-top { display: flex; align-items: baseline; gap: 7px; margin-bottom: 1px; }
   .label { font-weight: 600; font-size: 12.5px; }
   .plan {
@@ -88,9 +112,12 @@ export const PAGE_HTML = /* html */ `<!doctype html>
   <h1>Smithers Quota</h1>
   <span class="sub" id="stamp">loading…</span>
   <span class="spacer"></span>
+  <span class="legend"><span class="dot" style="background:var(--ok)"></span>usable
+    <span class="dot" style="background:var(--warn)"></span>degraded
+    <span class="dot" style="background:var(--hot)"></span>rate-limited</span>
   <button id="refresh">Refresh</button>
 </header>
-<main id="root"><p class="none">Reading <code>smithers usage</code>…</p></main>
+<main><div id="jobs"></div><div id="root"><p class="none">Reading <code>smithers usage</code>…</p></div></main>
 <script>
 const pct = (n) => Math.max(0, Math.min(100, Number(n) || 0));
 const tone = (used) => used >= 85 ? "var(--hot)" : used >= 60 ? "var(--warn)" : "var(--ok)";
@@ -107,36 +134,55 @@ function until(iso) {
 }
 
 function windowRow(name, w) {
-  if (!w) return "";
+  if (!w) {
+    return \`<div class="row">
+      <div class="row-head"><span class="name">\${name}</span><span class="free" style="color:var(--muted)">not reported</span></div>
+      <div class="bar"></div>
+    </div>\`;
+  }
   const used = pct(w.usedPercent);
   const free = 100 - used;
+  const reset = until(w.resetsAt);
   return \`<div class="row">
     <div class="row-head">
       <span class="name">\${name}</span>
       <span class="free" style="color:\${tone(used)}">\${free}% free</span>
     </div>
     <div class="bar"><div class="fill" style="width:\${used}%;background:\${tone(used)}"></div></div>
-    <div class="reset">\${used}% used · \${until(w.resetsAt)}</div>
+    <div class="reset">\${used}% used\${reset ? " · " + reset : ""}</div>
   </div>\`;
 }
+
+// Mirrors LOGIN_PROVIDERS on the server: only subscription providers have a
+// browser login the dashboard can drive.
+const CAN_LOGIN = new Set(["claude-code", "codex", "kimi", "antigravity"]);
+
+const seatActions = (seat) => \`<span class="spacer"></span>
+    \${CAN_LOGIN.has(seat.provider) ? \`<button class="act login" data-login="\${seat.label}">log in</button>\` : ""}
+    <button class="act" data-remove="\${seat.label}" title="Remove this account">✕</button>\`;
 
 function seatCard(seat) {
   if (seat.error) {
     return \`<div class="seat err">
-      <div class="seat-top"><span class="label">\${seat.label}</span></div>
+      <div class="seat-top"><span class="label">\${seat.label}</span>\${seatActions(seat)}</div>
       <div class="who">\${seat.account ?? "unknown subscription"}</div>
       <div class="err-msg">\${seat.error}</div>
     </div>\`;
   }
-  return \`<div class="seat">
+  const status = seat.availability?.status ?? "unknown";
+  const reasons = seat.availability?.reasons ?? [];
+  return \`<div class="seat \${status === "unknown" ? "" : status}">
     <div class="seat-top">
       <span class="label">\${seat.label}</span>
       \${seat.planType ? \`<span class="plan">\${seat.planType}</span>\` : ""}
+      \${seatActions(seat)}
     </div>
     <div class="who">\${seat.account ?? "—"}</div>
     \${windowRow("weekly", seat.weekly)}
     \${windowRow("5-hour", seat.session)}
-    \${!seat.weekly && !seat.session ? '<div class="none">no usage windows reported</div>' : ""}
+    \${(seat.scoped ?? []).map((w) => windowRow(w.label, w)).join("")}
+    \${(seat.extra ?? []).map((w) => windowRow(w.label, w)).join("")}
+    \${reasons.length ? \`<div class="status \${status}">\${reasons.join(" · ")}</div>\` : ""}
   </div>\`;
 }
 
@@ -147,36 +193,49 @@ function poolTotal(seats) {
   return { free: Math.round(free), live: live.length, total: seats.length };
 }
 
+/** A KPI tile per provider that reports weekly windows, plus a seats-reporting tile. */
+function totalsFor(groups) {
+  const charted = groups.filter((g) => g.seats.some((s) => s.weekly));
+  const tiles = charted.map((g) => {
+    const t = poolTotal(g.seats);
+    return \`<div class="tot"><div class="k">\${g.title} weekly free</div>
+      <div class="v" style="color:\${tone(100 - t.free)}">\${t.free}%</div>
+      <div class="n">mean across \${t.live} of \${t.total} seats</div></div>\`;
+  });
+  const allSeats = groups.flatMap((g) => g.seats);
+  const reporting = allSeats.filter((s) => !s.error && (s.weekly || s.session)).length;
+  tiles.push(\`<div class="tot"><div class="k">Seats reporting</div><div class="v">\${reporting}</div>
+    <div class="n">of \${allSeats.length} registered</div></div>\`);
+  return \`<div class="totals">\${tiles.join("")}</div>\`;
+}
+
 function render(snap) {
   const root = document.getElementById("root");
+  const groups = snap.groups ?? [];
+  const allSeats = groups.flatMap((g) => g.seats);
   document.getElementById("stamp").textContent =
-    new Date(snap.fetchedAt).toLocaleTimeString() + " · " +
-    (snap.claude.length + snap.codex.length) + " seats";
+    new Date(snap.fetchedAt).toLocaleTimeString() + " · " + allSeats.length + " seats";
 
   if (snap.error) {
     root.innerHTML = \`<div class="banner">\${snap.error}</div>\`;
     return;
   }
 
-  const c = poolTotal(snap.claude), x = poolTotal(snap.codex);
-  const broken = [...snap.claude, ...snap.codex].filter((s) => s.error);
+  const broken = allSeats.filter((s) => s.error);
 
   root.innerHTML =
     (broken.length
-      ? \`<div class="banner">\${broken.length} seat\${broken.length > 1 ? "s" : ""} cannot report quota — \${broken.map((s) => s.label).join(", ")}. Re-authenticate to put \${broken.length > 1 ? "them" : "it"} back in the pool.</div>\`
+      ? \`<div class="banner">\${broken.length} seat\${broken.length > 1 ? "s" : ""} cannot report quota: \${broken.map((s) => s.label).join(", ")}. Log in again to put \${broken.length > 1 ? "them" : "it"} back in the pool.</div>\`
       : "") +
-    \`<div class="totals">
-      <div class="tot"><div class="k">Claude weekly free</div><div class="v" style="color:\${tone(100 - c.free)}">\${c.free}%</div><div class="n">mean across \${c.live} of \${c.total} seats</div></div>
-      <div class="tot"><div class="k">Codex weekly free</div><div class="v" style="color:\${tone(100 - x.free)}">\${x.free}%</div><div class="n">mean across \${x.live} of \${x.total} seats</div></div>
-      <div class="tot"><div class="k">Seats reporting</div><div class="v">\${c.live + x.live}</div><div class="n">of \${c.total + x.total} registered</div></div>
-    </div>\` +
-    \`<h2>Claude Code — \${snap.claude.length} subscriptions</h2>\` +
-    (snap.claude.length ? \`<div class="grid">\${snap.claude.map(seatCard).join("")}</div>\` : '<p class="none">none registered</p>') +
-    \`<h2>Codex — \${snap.codex.length} subscriptions</h2>\` +
-    (snap.codex.length ? \`<div class="grid">\${snap.codex.map(seatCard).join("")}</div>\` : '<p class="none">none registered</p>') +
-    (snap.otherProviders.length
-      ? \`<div class="others">Not charted: \${snap.otherProviders.map((o) => \`<code>\${o.label}</code> (\${o.provider})\`).join(", ")} — no subscription quota windows.</div>\`
-      : "");
+    totalsFor(groups) +
+    groups
+      .map(
+        (g) =>
+          \`<h2>\${g.title} — \${g.seats.length} \${g.seats.length === 1 ? "account" : "accounts"}
+            \${g.canLogin ? \`<button data-add="\${g.provider}">＋ add seat</button>\` : ""}</h2>\` +
+          \`<div class="grid">\${g.seats.map(seatCard).join("")}</div>\`,
+      )
+      .join("");
 }
 
 async function load() {
@@ -188,8 +247,66 @@ async function load() {
   }
 }
 
+function renderJobs(jobs) {
+  const el = document.getElementById("jobs");
+  const visible = jobs.filter((j) => !j.done || j.ok === false);
+  el.innerHTML = visible
+    .map((j) => {
+      const verb = j.kind === "add" ? "Adding" : "Re-login for";
+      const state = j.done ? "failed" : "waiting for the browser login to complete…";
+      const tail = j.lines.slice(-2).join(" · ");
+      return \`<div class="job">\${verb} <b>\${j.label}</b> (\${j.provider}): \${state}
+        \${j.attachCmd ? \`<div>Drive the login from a terminal: <code>\${j.attachCmd}</code></div>\` : ""}
+        \${tail ? \`<div class="tail">\${tail}</div>\` : ""}
+      </div>\`;
+    })
+    .join("");
+}
+
+let jobTimer = null;
+async function pollJobs() {
+  if (jobTimer) { clearTimeout(jobTimer); jobTimer = null; }
+  try {
+    const res = await fetch("/api/jobs", { cache: "no-store" });
+    const { jobs } = await res.json();
+    renderJobs(jobs);
+    if (jobs.some((j) => !j.done)) {
+      jobTimer = setTimeout(pollJobs, 3000);
+    } else if (jobs.some((j) => j.done && j.ok)) {
+      load();
+    }
+  } catch {
+    jobTimer = setTimeout(pollJobs, 3000);
+  }
+}
+
+async function post(path, body) {
+  await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+document.addEventListener("click", async (event) => {
+  const target = event.target.closest("[data-add],[data-remove],[data-login]");
+  if (!target) return;
+  if (target.dataset.add) {
+    await post("/api/accounts/add", { provider: target.dataset.add });
+    pollJobs();
+  } else if (target.dataset.login) {
+    await post("/api/accounts/login", { label: target.dataset.login });
+    pollJobs();
+  } else if (target.dataset.remove) {
+    if (!confirm("Remove " + target.dataset.remove + " from the pool?")) return;
+    await post("/api/accounts/remove", { label: target.dataset.remove });
+    load();
+  }
+});
+
 document.getElementById("refresh").addEventListener("click", load);
 load();
+pollJobs();
 // Provider windows move on the order of minutes; a 60s poll keeps the view
 // current without hammering each provider's usage endpoint.
 setInterval(load, 60000);
