@@ -1390,7 +1390,7 @@ async function* streamRunEventsCommand(c) {
       }
     }
     const initialRunState = await computeRunStateFromRow(adapter, run);
-    const initialFollowState = initialRunState.state === "succeeded" ? "finished" : initialRunState.state;
+    const initialFollowState = deriveTailStatus(initialRunState);
     // Follow only when explicitly asked (-f/--follow), or, when unset,
     // only if stdout is a TTY. A piped/redirected `logs <run>` (non-TTY)
     // snapshots and exits instead of hanging the pipe. --no-follow forces
@@ -1422,7 +1422,7 @@ async function* streamRunEventsCommand(c) {
       }
       const currentRun = await adapter.getRun(c.args.runId);
       const currentRunState = currentRun ? await computeRunStateFromRow(adapter, currentRun) : undefined;
-      const currentStatus = currentRunState?.state === "succeeded" ? "finished" : currentRunState?.state;
+      const currentStatus = deriveTailStatus(currentRunState);
       if (
         currentStatus === "waiting-approval" ||
         currentStatus === "waiting-event" ||
@@ -2385,10 +2385,10 @@ async function buildPsRows(adapter, limit, status) {
       // which the display name above need not match. (#26)
       workflowId: run.workflowPath ? workflowIdFromPath(run.workflowPath) : (run.workflowName ?? undefined),
       // Legacy `ps` consumers key off `status` and expect "finished", so
-      // only the derived "succeeded" is renamed; every other derived
+      // successful derived outcomes are renamed; every other derived
       // state passes through unchanged, including stale/orphaned so
       // dead-owner runs never read as "running".
-      status: view.state === "succeeded" ? "finished" : view.state,
+      status: deriveTailStatus(view),
       dbStatus: run.status,
       state: view.state,
       ...(view.unhealthy ? { unhealthy: view.unhealthy } : {}),
@@ -3148,6 +3148,10 @@ const gatewayOptions = z.object({
     .describe(
       "Allow binding a non-loopback --host with NO auth (exposes a full-control, unauthenticated control plane — dangerous)",
     ),
+  killRuns: z
+    .boolean()
+    .default(false)
+    .describe("With gateway stop, cancel gateway-hosted runs instead of parking them for resume"),
   idleTimeout: z
     .number()
     .int()
@@ -5637,6 +5641,50 @@ async function runGatewayStatusCommand(c) {
     stateFile,
   });
 }
+
+function gatewayStopRpcBase(state) {
+  const base = new URL(state.url);
+  const hostname = base.hostname.replace(/^\[(.*)\]$/, "$1");
+  if (hostname === "0.0.0.0") base.hostname = "127.0.0.1";
+  if (hostname === "::") base.hostname = "::1";
+  return base.toString().replace(/\/+$/, "");
+}
+
+async function gatewayStopRpc(state, method, params = {}) {
+  const response = await fetch(`${gatewayStopRpcBase(state)}/v1/rpc/${method}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(state.token ? { authorization: `Bearer ${state.token}` } : {}),
+    },
+    body: JSON.stringify(params),
+    signal: AbortSignal.timeout(5_000),
+  });
+  const frame = await response.json().catch(() => null);
+  if (!frame?.ok) {
+    throw new Error(frame?.error?.message ?? `Gateway RPC ${method} failed with HTTP ${response.status}`);
+  }
+  return frame.payload;
+}
+
+async function listGatewayHostedRunIds(state) {
+  const pageSize = 200;
+  const hosted = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await gatewayStopRpc(state, "listRuns", {
+      filter: { includeSystem: true, limit: pageSize, offset },
+    });
+    if (!Array.isArray(page)) throw new Error("Gateway listRuns returned a non-array payload");
+    for (const run of page) {
+      if (parseRuntimeOwnerPid(run?.runtimeOwnerId) === state.pid && typeof run?.runId === "string") {
+        hosted.push(run.runId);
+      }
+    }
+    if (page.length < pageSize) break;
+  }
+  return hosted;
+}
+
 async function runGatewayStopCommand(c) {
   const workspace = resolveGatewayWorkspace();
   if (!workspace) {
@@ -5678,6 +5726,21 @@ async function runGatewayStopCommand(c) {
     clearGatewayRuntimeState(workspace, state.pid);
     return c.ok({ stopped: false, running: false, workspace, cleanedStaleState: true });
   }
+  let hostedRunIds;
+  try {
+    hostedRunIds = await listGatewayHostedRunIds(state);
+    if (c.options.killRuns) {
+      for (const runId of hostedRunIds) {
+        await gatewayStopRpc(state, "cancelRun", { runId });
+      }
+    }
+  } catch (error) {
+    return c.error({
+      code: "GATEWAY_STOP_FAILED",
+      message: `Could not ${c.options.killRuns ? "cancel" : "inventory"} gateway-hosted runs before shutdown: ${error?.message ?? String(error)}`,
+      exitCode: 1,
+    });
+  }
   try {
     process.kill(state.pid, "SIGTERM");
   } catch (error) {
@@ -5700,7 +5763,26 @@ async function runGatewayStopCommand(c) {
     });
   }
   clearGatewayRuntimeState(workspace, state.pid);
-  return c.ok({ stopped: true, workspace, pid: state.pid });
+  const resumeCommands = c.options.killRuns
+    ? []
+    : hostedRunIds.map((runId) => `smithers up --run-id ${runId} --resume true -d`);
+  for (let index = 0; index < hostedRunIds.length; index += 1) {
+    const runId = hostedRunIds[index];
+    if (c.options.killRuns) {
+      process.stderr.write(`⊘ Killed: ${runId}\n`);
+    } else {
+      process.stderr.write(`⏸ Parked: ${runId}\n  Resume: ${resumeCommands[index]}\n`);
+    }
+  }
+  return c.ok({
+    stopped: true,
+    workspace,
+    pid: state.pid,
+    affectedRuns: hostedRunIds,
+    parkedRuns: c.options.killRuns ? [] : hostedRunIds,
+    killedRuns: c.options.killRuns ? hostedRunIds : [],
+    resumeCommands,
+  });
 }
 /**
  * @param {{ host: string; port: number; backend?: "sqlite" | "pglite" | "postgres"; authToken?: string; mintToken?: boolean; insecure?: boolean; idleTimeout?: number }} options
@@ -13099,6 +13181,11 @@ const cli = Cli.create({
     options: z.object({
       olderThan: z.string().default("7d").describe("Only reclaim artifacts unused for at least this long, e.g. 24h"),
       dryRun: z.boolean().default(false).describe("Report what would be removed without removing anything"),
+      dbRetentionDays: z
+        .number()
+        .nonnegative()
+        .optional()
+        .describe("Opt in to deleting terminal database runs older than this many days"),
       includeUnmanaged: z
         .boolean()
         .default(false)
@@ -13115,6 +13202,7 @@ const cli = Cli.create({
           dryRun: c.options.dryRun,
           includeUnmanaged: c.options.includeUnmanaged,
           forceWorktrees: c.options.force,
+          dbRetentionDays: c.options.dbRetentionDays,
         });
         if (c.format !== "json") {
           const disk = result.disk.before;
@@ -13135,6 +13223,23 @@ const cli = Cli.create({
               `Keeping ${formatBytes(unmanagedBytes)} of unowned legacy scratch; inspect with --dry-run and opt in with --include-unmanaged.`,
             );
           }
+          const snapshots = result.database.snapshots;
+          console.log(
+            result.dryRun
+              ? `Would compact ${snapshots.remainingRows ?? 0} legacy snapshot row(s), removing ${formatBytes(snapshots.remainingInlineBytes ?? 0)} of inline payloads.`
+              : `Compacted ${snapshots.migratedRows} legacy snapshot row(s), clearing ${formatBytes(snapshots.clearedInlineBytes)} of inline payloads for content-addressed reuse.`,
+          );
+          const retention = result.database.retention;
+          if (retention.enabled) {
+            console.log(
+              `${result.dryRun ? "Would remove" : "Removed"} ${retention.removedRuns.length} terminal database run(s) older than ${retention.retentionDays} day(s).`,
+            );
+          } else {
+            console.log(
+              "Database run retention is disabled; opt in with --db-retention-days or SMITHERS_DB_RETENTION_DAYS.",
+            );
+          }
+          console.log("Database pages are reusable, but Smithers never VACUUMs an online database.");
         }
         return c.ok(result);
       } catch (err) {

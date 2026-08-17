@@ -17,6 +17,7 @@ export * from "./output.js";
 export * from "./openDurableSqliteDatabase.js";
 export * from "./runtime-owner.js";
 export * from "./runDriverLiveness.js";
+export * from "./run-history-gc.js";
 export * from "./schema-signature.js";
 export * from "./snapshot.js";
 export * from "./sql-message-storage.js";

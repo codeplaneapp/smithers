@@ -133,7 +133,7 @@ type AgentSessionTranscriptEvent = {
 };
 
 type RunStatus = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "finished" | "continued" | "failed" | "cancelled";
-type RunState = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "unknown";
+type RunState = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "succeeded-with-failures" | "unknown";
 type AgentCliActionKind = "turn" | "command" | "tool" | "file_change" | "web_search" | "todo_list" | "reasoning" | "warning" | "note";
 type AgentCliActionPhase = "started" | "updated" | "completed";
 type AgentCliEventLevel = "debug" | "info" | "warning" | "error";
@@ -223,6 +223,12 @@ type SmithersEvent$2 = {
     requestedDemand: number;
     effectiveCap: number;
     remediationCommand: string;
+    /** Present when a lifecycle-linked descendant caused the owner's budget to saturate. */
+    descendantRunId?: string;
+    /** Which owner budget bound admission. Historical events omit this. */
+    budget?: "run" | "subtree";
+    /** Present when `budget` is `subtree`. */
+    subtreeGroupId?: string;
     timestampMs: number;
 } | {
     type: "RunFinished";
@@ -1321,6 +1327,17 @@ declare function updateCurrentCorrelationContext(patch: CorrelationPatch$1): voi
 type CorrelationPatch$1 = CorrelationPatch$5;
 
 /**
+ * Scope imperative Smithers logs to one host-owned Effect runner. Unlike
+ * {@link setSmithersLogRunner}, this is concurrency-safe: parallel embedded
+ * engine instances keep their loggers isolated across awaits and timers.
+ *
+ * @template T
+ * @param {SmithersLogRunner} runner
+ * @param {() => T} execute
+ * @returns {T}
+ */
+declare function runWithSmithersLogRunner<T>(runner: SmithersLogRunner, execute: () => T): T;
+/**
  * Install the Effect runtime used by fire-and-forget observability logs.
  * Returns a restore function so tests and embedded hosts can scope overrides.
  *
@@ -1372,4 +1389,4 @@ type SmithersMetricDefinition = SmithersMetricDefinition$2;
 type SmithersObservabilityOptions = SmithersObservabilityOptions$4;
 type SmithersObservabilityService = SmithersObservabilityService$2;
 
-export { type CorrelationContext, CorrelationContextLive, type CorrelationContextPatch, CorrelationContextService, type CorrelationPatch, type MetricLabels, MetricsService, MetricsServiceLive, type MetricsServiceShape, type MetricsSnapshot, type ResolvedSmithersObservabilityOptions, type RunCancellationSource, type SmithersEvent, type SmithersLogFormat, type SmithersMetricDefinition, SmithersObservability, type SmithersObservabilityOptions, type SmithersObservabilityService, TracingService, TracingServiceLive, activeNodes, activeRuns, annotateSmithersTrace, approvalPending, approvalWaitDuration, approvalsDenied, approvalsGranted, approvalsRequested, attemptDuration, cacheHits, cacheMisses, correlationContextFiberRef, correlationContextToLogAnnotations, createSmithersObservabilityLayer, createSmithersOtelLayer, createSmithersRuntimeLayer, dbQueryDuration, dbRetries, dbTransactionDuration, dbTransactionRetries, dbTransactionRollbacks, errorsTotal, eventsEmittedTotal, externalWaitAsyncPending, getCurrentCorrelationContext, getCurrentCorrelationContextEffect, getCurrentSmithersTraceAnnotations, getCurrentSmithersTraceSpan, hotReloadDuration, hotReloadFailures, hotReloads, httpRequestDuration, httpRequests, logDebug, logError, logInfo, logWarning, makeSmithersSpanAttributes, mergeCorrelationContext, metricsServiceAdapter, nodeDuration, nodeRetriesTotal, nodesFailed, nodesFinished, nodesStarted, processHeapUsedBytes, processMemoryRssBytes, processUptimeSeconds, prometheusContentType, promptSizeBytes, renderPrometheusMetrics, replaysStarted, resolveSmithersObservabilityOptions, responseSizeBytes, rewindDurationMs, rewindFramesDeleted, rewindRollbackTotal, rewindSandboxesReverted, rewindTotal, runDuration, runForksCreated, runWithCorrelationContext, runsAncestryDepth, runsCancelledTotal, runsCarriedStateBytes, runsContinuedTotal, runsFailedTotal, runsFinishedTotal, runsResumedTotal, runsTotal, sandboxActive, sandboxBundleSizeBytes, sandboxCompletedTotal, sandboxCreatedTotal, sandboxDurationMs, sandboxPatchCount, sandboxTransportDurationMs, schedulerConcurrencyUtilization, schedulerQueueDepth, schedulerWaitDuration, scorerEventsFailed, scorerEventsFinished, scorerEventsStarted, setSmithersLogRunner, smithersMetricCatalog, smithersMetrics, smithersSpanNames, snapshotDuration, snapshotsCaptured, timerDelayDuration, timersCancelled, timersCreated, timersFired, timersPending, toPrometheusMetricName, tokensCacheReadTotal, tokensCacheWriteTotal, tokensContextWindowBucketTotal, tokensContextWindowPerCall, tokensInputPerCall, tokensInputTotal, tokensOutputPerCall, tokensOutputTotal, tokensReasoningTotal, toolCallErrorsTotal, toolCallsTotal, toolDuration, toolOutputTruncatedTotal, trackEvent as trackSmithersEvent, updateCurrentCorrelationContext, updateProcessMetrics, vcsDuration, withCorrelationContext, withCurrentCorrelationContext, withSmithersSpan };
+export { type CorrelationContext, CorrelationContextLive, type CorrelationContextPatch, CorrelationContextService, type CorrelationPatch, type MetricLabels, MetricsService, MetricsServiceLive, type MetricsServiceShape, type MetricsSnapshot, type ResolvedSmithersObservabilityOptions, type RunCancellationSource, type SmithersEvent, type SmithersLogFormat, type SmithersMetricDefinition, SmithersObservability, type SmithersObservabilityOptions, type SmithersObservabilityService, TracingService, TracingServiceLive, activeNodes, activeRuns, annotateSmithersTrace, approvalPending, approvalWaitDuration, approvalsDenied, approvalsGranted, approvalsRequested, attemptDuration, cacheHits, cacheMisses, correlationContextFiberRef, correlationContextToLogAnnotations, createSmithersObservabilityLayer, createSmithersOtelLayer, createSmithersRuntimeLayer, dbQueryDuration, dbRetries, dbTransactionDuration, dbTransactionRetries, dbTransactionRollbacks, errorsTotal, eventsEmittedTotal, externalWaitAsyncPending, getCurrentCorrelationContext, getCurrentCorrelationContextEffect, getCurrentSmithersTraceAnnotations, getCurrentSmithersTraceSpan, hotReloadDuration, hotReloadFailures, hotReloads, httpRequestDuration, httpRequests, logDebug, logError, logInfo, logWarning, makeSmithersSpanAttributes, mergeCorrelationContext, metricsServiceAdapter, nodeDuration, nodeRetriesTotal, nodesFailed, nodesFinished, nodesStarted, processHeapUsedBytes, processMemoryRssBytes, processUptimeSeconds, prometheusContentType, promptSizeBytes, renderPrometheusMetrics, replaysStarted, resolveSmithersObservabilityOptions, responseSizeBytes, rewindDurationMs, rewindFramesDeleted, rewindRollbackTotal, rewindSandboxesReverted, rewindTotal, runDuration, runForksCreated, runWithCorrelationContext, runWithSmithersLogRunner, runsAncestryDepth, runsCancelledTotal, runsCarriedStateBytes, runsContinuedTotal, runsFailedTotal, runsFinishedTotal, runsResumedTotal, runsTotal, sandboxActive, sandboxBundleSizeBytes, sandboxCompletedTotal, sandboxCreatedTotal, sandboxDurationMs, sandboxPatchCount, sandboxTransportDurationMs, schedulerConcurrencyUtilization, schedulerQueueDepth, schedulerWaitDuration, scorerEventsFailed, scorerEventsFinished, scorerEventsStarted, setSmithersLogRunner, smithersMetricCatalog, smithersMetrics, smithersSpanNames, snapshotDuration, snapshotsCaptured, timerDelayDuration, timersCancelled, timersCreated, timersFired, timersPending, toPrometheusMetricName, tokensCacheReadTotal, tokensCacheWriteTotal, tokensContextWindowBucketTotal, tokensContextWindowPerCall, tokensInputPerCall, tokensInputTotal, tokensOutputPerCall, tokensOutputTotal, tokensReasoningTotal, toolCallErrorsTotal, toolCallsTotal, toolDuration, toolOutputTruncatedTotal, trackEvent as trackSmithersEvent, updateCurrentCorrelationContext, updateProcessMetrics, vcsDuration, withCorrelationContext, withCurrentCorrelationContext, withSmithersSpan };

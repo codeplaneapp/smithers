@@ -1,2 +1,2 @@
 [test]
-preload = ["./tests/preload-monitor-dom.ts"]
+preload = ["./tests/preload-ui-chain.ts"]

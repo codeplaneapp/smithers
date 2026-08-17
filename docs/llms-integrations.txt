@@ -1128,6 +1128,148 @@ export const claude = useCli
 
 ---
 
+## Embed the Engine in Node
+
+> Construct one reusable Smithers engine in a plain Node host with PGlite or Postgres, host-owned logging, and intact error causes.
+
+`createExternalSmithersEngine()` is the headless integration boundary for a
+long-lived Node service. It opens the normal Smithers database and execution
+engine once, lets the host construct several workflows from `HostNodeJson`, and
+drives any number of runs before one final `close()`.
+
+The complete runnable example is
+[`examples/node-embedded-engine.mjs`](https://github.com/smithersai/smithers/blob/main/examples/node-embedded-engine.mjs).
+Run it with plain Node:
+
+```bash
+node examples/node-embedded-engine.mjs
+```
+
+## Construct once, run many times
+
+```js
+import { createExternalSmithersEngine } from "smthrs";
+import { z } from "zod";
+
+const engine = await createExternalSmithersEngine({
+  schemas: {
+    input: z.object({ label: z.string() }),
+    result: z.object({ value: z.string() }),
+  },
+  agents: {},
+  backend: "pglite",
+  pgliteDataDir: ".smithers/pg",
+  logger: (record) => hostLogger[record.level](record.message, record.annotations),
+});
+
+const workflow = (name, value) =>
+  engine.workflow(
+    () => ({
+      kind: "element",
+      tag: "smithers:workflow",
+      props: {},
+      rawProps: { name },
+      children: [
+        {
+          kind: "element",
+          tag: "smithers:task",
+          props: {},
+          rawProps: {
+            id: name,
+            output: "result",
+            __smithersKind: "static",
+            __smithersPayload: { value },
+          },
+          children: [],
+        },
+      ],
+    }),
+    { output: "result" },
+  );
+
+try {
+  await engine.run(workflow("first", "one"), { input: { label: "first" } });
+  await engine.run(workflow("second", "two"), { input: { label: "second" } });
+} finally {
+  await engine.close();
+}
+```
+
+`engine.workflow()` can be called repeatedly; every returned workflow shares
+the opened backend and the process-local task runtime. `engine.run()` waits for
+one run result. A failed result rejects with a `SmithersError`; its `cause`
+points at the restored run error, whose own nested causes remain available.
+`close()` waits for this instance's active runs, closes its backend, and closes
+the process-local task runtime when the last external engine closes.
+
+## Node storage contract
+
+Node gets the existing Postgres-dialect implementations, not a forked engine:
+
+| Backend | Node configuration | Use |
+| --- | --- | --- |
+| PGlite | Omit `backend` (the Node default), or set `backend: "pglite"`; set `pgliteDataDir` for persistent state | Local development and one-process deployments |
+| Postgres | `backend: "postgres"` plus `connectionString`, `connection`, `SMITHERS_POSTGRES_URL`, or `DATABASE_URL` | Production and multi-process hosts |
+| SQLite | Unsupported under Node; requesting `backend: "sqlite"` throws `DB_REQUIRES_BUN_SQLITE` and names PGlite/Postgres alternatives | Bun-only native `bun:sqlite` path |
+
+Smithers does not add a `node:sqlite` backend here. The durable SQLite adapter,
+Drizzle driver, retry behavior, and migrations currently share the synchronous
+`bun:sqlite` contract. PGlite and Postgres already exercise the same engine
+through its SQL dialect seam and are the supported Node choices.
+
+If a legacy `smithers.db` contains run history, selecting PGlite/Postgres still
+enforces the migration gate; migrate it instead of silently starting an empty
+store.
+
+## Logging
+
+Pass `logger(record)` to route structured `debug`, `info`, `warn`, and `error`
+records into the host. Logger scope follows the run across awaits and timers,
+so concurrent external engine instances do not overwrite one global sink. A
+throwing logger is ignored and cannot fail a run. Pass `logger: false` to silence
+engine logs. `onProgress` and `onError` run callbacks remain available for
+durable events and occurrence-level error reporting.
+
+## Capability boundaries
+
+This facade drives the same engine under Node and Bun. It does not emulate
+Bun-only capabilities:
+
+- Native SQLite fails with `DB_REQUIRES_BUN_SQLITE` under Node.
+- PTY/UI terminal hosting is not part of this headless API; use the Gateway/UI
+  host for interactive terminals.
+- Sandbox and worktree tasks still require their configured provider and local
+  VCS/process capabilities. Existing capability checks fail with the named
+  capability and operation when the host does not supply one.
+
+The older synchronous `createExternalSmithers()` remains a Bun SQLite helper.
+Node embedders should use the async reusable engine.
+
+## Error causes
+
+Tagged errors crossing the process-local worker RPC now carry a JSON-safe
+`cause` payload. The external engine restores serialized error objects into an
+actual `Error`/`SmithersError` chain before wrapping the failed run, so ordinary
+cause walking works:
+
+```js
+try {
+  await engine.run(failingWorkflow, { input });
+} catch (error) {
+  for (let current = error; current; current = current.cause) {
+    hostLogger.error(current.message);
+  }
+}
+```
+
+## Related
+
+- [Runtime shutdown](/runtime/shutdown)
+- [Production persistence](/deployment/production-hardening#persistence)
+- [Authoring API](/reference/authoring#createexternalsmithers)
+
+---
+
 ## Nanocodex
 
 > Run the pinned stock Nanocodex agent as a short-lived, checkpoint-aware Smithers worker.

@@ -6,20 +6,35 @@
  *
  * Real react-dom under happy-dom (the packages/ui radix-interaction
  * convention) driving the monitor's own shell components — no mocking of the
- * unit under test. The DOM must exist before radix-ui loads (it decides
- * whether layout effects run at module-load time), so bunfig registers
- * happy-dom in preload-monitor-dom.ts before this module is evaluated. The
- * package test script runs this file in its own Bun process so happy-dom cannot
- * leak into the shared CLI test shards.
+ * unit under test. The bunfig preload creates the DOM before Radix loads (it
+ * decides whether layout effects run at module-load time). The package test
+ * script runs this file in its own Bun process so the DOM does not leak into
+ * the non-rendered CLI test shards.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+
+// happy-dom is registered before this module through apps/cli/bunfig.toml;
+// Radix reads DOM availability at module-load time.
+const nativeFetch = globalThis.fetch;
+const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+globalThis.fetch = nativeFetch;
 
 const { act, useState } = await import("react");
 const { createRoot } = await import("react-dom/client");
 type ReactElement = import("react").ReactElement;
 type Root = import("react-dom/client").Root;
-const { SMITHERS_UI_STYLE_ATTR, smithersUiCss } = await import("smthrs/ui");
+const {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  SMITHERS_UI_STYLE_ATTR,
+  smithersUiCss,
+} = await import("smthrs/ui");
 const { workflowUiThemeCss } = await import("smthrs/gateway-ui");
 const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRailRow, RunsPagination } =
   await import("../src/monitor-ui/monitorShell.tsx");
@@ -48,6 +63,15 @@ const monitorSource = readFileSync(new URL("../src/monitor-ui/monitor.tsx", impo
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
+
+afterAll(async () => {
+  globalThis.fetch = nativeFetch;
+  if (previousReactActEnvironment === undefined) {
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  } else {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = previousReactActEnvironment;
+  }
+});
 
 afterEach(async () => {
   if (root) {
@@ -494,6 +518,8 @@ describe("remaining monitor control migrations", () => {
       expect(row.className).toContain("sui-row-button");
       expect((row as HTMLButtonElement).type).toBe("button");
     }
+    expect(active.closest("li")).not.toBeNull();
+    expect(active.closest("ul")?.classList.contains("mon-plain-list")).toBe(true);
     await click(approval);
     await click(needs);
     await click(active);
@@ -722,6 +748,48 @@ describe("monitor global keyboard selection", () => {
   });
 });
 
+describe("monitor dialog primitive", () => {
+  test("labels the modal, traps Tab, closes on Escape, and restores its trigger", async () => {
+    await render(
+      <Dialog>
+        <DialogTrigger asChild>
+          <Button data-testid="dialog-trigger">Open UI</Button>
+        </DialogTrigger>
+        <DialogContent data-testid="dialog-content" aria-modal="true">
+          <DialogHeader>
+            <DialogTitle>Workflow custom UI</DialogTitle>
+            <DialogDescription>Embedded workflow interface.</DialogDescription>
+          </DialogHeader>
+          <Button data-testid="dialog-action">Open in new tab</Button>
+        </DialogContent>
+      </Dialog>,
+    );
+    const trigger = byTestId("dialog-trigger");
+    await act(async () => trigger.focus());
+    await click(trigger);
+
+    const content = byTestId("dialog-content");
+    expect(content.getAttribute("role")).toBe("dialog");
+    expect(content.getAttribute("aria-modal")).toBe("true");
+    expect(document.querySelector('[data-slot="dialog-overlay"]')).not.toBeNull();
+    expect(document.getElementById(content.getAttribute("aria-labelledby")!)?.textContent).toBe("Workflow custom UI");
+    expect(document.getElementById(content.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Embedded workflow interface.",
+    );
+    expect(content.contains(document.activeElement)).toBe(true);
+
+    const close = content.querySelector<HTMLElement>(".sui-dialog-close")!;
+    await act(async () => close.focus());
+    await keydown(close, "Tab");
+    expect(content.contains(document.activeElement)).toBe(true);
+
+    await keydown(document.activeElement as Element, "Escape");
+    expect(document.querySelector('[data-testid="dialog-content"]')).toBeNull();
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(document.activeElement).toBe(trigger);
+  });
+});
+
 describe("migrated monitor surfaces", () => {
   const run = {
     runId: "run-surface-42",
@@ -804,6 +872,10 @@ describe("migrated monitor surfaces", () => {
       <RunsRail runs={[run]} loading={false} connStatus="online" selectedRunId={run.runId} onSelect={() => {}} />,
     );
     expect(byTestId("monitor-runs")).toBeDefined();
+    expect(byTestId("monitor-runs").tagName).toBe("NAV");
+    expect(byTestId("monitor-runs").getAttribute("aria-label")).toBe("Runs");
+    expect(byTestId("monitor-run-row").closest("li")).not.toBeNull();
+    expect(byTestId("monitor-run-row").closest("ul")?.classList.contains("mon-run-list")).toBe(true);
     expect(byTestId("monitor-run-row").getAttribute("data-active")).toBe("true");
     expect(byTestId("monitor-run-row").textContent).toContain("rendered-coverage");
 
@@ -1257,9 +1329,12 @@ describe("event log accessibility", () => {
     expect(list.tagName).toBe("OL");
     expect(list.tabIndex).toBe(0);
     expect(list.getAttribute("aria-label")).toBe("Activity event stream");
-    expect(list.getAttribute("aria-live")).toBe("polite");
-    expect(list.getAttribute("aria-relevant")).toBe("additions text");
+    expect(list.getAttribute("aria-live")).toBe("off");
     expect(list.getAttribute("aria-busy")).toBe("false");
+    const announcer = byTestId("monitor-events-announcer");
+    expect(announcer.getAttribute("role")).toBe("status");
+    expect(announcer.getAttribute("aria-live")).toBe("polite");
+    expect(announcer.getAttribute("aria-atomic")).toBe("true");
     await act(async () => list.focus());
     expect(document.activeElement).toBe(list);
 
@@ -1306,8 +1381,39 @@ describe("event log accessibility", () => {
     expect(follow.getAttribute("aria-label")).toBe("Following new events");
     expect(follow.textContent).toContain("Following");
     expect(status.textContent).toContain("Following new events");
-    expect(list.getAttribute("aria-live")).toBe("polite");
+    expect(list.getAttribute("aria-live")).toBe("off");
     expect(list.scrollTop).toBe(1_000);
+  });
+
+  test("batches new event announcements instead of replaying the busy list", async () => {
+    const initial = eventsState();
+    await render(<EventLog runId="run-batched" eventsState={initial} />);
+    expect(byTestId("monitor-events-announcer").textContent).toBe("");
+
+    const nextEvents = [
+      ...initial.events,
+      {
+        type: "event" as const,
+        event: "NodeFinished",
+        payload: { nodeId: "task-1" },
+        seq: 3,
+        stateVersion: 3,
+        timestampMs: Date.now(),
+      },
+      {
+        type: "event" as const,
+        event: "RunFinished",
+        payload: {},
+        seq: 4,
+        stateVersion: 4,
+        timestampMs: Date.now(),
+      },
+    ];
+    await rerender(<EventLog runId="run-batched" eventsState={eventsState({ events: nextEvents })} />);
+    expect(byTestId("monitor-events-announcer").textContent).toBe("");
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 800)));
+    expect(byTestId("monitor-events-announcer").textContent).toBe("2 new events. Latest #4: RunFinished.");
+    expect(byTestId("monitor-events").getAttribute("aria-live")).toBe("off");
   });
 });
 

@@ -14,7 +14,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -58,15 +58,17 @@ test("the shared CLI runner bounds mixed React test process state", () => {
   expect(shared).toBe("bun ./scripts/run-test-shards.mjs");
 
   const bunfig = readFileSync(resolve(CLI_ROOT, "bunfig.toml"), "utf8");
-  expect(bunfig).toContain('preload = ["./tests/preload-monitor-dom.ts"]');
-  const monitorPreload = readFileSync(resolve(CLI_ROOT, "tests/preload-monitor-dom.ts"), "utf8");
-  expect(monitorPreload).toContain('endsWith("monitor-shell-controls.test.tsx")');
+  expect(bunfig).toContain('preload = ["./tests/preload-ui-chain.ts"]');
+  const monitorPreload = readFileSync(resolve(CLI_ROOT, "tests/preload-ui-chain.ts"), "utf8");
+  expect(monitorPreload).toContain('includes("monitor-shell-controls.test.tsx")');
   expect(monitorPreload).toContain("GlobalRegistrator.register");
+  expect(monitorPreload).toContain("IS_REACT_ACT_ENVIRONMENT = true");
 
   const runner = readFileSync(resolve(CLI_ROOT, "scripts/run-test-shards.mjs"), "utf8");
   expect(runner).toContain('"--isolate"');
-  expect(runner).toContain('"./tests/preload-ui-chain.ts"');
+  expect(runner).not.toContain('"--preload"');
   expect(runner).toContain('new Set(["monitor-shell-controls.test.tsx"])');
   expect(runner).toContain("const BATCH_SIZE = 1");
-  expect(existsSync(resolve(CLI_ROOT, "bunfig.toml"))).toBe(true);
+  expect(bunfig).toContain("[test]");
+  expect(bunfig).toContain('preload = ["./tests/preload-ui-chain.ts"]');
 });

@@ -196,7 +196,7 @@ export function buildOutlineRootsFromSnapshot(snapshot, metaByNode = {}) {
 export function deriveDerivedStatusFromRunState(runState, fallbackStatus) {
   const derived = deriveTailStatus(runState);
   if (typeof derived === "string" && derived !== "") return derived;
-  return fallbackStatus === "succeeded" ? "finished" : fallbackStatus;
+  return fallbackStatus === "succeeded" || fallbackStatus === "succeeded-with-failures" ? "finished" : fallbackStatus;
 }
 
 // Cap the per-node activity ring buffer. The strip only paints the last few
@@ -441,7 +441,7 @@ export function createGatewayObservationSource(client, _opts = {}) {
       for (const r of byId.values()) {
         const derived = boundedActiveIds.has(r.runId)
           ? deriveDerivedStatusFromRunState(runStateById.get(r.runId), r.status)
-          : r.status === "succeeded"
+          : r.status === "succeeded" || r.status === "succeeded-with-failures"
             ? "finished"
             : r.status;
         // listRuns rows carry workflowKey, not workflowName — map so the

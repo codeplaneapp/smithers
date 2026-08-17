@@ -5,11 +5,12 @@ import * as effect from 'effect';
 import { Effect, Exit, Schema, Scope, Layer, Context } from 'effect';
 import * as _smthrs_errors_SmithersError from '@smthrs/errors/SmithersError';
 import { SmithersError } from '@smthrs/errors/SmithersError';
+import * as _smthrs_observability from '@smthrs/observability';
+import * as _smthrs_db_adapter from '@smthrs/db/adapter';
+import { SmithersDb as SmithersDb$2 } from '@smthrs/db/adapter';
 import * as _smthrs_db_adapter_RunRow from '@smthrs/db/adapter/RunRow';
 import * as _smthrs_driver_RunResult from '@smthrs/driver/RunResult';
 import { buildSubflowChildRunId } from '@smthrs/graph/subflow-run-lineage';
-import * as _smthrs_db_adapter from '@smthrs/db/adapter';
-import { SmithersDb as SmithersDb$1 } from '@smthrs/db/adapter';
 import * as _smthrs_observability_SmithersEvent from '@smthrs/observability/SmithersEvent';
 import * as _smthrs_observability_correlation from '@smthrs/observability/correlation';
 import { EventEmitter } from 'node:events';
@@ -264,6 +265,210 @@ declare function serializeDecision(decision: unknown): string | null;
  */
 declare function validateNodeWaitingForApproval(runId: string, nodeId: string, iteration: number, state: string | null | undefined): Effect.Effect<void, SmithersError>;
 
+/**
+ * @param {string | null | undefined} status
+ * @returns {boolean}
+ */
+declare function isCancellableRunStatus(status: string | null | undefined): boolean;
+/**
+ * Terminate a detached run owner process and, where possible, its whole
+ * process tree (agent CLIs spawned by the engine live under it).
+ *
+ * Delegates to `@smthrs/driver`'s `killProcessTree`, so owner termination,
+ * agent termination, and in-process `killChildTree` all use one implementation
+ * — including the win32 `taskkill /T /F` path, which is the only way to reach
+ * grandchildren on a platform without process groups.
+ *
+ * @param {number | null} pid
+ * @param {Parameters<typeof killProcessTree>[1]} [options]
+ * @returns {Promise<{ terminated: boolean; skipped: boolean; escalated: boolean }>}
+ */
+declare function terminateRunOwner(pid: number | null, options?: Parameters<typeof killProcessTree>[1]): Promise<{
+    terminated: boolean;
+    skipped: boolean;
+    escalated: boolean;
+}>;
+/**
+ * Kill every agent process registered for `runIds` and drop its registry row.
+ *
+ * The generic orphan sweep deliberately spares agents whose engine pid is
+ * still alive. That is wrong for cancellation: a hung-but-alive engine owning
+ * a run we just fenced cancelled must not keep its agents burning tokens. Here
+ * the run rows are already terminal, so every registered agent for them is by
+ * definition unsupervised and is killed by process tree, then verified gone.
+ *
+ * Scoped strictly to the cancelled subtree — unrelated runs' agents are never
+ * touched.
+ *
+ * @param {SmithersDb} adapter
+ * @param {Iterable<string>} runIds
+ * @param {{ killTree?: typeof killProcessTree; agentKillGraceMs?: number; alive?: (pid: number) => boolean }} [options]
+ * @returns {Promise<{ terminatedAgents: { runId: string | null; pid: number }[]; survivingAgents: number }>}
+ */
+declare function terminateSubtreeAgentProcesses(adapter: SmithersDb$1, runIds: Iterable<string>, options?: {
+    killTree?: typeof killProcessTree;
+    agentKillGraceMs?: number;
+    alive?: (pid: number) => boolean;
+}): Promise<{
+    terminatedAgents: {
+        runId: string | null;
+        pid: number;
+    }[];
+    survivingAgents: number;
+}>;
+/**
+ * Atomically fence an active run from further owner writes, complete all
+ * cancellation cleanup, and then terminate any surviving owner process tree
+ * plus the run's registered agent processes.
+ *
+ * @param {SmithersDb} adapter
+ * @param {Pick<RunRow, "runId" | "runtimeOwnerId">} run
+ * @param {{
+ *   now?: number;
+ *   terminateOwner?: typeof terminateRunOwner;
+ *   ownerKillGraceMs?: number;
+ *   agentKillGraceMs?: number;
+ *   attribution?: RunCancellationSource;
+ *   reapAgents?: boolean;
+ * }} [options]
+ */
+declare function finalizeCancelledOwnedRun(adapter: SmithersDb$1, run: Pick<RunRow$1, "runId" | "runtimeOwnerId">, options?: {
+    now?: number;
+    terminateOwner?: typeof terminateRunOwner;
+    ownerKillGraceMs?: number;
+    agentKillGraceMs?: number;
+    attribution?: RunCancellationSource;
+    reapAgents?: boolean;
+}): Promise<{
+    cancellation: {
+        runId: string;
+        won: boolean;
+        status: string;
+        terminalStatus: any;
+        repaired: boolean;
+    };
+    ownerPid: number | null;
+    ownerTerminated: boolean;
+    agents: {
+        terminatedAgents: {
+            runId: string | null;
+            pid: number;
+        }[];
+        survivingAgents: number;
+    };
+}>;
+/**
+ * The lineage a cancel of `rootRunId` will actually reach: its descendants with
+ * every fork subtree pruned out. Callers that need to reason about what a
+ * cascade WILL do (e.g. the CLI's terminal-root pre-check, which decides between
+ * RUN_NOT_ACTIVE and finishing an interrupted cascade) must use this rather than
+ * a raw listRunDescendants, or they will count a fork — which the cascade spares
+ * — as work still to do, and report success while cancelling nothing.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} rootRunId
+ * @returns {Promise<{ runId: string; parentRunId: string | null; depth: number }[]>}
+ */
+declare function listCascadeLineage(adapter: SmithersDb$1, rootRunId: string): Promise<{
+    runId: string;
+    parentRunId: string | null;
+    depth: number;
+}[]>;
+/**
+ * @typedef {{
+ *   runId: string;
+ *   depth: number;
+ *   action: "cancel-requested" | "cancelled" | "already-terminal" | "missing";
+ *   ownerPid: number | null;
+ *   ownerTerminated: boolean;
+ * }} CascadeRunOutcome
+ */
+/**
+ * @typedef {{
+ *   root: CascadeRunOutcome | null;
+ *   descendants: CascadeRunOutcome[];
+ *   cancelledAttempts: number;
+ *   terminatedOwners: { runId: string; pid: number }[];
+ *   terminatedAgents: { runId: string | null; pid: number }[];
+ *   survivingAgents: number;
+ * }} CascadeCancelSummary
+ */
+/**
+ * Cancel a run AND every transitive child-workflow descendant (runs whose
+ * parent_run_id chain leads back to it), then clean up owner and agent
+ * processes. Time-travel forks also carry parent_run_id, but a fork is an
+ * independent branch of history, not a lifecycle child: fork subtrees are
+ * pruned from every discovery pass and survive the cascade. A fork given
+ * explicitly as the root is still cancelled.
+ *
+ * Per run:
+ * - live running (fresh heartbeat) → durable cancel request; its engine's
+ *   cancel watcher observes it — in THIS process or any detached one — and
+ *   aborts the run and its in-flight agents itself. The owner process is left
+ *   alone so it can shut down gracefully.
+ * - stale running / waiting-* / paused / ownerless → direct flip to cancelled;
+ *   if the recorded owner pid is still alive (hung engine, parked detached
+ *   owner) its process tree is terminated.
+ * - already terminal → skipped (idempotent).
+ *
+ * Race hardening: descendants are re-discovered after each pass so children
+ * spawned while the cascade ran are caught; runs are re-read right before
+ * acting so one that finished (or was cancelled concurrently) in the window
+ * since discovery is skipped instead of clobbered. Concurrent cancellers are
+ * safe because every terminal transition goes through the single-winner
+ * `claimRunCancellation` compare-and-set.
+ *
+ * A final reaping pass covers the whole subtree once the last row is fenced,
+ * so an agent registered by a run in the window between its own cancellation
+ * and the end of the cascade does not survive.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} rootRunId
+ * @param {{
+ *   now?: () => number;
+ *   heartbeatFresh?: (run: RunRow) => boolean;
+ *   terminateOwner?: typeof terminateRunOwner;
+ *   ownerKillGraceMs?: number;
+ *   agentKillGraceMs?: number;
+ *   attribution?: RunCancellationSource;
+ *   reapAgents?: boolean;
+ * }} [options]
+ * @returns {Promise<CascadeCancelSummary>}
+ */
+declare function cancelRunSubtree(adapter: SmithersDb$1, rootRunId: string, options?: {
+    now?: () => number;
+    heartbeatFresh?: (run: RunRow$1) => boolean;
+    terminateOwner?: typeof terminateRunOwner;
+    ownerKillGraceMs?: number;
+    agentKillGraceMs?: number;
+    attribution?: RunCancellationSource;
+    reapAgents?: boolean;
+}): Promise<CascadeCancelSummary>;
+type CascadeRunOutcome = {
+    runId: string;
+    depth: number;
+    action: "cancel-requested" | "cancelled" | "already-terminal" | "missing";
+    ownerPid: number | null;
+    ownerTerminated: boolean;
+};
+type CascadeCancelSummary = {
+    root: CascadeRunOutcome | null;
+    descendants: CascadeRunOutcome[];
+    cancelledAttempts: number;
+    terminatedOwners: {
+        runId: string;
+        pid: number;
+    }[];
+    terminatedAgents: {
+        runId: string | null;
+        pid: number;
+    }[];
+    survivingAgents: number;
+};
+type SmithersDb$1 = _smthrs_db_adapter.SmithersDb;
+type RunRow$1 = _smthrs_db_adapter.RunRow;
+type RunCancellationSource = _smthrs_observability.RunCancellationSource;
+
 type ChildWorkflowExecuteOptions$1 = {
     workflow: ChildWorkflowDefinition$2;
     input?: unknown;
@@ -378,7 +583,7 @@ declare function stripSystemColumns(value: unknown): unknown;
  * @param {number} [pollIntervalMs]
  * @returns {Promise<RunRow | undefined>}
  */
-declare function waitForChildRunToSettle(adapter: SmithersDb$1, childRunId: string, signal?: AbortSignal, pollIntervalMs?: number): Promise<RunRow | undefined>;
+declare function waitForChildRunToSettle(adapter: SmithersDb$2, childRunId: string, signal?: AbortSignal, pollIntervalMs?: number): Promise<RunRow | undefined>;
 
 /** @typedef {import("@smthrs/observability/correlation").CorrelationContext} CorrelationContext */
 /**
@@ -1184,7 +1389,7 @@ type HijackState$1 = {
     completion: HijackCompletion | null;
 };
 
-type LegacyExecuteTaskFn$1 = (adapter: SmithersDb$1, db: BunSQLiteDatabase$2<Record<string, unknown>>, runId: string, desc: TaskDescriptor, descriptorMap: Map<string, TaskDescriptor>, inputTable: SQLiteTable$1, eventBus: EventBus$1, toolConfig: TaskBridgeToolConfig$1, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<string>, runAbortController?: AbortController, hijackState?: HijackState$1, pauseSignal?: AbortSignal) => Promise<void>;
+type LegacyExecuteTaskFn$1 = (adapter: SmithersDb$2, db: BunSQLiteDatabase$2<Record<string, unknown>>, runId: string, desc: TaskDescriptor, descriptorMap: Map<string, TaskDescriptor>, inputTable: SQLiteTable$1, eventBus: EventBus$1, toolConfig: TaskBridgeToolConfig$1, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<string>, runAbortController?: AbortController, hijackState?: HijackState$1, pauseSignal?: AbortSignal) => Promise<void>;
 
 declare function makeDurableDeferredBridgeExecutionId(adapter: _SmithersDb$4, runId: string, nodeId: string, iteration: number): string;
 declare function makeApprovalDurableDeferred(nodeId: string): DurableDeferred.DurableDeferred<Schema.Struct<{
@@ -1323,7 +1528,7 @@ type UnknownWorkerError = {
     message: string;
 };
 
-type TaggedWorkerError = {
+type TaggedWorkerError = ({
     _tag: "TaskAborted";
     message: string;
     details?: Record<string, unknown>;
@@ -1364,6 +1569,8 @@ type TaggedWorkerError = {
     message: string;
     details?: Record<string, unknown>;
     status?: number;
+}) & {
+    cause?: unknown;
 };
 
 type WorkerTaskError = TaggedWorkerError | UnknownWorkerError;
@@ -1438,17 +1645,20 @@ declare const TaskResult: Schema.Union<readonly [Schema.Struct<{
     readonly _tag: Schema.Literal<"Failure">;
     readonly executionId: Schema.String;
     readonly error: Schema.Union<readonly [Schema.Union<readonly [Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"TaskAborted">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
         readonly name: Schema.optional<Schema.String>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"TaskTimeout">;
         readonly message: Schema.String;
         readonly nodeId: Schema.String;
         readonly attempt: Schema.Number;
         readonly timeoutMs: Schema.Number;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"TaskHeartbeatTimeout">;
         readonly message: Schema.String;
         readonly nodeId: Schema.String;
@@ -1458,22 +1668,27 @@ declare const TaskResult: Schema.Union<readonly [Schema.Struct<{
         readonly staleForMs: Schema.Number;
         readonly lastHeartbeatAtMs: Schema.Number;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"RunNotFound">;
         readonly message: Schema.String;
         readonly runId: Schema.String;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"InvalidInput">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"DbWriteFailed">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"AgentCliError">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"WorkflowFailed">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
@@ -1502,17 +1717,20 @@ declare const TaskWorkerEntity: Entity.Entity<"TaskWorker", Rpc.Rpc<"execute", S
     readonly _tag: Schema.Literal<"Failure">;
     readonly executionId: Schema.String;
     readonly error: Schema.Union<readonly [Schema.Union<readonly [Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"TaskAborted">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
         readonly name: Schema.optional<Schema.String>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"TaskTimeout">;
         readonly message: Schema.String;
         readonly nodeId: Schema.String;
         readonly attempt: Schema.Number;
         readonly timeoutMs: Schema.Number;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"TaskHeartbeatTimeout">;
         readonly message: Schema.String;
         readonly nodeId: Schema.String;
@@ -1522,22 +1740,27 @@ declare const TaskWorkerEntity: Entity.Entity<"TaskWorker", Rpc.Rpc<"execute", S
         readonly staleForMs: Schema.Number;
         readonly lastHeartbeatAtMs: Schema.Number;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"RunNotFound">;
         readonly message: Schema.String;
         readonly runId: Schema.String;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"InvalidInput">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"DbWriteFailed">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"AgentCliError">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
     }>, Schema.Struct<{
+        readonly cause: Schema.optional<Schema.Unknown>;
         readonly _tag: Schema.Literal<"WorkflowFailed">;
         readonly message: Schema.String;
         readonly details: Schema.optional<Schema.$Record<Schema.String, Schema.Unknown>>;
@@ -1860,7 +2083,7 @@ declare function resolveSchema(db: {
  *   };
  * }} [options]
  */
-declare function finalizeCancelledRun(adapter: SmithersDb$1, runId: string, options?: {
+declare function finalizeCancelledRun(adapter: SmithersDb$2, runId: string, options?: {
     now?: number;
     eventBus?: EventBus$1;
     errorJson?: string | null;
@@ -2861,6 +3084,10 @@ type SignalPayload$1 = {
     sentBy?: string;
 };
 
+/**
+ * Persisted lifecycle status. A tolerated child failure remains `finished`;
+ * the derived RunState distinguishes it as `succeeded-with-failures`.
+ */
 type RunStatusSchema$1 = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "paused" | "finished" | "continued" | "failed" | "cancelled";
 
 type RunSummary$1 = {
@@ -3349,4 +3576,4 @@ type JsonSchema = Record<string, any>;
 type ChildWorkflowDefinition = ChildWorkflowDefinition$2;
 type ChildWorkflowFileRef = ChildWorkflowFileRef$2;
 
-export { type AlertHumanRequestOptions, AlertRuntime, type AlertRuntimeServices, type AnyEffect, type AnySchema, type AnySmithersWorkflow, type ApprovalOptions, type ApprovalPayload, ApprovalPayloadSchema, type ApprovalResult, ApprovalResultSchema, type BridgeManagedTaskKind, type BuildAgentAskRequestInput, type BuilderApi, type BuilderNode, type BuilderStepContext, type BuilderStepHandle, type BuiltSmithersWorkflow, COMPLETED_ACTIVITY_RESULTS_MAX, type CancelPayload, CancelPayloadSchema, type CancelResult, CancelResultSchema, type ChildWorkflowDefinition, type ChildWorkflowExecuteOptions, type ChildWorkflowFileRef, type ComponentDefinition, type ComponentDefinitionBuilder, type ComputeTaskBridgeToolConfig, type ContinuationRequest, type CorrelatedSmithersEvent, type CorrelationContext, DEFAULT_AGENT_ASK_NODE_ID, type DiffBundle, EventBus$1 as EventBus, type ExecuteTaskActivityOptions, type FilePatch, type GetRunPayload, GetRunPayloadSchema, type GetRunResult, GetRunResultSchema, HUMAN_REQUEST_KINDS, HUMAN_REQUEST_STATUSES, type HijackState, type HotReloadEvent, HotWorkflowController, type HumanAnswerOutcome, type HumanRequestKind, type HumanRequestSchemaValidation, type HumanRequestStatus, type JsonSchema, type LegacyExecuteTaskFn, type ListRunsPayload, ListRunsPayloadSchema, OPTIMIZATION_ARTIFACT_ENV, type OverlayOptions, type PlanNode, type RalphMeta, type RalphState, type RalphStateMap, type ReadonlyTaskStateMap, type ReapWorktreesResult, type ReapedWorktree, RetriableTaskFailure, type RetryPolicy, type RetryWaitMap, type RunResult$2 as RunResult, type RunRow, RunStatusSchema, type RunSummary, RunSummarySchema, type SQLiteTable, type ScheduleResult, type ScheduleSnapshot, type SignalPayload, SignalPayloadSchema, type SignalResult, SignalResultSchema, type SignalRunOptions, type SkippedWorktree, Smithers, type SmithersAlertPolicy, type SmithersEvent, SmithersRpcGroup, type SmithersSqliteOptions, type StaticTaskBridgeToolConfig, type StepOptions, TERMINAL_RUN_STATUSES, type TaskActivityContext, type TaskActivityRetryOptions, type TaskBridgeToolConfig, type TaskRecord, TaskResult, type TaskState, type TaskStateMap, TaskWorkerEntity, WatchTree, type WatchTreeOptions, WorkerDispatchKind, WorkerTask$1 as WorkerTask, WorkerTaskKind, type WorkflowDefinitionBuilder, type WorkflowGraph, type WorkflowPatchDecisionRecord, type WorkflowPatchDecisions, type WorkflowVersioningRuntime, type WorkflowVersioningRuntimeOptions, type WorktreeOwner, type XmlNode, type _TaskActivityContext, __approvalInternals, __builderInternals, __childWorkflowInternals, __computeTaskBridgeInternals, __diffBundleInternals, __humanRequestInternals, __staticTaskBridgeInternals, __workflowBridgeInternals, applyDiffBundle, applyOptimizationArtifactToTasks, approve, approveNode, awaitApprovalDurableDeferred, awaitWaitForEventDurableDeferred, bridgeApprovalResolve, bridgeSignalResolve, bridgeWaitForEventResolve, buildAgentAskRequestId, buildAgentAskRequestRow, buildHumanRequestId, buildOverlay, buildPlanTree, canExecuteBridgeManagedComputeTask, canExecuteBridgeManagedStaticTask, cancel, cancelPendingTimersBridge, cleanupGenerations, closeSingleRunnerRuntime, completedActivityResultsSize, computeDiffBundle, computeDiffBundleBetweenRefs, createDocWatcher, createSchedulerWakeQueue, createWorkflowVersioningRuntime, denyNode, dispatchWorkerTask, enqueueSteer, executeChildWorkflow, executeComputeTaskBridge, executeStaticTaskBridge, executeTaskActivity, executeTaskBridge, executeTaskBridgeEffect, expireQueuedSteersForRun, finalizeCancelledRun, fragment, getDefinedToolMetadata, getHumanTaskPrompt, getRun, getWorkflowMakeBridgeRuntime, getWorkflowPatchDecisions, getWorkflowVersioningRuntime, isBridgeManagedTimerTask, isBridgeManagedWaitForEventTask, isHumanRequestPastTimeout, isHumanTaskMeta, isResolvedHumanRequestStatus, isRunHeartbeatFresh, isTaskResultFailure, isWorkflowFileRef, jsonSchemaToZod, jsonSchemaToZodType, listRuns, listSmithersWorktrees, loadOptimizationArtifact, loadWorkflowFileRef, makeAbortError, makeApprovalDurableDeferred, makeDurableDeferredBridgeExecutionId, makeTaskActivity, makeTaskBridgeKey, makeWaitForEventDurableDeferred, makeWorkerTask, parseAttemptMetaJson, reapWorktrees, renderFrame, reopenSingleRunnerRuntime, resolveDeferredTaskStateBridge, resolveOverlayEntry, resolveSchema, runWorkflow, runWorkflowWithMakeBridge, scheduleTasks, signal, signalRun, startDocFileSync, subscribeTaskWorkerDispatches, syncDocsFromDisk, usePatched, validateHumanRequestValue, waitForHumanAnswer, wireAbortSignal, withWorkflowMakeBridgeRuntime, withWorkflowVersioningRuntime, workflow };
+export { type AlertHumanRequestOptions, AlertRuntime, type AlertRuntimeServices, type AnyEffect, type AnySchema, type AnySmithersWorkflow, type ApprovalOptions, type ApprovalPayload, ApprovalPayloadSchema, type ApprovalResult, ApprovalResultSchema, type BridgeManagedTaskKind, type BuildAgentAskRequestInput, type BuilderApi, type BuilderNode, type BuilderStepContext, type BuilderStepHandle, type BuiltSmithersWorkflow, COMPLETED_ACTIVITY_RESULTS_MAX, type CancelPayload, CancelPayloadSchema, type CancelResult, CancelResultSchema, type CascadeCancelSummary, type CascadeRunOutcome, type ChildWorkflowDefinition, type ChildWorkflowExecuteOptions, type ChildWorkflowFileRef, type ComponentDefinition, type ComponentDefinitionBuilder, type ComputeTaskBridgeToolConfig, type ContinuationRequest, type CorrelatedSmithersEvent, type CorrelationContext, DEFAULT_AGENT_ASK_NODE_ID, type DiffBundle, EventBus$1 as EventBus, type ExecuteTaskActivityOptions, type FilePatch, type GetRunPayload, GetRunPayloadSchema, type GetRunResult, GetRunResultSchema, HUMAN_REQUEST_KINDS, HUMAN_REQUEST_STATUSES, type HijackState, type HotReloadEvent, HotWorkflowController, type HumanAnswerOutcome, type HumanRequestKind, type HumanRequestSchemaValidation, type HumanRequestStatus, type JsonSchema, type LegacyExecuteTaskFn, type ListRunsPayload, ListRunsPayloadSchema, OPTIMIZATION_ARTIFACT_ENV, type OverlayOptions, type PlanNode, type RalphMeta, type RalphState, type RalphStateMap, type ReadonlyTaskStateMap, type ReapWorktreesResult, type ReapedWorktree, RetriableTaskFailure, type RetryPolicy, type RetryWaitMap, type RunCancellationSource, type RunResult$2 as RunResult, RunStatusSchema, type RunSummary, RunSummarySchema, type SQLiteTable, type ScheduleResult, type ScheduleSnapshot, type SignalPayload, SignalPayloadSchema, type SignalResult, SignalResultSchema, type SignalRunOptions, type SkippedWorktree, Smithers, type SmithersAlertPolicy, type SmithersDb$1 as SmithersDb, type SmithersEvent, SmithersRpcGroup, type SmithersSqliteOptions, type StaticTaskBridgeToolConfig, type StepOptions, TERMINAL_RUN_STATUSES, type TaskActivityContext, type TaskActivityRetryOptions, type TaskBridgeToolConfig, type TaskRecord, TaskResult, type TaskState, type TaskStateMap, TaskWorkerEntity, WatchTree, type WatchTreeOptions, WorkerDispatchKind, WorkerTask$1 as WorkerTask, WorkerTaskKind, type WorkflowDefinitionBuilder, type WorkflowGraph, type WorkflowPatchDecisionRecord, type WorkflowPatchDecisions, type WorkflowVersioningRuntime, type WorkflowVersioningRuntimeOptions, type WorktreeOwner, type XmlNode, type _TaskActivityContext, __approvalInternals, __builderInternals, __childWorkflowInternals, __computeTaskBridgeInternals, __diffBundleInternals, __humanRequestInternals, __staticTaskBridgeInternals, __workflowBridgeInternals, applyDiffBundle, applyOptimizationArtifactToTasks, approve, approveNode, awaitApprovalDurableDeferred, awaitWaitForEventDurableDeferred, bridgeApprovalResolve, bridgeSignalResolve, bridgeWaitForEventResolve, buildAgentAskRequestId, buildAgentAskRequestRow, buildHumanRequestId, buildOverlay, buildPlanTree, canExecuteBridgeManagedComputeTask, canExecuteBridgeManagedStaticTask, cancel, cancelPendingTimersBridge, cancelRunSubtree, cleanupGenerations, closeSingleRunnerRuntime, completedActivityResultsSize, computeDiffBundle, computeDiffBundleBetweenRefs, createDocWatcher, createSchedulerWakeQueue, createWorkflowVersioningRuntime, denyNode, dispatchWorkerTask, enqueueSteer, executeChildWorkflow, executeComputeTaskBridge, executeStaticTaskBridge, executeTaskActivity, executeTaskBridge, executeTaskBridgeEffect, expireQueuedSteersForRun, finalizeCancelledOwnedRun, finalizeCancelledRun, fragment, getDefinedToolMetadata, getHumanTaskPrompt, getRun, getWorkflowMakeBridgeRuntime, getWorkflowPatchDecisions, getWorkflowVersioningRuntime, isBridgeManagedTimerTask, isBridgeManagedWaitForEventTask, isCancellableRunStatus, isHumanRequestPastTimeout, isHumanTaskMeta, isResolvedHumanRequestStatus, isRunHeartbeatFresh, isTaskResultFailure, isWorkflowFileRef, jsonSchemaToZod, jsonSchemaToZodType, listCascadeLineage, listRuns, listSmithersWorktrees, loadOptimizationArtifact, loadWorkflowFileRef, makeAbortError, makeApprovalDurableDeferred, makeDurableDeferredBridgeExecutionId, makeTaskActivity, makeTaskBridgeKey, makeWaitForEventDurableDeferred, makeWorkerTask, parseAttemptMetaJson, reapWorktrees, renderFrame, reopenSingleRunnerRuntime, resolveDeferredTaskStateBridge, resolveOverlayEntry, resolveSchema, runWorkflow, runWorkflowWithMakeBridge, scheduleTasks, signal, signalRun, startDocFileSync, subscribeTaskWorkerDispatches, syncDocsFromDisk, terminateRunOwner, terminateSubtreeAgentProcesses, usePatched, validateHumanRequestValue, waitForHumanAnswer, wireAbortSignal, withWorkflowMakeBridgeRuntime, withWorkflowVersioningRuntime, workflow };

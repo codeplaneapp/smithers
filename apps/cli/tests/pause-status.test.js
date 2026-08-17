@@ -10,6 +10,12 @@ if (previousDisableAutoMain === undefined) {
 }
 
 describe("gracefully paused run status", () => {
+  test("a degraded derived outcome keeps the compatible finished exit code", () => {
+    // `up` receives the persisted RunResult status, which deliberately remains
+    // finished when RunState is succeeded-with-failures.
+    expect(formatStatusExitCode("finished")).toBe(0);
+  });
+
   test("uses the non-failure waiting exit code", () => {
     expect(formatStatusExitCode("paused")).toBe(3);
     expect(isWaitingStatus("paused")).toBe(true);

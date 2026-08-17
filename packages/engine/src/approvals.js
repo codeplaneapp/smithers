@@ -3,6 +3,7 @@ import { nowMs } from "@smthrs/scheduler/nowMs";
 import { approvalWaitDuration, trackEvent, updateAsyncExternalWaitPending } from "@smthrs/observability/metrics";
 import { bridgeApprovalResolve } from "./effect/durable-deferred-bridge.js";
 import { SmithersError } from "@smthrs/errors/SmithersError";
+import { logWarning } from "@smthrs/observability/logging";
 /**
  * @param {string | null | undefined} currentStatus
  * @param {number} pendingApprovals
@@ -244,8 +245,10 @@ function resolveApprovalNode(adapter, runId, nodeId, iteration, note, decidedBy,
         // while the decision is already consumed — worse than the bridge
         // being a no-op.
         const message = bridgeError instanceof Error ? bridgeError.message : String(bridgeError);
-        console.warn(
-          `[approvals] post-commit bridgeApprovalResolve failed (non-fatal, run will re-drive on resume): ${message}`,
+        logWarning(
+          "post-commit approval bridge failed; run will re-drive on resume",
+          { runId, nodeId: targetNodeId, iteration: targetIteration, error: message },
+          "engine:approval",
         );
       }),
     );

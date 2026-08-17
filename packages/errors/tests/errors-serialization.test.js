@@ -176,6 +176,22 @@ describe("errorToJson is JSON-safe on the error path", () => {
 });
 
 describe("tagged-error payloads keep numeric fields finite across a round-trip", () => {
+  test("tagged worker errors preserve their nested cause chain", () => {
+    const err = new TaskTimeout({
+      message: "task timed out",
+      nodeId: "node-a",
+      attempt: 1,
+      timeoutMs: 100,
+      cause: new Error("provider timed out", { cause: new Error("socket closed") }),
+    });
+    const round = JSON.parse(JSON.stringify(toTaggedErrorPayload(err)));
+    const rebuilt = fromTaggedErrorPayload(round);
+    expect(rebuilt.cause).toMatchObject({
+      message: "provider timed out",
+      cause: { message: "socket closed" },
+    });
+  });
+
   test("TaskTimeout with missing numerics round-trips to defined numbers, not null", () => {
     // attempt/timeoutMs intentionally omitted -> Number(undefined) used to be NaN -> null.
     const err = new TaskTimeout({ message: "timed out", nodeId: "node-a" });

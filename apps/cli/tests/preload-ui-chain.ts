@@ -6,14 +6,22 @@
 // tests; CI reproduced the same loader failure at review-verdict.test.js after
 // the model-only fix. Loading the family once serializes those remaining edges.
 //
-// This preload is passed only to the shared test process. The isolated
-// monitor-shell-controls process registers its own happy-dom window before
-// dynamically importing radix, preserving radix's module-load-time DOM check.
+// Registered through apps/cli/bunfig.toml for both CLI test commands. Radix
+// decides whether to use layout effects at module load, so happy-dom must
+// exist before any test module imports the shared UI. The rendered monitor
+// suite keeps the DOM for its assertions; non-DOM shards only use it to
+// serialize the React module family, then unregister it.
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 const nativeFetch = globalThis.fetch;
+const monitorShellProcess = process.argv.some((arg) => arg.includes("monitor-shell-controls.test.tsx"));
 GlobalRegistrator.register({ url: "http://localhost/preload" });
 globalThis.fetch = nativeFetch;
+// The rendered monitor shard uses React act(); enable its environment before
+// the component family loads without changing the non-DOM CLI shards.
+if (monitorShellProcess) {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+}
 try {
   await import("react");
   await import("smthrs/ui");
@@ -23,6 +31,6 @@ try {
   // gateway-react's createGatewayReactRoot imports it statically.
   await import("smthrs/gateway-react");
 } finally {
-  await GlobalRegistrator.unregister();
+  if (!monitorShellProcess) await GlobalRegistrator.unregister();
   globalThis.fetch = nativeFetch;
 }

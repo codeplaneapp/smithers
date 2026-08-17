@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseQuizColumn, runReviewCli } from "../../src/cli/main";
+import { buildRunSummaryLine, parseQuizColumn, runReviewCli } from "../../src/cli/main";
 
 const MAIN_TS = fileURLToPath(new URL("../../src/cli/main.ts", import.meta.url));
 const PKG_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -149,6 +149,49 @@ describe("runReviewCli", () => {
     }
     expect(logs.join("\n")).toContain("Usage: smithers review [repo] [options]");
     expect(logs.join("\n")).toContain("smithers review --from main --to HEAD");
+  });
+});
+
+/**
+ * A review that produced no findings because every file review errored must not
+ * report "findings: none" — that is the exact wording of a clean review, so a
+ * CI credential expiry reads as a passing review to anyone scanning the log.
+ */
+describe("buildRunSummaryLine", () => {
+  const base = { filesChanged: 9, elapsed: "17s", breakdown: "none", reviewFailed: false, failedFileReviews: 0 };
+
+  test("a clean review reports findings: none", () => {
+    expect(buildRunSummaryLine(base)).toBe("reviewed 9 files in 17s — findings: none");
+  });
+
+  test("a review with findings reports the severity breakdown", () => {
+    expect(buildRunSummaryLine({ ...base, breakdown: "1 major, 2 minor" })).toBe(
+      "reviewed 9 files in 17s — findings: 1 major, 2 minor",
+    );
+  });
+
+  test("a failed review says so instead of claiming no findings", () => {
+    const line = buildRunSummaryLine({ ...base, reviewFailed: true, failedFileReviews: 5 });
+    expect(line).toBe(
+      "reviewed 9 files in 17s — review did not complete (5 file reviews failed); findings unavailable",
+    );
+    expect(line).not.toContain("findings: none");
+  });
+
+  test("a failed review with no per-file detail still refuses to claim no findings", () => {
+    const line = buildRunSummaryLine({ ...base, reviewFailed: true });
+    expect(line).toBe("reviewed 9 files in 17s — review did not complete; findings unavailable");
+    expect(line).not.toContain("findings: none");
+  });
+
+  test("a partial review reports the breakdown AND that coverage is incomplete", () => {
+    expect(buildRunSummaryLine({ ...base, failedFileReviews: 1 })).toBe(
+      "reviewed 9 files in 17s — findings: none (incomplete: 1 file review failed)",
+    );
+  });
+
+  test("singular file count reads naturally", () => {
+    expect(buildRunSummaryLine({ ...base, filesChanged: 1 })).toBe("reviewed 1 file in 17s — findings: none");
   });
 });
 

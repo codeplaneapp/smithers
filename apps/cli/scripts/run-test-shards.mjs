@@ -24,23 +24,11 @@ function collectTestFiles(dir, files = []) {
 
 function runBatch(files) {
   return new Promise((resolveBatch) => {
-    const child = spawn(
-      process.execPath,
-      [
-        "test",
-        "--isolate",
-        "--preload",
-        "./tests/preload-ui-chain.ts",
-        "--timeout=120000",
-        "--max-concurrency=1",
-        ...files,
-      ],
-      {
-        cwd: CLI_ROOT,
-        env: process.env,
-        stdio: "inherit",
-      },
-    );
+    const child = spawn(process.execPath, ["test", "--isolate", "--timeout=120000", "--max-concurrency=1", ...files], {
+      cwd: CLI_ROOT,
+      env: process.env,
+      stdio: "inherit",
+    });
     child.once("error", () => resolveBatch(1));
     child.once("exit", (code, signal) => resolveBatch(signal === null ? (code ?? 1) : 1));
   });
