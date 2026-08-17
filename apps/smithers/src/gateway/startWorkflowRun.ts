@@ -44,6 +44,7 @@ function notificationStatusFromRunState(state: string | undefined): "running" | 
     case "canceled":
       return "failed";
     case "succeeded":
+    case "succeeded-with-failures":
     case "finished":
     case "completed":
     case "ok":

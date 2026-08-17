@@ -11,6 +11,7 @@ export function toNodeStatus(state: string | undefined): NodeStatus {
     case "running":
       return "running";
     case "succeeded":
+    case "succeeded-with-failures":
     case "finished":
     case "completed":
     case "ok":

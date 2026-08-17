@@ -56,7 +56,7 @@ export class HermesCliAgent extends BaseCliAgent {
    * @param {HermesCliAgentOptions} [opts]
    */
   constructor(opts = {}) {
-    super(opts);
+    super(opts, "HermesCliAgent");
     this.opts = opts;
     this.capabilities = createHermesCliCapabilityRegistry();
   }

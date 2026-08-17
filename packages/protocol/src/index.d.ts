@@ -144,7 +144,7 @@ type DevToolsRunStateWarning = {
  */
 type DevToolsRunState = {
     runId: string;
-    state: "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "unknown";
+    state: "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "succeeded-with-failures" | "unknown";
     blocked?: DevToolsBlockedReason;
     unhealthy?: DevToolsUnhealthyReason;
     warnings?: DevToolsRunStateWarning[];

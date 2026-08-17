@@ -2704,7 +2704,7 @@ MCP tools). It also subsumes the weaker heartbeat-freshness check, so it never
 needs to be combined with `--force`. The gateway's `resumeRun` RPC deliberately
 has no equivalent: a remote caller can never steal a live run.
 
-A *stale* run (dead driver, expired claim) still resumes with no extra flag,
+A _stale_ run (dead driver, expired claim) still resumes with no extra flag,
 so ordinary crash recovery and `bunx smthrs supervise` are unaffected.
 
 If resume fails with `RESUME_METADATA_MISMATCH`, the workflow file changed after the run started. Resume validates the original workflow metadata and source hash; it is not a hot-reload mechanism for stopped runs. Start a fresh run instead, for example with a new `--run-id`, or overwrite an existing planned id with `--force` when that command supports it. When iterating on a workflow definition, expect each edit to require a fresh run rather than `--resume`.
@@ -2724,6 +2724,8 @@ Use the unified collector to inspect filesystem capacity and stale artifacts:
 ```sh
 bunx smthrs gc --dry-run
 bunx smthrs gc --older-than 24h
+bunx smthrs gc --dry-run --db-retention-days 30
+bunx smthrs gc --db-retention-days 30
 ```
 
 `gc` reclaims logs, `.smithers/sandboxes/<runId>` roots, and Smithers-owned
@@ -2738,6 +2740,27 @@ protects every candidate, and an unowned worktree must be clean with its HEAD
 already merged or pushed. `--force` applies only to owned worktrees and allows
 their uncommitted or unpushed contents to be removed.
 
+The same explicit `gc` invocation reports legacy inline snapshot payloads and,
+without `--dry-run`, moves them into the content-addressed snapshot store in
+small resumable transactions. This representation-only compaction preserves
+run history and is independent of retention.
+
+Database run retention has **no destructive default**. Opt in per invocation
+with `--db-retention-days DAYS`, or set `SMITHERS_DB_RETENTION_DAYS`; zero is
+allowed. Only runs in a terminal state with a recorded finish time older than
+the cutoff are eligible. Running, paused, waiting, unfinished `continued`
+runs, and terminal ancestors of retained descendants are protected. Deletion
+uses small committed chunks and removes the run record last. `--dry-run`
+reports eligible runs and row counts without changing either snapshots or run
+history.
+
+Cleared and deleted SQLite pages become reusable inside `smithers.db`, but the
+file does not shrink automatically. Smithers never runs `VACUUM` against an
+online store. To return those pages to the filesystem, stop every engine,
+gateway, and other process using the database, verify a backup, and run the
+SQLite `VACUUM` command offline. PostgreSQL installations should use their
+normal operator-managed vacuum policy.
+
 ## Interactive mode and the full-screen TUI monitor
 
 `bunx smthrs up --interactive` (or just `bunx smthrs up` / `bunx smthrs workflow run` from an interactive TTY without a positional argument) opens a terminal UI that guides you through three steps:
@@ -2746,22 +2769,22 @@ their uncommitted or unpushed contents to be removed.
 2. **Input prompts** - fill required fields for the chosen workflow.
 3. **Full-screen monitor** - the run starts in a detached background process and the terminal switches into a full-screen view that tracks it live.
 
-The monitor connects to a local Gateway on port 7331, starting one automatically if none is running.  It exits when you press `q`.
+The monitor connects to a local Gateway on port 7331, starting one automatically if none is running. It exits when you press `q`.
 
 **Agents: hand humans interactive commands.** When you (an AI agent) give a human a command to run themselves, include the `--interactive` flag whenever the command supports it (`bunx smthrs up --interactive`, `bunx smthrs workflow run WORKFLOW_ID --interactive`), so the human lands in this full-screen monitor instead of a detached log tail. Reserve the non-interactive forms for CI, scripts, and the commands you execute yourself with your shell tool. Never pass `--interactive` to a command you run programmatically, since it opens a full-screen TUI your harness cannot drive.
 
 ### Monitor modes and keybindings
 
-The monitor opens in **Tree** mode. Switch modes with the letter aliases below. From any *non-Tree* mode the number keys `1`–`5` also jump straight to a mode (and `1` returns to Tree).
+The monitor opens in **Tree** mode. Switch modes with the letter aliases below. From any _non-Tree_ mode the number keys `1`–`5` also jump straight to a mode (and `1` returns to Tree).
 
-| Mode | Reach it with | What you see |
-|------|---------------|--------------|
-| **Tree** | `1` (from another mode) | Node tree with per-node output, logs, diffs, and props; inline approval banner when waiting |
-| **Graph** | `g` (toggles Tree ↔ Graph), or `2` | Directed dependency graph; `j`/`k` navigate, `⏎` inspects a node in Tree |
-| **Logs** | `l`, or `3` | Filtered event stream (up to 2 000 events); `[`/`]` filter by attempt, `f` toggles follow |
-| **Timeline** | `t`, or `4` | Horizontal tick strip you scrub with `j`/`k` to inspect node state at past frames; `L` jumps back to live (inspect-only; rewind with `bunx smthrs rewind`) |
-| **Hijack** | `h`, or `5` | Hand off to `bunx smthrs hijack` for an active node |
-| **Quit** | `q` (or Ctrl-C) | (quit) |
+| Mode         | Reach it with                      | What you see                                                                                                                                               |
+| ------------ | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Tree**     | `1` (from another mode)            | Node tree with per-node output, logs, diffs, and props; inline approval banner when waiting                                                                |
+| **Graph**    | `g` (toggles Tree ↔ Graph), or `2` | Directed dependency graph; `j`/`k` navigate, `⏎` inspects a node in Tree                                                                                   |
+| **Logs**     | `l`, or `3`                        | Filtered event stream (up to 2 000 events); `[`/`]` filter by attempt, `f` toggles follow                                                                  |
+| **Timeline** | `t`, or `4`                        | Horizontal tick strip you scrub with `j`/`k` to inspect node state at past frames; `L` jumps back to live (inspect-only; rewind with `bunx smthrs rewind`) |
+| **Hijack**   | `h`, or `5`                        | Hand off to `bunx smthrs hijack` for an active node                                                                                                        |
+| **Quit**     | `q` (or Ctrl-C)                    | (quit)                                                                                                                                                     |
 
 Inside **Tree** mode the number keys are **inspector tabs, not mode switches**: `1` output, `2` logs, `3` diff, `4` props (`←`/`→` also walk the tabs). Use the `g`/`l`/`t`/`h` aliases to leave Tree.
 
@@ -2797,13 +2820,13 @@ bunx smthrs ui RUN_ID
 
 Five commands cross historical boundaries. Pick by what each acts on:
 
-| Command | Acts on | Behavior |
-| --- | --- | --- |
-| `rewind` | a run | Rewinds a run to a previous frame. Args: `RUN_ID FRAME_NO`. |
-| `replay` | a snapshot checkpoint | Forks from a checkpoint and resumes execution (time-travel fork). Takes a workflow. |
-| `fork` | a snapshot checkpoint | Creates a child run. `--run` also resumes it. `--reset-node` resets exactly the nodes you name; downstream dependents keep the parent's finished output unless you name them too. |
-| `timetravel` | a past task state | Reverts filesystem plus DB state to a previous task state, then optionally resumes. Takes a workflow. |
-| `revert` | the workspace | Reverts the workspace to a previous task attempt's filesystem state only, no DB reset. Takes a workflow. |
+| Command      | Acts on               | Behavior                                                                                                                                                                          |
+| ------------ | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rewind`     | a run                 | Rewinds a run to a previous frame. Args: `RUN_ID FRAME_NO`.                                                                                                                       |
+| `replay`     | a snapshot checkpoint | Forks from a checkpoint and resumes execution (time-travel fork). Takes a workflow.                                                                                               |
+| `fork`       | a snapshot checkpoint | Creates a child run. `--run` also resumes it. `--reset-node` resets exactly the nodes you name; downstream dependents keep the parent's finished output unless you name them too. |
+| `timetravel` | a past task state     | Reverts filesystem plus DB state to a previous task state, then optionally resumes. Takes a workflow.                                                                             |
+| `revert`     | the workspace         | Reverts the workspace to a previous task attempt's filesystem state only, no DB reset. Takes a workflow.                                                                          |
 
 Every command prints an effect-boundary report, including a clean report when
 no effects are crossed. `revert`, `timetravel`, and `rewind` run registered
@@ -4804,7 +4827,10 @@ type ParallelProps = {
   children** in flight at once; each descendant task counts toward its child.
   A child is in flight from its first task to its last; a freed slot admits
   the next child in document order, and an in-flight child always finishes
-  (even nested tasks) while over-cap siblings wait.
+  (even nested tasks) while over-cap siblings wait. If that child launches a
+  lifecycle-linked workflow, tasks in the child and deeper descendants also
+  draw from this budget; dynamic child-run fan-out therefore stays bounded by
+  the declaring ancestor.
 
 The two diverge once children are subtrees. In a kanban workflow where each
 ticket is a sequence of implement then reviews, `maxConcurrency={4}` bounds
@@ -4859,6 +4885,11 @@ run-level cap still bounds total in-flight tasks.
 - A group completes when all children finish. `continueOnFail` on a failing child `<Task>` (not a `<Parallel>` prop) lets the group proceed past it.
 - Children carry `parallelGroupId`/`parallelMaxConcurrency` in their descriptor; under a subtree cap, descendants also get `subtreeGroupId`, `subtreeChildKey`, and `subtreeMax`.
 - The run-wide cap layers on top of every group cap. Unpinned, it starts at 4 and grows with demand up to `SMITHERS_AUTO_MAX_CONCURRENCY_CEILING` (default 16); a declared `maxConcurrency`/`subtreeConcurrency` can raise that starting point above the ceiling. `--max-concurrency N` pins the cap instead, disabling those raises and holding the run at `N` even above the ceiling. Leaf cap, subtree cap, and run-wide cap must all pass.
+- Lifecycle-linked `<Subflow>` children inherit every ancestor run/subtree
+  admission scope. The awaiting parent task releases its scopes before the
+  child starts and reacquires them after it settles, so inheritance cannot
+  deadlock at `--max-concurrency 1`. A direct `runWorkflow` call with only
+  `parentRunId` records detached lineage and does not inherit.
 
 ---
 
@@ -7622,7 +7653,7 @@ const { Workflow, smithers, outputs } = createSmithers({
 const sol = new CodexAgent({ model: "gpt-5.6-sol" });
 const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
 const terra = new CodexAgent({ model: "gpt-5.6-terra" });
-const luna = new CodexAgent({ model: "gpt-5.6-luna", model_reasoning_effort: "high" });
+const luna = new CodexAgent({ model: "gpt-5.6-luna", effort: "high" });
 
 export default smithers((ctx) => {
   // The schema default is applied before runtime and static graph rendering.
@@ -8394,9 +8425,9 @@ Every agent task produces a reusable session snapshot. `fork` starts a new task 
 
 > The rules that repeatedly cost authoring runs when learned at runtime instead of before render. Read this before hand-authoring a workflow.
 
-These five rules keep biting workflow-authoring agents at runtime, hours after
+These six rules keep biting workflow-authoring agents at runtime, hours after
 writing a workflow, instead of surfacing at the first `bunx smthrs graph`.
-Each is documented elsewhere in full; this page collects all five in one read
+Each is documented elsewhere in full; this page collects all six in one read
 before you write JSX, instead of hitting them one at a time across failed
 runs. See
 [the postmortem](https://github.com/smithersai/smithers/blob/main/research/workflow-authoring-friction-postmortem.md)
@@ -8510,6 +8541,20 @@ green-looking in the repo indefinitely while contributing zero coverage.
 `node scripts/check-smithers-test-script.mjs` (part of the root `pnpm test`
 gate) catches this; run it after adding a test file, or just add the path
 yourself.
+
+## 6. Use the isolated-clone helper; do not gate a hot source tree
+
+For bundle-producing work, call `createIsolatedClone({ repo, at })` from
+`smthrs` or `@smthrs/vcs`. Only the pinned commit must remain available while
+the clone is created. Do not repeatedly assert equality of the shared working
+tree, index, refs, JJ bookmarks, or object inventory: concurrent work can
+legitimately change all of them after isolation.
+
+Use `clone.run()` so commands execute at the clone root with the documented
+scrubbed environment, then `clone.emitBundle()` for a patch, Git bundle,
+manifest, and fresh-import proof. JJ-colocated repos can have multi-megabyte
+ref inventories; use `listGitRefs()` rather than synchronous `git for-each-ref`
+with Node's default `maxBuffer`. See [VCS Helper Reference](/reference/vcs-helpers).
 
 ## See also
 
@@ -8789,6 +8834,12 @@ type WorkflowViewDefinition = {
 type SmithersWorkflowOptions = {
   alertPolicy?: SmithersAlertPolicy;
   cache?: boolean;
+  environment?: {
+    inherit?: boolean;
+    allow?: string[]; // exact names or PREFIX* patterns
+    deny?: string[];  // exact names or PREFIX* patterns
+    set?: Record<string, string>;
+  };
   // Explicit workflow-level output schema/table used to populate
   // RunResult.output (and therefore a parent <Subflow>'s child result).
   // Defaults to the schema key literally named `output`.
@@ -8912,6 +8963,11 @@ type RunAuthContext = {
 | Suspended | `waiting-approval`, `waiting-event`, `waiting-timer`, `waiting-quota`, `paused` | The run is nonterminal and can resume. |
 | Terminal | `finished`, `continued`, `failed`, `cancelled` | This run will not schedule more work. A `continued` run points to its successor through `nextRunId`. |
 
+`RunState` is the derived outcome/health view. A persisted `finished` run maps
+to `succeeded` when clean and `succeeded-with-failures` when its durable
+`RunFinished` event records tolerated child failures. Both are terminal;
+`RunStatus` remains `finished` for compatibility.
+
 `TaskState` is the persisted, detailed lifecycle for an individual task.
 Import it from `@smthrs/scheduler/TaskState`. `NodeStatus` is a
 separate six-value display palette exported by
@@ -8960,7 +9016,7 @@ type RunOptions = {
   runId?: string;
   parentRunId?: string | null;
   input: Record<string, unknown>;
-  maxConcurrency?: number;          // default 4
+  maxConcurrency?: number;          // default 4; run cap shared with lifecycle-linked descendant tasks
   maxConcurrencyPinned?: boolean;   // internal/runtime proof that the value was explicitly persisted
   requireRerenderOnOutputChange?: boolean;  // default true; re-render the frame on every task completion
   onProgress?: (e: SmithersEvent) => void;
@@ -9020,6 +9076,8 @@ type RunResult = {
   readonly output?: unknown;
   readonly error?: unknown;
   readonly nextRunId?: string;      // set when the run continued-as-new
+  readonly failedChildren?: number; // tolerated failures; finished only, omitted when zero
+  readonly failedChildKeys?: readonly string[]; // nodeId::iteration keys
 };
 
 type RunStatus =
@@ -9560,7 +9618,7 @@ type ParallelProps = {
   id?: string;
   label?: string;
   maxConcurrency?: number;
-  subtreeConcurrency?: number;
+  subtreeConcurrency?: number; // direct-child cap; inherited by lifecycle-linked child-run tasks
   priority?: number;
   failurePolicy?: "halt" | "quarantine";
   skipIf?: boolean;
@@ -10462,7 +10520,7 @@ type KnownSmithersErrorCode =
   | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "TASK_EMPTY_PROMPT" | "WORKFLOW_RENDER_FAILED" | "DUPLICATE_ID" | "NESTED_LOOP"
   | "WORKTREE_EMPTY_PATH" | "MDX_PRELOAD_INACTIVE" | "CONTEXT_OUTSIDE_WORKFLOW"
   | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "BOUND_STALE" | "ASPECT_BUDGET_EXCEEDED" | "APPROVAL_OUTSIDE_TASK"
-  | "APPROVAL_OPTIONS_REQUIRED" | "WORKFLOW_MISSING_DEFAULT" | "WORKFLOW_NOT_BUILT"
+  | "APPROVAL_OPTIONS_REQUIRED" | "WORKFLOW_MISSING_DEFAULT" | "WORKFLOW_NOT_BUILT" | "WORKFLOW_FILE_NOT_FOUND"
   | "TOOL_PATH_INVALID" | "TOOL_PATH_ESCAPE" | "TOOL_FILE_TOO_LARGE" | "TOOL_CONTENT_TOO_LARGE"
   | "TOOL_PATCH_TOO_LARGE" | "TOOL_PATCH_FAILED" | "TOOL_NETWORK_DISABLED"
   | "TOOL_GIT_REMOTE_DISABLED" | "TOOL_COMMAND_FAILED" | "TOOL_GREP_FAILED"
@@ -11309,6 +11367,7 @@ connection setup problems aren't hidden behind unrelated source-store errors.
 | Code | When | Details |
 |---|---|---|
 | `INVALID_EVENTS_OPTIONS` | The smithers events command receives invalid filter options. | -- |
+| `WORKFLOW_FILE_NOT_FOUND` | A path-like workflow argument does not exist at the path resolved from the operator working directory. | `{ given, resolved }` |
 | `WORKFLOW_EXISTS` | The workflow creation CLI refuses to overwrite an existing workflow file. | -- |
 | `CLI_DB_NOT_FOUND` | A CLI command cannot find a nearby `smithers.db` file. | -- |
 | `CLI_AGENT_UNSUPPORTED` | The ask command selects an agent integration Smithers doesn't support in that mode. | -- |
@@ -11451,7 +11510,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 
 | Import path | Entry file | Purpose |
 |---|---|---|
-| `smthrs` | `./src/index.js` | Core API: `createSmithers`, `openSmithersBackend`, components, `runWorkflow`, `renderMdx`, errors |
+| `smthrs` | `./src/index.js` | Core API: `createSmithers`, `openSmithersBackend`, `createExternalSmithersEngine`, components, `runWorkflow`, `renderMdx`, errors |
 | `smthrs/gateway` | `./src/gateway.js` | Gateway server primitives from `@smthrs/server/gateway` |
 | `smthrs/gateway-client` | `./src/gateway-client.js` | Typed client helpers from `@smthrs/gateway-client` |
 | `smthrs/gateway-react` | `./src/gateway-react.js` | React hooks and providers for gateway-backed UIs |
@@ -11517,7 +11576,7 @@ Most applications should import from `smthrs`. The workspace packages below are 
 | `@smthrs/devtools` | Snapshot, tree, diff, node lookup, task collection, and DevTools run-store helpers behind the CLI inspect commands | [Debugging](/guides/debugging), [CLI Overview](/cli/overview) |
 | `@smthrs/driver` | Runtime driver contracts: `RunOptions`, `RunResult`, `RunStatus`, `SmithersCtx`, outputs, task runtime, interop, and child process helpers | [Run Workflow](/runtime/run-workflow), [Execution Model](/how-it-works) |
 | `@smthrs/electric-proxy` | ElectricSQL shape proxy for cloud sync, scoped shape access, rate limits, stripped auth forwarding, and shape metrics | [Production Hardening](/deployment/production-hardening), [Gateway](/integrations/gateway) |
-| `@smthrs/engine` | Workflow rendering/execution API: `runWorkflow`, `renderFrame`, `workflow`, `Smithers`, `fragment`, signals, and Effect versioning | [Render Frame](/runtime/render-frame), [Run Workflow](/runtime/run-workflow) |
+| `@smthrs/engine` | Workflow rendering/execution API: `runWorkflow`, Node/Bun platform layers, `renderFrame`, `workflow`, `Smithers`, signals, and Effect versioning | [Embed the engine in Node](/integrations/embedded-engine), [Run Workflow](/runtime/run-workflow) |
 | `@smthrs/errors` | Error definitions, known codes, JSON serialization, docs URLs, and type guards | [Errors](/reference/errors) |
 | `@smthrs/ferric-site` | Private Cloudflare Worker deployment for the Operation Ferric site at `ferric.smithers.sh` (React's runtime rewritten in Rust) | [Ecosystem](/integrations/ecosystem) |
 | `@smthrs/gateway` | Stable Gateway RPC contracts, auth scopes, deployment metadata, and generated OpenAPI schema | [Gateway](/integrations/gateway), [RPC](/rpc/launch-run) |
@@ -11773,7 +11832,56 @@ import {
   resolveGitBinary,
   resolveJjBinary,
   vcsToolingStatus,
+  createIsolatedClone,
+  listGitRefs,
+  gitDirtyPaths,
 } from "@smthrs/vcs";
+```
+
+`createIsolatedClone`, `listGitRefs`, and `gitDirtyPaths` are also exported by
+the root `smthrs` facade.
+
+## Isolated clone and bundle handoff
+
+`createIsolatedClone({ repo, at, destination? })` creates a standalone,
+detached clone at exactly `at^{commit}`. It removes remotes and refs, rejects
+Git alternates, writes a nonce ownership marker, and will only clean a clone
+whose marker still matches.
+
+```ts
+const clone = await createIsolatedClone({ repo: sharedRepo, at: expectedHead });
+try {
+  await clone.run("pnpm", ["test"]);
+  const handoff = await clone.emitBundle({ outputDir: artifacts, name: "wave-2" });
+} finally {
+  await clone.cleanup();
+}
+```
+
+The hot-tree contract is deliberately narrow: `expectedHead^{commit}` must be
+readable while the clone is created. The source working tree, index, refs, JJ
+bookmarks, object inventory, and later HEAD movement may change; they are not
+quiescence gates. The clone is the isolation boundary. The emitted patch,
+bundle, and JSON manifest are adoption evidence, and `emitBundle()` verifies
+them in a fresh repository before returning. Land a handoff into a shared tree
+only in a short serialized adoption step.
+
+`clone.run()` always uses the clone root as `cwd`. It inherits only `PATH`,
+`HOME`, temp-directory, user/shell, and locale variables, plus explicit `env`
+overrides. Ambient `GIT_*`, `SMITHERS_HOME`, and other `SMITHERS_*` variables
+are absent unless explicitly supplied.
+
+## Large Git inventories
+
+`listGitRefs(repo)` and `gitDirtyPaths(repo)` use streamed child-process output,
+so they do not have Node's synchronous 1 MB `maxBuffer` ceiling. This matters
+for JJ-colocated repositories, where tens of thousands of refs can produce
+multi-megabyte output. Do not replace these helpers with `execFileSync("git",
+["for-each-ref"])` using its default buffer.
+
+```ts
+const refs = await listGitRefs(repo);
+const dirtyPaths = await gitDirtyPaths(repo);
 ```
 
 Direct JJ helper calls need a platform layer:
@@ -13709,6 +13817,12 @@ Providing `opts.maxConcurrency` explicitly pins the cap: it disables automatic
 raises, including declared-width raises, so the run can't exceed the supplied
 value, even though that value can itself be larger than the automatic ceiling.
 
+Lifecycle-linked child workflows (`<Subflow>` / `executeChildWorkflow`) draw
+from the parent's run cap as well as any enclosing `subtreeConcurrency` cap,
+including through nested child runs. The awaiting parent task yields its slot
+while the child runs, so `maxConcurrency: 1` remains deadlock-free. A run that
+only supplies `parentRunId` is detached lineage and keeps an independent cap.
+
 ## Resume
 
 Pass the original `runId` plus `resume: true`: state loads from the configured durable store, completed tasks are skipped, and in-progress attempts older than 15 minutes are abandoned and retried.
@@ -13801,6 +13915,11 @@ function reopenSingleRunnerRuntime(): void;
 Nothing in Smithers calls either function for you. Gateway, `up --serve`, and
 the HTTP server deliberately keep the runtime open across many runs, so
 `Gateway.close()` does not close it.
+
+`createExternalSmithersEngine()` is the higher-level exception: its `close()`
+waits for runs started by that instance, closes the database, and closes the
+process-local runtime when the last external engine instance closes. See
+[Embed the engine in Node](/integrations/embedded-engine).
 
 ## Semantics
 
@@ -14176,6 +14295,7 @@ type RunState =
   | "failed"
   | "cancelled"
   | "succeeded"
+  | "succeeded-with-failures" // finished, but tolerated child failures
   | "unknown"           // telemetry gap; never invent a state
 ```
 
@@ -14191,7 +14311,7 @@ The legacy run-row `status` column maps to `RunState` like this:
 | `waiting-event`         | `waiting-event`                |
 | `waiting-timer`         | `waiting-timer`                |
 | `paused`                | `paused`                       |
-| `finished`              | `succeeded`                    |
+| `finished`              | `succeeded` or `succeeded-with-failures` |
 | `continued`             | `succeeded`                    |
 | `failed`                | `failed`                       |
 | `cancelled`             | `cancelled`                    |
@@ -14218,8 +14338,23 @@ run row says `waiting-event` but no node does, `runState.blocked.kind` is
 detailed unblock command and may report other blockers such as
 `retries-exhausted` or `dependency-failed`.
 </Warning>
+
+When a fail-closed composite such as `<TryCatchFinally>` terminates a run, its
+run-level `SCHEDULER_ERROR` includes the nearest completed output row's
+`summary` and `blockers` fields. The leaf diagnostic is therefore visible in
+`up`, `inspect`, and autopsy output without a separate node/output lookup.
+
 <Warning>
-**`succeeded`/`finished` can mask failed child agents.** Run-level status is binary (`finished` or `failed`); a run fails only on an *unhandled* task failure. Two classes of failed children don't count as run-level failures: tasks marked [`continueOnFail`](/components/task), and agent tasks failing with a *transient* error (rate limits, timeouts, aborts: `SESSION_ERROR`, `TASK_TIMEOUT`, `TASK_HEARTBEAT_TIMEOUT`, `TASK_ABORTED`, or `failureRetryable`). A fan-out where most agents hit provider rate limits can still report `finished` → `succeeded`.
+**`finished` does not always mean clean success.** Run-level lifecycle status is
+binary (`finished` or `failed`); a run fails only on an *unhandled* task
+failure. Two classes of failed children don't count as run-level failures:
+tasks marked [`continueOnFail`](/components/task), and agent tasks failing with
+a *transient* error (rate limits, timeouts, aborts: `SESSION_ERROR`,
+`TASK_TIMEOUT`, `TASK_HEARTBEAT_TIMEOUT`, `TASK_ABORTED`, or
+`failureRetryable`). A fan-out where most agents hit provider rate limits can
+therefore persist `status: "finished"`, but now derives
+`RunState.state: "succeeded-with-failures"` instead of claiming clean
+`succeeded`.
 
 Never trust top-level status alone; inspect per-node/agent outcomes:
 
@@ -14244,9 +14379,19 @@ signal in three places:
   DevTools can flag the degraded outcome from the event stream without
   re-reading every node row.
 
-The run-row `status` stays `finished` (`RunState` stays `succeeded`), so existing
-`finished === success` callers and `continueOnFail` semantics are unchanged: the
-count is the signal, not a new terminal status.
+The run-row and `RunResult.status` stay `finished`. `RunState` reads the
+persisted `RunFinished.failedChildren` value and returns
+`succeeded-with-failures` when it is nonzero; historical or clean events still
+map to `succeeded`. This is deliberately a distinct derived outcome, not a
+third persisted `RunStatus`, so existing terminal pollers, Gateway clients, and
+`status === "finished"` callers continue to complete normally. State-aware
+consumers should treat both success states as terminal, while using
+`succeeded-with-failures` to request review or gate clean-success automation.
+
+`bunx smthrs up` keeps exit code `0` for this outcome. `continueOnFail` is an
+explicit instruction to finish the workflow; changing the exit code would
+silently break CI that already accepts `finished`. CI requiring a clean run
+should inspect `runState.state` or `failedChildren`.
 
 The same applies to **loops that never converged**: a `<Loop>`/`<ReviewLoop>`
 exiting via `onMaxReached: "return-last"` with its `until` predicate still false
@@ -14316,8 +14461,8 @@ run has no event-waiting node, or when that context is supplied to
 `deriveRunState`. A `waiting-*` state can be returned without `blocked` when
 the supporting row is unavailable. `unhealthy` is present for `stale`,
 `orphaned`, and overdue-timer results. `recovering` stays unemitted for now
-(see above), and terminal states (`succeeded`, `failed`, `cancelled`) carry
-neither.
+(see above), and terminal states (`succeeded`, `succeeded-with-failures`,
+`failed`, `cancelled`) carry neither.
 
 `warnings` retains durable operator diagnostics independently of lifecycle
 state. When automatic concurrency reaches its configured ceiling while demand
@@ -14366,6 +14511,9 @@ engine uses for `isRunHeartbeatFresh`.
   output (and rendered in the human view).
 - Gateway RPC `getRun`: `runState` field on the response.
 - DevTools snapshot header: `runState?: RunStateView` field.
+- `ps --json`: compatible `status: "finished"` plus the distinct
+  `state: "succeeded-with-failures"`; `status`, `inspect`, `tail`, `why`, and
+  monitor views render the degraded outcome without keeping the run active.
 - Event stream: `RunStatusChanged` records persisted status transitions.
   `RunStateChanged` is a typed/reserved event variant, but the current runtime
   does not emit it; call `getRun` or `computeRunState` when you need the

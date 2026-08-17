@@ -102,4 +102,21 @@ describe("makeWorkflowSession surfaces masked child failures on a finished run",
     expect(decision.result.failedChildren).toBeUndefined();
     expect(decision.result.failedChildKeys).toBeUndefined();
   });
+
+  test("an unhandled child failure still fails the run", () => {
+    const session = makeWorkflowSession({ nowMs: () => 1_000 });
+    const descriptor = makeDescriptor("required-task");
+    Effect.runSync(session.submitGraph(makeGraph([descriptor])));
+
+    const decision = Effect.runSync(
+      session.taskFailed({
+        nodeId: "required-task",
+        iteration: 0,
+        error: { code: "INVALID_OUTPUT", message: "required output failed" },
+      }),
+    );
+
+    expect(decision._tag).toBe("Failed");
+    expect(String(decision.error)).toContain("required output failed");
+  });
 });

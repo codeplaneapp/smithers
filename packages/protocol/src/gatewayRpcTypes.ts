@@ -245,6 +245,20 @@ export type CancelRunRequest = {
   runId: string;
 };
 
+/** What subtree cancellation did to one run in the cancelled lineage. */
+export type CancelledRunOutcome = {
+  runId: string;
+  /** Zero for the requested run, one for direct children, and so on. */
+  depth: number;
+  action: "cancel-requested" | "cancelled" | "already-terminal" | "missing";
+};
+
+/** A process tree cancellation terminated to stop work outliving its run. */
+export type CancelledProcess = {
+  runId: string | null;
+  pid: number;
+};
+
 export type CancelRunResponse = {
   runId: string;
   won: boolean;
@@ -253,6 +267,18 @@ export type CancelRunResponse = {
   repaired: boolean;
   /** Missing only for historical or unattributed cancellations. */
   cancellationSource?: RunCancellationSource;
+  /**
+   * Attempts closed across the whole cancelled subtree. Cancellation is
+   * recursive: the requested run AND every transitive child-workflow
+   * descendant are cancelled as one operation. Time-travel forks are spared.
+   */
+  cancelledAttempts?: number;
+  /** Every descendant the cascade reached, excluding the requested run. */
+  descendants?: CancelledRunOutcome[];
+  /** Detached owner processes terminated because they outlived their run. */
+  terminatedOwners?: CancelledProcess[];
+  /** Agent process trees terminated for runs in the cancelled subtree. */
+  terminatedAgents?: CancelledProcess[];
 };
 
 export type PauseRunRequest = {

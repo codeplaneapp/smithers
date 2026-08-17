@@ -15,10 +15,12 @@ describe("public re-export barrels", () => {
   test("root backend resolver exports stay aligned with their declarations", async () => {
     const facade = await importBarrel("../src/index.js");
     expect(typeof facade.resolveSmithersBackendPreference).toBe("function");
+    expect(typeof facade.createExternalSmithersEngine).toBe("function");
 
     const declarations = await Bun.file(new URL("../src/index.d.ts", import.meta.url)).text();
     expect(declarations).toContain("declare function resolveSmithersBackendPreference");
     expect(declarations).toContain("resolveSmithersBackendPreference,");
+    expect(declarations).toContain("createExternalSmithersEngine");
   });
 
   test("root facade exports the headless Nanocodex adapter", async () => {

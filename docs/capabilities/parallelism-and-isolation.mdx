@@ -37,7 +37,11 @@ Smithers does both: worktrees for parallel lanes on your machine, provider-backe
 - `maxConcurrency` caps **leaf tasks** in the group's innermost scope.
 - `subtreeConcurrency` caps **direct children as whole subtrees** - the right cap when each child is a sequence (implement → review → land), because a nested `<Parallel>` escapes the outer leaf cap.
 
-On top of every group cap sits a **run-wide cap**: unpinned it starts at 4 and grows with demand up to `SMITHERS_AUTO_MAX_CONCURRENCY_CEILING` (default 16); `--max-concurrency N` pins it. A task runs only if the leaf cap, subtree cap, and run cap all pass. Admission is deterministic in document order, so a resumed run re-admits the same lanes.
+On top of every group cap sits a **run-wide cap**: unpinned it starts at 4 and grows with demand up to `SMITHERS_AUTO_MAX_CONCURRENCY_CEILING` (default 16); `--max-concurrency N` pins it. Lifecycle-linked child workflows share that cap with the parent instead of opening a fresh pool. A task runs only if the leaf cap, subtree cap, and every inherited run cap pass. Admission is deterministic in document order, so a resumed run re-admits the same lanes.
+
+`subtreeConcurrency` also crosses a lifecycle child boundary. Child and grandchild tasks launched by a `<Subflow>` inside the group consume the inherited subtree budget, so dynamic fan-out cannot multiply the declared width at every run depth. The parent task yields its task-slot leases while awaiting the child and reacquires them afterward; a parent pinned to one slot can therefore await a one-slot child without deadlocking.
+
+This inheritance is tied to the lifecycle boundary (`<Subflow>` / `executeChildWorkflow`), whose child run records `subflowWorkspaceParentRunId` alongside `parentRunId`. Passing `parentRunId` directly to `runWorkflow` records lineage only: that detached run owns independent budgets and is not throttled by the parent.
 
 ### `<Worktree>`: one working copy per lane
 

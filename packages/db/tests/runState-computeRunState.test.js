@@ -37,6 +37,7 @@ function makeRun(overrides = {}) {
  *   approvals?: any[],
  *   nodes?: any[],
  *   attemptsByKey?: Record<string, any[]>,
+ *   events?: any[],
  * }} state
  */
 function makeAdapter(state = {}) {
@@ -53,6 +54,9 @@ function makeAdapter(state = {}) {
     async listAttempts(runId, nodeId, iteration) {
       const key = `${runId}|${nodeId}|${iteration}`;
       return state.attemptsByKey?.[key] ?? [];
+    },
+    async listEventsByType(_runId, type) {
+      return type === "RunFinished" ? (state.events ?? []) : [];
     },
   };
 }
@@ -238,5 +242,23 @@ describe("computeRunState", () => {
       state: "succeeded",
       computedAt: new Date(NOW).toISOString(),
     });
+  });
+
+  test("persisted tolerated failures derive a distinct terminal state", async () => {
+    const adapter = makeAdapter({
+      run: makeRun({ status: "finished" }),
+      events: [{ payloadJson: JSON.stringify({ failedChildren: 1 }) }],
+    });
+    const view = await computeRunState(adapter, "run-1", { now: NOW });
+    expect(view.state).toBe("succeeded-with-failures");
+  });
+
+  test("a failed run remains failed even if a stale finish event recorded child failures", async () => {
+    const adapter = makeAdapter({
+      run: makeRun({ status: "failed" }),
+      events: [{ payloadJson: JSON.stringify({ failedChildren: 1 }) }],
+    });
+    const view = await computeRunState(adapter, "run-1", { now: NOW });
+    expect(view.state).toBe("failed");
   });
 });

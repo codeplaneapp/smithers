@@ -85,6 +85,7 @@ export function normalizeRunStatus(status: string | undefined): string {
 export function runStatusCategory(status: string | undefined): RunListStatus {
   switch (normalizeRunStatus(status)) {
     case "succeeded":
+    case "succeeded-with-failures":
     case "finished":
     case "completed":
     case "ok":
@@ -307,7 +308,9 @@ export function runActionAvailability(run: RunSummary): {
   retry: boolean;
 } {
   const status = normalizeRunStatus(runLifecycleStatus(run));
-  const completed = ["finished", "succeeded", "completed", "ok", "continued"].includes(status);
+  const completed = ["finished", "succeeded", "succeeded-with-failures", "completed", "ok", "continued"].includes(
+    status,
+  );
   const cancelled = status === "cancelled";
   const failed = ["failed", "errored"].includes(status);
   return {

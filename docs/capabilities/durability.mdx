@@ -118,6 +118,16 @@ Per-task, `agent={[claude, codex]}` fails over between harnesses. When every opt
 
 <Accordion title="Pause and cancellation">
 `smithers pause <runId>` sets `pause_requested_at_ms`; the driver stops scheduling new tasks, lets in-flight attempts drain, and parks the run as `paused` - resumable later, cleanly, with zero abandoned attempts. `bunx smthrs cancel` propagates abort to running agents and marks the run `cancelled`; even that is resumable, because cancellation deletes no state.
+
+**Cancellation is recursive over the run subtree.** Cancelling a run cancels it *and* every transitive child-workflow descendant as one idempotent operation - `bunx smthrs cancel`, the gateway's `cancelRun` RPC, and `POST /v1/api/runs/{runId}/cancel` all drive the same code path, so a child workflow can never outlive the parent that spawned it. Per run in the subtree:
+
+- **Live** (fresh heartbeat): gets a durable `cancel_requested_at_ms`. Its engine's cancel watcher observes it - in this process or a detached one - and aborts the run and its in-flight agents itself. The owner process is left to shut down gracefully.
+- **Parked, stale, or ownerless** (`waiting-approval`, `waiting-event`, `waiting-timer`, `waiting-quota`, `paused`, stale `running`): flipped straight to `cancelled` with attempts, timer state, owner, and heartbeat cleared, and a surviving owner process tree terminated.
+- **Terminal**: skipped. Re-running a cancel only touches survivors, so an interrupted cascade is finished by repeating it.
+
+Every terminal transition goes through one compare-and-set claim, so concurrent cancellers are safe: exactly one wins per run and the losers report `already-terminal` instead of clobbering the winner's row. Time-travel **forks** are spared (an independent branch of history is not a lifecycle child); continue-as-new **continuations** are not (they are the same logical run in a fresh segment). A parent that is already cancelling cannot create a new descendant - both child-workflow launch and the continue-as-new handoff re-read the durable cancel flag and refuse.
+
+Nothing survives the fence. Detached run owners and every registered agent process for the cancelled subtree are terminated by process tree (POSIX process-group `SIGTERM` then `SIGKILL`; `taskkill /T /F` on Windows) and verified gone before the operation reports success. The response carries the whole result: `descendants`, `cancelledAttempts`, `terminatedOwners`, and `terminatedAgents`. Runs outside the subtree are never touched.
 </Accordion>
 
 ## Guarantees and limits

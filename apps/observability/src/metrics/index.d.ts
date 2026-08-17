@@ -120,7 +120,7 @@ type AgentSessionTranscriptEvent = {
 };
 
 type RunStatus = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "finished" | "continued" | "failed" | "cancelled";
-type RunState = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "unknown";
+type RunState = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "succeeded-with-failures" | "unknown";
 type AgentCliActionKind = "turn" | "command" | "tool" | "file_change" | "web_search" | "todo_list" | "reasoning" | "warning" | "note";
 type AgentCliActionPhase = "started" | "updated" | "completed";
 type AgentCliEventLevel = "debug" | "info" | "warning" | "error";
@@ -210,6 +210,12 @@ type SmithersEvent$2 = {
     requestedDemand: number;
     effectiveCap: number;
     remediationCommand: string;
+    /** Present when a lifecycle-linked descendant caused the owner's budget to saturate. */
+    descendantRunId?: string;
+    /** Which owner budget bound admission. Historical events omit this. */
+    budget?: "run" | "subtree";
+    /** Present when `budget` is `subtree`. */
+    subtreeGroupId?: string;
     timestampMs: number;
 } | {
     type: "RunFinished";

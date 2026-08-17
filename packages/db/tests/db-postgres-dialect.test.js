@@ -1364,4 +1364,80 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
     expect(message).toMatch(/Failed to execute Postgres statement: .+; sql=.+/);
     expect(message).toContain("sql=SELECT * FROM __missing_pg_table__");
   });
+
+  // Notes are served only from bun:sqlite, yet 0001/0023 create the note tables
+  // on Postgres for dialect parity. 0043 labels them so the schema itself says
+  // "staged, not served" rather than implying runtime support that MemoryStore
+  // refuses to provide.
+  describe("0043 labels the staged memory-note tables", () => {
+    const noteTables = ["_smithers_memory_notes", "_smithers_memory_note_supersessions"];
+
+    async function tableComments() {
+      const result = await client.query(
+        `SELECT c.relname AS name, obj_description(c.oid, 'pg_class') AS comment
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = current_schema() AND c.relname = ANY($1)
+         ORDER BY c.relname`,
+        [noteTables],
+      );
+      return result.rows;
+    }
+
+    test("both note tables carry the staged-but-unserved comment", async () => {
+      const rows = await tableComments();
+      expect(rows.map((row) => row.name)).toEqual(["_smithers_memory_note_supersessions", "_smithers_memory_notes"]);
+      for (const row of rows) {
+        expect(row.comment).toContain("STAGED, NOT SERVED");
+        expect(row.comment).toContain(".smithers/smithers.db");
+        expect(row.comment).toContain("0023_add_memory_notes");
+      }
+    });
+
+    test("a deployment that already ran 0023 gets the label without losing rows", async () => {
+      // Reproduce a Postgres store upgraded from before 0043: the note tables
+      // exist with data and a ledger row for 0023, but no catalog comment.
+      await client.query(
+        `INSERT INTO _smithers_memory_notes (id, namespace, body, status, created_at_ms)
+         VALUES ('staged-note', 'user:pg', 'existing row', 'accepted', 1)
+         ON CONFLICT (id) DO NOTHING`,
+      );
+      for (const table of noteTables) {
+        await client.query(`COMMENT ON TABLE ${table} IS NULL`);
+      }
+      await client.query("DELETE FROM _smithers_schema_migrations WHERE id = '0043_memory_notes_postgres_staged'");
+
+      await storage.ensureSchema();
+
+      const rows = await tableComments();
+      expect(rows.every((row) => String(row.comment).startsWith("STAGED, NOT SERVED"))).toBe(true);
+      // The migration is metadata only: the pre-existing note row survives.
+      const notes = await client.query("SELECT id, body FROM _smithers_memory_notes WHERE id = 'staged-note'");
+      expect(notes.rows).toEqual([{ id: "staged-note", body: "existing row" }]);
+      const ledger = await client.query(
+        "SELECT COUNT(*)::int AS count FROM _smithers_schema_migrations WHERE id = '0043_memory_notes_postgres_staged'",
+      );
+      expect(ledger.rows).toEqual([{ count: 1 }]);
+    });
+
+    test("a dropped comment is repaired on the next boot and re-runs idempotently", async () => {
+      // The ledger row stays in place: isAppliedPostgres keys off the comment,
+      // not the ledger, so schema drift self-heals.
+      await client.query(`COMMENT ON TABLE _smithers_memory_notes IS NULL`);
+
+      await storage.ensureSchema();
+      const before = await client.query("SELECT id FROM _smithers_schema_migrations ORDER BY id");
+      await storage.ensureSchema();
+      const after = await client.query("SELECT id FROM _smithers_schema_migrations ORDER BY id");
+
+      expect(after.rows).toEqual(before.rows);
+      const rows = await tableComments();
+      expect(rows.every((row) => String(row.comment).startsWith("STAGED, NOT SERVED"))).toBe(true);
+    });
+
+    test("0043 is the recorded schema head", async () => {
+      const head = await client.query("SELECT id FROM _smithers_schema_migrations ORDER BY id DESC LIMIT 1");
+      expect(head.rows[0].id).toBe("0043_memory_notes_postgres_staged");
+    });
+  });
 });

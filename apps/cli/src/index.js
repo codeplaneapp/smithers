@@ -60,6 +60,7 @@ import { SmithersError } from "@smthrs/errors";
 import { findAndOpenDb, findSmithersDb } from "./find-db.js";
 import { reapOrphanedAgentsOnBoot } from "./reap-orphaned-agents.js";
 import { cliWorkspace } from "./cliWorkspace.js";
+import { applyWorkflowEnvironment } from "./workflow-environment.js";
 import {
   cascadeCancelRun,
   finalizeCancelledOwnedRun,
@@ -1390,7 +1391,7 @@ async function* streamRunEventsCommand(c) {
       }
     }
     const initialRunState = await computeRunStateFromRow(adapter, run);
-    const initialFollowState = initialRunState.state === "succeeded" ? "finished" : initialRunState.state;
+    const initialFollowState = deriveTailStatus(initialRunState);
     // Follow only when explicitly asked (-f/--follow), or, when unset,
     // only if stdout is a TTY. A piped/redirected `logs <run>` (non-TTY)
     // snapshots and exits instead of hanging the pipe. --no-follow forces
@@ -1422,7 +1423,7 @@ async function* streamRunEventsCommand(c) {
       }
       const currentRun = await adapter.getRun(c.args.runId);
       const currentRunState = currentRun ? await computeRunStateFromRow(adapter, currentRun) : undefined;
-      const currentStatus = currentRunState?.state === "succeeded" ? "finished" : currentRunState?.state;
+      const currentStatus = deriveTailStatus(currentRunState);
       if (
         currentStatus === "waiting-approval" ||
         currentStatus === "waiting-event" ||
@@ -2385,10 +2386,10 @@ async function buildPsRows(adapter, limit, status) {
       // which the display name above need not match. (#26)
       workflowId: run.workflowPath ? workflowIdFromPath(run.workflowPath) : (run.workflowName ?? undefined),
       // Legacy `ps` consumers key off `status` and expect "finished", so
-      // only the derived "succeeded" is renamed; every other derived
+      // successful derived outcomes are renamed; every other derived
       // state passes through unchanged, including stale/orphaned so
       // dead-owner runs never read as "running".
-      status: view.state === "succeeded" ? "finished" : view.state,
+      status: deriveTailStatus(view),
       dbStatus: run.status,
       state: view.state,
       ...(view.unhealthy ? { unhealthy: view.unhealthy } : {}),
@@ -3654,6 +3655,18 @@ function resolveWorkflowArg(workflowInput) {
   if (existsSync(asPath)) {
     return workflowInput;
   }
+  const pathLike =
+    isAbsolute(workflowInput) ||
+    workflowInput.includes("/") ||
+    workflowInput.includes("\\") ||
+    /\.(?:[cm]?[jt]sx?|mdx)$/i.test(workflowInput);
+  if (pathLike) {
+    throw new SmithersError(
+      "WORKFLOW_FILE_NOT_FOUND",
+      `Workflow file not found: ${workflowInput} (resolved: ${asPath})`,
+      { given: workflowInput, resolved: asPath },
+    );
+  }
   return resolveWorkflow(workflowInput, process.cwd()).entryFile;
 }
 /**
@@ -3894,9 +3907,11 @@ async function deriveResumeWorkflowPath(runId) {
 async function preflightDetachedLaunch(options) {
   const previousBackend = process.env.SMITHERS_BACKEND;
   let workflow;
+  let restoreWorkflowEnvironment = () => {};
   try {
     if (options.backend) process.env.SMITHERS_BACKEND = options.backend;
     workflow = await loadWorkflowAsync(options.workflowPath);
+    restoreWorkflowEnvironment = applyWorkflowEnvironment(workflow);
     ensureSmithersTables(workflow.db);
     const schema = resolveSchema(workflow.db);
     const inputTable = schema.input;
@@ -3925,6 +3940,7 @@ async function preflightDetachedLaunch(options) {
       throw rendered.failure;
     }
   } finally {
+    restoreWorkflowEnvironment();
     if (workflow) await closeWorkflowBackend(workflow).catch(() => {});
     if (previousBackend === undefined) delete process.env.SMITHERS_BACKEND;
     else process.env.SMITHERS_BACKEND = previousBackend;
@@ -4013,6 +4029,7 @@ const MONITOR_PARENT_POLL_MS = 100;
  * @param {Record<string, unknown>} [launchConfig]
  */
 async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {}) {
+  let restoreWorkflowEnvironment = () => {};
   const detachedLogFile = process.env[DETACHED_RUN_LOG_FILE_ENV];
   startDetachedRunLogRotation({ logFile: detachedLogFile });
   delete process.env[DETACHED_RUN_LOG_FILE_ENV];
@@ -4310,6 +4327,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
       process.env.SMITHERS_BACKEND = options.backend;
     }
     const workflow = await loadWorkflow(workflowPath);
+    restoreWorkflowEnvironment = applyWorkflowEnvironment(workflow);
     // If the workspace has been migrated to pglite (backend.json says pglite)
     // but this workflow was authored with the synchronous createSmithers()
     // bun:sqlite factory, fail loud. Silently swapping its db to the async
@@ -4978,6 +4996,8 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
     return await finishRun(result);
   } catch (err) {
     return fail({ code: "RUN_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+  } finally {
+    restoreWorkflowEnvironment();
   }
 }
 /**
@@ -11734,10 +11754,12 @@ const cli = Cli.create({
     alias: { runId: "r" },
     async run(c) {
       const fail = makeFail(c);
+      let restoreWorkflowEnvironment = () => {};
       try {
         const workflowFile = resolveWorkflowArg(c.args.workflow);
         const resolvedWorkflowPath = resolve(process.cwd(), workflowFile);
         const workflow = await loadWorkflow(workflowFile);
+        restoreWorkflowEnvironment = applyWorkflowEnvironment(workflow);
         ensureSmithersTables(workflow.db);
         const schema = resolveSchema(workflow.db);
         const inputTable = schema.input;
@@ -11809,6 +11831,8 @@ const cli = Cli.create({
           return fail({ code: err.code, message: err.message, exitCode: err.code === "INVALID_INPUT" ? 4 : 1 });
         }
         return fail({ code: "GRAPH_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+      } finally {
+        restoreWorkflowEnvironment();
       }
     },
   })
@@ -13194,6 +13218,11 @@ const cli = Cli.create({
     options: z.object({
       olderThan: z.string().default("7d").describe("Only reclaim artifacts unused for at least this long, e.g. 24h"),
       dryRun: z.boolean().default(false).describe("Report what would be removed without removing anything"),
+      dbRetentionDays: z
+        .number()
+        .nonnegative()
+        .optional()
+        .describe("Opt in to deleting terminal database runs older than this many days"),
       includeUnmanaged: z
         .boolean()
         .default(false)
@@ -13210,6 +13239,7 @@ const cli = Cli.create({
           dryRun: c.options.dryRun,
           includeUnmanaged: c.options.includeUnmanaged,
           forceWorktrees: c.options.force,
+          dbRetentionDays: c.options.dbRetentionDays,
         });
         if (c.format !== "json") {
           const disk = result.disk.before;
@@ -13230,6 +13260,23 @@ const cli = Cli.create({
               `Keeping ${formatBytes(unmanagedBytes)} of unowned legacy scratch; inspect with --dry-run and opt in with --include-unmanaged.`,
             );
           }
+          const snapshots = result.database.snapshots;
+          console.log(
+            result.dryRun
+              ? `Would compact ${snapshots.remainingRows ?? 0} legacy snapshot row(s), removing ${formatBytes(snapshots.remainingInlineBytes ?? 0)} of inline payloads.`
+              : `Compacted ${snapshots.migratedRows} legacy snapshot row(s), clearing ${formatBytes(snapshots.clearedInlineBytes)} of inline payloads for content-addressed reuse.`,
+          );
+          const retention = result.database.retention;
+          if (retention.enabled) {
+            console.log(
+              `${result.dryRun ? "Would remove" : "Removed"} ${retention.removedRuns.length} terminal database run(s) older than ${retention.retentionDays} day(s).`,
+            );
+          } else {
+            console.log(
+              "Database run retention is disabled; opt in with --db-retention-days or SMITHERS_DB_RETENTION_DAYS.",
+            );
+          }
+          console.log("Database pages are reusable, but Smithers never VACUUMs an online database.");
         }
         return c.ok(result);
       } catch (err) {

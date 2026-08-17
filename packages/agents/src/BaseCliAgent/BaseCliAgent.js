@@ -23,6 +23,7 @@ import { buildGenerateResult } from "./buildGenerateResult.js";
 import { runCommandEffect } from "./runCommandEffect.js";
 import { sanitizeCliArgs } from "./sanitizeCliArgs.js";
 import { taskContextEnv } from "./taskContextEnv.js";
+import { assertKnownCliAgentOptions } from "./agentOptionKeys.js";
 
 const QUOTA_PATTERNS = [
   /\bhit\s+your\s+(usage|session|weekly|daily|monthly|rate)\s+limit\b/i,
@@ -985,8 +986,10 @@ export class BaseCliAgent {
   onQuotaExceeded;
   /**
    * @param {BaseCliAgentOptions} opts
+   * @param {string} [agentName]
    */
-  constructor(opts) {
+  constructor(opts, agentName = "BaseCliAgent") {
+    assertKnownCliAgentOptions(opts, agentName);
     this.id = opts.id ?? randomUUID();
     this.model = opts.model;
     this.systemPrompt = opts.systemPrompt ?? opts.instructions;

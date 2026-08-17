@@ -249,6 +249,23 @@ const runSummary = objectSchema(
   "Run summary view.",
   true,
 );
+const cancelledRunOutcome = objectSchema(
+  {
+    runId,
+    depth: integerSchema("Distance from the requested root run.", 0),
+    action: { type: "string", enum: ["cancel-requested", "cancelled", "already-terminal", "missing"] },
+  },
+  ["runId", "depth", "action"],
+  "What recursive cancellation did to one run in the cancelled subtree.",
+);
+const cancelledProcess = objectSchema(
+  {
+    runId: { type: ["string", "null"], description: "Run the process belonged to." },
+    pid: integerSchema("Terminated process id.", 1),
+  },
+  ["runId", "pid"],
+  "A process tree cancellation terminated so work cannot outlive its run.",
+);
 const runDescendant = objectSchema(
   {
     runId,
@@ -892,7 +909,8 @@ export const GATEWAY_RPC_DEFINITIONS = [
     version: SMITHERS_API_VERSION,
     method: "cancelRun",
     title: "Cancel Run",
-    description: "Cancel an active run.",
+    description:
+      "Cancel a run AND every transitive child-workflow descendant as one recursive operation. Time-travel forks are spared; continue-as-new continuations are not.",
     maturity: "stable",
     transport: "http+websocket",
     requiredScope: "run:write",
@@ -905,10 +923,14 @@ export const GATEWAY_RPC_DEFINITIONS = [
         terminalStatus: stringSchema("Persisted terminal status after cancellation finalization."),
         repaired: booleanSchema("Whether replay repaired incomplete cancellation cleanup."),
         cancellationSource,
+        cancelledAttempts: integerSchema("Attempts closed across the whole cancelled subtree.", 0),
+        descendants: arraySchema(cancelledRunOutcome, "Every descendant the cascade reached, excluding the root run."),
+        terminatedOwners: arraySchema(cancelledProcess, "Detached owner processes terminated by the cascade."),
+        terminatedAgents: arraySchema(cancelledProcess, "Agent process trees terminated for the cancelled subtree."),
       },
       ["runId", "won", "status", "repaired"],
     ),
-    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RUN_NOT_ACTIVE", "Internal"],
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "RUN_NOT_ACTIVE", "Internal"],
     exampleRequest: { runId: "run_01" },
     exampleResponse: {
       runId: "run_01",
@@ -923,6 +945,10 @@ export const GATEWAY_RPC_DEFINITIONS = [
         requestId: "cancelRun-1",
         clientIdentity: "user:operator",
       },
+      cancelledAttempts: 2,
+      descendants: [{ runId: "run_01:child:review:0", depth: 1, action: "cancelled" }],
+      terminatedOwners: [{ runId: "run_01:child:review:0", pid: 4711 }],
+      terminatedAgents: [{ runId: "run_01:child:review:0", pid: 4712 }],
     },
   },
   {

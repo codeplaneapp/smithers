@@ -12,4 +12,5 @@ export type RunState =
   | "cancel-pending"
   | "cancelled"
   | "succeeded"
+  | "succeeded-with-failures"
   | "unknown";

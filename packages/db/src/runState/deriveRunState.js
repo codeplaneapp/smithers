@@ -18,6 +18,7 @@ export function deriveRunState(input) {
     parkedEventBlock = null,
     sandboxHeartbeats = [],
     warnings = [],
+    failedChildren = 0,
     now = Date.now(),
     staleThresholdMs = RUN_STATE_HEARTBEAT_STALE_MS,
     timerOverdueGraceMs = RUN_STATE_TIMER_OVERDUE_GRACE_MS,
@@ -33,6 +34,7 @@ export function deriveRunState(input) {
 
   switch (run.status) {
     case "finished":
+      return { ...base, state: failedChildren > 0 ? "succeeded-with-failures" : "succeeded" };
     case "continued":
       return { ...base, state: "succeeded" };
     case "failed":

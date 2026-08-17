@@ -58,6 +58,12 @@ Providing `opts.maxConcurrency` explicitly pins the cap: it disables automatic
 raises, including declared-width raises, so the run can't exceed the supplied
 value, even though that value can itself be larger than the automatic ceiling.
 
+Lifecycle-linked child workflows (`<Subflow>` / `executeChildWorkflow`) draw
+from the parent's run cap as well as any enclosing `subtreeConcurrency` cap,
+including through nested child runs. The awaiting parent task yields its slot
+while the child runs, so `maxConcurrency: 1` remains deadlock-free. A run that
+only supplies `parentRunId` is detached lineage and keeps an independent cap.
+
 ## Resume
 
 Pass the original `runId` plus `resume: true`: state loads from the configured durable store, completed tasks are skipped, and in-progress attempts older than 15 minutes are abandoned and retried.

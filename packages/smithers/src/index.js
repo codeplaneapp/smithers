@@ -49,6 +49,14 @@
  * @template S
  * @typedef {import("./external/ExternalSmithersConfig.ts").ExternalSmithersConfig<S>} ExternalSmithersConfig
  */
+/**
+ * @template S
+ * @typedef {import("./external/ExternalSmithersEngine.ts").ExternalSmithersEngine<S>} ExternalSmithersEngine
+ */
+/**
+ * @template S
+ * @typedef {import("./external/ExternalSmithersEngineConfig.ts").ExternalSmithersEngineConfig<S>} ExternalSmithersEngineConfig
+ */
 /** @typedef {import("@smthrs/server/gateway").GatewayAuthConfig} GatewayAuthConfig */
 /** @typedef {import("@smthrs/server/gateway").GatewayDefaults} GatewayDefaults */
 /** @typedef {import("@smthrs/server").GatewayExtensionDefinition} GatewayExtensionDefinition */
@@ -64,6 +72,9 @@
 /** @typedef {import("@smthrs/server/gateway").HelloResponse} HelloResponse */
 /** @typedef {import("@smthrs/react-reconciler/dom/renderer").HostContainer} HostContainer */
 /** @typedef {import("./external/HostNodeJson.ts").HostNodeJson} HostNodeJson */
+/** @typedef {import("./external/ExternalSmithersEngineConfig.ts").SmithersEngineLogger} SmithersEngineLogger */
+/** @typedef {import("./external/ExternalSmithersEngineConfig.ts").SmithersEngineLogLevel} SmithersEngineLogLevel */
+/** @typedef {import("./external/ExternalSmithersEngineConfig.ts").SmithersEngineLogRecord} SmithersEngineLogRecord */
 /** @typedef {import("@smthrs/components").InferDeps} InferDeps */
 /**
  * @template T
@@ -218,6 +229,7 @@ export { getSmithersErrorDocsUrl } from "@smthrs/errors/getSmithersErrorDocsUrl"
 export { isKnownSmithersErrorCode } from "@smthrs/errors/isKnownSmithersErrorCode";
 export { isSmithersError } from "@smthrs/errors/isSmithersError";
 export { knownSmithersErrorCodes } from "@smthrs/errors/knownSmithersErrorCodes";
+export { createIsolatedClone, gitDirtyPaths, isolatedCloneEnvironment, listGitRefs } from "@smthrs/vcs";
 // Components
 export {
   Approval,
@@ -482,7 +494,7 @@ export { ensureSmithersTables } from "@smthrs/db/ensure";
 // Renderer
 export { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
 // External / multi-language
-export { createExternalSmithers } from "./external/index.js";
+export { createExternalSmithers, createExternalSmithersEngine } from "./external/index.js";
 // Revert
 export { revertToAttempt } from "@smthrs/time-travel/revert";
 export { timeTravel } from "@smthrs/time-travel/timetravel";

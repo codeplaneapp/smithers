@@ -298,7 +298,11 @@ function makeMemoryStore(db) {
   function deleteThreadEffect(threadId) {
     // Delete the messages and the thread row atomically so a failure on the
     // second write can't leave the thread without its messages (or vice versa).
-    return requireSqliteNotesEffect("DB_WRITE_FAILED", "memory deleteThread").pipe(
+    return requireSyncSqliteEffect(
+      "DB_WRITE_FAILED",
+      "memory deleteThread",
+      "gives the thread row and its messages a single atomic delete",
+    ).pipe(
       Effect.andThen(
         writeEffect("memory deleteThread", () =>
           Promise.resolve(
@@ -422,23 +426,31 @@ function makeMemoryStore(db) {
   }
   // --- Note Effects (P2/P3: append-only knowledge) ---
   /**
-   * Note writes and search ride the synchronous sqlite driver (sync
-   * transactions for note+edge atomicity, FTS5 for search), which the
-   * Postgres/PGlite backends do not provide — there, fail loud up front
-   * instead of surfacing an obscure driver TypeError mid-write. Migration
-   * 0023 still creates the note tables on Postgres so the data model is
-   * ready when this path is ported.
+   * These operations ride the synchronous sqlite driver, which the
+   * Postgres/PGlite backends do not provide — fail loud up front instead of
+   * surfacing an obscure driver TypeError mid-write.
+   *
+   * The Postgres note tables are staged, not served: 0001/0023 create them for
+   * dialect parity and 0043_memory_notes_postgres_staged labels them as such in
+   * the Postgres catalog. The error names both so the schema and the runtime
+   * tell an operator the same story, and points at the sqlite sidecar where a
+   * Postgres-backed workspace actually keeps its memory.
    * @param {"DB_QUERY_FAILED" | "DB_WRITE_FAILED"} code
    * @param {string} label
+   * @param {string} reason What the synchronous sqlite driver is needed for.
    * @returns {Effect.Effect<void, SmithersError>}
    */
-  function requireSqliteNotesEffect(code, label) {
+  function requireSyncSqliteEffect(code, label, reason) {
     const anyDb = /** @type {any} */ (db);
     if (anyDb?.dialect === "postgres" || typeof anyDb?.all !== "function") {
       return Effect.fail(
         toSmithersError(
           new Error(
-            `${label}: memory notes require the sqlite backend (bun:sqlite) — this database does not expose the synchronous sqlite driver`,
+            `${label}: this database does not expose the synchronous sqlite driver (bun:sqlite), which ${reason}. ` +
+              `The Postgres memory-note tables are staged, not served — created for dialect parity by ` +
+              `0001_current_tables/0023_add_memory_notes and labelled by 0043_memory_notes_postgres_staged. ` +
+              `On a Postgres/PGlite workspace, openSmithersBackend keeps memory in the .smithers/smithers.db ` +
+              `sqlite sidecar; open the MemoryStore against that handle instead.`,
           ),
           label,
           { code, details: { operation: label } },
@@ -520,7 +532,11 @@ function makeMemoryStore(db) {
       iteration: input.provenance?.iteration ?? null,
     };
     const nsKind = parseNamespace(nsStr).kind;
-    return requireSqliteNotesEffect("DB_WRITE_FAILED", "memory saveNote").pipe(
+    return requireSyncSqliteEffect(
+      "DB_WRITE_FAILED",
+      "memory saveNote",
+      "gives the note row, its supersession edges, and its FTS5 index entry a single atomic write",
+    ).pipe(
       Effect.andThen(
         writeEffect("memory saveNote", () =>
           Promise.resolve(
@@ -614,7 +630,11 @@ function makeMemoryStore(db) {
    * @returns {Effect.Effect<void, SmithersError>}
    */
   function enableNoteSearchEffect(kind) {
-    return requireSqliteNotesEffect("DB_WRITE_FAILED", "memory enableNoteSearch")
+    return requireSyncSqliteEffect(
+      "DB_WRITE_FAILED",
+      "memory enableNoteSearch",
+      "provides the FTS5 virtual table that backs note search",
+    )
       .pipe(
         Effect.andThen(
           writeEffect("memory enableNoteSearch", () =>
@@ -656,7 +676,11 @@ function makeMemoryStore(db) {
   function searchNotesEffect(kind, query, limit, filter) {
     const max = limit ?? 20;
     return Effect.gen(function* () {
-      yield* requireSqliteNotesEffect("DB_QUERY_FAILED", "memory searchNotes");
+      yield* requireSyncSqliteEffect(
+        "DB_QUERY_FAILED",
+        "memory searchNotes",
+        "provides the FTS5 virtual table that backs note search",
+      );
       if (!noteFtsKindEnabled(kind)) {
         return yield* Effect.fail(
           toSmithersError(
