@@ -19,7 +19,17 @@ import { parseJsonArgument, tryParseJsonInput } from "./json-args.js";
 import { CLI_TEXT_ARGUMENT_MAX_LENGTH, wrapCliCommandHandlersWithInputBounds } from "./cli-command-bounds.js";
 import { resolve, dirname, basename, relative, join, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { closeSync, readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  readFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  statSync,
+  watch,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { Effect, Fiber } from "effect";
 import { Cli, SyncSkills, z } from "incur";
 import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smthrs/engine";
@@ -41,6 +51,11 @@ import { resolveCliStartedBy } from "./runStartedBy.js";
 import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { runFork, runPromise, runSync } from "./smithersRuntime.js";
 import { trackEvent } from "@smthrs/observability/metrics";
+import {
+  DEFAULT_LISTENER_REGISTRY_PATH,
+  readListenerRegistry,
+  reconcileGitHubListeners,
+} from "@smthrs/integrations/github";
 import { vcsToolingStatus } from "@smthrs/vcs/vcsToolingStatus";
 import { findVcsRoot } from "@smthrs/vcs/find-root";
 import { listSmithersWorktrees } from "@smthrs/engine/listSmithersWorktrees";
@@ -3038,7 +3053,10 @@ const oneshotOptions = z
   .object({
     goalFile: z.string().optional().describe("Read a long goal from a file"),
     model: z.string().optional().describe("Model slot or canonical model id"),
-    agent: z.enum(["codex", "kimi", "claude-code", "opencode", "pi"]).optional().describe("Force an agent engine"),
+    agent: z
+      .enum(["codex", "grok", "kimi", "claude-code", "opencode", "pi"])
+      .optional()
+      .describe("Force an agent engine"),
     review: z.enum(["on", "off"]).optional().describe("Review preference for this run"),
     setReview: z.enum(["on", "off"]).optional().describe("Persist the review preference"),
     setTrivial: z.enum(["direct", "oneshot"]).optional().describe("Persist trivial-task routing"),
@@ -3118,6 +3136,12 @@ const gatewayArgs = z.object({
     .optional()
     .describe("Manage the workspace's singleton gateway instead of serving one: status | stop"),
 });
+const listenersArgs = z.object({
+  action: z.enum(["plan", "apply"]).optional().default("plan").describe("Plan by default; use apply to mutate GitHub"),
+});
+const listenersOptions = z.object({
+  delete: z.boolean().default(false).describe("With apply, delete owned hooks removed from the registry"),
+});
 const gatewayOptions = z.object({
   host: z.string().default("127.0.0.1").describe("Gateway bind address"),
   port: z
@@ -3153,6 +3177,14 @@ const gatewayOptions = z.object({
     .boolean()
     .default(false)
     .describe("With gateway stop, cancel gateway-hosted runs instead of parking them for resume"),
+  applyListeners: z
+    .boolean()
+    .default(false)
+    .describe("Apply declared listener creates and updates on boot and registry changes (otherwise plan only)"),
+  deleteListeners: z
+    .boolean()
+    .default(false)
+    .describe("Also delete owned hooks removed from the registry; requires --apply-listeners"),
   idleTimeout: z
     .number()
     .int()
@@ -5866,6 +5898,20 @@ async function runGatewayCommand(options) {
     }
   }
   const workspace = localWorkspace ?? dirname(dbPath);
+  if (options.deleteListeners && !options.applyListeners) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      "--delete-listeners requires --apply-listeners because deletion is never enabled by default.",
+    );
+  }
+  const listenerRegistryPath = resolve(workspace, DEFAULT_LISTENER_REGISTRY_PATH);
+  let listenerRegistry = existsSync(listenerRegistryPath) ? readListenerRegistry(workspace) : null;
+  if (manifestFallback && listenerRegistry) {
+    throw new SmithersError(
+      "WORKSPACE_MANIFEST_CONFLICT",
+      "Declarative listeners are unavailable while package.json has unresolved merge conflicts. Resolve the manifest before planning or applying repository webhooks.",
+    );
+  }
   const startLock = claimGatewayDaemonStartLock(workspace);
   if (!startLock) {
     const workflowCount = countDiscoverableWorkflows(workspace);
@@ -6091,7 +6137,7 @@ async function runGatewayCommand(options) {
         ensureSmithersTables(workflow.db);
         setupSqliteCleanup(workflow);
         backendCleanups.push(() => closeWorkflowBackend(workflow));
-        gateway.register(discovered.id, workflow, workflowGatewayRegistration(discovered));
+        gateway.register(discovered.id, workflow, workflowGatewayRegistration(discovered, listenerRegistry));
         workflows.push(discovered.id);
         workflowIndex.set(discovered.id, discovered);
       } catch (error) {
@@ -6176,6 +6222,18 @@ async function runGatewayCommand(options) {
       warn: (message) => console.warn(message),
       info: (message) => console.log(message),
     });
+    if (listenerRegistry) {
+      const reconciliation = await reconcileGitHubListeners({
+        workspaceRoot: workspace,
+        registry: listenerRegistry,
+        apply: options.applyListeners,
+        allowDelete: options.deleteListeners,
+      });
+      applyListenerIngressConfig(gateway, listenerRegistry);
+      process.stderr.write(
+        `[smithers] Listener reconciliation: ${options.applyListeners ? "applied" : "dry-run"}; ${reconciliation.changes} change(s), ${reconciliation.destructiveChanges} delete(s)\n`,
+      );
+    }
     try {
       server = await gateway.listen({ host: options.host, port: options.port });
     } catch (error) {
@@ -6224,6 +6282,43 @@ async function runGatewayCommand(options) {
       protocol: gateway.protocol ?? null,
       startedAtMs: Date.now(),
     });
+    if (listenerRegistry) {
+      let listenerWatchTimer;
+      let listenerReconcileInFlight = Promise.resolve();
+      // Watch the directory, not the file: editors and `jj`/`git` checkouts
+      // replace `listeners.json` by rename, which permanently detaches a
+      // file-level watch and would silently stop reconciling after one edit.
+      const listenerRegistryFile = basename(listenerRegistryPath);
+      const watcher = watch(dirname(listenerRegistryPath), { persistent: false }, (_type, filename) => {
+        if (filename && basename(filename) !== listenerRegistryFile) return;
+        if (listenerWatchTimer) clearTimeout(listenerWatchTimer);
+        listenerWatchTimer = setTimeout(() => {
+          listenerReconcileInFlight = listenerReconcileInFlight.then(async () => {
+            try {
+              const nextRegistry = readListenerRegistry(workspace);
+              const result = await reconcileGitHubListeners({
+                workspaceRoot: workspace,
+                registry: nextRegistry,
+                apply: options.applyListeners,
+                allowDelete: options.deleteListeners,
+              });
+              listenerRegistry = nextRegistry;
+              applyListenerIngressConfig(gateway, nextRegistry);
+              process.stderr.write(
+                `[smithers] Listener registry reconciled: ${options.applyListeners ? "applied" : "dry-run"}; ${result.changes} change(s), ${result.destructiveChanges} delete(s)\n`,
+              );
+            } catch (error) {
+              process.stderr.write(`[smithers] Listener reconciliation failed: ${error?.message ?? String(error)}\n`);
+            }
+          });
+        }, 100);
+      });
+      backendCleanups.push(async () => {
+        if (listenerWatchTimer) clearTimeout(listenerWatchTimer);
+        watcher.close();
+        await listenerReconcileInFlight;
+      });
+    }
   } catch (error) {
     releaseStartLock();
     await closeGatewayStartupResources(gateway, backendCleanups);
@@ -7135,7 +7230,17 @@ const agentsCli = Cli.create({
     description: "Register a Smithers agent account (interactive wizard, or non-interactive via flags).",
     options: z.object({
       provider: z
-        .enum(["claude-code", "antigravity", "codex", "kimi", "anthropic-api", "openai-api", "gemini-api"])
+        .enum([
+          "claude-code",
+          "antigravity",
+          "codex",
+          "kimi",
+          "grok",
+          "anthropic-api",
+          "openai-api",
+          "gemini-api",
+          "xai-api",
+        ])
         .optional()
         .describe("Provider id; omit to launch the interactive wizard"),
       label: z.string().optional().describe("Unique label, e.g. 'claude-work'"),
@@ -8557,14 +8662,65 @@ function openOneshotUi(runId, cwd) {
 }
 
 /** @param {import("./DiscoveredWorkflow.ts").DiscoveredWorkflow} discovered */
-function workflowGatewayRegistration(discovered) {
-  if (discovered.id !== "oneshot") return { system: discovered.system, entryFile: discovered.entryFile };
+function workflowGatewayRegistration(discovered, listenerRegistry, env = process.env) {
+  const listeners = listenerRegistry?.listeners.filter((listener) => listener.workflow === discovered.id) ?? [];
+  const declared = listeners[0];
+  let webhook;
+  if (declared) {
+    const secret = env[declared.secretEnv];
+    if (!secret) {
+      throw new SmithersError(
+        "LISTENER_CREDENTIALS_MISSING",
+        `Listener workflow "${discovered.id}" requires webhook secret environment variable ${declared.secretEnv}.`,
+        { workflow: discovered.id, secretEnv: declared.secretEnv },
+      );
+    }
+    webhook = { secret, source: "github" };
+  }
+  if (discovered.id !== "oneshot") {
+    return { system: discovered.system, entryFile: discovered.entryFile, ...(webhook ? { webhook } : {}) };
+  }
   const conventionUi = discovered.packDir ? join(discovered.packDir, "ui", "oneshot.tsx") : undefined;
   return {
     system: discovered.system,
     entryFile: discovered.entryFile,
     ui: { entry: conventionUi && existsSync(conventionUi) ? conventionUi : ONESHOT_UI_ENTRY, title: "Oneshot" },
+    ...(webhook ? { webhook } : {}),
   };
+}
+
+function applyListenerIngressConfig(gateway, listenerRegistry, env = process.env) {
+  for (const [workflowKey, entry] of gateway.workflows) {
+    const declared = listenerRegistry.listeners.find((listener) => listener.workflow === workflowKey);
+    if (!declared) {
+      if (entry.webhook?.source === "github") entry.webhook = undefined;
+      continue;
+    }
+    const secret = env[declared.secretEnv];
+    if (!secret) {
+      throw new SmithersError(
+        "LISTENER_CREDENTIALS_MISSING",
+        `Listener workflow "${workflowKey}" requires webhook secret environment variable ${declared.secretEnv}.`,
+        { workflow: workflowKey, secretEnv: declared.secretEnv },
+      );
+    }
+    entry.webhook = { secret, source: "github" };
+  }
+  // A declared listener whose workflow is not registered still gets a real
+  // webhook created on the repository, and every delivery to it 404s. Name the
+  // gap instead of silently dropping the events the user asked to react to.
+  const unroutable = [
+    ...new Set(
+      listenerRegistry.listeners
+        .filter((listener) => !gateway.workflows.has(listener.workflow))
+        .map((listener) => listener.workflow),
+    ),
+  ];
+  if (unroutable.length > 0) {
+    process.stderr.write(
+      `[smithers] Declared listeners target unregistered workflow(s): ${unroutable.join(", ")}. Deliveries to their callback URLs will be rejected until the workflow exists.\n`,
+    );
+  }
 }
 const cli = Cli.create({
   name: "smithers",
@@ -9461,6 +9617,36 @@ const cli = Cli.create({
         message:
           "`smithers review` runs a long-lived review workflow and is only available from a shell, not as an MCP/HTTP tool. Run `smithers review [repo] [options]` in a terminal.",
       });
+    },
+  })
+  // =========================================================================
+  // smithers listeners [plan|apply]
+  // =========================================================================
+  .command("listeners", {
+    description:
+      "Plan or explicitly apply the .smithers/listeners.json GitHub webhook declaration. Deletes additionally require --delete.",
+    args: listenersArgs,
+    options: listenersOptions,
+    async run(c) {
+      const fail = makeFail(c);
+      try {
+        const workspace = resolveGatewayWorkspace() ?? process.cwd();
+        const result = await reconcileGitHubListeners({
+          workspaceRoot: workspace,
+          apply: c.args.action === "apply",
+          allowDelete: c.args.action === "apply" && c.options.delete,
+        });
+        return c.ok({
+          mode: c.args.action,
+          deleteEnabled: c.args.action === "apply" && c.options.delete,
+          ...result,
+        });
+      } catch (error) {
+        if (error instanceof SmithersError) {
+          return fail({ code: error.code, message: error.message, exitCode: 4 });
+        }
+        return fail({ code: "LISTENER_RECONCILE_FAILED", message: error?.message ?? String(error), exitCode: 1 });
+      }
     },
   })
   // =========================================================================
@@ -14039,7 +14225,8 @@ async function main() {
     process.exit(4);
   }
   if (command === "review") {
-    const { runReviewCli } = await import("@smthrs/review/cli");
+    const { loadOptionalReviewCli } = await import("./optional-review.js");
+    const { runReviewCli } = await loadOptionalReviewCli();
     // Forward every arg except the `review` token itself — including any flags
     // that preceded it (e.g. `smithers --help review`), so the review CLI can
     // render its own help instead of eagerly starting a review.

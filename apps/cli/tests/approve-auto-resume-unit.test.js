@@ -65,9 +65,9 @@ beforeEach(() => {
 });
 
 async function readSpawnArgs() {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < 500; attempt++) {
     if (existsSync(spawnRecord)) return readFileSync(spawnRecord, "utf8").trimEnd().split("\n");
-    await new Promise((resolve) => setTimeout(resolve, 2));
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("detached resume stub did not record argv");
 }

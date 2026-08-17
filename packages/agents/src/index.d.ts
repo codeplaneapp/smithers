@@ -1,6 +1,6 @@
 import * as ai from 'ai';
 import { Tool as Tool$1, ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent } from 'ai';
-import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$e, h as CodexConfigOverrides, i as AgentCliEvent$1, j as CliOutputInterpreter$f, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-CvMSLAEd.js';
+import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$f, h as CodexConfigOverrides, i as AgentCliEvent$1, j as CliOutputInterpreter$g, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-CvMSLAEd.js';
 import * as zod from 'zod';
 import '@smthrs/errors/SmithersError';
 import 'effect';
@@ -195,7 +195,7 @@ type ImageGenerationProvider$1 = {
     generateImage(request: ImageGenerationRequest$1): Promise<ImageGenerationResult$1> | ImageGenerationResult$1;
 };
 
-type CliAgentCapabilityAdapterId$1 = "claude" | "amp" | "antigravity" | "codex" | "cursor" | "forge" | "hermes" | "kimi" | "opencode" | "openclaw" | "pi" | "omp" | "pool" | "vibe";
+type CliAgentCapabilityAdapterId$1 = "claude" | "amp" | "antigravity" | "codex" | "cursor" | "forge" | "grok" | "hermes" | "kimi" | "opencode" | "openclaw" | "pi" | "omp" | "pool" | "vibe";
 
 type CliAgentSurfaceOptionMapping$1 = {
     option: string;
@@ -218,7 +218,7 @@ type CliAgentSurfaceManifestEntry$2 = {
     displayName: string;
     binary: string;
     packageExport: string;
-    defaultOutputFormat: "text" | "json" | "stream-json" | "rpc";
+    defaultOutputFormat: "text" | "json" | "stream-json" | "streaming-json" | "rpc";
     docsUrls: string[];
     emittedFlags: string[];
     supportedFlags: string[];
@@ -232,9 +232,9 @@ type AgentToolDescriptor$1 = {
     source?: "builtin" | "mcp" | "extension" | "skill" | "runtime";
 };
 
-type AgentCapabilityRegistry$c = {
+type AgentCapabilityRegistry$d = {
     version: 1;
-    engine: "claude-code" | "codex" | "cursor" | "antigravity" | "gemini" | "kimi" | "pi" | "omp" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";
+    engine: "claude-code" | "codex" | "cursor" | "antigravity" | "gemini" | "kimi" | "grok" | "pi" | "omp" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";
     runtimeTools: Record<string, AgentToolDescriptor$1>;
     mcp: {
         bootstrap: "inline-config" | "project-config" | "allow-list" | "unsupported";
@@ -263,16 +263,16 @@ type AgentCapabilityRegistry$c = {
  * @param {AgentCapabilityRegistry | null | undefined} registry
  * @returns {string}
  */
-declare function hashCapabilityRegistry(registry: AgentCapabilityRegistry$b | null | undefined): string;
-type AgentCapabilityRegistry$b = AgentCapabilityRegistry$c;
+declare function hashCapabilityRegistry(registry: AgentCapabilityRegistry$c | null | undefined): string;
+type AgentCapabilityRegistry$c = AgentCapabilityRegistry$d;
 
-type AgentCapabilityRegistry$a = AgentCapabilityRegistry$c;
+type AgentCapabilityRegistry$b = AgentCapabilityRegistry$d;
 
 type CliAgentCapabilityReportEntry$3 = {
     id: CliAgentCapabilityAdapterId$1;
     binary: string;
     fingerprint: string;
-    capabilities: AgentCapabilityRegistry$a;
+    capabilities: AgentCapabilityRegistry$b;
     surface: CliAgentSurfaceManifestEntry$2;
 };
 
@@ -389,7 +389,7 @@ type AgentLike$2 = {
     /** Available tools the agent can use */
     tools?: Record<string, unknown>;
     /** Optional structured capability registry for cache and diagnostics */
-    capabilities?: AgentCapabilityRegistry$a;
+    capabilities?: AgentCapabilityRegistry$b;
     /** True when the agent consumes outputSchema through a native structured-output API. */
     supportsNativeStructuredOutput?: boolean;
     /** Optional harness-specific file-change normalizer. */
@@ -425,7 +425,7 @@ type AgentLike$2 = {
  * Subscription providers use the account's `configDir`; API providers use the
  * account's `apiKey`.
  */
-type FallbackAgentProvider$1 = "claude-code" | "codex" | "kimi" | "antigravity" | "anthropic-api" | "openai-api";
+type FallbackAgentProvider$1 = "claude-code" | "codex" | "kimi" | "grok" | "antigravity" | "anthropic-api" | "openai-api" | "xai-api";
 type FallbackAgentsOptions$2 = {
     /**
      * Which registered account providers to include in the chain. Defaults to
@@ -602,6 +602,22 @@ type OpenClawAgentOptions$2 = BaseCliAgentOptions & {
     json?: boolean;
     /** Continue an existing/default conversation, when supported by the installed CLI. */
     continueSession?: boolean;
+};
+
+type GrokAgentOptions$2 = BaseCliAgentOptions & {
+    /** Isolated Grok Build configuration root. Sets `GROK_HOME`. */
+    configDir?: string;
+    /** xAI API key passed only through `XAI_API_KEY`. */
+    apiKey?: string;
+    tools?: string[];
+    disallowedTools?: string[];
+    maxTurns?: number;
+    sandbox?: string;
+    rules?: string;
+    noPlan?: boolean;
+    noSubagents?: boolean;
+    noMemory?: boolean;
+    disableWebSearch?: boolean;
 };
 
 /**
@@ -823,12 +839,12 @@ declare class AmpAgent extends BaseCliAgent {
     constructor(opts?: AmpAgentOptions);
     opts: AmpAgentOptions$1;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$9;
+    capabilities: AgentCapabilityRegistry$a;
     cliEngine: string;
     /**
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter$d;
+    createOutputInterpreter(): CliOutputInterpreter$e;
     /**
      * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
      * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
@@ -851,8 +867,8 @@ declare class AmpAgent extends BaseCliAgent {
         outputFormat: string;
     }>;
 }
-type AgentCapabilityRegistry$9 = AgentCapabilityRegistry$c;
-type CliOutputInterpreter$d = CliOutputInterpreter$e;
+type AgentCapabilityRegistry$a = AgentCapabilityRegistry$d;
+type CliOutputInterpreter$e = CliOutputInterpreter$f;
 type AmpAgentOptions = AmpAgentOptions$1;
 
 type AntigravityAgentOptions$1 = BaseCliAgentOptions & {
@@ -939,12 +955,12 @@ declare class AntigravityAgent extends BaseCliAgent {
      */
     constructor(opts?: AntigravityAgentOptions);
     opts: AntigravityAgentOptions$1;
-    capabilities: AgentCapabilityRegistry$c;
+    capabilities: AgentCapabilityRegistry$d;
     cliEngine: string;
     /**
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter$c;
+    createOutputInterpreter(): CliOutputInterpreter$d;
     /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
      */
@@ -963,7 +979,7 @@ declare class AntigravityAgent extends BaseCliAgent {
         } | undefined;
     }>;
 }
-type CliOutputInterpreter$c = CliOutputInterpreter$e;
+type CliOutputInterpreter$d = CliOutputInterpreter$f;
 type AntigravityAgentOptions = AntigravityAgentOptions$1;
 
 type ClaudeCodeAgentOptions$1 = BaseCliAgentOptions & {
@@ -1037,12 +1053,12 @@ declare class ClaudeCodeAgent extends BaseCliAgent {
      */
     constructor(opts?: ClaudeCodeAgentOptions);
     opts: ClaudeCodeAgentOptions$1;
-    capabilities: AgentCapabilityRegistry$c;
+    capabilities: AgentCapabilityRegistry$d;
     cliEngine: string;
     /**
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter$b;
+    createOutputInterpreter(): CliOutputInterpreter$c;
     /**
      * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
      * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
@@ -1072,7 +1088,7 @@ declare class ClaudeCodeAgent extends BaseCliAgent {
     }>;
 }
 type ClaudeCodeAgentOptions = ClaudeCodeAgentOptions$1;
-type CliOutputInterpreter$b = CliOutputInterpreter$e;
+type CliOutputInterpreter$c = CliOutputInterpreter$f;
 
 type CodexAgentOptions$1 = BaseCliAgentOptions & {
     config?: CodexConfigOverrides;
@@ -1128,13 +1144,13 @@ declare class CodexAgent extends BaseCliAgent {
      */
     constructor(opts?: CodexAgentOptions);
     opts: CodexAgentOptions$1;
-    capabilities: AgentCapabilityRegistry$c;
+    capabilities: AgentCapabilityRegistry$d;
     cliEngine: string;
     supportsNativeStructuredOutput: boolean;
     /**
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter$a;
+    createOutputInterpreter(): CliOutputInterpreter$b;
     /**
      * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
      * into {@link AgentFileChange} records. `action.detail.changes` is codex's
@@ -1166,7 +1182,7 @@ declare class CodexAgent extends BaseCliAgent {
         cleanup: () => Promise<void>;
     }>;
 }
-type CliOutputInterpreter$a = CliOutputInterpreter$e;
+type CliOutputInterpreter$b = CliOutputInterpreter$f;
 type CodexAgentOptions = CodexAgentOptions$1;
 
 declare class CursorAgent extends BaseCliAgent {
@@ -1177,13 +1193,13 @@ declare class CursorAgent extends BaseCliAgent {
     /** @type {CursorAgentOptions} */
     opts: CursorAgentOptions$1;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$8;
+    capabilities: AgentCapabilityRegistry$9;
     /** @type {"cursor"} */
     cliEngine: "cursor";
     /**
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter$9;
+    createOutputInterpreter(): CliOutputInterpreter$a;
     /**
      * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
      * into {@link AgentFileChange} records. `action` is
@@ -1211,8 +1227,8 @@ declare class CursorAgent extends BaseCliAgent {
         } | undefined;
     }>;
 }
-type AgentCapabilityRegistry$8 = AgentCapabilityRegistry$c;
-type CliOutputInterpreter$9 = CliOutputInterpreter$e;
+type AgentCapabilityRegistry$9 = AgentCapabilityRegistry$d;
+type CliOutputInterpreter$a = CliOutputInterpreter$f;
 type CursorAgentOptions$1 = CursorAgentOptions$2;
 
 /**
@@ -1256,16 +1272,16 @@ declare class GeminiAgent extends BaseCliAgent {
      */
     constructor(opts?: GeminiAgentOptions);
     opts: GeminiAgentOptions$1;
-    capabilities: AgentCapabilityRegistry$c;
+    capabilities: AgentCapabilityRegistry$d;
     cliEngine: string;
     /**
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter$8;
+    createOutputInterpreter(): CliOutputInterpreter$9;
     generate(): Promise<void>;
     buildCommand(): Promise<void>;
 }
-type CliOutputInterpreter$8 = CliOutputInterpreter$e;
+type CliOutputInterpreter$9 = CliOutputInterpreter$f;
 type GeminiAgentOptions = GeminiAgentOptions$1;
 
 declare class PiAgent extends BaseCliAgent {
@@ -1274,7 +1290,7 @@ declare class PiAgent extends BaseCliAgent {
      */
     constructor(opts?: PiAgentOptions$1);
     opts: PiAgentOptions$2;
-    capabilities: AgentCapabilityRegistry$c;
+    capabilities: AgentCapabilityRegistry$d;
     cliEngine: string;
     issuedSessionRef: any;
     /**
@@ -1295,7 +1311,7 @@ declare class PiAgent extends BaseCliAgent {
     /**
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter$7;
+    createOutputInterpreter(): CliOutputInterpreter$8;
     /**
      * @param {PiGenerateOptions} [options]
      * @returns {Promise<GenerateTextResult>}
@@ -1327,7 +1343,7 @@ declare class PiAgent extends BaseCliAgent {
         apiKey?: string;
     };
 }
-type CliOutputInterpreter$7 = CliOutputInterpreter$e;
+type CliOutputInterpreter$8 = CliOutputInterpreter$f;
 type AgentCliEvent = AgentCliEvent$1;
 type GenerateTextResult = ai.GenerateTextResult<Record<string, never>, unknown, any>;
 type PiAgentOptions$1 = PiAgentOptions$2;
@@ -1380,13 +1396,13 @@ declare class KimiAgent extends BaseCliAgent {
      */
     constructor(opts?: KimiAgentOptions);
     opts: KimiAgentOptions$1;
-    capabilities: AgentCapabilityRegistry$c;
+    capabilities: AgentCapabilityRegistry$d;
     cliEngine: string;
     issuedSessionId: any;
     /**
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter$6;
+    createOutputInterpreter(): CliOutputInterpreter$7;
     /**
      * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
      * into {@link AgentFileChange} records. `action.detail.arguments` is the raw
@@ -1418,7 +1434,7 @@ declare class KimiAgent extends BaseCliAgent {
         errorOnBannerOnly: boolean;
     }>;
 }
-type CliOutputInterpreter$6 = CliOutputInterpreter$e;
+type CliOutputInterpreter$7 = CliOutputInterpreter$f;
 type KimiAgentOptions = KimiAgentOptions$1;
 
 type ForgeAgentOptions$1 = BaseCliAgentOptions & {
@@ -1441,13 +1457,13 @@ declare class ForgeAgent extends BaseCliAgent {
     constructor(opts?: ForgeAgentOptions);
     opts: ForgeAgentOptions$1;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$7;
+    capabilities: AgentCapabilityRegistry$8;
     cliEngine: string;
     issuedConversationId: any;
     /**
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter$5;
+    createOutputInterpreter(): CliOutputInterpreter$6;
     /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
      */
@@ -1462,8 +1478,8 @@ declare class ForgeAgent extends BaseCliAgent {
         outputFormat: string;
     }>;
 }
-type AgentCapabilityRegistry$7 = AgentCapabilityRegistry$c;
-type CliOutputInterpreter$5 = CliOutputInterpreter$e;
+type AgentCapabilityRegistry$8 = AgentCapabilityRegistry$d;
+type CliOutputInterpreter$6 = CliOutputInterpreter$f;
 type ForgeAgentOptions = ForgeAgentOptions$1;
 
 /**
@@ -1489,7 +1505,7 @@ declare class OpenCodeAgent extends BaseCliAgent {
     /** @type {OpenCodeAgentOptions} */
     opts: OpenCodeAgentOptions$1;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$6;
+    capabilities: AgentCapabilityRegistry$7;
     /** @type {"opencode"} */
     cliEngine: "opencode";
     /**
@@ -1512,7 +1528,7 @@ declare class OpenCodeAgent extends BaseCliAgent {
      *
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter$4;
+    createOutputInterpreter(): CliOutputInterpreter$5;
     /**
      * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
      * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
@@ -1542,9 +1558,9 @@ declare class OpenCodeAgent extends BaseCliAgent {
         stdoutErrorPatterns: RegExp[];
     }>;
 }
-type AgentCapabilityRegistry$6 = AgentCapabilityRegistry$a;
+type AgentCapabilityRegistry$7 = AgentCapabilityRegistry$b;
 type OpenCodeAgentOptions$1 = OpenCodeAgentOptions$2;
-type CliOutputInterpreter$4 = CliOutputInterpreter$f;
+type CliOutputInterpreter$5 = CliOutputInterpreter$g;
 
 declare class VibeAgent extends BaseCliAgent {
     /**
@@ -1554,7 +1570,7 @@ declare class VibeAgent extends BaseCliAgent {
     /** @type {VibeAgentOptions} */
     opts: VibeAgentOptions$1;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$5;
+    capabilities: AgentCapabilityRegistry$6;
     /** @type {"vibe"} */
     cliEngine: "vibe";
     /** @type {string | undefined} */
@@ -1562,7 +1578,7 @@ declare class VibeAgent extends BaseCliAgent {
     /**
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter$3;
+    createOutputInterpreter(): CliOutputInterpreter$4;
     /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any }} params
      */
@@ -1577,8 +1593,8 @@ declare class VibeAgent extends BaseCliAgent {
         outputFormat: string;
     }>;
 }
-type AgentCapabilityRegistry$5 = AgentCapabilityRegistry$c;
-type CliOutputInterpreter$3 = CliOutputInterpreter$e;
+type AgentCapabilityRegistry$6 = AgentCapabilityRegistry$d;
+type CliOutputInterpreter$4 = CliOutputInterpreter$f;
 type VibeAgentOptions$1 = VibeAgentOptions$2;
 
 /**
@@ -1827,7 +1843,7 @@ declare const DEFAULT_AGENT_CHECKPOINT_MAX_BYTES: number;
  *
  * @returns {AgentCapabilityRegistry}
  */
-declare function createHermesCliCapabilityRegistry(): AgentCapabilityRegistry$4;
+declare function createHermesCliCapabilityRegistry(): AgentCapabilityRegistry$5;
 /**
  * Hermes Agent (Nous Research) driven through its `hermes` CLI.
  *
@@ -1844,12 +1860,12 @@ declare class HermesCliAgent extends BaseCliAgent {
     constructor(opts?: HermesCliAgentOptions$1);
     opts: HermesCliAgentOptions$2;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$4;
+    capabilities: AgentCapabilityRegistry$5;
     cliEngine: string;
     /**
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter$2;
+    createOutputInterpreter(): CliOutputInterpreter$3;
     /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
      */
@@ -1864,8 +1880,8 @@ declare class HermesCliAgent extends BaseCliAgent {
         outputFormat: string;
     }>;
 }
-type AgentCapabilityRegistry$4 = AgentCapabilityRegistry$c;
-type CliOutputInterpreter$2 = CliOutputInterpreter$e;
+type AgentCapabilityRegistry$5 = AgentCapabilityRegistry$d;
+type CliOutputInterpreter$3 = CliOutputInterpreter$f;
 type HermesCliAgentOptions$1 = HermesCliAgentOptions$2;
 
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
@@ -1876,7 +1892,7 @@ type HermesCliAgentOptions$1 = HermesCliAgentOptions$2;
  *
  * @returns {AgentCapabilityRegistry}
  */
-declare function createOpenClawCapabilityRegistry(): AgentCapabilityRegistry$3;
+declare function createOpenClawCapabilityRegistry(): AgentCapabilityRegistry$4;
 /**
  * OpenClaw driven through its gateway-backed `openclaw agent` CLI.
  *
@@ -1895,14 +1911,14 @@ declare class OpenClawAgent extends BaseCliAgent {
     constructor(opts?: OpenClawAgentOptions$1);
     opts: OpenClawAgentOptions$2;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$3;
+    capabilities: AgentCapabilityRegistry$4;
     cliEngine: string;
     /** @type {string | undefined} */
     issuedSessionId: string | undefined;
     /**
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter$1;
+    createOutputInterpreter(): CliOutputInterpreter$2;
     /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
      */
@@ -1917,8 +1933,8 @@ declare class OpenClawAgent extends BaseCliAgent {
         outputFormat: string;
     }>;
 }
-type AgentCapabilityRegistry$3 = AgentCapabilityRegistry$c;
-type CliOutputInterpreter$1 = CliOutputInterpreter$e;
+type AgentCapabilityRegistry$4 = AgentCapabilityRegistry$d;
+type CliOutputInterpreter$2 = CliOutputInterpreter$f;
 type OpenClawAgentOptions$1 = OpenClawAgentOptions$2;
 
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
@@ -1928,7 +1944,7 @@ type OpenClawAgentOptions$1 = OpenClawAgentOptions$2;
  * @param {PoolAgentOptions} [_opts]
  * @returns {AgentCapabilityRegistry}
  */
-declare function createPoolCapabilityRegistry(_opts?: PoolAgentOptions$1): AgentCapabilityRegistry$2;
+declare function createPoolCapabilityRegistry(_opts?: PoolAgentOptions$1): AgentCapabilityRegistry$3;
 /**
  * Poolside's `pool` agent (Agent Context Protocol / ACP), driven through its CLI.
  *
@@ -1951,7 +1967,7 @@ declare class PoolAgent extends BaseCliAgent {
     /** @type {PoolAgentOptions} */
     opts: PoolAgentOptions$1;
     /** @type {AgentCapabilityRegistry} */
-    capabilities: AgentCapabilityRegistry$2;
+    capabilities: AgentCapabilityRegistry$3;
     /** @type {"pool"} */
     cliEngine: "pool";
     /**
@@ -1959,7 +1975,7 @@ declare class PoolAgent extends BaseCliAgent {
      *
      * @returns {CliOutputInterpreter}
      */
-    createOutputInterpreter(): CliOutputInterpreter;
+    createOutputInterpreter(): CliOutputInterpreter$1;
     /**
      * Build the CLI command spec for `pool exec`.
      *
@@ -1976,8 +1992,8 @@ declare class PoolAgent extends BaseCliAgent {
         outputFormat: string;
     }>;
 }
-type AgentCapabilityRegistry$2 = AgentCapabilityRegistry$c;
-type CliOutputInterpreter = CliOutputInterpreter$e;
+type AgentCapabilityRegistry$3 = AgentCapabilityRegistry$d;
+type CliOutputInterpreter$1 = CliOutputInterpreter$f;
 type PoolAgentOptions$1 = PoolAgentOptions$2;
 
 type OmpAgentOptions$1 = BaseCliAgentOptions & {
@@ -2011,11 +2027,11 @@ type OmpAgentOptions$1 = BaseCliAgentOptions & {
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
 /** @param {OmpAgentOptions} [opts] @returns {AgentCapabilityRegistry} */
-declare function createOmpCapabilityRegistry(opts?: OmpAgentOptions): AgentCapabilityRegistry$1;
+declare function createOmpCapabilityRegistry(opts?: OmpAgentOptions): AgentCapabilityRegistry$2;
 declare class OmpAgent extends BaseCliAgent {
     constructor(opts?: {});
     /** @type {OmpAgentOptions} */ opts: OmpAgentOptions;
-    /** @type {AgentCapabilityRegistry} */ capabilities: AgentCapabilityRegistry$1;
+    /** @type {AgentCapabilityRegistry} */ capabilities: AgentCapabilityRegistry$2;
     cliEngine: string;
     issuedSessionId: any;
     /** @param {{ onEvent?: unknown, files?: unknown[] } | undefined} options @returns {"text" | "json" | "rpc"} */
@@ -2121,7 +2137,45 @@ declare class OmpAgent extends BaseCliAgent {
     };
 }
 type OmpAgentOptions = OmpAgentOptions$1;
-type AgentCapabilityRegistry$1 = AgentCapabilityRegistry$c;
+type AgentCapabilityRegistry$2 = AgentCapabilityRegistry$d;
+
+/** @typedef {import("./GrokAgentOptions.ts").GrokAgentOptions} GrokAgentOptions */
+/** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
+/** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
+/**
+ * @param {GrokAgentOptions} [opts]
+ * @returns {AgentCapabilityRegistry}
+ */
+declare function createGrokCapabilityRegistry(opts?: GrokAgentOptions$1): AgentCapabilityRegistry$1;
+/** xAI Grok Build CLI adapter. */
+declare class GrokAgent extends BaseCliAgent {
+    /** @param {GrokAgentOptions} [opts] */
+    constructor(opts?: GrokAgentOptions$1);
+    opts: GrokAgentOptions$2;
+    capabilities: AgentCapabilityRegistry$d;
+    cliEngine: string;
+    supportsNativeStructuredOutput: boolean;
+    /** @returns {CliOutputInterpreter} */
+    createOutputInterpreter(): CliOutputInterpreter;
+    /** @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any }} params */
+    buildCommand(params: {
+        prompt: string;
+        systemPrompt?: string;
+        cwd: string;
+        options: any;
+    }): Promise<{
+        command: string;
+        args: string[];
+        outputFormat: string;
+        env: {
+            XAI_API_KEY?: string | undefined;
+            GROK_HOME?: string | undefined;
+        };
+    }>;
+}
+type GrokAgentOptions$1 = GrokAgentOptions$2;
+type CliOutputInterpreter = CliOutputInterpreter$f;
+type AgentCapabilityRegistry$1 = AgentCapabilityRegistry$d;
 
 /**
  * @returns {CliAgentCapabilityReportEntry[]}
@@ -2248,7 +2302,7 @@ declare function createSerperSearchProvider(options: {
 }): GroundedWebSearchProvider;
 type GroundedWebSearchProvider = GroundedWebSearchProvider$5;
 
-type AgentCapabilityRegistry = AgentCapabilityRegistry$c;
+type AgentCapabilityRegistry = AgentCapabilityRegistry$d;
 type AgentGenerateOptions = AgentGenerateOptions$4;
 type AgentLike = AgentLike$2;
 type AgentCheckpoint = AgentCheckpoint$1;
@@ -2267,6 +2321,7 @@ type AnthropicAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = Anthropic
 type OpenAIAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = OpenAIAgentOptions$2<CALL_OPTIONS, TOOLS>;
 type HermesAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = HermesAgentOptions$2<CALL_OPTIONS, TOOLS>;
 type HermesCliAgentOptions = HermesCliAgentOptions$2;
+type GrokAgentOptions = GrokAgentOptions$2;
 type OpenClawAgentOptions = OpenClawAgentOptions$2;
 type PiAgentOptions = PiAgentOptions$2;
 type CursorAgentOptions = CursorAgentOptions$2;
@@ -2315,4 +2370,4 @@ type TranscriptionProvider = TranscriptionProvider$1;
 type TranscriptionToolInput = TranscriptionToolInput$1;
 type TranscriptionToolResult = TranscriptionToolResult$1;
 
-export { type AgentCapabilityRegistry, type AgentCheckpoint, type AgentCheckpointCapability, type AgentCheckpointContinuationOptions, type AgentCheckpointFormat, type AgentCheckpointJsonArray, type AgentCheckpointJsonObject, type AgentCheckpointJsonPrimitive, type AgentCheckpointJsonValue, type AgentCheckpointMode, type AgentCheckpointPublisher, type AgentCheckpointResult, type AgentFileChange, type AgentFileChangeKind, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, type AudioHostResolver, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, CursorAgent, type CursorAgentOptions, DEFAULT_AGENT_CHECKPOINT_MAX_BYTES, type FallbackAgentProvider, type FallbackAgentsOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, NanocodexAgent, type NanocodexAgentOptions, type NanocodexAuth, type NanocodexGenerateOptions, type NanocodexReasoningMode, type NanocodexThinking, OmpAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PinnedAudioTransport, type PinnedAudioTransportRequest, PoolAgent, type PoolAgentOptions, type ResolvedAudioAddress, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, agentProducesCheckpoint, agentSupportsCheckpoint, cloneAgentCheckpoint, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOmpCapabilityRegistry, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, fallbackAgents, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashAgentCheckpointCapabilities, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentCheckpoint, type AgentCheckpointCapability, type AgentCheckpointContinuationOptions, type AgentCheckpointFormat, type AgentCheckpointJsonArray, type AgentCheckpointJsonObject, type AgentCheckpointJsonPrimitive, type AgentCheckpointJsonValue, type AgentCheckpointMode, type AgentCheckpointPublisher, type AgentCheckpointResult, type AgentFileChange, type AgentFileChangeKind, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, type AudioHostResolver, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, CursorAgent, type CursorAgentOptions, DEFAULT_AGENT_CHECKPOINT_MAX_BYTES, type FallbackAgentProvider, type FallbackAgentsOptions, ForgeAgent, GeminiAgent, GrokAgent, type GrokAgentOptions, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, NanocodexAgent, type NanocodexAgentOptions, type NanocodexAuth, type NanocodexGenerateOptions, type NanocodexReasoningMode, type NanocodexThinking, OmpAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PinnedAudioTransport, type PinnedAudioTransportRequest, PoolAgent, type PoolAgentOptions, type ResolvedAudioAddress, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, agentProducesCheckpoint, agentSupportsCheckpoint, cloneAgentCheckpoint, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGrokCapabilityRegistry, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOmpCapabilityRegistry, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, fallbackAgents, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashAgentCheckpointCapabilities, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };

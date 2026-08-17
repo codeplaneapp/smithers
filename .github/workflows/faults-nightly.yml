@@ -1,5 +1,9 @@
 name: Faults (nightly soak)
 
+concurrency:
+  group: faults-nightly-history
+  cancel-in-progress: false
+
 on:
   schedule:
     - cron: "0 7 * * *"
@@ -8,7 +12,7 @@ on:
 jobs:
   soak:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     env:
       SMITHERS_E2E_SOAK: "1"
 
@@ -30,10 +34,42 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Restore flake history
+        uses: actions/cache/restore@v4
+        with:
+          path: .e2e-flakes/history.json
+          key: fault-flakes-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fault-flakes-v1-
+
       # apps/cli's dts rollup needs more heap than the runner's default worker
       # limit or tsup dies with ERR_WORKER_OUT_OF_MEMORY.
       - run: pnpm -r build
         env:
           NODE_OPTIONS: --max-old-space-size=8192
 
-      - run: pnpm --filter @smthrs/e2e test:soak
+      - name: Run nightly fault matrix and update history
+        env:
+          # pnpm --filter runs in e2e/, so these must be absolute or the
+          # scripts would read/write e2e/.e2e-flakes/ while the cache and
+          # artifact steps below use the repo-root path.
+          SMITHERS_E2E_FLAKE_HISTORY: ${{ github.workspace }}/.e2e-flakes/history.json
+          SMITHERS_E2E_FLAKE_RESULTS: ${{ github.workspace }}/.e2e-flakes/latest-nightly.json
+        run: pnpm --filter @smthrs/e2e test:soak
+
+      - name: Save flake history
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .e2e-flakes/history.json
+          key: fault-flakes-v1-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload nightly fault results
+        if: always()
+        uses: actions/upload-artifact@v5.0.0
+        with:
+          name: fault-results-nightly-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: |
+            .e2e-flakes/history.json
+            .e2e-flakes/latest-nightly.json

@@ -3,13 +3,13 @@ title: Workflow Catalog
 description: Canonical workflow packs and marketplace-ready metadata.
 ---
 
-The default `.smithers` pack is small: it installs `create-workflow`, `create-skill`, and `docs-driven-development`; `init`, `post-failure`, and `upgrade` stay hidden as durable system plumbing. Former starter workflows live under `examples/init-pack/`.
+The default `.smithers` pack is small: it installs `create-workflow` and `create-skill`; system workflows stay hidden as durable plumbing. Specialized and former starter workflows live in installable packs and the source repository.
 
 ## Canonical Packs
 
 | Pack | Workflows | Audience |
 | --- | --- | --- |
-| Curated default | `create-workflow`, `create-skill`, `docs-driven-development` | Author workflows, author standalone skills, or maintain a target repo's living product spec. |
+| Curated default | `create-workflow`, `create-skill` | Author workflows or standalone skills without installing repository-specific examples. |
 | Examples | `examples/init-pack/` | Former init workflows retained as runnable/copyable examples. |
 | System | `add`, `init`, `post-failure`, `share-pack`, `upgrade` | Internal plumbing (hidden from default listings): durable pack install/refresh, pack sharing, automatic failed-run autopsies, and assisted Smithers upgrades. |
 
@@ -29,8 +29,8 @@ description: ""
 repository: ""
 smithers: *
 contents:
-  workflows[3]: create-workflow,create-skill,docs-driven-development
-  ui[3]: create-workflow,create-skill,docs-driven-development
+  workflows[2]: create-workflow,create-skill
+  ui[2]: create-workflow,create-skill
 capabilities:
   bins: []
   env: []

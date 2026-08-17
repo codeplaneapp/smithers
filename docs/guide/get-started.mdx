@@ -14,7 +14,7 @@ From inside your project:
 bunx smthrs init
 ```
 
-`init` asks one question, which coding agent do you prefer, shows what it detected (Claude Code, Codex, Pi, ...), and scaffolds `.smithers/` with the focused authoring pack (`create-workflow`, `create-skill`, `docs-driven-development`), installs dependencies, and installs that agent's plugin (or skill). Former recipes live under `examples/init-pack/`; piped or non-interactive callers (CI, agents, `--yes`) skip the question and install defaults, and `--no-tutorial` skips the guided session.
+`init` asks one question, which coding agent do you prefer, shows what it detected (Claude Code, Codex, Pi, ...), and scaffolds `.smithers/` with the compact authoring pack (`create-workflow`, `create-skill`), installs dependencies, and installs that agent's plugin (or skill). Specialized recipes remain available from packs and the source repository; piped or non-interactive callers (CI, agents, `--yes`) skip the question and install defaults, and `--no-tutorial` skips the guided session.
 
 **`create-workflow`** is the scaffold's star: describe the workflow you want and it writes that plus a companion skill document. Re-running `init` later only offers to update files that drifted.
 

@@ -6,6 +6,7 @@ import { createCodexCapabilityRegistry } from "../CodexAgent.js";
 import { createCursorCapabilityRegistry } from "../CursorAgent.js";
 import { createForgeCapabilityRegistry } from "../ForgeAgent.js";
 import { createHermesCliCapabilityRegistry } from "../HermesCliAgent.js";
+import { createGrokCapabilityRegistry } from "../GrokAgent.js";
 import { createKimiCapabilityRegistry } from "../KimiAgent.js";
 import { createOpenClawCapabilityRegistry } from "../OpenClawAgent.js";
 import { createOpenCodeCapabilityRegistry } from "../OpenCodeAgent.js";
@@ -51,6 +52,11 @@ const CLI_AGENT_CAPABILITY_ADAPTERS = [
     id: "hermes",
     binary: "hermes",
     buildRegistry: () => createHermesCliCapabilityRegistry(),
+  },
+  {
+    id: "grok",
+    binary: "grok",
+    buildRegistry: () => createGrokCapabilityRegistry(),
   },
   {
     id: "kimi",

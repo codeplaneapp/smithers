@@ -12,7 +12,7 @@
 
 import pc from "picocolors";
 import { buildDigestBlock, formatElapsed, isLikelyWorkerNodeId } from "@smthrs/herdr";
-import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
+import { sanitizeTerminalText } from "./sanitizeTerminalText.js";
 import { ACTIVITY_STRIP_LINES, formatActivityPlain } from "./cockpit-activity.js";
 import { flattenOutlineTree, outlinePhasesToTree } from "./cockpit-outline-graph.js";
 import { buildDigestInputFromOverview, overviewStateLabel } from "./tail-overview.js";

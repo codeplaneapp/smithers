@@ -78,11 +78,16 @@ function installResumeStub(repo) {
 }
 
 async function waitForSpawnRecord(spawnRecord) {
-  for (let attempt = 0; attempt < 500 && !existsSync(spawnRecord); attempt++) {
+  let contents = "";
+  for (let attempt = 0; attempt < 500; attempt++) {
+    if (existsSync(spawnRecord)) {
+      contents = readFileSync(spawnRecord, "utf8");
+      if (contents.includes("--resume")) return contents;
+    }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   expect(existsSync(spawnRecord)).toBe(true);
-  return readFileSync(spawnRecord, "utf8");
+  return contents;
 }
 
 function builtinResumeConfig(repo, goal) {

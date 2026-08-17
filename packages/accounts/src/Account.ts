@@ -12,12 +12,12 @@ export type Account = {
   provider: AccountProvider;
   /**
    * Absolute path to the per-account CLI config directory. Set for
-   * subscription providers (claude-code, antigravity, codex, kimi).
+   * subscription providers (claude-code, antigravity, codex, kimi, grok).
    */
   configDir?: string;
   /**
    * Raw API key. Set for API providers (anthropic-api, openai-api,
-   * gemini-api). Stored in plaintext in `~/.smithers/accounts.json` (mode 600).
+   * gemini-api, xai-api). Stored in plaintext in `~/.smithers/accounts.json` (mode 600).
    * For stricter handling, set this to the empty string and override at
    * runtime via the matching env var.
    */

@@ -126,14 +126,11 @@ test("smithers init --global scaffolds the canonical ~/.smithers pack (no nested
     "create-skill.tsx",
     "create-ui.tsx",
     "create-workflow.tsx",
-    "docs-driven-development.tsx",
     "eval-suite-run.tsx",
     "init.tsx",
     "post-failure.tsx",
     "share-pack.tsx",
-    "smithers-repo-federation.tsx",
     "upgrade.tsx",
-    "whole-foods-meal-planner.tsx",
   ]);
   expect(existsSync(join(smithersHome, "components"))).toBe(false);
   expect(existsSync(join(smithersHome, ".smithers"))).toBe(false);

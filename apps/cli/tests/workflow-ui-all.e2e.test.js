@@ -39,7 +39,7 @@ import {
  */
 
 const DESCRIPTORS = JSON.parse(readFileSync(resolve(import.meta.dir, "workflow-ui-descriptors.json"), "utf8")).filter(
-  (descriptor) => ["create-workflow", "create-skill", "docs-driven-development"].includes(descriptor.key),
+  (descriptor) => ["create-workflow", "create-skill"].includes(descriptor.key),
 );
 const require = createRequire(import.meta.url);
 

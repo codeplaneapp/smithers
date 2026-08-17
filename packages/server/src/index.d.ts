@@ -196,6 +196,8 @@ type GatewayWebhookRunConfig$1 = {
 
 type GatewayWebhookConfig$1 = {
     secret: string;
+    /** Decode and durably deduplicate provider deliveries before signaling or launching. */
+    source?: "github";
     signatureHeader?: string;
     signaturePrefix?: string;
     signal?: GatewayWebhookSignalConfig$1;
@@ -2168,7 +2170,7 @@ declare class Gateway {
      */
     registeredAccountsFromRegistry(): {
         label: string;
-        provider: "claude-code" | "antigravity" | "codex" | "kimi" | "anthropic-api" | "openai-api" | "gemini-api";
+        provider: "claude-code" | "antigravity" | "codex" | "kimi" | "grok" | "anthropic-api" | "openai-api" | "gemini-api" | "xai-api";
         configDir?: string;
         apiKey?: string;
         model?: string;

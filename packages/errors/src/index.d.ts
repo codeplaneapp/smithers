@@ -982,21 +982,21 @@ declare namespace smithersErrorDefinitions {
         let when_113: string;
         export { when_113 as when };
     }
-    namespace PI_HTTP_ERROR {
+    namespace LISTENER_CREDENTIALS_MISSING {
         let category_114: string;
         export { category_114 as category };
         let when_114: string;
         export { when_114 as when };
+        let details_62: string;
+        export { details_62 as details };
     }
-    namespace EXTERNAL_BUILD_FAILED {
+    namespace LISTENER_RECONCILE_FAILED {
         let category_115: string;
         export { category_115 as category };
         let when_115: string;
         export { when_115 as when };
-        let details_62: string;
-        export { details_62 as details };
     }
-    namespace SCHEMA_DISCOVERY_FAILED {
+    namespace INTEGRATION_ERROR {
         let category_116: string;
         export { category_116 as category };
         let when_116: string;
@@ -1004,39 +1004,61 @@ declare namespace smithersErrorDefinitions {
         let details_63: string;
         export { details_63 as details };
     }
-    namespace OPENAPI_SPEC_LOAD_FAILED {
+    namespace PI_HTTP_ERROR {
         let category_117: string;
         export { category_117 as category };
         let when_117: string;
         export { when_117 as when };
     }
-    namespace OPENAPI_OPERATION_NOT_FOUND {
+    namespace EXTERNAL_BUILD_FAILED {
         let category_118: string;
         export { category_118 as category };
         let when_118: string;
         export { when_118 as when };
+        let details_64: string;
+        export { details_64 as details };
     }
-    namespace OPENAPI_TOOL_EXECUTION_FAILED {
+    namespace SCHEMA_DISCOVERY_FAILED {
         let category_119: string;
         export { category_119 as category };
         let when_119: string;
         export { when_119 as when };
+        let details_65: string;
+        export { details_65 as details };
     }
-    namespace SINGLE_RUNNER_BUSY {
+    namespace OPENAPI_SPEC_LOAD_FAILED {
         let category_120: string;
         export { category_120 as category };
         let when_120: string;
         export { when_120 as when };
-        let details_64: string;
-        export { details_64 as details };
     }
-    namespace SINGLE_RUNNER_CLOSED {
+    namespace OPENAPI_OPERATION_NOT_FOUND {
         let category_121: string;
         export { category_121 as category };
         let when_121: string;
         export { when_121 as when };
-        let details_65: string;
-        export { details_65 as details };
+    }
+    namespace OPENAPI_TOOL_EXECUTION_FAILED {
+        let category_122: string;
+        export { category_122 as category };
+        let when_122: string;
+        export { when_122 as when };
+    }
+    namespace SINGLE_RUNNER_BUSY {
+        let category_123: string;
+        export { category_123 as category };
+        let when_123: string;
+        export { when_123 as when };
+        let details_66: string;
+        export { details_66 as details };
+    }
+    namespace SINGLE_RUNNER_CLOSED {
+        let category_124: string;
+        export { category_124 as category };
+        let when_124: string;
+        export { when_124 as when };
+        let details_67: string;
+        export { details_67 as details };
     }
 }
 

@@ -1,8 +1,9 @@
-import { listAccounts, registeredAgentId } from "@smthrs/accounts";
+import { defaultConfigDir, listAccounts, registeredAgentId } from "@smthrs/accounts";
 import { AntigravityAgent } from "./AntigravityAgent.js";
 import { ClaudeCodeAgent } from "./ClaudeCodeAgent.js";
 import { CodexAgent } from "./CodexAgent.js";
 import { KimiAgent } from "./KimiAgent.js";
+import { GrokAgent } from "./GrokAgent.js";
 import { SmithersError } from "@smthrs/errors/SmithersError";
 import {
   accountQuotaBlock,
@@ -41,7 +42,7 @@ const stableOrders = new Map();
  * be able to repoint a rung at another subscription or forge its quota
  * attribution.
  *
- * @type {Record<FallbackAgentProvider, (account: Account, model: string | undefined, extra: Record<string, unknown>) => AgentLike | null>}
+ * @type {Record<FallbackAgentProvider, (account: Account, model: string | undefined, extra: Record<string, unknown>, env: NodeJS.ProcessEnv) => AgentLike | null>}
  */
 const PROVIDER_FACTORIES = {
   "claude-code": (account, model, extra) =>
@@ -72,6 +73,15 @@ const PROVIDER_FACTORIES = {
           id: registeredAgentId(account.label),
         })
       : null,
+  grok: (account, model, extra) =>
+    account.configDir
+      ? new GrokAgent({
+          ...extra,
+          configDir: account.configDir,
+          ...(model ? { model } : {}),
+          id: registeredAgentId(account.label),
+        })
+      : null,
   antigravity: (account, model, extra) =>
     account.configDir
       ? new AntigravityAgent({
@@ -95,6 +105,19 @@ const PROVIDER_FACTORIES = {
       ? new CodexAgent({
           skipGitRepoCheck: true,
           ...extra,
+          apiKey: account.apiKey,
+          ...(model ? { model } : {}),
+          id: registeredAgentId(account.label),
+        })
+      : null,
+  "xai-api": (account, model, extra, env) =>
+    account.apiKey
+      ? new GrokAgent({
+          ...extra,
+          // Keep a cached subscription token in ~/.grok from overriding this
+          // registered API-key identity. The isolated directory also holds
+          // resumable sessions for this account.
+          configDir: defaultConfigDir(account.label, env),
           apiKey: account.apiKey,
           ...(model ? { model } : {}),
           id: registeredAgentId(account.label),
@@ -226,6 +249,7 @@ function defaultFallbackAgent(providers) {
   if (first === "codex" || first === "openai-api") {
     return new CodexAgent({ skipGitRepoCheck: true });
   }
+  if (first === "grok" || first === "xai-api") return new GrokAgent({});
   return new ClaudeCodeAgent({});
 }
 
@@ -306,25 +330,30 @@ export function fallbackAgents(options = {}) {
     const extra = options.agentOptions?.[provider] ?? {};
     const callerQuotaHook = typeof extra.onQuotaExceeded === "function" ? extra.onQuotaExceeded : null;
     const buildAgent = () =>
-      PROVIDER_FACTORIES[provider](account, model, {
-        ...extra,
-        onQuotaExceeded: (details) => {
-          const providerMessage = typeof details?.underlying === "string" ? details.underlying : "";
-          const modelFamilyMatch = /\b(fable|opus|sonnet)\b/i.exec(providerMessage)?.[1]?.toLowerCase();
-          const modelSpecific = Boolean(modelFamilyMatch);
-          const quotaModel = model ?? (modelFamilyMatch ? `claude-${modelFamilyMatch}` : undefined);
-          try {
-            recordAccountQuotaLimit(account.label, {
-              env,
-              model: quotaModel,
-              scope: modelSpecific ? "model" : "shared",
-              untilMs: typeof details?.quotaResetAtMs === "number" ? details.quotaResetAtMs : undefined,
-            });
-          } finally {
-            callerQuotaHook?.(details);
-          }
+      PROVIDER_FACTORIES[provider](
+        account,
+        model,
+        {
+          ...extra,
+          onQuotaExceeded: (details) => {
+            const providerMessage = typeof details?.underlying === "string" ? details.underlying : "";
+            const modelFamilyMatch = /\b(fable|opus|sonnet)\b/i.exec(providerMessage)?.[1]?.toLowerCase();
+            const modelSpecific = Boolean(modelFamilyMatch);
+            const quotaModel = model ?? (modelFamilyMatch ? `claude-${modelFamilyMatch}` : undefined);
+            try {
+              recordAccountQuotaLimit(account.label, {
+                env,
+                model: quotaModel,
+                scope: modelSpecific ? "model" : "shared",
+                untilMs: typeof details?.quotaResetAtMs === "number" ? details.quotaResetAtMs : undefined,
+              });
+            } finally {
+              callerQuotaHook?.(details);
+            }
+          },
         },
-      });
+        env,
+      );
     const block = accountQuotaBlock(quota, account.label, model, usage[account.label]?.report);
     if (block) {
       chain.push(knownQuotaBlockedAgent(account, model, block, buildAgent));

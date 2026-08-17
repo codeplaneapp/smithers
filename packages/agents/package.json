@@ -82,7 +82,6 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.5",
     "@ai-sdk/openai": "^4.0.5",
-    "@modelcontextprotocol/sdk": "^1.29.0",
     "@smthrs/accounts": "workspace:*",
     "@smthrs/driver": "workspace:*",
     "@smthrs/errors": "workspace:*",
@@ -92,7 +91,16 @@
     "effect": "4.0.0-beta.105",
     "zod": "^4.4.3"
   },
+  "peerDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "peerDependenciesMeta": {
+    "@modelcontextprotocol/sdk": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/bun": "latest",
     "react": "^19.2.7",
     "typescript": "~6.0.3"

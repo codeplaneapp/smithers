@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import {
   AmpAgent,
   AntigravityAgent,
@@ -10,6 +11,7 @@ import {
   CodexAgent,
   CursorAgent,
   ForgeAgent,
+  GrokAgent,
   HermesCliAgent,
   KimiAgent,
   OpenClawAgent,
@@ -240,6 +242,23 @@ async function buildDeclaredSurfaceCommands() {
         debug: true,
       }),
       params: commonParams(),
+    },
+    {
+      id: "grok",
+      agent: new GrokAgent({
+        model: "m",
+        effort: "high",
+        sandbox: "workspace-write",
+        maxTurns: 2,
+        tools: ["read_file"],
+        disallowedTools: ["run_terminal_cmd"],
+        noPlan: true,
+        noSubagents: true,
+        noMemory: true,
+        disableWebSearch: true,
+        rules: "rule",
+      }),
+      params: commonParams({ resumeSession: "session", outputSchema: z.object({ result: z.string() }) }),
     },
     {
       id: "kimi",

@@ -5,7 +5,15 @@ import type { AgentLike } from "./AgentLike";
  * Subscription providers use the account's `configDir`; API providers use the
  * account's `apiKey`.
  */
-export type FallbackAgentProvider = "claude-code" | "codex" | "kimi" | "antigravity" | "anthropic-api" | "openai-api";
+export type FallbackAgentProvider =
+  | "claude-code"
+  | "codex"
+  | "kimi"
+  | "grok"
+  | "antigravity"
+  | "anthropic-api"
+  | "openai-api"
+  | "xai-api";
 
 export type FallbackAgentsOptions = {
   /**

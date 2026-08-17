@@ -455,6 +455,7 @@ describe("accountToProviderEnv", () => {
     });
     expect(accountToProviderEnv({ label: "x", provider: "codex", configDir: "/c" })).toEqual({ CODEX_HOME: "/c" });
     expect(accountToProviderEnv({ label: "x", provider: "kimi", configDir: "/c" })).toEqual({ KIMI_SHARE_DIR: "/c" });
+    expect(accountToProviderEnv({ label: "x", provider: "grok", configDir: "/c" })).toEqual({ GROK_HOME: "/c" });
   });
   test("api providers map to their api-key env var (or empty if no key)", () => {
     expect(accountToProviderEnv({ label: "x", provider: "openai-api", apiKey: "sk-1" })).toEqual({
@@ -464,12 +465,16 @@ describe("accountToProviderEnv", () => {
       ANTHROPIC_API_KEY: "sk-2",
     });
     expect(accountToProviderEnv({ label: "x", provider: "gemini-api", apiKey: "" })).toEqual({});
+    expect(accountToProviderEnv({ label: "x", provider: "xai-api", apiKey: "xai-1" })).toEqual({
+      XAI_API_KEY: "xai-1",
+    });
   });
   test("subscription provider with missing configDir throws", () => {
     expect(() => accountToProviderEnv({ label: "x", provider: "claude-code" })).toThrow(/missing configDir/);
     expect(() => accountToProviderEnv({ label: "x", provider: "antigravity" })).toThrow(/missing configDir/);
     expect(() => accountToProviderEnv({ label: "x", provider: "codex" })).toThrow(/missing configDir/);
     expect(() => accountToProviderEnv({ label: "x", provider: "kimi" })).toThrow(/missing configDir/);
+    expect(() => accountToProviderEnv({ label: "x", provider: "grok" })).toThrow(/missing configDir/);
   });
   test("unknown provider throws", () => {
     expect(() => accountToProviderEnv({ label: "x", provider: "nope" })).toThrow(/unknown provider/);
