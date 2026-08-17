@@ -11,6 +11,7 @@ import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
 import { getWorkflowMakeBridgeRuntime } from "./effect/workflow-make-bridge.js";
 import { isWorkflowFileRef, loadWorkflowFileRef } from "./workflow-file.js";
 import { buildValidatedChildRunId } from "./child-run-id.js";
+import { getLifecycleTaskLease } from "./lifecycle-concurrency.js";
 /** @typedef {import("./ChildWorkflowDefinition.ts").ChildWorkflowDefinition} ChildWorkflowDefinition */
 /** @typedef {import("./ChildWorkflowExecuteOptions.ts").ChildWorkflowExecuteOptions} ChildWorkflowExecuteOptions */
 /** @typedef {import("@smthrs/driver/RunResult").RunResult} RunResult */
@@ -284,6 +285,8 @@ function resolveChildWorkflow(definition, parentWorkflow) {
  */
 export async function executeChildWorkflow(parentWorkflow, options) {
   const runtime = requireTaskRuntime();
+  const lifecycleLease = getLifecycleTaskLease();
+  const runWithoutParentSlots = (execute) => (lifecycleLease ? lifecycleLease.runChild(execute) : execute());
   const acceptWorkflowChange = /** @type {any} */ (runtime).acceptWorkflowChange === true;
   let definition = options.workflow;
   let workflowPath = options.workflowPath;
@@ -334,7 +337,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
     // still executing this child. Launching a second engine would duplicate
     // the fan-out, so attach: wait for the in-flight child to settle and
     // preserve whatever terminal state it reaches.
-    const settled = await waitForChildRunToSettle(adapter, childRunId, signal);
+    const settled = await runWithoutParentSlots(() => waitForChildRunToSettle(adapter, childRunId, signal));
     if (settled && TERMINAL_CHILD_RUN_STATUSES.has(settled.status)) {
       return loadPreservedChildResult(childWorkflow, childRunId, /** @type {RunResult["status"]} */ (settled.status));
     }
@@ -344,51 +347,55 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   const resume = Boolean(existingChildRun);
   const bridgeRuntime = getWorkflowMakeBridgeRuntime();
   if (bridgeRuntime) {
-    const result = await bridgeRuntime.executeChildWorkflow(childWorkflow, {
-      input,
-      runId: childRunId,
-      // Effect Workflow memoizes completed executions process-locally by
-      // execution id. The durable run id remains stable; only the internal
-      // bridge execution gets a retry-specific key after an in-place reset.
-      ...(automaticFailedRetry ? { bridgeExecutionId: `${childRunId}:retry:${runtime.attempt}` } : {}),
-      resume,
-      acceptWorkflowChange,
-      parentRunId,
-      ...(parentContext.startedBy ? { startedBy: parentContext.startedBy } : {}),
-      config: childConfig,
-      rootDir: options.rootDir,
-      workflowPath,
-      allowNetwork: options.allowNetwork,
-      maxOutputBytes: options.maxOutputBytes,
-      maxAgentCheckpointBytes: options.maxAgentCheckpointBytes,
-      toolTimeoutMs: options.toolTimeoutMs,
-      signal,
-      pauseSignal,
-    });
+    const result = await runWithoutParentSlots(() =>
+      bridgeRuntime.executeChildWorkflow(childWorkflow, {
+        input,
+        runId: childRunId,
+        // Effect Workflow memoizes completed executions process-locally by
+        // execution id. The durable run id remains stable; only the internal
+        // bridge execution gets a retry-specific key after an in-place reset.
+        ...(automaticFailedRetry ? { bridgeExecutionId: `${childRunId}:retry:${runtime.attempt}` } : {}),
+        resume,
+        acceptWorkflowChange,
+        parentRunId,
+        ...(parentContext.startedBy ? { startedBy: parentContext.startedBy } : {}),
+        config: childConfig,
+        rootDir: options.rootDir,
+        workflowPath,
+        allowNetwork: options.allowNetwork,
+        maxOutputBytes: options.maxOutputBytes,
+        maxAgentCheckpointBytes: options.maxAgentCheckpointBytes,
+        toolTimeoutMs: options.toolTimeoutMs,
+        signal,
+        pauseSignal,
+      }),
+    );
     return {
       ...result,
       output: normalizeChildOutput(result),
     };
   }
   const { runWorkflow } = await import("./engine.js");
-  const result = await Effect.runPromise(
-    runWorkflow(childWorkflow, {
-      input,
-      runId: childRunId,
-      resume,
-      acceptWorkflowChange,
-      parentRunId,
-      ...(parentContext.startedBy ? { startedBy: parentContext.startedBy } : {}),
-      config: childConfig,
-      rootDir: options.rootDir,
-      workflowPath,
-      allowNetwork: options.allowNetwork,
-      maxOutputBytes: options.maxOutputBytes,
-      maxAgentCheckpointBytes: options.maxAgentCheckpointBytes,
-      toolTimeoutMs: options.toolTimeoutMs,
-      signal,
-      pauseSignal,
-    }),
+  const result = await runWithoutParentSlots(() =>
+    Effect.runPromise(
+      runWorkflow(childWorkflow, {
+        input,
+        runId: childRunId,
+        resume,
+        acceptWorkflowChange,
+        parentRunId,
+        ...(parentContext.startedBy ? { startedBy: parentContext.startedBy } : {}),
+        config: childConfig,
+        rootDir: options.rootDir,
+        workflowPath,
+        allowNetwork: options.allowNetwork,
+        maxOutputBytes: options.maxOutputBytes,
+        maxAgentCheckpointBytes: options.maxAgentCheckpointBytes,
+        toolTimeoutMs: options.toolTimeoutMs,
+        signal,
+        pauseSignal,
+      }),
+    ),
   );
   return {
     ...result,
