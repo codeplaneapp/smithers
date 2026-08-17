@@ -166,6 +166,21 @@ export type TaskAspects = {
   };
 };
 
+/** Engine-ready form of the author-facing `Task.repair` declaration. */
+export type TaskRepairDescriptor = {
+  agent: AgentLike | AgentLike[];
+  outputTable: unknown | null;
+  outputTableName: string;
+  outputRef?: z.ZodObject;
+  outputSchema?: z.ZodObject;
+  instructions?: string;
+  retries: number;
+  retryPolicy?: RetryPolicy;
+  timeoutMs: number | null;
+  heartbeatTimeoutMs: number | null;
+  maxSchemaRetries?: number;
+};
+
 export type TaskDescriptor = {
   nodeId: string;
   ordinal: number;
@@ -228,6 +243,8 @@ export type TaskDescriptor = {
   /** Automatic output-format/schema correction calls; undefined uses the engine default. */
   maxSchemaRetries?: number;
   retryPolicy?: RetryPolicy;
+  /** One bounded repair task, executed only after this task fails terminally. */
+  repair?: TaskRepairDescriptor;
   timeoutMs: number | null;
   heartbeatTimeoutMs: number | null;
   continueOnFail: boolean;

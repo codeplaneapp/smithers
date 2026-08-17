@@ -566,6 +566,14 @@ declare namespace smithersErrorDefinitions {
         let when_50: string;
         export { when_50 as when };
     }
+    namespace TASK_REPAIR_FAILED {
+        let category_118: string;
+        export { category_118 as category };
+        let when_118: string;
+        export { when_118 as when };
+        let details_62: string;
+        export { details_62 as details };
+    }
     namespace RALPH_MAX_REACHED {
         let category_51: string;
         export { category_51 as category };

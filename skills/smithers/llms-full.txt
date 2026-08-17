@@ -4320,6 +4320,17 @@ type TaskProps = {
     maxIdenticalFailures?: number; // consecutive identical failures before the task stalls; default 3
     retryable?: boolean | ((error: unknown) => boolean); // false makes a failure terminal
   };
+  repair?: {
+    agent: AgentLike | AgentLike[];
+    output: z.ZodObject | Table | string;
+    outputSchema?: z.ZodObject;
+    instructions?: string;
+    retries?: number; // finite; default 0
+    retryPolicy?: RetryPolicy;
+    timeoutMs?: number;
+    heartbeatTimeoutMs?: number;
+    maxSchemaRetries?: number;
+  };
   continueOnFail?: boolean;
   cache?: { by?: (ctx) => unknown; version?: string; key?: string; ttlMs?: number; scope?: "run" | "workflow" | "global" };
   label?: string;
@@ -4459,6 +4470,55 @@ downstream `deps`, and works inside `<Loop>`, `<Branch>`, `<Parallel>`, and
 `<Sequence>` like an agent Task, except it can't be a `fork` source (no agent
 session). Throwing in a compute function fails the task and triggers its retry
 policy.
+
+## Repair after terminal failure
+
+`repair` declares one bounded agent task that fixes a failed task's
+precondition. Smithers first exhausts the original task's `retryPolicy` and
+agent fallback chain. If the failure is terminal, it runs the repair in the
+same workspace, persists the repair's Zod-validated output, then runs the
+original task one more time from the first agent in its chain.
+
+```tsx
+<Task
+  id="read-manifest"
+  output={outputs.manifest}
+  noRetry
+  repair={{
+    agent: repairAgent,
+    output: outputs.repair,
+    instructions: "Create the missing generated/manifest.json file.",
+  }}
+>
+  {async () => readManifest()}
+</Task>
+```
+
+The repair prompt always receives a structured context with `runId`,
+`nodeId`, `iteration`, the terminal error, every durable attempt summary,
+the original task kind, label, prompt or static payload, dependency ids, and
+the resolved workflow input and dependency outputs, and the active workspace
+path and branch. Attempt summaries include state,
+timestamps, error payload, and `jjPointer`. The repair agent operates in that
+same workspace, so filesystem changes are visible to the final original task
+attempt.
+
+Repair is a task, not a replacement result and not an automatic agent
+escalation. Use `fallbackAgent`, an agent array, or `fallbackAgents()` to try a
+different agent for the same work. Use `repair` when another task must change
+the state that made the original work impossible.
+
+The repair has a finite attempt budget. It runs once by default, or at most
+`retries + 1` times when configured. A repair that exhausts that budget fails
+with `TASK_REPAIR_FAILED`; it never repairs itself, and the original task can
+enter repair only once. Repair attempts and their output are ordinary durable
+rows, so resuming after a process crash continues an interrupted repair rather
+than starting a second recovery round.
+
+`repair` and `continueOnFail` are mutually exclusive. `continueOnFail` already
+declares that the failure is handled and downstream work may proceed. Combining
+it with repair is rejected during graph extraction so there is no ambiguity
+about whether a tolerated failure should trigger recovery.
 
 ## External side effects
 
@@ -9650,6 +9710,19 @@ type InferDeps<D extends DepsSpec> = {
   [K in keyof D]: D[K] extends string ? unknown : InferOutputEntry<D[K]>;
 };
 
+type TaskRepair = {
+  agent: AgentLike | AgentLike[];
+  output: OutputTarget;
+  outputSchema?: import("zod").ZodObject<any>;
+  instructions?: string;
+  retries?: number;
+  retryPolicy?: RetryPolicy;
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  heartbeatTimeout?: number;
+  maxSchemaRetries?: number;
+};
+
 type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSpec = {}> = {
   key?: string;
   id: string;
@@ -9673,6 +9746,7 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   noRetry?: boolean;
   retries?: number;                 // default Infinity (set 0 to disable)
   retryPolicy?: RetryPolicy;
+  repair?: TaskRepair;
   continueOnFail?: boolean;
   cache?: CachePolicy;
   scorers?: ScorersMap;
@@ -10614,6 +10688,7 @@ type KnownSmithersErrorCode =
   | "RUN_OWNER_ALIVE" | "RUN_STILL_RUNNING" | "RUN_RESUME_CLAIM_LOST" | "RUN_RESUME_CLAIM_FAILED"
   | "RUN_RESUME_ACTIVATION_FAILED" | "AUTO_RESUME_GAVE_UP" | "RUN_HIJACKED" | "CONTINUATION_STATE_TOO_LARGE"
   | "INVALID_CONTINUATION_STATE" | "RALPH_MAX_REACHED" | "SCHEDULER_ERROR" | "SESSION_ERROR" | "TASK_STALLED"
+  | "TASK_REPAIR_FAILED"
   | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "TASK_EMPTY_PROMPT" | "WORKFLOW_RENDER_FAILED" | "DUPLICATE_ID" | "NESTED_LOOP"
   | "WORKTREE_EMPTY_PATH" | "MDX_PRELOAD_INACTIVE" | "CONTEXT_OUTSIDE_WORKFLOW"
   | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "BOUND_STALE" | "ASPECT_BUDGET_EXCEEDED" | "APPROVAL_OUTSIDE_TASK"
@@ -11354,6 +11429,7 @@ try {
 | `SCHEDULER_ERROR` | The scheduler cannot produce a valid execution decision. | -- |
 | `SESSION_ERROR` | The workflow session state machine reaches an invalid or failed state. | -- |
 | `TASK_STALLED` | A task stopped retrying after consecutive attempts failed with an identical error signature (non-progress detection) and the run failed. | `{ key, nodeId, attempts, identicalFailures, signature }` |
+| `TASK_REPAIR_FAILED` | A declared task repair exhausts its finite attempt budget or fails terminally. | `{ nodeId, repairNodeId, attempts }` |
 
 ## Components
 

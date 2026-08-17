@@ -102,6 +102,7 @@
 /** @typedef {import("./ScanFixVerifyProps.ts").ScanFixVerifyProps} ScanFixVerifyProps */
 /** @typedef {import("@smthrs/graph/types").ScorersMap} ScorersMap */
 /** @typedef {import("./SequenceProps.ts").SequenceProps} SequenceProps */
+/** @typedef {import("./TaskRepair.ts").TaskRepair} TaskRepair */
 /** @typedef {import("./SidecarDelta.ts").SidecarDelta} SidecarDelta */
 /** @typedef {import("./SidecarProps.ts").SidecarProps} SidecarProps */
 /**

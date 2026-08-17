@@ -3578,6 +3578,19 @@ export function resolveSchema(db) {
  */
 export function resolveTaskOutputs(tasks, workflow) {
   for (const task of tasks) {
+    if (task.repair) {
+      const repairTarget = {
+        nodeId: `__smithers_repair__:${encodeURIComponent(task.nodeId)}`,
+        outputTable: task.repair.outputTable,
+        outputTableName: task.repair.outputTableName,
+        outputRef: task.repair.outputRef,
+        outputSchema: task.repair.outputSchema,
+      };
+      resolveTaskOutputs([repairTarget], workflow);
+      task.repair.outputTable = repairTarget.outputTable;
+      task.repair.outputTableName = repairTarget.outputTableName;
+      task.repair.outputSchema = repairTarget.outputSchema;
+    }
     if (isTimerTask(task)) {
       continue;
     }
@@ -10365,35 +10378,218 @@ async function runWorkflowBodyDriver(workflow, opts) {
           );
           return existingOutput;
         }
-        // A node the previous pass marked `stalled` (#1500) stays terminal:
-        // re-dispatching it after a resume would restart the very livelock
-        // stall detection just stopped.
         const priorNode = await Effect.runPromise(adapter.getNode(runId, task.nodeId, task.iteration));
-        if (priorNode?.state === "stalled") {
-          throw await readTaskFailure(task);
-        }
-        const attempts = await Effect.runPromise(adapter.listAttempts(runId, task.nodeId, task.iteration));
-        const failedAttempts = attempts.filter((attempt) => attempt.state === "failed");
-        const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableTaskFailure(attempt));
-        const retryConsumingFailedAttempts = failedAttempts.filter((attempt) => !isQuotaTaskFailure(attempt));
-        const latestFailedAttemptIsQuota = isQuotaTaskFailure(failedAttempts[0]);
-        if (
-          !latestFailedAttemptIsQuota &&
-          (hasNonRetryableFailure || retryConsumingFailedAttempts.length >= task.retries + 1)
-        ) {
-          await Effect.runPromise(
-            adapter.insertNode({
-              runId,
-              nodeId: task.nodeId,
-              iteration: task.iteration,
-              state: "failed",
-              lastAttempt: attempts[0]?.attempt ?? null,
-              updatedAtMs: nowMs(),
-              outputTable: task.outputTableName,
-              label: task.label ?? null,
-            }),
+        let attempts = await Effect.runPromise(adapter.listAttempts(runId, task.nodeId, task.iteration));
+        const terminalFailure = (nodeState = priorNode?.state) => {
+          const failedAttempts = attempts.filter((attempt) => attempt.state === "failed");
+          const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableTaskFailure(attempt));
+          const retryConsumingFailedAttempts = failedAttempts.filter((attempt) => !isQuotaTaskFailure(attempt));
+          const latestFailedAttemptIsQuota = isQuotaTaskFailure(failedAttempts[0]);
+          return (
+            nodeState === "stalled" ||
+            (!latestFailedAttemptIsQuota &&
+              (hasNonRetryableFailure || retryConsumingFailedAttempts.length >= task.retries + 1))
           );
-          throw await readTaskFailure(task);
+        };
+        const executeDescriptor = async (descriptor) => {
+          await runPromisePreservingFailure(
+            withCorrelationContext(
+              withSmithersSpan(
+                smithersSpanNames.task,
+                executeTaskBridgeEffect(
+                  adapter,
+                  db,
+                  runId,
+                  descriptor,
+                  descriptorMap,
+                  inputTable,
+                  eventBus,
+                  toolConfig,
+                  workflowName,
+                  cacheEnabled,
+                  runAbortController.signal,
+                  disabledAgents,
+                  runAbortController,
+                  hijackState,
+                  legacyExecuteTask,
+                  pauseAbortController.signal,
+                ),
+                {
+                  runId,
+                  workflowName,
+                  nodeId: descriptor.nodeId,
+                  iteration: descriptor.iteration,
+                  nodeLabel: descriptor.label ?? null,
+                  status: "running",
+                },
+              ),
+              {
+                workflowName,
+                nodeId: descriptor.nodeId,
+                iteration: descriptor.iteration,
+              },
+            ),
+          );
+        };
+        const repairNodeId = `__smithers_repair__:${encodeURIComponent(task.nodeId)}`;
+        const runRepair = async () => {
+          if (!task.repair) return false;
+          const repairNode = await Effect.runPromise(adapter.getNode(runId, repairNodeId, task.iteration));
+          const repairAttempts = await Effect.runPromise(adapter.listAttempts(runId, repairNodeId, task.iteration));
+          if (repairNode?.state === "finished") return true;
+          if (repairNode?.state === "failed" || repairNode?.state === "stalled") {
+            const failed = repairAttempts.filter((attempt) => attempt.state === "failed");
+            const terminal =
+              repairNode.state === "stalled" ||
+              failed.some((attempt) => !isRetryableTaskFailure(attempt)) ||
+              failed.filter((attempt) => !isQuotaTaskFailure(attempt)).length >= task.repair.retries + 1;
+            if (terminal) {
+              throw new SmithersError(
+                "TASK_REPAIR_FAILED",
+                `Repair for task ${task.nodeId} failed after ${failed.length} attempt${failed.length === 1 ? "" : "s"}.`,
+                { nodeId: task.nodeId, repairNodeId, attempts: failed.length },
+                await readTaskFailure({ ...task, nodeId: repairNodeId }),
+              );
+            }
+            const retryState = parseDurableRetryState(
+              parseAttemptMetaJson(repairAttempts[0]?.metaJson)[RETRY_STATE_META_KEY],
+            );
+            if (retryState?.retryAtMs > nowMs()) {
+              await sleep(retryState.retryAtMs - nowMs(), runAbortController.signal);
+            }
+          }
+          const parseError = (attempt) => {
+            if (!attempt?.errorJson) return null;
+            try {
+              return JSON.parse(attempt.errorJson);
+            } catch {
+              return attempt.errorJson;
+            }
+          };
+          const originalError = parseError(attempts.find((attempt) => attempt.state === "failed"));
+          const context = {
+            runId,
+            nodeId: task.nodeId,
+            iteration: task.iteration,
+            error: originalError,
+            attempts: [...attempts].reverse().map((attempt) => ({
+              attempt: attempt.attempt,
+              state: attempt.state,
+              startedAtMs: attempt.startedAtMs ?? null,
+              finishedAtMs: attempt.finishedAtMs ?? null,
+              error: parseError(attempt),
+              jjPointer: attempt.jjPointer ?? null,
+            })),
+            task: {
+              kind: task.kind ?? (task.agent ? "agent" : task.computeFn ? "compute" : "static"),
+              label: task.label ?? null,
+              prompt: task.prompt ?? null,
+              staticPayload: task.staticPayload ?? null,
+              dependsOn: task.dependsOn ?? [],
+              needs: task.needs ?? {},
+              executionContext: await buildCacheContext(
+                db,
+                inputTable,
+                runId,
+                task,
+                descriptorMap,
+                Number(attempts[0]?.attempt ?? 0),
+              ),
+            },
+            worktree: {
+              path: task.worktreePath ?? toolConfig.rootDir,
+              branch: task.worktreeBranch ?? null,
+              baseBranch: task.worktreeBaseBranch ?? null,
+              lastAttemptJjPointer: attempts.find((attempt) => attempt.jjPointer)?.jjPointer ?? null,
+            },
+          };
+          const repairPrompt = [
+            `Repair the precondition that caused task "${task.nodeId}" to fail terminally.`,
+            "Work in the same workspace. Make the smallest targeted change needed for the original task to succeed.",
+            "Do not replace the original task and do not merely retry it. Return the declared structured repair result.",
+            task.repair.instructions ? `Workflow instructions:\n${task.repair.instructions}` : "",
+            `Failure context:\n${JSON.stringify(context, null, 2)}`,
+          ]
+            .filter(Boolean)
+            .join("\n\n");
+          const repairDescriptor = {
+            nodeId: repairNodeId,
+            ordinal: task.ordinal,
+            iteration: task.iteration,
+            kind: "agent",
+            worktreeId: task.worktreeId,
+            worktreePath: task.worktreePath,
+            worktreeBranch: task.worktreeBranch,
+            worktreeBaseBranch: task.worktreeBaseBranch,
+            outputTable: task.repair.outputTable,
+            outputTableName: task.repair.outputTableName,
+            outputRef: task.repair.outputRef,
+            outputSchema: task.repair.outputSchema,
+            needsApproval: false,
+            skipIf: false,
+            retries: task.repair.retries,
+            maxSchemaRetries: task.repair.maxSchemaRetries,
+            retryPolicy: task.repair.retryPolicy,
+            timeoutMs: task.repair.timeoutMs,
+            heartbeatTimeoutMs: task.repair.heartbeatTimeoutMs,
+            continueOnFail: false,
+            agent: task.repair.agent,
+            prompt: repairPrompt,
+            label: `repair:${task.nodeId}`,
+            meta: { __taskRepairFor: task.nodeId },
+          };
+          await executeDescriptor(repairDescriptor);
+          const completed = await Effect.runPromise(adapter.getNode(runId, repairNodeId, task.iteration));
+          if (completed?.state === "finished") {
+            await readTaskOutput(repairDescriptor);
+            return true;
+          }
+          return runRepair();
+        };
+        const recoverTerminalFailure = async () => {
+          if (!task.repair) return false;
+          const repairNode = await Effect.runPromise(adapter.getNode(runId, repairNodeId, task.iteration));
+          const postRepairFailure =
+            repairNode?.state === "finished" &&
+            attempts.some(
+              (attempt) =>
+                attempt.state === "failed" &&
+                Number(attempt.startedAtMs ?? 0) >= Number(repairNode.updatedAtMs ?? Number.MAX_SAFE_INTEGER),
+            );
+          if (postRepairFailure) return false;
+          return runRepair();
+        };
+        if (terminalFailure()) {
+          const repaired = await recoverTerminalFailure();
+          if (!repaired) {
+            await Effect.runPromise(
+              adapter.insertNode({
+                runId,
+                nodeId: task.nodeId,
+                iteration: task.iteration,
+                state: priorNode?.state === "stalled" ? "stalled" : "failed",
+                lastAttempt: attempts[0]?.attempt ?? null,
+                updatedAtMs: nowMs(),
+                outputTable: task.outputTableName,
+                label: task.label ?? null,
+              }),
+            );
+            throw await readTaskFailure(task);
+          }
+          // The activity bridge coalesces duplicate dispatches for one
+          // macrotask. Cross that boundary so this intentional post-repair
+          // execution cannot replay the terminal pre-repair result.
+          await sleep(0);
+          await executeDescriptor({
+            ...task,
+            agent: Array.isArray(task.agent) ? task.agent[0] : task.agent,
+            meta: { ...task.meta, __taskRepairRetry: true },
+          });
+          const repairedNode = await Effect.runPromise(adapter.getNode(runId, task.nodeId, task.iteration));
+          if (repairedNode?.state === "failed" || repairedNode?.state === "stalled") {
+            throw await readTaskFailure(task);
+          }
+          return readTaskOutput(task);
         }
         if (task.proofBindingRequired) {
           // Rendering can be followed by a long running attempt or retry
@@ -10412,48 +10608,24 @@ async function runWorkflowBodyDriver(workflow, opts) {
             );
           }
         }
-        await runPromisePreservingFailure(
-          withCorrelationContext(
-            withSmithersSpan(
-              smithersSpanNames.task,
-              executeTaskBridgeEffect(
-                adapter,
-                db,
-                runId,
-                task,
-                descriptorMap,
-                inputTable,
-                eventBus,
-                toolConfig,
-                workflowName,
-                cacheEnabled,
-                runAbortController.signal,
-                disabledAgents,
-                runAbortController,
-                hijackState,
-                legacyExecuteTask,
-                pauseAbortController.signal,
-              ),
-              {
-                runId,
-                workflowName,
-                nodeId: task.nodeId,
-                iteration: task.iteration,
-                nodeLabel: task.label ?? null,
-                status: "running",
-              },
-            ),
-            {
-              workflowName,
-              nodeId: task.nodeId,
-              iteration: task.iteration,
-            },
-          ),
-        );
+        await executeDescriptor(task);
         const node = await Effect.runPromise(adapter.getNode(runId, task.nodeId, task.iteration));
         // `stalled` is a terminal failure verdict (#1500), so it surfaces the
         // attempt failure exactly like `failed` does.
         if (node?.state === "failed" || node?.state === "stalled") {
+          attempts = await Effect.runPromise(adapter.listAttempts(runId, task.nodeId, task.iteration));
+          if (terminalFailure(node.state) && (await recoverTerminalFailure())) {
+            await sleep(0);
+            await executeDescriptor({
+              ...task,
+              agent: Array.isArray(task.agent) ? task.agent[0] : task.agent,
+              meta: { ...task.meta, __taskRepairRetry: true },
+            });
+            const recoveredNode = await Effect.runPromise(adapter.getNode(runId, task.nodeId, task.iteration));
+            if (recoveredNode?.state !== "failed" && recoveredNode?.state !== "stalled") {
+              return readTaskOutput(task);
+            }
+          }
           throw await readTaskFailure(task);
         }
         if (node?.state === "cancelled") {

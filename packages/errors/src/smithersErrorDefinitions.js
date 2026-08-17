@@ -269,6 +269,11 @@ export const smithersErrorDefinitions = {
     when: "A task stopped retrying after consecutive attempts failed with an identical error signature (non-progress detection) and the run failed.",
     details: "{ key, nodeId, attempts, identicalFailures, signature }",
   },
+  TASK_REPAIR_FAILED: {
+    category: "engine",
+    when: "A declared task repair exhausts its finite attempt budget or fails terminally.",
+    details: "{ nodeId, repairNodeId, attempts }",
+  },
   TASK_ID_REQUIRED: {
     category: "components",
     when: "<Task> is missing a valid string id.",

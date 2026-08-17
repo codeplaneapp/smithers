@@ -347,6 +347,29 @@ describe("extractFromHost", () => {
     expect(result.tasks[0].retries).toBe(0);
     expect(result.tasks[0].retryPolicy).toBeUndefined();
   });
+  test("extracts a bounded repair declaration", () => {
+    const agent = { generate: async () => ({}) };
+    const repairOutput = z.object({ repaired: z.boolean() });
+    const root = hostEl("smithers:task", {
+      id: "t1",
+      output: "t",
+      repair: { agent, output: repairOutput, instructions: "Fix state" },
+    });
+    const task = extractFromHost(root).tasks[0];
+    expect(task.repair).toMatchObject({ agent, outputRef: repairOutput, instructions: "Fix state", retries: 0 });
+  });
+  test("repair is mutually exclusive with continueOnFail", () => {
+    expect(() =>
+      extractFromHost(
+        hostEl("smithers:task", {
+          id: "t1",
+          output: "t",
+          continueOnFail: true,
+          repair: { agent: { generate: async () => ({}) }, output: "repair" },
+        }),
+      ),
+    ).toThrow("cannot combine repair with continueOnFail");
+  });
   test("extracts skipIf flag", () => {
     const root = hostEl("smithers:task", {
       id: "t1",

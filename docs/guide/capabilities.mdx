@@ -64,6 +64,7 @@ stops it instead of burning the retry budget.
 | --- | --- |
 | "That step failed the same way 80 times. Stop it after a few and tell me." | Non-progress detection: after 3 consecutive attempts with an identical error signature the node goes to the `stalled` state; tune it with `retryPolicy={{ maxIdenticalFailures: N }}` ([Retries and Recovery](/capabilities/retries-and-recovery)). |
 | "Never retry this gate. If it fails, it failed." | `retryPolicy={{ retryable: false }}`, or a `retryable(error)` predicate to veto only some failures. |
+| "If this task fails terminally, fix its precondition and try it once more." | `repair={{ agent, output, instructions }}` runs one durable repair task after retries and agent fallbacks are exhausted, then gives the original task one fresh attempt. |
 | "The run error just says the node name. Tell me what actually broke." | Run-level errors carry the failing node, the attempt count, and the last attempt's real error payload. |
 | "It failed. What do I run to pick up where it left off?" | The failure output and `bunx smthrs why` print the last good checkpoint with the exact `up --resume` and `replay --frame` commands. |
 

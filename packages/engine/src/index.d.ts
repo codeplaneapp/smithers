@@ -3596,6 +3596,7 @@ declare function applyOptimizationArtifactToTasks(tasks: _smthrs_graph_TaskDescr
     retries: number;
     maxSchemaRetries?: number;
     retryPolicy?: _smthrs_graph_types.RetryPolicy;
+    repair?: _smthrs_graph_types.TaskRepairDescriptor;
     timeoutMs: number | null;
     heartbeatTimeoutMs: number | null;
     continueOnFail: boolean;

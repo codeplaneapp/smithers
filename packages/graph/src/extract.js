@@ -159,6 +159,55 @@ function resolveRetryConfig(raw, isAgent = false) {
   return { retries, retryPolicy };
 }
 /**
+ * Normalize the author-facing repair declaration. A repair is deliberately a
+ * bounded agent task, not another workflow branch.
+ * @param {Record<string, unknown>} raw
+ * @param {string} nodeId
+ * @returns {import("./types.ts").TaskRepairDescriptor | undefined}
+ */
+function resolveRepair(raw, nodeId) {
+  if (raw.repair == null) return undefined;
+  if (raw.continueOnFail) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `Task ${nodeId} cannot combine repair with continueOnFail; a tolerated failure never enters repair.`,
+      { nodeId },
+    );
+  }
+  if (typeof raw.repair !== "object" || Array.isArray(raw.repair)) {
+    throw new SmithersError("INVALID_INPUT", `Task ${nodeId} repair must be an object.`, { nodeId });
+  }
+  const repair = /** @type {Record<string, unknown>} */ (raw.repair);
+  if (!repair.agent) {
+    throw new SmithersError("INVALID_INPUT", `Task ${nodeId} repair requires an agent.`, { nodeId });
+  }
+  if (!repair.output) {
+    throw new SmithersError("INVALID_INPUT", `Task ${nodeId} repair requires an output.`, { nodeId });
+  }
+  const retriesRaw = repair.retries === undefined ? 0 : coerceFiniteNumber(repair.retries);
+  if (retriesRaw == null || retriesRaw < 0 || !Number.isSafeInteger(retriesRaw)) {
+    throw new SmithersError("INVALID_INPUT", `Task ${nodeId} repair retries must be a finite non-negative integer.`, {
+      nodeId,
+    });
+  }
+  const output = resolveOutput(repair);
+  return {
+    agent: /** @type {import("./types.ts").TaskRepairDescriptor["agent"]} */ (repair.agent),
+    ...output,
+    instructions: typeof repair.instructions === "string" ? repair.instructions : undefined,
+    retries: retriesRaw,
+    retryPolicy:
+      repair.retryPolicy && typeof repair.retryPolicy === "object"
+        ? /** @type {import("./RetryPolicy.ts").RetryPolicy} */ (repair.retryPolicy)
+        : retriesRaw > 0
+          ? { backoff: "exponential", initialDelayMs: 1000 }
+          : undefined,
+    timeoutMs: coerceFiniteNumber(repair.timeoutMs),
+    heartbeatTimeoutMs: parseHeartbeatTimeoutMs(repair) ?? DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS,
+    maxSchemaRetries: typeof repair.maxSchemaRetries === "number" ? repair.maxSchemaRetries : undefined,
+  };
+}
+/**
  * @param {HostNode} node
  * @returns {XmlNode}
  */
@@ -821,6 +870,7 @@ export function extractGraph(root, opts) {
         retries,
         maxSchemaRetries: typeof raw.maxSchemaRetries === "number" ? raw.maxSchemaRetries : undefined,
         retryPolicy,
+        repair: resolveRepair(raw, nodeId),
         timeoutMs: coerceFiniteNumber(raw.timeoutMs),
         heartbeatTimeoutMs,
         continueOnFail: Boolean(raw.continueOnFail),

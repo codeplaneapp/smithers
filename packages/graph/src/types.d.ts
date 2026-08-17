@@ -152,6 +152,20 @@ type TaskAspects = {
         onExceeded?: "fail" | "warn";
     };
 };
+/** Engine-ready form of the author-facing `Task.repair` declaration. */
+type TaskRepairDescriptor = {
+    agent: AgentLike | AgentLike[];
+    outputTable: unknown | null;
+    outputTableName: string;
+    outputRef?: z.ZodObject;
+    outputSchema?: z.ZodObject;
+    instructions?: string;
+    retries: number;
+    retryPolicy?: RetryPolicy;
+    timeoutMs: number | null;
+    heartbeatTimeoutMs: number | null;
+    maxSchemaRetries?: number;
+};
 type TaskDescriptor = {
     nodeId: string;
     ordinal: number;
@@ -214,6 +228,8 @@ type TaskDescriptor = {
     /** Automatic output-format/schema correction calls; undefined uses the engine default. */
     maxSchemaRetries?: number;
     retryPolicy?: RetryPolicy;
+    /** One bounded repair task, executed only after this task fails terminally. */
+    repair?: TaskRepairDescriptor;
     timeoutMs: number | null;
     heartbeatTimeoutMs: number | null;
     continueOnFail: boolean;
@@ -267,4 +283,4 @@ type ExtractOptions = {
 };
 type ExtractGraph = (root: HostNode | null, opts?: ExtractOptions) => WorkflowGraph | Promise<WorkflowGraph>;
 
-export type { AgentLike, ApprovalOption, CachePolicy, ExtractGraph, ExtractOptions, GraphSnapshot, HostElement, HostNode, HostText, MemoryNamespace, MemoryNamespaceKind, RetryPolicy, SamplingConfig, ScoreResult, Scorer, ScorerBinding, ScorerFn, ScorerInput, ScorersMap, TaskAspects, TaskDescriptor, TaskMemoryConfig, WorkflowGraph, XmlElement, XmlNode, XmlText };
+export type { AgentLike, ApprovalOption, CachePolicy, ExtractGraph, ExtractOptions, GraphSnapshot, HostElement, HostNode, HostText, MemoryNamespace, MemoryNamespaceKind, RetryPolicy, SamplingConfig, ScoreResult, Scorer, ScorerBinding, ScorerFn, ScorerInput, ScorersMap, TaskAspects, TaskDescriptor, TaskMemoryConfig, TaskRepairDescriptor, WorkflowGraph, XmlElement, XmlNode, XmlText };

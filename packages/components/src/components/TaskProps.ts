@@ -10,6 +10,7 @@ import type { TaskMemoryConfig } from "@smthrs/memory/types";
 import type { OutputTarget } from "./OutputTarget.ts";
 import type { DepsSpec } from "./DepsSpec.ts";
 import type { InferDeps } from "./InferDeps.ts";
+import type { TaskRepair } from "./TaskRepair.ts";
 
 export type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSpec = {}> = {
   key?: string;
@@ -68,6 +69,12 @@ export type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends
   noRetry?: boolean;
   retries?: number;
   retryPolicy?: RetryPolicy;
+  /**
+   * Run one explicit, bounded repair task after this task exhausts retries or
+   * otherwise reaches a terminal failure, then try this task once more.
+   * Mutually exclusive with `continueOnFail`.
+   */
+  repair?: TaskRepair;
   continueOnFail?: boolean;
   cache?: CachePolicy;
   /** Optional scorers to evaluate this task's output after completion. */
