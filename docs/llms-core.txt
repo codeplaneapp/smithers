@@ -2384,7 +2384,10 @@ seat closing the chain.
 Every rung is availability-gated: oneshot selects only from the agents
 detected usable on the machine, the claude seats fall back to opencode when
 the Claude CLI is unavailable, and the kimi seats all run Kimi K3 (1M-token
-context). An explicit `--model` (a slot: `sol`, `terra`, `luna`, `kimi`,
+context). When an engine has several registered accounts, each rung runs on
+the account with the most cached quota headroom for that rung's model:
+rate-limited seats sink, and a model-scoped cap such as the Fable weekly
+limit routes Fable rungs to seats that can still serve them. An explicit `--model` (a slot: `sol`, `terra`, `luna`, `kimi`,
 `fable`, `opus`, `sonnet`; or a canonical model id) or `--agent` (`codex`,
 `kimi`, `claude-code`, `opencode`, `pi`) always overrides classification; the
 default `auto` follows the task shape, with review on Sol at high reasoning

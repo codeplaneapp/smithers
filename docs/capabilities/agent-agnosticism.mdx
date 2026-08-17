@@ -93,6 +93,8 @@ bunx smthrs agents list
 bunx smthrs usage          # rate-limit / subscription quota per registered account
 ```
 
+`bunx smthrs usage` prints each account's quota windows. For a Claude account that is the `5-hour session` and `weekly` windows plus any model-scoped weekly cap Anthropic reports, such as `weekly (Fable)`, parsed from the OAuth usage payload's `limits` array. A scoped window carries the lowercased model family in the optional `modelScope` field on `UsageWindow` (`"fable"`, `"opus"`, `"sonnet"`); account-wide windows leave it unset.
+
 Subscription seats are a **config directory**, not a key: `ClaudeCodeAgent` *clears* `ANTHROPIC_API_KEY` so the CLI bills your Claude Pro/Max plan from the account's isolated credentials (`CLAUDE_CONFIG_DIR/.credentials.json`, or on macOS a per-config-dir Keychain item); `CodexAgent` mirrors this with `CODEX_HOME`/`auth.json`. Registering multiple labels for one provider gives you a seat pool you wire into distinct agent instances (one `configDir` each) and place on chain rungs - the quota failover above then rotates work off exhausted seats. Setting `apiKey` flips the same adapter to pay-per-token API billing, which is what makes cold sandboxes viable (see [Sandboxes](/concepts/sandboxes)). `bunx smthrs agents add` also regenerates a previously generated `.smithers/agents.ts` to reflect the registry; hand-edited files are left alone.
 
 `--tmux` runs the whole login for you: it launches the provider CLI in a detached tmux session with the account's config-dir variable set (Claude Code via `claude auth login --claudeai`, which skips REPL onboarding), prints the `tmux attach` command, and polls until the browser login completes, then registers the seat. Re-running the same command after a timeout detects finished credentials and just registers.
@@ -118,6 +120,13 @@ import { fallbackAgents, ClaudeCodeAgent } from "smthrs";
 ```
 
 Options: `providers` (default `["claude-code", "codex"]`, or `"all"`), `fallback` (agent, array, or `[]`), `models` (per-provider override; otherwise the seat's registered model, else the CLI default), `shuffle: false` for registration order, and `seed` / `random` to control the shuffle. Pass `seed: ctx.runId` so one run keeps a stable chain across renders and retries (which keeps per-rung quota skipping precise) while load still spreads across runs.
+
+Seats are ordered by cached quota headroom for the model each rung would serve, and the shuffle only breaks ties. Because the headroom lookup keys on the per-model window ids, a Fable rung reads the `weekly-fable` window and an Opus rung reads `weekly-opus`, so a seat that spent its Fable cap still sorts well for Opus work. The ordering reads the on-disk usage cache (`usage-cache.json`) and the persisted quota-block file, never the network, so it is safe at workflow render time.
+
+`@smthrs/usage` also exports the availability classifier the quota dashboard renders:
+
+- `classifyAccountAvailability(windows, nowMs?)` returns `{ status, reasons }` with `status` one of `"ok" | "degraded" | "blocked" | "unknown"`. `blocked` means an account-wide window (5-hour session, weekly) is exhausted; `degraded` means only a model-scoped cap like the Fable weekly is exhausted, so other models still work.
+- `effectiveUsedPercent(window, nowMs)` returns a window's used percent, reading a window whose reset time has passed as fresh.
 
 ## Guarantees and limits
 

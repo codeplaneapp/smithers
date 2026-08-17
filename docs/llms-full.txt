@@ -2402,7 +2402,10 @@ seat closing the chain.
 Every rung is availability-gated: oneshot selects only from the agents
 detected usable on the machine, the claude seats fall back to opencode when
 the Claude CLI is unavailable, and the kimi seats all run Kimi K3 (1M-token
-context). An explicit `--model` (a slot: `sol`, `terra`, `luna`, `kimi`,
+context). When an engine has several registered accounts, each rung runs on
+the account with the most cached quota headroom for that rung's model:
+rate-limited seats sink, and a model-scoped cap such as the Fable weekly
+limit routes Fable rungs to seats that can still serve them. An explicit `--model` (a slot: `sol`, `terra`, `luna`, `kimi`,
 `fable`, `opus`, `sonnet`; or a canonical model id) or `--agent` (`codex`,
 `kimi`, `claude-code`, `opencode`, `pi`) always overrides classification; the
 default `auto` follows the task shape, with review on Sol at high reasoning
@@ -23314,7 +23317,7 @@ Used by `bunx smthrs events --type <category>` and the metrics layer.
 |---|---|
 | `run` | RunAutoResumed, RunAutoResumeSkipped, RunStarted, RunStatusChanged, RunStateChanged, RunConcurrencySaturated, RunFinished, RunFailed, RunCancelled, RunContinuedAsNew, RunHijackRequested, RunHijacked, RetryTaskStarted, RetryTaskFinished, RunForked, ReplayStarted |
 | `frame` | FrameCommitted |
-| `node` | NodePending, NodeStarted, TaskHeartbeat, TaskHeartbeatTimeout, NodeFinished, NodeFailed, NodeCancelled, NodeSkipped, NodeRetrying, NodeWaitingApproval, NodeWaitingTimer |
+| `node` | NodePending, NodeStarted, TaskHeartbeat, TaskHeartbeatTimeout, NodeFinished, NodeFailed, NodeStalled, NodeCancelled, NodeSkipped, NodeRetrying, NodeWaitingApproval, NodeWaitingTimer |
 | `approval` | ApprovalRequested, ApprovalGranted, ApprovalAutoApproved, ApprovalDenied |
 | `tool-call` | ToolCallStarted, ToolCallFinished |
 | `agent` | AgentEvent, AgentTraceEvent, AgentTraceSummary, AgentSessionEvent |
@@ -23419,6 +23422,7 @@ type TaskState =
   | "in-progress"
   | "finished"
   | "failed"
+  | "stalled"
   | "cancelled"
   | "skipped";
 ```
@@ -23430,7 +23434,7 @@ type TaskState =
 Node lifecycle events do not carry a separate `NodeStatus` or `TaskState`
 field. Their names report transitions: `NodePending`, `NodeStarted`,
 `NodeRetrying`, the `NodeWaiting*` variants, and the terminal
-`NodeFinished`/`NodeFailed`/`NodeCancelled`/`NodeSkipped` variants. Read node
+`NodeFinished`/`NodeFailed`/`NodeStalled`/`NodeCancelled`/`NodeSkipped` variants. Read node
 records or a DevTools snapshot when you need the current persisted
 `TaskState`; some states, including bound waits, have no dedicated event.
 Browser run trees intentionally collapse the detailed states to the
