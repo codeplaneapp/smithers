@@ -145,7 +145,7 @@ function normalizeChildOutput(runResult) {
  */
 async function resetFailedChildRun(adapter, childRunId, acceptWorkflowChange) {
   const nodes = await adapter.listNodes(childRunId);
-  const failedNodes = nodes.filter((node) => node.state === "failed");
+  const failedNodes = nodes.filter((node) => node.state === "failed" || node.state === "stalled");
   if (failedNodes.length === 0) return false;
   for (const failedNode of failedNodes) {
     const reset = await retryTask(adapter, {
@@ -163,7 +163,9 @@ async function resetFailedChildRun(adapter, childRunId, acceptWorkflowChange) {
       );
     }
   }
-  const remainingFailed = (await adapter.listNodes(childRunId)).filter((node) => node.state === "failed");
+  const remainingFailed = (await adapter.listNodes(childRunId)).filter(
+    (node) => node.state === "failed" || node.state === "stalled",
+  );
   if (remainingFailed.length > 0) {
     throw new SmithersError(
       "INTERNAL_ERROR",

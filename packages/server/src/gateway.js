@@ -53,6 +53,7 @@ import {
 import { runFork, runPromise } from "./smithersRuntime.js";
 import { prometheusContentType, renderPrometheusMetrics } from "@smthrs/observability";
 import { nowMs } from "@smthrs/scheduler/nowMs";
+import { makeRunParkAbortReason } from "@smthrs/engine/run-parking";
 import { errorToJson } from "@smthrs/errors/errorToJson";
 import { isSmithersError } from "@smthrs/errors/isSmithersError";
 import { SmithersError } from "@smthrs/errors/SmithersError";
@@ -725,6 +726,189 @@ function isLoopbackHost(hostHeader) {
     host.endsWith(".localhost") ||
     /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
   );
+}
+/**
+ * Parse a dotted-quad IPv4 literal into its 4 raw bytes.
+ * @param {string} value
+ * @returns {Uint8Array | null}
+ */
+function parseIpv4Bytes(value) {
+  const parts = value.split(".");
+  if (parts.length !== 4) {
+    return null;
+  }
+  const bytes = new Uint8Array(4);
+  for (let index = 0; index < 4; index += 1) {
+    const part = parts[index];
+    if (!/^\d{1,3}$/.test(part)) {
+      return null;
+    }
+    const octet = Number(part);
+    if (octet > 255) {
+      return null;
+    }
+    bytes[index] = octet;
+  }
+  return bytes;
+}
+/**
+ * Parse an IP literal into raw bytes: 4 for IPv4, 16 for IPv6. An IPv4-mapped
+ * IPv6 address (`::ffff:10.0.0.7`, what a dual-stack listener reports for an
+ * IPv4 peer) collapses to its 4-byte IPv4 form so one `10.0.0.7` entry matches
+ * both spellings. An RFC 4007 zone id (`fe80::1%eth0`) is stripped.
+ * @param {string} value
+ * @returns {Uint8Array | null}
+ */
+function parseIpBytes(value) {
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed === "") {
+    return null;
+  }
+  const zone = trimmed.indexOf("%");
+  const address = zone >= 0 ? trimmed.slice(0, zone) : trimmed;
+  if (!address.includes(":")) {
+    return parseIpv4Bytes(address);
+  }
+  // A trailing dotted quad ("::ffff:10.0.0.7") occupies the final two groups.
+  let text = address;
+  const lastColon = text.lastIndexOf(":");
+  if (text.slice(lastColon + 1).includes(".")) {
+    const embedded = parseIpv4Bytes(text.slice(lastColon + 1));
+    if (!embedded) {
+      return null;
+    }
+    const high = ((embedded[0] << 8) | embedded[1]).toString(16);
+    const low = ((embedded[2] << 8) | embedded[3]).toString(16);
+    text = `${text.slice(0, lastColon + 1)}${high}:${low}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) {
+    return null;
+  }
+  /**
+   * @param {string} part
+   * @returns {number[] | null}
+   */
+  const parseGroups = (part) => {
+    if (part === "") {
+      return [];
+    }
+    const parsed = [];
+    for (const group of part.split(":")) {
+      if (!/^[0-9a-f]{1,4}$/.test(group)) {
+        return null;
+      }
+      parsed.push(Number.parseInt(group, 16));
+    }
+    return parsed;
+  };
+  const head = parseGroups(halves[0]);
+  const tail = halves.length === 2 ? parseGroups(halves[1]) : [];
+  if (head === null || tail === null) {
+    return null;
+  }
+  const zeros = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (zeros < 0 || (halves.length === 1 && head.length !== 8)) {
+    return null;
+  }
+  const words = [...head, ...new Array(zeros).fill(0), ...tail];
+  const bytes = new Uint8Array(16);
+  for (let index = 0; index < 8; index += 1) {
+    bytes[index * 2] = (words[index] >> 8) & 0xff;
+    bytes[index * 2 + 1] = words[index] & 0xff;
+  }
+  const mapped = bytes[10] === 0xff && bytes[11] === 0xff && bytes.slice(0, 10).every((byte) => byte === 0);
+  return mapped ? bytes.slice(12) : bytes;
+}
+/**
+ * @param {Uint8Array} peer
+ * @param {{ bytes: Uint8Array; prefix: number }} cidr
+ * @returns {boolean}
+ */
+function ipMatchesCidr(peer, cidr) {
+  // Address families never match across each other: a 4-byte IPv4 peer is only
+  // compared to IPv4 entries (mapped forms are normalized before we get here).
+  if (peer.length !== cidr.bytes.length) {
+    return false;
+  }
+  const wholeBytes = cidr.prefix >> 3;
+  for (let index = 0; index < wholeBytes; index += 1) {
+    if (peer[index] !== cidr.bytes[index]) {
+      return false;
+    }
+  }
+  const remainingBits = cidr.prefix & 7;
+  if (remainingBits === 0) {
+    return true;
+  }
+  const mask = (0xff << (8 - remainingBits)) & 0xff;
+  return (peer[wholeBytes] & mask) === (cidr.bytes[wholeBytes] & mask);
+}
+/**
+ * Compile one `auth.trustedProxies` entry: an IP literal, a CIDR block, or the
+ * literal `"unix"` (peers arriving over a Unix-domain socket, bounded by the
+ * socket file's filesystem permissions).
+ * @param {unknown} entry
+ * @returns {{ kind: "unix" } | { kind: "cidr"; bytes: Uint8Array; prefix: number }}
+ */
+function compileTrustedProxyEntry(entry) {
+  const value = typeof entry === "string" ? entry.trim().toLowerCase() : "";
+  if (value === "") {
+    throw new SmithersError("INVALID_INPUT", "auth.trustedProxies entries must be non-empty strings.");
+  }
+  if (value === "unix") {
+    return { kind: "unix" };
+  }
+  const slash = value.lastIndexOf("/");
+  const bytes = parseIpBytes(slash >= 0 ? value.slice(0, slash) : value);
+  if (!bytes) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `auth.trustedProxies entry is not an IP address, a CIDR block, or "unix": ${String(entry)}`,
+    );
+  }
+  const maxPrefix = bytes.length * 8;
+  if (slash < 0) {
+    return { kind: "cidr", bytes, prefix: maxPrefix };
+  }
+  const suffix = value.slice(slash + 1);
+  if (!/^\d{1,3}$/.test(suffix) || Number(suffix) > maxPrefix) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `auth.trustedProxies entry has an out-of-range prefix length (max /${maxPrefix}): ${String(entry)}`,
+    );
+  }
+  return { kind: "cidr", bytes, prefix: Number(suffix) };
+}
+/**
+ * Compile the trusted-proxy transport trust boundary, failing startup when
+ * none is configured. trusted-proxy mode authenticates from client-supplied
+ * identity headers, so without a peer allow-list every client that can reach
+ * the listener could forge `x-user-role: operator` / `x-user-scopes: *`. A mode
+ * that cannot be enforced must not appear to work, so this throws rather than
+ * degrading to the old allow-everyone behavior (#785).
+ * @param {unknown} configured
+ * @returns {{ cidrs: { bytes: Uint8Array; prefix: number }[]; unix: boolean }}
+ */
+function compileTrustedProxies(configured) {
+  if (!Array.isArray(configured) || configured.length === 0) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      'auth.mode "trusted-proxy" requires a non-empty auth.trustedProxies list of peer IPs, CIDR blocks, or "unix". Without it the gateway cannot verify that identity headers arrived through your proxy, so any direct client could forge them.',
+    );
+  }
+  /** @type {{ bytes: Uint8Array; prefix: number }[]} */
+  const cidrs = [];
+  let unix = false;
+  for (const entry of configured) {
+    const compiled = compileTrustedProxyEntry(entry);
+    if (compiled.kind === "unix") {
+      unix = true;
+      continue;
+    }
+    cidrs.push({ bytes: compiled.bytes, prefix: compiled.prefix });
+  }
+  return { cidrs, unix };
 }
 /**
  * @param {unknown} value
@@ -1630,6 +1814,7 @@ export function statusForRpcError(code) {
       return 401;
     case "FORBIDDEN":
     case "Forbidden":
+    case "UNTRUSTED_PROXY_PEER":
       return 403;
     case "NOT_FOUND":
     case "METHOD_NOT_FOUND":
@@ -2808,6 +2993,14 @@ export class Gateway {
         ? DEFAULT_AUTH_DEADLINE_MS
         : Math.floor(assertPositiveFiniteInteger("authDeadlineMs", Number(options.authDeadlineMs)));
     this.auth = options.auth;
+    // #785: trusted-proxy mode authenticates from forgeable identity headers,
+    // so it only starts with an enforceable transport-level trust boundary.
+    // Compiling here (not on first request) makes a missing or malformed
+    // `trustedProxies` a startup failure instead of a silent open door.
+    this.trustedProxies = this.auth?.mode === "trusted-proxy" ? compileTrustedProxies(this.auth.trustedProxies) : null;
+    // Set by listen(): only a process that actually bound a Unix-domain socket
+    // may honor a "unix" trusted-proxy entry.
+    this.unixSocketListener = false;
     // A deliberate unauthenticated remote bind (`smithers gateway --insecure`)
     // trusts any Host, matching serve.js. Without this, --insecure passes the
     // CLI bind guard but isHostAllowed still 403s every non-loopback request.
@@ -5660,6 +5853,25 @@ a { color: var(--brand); }</style>
     if (this.server) {
       return this.server;
     }
+    // #785: the compiled trust boundary must be enforceable against the socket
+    // we are about to bind. A "unix"-only allow-list on a TCP listener (or an
+    // address-only allow-list on a Unix socket) would reject every request, so
+    // fail the bind instead of coming up in a mode that cannot work.
+    this.unixSocketListener = options.path !== undefined;
+    if (this.trustedProxies) {
+      if (this.unixSocketListener && !this.trustedProxies.unix) {
+        throw new SmithersError(
+          "INVALID_INPUT",
+          'auth.trustedProxies must include "unix" when the gateway listens on a Unix-domain socket; peer IPs and CIDR blocks never match a Unix peer.',
+        );
+      }
+      if (!this.unixSocketListener && this.trustedProxies.cidrs.length === 0) {
+        throw new SmithersError(
+          "INVALID_INPUT",
+          "auth.trustedProxies must include at least one peer IP or CIDR block when the gateway listens on a TCP port.",
+        );
+      }
+    }
     const wsServer = new WebSocketServer({
       noServer: true,
       maxPayload: this.maxPayload,
@@ -5804,6 +6016,39 @@ a { color: var(--brand); }</style>
         );
         return;
       }
+      // #785: in trusted-proxy mode the only credential is a set of headers,
+      // so an upgrade from an untrusted peer can never authenticate. Refuse it
+      // at the handshake, as the Origin gate above does, instead of letting it
+      // hold a pre-auth slot until its `connect` is rejected.
+      if (this.auth?.mode === "trusted-proxy" && !this.isTrustedProxyPeer(req)) {
+        emitGatewayEffect(
+          incrementMetric(gatewayErrorsTotal, {
+            kind: "auth",
+            transport: "ws",
+          }),
+        );
+        emitGatewayLog(
+          "warning",
+          "Gateway WS upgrade rejected: peer is not a configured trusted proxy",
+          {
+            transport: "ws",
+            remoteAddress: req.socket.remoteAddress ?? null,
+            host: asString(req.headers.host) ?? null,
+          },
+          "gateway:connect",
+        );
+        const body = "Peer is not a configured trusted proxy\n";
+        socket.end(
+          "HTTP/1.1 403 Forbidden\r\n" +
+            "Connection: close\r\n" +
+            "Content-Type: text/plain; charset=utf-8\r\n" +
+            `X-Smithers-API-Version: ${SMITHERS_API_VERSION}\r\n` +
+            `Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n` +
+            "\r\n" +
+            body,
+        );
+        return;
+      }
       // PTY hijack channel: same listener, same Origin/Host rejection as
       // the RPC websocket above (a drive-by page must never reach a
       // shell), then its own auth + spawn path instead of the RPC loop.
@@ -5874,7 +6119,10 @@ a { color: var(--brand); }</style>
     }
     return server;
   }
-  async close() {
+  /**
+   * @param {{ killRuns?: boolean }} [options]
+   */
+  async close(options = {}) {
     this.gatewayClosing = true;
     this.stopIdleMonitor();
     // A closing gateway never renders queued workflow views.
@@ -5889,10 +6137,27 @@ a { color: var(--brand); }</style>
     // is `cancelRun` (or `smithers down`), which claims each row terminally
     // and reaps its owner/agent process trees. Keeping the two apart is what
     // makes `close()` safe to call on a healthy gateway.
-    const activeRuns = [...this.activeRuns.values()];
-    for (const activeRun of activeRuns) {
-      activeRun.abort.abort();
-    }
+    const killRuns = options.killRuns === true;
+    const handledRuns = new Set();
+    const stopActiveRuns = async (activeRuns) => {
+      if (!killRuns) {
+        await Promise.allSettled(
+          activeRuns.map(async ([runId, activeRun]) => {
+            if (handledRuns.has(activeRun) || !activeRun.workflow) return;
+            await this.adapterForWorkflow(activeRun.workflow).requestRunPause(runId, nowMs());
+          }),
+        );
+      }
+      for (const [, activeRun] of activeRuns) {
+        if (handledRuns.has(activeRun)) continue;
+        handledRuns.add(activeRun);
+        activeRun.abort.abort(
+          killRuns ? undefined : makeRunParkAbortReason("Run parked because the Gateway is stopping"),
+        );
+      }
+    };
+    const activeRuns = [...this.activeRuns.entries()];
+    await stopActiveRuns(activeRuns);
     // Approval decisions can start a detached resume while the original run
     // is still settling. Drain that gate before taking the final active/inflight
     // snapshots so a resume cannot begin using its database after close.
@@ -5902,9 +6167,7 @@ a { color: var(--brand); }</style>
     }
     // A resume that had already entered startRun before gatewayClosing was set
     // may have registered while we awaited it. Abort that raced run too.
-    for (const activeRun of this.activeRuns.values()) {
-      activeRun.abort.abort();
-    }
+    await stopActiveRuns([...this.activeRuns.entries()]);
     const inflightRuns = [...this.inflightRuns.values()];
     if (inflightRuns.length > 0) {
       await Promise.allSettled(inflightRuns);
@@ -7274,6 +7537,53 @@ a { color: var(--brand); }</style>
     }
   }
   /**
+   * The immediate transport peer of `req`: the address of the socket that is
+   * actually connected to this process.
+   *
+   * Deliberately NOT derived from `X-Forwarded-For` (or any other header):
+   * those are supplied by the very caller whose provenance is in question, so
+   * reading the peer from them would make the trust check circular. Behind a
+   * proxy chain (`client -> edge -> internal proxy -> gateway`) the peer is the
+   * LAST hop, the one that opened this connection — only that hop belongs in
+   * `trustedProxies`, and the earlier hops in `X-Forwarded-For` are just data
+   * the trusted proxy vouched for. A request whose socket reports no remote
+   * address arrived over a Unix-domain socket, whose peer set is bounded by the
+   * socket file's filesystem permissions rather than by an address.
+   * @param {IncomingMessage} req
+   * @returns {{ kind: "ip"; address: string } | { kind: "unix" }}
+   */
+  requestPeer(req) {
+    const remoteAddress = asString(req?.socket?.remoteAddress);
+    if (remoteAddress !== undefined && remoteAddress !== "") {
+      return { kind: "ip", address: remoteAddress };
+    }
+    return { kind: "unix" };
+  }
+  /**
+   * Whether `req`'s transport peer is a configured trusted proxy, the only
+   * condition under which trusted-proxy identity headers may be honored (#785).
+   * @param {IncomingMessage} req
+   * @returns {boolean}
+   */
+  isTrustedProxyPeer(req) {
+    const trusted = this.trustedProxies;
+    if (!trusted) {
+      return false;
+    }
+    const peer = this.requestPeer(req);
+    if (peer.kind === "unix") {
+      // Require an actual Unix-domain listener: a TCP socket that has lost its
+      // remote address (already destroyed, say) must never fall through into
+      // the unix branch and inherit the socket file's trust.
+      return trusted.unix && this.unixSocketListener;
+    }
+    const bytes = parseIpBytes(peer.address);
+    if (!bytes) {
+      return false;
+    }
+    return trusted.cidrs.some((cidr) => ipMatchesCidr(bytes, cidr));
+  }
+  /**
    * DNS-rebinding defense (spec decision 16a). An unauthenticated daemon grants
    * operator scope to every request, so a browser page at a name rebound to
    * 127.0.0.1 could drive `launchRun` (real compute/shell). Browsers send the
@@ -7428,6 +7738,30 @@ a { color: var(--brand); }</style>
       };
     }
     if (this.auth.mode === "trusted-proxy") {
+      // #785: every header read below is forgeable by anyone who can reach the
+      // listener, so they are honored ONLY when the immediate transport peer is
+      // a configured trusted proxy. Any other peer is REJECTED rather than
+      // downgraded to anonymous — a forged-credential attempt has to be visible
+      // — and returning here guarantees the headers never reach the
+      // authenticated context.
+      if (!this.isTrustedProxyPeer(req)) {
+        const peer = this.requestPeer(req);
+        emitGatewayLog(
+          "warning",
+          "Gateway rejected trusted-proxy identity headers from an untrusted peer",
+          {
+            peer: peer.kind === "ip" ? peer.address : "unix",
+            host: asString(req.headers.host) ?? null,
+            origin: asString(req.headers.origin) ?? null,
+          },
+          "gateway:auth",
+        );
+        return {
+          ok: false,
+          code: "UNTRUSTED_PROXY_PEER",
+          message: "trusted-proxy identity headers are only accepted from a configured trusted proxy peer",
+        };
+      }
       // Origin allow-list is enforced uniformly above (#446).
       const [userHeader = "x-user-id", scopesHeader = "x-user-scopes", roleHeader = "x-user-role"] = (
         this.auth.trustedHeaders ?? []
@@ -8892,6 +9226,18 @@ a { color: var(--brand); }</style>
             runId: event.runId,
             nodeId: event.nodeId,
             state: "failed",
+            error: event.error,
+          },
+        };
+      case "NodeStalled":
+        return {
+          event: "node.stalled",
+          payload: {
+            runId: event.runId,
+            nodeId: event.nodeId,
+            state: "stalled",
+            identicalFailures: event.identicalFailures,
+            signature: event.signature,
             error: event.error,
           },
         };

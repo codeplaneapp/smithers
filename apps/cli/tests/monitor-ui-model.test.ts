@@ -38,7 +38,9 @@ import {
   diffPatchesOf,
   diffSummaryOf,
   embedModeFromSearch,
+  eventLogViewState,
   eventViewFor,
+  executionTreeViewState,
   filterRuns,
   formatDiffSummary,
   formatDurationMs,
@@ -57,6 +59,7 @@ import {
   labelForStatus,
   looksLikeUnifiedDiff,
   middleTruncate,
+  nodeOutputViewState,
   nodeStateRowsOf,
   nodeSummaryEligible,
   paginateRuns,
@@ -64,6 +67,7 @@ import {
   rowOf,
   runErrorOf,
   runProgress,
+  runsLandingState,
   runsViewState,
   RUNS_PAGE_SIZE,
   shortRunId,
@@ -532,6 +536,77 @@ describe("filtering", () => {
     expect(runsViewState({ ...base, totalCount: 3 })).toBe("filtered");
     expect(runsViewState({ ...base, totalCount: 3, queryError: true })).toBe("error");
     expect(runsViewState({ ...base, visibleCount: 1, totalCount: 3 })).toBe("ready");
+  });
+
+  test("the transport outranks emptiness on every runs surface", () => {
+    const base = { visibleCount: 0, totalCount: 0, loading: false, queryError: false };
+    // A socket that has not opened yet can't back "no runs yet" (issue #855).
+    expect(runsLandingState({ ...base, connectionStatus: "connecting" })).toBe("connecting");
+    expect(runsLandingState({ ...base, connectionStatus: "idle" })).toBe("connecting");
+    expect(runsLandingState({ ...base, loading: true, connectionStatus: "connecting" })).toBe("connecting");
+    expect(runsLandingState({ ...base, connectionStatus: "unauthorized", totalCount: 3, visibleCount: 3 })).toBe(
+      "unauthorized",
+    );
+    expect(runsLandingState({ ...base, connectionStatus: "offline" })).toBe("offline-without-cache");
+    expect(runsLandingState({ ...base, connectionStatus: "offline", hasCachedData: true })).toBe("offline-with-cache");
+    expect(runsLandingState({ ...base, connectionStatus: "online", loading: true })).toBe("loading");
+    expect(runsLandingState({ ...base, connectionStatus: "online", queryError: true })).toBe("error");
+    expect(runsLandingState({ ...base, connectionStatus: "online", totalCount: 3 })).toBe("filtered");
+    expect(runsLandingState({ ...base, connectionStatus: "online" })).toBe("empty");
+  });
+});
+
+describe("run-detail panel states", () => {
+  test("the event log separates loading, failure, durable emptiness, and a hidden buffer", () => {
+    const base = { visibleCount: 0, totalCount: 0, loading: false, queryError: false };
+    expect(eventLogViewState({ ...base, visibleCount: 2, totalCount: 9 })).toBe("ready");
+    // The panel's error alert owns the surface, so a failure outranks loading;
+    // reporting emptiness underneath it would be a contradictory claim.
+    expect(eventLogViewState({ ...base, loading: true, queryError: true })).toBe("error");
+    expect(eventLogViewState({ ...base, loading: true })).toBe("loading");
+    // Buffered events hidden by the Notable/Activity chips are "filtered", not
+    // "empty" — the panel owes a way back to All.
+    expect(eventLogViewState({ ...base, totalCount: 4 })).toBe("filtered");
+    expect(eventLogViewState(base)).toBe("empty");
+    // Rows on screen beat every degraded flag: a failed refetch is a banner.
+    expect(eventLogViewState({ visibleCount: 1, totalCount: 1, loading: true, queryError: true })).toBe("ready");
+  });
+
+  test("the execution tree separates the live query from the scrubbed frame", () => {
+    const base = {
+      hasRoot: false,
+      loading: false,
+      queryError: false,
+      isStatic: false,
+      frameLoading: false,
+      frameError: false,
+    };
+    expect(executionTreeViewState({ ...base, hasRoot: true })).toBe("ready");
+    expect(executionTreeViewState({ ...base, loading: true })).toBe("loading");
+    expect(executionTreeViewState({ ...base, queryError: true, loading: true })).toBe("error");
+    expect(executionTreeViewState(base)).toBe("empty");
+    // The scrubber overrides the live query, so live loading/error is muted.
+    const stat = { ...base, isStatic: true };
+    expect(executionTreeViewState({ ...stat, queryError: true, loading: true })).toBe("frame-empty");
+    expect(executionTreeViewState({ ...stat, frameLoading: true })).toBe("frame-loading");
+    expect(executionTreeViewState({ ...stat, frameError: true })).toBe("frame-error");
+    // A previous valid frame stays on screen behind a notice.
+    expect(executionTreeViewState({ ...stat, hasRoot: true, frameLoading: true })).toBe("stale-frame-loading");
+    expect(executionTreeViewState({ ...stat, hasRoot: true, frameError: true })).toBe("stale-frame-error");
+    // Loading wins over a stale error: the newer request is still in flight.
+    expect(executionTreeViewState({ ...stat, frameLoading: true, frameError: true })).toBe("frame-loading");
+    expect(executionTreeViewState({ ...stat, hasRoot: true })).toBe("ready");
+  });
+
+  test("node output never reports a pending or failed query as missing output", () => {
+    const base = { hasRow: false, loading: false, queryError: false, failed: false, live: false };
+    expect(nodeOutputViewState({ ...base, hasRow: true, queryError: true })).toBe("ready");
+    expect(nodeOutputViewState({ ...base, loading: true, queryError: true })).toBe("loading");
+    expect(nodeOutputViewState({ ...base, queryError: true, failed: true })).toBe("error");
+    expect(nodeOutputViewState({ ...base, failed: true, live: true })).toBe("failed");
+    expect(nodeOutputViewState({ ...base, live: true })).toBe("live");
+    // "empty" is the one honest claim that the node finished recording nothing.
+    expect(nodeOutputViewState(base)).toBe("empty");
   });
 });
 

@@ -587,7 +587,9 @@ function forkRunWhileLocked(adapter, params, rewindLock) {
             details: { runId: parentRunId, frameNo },
           }),
       });
-      const keysToReset = expandResetSet(parsed.nodes, resetNodes);
+      // Only the nodes the caller named reset; fork never expands to
+      // downstream dependents. See `expandResetSet` for why.
+      const keysToReset = new Set(expandResetSet(parsed.nodes, resetNodes));
       const nodesArr = yield* Effect.try({
         try: () => parseSnapshotJson(source.nodesJson, "nodesJson", { runId: parentRunId, frameNo }),
         catch: (cause) =>
@@ -598,7 +600,7 @@ function forkRunWhileLocked(adapter, params, rewindLock) {
       });
       const updatedNodes = nodesArr.map((n) => {
         const key = `${n.nodeId}::${n.iteration}`;
-        if (keysToReset.includes(key) || resetNodes.includes(n.nodeId)) {
+        if (keysToReset.has(key)) {
           return { ...n, state: "pending", lastAttempt: null };
         }
         return n;

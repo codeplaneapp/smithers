@@ -1108,6 +1108,13 @@ function checkGatewayAuthDocsMatchRuntimeDefaults() {
     ],
     [serverSource, "const allowedOrigins = this.auth?.allowedOrigins ?? [];"],
     [serverSource, "return !origin || allowedOrigins.includes(origin);"],
+    // #785: trusted-proxy identity headers are gated on the transport peer, and
+    // the mode refuses to start without an enforceable boundary.
+    [serverSource, "if (!this.isTrustedProxyPeer(req)) {"],
+    [serverSource, 'code: "UNTRUSTED_PROXY_PEER",'],
+    [GATEWAY_AUTH_CONFIG_SOURCE, "trustedProxies: string[];"],
+    [GATEWAY_INTEGRATION, 'trustedProxies: string[];      // REQUIRED: peer IPs / CIDR blocks, or "unix"'],
+    [TYPES_REFERENCE, 'trustedProxies: string[];      // REQUIRED: peer IPs / CIDR blocks, or "unix"'],
     [GATEWAY_INTEGRATION, 'scopesClaim?: string;          // default "scope"'],
     [GATEWAY_INTEGRATION, 'roleClaim?: string;            // default "role"'],
     [GATEWAY_INTEGRATION, 'userClaim?: string;            // default "sub"'],

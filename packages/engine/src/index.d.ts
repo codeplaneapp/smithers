@@ -1853,11 +1853,16 @@ declare function classifyTaskAttempt(adapter: SmithersDb, runId: string, desc: _
 declare function getNextTaskActivityAttempt(adapter: SmithersDb, runId: string, desc: _TaskDescriptor$3): Promise<any>;
 /**
  * @param {{ errorJson?: string | null; metaJson?: string | null } | null} [attempt]
+ * @param {{ agent?: unknown; retryPolicy?: unknown }} [descriptor] task descriptor when known; lets the
+ * verdict include the author's `retryPolicy.retryable` gate
  */
 declare function isRetryableBridgeTaskFailure(attempt?: {
     errorJson?: string | null;
     metaJson?: string | null;
-} | null): boolean;
+} | null, descriptor?: {
+    agent?: unknown;
+    retryPolicy?: unknown;
+}): boolean;
 /**
  * @param {string | null} [errorJson]
  * @returns {string | null}

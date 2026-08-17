@@ -1,4 +1,5 @@
 import Electrobun, { BrowserWindow } from "electrobun/bun";
+import { listJobs, removeAccount, startAddAccount, startRelogin } from "./accounts";
 import { PAGE_HTML } from "./page";
 import { readSnapshot } from "./usage";
 
@@ -17,12 +18,27 @@ const server = Bun.serve({
   // server or a second copy of itself.
   port: 0,
   hostname: "127.0.0.1",
-  fetch(req) {
+  async fetch(req) {
     const { pathname } = new URL(req.url);
     if (pathname === "/api/usage") {
       return Response.json(readSnapshot(), {
         headers: { "cache-control": "no-store" },
       });
+    }
+    if (pathname === "/api/jobs") {
+      return Response.json({ jobs: listJobs() }, { headers: { "cache-control": "no-store" } });
+    }
+    if (req.method === "POST" && pathname === "/api/accounts/add") {
+      const body = (await req.json().catch(() => ({}))) as { provider?: string };
+      return Response.json(startAddAccount(body.provider ?? ""));
+    }
+    if (req.method === "POST" && pathname === "/api/accounts/login") {
+      const body = (await req.json().catch(() => ({}))) as { label?: string };
+      return Response.json(startRelogin(body.label ?? ""));
+    }
+    if (req.method === "POST" && pathname === "/api/accounts/remove") {
+      const body = (await req.json().catch(() => ({}))) as { label?: string };
+      return Response.json(removeAccount(body.label ?? ""));
     }
     return new Response(PAGE_HTML, {
       headers: { "content-type": "text/html; charset=utf-8" },

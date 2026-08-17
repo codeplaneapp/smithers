@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { Effect } from "effect";
 import { toSmithersError } from "@smthrs/errors/toSmithersError";
@@ -16,6 +16,7 @@ import { buildBuiltinRelaunch, describeResumeTarget, resolveResumeTarget } from 
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./SupervisorOptions.ts").SupervisorOptions} SupervisorOptions */
 /** @typedef {import("./SupervisorPollSummary.ts").SupervisorPollSummary} SupervisorPollSummary */
+/** @typedef {import("./SupervisorPollSummary.ts").SupervisorLoopSummary} SupervisorLoopSummary */
 
 export const DEFAULT_SUPERVISOR_INTERVAL_MS = 10_000;
 export const DEFAULT_SUPERVISOR_STALE_THRESHOLD_MS = 30_000;
@@ -160,6 +161,11 @@ function normalizeSupervisorOptions(options) {
     dryRun: Boolean(options.dryRun),
     supervisorId: options.supervisorId ?? randomUUID(),
     supervisorRunId: options.supervisorRunId ?? SUPERVISOR_EVENT_RUN_ID,
+    // Mutable per-poll sink: give-up happens deep inside the candidate
+    // processors, which can only report "skipped" to the poll. Without this the
+    // poll (and the CLI above it) cannot tell "nothing to do" apart from "the
+    // supervisor abandoned a run", which is what made give-up exit 0.
+    gaveUpRunIds: /** @type {string[]} */ ([]),
     deps,
   };
 }
@@ -371,6 +377,76 @@ function emitSkipEventEffect(options, runId, reason) {
     timestampMs: options.deps.now(),
   });
 }
+/** Policy name of the durable alert raised when auto-resume is abandoned. */
+export const SUPERVISOR_GAVE_UP_ALERT_POLICY = "supervisor_auto_resume_gave_up";
+// Alert messages are capped at DB_ALERT_MESSAGE_MAX_LENGTH (4096) by the db
+// layer. The give-up diagnostic embeds the manual resume command, which for a
+// built-in oneshot contains the whole goal, so truncate rather than let the
+// insert throw and lose the alert entirely.
+const GIVE_UP_ALERT_MESSAGE_MAX_LENGTH = 2048;
+
+/**
+ * Raise the durable alert for an abandoned run. Give-up already marks the run
+ * failed, but a failed row is only visible to someone who goes looking; the
+ * alert is the durable, queryable signal (`smithers alerts`) that unattended
+ * recovery stopped trying.
+ *
+ * @param {NormalizedSupervisorOptions} options
+ * @param {string} runId
+ * @param {number} attempts
+ * @param {string} message
+ * @param {string} logFile
+ * @returns {Effect.Effect<void, never>}
+ */
+function raiseGiveUpAlertEffect(options, runId, attempts, message, logFile) {
+  const firedAtMs = options.deps.now();
+  // A run ID may consume the DB's full 256-character allowance, so embedding
+  // it verbatim makes the alert ID itself invalid and silently drops the
+  // durable signal. Hash only the identifier key; keep the original run ID in
+  // the indexed runId field and alert details.
+  const runIdKey = createHash("sha256").update(runId).digest("hex");
+  const truncated =
+    message.length > GIVE_UP_ALERT_MESSAGE_MAX_LENGTH
+      ? `${message.slice(0, GIVE_UP_ALERT_MESSAGE_MAX_LENGTH - 1)}…`
+      : message;
+  return Effect.tryPromise(() =>
+    Promise.resolve(
+      options.adapter.insertAlert({
+        alertId: `auto-resume-gave-up:${runIdKey}:${firedAtMs}`,
+        runId,
+        policyName: SUPERVISOR_GAVE_UP_ALERT_POLICY,
+        severity: "critical",
+        status: "firing",
+        firedAtMs,
+        resolvedAtMs: null,
+        acknowledgedAtMs: null,
+        message: truncated,
+        detailsJson: JSON.stringify({ runId, attempts, logFile, supervisorId: options.supervisorId }),
+        fingerprint: `auto-resume-gave-up:${runId}`,
+        nodeId: null,
+        iteration: null,
+        owner: null,
+        runbook: null,
+        labelsJson: null,
+        reactionJson: null,
+        sourceEventType: "RunAutoResumeSkipped",
+        firstFiredAtMs: firedAtMs,
+        lastFiredAtMs: firedAtMs,
+        occurrenceCount: 1,
+        silencedUntilMs: null,
+        acknowledgedBy: null,
+        resolvedBy: null,
+      }),
+    ),
+  ).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning(
+        `[supervisor] failed to raise give-up alert for run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    ),
+    Effect.asVoid,
+  );
+}
 /**
  * Stop hot-looping on a run whose auto-resumes keep dying before activation:
  * claim it one final time and mark it failed with a diagnosable error instead
@@ -456,6 +532,8 @@ function giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorAttempts,
     if (!failed) {
       return "skipped";
     }
+    options.gaveUpRunIds.push(run.runId);
+    yield* raiseGiveUpAlertEffect(options, run.runId, priorAttempts, errorInfo.message, logFile);
     yield* Effect.logWarning(
       `Giving up on run ${run.runId}: ${priorAttempts} consecutive auto-resumes died before activation; marked failed (resume log: ${logFile})`,
     );
@@ -1001,6 +1079,7 @@ function pollEffect(options) {
   return Effect.withLogSpan("supervisor:poll")(
     Effect.gen(function* () {
       const pollStartedAtMs = options.deps.now();
+      options.gaveUpRunIds.length = 0;
       const staleBeforeMs = pollStartedAtMs - options.staleThresholdMs;
       const allStaleRuns = yield* options.adapter
         .listStaleRunningRunsEffect(staleBeforeMs)
@@ -1164,6 +1243,7 @@ function pollEffect(options) {
         skippedCount,
         durationMs,
         wouldResumeRunIds,
+        gaveUpRunIds: [...options.gaveUpRunIds],
       };
     }),
   );
@@ -1177,10 +1257,12 @@ export function supervisorPollEffect(options) {
 }
 /**
  * @param {SupervisorOptions} options
- * @returns {Effect.Effect<void, never>}
+ * @returns {Effect.Effect<SupervisorLoopSummary, never>}
  */
 export function supervisorLoopEffect(options) {
   const normalized = normalizeSupervisorOptions(options);
+  /** Accumulated across polls: pollEffect resets the per-poll sink each time. */
+  const gaveUpRunIds = new Set();
   return Effect.gen(function* () {
     yield* Effect.logInfo(
       `[supervisor] started (interval=${normalized.pollIntervalMs}ms, staleThreshold=${normalized.staleThresholdMs}ms, maxConcurrent=${normalized.maxConcurrent}, dryRun=${normalized.dryRun})`,
@@ -1193,7 +1275,10 @@ export function supervisorLoopEffect(options) {
       timestampMs: normalized.deps.now(),
     });
     while (true) {
-      yield* pollEffect(normalized);
+      const summary = yield* pollEffect(normalized);
+      for (const runId of summary.gaveUpRunIds) {
+        gaveUpRunIds.add(runId);
+      }
       if (normalized.runIds !== null) {
         const scopedRuns = yield* Effect.all(
           [...normalized.runIds].map((runId) =>
@@ -1204,7 +1289,7 @@ export function supervisorLoopEffect(options) {
           scopedRuns.length > 0 &&
           scopedRuns.every((run) => run !== null && isTerminalClaudeMirrorRunStatus(run.status))
         ) {
-          return;
+          return { gaveUpRunIds: [...gaveUpRunIds] };
         }
       }
       yield* Effect.sleep(`${normalized.pollIntervalMs} millis`);
@@ -1218,6 +1303,5 @@ export function supervisorLoopEffect(options) {
       maxConcurrent: normalized.maxConcurrent,
       dryRun: normalized.dryRun,
     }),
-    Effect.asVoid,
   );
 }

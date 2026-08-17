@@ -71,4 +71,46 @@ describe("smithers supervise scope", () => {
     },
     TIMEOUT_MS,
   );
+
+  // Giving up abandons the supervised run. Exiting 0 made an unattended
+  // supervisor look like it had shut down cleanly, so nothing above it noticed
+  // the run was dead.
+  test(
+    "exits non-zero and raises a durable alert when it gives up on a run",
+    async () => {
+      const repo = createTempRepo();
+      const workflowPath = repo.write("workflow.tsx", "export default {};\n");
+      const { sqlite, adapter } = openRepoDb(repo);
+      // A supervisor claim that is STILL the owner after going stale is proof
+      // the resume died before activation; #a3 means three died in a row, so
+      // the next detection exhausts the default maxResumeAttempts.
+      await insertStaleRun(adapter, "run-giveup", workflowPath);
+      await adapter.updateRun("run-giveup", { runtimeOwnerId: "supervisor:prior-sup#a3" });
+      sqlite.close();
+
+      const result = runSmithers(["supervise", "--run", "run-giveup"], {
+        cwd: repo.dir,
+        format: "json",
+        timeoutMs: TIMEOUT_MS,
+      });
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(1);
+      expect(result.json?.code).toBe("SUPERVISOR_GAVE_UP");
+      expect(result.json?.message).toContain("run-giveup");
+
+      const reopened = openRepoDb(repo);
+      try {
+        const run = await reopened.adapter.getRun("run-giveup");
+        expect(run?.status).toBe("failed");
+        const alerts = await reopened.adapter.listAlerts(10);
+        const giveUpAlerts = alerts.filter((alert) => alert.policyName === "supervisor_auto_resume_gave_up");
+        expect(giveUpAlerts).toHaveLength(1);
+        expect(giveUpAlerts[0].runId).toBe("run-giveup");
+        expect(giveUpAlerts[0].severity).toBe("critical");
+        expect(giveUpAlerts[0].status).toBe("firing");
+      } finally {
+        reopened.sqlite.close();
+      }
+    },
+    TIMEOUT_MS,
+  );
 });

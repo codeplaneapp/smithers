@@ -55,6 +55,7 @@ type TaskState =
   | "in-progress"
   | "finished"
   | "failed"
+  | "stalled"
   | "cancelled"
   | "skipped";
 ```
@@ -66,7 +67,7 @@ type TaskState =
 Node lifecycle events do not carry a separate `NodeStatus` or `TaskState`
 field. Their names report transitions: `NodePending`, `NodeStarted`,
 `NodeRetrying`, the `NodeWaiting*` variants, and the terminal
-`NodeFinished`/`NodeFailed`/`NodeCancelled`/`NodeSkipped` variants. Read node
+`NodeFinished`/`NodeFailed`/`NodeStalled`/`NodeCancelled`/`NodeSkipped` variants. Read node
 records or a DevTools snapshot when you need the current persisted
 `TaskState`; some states, including bound waits, have no dedicated event.
 Browser run trees intentionally collapse the detailed states to the

@@ -2384,7 +2384,10 @@ seat closing the chain.
 Every rung is availability-gated: oneshot selects only from the agents
 detected usable on the machine, the claude seats fall back to opencode when
 the Claude CLI is unavailable, and the kimi seats all run Kimi K3 (1M-token
-context). An explicit `--model` (a slot: `sol`, `terra`, `luna`, `kimi`,
+context). When an engine has several registered accounts, each rung runs on
+the account with the most cached quota headroom for that rung's model:
+rate-limited seats sink, and a model-scoped cap such as the Fable weekly
+limit routes Fable rungs to seats that can still serve them. An explicit `--model` (a slot: `sol`, `terra`, `luna`, `kimi`,
 `fable`, `opus`, `sonnet`; or a canonical model id) or `--agent` (`codex`,
 `kimi`, `claude-code`, `opencode`, `pi`) always overrides classification; the
 default `auto` follows the task shape, with review on Sol at high reasoning
@@ -2798,7 +2801,7 @@ Five commands cross historical boundaries. Pick by what each acts on:
 | --- | --- | --- |
 | `rewind` | a run | Rewinds a run to a previous frame. Args: `RUN_ID FRAME_NO`. |
 | `replay` | a snapshot checkpoint | Forks from a checkpoint and resumes execution (time-travel fork). Takes a workflow. |
-| `fork` | a snapshot checkpoint | Creates a child run. `--run` also resumes it. |
+| `fork` | a snapshot checkpoint | Creates a child run. `--run` also resumes it. `--reset-node` resets exactly the nodes you name; downstream dependents keep the parent's finished output unless you name them too. |
 | `timetravel` | a past task state | Reverts filesystem plus DB state to a previous task state, then optionally resumes. Takes a workflow. |
 | `revert` | the workspace | Reverts the workspace to a previous task attempt's filesystem state only, no DB reset. Takes a workflow. |
 
@@ -3373,7 +3376,7 @@ commands[113]:
     flags[7]{name,short,type,default,desc}:
       run-id,r,string,,Source run ID
       frame,f,number,,Frame number to fork from
-      node,n,string,,Node ID to reset to pending
+      node,n,string,,Node ID to reset to pending (comma-separate ids; dependents are not reset for you)
       input,i,string,,Input overrides as JSON
       label,l,string,,Branch label for the fork
       restore-vcs,,boolean,false,Restore jj filesystem state to source frame revision
@@ -3385,7 +3388,7 @@ commands[113]:
     flags[7]{name,short,type,default,desc}:
       run-id,r,string,,Source run ID
       frame,f,number,,Frame number to fork from
-      reset-node,n,string,,Node ID to reset to pending
+      reset-node,n,string,,Node ID to reset to pending (comma-separate ids; dependents are not reset for you)
       input,i,string,,Input overrides as JSON
       label,l,string,,Branch label
       run,,boolean,false,Immediately start the forked run
@@ -8279,8 +8282,13 @@ GitHub API mutations such as `gh pr merge` are not.
 bunx smthrs timeline RUN_ID --tree
 bunx smthrs diff RUN_ID NODE_ID
 bunx smthrs fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze --label exp1
+bunx smthrs fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze,implement   # dependents are not reset for you
 bunx smthrs replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
 ```
+
+`--reset-node` resets exactly the nodes you name and nothing else: a task that
+consumed a reset task's output keeps the parent's finished output unless you
+name it too, so comma-separate the whole set you want re-run.
 
 Fork makes a child run without starting it (add `--run` to start immediately);
 replay also makes a child run but immediately resumes it. Branch operations do
@@ -10527,6 +10535,7 @@ type GatewayAuthConfig =
     }
   | {
       mode: "trusted-proxy";
+      trustedProxies: string[];      // REQUIRED: peer IPs / CIDR blocks, or "unix"
       trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
       allowedOrigins?: string[];     // default [] (no Origin allowlist)
       defaultRole?: string;          // default "operator"
@@ -11342,6 +11351,7 @@ JSON response codes, not `SmithersErrorInstance` objects.
 | `INVALID_JSON` | 400 | Body not valid JSON |
 | `SERVER_ERROR` | 500 | Unexpected server error |
 | `UNAUTHORIZED` | 401 | Missing or invalid auth token |
+| `UNTRUSTED_PROXY_PEER` | 403 | `mode: "trusted-proxy"` request or WebSocket upgrade whose transport peer is not in `auth.trustedProxies`. The identity headers are discarded, not honored. See [Gateway auth](/integrations/gateway). |
 | `WORKFLOW_PATH_OUTSIDE_ROOT` | 400 | Workflow path outside server root |
 | `RUN_ID_REQUIRED` | 400 | `runId` required when `resume: true` |
 | `RUN_ALREADY_EXISTS` | 409 | Run ID already exists |
@@ -13591,6 +13601,8 @@ The proxy usually has two Gateway-auth branches:
 The Gateway auth mode determines which branch preserves per-user identity. In `mode: "trusted-proxy"`, the Gateway reads role, scopes, user id, and token id from the trusted headers the proxy set. In `mode: "token"` or `mode: "jwt"`, the Gateway reads the bearer credential and ignores trusted-proxy identity headers; use the service-token branch only when service identity is acceptable. The browser never sees a Gateway credential; the iframe's RPC calls and WebSocket upgrades flow through the proxy.
 
 The same shape works behind any reverse proxy (Cloudflare, Cloudflare Access, Caddy, nginx, an internal API gateway): terminate session, strip identity headers off the request, set them from the validated session, forward to the Gateway. Trusted-proxy mode is **only safe behind something you control** that strips and rewrites identity headers; the Gateway docs call this out explicitly.
+
+Stripping headers at the proxy is necessary but not sufficient, because it does nothing about a client that skips the proxy entirely. Set `auth.trustedProxies` to the peer addresses, CIDR blocks, or `"unix"` socket the proxy connects from: the Gateway reads identity headers only from those peers, answers `403 UNTRUSTED_PROXY_PEER` to anything else, and refuses to start in trusted-proxy mode without the list. See [Gateway auth](/integrations/gateway).
 
 ## Local dev quick reference
 

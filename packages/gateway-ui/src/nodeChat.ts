@@ -75,6 +75,7 @@ const LIFECYCLE_STATUS: Record<string, string> = {
   NodeRetrying: "running",
   NodeFinished: "ok",
   NodeFailed: "failed",
+  NodeStalled: "failed",
   NodeCancelled: "cancelled",
   NodeSkipped: "cancelled",
   NodeWaitingApproval: "waiting",

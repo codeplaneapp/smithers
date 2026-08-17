@@ -8,6 +8,7 @@
  */
 import { Effect } from "effect";
 import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { isRetryableFailure } from "@smthrs/scheduler";
 import { makeWorkerTask } from "./entity-worker.js";
 import { executeTaskActivity, makeTaskBridgeKey, RetriableTaskFailure } from "./activity-bridge.js";
 import { parseAttemptMetaJson } from "./bridge-utils.js";
@@ -109,8 +110,10 @@ function parseAttemptErrorCode(errorJson) {
 }
 /**
  * @param {{ errorJson?: string | null; metaJson?: string | null } | null} [attempt]
+ * @param {{ agent?: unknown; retryPolicy?: unknown }} [descriptor] task descriptor when known; lets the
+ * verdict include the author's `retryPolicy.retryable` gate
  */
-function isRetryableBridgeTaskFailure(attempt) {
+function isRetryableBridgeTaskFailure(attempt, descriptor) {
   const meta = parseAttemptMetaJson(attempt?.metaJson);
   if (meta?.failureRetryable === false) {
     return false;
@@ -118,11 +121,35 @@ function isRetryableBridgeTaskFailure(attempt) {
   if (meta?.failureRetryable === true) {
     return true;
   }
+  const kind = typeof meta?.kind === "string" ? meta.kind : null;
+  // Mirror the scheduler's retry/terminal verdict (#1500) from the persisted
+  // attempt row: terminal failure shapes (ENOENT preconditions, hard size
+  // caps) and the author's retryPolicy.retryable gate must read identically
+  // here, or a bridge-managed task would be retried over a failure the
+  // scheduler already declared terminal.
+  const error = (() => {
+    const errorJson = attempt?.errorJson;
+    if (typeof errorJson !== "string" || errorJson.length === 0) return null;
+    try {
+      const parsed = JSON.parse(errorJson);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  })();
+  if (error) {
+    return isRetryableFailure(
+      {
+        agent: descriptor?.agent ?? (kind === "agent" ? true : undefined),
+        retryPolicy: descriptor?.retryPolicy,
+      },
+      error,
+    );
+  }
   const errorCode = parseAttemptErrorCode(attempt?.errorJson);
   if (errorCode === "AGENT_CONFIG_INVALID") {
     return false;
   }
-  const kind = typeof meta?.kind === "string" ? meta.kind : null;
   // INVALID_OUTPUT is only retryable for agent tasks.
   if (kind !== "agent" && errorCode === "INVALID_OUTPUT") {
     return false;
@@ -165,7 +192,7 @@ const classifyTaskAttempt = async (adapter, runId, desc, context) => {
   const latestState = latest?.state ?? null;
   if (latestState === "failed") {
     const failedAttempts = attempts.filter((attempt) => attempt.state === "failed");
-    const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableBridgeTaskFailure(attempt));
+    const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableBridgeTaskFailure(attempt, desc));
     const retryConsumingFailures = failedAttempts.filter((attempt) => !isQuotaBridgeTaskFailure(attempt));
     if (
       !hasNonRetryableFailure &&

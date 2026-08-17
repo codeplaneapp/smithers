@@ -505,6 +505,43 @@ describe("non-sqlite backends fail loud", () => {
     await expect(store.searchNotes("user", "\uDC00")).rejects.toThrow(/sqlite/);
     await expect(store.deleteThread("thread-1")).rejects.toThrow(/sqlite/);
   });
+
+  // The Postgres note tables are staged, not served. The runtime rejection is
+  // the operator's other half of that story (the first half is the catalog
+  // comment migration 0043 stamps), so it must name the migrations that staged
+  // the tables and the sidecar where a Postgres workspace really keeps memory.
+  test("the rejection names the staging migrations and the sqlite sidecar", async () => {
+    const store = createMemoryStore(/** @type {any} */ ({ dialect: "postgres" }));
+    for (const operation of [
+      () => store.saveNote({ namespace: USER_NS, body: "x" }),
+      () => store.enableNoteSearch("user"),
+      () => store.searchNotes("user", "x"),
+      () => store.deleteThread("thread-1"),
+    ]) {
+      const error = await operation().then(
+        () => undefined,
+        (cause) => cause,
+      );
+      expect(error).toBeDefined();
+      expect(error.message).toContain("0023_add_memory_notes");
+      expect(error.message).toContain("0043_memory_notes_postgres_staged");
+      expect(error.message).toContain("staged, not served");
+      expect(error.message).toContain(".smithers/smithers.db");
+    }
+  });
+
+  // deleteThread is a thread operation, not a note operation. It shares the
+  // gate because it needs a synchronous transaction, so its reason must say so
+  // rather than blaming notes.
+  test("deleteThread explains the transaction it needs, not notes", async () => {
+    const store = createMemoryStore(/** @type {any} */ ({ dialect: "postgres" }));
+    const error = await store.deleteThread("thread-1").then(
+      () => undefined,
+      (cause) => cause,
+    );
+    expect(error.message).toContain("the thread row and its messages a single atomic delete");
+    expect(error.code).toBe("DB_WRITE_FAILED");
+  });
 });
 
 describe("additive migration (criterion f)", () => {

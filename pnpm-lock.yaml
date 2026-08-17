@@ -676,6 +676,9 @@ importers:
 
   apps/quota-dashboard:
     dependencies:
+      '@smthrs/usage':
+        specifier: workspace:*
+        version: link:../../packages/usage
       electrobun:
         specifier: 1.18.1
         version: 1.18.1
