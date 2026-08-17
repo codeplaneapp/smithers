@@ -1337,12 +1337,20 @@ export function autoExpandKeys(root: TreeNodeLike | null): Set<string> {
   return expanded;
 }
 
-/** True when any descendant (not the node itself) failed — for rollup badges. */
-export function hasFailedDescendant(node: TreeNodeLike): boolean {
+/** Number of deepest failed descendants — propagated container failures count once. */
+export function failedDescendantCount(node: TreeNodeLike): number {
+  let count = 0;
   for (const child of node.children ?? []) {
-    if (toneForStatus(child.status) === "failed" || hasFailedDescendant(child)) return true;
+    const nestedFailures = failedDescendantCount(child);
+    if (nestedFailures > 0) count += nestedFailures;
+    else if (toneForStatus(child.status) === "failed") count += 1;
   }
-  return false;
+  return count;
+}
+
+/** True when any descendant (not the node itself) failed. */
+export function hasFailedDescendant(node: TreeNodeLike): boolean {
+  return failedDescendantCount(node) > 0;
 }
 
 // ---------------------------------------------------------------------------

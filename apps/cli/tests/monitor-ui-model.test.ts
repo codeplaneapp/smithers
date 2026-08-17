@@ -41,6 +41,7 @@ import {
   eventLogViewState,
   eventViewFor,
   executionTreeViewState,
+  failedDescendantCount,
   filterRuns,
   formatDiffSummary,
   formatDurationMs,
@@ -1071,6 +1072,16 @@ describe("tree expansion", () => {
   test("hasFailedDescendant rolls up through collapsed branches", () => {
     expect(hasFailedDescendant(tree)).toBe(true);
     expect(hasFailedDescendant({ key: "leaf", status: "failed" })).toBe(false);
+    expect(failedDescendantCount(tree)).toBe(1);
+    expect(
+      failedDescendantCount({
+        key: "root",
+        children: [
+          { key: "failed-parent", status: "failed", children: [{ key: "failed-child", status: "failed" }] },
+          { key: "cancelled", status: "cancelled" },
+        ],
+      }),
+    ).toBe(1);
   });
 });
 
