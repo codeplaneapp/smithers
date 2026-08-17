@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/observability",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "Concrete Smithers metrics, logging, tracing, and observability integrations",
   "type": "module",
   "sideEffects": false,

@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/telegram",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "Serverless-friendly Telegram Bot API helpers for Smithers workflows and examples",
   "type": "module",
   "sideEffects": false,

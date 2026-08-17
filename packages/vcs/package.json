@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/vcs",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "VCS discovery and jj workspace operations for Smithers",
   "type": "module",
   "sideEffects": false,

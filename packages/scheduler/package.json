@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/scheduler",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "Pure decision engine: session, scheduler, and task state management for Smithers workflows",
   "type": "module",
   "sideEffects": false,

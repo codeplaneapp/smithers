@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/engine",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "Concrete Smithers workflow execution engine",
   "type": "module",
   "sideEffects": [

@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/errors",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "Error types, tagged errors, and error utilities for Smithers",
   "type": "module",
   "sideEffects": false,

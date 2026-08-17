@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/herdr",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "Herdr socket client for Smithers: mirror runs into a herdr presentation & steering plane over its unix-socket control API",
   "type": "module",
   "sideEffects": false,

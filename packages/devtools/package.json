@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/devtools",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "Devtools and debugging utilities for Smithers workflow inspection",
   "type": "module",
   "sideEffects": false,
