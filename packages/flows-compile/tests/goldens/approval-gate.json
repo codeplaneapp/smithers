@@ -1,0 +1,290 @@
+{
+  "plan": {
+    "planId": "fixture-approval-gate",
+    "flow": "smithers/workflow",
+    "generation": 0,
+    "baseDigest": "key1_9b9676fbd9ed85cb459ee15d33c796430b294faa8bc2b2bd758490cd26b3273a",
+    "digest": "key1_9b9676fbd9ed85cb459ee15d33c796430b294faa8bc2b2bd758490cd26b3273a",
+    "nodes": [
+      {
+        "id": "root.task.0",
+        "kind": "agent",
+        "key": "key1_9a70e727fa9e0f9706e11c68050555123102f31df9fbfc0a13c6f18c09f1bbae",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "nondeterministic": true,
+          "body": {
+            "action": "smithers/agent",
+            "kind": "agent",
+            "tier": "sealed",
+            "payload": {
+              "step": {
+                "seat": "claude-code:default",
+                "thinkingLevel": "medium",
+                "layers": [],
+                "capabilityEnvelope": [],
+                "placement": {
+                  "_tag": "None"
+                },
+                "input": {},
+                "system": {
+                  "text": "propose",
+                  "digest": "12df7f0ee89f9d7f17fb8e881e8b568794603af2a9d53c1d0379d2c588792a50"
+                },
+                "instructions": [
+                  {
+                    "text": "output: proposals",
+                    "digest": "f64d09b8f8b885fdc3b86f9596c5879dd9fa2c26ae82082ad35cb855db1f273f"
+                  }
+                ],
+                "prompt": {
+                  "text": "Propose a migration order.",
+                  "digest": "70c64c3a250ba91c670af1b365ef913e70c6b9a7ffec17795705f7ee721d3b8f"
+                },
+                "journal": [],
+                "activeToolNames": [],
+                "toolDefinitions": [],
+                "contextWindowTokens": 0
+              }
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": true,
+              "heartbeatTimeoutMs": 600000,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "proposals",
+              "retries": 1,
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false
+            }
+          },
+          "inputs": [],
+          "layers": [],
+          "capabilities": [
+            "task:agent"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      },
+      {
+        "id": "root.task.1",
+        "kind": "step",
+        "key": "key1_01a033cbc6a7810455ccc85ada48c55d34887a68c28baca11fbe6f14d35e1f0d",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "body": {
+            "action": "smithers/human",
+            "kind": "human",
+            "tier": "sealed",
+            "payload": {
+              "nodeId": "decide",
+              "source": "c2b87e7ee64225d144b1bff86927e7595c39092442b3cb9bdc8f74389465a7dc"
+            },
+            "declaration": {
+              "approvalAllowedScopes": [
+                "run:approve"
+              ],
+              "approvalMode": "decision",
+              "approvalOnDeny": "skip",
+              "approvalOptions": [
+                {
+                  "key": "ship",
+                  "label": "Ship it"
+                },
+                {
+                  "key": "hold",
+                  "label": "Hold"
+                }
+              ],
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": null,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": true,
+              "onHijackExit": "complete",
+              "outputTableName": "decisions",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false
+            }
+          },
+          "inputs": [
+            {
+              "_tag": "Ref",
+              "from": "root.task.0",
+              "path": []
+            }
+          ],
+          "layers": [],
+          "capabilities": [
+            "approval",
+            "task:human"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [
+          "root.task.0"
+        ],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      },
+      {
+        "id": "root.task.2",
+        "kind": "step",
+        "key": "key1_f0cc992cdc7e5168fc721d70bd0b7a94427707b8ad4ebe834a7183cbb1c467d3",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "body": {
+            "action": "smithers/static",
+            "kind": "static",
+            "tier": "sealed",
+            "payload": {
+              "value": {
+                "recorded": true
+              }
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": null,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "records",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false
+            }
+          },
+          "inputs": [
+            {
+              "_tag": "Pending",
+              "from": "root.task.1"
+            }
+          ],
+          "layers": [],
+          "capabilities": [
+            "task:static"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [
+          "root.task.1"
+        ],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      }
+    ]
+  },
+  "flow": "smithers/workflow",
+  "nodes": [
+    {
+      "planNodeId": "root.task.0",
+      "nodeId": "propose",
+      "key": "key1_9a70e727fa9e0f9706e11c68050555123102f31df9fbfc0a13c6f18c09f1bbae",
+      "kind": "agent",
+      "tier": "sealed",
+      "action": "smithers/agent",
+      "ordinal": 0,
+      "iteration": 0,
+      "consumes": [],
+      "after": []
+    },
+    {
+      "planNodeId": "root.task.1",
+      "nodeId": "decide",
+      "key": "key1_01a033cbc6a7810455ccc85ada48c55d34887a68c28baca11fbe6f14d35e1f0d",
+      "kind": "human",
+      "tier": "sealed",
+      "action": "smithers/human",
+      "ordinal": 1,
+      "iteration": 0,
+      "consumes": [
+        "root.task.0"
+      ],
+      "after": []
+    },
+    {
+      "planNodeId": "root.task.2",
+      "nodeId": "record",
+      "key": "key1_f0cc992cdc7e5168fc721d70bd0b7a94427707b8ad4ebe834a7183cbb1c467d3",
+      "kind": "static",
+      "tier": "sealed",
+      "action": "smithers/static",
+      "ordinal": 2,
+      "iteration": 0,
+      "consumes": [],
+      "after": [
+        "root.task.1"
+      ]
+    }
+  ],
+  "diagnostics": []
+}

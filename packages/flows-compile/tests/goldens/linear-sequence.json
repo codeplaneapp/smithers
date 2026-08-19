@@ -1,0 +1,294 @@
+{
+  "plan": {
+    "planId": "fixture-linear-sequence",
+    "flow": "smithers/workflow",
+    "generation": 0,
+    "baseDigest": "key1_cca0ab8bc7b815a0d20f761816e2b04c13bd3f107c209fb52a7990b124cec455",
+    "digest": "key1_cca0ab8bc7b815a0d20f761816e2b04c13bd3f107c209fb52a7990b124cec455",
+    "nodes": [
+      {
+        "id": "root.task.0",
+        "kind": "step",
+        "key": "key1_bd6b26b47c2dd369a60b20ba16be32e195142420535b92136abd66a00649588a",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "body": {
+            "action": "smithers/static",
+            "kind": "static",
+            "tier": "sealed",
+            "payload": {
+              "value": {
+                "limit": 3,
+                "topic": "durable execution"
+              }
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": null,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "seeds",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false
+            }
+          },
+          "inputs": [],
+          "layers": [],
+          "capabilities": [
+            "task:static"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      },
+      {
+        "id": "root.task.1",
+        "kind": "step",
+        "key": "key1_60388d62cb1fdb9e547e9e8c5fc68aa843f70b78a2237691100905e9d77fedca",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "body": {
+            "action": "smithers/compute",
+            "kind": "compute",
+            "tier": "sealed",
+            "payload": {
+              "nodeId": "shape",
+              "source": "f93973986f402c00cbed633b73ae40e4a3ec7ec93d2529c9fde21a0abe2e5df8"
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": null,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "shapes",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false
+            }
+          },
+          "inputs": [
+            {
+              "_tag": "Ref",
+              "from": "root.task.0",
+              "path": []
+            }
+          ],
+          "layers": [],
+          "capabilities": [
+            "task:compute"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [
+          "root.task.0"
+        ],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      },
+      {
+        "id": "root.task.2",
+        "kind": "agent",
+        "key": "key1_01da867fd449863ce1b0f99dc5df300c84a91fd2915ea2a8d8ce4da461897bb9",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "nondeterministic": true,
+          "body": {
+            "action": "smithers/agent",
+            "kind": "agent",
+            "tier": "sealed",
+            "payload": {
+              "step": {
+                "seat": "claude-code:default",
+                "thinkingLevel": "medium",
+                "layers": [],
+                "capabilityEnvelope": [],
+                "placement": {
+                  "_tag": "None"
+                },
+                "input": {
+                  "shape": "shape"
+                },
+                "system": {
+                  "text": "Write the summary",
+                  "digest": "e8d96e7cf4522d24cc62032f0bcfeebbc87cf6e86c733858a60b44fc4bc6fdbd"
+                },
+                "instructions": [
+                  {
+                    "text": "label: Write the summary",
+                    "digest": "ec0af603d772f5103f03e9fd5d990303ada38ab5f9d21dcc13bf40385c09d7eb"
+                  },
+                  {
+                    "text": "output: writeups",
+                    "digest": "af47e262615568b4b74c0d19507766270434fd9ba55d6faf950ffda4595e506c"
+                  }
+                ],
+                "prompt": {
+                  "text": "Summarize the shaped rows.",
+                  "digest": "7b70e7f4360d7315678e35438f81f147128ae549753ebab4c7ae4b722b1ff55d"
+                },
+                "journal": [],
+                "activeToolNames": [
+                  "Read",
+                  "Write"
+                ],
+                "toolDefinitions": [],
+                "contextWindowTokens": 0
+              }
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": 600000,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "writeups",
+              "retries": 2,
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false
+            }
+          },
+          "inputs": [
+            {
+              "_tag": "Ref",
+              "from": "root.task.1",
+              "path": []
+            },
+            {
+              "_tag": "Pending",
+              "from": "root.task.0"
+            }
+          ],
+          "layers": [],
+          "capabilities": [
+            "task:agent"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [
+          "root.task.1",
+          "root.task.0"
+        ],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      }
+    ]
+  },
+  "flow": "smithers/workflow",
+  "nodes": [
+    {
+      "planNodeId": "root.task.0",
+      "nodeId": "seed",
+      "key": "key1_bd6b26b47c2dd369a60b20ba16be32e195142420535b92136abd66a00649588a",
+      "kind": "static",
+      "tier": "sealed",
+      "action": "smithers/static",
+      "ordinal": 0,
+      "iteration": 0,
+      "consumes": [],
+      "after": []
+    },
+    {
+      "planNodeId": "root.task.1",
+      "nodeId": "shape",
+      "key": "key1_60388d62cb1fdb9e547e9e8c5fc68aa843f70b78a2237691100905e9d77fedca",
+      "kind": "compute",
+      "tier": "sealed",
+      "action": "smithers/compute",
+      "ordinal": 1,
+      "iteration": 0,
+      "consumes": [
+        "root.task.0"
+      ],
+      "after": []
+    },
+    {
+      "planNodeId": "root.task.2",
+      "nodeId": "write",
+      "key": "key1_01da867fd449863ce1b0f99dc5df300c84a91fd2915ea2a8d8ce4da461897bb9",
+      "kind": "agent",
+      "tier": "sealed",
+      "action": "smithers/agent",
+      "ordinal": 2,
+      "iteration": 0,
+      "label": "Write the summary",
+      "consumes": [
+        "root.task.1"
+      ],
+      "after": [
+        "root.task.0"
+      ]
+    }
+  ],
+  "diagnostics": []
+}

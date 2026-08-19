@@ -1,0 +1,521 @@
+{
+  "plan": {
+    "planId": "fixture-parallel-fanout",
+    "flow": "smithers/workflow",
+    "generation": 0,
+    "baseDigest": "key1_7dcb8948de5992da4c28f14928e083afc6eb4d39ee9ae73c88570e2a0a3e66e3",
+    "digest": "key1_7dcb8948de5992da4c28f14928e083afc6eb4d39ee9ae73c88570e2a0a3e66e3",
+    "nodes": [
+      {
+        "id": "root.task.0",
+        "kind": "step",
+        "key": "key1_dc634548558d0ba248c5c14de96a7d974a9d040eae060c6487f11fda67bb1a83",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "body": {
+            "action": "smithers/static",
+            "kind": "static",
+            "tier": "sealed",
+            "payload": {
+              "value": {
+                "candidates": [
+                  "a",
+                  "b",
+                  "c"
+                ]
+              }
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": null,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "seeds",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false
+            }
+          },
+          "inputs": [],
+          "layers": [],
+          "capabilities": [
+            "task:static"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      },
+      {
+        "id": "root.task.1",
+        "kind": "agent",
+        "key": "key1_b687b4cdc4f51eb6133ae8fc6164af5e4a1367c8ddf8e3ef501249ba5521f16f",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "nondeterministic": true,
+          "body": {
+            "action": "smithers/agent",
+            "kind": "agent",
+            "tier": "sealed",
+            "payload": {
+              "step": {
+                "seat": "codex:default",
+                "thinkingLevel": "medium",
+                "layers": [],
+                "capabilityEnvelope": [],
+                "placement": {
+                  "_tag": "None"
+                },
+                "input": {
+                  "seed": "seed"
+                },
+                "system": {
+                  "text": "review-a",
+                  "digest": "0c263c7ee9106e929db8e27797fc9e9fd5cda68bc6fd0a4921b08ca7af7aa446"
+                },
+                "instructions": [
+                  {
+                    "text": "output: reviews",
+                    "digest": "907ae768c339118631409cf367f8b196897bc8987ff977024a2e305dee056948"
+                  }
+                ],
+                "prompt": {
+                  "text": "Review candidate a.",
+                  "digest": "39c81d52e23b095d17e37028e34d1b33b273d7e04931e4f6a371c5e85438ada8"
+                },
+                "journal": [],
+                "activeToolNames": [],
+                "toolDefinitions": [],
+                "contextWindowTokens": 0
+              }
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": 600000,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "reviews",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false
+            }
+          },
+          "inputs": [
+            {
+              "_tag": "Ref",
+              "from": "root.task.0",
+              "path": []
+            }
+          ],
+          "layers": [],
+          "capabilities": [
+            "task:agent"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [
+          "root.task.0"
+        ],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      },
+      {
+        "id": "root.task.2",
+        "kind": "agent",
+        "key": "key1_3ddb57979c575414df69d91fa47f3dcd711e53b06e0f366671f9ce1fbf0b455e",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "nondeterministic": true,
+          "body": {
+            "action": "smithers/agent",
+            "kind": "agent",
+            "tier": "sealed",
+            "payload": {
+              "step": {
+                "seat": "codex:default",
+                "thinkingLevel": "medium",
+                "layers": [],
+                "capabilityEnvelope": [],
+                "placement": {
+                  "_tag": "None"
+                },
+                "input": {
+                  "seed": "seed"
+                },
+                "system": {
+                  "text": "review-b",
+                  "digest": "7b6f111491c06d2a213daa4b6f72f2cfa87629e6fa57f92fc8df7109c2279e9d"
+                },
+                "instructions": [
+                  {
+                    "text": "output: reviews",
+                    "digest": "907ae768c339118631409cf367f8b196897bc8987ff977024a2e305dee056948"
+                  }
+                ],
+                "prompt": {
+                  "text": "Review candidate b.",
+                  "digest": "2f1f0fa4d036f02c8992bca5d2db73513a60eff0811c78c6c6fdc34cb7a7e2e6"
+                },
+                "journal": [],
+                "activeToolNames": [],
+                "toolDefinitions": [],
+                "contextWindowTokens": 0
+              }
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": 600000,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "reviews",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false
+            }
+          },
+          "inputs": [
+            {
+              "_tag": "Ref",
+              "from": "root.task.0",
+              "path": []
+            }
+          ],
+          "layers": [],
+          "capabilities": [
+            "task:agent"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [
+          "root.task.0"
+        ],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      },
+      {
+        "id": "root.task.3",
+        "kind": "agent",
+        "key": "key1_71c40691c8d204e56c7b802d0fb89f4c21fbec4a0eafd241779b4aa8017468e5",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "nondeterministic": true,
+          "body": {
+            "action": "smithers/agent",
+            "kind": "agent",
+            "tier": "sealed",
+            "payload": {
+              "step": {
+                "seat": "codex:default",
+                "thinkingLevel": "medium",
+                "layers": [],
+                "capabilityEnvelope": [],
+                "placement": {
+                  "_tag": "None"
+                },
+                "input": {
+                  "seed": "seed"
+                },
+                "system": {
+                  "text": "review-c",
+                  "digest": "96e83ebe09087b26249f228d8b3d712c0536426840ef1ab1ac89f6644abe66de"
+                },
+                "instructions": [
+                  {
+                    "text": "output: reviews",
+                    "digest": "907ae768c339118631409cf367f8b196897bc8987ff977024a2e305dee056948"
+                  }
+                ],
+                "prompt": {
+                  "text": "Review candidate c.",
+                  "digest": "0459020bdea1b7bbad7cc2be3de4374eb91c9e646bb1e3b502c7eacc2ae7bf09"
+                },
+                "journal": [],
+                "activeToolNames": [],
+                "toolDefinitions": [],
+                "contextWindowTokens": 0
+              }
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": 600000,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "reviews",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false
+            }
+          },
+          "inputs": [
+            {
+              "_tag": "Ref",
+              "from": "root.task.0",
+              "path": []
+            }
+          ],
+          "layers": [],
+          "capabilities": [
+            "task:agent"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [
+          "root.task.0"
+        ],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      },
+      {
+        "id": "root.task.4",
+        "kind": "step",
+        "key": "key1_86c424b1e10e6e7fa94d973ad49ebc4d2b32dea5c5ede4e480a792abf5adc34f",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "body": {
+            "action": "smithers/compute",
+            "kind": "compute",
+            "tier": "sealed",
+            "payload": {
+              "nodeId": "merge",
+              "source": "3de8c40e17fc44abe45688116e03d3284988b77fd892d41cb20ce6246af784d4"
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": null,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "merged",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false
+            }
+          },
+          "inputs": [
+            {
+              "_tag": "Ref",
+              "from": "root.task.1",
+              "path": []
+            },
+            {
+              "_tag": "Ref",
+              "from": "root.task.2",
+              "path": []
+            },
+            {
+              "_tag": "Ref",
+              "from": "root.task.3",
+              "path": []
+            }
+          ],
+          "layers": [],
+          "capabilities": [
+            "task:compute"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [
+          "root.task.1",
+          "root.task.2",
+          "root.task.3"
+        ],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      }
+    ]
+  },
+  "flow": "smithers/workflow",
+  "nodes": [
+    {
+      "planNodeId": "root.task.0",
+      "nodeId": "seed",
+      "key": "key1_dc634548558d0ba248c5c14de96a7d974a9d040eae060c6487f11fda67bb1a83",
+      "kind": "static",
+      "tier": "sealed",
+      "action": "smithers/static",
+      "ordinal": 0,
+      "iteration": 0,
+      "consumes": [],
+      "after": []
+    },
+    {
+      "planNodeId": "root.task.1",
+      "nodeId": "review-a",
+      "key": "key1_b687b4cdc4f51eb6133ae8fc6164af5e4a1367c8ddf8e3ef501249ba5521f16f",
+      "kind": "agent",
+      "tier": "sealed",
+      "action": "smithers/agent",
+      "ordinal": 1,
+      "iteration": 0,
+      "consumes": [
+        "root.task.0"
+      ],
+      "after": []
+    },
+    {
+      "planNodeId": "root.task.2",
+      "nodeId": "review-b",
+      "key": "key1_3ddb57979c575414df69d91fa47f3dcd711e53b06e0f366671f9ce1fbf0b455e",
+      "kind": "agent",
+      "tier": "sealed",
+      "action": "smithers/agent",
+      "ordinal": 2,
+      "iteration": 0,
+      "consumes": [
+        "root.task.0"
+      ],
+      "after": []
+    },
+    {
+      "planNodeId": "root.task.3",
+      "nodeId": "review-c",
+      "key": "key1_71c40691c8d204e56c7b802d0fb89f4c21fbec4a0eafd241779b4aa8017468e5",
+      "kind": "agent",
+      "tier": "sealed",
+      "action": "smithers/agent",
+      "ordinal": 3,
+      "iteration": 0,
+      "consumes": [
+        "root.task.0"
+      ],
+      "after": []
+    },
+    {
+      "planNodeId": "root.task.4",
+      "nodeId": "merge",
+      "key": "key1_86c424b1e10e6e7fa94d973ad49ebc4d2b32dea5c5ede4e480a792abf5adc34f",
+      "kind": "compute",
+      "tier": "sealed",
+      "action": "smithers/compute",
+      "ordinal": 4,
+      "iteration": 0,
+      "consumes": [
+        "root.task.1",
+        "root.task.2",
+        "root.task.3"
+      ],
+      "after": []
+    }
+  ],
+  "diagnostics": []
+}

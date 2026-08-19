@@ -746,6 +746,18 @@
         "typescript": "~6.0.3",
       },
     },
+    "packages/flows-compile": {
+      "name": "@smthrs/flows-compile",
+      "version": "0.35.0",
+      "dependencies": {
+        "@smthrs/graph": "workspace:*",
+        "effect": "4.0.0-rc.108",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "~6.0.3",
+      },
+    },
     "packages/gateway": {
       "name": "@smthrs/gateway",
       "version": "0.35.0",
@@ -2642,6 +2654,8 @@
     "@smthrs/errors": ["@smthrs/errors@workspace:packages/errors"],
 
     "@smthrs/ferric-site": ["@smthrs/ferric-site@workspace:apps/ferric-site"],
+
+    "@smthrs/flows-compile": ["@smthrs/flows-compile@workspace:packages/flows-compile"],
 
     "@smthrs/gateway": ["@smthrs/gateway@workspace:packages/gateway"],
 

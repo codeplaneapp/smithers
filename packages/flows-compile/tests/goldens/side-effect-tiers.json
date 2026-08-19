@@ -1,0 +1,356 @@
+{
+  "plan": {
+    "planId": "fixture-side-effect-tiers",
+    "flow": "smithers/workflow",
+    "generation": 0,
+    "baseDigest": "key1_05bdf6248cf5b648167f53b8e2daf7e63627969a9b3be63634d1d3cfd5875eb6",
+    "digest": "key1_05bdf6248cf5b648167f53b8e2daf7e63627969a9b3be63634d1d3cfd5875eb6",
+    "nodes": [
+      {
+        "id": "root.task.0",
+        "kind": "agent",
+        "key": "key1_e5198b120c356fb375df5b5d9e3d0eadb0632c73df3c5cf13a17f158d7dbbc08",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "nondeterministic": true,
+          "body": {
+            "action": "smithers/agent",
+            "kind": "agent",
+            "tier": "sealed",
+            "payload": {
+              "step": {
+                "seat": "claude-code:default",
+                "thinkingLevel": "medium",
+                "layers": [],
+                "capabilityEnvelope": [],
+                "placement": {
+                  "_tag": "None"
+                },
+                "input": {},
+                "system": {
+                  "text": "plan",
+                  "digest": "64879f7d6b960a01909762d911a32d4582c20010c5641ee90278b644a9e3b525"
+                },
+                "instructions": [
+                  {
+                    "text": "output: plans",
+                    "digest": "e69402248e8d4620d88e4e801797ca951d92eadd0412aceea59dcf09a022a46a"
+                  }
+                ],
+                "prompt": {
+                  "text": "Plan the change.",
+                  "digest": "e6612446f708592513128a8f927e4eb75e786060fe2e96e6007e034348201074"
+                },
+                "journal": [],
+                "activeToolNames": [],
+                "toolDefinitions": [],
+                "contextWindowTokens": 0
+              }
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": 600000,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "plans",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false,
+              "worktreeBaseBranch": "main",
+              "worktreeBranch": "lane",
+              "worktreeId": "wt"
+            }
+          },
+          "inputs": [],
+          "layers": [],
+          "capabilities": [
+            "task:agent",
+            "worktree"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      },
+      {
+        "id": "root.task.1",
+        "kind": "agent",
+        "key": "key1_e0bd8abe3db53d8a921152d9faca2cd1d4ff056cadcda09fc8688ecd82ad10cc",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "nondeterministic": true,
+          "body": {
+            "action": "smithers/agent.compensable",
+            "kind": "agent",
+            "tier": "compensable",
+            "payload": {
+              "step": {
+                "seat": "claude-code:default",
+                "thinkingLevel": "medium",
+                "layers": [],
+                "capabilityEnvelope": [],
+                "placement": {
+                  "_tag": "None"
+                },
+                "input": {
+                  "plan": "plan"
+                },
+                "system": {
+                  "text": "apply",
+                  "digest": "97a5e41b45ddd2b2381046e77ccfa5c45d3553b81b66aeba7ed5c460c660f93f"
+                },
+                "instructions": [
+                  {
+                    "text": "output: applies",
+                    "digest": "48c4aa74f619222c21d124b5e53dc8ffbcae90693bfbd28b615b040399eede6f"
+                  }
+                ],
+                "prompt": {
+                  "text": "Apply the change.",
+                  "digest": "1430796a88b7901ccf77c61437c067f7c93fcc8dca4901acbd45f2ff4ec3c5ac"
+                },
+                "journal": [],
+                "activeToolNames": [],
+                "toolDefinitions": [],
+                "contextWindowTokens": 0
+              }
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": 600000,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "applies",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "sideEffect": {
+                "idempotent": false,
+                "reversible": true
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false,
+              "worktreeBaseBranch": "main",
+              "worktreeBranch": "lane",
+              "worktreeId": "wt"
+            }
+          },
+          "inputs": [
+            {
+              "_tag": "Ref",
+              "from": "root.task.0",
+              "path": []
+            }
+          ],
+          "layers": [],
+          "capabilities": [
+            "task:agent",
+            "worktree"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [
+          "root.task.0"
+        ],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      },
+      {
+        "id": "root.task.2",
+        "kind": "agent",
+        "key": "key1_19f5650bd41ab2ca566acf115c26de5f40acafb0d01bf38f75130a045c86e13c",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "nondeterministic": true,
+          "body": {
+            "action": "smithers/agent.irreversible",
+            "kind": "agent",
+            "tier": "irreversible",
+            "payload": {
+              "step": {
+                "seat": "claude-code:default",
+                "thinkingLevel": "medium",
+                "layers": [],
+                "capabilityEnvelope": [],
+                "placement": {
+                  "_tag": "None"
+                },
+                "input": {
+                  "apply": "apply"
+                },
+                "system": {
+                  "text": "publish",
+                  "digest": "a5d47a4311d759db69e576d9eedd6a02fcfd9cd214129fa8492ee1e9c7343def"
+                },
+                "instructions": [
+                  {
+                    "text": "output: publishes",
+                    "digest": "0fe348dae2c0810ae26d26c6d50ce25fa4ab36978e6f03905b9ae76f7cee1f6c"
+                  }
+                ],
+                "prompt": {
+                  "text": "Publish the change.",
+                  "digest": "12015be3b2f8ba2e6b30a281015b3ce608a16eadb202377d1d0ea728fc036b13"
+                },
+                "journal": [],
+                "activeToolNames": [],
+                "toolDefinitions": [],
+                "contextWindowTokens": 0
+              }
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": 600000,
+              "hijack": false,
+              "iteration": 0,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "publishes",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "sideEffect": {
+                "idempotent": true,
+                "reversible": false
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false,
+              "worktreeBaseBranch": "main",
+              "worktreeBranch": "lane",
+              "worktreeId": "wt"
+            }
+          },
+          "inputs": [
+            {
+              "_tag": "Ref",
+              "from": "root.task.1",
+              "path": []
+            }
+          ],
+          "layers": [],
+          "capabilities": [
+            "task:agent",
+            "worktree"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [
+          "root.task.1"
+        ],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      }
+    ]
+  },
+  "flow": "smithers/workflow",
+  "nodes": [
+    {
+      "planNodeId": "root.task.0",
+      "nodeId": "plan",
+      "key": "key1_e5198b120c356fb375df5b5d9e3d0eadb0632c73df3c5cf13a17f158d7dbbc08",
+      "kind": "agent",
+      "tier": "sealed",
+      "action": "smithers/agent",
+      "ordinal": 0,
+      "iteration": 0,
+      "consumes": [],
+      "after": []
+    },
+    {
+      "planNodeId": "root.task.1",
+      "nodeId": "apply",
+      "key": "key1_e0bd8abe3db53d8a921152d9faca2cd1d4ff056cadcda09fc8688ecd82ad10cc",
+      "kind": "agent",
+      "tier": "compensable",
+      "action": "smithers/agent.compensable",
+      "ordinal": 1,
+      "iteration": 0,
+      "consumes": [
+        "root.task.0"
+      ],
+      "after": []
+    },
+    {
+      "planNodeId": "root.task.2",
+      "nodeId": "publish",
+      "key": "key1_19f5650bd41ab2ca566acf115c26de5f40acafb0d01bf38f75130a045c86e13c",
+      "kind": "agent",
+      "tier": "irreversible",
+      "action": "smithers/agent.irreversible",
+      "ordinal": 2,
+      "iteration": 0,
+      "consumes": [
+        "root.task.1"
+      ],
+      "after": []
+    }
+  ],
+  "diagnostics": []
+}

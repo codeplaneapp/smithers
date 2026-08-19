@@ -1,0 +1,198 @@
+{
+  "plan": {
+    "planId": "fixture-loop-iteration",
+    "flow": "smithers/workflow",
+    "generation": 0,
+    "baseDigest": "key1_9679e417239a22796b66f089e8889d0a9d1c8f241e2ff1f0ded0a05e91d94ae9",
+    "digest": "key1_9679e417239a22796b66f089e8889d0a9d1c8f241e2ff1f0ded0a05e91d94ae9",
+    "nodes": [
+      {
+        "id": "root.task.0",
+        "kind": "agent",
+        "key": "key1_f4cb1f3d0187d01e804dde98632a78675d44f1c66aa1d77a8ab0f1fcb1556e6b",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "nondeterministic": true,
+          "body": {
+            "action": "smithers/agent",
+            "kind": "agent",
+            "tier": "sealed",
+            "payload": {
+              "step": {
+                "seat": "codex:default",
+                "thinkingLevel": "medium",
+                "layers": [],
+                "capabilityEnvelope": [],
+                "placement": {
+                  "_tag": "None"
+                },
+                "input": {},
+                "system": {
+                  "text": "attempt",
+                  "digest": "c7ce66d0fb14e3c2d4d920918cc6cc7e488668b08dddeb7b85e44de3b9f3eb01"
+                },
+                "instructions": [
+                  {
+                    "text": "output: attempts",
+                    "digest": "d4104311e222c19d822b9d6c2034a3fb3bb5ceca2a609a11a26355a9d17f60e9"
+                  }
+                ],
+                "prompt": {
+                  "text": "Improve the draft.",
+                  "digest": "2053feedacaa5db694397447a4ee32bb7fdcafdff20cd0da75427731471f4483"
+                },
+                "journal": [],
+                "activeToolNames": [],
+                "toolDefinitions": [],
+                "contextWindowTokens": 0
+              }
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": 600000,
+              "hijack": false,
+              "iteration": 2,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "attempts",
+              "ralphId": "improve",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false
+            }
+          },
+          "inputs": [],
+          "layers": [],
+          "capabilities": [
+            "task:agent"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      },
+      {
+        "id": "root.task.1",
+        "kind": "step",
+        "key": "key1_ad5af3c1f8ecbcfa5a9fdf9bd35f7f0af02e8acef4bc190c7913427339680d15",
+        "material": {
+          "version": "flows/key-material/v1",
+          "kind": "sealed",
+          "body": {
+            "action": "smithers/compute",
+            "kind": "compute",
+            "tier": "sealed",
+            "payload": {
+              "nodeId": "score",
+              "source": "10084c00656f52377a7d074761a8f8f02a29eaf18b1efe5a6822ee35adce941d"
+            },
+            "declaration": {
+              "approvalMode": "gate",
+              "continueOnFail": false,
+              "heartbeatTimeoutMs": null,
+              "hijack": false,
+              "iteration": 2,
+              "needsApproval": false,
+              "onHijackExit": "complete",
+              "outputTableName": "scores",
+              "ralphId": "improve",
+              "retries": {
+                "$opaque": "number",
+                "digest": "Infinity"
+              },
+              "retryPolicy": {
+                "backoff": "exponential",
+                "initialDelayMs": 1000
+              },
+              "skipIf": false,
+              "timeoutMs": null,
+              "waitAsync": false
+            }
+          },
+          "inputs": [
+            {
+              "_tag": "Ref",
+              "from": "root.task.0",
+              "path": []
+            }
+          ],
+          "layers": [],
+          "capabilities": [
+            "task:compute"
+          ],
+          "effects": {
+            "reads": [],
+            "writes": [],
+            "boundaryMode": "expected"
+          }
+        },
+        "effects": {
+          "reads": [],
+          "writes": [],
+          "boundaryMode": "expected"
+        },
+        "dependsOn": [
+          "root.task.0"
+        ],
+        "conflicts": [],
+        "strategy": "serialize",
+        "runtime": "delay-rebase",
+        "priority": 0,
+        "generation": 0
+      }
+    ]
+  },
+  "flow": "smithers/workflow",
+  "nodes": [
+    {
+      "planNodeId": "root.task.0",
+      "nodeId": "attempt",
+      "key": "key1_f4cb1f3d0187d01e804dde98632a78675d44f1c66aa1d77a8ab0f1fcb1556e6b",
+      "kind": "agent",
+      "tier": "sealed",
+      "action": "smithers/agent",
+      "ordinal": 0,
+      "iteration": 2,
+      "consumes": [],
+      "after": []
+    },
+    {
+      "planNodeId": "root.task.1",
+      "nodeId": "score",
+      "key": "key1_ad5af3c1f8ecbcfa5a9fdf9bd35f7f0af02e8acef4bc190c7913427339680d15",
+      "kind": "compute",
+      "tier": "sealed",
+      "action": "smithers/compute",
+      "ordinal": 1,
+      "iteration": 2,
+      "consumes": [
+        "root.task.0"
+      ],
+      "after": []
+    }
+  ],
+  "diagnostics": []
+}
