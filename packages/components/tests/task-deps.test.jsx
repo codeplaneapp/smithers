@@ -156,6 +156,64 @@ describe("Task deps", () => {
     expect(new Set(summary?.dependsOn)).toEqual(new Set(["review-a", "review-b"]));
     cleanup();
   });
+  test("preview render mounts a deps Task with pending placeholders and the run delivers the dep to the compute function", async () => {
+    const { smithers, Workflow, Task, Sequence, outputs, tables, db, cleanup } = createTestSmithers({
+      a: z.object({ n: z.number() }),
+      t: z.object({ m: z.number() }),
+    });
+    const workflow = smithers(() => (
+      <Workflow name="deps-preview-mount">
+        <Sequence>
+          <Task id="one" output={outputs.a}>
+            {{ n: 1 }}
+          </Task>
+          <Task id="triage" output={outputs.t} dependsOn={["one"]} deps={{ one: outputs.a }}>
+            {(deps) => ({ m: deps.one.n + 1 })}
+          </Task>
+        </Sequence>
+      </Workflow>
+    ));
+    // Static preview (smithers graph): no outputs exist yet, but the deps
+    // Task still mounts with a pending placeholder instead of being silently
+    // dropped from the rendered graph.
+    const preview = await Effect.runPromise(
+      renderFrame(
+        workflow,
+        new SmithersCtx({
+          runId: "deps-preview",
+          iteration: 0,
+          input: {},
+          outputs: {},
+          zodToKeyName: workflow.zodToKeyName,
+          depsPreview: true,
+        }),
+      ),
+    );
+    const triage = preview.tasks.find((task) => task.nodeId === "triage");
+    expect(triage).toBeDefined();
+    expect(triage?.kind).toBe("compute");
+    expect(triage?.dependsOn).toEqual(["one"]);
+    // The same frame without preview mode still defers: the runtime contract
+    // (mount once the upstream produces output) is unchanged.
+    const deferred = await Effect.runPromise(
+      renderFrame(
+        workflow,
+        new SmithersCtx({
+          runId: "deps-preview-off",
+          iteration: 0,
+          input: {},
+          outputs: {},
+          zodToKeyName: workflow.zodToKeyName,
+        }),
+      ),
+    );
+    expect(deferred.tasks.map((task) => task.nodeId)).toEqual(["one"]);
+    // Runtime: the resolved dep value reaches the compute function.
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    expect(result.status).toBe("finished");
+    expect(db.select().from(tables.t).all()[0]?.m).toBe(2);
+    cleanup();
+  }, 15_000);
   test("does not resolve deps from another createSmithers context", async () => {
     const api1 = createSmithers(
       {

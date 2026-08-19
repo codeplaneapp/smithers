@@ -295,6 +295,8 @@ custom `defineTool`. Git commits, branch changes, worktree writes, and
 
 Without the remap, `deps={{ summary: ... }}` depends on a node id `summary` no task produces: it never resolves, and the run fails with `DEPENDENCY_DEADLOCK` naming the stuck task (previously it hung or silently skipped it). `needs` alone works too, when you don't need the typed `children` callback.
 
+**Preview renders always show the task.** `bunx smthrs graph` mounts a task whose `deps` have not resolved yet, substituting a pending placeholder per dep key (printed as `<pending:key>` when a prompt template reads it), so a deps task is never silently dropped from the rendered graph. Placeholders exist only in the preview frame; at run time the task still defers until its upstream produces output, and a dependency that can never resolve fails the run with `DEPENDENCY_DEADLOCK`.
+
 ### Across a loop boundary
 
 A task inside a `<Loop>` can depend on a task outside it: the upstream resolves at its own iteration, not the loop's, so `deps`/`needs` reach it from any iteration:

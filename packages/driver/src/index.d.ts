@@ -535,6 +535,14 @@ type SmithersCtxOptions$2 = {
     taskIterations?: ReadonlyMap<string, number> | Record<string, number>;
     zodToKeyName?: Map<any, string>;
     runtimeConfig?: SmithersRuntimeConfig$1;
+    /**
+     * Preview-render mode (e.g. `smithers graph`). When true, a `Task` whose
+     * `deps` cannot resolve yet mounts with per-key pending placeholders
+     * instead of deferring (returning null), so the node is never silently
+     * dropped from a static graph render. Runtime renders leave this false:
+     * deferral is what re-mounts the task once its upstream produces output.
+     */
+    depsPreview?: boolean;
 };
 
 type SafeParser$1 = {
@@ -592,6 +600,15 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
     _taskStates: ReadonlyMap<string, unknown> | Record<string, unknown> | undefined;
     /** @type {ReadonlyMap<string, number> | Record<string, number> | undefined} */
     _taskIterations: ReadonlyMap<string, number> | Record<string, number> | undefined;
+    /**
+     * Preview-render mode (e.g. `smithers graph`). When true, a `Task` whose
+     * `deps` cannot resolve yet mounts with per-key pending placeholders
+     * instead of deferring (returning null), so the node is never silently
+     * dropped from a static graph render. Runtime renders leave this false:
+     * deferral is what re-mounts the task once its upstream produces output.
+     * @type {boolean}
+     */
+    depsPreview: boolean;
     /**
      * Tasks that declared `deps` but could not resolve them this render, so
      * they deferred (returned null) instead of mounting. The engine reads this

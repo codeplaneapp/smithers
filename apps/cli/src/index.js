@@ -11963,6 +11963,10 @@ const cli = Cli.create({
           input: inputRow ?? {},
           outputs,
           zodToKeyName: workflow.zodToKeyName,
+          // Static preview: mount tasks whose deps have not resolved yet
+          // (with pending placeholders) so a deps Task is never silently
+          // dropped from the rendered graph.
+          depsPreview: true,
         });
         const baseRootDir = resolveLaunchRootDir(c.options.root);
         const rendered = await Effect.runPromise(

@@ -16,4 +16,12 @@ export type SmithersCtxOptions = {
   taskIterations?: ReadonlyMap<string, number> | Record<string, number>;
   zodToKeyName?: Map<any, string>;
   runtimeConfig?: SmithersRuntimeConfig;
+  /**
+   * Preview-render mode (e.g. `smithers graph`). When true, a `Task` whose
+   * `deps` cannot resolve yet mounts with per-key pending placeholders
+   * instead of deferring (returning null), so the node is never silently
+   * dropped from a static graph render. Runtime renders leave this false:
+   * deferral is what re-mounts the task once its upstream produces output.
+   */
+  depsPreview?: boolean;
 };

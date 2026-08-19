@@ -108,6 +108,15 @@ export class SmithersCtx {
   /** @type {ReadonlyMap<string, number> | Record<string, number> | undefined} */
   _taskIterations;
   /**
+   * Preview-render mode (e.g. `smithers graph`). When true, a `Task` whose
+   * `deps` cannot resolve yet mounts with per-key pending placeholders
+   * instead of deferring (returning null), so the node is never silently
+   * dropped from a static graph render. Runtime renders leave this false:
+   * deferral is what re-mounts the task once its upstream produces output.
+   * @type {boolean}
+   */
+  depsPreview;
+  /**
    * Tasks that declared `deps` but could not resolve them this render, so
    * they deferred (returned null) instead of mounting. The engine reads this
    * after each render: a deferral is normal while an upstream is still
@@ -133,6 +142,7 @@ export class SmithersCtx {
     this._currentScopes = buildCurrentScopes(this.iterations);
     this._taskStates = opts.taskStates;
     this._taskIterations = opts.taskIterations;
+    this.depsPreview = opts.depsPreview === true;
     /**
      * Callable form of `ctx.outputs`. Accepts either the string table name or
      * the output target ref (`outputs.probe`) that every other accessor on

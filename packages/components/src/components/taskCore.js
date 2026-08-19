@@ -124,6 +124,34 @@ function mergeDependsOn(dependsOn, depNodeIds) {
   return merged.size > 0 ? [...merged] : undefined;
 }
 /**
+ * Placeholder value for an unresolved dep during a preview render
+ * (`SmithersCtx` `depsPreview`, used by `smithers graph`). Chainable and
+ * printable so prompt and compute templates can read arbitrary properties
+ * without throwing; stringifies to `<pending:<key>>` so a rendered graph
+ * shows the value is pending, not real data. Never a thenable (`then`
+ * resolves to undefined) so `await` on it cannot hang.
+ * @param {string} key
+ * @returns {unknown}
+ */
+function pendingDepValue(key) {
+  const label = `<pending:${key}>`;
+  const target = function () {};
+  const proxy = new Proxy(target, {
+    get(_target, prop) {
+      if (prop === Symbol.toPrimitive) return () => label;
+      if (prop === "toString" || prop === "valueOf" || prop === "toJSON") return () => label;
+      if (prop === "then") return undefined;
+      if (prop === Symbol.iterator) return function* () {};
+      if (typeof prop === "symbol") return undefined;
+      return proxy;
+    },
+    apply() {
+      return label;
+    },
+  });
+  return proxy;
+}
+/**
  * @param {any} ctx
  * @param {DepsSpec | undefined} deps
  * @param {Record<string, string> | undefined} needs
@@ -135,6 +163,7 @@ function resolveDeps(ctx, deps, needs, depsOptional) {
   const keys = Object.keys(deps);
   if (keys.length === 0) return Object.create(null);
   const resolved = Object.create(null);
+  const preview = ctx?.depsPreview === true;
   for (const key of keys) {
     const target = deps[key];
     const nodeId = needs?.[key] ?? key;
@@ -145,6 +174,13 @@ function resolveDeps(ctx, deps, needs, depsOptional) {
       // and upstream tasks may legitimately fail (continueOnFail) without
       // producing an output row.
       if (depsOptional) continue;
+      // Preview renders (smithers graph) mount the task with a pending
+      // placeholder instead of deferring, so the node is never silently
+      // dropped from the rendered graph.
+      if (preview) {
+        resolved[key] = pendingDepValue(key);
+        continue;
+      }
       return null;
     }
     resolved[key] = value;
