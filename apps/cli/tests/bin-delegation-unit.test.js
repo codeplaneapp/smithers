@@ -221,6 +221,78 @@ test("bin shim refuses to hand `claude` to a stale pin instead of delegating (re
   expect(result.stdout).not.toContain("stale");
 });
 
+/**
+ * Install a fake orchestrator under the legacy `smithers-orchestrator` package
+ * directory, the shape a pre-rename pin (or a legacy-named `file:` link) leaves
+ * on disk.
+ *
+ * @param {string} root
+ * @param {string} label
+ * @param {string} [version]
+ * @param {string} [manifestName]
+ */
+function installFakeLegacyPackage(root, label, version = "0.0.0-test", manifestName = "smithers-orchestrator") {
+  const pkgDir = join(root, "node_modules/smithers-orchestrator");
+  writeFile(
+    join(pkgDir, "package.json"),
+    JSON.stringify({
+      name: manifestName,
+      version,
+      bin: { smithers: "./src/bin/smithers.js" },
+    }) + "\n",
+  );
+  writeFile(join(pkgDir, "src/bin/smithers.js"), markerScript(label), 0o755);
+  writeFile(join(root, "node_modules/.bin/smithers"), POSIX_BIN_SHIM, 0o755);
+}
+
+test("bin shim delegates to a legacy smithers-orchestrator pin", () => {
+  const dir = mkdtempSync(join(tmpdir(), "smithers-bin-delegation-legacy-"));
+  onTestFinished(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  installFakeLegacyPackage(dir, "legacy-dep", "9.9.9");
+  const delegated = runBin(dir, ["ps"]);
+
+  expect(delegated.label).toBe("legacy-dep");
+  expect(delegated.args).toEqual(["ps"]);
+});
+
+test("bin shim refuses to hand `claude` to a stale legacy pin with the skew message", () => {
+  // The plue shape: the project devDeps `smithers-orchestrator@^0.9.1`, which
+  // predates every plugin protocol command. Delegating anyway reproduces the
+  // bare `Unknown command: claude` monitor death; the skew guard must name the
+  // pin and the fix for the legacy package name too.
+  const dir = mkdtempSync(join(tmpdir(), "smithers-bin-skew-legacy-"));
+  onTestFinished(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  installFakeLegacyPackage(dir, "stale-legacy", "0.9.1");
+
+  const result = spawnSync(process.execPath, [SMITHERS_BIN, "claude", "monitor"], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+
+  expect(result.status).toBe(4);
+  expect(result.stderr).toContain(">=0.27.0");
+  expect(result.stderr).toContain("0.9.1");
+  expect(result.stderr).toContain("bun add smthrs@latest");
+  expect(result.stdout).not.toContain("stale-legacy");
+});
+
+test("describeProtocolCommandSkew stays quiet for a current checkout behind a legacy-named link", () => {
+  // A legacy-named directory whose manifest is the renamed current package
+  // (the `file:../smithers/packages/smithers` link shape) is not a stale pin.
+  const dir = mkdtempSync(join(tmpdir(), "smithers-bin-skew-legacy-link-"));
+  onTestFinished(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  installFakeLegacyPackage(dir, "linked-checkout", "9.9.9", "smthrs");
+  const binPath = join(dir, "node_modules/smithers-orchestrator/src/bin/smithers.js");
+
+  expect(describeProtocolCommandSkew({ args: ["claude", "monitor"], binPath })).toBeNull();
+});
+
 test("bin shim ignores a bare .bin/smithers shell shim with no local package (regression)", () => {
   // Reproduces the user-reported crash: `bunx smthrs agent --help`
   // found `.smithers/node_modules/.bin/smithers` (a `#!/bin/sh` shim) and tried

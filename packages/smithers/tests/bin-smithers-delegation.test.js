@@ -108,10 +108,61 @@ describe("getExplicitWorkflowPath", () => {
   });
 });
 
+/**
+ * Scaffold a minimal install under the legacy `smithers-orchestrator` package
+ * directory. The manifest name defaults to the legacy name (a real pre-rename
+ * install); passing "smthrs" models a legacy-named symlink into a current
+ * checkout.
+ *
+ * @param {string} root
+ * @param {string} [manifestName]
+ * @returns {string} absolute path to the bin file
+ */
+function scaffoldLegacyInstall(root, manifestName = "smithers-orchestrator") {
+  const pkgDir = join(root, "node_modules", "smithers-orchestrator");
+  const binDir = join(pkgDir, "bin");
+  mkdirSync(binDir, { recursive: true });
+  const binFile = join(binDir, "smithers.js");
+  writeFileSync(
+    join(pkgDir, "package.json"),
+    JSON.stringify({ name: manifestName, bin: { smithers: "bin/smithers.js" } }),
+  );
+  writeFileSync(binFile, "#!/usr/bin/env bun\nconsole.log('legacy smithers');");
+  return binFile;
+}
+
 describe("resolveLocalSmithersBinJs", () => {
   test("returns null when node_modules/smthrs does not exist", () => {
     const tmp = makeTmp();
     expect(resolveLocalSmithersBinJs(tmp)).toBeNull();
+  });
+
+  test("resolves a legacy smithers-orchestrator install", () => {
+    const tmp = makeTmp();
+    const binFile = scaffoldLegacyInstall(tmp);
+    expect(resolveLocalSmithersBinJs(tmp)).toBe(binFile);
+  });
+
+  test("resolves a legacy-named directory holding a renamed manifest", () => {
+    const tmp = makeTmp();
+    const binFile = scaffoldLegacyInstall(tmp, "smthrs");
+    expect(resolveLocalSmithersBinJs(tmp)).toBe(binFile);
+  });
+
+  test("the current package name wins over the legacy one at the same level", () => {
+    const tmp = makeTmp();
+    scaffoldLegacyInstall(tmp);
+    const current = scaffoldLocalInstall(tmp);
+    expect(resolveLocalSmithersBinJs(tmp)).toBe(current);
+  });
+
+  test("a malformed current-name manifest falls through to the legacy install", () => {
+    const tmp = makeTmp();
+    const pkgDir = join(tmp, "node_modules", "smthrs");
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(join(pkgDir, "package.json"), "not json {{{");
+    const legacy = scaffoldLegacyInstall(tmp);
+    expect(resolveLocalSmithersBinJs(tmp)).toBe(legacy);
   });
 
   test("returns null when package.json is missing", () => {

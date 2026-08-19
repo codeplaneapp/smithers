@@ -47,8 +47,26 @@ export function getExplicitWorkflowPath(args) {
 }
 
 /**
- * Resolve the local `smthrs` package's bin JS file under
- * `<directory>/node_modules/`. Going through `package.json` (instead of the
+ * Directory names an installed orchestrator can live under inside
+ * `node_modules/`. The package was published as `smithers-orchestrator` before
+ * the `smthrs` rename, and a project pinning the old name (or `file:`-linking
+ * it) still expects delegation to honor its pin; without this, a newer global
+ * CLI silently runs against the old pin's store and auto-migrates its schema
+ * forward. The new name wins when both are installed.
+ */
+const INSTALLED_PACKAGE_DIRS = ["smthrs", "smithers-orchestrator"];
+
+/**
+ * Manifest `name` values that identify the orchestrator package. Both appear
+ * in the wild: a legacy install carries the pre-rename name, while a
+ * legacy-named symlink into a current checkout carries the new one.
+ */
+const ORCHESTRATOR_PACKAGE_NAMES = new Set(INSTALLED_PACKAGE_DIRS);
+
+/**
+ * Resolve the local orchestrator package's bin JS file under
+ * `<directory>/node_modules/`, checking the current package name first and the
+ * legacy one second. Going through `package.json` (instead of the
  * `.bin/smithers` shell shim npm/pnpm generate) is the whole point: the shim
  * is `#!/bin/sh` and re-execing it with `process.execPath` (bun) makes bun
  * parse shell as JavaScript, which crashes with `Expected ")" but found
@@ -57,18 +75,21 @@ export function getExplicitWorkflowPath(args) {
  * @param {string} directory
  */
 export function resolveLocalSmithersBinJs(directory) {
-  const pkgJsonPath = resolve(directory, "node_modules/smthrs/package.json");
-  if (!existsSync(pkgJsonPath)) return null;
-  let pkg;
-  try {
-    pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
-  } catch {
-    return null;
+  for (const packageDir of INSTALLED_PACKAGE_DIRS) {
+    const pkgJsonPath = resolve(directory, "node_modules", packageDir, "package.json");
+    if (!existsSync(pkgJsonPath)) continue;
+    let pkg;
+    try {
+      pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
+    } catch {
+      continue;
+    }
+    const binEntry = typeof pkg?.bin === "string" ? pkg.bin : pkg?.bin?.smithers;
+    if (typeof binEntry !== "string" || binEntry.length === 0) continue;
+    const binPath = resolve(dirname(pkgJsonPath), binEntry);
+    if (existsSync(binPath)) return binPath;
   }
-  const binEntry = typeof pkg?.bin === "string" ? pkg.bin : pkg?.bin?.smithers;
-  if (typeof binEntry !== "string" || binEntry.length === 0) return null;
-  const binPath = resolve(dirname(pkgJsonPath), binEntry);
-  return existsSync(binPath) ? binPath : null;
+  return null;
 }
 
 /**
@@ -185,10 +206,12 @@ export function compareVersions(a, b) {
 }
 
 /**
- * The `smthrs` package that owns `binPath`: its version and the
- * directory whose `package.json` pins it (the parent of `node_modules`). Null
- * when `binPath` is not inside an installed copy, which includes the source
- * checkout entry — a checkout is never a stale pin.
+ * The orchestrator package that owns `binPath`: its version and the
+ * directory whose `package.json` pins it (the parent of `node_modules`). The
+ * manifest may carry the current `smthrs` name or the legacy
+ * `smithers-orchestrator` one. Null when `binPath` is not inside an installed
+ * copy, which includes the source checkout entry — a checkout is never a stale
+ * pin.
  *
  * @param {string} binPath
  * @returns {{ version: string, packageRoot: string, installRoot: string | null } | null}
@@ -200,7 +223,7 @@ export function describeLocalSmithersInstall(binPath) {
     if (existsSync(manifestPath)) {
       try {
         const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-        if (manifest?.name === "smthrs" && typeof manifest?.version === "string") {
+        if (ORCHESTRATOR_PACKAGE_NAMES.has(manifest?.name) && typeof manifest?.version === "string") {
           const parent = dirname(current);
           const grandparent = dirname(parent);
           const installRoot = parse(parent).base === "node_modules" ? grandparent : null;
