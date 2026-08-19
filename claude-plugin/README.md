@@ -108,15 +108,27 @@ Every command the plugin issues — the MCP server, the run monitor, the
 SessionStart run count, the `/workflows` mirror — goes through
 `lib/resolve-smithers-cli.mjs`:
 
-1. If the project sits inside a **Smithers source checkout** (a tree whose root
-   `package.json` is named `smithers-monorepo` and that has
+1. `workspace` — if the project sits inside a **Smithers source checkout** (a
+   tree whose root `package.json` is named `smithers-monorepo` and that has
    `apps/cli/src/index.js`), it runs that working tree. Contributors get the code
    they are editing, not the last published release.
-2. Otherwise it runs `bunx smthrs` — the published package.
+2. `installed` — otherwise a `node_modules/smthrs` whose manifest `name` is
+   `smthrs`, run by the bin path that manifest declares. The directory name
+   alone is not proof of identity, since a workspace can link anything there.
+3. `path` — otherwise an executable named **`smithers`** on PATH. That is the
+   bin name the published package actually declares, so it is unambiguous.
+4. `published` — otherwise `bunx smthrs`, what a machine with no install gets.
+
+Only the last tier resolves by bin name, and that ordering is the point:
+`bunx smthrs` asks the runner to map a package name to a bin, and any project
+shipping its own `smthrs` bin wins that guess. `@smthrs/build-cli` in the flows
+repo declares one, so inside flows `bunx smthrs --version` prints that package's
+version and every orchestrator subcommand exits COMMAND_NOT_FOUND.
 
 `bin/smithers.mjs` applies that choice for config files that can only name a
-static command, forwarding argv and stdio unchanged. In a checkout the
-SessionStart hook also passes the resolved command to the mirror as `args.cli`.
+static command, forwarding argv and stdio unchanged. The SessionStart hook also
+passes the resolved command to the mirror as `args.cli` whenever it differs from
+the mirror's own `bunx smthrs` default — not only inside a checkout.
 
 ## Requirements
 
