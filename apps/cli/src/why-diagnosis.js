@@ -1050,7 +1050,9 @@ function buildDiagnosis(params) {
         run.finishedAtMs,
         run.startedAtMs,
       ),
-      unblocker: buildResumeUnblocker(run),
+      // A resume re-drives the run but leaves an exhausted node's state alone,
+      // so it reports the same failure; only retry-task resets the node first.
+      unblocker: buildRetryTaskUnblocker(run, node.nodeId, node.iteration ?? 0, run.status === "running"),
       context:
         insight.maxAttempts != null
           ? `Attempt ${insight.failedCount} of ${insight.maxAttempts}`

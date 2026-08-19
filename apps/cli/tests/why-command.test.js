@@ -207,7 +207,7 @@ describe("smithers why", () => {
       sqlite.close();
     }
   });
-  test("failed run diagnosis reports exhausted retries and resume command", async () => {
+  test("failed run diagnosis reports exhausted retries and retry-task command", async () => {
     const repo = createTempRepo();
     const { sqlite, adapter } = openRepoDb(repo);
     const now = Date.now();
@@ -257,7 +257,11 @@ describe("smithers why", () => {
       expect(result.stdout).toContain("All retries exhausted");
       expect(result.stdout).toContain("SchemaValidationError: output.score must be >= 0");
       expect(result.stdout).toContain("Attempt 3 of 3");
-      expect(result.stdout).toContain("smithers up workflow.tsx --run-id failed-run --resume true");
+      // Resuming honors the spent retry count and re-fails immediately, so the
+      // hint names the retry-task that resets the node first.
+      expect(result.stdout).toContain(
+        "smithers retry-task workflow.tsx --run-id failed-run --node-id validate-output --iteration 0",
+      );
     } finally {
       sqlite.close();
     }

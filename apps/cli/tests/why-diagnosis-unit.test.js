@@ -423,6 +423,11 @@ describe("why diagnosis unit coverage", () => {
     const exhausted = diagnosis.blockers.find((blocker) => blocker.kind === "retries-exhausted");
     expect(exhausted?.reason).toContain("dependency exploded");
     expect(exhausted?.context).toBe("Attempt 1 of 1");
+    // A resume leaves the exhausted node failed and reports the same error, so
+    // the hint has to be the retry-task that resets the node first.
+    expect(exhausted?.unblocker).toBe(
+      `smithers retry-task 'workflow with spaces.tsx' --run-id diag-run --node-id ${exhausted?.nodeId} --iteration 0 --force true`,
+    );
 
     const dependency = diagnosis.blockers.find((blocker) => blocker.kind === "dependency-failed");
     expect(dependency?.dependencyNodeId).toBe("dep-a");
