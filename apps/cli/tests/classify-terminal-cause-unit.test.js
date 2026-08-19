@@ -3,11 +3,12 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smthrs/db/adapter";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
-import { CANCEL_APPROVAL_AUTHOR, classifyTerminalCause } from "../src/classifyTerminalCause.js";
+import { CANCEL_APPROVAL_AUTHOR, classifyTerminalCause, PARKED_RUN_STATUSES } from "../src/classifyTerminalCause.js";
 
 // classifyTerminalCause decides whether a failed run warrants a post-failure
 // autopsy. Only a genuine, unexpected task error does; a human-denied gate, an
-// operator cancel, or a quota park all have their cause already recorded.
+// operator cancel, a quota park, or a run that never actually terminated all
+// have their cause already recorded.
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
@@ -115,6 +116,47 @@ describe("classifyTerminalCause", () => {
     openSqlite = sqlite;
     await insertRun(adapter, "run-cancel-req", { cancelRequestedAtMs: Date.now() - 2_000 });
     expect(await classifyTerminalCause(adapter, "run-cancel-req", { status: "failed" })).toBe("cancelled");
+  });
+
+  // REGRESSION: an `up` process that dies or is interrupted while its run sits
+  // on a gate reports a failed RESULT for a run the ledger still shows as
+  // parked. Autopsying that spends a research agent to conclude "nothing
+  // failed, just resume it" — which is exactly what happened to
+  // run-1787103700592 (30/31 nodes finished, 0 failed, empty runError) on
+  // 2026-08-19.
+  for (const parked of PARKED_RUN_STATUSES) {
+    test(`a run still parked on ${parked} is not autopsy-worthy even when the process reports failure`, async () => {
+      const { adapter, sqlite } = createTestDb();
+      openSqlite = sqlite;
+      await insertRun(adapter, `run-parked-${parked}`, { status: parked, finishedAtMs: null });
+      expect(await classifyTerminalCause(adapter, `run-parked-${parked}`, { status: "failed" })).toBe("not-terminal");
+    });
+  }
+
+  test("a parked run whose gate was genuinely denied still classifies as human-denied", async () => {
+    // Ordering guard: the denial check must not be shadowed by the parked-status
+    // check for a run that failed ON its gate.
+    const { adapter, sqlite } = createTestDb();
+    openSqlite = sqlite;
+    await insertRun(adapter, "run-denied-terminal", { status: "failed" });
+    await insertDeniedGate(adapter, "run-denied-terminal", "qa:reviewer");
+    expect(await classifyTerminalCause(adapter, "run-denied-terminal", { status: "failed" })).toBe("human-denied");
+  });
+
+  test("a run absent from the ledger stays autopsy-worthy (fail open)", async () => {
+    // The parked-status check reads the ledger only. An unreadable or missing
+    // run must never be silently reclassified as "nothing to see".
+    const { adapter, sqlite } = createTestDb();
+    openSqlite = sqlite;
+    expect(await classifyTerminalCause(adapter, "run-never-inserted", { status: "failed" })).toBe("task-error");
+  });
+
+  test("a finished-but-failed run is still autopsy-worthy", async () => {
+    const { adapter, sqlite } = createTestDb();
+    openSqlite = sqlite;
+    await insertRun(adapter, "run-really-failed", { status: "failed" });
+    await insertFailedTaskNode(adapter, "run-really-failed");
+    expect(await classifyTerminalCause(adapter, "run-really-failed", { status: "failed" })).toBe("task-error");
   });
 
   test("a quota-parked run is not autopsy-worthy", async () => {

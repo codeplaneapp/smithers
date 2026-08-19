@@ -10,15 +10,23 @@
 export const CANCEL_APPROVAL_AUTHOR = "smithers:cancel";
 
 /**
- * @typedef {"human-denied" | "cancelled" | "quota-parked" | "task-error"} TerminalCause
+ * Run statuses that mean "parked, waiting for something outside the engine" —
+ * not terminal, so never autopsy-worthy. `waiting-quota` is deliberately absent:
+ * it has its own, more specific cause.
+ */
+export const PARKED_RUN_STATUSES = new Set(["waiting-approval", "waiting-event", "waiting-timer"]);
+
+/**
+ * @typedef {"human-denied" | "cancelled" | "quota-parked" | "not-terminal" | "task-error"} TerminalCause
  */
 
 /**
  * Classify WHY a run reached its failed/terminal state, reading the ledger the
  * cause is already recorded in. Only a genuine, unexpected task error
  * (`"task-error"`) warrants a post-failure autopsy; a human-denied gate, an
- * operator cancel, or a quota park all already have their cause recorded, so
- * autopsying them just burns agent tokens investigating a decision.
+ * operator cancel, a quota park, or a run that never actually terminated all
+ * already have their cause recorded, so autopsying them just burns agent tokens
+ * investigating a decision.
  *
  * Reads are defensive: any ledger lookup that throws degrades to the
  * autopsy-worthy `"task-error"` so a genuine failure is never silently
@@ -43,6 +51,21 @@ export async function classifyTerminalCause(adapter, runId, result) {
   }
   if (status === "waiting-quota" || result?.status === "waiting-quota") {
     return "quota-parked";
+  }
+  // The caller reaches here because the *process* reported a failed result, but
+  // that is not the same as the RUN having failed. An `up` process that dies or
+  // is interrupted while its run sits on a gate reports failure for a run whose
+  // ledger status is still a parked one — and autopsying that produces a report
+  // whose own conclusion is "nothing failed, just resume it". Trust the ledger
+  // over the process: a run parked on a human, an event, or a timer has not
+  // terminated, so there is nothing to explain yet. Whichever process later
+  // carries the run to a terminal state classifies it then.
+  //
+  // Scoped to a status positively read from the LEDGER (`run.status`), never the
+  // caller's `result.status`, which is "failed" by definition at the call site.
+  // An unreadable run keeps the fail-open `"task-error"` path below.
+  if (run && PARKED_RUN_STATUSES.has(String(run.status))) {
+    return "not-terminal";
   }
   // listAllDecidedApprovals (NOT listDecidedApprovals): a human-denied gate
   // leaves its node in state "failed", which the node-state='pending' filter
