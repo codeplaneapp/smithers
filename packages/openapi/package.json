@@ -38,7 +38,7 @@
     "@smthrs/observability": "workspace:*",
     "@smthrs/scheduler": "workspace:*",
     "ai": "^7.0.10",
-    "effect": "4.0.0-beta.105",
+    "effect": "4.0.0-rc.108",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },

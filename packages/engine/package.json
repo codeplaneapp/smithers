@@ -32,9 +32,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@effect/platform-bun": "4.0.0-beta.105",
-    "@effect/platform-node-shared": "4.0.0-beta.105",
-    "@effect/sql-sqlite-bun": "4.0.0-beta.105",
+    "@effect/platform-bun": "4.0.0-rc.108",
+    "@effect/platform-node-shared": "4.0.0-rc.108",
+    "@effect/sql-sqlite-bun": "4.0.0-rc.108",
     "@smthrs/agents": "workspace:*",
     "@smthrs/components": "workspace:*",
     "@smthrs/db": "workspace:*",
@@ -52,7 +52,7 @@
     "ai": "^7.0.10",
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",
-    "effect": "4.0.0-beta.105",
+    "effect": "4.0.0-rc.108",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "zod": "^4.4.3"
@@ -63,7 +63,7 @@
     "pg": "^8.22.0"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.105",
+    "@effect/platform-node": "4.0.0-rc.108",
     "@types/bun": "latest",
     "typescript": "~6.0.3"
   }

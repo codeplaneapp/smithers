@@ -182,7 +182,7 @@
   "dependencies": {
     "@smthrs/errors": "workspace:*",
     "@smthrs/graph": "workspace:*",
-    "effect": "4.0.0-beta.105"
+    "effect": "4.0.0-rc.108"
   },
   "devDependencies": {
     "@types/bun": "latest",
