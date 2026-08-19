@@ -1,4 +1,4 @@
-import { dynamicTool, jsonSchema } from "ai";
+import { dynamicTool, jsonSchema } from "../runtime-tool.js";
 
 /** @typedef {import("./GroundedWebSearchProvider.ts").GroundedWebSearchProvider} GroundedWebSearchProvider */
 /** @typedef {import("./GroundedWebSearchProvider.ts").GroundedWebSearchResult} GroundedWebSearchResult */

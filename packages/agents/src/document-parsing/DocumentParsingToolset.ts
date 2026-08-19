@@ -1,4 +1,4 @@
 export type DocumentParsingToolset = {
-  tools: Record<string, import("ai").Tool>;
+  tools: Record<string, import("../Tool").Tool>;
   toolNames: string[];
 };

@@ -57,7 +57,7 @@ function createInactivityTimer(timeoutMs, onTimeout) {
 /**
  * Normalize CLI usage into the AI SDK shape consumed by Smithers telemetry.
  * @param {unknown} value
- * @returns {import("ai").LanguageModelUsage | undefined}
+ * @returns {import("../GenerateResult.ts").LanguageModelUsage | undefined}
  */
 function toLanguageModelUsage(value) {
   const usage = normalizeTokenUsage(value);

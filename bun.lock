@@ -375,7 +375,6 @@
       "name": "@smthrs/smithers-ui",
       "version": "0.0.1",
       "dependencies": {
-        "@ai-sdk/anthropic": "^4.0.5",
         "@pierre/diffs": "^1.2.12",
         "@pierre/trees": "1.0.0-beta.5",
         "@smthrs/gateway-client": "workspace:*",
@@ -389,7 +388,6 @@
         "@tanstack/react-router": "^1.135.5",
         "@tanstack/react-virtual": "^3.14.5",
         "@xyflow/react": "^12.10.2",
-        "ai": "^7.0.10",
         "dagre": "^0.8.5",
         "react": "^19.2.7",
         "react-dom": "^19.2.7",
@@ -493,7 +491,6 @@
       "dependencies": {
         "@elizaos/core": "~1.7.2",
         "@smthrs/agents": "workspace:*",
-        "ai": "^7.0.10",
         "smthrs": "workspace:*",
         "yaml": "^2.9.0",
         "zod": "^4.4.3",
@@ -507,14 +504,12 @@
       "name": "@smthrs/agents",
       "version": "0.35.0",
       "dependencies": {
-        "@ai-sdk/anthropic": "^4.0.5",
-        "@ai-sdk/openai": "^4.0.5",
+        "@effect/platform-node": "4.0.0-rc.108",
         "@smthrs/accounts": "workspace:*",
         "@smthrs/driver": "workspace:*",
         "@smthrs/errors": "workspace:*",
         "@smthrs/observability": "workspace:*",
         "@smthrs/usage": "workspace:*",
-        "ai": "^7.0.10",
         "effect": "4.0.0-rc.108",
         "zod": "^4.4.3",
       },
@@ -525,9 +520,11 @@
         "typescript": "~6.0.3",
       },
       "peerDependencies": {
+        "@flows/model": "0.1.0",
         "@modelcontextprotocol/sdk": "^1.29.0",
       },
       "optionalPeers": [
+        "@flows/model",
         "@modelcontextprotocol/sdk",
       ],
     },
@@ -716,7 +713,6 @@
         "@smthrs/time-travel": "workspace:*",
         "@smthrs/tool-context": "workspace:*",
         "@smthrs/vcs": "workspace:*",
-        "ai": "^7.0.10",
         "diff": "^9.0.0",
         "drizzle-orm": "^0.45.2",
         "effect": "4.0.0-rc.108",
@@ -990,7 +986,6 @@
         "@smthrs/errors": "workspace:*",
         "@smthrs/observability": "workspace:*",
         "@smthrs/scheduler": "workspace:*",
-        "ai": "^7.0.10",
         "effect": "4.0.0-rc.108",
         "yaml": "^2.9.0",
         "zod": "^4.4.3",
@@ -1272,7 +1267,6 @@
       "name": "@smthrs/tool-context",
       "version": "0.35.0",
       "dependencies": {
-        "ai": "^7.0.10",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -1467,11 +1461,7 @@
 
     "@ag-ui/core": ["@ag-ui/core@0.0.52", "", { "dependencies": { "zod": "^3.22.4" } }, "sha512-Xo0bUaNV56EqylzcrAuhUkQX7et7+SZIrqZZtEByGwEq/I1EHny6ZMkWHLkKR7UNi0FJZwJyhKYmKJS3B2SEgA=="],
 
-    "@ai-sdk/anthropic": ["@ai-sdk/anthropic@4.0.27", "", { "dependencies": { "@ai-sdk/provider": "4.0.4", "@ai-sdk/provider-utils": "5.0.18" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-ecrPWkYf+sHDLHErHAU/yjJfNevUzT0i6TuoQLb58oadnquSHcLQ5NMLLWjbr6d1rxYdzI7ftulIJ03VH9yM3w=="],
-
     "@ai-sdk/gateway": ["@ai-sdk/gateway@4.0.36", "", { "dependencies": { "@ai-sdk/provider": "4.0.4", "@ai-sdk/provider-utils": "5.0.18", "@vercel/oidc": "3.2.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-N1P6bdW/aC5rxLeuGYgx3X4el3DoZy8UWlky+g+AeIZSmxaEi/AToHJL4cmZ6nCPHk1byqJWwC+PaOZG0hK0dw=="],
-
-    "@ai-sdk/openai": ["@ai-sdk/openai@4.0.27", "", { "dependencies": { "@ai-sdk/provider": "4.0.4", "@ai-sdk/provider-utils": "5.0.18" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-6MsWnbNG0ZjZgzYimNNjnTAlOFXn+jdLMFB47dDVUsRNjxdUoTSduCQPZZeTKoUl0ZNwCjsJ31of49l/t1r9MA=="],
 
     "@ai-sdk/provider": ["@ai-sdk/provider@4.0.4", "", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-tbHKNLirllUNF3ZlkCsXnwab2ZV1Sl4b1H/Cp9ruCce15IBmskE8Gwkk0yo9xDWY+jho2of7lVXtwSsyrq7cwQ=="],
 

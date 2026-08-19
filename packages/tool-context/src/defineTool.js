@@ -1,4 +1,4 @@
-import { tool, zodSchema } from "ai";
+import { tool, zodSchema } from "./tool.js";
 import { getToolContext, getToolIdempotencyKey, nextToolSeq } from "./toolContext.js";
 
 const smithersToolMetadata = Symbol.for("smithers.tool.metadata");

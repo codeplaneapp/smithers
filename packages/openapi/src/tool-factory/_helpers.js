@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Shared private helpers for OpenAPI tool factory
 // ---------------------------------------------------------------------------
-import { tool, zodSchema } from "ai";
+import { tool, zodSchema } from "../tool.js";
 import { Effect, Metric } from "effect";
 import { nowMs } from "@smthrs/scheduler/nowMs";
 import { openApiToolCallsTotal, openApiToolCallErrorsTotal, openApiToolDuration } from "../metrics.js";

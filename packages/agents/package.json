@@ -1,7 +1,7 @@
 {
   "name": "@smthrs/agents",
   "version": "0.35.0",
-  "description": "AI SDK and CLI agent adapters for Smithers",
+  "description": "flows model and CLI agent adapters for Smithers",
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -80,14 +80,13 @@
     "build": "rm -f src/index.d.ts src/index-*.d.ts src/BaseCliAgent/index.d.ts && tsup --dts-only"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.5",
-    "@ai-sdk/openai": "^4.0.5",
+    "@effect/platform-node": "4.0.0-rc.108",
+    "@flows/model": "0.1.0",
     "@smthrs/accounts": "workspace:*",
     "@smthrs/driver": "workspace:*",
     "@smthrs/errors": "workspace:*",
     "@smthrs/observability": "workspace:*",
     "@smthrs/usage": "workspace:*",
-    "ai": "^7.0.10",
     "effect": "4.0.0-rc.108",
     "zod": "^4.4.3"
   },

@@ -1,4 +1,8 @@
-import type { Tool } from "ai";
+export type Tool<Input = unknown, Output = unknown> = {
+  description?: string;
+  inputSchema: unknown;
+  execute?: (input: Input, options?: { abortSignal?: AbortSignal }) => Output | Promise<Output>;
+};
 
 /**
  * Type alias for an AI SDK tool produced from an OpenAPI operation.

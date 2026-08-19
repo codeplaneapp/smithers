@@ -1,4 +1,4 @@
-import { dynamicTool, jsonSchema } from "ai";
+import { dynamicTool, jsonSchema } from "../runtime-tool.js";
 
 /** @typedef {import("./DocumentParsingProvider.ts").DocumentParsingProvider} DocumentParsingProvider */
 /** @typedef {import("./DocumentParsingToolset.ts").DocumentParsingToolset} DocumentParsingToolset */

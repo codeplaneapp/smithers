@@ -315,9 +315,9 @@ function filterBenignStderr(stderr, extraPatterns) {
 /** @typedef {import("./BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
 /** @typedef {import("./CliUsageInfo.ts").CliUsageInfo} CliUsageInfo */
-/** @typedef {import("ai").GenerateTextResult} GenerateTextResult */
-/** @typedef {import("ai").StreamTextResult} StreamTextResult */
-/** @typedef {import("ai").LanguageModelUsage} LanguageModelUsage */
+/** @typedef {import("../GenerateResult.ts").GenerateTextResult} GenerateTextResult */
+/** @typedef {import("../GenerateResult.ts").StreamTextResult} StreamTextResult */
+/** @typedef {import("../GenerateResult.ts").LanguageModelUsage} LanguageModelUsage */
 /**
  * @typedef {"generate" | "stream"} AgentInvocationOperation
  */

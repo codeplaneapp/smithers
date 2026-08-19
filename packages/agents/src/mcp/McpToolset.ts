@@ -1,4 +1,4 @@
-import type { Tool } from "ai";
+import type { Tool } from "../Tool";
 
 /**
  * A live connection to an MCP server, with its tools projected as AI SDK tools.

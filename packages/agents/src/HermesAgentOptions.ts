@@ -1,4 +1,5 @@
-import type { LanguageModel, ToolSet } from "ai";
+import type { Model } from "@flows/model/Model";
+import type { ToolSet } from "./Tool";
 import type { SdkAgentOptions } from "./SdkAgentOptions";
 
 /**
@@ -10,7 +11,7 @@ import type { SdkAgentOptions } from "./SdkAgentOptions";
  * the string-model form of `OpenAIAgentOptions`.
  */
 export type HermesAgentOptions<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = Omit<
-  SdkAgentOptions<CALL_OPTIONS, TOOLS, LanguageModel>,
+  SdkAgentOptions<CALL_OPTIONS, TOOLS, Model>,
   "model"
 > & {
   /**

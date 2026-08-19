@@ -1,4 +1,4 @@
-/** @typedef {import("ai").ModelMessage} ModelMessage */
+/** @typedef {import("../GenerateResult.ts").ModelMessage} ModelMessage */
 /**
  * @typedef {{ prompt: string; systemFromMessages?: string; }} PromptParts
  */

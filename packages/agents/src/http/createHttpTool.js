@@ -1,8 +1,8 @@
-import { dynamicTool } from "ai";
+import { dynamicTool } from "../runtime-tool.js";
 import { z } from "zod";
 import { readBoundedResponseBody } from "../readBoundedResponseBody.js";
 
-/** @typedef {import("ai").Tool} Tool */
+/** @typedef {import("../Tool.ts").Tool} Tool */
 /** @typedef {import("./CreateHttpToolOptions.ts").CreateHttpToolOptions} CreateHttpToolOptions */
 /** @typedef {import("./HttpToolInput.ts").HttpToolInput} HttpToolInput */
 /** @typedef {import("./HttpToolOutput.ts").HttpToolOutput} HttpToolOutput */

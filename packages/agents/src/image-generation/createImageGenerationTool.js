@@ -1,6 +1,6 @@
-import { dynamicTool, jsonSchema } from "ai";
+import { dynamicTool, jsonSchema } from "../runtime-tool.js";
 
-/** @typedef {import("ai").Tool} Tool */
+/** @typedef {import("../Tool.ts").Tool} Tool */
 /** @typedef {import("./ImageGenerationProvider.ts").ImageGenerationProvider} ImageGenerationProvider */
 /** @typedef {import("./ImageGenerationToolOptions.ts").ImageGenerationToolOptions} ImageGenerationToolOptions */
 /** @typedef {import("./ImageGenerationRequest.ts").ImageGenerationRequest} ImageGenerationRequest */

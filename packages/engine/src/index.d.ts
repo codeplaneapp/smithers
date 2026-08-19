@@ -15,7 +15,6 @@ import { buildSubflowChildRunId } from '@smthrs/graph/subflow-run-lineage';
 import * as _smthrs_observability_SmithersEvent from '@smthrs/observability/SmithersEvent';
 import * as _smthrs_observability_correlation from '@smthrs/observability/correlation';
 import { EventEmitter } from 'node:events';
-import { Tool } from 'ai';
 import { WorkflowDefinition } from '@smthrs/driver/WorkflowDefinition';
 export { isPidAlive, parseRuntimeOwnerPid } from '@smthrs/db/runtime-owner';
 export { RUN_DRIVER_HEARTBEAT_STALE_MS, STEAL_OWNERSHIP_FLAG, classifyRunDriverLiveness, describeLiveDriverRefusal, isRunDriverAlive, readProcessStartMs } from '@smthrs/db/runDriverLiveness';
@@ -721,6 +720,13 @@ declare function loadWorkflowFileRef(ref: ChildWorkflowFileRef$1, opts?: {
 type ChildWorkflowFileRef$1 = ChildWorkflowFileRef$2;
 type AnySmithersWorkflow = _smthrs_components_SmithersWorkflow.SmithersWorkflow<any>;
 
+type Tool<Input = unknown, Output = unknown> = {
+    description?: string;
+    inputSchema: unknown;
+    execute?: (input: Input, options?: {
+        abortSignal?: AbortSignal;
+    }) => Output | Promise<Output>;
+};
 type WorkflowToolInput<Schema> = Schema extends {
     input: infer Input;
 } ? Input : Record<string, never>;

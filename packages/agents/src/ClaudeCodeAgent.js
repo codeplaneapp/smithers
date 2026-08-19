@@ -202,7 +202,7 @@ export class ClaudeCodeAgent extends BaseCliAgent {
         didWarnAnthropicApiKeyUnset = true;
         logWarning(
           "ClaudeCodeAgent: unsetting ANTHROPIC_API_KEY so Claude Code uses your subscription. " +
-            "To use API billing instead, pass `apiKey` to ClaudeCodeAgent or use ToolLoopAgent from 'ai' with anthropic() provider.",
+            "To use API billing instead, pass `apiKey` to ClaudeCodeAgent or use AnthropicAgent with the flows model provider.",
           {},
           "agent.init",
         );

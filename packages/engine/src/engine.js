@@ -7048,7 +7048,7 @@ async function legacyExecuteTask(
           logInfo(
             `Task "${desc.nodeId}" has an output schema but engine "${engineName}" does not support native structured output. ` +
               `Falling back to prompt-injection + text JSON extraction. Schema validity does not guarantee meaningful output — ` +
-              `consider switching to an engine that declares supportsNativeStructuredOutput=true (Anthropic, OpenAI).`,
+              `consider switching to an engine that declares supportsNativeStructuredOutput=true (Grok, Codex with nativeStructuredOutput).`,
             { nodeId: desc.nodeId, agentEngine: engineName },
             "engine:task",
           );

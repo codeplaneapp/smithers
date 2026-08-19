@@ -3,7 +3,7 @@ import { buildGenerateResult, extractPrompt, truncate } from "@smthrs/agents/Bas
 /** @typedef {import("./ElizaAgentOptions.ts").ElizaAgentOptions} ElizaAgentOptions */
 /** @typedef {import("./ElizaAgentOptions.ts").ElizaPlugin} ElizaPlugin */
 /** @typedef {import("@smthrs/agents").AgentGenerateOptions} AgentGenerateOptions */
-/** @typedef {import("ai").GenerateTextResult} GenerateTextResult */
+/** @typedef {{ text: string, output?: unknown, [key: string]: any }} GenerateTextResult */
 
 /**
  * Internal interface for the elizaOS AgentRuntime — structural only, so we

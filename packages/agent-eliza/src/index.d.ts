@@ -1,5 +1,4 @@
-import * as ai from 'ai';
-import * as _smithers_orchestrator_agents from '@smthrs/agents';
+import * as _smthrs_agents from '@smthrs/agents';
 
 /**
  * Minimal structural types for elizaOS so this file compiles even when
@@ -129,8 +128,12 @@ declare class ElizaAgent {
     #private;
 }
 type ElizaAgentOptions$1 = ElizaAgentOptions$2;
-type AgentGenerateOptions = _smithers_orchestrator_agents.AgentGenerateOptions;
-type GenerateTextResult = ai.GenerateTextResult<any, any>;
+type AgentGenerateOptions = _smthrs_agents.AgentGenerateOptions;
+type GenerateTextResult = {
+    text: string;
+    output?: unknown;
+    [key: string]: any;
+};
 /**
  * Internal interface for the elizaOS AgentRuntime — structural only, so we
  * don't hard-depend on

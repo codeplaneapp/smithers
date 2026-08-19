@@ -130,7 +130,7 @@ export class NanocodexAgent {
    * @overload
    * @this {NanocodexAgent}
    * @param {NanocodexGenerateOptions} [args]
-   * @returns {Promise<import("ai").GenerateTextResult<Record<string, never>, Record<string, unknown>, import("ai").Output.Output<string, string, never>> & import("./AgentCheckpoint.ts").AgentCheckpointResult>}
+   * @returns {Promise<import("./GenerateResult.ts").GenerateTextResult & import("./AgentCheckpoint.ts").AgentCheckpointResult>}
    */
   /** @param {AgentGenerateOptions} [args] */
   async generate(args = {}) {

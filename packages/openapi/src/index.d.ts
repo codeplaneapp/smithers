@@ -1,7 +1,6 @@
-import * as effect from 'effect';
 import { Effect } from 'effect';
 import { z } from 'zod';
-import { Tool } from 'ai';
+export { openApiToolCallErrorsTotal, openApiToolCallsTotal, openApiToolDuration } from '@smthrs/observability/metrics';
 
 type HttpMethod = "get" | "post" | "put" | "delete" | "patch";
 
@@ -85,18 +84,24 @@ type OpenApiToolResponseExample = {
     description?: string;
     value: unknown;
 };
-
 type OpenApiOperationCuration = false | {
     include?: boolean;
     name?: string;
     description?: string;
     responseExamples?: OpenApiToolResponseExample[];
 };
-
 type OpenApiToolsOptions$5 = {
     baseUrl?: string;
     headers?: Record<string, string>;
     auth?: OpenApiAuth$1;
+    /**
+     * Extra origins (e.g. "https://cdn.example.com") that redirects may be
+     * followed to. Redirect destinations are always validated against the
+     * origin of the request itself (the configured OpenAPI service); any hop
+     * to another origin is refused unless it is listed here, so the injected
+     * auth/API-key headers can never leak to an unexpected host.
+     */
+    allowedRedirectOrigins?: string[];
     /**
      * Maximum response body size in bytes. Both successful and error responses
      * are bounded. Defaults to 1,048,576 bytes (1 MiB) and must be a positive
@@ -195,16 +200,14 @@ type OpenApiSpec$8 = OpenApiSpec$b;
  * @param {SchemaObject | RefObject | undefined} schema
  * @param {OpenApiSpec} spec
  * @param {Set<string>} [visited]
+ * @param {number} [depth]
  * @returns {z.ZodType}
  */
-declare function jsonSchemaToZod(schema: SchemaObject | RefObject | undefined, spec: OpenApiSpec$7, visited?: Set<string>): z.ZodType;
+declare function jsonSchemaToZod(schema: SchemaObject | RefObject | undefined, spec: OpenApiSpec$7, visited?: Set<string>, depth?: number): z.ZodType;
 type OpenApiSpec$7 = OpenApiSpec$b;
 type RefObject = RefObject$1;
 type SchemaObject = SchemaObject$1;
 
-/** @typedef {import("./OpenApiSpec.ts").OpenApiSpec} OpenApiSpec */
-/** @typedef {import("./ParameterObject.ts").ParameterObject} ParameterObject */
-/** @typedef {import("./RequestBodyObject.ts").RequestBodyObject} RequestBodyObject */
 /**
  * Build a single Zod object schema for an operation's input, combining:
  * - path parameters
@@ -262,6 +265,13 @@ declare function createOpenApiTool(input: string | OpenApiSpec$3, operationId: s
 type OpenApiSpec$3 = OpenApiSpec$b;
 type OpenApiToolsOptions$2 = OpenApiToolsOptions$5;
 
+type Tool<Input = unknown, Output = unknown> = {
+    description?: string;
+    inputSchema: unknown;
+    execute?: (input: Input, options?: {
+        abortSignal?: AbortSignal;
+    }) => Output | Promise<Output>;
+};
 /**
  * Type alias for an AI SDK tool produced from an OpenAPI operation.
  * Re-exported here so JSDoc files can reference a stable name without
@@ -300,16 +310,9 @@ declare function listOperations(input: string | OpenApiSpec$1): Array<{
 }>;
 type OpenApiSpec$1 = OpenApiSpec$b;
 
-/** @type {import("effect").Metric.Metric.Counter<number>} */
-declare const openApiToolCallsTotal: effect.Metric.Metric.Counter<number>;
-/** @type {import("effect").Metric.Metric.Counter<number>} */
-declare const openApiToolCallErrorsTotal: effect.Metric.Metric.Counter<number>;
-/** @type {import("effect").Metric.Metric.Histogram<number>} */
-declare const openApiToolDuration: effect.Metric.Metric.Histogram<number>;
-
 type OpenApiAuth = OpenApiAuth$1;
 type OpenApiSpec = OpenApiSpec$b;
 type OpenApiToolsOptions = OpenApiToolsOptions$5;
 type ParsedOperation = ParsedOperation$2;
 
-export { type OpenApiAuth, type OpenApiSpec, type OpenApiToolsOptions, type ParsedOperation, buildOperationSchema, createOpenApiTool, createOpenApiToolSync, createOpenApiTools, createOpenApiToolsSync, extractOperations, jsonSchemaToZod, listOperations, loadSpecEffect, loadSpecSync, openApiToolCallErrorsTotal, openApiToolCallsTotal, openApiToolDuration };
+export { type OpenApiAuth, type OpenApiSpec, type OpenApiToolsOptions, type ParsedOperation, buildOperationSchema, createOpenApiTool, createOpenApiToolSync, createOpenApiTools, createOpenApiToolsSync, extractOperations, jsonSchemaToZod, listOperations, loadSpecEffect, loadSpecSync };

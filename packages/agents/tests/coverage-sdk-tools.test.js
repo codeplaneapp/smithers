@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { simulateReadableStream } from "ai";
-import { MockLanguageModelV3 } from "ai/test";
+import * as ModelEvent from "@flows/model/ModelEvent";
+import { Stream } from "effect";
 import { AnthropicAgent } from "../src/AnthropicAgent.js";
 import { createElevenLabsTextToSpeechTool } from "../src/createElevenLabsTextToSpeechTool.js";
 import { createImageGenerationTool } from "../src/image-generation/createImageGenerationTool.js";
@@ -15,37 +15,20 @@ const callOptions = { toolCallId: "test-call", messages: [] };
 // ---------------------------------------------------------------------------
 describe("AnthropicAgent streaming", () => {
   test("streams assistant deltas through onStdout", async () => {
-    const model = new MockLanguageModelV3({
-      modelId: "mock-anthropic-stream",
-      doGenerate: async () => ({
-        content: [{ type: "text", text: "generate-path" }],
-        finishReason: { unified: "stop", raw: undefined },
-        usage: {
-          inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-          outputTokens: { total: 1, text: 1, reasoning: undefined },
-        },
-        warnings: [],
-      }),
-      doStream: async () => ({
-        stream: simulateReadableStream({
-          chunks: [
-            { type: "text-start", id: "text-1" },
-            { type: "text-delta", id: "text-1", delta: "hello" },
-            { type: "text-delta", id: "text-1", delta: " anthropic" },
-            { type: "text-end", id: "text-1" },
-            {
-              type: "finish",
-              finishReason: { unified: "stop", raw: undefined },
-              usage: {
-                inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined },
-                outputTokens: { total: 2, text: 2, reasoning: undefined },
-              },
-            },
-          ],
-        }),
-      }),
-    });
-    const agent = new AnthropicAgent({ id: "anthropic-sdk-stream", model });
+    let called = 0;
+    const model = {
+      stream: () => {
+        called += 1;
+        return Stream.fromIterable([
+          ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "text-1" }),
+          ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "text-1", text: "hello" }),
+          ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "text-1", text: " anthropic" }),
+          ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: "text-1" }),
+          ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" }),
+        ]);
+      },
+    };
+    const agent = new AnthropicAgent({ id: "anthropic-sdk-stream", model, modelId: "claude-test" });
     let streamed = "";
     const result = await agent.generate({
       prompt: "stream this",
@@ -55,7 +38,7 @@ describe("AnthropicAgent streaming", () => {
     });
     expect(result.text).toBe("hello anthropic");
     expect(streamed).toBe("hello anthropic");
-    expect(model.doStreamCalls).toHaveLength(1);
+    expect(called).toBe(1);
   });
 });
 

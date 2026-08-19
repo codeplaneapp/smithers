@@ -827,9 +827,6 @@ importers:
 
   apps/smithers:
     dependencies:
-      '@ai-sdk/anthropic':
-        specifier: ^4.0.5
-        version: 4.0.5(zod@4.4.3)
       '@pierre/diffs':
         specifier: ^1.2.12
         version: 1.2.12(@shikijs/themes@3.23.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -869,9 +866,6 @@ importers:
       '@xyflow/react':
         specifier: ^12.10.2
         version: 12.11.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.15)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      ai:
-        specifier: ^7.0.10
-        version: 7.0.10(zod@4.4.3)
       dagre:
         specifier: ^0.8.5
         version: 0.8.5
@@ -1152,9 +1146,6 @@ importers:
       '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
-      ai:
-        specifier: ^7.0.10
-        version: 7.0.10(zod@4.4.3)
       smthrs:
         specifier: workspace:*
         version: link:../smithers
@@ -1174,12 +1165,12 @@ importers:
 
   packages/agents:
     dependencies:
-      '@ai-sdk/anthropic':
-        specifier: ^4.0.5
-        version: 4.0.5(zod@4.4.3)
-      '@ai-sdk/openai':
-        specifier: ^4.0.5
-        version: 4.0.5(zod@4.4.3)
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1)
+      '@flows/model':
+        specifier: 0.1.0
+        version: '@smthrs/model@file:vendor/flows/smthrs-model-0.1.0.tgz'
       '@smthrs/accounts':
         specifier: workspace:*
         version: link:../accounts
@@ -1195,9 +1186,6 @@ importers:
       '@smthrs/usage':
         specifier: workspace:*
         version: link:../usage
-      ai:
-        specifier: ^7.0.10
-        version: 7.0.10(zod@4.4.3)
       effect:
         specifier: 4.0.0-rc.108
         version: 4.0.0-rc.108
@@ -1507,9 +1495,6 @@ importers:
       '@smthrs/vcs':
         specifier: workspace:*
         version: link:../vcs
-      ai:
-        specifier: ^7.0.10
-        version: 7.0.10(zod@4.4.3)
       diff:
         specifier: ^9.0.0
         version: 9.0.0
@@ -1908,9 +1893,6 @@ importers:
       '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
-      ai:
-        specifier: ^7.0.10
-        version: 7.0.10(zod@4.4.3)
       effect:
         specifier: 4.0.0-rc.108
         version: 4.0.0-rc.108
@@ -2444,9 +2426,6 @@ importers:
 
   packages/tool-context:
     dependencies:
-      ai:
-        specifier: ^7.0.10
-        version: 7.0.10(zod@4.4.3)
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -2781,20 +2760,8 @@ packages:
   '@ag-ui/core@0.0.52':
     resolution: {integrity: sha512-Xo0bUaNV56EqylzcrAuhUkQX7et7+SZIrqZZtEByGwEq/I1EHny6ZMkWHLkKR7UNi0FJZwJyhKYmKJS3B2SEgA==}
 
-  '@ai-sdk/anthropic@4.0.5':
-    resolution: {integrity: sha512-JyJYKWGYz8vfoQ1pCm48a9zgX3Gvb2/6iGHb+8pEelpqnOiUq3aDHVq+nYMf9VepqcjCuH0JSOwBrKiPg/PD9w==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
   '@ai-sdk/gateway@4.0.8':
     resolution: {integrity: sha512-esHzojMp+LllqOnEu6sYa6NKOmPcE5UObPV61LE6L2QAzCH6WHMgTS+Q/HF5HU3lVUWsHtkDzN7TNqMfv/ecCg==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/openai@4.0.5':
-    resolution: {integrity: sha512-a9cYQNAKAbkMTt6bHAvDuLv3klwtJT9m0A6x7s8EZlf1ebcxadg/1CONaYh1GA80ZRA9UQHJUS2wHoOphkQQkg==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -11521,23 +11488,11 @@ snapshots:
     dependencies:
       zod: 3.25.76
 
-  '@ai-sdk/anthropic@4.0.5(zod@4.4.3)':
-    dependencies:
-      '@ai-sdk/provider': 4.0.1
-      '@ai-sdk/provider-utils': 5.0.3(zod@4.4.3)
-      zod: 4.4.3
-
   '@ai-sdk/gateway@4.0.8(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.1
       '@ai-sdk/provider-utils': 5.0.3(zod@4.4.3)
       '@vercel/oidc': 3.2.0
-      zod: 4.4.3
-
-  '@ai-sdk/openai@4.0.5(zod@4.4.3)':
-    dependencies:
-      '@ai-sdk/provider': 4.0.1
-      '@ai-sdk/provider-utils': 5.0.3(zod@4.4.3)
       zod: 4.4.3
 
   '@ai-sdk/provider-utils@5.0.3(zod@4.4.3)':

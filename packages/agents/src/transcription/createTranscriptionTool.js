@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import { dynamicTool, jsonSchema } from "ai";
+import { dynamicTool, jsonSchema } from "../runtime-tool.js";
 import { readBoundedResponseBody } from "../readBoundedResponseBody.js";
 import { createPinnedAudioTransport } from "./createPinnedAudioTransport.js";
 import { guardedAudioDownload } from "./guardedAudioDownload.js";
@@ -49,7 +49,7 @@ const transcriptionInputSchema = {
  * Create an AI SDK-compatible audio transcription tool backed by Whisper or Deepgram.
  *
  * @param {import("./createTranscriptionTool.ts").CreateTranscriptionToolOptions} options
- * @returns {import("ai").Tool}
+ * @returns {import("../Tool.ts").Tool}
  */
 export function createTranscriptionTool(options) {
   const provider = options.provider;

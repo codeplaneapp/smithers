@@ -1,5 +1,5 @@
-/** @typedef {import("ai").GenerateTextResult} GenerateTextResult */
-/** @typedef {import("ai").StreamTextResult} StreamTextResult */
+/** @typedef {import("./GenerateResult.ts").GenerateTextResult} GenerateTextResult */
+/** @typedef {import("./GenerateResult.ts").StreamTextResult} StreamTextResult */
 /**
  * @template TOOLS, OUTPUT
  * @param {StreamTextResult<TOOLS, any>} stream

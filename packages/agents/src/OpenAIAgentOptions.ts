@@ -1,38 +1,31 @@
-import type { LanguageModel, ToolSet } from "ai";
-import type { SdkAgentOptions } from "./SdkAgentOptions";
+import type { Model } from "@flows/model/Model";
+import type { SdkAgentCommonOptions } from "./SdkAgentOptions";
+import type { ToolSet } from "./Tool";
 
-type OpenAIAgentCommonOptions<CALL_OPTIONS, TOOLS extends ToolSet> = Omit<
-  SdkAgentOptions<CALL_OPTIONS, TOOLS, LanguageModel>,
-  "model"
-> & {
+type OpenAIAgentCommonOptions<CALL_OPTIONS, TOOLS extends ToolSet> = SdkAgentCommonOptions<CALL_OPTIONS, TOOLS> & {
   /**
-   * Disable AI SDK native structured output and let Smithers use prompt-based JSON extraction.
-   * Useful for OpenAI-compatible local servers that do not honor JSON schema response formats.
+   * Kept for source compatibility. The flows Model request has no native
+   * structured-output field, so the agent always declares prompt fallback.
    */
   nativeStructuredOutput?: boolean;
 };
 
 type OpenAIAgentStringModelOptions = {
   model: string;
-  /**
-   * Base URL for OpenAI-compatible API calls, e.g. a local llama.cpp server.
-   */
+  /** Optional wire model id override. Defaults to `model`. */
+  modelId?: string;
+  /** Base URL for OpenAI Responses-compatible calls. A terminal `/v1` is accepted. */
   baseURL?: string;
-  /**
-   * API key sent to OpenAI-compatible endpoints. Local servers often accept "none".
-   */
+  /** API key sent as a bearer token. */
   apiKey?: string;
-  /**
-   * Which OpenAI API surface serves the string model. The provider default
-   * ("responses") targets the `/responses` endpoint, which most OpenAI-compatible
-   * servers (Gemini's compat layer, llama.cpp, vLLM, ...) do not implement — set
-   * "chat" to call `/chat/completions` on those endpoints.
-   */
+  /** `chat` is retained only so runtime callers receive a targeted migration error. */
   api?: "responses" | "chat";
 };
 
 type OpenAIAgentPrebuiltModelOptions = {
-  model: LanguageModel;
+  model: Model;
+  /** Required because a provider-neutral flows Model carries no model identity. */
+  modelId: string;
   baseURL?: never;
   apiKey?: never;
   api?: never;

@@ -2,7 +2,7 @@ import { SmithersError } from "@smthrs/errors/SmithersError";
 import { OpenAIAgent } from "./OpenAIAgent.js";
 
 /**
- * @template [CALL_OPTIONS=never], [TOOLS=import("ai").ToolSet]
+ * @template [CALL_OPTIONS=never], [TOOLS=import("./Tool.ts").ToolSet]
  * @typedef {import("./HermesAgentOptions.ts").HermesAgentOptions<CALL_OPTIONS, TOOLS>} HermesAgentOptions
  */
 
@@ -15,7 +15,7 @@ import { OpenAIAgent } from "./OpenAIAgent.js";
  * honor JSON-schema response formats. Everything else — tool loops, streaming,
  * prompt-based structured output — comes from the shared OpenAI path.
  *
- * @template [CALL_OPTIONS=never], [TOOLS=import("ai").ToolSet]
+ * @template [CALL_OPTIONS=never], [TOOLS=import("./Tool.ts").ToolSet]
  */
 export class HermesAgent extends OpenAIAgent {
   /**

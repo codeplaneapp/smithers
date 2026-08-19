@@ -1,4 +1,4 @@
-import { dynamicTool, jsonSchema } from "ai";
+import { dynamicTool, jsonSchema } from "../runtime-tool.js";
 
 /** @typedef {import("./McpServerConfig.ts").McpServerConfig} McpServerConfig */
 /** @typedef {import("./McpToolset.ts").McpToolset} McpToolset */
@@ -35,7 +35,7 @@ export async function createMcpToolset(config, options = {}) {
 
   const prefix = options.namePrefix ?? "";
   const listed = await client.listTools();
-  /** @type {Record<string, import("ai").Tool>} */
+  /** @type {Record<string, import("../Tool.ts").Tool>} */
   const tools = {};
   for (const mcpTool of listed.tools) {
     if (options.include && !options.include.includes(mcpTool.name)) continue;

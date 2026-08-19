@@ -25,7 +25,7 @@ import { enrichReportWithErrorAnalysis, launchDiagnostics } from "./diagnostics/
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
 /** @typedef {import("./BaseCliAgent/AgentCliEvent.ts").AgentCliEvent} AgentCliEvent */
-/** @typedef {import("ai").GenerateTextResult<Record<string, never>, unknown>} GenerateTextResult */
+/** @typedef {import("./GenerateResult.ts").GenerateTextResult} GenerateTextResult */
 /** @typedef {import("./PiAgentOptions.ts").PiAgentOptions} PiAgentOptions */
 /** @typedef {"text" | "json" | "stream-json" | "rpc"} PiMode */
 /**

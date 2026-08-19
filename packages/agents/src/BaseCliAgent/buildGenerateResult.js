@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-/** @typedef {import("ai").GenerateTextResult} GenerateTextResult */
-/** @typedef {import("ai").LanguageModelUsage} LanguageModelUsage */
+/** @typedef {import("../GenerateResult.ts").GenerateTextResult} GenerateTextResult */
+/** @typedef {import("../GenerateResult.ts").LanguageModelUsage} LanguageModelUsage */
 
 /**
  * @param {string} text

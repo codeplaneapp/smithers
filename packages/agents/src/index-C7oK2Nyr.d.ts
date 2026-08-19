@@ -1,4 +1,3 @@
-import * as ai from 'ai';
 import * as _smthrs_errors_SmithersError from '@smthrs/errors/SmithersError';
 import { SmithersError as SmithersError$1 } from '@smthrs/errors/SmithersError';
 import { Effect } from 'effect';
@@ -298,6 +297,20 @@ type TimeoutInput = number | {
  */
 declare function combineNonEmpty(parts: Array<string | undefined>): string | undefined;
 
+type LanguageModelUsage$1 = {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    [key: string]: unknown;
+};
+type GenerateTextResult$2 = {
+    text: string;
+    output?: unknown;
+    usage?: LanguageModelUsage$1;
+    [key: string]: any;
+};
+type StreamTextResult$1 = Record<string, any>;
+
 /**
  * @param {unknown} options
  * @returns {PromptParts}
@@ -348,8 +361,8 @@ type AgentStdoutTextEmitterOptions = {
  */
 declare function truncateToBytes(text: string, maxBytes?: number): string;
 
-/** @typedef {import("ai").GenerateTextResult} GenerateTextResult */
-/** @typedef {import("ai").LanguageModelUsage} LanguageModelUsage */
+/** @typedef {import("../GenerateResult.ts").GenerateTextResult} GenerateTextResult */
+/** @typedef {import("../GenerateResult.ts").LanguageModelUsage} LanguageModelUsage */
 /**
  * @param {string} text
  * @param {unknown} output
@@ -358,8 +371,8 @@ declare function truncateToBytes(text: string, maxBytes?: number): string;
  * @returns {GenerateTextResult<Record<string, never>, unknown>}
  */
 declare function buildGenerateResult(text: string, output: unknown, modelId: string, usage?: LanguageModelUsage): GenerateTextResult$1<Record<string, never>, unknown>;
-type GenerateTextResult$1 = ai.GenerateTextResult<any, any, any>;
-type LanguageModelUsage = ai.LanguageModelUsage;
+type GenerateTextResult$1 = GenerateTextResult$2;
+type LanguageModelUsage = LanguageModelUsage$1;
 
 /**
  * @typedef {{ cwd: string; env: Record<string, string>; input?: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; truncateKeep?: "head" | "tail"; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined; exitCode?: number | null; signal?: string | null }) => void; }} RunCommandOptions
@@ -488,9 +501,9 @@ type AgentFileChange = AgentFileChange$1;
 /** @typedef {import("./BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
 /** @typedef {import("./CliUsageInfo.ts").CliUsageInfo} CliUsageInfo */
-/** @typedef {import("ai").GenerateTextResult} GenerateTextResult */
-/** @typedef {import("ai").StreamTextResult} StreamTextResult */
-/** @typedef {import("ai").LanguageModelUsage} LanguageModelUsage */
+/** @typedef {import("../GenerateResult.ts").GenerateTextResult} GenerateTextResult */
+/** @typedef {import("../GenerateResult.ts").StreamTextResult} StreamTextResult */
+/** @typedef {import("../GenerateResult.ts").LanguageModelUsage} LanguageModelUsage */
 /**
  * @typedef {"generate" | "stream"} AgentInvocationOperation
  */
@@ -583,8 +596,8 @@ type AgentGenerateOptions$1 = AgentGenerateOptions$2;
 type BaseCliAgentOptions$1 = BaseCliAgentOptions$2;
 type CliOutputInterpreter$1 = CliOutputInterpreter$2;
 type CliUsageInfo$1 = CliUsageInfo$2;
-type GenerateTextResult = ai.GenerateTextResult<any, any, any>;
-type StreamTextResult = ai.StreamTextResult<any, any, any>;
+type GenerateTextResult = GenerateTextResult$2;
+type StreamTextResult = StreamTextResult$1;
 type AgentInvocationOperation = "generate" | "stream";
 
 /** @typedef {import("./AgentCliActionKind.ts").AgentCliActionKind} AgentCliActionKind */
@@ -648,4 +661,4 @@ type PiExtensionUiRequest = PiExtensionUiRequest$2;
 type PiExtensionUiResponse = PiExtensionUiResponse$2;
 type RunCommandResult = RunCommandResult$2;
 
-export { pushList as $, type AgentGenerateOptions$2 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, type AgentCliStartedEvent as D, type AgentGenerateOptions as E, type CliUsageInfo as F, type CodexConfigOverrides as G, type PiExtensionUiRequest as H, type PiExtensionUiResponse as I, asNumber as J, asString as K, buildGenerateResult as L, combineNonEmpty as M, type NormalizedTokenUsage as N, createAgentStdoutTextEmitter as O, type PiExtensionUiRequest$2 as P, createSyntheticIdGenerator as Q, type RunCommandResult as R, extractPrompt as S, extractTextFromJsonValue as T, extractUsageFromOutput as U, isLikelyRuntimeMetadata as V, isRecord as W, normalizeCodexConfig as X, normalizeTokenUsage as Y, parseAnthropicStyleFileChanges as Z, pushFlag as _, type AgentCheckpoint as a, reconstructUnifiedDiff as a0, resolveTimeouts as a1, runAgentPromise as a2, runCommandEffect as a3, runRpcCommandEffect as a4, shouldSurfaceUnparsedStdout as a5, toolKindFromName as a6, truncate as a7, truncateToBytes as a8, tryParseJson as a9, type AgentFileChange$1 as b, type AgentCheckpointCapability as c, type AgentCheckpointFormat as d, type BaseCliAgentOptions as e, type PiExtensionUiResponse$2 as f, BaseCliAgent as g, type CodexConfigOverrides$2 as h, type AgentCliEvent$1 as i, type CliOutputInterpreter as j, type AgentCheckpointResult as k, type AgentCheckpointMode as l, type AgentCliActionKind$2 as m, type AgentCheckpointContinuationOptions as n, type AgentCheckpointJsonArray as o, type AgentCheckpointJsonObject as p, type AgentCheckpointJsonPrimitive as q, type AgentCheckpointJsonValue as r, type AgentCheckpointPublisher as s, type AgentFileChangeKind as t, type AgentCliActionEvent as u, type AgentCliActionKind as v, type AgentCliActionPhase as w, type AgentCliCompletedEvent as x, type AgentCliEvent as y, type AgentCliEventLevel as z };
+export { pushFlag as $, type AgentGenerateOptions$2 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, type AgentCliStartedEvent as D, type AgentGenerateOptions as E, type CliUsageInfo as F, type GenerateTextResult$2 as G, type CodexConfigOverrides as H, type PiExtensionUiRequest as I, type PiExtensionUiResponse as J, asNumber as K, asString as L, buildGenerateResult as M, type NormalizedTokenUsage as N, combineNonEmpty as O, type PiExtensionUiRequest$2 as P, createAgentStdoutTextEmitter as Q, type RunCommandResult as R, createSyntheticIdGenerator as S, extractPrompt as T, extractTextFromJsonValue as U, extractUsageFromOutput as V, isLikelyRuntimeMetadata as W, isRecord as X, normalizeCodexConfig as Y, normalizeTokenUsage as Z, parseAnthropicStyleFileChanges as _, type AgentCheckpoint as a, pushList as a0, reconstructUnifiedDiff as a1, resolveTimeouts as a2, runAgentPromise as a3, runCommandEffect as a4, runRpcCommandEffect as a5, shouldSurfaceUnparsedStdout as a6, toolKindFromName as a7, truncate as a8, truncateToBytes as a9, tryParseJson as aa, type AgentFileChange$1 as b, type AgentCheckpointCapability as c, type AgentCheckpointFormat as d, type BaseCliAgentOptions as e, type PiExtensionUiResponse$2 as f, BaseCliAgent as g, type CodexConfigOverrides$2 as h, type AgentCliEvent$1 as i, type CliOutputInterpreter as j, type AgentCheckpointResult as k, type AgentCheckpointMode as l, type AgentCliActionKind$2 as m, type AgentCheckpointContinuationOptions as n, type AgentCheckpointJsonArray as o, type AgentCheckpointJsonObject as p, type AgentCheckpointJsonPrimitive as q, type AgentCheckpointJsonValue as r, type AgentCheckpointPublisher as s, type AgentFileChangeKind as t, type AgentCliActionEvent as u, type AgentCliActionKind as v, type AgentCliActionPhase as w, type AgentCliCompletedEvent as x, type AgentCliEvent as y, type AgentCliEventLevel as z };

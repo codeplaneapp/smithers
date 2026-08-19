@@ -1,4 +1,4 @@
-import { dynamicTool, jsonSchema } from "ai";
+import { dynamicTool, jsonSchema } from "./runtime-tool.js";
 
 const DEFAULT_BASE_URL = "https://api.elevenlabs.io";
 const DEFAULT_MODEL_ID = "eleven_turbo_v2_5";

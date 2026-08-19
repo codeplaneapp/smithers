@@ -1,4 +1,4 @@
-import type { Tool } from "ai";
+import type { Tool } from "../Tool";
 import type { ImageGenerationProvider } from "./ImageGenerationProvider.js";
 import type { ImageGenerationToolOptions } from "./ImageGenerationToolOptions.js";
 

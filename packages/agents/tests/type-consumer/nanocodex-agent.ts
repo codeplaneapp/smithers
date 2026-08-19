@@ -7,7 +7,7 @@ import {
   type NanocodexAuth,
   type NanocodexGenerateOptions,
 } from "@smthrs/agents";
-import type { GenerateTextResult, Output } from "ai";
+import type { GenerateTextResult } from "../../src/GenerateResult";
 import type { NanocodexGenerateOptions as SourceNanocodexGenerateOptions } from "../../src/NanocodexAgentOptions";
 
 const auth: NanocodexAuth = {
@@ -49,12 +49,7 @@ void nanocodex.generate({ prompt: "fork", resumeCheckpoint: checkpoint, checkpoi
 // @ts-expect-error Nanocodex continuation does not use provider session identifiers
 void nanocodex.generate({ prompt: "session", resumeSession: "provider-session" });
 
-type ExpectedResult = GenerateTextResult<
-  Record<string, never>,
-  Record<string, unknown>,
-  Output.Output<string, string, never>
-> &
-  AgentCheckpointResult;
+type ExpectedResult = GenerateTextResult & AgentCheckpointResult;
 declare const generated: Awaited<ReturnType<typeof nanocodex.generate>>;
 const expectedResult: ExpectedResult = generated;
 void agent;

@@ -2,6 +2,9 @@
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
 /** @typedef {import("./AgentLike.ts").AgentLike} AgentLike */
+/** @typedef {import("./GenerateResult.ts").GenerateTextResult} GenerateTextResult */
+/** @typedef {import("./Tool.ts").Tool} Tool */
+/** @typedef {import("./Tool.ts").ToolSet} ToolSet */
 /** @typedef {import("./AgentCheckpoint.ts").AgentCheckpoint} AgentCheckpoint */
 /** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointCapability} AgentCheckpointCapability */
 /** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointFormat} AgentCheckpointFormat */
@@ -16,17 +19,17 @@
 /** @typedef {import("./capability-registry/AgentToolDescriptor.ts").AgentToolDescriptor} AgentToolDescriptor */
 /**
  * @template [CALL_OPTIONS=never]
- * @template [TOOLS=import("ai").ToolSet]
+ * @template [TOOLS=import("./Tool.ts").ToolSet]
  * @typedef {import("./AnthropicAgentOptions.ts").AnthropicAgentOptions<CALL_OPTIONS, TOOLS>} AnthropicAgentOptions
  */
 /**
  * @template [CALL_OPTIONS=never]
- * @template [TOOLS=import("ai").ToolSet]
+ * @template [TOOLS=import("./Tool.ts").ToolSet]
  * @typedef {import("./OpenAIAgentOptions.ts").OpenAIAgentOptions<CALL_OPTIONS, TOOLS>} OpenAIAgentOptions
  */
 /**
  * @template [CALL_OPTIONS=never]
- * @template [TOOLS=import("ai").ToolSet]
+ * @template [TOOLS=import("./Tool.ts").ToolSet]
  * @typedef {import("./HermesAgentOptions.ts").HermesAgentOptions<CALL_OPTIONS, TOOLS>} HermesAgentOptions
  */
 /** @typedef {import("./HermesCliAgentOptions.ts").HermesCliAgentOptions} HermesCliAgentOptions */
@@ -91,6 +94,8 @@ export {
 export { hashCapabilityRegistry } from "./capability-registry/index.js";
 export { AnthropicAgent } from "./AnthropicAgent.js";
 export { OpenAIAgent } from "./OpenAIAgent.js";
+export { ModelAgent } from "./ModelAgent.js";
+export { dynamicTool, jsonSchema, tool, zodSchema } from "./runtime-tool.js";
 export { HermesAgent } from "./HermesAgent.js";
 export { HermesCliAgent, createHermesCliCapabilityRegistry } from "./HermesCliAgent.js";
 export { OpenClawAgent, createOpenClawCapabilityRegistry } from "./OpenClawAgent.js";

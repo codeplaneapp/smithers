@@ -1,10 +1,37 @@
-import * as ai from 'ai';
-import { Tool as Tool$1, ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent } from 'ai';
-import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$f, h as CodexConfigOverrides, i as AgentCliEvent$1, j as CliOutputInterpreter$g, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-CvMSLAEd.js';
 import * as zod from 'zod';
+import { ZodType } from 'zod';
+import { A as AgentGenerateOptions$2, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$f, h as CodexConfigOverrides, i as AgentCliEvent$1, G as GenerateTextResult$2, j as CliOutputInterpreter$g, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-C7oK2Nyr.js';
+import { Model } from '@flows/model/Model';
 import '@smthrs/errors/SmithersError';
 import 'effect';
 import 'node:child_process';
+
+/**
+ * What a wrapper schema's `validate` resolves to. It reports failure instead
+ * of throwing, so callers must unwrap `value` before handing arguments to a
+ * tool.
+ */
+type ToolValidationResult<Input = unknown> = {
+    readonly success: true;
+    readonly value: Input;
+} | {
+    readonly success: false;
+    readonly error?: unknown;
+};
+type ToolSchema<Input = unknown> = ZodType<Input> | {
+    readonly jsonSchema: Record<string, unknown>;
+    readonly validate?: (value: unknown) => Promise<ToolValidationResult<Input>>;
+};
+type Tool$2<Input = unknown, Output = unknown> = {
+    description?: string;
+    inputSchema: ToolSchema<Input>;
+    execute?: (input: Input, options?: {
+        abortSignal?: AbortSignal;
+        toolCallId?: string;
+        messages?: ReadonlyArray<unknown>;
+    }) => Output | Promise<Output>;
+};
+type ToolSet$1 = Record<string, Tool$2<any, any>>;
 
 type TranscriptionProvider$1 = "whisper" | "deepgram";
 type TranscriptionToolInput$1 = {
@@ -83,7 +110,7 @@ type CreateTranscriptionToolOptions$1 = {
     /** Maximum local Whisper download redirects. Defaults to 5; maximum 20. */
     audioUrlMaxRedirects?: number;
 };
-declare function createTranscriptionTool(options: CreateTranscriptionToolOptions$1): Tool$1;
+declare function createTranscriptionTool(options: CreateTranscriptionToolOptions$1): Tool$2;
 
 type HttpToolOutput$1 = {
     ok: boolean;
@@ -332,7 +359,7 @@ type NanocodexReasoningMode$1 = "standard" | "pro";
  * supports same-session checkpoint resume only and does not accept provider
  * session identifiers.
  */
-type NanocodexGenerateOptions$1 = AgentGenerateOptions$4 & {
+type NanocodexGenerateOptions$1 = AgentGenerateOptions$2 & {
     /** Nanocodex always uses its stock native tool set. */
     tools?: never;
     /** Provider options are configured on the agent, not per call. */
@@ -402,7 +429,7 @@ type AgentLike$2 = {
      * Performs deterministic startup checks before the first generation call in a
      * workflow run. A rejected promise fails the task without retrying.
      */
-    preflight?: (args?: AgentGenerateOptions$4) => Promise<void>;
+    preflight?: (args?: AgentGenerateOptions$2) => Promise<void>;
     /**
      * Generates a response or action based on the provided arguments.
      *
@@ -417,7 +444,7 @@ type AgentLike$2 = {
      * @returns A promise resolving to the generated output. Results may include
      * an optional `checkpoint: AgentCheckpoint` for a later resume or fork.
      */
-    generate: (args?: AgentGenerateOptions$4) => Promise<unknown>;
+    generate: (args?: AgentGenerateOptions$2) => Promise<unknown>;
 };
 
 /**
@@ -641,13 +668,29 @@ type HermesCliAgentOptions$2 = BaseCliAgentOptions & {
     continueSession?: string | boolean;
 };
 
-type SdkAgentOptions<CALL_OPTIONS = never, TOOLS extends ToolSet = {}, MODEL = any> = Omit<ToolLoopAgentSettings<CALL_OPTIONS, TOOLS, any, never>, "model"> & {
-    /**
-     * Either a provider model id string or a preconstructed AI SDK language model.
-     * Passing a model instance is mainly useful for tests and advanced provider setup.
-     */
-    model: string | MODEL;
+type SdkAgentCommonOptions<CALL_OPTIONS = never, TOOLS extends ToolSet$1 = {}> = {
+    id?: string;
+    instructions?: string;
+    tools?: TOOLS;
+    maxOutputTokens?: number;
+    temperature?: number;
+    topP?: number;
+    experimental_context?: CALL_OPTIONS;
 };
+type SdkAgentOptions<CALL_OPTIONS = never, TOOLS extends ToolSet$1 = {}, MODEL = Model> = SdkAgentCommonOptions<CALL_OPTIONS, TOOLS> & ({
+    /** Provider model id used by the configured flows route. */
+    model: string;
+    /** Optional wire model id override. Defaults to `model`. */
+    modelId?: string;
+    /** Provider API key. Defaults to the provider environment variable. */
+    apiKey?: string;
+} | {
+    /** A preconstructed flows Model implementation. */
+    model: MODEL;
+    /** Required because the provider-neutral Model interface intentionally has no identity field. */
+    modelId: string;
+    apiKey?: never;
+});
 
 /**
  * Options for {@link HermesAgent}.
@@ -657,7 +700,7 @@ type SdkAgentOptions<CALL_OPTIONS = never, TOOLS extends ToolSet = {}, MODEL = a
  * OpenAI-compatible endpoint: point `baseURL` at the Hermes server. These mirror
  * the string-model form of `OpenAIAgentOptions`.
  */
-type HermesAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, LanguageModel>, "model"> & {
+type HermesAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet$1 = {}> = Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, Model>, "model"> & {
     /**
      * Model name exposed by your Hermes server. Defaults to `"hermes"`; override
      * with whatever model id the server advertises.
@@ -681,99 +724,65 @@ type HermesAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = Om
     nativeStructuredOutput?: boolean;
 };
 
-type OpenAIAgentCommonOptions<CALL_OPTIONS, TOOLS extends ToolSet> = Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, LanguageModel>, "model"> & {
+type OpenAIAgentCommonOptions<CALL_OPTIONS, TOOLS extends ToolSet$1> = SdkAgentCommonOptions<CALL_OPTIONS, TOOLS> & {
     /**
-     * Disable AI SDK native structured output and let Smithers use prompt-based JSON extraction.
-     * Useful for OpenAI-compatible local servers that do not honor JSON schema response formats.
+     * Kept for source compatibility. The flows Model request has no native
+     * structured-output field, so the agent always declares prompt fallback.
      */
     nativeStructuredOutput?: boolean;
 };
 type OpenAIAgentStringModelOptions = {
     model: string;
-    /**
-     * Base URL for OpenAI-compatible API calls, e.g. a local llama.cpp server.
-     */
+    /** Optional wire model id override. Defaults to `model`. */
+    modelId?: string;
+    /** Base URL for OpenAI Responses-compatible calls. A terminal `/v1` is accepted. */
     baseURL?: string;
-    /**
-     * API key sent to OpenAI-compatible endpoints. Local servers often accept "none".
-     */
+    /** API key sent as a bearer token. */
     apiKey?: string;
-    /**
-     * Which OpenAI API surface serves the string model. The provider default
-     * ("responses") targets the `/responses` endpoint, which most OpenAI-compatible
-     * servers (Gemini's compat layer, llama.cpp, vLLM, ...) do not implement — set
-     * "chat" to call `/chat/completions` on those endpoints.
-     */
+    /** `chat` is retained only so runtime callers receive a targeted migration error. */
     api?: "responses" | "chat";
 };
 type OpenAIAgentPrebuiltModelOptions = {
-    model: LanguageModel;
+    model: Model;
+    /** Required because a provider-neutral flows Model carries no model identity. */
+    modelId: string;
     baseURL?: never;
     apiKey?: never;
     api?: never;
 };
-type OpenAIAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = OpenAIAgentCommonOptions<CALL_OPTIONS, TOOLS> & (OpenAIAgentStringModelOptions | OpenAIAgentPrebuiltModelOptions);
+type OpenAIAgentOptions$1<CALL_OPTIONS = never, TOOLS extends ToolSet$1 = {}> = OpenAIAgentCommonOptions<CALL_OPTIONS, TOOLS> & (OpenAIAgentStringModelOptions | OpenAIAgentPrebuiltModelOptions);
 
-type AnthropicAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = SdkAgentOptions<CALL_OPTIONS, TOOLS, LanguageModel>;
+type AnthropicAgentOptions$1<CALL_OPTIONS = never, TOOLS extends ToolSet$1 = {}> = SdkAgentOptions<CALL_OPTIONS, TOOLS, Model>;
 
-/** @typedef {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
-/**
- * @template [CALL_OPTIONS=never], [TOOLS=import("ai").ToolSet]
- * @typedef {import("./AnthropicAgentOptions.ts").AnthropicAgentOptions<CALL_OPTIONS, TOOLS>} AnthropicAgentOptions
- */
-/** @typedef {import("ai").GenerateTextResult} GenerateTextResult */
-/**
- * @template [CALL_OPTIONS=never]
- * @template [TOOLS=import("ai").ToolSet]
- * @extends {ToolLoopAgent<CALL_OPTIONS, TOOLS, any, never>}
- */
-declare class AnthropicAgent<CALL_OPTIONS = never, TOOLS = ai.ToolSet> extends ToolLoopAgent<CALL_OPTIONS, TOOLS, any, never> {
-    /**
-     * @param {AnthropicAgentOptions<CALL_OPTIONS, TOOLS>} opts
-     */
-    constructor(opts: AnthropicAgentOptions$1<CALL_OPTIONS, TOOLS>);
+/** Provider-neutral Smithers agent backed only by the flows Model seam. */
+declare class ModelAgent {
+    /** @param {Record<string, any>} opts @param {"anthropic" | "openai"} family */
+    constructor(opts: Record<string, any>, family: "anthropic" | "openai");
     hijackEngine: string;
     supportsNativeStructuredOutput: boolean;
-    /**
-     * @param {AgentGenerateOptions} [args]
-     * @returns {Promise<GenerateTextResult<TOOLS, never>>}
-     */
-    generate(args?: AgentGenerateOptions$3): Promise<GenerateTextResult$2<TOOLS, never>>;
+    id: any;
+    opts: Record<string, any>;
+    family: "anthropic" | "openai";
+    model: any;
+    modelId: string;
+    tools: any;
+    resolveModel(): Promise<any>;
+    /** @param {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} [args] */
+    generate(args?: AgentGenerateOptions$2): Promise<any>;
 }
-type AgentGenerateOptions$3 = AgentGenerateOptions$4;
-type AnthropicAgentOptions$1<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = AnthropicAgentOptions$2<CALL_OPTIONS, TOOLS>;
-type GenerateTextResult$2 = ai.GenerateTextResult<any, any, any>;
 
-/** @typedef {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
-/** @typedef {import("ai").GenerateTextResult} GenerateTextResult */
-/**
- * @template [CALL_OPTIONS=never], [TOOLS=import("ai").ToolSet]
- * @typedef {import("./OpenAIAgentOptions.ts").OpenAIAgentOptions<CALL_OPTIONS, TOOLS>} OpenAIAgentOptions
- */
-/**
- * @template [CALL_OPTIONS=never]
- * @template [TOOLS=import("ai").ToolSet]
- * @extends {ToolLoopAgent<CALL_OPTIONS, TOOLS, any, never>}
- */
-declare class OpenAIAgent<CALL_OPTIONS = never, TOOLS = ai.ToolSet> extends ToolLoopAgent<CALL_OPTIONS, TOOLS, any, never> {
-    /**
-     * @param {OpenAIAgentOptions<CALL_OPTIONS, TOOLS>} opts
-     */
-    constructor(opts: OpenAIAgentOptions$1<CALL_OPTIONS, TOOLS>);
-    hijackEngine: string;
-    supportsNativeStructuredOutput: boolean;
-    /**
-     * @param {AgentGenerateOptions} [args]
-     * @returns {Promise<GenerateTextResult<TOOLS, never>>}
-     */
-    generate(args?: AgentGenerateOptions$2): Promise<GenerateTextResult$1<TOOLS, never>>;
+declare class AnthropicAgent extends ModelAgent {
+    /** @param {import("./AnthropicAgentOptions.ts").AnthropicAgentOptions<any, any>} opts */
+    constructor(opts: AnthropicAgentOptions$1<any, any>);
 }
-type AgentGenerateOptions$2 = AgentGenerateOptions$4;
-type GenerateTextResult$1 = ai.GenerateTextResult<any, any, any>;
-type OpenAIAgentOptions$1<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = OpenAIAgentOptions$2<CALL_OPTIONS, TOOLS>;
+
+declare class OpenAIAgent extends ModelAgent {
+    /** @param {import("./OpenAIAgentOptions.ts").OpenAIAgentOptions<any, any>} opts */
+    constructor(opts: OpenAIAgentOptions$1<any, any>);
+}
 
 /**
- * @template [CALL_OPTIONS=never], [TOOLS=import("ai").ToolSet]
+ * @template [CALL_OPTIONS=never], [TOOLS=import("./Tool.ts").ToolSet]
  * @typedef {import("./HermesAgentOptions.ts").HermesAgentOptions<CALL_OPTIONS, TOOLS>} HermesAgentOptions
  */
 /**
@@ -785,15 +794,15 @@ type OpenAIAgentOptions$1<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = OpenAIAgen
  * honor JSON-schema response formats. Everything else — tool loops, streaming,
  * prompt-based structured output — comes from the shared OpenAI path.
  *
- * @template [CALL_OPTIONS=never], [TOOLS=import("ai").ToolSet]
+ * @template [CALL_OPTIONS=never], [TOOLS=import("./Tool.ts").ToolSet]
  */
-declare class HermesAgent<CALL_OPTIONS = never, TOOLS = ai.ToolSet> extends OpenAIAgent<never, ai.ToolSet> {
+declare class HermesAgent<CALL_OPTIONS = never, TOOLS = ToolSet$1> extends OpenAIAgent {
     /**
      * @param {HermesAgentOptions<CALL_OPTIONS, TOOLS>} [opts]
      */
     constructor(opts?: HermesAgentOptions$1<CALL_OPTIONS, TOOLS>);
 }
-type HermesAgentOptions$1<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = HermesAgentOptions$2<CALL_OPTIONS, TOOLS>;
+type HermesAgentOptions$1<CALL_OPTIONS = never, TOOLS = ToolSet$1> = HermesAgentOptions$2<CALL_OPTIONS, TOOLS>;
 
 /**
  * Configuration options for the AmpAgent.
@@ -1316,7 +1325,7 @@ declare class PiAgent extends BaseCliAgent {
      * @param {PiGenerateOptions} [options]
      * @returns {Promise<GenerateTextResult>}
      */
-    generate(options?: PiGenerateOptions): Promise<GenerateTextResult>;
+    generate(options?: PiGenerateOptions): Promise<GenerateTextResult$1>;
     /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options?: PiGenerateOptions; }} params
      * @returns {Promise<{ command: string; args: string[]; stdin?: string; outputFormat?: string; outputFile?: string; cleanup?: () => Promise<void>; }>}
@@ -1345,7 +1354,7 @@ declare class PiAgent extends BaseCliAgent {
 }
 type CliOutputInterpreter$8 = CliOutputInterpreter$f;
 type AgentCliEvent = AgentCliEvent$1;
-type GenerateTextResult = ai.GenerateTextResult<Record<string, never>, unknown, any>;
+type GenerateTextResult$1 = GenerateTextResult$2;
 type PiAgentOptions$1 = PiAgentOptions$2;
 type PiMode = "text" | "json" | "stream-json" | "rpc";
 type PiGenerateOptions = {
@@ -1647,14 +1656,14 @@ declare class NanocodexAgent {
      * @param {AgentGenerateOptions} [args]
      * @returns {Promise<unknown>}
      */
-    generate(this: never, args?: AgentGenerateOptions$4 | undefined): Promise<unknown>;
+    generate(this: never, args?: AgentGenerateOptions$2 | undefined): Promise<unknown>;
     /**
      * @overload
      * @this {NanocodexAgent}
      * @param {NanocodexGenerateOptions} [args]
-     * @returns {Promise<import("ai").GenerateTextResult<Record<string, never>, Record<string, unknown>, import("ai").Output.Output<string, string, never>> & import("./AgentCheckpoint.ts").AgentCheckpointResult>}
+     * @returns {Promise<import("./GenerateResult.ts").GenerateTextResult & import("./AgentCheckpoint.ts").AgentCheckpointResult>}
      */
-    generate(this: NanocodexAgent, args?: NanocodexGenerateOptions$1 | undefined): Promise<ai.GenerateTextResult<Record<string, never>, Record<string, unknown>, ai.Output.Output<string, string, never>> & AgentCheckpointResult$1>;
+    generate(this: NanocodexAgent, args?: NanocodexGenerateOptions$1 | undefined): Promise<GenerateTextResult$2 & AgentCheckpointResult$1>;
     /**
      * Publish recovery carried by a process-cleanup failure without making the
      * bridge snapshot part of the durable error surface.
@@ -1690,7 +1699,7 @@ declare class NanocodexAgent {
     private environment;
 }
 type NanocodexAgentOptions$1 = NanocodexAgentOptions$2;
-type AgentGenerateOptions$1 = AgentGenerateOptions$4;
+type AgentGenerateOptions$1 = AgentGenerateOptions$2;
 
 /**
  * @param {CreateSmithersAgentContractOptions} options
@@ -1720,12 +1729,12 @@ type SmithersAgentContract$1 = SmithersAgentContract$3;
 declare function createImageGenerationTool(
   provider: ImageGenerationProvider$1,
   options: ImageGenerationToolOptions$1 & { asToolset: true },
-): Record<string, Tool$1>;
+): Record<string, Tool$2>;
 
 declare function createImageGenerationTool(
   provider: ImageGenerationProvider$1,
   options?: ImageGenerationToolOptions$1,
-): Tool$1;
+): Tool$2;
 
 /**
  * Create an AI SDK tool that can call any REST API without an OpenAPI spec.
@@ -1733,8 +1742,8 @@ declare function createImageGenerationTool(
  * @param {CreateHttpToolOptions} [options]
  * @returns {Tool}
  */
-declare function createHttpTool(options?: CreateHttpToolOptions$1): Tool;
-type Tool = ai.Tool;
+declare function createHttpTool(options?: CreateHttpToolOptions$1): Tool$1;
+type Tool$1 = Tool$2;
 type CreateHttpToolOptions$1 = CreateHttpToolOptions$2;
 
 /**
@@ -1781,7 +1790,7 @@ type ElevenLabsTextToSpeechToolOptions = {
     fetch?: typeof fetch;
 };
 type ElevenLabsTextToSpeechToolset = {
-    tools: Record<"elevenlabs_text_to_speech", Tool$1>;
+    tools: Record<"elevenlabs_text_to_speech", Tool$2>;
     toolNames: ["elevenlabs_text_to_speech"];
 };
 declare function createElevenLabsTextToSpeechTool(options: ElevenLabsTextToSpeechToolOptions): ElevenLabsTextToSpeechToolset;
@@ -1834,6 +1843,16 @@ declare function agentProducesCheckpoint(agent: {
 declare function cloneAgentCheckpoint(checkpoint: AgentCheckpoint$1, maxBytes?: number): AgentCheckpoint$1;
 /** Maximum encoded checkpoint size accepted by default (16 MiB). */
 declare const DEFAULT_AGENT_CHECKPOINT_MAX_BYTES: number;
+
+declare function jsonSchema(schema: Record<string, unknown>, options?: {
+    validate?: (value: unknown) => Promise<unknown>;
+}): {
+    validate?: (value: unknown) => Promise<unknown>;
+    jsonSchema: Record<string, unknown>;
+};
+declare function zodSchema(schema: unknown): unknown;
+declare function dynamicTool<T>(definition: T): T;
+declare function tool<T>(definition: T): T;
 
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
@@ -2220,7 +2239,7 @@ declare const CLI_AGENT_SURFACE_MANIFEST: readonly CliAgentSurfaceManifestEntry$
 type CliAgentSurfaceManifestEntry$1 = CliAgentSurfaceManifestEntry$2;
 
 type GroundedWebSearchToolset$1 = {
-    tools: Record<"grounded_web_search", Tool$1>;
+    tools: Record<"grounded_web_search", Tool$2>;
     toolNames: ["grounded_web_search"];
 };
 
@@ -2303,8 +2322,11 @@ declare function createSerperSearchProvider(options: {
 type GroundedWebSearchProvider = GroundedWebSearchProvider$5;
 
 type AgentCapabilityRegistry = AgentCapabilityRegistry$d;
-type AgentGenerateOptions = AgentGenerateOptions$4;
+type AgentGenerateOptions = AgentGenerateOptions$2;
 type AgentLike = AgentLike$2;
+type GenerateTextResult = GenerateTextResult$2;
+type Tool = Tool$2;
+type ToolSet = ToolSet$1;
 type AgentCheckpoint = AgentCheckpoint$1;
 type AgentCheckpointCapability = AgentCheckpointCapability$1;
 type AgentCheckpointFormat = AgentCheckpointFormat$1;
@@ -2317,9 +2339,9 @@ type AgentCheckpointPublisher = AgentCheckpointPublisher$1;
 type AgentCheckpointResult = AgentCheckpointResult$1;
 type AgentCheckpointContinuationOptions = AgentCheckpointContinuationOptions$1;
 type AgentToolDescriptor = AgentToolDescriptor$1;
-type AnthropicAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = AnthropicAgentOptions$2<CALL_OPTIONS, TOOLS>;
-type OpenAIAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = OpenAIAgentOptions$2<CALL_OPTIONS, TOOLS>;
-type HermesAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = HermesAgentOptions$2<CALL_OPTIONS, TOOLS>;
+type AnthropicAgentOptions<CALL_OPTIONS = never, TOOLS = ToolSet$1> = AnthropicAgentOptions$1<CALL_OPTIONS, TOOLS>;
+type OpenAIAgentOptions<CALL_OPTIONS = never, TOOLS = ToolSet$1> = OpenAIAgentOptions$1<CALL_OPTIONS, TOOLS>;
+type HermesAgentOptions<CALL_OPTIONS = never, TOOLS = ToolSet$1> = HermesAgentOptions$2<CALL_OPTIONS, TOOLS>;
 type HermesCliAgentOptions = HermesCliAgentOptions$2;
 type GrokAgentOptions = GrokAgentOptions$2;
 type OpenClawAgentOptions = OpenClawAgentOptions$2;
@@ -2370,4 +2392,4 @@ type TranscriptionProvider = TranscriptionProvider$1;
 type TranscriptionToolInput = TranscriptionToolInput$1;
 type TranscriptionToolResult = TranscriptionToolResult$1;
 
-export { type AgentCapabilityRegistry, type AgentCheckpoint, type AgentCheckpointCapability, type AgentCheckpointContinuationOptions, type AgentCheckpointFormat, type AgentCheckpointJsonArray, type AgentCheckpointJsonObject, type AgentCheckpointJsonPrimitive, type AgentCheckpointJsonValue, type AgentCheckpointMode, type AgentCheckpointPublisher, type AgentCheckpointResult, type AgentFileChange, type AgentFileChangeKind, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, type AudioHostResolver, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, CursorAgent, type CursorAgentOptions, DEFAULT_AGENT_CHECKPOINT_MAX_BYTES, type FallbackAgentProvider, type FallbackAgentsOptions, ForgeAgent, GeminiAgent, GrokAgent, type GrokAgentOptions, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, NanocodexAgent, type NanocodexAgentOptions, type NanocodexAuth, type NanocodexGenerateOptions, type NanocodexReasoningMode, type NanocodexThinking, OmpAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PinnedAudioTransport, type PinnedAudioTransportRequest, PoolAgent, type PoolAgentOptions, type ResolvedAudioAddress, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, agentProducesCheckpoint, agentSupportsCheckpoint, cloneAgentCheckpoint, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGrokCapabilityRegistry, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOmpCapabilityRegistry, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, fallbackAgents, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashAgentCheckpointCapabilities, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentCheckpoint, type AgentCheckpointCapability, type AgentCheckpointContinuationOptions, type AgentCheckpointFormat, type AgentCheckpointJsonArray, type AgentCheckpointJsonObject, type AgentCheckpointJsonPrimitive, type AgentCheckpointJsonValue, type AgentCheckpointMode, type AgentCheckpointPublisher, type AgentCheckpointResult, type AgentFileChange, type AgentFileChangeKind, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, type AudioHostResolver, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, CursorAgent, type CursorAgentOptions, DEFAULT_AGENT_CHECKPOINT_MAX_BYTES, type FallbackAgentProvider, type FallbackAgentsOptions, ForgeAgent, GeminiAgent, type GenerateTextResult, GrokAgent, type GrokAgentOptions, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, ModelAgent, NanocodexAgent, type NanocodexAgentOptions, type NanocodexAuth, type NanocodexGenerateOptions, type NanocodexReasoningMode, type NanocodexThinking, OmpAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PinnedAudioTransport, type PinnedAudioTransportRequest, PoolAgent, type PoolAgentOptions, type ResolvedAudioAddress, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type Tool, type ToolSet, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, agentProducesCheckpoint, agentSupportsCheckpoint, cloneAgentCheckpoint, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGrokCapabilityRegistry, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOmpCapabilityRegistry, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, dynamicTool, fallbackAgents, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashAgentCheckpointCapabilities, hashCapabilityRegistry, jsonSchema, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, tool, zodSchema, zodToOpenAISchema };
