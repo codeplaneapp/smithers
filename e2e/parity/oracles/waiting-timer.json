@@ -1,0 +1,97 @@
+{
+  "fixture": "waiting-timer",
+  "verdict": {
+    "status": "finished",
+    "workflowName": "parity-waiting-timer",
+    "error": null
+  },
+  "nodes": [
+    {
+      "nodeId": "after",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "after",
+      "lastAttempt": 1,
+      "label": null
+    },
+    {
+      "nodeId": "hold",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "",
+      "lastAttempt": 1,
+      "label": "timer:hold"
+    }
+  ],
+  "attempts": [
+    {
+      "key": "after::0",
+      "states": [
+        "finished"
+      ]
+    },
+    {
+      "key": "hold::0",
+      "states": [
+        "finished"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "table": "after",
+      "rows": [
+        {
+          "nodeId": "after",
+          "iteration": 0,
+          "payload": {
+            "value": 7
+          }
+        }
+      ]
+    }
+  ],
+  "events": {
+    "run": [
+      "RunStarted",
+      "TimerCreated",
+      "RunStatusChanged",
+      "RunStarted",
+      "TimerFired",
+      "RunFinished"
+    ],
+    "nodes": [
+      {
+        "key": "after::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      },
+      {
+        "key": "hold::0",
+        "types": [
+          "NodeWaitingTimer",
+          "NodeFinished"
+        ]
+      }
+    ],
+    "counts": {
+      "NodeFinished": 2,
+      "NodePending": 1,
+      "NodeStarted": 1,
+      "NodeWaitingTimer": 1,
+      "RunFinished": 1,
+      "RunStarted": 2,
+      "RunStatusChanged": 1,
+      "TimerCreated": 1,
+      "TimerFired": 1
+    }
+  },
+  "sideEffects": {
+    "executions": [
+      "after"
+    ]
+  }
+}

@@ -1,0 +1,128 @@
+{
+  "fixture": "loop-iterations",
+  "verdict": {
+    "status": "finished",
+    "workflowName": "parity-loop-iterations",
+    "error": null
+  },
+  "nodes": [
+    {
+      "nodeId": "tick",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "tick",
+      "lastAttempt": 1,
+      "label": null
+    },
+    {
+      "nodeId": "tick",
+      "iteration": 1,
+      "state": "finished",
+      "outputTable": "tick",
+      "lastAttempt": 1,
+      "label": null
+    },
+    {
+      "nodeId": "tick",
+      "iteration": 2,
+      "state": "finished",
+      "outputTable": "tick",
+      "lastAttempt": 1,
+      "label": null
+    }
+  ],
+  "attempts": [
+    {
+      "key": "tick::0",
+      "states": [
+        "finished"
+      ]
+    },
+    {
+      "key": "tick::1",
+      "states": [
+        "finished"
+      ]
+    },
+    {
+      "key": "tick::2",
+      "states": [
+        "finished"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "table": "tick",
+      "rows": [
+        {
+          "nodeId": "tick",
+          "iteration": 0,
+          "payload": {
+            "index": 0
+          }
+        },
+        {
+          "nodeId": "tick",
+          "iteration": 1,
+          "payload": {
+            "index": 1
+          }
+        },
+        {
+          "nodeId": "tick",
+          "iteration": 2,
+          "payload": {
+            "index": 2
+          }
+        }
+      ]
+    }
+  ],
+  "events": {
+    "run": [
+      "RunStarted",
+      "RunFinished"
+    ],
+    "nodes": [
+      {
+        "key": "tick::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      },
+      {
+        "key": "tick::1",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      },
+      {
+        "key": "tick::2",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      }
+    ],
+    "counts": {
+      "NodeFinished": 3,
+      "NodePending": 3,
+      "NodeStarted": 3,
+      "RunFinished": 1,
+      "RunStarted": 1
+    }
+  },
+  "sideEffects": {
+    "executions": [
+      "tick",
+      "tick",
+      "tick"
+    ]
+  }
+}

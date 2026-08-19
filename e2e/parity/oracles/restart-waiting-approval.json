@@ -1,0 +1,113 @@
+{
+  "fixture": "restart-waiting-approval",
+  "verdict": {
+    "status": "finished",
+    "workflowName": "parity-restart-waiting-approval",
+    "error": null
+  },
+  "nodes": [
+    {
+      "nodeId": "deploy",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "deploy",
+      "lastAttempt": 1,
+      "label": null
+    },
+    {
+      "nodeId": "gate",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "decision",
+      "lastAttempt": 1,
+      "label": "parity: approve the deploy?"
+    }
+  ],
+  "attempts": [
+    {
+      "key": "deploy::0",
+      "states": [
+        "finished"
+      ]
+    },
+    {
+      "key": "gate::0",
+      "states": [
+        "finished"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "table": "decision",
+      "rows": [
+        {
+          "nodeId": "gate",
+          "iteration": 0,
+          "payload": {
+            "approved": 1,
+            "decided_at": "<redacted>",
+            "decided_by": "parity-operator",
+            "note": "parity fixture grant after restart"
+          }
+        }
+      ]
+    },
+    {
+      "table": "deploy",
+      "rows": [
+        {
+          "nodeId": "deploy",
+          "iteration": 0,
+          "payload": {
+            "value": 41
+          }
+        }
+      ]
+    }
+  ],
+  "events": {
+    "run": [
+      "RunStarted",
+      "RunStatusChanged",
+      "RunStarted",
+      "RunFinished"
+    ],
+    "nodes": [
+      {
+        "key": "deploy::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      },
+      {
+        "key": "gate::0",
+        "types": [
+          "ApprovalRequested",
+          "NodeWaitingApproval",
+          "ApprovalGranted",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      }
+    ],
+    "counts": {
+      "ApprovalGranted": 1,
+      "ApprovalRequested": 1,
+      "NodeFinished": 2,
+      "NodePending": 1,
+      "NodeStarted": 2,
+      "NodeWaitingApproval": 1,
+      "RunFinished": 1,
+      "RunStarted": 2,
+      "RunStatusChanged": 1
+    }
+  },
+  "sideEffects": {
+    "executions": [
+      "deploy"
+    ]
+  }
+}

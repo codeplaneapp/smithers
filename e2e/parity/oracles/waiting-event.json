@@ -1,0 +1,97 @@
+{
+  "fixture": "waiting-event",
+  "verdict": {
+    "status": "finished",
+    "workflowName": "parity-waiting-event",
+    "error": null
+  },
+  "nodes": [
+    {
+      "nodeId": "acted",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "acted",
+      "lastAttempt": 1,
+      "label": null
+    },
+    {
+      "nodeId": "release",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "release",
+      "lastAttempt": 1,
+      "label": "signal:release"
+    }
+  ],
+  "attempts": [
+    {
+      "key": "acted::0",
+      "states": [
+        "finished"
+      ]
+    },
+    {
+      "key": "release::0",
+      "states": [
+        "finished"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "table": "acted",
+      "rows": [
+        {
+          "nodeId": "acted",
+          "iteration": 0,
+          "payload": {
+            "token": "parity-token"
+          }
+        }
+      ]
+    },
+    {
+      "table": "release",
+      "rows": [
+        {
+          "nodeId": "release",
+          "iteration": 0,
+          "payload": {
+            "token": "parity-token"
+          }
+        }
+      ]
+    }
+  ],
+  "events": {
+    "run": [
+      "RunStarted",
+      "RunStatusChanged",
+      "RunStarted",
+      "RunFinished"
+    ],
+    "nodes": [
+      {
+        "key": "acted::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      }
+    ],
+    "counts": {
+      "NodeFinished": 1,
+      "NodePending": 1,
+      "NodeStarted": 1,
+      "RunFinished": 1,
+      "RunStarted": 2,
+      "RunStatusChanged": 1
+    }
+  },
+  "sideEffects": {
+    "executions": [
+      "acted"
+    ]
+  }
+}

@@ -1,0 +1,138 @@
+{
+  "fixture": "linear-sequence",
+  "verdict": {
+    "status": "finished",
+    "workflowName": "parity-linear-sequence",
+    "error": null
+  },
+  "nodes": [
+    {
+      "nodeId": "first",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "first",
+      "lastAttempt": 1,
+      "label": null
+    },
+    {
+      "nodeId": "second",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "second",
+      "lastAttempt": 1,
+      "label": null
+    },
+    {
+      "nodeId": "third",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "third",
+      "lastAttempt": 1,
+      "label": null
+    }
+  ],
+  "attempts": [
+    {
+      "key": "first::0",
+      "states": [
+        "finished"
+      ]
+    },
+    {
+      "key": "second::0",
+      "states": [
+        "finished"
+      ]
+    },
+    {
+      "key": "third::0",
+      "states": [
+        "finished"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "table": "first",
+      "rows": [
+        {
+          "nodeId": "first",
+          "iteration": 0,
+          "payload": {
+            "value": 5
+          }
+        }
+      ]
+    },
+    {
+      "table": "second",
+      "rows": [
+        {
+          "nodeId": "second",
+          "iteration": 0,
+          "payload": {
+            "value": 10
+          }
+        }
+      ]
+    },
+    {
+      "table": "third",
+      "rows": [
+        {
+          "nodeId": "third",
+          "iteration": 0,
+          "payload": {
+            "value": 11
+          }
+        }
+      ]
+    }
+  ],
+  "events": {
+    "run": [
+      "RunStarted",
+      "RunFinished"
+    ],
+    "nodes": [
+      {
+        "key": "first::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      },
+      {
+        "key": "second::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      },
+      {
+        "key": "third::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      }
+    ],
+    "counts": {
+      "NodeFinished": 3,
+      "NodePending": 3,
+      "NodeStarted": 3,
+      "RunFinished": 1,
+      "RunStarted": 1
+    }
+  },
+  "sideEffects": {
+    "executions": [
+      "first",
+      "second",
+      "third"
+    ]
+  }
+}

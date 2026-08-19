@@ -1,0 +1,115 @@
+{
+  "fixture": "retry-then-succeed",
+  "verdict": {
+    "status": "finished",
+    "workflowName": "parity-retry-then-succeed",
+    "error": null
+  },
+  "nodes": [
+    {
+      "nodeId": "downstream",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "downstream",
+      "lastAttempt": 1,
+      "label": null
+    },
+    {
+      "nodeId": "flaky",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "flaky",
+      "lastAttempt": 3,
+      "label": null
+    }
+  ],
+  "attempts": [
+    {
+      "key": "downstream::0",
+      "states": [
+        "finished"
+      ]
+    },
+    {
+      "key": "flaky::0",
+      "states": [
+        "failed",
+        "failed",
+        "finished"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "table": "downstream",
+      "rows": [
+        {
+          "nodeId": "downstream",
+          "iteration": 0,
+          "payload": {
+            "value": 3
+          }
+        }
+      ]
+    },
+    {
+      "table": "flaky",
+      "rows": [
+        {
+          "nodeId": "flaky",
+          "iteration": 0,
+          "payload": {
+            "attempts": 3
+          }
+        }
+      ]
+    }
+  ],
+  "events": {
+    "run": [
+      "RunStarted",
+      "RunFinished"
+    ],
+    "nodes": [
+      {
+        "key": "downstream::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      },
+      {
+        "key": "flaky::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFailed",
+          "NodeRetrying",
+          "NodeStarted",
+          "NodeFailed",
+          "NodeRetrying",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      }
+    ],
+    "counts": {
+      "NodeFailed": 2,
+      "NodeFinished": 2,
+      "NodePending": 2,
+      "NodeRetrying": 2,
+      "NodeStarted": 4,
+      "RunFinished": 1,
+      "RunStarted": 1
+    }
+  },
+  "sideEffects": {
+    "executions": [
+      "flaky",
+      "flaky",
+      "flaky",
+      "downstream"
+    ]
+  }
+}

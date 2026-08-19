@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "description": "How every case in ../fault-matrix.json is accounted for by the parity suite. `ported` names the parity fixtures that carry the case's engine-observable behaviour; `out-of-scope` records a case whose subject is not engine semantics, with the reason. The coverage test fails when a case in the matrix is missing here, when a case names a fixture that does not exist, or when a fixture claims a case this file does not mark as ported.",
+  "cases": {
+    "case01": {
+      "status": "ported",
+      "fixtures": ["crash-resume"],
+      "reason": "SIGKILL of the engine mid-node, resumed in a fresh process, asserted through the execution ledger, attempt trace, and output rows."
+    },
+    "case02": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Sandbox transport liveness. The sandbox adapter is not part of the engine loop and is untouched by stages 1 to 3."
+    },
+    "case03": {
+      "status": "ported",
+      "fixtures": ["restart-waiting-approval", "waiting-approval-granted"],
+      "reason": "The gate is decided while no engine owns the run, then a fresh process resumes it."
+    },
+    "case04": {
+      "status": "ported",
+      "fixtures": ["waiting-event"],
+      "reason": "The run parks in waiting-event and resumes with the delivered signal payload as the node's output row."
+    },
+    "case05": {
+      "status": "ported",
+      "fixtures": ["waiting-timer"],
+      "reason": "The run parks on the durable clock, the timer fires, and the descendant runs exactly once."
+    },
+    "case06": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Concurrent resume versus supervisor is a run-claim CAS assertion made directly against SmithersDb. It has no workflow-level observation, and stage 1.1 gates it with the db and engine suites."
+    },
+    "case07": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "The fault case walks a continueAsNew lineage over rows seeded through adapter.insertRun; it exercises no engine execution path. The parity observation carries a `lineage` field so an engine that grows an unexpected descendant run still diverges from its oracle."
+    },
+    "case08": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Inspector run-state derivation. It is a projection over the same run and node rows the parity observation already compares column by column."
+    },
+    "case09": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Gateway reconnect cursor semantics. Transport, not engine."
+    },
+    "case10": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "UI unmount behaviour. No durable state is involved."
+    },
+    "case11": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Frame scrubbing reads the legacy React render loop's frame journal, which is engine-internal by construction and excluded from the parity event projection."
+    },
+    "case12": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Rewind and VCS revert land in stage 1.6 (checkpoints and time travel) and are gated by the time-travel CLI suites run against the flows engine."
+    },
+    "case13": {
+      "status": "ported",
+      "fixtures": ["terminal-failure"],
+      "reason": "The failure is attributed to the node that raised it and its descendant never materializes."
+    },
+    "case14": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Gateway RPC round trip. Transport, not engine."
+    },
+    "case15": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "WebSocket drop and reconnect. Transport, not engine."
+    },
+    "case16": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Subscriber memory budget under fan-out. A budget assertion over the gateway, not a durable-state contract."
+    },
+    "case17": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Webhook signature verification. Gateway ingress, not engine."
+    },
+    "case18": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Cron and manual trigger overlap. Trigger scheduling sits above the engine."
+    },
+    "case19": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Agent auth persistence across suspend and resume. Stage 2 territory; gated by the agent suites."
+    },
+    "case20": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Browser reference runtime. A runtime-portability case, gated by e2e/runtime."
+    },
+    "case21": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "VCS pointer integrity. Owned by packages/vcs."
+    },
+    "case22": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Secret injection containment. A sandbox and secrets contract."
+    },
+    "case23": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Network allow and deny policy. A sandbox contract."
+    },
+    "case24": {
+      "status": "ported",
+      "fixtures": ["waiting-approval-granted"],
+      "reason": "A decision is accepted only while the node is parked in waiting-approval; the parity fixture drives that same product path from a second connection."
+    },
+    "case25": {
+      "status": "ported",
+      "fixtures": ["waiting-approval-denied"],
+      "reason": "A denied gate fails the run and its descendant never executes."
+    },
+    "case26": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Sandbox diff review mode. Not an engine execution path."
+    },
+    "case27": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "The fault case asserts a scorer gate function over rows written directly through SmithersDb; it runs no workflow. Scorer events are classified as parity-semantic so a fixture that uses scorers gates on them once one exists."
+    },
+    "case28": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Soak: live stream RSS over hours. A nightly budget case, not a conformance case."
+    },
+    "case29": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Soak: two-hour cron with no stuck runs. A nightly budget case."
+    },
+    "case30": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Soak: long-lived jjhub run. A nightly budget case."
+    },
+    "case31": {
+      "status": "ported",
+      "fixtures": ["crash-resume"],
+      "reason": "Same fixture as case01: a real SIGKILL of a real child engine process, resumed in a fresh one."
+    },
+    "case32": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Agent checkpoint kill and resume. Agent-session checkpoints are the stage 1.6 Checkpoint host capability and are gated there."
+    }
+  }
+}
