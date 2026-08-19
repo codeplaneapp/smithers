@@ -1,0 +1,63 @@
+{
+  "fixture": "terminal-failure",
+  "verdict": {
+    "status": "failed",
+    "workflowName": "parity-terminal-failure",
+    "error": {
+      "code": "SESSION_ERROR",
+      "nodeId": "doomed"
+    }
+  },
+  "nodes": [
+    {
+      "nodeId": "doomed",
+      "iteration": 0,
+      "state": "failed",
+      "outputTable": "doomed",
+      "lastAttempt": 1,
+      "label": null
+    }
+  ],
+  "attempts": [
+    {
+      "key": "doomed::0",
+      "states": [
+        "failed"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "table": "doomed",
+      "rows": []
+    }
+  ],
+  "events": {
+    "run": [
+      "RunStarted",
+      "RunFailed"
+    ],
+    "nodes": [
+      {
+        "key": "doomed::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFailed"
+        ]
+      }
+    ],
+    "counts": {
+      "NodeFailed": 1,
+      "NodePending": 1,
+      "NodeStarted": 1,
+      "RunFailed": 1,
+      "RunStarted": 1
+    }
+  },
+  "sideEffects": {
+    "executions": [
+      "doomed"
+    ]
+  }
+}

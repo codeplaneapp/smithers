@@ -1,0 +1,76 @@
+{
+  "fixture": "waiting-approval-denied",
+  "verdict": {
+    "status": "failed",
+    "workflowName": "parity-waiting-approval-denied",
+    "error": {
+      "code": "SESSION_ERROR",
+      "nodeId": "gate"
+    }
+  },
+  "nodes": [
+    {
+      "nodeId": "deploy",
+      "iteration": 0,
+      "state": "pending",
+      "outputTable": "deploy",
+      "lastAttempt": null,
+      "label": null
+    },
+    {
+      "nodeId": "gate",
+      "iteration": 0,
+      "state": "failed",
+      "outputTable": "decision",
+      "lastAttempt": null,
+      "label": "parity: approve the deploy?"
+    }
+  ],
+  "attempts": [],
+  "outputs": [
+    {
+      "table": "decision",
+      "rows": []
+    },
+    {
+      "table": "deploy",
+      "rows": []
+    }
+  ],
+  "events": {
+    "run": [
+      "RunStarted",
+      "RunStatusChanged",
+      "RunStarted",
+      "RunFailed"
+    ],
+    "nodes": [
+      {
+        "key": "deploy::0",
+        "types": [
+          "NodePending"
+        ]
+      },
+      {
+        "key": "gate::0",
+        "types": [
+          "ApprovalRequested",
+          "NodeWaitingApproval",
+          "ApprovalDenied"
+        ]
+      }
+    ],
+    "counts": {
+      "ApprovalDenied": 1,
+      "ApprovalRequested": 1,
+      "NodePending": 1,
+      "NodeWaitingApproval": 1,
+      "RunFailed": 1,
+      "RunStarted": 2,
+      "RunStatusChanged": 1
+    }
+  },
+  "sideEffects": {
+    "executions": []
+  }
+}

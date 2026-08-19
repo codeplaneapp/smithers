@@ -11,6 +11,9 @@ safety/side effects, and soak.
   `freezeSqliteLock`, `stallSandbox`, `skewClock`, `corruptHeartbeat`).
   Reusable from any test.
 - `faults/` — one file per matrix row, named after the case it covers.
+- `parity/` — cross-engine conformance suite (stage 0.5 of the flows
+  migration): fixture workflows run on a selectable engine and are compared
+  against committed oracles. See [`parity/README.md`](./parity/README.md).
 - `budgets/` — memory and latency budgets, enforced by tests (regressions
   fail; they are not just recorded).
 - `fault-matrix.json` — case inventory and PR/nightly promotion tier.
@@ -23,6 +26,12 @@ Per-PR subset (must finish under 10 min wall time):
 
 ```sh
 pnpm -C e2e test:faults
+```
+
+Cross-engine parity (the gate for every flows-migration lane):
+
+```sh
+pnpm -C e2e test:parity
 ```
 
 Nightly soak (must finish under 2h wall time):

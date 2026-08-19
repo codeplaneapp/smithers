@@ -9,6 +9,8 @@
     "test:faults": "node ../scripts/check-fault-skips.mjs && bun ci/checkFaultPromotion.ts && bun ci/runFaultSuite.ts --suite pr",
     "test:soak": "node ../scripts/check-fault-skips.mjs && bun ci/checkFaultPromotion.ts && bun ci/runFaultSuite.ts --suite nightly",
     "check:fault-promotion": "bun ci/checkFaultPromotion.ts",
+    "test:parity": "bun test parity/",
+    "record:parity-oracles": "bun parity/recordOracles.ts",
     "test:browser:install": "pnpm exec playwright install chromium",
     "test:browser:types": "tsc -p browser/tsconfig.json",
     "test:browser": "node browser/run-browser.mjs",

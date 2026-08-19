@@ -1,0 +1,107 @@
+{
+  "fixture": "crash-resume",
+  "verdict": {
+    "status": "finished",
+    "workflowName": "parity-crash-resume",
+    "error": null
+  },
+  "nodes": [
+    {
+      "nodeId": "committed",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "committed",
+      "lastAttempt": 1,
+      "label": null
+    },
+    {
+      "nodeId": "interrupted",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "interrupted",
+      "lastAttempt": 2,
+      "label": null
+    }
+  ],
+  "attempts": [
+    {
+      "key": "committed::0",
+      "states": [
+        "finished"
+      ]
+    },
+    {
+      "key": "interrupted::0",
+      "states": [
+        "cancelled",
+        "finished"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "table": "committed",
+      "rows": [
+        {
+          "nodeId": "committed",
+          "iteration": 0,
+          "payload": {
+            "value": 10
+          }
+        }
+      ]
+    },
+    {
+      "table": "interrupted",
+      "rows": [
+        {
+          "nodeId": "interrupted",
+          "iteration": 0,
+          "payload": {
+            "value": 20
+          }
+        }
+      ]
+    }
+  ],
+  "events": {
+    "run": [
+      "RunStarted",
+      "RunStarted",
+      "RunFinished"
+    ],
+    "nodes": [
+      {
+        "key": "committed::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      },
+      {
+        "key": "interrupted::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      }
+    ],
+    "counts": {
+      "NodeFinished": 2,
+      "NodePending": 2,
+      "NodeStarted": 3,
+      "RunFinished": 1,
+      "RunStarted": 2
+    }
+  },
+  "sideEffects": {
+    "executions": [
+      "committed",
+      "interrupted",
+      "interrupted"
+    ]
+  }
+}

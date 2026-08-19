@@ -1,0 +1,68 @@
+{
+  "fixture": "branch-selection",
+  "verdict": {
+    "status": "finished",
+    "workflowName": "parity-branch-selection",
+    "error": null
+  },
+  "nodes": [
+    {
+      "nodeId": "taken",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "taken",
+      "lastAttempt": 1,
+      "label": null
+    }
+  ],
+  "attempts": [
+    {
+      "key": "taken::0",
+      "states": [
+        "finished"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "table": "taken",
+      "rows": [
+        {
+          "nodeId": "taken",
+          "iteration": 0,
+          "payload": {
+            "path": "then"
+          }
+        }
+      ]
+    }
+  ],
+  "events": {
+    "run": [
+      "RunStarted",
+      "RunFinished"
+    ],
+    "nodes": [
+      {
+        "key": "taken::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      }
+    ],
+    "counts": {
+      "NodeFinished": 1,
+      "NodePending": 1,
+      "NodeStarted": 1,
+      "RunFinished": 1,
+      "RunStarted": 1
+    }
+  },
+  "sideEffects": {
+    "executions": [
+      "taken"
+    ]
+  }
+}

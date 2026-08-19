@@ -1,0 +1,173 @@
+{
+  "fixture": "parallel-fanout",
+  "verdict": {
+    "status": "finished",
+    "workflowName": "parity-parallel-fanout",
+    "error": null
+  },
+  "nodes": [
+    {
+      "nodeId": "alpha",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "alpha",
+      "lastAttempt": 1,
+      "label": null
+    },
+    {
+      "nodeId": "beta",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "beta",
+      "lastAttempt": 1,
+      "label": null
+    },
+    {
+      "nodeId": "gamma",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "gamma",
+      "lastAttempt": 1,
+      "label": null
+    },
+    {
+      "nodeId": "joined",
+      "iteration": 0,
+      "state": "finished",
+      "outputTable": "joined",
+      "lastAttempt": 1,
+      "label": null
+    }
+  ],
+  "attempts": [
+    {
+      "key": "alpha::0",
+      "states": [
+        "finished"
+      ]
+    },
+    {
+      "key": "beta::0",
+      "states": [
+        "finished"
+      ]
+    },
+    {
+      "key": "gamma::0",
+      "states": [
+        "finished"
+      ]
+    },
+    {
+      "key": "joined::0",
+      "states": [
+        "finished"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "table": "alpha",
+      "rows": [
+        {
+          "nodeId": "alpha",
+          "iteration": 0,
+          "payload": {
+            "value": 3
+          }
+        }
+      ]
+    },
+    {
+      "table": "beta",
+      "rows": [
+        {
+          "nodeId": "beta",
+          "iteration": 0,
+          "payload": {
+            "value": 6
+          }
+        }
+      ]
+    },
+    {
+      "table": "gamma",
+      "rows": [
+        {
+          "nodeId": "gamma",
+          "iteration": 0,
+          "payload": {
+            "value": 9
+          }
+        }
+      ]
+    },
+    {
+      "table": "joined",
+      "rows": [
+        {
+          "nodeId": "joined",
+          "iteration": 0,
+          "payload": {
+            "total": 18
+          }
+        }
+      ]
+    }
+  ],
+  "events": {
+    "run": [
+      "RunStarted",
+      "RunFinished"
+    ],
+    "nodes": [
+      {
+        "key": "alpha::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      },
+      {
+        "key": "beta::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      },
+      {
+        "key": "gamma::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      },
+      {
+        "key": "joined::0",
+        "types": [
+          "NodePending",
+          "NodeStarted",
+          "NodeFinished"
+        ]
+      }
+    ],
+    "counts": {
+      "NodeFinished": 4,
+      "NodePending": 4,
+      "NodeStarted": 4,
+      "RunFinished": 1,
+      "RunStarted": 1
+    }
+  },
+  "sideEffects": {
+    "executions": [
+      "alpha",
+      "beta",
+      "gamma",
+      "joined"
+    ]
+  }
+}
