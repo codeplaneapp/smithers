@@ -13,6 +13,17 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSmithersCli, resolveSmithersShellCommand } from "../lib/resolve-smithers-cli.mjs";
 
+/**
+ * The CLI command `workflows/smithers-run.mjs` falls back to when the mirror is
+ * launched without an explicit `cli` argument. Passing that same string again
+ * would be noise, so the hook only names a CLI that differs from it.
+ *
+ * Kept in step with the mirror by
+ * `apps/cli/tests/claude-mirror-cli-surface.test.js`; the mirror is a sandboxed
+ * Workflow script and cannot import this constant.
+ */
+const MIRROR_DEFAULT_CLI = "bunx smthrs";
+
 function listKeys(dir) {
   try {
     return readdirSync(dir)
@@ -83,17 +94,19 @@ try {
   const uis = new Set(listKeys(join(smithersDir, "ui")));
   const mirrorScript = join(pluginRoot(), "workflows", "smithers-run.mjs");
   const activeRuns = countActiveRuns();
-  // Inside a Smithers source checkout every command must execute the working
-  // tree, so the mirror gets an explicit `cli` and the prose names the same
-  // command. Elsewhere both fall back to `bunx smthrs`.
+  // The mirror's own default is `bunx smthrs`, which is a bin-NAME lookup that
+  // another package can answer for: `@smthrs/build-cli` declares a `smthrs`
+  // bin, so inside a project carrying it the mirror runs that program and every
+  // orchestrator subcommand exits COMMAND_NOT_FOUND. So whenever this project
+  // resolves to an identified orchestrator — a source checkout, an installed
+  // package, or one on PATH — name it explicitly. Only a machine with no
+  // install at all is left on the default. See lib/resolve-smithers-cli.mjs.
   const cli = resolveSmithersCli(cwd);
   const cliCommand = resolveSmithersShellCommand(cwd);
-  const mirrorCliArg = cli.source === "workspace" ? `cli: ${JSON.stringify(cliCommand)}, ` : "";
+  const mirrorCliArg = cliCommand === MIRROR_DEFAULT_CLI ? "" : `cli: ${JSON.stringify(cliCommand)}, `;
 
   const lines = [];
-  lines.push(
-    "This project uses Smithers (a durable control plane for long-running coding agents).",
-  );
+  lines.push("This project uses Smithers (a durable control plane for long-running coding agents).");
   lines.push(
     "You operate Smithers via the `smithers` MCP tools (list_workflows, run_workflow, watch_run, resolve_approval, ...) and the `smithers` CLI. You are the orchestrator: run multi-step / long-running / background work THROUGH a Smithers workflow, NOT through your own ad-hoc orchestration (Task/Agent fan-outs, `/loop`, hand-written Workflow scripts).",
     "Route ANY clear single-goal ask through `smithers oneshot`, even large repo-wide goals (make CI green, upgrade every dependency and fix builds, audit and update all docs): one strong agent one-shots up to roughly 300k tokens in a single run. Reserve full workflows for genuinely multi-stage, approval-gated, parallel, or reusable work; authoring a workflow for a single-goal ask is overengineering, and 'it feels big' never justifies one.",
