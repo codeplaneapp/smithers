@@ -11,6 +11,7 @@ import { isTerminalClaudeMirrorRunStatus } from "./claude-mirror/isTerminalClaud
 import { findAndOpenDb } from "./find-db.js";
 import { resumeRunDetached, resumeRunDetachedLogFile } from "./resume-detached.js";
 import { buildBuiltinRelaunch, describeResumeTarget, resolveResumeTarget } from "./resume-target.js";
+import { runDriverSweepPoll } from "./supervisor-sweep.js";
 /** @typedef {import("./RunAutoResumeSkipReason.ts").RunAutoResumeSkipReason} RunAutoResumeSkipReason */
 /** @typedef {import("./ResumeTarget.ts").ResumeTarget} ResumeTarget */
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
@@ -1249,11 +1250,53 @@ function pollEffect(options) {
   );
 }
 /**
+ * Whether this process drives runs on the flows engine.
+ *
+ * Spec 1.4 replaces the claim-by-proxy poll with the run driver's own
+ * heartbeat sweep, and stage 1 keeps every flows-routed path behind the engine
+ * selector until 1.7. On the flows route the claim-by-proxy path below is
+ * dead: `runDriverSweepPoll` re-drives stale-running rows, released rows, and
+ * due wakes with no proxy claim, no `supervisor:` owner id, and no pid probe.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+export function usesRunDriverSweep(env = process.env) {
+  return env.SMITHERS_ENGINE === "flows";
+}
+/**
  * @param {SupervisorOptions} options
  * @returns {Effect.Effect<SupervisorPollSummary, never>}
  */
 export function supervisorPollEffect(options) {
-  return pollEffect(normalizeSupervisorOptions(options));
+  return pollOnceEffect(normalizeSupervisorOptions(options));
+}
+/**
+ * One poll on whichever route is selected.
+ * @param {NormalizedSupervisorOptions} normalized
+ * @returns {Effect.Effect<SupervisorPollSummary, never>}
+ */
+function pollOnceEffect(normalized) {
+  if (!usesRunDriverSweep()) return pollEffect(normalized);
+  return Effect.promise(() =>
+    runDriverSweepPoll({
+      adapter: normalized.adapter,
+      runIds: normalized.runIds,
+      staleThresholdMs: normalized.staleThresholdMs,
+      maxConcurrent: normalized.maxConcurrent,
+      // The claim-by-proxy encoded the consecutive failed-resume count in the
+      // owner id it stamped. The sweep stamps nothing, so the same budget is
+      // kept in its own ledger, keyed by this supervisor's identity so ticks
+      // of one loop share a count.
+      maxResumeAttempts: normalized.maxResumeAttempts,
+      supervisorId: normalized.supervisorId,
+      dryRun: normalized.dryRun,
+      deps: {
+        now: normalized.deps.now,
+        workflowExists: normalized.deps.workflowExists,
+        spawnResumeDetached: (target, runId) => normalized.deps.spawnResumeDetached(target, runId),
+      },
+    }),
+  );
 }
 /**
  * @param {SupervisorOptions} options
@@ -1275,7 +1318,7 @@ export function supervisorLoopEffect(options) {
       timestampMs: normalized.deps.now(),
     });
     while (true) {
-      const summary = yield* pollEffect(normalized);
+      const summary = yield* pollOnceEffect(normalized);
       for (const runId of summary.gaveUpRunIds) {
         gaveUpRunIds.add(runId);
       }

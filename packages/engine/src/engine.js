@@ -160,6 +160,15 @@ import {
   withCancellationSource,
 } from "./cancellation-attribution.js";
 import { isRunParkAbort } from "./run-parking.js";
+import { createWaitingSeam } from "./waiting/createWaitingSeam.js";
+import { defaultWaitWakeClassifiers } from "./classify/defaultWaitWakeClassifiers.js";
+import { makeWaitingAnnotation, runStatusForWaitingAnnotation } from "./waiting/waitingTaxonomy.js";
+import { waitingAnnotationFromRunRow } from "./waiting/readWaitingAnnotation.js";
+/** @typedef {import("./waiting/WaitingAnnotation.ts").WaitingAnnotation} WaitingAnnotation */
+/** @typedef {import("./waiting/WaitingAnnotation.ts").WaitingReason} WaitingReason */
+/** @typedef {import("./classify/WaitWakeClassifiers.ts").WaitWakeClassifiers} WaitWakeClassifiers */
+/** @typedef {import("./classify/WaitWakeClassifiers.ts").ErrorClassification} ErrorClassification */
+/** @typedef {import("./classify/WaitWakeClassifiers.ts").RetryResolution} RetryResolution */
 /** @typedef {import("@smthrs/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
 /** @typedef {import("@smthrs/driver/RunOptions").RunOptions} RunOptions */
@@ -3087,8 +3096,113 @@ function assertResumeDurabilityMetadata(existingRun, existingConfig, current, wo
 }
 
 /**
- * Return quota-parked runs whose known provider reset time has elapsed. Quota
- * parks without a reset time require manual intervention and are never due.
+ * Resolve when a quota park should wake.
+ *
+ * Spec 1.5 keeps provider knowledge out of the executor: each blocked task's
+ * failure text goes through the injected `classifyError`, and the earliest
+ * deadline any provider offered becomes the park's `wakeAt`. The scheduler's
+ * own aggregate `resetAtMs` is the fallback for a blocked sample that carried
+ * no message. A quota park whose providers all declined to say when the limit
+ * lifts gets no deadline, and waits for an operator rather than spinning.
+ *
+ * @param {Extract<WaitReason, { _tag: "Quota" }>} reason
+ * @param {{ classifyError: (failure: unknown) => { kind: string; wakeAt?: number } }} seam
+ * @param {number} now
+ * @returns {number | null}
+ */
+export function resolveQuotaWakeAt(reason, seam, now) {
+  let earliest = null;
+  // A provider that named a deadline which has already elapsed by the time the
+  // park is written is still a provider that named one: the limit has lifted,
+  // so the park is due immediately rather than deadline-less. Losing that
+  // distinction would strand the run, because a park with no deadline waits
+  // for an operator.
+  let sawElapsedDeadline = false;
+  for (const blocked of reason.blocked ?? []) {
+    const classification = seam.classifyError({
+      code: "AGENT_QUOTA_EXCEEDED",
+      message: blocked.message ?? "",
+      details: {
+        failureQuota: true,
+        ...(blocked.resetAtMs != null ? { quotaResetAtMs: blocked.resetAtMs } : {}),
+      },
+    });
+    const wakeAt = classification.kind === "quota" ? classification.wakeAt : undefined;
+    if (wakeAt != null && wakeAt > now && (earliest == null || wakeAt < earliest)) {
+      earliest = wakeAt;
+    }
+    if (wakeAt == null && blocked.resetAtMs != null) {
+      sawElapsedDeadline = true;
+    }
+  }
+  if (earliest != null) return earliest;
+  if (reason.resetAtMs != null) return reason.resetAtMs > now ? reason.resetAtMs : now;
+  return sawElapsedDeadline ? now : null;
+}
+/**
+ * Merge a waiting annotation into a run row's `errorJson` without disturbing
+ * what is already there. Only parks that already write error metadata reach
+ * this, so the column keeps its existing shape and gains one `waiting` key.
+ * @param {string | null | undefined} errorJson
+ * @param {WaitingAnnotation} annotation
+ * @returns {string | null | undefined}
+ */
+export function mergeWaitingAnnotationIntoErrorJson(errorJson, annotation) {
+  if (errorJson == null) return errorJson;
+  try {
+    const parsed = JSON.parse(errorJson);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return errorJson;
+    return JSON.stringify({ ...parsed, waiting: annotation });
+  } catch {
+    return errorJson;
+  }
+}
+/**
+ * The run-row patch a park writes.
+ *
+ * One place decides what a parked row looks like, so the durable shape cannot
+ * drift between the engine's own park path and anything else that has to
+ * reproduce it. `markRunWaiting` is its only production caller; tests that
+ * assert on a park use it rather than restating the columns.
+ *
+ * @param {WaitingAnnotation} annotation
+ * @param {{ quotaMetadataJson?: string; errorJson?: string }} [options]
+ * @returns {Record<string, unknown>}
+ */
+export function buildWaitingRunPatch(annotation, options = {}) {
+  const patch = {
+    status: runStatusForWaitingAnnotation(annotation),
+    heartbeatAtMs: null,
+    runtimeOwnerId: null,
+    cancelRequestedAtMs: null,
+    pauseRequestedAtMs: null,
+    hijackRequestedAtMs: null,
+    hijackTarget: null,
+  };
+  if (options.quotaMetadataJson != null) {
+    patch.errorJson = options.quotaMetadataJson;
+  }
+  if (options.errorJson != null) {
+    patch.errorJson = options.errorJson;
+  }
+  // Only a park that already writes error metadata (quota) carries the
+  // annotation on the row as well. Every other park leaves `errorJson` exactly
+  // as it was: the `RunStatusChanged` journal entry is the durable record, and
+  // stamping an otherwise-clean row would change what a park looks like to
+  // every reader of that column.
+  if (patch.errorJson != null) {
+    patch.errorJson = mergeWaitingAnnotationIntoErrorJson(patch.errorJson, annotation);
+  }
+  return patch;
+}
+/**
+ * Return quota-parked runs whose wake deadline has elapsed.
+ *
+ * The deadline is the waiting annotation's `wakeAt` (spec 1.4), falling back
+ * to the `resetAtMs` this path wrote before the taxonomy existed so a run
+ * parked by an older build still wakes. A quota park with no deadline at all
+ * is never due: the provider gave no reset time, so only an operator can
+ * decide when to try again.
  * @param {SmithersDb} adapter
  * @param {number} nowMs
  * @returns {Promise<RunRow[]>}
@@ -3096,13 +3210,8 @@ function assertResumeDurabilityMetadata(existingRun, existingConfig, current, wo
 export async function runsDueForQuotaResume(adapter, nowMs) {
   const waitingRuns = await adapter.listRuns(1_000, "waiting-quota");
   return waitingRuns.filter((run) => {
-    if (!run.errorJson) return false;
-    try {
-      const resetAtMs = Number(JSON.parse(run.errorJson)?.resetAtMs);
-      return Number.isFinite(resetAtMs) && resetAtMs <= nowMs;
-    } catch {
-      return false;
-    }
+    const wakeAt = waitingAnnotationFromRunRow(run)?.wakeAt;
+    return wakeAt != null && wakeAt <= nowMs;
   });
 }
 /**
@@ -3973,48 +4082,66 @@ function estimateReportedCostUsd(model, usage) {
   });
 }
 /**
+ * Classify one failed attempt through the injected `classifyError` service.
+ *
+ * Spec 1.5: provider quota and transient-error knowledge stays in Smithers as
+ * an injected service, and this is the single point the engine reads it from.
+ * Every park/retry/fail decision below is expressed in terms of the returned
+ * classification, so a host that replaces `classifyError` changes what the
+ * engine does with a failure, not merely when it wakes.
+ *
  * @param {{ errorJson?: string | null; metaJson?: string | null } | null} [attempt]
+ * @param {WaitWakeClassifiers} [classifiers]
+ * @param {number} [atMs]
+ * @returns {ErrorClassification}
  */
-function isRetryableTaskFailure(attempt) {
-  const meta = parseAttemptMetaJson(attempt?.metaJson);
-  if (meta?.failureRetryable === false) {
-    return false;
-  }
-  if (meta?.failureRetryable === true) {
-    return true;
-  }
-  const errorCode = parseAttemptErrorCode(attempt?.errorJson);
-  // AGENT_CONFIG_INVALID is a deterministic configuration failure (e.g.
-  // "LLM not set", unknown model). Retrying is guaranteed to fail again
-  // and just multiplies cost — short-circuit immediately.
-  if (errorCode === "AGENT_CONFIG_INVALID") {
-    return false;
-  }
-  const kind = typeof meta?.kind === "string" ? meta.kind : null;
-  return !(kind !== "agent" && errorCode === "INVALID_OUTPUT");
+function classifyAttemptFailure(attempt, classifiers = defaultWaitWakeClassifiers, atMs = nowMs()) {
+  return classifiers.classifyError(attempt ?? {}, { nowMs: atMs });
+}
+/**
+ * @param {{ errorJson?: string | null; metaJson?: string | null } | null} [attempt]
+ * @param {WaitWakeClassifiers} [classifiers]
+ */
+function isRetryableTaskFailure(attempt, classifiers) {
+  return classifyAttemptFailure(attempt, classifiers).kind !== "fatal";
 }
 /**
  * Quota-limited attempts are transient failures that should never count
  * against the task's retry budget. The run pauses until the quota resets
  * and then retries as if the attempt never occurred.
  * @param {{ errorJson?: string | null; metaJson?: string | null } | null} [attempt]
+ * @param {WaitWakeClassifiers} [classifiers]
  */
-function isQuotaTaskFailure(attempt) {
-  const errorCode = parseAttemptErrorCode(attempt?.errorJson);
-  if (errorCode === "AGENT_QUOTA_EXCEEDED") return true;
-  // Check error details for failureQuota flag (covers agents using a different
-  // error code but still marking the failure as quota-related via details).
-  if (attempt?.errorJson) {
-    try {
-      const errorObj = JSON.parse(attempt.errorJson);
-      if (errorObj?.details?.failureQuota === true) return true;
-    } catch {
-      /* ignore parse errors */
-    }
+function isQuotaTaskFailure(attempt, classifiers) {
+  return classifyAttemptFailure(attempt, classifiers).kind === "quota";
+}
+/**
+ * What the engine does next with a node whose attempts have failed: park on
+ * the durable clock, retry, or fail the node.
+ *
+ * This is `resolveRetry` from spec 1.5, applied to real attempt rows. The
+ * newest failure decides — a quota park never spends a retry, so the budget it
+ * did not spend is still there when the provider resets — and an earlier
+ * fatal failure is terminal whatever the newest one says.
+ *
+ * @param {Array<{ errorJson?: string | null; metaJson?: string | null }>} failedAttempts newest first
+ * @param {{ classifiers?: WaitWakeClassifiers; retries: number; nowMs?: number }} options
+ * @returns {RetryResolution}
+ */
+export function resolveFailedAttemptsDisposition(failedAttempts, options) {
+  const classifiers = options.classifiers ?? defaultWaitWakeClassifiers;
+  const atMs = options.nowMs ?? nowMs();
+  const classifications = failedAttempts.map((attempt) => classifyAttemptFailure(attempt, classifiers, atMs));
+  const latest = classifications[0];
+  if (!latest) return { action: "retry", waitMs: 0 };
+  // Quota failures do not consume the budget, so they are not counted here.
+  const attemptsUsed = classifications.filter((classification) => classification.kind !== "quota").length;
+  const resolution = classifiers.resolveRetry(latest, { nowMs: atMs, attemptsUsed, retries: options.retries });
+  if (resolution.action === "park") return resolution;
+  if (classifications.some((classification) => classification.kind === "fatal")) {
+    return { action: "fail", reason: "non-retryable" };
   }
-  // Legacy: some paths may set failureQuota in metaJson instead of errorJson.
-  const meta = parseAttemptMetaJson(attempt?.metaJson);
-  return meta?.failureQuota === true;
+  return resolution;
 }
 
 const HUMAN_REQUEST_REOPEN_ERROR_CODES = new Set(["HUMAN_TASK_INVALID_JSON", "HUMAN_TASK_VALIDATION_FAILED"]);
@@ -5046,6 +5173,10 @@ async function legacyExecuteTask(
   runAbortController,
   hijackState,
   pauseSignal,
+  // Spec 1.5: the run's injected `classifyError` / `resolveRetry`. The bridge
+  // calls this function positionally and does not pass it, so the default is
+  // what a caller outside `runEngine` gets.
+  waitWakeClassifiers = defaultWaitWakeClassifiers,
 ) {
   const taskStartMs = performance.now();
   const attempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
@@ -8902,13 +9033,15 @@ async function legacyExecuteTask(
     });
     const updatedAttempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
     const failedAttempts = updatedAttempts.filter((a) => a.state === "failed");
-    const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableTaskFailure(attempt));
-    const retryConsumingFailedAttempts = failedAttempts.filter((a) => !isQuotaTaskFailure(a));
-    const latestFailedAttemptIsQuota = isQuotaTaskFailure(failedAttempts[0]);
-    if (
-      !stalledVerdict &&
-      (latestFailedAttemptIsQuota || (!hasNonRetryableFailure && retryConsumingFailedAttempts.length <= desc.retries))
-    ) {
+    // Spec 1.5: park, retry, or fail is the injected `resolveRetry`'s call, not
+    // an inline rule. A quota park and a retry both mean the node continues;
+    // only "fail" stops it here.
+    const disposition = resolveFailedAttemptsDisposition(failedAttempts, {
+      classifiers: waitWakeClassifiers,
+      retries: desc.retries,
+      nowMs: nowMs(),
+    });
+    if (!stalledVerdict && disposition.action !== "fail") {
       await Effect.runPromise(
         eventBus.emitEventWithPersist({
           type: "NodeRetrying",
@@ -9483,9 +9616,15 @@ async function runWorkflowBodyDriver(workflow, opts) {
         runId,
         status: "paused",
         timestampMs: nowMs(),
+        // The durable marker that separates this park from a human's
+        // `smithers pause` (spec 1.4). Both land on `paused` with every
+        // request column cleared, so the row alone cannot tell them apart;
+        // only a run whose owner released it may be re-driven unasked, and the
+        // run driver's sweep reads exactly this annotation to decide that.
+        waiting: makeWaitingAnnotation("released"),
       }),
     );
-    await annotateRunSpan({ status: "paused", parkReason: "host-stopped" });
+    await annotateRunSpan({ status: "paused", parkReason: "host-stopped", waitingReason: "released" });
     return { runId, status: "paused" };
   };
   const wakeLock = acquireCaffeinate();
@@ -9507,6 +9646,43 @@ async function runWorkflowBodyDriver(workflow, opts) {
         runId,
         ...attributes,
       }),
+    );
+  /**
+   * The wait/wake seam for this run (spec 1.4 and 1.5). It owns the waiting
+   * taxonomy and holds the injected provider policy — `classifyError` and
+   * `resolveRetry` — so a host can replace the quota and transient-error
+   * rules without touching the executor.
+   */
+  const waitingSeam =
+    opts.waitingSeam ??
+    createWaitingSeam({
+      classifiers: opts.waitWakeClassifiers,
+      // The flows declaration point. `FlowRuntime.annotateWaiting` requires
+      // the `FlowInstance` service, so it only succeeds inside the flow's own
+      // fiber and cannot be reached from here: a flows-driven host binds it to
+      // that fiber and hands the bound function in. Without one the seam still
+      // produces the annotation and the park below persists it, which is every
+      // legacy-engine park.
+      annotateWaiting: opts.annotateWaiting,
+      nowMs,
+    });
+  /**
+   * Read off the run options here because `markRunWaiting` shadows `opts` with
+   * its own per-park options bag.
+   * @type {((declaration: import("./waiting/createWaitingSeam.js").WaitingDeclaration) => void) | undefined}
+   */
+  const notifyWaitingDeclared = opts.onWaitingDeclared;
+  /**
+   * `legacyExecuteTask` bound to this run's injected classifiers. The workflow
+   * bridge calls the executor positionally with a fixed argument list, so the
+   * only way the run's own `classifyError` / `resolveRetry` reach it is a
+   * closure that appends them.
+   * @type {typeof legacyExecuteTask}
+   */
+  const legacyExecuteTaskForRun = (...args) =>
+    legacyExecuteTask(
+      .../** @type {Parameters<typeof legacyExecuteTask>} */ (args.slice(0, 15)),
+      waitingSeam.classifiers,
     );
   let workflowSession;
   const renderer = new SmithersRenderer();
@@ -10018,27 +10194,39 @@ async function runWorkflowBodyDriver(workflow, opts) {
     return Effect.runPromise(workflowSession.submitGraph(lastGraph));
   };
   /**
-   * @param {"waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota"} status
+   * The one park path.
+   *
+   * Stage 1.4 of `.smithers/specs/flows-migration.md`: every wait produces a
+   * `WaitingAnnotation` — `{ reason, wakeAt?, token? }` — first, declares it
+   * through the wait/wake seam (which hands it to
+   * `FlowRuntime.annotateWaiting` when a flows fiber is driving), and only
+   * then writes the derived `waiting-*` status. The annotation rides on the
+   * `RunStatusChanged` journal entry and, for a park that carries error
+   * metadata, on the run row's `errorJson`, so the wake sweep reads one
+   * taxonomy instead of four inline states.
+   *
    * @param {"approval" | "event" | "timer" | "quota" | "bound"} waitReason
-   * @param {{ quotaMetadataJson?: string; errorJson?: string }} [opts]
+   * @param {{ quotaMetadataJson?: string; errorJson?: string; wakeAt?: number; token?: string }} [opts]
    * @returns {Promise<RunResult>}
    */
-  const markRunWaiting = async (status, waitReason, opts = {}) => {
-    const patch = {
-      status,
-      heartbeatAtMs: null,
-      runtimeOwnerId: null,
-      cancelRequestedAtMs: null,
-      pauseRequestedAtMs: null,
-      hijackRequestedAtMs: null,
-      hijackTarget: null,
-    };
-    if (opts.quotaMetadataJson != null) {
-      patch.errorJson = opts.quotaMetadataJson;
-    }
-    if (opts.errorJson != null) {
-      patch.errorJson = opts.errorJson;
-    }
+  const markRunWaiting = async (waitReason, opts = {}) => {
+    // `bound` is not a waiting reason of its own: a run parked on a stale
+    // bound authority is waiting for an external event to refresh it.
+    const annotation = makeWaitingAnnotation(
+      /** @type {WaitingReason} */ (waitReason === "bound" ? "event" : waitReason),
+      { wakeAt: opts.wakeAt, token: opts.token },
+    );
+    // The durable status is derived from the taxonomy, not chosen at the call
+    // site. That is the whole of stage 1.4's "instead of engine.js's inline
+    // waiting states": there is one place that decides what a park looks like.
+    const status = /** @type {string} */ (runStatusForWaitingAnnotation(annotation));
+    // Declaring to flows is best effort by design: outside a flows fiber there
+    // is nothing to declare to, and the annotation persisted below is the
+    // durable record either way. A host that bound the fiber gets the outcome
+    // back, so "did this park reach flows" is observable rather than inferred.
+    const declaration = await waitingSeam.declareAnnotation(annotation);
+    notifyWaitingDeclared?.(declaration);
+    const patch = buildWaitingRunPatch(annotation, opts);
     const parked = await Effect.runPromise(adapter.updateRunIfNotCancelled(runId, patch));
     if (!parked) {
       const authoritative = await Effect.runPromise(adapter.getRun(runId));
@@ -10058,11 +10246,18 @@ async function runWorkflowBodyDriver(workflow, opts) {
         runId,
         status,
         timestampMs: nowMs(),
+        // The waiting taxonomy travels with the journal entry that records the
+        // park, so a wake sweep reads `{ reason, wakeAt?, token? }` instead of
+        // re-deriving intent from the status string.
+        waiting: annotation,
       }),
     );
     await annotateRunSpan({
       status,
       waitReason,
+      waitingReason: annotation.reason,
+      waitingDeclaredToFlows: declaration.declaredToFlows,
+      ...(annotation.wakeAt !== undefined ? { waitingWakeAtMs: annotation.wakeAt } : {}),
     });
     return { runId, status };
   };
@@ -10072,7 +10267,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
   const reconcileApprovalWait = async (nodeId) => {
     const task = lastGraph?.tasks.find((candidate) => candidate.nodeId === nodeId);
     if (!task) {
-      return markRunWaiting("waiting-approval", "approval");
+      return markRunWaiting("approval", { token: nodeId });
     }
     /**
      * @param {{ note?: string | null; decidedBy?: string | null; decisionJson?: string | null; }} approval
@@ -10119,13 +10314,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
         }
         return submitLastGraph();
       }
-      return markRunWaiting("waiting-approval", "approval");
+      return markRunWaiting("approval", { token: nodeId });
     }
     const approval = await Effect.runPromise(adapter.getApproval(runId, task.nodeId, task.iteration));
     if (approval?.status === "approved" || approval?.status === "denied") {
       return resolveSessionApproval(approval, approval.status === "approved");
     }
-    return markRunWaiting("waiting-approval", "approval");
+    return markRunWaiting("approval", { token: nodeId });
   };
   /**
    * @param {string} eventName
@@ -10156,7 +10351,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         return submitLastGraph();
       }
     }
-    return markRunWaiting("waiting-event", "event");
+    return markRunWaiting("event", { token: eventName });
   };
   /**
    * @param {TaskDescriptor} task
@@ -10323,7 +10518,10 @@ async function runWorkflowBodyDriver(workflow, opts) {
     if (waitMs <= 0) {
       return submitLastGraph();
     }
-    return markRunWaiting("waiting-timer", "timer");
+    // The deadline is the annotation's `wakeAt`, so a wake sweep can answer
+    // "is this park due" from the taxonomy rather than by re-reading attempt
+    // timer metadata.
+    return markRunWaiting("timer", { wakeAt: effectiveResumeAtMs });
   };
   /**
    * Persist provenance waits as nonterminal node states. The run uses the
@@ -10356,7 +10554,6 @@ async function runWorkflowBodyDriver(workflow, opts) {
     });
     const primaryBindings = reason.bindings ?? primaryTask?.proofBindings ?? [];
     return markRunWaiting(
-      "waiting-event",
       "bound",
       staleTasks.length > 0
         ? {
@@ -10397,8 +10594,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
           return { runId, status: "cancelled" };
         }
         return submitLastGraph();
-      case "Quota":
-        return markRunWaiting("waiting-quota", "quota", {
+      case "Quota": {
+        // Spec 1.5: the wake deadline comes from the injected classifier, not
+        // from the executor. The scheduler's own `resetAtMs` is the fallback
+        // for a blocked task whose failure carried no provider deadline.
+        const wakeAt = resolveQuotaWakeAt(reason, waitingSeam, nowMs());
+        return markRunWaiting("quota", {
+          ...(wakeAt != null ? { wakeAt } : {}),
           quotaMetadataJson: JSON.stringify({
             quotaBlockedCount: reason.quotaBlockedCount,
             ...(reason.resetAtMs != null ? { resetAtMs: reason.resetAtMs } : {}),
@@ -10407,13 +10609,14 @@ async function runWorkflowBodyDriver(workflow, opts) {
             ...(Array.isArray(reason.blocked) && reason.blocked.length ? { blocked: reason.blocked } : {}),
           }),
         });
+      }
       case "Bound":
         return reconcileBoundWait(reason);
       case "HotReload":
       case "OrphanRecovery":
       case "ExternalTrigger":
       default:
-        return markRunWaiting("waiting-event", "event");
+        return markRunWaiting("event");
     }
   };
   /**
@@ -10451,13 +10654,17 @@ async function runWorkflowBodyDriver(workflow, opts) {
         let attempts = await Effect.runPromise(adapter.listAttempts(runId, task.nodeId, task.iteration));
         const terminalFailure = (nodeState = priorNode?.state) => {
           const failedAttempts = attempts.filter((attempt) => attempt.state === "failed");
-          const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableTaskFailure(attempt));
-          const retryConsumingFailedAttempts = failedAttempts.filter((attempt) => !isQuotaTaskFailure(attempt));
-          const latestFailedAttemptIsQuota = isQuotaTaskFailure(failedAttempts[0]);
+          // Spec 1.5: the node is terminal exactly when the injected
+          // `resolveRetry` says fail. A quota park is not terminal — it waits
+          // for the provider and keeps its unspent retries — and a stall is
+          // terminal whatever the classifiers say.
           return (
             nodeState === "stalled" ||
-            (!latestFailedAttemptIsQuota &&
-              (hasNonRetryableFailure || retryConsumingFailedAttempts.length >= task.retries + 1))
+            resolveFailedAttemptsDisposition(failedAttempts, {
+              classifiers: waitingSeam.classifiers,
+              retries: task.retries,
+              nowMs: nowMs(),
+            }).action === "fail"
           );
         };
         const executeDescriptor = async (descriptor) => {
@@ -10480,7 +10687,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                   disabledAgents,
                   runAbortController,
                   hijackState,
-                  legacyExecuteTask,
+                  legacyExecuteTaskForRun,
                   pauseAbortController.signal,
                 ),
                 {
@@ -10510,8 +10717,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
             const failed = repairAttempts.filter((attempt) => attempt.state === "failed");
             const terminal =
               repairNode.state === "stalled" ||
-              failed.some((attempt) => !isRetryableTaskFailure(attempt)) ||
-              failed.filter((attempt) => !isQuotaTaskFailure(attempt)).length >= task.repair.retries + 1;
+              resolveFailedAttemptsDisposition(failed, {
+                classifiers: waitingSeam.classifiers,
+                retries: task.repair.retries,
+                nowMs: nowMs(),
+              }).action === "fail";
             if (terminal) {
               throw new SmithersError(
                 "TASK_REPAIR_FAILED",

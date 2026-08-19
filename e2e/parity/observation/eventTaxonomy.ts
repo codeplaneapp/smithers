@@ -24,6 +24,12 @@ export const PARITY_SEMANTIC_EVENT_TYPES: ReadonlySet<string> = new Set([
   "RunStatusChanged",
   "RunHijackRequested",
   "RunHijacked",
+  // Attributed control verbs (stage 1.4). `RunControlRequested` is journaled
+  // before the durable flip and `RunControlApplied` after it, so a pause,
+  // cancel, steer, or hijack carries who asked and why. They are semantics,
+  // not bookkeeping: an engine that drops them loses the attribution record.
+  "RunControlRequested",
+  "RunControlApplied",
   // Node lifecycle
   "NodePending",
   "NodeStarted",

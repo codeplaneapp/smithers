@@ -123,6 +123,87 @@ describe("hijack --target accepts node ids (#23)", () => {
     }
   }, 60_000);
 
+  test("live run: a node-id target with no recorded engine persists null, not the node id", async () => {
+    // `resolveHijackRequestEngine` returns null for a node it cannot name an
+    // engine for, and that null is deliberate: `engine.js`'s hand-off check is
+    // `if (target && target !== engine) return`, so persisting the raw node id
+    // would make the engine skip the hand-off entirely. A null target means
+    // "hand off whatever is running". (#23)
+    const repo = createTempRepo();
+    const { sqlite, adapter } = openRepoDb(repo);
+    try {
+      const now = Date.now();
+      await adapter.insertRun({
+        runId: "hijack-run",
+        workflowName: "hijack-fixture",
+        workflowPath: "workflow.tsx",
+        status: "running",
+        createdAtMs: now - 10_000,
+        startedAtMs: now - 9_000,
+        finishedAtMs: null,
+        heartbeatAtMs: now,
+        vcsType: "none",
+        vcsRevision: null,
+      });
+      // A node with no attempt at all: nothing records an engine for it.
+      await adapter.insertNode({
+        runId: "hijack-run",
+        nodeId: "node-pending",
+        iteration: 0,
+        state: "pending",
+        lastAttempt: 0,
+        updatedAtMs: now - 2_000,
+        outputTable: "",
+        label: "Node Pending",
+      });
+      const child = spawn(
+        process.execPath,
+        [
+          "run",
+          CLI_ENTRY,
+          "hijack",
+          "hijack-run",
+          "--target",
+          "node-pending",
+          "--no-launch",
+          "--timeout-ms",
+          "15000",
+          "--format",
+          "json",
+        ],
+        { cwd: repo.dir, env: { ...process.env, NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      const closePromise = new Promise((resolveClose) => child.once("close", resolveClose));
+      try {
+        let seen = false;
+        let persistedTarget;
+        const deadline = Date.now() + 10_000;
+        while (Date.now() < deadline) {
+          try {
+            const run = await adapter.getRun("hijack-run");
+            if (run?.hijackRequestedAtMs) {
+              persistedTarget = run.hijackTarget ?? null;
+              seen = true;
+              break;
+            }
+          } catch {
+            // Transient cross-process SQLITE_BUSY; keep polling.
+          }
+          await Bun.sleep(100);
+        }
+        expect(seen).toBe(true);
+        expect(persistedTarget).toBeNull();
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGTERM");
+        }
+        await closePromise;
+      }
+    } finally {
+      sqlite.close();
+    }
+  }, 60_000);
+
   test("live run: a node-id target is persisted as the node's ENGINE so the engine can hand off", async () => {
     const repo = createTempRepo();
     const { sqlite, adapter } = openRepoDb(repo);

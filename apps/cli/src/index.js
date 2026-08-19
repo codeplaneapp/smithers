@@ -288,6 +288,7 @@ import {
   getCliAgentCapabilityDoctorReport,
   getCliAgentCapabilityReport,
 } from "@smthrs/agents/cli-capabilities";
+import { cliControlAttribution, cliRunControl } from "./run-control.js";
 import { findAndOpenSupervisorDb, parseDurationMs, supervisorLoopEffect, supervisorPollEffect } from "./supervisor.js";
 import { DEFAULT_LIFECYCLE_EVENT_TYPES, renderAttemptPool, tallyAttemptPool } from "./observability-helpers.js";
 import { buildDurabilityRunOptions } from "./up-engine-options.js";
@@ -8224,7 +8225,19 @@ async function runHijackFlow(params) {
       timestampMs: requestedAtMs,
       ...(target ? { target } : {}),
     };
-    await adapter.requestRunHijack(runId, requestedAtMs, requestTarget);
+    // Spec 1.4: hijack is a RunControl verb, journaled with the same actor and
+    // reason attribution as pause and cancel. flows models it as an alternative
+    // RunControl implementation; here it is a verb on the one service, so
+    // "who took this run away from the engine" is answerable from the journal.
+    // `requestTarget` is the persisted value, exactly as
+    // `resolveHijackRequestEngine` resolved it: null for a node-id target with
+    // no recorded engine is deliberate, because the engine's hand-off check
+    // (`maybeCompleteHijack`) compares the persisted target against an engine
+    // name and would skip the hand-off entirely for a raw node id (#23).
+    await cliRunControl(adapter).hijack(runId, {
+      ...cliControlAttribution(`smithers hijack ${runId}`),
+      target: requestTarget,
+    });
     await adapter.insertEventWithNextSeq({
       runId,
       timestampMs: requestedAtMs,
@@ -8521,7 +8534,26 @@ async function runSteerCommand(c) {
     }
     let queued;
     try {
-      queued = await runPromise(enqueueSteer(adapter, runId, nodeId, message, { author: resolveSteerAuthor() }));
+      // Spec 1.4: steer is a RunControl verb. The durable enqueue stays here —
+      // it needs the resolved target node and the steer author — and RunControl
+      // journals who steered which run, and why, around it.
+      const steerAuthor = resolveSteerAuthor();
+      await cliRunControl(adapter).steer(
+        runId,
+        {
+          ...cliControlAttribution(`smithers steer ${runId}`),
+          actor: `cli:${steerAuthor}`,
+          nodeId,
+          message,
+        },
+        async () => {
+          queued = await runPromise(enqueueSteer(adapter, runId, nodeId, message, { author: steerAuthor }));
+          return { accepted: true, status: "queued" };
+        },
+      );
+      if (!queued) {
+        throw new SmithersError("STEER_FAILED", `Steer was not queued for run ${runId}.`, { runId, nodeId });
+      }
     } catch (error) {
       return fail({
         code: error instanceof SmithersError ? error.code : "STEER_FAILED",
@@ -11735,6 +11767,15 @@ const cli = Cli.create({
           // "finished" on completion. Stale/waiting/paused runs are flipped
           // directly and any surviving detached owner process group is
           // terminated.
+          // Spec 1.4: the attributed control record is journaled through
+          // RunControl. The durable flip stays with the cascade, which owns
+          // the descendant sweep and the owner-process termination RunControl
+          // deliberately knows nothing about.
+          await cliRunControl(adapter).journalRequest(
+            "cancel",
+            c.args.runId,
+            cliControlAttribution(`smithers cancel ${c.args.runId}`),
+          );
           const summary = await cascadeCancelRun(adapter, c.args.runId, {
             attribution: cliCancellationAttribution(`smithers cancel ${c.args.runId}`),
           });
@@ -11806,21 +11847,39 @@ const cli = Cli.create({
           if (!run) {
             return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${c.args.runId}`, exitCode: 4 });
           }
-          if (run.status === "paused") {
-            return c.ok({ runId: c.args.runId, status: "paused" });
-          }
           // Graceful pause only makes sense for a run a live engine is actively
           // driving: the engine's pause-watcher stops scheduling, lets in-flight
           // tasks finish, then writes the resumable "paused" status. A suspended
           // run (waiting-*) is already parked; use `smithers cancel` to stop it.
-          if (run.status !== "running" || !isRunHeartbeatFresh(run)) {
+          // The freshness half of that guard stays here because RunControl
+          // reads durable state only and has no view of heartbeat liveness
+          // policy; the status half belongs to the service.
+          if (run.status === "running" && !isRunHeartbeatFresh(run)) {
             return fail({
               code: "RUN_NOT_ACTIVE",
               message: `Run is not actively executing (status: ${run.status}); only a live run can be gracefully paused.`,
               exitCode: 4,
             });
           }
-          await adapter.requestRunPause(c.args.runId, Date.now());
+          // Spec 1.4: the verb is a thin call onto RunControl, which journals
+          // who asked and why before it flips durable state.
+          const outcome = await cliRunControl(adapter).pause(
+            c.args.runId,
+            cliControlAttribution(`smithers pause ${c.args.runId}`),
+          );
+          if (!outcome.accepted) {
+            return fail({
+              code: outcome.refusedBecause === "run-not-found" ? "RUN_NOT_FOUND" : "RUN_NOT_ACTIVE",
+              message:
+                outcome.refusedBecause === "run-not-found"
+                  ? `Run not found: ${c.args.runId}`
+                  : `Run is not actively executing (status: ${outcome.status}); only a live run can be gracefully paused.`,
+              exitCode: 4,
+            });
+          }
+          if (outcome.status === "paused") {
+            return c.ok({ runId: c.args.runId, status: "paused" });
+          }
           // A successful park is a success: leave the exit code at 0 so
           // scripts don't read a healthy pause as a failure. Exit 2 is
           // reserved for "cancelled" (see the exit-code table); a graceful

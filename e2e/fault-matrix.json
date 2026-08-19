@@ -33,6 +33,9 @@
     { "id": "case29", "file": "faults/case29-soak-cron-2h-no-stuck.test.ts", "promotionTier": "nightly" },
     { "id": "case30", "file": "faults/case30-soak-jjhub-long-lived.test.ts", "promotionTier": "nightly" },
     { "id": "case31", "file": "faults/case31-real-engine-kill-resume.test.ts", "promotionTier": "pr" },
-    { "id": "case32", "file": "faults/case32-generic-agent-checkpoint-kill-resume.test.ts", "promotionTier": "pr" }
+    { "id": "case32", "file": "faults/case32-generic-agent-checkpoint-kill-resume.test.ts", "promotionTier": "pr" },
+    { "id": "case33", "file": "faults/case33-pause-attribution.test.ts", "promotionTier": "nightly" },
+    { "id": "case34", "file": "faults/case34-hijack-attribution.test.ts", "promotionTier": "nightly" },
+    { "id": "case35", "file": "faults/case35-quota-park-then-wake.test.ts", "promotionTier": "nightly" }
   ]
 }

@@ -161,6 +161,21 @@
       "status": "out-of-scope",
       "fixtures": [],
       "reason": "Agent checkpoint kill and resume. Agent-session checkpoints are the stage 1.6 Checkpoint host capability and are gated there."
+    },
+    "case33": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Pause attribution is a control-plane record, not workflow execution. The verb journals actor and reason and flips the run row; no node state, output row, or terminal verdict differs, so a parity fixture would compare nothing. The RunControlRequested and RunControlApplied types are classified as semantic in observation/eventTaxonomy.ts, so an engine that stops emitting them still diverges from its oracle on any fixture that pauses."
+    },
+    "case34": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Hijack attribution hands a live agent session to a human; the run keeps executing and its durable workflow state is unchanged by the hand-off. Like case33 it is a control-plane record, and its journal types are classified in the parity event taxonomy so a silent drop is still an oracle diff."
+    },
+    "case35": {
+      "status": "out-of-scope",
+      "fixtures": [],
+      "reason": "Per-provider quota park-then-wake. What case35 asserts is the classification step: which provider family a failure belongs to, and what wakeAt its reset header implies. By spec 1.5 that is an injected Smithers service (classifyError/resolveRetry) at the wait/wake seam and never enters the executor, so no parity fixture can compare it — an engine swap cannot change an answer the engine never computes. The waiting-timer fixture covers the park-and-wake shape a quota park shares with a timer, but it drives no provider failure and no classifier, so it does not port this case."
     }
   }
 }
