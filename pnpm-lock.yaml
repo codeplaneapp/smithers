@@ -8,6 +8,35 @@ overrides:
   '@opentelemetry/propagator-jaeger': 2.9.0
   effect: 4.0.0-rc.108
   '@smthrs/cli': link:apps/cli
+  '@smthrs/artifacts@0.1.0': file:vendor/flows/smthrs-artifacts-0.1.0.tgz
+  '@smthrs/canonical@0.1.0': file:vendor/flows/smthrs-canonical-0.1.0.tgz
+  '@smthrs/capability@0.1.0': file:vendor/flows/smthrs-capability-0.1.0.tgz
+  '@smthrs/control@0.1.0': file:vendor/flows/smthrs-control-0.1.0.tgz
+  '@smthrs/core@0.1.0': file:vendor/flows/smthrs-core-0.1.0.tgz
+  '@smthrs/crypto@0.1.0': file:vendor/flows/smthrs-crypto-0.1.0.tgz
+  '@smthrs/database@0.1.0': file:vendor/flows/smthrs-database-0.1.0.tgz
+  '@smthrs/engine@0.1.0': file:vendor/flows/smthrs-engine-0.1.0.tgz
+  '@smthrs/engine-store@0.1.0': file:vendor/flows/smthrs-engine-store-0.1.0.tgz
+  '@smthrs/flow@0.1.0': file:vendor/flows/smthrs-flow-0.1.0.tgz
+  '@smthrs/flows@0.1.0': file:vendor/flows/smthrs-flows-0.1.0.tgz
+  '@smthrs/harness@0.1.0': file:vendor/flows/smthrs-harness-0.1.0.tgz
+  '@smthrs/jj@0.1.0': file:vendor/flows/smthrs-jj-0.1.0.tgz
+  '@smthrs/journal@0.1.0': file:vendor/flows/smthrs-journal-0.1.0.tgz
+  '@smthrs/kernel@0.1.0': file:vendor/flows/smthrs-kernel-0.1.0.tgz
+  '@smthrs/keys@0.1.0': file:vendor/flows/smthrs-keys-0.1.0.tgz
+  '@smthrs/model@0.1.0': file:vendor/flows/smthrs-model-0.1.0.tgz
+  '@smthrs/notifications@0.1.0': file:vendor/flows/smthrs-notifications-0.1.0.tgz
+  '@smthrs/observability@0.1.0': file:vendor/flows/smthrs-observability-0.1.0.tgz
+  '@smthrs/patterns@0.1.0': file:vendor/flows/smthrs-patterns-0.1.0.tgz
+  '@smthrs/plan@0.1.0': file:vendor/flows/smthrs-plan-0.1.0.tgz
+  '@smthrs/platform-browser@0.1.0': file:vendor/flows/smthrs-platform-browser-0.1.0.tgz
+  '@smthrs/registry@0.1.0': file:vendor/flows/smthrs-registry-0.1.0.tgz
+  '@smthrs/run-store@0.1.0': file:vendor/flows/smthrs-run-store-0.1.0.tgz
+  '@smthrs/sandbox@0.1.0': file:vendor/flows/smthrs-sandbox-0.1.0.tgz
+  '@smthrs/std@0.1.0': file:vendor/flows/smthrs-std-0.1.0.tgz
+  '@smthrs/step-cache@0.1.0': file:vendor/flows/smthrs-step-cache-0.1.0.tgz
+  '@smthrs/sync@0.1.0': file:vendor/flows/smthrs-sync-0.1.0.tgz
+  '@smthrs/time-travel@0.1.0': file:vendor/flows/smthrs-time-travel-0.1.0.tgz
 
 importers:
 
@@ -617,7 +646,7 @@ importers:
     dependencies:
       '@effect/opentelemetry':
         specifier: 4.0.0-rc.108
-        version: 4.0.0-rc.108(@opentelemetry/api-logs@0.217.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-web@2.6.1(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)(effect@4.0.0-rc.108)
+        version: 4.0.0-rc.108(@opentelemetry/api-logs@0.220.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.220.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-web@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)(effect@4.0.0-rc.108)
       '@effect/platform-bun':
         specifier: 4.0.0-rc.108
         version: 4.0.0-rc.108(effect@4.0.0-rc.108)
@@ -2679,6 +2708,52 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
 
+  vendor/flows:
+    dependencies:
+      '@flows/core':
+        specifier: file:./smthrs-core-0.1.0.tgz
+        version: '@smthrs/core@file:vendor/flows/smthrs-core-0.1.0.tgz'
+      '@flows/engine':
+        specifier: file:./smthrs-engine-0.1.0.tgz
+        version: '@smthrs/engine@file:vendor/flows/smthrs-engine-0.1.0.tgz'
+      '@flows/engine-store':
+        specifier: file:./smthrs-engine-store-0.1.0.tgz
+        version: '@smthrs/engine-store@file:vendor/flows/smthrs-engine-store-0.1.0.tgz'
+      '@flows/flow':
+        specifier: file:./smthrs-flow-0.1.0.tgz
+        version: '@smthrs/flow@file:vendor/flows/smthrs-flow-0.1.0.tgz'
+      '@flows/flows':
+        specifier: file:./smthrs-flows-0.1.0.tgz
+        version: '@smthrs/flows@file:vendor/flows/smthrs-flows-0.1.0.tgz(@opentelemetry/api-logs@0.220.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)'
+      '@flows/harness':
+        specifier: file:./smthrs-harness-0.1.0.tgz
+        version: '@smthrs/harness@file:vendor/flows/smthrs-harness-0.1.0.tgz'
+      '@flows/journal':
+        specifier: file:./smthrs-journal-0.1.0.tgz
+        version: '@smthrs/journal@file:vendor/flows/smthrs-journal-0.1.0.tgz'
+      '@flows/model':
+        specifier: file:./smthrs-model-0.1.0.tgz
+        version: '@smthrs/model@file:vendor/flows/smthrs-model-0.1.0.tgz'
+      '@flows/patterns':
+        specifier: file:./smthrs-patterns-0.1.0.tgz
+        version: '@smthrs/patterns@file:vendor/flows/smthrs-patterns-0.1.0.tgz'
+      '@flows/plan':
+        specifier: file:./smthrs-plan-0.1.0.tgz
+        version: '@smthrs/plan@file:vendor/flows/smthrs-plan-0.1.0.tgz'
+      '@flows/run-store':
+        specifier: file:./smthrs-run-store-0.1.0.tgz
+        version: '@smthrs/run-store@file:vendor/flows/smthrs-run-store-0.1.0.tgz'
+      '@flows/std':
+        specifier: file:./smthrs-std-0.1.0.tgz
+        version: '@smthrs/std@file:vendor/flows/smthrs-std-0.1.0.tgz'
+    devDependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1)
+      effect:
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
+
 packages:
 
   '@adobe/css-tools@4.5.0':
@@ -3325,6 +3400,11 @@ packages:
 
   '@effect/sql-sqlite-bun@4.0.0-rc.108':
     resolution: {integrity: sha512-DfulBKzAyX7CwAT7Kk+/Ht7t6HggyBaOwJLPWortnyJGKmIImp4Jwn73M0ifwL3nubz7RgBm1Pf5YnZODwBJKw==}
+    peerDependencies:
+      effect: 4.0.0-rc.108
+
+  '@effect/sql-sqlite-node@4.0.0-rc.108':
+    resolution: {integrity: sha512-GiKCoQFa7Mp/PapmHsRHhqvHq+lUbKKrqjvdRzaOQAFp08zL8EKOgiXyJaNBP2A6s1hb/2TmpdBVTr4MrdYxAw==}
     peerDependencies:
       effect: 4.0.0-rc.108
 
@@ -4102,6 +4182,12 @@ packages:
     resolution: {integrity: sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w==}
     engines: {node: '>=18.0.0'}
 
+  '@jitl/quickjs-ffi-types@0.32.0':
+    resolution: {integrity: sha512-v9T+GQpmk43VDJ7d72sf0Nexhk+ArvtUihW27dy7lqAl0zBObFKtSBBIm5RBjwIhE8VwsPPm9PNuvPvNqLWUEg==}
+
+  '@jitl/quickjs-singlefile-browser-release-sync@0.32.0':
+    resolution: {integrity: sha512-Hfdl7rh8dzxNWFRiYAYNbhn0RMF1/tO6SMH2mUW0aTibqwaAtqPRbi4WkwaIDlhNz8Z4dksJi1Zjl1R54Jsc/Q==}
+
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0':
     resolution: {integrity: sha512-qvsTEwEFefhdirGOPnu9Wp6ChfIwy2dBCRuETU3uE+4cC+PFoxMSiiEhxk4lOluA34eARHA0OxqsEUYDqRMgeQ==}
     peerDependencies:
@@ -4564,6 +4650,10 @@ packages:
     resolution: {integrity: sha512-Cdq0jW2lknrNfrAm92MyEAvpe2cRsKjdnQLHUL6xRA4IVUnsWx6P65E7NcUO0Y+L4w1Aee5iV8FvjSwd+lrs9A==}
     engines: {node: '>=8.0.0'}
 
+  '@opentelemetry/api-logs@0.220.0':
+    resolution: {integrity: sha512-CmVa4ImJ+ynfrPMNaAXHET6Bhb44SwzmfyVJFq9ni2jgXJR/l7C6gfVFddNmHP+ZOkP9cf4f9DBe68qVLTHc9w==}
+    engines: {node: '>=8.0.0'}
+
   '@opentelemetry/api@1.9.0':
     resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
     engines: {node: '>=8.0.0'}
@@ -4580,8 +4670,8 @@ packages:
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
 
-  '@opentelemetry/core@2.6.1':
-    resolution: {integrity: sha512-8xHSGWpJP9wBxgBpnqGL0R3PbdWQndL1Qp50qrg71+B28zK5OQmUgcDKLJgzyAAV38t4tOyLMGDD60LneR5W8g==}
+  '@opentelemetry/context-async-hooks@2.9.0':
+    resolution: {integrity: sha512-OQ0vzvbZBiUhjqLnUaoNfYmP8553Crr3aggB4y0ZUi815mZ7idpdJXQmoKdeBKJelYttoBlLSSHubmyw3wvX4w==}
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
@@ -4610,6 +4700,12 @@ packages:
     peerDependencies:
       '@opentelemetry/api': ^1.3.0
 
+  '@opentelemetry/exporter-logs-otlp-http@0.220.0':
+    resolution: {integrity: sha512-8186thl+pTw64iz/qEEen5oJZoZ/gO73XruChdaGlYdWOdBIQ42r+vHLf6a7vIDqTD4b8ZOoMlyxptanECaI9A==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': ^1.3.0
+
   '@opentelemetry/exporter-logs-otlp-proto@0.217.0':
     resolution: {integrity: sha512-Se0GG/ZO24mQTlQj7zprR4pNI0nKe4lPDPBsuJmi6508b9TlZEuUd3EfyuHk6oJxzL7fGyDFYAbxNigQvRP2ZQ==}
     engines: {node: ^18.19.0 || >=20.6.0}
@@ -4624,6 +4720,12 @@ packages:
 
   '@opentelemetry/exporter-metrics-otlp-http@0.217.0':
     resolution: {integrity: sha512-1zkMzzhiNJdVmLxuwkltqWGw4fOOam47bqRxmuQNjyKJe/9NmY5cIrZ4kiQV7sVGxoOgT0ZvGUfLcjvtpC/b9Q==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': ^1.3.0
+
+  '@opentelemetry/exporter-metrics-otlp-http@0.220.0':
+    resolution: {integrity: sha512-Yqt3RBw/bRVncaE9qIIhk4WfjbAQqXuP9FgAaU+IKPndnLEp/cUqZlSC324+bpmduRz7DoTjig8Ub0PeILWXUA==}
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       '@opentelemetry/api': ^1.3.0
@@ -4648,6 +4750,12 @@ packages:
 
   '@opentelemetry/exporter-trace-otlp-http@0.217.0':
     resolution: {integrity: sha512-38YQoqtYjglz2GV94LGUN/djLvxtvGIQO68o6qAFPVshjmwSdX1F2i0c7vn3lEl1L5B/YqjB/bgKXaVx7KO+RQ==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': ^1.3.0
+
+  '@opentelemetry/exporter-trace-otlp-http@0.220.0':
+    resolution: {integrity: sha512-/+ExB3lRkf+erv4PnoywyL7RHKITidxtUpUTS55k7OQ0dB42S7gEF1gry7swb9MSm1hYLUhJg4QQh9W8SpwwqA==}
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       '@opentelemetry/api': ^1.3.0
@@ -4682,6 +4790,12 @@ packages:
     peerDependencies:
       '@opentelemetry/api': ^1.3.0
 
+  '@opentelemetry/otlp-exporter-base@0.220.0':
+    resolution: {integrity: sha512-CXYo8UD5Mn9YbgebO2EL4wejtA+gxLmLiu6HCk2KH2BR7XhFN6/6p1UlCb23DYCjeYkndevLHuejCCN1yx4+OQ==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': ^1.3.0
+
   '@opentelemetry/otlp-grpc-exporter-base@0.217.0':
     resolution: {integrity: sha512-7RTAdZuOsCDnsyqTCG4+bDzrfnsWdzkRs7z0AVi/V3tEQx0oKeyc+OuRWYxnRsmaJXgxcmB8vb/lfxn58Dj6Ag==}
     engines: {node: ^18.19.0 || >=20.6.0}
@@ -4690,6 +4804,12 @@ packages:
 
   '@opentelemetry/otlp-transformer@0.217.0':
     resolution: {integrity: sha512-MKK8UHKFUOGAvbZRWh90MhwHG+Fxm6OROBdjKPCF+HQobjuJ/Kuf8Chs8CR45X1aqotxrMj7OxTdsXe8sXuGVA==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': ^1.3.0
+
+  '@opentelemetry/otlp-transformer@0.220.0':
+    resolution: {integrity: sha512-lXGrv7KXZ0gNH9SVNUaa6vv6phVYGvJxfXAlMbzbakiXru75f5MZl8Z7oqiMMQD77riVHJCFlQvbZs/VVN2/4A==}
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       '@opentelemetry/api': ^1.3.0
@@ -4705,12 +4825,6 @@ packages:
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
-
-  '@opentelemetry/resources@2.6.1':
-    resolution: {integrity: sha512-lID/vxSuKWXM55XhAKNoYXu9Cutoq5hFdkbTdI/zDKQktXzcWBVhNsOkiZFTMU9UtEWuGRNe0HUgmsFldIdxVA==}
-    engines: {node: ^18.19.0 || >=20.6.0}
-    peerDependencies:
-      '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
   '@opentelemetry/resources@2.7.1':
     resolution: {integrity: sha512-DeT6KKolmC4e/dRQvMQ/RwlnzhaqeiFOXY5ngoOPJ07GgVVKxZOg9EcrNZb5aTzUn+iCrJldAgOfQm1O/QfPAQ==}
@@ -4730,20 +4844,26 @@ packages:
     peerDependencies:
       '@opentelemetry/api': '>=1.4.0 <1.10.0'
 
+  '@opentelemetry/sdk-logs@0.220.0':
+    resolution: {integrity: sha512-WywcTkQtv2iNmt+6y5Kcd4rzvx9bLVsBa2Nwcmg01IUaBTkTow3W4d9KE5vNBpEDtb9tp21WcRBY/lANRrApYA==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': '>=1.4.0 <1.10.0'
+
   '@opentelemetry/sdk-metrics@2.7.1':
     resolution: {integrity: sha512-MpDJdkiFDs3Pm1RHO3KByuZbuBdJEXEAkiC0+yJdsZGVCdf1RpHR6n+LHDcS7ffmfrt5kVCzJSCfm4z2C7v0uQ==}
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       '@opentelemetry/api': '>=1.9.0 <1.10.0'
 
-  '@opentelemetry/sdk-node@0.217.0':
-    resolution: {integrity: sha512-K/60pSv42+NQiZKy1pAH18nYDkxltsDV4O3SJ233J0E9raU1ksyL9gsKuS8p30bYBb4AMPCfDuutHQaHYpcv0Q==}
+  '@opentelemetry/sdk-metrics@2.9.0':
+    resolution: {integrity: sha512-Xx8RGS4H5XEBl01WuCreMIpiah9cCXMbSkeuIePPdD2cUpq/vUzYmj8E/MK1OsbOc93FuAD4jfn2WOacKwLn7Q==}
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
-      '@opentelemetry/api': '>=1.3.0 <1.10.0'
+      '@opentelemetry/api': '>=1.9.0 <1.10.0'
 
-  '@opentelemetry/sdk-trace-base@2.6.1':
-    resolution: {integrity: sha512-r86ut4T1e8vNwB35CqCcKd45yzqH6/6Wzvpk2/cZB8PsPLlZFTvrh8yfOS3CYZYcUmAx4hHTZJ8AO8Dj8nrdhw==}
+  '@opentelemetry/sdk-node@0.217.0':
+    resolution: {integrity: sha512-K/60pSv42+NQiZKy1pAH18nYDkxltsDV4O3SJ233J0E9raU1ksyL9gsKuS8p30bYBb4AMPCfDuutHQaHYpcv0Q==}
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
@@ -4766,8 +4886,14 @@ packages:
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
 
-  '@opentelemetry/sdk-trace-web@2.6.1':
-    resolution: {integrity: sha512-JQevIjBlWGcKBfuwe7tdxGR/75RERsf1OOIvUzPKq86J8qhzkyjnLTTuPNPLRQF1xxEe65W5aI1Uwl6yWUGPQQ==}
+  '@opentelemetry/sdk-trace-node@2.9.0':
+    resolution: {integrity: sha512-ec9a7ps37huy5itYk0MalaZdSLlM6AXWp/FhtEjgMpp5leEGojBDvAl/UWttQnkMZOvFHKzRESn8TD3yKTF5nQ==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': '>=1.0.0 <1.10.0'
+
+  '@opentelemetry/sdk-trace-web@2.9.0':
+    resolution: {integrity: sha512-LS4XlzOK3e6YYdt84m15AmRR04121rKipmifi4XFZToH1h75f7F2bzHLbB1NMgIEYJ0jSKYm4VsK5mws/5kfTQ==}
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
@@ -6386,6 +6512,156 @@ packages:
   '@smithy/util-utf8@2.3.0':
     resolution: {integrity: sha512-R8Rdn8Hy72KKcebgLiv8jQcQkXoLMOGGv5uI1/k0l+snqkOzQ1R0ChUBCxWMlBsFMekWjq0wRudIweFs7sKT5A==}
     engines: {node: '>=14.0.0'}
+
+  '@smthrs/artifacts@file:vendor/flows/smthrs-artifacts-0.1.0.tgz':
+    resolution: {integrity: sha512-7xh68O1/j+oAxs3+maVN/EwsESJHlyxwmCXo55085M3/+IkEEDAI06rQ/tNxr/fskRZNXnx6vAk0WO+kQZlDdQ==, tarball: file:vendor/flows/smthrs-artifacts-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/canonical@file:vendor/flows/smthrs-canonical-0.1.0.tgz':
+    resolution: {integrity: sha512-LTyfFqfeAAPKZFL3UBwvEzLgIafcTLr3lYBS5qBKC91spIDLIzXIFKQX8o65f4DvxBXDa9d0ew713ScjVa8L4g==, tarball: file:vendor/flows/smthrs-canonical-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/capability@file:vendor/flows/smthrs-capability-0.1.0.tgz':
+    resolution: {integrity: sha512-B+YZk3Vs+1OUe7iyf4DmaYme9WYG2ZKl9foCwhdwlRFmNuWaWDMh5Z6pVwu3iByow7LofBEWBDuTsJDHeTUxVA==, tarball: file:vendor/flows/smthrs-capability-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/control@file:vendor/flows/smthrs-control-0.1.0.tgz':
+    resolution: {integrity: sha512-mbaB62zC4RXdVNUsK2g057+OUmvolBeX8nDMNUmz95iRkiVlga/QqMfLv8GLiJEPFlNSiuBa+J1GHYol/jsxHw==, tarball: file:vendor/flows/smthrs-control-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/core@file:vendor/flows/smthrs-core-0.1.0.tgz':
+    resolution: {integrity: sha512-csEDRXvZfcI7wXsOij3Wz8zkljQ6q31SaLaAf73zrVGjws3lGLMVr0qfM4+36byKMcvqIpOFL0w/kCMyKK9hJw==, tarball: file:vendor/flows/smthrs-core-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/crypto@file:vendor/flows/smthrs-crypto-0.1.0.tgz':
+    resolution: {integrity: sha512-G6I6hIlH6Yden2bUeQN8osIHCXTPFXViqRBp/eFG8PSDg34hkLvYZwVdjeRp+3xBcqhjTP3Kg3uukJnpoYoIZw==, tarball: file:vendor/flows/smthrs-crypto-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/database@file:vendor/flows/smthrs-database-0.1.0.tgz':
+    resolution: {integrity: sha512-CJ9NJ7MWlSDZG7lNLI+CbXh3x5tiORI08Pzig3eOB9Kw+SKlj0gzNYmI4slt09sZB3JtUwH5c7boFybjnj263A==, tarball: file:vendor/flows/smthrs-database-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/engine-store@file:vendor/flows/smthrs-engine-store-0.1.0.tgz':
+    resolution: {integrity: sha512-kM+dFahIr5PsSTyd3msvvOPkf1WS1MVXcnNL6faKmTOxDFMqdY5tdR4U+n7xk1pRGIJCbpwbF6wAOce3r+pVHg==, tarball: file:vendor/flows/smthrs-engine-store-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/engine@file:vendor/flows/smthrs-engine-0.1.0.tgz':
+    resolution: {integrity: sha512-lboLofXdrfCBSHhBWndINOdX20qAI80QLQYuxkB4/cXcElcoGswK9sAUPk0yW853gMbba/U5/dp6AjtquWw1Wg==, tarball: file:vendor/flows/smthrs-engine-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/flow@file:vendor/flows/smthrs-flow-0.1.0.tgz':
+    resolution: {integrity: sha512-aF+zNfgjzCT5T79aHhqn825cET7dGUSEvWcDGt/l+7XGNkuCOduZwI2Un1UZrbFec4pPo+6UzaYX5+ui9BmoCQ==, tarball: file:vendor/flows/smthrs-flow-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/flows@file:vendor/flows/smthrs-flows-0.1.0.tgz':
+    resolution: {integrity: sha512-lTZO2tp7WpUMMqvmbUdoSekQfx4DKk79ZV7DxizRY6di/AqNs3awgNxz+zcGWkyZGbdOu3LRxYSn3boigvk0TA==, tarball: file:vendor/flows/smthrs-flows-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/harness@file:vendor/flows/smthrs-harness-0.1.0.tgz':
+    resolution: {integrity: sha512-cJ5XNaeDQPQUkFauEFjPunrX31r+BnT3V83e5PTO25pqFM3SzOGeQSYEy/bNSxB4bmEO+8kYhhsds6FkfvNT5g==, tarball: file:vendor/flows/smthrs-harness-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/jj@file:vendor/flows/smthrs-jj-0.1.0.tgz':
+    resolution: {integrity: sha512-uxk1gNQnq0MUifgZnJW/lFlkiYaIEEkReKNsnrfisaHNiB5VDkdECt0K04Yne0Fvo0lB0AjlGL2wW9cdYc5aow==, tarball: file:vendor/flows/smthrs-jj-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/journal@file:vendor/flows/smthrs-journal-0.1.0.tgz':
+    resolution: {integrity: sha512-NtTE7uwULSUiig+hNkAo6obsXnYhYs9OrpFNVvhA1+0FRfzhcVBEr3aA30K31DKCg9UanNmB9iwVBF88NgH2xg==, tarball: file:vendor/flows/smthrs-journal-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/kernel@file:vendor/flows/smthrs-kernel-0.1.0.tgz':
+    resolution: {integrity: sha512-naTpqIEPcaNEI9cJHRgTAjIBlZkVdg4rZn3VOmScenuRJijSEH1RxohaDs9mNVmg4wQUEFMFD4mfLSMitqb9dg==, tarball: file:vendor/flows/smthrs-kernel-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+    peerDependencies:
+      vitest: 4.1.9
+    peerDependenciesMeta:
+      vitest:
+        optional: true
+
+  '@smthrs/keys@file:vendor/flows/smthrs-keys-0.1.0.tgz':
+    resolution: {integrity: sha512-tQYRp9sec0uZzTMN0BA480kwWFY2U8D6iLCeipbzfQBifFAOnwezXlNe1S3C3UDa/uzOihLhC/3VVejCycOuLQ==, tarball: file:vendor/flows/smthrs-keys-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/model@file:vendor/flows/smthrs-model-0.1.0.tgz':
+    resolution: {integrity: sha512-5oC4Ouzc/3vwD9piB/DV27lOwPBUSNgn++W+isxuW9VBJTzULkvYEHpxD0O6Ir2v+NDzN1NHfoyjjvb2+pe2xQ==, tarball: file:vendor/flows/smthrs-model-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/notifications@file:vendor/flows/smthrs-notifications-0.1.0.tgz':
+    resolution: {integrity: sha512-shj1CojewFDqe0ttmOFvTAwl/LWdcKmC94cNq2vRq2PdN5L8EUwqx7FhMFxpm5wb55xbuQTnzejrg7VbQTXnUg==, tarball: file:vendor/flows/smthrs-notifications-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/observability@file:vendor/flows/smthrs-observability-0.1.0.tgz':
+    resolution: {integrity: sha512-RDeMa4tmTc/grleaUqAFt6Y1/Ys1yoK+ug8J6rPFqRRP4J/ZBppOs94BPnpCD+nAKBzgxcs9WfQj3HreC+vrjg==, tarball: file:vendor/flows/smthrs-observability-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/patterns@file:vendor/flows/smthrs-patterns-0.1.0.tgz':
+    resolution: {integrity: sha512-DMRd71x4LX0zJ59XD5OEJ392/hoyz5Eab9C1PjmJUDsasARrBMrvDpo/uP37CxG7ks2EOOUjVAi6oQqlWvOACA==, tarball: file:vendor/flows/smthrs-patterns-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/plan@file:vendor/flows/smthrs-plan-0.1.0.tgz':
+    resolution: {integrity: sha512-ydRPRWhfbppR0yTIHOcLwtt9gWAr4FUm5tVlaCN7fo4+W7YjhRuXdglDOrq/PnhxXzTJ9jaZ2Y79Orh+m0UTjQ==, tarball: file:vendor/flows/smthrs-plan-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/platform-browser@file:vendor/flows/smthrs-platform-browser-0.1.0.tgz':
+    resolution: {integrity: sha512-n0XI3S9+FRhc2ZiKfpXFQ4F0YVb+O3OY1NcQx0gaslv3nAISNBUCZDcznAOY3CMFCelf/H4CoJQvMJXisl/o3w==, tarball: file:vendor/flows/smthrs-platform-browser-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/registry@file:vendor/flows/smthrs-registry-0.1.0.tgz':
+    resolution: {integrity: sha512-uiJ4dsD1bVTS6TUkYkcoZ3OtwZhzthX4mv9m31pO3zDVQNHbnCwXU9kUmy4WbNw+VoxdabtfXl4P5J0HsiW95w==, tarball: file:vendor/flows/smthrs-registry-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/run-store@file:vendor/flows/smthrs-run-store-0.1.0.tgz':
+    resolution: {integrity: sha512-aYIaop1JpwjdrMuA8uQCjQL9Zu3DtxW6k1dRyXSzyWPCRceSL/7x4H9XtjiMRCveGvntSHaXExv+fh81mUoAqw==, tarball: file:vendor/flows/smthrs-run-store-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/sandbox@file:vendor/flows/smthrs-sandbox-0.1.0.tgz':
+    resolution: {integrity: sha512-ByoVZkwlf1bptIWHk93MvHPWXSbrhW4314q6KiUmgq6YBJwoELrZNi6JTeadOOwUM6kEDYVPP32pS2osVhy9Pw==, tarball: file:vendor/flows/smthrs-sandbox-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/std@file:vendor/flows/smthrs-std-0.1.0.tgz':
+    resolution: {integrity: sha512-nwCVszMGhP0N6RUAh6jw0CYwMyU150XS45Yb3PztKOy49AgmON+R9/TwrzPETzUirSWpJlDVN4Ojk/FL5yr6KA==, tarball: file:vendor/flows/smthrs-std-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/step-cache@file:vendor/flows/smthrs-step-cache-0.1.0.tgz':
+    resolution: {integrity: sha512-dRmEq2BaA0Ee6RRjemaOok1CJcpQd6vEbiXBvpaM20CIJkYaikjGLtsZ0qp/6PLLwT/FbsZtq+vGQp/7c361Dg==, tarball: file:vendor/flows/smthrs-step-cache-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/sync@file:vendor/flows/smthrs-sync-0.1.0.tgz':
+    resolution: {integrity: sha512-XcPaRqhdBPAcYVvjBFWNV5hawi/Pobvvzkp3CmGC2G2tYUCOkUB9eB6Ok9ofZSLDrehin651lpGAvCB4zqbTpA==, tarball: file:vendor/flows/smthrs-sync-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@smthrs/time-travel@file:vendor/flows/smthrs-time-travel-0.1.0.tgz':
+    resolution: {integrity: sha512-2RS8SR8UYgnupBXt7xFuT7aF9QCcOfOEKbuPHjjsfSTHQ/ryUefIX4Y0eLbj496zxEYHX8ssG3Ic7iEzTB/mbA==, tarball: file:vendor/flows/smthrs-time-travel-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
 
   '@speed-highlight/core@1.2.17':
     resolution: {integrity: sha512-Z92FwKpCtfaW1V0jTU/fh3QzYEZN8wDwrzRIBoADCJfn4mJCNcJN/XegifX7BDrQ8/h9Xh/JnbyMchL0FqXrkg==}
@@ -10019,6 +10295,9 @@ packages:
   queue-microtask@1.2.3:
     resolution: {integrity: sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A==}
 
+  quickjs-emscripten-core@0.32.0:
+    resolution: {integrity: sha512-QFnPfjFey8EqknSrSxe1hZrf1/8z7/6s1QzGOmKo6++02r7QRRX7ZoyNaZh7JuVjWsVW87KnQrbZqnHkOAzUyg==}
+
   radix-ui@1.6.1:
     resolution: {integrity: sha512-QXDXJtB6sK83mLASONYUZCauatcWb+knFviFpN1EhtdbbmlsRmzCLrbZSKztnNiem2KOHIBbiDbauVB7SORXMw==}
     peerDependencies:
@@ -12272,19 +12551,19 @@ snapshots:
     dependencies:
       '@edge-runtime/primitives': 4.1.0
 
-  '@effect/opentelemetry@4.0.0-rc.108(@opentelemetry/api-logs@0.217.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-web@2.6.1(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)(effect@4.0.0-rc.108)':
+  '@effect/opentelemetry@4.0.0-rc.108(@opentelemetry/api-logs@0.220.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.220.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-web@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)(effect@4.0.0-rc.108)':
     dependencies:
       '@opentelemetry/semantic-conventions': 1.41.1
       effect: 4.0.0-rc.108
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
-      '@opentelemetry/api-logs': 0.217.0
+      '@opentelemetry/api-logs': 0.220.0
       '@opentelemetry/resources': 2.9.0(@opentelemetry/api@1.9.0)
-      '@opentelemetry/sdk-logs': 0.217.0(@opentelemetry/api@1.9.0)
-      '@opentelemetry/sdk-metrics': 2.7.1(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-logs': 0.220.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-metrics': 2.9.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/sdk-trace-base': 2.9.0(@opentelemetry/api@1.9.0)
-      '@opentelemetry/sdk-trace-node': 2.7.1(@opentelemetry/api@1.9.0)
-      '@opentelemetry/sdk-trace-web': 2.6.1(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-trace-node': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-trace-web': 2.9.0(@opentelemetry/api@1.9.0)
 
   '@effect/platform-bun@4.0.0-rc.108(effect@4.0.0-rc.108)':
     dependencies:
@@ -12315,6 +12594,10 @@ snapshots:
       - utf-8-validate
 
   '@effect/sql-sqlite-bun@4.0.0-rc.108(effect@4.0.0-rc.108)':
+    dependencies:
+      effect: 4.0.0-rc.108
+
+  '@effect/sql-sqlite-node@4.0.0-rc.108(effect@4.0.0-rc.108)':
     dependencies:
       effect: 4.0.0-rc.108
 
@@ -12874,6 +13157,12 @@ snapshots:
   '@isaacs/fs-minipass@4.0.1':
     dependencies:
       minipass: 7.1.3
+
+  '@jitl/quickjs-ffi-types@0.32.0': {}
+
+  '@jitl/quickjs-singlefile-browser-release-sync@0.32.0':
+    dependencies:
+      '@jitl/quickjs-ffi-types': 0.32.0
 
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0(typescript@6.0.3)(vite@8.1.2(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))':
     dependencies:
@@ -13631,6 +13920,10 @@ snapshots:
     dependencies:
       '@opentelemetry/api': 1.9.0
 
+  '@opentelemetry/api-logs@0.220.0':
+    dependencies:
+      '@opentelemetry/api': 1.9.0
+
   '@opentelemetry/api@1.9.0': {}
 
   '@opentelemetry/configuration@0.217.0(@opentelemetry/api@1.9.0)':
@@ -13643,11 +13936,9 @@ snapshots:
     dependencies:
       '@opentelemetry/api': 1.9.0
 
-  '@opentelemetry/core@2.6.1(@opentelemetry/api@1.9.0)':
+  '@opentelemetry/context-async-hooks@2.9.0(@opentelemetry/api@1.9.0)':
     dependencies:
       '@opentelemetry/api': 1.9.0
-      '@opentelemetry/semantic-conventions': 1.41.1
-    optional: true
 
   '@opentelemetry/core@2.7.1(@opentelemetry/api@1.9.0)':
     dependencies:
@@ -13677,6 +13968,15 @@ snapshots:
       '@opentelemetry/otlp-exporter-base': 0.217.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/otlp-transformer': 0.217.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/sdk-logs': 0.217.0(@opentelemetry/api@1.9.0)
+
+  '@opentelemetry/exporter-logs-otlp-http@0.220.0(@opentelemetry/api@1.9.0)':
+    dependencies:
+      '@opentelemetry/api': 1.9.0
+      '@opentelemetry/api-logs': 0.220.0
+      '@opentelemetry/core': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/otlp-exporter-base': 0.220.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/otlp-transformer': 0.220.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-logs': 0.220.0(@opentelemetry/api@1.9.0)
 
   '@opentelemetry/exporter-logs-otlp-proto@0.217.0(@opentelemetry/api@1.9.0)':
     dependencies:
@@ -13709,6 +14009,15 @@ snapshots:
       '@opentelemetry/otlp-transformer': 0.217.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/resources': 2.7.1(@opentelemetry/api@1.9.0)
       '@opentelemetry/sdk-metrics': 2.7.1(@opentelemetry/api@1.9.0)
+
+  '@opentelemetry/exporter-metrics-otlp-http@0.220.0(@opentelemetry/api@1.9.0)':
+    dependencies:
+      '@opentelemetry/api': 1.9.0
+      '@opentelemetry/core': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/otlp-exporter-base': 0.220.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/otlp-transformer': 0.220.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/resources': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-metrics': 2.9.0(@opentelemetry/api@1.9.0)
 
   '@opentelemetry/exporter-metrics-otlp-proto@0.217.0(@opentelemetry/api@1.9.0)':
     dependencies:
@@ -13747,6 +14056,15 @@ snapshots:
       '@opentelemetry/otlp-transformer': 0.217.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/resources': 2.7.1(@opentelemetry/api@1.9.0)
       '@opentelemetry/sdk-trace-base': 2.7.1(@opentelemetry/api@1.9.0)
+
+  '@opentelemetry/exporter-trace-otlp-http@0.220.0(@opentelemetry/api@1.9.0)':
+    dependencies:
+      '@opentelemetry/api': 1.9.0
+      '@opentelemetry/core': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/otlp-exporter-base': 0.220.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/otlp-transformer': 0.220.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/resources': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-trace': 2.9.0(@opentelemetry/api@1.9.0)
 
   '@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0)':
     dependencies:
@@ -13790,6 +14108,12 @@ snapshots:
       '@opentelemetry/core': 2.7.1(@opentelemetry/api@1.9.0)
       '@opentelemetry/otlp-transformer': 0.217.0(@opentelemetry/api@1.9.0)
 
+  '@opentelemetry/otlp-exporter-base@0.220.0(@opentelemetry/api@1.9.0)':
+    dependencies:
+      '@opentelemetry/api': 1.9.0
+      '@opentelemetry/core': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/otlp-transformer': 0.220.0(@opentelemetry/api@1.9.0)
+
   '@opentelemetry/otlp-grpc-exporter-base@0.217.0(@opentelemetry/api@1.9.0)':
     dependencies:
       '@grpc/grpc-js': 1.14.4
@@ -13809,6 +14133,16 @@ snapshots:
       '@opentelemetry/sdk-trace-base': 2.7.1(@opentelemetry/api@1.9.0)
       protobufjs: 8.0.1
 
+  '@opentelemetry/otlp-transformer@0.220.0(@opentelemetry/api@1.9.0)':
+    dependencies:
+      '@opentelemetry/api': 1.9.0
+      '@opentelemetry/api-logs': 0.220.0
+      '@opentelemetry/core': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/resources': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-logs': 0.220.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-metrics': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-trace': 2.9.0(@opentelemetry/api@1.9.0)
+
   '@opentelemetry/propagator-b3@2.7.1(@opentelemetry/api@1.9.0)':
     dependencies:
       '@opentelemetry/api': 1.9.0
@@ -13818,13 +14152,6 @@ snapshots:
     dependencies:
       '@opentelemetry/api': 1.9.0
       '@opentelemetry/core': 2.9.0(@opentelemetry/api@1.9.0)
-
-  '@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.0)':
-    dependencies:
-      '@opentelemetry/api': 1.9.0
-      '@opentelemetry/core': 2.6.1(@opentelemetry/api@1.9.0)
-      '@opentelemetry/semantic-conventions': 1.41.1
-    optional: true
 
   '@opentelemetry/resources@2.7.1(@opentelemetry/api@1.9.0)':
     dependencies:
@@ -13846,11 +14173,25 @@ snapshots:
       '@opentelemetry/resources': 2.7.1(@opentelemetry/api@1.9.0)
       '@opentelemetry/semantic-conventions': 1.41.1
 
+  '@opentelemetry/sdk-logs@0.220.0(@opentelemetry/api@1.9.0)':
+    dependencies:
+      '@opentelemetry/api': 1.9.0
+      '@opentelemetry/api-logs': 0.220.0
+      '@opentelemetry/core': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/resources': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/semantic-conventions': 1.41.1
+
   '@opentelemetry/sdk-metrics@2.7.1(@opentelemetry/api@1.9.0)':
     dependencies:
       '@opentelemetry/api': 1.9.0
       '@opentelemetry/core': 2.7.1(@opentelemetry/api@1.9.0)
       '@opentelemetry/resources': 2.7.1(@opentelemetry/api@1.9.0)
+
+  '@opentelemetry/sdk-metrics@2.9.0(@opentelemetry/api@1.9.0)':
+    dependencies:
+      '@opentelemetry/api': 1.9.0
+      '@opentelemetry/core': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/resources': 2.9.0(@opentelemetry/api@1.9.0)
 
   '@opentelemetry/sdk-node@0.217.0(@opentelemetry/api@1.9.0)':
     dependencies:
@@ -13883,14 +14224,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.0)':
-    dependencies:
-      '@opentelemetry/api': 1.9.0
-      '@opentelemetry/core': 2.6.1(@opentelemetry/api@1.9.0)
-      '@opentelemetry/resources': 2.6.1(@opentelemetry/api@1.9.0)
-      '@opentelemetry/semantic-conventions': 1.41.1
-    optional: true
-
   '@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0)':
     dependencies:
       '@opentelemetry/api': 1.9.0
@@ -13913,12 +14246,18 @@ snapshots:
       '@opentelemetry/core': 2.7.1(@opentelemetry/api@1.9.0)
       '@opentelemetry/sdk-trace-base': 2.7.1(@opentelemetry/api@1.9.0)
 
-  '@opentelemetry/sdk-trace-web@2.6.1(@opentelemetry/api@1.9.0)':
+  '@opentelemetry/sdk-trace-node@2.9.0(@opentelemetry/api@1.9.0)':
     dependencies:
       '@opentelemetry/api': 1.9.0
-      '@opentelemetry/core': 2.6.1(@opentelemetry/api@1.9.0)
-      '@opentelemetry/sdk-trace-base': 2.6.1(@opentelemetry/api@1.9.0)
-    optional: true
+      '@opentelemetry/context-async-hooks': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/core': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-trace-base': 2.9.0(@opentelemetry/api@1.9.0)
+
+  '@opentelemetry/sdk-trace-web@2.9.0(@opentelemetry/api@1.9.0)':
+    dependencies:
+      '@opentelemetry/api': 1.9.0
+      '@opentelemetry/core': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-trace-base': 2.9.0(@opentelemetry/api@1.9.0)
 
   '@opentelemetry/sdk-trace@2.9.0(@opentelemetry/api@1.9.0)':
     dependencies:
@@ -15304,6 +15643,255 @@ snapshots:
     dependencies:
       '@smithy/util-buffer-from': 2.2.0
       tslib: 2.8.1
+
+  '@smthrs/artifacts@file:vendor/flows/smthrs-artifacts-0.1.0.tgz':
+    dependencies:
+      '@smthrs/crypto': file:vendor/flows/smthrs-crypto-0.1.0.tgz
+      effect: 4.0.0-rc.108
+
+  '@smthrs/canonical@file:vendor/flows/smthrs-canonical-0.1.0.tgz':
+    dependencies:
+      effect: 4.0.0-rc.108
+
+  '@smthrs/capability@file:vendor/flows/smthrs-capability-0.1.0.tgz':
+    dependencies:
+      effect: 4.0.0-rc.108
+
+  '@smthrs/control@file:vendor/flows/smthrs-control-0.1.0.tgz':
+    dependencies:
+      '@smthrs/canonical': file:vendor/flows/smthrs-canonical-0.1.0.tgz
+      '@smthrs/core': file:vendor/flows/smthrs-core-0.1.0.tgz
+      '@smthrs/crypto': file:vendor/flows/smthrs-crypto-0.1.0.tgz
+      '@smthrs/database': file:vendor/flows/smthrs-database-0.1.0.tgz
+      '@smthrs/journal': file:vendor/flows/smthrs-journal-0.1.0.tgz
+      '@smthrs/notifications': file:vendor/flows/smthrs-notifications-0.1.0.tgz
+      '@smthrs/plan': file:vendor/flows/smthrs-plan-0.1.0.tgz
+      '@smthrs/registry': file:vendor/flows/smthrs-registry-0.1.0.tgz
+      '@smthrs/run-store': file:vendor/flows/smthrs-run-store-0.1.0.tgz
+      effect: 4.0.0-rc.108
+    transitivePeerDependencies:
+      - vitest
+
+  '@smthrs/core@file:vendor/flows/smthrs-core-0.1.0.tgz':
+    dependencies:
+      '@smthrs/canonical': file:vendor/flows/smthrs-canonical-0.1.0.tgz
+      '@smthrs/crypto': file:vendor/flows/smthrs-crypto-0.1.0.tgz
+      effect: 4.0.0-rc.108
+      yaml: 2.9.0
+
+  '@smthrs/crypto@file:vendor/flows/smthrs-crypto-0.1.0.tgz':
+    dependencies:
+      effect: 4.0.0-rc.108
+
+  '@smthrs/database@file:vendor/flows/smthrs-database-0.1.0.tgz':
+    dependencies:
+      '@effect/sql-sqlite-node': 4.0.0-rc.108(effect@4.0.0-rc.108)
+      effect: 4.0.0-rc.108
+
+  '@smthrs/engine-store@file:vendor/flows/smthrs-engine-store-0.1.0.tgz':
+    dependencies:
+      '@smthrs/artifacts': file:vendor/flows/smthrs-artifacts-0.1.0.tgz
+      '@smthrs/crypto': file:vendor/flows/smthrs-crypto-0.1.0.tgz
+      '@smthrs/database': file:vendor/flows/smthrs-database-0.1.0.tgz
+      '@smthrs/engine': file:vendor/flows/smthrs-engine-0.1.0.tgz
+      '@smthrs/flow': file:vendor/flows/smthrs-flow-0.1.0.tgz
+      '@smthrs/journal': file:vendor/flows/smthrs-journal-0.1.0.tgz
+      '@smthrs/kernel': file:vendor/flows/smthrs-kernel-0.1.0.tgz
+      '@smthrs/keys': file:vendor/flows/smthrs-keys-0.1.0.tgz
+      '@smthrs/plan': file:vendor/flows/smthrs-plan-0.1.0.tgz
+      '@smthrs/run-store': file:vendor/flows/smthrs-run-store-0.1.0.tgz
+      '@smthrs/step-cache': file:vendor/flows/smthrs-step-cache-0.1.0.tgz
+      effect: 4.0.0-rc.108
+    transitivePeerDependencies:
+      - vitest
+
+  '@smthrs/engine@file:vendor/flows/smthrs-engine-0.1.0.tgz':
+    dependencies:
+      '@smthrs/crypto': file:vendor/flows/smthrs-crypto-0.1.0.tgz
+      '@smthrs/flow': file:vendor/flows/smthrs-flow-0.1.0.tgz
+      '@smthrs/keys': file:vendor/flows/smthrs-keys-0.1.0.tgz
+      effect: 4.0.0-rc.108
+
+  '@smthrs/flow@file:vendor/flows/smthrs-flow-0.1.0.tgz':
+    dependencies:
+      '@smthrs/crypto': file:vendor/flows/smthrs-crypto-0.1.0.tgz
+      '@smthrs/keys': file:vendor/flows/smthrs-keys-0.1.0.tgz
+      '@smthrs/plan': file:vendor/flows/smthrs-plan-0.1.0.tgz
+      effect: 4.0.0-rc.108
+
+  '@smthrs/flows@file:vendor/flows/smthrs-flows-0.1.0.tgz(@opentelemetry/api-logs@0.220.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)':
+    dependencies:
+      '@smthrs/artifacts': file:vendor/flows/smthrs-artifacts-0.1.0.tgz
+      '@smthrs/canonical': file:vendor/flows/smthrs-canonical-0.1.0.tgz
+      '@smthrs/capability': file:vendor/flows/smthrs-capability-0.1.0.tgz
+      '@smthrs/crypto': file:vendor/flows/smthrs-crypto-0.1.0.tgz
+      '@smthrs/database': file:vendor/flows/smthrs-database-0.1.0.tgz
+      '@smthrs/engine': file:vendor/flows/smthrs-engine-0.1.0.tgz
+      '@smthrs/engine-store': file:vendor/flows/smthrs-engine-store-0.1.0.tgz
+      '@smthrs/flow': file:vendor/flows/smthrs-flow-0.1.0.tgz
+      '@smthrs/jj': file:vendor/flows/smthrs-jj-0.1.0.tgz
+      '@smthrs/journal': file:vendor/flows/smthrs-journal-0.1.0.tgz
+      '@smthrs/kernel': file:vendor/flows/smthrs-kernel-0.1.0.tgz
+      '@smthrs/keys': file:vendor/flows/smthrs-keys-0.1.0.tgz
+      '@smthrs/observability': file:vendor/flows/smthrs-observability-0.1.0.tgz(@opentelemetry/api-logs@0.220.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)
+      '@smthrs/plan': file:vendor/flows/smthrs-plan-0.1.0.tgz
+      '@smthrs/run-store': file:vendor/flows/smthrs-run-store-0.1.0.tgz
+      '@smthrs/sandbox': file:vendor/flows/smthrs-sandbox-0.1.0.tgz
+      '@smthrs/step-cache': file:vendor/flows/smthrs-step-cache-0.1.0.tgz
+      '@smthrs/sync': file:vendor/flows/smthrs-sync-0.1.0.tgz
+      '@smthrs/time-travel': file:vendor/flows/smthrs-time-travel-0.1.0.tgz
+      effect: 4.0.0-rc.108
+    transitivePeerDependencies:
+      - '@opentelemetry/api-logs'
+      - '@opentelemetry/resources'
+      - '@opentelemetry/semantic-conventions'
+      - vitest
+
+  '@smthrs/harness@file:vendor/flows/smthrs-harness-0.1.0.tgz':
+    dependencies:
+      '@jitl/quickjs-singlefile-browser-release-sync': 0.32.0
+      '@smthrs/capability': file:vendor/flows/smthrs-capability-0.1.0.tgz
+      '@smthrs/core': file:vendor/flows/smthrs-core-0.1.0.tgz
+      '@smthrs/journal': file:vendor/flows/smthrs-journal-0.1.0.tgz
+      '@smthrs/kernel': file:vendor/flows/smthrs-kernel-0.1.0.tgz
+      '@smthrs/model': file:vendor/flows/smthrs-model-0.1.0.tgz
+      '@smthrs/notifications': file:vendor/flows/smthrs-notifications-0.1.0.tgz
+      '@smthrs/registry': file:vendor/flows/smthrs-registry-0.1.0.tgz
+      effect: 4.0.0-rc.108
+      quickjs-emscripten-core: 0.32.0
+      typescript: 6.0.3
+    transitivePeerDependencies:
+      - vitest
+
+  '@smthrs/jj@file:vendor/flows/smthrs-jj-0.1.0.tgz':
+    dependencies:
+      '@smthrs/capability': file:vendor/flows/smthrs-capability-0.1.0.tgz
+      effect: 4.0.0-rc.108
+
+  '@smthrs/journal@file:vendor/flows/smthrs-journal-0.1.0.tgz':
+    dependencies:
+      '@smthrs/database': file:vendor/flows/smthrs-database-0.1.0.tgz
+      effect: 4.0.0-rc.108
+
+  '@smthrs/kernel@file:vendor/flows/smthrs-kernel-0.1.0.tgz':
+    dependencies:
+      '@smthrs/capability': file:vendor/flows/smthrs-capability-0.1.0.tgz
+      '@smthrs/jj': file:vendor/flows/smthrs-jj-0.1.0.tgz
+      '@smthrs/journal': file:vendor/flows/smthrs-journal-0.1.0.tgz
+      '@smthrs/platform-browser': file:vendor/flows/smthrs-platform-browser-0.1.0.tgz
+      effect: 4.0.0-rc.108
+
+  '@smthrs/keys@file:vendor/flows/smthrs-keys-0.1.0.tgz':
+    dependencies:
+      '@smthrs/canonical': file:vendor/flows/smthrs-canonical-0.1.0.tgz
+      '@smthrs/crypto': file:vendor/flows/smthrs-crypto-0.1.0.tgz
+      effect: 4.0.0-rc.108
+
+  '@smthrs/model@file:vendor/flows/smthrs-model-0.1.0.tgz':
+    dependencies:
+      '@smthrs/capability': file:vendor/flows/smthrs-capability-0.1.0.tgz
+      '@smthrs/kernel': file:vendor/flows/smthrs-kernel-0.1.0.tgz
+      effect: 4.0.0-rc.108
+    transitivePeerDependencies:
+      - vitest
+
+  '@smthrs/notifications@file:vendor/flows/smthrs-notifications-0.1.0.tgz':
+    dependencies:
+      '@smthrs/journal': file:vendor/flows/smthrs-journal-0.1.0.tgz
+      effect: 4.0.0-rc.108
+
+  '@smthrs/observability@file:vendor/flows/smthrs-observability-0.1.0.tgz(@opentelemetry/api-logs@0.220.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)':
+    dependencies:
+      '@effect/opentelemetry': 4.0.0-rc.108(@opentelemetry/api-logs@0.220.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.220.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-web@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)(effect@4.0.0-rc.108)
+      '@opentelemetry/api': 1.9.0
+      '@opentelemetry/exporter-logs-otlp-http': 0.220.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/exporter-metrics-otlp-http': 0.220.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/exporter-trace-otlp-http': 0.220.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-logs': 0.220.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-metrics': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-trace-base': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-trace-node': 2.9.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-trace-web': 2.9.0(@opentelemetry/api@1.9.0)
+      '@smthrs/journal': file:vendor/flows/smthrs-journal-0.1.0.tgz
+      effect: 4.0.0-rc.108
+    transitivePeerDependencies:
+      - '@opentelemetry/api-logs'
+      - '@opentelemetry/resources'
+      - '@opentelemetry/semantic-conventions'
+
+  '@smthrs/patterns@file:vendor/flows/smthrs-patterns-0.1.0.tgz':
+    dependencies:
+      '@smthrs/core': file:vendor/flows/smthrs-core-0.1.0.tgz
+      effect: 4.0.0-rc.108
+
+  '@smthrs/plan@file:vendor/flows/smthrs-plan-0.1.0.tgz':
+    dependencies:
+      '@smthrs/database': file:vendor/flows/smthrs-database-0.1.0.tgz
+      '@smthrs/keys': file:vendor/flows/smthrs-keys-0.1.0.tgz
+      effect: 4.0.0-rc.108
+
+  '@smthrs/platform-browser@file:vendor/flows/smthrs-platform-browser-0.1.0.tgz':
+    dependencies:
+      '@smthrs/jj': file:vendor/flows/smthrs-jj-0.1.0.tgz
+      '@smthrs/kernel': file:vendor/flows/smthrs-kernel-0.1.0.tgz
+      effect: 4.0.0-rc.108
+    transitivePeerDependencies:
+      - vitest
+
+  '@smthrs/registry@file:vendor/flows/smthrs-registry-0.1.0.tgz':
+    dependencies:
+      '@smthrs/core': file:vendor/flows/smthrs-core-0.1.0.tgz
+      '@smthrs/kernel': file:vendor/flows/smthrs-kernel-0.1.0.tgz
+      effect: 4.0.0-rc.108
+      yaml: 2.9.0
+    transitivePeerDependencies:
+      - vitest
+
+  '@smthrs/run-store@file:vendor/flows/smthrs-run-store-0.1.0.tgz':
+    dependencies:
+      '@smthrs/database': file:vendor/flows/smthrs-database-0.1.0.tgz
+      '@smthrs/journal': file:vendor/flows/smthrs-journal-0.1.0.tgz
+      effect: 4.0.0-rc.108
+
+  '@smthrs/sandbox@file:vendor/flows/smthrs-sandbox-0.1.0.tgz':
+    dependencies:
+      '@smthrs/kernel': file:vendor/flows/smthrs-kernel-0.1.0.tgz
+      effect: 4.0.0-rc.108
+    transitivePeerDependencies:
+      - vitest
+
+  '@smthrs/std@file:vendor/flows/smthrs-std-0.1.0.tgz':
+    dependencies:
+      '@smthrs/capability': file:vendor/flows/smthrs-capability-0.1.0.tgz
+      '@smthrs/control': file:vendor/flows/smthrs-control-0.1.0.tgz
+      '@smthrs/core': file:vendor/flows/smthrs-core-0.1.0.tgz
+      '@smthrs/kernel': file:vendor/flows/smthrs-kernel-0.1.0.tgz
+      effect: 4.0.0-rc.108
+    transitivePeerDependencies:
+      - vitest
+
+  '@smthrs/step-cache@file:vendor/flows/smthrs-step-cache-0.1.0.tgz':
+    dependencies:
+      '@smthrs/canonical': file:vendor/flows/smthrs-canonical-0.1.0.tgz
+      '@smthrs/database': file:vendor/flows/smthrs-database-0.1.0.tgz
+      effect: 4.0.0-rc.108
+
+  '@smthrs/sync@file:vendor/flows/smthrs-sync-0.1.0.tgz':
+    dependencies:
+      '@smthrs/journal': file:vendor/flows/smthrs-journal-0.1.0.tgz
+      effect: 4.0.0-rc.108
+
+  '@smthrs/time-travel@file:vendor/flows/smthrs-time-travel-0.1.0.tgz':
+    dependencies:
+      '@smthrs/database': file:vendor/flows/smthrs-database-0.1.0.tgz
+      '@smthrs/engine-store': file:vendor/flows/smthrs-engine-store-0.1.0.tgz
+      '@smthrs/jj': file:vendor/flows/smthrs-jj-0.1.0.tgz
+      '@smthrs/journal': file:vendor/flows/smthrs-journal-0.1.0.tgz
+      '@smthrs/run-store': file:vendor/flows/smthrs-run-store-0.1.0.tgz
+      '@smthrs/step-cache': file:vendor/flows/smthrs-step-cache-0.1.0.tgz
+      effect: 4.0.0-rc.108
+    transitivePeerDependencies:
+      - vitest
 
   '@speed-highlight/core@1.2.17': {}
 
@@ -19491,6 +20079,10 @@ snapshots:
       side-channel: 1.1.0
 
   queue-microtask@1.2.3: {}
+
+  quickjs-emscripten-core@0.32.0:
+    dependencies:
+      '@jitl/quickjs-ffi-types': 0.32.0
 
   radix-ui@1.6.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
     dependencies:

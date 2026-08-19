@@ -1,0 +1,28 @@
+{
+  "name": "@smthrs/flows-vendor",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Installs the vendored flows tarballs under @flows/* until the flows alpha is published",
+  "scripts": {
+    "test": "node --test resolution.test.mjs"
+  },
+  "dependencies": {
+    "@flows/core": "file:./smthrs-core-0.1.0.tgz",
+    "@flows/engine": "file:./smthrs-engine-0.1.0.tgz",
+    "@flows/engine-store": "file:./smthrs-engine-store-0.1.0.tgz",
+    "@flows/flow": "file:./smthrs-flow-0.1.0.tgz",
+    "@flows/flows": "file:./smthrs-flows-0.1.0.tgz",
+    "@flows/harness": "file:./smthrs-harness-0.1.0.tgz",
+    "@flows/journal": "file:./smthrs-journal-0.1.0.tgz",
+    "@flows/model": "file:./smthrs-model-0.1.0.tgz",
+    "@flows/patterns": "file:./smthrs-patterns-0.1.0.tgz",
+    "@flows/plan": "file:./smthrs-plan-0.1.0.tgz",
+    "@flows/run-store": "file:./smthrs-run-store-0.1.0.tgz",
+    "@flows/std": "file:./smthrs-std-0.1.0.tgz"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "4.0.0-rc.108",
+    "effect": "4.0.0-rc.108"
+  }
+}

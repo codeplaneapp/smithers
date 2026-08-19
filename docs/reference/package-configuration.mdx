@@ -271,6 +271,9 @@ Defined in the root `package.json` for development:
 | `check:sota` | `node scripts/check-sota.mjs` | Verify the SOTA registry's generated docs page and CLI module match `docs/data/sota-models.json` |
 | `check:dts` | `node scripts/check-dts.mjs` | Verify per-file `.d.ts` declarations are freshly regenerated from source |
 | `fetch:jj` | `node scripts/fetch-jj-binaries.mjs` | Fetch vendored jj binaries for supported platforms |
+| `vendor:flows` | `node scripts/vendor-flows.mjs` | Re-pack the flows library into `vendor/flows/` from a sibling flows checkout |
+| `check:vendored-flows` | `node scripts/vendor-flows.mjs --check` | Verify `vendor/flows/` matches the flows checkout (needs that checkout; not a CI gate) |
+| `test:vendored-flows` | `pnpm -C vendor/flows test` | Verify the `@flows/*` aliases run a flow and the colliding `@smthrs/*` names still resolve to this workspace |
 | `docs:components` | `node scripts/generate-component-source.mjs` | Embed composite component source as tabs in their docs pages |
 | `docs:llms` | `bun scripts/generate-llms.ts && bun scripts/optimize-llms-full.ts` | Regenerate `llms-core.txt` and `llms-full.txt` |
 | `docs` | `cd docs && bunx mintlify dev` | Start the Mintlify docs dev server for local preview |
@@ -299,3 +302,38 @@ When scaffolding your own project (with `bunx smthrs init` or manually), add a t
 ```
 
 See [Production Project Structure](/guides/project-structure) for a complete user-project `package.json` example.
+
+## Vendored Flows Packages
+
+The flows library is not on the npm registry yet, so its packages are committed
+to this repository as tarballs under `vendor/flows/` and exposed to workspace
+source under `@flows/*` aliases:
+
+```js
+import { FlowEngine } from "@flows/engine";
+import { Action, Flow, Interpreter } from "@flows/flow";
+```
+
+Both trees publish under `@smthrs/*`, and nine names exist in both. The bare
+name always resolves to this workspace's package; the flows copy is reachable
+only under its `@flows/*` alias. `vendor/flows/resolution.test.mjs` asserts that
+rule, and `pnpm test:vendored-flows` runs it.
+
+Three pieces make the aliases resolve. `vendor/flows/package.json` declares them
+as `file:` tarball dependencies and is listed in `pnpm-workspace.yaml`. `.npmrc`
+public-hoists `@flows/*` into the root `node_modules`. The root manifest's
+`pnpm.overrides` redirects each vendored package at its exact version, for
+example `"@smthrs/flow@0.1.0"`, because a bare key would also capture this
+workspace's own package of that name. The edges stay out of the root manifest's
+`workspaces` array, which is what bun reads, because bun has no version-scoped
+override.
+
+`pnpm vendor:flows` re-packs the closure from a sibling flows checkout, defaulting
+to `../flows/flows` and overridable with an argument or `SMITHERS_FLOWS_REPO`.
+`pnpm check:vendored-flows` reports drift without writing.
+
+When the flows alpha publishes, `vendor/flows/` is deleted and the aliases move
+to registry version ranges such as `"@flows/flow": "npm:@smthrs/flow@0.1.0-alpha.N"`,
+declared by the packages that import them. `vendor/flows/README.md` has the full
+step-by-step swap, including the overrides, `.npmrc`, and workspace entries to
+remove.

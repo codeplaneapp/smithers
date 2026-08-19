@@ -4,3 +4,7 @@ packages:
   - "e2e"
   - ".smithers"
   - "codex-plugin"
+  # Interim: installs the vendored flows tarballs. Deliberately absent from the
+  # root manifest's `workspaces` array, which is what bun reads.
+  # See vendor/flows/README.md.
+  - "vendor/flows"

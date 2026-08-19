@@ -1,0 +1,176 @@
+[
+  {
+    "name": "@smthrs/artifacts",
+    "version": "0.1.0",
+    "filename": "smthrs-artifacts-0.1.0.tgz",
+    "integrity": "sha256-mcyk0eS875yXY1rbVvLeWqZMCVdbxMTGxnwRW0yYU8g="
+  },
+  {
+    "name": "@smthrs/canonical",
+    "version": "0.1.0",
+    "filename": "smthrs-canonical-0.1.0.tgz",
+    "integrity": "sha256-uDH3jVn2xMUu/gUc6RKk+zmHOGfms7vq/YLOWKIX89Y="
+  },
+  {
+    "name": "@smthrs/capability",
+    "version": "0.1.0",
+    "filename": "smthrs-capability-0.1.0.tgz",
+    "integrity": "sha256-aJ+tcNeo5wx9K0FBbnIHnx+yVYBCffrM6AToxiY7Byg="
+  },
+  {
+    "name": "@smthrs/control",
+    "version": "0.1.0",
+    "filename": "smthrs-control-0.1.0.tgz",
+    "integrity": "sha256-24+8BWifDrdgh8w+HaTHa9nqmH+xWP67wjbzhD7CkvQ="
+  },
+  {
+    "name": "@smthrs/core",
+    "version": "0.1.0",
+    "filename": "smthrs-core-0.1.0.tgz",
+    "integrity": "sha256-84iLQ6YFklFQ9N3lElr92Bqvaw4J5EyZXUlRn/lTEyk="
+  },
+  {
+    "name": "@smthrs/crypto",
+    "version": "0.1.0",
+    "filename": "smthrs-crypto-0.1.0.tgz",
+    "integrity": "sha256-pmc/gFa+YlJaR1yrpMyxt6XerGnUEQsYPfuWL9YKMfc="
+  },
+  {
+    "name": "@smthrs/database",
+    "version": "0.1.0",
+    "filename": "smthrs-database-0.1.0.tgz",
+    "integrity": "sha256-ZfxA/YZEyQkL88iPQe+vOEdycIn2nuMo08+dchIdI2I="
+  },
+  {
+    "name": "@smthrs/engine",
+    "version": "0.1.0",
+    "filename": "smthrs-engine-0.1.0.tgz",
+    "integrity": "sha256-PUaLtHN1mKnq5qs4YhiA1B4jA2deXZ6MTHexXPf3qNU="
+  },
+  {
+    "name": "@smthrs/engine-store",
+    "version": "0.1.0",
+    "filename": "smthrs-engine-store-0.1.0.tgz",
+    "integrity": "sha256-IEm1J4j5AWN2impdDw/yTy+e6Go0K72A4bdyBR1x5QA="
+  },
+  {
+    "name": "@smthrs/flow",
+    "version": "0.1.0",
+    "filename": "smthrs-flow-0.1.0.tgz",
+    "integrity": "sha256-2toxCplga9FvcJYLleLYVEo505uMO4ni2chIQNcbx1Q="
+  },
+  {
+    "name": "@smthrs/flows",
+    "version": "0.1.0",
+    "filename": "smthrs-flows-0.1.0.tgz",
+    "integrity": "sha256-PuaSdHogKWuI7VXfmpkTmWyVWljz27DDyDn1z1nPMSk="
+  },
+  {
+    "name": "@smthrs/harness",
+    "version": "0.1.0",
+    "filename": "smthrs-harness-0.1.0.tgz",
+    "integrity": "sha256-MNe5JUaJq+JABmCd8tuVV/hFoXCTsy7kGqXAp2Vvrxg="
+  },
+  {
+    "name": "@smthrs/jj",
+    "version": "0.1.0",
+    "filename": "smthrs-jj-0.1.0.tgz",
+    "integrity": "sha256-y34D11Sa6Hj90XxIE5OBpjAUmi5IPSV9XIVw+ppxGMM="
+  },
+  {
+    "name": "@smthrs/journal",
+    "version": "0.1.0",
+    "filename": "smthrs-journal-0.1.0.tgz",
+    "integrity": "sha256-3JreeLhMw1SxcUaydMgjM4/dxmX2JMFEh4B+MkCuJGY="
+  },
+  {
+    "name": "@smthrs/kernel",
+    "version": "0.1.0",
+    "filename": "smthrs-kernel-0.1.0.tgz",
+    "integrity": "sha256-G2RDrhSCMRdl28Xm/Iu0t4yOMESw5I+ssRsF4oIfgl4="
+  },
+  {
+    "name": "@smthrs/keys",
+    "version": "0.1.0",
+    "filename": "smthrs-keys-0.1.0.tgz",
+    "integrity": "sha256-rGfoy+NYmaBNoBCLjdC4rSm61/M7j6EjQgJ4LeEgJXY="
+  },
+  {
+    "name": "@smthrs/model",
+    "version": "0.1.0",
+    "filename": "smthrs-model-0.1.0.tgz",
+    "integrity": "sha256-3/amOKXyz8BWJZPlqV8KoZcrHdjEwka0DCfJgmPPwGs="
+  },
+  {
+    "name": "@smthrs/notifications",
+    "version": "0.1.0",
+    "filename": "smthrs-notifications-0.1.0.tgz",
+    "integrity": "sha256-aSystlZV1NP3E7Kp9qT8m2sV+0E4fFi5faTMCqvgvNM="
+  },
+  {
+    "name": "@smthrs/observability",
+    "version": "0.1.0",
+    "filename": "smthrs-observability-0.1.0.tgz",
+    "integrity": "sha256-g+YUIlnZajAfOwEwlM1UFqa4/GQkoCdGqFmsl3Yesvk="
+  },
+  {
+    "name": "@smthrs/patterns",
+    "version": "0.1.0",
+    "filename": "smthrs-patterns-0.1.0.tgz",
+    "integrity": "sha256-g1931hH/r7Wl2kvOoBRTR0tEitgG36RYTZlAylNWWos="
+  },
+  {
+    "name": "@smthrs/plan",
+    "version": "0.1.0",
+    "filename": "smthrs-plan-0.1.0.tgz",
+    "integrity": "sha256-xze6XxDVxEplfvA4XQhU1Vx3j2JkTXo/rt9y9plfZKk="
+  },
+  {
+    "name": "@smthrs/platform-browser",
+    "version": "0.1.0",
+    "filename": "smthrs-platform-browser-0.1.0.tgz",
+    "integrity": "sha256-0kaZYa2lN60h6xJvEw593aUO93X6xZ4LmSTxTipb2Sk="
+  },
+  {
+    "name": "@smthrs/registry",
+    "version": "0.1.0",
+    "filename": "smthrs-registry-0.1.0.tgz",
+    "integrity": "sha256-y+K4BnTnTRJGd6IhxTuUDIZG4KO9HeOmQu/UA4zilY4="
+  },
+  {
+    "name": "@smthrs/run-store",
+    "version": "0.1.0",
+    "filename": "smthrs-run-store-0.1.0.tgz",
+    "integrity": "sha256-+LhL3U8WpdK8QE9LVqRTp6PF1DkuBRyZjf6JtbfO6R4="
+  },
+  {
+    "name": "@smthrs/sandbox",
+    "version": "0.1.0",
+    "filename": "smthrs-sandbox-0.1.0.tgz",
+    "integrity": "sha256-QvShr6Xwfn0Shhrn7iO7xFiIk4ATcsllzEFpDTHKNoo="
+  },
+  {
+    "name": "@smthrs/std",
+    "version": "0.1.0",
+    "filename": "smthrs-std-0.1.0.tgz",
+    "integrity": "sha256-5ZLNMWL7PWPMw08yUeho8CjuMkcKF9C5pi1GtelB/1k="
+  },
+  {
+    "name": "@smthrs/step-cache",
+    "version": "0.1.0",
+    "filename": "smthrs-step-cache-0.1.0.tgz",
+    "integrity": "sha256-KA03v8LEJ5lQimuGu/YzspvQpXbAEkenX7qiNX4Vlqk="
+  },
+  {
+    "name": "@smthrs/sync",
+    "version": "0.1.0",
+    "filename": "smthrs-sync-0.1.0.tgz",
+    "integrity": "sha256-fWcx1+vv+fUMLe14bSbfNSYb1tSHDKod+CwsmFePCyU="
+  },
+  {
+    "name": "@smthrs/time-travel",
+    "version": "0.1.0",
+    "filename": "smthrs-time-travel-0.1.0.tgz",
+    "integrity": "sha256-0AKGhCAfeXglCTWS3Ax0ts32fy2ZA7aVTM9hYataNos="
+  }
+]

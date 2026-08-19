@@ -15,6 +15,7 @@ Durable agent-workflow runtime/control plane. Product UI: `../multi`. Hosted for
 - `.smithers` — built-in/init workflow pack and workflow UIs; `scripts/generate-workflow-pack.ts` generates shipped pack assets.
 - `apps/observability`, `apps/review` — observability and review integrations.
 - `docs` — Mintlify source; `skills` — agent skills; `examples` — runnable patterns; `e2e` — real-backend suites.
+- `vendor/flows` — flows library vendored as tarballs under `@flows/*` until its alpha publishes; read `vendor/flows/README.md` before touching the aliases, overrides, or `.npmrc`.
 - `package.json`, `pnpm-workspace.yaml` — command and workspace index.
 - `apps/smithers*` and demo apps are POCs, not the product UI.
 
