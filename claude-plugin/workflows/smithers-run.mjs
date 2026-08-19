@@ -46,9 +46,10 @@ if (typeof workflowArgs === 'string') {
 if (!workflowArgs || (!workflowArgs.runId && !workflowArgs.workflow)) {
   throw new Error('args.runId (attach) or args.workflow (launch) is required')
 }
-// `smithers workflow run` takes a discovered workflow ID, not a file path.
-// Accept either: discovery derives IDs from the filename, so a path like
-// `.smithers/workflows/ticket-fleet.tsx` normalizes to `ticket-fleet`.
+// `smithers up` accepts either a discovered workflow ID or a .tsx/.mdx file
+// path. Normalize a path to its ID anyway (discovery derives IDs from the
+// filename, so `.smithers/workflows/ticket-fleet.tsx` becomes `ticket-fleet`)
+// to keep the launch label and log lines stable.
 if (workflowArgs.workflow && /[\\/]/.test(String(workflowArgs.workflow))) {
   workflowArgs.workflow = String(workflowArgs.workflow)
     .split(/[\\/]/).pop()
@@ -133,7 +134,7 @@ if (!runId) {
     : ` --input ${shellQuote(JSON.stringify(workflowArgs.input))}`
   const launched = await agent(
     'Launch a detached Smithers run and return only its run id as structured output. Run this command once:\n' +
-    `RUN-EXACTLY: ${CLI} workflow run ${shellQuote(String(workflowArgs.workflow))} --detach${inputFlag}${startedByFlags} --format json\n` +
+    `RUN-EXACTLY: ${CLI} up ${shellQuote(String(workflowArgs.workflow))} -d${inputFlag}${startedByFlags} --format json\n` +
     'Extract the run id from the JSON output (field runId or id). Do not run anything else.',
     { label: `launch ${String(workflowArgs.workflow)}`, phase: 'Run', schema: LAUNCH_SCHEMA, effort: 'low' },
   )
