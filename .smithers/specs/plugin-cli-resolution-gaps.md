@@ -45,6 +45,17 @@ verify identity for an arbitrary executable, so either accept and document the
 risk, or probe the resolved bin once (`<bin> --version` / a marker subcommand)
 before trusting it for protocol commands.
 
+## Live regression evidence for gap 1 (added 2026-08-19 ~02:40)
+
+The /workflows mirror (`claude-plugin/workflows/smithers-run.mjs`) now dies in
+plue within ~24s, ticks returning
+`{'status': 'error', 'outputs': {'error': 'Unknown command: claude'}}`
+(journal wf_79e4e167-7a9 in session 769fc910). The mirror mirrored 15 ticks
+fine at 00:42 before the rewrite. In the Workflow-subagent environment the
+PATH tier misses (no global orchestrator on that PATH), the resolver falls to
+tier 4 `bunx smthrs`, and plue's `.bin/smithers` shim (0.9.1) answers. An
+explicit `smthrs@latest` in tier 4 fixes exactly this.
+
 ## Gap 3: tier 2 bypasses the protocol skew guard
 
 `describeProtocolCommandSkew` lives in the published bin's delegation path.
