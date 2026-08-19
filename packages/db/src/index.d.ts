@@ -5,9 +5,9 @@ import { Table as Table$1, and } from 'drizzle-orm';
 import * as _smthrs_errors_SmithersError from '@smthrs/errors/SmithersError';
 import { SmithersError as SmithersError$2 } from '@smthrs/errors/SmithersError';
 import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
+import { Effect, ManagedRuntime } from 'effect';
 import * as _smthrs_observability from '@smthrs/observability';
 import * as bun_sqlite from 'bun:sqlite';
-import { ManagedRuntime, Effect } from 'effect';
 import * as SqlClient from 'effect/unstable/sql/SqlClient';
 import { SqlError as SqlError$1 } from 'effect/unstable/sql/SqlError';
 import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
@@ -293,6 +293,166 @@ type ApprovalRow$1 = {
     decisionJson: string | null;
     autoApproved: boolean;
 };
+
+type FlowsStores = {
+    filename: string;
+    /**
+     * runs an effect with the flows services provided
+     */
+    runPromise: <A, E>(effect: Effect.Effect<A, E, never>) => Promise<A>;
+    /**
+     * releases the flows connection and its fibers
+     */
+    close: () => Promise<void>;
+};
+
+/**
+ * The flows-backed implementation of the `adapter.js` methods this lane moves.
+ */
+declare class FlowsAdapterCompat {
+    /**
+     * @param {{ filename: string }} options
+     * @returns {Promise<FlowsAdapterCompat>}
+     */
+    static open(options: {
+        filename: string;
+    }): Promise<FlowsAdapterCompat>;
+    /** @param {import("./flowsStores.js").FlowsStores} stores */
+    constructor(stores: FlowsStores);
+    stores: FlowsStores;
+    /** @returns {Promise<void>} */
+    close(): Promise<void>;
+    /**
+     * The effect that runs `body` in one flows write transaction, with the
+     * services it needs.
+     *
+     * `Journal.transact` is the seam that makes the flows state transition, its
+     * journal entry, and the legacy mirror row one atomic write: a failure
+     * anywhere inside rolls all three back.
+     *
+     * @param {(services: { sql: any; journal: any; runStore: any; attemptStore: any }) => any} body
+     * @returns {any}
+     */
+    program(body: (services: {
+        sql: any;
+        journal: any;
+        runStore: any;
+        attemptStore: any;
+    }) => any): any;
+    /**
+     * @param {(services: { sql: any; journal: any; runStore: any; attemptStore: any }) => any} body
+     * @returns {Promise<any>}
+     */
+    transact(body: (services: {
+        sql: any;
+        journal: any;
+        runStore: any;
+        attemptStore: any;
+    }) => any): Promise<any>;
+    /**
+     * Run a compare-and-set whose lost outcome rolls the transaction back.
+     *
+     * The result is inspected outside the transaction on purpose: a `ClaimLost`
+     * observed inside it would commit whatever the mirror had already written.
+     *
+     * @param {(services: { sql: any; journal: any; runStore: any; attemptStore: any }) => any} body
+     * @returns {Promise<boolean>}
+     */
+    transactClaim(body: (services: {
+        sql: any;
+        journal: any;
+        runStore: any;
+        attemptStore: any;
+    }) => any): Promise<boolean>;
+    /**
+     * Copy every live run's legacy rows into the flows tables.
+     *
+     * @returns {Promise<{ runs: number; events: number; attempts: number }>}
+     */
+    migrateLiveRuns(): Promise<{
+        runs: number;
+        events: number;
+        attempts: number;
+    }>;
+    /**
+     * `SmithersDb.insertEventWithNextSeq`: append one event and return its
+     * sequence.
+     *
+     * @param {{ runId: string; timestampMs: number; type: string; payloadJson: string }} row
+     * @returns {Promise<number>}
+     */
+    insertEventWithNextSeq(row: {
+        runId: string;
+        timestampMs: number;
+        type: string;
+        payloadJson: string;
+    }): Promise<number>;
+    /**
+     * `SmithersDb.claimRunForResume`: take over a run whose owner is gone.
+     *
+     * @param {{ runId: string; expectedStatus?: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; staleBeforeMs: number; claimOwnerId: string; claimHeartbeatAtMs: number; requireStale?: boolean }} params
+     * @returns {Promise<boolean>}
+     */
+    claimRunForResume(params: {
+        runId: string;
+        expectedStatus?: string;
+        expectedRuntimeOwnerId: string | null;
+        expectedHeartbeatAtMs: number | null;
+        staleBeforeMs: number;
+        claimOwnerId: string;
+        claimHeartbeatAtMs: number;
+        requireStale?: boolean;
+    }): Promise<boolean>;
+    /**
+     * `SmithersDb.insertAttempt`: record a new attempt row.
+     *
+     * @param {Record<string, unknown>} row
+     * @returns {Promise<void>}
+     */
+    insertAttempt(row: Record<string, unknown>): Promise<void>;
+    /**
+     * `SmithersDb.claimAttemptCompletion`: compare-and-set the attempt to
+     * `finished`.
+     *
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @param {number} attempt
+     * @param {string | null} runtimeOwnerId
+     * @param {number} finishedAtMs
+     * @returns {Promise<boolean>}
+     */
+    claimAttemptCompletion(runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string | null, finishedAtMs: number): Promise<boolean>;
+    /**
+     * `SmithersDb.claimAttemptTerminal`: compare-and-set the attempt's terminal
+     * state.
+     *
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @param {number} attempt
+     * @param {string | null} runtimeOwnerId
+     * @param {string} state
+     * @param {number} finishedAtMs
+     * @param {string} [errorJson]
+     * @returns {Promise<boolean>}
+     */
+    claimAttemptTerminal(runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string | null, state: string, finishedAtMs: number, errorJson?: string): Promise<boolean>;
+    /**
+     * `SmithersDb.heartbeatAttempt`: refresh the run and attempt heartbeats as one
+     * ownership-fenced fact.
+     *
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @param {number} attempt
+     * @param {number} heartbeatAtMs
+     * @param {string | null} heartbeatDataJson
+     * @param {string} runtimeOwnerId
+     * @returns {Promise<boolean>}
+     */
+    heartbeatAttempt(runId: string, nodeId: string, iteration: number, attempt: number, heartbeatAtMs: number, heartbeatDataJson: string | null, runtimeOwnerId: string): Promise<boolean>;
+}
 
 type SqlMessageStorageEventHistoryQuery$1 = {
     afterSeq?: number;
@@ -733,10 +893,7 @@ declare const DB_RUN_ALLOWED_STATUSES: string[];
  */
 declare const DB_RUN_IMMUTABLE_FIELDS: string[];
 declare class SmithersDb {
-    /**
-     * @param {BunSQLiteDatabase<Record<string, unknown>>} db
-     */
-    constructor(db: BunSQLiteDatabase$2<Record<string, unknown>>);
+    constructor(db: any);
     /** @type {BunSQLiteDatabase<Record<string, unknown>>} */
     db: BunSQLiteDatabase$2<Record<string, unknown>>;
     /** @type {ReturnType<typeof getSqlMessageStorage>} */
@@ -748,6 +905,56 @@ declare class SmithersDb {
     transactionOwnerThread: string | null;
     /** @type {Promise<unknown>} */
     transactionTail: Promise<unknown>;
+    /**
+     * @param {BunSQLiteDatabase<Record<string, unknown>>} db
+     */
+    /**
+     * Stage 1.1 of the flows migration. `null` until the first call asks, then
+     * either the decision that this workspace keeps the legacy path or the loaded
+     * flows-backed compat module.
+     * @type {{ enabled: boolean; reason: string } | null}
+     */
+    flowsStorageDecision: {
+        enabled: boolean;
+        reason: string;
+    } | null;
+    /** @type {Promise<import("./flows-compat/flowsAdapterCompat.js").FlowsAdapterCompat> | null} */
+    flowsCompatPromise: Promise<FlowsAdapterCompat> | null;
+    /**
+     * Whether this database runs the flows-backed storage path
+     * (`.smithers/specs/flows-migration.md`, stage 1.1). Default off, SQLite only.
+     * @returns {{ enabled: boolean; reason: string }}
+     */
+    flowsStorage(): {
+        enabled: boolean;
+        reason: string;
+    };
+    /**
+     * Whether a call may be served by the flows stores right now.
+     *
+     * A transaction this adapter already opened holds the SQLite write lock on
+     * this connection, and the flows stores write through a second connection to
+     * the same file, so a flows write nested inside it would wait on its own
+     * caller. Those calls keep the legacy path; the compat module's per-run
+     * catch-up copies what they wrote on the next delegated call.
+     * @returns {boolean}
+     */
+    flowsStorageDelegates(): boolean;
+    /**
+     * The flows-backed compat module for this database, opened once.
+     * @returns {Promise<import("./flows-compat/flowsAdapterCompat.js").FlowsAdapterCompat>}
+     */
+    flowsCompat(): Promise<FlowsAdapterCompat>;
+    /**
+     * Migrate this workspace's live runs into the flows tables. A no-op — reported
+     * as `null` — on a workspace that keeps the legacy path.
+     * @returns {Promise<{ runs: number; events: number; attempts: number } | null>}
+     */
+    migrateLiveRunsIntoFlows(): Promise<{
+        runs: number;
+        events: number;
+        attempts: number;
+    } | null>;
     /**
      * @param {string} runId
      * @param {number} frameNo

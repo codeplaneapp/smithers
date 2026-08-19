@@ -238,6 +238,15 @@ describe("SmithersDb transactions", () => {
     try {
       const runId = "txn-read-gating";
       await insertRun(adapter, runId);
+      // Timed from the moment the transaction body actually starts its delay, so
+      // a loaded machine that oversleeps a fixed head start cannot shrink the
+      // measured gating window below the floor.
+      let delayStartedAt = 0;
+      /** @type {() => void} */
+      let signalDelayStarted = () => {};
+      const delayStarted = new Promise((resolve) => {
+        signalDelayStarted = () => resolve(undefined);
+      });
       const transaction = adapter.withTransaction(
         "test-read-gating",
         Effect.gen(function* () {
@@ -258,7 +267,12 @@ describe("SmithersDb transactions", () => {
             metaJson: null,
           });
           yield* Effect.tryPromise({
-            try: () => new Promise((resolve) => setTimeout(resolve, 60)),
+            try: () =>
+              new Promise((resolve) => {
+                delayStartedAt = performance.now();
+                signalDelayStarted();
+                setTimeout(resolve, 60);
+              }),
             catch: (cause) =>
               toSmithersError(cause, "test read gating delay", {
                 code: "DB_WRITE_FAILED",
@@ -271,14 +285,13 @@ describe("SmithersDb transactions", () => {
           );
         }),
       );
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const readStartedAt = performance.now();
+      await delayStarted;
       const readPromise = adapter.getAttempt(runId, "inside", 0, 1);
       await expect(transaction).rejects.toThrow("read gating boom");
       const attempt = await readPromise;
-      const readElapsedMs = performance.now() - readStartedAt;
+      const readSettledAt = performance.now();
       expect(attempt).toBeUndefined();
-      expect(readElapsedMs).toBeGreaterThanOrEqual(35);
+      expect(readSettledAt - delayStartedAt).toBeGreaterThanOrEqual(55);
     } finally {
       sqlite.close();
     }
