@@ -29,6 +29,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@effect/sql-sqlite-bun": "4.0.0-rc.108",
     "@smthrs/errors": "workspace:*",
     "@smthrs/graph": "workspace:*",
     "@smthrs/observability": "workspace:*",

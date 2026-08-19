@@ -1357,6 +1357,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@effect/sql-sqlite-bun':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors

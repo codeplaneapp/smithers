@@ -71,6 +71,7 @@ import { camelToSnake } from "./utils/camelToSnake.js";
 import { capturePostgresTransactionTxid, recordCommittedTxid, shouldCapturePostgresTxid } from "./captureTxid.js";
 import { normalizeWaitForEventCorrelationId, parseWaitForEventAttemptSnapshot } from "./waitForEventAttempt.js";
 import { clearAttemptResumePointers, isNonSuccessTerminalAttemptState } from "./attempt-resume-pointers.js";
+import { resolveFlowsStorageDecision } from "./flows-compat/flowsStorageGate.js";
 /** @typedef {import("./adapter/AlertRow.ts").AlertRow} AlertRow */
 /** @typedef {import("./adapter/AlertStatus.ts").AlertStatus} AlertStatus */
 /** @typedef {import("./adapter/AttemptRow.ts").AttemptRow} AttemptRow */
@@ -975,6 +976,16 @@ function getPersistedBooleanColumnNames(client, tableName) {
  * @param {ReturnType<typeof getSqlMessageStorage>} storage
  * @returns {boolean}
  */
+/**
+ * The path of the SQLite file behind a drizzle bun:sqlite database, which is what
+ * the flows stores open their own connection to. `undefined` on any other driver.
+ * @param {unknown} db
+ * @returns {string | undefined}
+ */
+function sqliteFilename(db) {
+  const client = /** @type {{ filename?: unknown }} */ (resolveSqliteClientKey(db));
+  return typeof client?.filename === "string" ? client.filename : undefined;
+}
 function isBunSqliteStorage(storage) {
   return storage.dialect !== POSTGRES && storage.driverKind === "bun-sqlite";
 }
@@ -1024,9 +1035,79 @@ export class SmithersDb {
   /**
    * @param {BunSQLiteDatabase<Record<string, unknown>>} db
    */
+  /**
+   * Stage 1.1 of the flows migration. `null` until the first call asks, then
+   * either the decision that this workspace keeps the legacy path or the loaded
+   * flows-backed compat module.
+   * @type {{ enabled: boolean; reason: string } | null}
+   */
+  flowsStorageDecision = null;
+  /** @type {Promise<import("./flows-compat/flowsAdapterCompat.js").FlowsAdapterCompat> | null} */
+  flowsCompatPromise = null;
   constructor(db) {
     this.db = db;
     this.internalStorage = getSqlMessageStorage(db);
+  }
+  /**
+   * Whether this database runs the flows-backed storage path
+   * (`.smithers/specs/flows-migration.md`, stage 1.1). Default off, SQLite only.
+   * @returns {{ enabled: boolean; reason: string }}
+   */
+  flowsStorage() {
+    if (this.flowsStorageDecision === null) {
+      this.flowsStorageDecision = resolveFlowsStorageDecision({
+        dialect: this.internalStorage.dialect,
+        driverKind: this.internalStorage.driverKind,
+        filename: sqliteFilename(this.db),
+      });
+    }
+    return this.flowsStorageDecision;
+  }
+  /**
+   * Whether a call may be served by the flows stores right now.
+   *
+   * A transaction this adapter already opened holds the SQLite write lock on
+   * this connection, and the flows stores write through a second connection to
+   * the same file, so a flows write nested inside it would wait on its own
+   * caller. Those calls keep the legacy path; the compat module's per-run
+   * catch-up copies what they wrote on the next delegated call.
+   * @returns {boolean}
+   */
+  flowsStorageDelegates() {
+    if (!this.flowsStorage().enabled) return false;
+    this.ownsActiveTransaction();
+    return this.transactionDepth === 0;
+  }
+  /**
+   * The flows-backed compat module for this database, opened once.
+   * @returns {Promise<import("./flows-compat/flowsAdapterCompat.js").FlowsAdapterCompat>}
+   */
+  flowsCompat() {
+    if (this.flowsCompatPromise === null) {
+      const filename = sqliteFilename(this.db);
+      this.flowsCompatPromise = import("./flows-compat/flowsAdapterCompat.js")
+        .then((module) => module.FlowsAdapterCompat.open({ filename: /** @type {string} */ (filename) }))
+        .catch((cause) => {
+          // A failed open must not be sticky: the next call reopens rather than
+          // replaying a transient failure — opening the file, or migrating it,
+          // can lose a race with another process for the write lock. It also
+          // deliberately never falls back to the legacy path, which would split
+          // sequence allocation across two allocators.
+          this.flowsCompatPromise = null;
+          throw cause;
+        });
+    }
+    return this.flowsCompatPromise;
+  }
+  /**
+   * Migrate this workspace's live runs into the flows tables. A no-op — reported
+   * as `null` — on a workspace that keeps the legacy path.
+   * @returns {Promise<{ runs: number; events: number; attempts: number } | null>}
+   */
+  async migrateLiveRunsIntoFlows() {
+    if (!this.flowsStorage().enabled) return null;
+    const compat = await this.flowsCompat();
+    return compat.migrateLiveRuns();
   }
   /**
    * @param {string} runId
@@ -2034,6 +2115,13 @@ export class SmithersDb {
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
   claimRunForResume(params) {
+    if (this.flowsStorageDelegates()) {
+      // Stage 1.1: the flows run store takes the run over on a lease, with
+      // liveness evidence, instead of comparing a heartbeat alone.
+      return this.write(`claim stale run ${params.runId}`, async () =>
+        (await this.flowsCompat()).claimRunForResume(params),
+      );
+    }
     return this.write(`claim stale run ${params.runId}`, () => {
       const expectedStatus = params.expectedStatus ?? "running";
       const requireStale = params.requireStale ?? expectedStatus === "running";
@@ -2583,6 +2671,11 @@ export class SmithersDb {
    * @returns {RunnableEffect<void, SmithersError>}
    */
   insertAttempt(row) {
+    if (this.flowsStorageDelegates()) {
+      return this.write(`insert attempt ${row.nodeId}#${row.attempt}`, async () =>
+        (await this.flowsCompat()).insertAttempt(row),
+      );
+    }
     return this.write(`insert attempt ${row.nodeId}#${row.attempt}`, () =>
       this.internalStorage.upsert("_smithers_attempts", row, ["runId", "nodeId", "iteration", "attempt"]),
     );
@@ -2644,6 +2737,18 @@ export class SmithersDb {
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
   claimAttemptCompletion(runId, nodeId, iteration, attempt, runtimeOwnerId, finishedAtMs) {
+    if (this.flowsStorageDelegates()) {
+      return this.write(`claim attempt completion ${nodeId}#${attempt}`, async () =>
+        (await this.flowsCompat()).claimAttemptCompletion(
+          runId,
+          nodeId,
+          iteration,
+          attempt,
+          runtimeOwnerId,
+          finishedAtMs,
+        ),
+      );
+    }
     return this.write(`claim attempt completion ${nodeId}#${attempt}`, () =>
       this.internalStorage
         .updateWhere(
@@ -2665,6 +2770,20 @@ export class SmithersDb {
     );
   }
   claimAttemptTerminal(runId, nodeId, iteration, attempt, runtimeOwnerId, state, finishedAtMs, errorJson) {
+    if (this.flowsStorageDelegates()) {
+      return this.write(`claim attempt ${state} ${nodeId}#${attempt}`, async () =>
+        (await this.flowsCompat()).claimAttemptTerminal(
+          runId,
+          nodeId,
+          iteration,
+          attempt,
+          runtimeOwnerId,
+          state,
+          finishedAtMs,
+          errorJson,
+        ),
+      );
+    }
     return this.write(`claim attempt ${state} ${nodeId}#${attempt}`, async () => {
       const claimed = await this.internalStorage
         .updateWhere(
@@ -2715,6 +2834,21 @@ export class SmithersDb {
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
   heartbeatAttempt(runId, nodeId, iteration, attempt, heartbeatAtMs, heartbeatDataJson, runtimeOwnerId) {
+    if (this.flowsStorageDelegates()) {
+      // Stage 1.1: both heartbeats are fenced by the flows run and attempt
+      // stores in one flows transaction.
+      return this.write(`heartbeat attempt ${nodeId}#${attempt}`, async () =>
+        (await this.flowsCompat()).heartbeatAttempt(
+          runId,
+          nodeId,
+          iteration,
+          attempt,
+          heartbeatAtMs,
+          heartbeatDataJson,
+          runtimeOwnerId,
+        ),
+      );
+    }
     // Both rows are one ownership-fenced fact.  Deliberately abort the
     // transaction when either side loses the fence; returning false after
     // only updating the attempt would leave stale-owner evidence visible to
@@ -4563,6 +4697,11 @@ export class SmithersDb {
   insertEventWithNextSeq(row) {
     const label = `insert event ${row.type}`;
     const self = this;
+    if (this.flowsStorageDelegates()) {
+      // Stage 1.1: the flows journal allocates the sequence inside the write
+      // transaction that commits the row.
+      return this.write(label, async () => (await this.flowsCompat()).insertEventWithNextSeq(row));
+    }
     // Finalization owns the surrounding transaction.  Do not open a
     // second transaction (or silently queue this write after COMMIT) when
     // an event is part of that atomic lifecycle transition.
