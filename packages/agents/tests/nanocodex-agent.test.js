@@ -74,7 +74,7 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
   let lifecycle;
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), "smithers-nanocodex-agent-"));
+    directory = await realpath(await mkdtemp(join(tmpdir(), "smithers-nanocodex-agent-")));
     binary = join(directory, "fake-smithers-nanocodex.mjs");
     capture = join(directory, "commands.jsonl");
     lifecycle = join(directory, "lifecycle.log");
@@ -262,8 +262,8 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
   });
 
   test("forwards the explicit stock-agent policy/auth options and applies workspace precedence", async () => {
-    const constructorWorkspace = await mkdtemp(join(tmpdir(), "smithers-nanocodex-constructor-"));
-    const callWorkspace = await mkdtemp(join(tmpdir(), "smithers-nanocodex-call-"));
+    const constructorWorkspace = await realpath(await mkdtemp(join(tmpdir(), "smithers-nanocodex-constructor-")));
+    const callWorkspace = await realpath(await mkdtemp(join(tmpdir(), "smithers-nanocodex-call-")));
     try {
       await agent({
         cwd: constructorWorkspace,

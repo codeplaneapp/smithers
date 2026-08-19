@@ -37,7 +37,7 @@
     "@smthrs/vcs": "workspace:*",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
-    "effect": "4.0.0-beta.105",
+    "effect": "4.0.0-rc.108",
     "esbuild": "^0.28.1",
     "playwright": "^1.61.1",
     "react": "^19.2.7",
@@ -47,7 +47,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260701.1",
-    "@effect/platform-bun": "4.0.0-beta.105",
+    "@effect/platform-bun": "4.0.0-rc.108",
     "@smthrs/errors": "workspace:*",
     "@types/better-sqlite3": "^7.6.11",
     "@types/bun": "latest",

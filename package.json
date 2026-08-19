@@ -144,7 +144,7 @@
   "pnpm": {
     "overrides": {
       "@opentelemetry/propagator-jaeger": "2.9.0",
-      "effect": "4.0.0-beta.105",
+      "effect": "4.0.0-rc.108",
       "@smthrs/cli": "link:apps/cli"
     },
     "onlyBuiltDependencies": [
@@ -164,7 +164,7 @@
   ],
   "overrides": {
     "@opentelemetry/propagator-jaeger": "2.9.0",
-    "effect": "4.0.0-beta.105"
+    "effect": "4.0.0-rc.108"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.10.6",
@@ -229,7 +229,7 @@
     "bun-types": "^1.3.14",
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",
-    "effect": "4.0.0-beta.105",
+    "effect": "4.0.0-rc.108",
     "esbuild": "^0.28.1",
     "oxfmt": "^0.60.0",
     "oxlint": "^1.72.0",

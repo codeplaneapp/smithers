@@ -6,7 +6,7 @@ settings:
 
 overrides:
   '@opentelemetry/propagator-jaeger': 2.9.0
-  effect: 4.0.0-beta.105
+  effect: 4.0.0-rc.108
   '@smthrs/cli': link:apps/cli
 
 importers:
@@ -213,8 +213,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
@@ -285,8 +285,8 @@ importers:
         specifier: ^0.8.5
         version: 0.8.5
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       mermaid:
         specifier: ^11.16.0
         version: 11.16.0
@@ -486,8 +486,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
@@ -616,17 +616,17 @@ importers:
   apps/observability:
     dependencies:
       '@effect/opentelemetry':
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105(@opentelemetry/api-logs@0.217.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-web@2.6.1(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)(effect@4.0.0-beta.105)
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(@opentelemetry/api-logs@0.217.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-web@2.6.1(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)(effect@4.0.0-rc.108)
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       '@effect/platform-node-shared':
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -698,8 +698,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/ui-styleguide
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       mermaid:
         specifier: ^11.16.0
         version: 11.16.0
@@ -1053,8 +1053,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
@@ -1078,8 +1078,8 @@ importers:
         specifier: 4.20260701.1
         version: 4.20260701.1
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       '@smthrs/errors':
         specifier: workspace:*
         version: link:../packages/errors
@@ -1170,8 +1170,8 @@ importers:
         specifier: ^7.0.10
         version: 7.0.10(zod@4.4.3)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1288,8 +1288,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -1347,8 +1347,8 @@ importers:
         specifier: ^0.8.3
         version: 0.8.3(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0))(zod@4.4.3)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1396,8 +1396,8 @@ importers:
         specifier: workspace:*
         version: link:../scheduler
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1425,14 +1425,14 @@ importers:
   packages/engine:
     dependencies:
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       '@effect/platform-node-shared':
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       '@effect/sql-sqlite-bun':
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
@@ -1485,8 +1485,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       react:
         specifier: ^19.2.7
         version: 19.2.7
@@ -1498,8 +1498,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105(effect@4.0.0-beta.105)(ioredis@5.11.1)
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1)
       '@types/bun':
         specifier: latest
         version: 1.3.14
@@ -1520,8 +1520,8 @@ importers:
   packages/errors:
     dependencies:
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -1595,8 +1595,8 @@ importers:
         specifier: 5.101.2
         version: 5.101.2(react@19.2.7)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
     devDependencies:
       '@happy-dom/global-registrator':
         specifier: ^20.10.6
@@ -1746,8 +1746,8 @@ importers:
         specifier: workspace:*
         version: link:../scheduler
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       react:
         specifier: ^19.2.7
         version: 19.2.7
@@ -1799,8 +1799,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1864,8 +1864,8 @@ importers:
         specifier: ^7.0.10
         version: 7.0.10(zod@4.4.3)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -1960,8 +1960,8 @@ importers:
         specifier: latest
         version: 1.3.14
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -1987,8 +1987,8 @@ importers:
         specifier: workspace:*
         version: link:../scheduler
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -2006,8 +2006,8 @@ importers:
         specifier: workspace:*
         version: link:../graph
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -2040,8 +2040,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -2110,8 +2110,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       hono:
         specifier: ^4.12.27
         version: 4.12.27
@@ -2144,8 +2144,8 @@ importers:
   packages/smithers:
     dependencies:
       '@effect/platform-node-shared':
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       '@mdx-js/esbuild':
         specifier: ^3.1.1
         version: 3.1.1(esbuild@0.28.1)
@@ -2258,8 +2258,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       incur:
         specifier: ^0.4.10
         version: 0.4.10
@@ -2323,8 +2323,8 @@ importers:
         specifier: workspace:*
         version: link:../scheduler
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -2345,11 +2345,11 @@ importers:
   packages/time-travel:
     dependencies:
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       '@effect/platform-node-shared':
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       '@smthrs/db':
         specifier: workspace:*
         version: link:../db
@@ -2378,8 +2378,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       picocolors:
         specifier: ^1.1.1
         version: 1.1.1
@@ -2579,18 +2579,18 @@ importers:
   packages/vcs:
     dependencies:
       '@effect/platform-node-shared':
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
     devDependencies:
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       '@types/bun':
         specifier: latest
         version: 1.3.14
@@ -2664,8 +2664,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       smthrs:
         specifier: workspace:*
         version: link:../smithers
@@ -3273,8 +3273,8 @@ packages:
     resolution: {integrity: sha512-0dEVyRLM/lG4gp1R/Ik5bfPl/1wX00xFwd5KcNH602tzBa09oF7pbTKETEhR1GjZ75K6OJnYFu8II2dyMhONMw==}
     engines: {node: '>=16'}
 
-  '@effect/opentelemetry@4.0.0-beta.105':
-    resolution: {integrity: sha512-1OzmjmhzwSzixTZS3d2to/EIcAlpfnCrkYuqp2pTlropmPGJ2cB/E2VUDz30mXQJ4Uh+05ntw7upvtp3voZYlQ==}
+  '@effect/opentelemetry@4.0.0-rc.108':
+    resolution: {integrity: sha512-jlJ3XmYhPQv3XV75mIBWUdggkCLIhSNQK2lGM3M89/ifdwkYfKBsPbW1AP36l54ImH79Hi0JrNdL8lOUhctHmg==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
       '@opentelemetry/api': '>=1.9.0 <2.0.0'
@@ -3286,7 +3286,7 @@ packages:
       '@opentelemetry/sdk-trace-node': '>=2.0.0 <3.0.0'
       '@opentelemetry/sdk-trace-web': '>=2.0.0 <3.0.0'
       '@opentelemetry/semantic-conventions': '>=1.33.0 <2.0.0'
-      effect: 4.0.0-beta.105
+      effect: 4.0.0-rc.108
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
@@ -3305,28 +3305,28 @@ packages:
       '@opentelemetry/sdk-trace-web':
         optional: true
 
-  '@effect/platform-bun@4.0.0-beta.105':
-    resolution: {integrity: sha512-5eCuMLxfkLbVK5If5zFybyKduQvhYofy0oPsbTH8UiIrYqyx5QqK9G9PZ1SfBsbqHfykwLEpMCdzQczFGERw2w==}
+  '@effect/platform-bun@4.0.0-rc.108':
+    resolution: {integrity: sha512-27RoALzmzx6Qp4LrPIE8bYJfHe+8ZaAO3xLhJMEE6mVA8fxcPh4HAGwBv09Nk2qTFVh578SlSCY5ojUlqeSJ4A==}
     peerDependencies:
-      effect: 4.0.0-beta.105
+      effect: 4.0.0-rc.108
 
-  '@effect/platform-node-shared@4.0.0-beta.105':
-    resolution: {integrity: sha512-UfeC8cFm4sP+XW14OO66CcOGJ8PcD102hH0kLwj8xUVL6nYIDGE/SJvlfVmFx+9OWF6rnjfXjMV6vyl6mCdhCQ==}
+  '@effect/platform-node-shared@4.0.0-rc.108':
+    resolution: {integrity: sha512-g5dSRR+tHzFcWav5A6zbug78oV8WPJL5BJqgKlKtow0cQ2IpULcLZaP2xCYR3RJDvz5SETREmPCJ+BNONIsalw==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      effect: 4.0.0-beta.105
+      effect: 4.0.0-rc.108
 
-  '@effect/platform-node@4.0.0-beta.105':
-    resolution: {integrity: sha512-gOHtgE9PqCT8aiiM0W7ZSbu4M2/jPGfJOKWuyBCxofNV5Np36fFY55FSa1MtyG+vjOjlD5btNY2i6i/SPtRqTA==}
+  '@effect/platform-node@4.0.0-rc.108':
+    resolution: {integrity: sha512-Nof78154BaHGdSYr4TPQFZ5+Dg+HkpmbI3SQUdwsby5QNs6yahGJPu2AgdIVqdx7pKZ2w7j/bvdnqoMmkG0PbA==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      effect: 4.0.0-beta.105
+      effect: 4.0.0-rc.108
       ioredis: '>=5.7.0 <6.0.0'
 
-  '@effect/sql-sqlite-bun@4.0.0-beta.105':
-    resolution: {integrity: sha512-wKdkRWA6dYQmJL5YeSDxbvTRC6PUui+kfdpHpK36h96CwzXuWBx99MtZ97MzwfhjOVLgXBQDJE4OT7y9BD9FDA==}
+  '@effect/sql-sqlite-bun@4.0.0-rc.108':
+    resolution: {integrity: sha512-DfulBKzAyX7CwAT7Kk+/Ht7t6HggyBaOwJLPWortnyJGKmIImp4Jwn73M0ifwL3nubz7RgBm1Pf5YnZODwBJKw==}
     peerDependencies:
-      effect: 4.0.0-beta.105
+      effect: 4.0.0-rc.108
 
   '@electric-sql/client@1.5.22':
     resolution: {integrity: sha512-bOlxcMHc39OUnvXNKa/rxtBTPwpxk/SerasFFi8Psw3825/uGvsT7br8YTWzMaETxWu6kvaPc5CXdYTyx5eJgw==}
@@ -7982,8 +7982,8 @@ packages:
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
 
-  effect@4.0.0-beta.105:
-    resolution: {integrity: sha512-7U5OzWVNlpnZFvXiZfOeu8V+dCQUa3Om569HnYG2Dx8C8V6uoKS920kFJkIDEYVhlSGhzkRqaGKmYY9bPkBMMQ==}
+  effect@4.0.0-rc.108:
+    resolution: {integrity: sha512-KmI3DlKZWPvCL4QQ2FMaPOuxMt/7DrKMENCY/gQ+MkDR5QYw25wgU5Zmh/wVLboNjIci1gNOgNCFe4xqgxli3A==}
 
   electrobun@1.18.1:
     resolution: {integrity: sha512-tgZ+WKGskn/1/Y5i1mpVCCkgRa1O31Tz7MIArBTK44GfPzT43uOq9c/HvxdQGrLeZV8ZvjK1lQrwqSXCgh6tvA==}
@@ -12272,10 +12272,10 @@ snapshots:
     dependencies:
       '@edge-runtime/primitives': 4.1.0
 
-  '@effect/opentelemetry@4.0.0-beta.105(@opentelemetry/api-logs@0.217.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-web@2.6.1(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)(effect@4.0.0-beta.105)':
+  '@effect/opentelemetry@4.0.0-rc.108(@opentelemetry/api-logs@0.217.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-web@2.6.1(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)(effect@4.0.0-rc.108)':
     dependencies:
       '@opentelemetry/semantic-conventions': 1.41.1
-      effect: 4.0.0-beta.105
+      effect: 4.0.0-rc.108
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
       '@opentelemetry/api-logs': 0.217.0
@@ -12286,27 +12286,27 @@ snapshots:
       '@opentelemetry/sdk-trace-node': 2.7.1(@opentelemetry/api@1.9.0)
       '@opentelemetry/sdk-trace-web': 2.6.1(@opentelemetry/api@1.9.0)
 
-  '@effect/platform-bun@4.0.0-beta.105(effect@4.0.0-beta.105)':
+  '@effect/platform-bun@4.0.0-rc.108(effect@4.0.0-rc.108)':
     dependencies:
-      '@effect/platform-node-shared': 4.0.0-beta.105(effect@4.0.0-beta.105)
-      effect: 4.0.0-beta.105
+      '@effect/platform-node-shared': 4.0.0-rc.108(effect@4.0.0-rc.108)
+      effect: 4.0.0-rc.108
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node-shared@4.0.0-beta.105(effect@4.0.0-beta.105)':
+  '@effect/platform-node-shared@4.0.0-rc.108(effect@4.0.0-rc.108)':
     dependencies:
       '@types/ws': 8.18.1
-      effect: 4.0.0-beta.105
+      effect: 4.0.0-rc.108
       ws: 8.21.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node@4.0.0-beta.105(effect@4.0.0-beta.105)(ioredis@5.11.1)':
+  '@effect/platform-node@4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1)':
     dependencies:
-      '@effect/platform-node-shared': 4.0.0-beta.105(effect@4.0.0-beta.105)
-      effect: 4.0.0-beta.105
+      '@effect/platform-node-shared': 4.0.0-rc.108(effect@4.0.0-rc.108)
+      effect: 4.0.0-rc.108
       ioredis: 5.11.1
       mime: 4.1.0
       undici: 8.9.0
@@ -12314,9 +12314,9 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@effect/sql-sqlite-bun@4.0.0-beta.105(effect@4.0.0-beta.105)':
+  '@effect/sql-sqlite-bun@4.0.0-rc.108(effect@4.0.0-rc.108)':
     dependencies:
-      effect: 4.0.0-beta.105
+      effect: 4.0.0-rc.108
 
   '@electric-sql/client@1.5.22':
     dependencies:
@@ -16967,7 +16967,7 @@ snapshots:
 
   ee-first@1.1.1: {}
 
-  effect@4.0.0-beta.105:
+  effect@4.0.0-rc.108:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.9.0
