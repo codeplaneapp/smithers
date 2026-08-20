@@ -23,7 +23,6 @@ import { buildGenerateResult } from "./buildGenerateResult.js";
 import { runCommandEffect } from "./runCommandEffect.js";
 import { sanitizeCliArgs } from "./sanitizeCliArgs.js";
 import { taskContextEnv } from "./taskContextEnv.js";
-import { assertKnownCliAgentOptions } from "./agentOptionKeys.js";
 
 const QUOTA_PATTERNS = [
   /\bhit\s+your\s+(usage|session|weekly|daily|monthly|rate)\s+limit\b/i,
@@ -184,14 +183,6 @@ function classifyNonRetryableAgentError(message, command, context = {}) {
  * - claude: `--resume <id>` of a killed/relocated conversation prints
  *   `No conversation found with session ID: <id>` (isolated jj worktrees can
  *   relocate the cwd its conversation store is keyed by).
- * - codex: when the response stream drops before the rollout is recorded, the
- *   thread id was captured but never persisted, so `exec resume <id>` fails
- *   `thread/resume failed: no rollout found for thread id <id> (code -32600)`.
- *   The disconnect is transient; without discarding the id the retry resumes
- *   the same non-existent thread and the run burns its whole attempt budget
- *   before failing over.
- * - grok: a deleted or relocated session reports `Session does not exist` (or
- *   the title-resolution equivalent) when `--resume` is reused.
  *
  * `hadResumeSession` says whether THIS invocation actually resumed a prior
  * session. When it did not — the session that broke was already freshly
@@ -202,6 +193,15 @@ function classifyNonRetryableAgentError(message, command, context = {}) {
  * `freshSessionFailure: true` and an honest message (issue #1480).
  */
 export function classifySessionLoss(command, errorText, rawStderr, hadResumeSession = true) {
+  // A provider quota rejection often prints its own resume hint on the way out:
+  // kimi's billing-cycle 403 ("You've reached your usage limit for this billing
+  // cycle", access_terminated_error) ends with "To resume this session: kimi -r
+  // <id>". Matching that hint first turns an exhausted account into a retryable
+  // session loss, so the task burns its whole attempt budget in ~3s bursts
+  // instead of parking or failing over, and reports "the kimi CLI is failing to
+  // establish sessions" instead of the truth. Quota always wins. The two
+  // signals can arrive on different streams, so test them together.
+  if (classifyQuotaError(`${errorText ?? ""}\n${rawStderr ?? ""}`, command)) return null;
   const kimiMatch =
     command === "kimi"
       ? rawStderr.match(/kimi -r ([0-9a-f-]{8,})/i) || errorText.match(/kimi -r ([0-9a-f-]{8,})/i)
@@ -221,26 +221,6 @@ export function classifySessionLoss(command, errorText, rawStderr, hadResumeSess
       },
     );
   }
-  const codexMatch =
-    command === "codex"
-      ? errorText.match(/no rollout found for thread id\s+([0-9a-z-]{8,})/i) ||
-        rawStderr.match(/no rollout found for thread id\s+([0-9a-z-]{8,})/i)
-      : null;
-  if (codexMatch) {
-    return new SmithersError(
-      "AGENT_SESSION_LOST",
-      hadResumeSession
-        ? `Codex thread ${codexMatch[1]} has no recorded rollout; the persisted resume id is dead. Retry will start a fresh session.`
-        : `Codex thread ${codexMatch[1]} has no recorded rollout even though this attempt started a FRESH session — the codex CLI is failing to record rollouts; retrying it will not help. Failing over to the next agent in the chain (if any).`,
-      {
-        failureRetryable: true,
-        discardResumeSession: true,
-        freshSessionFailure: !hadResumeSession,
-        command: "codex",
-        codexThreadId: codexMatch[1],
-      },
-    );
-  }
   const claudeMatch =
     command === "claude"
       ? errorText.match(/No conversation found with session ID:?\s*([0-9a-f-]{8,})?/i) ||
@@ -250,33 +230,11 @@ export function classifySessionLoss(command, errorText, rawStderr, hadResumeSess
     const lostId = claudeMatch[1] ? ` ${claudeMatch[1]}` : "";
     return new SmithersError(
       "AGENT_SESSION_LOST",
-      hadResumeSession
-        ? `Claude conversation${lostId} no longer exists; the persisted resume id is dead. Retry will start a fresh session.`
-        : `Claude conversation${lostId} was not found even though this attempt started a FRESH session — the claude CLI is failing to establish sessions on this account; retrying it will not help. Failing over to the next agent in the chain (if any).`,
+      `Claude conversation${lostId} no longer exists; the persisted resume id is dead. Retry will start a fresh session.`,
       {
         failureRetryable: true,
         discardResumeSession: true,
-        freshSessionFailure: !hadResumeSession,
         command: "claude",
-      },
-    );
-  }
-  const grokMatch =
-    command === "grok"
-      ? errorText.match(/Session does not exist|no session id or title matched/i) ||
-        rawStderr.match(/Session does not exist|no session id or title matched/i)
-      : null;
-  if (grokMatch) {
-    return new SmithersError(
-      "AGENT_SESSION_LOST",
-      hadResumeSession
-        ? "Grok session no longer exists; the persisted resume id is dead. Retry will start a fresh session."
-        : "Grok session was not found even though this attempt started a FRESH session — the grok CLI is failing to establish sessions; retrying it will not help. Failing over to the next agent in the chain (if any).",
-      {
-        failureRetryable: true,
-        discardResumeSession: true,
-        freshSessionFailure: !hadResumeSession,
-        command: "grok",
       },
     );
   }
@@ -695,27 +653,6 @@ function extractErrorFromJsonPayload(raw) {
   }
   return undefined;
 }
-
-const CLI_FAILURE_PREVIEW_CHARS = 200;
-
-/**
- * Keep structured stdout useful when it is the only failure signal without
- * copying an arbitrarily large provider event into the durable error/log line.
- *
- * @param {string} raw
- * @returns {string}
- */
-function summarizeStructuredFailureOutput(raw) {
-  const trimmed = stripOscSequences(raw).trim();
-  if (!trimmed) return "";
-  const metadataPrefix = trimmed.slice(0, 4_096);
-  const type = /"type"\s*:\s*"([^"\\]{1,80})"/.exec(metadataPrefix)?.[1];
-  const subtype = /"subtype"\s*:\s*"([^"\\]{1,80})"/.exec(metadataPrefix)?.[1];
-  const event = type ? (subtype ? `${type}/${subtype}` : type) : "unknown";
-  const preview = trimmed.slice(0, CLI_FAILURE_PREVIEW_CHARS).replace(/\r/g, "\\r").replace(/\n/g, "\\n");
-  const suffix = trimmed.length > CLI_FAILURE_PREVIEW_CHARS ? "…" : "";
-  return `CLI stdout fallback (event=${event}, bytes=${Buffer.byteLength(trimmed, "utf8")}, preview=${preview}${suffix})`;
-}
 /**
  * @param {string[]} args
  * @returns {string | undefined}
@@ -983,13 +920,10 @@ export class BaseCliAgent {
   idleTimeoutMs;
   maxOutputBytes;
   extraArgs;
-  onQuotaExceeded;
   /**
    * @param {BaseCliAgentOptions} opts
-   * @param {string} [agentName]
    */
-  constructor(opts, agentName = "BaseCliAgent") {
-    assertKnownCliAgentOptions(opts, agentName);
+  constructor(opts) {
     this.id = opts.id ?? randomUUID();
     this.model = opts.model;
     this.systemPrompt = opts.systemPrompt ?? opts.instructions;
@@ -1001,7 +935,6 @@ export class BaseCliAgent {
     this.idleTimeoutMs = opts.idleTimeoutMs;
     this.maxOutputBytes = opts.maxOutputBytes;
     this.extraArgs = opts.extraArgs;
-    this.onQuotaExceeded = opts.onQuotaExceeded;
   }
   /**
    * @param {AgentGenerateOptions | undefined} options
@@ -1051,17 +984,7 @@ export class BaseCliAgent {
         Effect.flatMap((durationMs) => Metric.update(taggedMetric(agentDurationMs, metricTags), durationMs)),
       );
     const agentCtx = { agentId: this.id, agentModel: this.model, agentEngine: resolveAgentEngineTag(this) };
-    const classifyQuota = (message, command) => {
-      const quota = classifyQuotaError(message, command, agentCtx);
-      if (quota && this.onQuotaExceeded) {
-        try {
-          this.onQuotaExceeded(/** @type {any} */ (quota.details ?? {}));
-        } catch {
-          // Quota persistence is best-effort and must not mask the provider error.
-        }
-      }
-      return quota;
-    };
+    const classifyQuota = (message, command) => classifyQuotaError(message, command, agentCtx);
     const program = Effect.all(
       [
         Metric.update(taggedMetric(agentInvocationsTotal, metricTags), 1),
@@ -1123,7 +1046,6 @@ export class BaseCliAgent {
           let stdoutBuffer = "";
           let stderrBuffer = "";
           let completedEvent = null;
-          let lastStructuredFailureOutput = "";
           /**
            * @param {AgentCliEvent[] | AgentCliEvent | null | undefined} eventPayload
            */
@@ -1154,9 +1076,6 @@ export class BaseCliAgent {
             }
             for (const line of lines) {
               if (!line) continue;
-              if (stream === "stdout" && (outputFormat === "json" || outputFormat === "stream-json")) {
-                lastStructuredFailureOutput = summarizeStructuredFailureOutput(line);
-              }
               emitEvents(stream === "stdout" ? interpreter.onStdoutLine?.(line) : interpreter.onStderrLine?.(line));
             }
             if (stream === "stdout") {
@@ -1234,7 +1153,7 @@ export class BaseCliAgent {
               const filteredStderr = filterBenignStderr(result.stderr, commandSpec.benignStderrPatterns);
               if (!(commandSpec.command === "codex" && filteredStderr.length === 0)) {
                 const structuredError =
-                  outputFormat === "json" || outputFormat === "stream-json"
+                  commandSpec.outputFormat === "json" || commandSpec.outputFormat === "stream-json"
                     ? extractErrorFromJsonPayload(result.stdout)
                     : undefined;
                 // Prefer a distilled error over the raw stdout tail: a
@@ -1250,16 +1169,11 @@ export class BaseCliAgent {
                 // exited with code N") carries less signal than stderr;
                 // only a real distilled message may outrank it.
                 const interpreterError = /exited with code/i.test(rawInterpreterError) ? "" : rawInterpreterError;
-                const rawStdout = result.stdout.trim();
-                const stdoutFallback =
-                  outputFormat === "json" || outputFormat === "stream-json"
-                    ? lastStructuredFailureOutput || summarizeStructuredFailureOutput(rawStdout)
-                    : rawStdout;
                 const errorText =
                   structuredError ||
                   interpreterError ||
                   filteredStderr ||
-                  stdoutFallback ||
+                  result.stdout.trim() ||
                   `CLI exited with code ${result.exitCode}`;
                 const quota = classifyQuota(errorText, commandSpec.command);
                 if (quota) {
