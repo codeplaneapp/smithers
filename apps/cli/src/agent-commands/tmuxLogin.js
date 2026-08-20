@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { listAccounts } from "@smthrs/accounts";
+import { readClaudeCredentials } from "@smthrs/usage";
 import { findDuplicateAccounts, formatAccountIdentity, readAccountIdentity } from "./accountIdentity.js";
 import {
   SUBSCRIPTION_DIR_ENV_VAR,
@@ -25,14 +26,26 @@ const CREDENTIAL_PROBES = {
   // the OAuth token in a per-config-dir Keychain item instead. `.claude.json`
   // gains an `oauthAccount` object the moment login completes on every
   // platform, so it doubles as the storage-agnostic completion marker.
-  "claude-code": (configDir) =>
-    existsSync(join(configDir, ".credentials.json")) || claudeStateShowsLogin(join(configDir, ".claude.json")),
+  "claude-code": (configDir) => claudeCredentialsUsable(configDir),
   codex: (configDir) => existsSync(join(configDir, "auth.json")),
   kimi: (configDir) => existsSync(join(configDir, "credentials.json")) || existsSync(join(configDir, "auth.json")),
   grok: (configDir) => existsSync(join(configDir, "auth.json")),
   antigravity: (configDir) =>
     existsSync(join(configDir, "oauth_creds.json")) || existsSync(join(configDir, "credentials.json")),
 };
+
+/**
+ * Whether the account holds a Claude OAuth token it can actually use. Reads the
+ * same credential source as the usage probe, so "logged in" means the same
+ * thing to `agents add` as it does to `smithers usage`.
+ *
+ * @param {string} configDir
+ */
+function claudeCredentialsUsable(configDir) {
+  const creds = readClaudeCredentials({ configDir });
+  if (!creds) return false;
+  return typeof creds.expiresAt !== "number" || creds.expiresAt > Date.now();
+}
 
 /** @param {string} statePath */
 function claudeStateShowsLogin(statePath) {
@@ -162,6 +175,31 @@ export function startTmuxLoginSession(input) {
   return { ok: true, sessionName, attachCmd, loginCmd, reused: false };
 }
 
+// An OAuth URL that a provider CLI wants the user to open, as opposed to a
+// docs or status link it may also print.
+const LOGIN_URL_HINT = /(oauth|authoriz|\/auth|login|device|verify)/i;
+
+/**
+ * Scrape the provider CLI's login URL out of the tmux pane.
+ *
+ * The CLIs print the authorize URL to their own terminal, never to the stdout
+ * of the process that spawned them, so a caller that cannot attach to the
+ * session (the quota dashboard, an editor, a wizard) otherwise has no way to
+ * reach the link. `-J` joins wrapped lines, which matters because these URLs
+ * are long enough to wrap even in the 220-column login pane.
+ *
+ * @param {string} sessionName
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string | null}
+ */
+export function captureLoginUrl(sessionName, env = process.env) {
+  const result = spawnSync("tmux", ["capture-pane", "-p", "-J", "-t", sessionName], { env, encoding: "utf8" });
+  if (result.status !== 0) return null;
+  const urls = (result.stdout ?? "").match(/https:\/\/[^\s"'<>)\]]+/g);
+  if (!urls || urls.length === 0) return null;
+  return urls.find((url) => LOGIN_URL_HINT.test(url)) ?? urls[0];
+}
+
 /**
  * Poll the config dir until the provider's credential artifact appears.
  *
@@ -172,8 +210,19 @@ export async function waitForLoginCredentials(input) {
   const timeoutMs = input.timeoutMs ?? 600_000;
   const pollMs = input.pollMs ?? 2_000;
   const startedAt = Date.now();
+  // On macOS the Claude token lands in a Keychain item this process may not be
+  // able to read, and `.claude.json` gains its `oauthAccount` marker the moment
+  // the login completes. The marker is a sound *transition* signal, but it
+  // outlives the token it describes, so it counts only when it flips during
+  // this wait. Treating a pre-existing marker as success would end the wait
+  // instantly and register an account holding no credential at all.
+  const markerPath = join(input.configDir, ".claude.json");
+  const markerAtStart = input.provider === "claude-code" && claudeStateShowsLogin(markerPath);
+  const loginCompleted = () =>
+    credentialsPresent(input.provider, input.configDir) ||
+    (input.provider === "claude-code" && !markerAtStart && claudeStateShowsLogin(markerPath));
   while (true) {
-    if (credentialsPresent(input.provider, input.configDir)) {
+    if (loginCompleted()) {
       return { ok: true, elapsedMs: Date.now() - startedAt };
     }
     const elapsedMs = Date.now() - startedAt;
@@ -219,7 +268,7 @@ function reportAccountIdentity(provider, configDir, label, env, onStatus) {
  * credential artifact, then register the account. Emits progress through
  * `onStatus` (plain strings — both the flag path and the wizard render them).
  *
- * @param {import("./runAgentAdd.js").RunAgentAddInput & { timeoutMs?: number; onStatus?: (message: string) => void }} input
+ * @param {import("./runAgentAdd.js").RunAgentAddInput & { timeoutMs?: number; onStatus?: (message: string) => void; onLoginUrl?: (url: string) => void }} input
  * @returns {Promise<ReturnType<typeof runAgentAdd> | { ok: false; reason: string; detail: string; configDir?: string }>}
  */
 export async function runAgentAddWithTmuxLogin(input) {
@@ -261,11 +310,22 @@ export async function runAgentAddWithTmuxLogin(input) {
       : `Started login session ${session.sessionName} running: ${session.loginCmd}`,
   );
   onStatus(`Attach to finish the browser login:\n\n  ${session.attachCmd}\n`);
+  /** @type {string | null} */
+  let loginUrl = null;
   const wait = await waitForLoginCredentials({
     provider: input.provider,
     configDir,
     timeoutMs: input.timeoutMs,
     onPoll: (elapsedMs) => {
+      // The CLI needs a moment to render its URL, so scrape the pane until one
+      // appears rather than only once at startup.
+      if (!loginUrl) {
+        loginUrl = captureLoginUrl(session.sessionName, env);
+        if (loginUrl) {
+          onStatus(`Open this URL to finish the login:\n\n  ${loginUrl}\n`);
+          input.onLoginUrl?.(loginUrl);
+        }
+      }
       // One status line every ~30s so long waits stay visibly alive.
       if (elapsedMs > 0 && Math.floor(elapsedMs / 30_000) !== Math.floor((elapsedMs - 2_000) / 30_000)) {
         onStatus(`Waiting for login… (${Math.round(elapsedMs / 1000)}s; attach with: ${session.attachCmd})`);
