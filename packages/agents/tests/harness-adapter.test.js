@@ -85,8 +85,59 @@ describe("Harness/AgentLike adapter", () => {
         return { text: Adapter.name };
       };
       const result = await collect(agent.run(step, host));
+      expect(result.map((event) => event._tag)).toEqual([
+        "turn-opened", "model-settled", "turn-closed", "resolved",
+      ]);
       expect(resolvedText(result.at(-1).message)).toBe(Adapter.name);
     }
+  });
+
+  test("CLI harnesses project legacy usage into canonical model settlement", async () => {
+    const agent = Object.create(CodexAgent.prototype);
+    agent.generate = async () => ({
+      text: "done",
+      usage: Promise.resolve({
+        inputTokens: 10,
+        outputTokens: 4,
+        reasoningTokens: 2,
+        totalTokens: 14,
+        inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 1 },
+      }),
+    });
+
+    const result = await collect(agent.run(step, host));
+
+    expect(result.find((event) => event._tag === "model-settled").usage).toEqual({
+      inputTokens: 10,
+      outputTokens: 4,
+      reasoningTokens: 2,
+      totalTokens: 14,
+      cachedInputTokens: 3,
+      cacheWriteTokens: 1,
+    });
+  });
+
+  test("legacy onEvent checkpoints open the turn before forwarding without stdout", async () => {
+    const checkpoint = { codec: "third-party", version: 1, payload: { cursor: 2 } };
+    const checkpointEvent = new AgentEvent.ResumeToken({
+      eventType: "flows.harness.resume-token.v1",
+      agentEngine: "smithers-agent-checkpoint",
+      agentResume: JSON.stringify(checkpoint),
+      discardResumeSession: false,
+    });
+    const agent = {
+      async generate({ onEvent }) {
+        onEvent({ type: "harness-event", event: checkpointEvent });
+        return { text: "done", checkpoint };
+      },
+    };
+
+    const result = await collect(agentLikeToHarness(agent).run(step, host));
+
+    expect(result.map((event) => event._tag)).toEqual([
+      "turn-opened", "resume-token", "model-settled", "turn-closed", "resolved",
+    ]);
+    expect(result[1]).toBe(checkpointEvent);
   });
 
   test("harnessToAgentLike forwards every concrete AgentEvent as it arrives", async () => {

@@ -34,6 +34,22 @@ const settledObject = async (value) => {
   return Object.fromEntries(await Promise.all(Object.entries(value).map(async ([key, entry]) => [key, await entry])));
 };
 
+const usageOf = (usage) => {
+  if (!usage || typeof usage !== "object") return {};
+  return {
+    ...(typeof usage.inputTokens === "number" ? { inputTokens: usage.inputTokens } : {}),
+    ...(typeof usage.outputTokens === "number" ? { outputTokens: usage.outputTokens } : {}),
+    ...(typeof usage.reasoningTokens === "number" ? { reasoningTokens: usage.reasoningTokens } : {}),
+    ...(typeof usage.totalTokens === "number" ? { totalTokens: usage.totalTokens } : {}),
+    ...(typeof usage.inputTokenDetails?.cacheReadTokens === "number"
+      ? { cachedInputTokens: usage.inputTokenDetails.cacheReadTokens }
+      : {}),
+    ...(typeof usage.inputTokenDetails?.cacheWriteTokens === "number"
+      ? { cacheWriteTokens: usage.inputTokenDetails.cacheWriteTokens }
+      : {}),
+  };
+};
+
 const textOf = (value) => {
   if (typeof value === "string") return value;
   if (value && typeof value === "object" && typeof value.text === "string") return value.text;
@@ -177,17 +193,32 @@ export const agentLikeToHarness = (agent, runtime) => {
         Effect.sync(() => {
           const controller = new AbortController();
           let streamed = "";
-          let resolved = false;
           let sawHarnessEvent = false;
+          let sawTerminalHarnessEvent = false;
           const emittedCheckpointTokens = new Set();
+          let opened = false;
+          const open = () => {
+            if (opened || nativeEvents) return;
+            opened = true;
+            Queue.offerUnsafe(queue, new AgentEvent.TurnOpened({
+              eventType: "flows.harness.turn-opened.v1",
+              seat: step.seat ?? "smithers:legacy",
+              modelParams: {},
+              activeToolNames: step.activeToolNames ?? [],
+              contextDigest: step.prompt?.digest ?? "smithers-legacy:prompt",
+            }));
+          };
           const run = generateOptionsOf(agent, step, host, controller.signal, runtime).then((generatedOptions) => agent.generate({
             ...generatedOptions,
             onStdout(text) {
               streamed += text;
-              if (!nativeEvents) Queue.offerUnsafe(queue, new AgentEvent.ModelDelta({
-                eventType: "flows.harness.model-delta.v1",
-                delta: { type: "text-delta", id: "legacy", text },
-              }));
+              if (!nativeEvents) {
+                open();
+                Queue.offerUnsafe(queue, new AgentEvent.ModelDelta({
+                  eventType: "flows.harness.model-delta.v1",
+                  delta: { type: "text-delta", id: "legacy", text },
+                }));
+              }
             },
             onStderr(text) {
               if (!nativeEvents) Queue.offerUnsafe(queue, bridgeEvent("stderr", text));
@@ -201,7 +232,9 @@ export const agentLikeToHarness = (agent, runtime) => {
             onEvent(value) {
               if (value.type === "harness-event") {
                 sawHarnessEvent = true;
-                resolved ||= value.event._tag === "resolved";
+                sawTerminalHarnessEvent ||= ["turn-closed", "suspended", "aborted", "resolved"].includes(value.event._tag);
+                if (value.event._tag === "turn-opened") opened = true;
+                else open();
                 if (value.event._tag === "resume-token" && value.event.agentEngine === checkpointEngine) {
                   emittedCheckpointTokens.add(value.event.agentResume);
                 }
@@ -212,6 +245,7 @@ export const agentLikeToHarness = (agent, runtime) => {
             },
           })).then(async (result) => {
             const settled = await settledObject(result);
+            open();
             if (result?.checkpoint) {
               const agentResume = JSON.stringify(result.checkpoint);
               if (!emittedCheckpointTokens.has(agentResume)) Queue.offerUnsafe(queue, new AgentEvent.ResumeToken({
@@ -222,13 +256,27 @@ export const agentLikeToHarness = (agent, runtime) => {
               }));
             }
             if (!nativeEvents && !sawHarnessEvent && settled && typeof settled === "object") {
-              const { checkpoint: _checkpoint, ...metadata } = settled;
-              Queue.offerUnsafe(queue, bridgeEvent("result", metadata));
+              const { checkpoint: _checkpoint, text: _text, usage: _usage, ...metadata } = settled;
+              if (Object.keys(metadata).length > 0) Queue.offerUnsafe(queue, bridgeEvent("result", metadata));
             }
-            if (!resolved) Queue.offerUnsafe(queue, new AgentEvent.Resolved({
-              eventType: "flows.harness.resolved.v1",
-              message: ModelRequest.Message.assistant(textOf(settled?.text ?? settled) || streamed),
-            }));
+            if (!nativeEvents && !sawTerminalHarnessEvent) {
+              open();
+              const message = ModelRequest.Message.assistant(textOf(settled?.text ?? settled) || streamed, { stopReason: "stop" });
+              Queue.offerUnsafe(queue, new AgentEvent.ModelSettled({
+                eventType: "flows.harness.model-settled.v1",
+                message,
+                usage: usageOf(settled?.usage),
+              }));
+              Queue.offerUnsafe(queue, new AgentEvent.TurnClosed({
+                eventType: "flows.harness.turn-closed.v1",
+                stopReason: "stop",
+                outcome: "resolved",
+              }));
+              Queue.offerUnsafe(queue, new AgentEvent.Resolved({
+                eventType: "flows.harness.resolved.v1",
+                message,
+              }));
+            }
             Queue.endUnsafe(queue);
           }, (cause) => {
             if (controller.signal.aborted) return;
