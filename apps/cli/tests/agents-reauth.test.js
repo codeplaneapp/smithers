@@ -67,6 +67,36 @@ describe("reauthClaudeAccounts", () => {
     expect(results[0]).toMatchObject({ ok: true, refreshed: true, reauthenticated: false });
   });
 
+  test("refreshOnly never clears credentials or opens a browser sign-in", async () => {
+    // The quota dashboard heals lapsed tokens on its own, with nobody watching
+    // a browser. The interactive recovery path deletes the stored credential
+    // before prompting, so it must stay out of reach of an automatic caller.
+    const root = makeTempDirPath("smithers-reauth-refresh-only-");
+    const accounts = [account(root, "one", "one@example.com", "org-one")];
+    const credentialFile = join(root, "one", ".credentials.json");
+    writeFileSync(credentialFile, JSON.stringify({ claudeAiOauth: { accessToken: "old", expiresAt: 1 } }));
+    const calls = [];
+    const results = await reauthClaudeAccounts({
+      accounts,
+      refreshOnly: true,
+      env: { SMITHERS_HOME: root },
+      spawn(command, args) {
+        calls.push([command, ...args]);
+        // Not signed in: the only way forward is the browser path.
+        if (args[0] === "auth" && args[1] === "status") {
+          return { status: 0, stdout: JSON.stringify({ loggedIn: false }), stderr: "" };
+        }
+        return { status: 1, stdout: "", stderr: "" };
+      },
+      readCredentials: () => ({ accessToken: "old", expiresAt: 1 }),
+      usageProbe: async () => ({ source: "none", windows: [] }),
+    });
+    expect(calls.some((call) => call.includes("login"))).toBe(false);
+    expect(calls.some((call) => call.includes("logout"))).toBe(false);
+    expect(existsSync(credentialFile)).toBe(true);
+    expect(results[0]).toMatchObject({ ok: false, reauthenticated: false, error: "needs browser authentication" });
+  });
+
   test("force logs in each account sequentially and verifies a credential artifact", async () => {
     const root = makeTempDirPath("smithers-reauth-force-");
     const accounts = [

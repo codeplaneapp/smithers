@@ -109,7 +109,7 @@ function sameSubscription(before, after) {
 /**
  * Reauthenticate registered Claude accounts sequentially.
  *
- * @param {{ force?: boolean; label?: string; includeDefault?: boolean; env?: NodeJS.ProcessEnv; accounts?: import("@smthrs/accounts").Account[]; spawn?: typeof spawnSync; usageProbe?: (account: { label: string; provider: "claude-code"; configDir?: string }) => Promise<ClaudeUsageProbe>; readCredentials?: typeof readClaudeCredentials; onStatus?: (message: string) => void }} [input]
+ * @param {{ force?: boolean; label?: string; includeDefault?: boolean; refreshOnly?: boolean; env?: NodeJS.ProcessEnv; accounts?: import("@smthrs/accounts").Account[]; spawn?: typeof spawnSync; usageProbe?: (account: { label: string; provider: "claude-code"; configDir?: string }) => Promise<ClaudeUsageProbe>; readCredentials?: typeof readClaudeCredentials; onStatus?: (message: string) => void }} [input]
  */
 export async function reauthClaudeAccounts(input = {}) {
   const env = input.env ?? process.env;
@@ -137,6 +137,20 @@ export async function reauthClaudeAccounts(input = {}) {
       ? { live: false, refreshed: false }
       : await probeClaudeLogin(account, { env, spawn, usageProbe, readCredentials });
     let reauthenticated = false;
+    if (!health.live && input.refreshOnly) {
+      // Callers with no human at a browser (the quota dashboard's automatic
+      // heal, CI) must not reach the recovery path below: it deletes the
+      // stored credential and then blocks on an interactive sign-in.
+      onStatus(`${account.label} needs browser authentication; skipping (refresh only).`);
+      results.push({
+        label: account.label,
+        ok: false,
+        reauthenticated: false,
+        refreshed: health.refreshed,
+        error: "needs browser authentication",
+      });
+      continue;
+    }
     if (!health.live) {
       onStatus(`${account.label} needs browser authentication.`);
       clearClaudeLogin(account, env, spawn);

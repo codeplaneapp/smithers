@@ -7362,6 +7362,10 @@ const agentsCli = Cli.create({
       provider: z.enum(["claude-code"]).default("claude-code").describe("Account provider to reauthenticate"),
       label: z.string().optional().describe("Only reauthenticate this account label"),
       force: z.boolean().default(false).describe("Reauthenticate even when the current login is live"),
+      refreshOnly: z
+        .boolean()
+        .default(false)
+        .describe("Only refresh lapsed tokens; never clear credentials or open a browser sign-in"),
       includeDefault: z
         .boolean()
         .default(false)
@@ -7372,6 +7376,7 @@ const agentsCli = Cli.create({
         const results = await reauthClaudeAccounts({
           force: c.options.force,
           label: c.options.label,
+          refreshOnly: c.options.refreshOnly,
           includeDefault: c.options.includeDefault,
           onStatus: (message) => process.stderr.write(`${message}\n`),
         });
