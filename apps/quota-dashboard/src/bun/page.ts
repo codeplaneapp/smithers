@@ -157,7 +157,12 @@ function windowRow(name, w) {
 // browser login the dashboard can drive.
 const CAN_LOGIN = new Set(["claude-code", "codex", "kimi", "antigravity"]);
 
+// A lapsed token recovers without a browser, so offer that first; the server
+// also starts it automatically when it sees one.
+const canRefresh = (seat) => seat.provider === "claude-code" && /expired/i.test(seat.error ?? "");
+
 const seatActions = (seat) => \`<span class="spacer"></span>
+    \${canRefresh(seat) ? \`<button class="act login" data-refresh="\${seat.label}" title="Refresh this token without a browser">refresh</button>\` : ""}
     \${CAN_LOGIN.has(seat.provider) ? \`<button class="act login" data-login="\${seat.label}">log in</button>\` : ""}
     <button class="act" data-remove="\${seat.label}" title="Remove this account">✕</button>\`;
 
@@ -242,6 +247,9 @@ async function load() {
   try {
     const res = await fetch("/api/usage", { cache: "no-store" });
     render(await res.json());
+    // The snapshot request is also what starts an automatic token refresh, so
+    // look for jobs the server just created rather than only ones we asked for.
+    pollJobs();
   } catch (err) {
     document.getElementById("root").innerHTML = '<div class="banner">' + err.message + "</div>";
   }
@@ -249,13 +257,23 @@ async function load() {
 
 function renderJobs(jobs) {
   const el = document.getElementById("jobs");
-  const visible = jobs.filter((j) => !j.done || j.ok === false);
+  // A finished job stays up briefly. A login that exits without needing a
+  // browser used to disappear the instant it completed, which read as the
+  // button doing nothing at all.
+  const visible = jobs.filter((j) => !j.done || j.ok === false || Date.now() - (j.finishedAt ?? 0) < 90000);
   el.innerHTML = visible
     .map((j) => {
-      const verb = j.kind === "add" ? "Adding" : "Re-login for";
-      const state = j.done ? "failed" : "waiting for the browser login to complete…";
+      const verb = j.kind === "add" ? "Adding" : j.kind === "refresh" ? "Refreshing the token for" : "Re-login for";
+      const state = !j.done
+        ? j.kind === "refresh"
+          ? "refreshing…"
+          : "waiting for the browser login to complete…"
+        : j.ok === false
+          ? "failed"
+          : (j.note ?? "done");
       const tail = j.lines.slice(-2).join(" · ");
       return \`<div class="job">\${verb} <b>\${j.label}</b> (\${j.provider}): \${state}
+        \${j.loginUrl ? \`<div>Opened in your browser: <a href="\${j.loginUrl}" target="_blank">\${j.loginUrl}</a></div>\` : ""}
         \${j.attachCmd ? \`<div>Drive the login from a terminal: <code>\${j.attachCmd}</code></div>\` : ""}
         \${tail ? \`<div class="tail">\${tail}</div>\` : ""}
       </div>\`;
@@ -264,35 +282,64 @@ function renderJobs(jobs) {
 }
 
 let jobTimer = null;
+const settledJobs = new Set();
 async function pollJobs() {
   if (jobTimer) { clearTimeout(jobTimer); jobTimer = null; }
   try {
     const res = await fetch("/api/jobs", { cache: "no-store" });
     const { jobs } = await res.json();
     renderJobs(jobs);
-    if (jobs.some((j) => !j.done)) {
+    for (const j of jobs) {
+      if (j.done && j.ok && !settledJobs.has(j.id)) {
+        settledJobs.add(j.id);
+        load();
+      }
+    }
+    // Keep polling while anything is pending or still on screen, so a finished
+    // job clears itself instead of sticking until the next manual refresh.
+    if (jobs.some((j) => !j.done || Date.now() - (j.finishedAt ?? 0) < 90000)) {
       jobTimer = setTimeout(pollJobs, 3000);
-    } else if (jobs.some((j) => j.done && j.ok)) {
-      load();
     }
   } catch {
     jobTimer = setTimeout(pollJobs, 3000);
   }
 }
 
+// A click that fails must never look like a click that did nothing: report the
+// reason in the job strip instead of dropping it.
+function reportActionError(message) {
+  const el = document.getElementById("jobs");
+  el.innerHTML = '<div class="job">' + message + "</div>" + el.innerHTML;
+}
+
 async function post(path, body) {
-  await fetch(path, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  try {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      reportActionError("Request failed (" + res.status + ").");
+    } else if (payload && payload.error) {
+      reportActionError(payload.error);
+    }
+    return payload;
+  } catch (err) {
+    reportActionError("Could not reach the dashboard backend: " + err.message + ". The app may have been restarted; reopen it.");
+    return {};
+  }
 }
 
 document.addEventListener("click", async (event) => {
-  const target = event.target.closest("[data-add],[data-remove],[data-login]");
+  const target = event.target.closest("[data-add],[data-remove],[data-login],[data-refresh]");
   if (!target) return;
   if (target.dataset.add) {
     await post("/api/accounts/add", { provider: target.dataset.add });
+    pollJobs();
+  } else if (target.dataset.refresh) {
+    await post("/api/accounts/refresh", { label: target.dataset.refresh });
     pollJobs();
   } else if (target.dataset.login) {
     await post("/api/accounts/login", { label: target.dataset.login });

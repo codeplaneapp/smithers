@@ -1,5 +1,5 @@
 import Electrobun, { BrowserWindow } from "electrobun/bun";
-import { listJobs, removeAccount, startAddAccount, startRelogin } from "./accounts";
+import { autoRefreshExpired, listJobs, removeAccount, startAddAccount, startRefresh, startRelogin } from "./accounts";
 import { PAGE_HTML } from "./page";
 import { readSnapshot } from "./usage";
 
@@ -21,7 +21,11 @@ const server = Bun.serve({
   async fetch(req) {
     const { pathname } = new URL(req.url);
     if (pathname === "/api/usage") {
-      return Response.json(readSnapshot(), {
+      const snapshot = readSnapshot();
+      // A lapsed token recovers without a human, so heal it here rather than
+      // rendering the provider's "run `claude` to refresh" advice as an error.
+      autoRefreshExpired(snapshot);
+      return Response.json(snapshot, {
         headers: { "cache-control": "no-store" },
       });
     }
@@ -35,6 +39,10 @@ const server = Bun.serve({
     if (req.method === "POST" && pathname === "/api/accounts/login") {
       const body = (await req.json().catch(() => ({}))) as { label?: string };
       return Response.json(startRelogin(body.label ?? ""));
+    }
+    if (req.method === "POST" && pathname === "/api/accounts/refresh") {
+      const body = (await req.json().catch(() => ({}))) as { label?: string };
+      return Response.json(startRefresh(body.label ?? ""));
     }
     if (req.method === "POST" && pathname === "/api/accounts/remove") {
       const body = (await req.json().catch(() => ({}))) as { label?: string };
