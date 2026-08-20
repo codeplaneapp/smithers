@@ -7,6 +7,7 @@ import { SmithersError } from "@smthrs/errors/SmithersError";
 import { DEFAULT_AGENT_CHECKPOINT_MAX_BYTES } from "./agent-checkpoint.js";
 import { buildGenerateResult, extractPrompt, resolveTimeouts, toolKindFromName } from "./BaseCliAgent/index.js";
 import { taskContextEnv } from "./BaseCliAgent/taskContextEnv.js";
+import { isValidatedHarnessInvocation, runAgentLikeHarness } from "./harness-adapter.js";
 import {
   NANOCODEX_CHECKPOINT_CAPABILITIES,
   NANOCODEX_CHECKPOINT_FORMATS,
@@ -97,6 +98,14 @@ export class NanocodexAgent {
   }
 
   /**
+   * @param {import("@flows/harness/AgentStep").AgentStep} step
+   * @param {import("@flows/harness/AgentStep").HostLike} host
+   */
+  run(step, host) {
+    return runAgentLikeHarness(this, step, host);
+  }
+
+  /**
    * Side-effect-free binary/protocol compatibility check. No agent, workspace
    * tool runtime, authentication request, or provider connection is created.
    *
@@ -137,7 +146,7 @@ export class NanocodexAgent {
     assertSupportedHost();
     assertGenerateBoundary(args);
     const { prompt, systemFromMessages } = extractPrompt(args);
-    if (systemFromMessages) {
+    if (systemFromMessages && !isValidatedHarnessInvocation(args)) {
       throw configError(
         "Nanocodex does not accept per-call system messages; configure complete instructions on the agent.",
       );
@@ -152,7 +161,8 @@ export class NanocodexAgent {
     const effectiveEnvironment = Object.freeze(inheritEnv ? { ...process.env, ...environment } : { ...environment });
     const configuredAuth = this.auth();
     assertConfiguredAuthentication(configuredAuth, effectiveEnvironment);
-    const policyFingerprint = createNanocodexPolicyFingerprint(this.opts.instructions ?? null);
+    const instructions = [this.opts.instructions, systemFromMessages].filter(Boolean).join("\n\n") || null;
+    const policyFingerprint = createNanocodexPolicyFingerprint(instructions);
     const maxCheckpointBytes = resolveCheckpointLimit(this.opts.maxCheckpointBytes, args.maxAgentCheckpointBytes);
     let continuation = null;
     if (Object.hasOwn(args, "resumeCheckpoint")) {
@@ -180,7 +190,7 @@ export class NanocodexAgent {
       workspace,
       auth,
       options: compactObject({
-        instructions: this.opts.instructions,
+        instructions: instructions ?? undefined,
         model: continuation ? (this.opts.model === undefined ? undefined : this.model) : this.model,
         thinking: this.opts.thinking,
         reasoningMode: this.opts.reasoningMode,

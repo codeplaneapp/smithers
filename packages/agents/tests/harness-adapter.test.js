@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import * as AgentEvent from "@flows/harness/AgentEvent";
 import * as ModelRequest from "@flows/model/ModelRequest";
 import { Effect, Option, Stream } from "effect";
-import { agentLikeToHarness, harnessToAgentLike } from "../src/index.js";
+import {
+  AmpAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, CursorAgent, ForgeAgent, GeminiAgent,
+  GrokAgent, HermesAgent, HermesCliAgent, KimiAgent, NanocodexAgent, OmpAgent, OpenClawAgent,
+  OpenCodeAgent, PiAgent, agentLikeToHarness, harnessToAgentLike,
+} from "../src/index.js";
 
 const assistant = ModelRequest.Message.assistant("done", { stopReason: "stop" });
 const identity = { session: "s", frame: 0, cell: "cell", ordinal: 0, declaration: "decl", layers: [] };
@@ -31,11 +35,59 @@ const events = [
   new AgentEvent.Resolved({ eventType: "flows.harness.resolved.v1", message: assistant }),
 ];
 
-const step = { prompt: { text: "prompt" } };
+const step = {
+  system: { text: "system" },
+  instructions: [{ text: "instruction one" }, { text: "instruction two" }],
+  prompt: { text: "prompt" },
+};
 const host = {};
 const collect = (stream) => Effect.runPromise(Stream.runCollect(stream)).then(Array.from);
+const resolvedText = (message) => message.content.filter((part) => part.type === "text").map((part) => part.text).join("");
 
 describe("Harness/AgentLike adapter", () => {
+  test("translates the complete declared prompt and propagates cancellation", async () => {
+    let received;
+    let aborted = false;
+    const agent = {
+      generate(options) {
+        received = options;
+        options.onStdout("started");
+        return new Promise((_, reject) => options.abortSignal.addEventListener("abort", () => {
+          aborted = true;
+          reject(options.abortSignal.reason);
+        }, { once: true }));
+      },
+    };
+
+    await Effect.runPromise(Stream.runDrain(Stream.take(agentLikeToHarness(agent).run(step, host), 1)));
+    await Promise.resolve();
+
+    expect(received.messages).toEqual([
+      { role: "system", content: "system\n\ninstruction one\n\ninstruction two" },
+      { role: "user", content: "prompt" },
+    ]);
+    expect(received.harnessStep).toBe(step);
+    expect(received.harnessHost).toBe(host);
+    expect(aborted).toBe(true);
+  });
+
+  test("every CLI-driven first-class adapter runs through the Harness contract", async () => {
+    const adapters = [
+      ClaudeCodeAgent, CodexAgent, GeminiAgent, OpenCodeAgent, AmpAgent, CursorAgent, GrokAgent,
+      KimiAgent, HermesAgent, HermesCliAgent, AntigravityAgent, OmpAgent, OpenClawAgent, PiAgent,
+      NanocodexAgent, ForgeAgent,
+    ];
+    for (const Adapter of adapters) {
+      const agent = Object.create(Adapter.prototype);
+      agent.generate = async (options) => {
+        expect(options.messages[0].content).toContain("instruction one");
+        return { text: Adapter.name };
+      };
+      const result = await collect(agent.run(step, host));
+      expect(resolvedText(result.at(-1).message)).toBe(Adapter.name);
+    }
+  });
+
   test("harnessToAgentLike forwards every concrete AgentEvent as it arrives", async () => {
     const seen = [];
     const agent = harnessToAgentLike({ run: () => Stream.fromIterable(events) });

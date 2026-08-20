@@ -1,9 +1,13 @@
+import * as _flows_harness_AgentEvent from '@flows/harness/AgentEvent';
 import { AgentEvent } from '@flows/harness/AgentEvent';
+import * as _flows_harness_AgentStep from '@flows/harness/AgentStep';
 import { AgentStep, HostLike } from '@flows/harness/AgentStep';
 import * as _smthrs_errors_SmithersError from '@smthrs/errors/SmithersError';
 import { SmithersError as SmithersError$1 } from '@smthrs/errors/SmithersError';
 import { Effect } from 'effect';
 import { spawn } from 'node:child_process';
+import * as effect_Stream from 'effect/Stream';
+import * as _flows_harness_HarnessError from '@flows/harness/HarnessError';
 
 /**
  * Normalized cross-harness file-change record. See
@@ -570,6 +574,12 @@ declare class BaseCliAgent {
         quotaResetAtMs?: number;
         underlying?: string;
     }) => void) | undefined;
+    /**
+     * Execute this CLI adapter through the flows Harness contract.
+     * @param {import("@flows/harness/AgentStep").AgentStep} step
+     * @param {import("@flows/harness/AgentStep").HostLike} host
+     */
+    run(step: _flows_harness_AgentStep.AgentStep, host: _flows_harness_AgentStep.HostLike): effect_Stream.Stream<_flows_harness_AgentEvent.TurnOpened | _flows_harness_AgentEvent.ModelDelta | _flows_harness_AgentEvent.ModelSettled | _flows_harness_AgentEvent.Elaborated | _flows_harness_AgentEvent.ChildProgress | _flows_harness_AgentEvent.ChildResult | _flows_harness_AgentEvent.CellProduced | _flows_harness_AgentEvent.CellCallStarted | _flows_harness_AgentEvent.CellCallSettled | _flows_harness_AgentEvent.CellSettled | _flows_harness_AgentEvent.TransitionApplied | _flows_harness_AgentEvent.Suspended | _flows_harness_AgentEvent.CompactionSettled | _flows_harness_AgentEvent.SteeringDrained | _flows_harness_AgentEvent.TurnClosed | _flows_harness_AgentEvent.PermissionRequired | _flows_harness_AgentEvent.ResumeToken | _flows_harness_AgentEvent.Aborted | _flows_harness_AgentEvent.Resolved, _flows_harness_HarnessError.HarnessError, never>;
     /**
      * @param {AgentGenerateOptions | undefined} options
      * @param {AgentInvocationOperation} operation

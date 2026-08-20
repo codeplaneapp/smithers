@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 import { errorToJson } from "@smthrs/errors/errorToJson";
+import { Effect, Stream } from "effect";
 
 import { NanocodexAgent } from "../src/NanocodexAgent.js";
 
@@ -1169,7 +1170,7 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
     ).rejects.toMatchObject({ code: "AGENT_CLI_ERROR", details: { bridgeCode: "bridge_idle_timeout" } });
   });
 
-  test("fails closed on unsupported outer features", async () => {
+  test("fails closed on unsupported outer features and ordinary system messages", async () => {
     expect(() => new NanocodexAgent({ endpoint: "https://example.test" })).toThrow("unsupported field");
     expect(() => new NanocodexAgent({ thinking: "unbounded" })).toThrow("thinking level");
     expect(
@@ -1181,15 +1182,26 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
       "checkpoints",
     );
     await expect(instance.generate({ prompt: "x", rootDir: directory, tools: {} })).rejects.toThrow("JavaScript tools");
-    await expect(
-      instance.generate({
-        messages: [
-          { role: "system", content: "hidden override" },
-          { role: "user", content: "x" },
-        ],
-        rootDir: directory,
-      }),
-    ).rejects.toThrow("system messages");
+    await expect(instance.generate({
+      messages: [
+        { role: "system", content: "hidden override" },
+        { role: "user", content: "x" },
+      ],
+      rootDir: directory,
+      harnessStep: { system: { text: "hidden override" }, instructions: [], prompt: { text: "x" } },
+      harnessHost: {},
+    })).rejects.toThrow("system messages");
+    expect(await readFile(capture, "utf8").catch(() => "")).toBe("");
+  });
+
+  test("accepts instructions from a validated harness invocation", async () => {
+    const instance = agent();
+    await Effect.runPromise(Stream.runDrain(instance.run({
+      system: { text: "declared harness instructions" },
+      instructions: [],
+      prompt: { text: "x" },
+    }, {})));
+    expect((await capturedCommands(capture))[0].data.options.instructions).toBe("declared harness instructions");
   });
 
   test("rejects malformed abort signals before starting a bridge", async () => {

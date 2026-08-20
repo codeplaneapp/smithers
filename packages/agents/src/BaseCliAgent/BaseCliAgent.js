@@ -24,6 +24,7 @@ import { runCommandEffect } from "./runCommandEffect.js";
 import { sanitizeCliArgs } from "./sanitizeCliArgs.js";
 import { taskContextEnv } from "./taskContextEnv.js";
 import { assertKnownCliAgentOptions } from "./agentOptionKeys.js";
+import { runAgentLikeHarness } from "../harness-adapter.js";
 
 const QUOTA_PATTERNS = [
   /\bhit\s+your\s+(usage|session|weekly|daily|monthly|rate)\s+limit\b/i,
@@ -1002,6 +1003,14 @@ export class BaseCliAgent {
     this.maxOutputBytes = opts.maxOutputBytes;
     this.extraArgs = opts.extraArgs;
     this.onQuotaExceeded = opts.onQuotaExceeded;
+  }
+  /**
+   * Execute this CLI adapter through the flows Harness contract.
+   * @param {import("@flows/harness/AgentStep").AgentStep} step
+   * @param {import("@flows/harness/AgentStep").HostLike} host
+   */
+  run(step, host) {
+    return runAgentLikeHarness(this, step, host);
   }
   /**
    * @param {AgentGenerateOptions | undefined} options

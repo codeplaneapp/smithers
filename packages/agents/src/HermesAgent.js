@@ -1,5 +1,6 @@
 import { SmithersError } from "@smthrs/errors/SmithersError";
 import { OpenAIAgent } from "./OpenAIAgent.js";
+import { runAgentLikeHarness } from "./harness-adapter.js";
 
 /**
  * @template [CALL_OPTIONS=never], [TOOLS=import("./Tool.ts").ToolSet]
@@ -18,6 +19,13 @@ import { OpenAIAgent } from "./OpenAIAgent.js";
  * @template [CALL_OPTIONS=never], [TOOLS=import("./Tool.ts").ToolSet]
  */
 export class HermesAgent extends OpenAIAgent {
+  /**
+   * @param {import("@flows/harness/AgentStep").AgentStep} step
+   * @param {import("@flows/harness/AgentStep").HostLike} host
+   */
+  run(step, host) {
+    return runAgentLikeHarness(this, step, host);
+  }
   /**
    * @param {HermesAgentOptions<CALL_OPTIONS, TOOLS>} [opts]
    */

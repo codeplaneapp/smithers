@@ -1,9 +1,10 @@
 import * as AgentEvent from "@flows/harness/AgentEvent";
 import { HarnessError } from "@flows/harness/HarnessError";
 import * as ModelRequest from "@flows/model/ModelRequest";
-import { Effect, Queue, Stream } from "effect";
+import { Cause, Effect, Queue, Stream } from "effect";
 
 const emitsHarnessEvents = Symbol("emitsHarnessEvents");
+const harnessInvocation = Symbol("harnessInvocation");
 
 const textOf = (value) => {
   if (typeof value === "string") return value;
@@ -15,6 +16,40 @@ const messageText = (message) => message.content
   .filter((part) => part.type === "text")
   .map((part) => part.text)
   .join("");
+
+const generateOptionsOf = (step, host, abortSignal) => {
+  const system = [step.system, ...step.instructions]
+    .map((section) => section.text)
+    .filter((text) => text.length > 0)
+    .join("\n\n");
+  const options = {
+    messages: [
+      ...(system ? [{ role: "system", content: system }] : []),
+      { role: "user", content: step.prompt.text },
+    ],
+    abortSignal,
+    harnessStep: step,
+    harnessHost: host,
+  };
+  Object.defineProperty(options, harnessInvocation, {
+    enumerable: true,
+    value: Object.freeze({ step, host }),
+  });
+  return options;
+};
+
+/**
+ * True only for options minted by the AgentLike-to-Harness bridge. Presence of
+ * the public step/host fields alone is insufficient to authorize instruction
+ * translation on legacy generate() calls.
+ *
+ * @param {unknown} options
+ */
+export const isValidatedHarnessInvocation = (options) => {
+  if (!options || typeof options !== "object") return false;
+  const invocation = options[harnessInvocation];
+  return invocation !== undefined && invocation.step === options.harnessStep && invocation.host === options.harnessHost;
+};
 
 /**
  * Adapt the legacy Smithers AgentLike contract to the flows Harness contract.
@@ -30,12 +65,11 @@ export const agentLikeToHarness = (agent) => {
     run(step, host) {
       return Stream.callback((queue) => Effect.acquireRelease(
         Effect.sync(() => {
+          const controller = new AbortController();
           let streamed = "";
           let resolved = false;
           const run = agent.generate({
-            prompt: step.prompt.text,
-            harnessStep: step,
-            harnessHost: host,
+            ...generateOptionsOf(step, host, controller.signal),
             onStdout(text) {
               streamed += text;
               if (!nativeEvents) Queue.offerUnsafe(queue, new AgentEvent.ModelDelta({
@@ -55,18 +89,32 @@ export const agentLikeToHarness = (agent) => {
               message: ModelRequest.Message.assistant(textOf(result) || streamed),
             }));
             Queue.endUnsafe(queue);
-          }, (cause) => Queue.failUnsafe(queue, new HarnessError({
-            code: "unknown",
-            message: cause instanceof Error ? cause.message : String(cause),
-            cause,
-          })));
-          return run;
+          }, (cause) => {
+            if (controller.signal.aborted) return;
+            Queue.failCauseUnsafe(queue, Cause.fail(new HarnessError({
+              code: "unknown",
+              message: cause instanceof Error ? cause.message : String(cause),
+              cause,
+            })));
+          });
+          return { controller, run };
         }),
-        () => Effect.void,
+        ({ controller }) => Effect.sync(() => controller.abort(new DOMException("Harness stream interrupted", "AbortError"))),
       ));
     },
   };
 };
+
+/**
+ * Native Harness entrypoint shared by first-class agents while generate()
+ * remains available for legacy workflows.
+ *
+ * @param {import("./AgentLike.ts").AgentLike} agent
+ * @param {import("@flows/harness/AgentStep").AgentStep} step
+ * @param {import("@flows/harness/AgentStep").HostLike} host
+ * @returns {ReturnType<import("@flows/harness/Harness").Harness["run"]>}
+ */
+export const runAgentLikeHarness = (agent, step, host) => agentLikeToHarness(agent).run(step, host);
 
 /**
  * Adapt a flows Harness for legacy workflow code expecting AgentLike.generate.
