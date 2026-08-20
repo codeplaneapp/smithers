@@ -3,6 +3,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { PoolAgent, createPoolCapabilityRegistry } from "../src/PoolAgent.js";
+import { Stream } from "effect";
 
 const originalPath = process.env.PATH ?? "";
 
@@ -24,6 +25,12 @@ afterEach(() => {
 });
 
 describe("PoolAgent", () => {
+  test("exposes the flows Harness entrypoint", () => {
+    const agent = new PoolAgent();
+    expect(typeof agent.run).toBe("function");
+    expect(Stream.isStream(agent.run({ prompt: { text: "pool" } }, {}))).toBe(true);
+  });
+
   test("builds pool command arguments for streamed execution", async () => {
     const agent = new PoolAgent({
       agentName: "default",

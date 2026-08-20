@@ -121,6 +121,33 @@ describe("fallbackAgents", () => {
     expect(distinct.size).toBeGreaterThan(1);
   });
 
+  test("keeps the legacy nine-seat assignment for a fixed runId", () => {
+    const seats = Array.from({ length: 9 }, (_, index) => ({
+      label: `seat-${index + 1}`,
+      provider: index % 2 === 0 ? "claude-code" : "codex",
+      configDir: `/tmp/seat-${index + 1}`,
+    }));
+    const env = registryEnv(seats);
+    const taskAgent = (ctx) => fallbackAgents({ env, fallback: [], seed: ctx.runId });
+    const ctx = { runId: "run-fixed-legacy-seat-pool" };
+    const assignment = taskAgent(ctx)
+      .map((agent) => agent.id?.replace("smithers-account:", ""));
+    expect(assignment).toEqual([
+      "seat-5",
+      "seat-4",
+      "seat-8",
+      "seat-1",
+      "seat-3",
+      "seat-2",
+      "seat-6",
+      "seat-7",
+      "seat-9",
+    ]);
+    expect(assignment).toHaveLength(9);
+    expect(taskAgent(ctx)
+      .every((agent) => typeof agent.run === "function")).toBe(true);
+  });
+
   test("orders by cached Fable headroom before the seeded tie-break", () => {
     const env = registryEnv([CLAUDE_1, CLAUDE_2]);
     const entry = (label, usedPercent) => ({

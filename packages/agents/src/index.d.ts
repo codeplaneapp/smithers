@@ -1,14 +1,16 @@
 import * as zod from 'zod';
 import { ZodType } from 'zod';
 import { A as AgentGenerateOptions$2, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$f, h as CodexConfigOverrides, i as AgentCliEvent$1, G as GenerateTextResult$2, j as CliOutputInterpreter$g, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1, u as AgentHarnessEvent$1 } from './index-sEzwMfWy.js';
+import * as _flows_harness_AgentStep from '@flows/harness/AgentStep';
+import { AgentStep, HostLike } from '@flows/harness/AgentStep';
+import * as _flows_harness_Harness from '@flows/harness/Harness';
+import { Harness } from '@flows/harness/Harness';
 import { Model } from '@flows/model/Model';
-import * as effect_Stream from 'effect/Stream';
 import * as _flows_harness_HarnessError from '@flows/harness/HarnessError';
 import * as _flows_harness_AgentEvent from '@flows/harness/AgentEvent';
-import * as _flows_harness_AgentStep from '@flows/harness/AgentStep';
-import * as _flows_harness_Harness from '@flows/harness/Harness';
+import { Stream } from 'effect';
+import * as effect_Stream from 'effect/Stream';
 import '@smthrs/errors/SmithersError';
-import 'effect';
 import 'node:child_process';
 
 /**
@@ -435,6 +437,8 @@ type AgentLike$2 = {
      * workflow run. A rejected promise fails the task without retrying.
      */
     preflight?: (args?: AgentGenerateOptions$2) => Promise<void>;
+    /** Native flows Harness entrypoint exposed by first-class adapters. */
+    run?: (step: AgentStep, host: HostLike) => ReturnType<Harness["run"]>;
     /**
      * Generates a response or action based on the provided arguments.
      *
@@ -771,6 +775,12 @@ declare class ModelAgent {
     model: any;
     modelId: string;
     tools: any;
+    /**
+     * Execute this provider adapter through the flows Harness contract.
+     * @param {import("@flows/harness/AgentStep").AgentStep} step
+     * @param {import("@flows/harness/AgentStep").HostLike} host
+     */
+    run(step: _flows_harness_AgentStep.AgentStep, host: _flows_harness_AgentStep.HostLike): Stream.Stream<_flows_harness_AgentEvent.TurnOpened | _flows_harness_AgentEvent.ModelDelta | _flows_harness_AgentEvent.ModelSettled | _flows_harness_AgentEvent.Elaborated | _flows_harness_AgentEvent.ChildProgress | _flows_harness_AgentEvent.ChildResult | _flows_harness_AgentEvent.CellProduced | _flows_harness_AgentEvent.CellCallStarted | _flows_harness_AgentEvent.CellCallSettled | _flows_harness_AgentEvent.CellSettled | _flows_harness_AgentEvent.TransitionApplied | _flows_harness_AgentEvent.Suspended | _flows_harness_AgentEvent.CompactionSettled | _flows_harness_AgentEvent.SteeringDrained | _flows_harness_AgentEvent.TurnClosed | _flows_harness_AgentEvent.PermissionRequired | _flows_harness_AgentEvent.ResumeToken | _flows_harness_AgentEvent.Aborted | _flows_harness_AgentEvent.Resolved, _flows_harness_HarnessError.HarnessError, never>;
     resolveModel(): Promise<any>;
     /** @param {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} [args] */
     generate(args?: AgentGenerateOptions$2): Promise<any>;
@@ -806,11 +816,6 @@ declare class HermesAgent<CALL_OPTIONS = never, TOOLS = ToolSet$1> extends OpenA
      * @param {HermesAgentOptions<CALL_OPTIONS, TOOLS>} [opts]
      */
     constructor(opts?: HermesAgentOptions$1<CALL_OPTIONS, TOOLS>);
-    /**
-     * @param {import("@flows/harness/AgentStep").AgentStep} step
-     * @param {import("@flows/harness/AgentStep").HostLike} host
-     */
-    run(step: _flows_harness_AgentStep.AgentStep, host: _flows_harness_AgentStep.HostLike): effect_Stream.Stream<_flows_harness_AgentEvent.TurnOpened | _flows_harness_AgentEvent.ModelDelta | _flows_harness_AgentEvent.ModelSettled | _flows_harness_AgentEvent.Elaborated | _flows_harness_AgentEvent.ChildProgress | _flows_harness_AgentEvent.ChildResult | _flows_harness_AgentEvent.CellProduced | _flows_harness_AgentEvent.CellCallStarted | _flows_harness_AgentEvent.CellCallSettled | _flows_harness_AgentEvent.CellSettled | _flows_harness_AgentEvent.TransitionApplied | _flows_harness_AgentEvent.Suspended | _flows_harness_AgentEvent.CompactionSettled | _flows_harness_AgentEvent.SteeringDrained | _flows_harness_AgentEvent.TurnClosed | _flows_harness_AgentEvent.PermissionRequired | _flows_harness_AgentEvent.ResumeToken | _flows_harness_AgentEvent.Aborted | _flows_harness_AgentEvent.Resolved, _flows_harness_HarnessError.HarnessError, never>;
 }
 type HermesAgentOptions$1<CALL_OPTIONS = never, TOOLS = ToolSet$1> = HermesAgentOptions$2<CALL_OPTIONS, TOOLS>;
 

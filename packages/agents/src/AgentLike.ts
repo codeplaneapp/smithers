@@ -2,6 +2,8 @@ import type { AgentCapabilityRegistry } from "./capability-registry";
 import type { AgentGenerateOptions } from "./BaseCliAgent/AgentGenerateOptions";
 import type { AgentFileChange } from "./agent-contract/AgentFileChange";
 import type { AgentCheckpointCapability, AgentCheckpointFormat } from "./AgentCheckpoint";
+import type { AgentStep, HostLike } from "@flows/harness/AgentStep";
+import type { Harness } from "@flows/harness/Harness";
 
 /**
  * Represents an entity capable of generating responses or actions based on prompts.
@@ -27,6 +29,8 @@ export type AgentLike = {
    * workflow run. A rejected promise fails the task without retrying.
    */
   preflight?: (args?: AgentGenerateOptions) => Promise<void>;
+  /** Native flows Harness entrypoint exposed by first-class adapters. */
+  run?: (step: AgentStep, host: HostLike) => ReturnType<Harness["run"]>;
   /**
    * Generates a response or action based on the provided arguments.
    *

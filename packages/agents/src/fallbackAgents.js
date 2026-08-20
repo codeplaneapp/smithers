@@ -5,6 +5,7 @@ import { CodexAgent } from "./CodexAgent.js";
 import { KimiAgent } from "./KimiAgent.js";
 import { GrokAgent } from "./GrokAgent.js";
 import { SmithersError } from "@smthrs/errors/SmithersError";
+import { runAgentLikeHarness } from "./harness-adapter.js";
 import {
   accountQuotaBlock,
   orderAccountsByUsage,
@@ -217,6 +218,9 @@ function knownQuotaBlockedAgent(account, model, quota, buildAgent) {
   return {
     id,
     model,
+    run(step, host) {
+      return runAgentLikeHarness(this, step, host);
+    },
     generate(options) {
       if (Date.now() >= quota.untilMs) {
         const revived = buildAgent();

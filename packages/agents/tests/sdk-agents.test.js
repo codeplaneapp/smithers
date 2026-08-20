@@ -97,6 +97,55 @@ const toolCallThenText = (id, name, args, text) => {
 const decodeBody = (body) => (typeof body === "string" ? body : new TextDecoder().decode(body));
 
 describe("flows model agents", () => {
+  test("Anthropic and OpenAI expose the flows Harness entrypoint", async () => {
+    for (const Agent of [AnthropicAgent, OpenAIAgent]) {
+      const fake = createFakeModel();
+      const agent = new Agent({ model: fake.model, modelId: "test-model" });
+      const events = await Effect.runPromise(
+        Stream.runCollect(agent.run({ prompt: { text: "use the harness" } }, {})),
+      ).then(Array.from);
+      expect(events.some((event) => event._tag === "model-delta")).toBe(true);
+      expect(events.at(-1)?._tag).toBe("resolved");
+    }
+  });
+
+  test("Harness execution runs configured tools with the host context", async () => {
+    const host = { host: "test-layer" };
+    let received;
+    const agent = new OpenAIAgent({
+      model: toolCallThenText("call-1", "lookup", '{"key":"answer"}', "done"),
+      modelId: "gpt-test",
+      tools: {
+        lookup: {
+          inputSchema: z.object({ key: z.string() }),
+          execute(input, context) {
+            received = { input, context };
+            return "42";
+          },
+        },
+      },
+    });
+    const events = await Effect.runPromise(Stream.runCollect(agent.run({ prompt: { text: "use lookup" } }, host)));
+    expect(received.input).toEqual({ key: "answer" });
+    expect(received.context.harnessHost).toBe(host);
+    expect(Array.from(events).at(-1)?._tag).toBe("resolved");
+  });
+
+  test("Harness interruption cancels the active model stream", async () => {
+    let cancelled = false;
+    const model = {
+      stream() {
+        return Stream.concat(
+          Stream.make(ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "text", text: "started" })),
+          Stream.never,
+        ).pipe(Stream.ensuring(Effect.sync(() => { cancelled = true; })));
+      },
+    };
+    const agent = new AnthropicAgent({ model, modelId: "claude-test" });
+    await Effect.runPromise(Stream.runDrain(Stream.take(agent.run({ prompt: { text: "wait" } }, {}), 1)));
+    expect(cancelled).toBe(true);
+  });
+
   test("AnthropicAgent accepts a prebuilt model and preserves instructions", async () => {
     const fake = createFakeModel();
     const agent = new AnthropicAgent({

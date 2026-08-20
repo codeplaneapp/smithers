@@ -8,6 +8,7 @@ import { SmithersError } from "@smthrs/errors/SmithersError";
 import { Effect, Redacted, Result, Stream } from "effect";
 import { z } from "zod";
 import { buildGenerateResult } from "./BaseCliAgent/buildGenerateResult.js";
+import { runAgentLikeHarness } from "./harness-adapter.js";
 
 const MAX_TOOL_STEPS = 100;
 const stopReasons = new Set(["stop", "length", "tool-calls", "content-filter", "error", "aborted", "unknown"]);
@@ -197,6 +198,20 @@ export class ModelAgent {
     this.tools = opts.tools ?? {};
   }
 
+  /**
+   * Execute this provider adapter through the flows Harness contract.
+   * @param {import("@flows/harness/AgentStep").AgentStep} step
+   * @param {import("@flows/harness/AgentStep").HostLike} host
+   */
+  run(step, host) {
+    return runAgentLikeHarness(this, {
+      ...step,
+      system: step.system ?? { text: "", digest: "" },
+      instructions: step.instructions ?? [],
+      prompt: step.prompt ?? { text: "", digest: "" },
+    }, host);
+  }
+
   async resolveModel() {
     if (typeof this.opts.model !== "string") return this.opts.model;
     const envKey = this.family === "anthropic" ? process.env.ANTHROPIC_API_KEY : process.env.OPENAI_API_KEY;
@@ -318,6 +333,8 @@ export class ModelAgent {
               abortSignal: signal,
               toolCallId: call.id,
               messages,
+              harnessStep: args.harnessStep,
+              harnessHost: args.harnessHost,
             });
           } catch (error) {
             isError = true;
