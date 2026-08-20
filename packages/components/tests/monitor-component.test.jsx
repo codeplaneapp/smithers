@@ -208,6 +208,17 @@ describe("the shipped monitoring prompt", () => {
     expect(prompt).toContain("ESCALATE to a human instead of guessing");
   });
 
+  test("classifies a quota-parked run as healthy rather than failed", () => {
+    // A run parked on `waiting-quota` resumes itself when the provider window
+    // resets. Without this, the FAILING signal ("exhausted its retries") also
+    // describes a quota park, so monitors escalate — and the escalation spends
+    // attempts against the very window that is already exhausted.
+    expect(prompt).toContain("QUOTA-PARKED");
+    expect(prompt).toContain("waiting-quota");
+    expect(prompt).toContain("Never retry a quota-parked node");
+    expect(prompt).toContain("Attempts lost to provider quota or rate limits do not count");
+  });
+
   test("narrows the allowed actions to the ones actually granted", () => {
     expect(monitorPrompt({ autoHeal: [] })).toContain("(nothing — report only)");
     expect(monitorPrompt({ autoHeal: ["stalled"] })).toContain("ONLY on these conditions: stalled");

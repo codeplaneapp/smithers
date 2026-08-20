@@ -63,11 +63,12 @@ export function monitorHealthSignals(params = {}) {
   return [
     `HEALTHY looks like: the run's status is running (or a terminal ${MONITOR_TERMINAL_STATUSES.join("/")}); the newest event is more recent than ${stallMs}ms; at least one node changed state, produced output, or emitted events since the previous heartbeat; attempt counts are flat or rising by at most one per node; token burn is roughly linear against progress.`,
     "HEALTHY also covers a run that is legitimately slow: a single long agent task that is still streaming events is working, not stalled. Elapsed time alone is never unhealthy.",
+    "HEALTHY also covers a QUOTA-PARKED run: status waiting-quota, or tasks parked against a future provider reset timestamp. The engine resumes these itself when the window resets, so there is nothing to repair. This holds however many consecutive beats it stays parked. Never retry a quota-parked node: the retry spends an attempt against a window that is already exhausted.",
     `STALLED looks like: status is running or paused, no new event for more than ${stallMs}ms, no pending approval and no open human request, and no node in a waiting-timer/waiting-event state that explains the silence.`,
     "WEDGED-NODE looks like: one node has burned repeated attempts whose error signatures are the same (or trivially different) each time, while the rest of the graph is idle behind it. Different errors each attempt is a node making progress through a problem, not a wedge.",
     "RUNAWAY-LOOP looks like: a Loop's iteration count is climbing while its exit condition is no closer, or token burn is accelerating with no matching node completions. Iterations alone are not runaway; iterations without convergence are.",
     "AWAITING-HUMAN looks like: a pending approval gate, an open human request, or a waiting-approval status. This is a healthy parked run, NOT a failure — it needs a person, not a repair.",
-    "FAILING looks like: the run status is failed, or a node without continueOnFail has exhausted its retries and nothing downstream can proceed.",
+    "FAILING looks like: the run status is failed, or a node without continueOnFail has exhausted its retries and nothing downstream can proceed. Attempts lost to provider quota or rate limits do not count toward that: the run is parked until the window resets, not failed.",
     "UNKNOWN is the honest verdict when reads failed, the evidence contradicts itself, or nothing above fits. Prefer unknown over a confident wrong classification.",
   ];
 }
