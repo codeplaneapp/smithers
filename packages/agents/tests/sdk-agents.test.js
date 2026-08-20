@@ -156,7 +156,7 @@ describe("flows model agents", () => {
     });
     const result = await agent.generate({ prompt: "review this file" });
     expect(result.text).toBe("hello from flows model");
-    expect(fake.getLastCall().system[0]).toEqual({ type: "text", text: "You are a reviewer." });
+    expect(fake.getLastCall().system).toContainEqual({ type: "text", text: "You are a reviewer." });
     expect(fake.getLastCall().modelId).toBe("claude-test");
   });
 
@@ -170,7 +170,7 @@ describe("flows model agents", () => {
     });
     const result = await agent.generate({ prompt: "write the patch" });
     expect(result.text).toBe("hello from flows model");
-    expect(fake.getLastCall().system[0]).toEqual({ type: "text", text: "You are an implementer." });
+    expect(fake.getLastCall().system).toContainEqual({ type: "text", text: "You are an implementer." });
     expect(result.response.modelId).toBe("gpt-test");
   });
 
@@ -256,7 +256,7 @@ describe("flows model agents", () => {
     });
     const agent = new OpenAIAgent({ model: fake.model, modelId: "gpt-test" });
     const result = await agent.generate({ prompt: "assess", outputSchema });
-    const instruction = fake.getLastCall().system.at(-1).text;
+    const instruction = fake.getLastCall().system.find((part) => part.text.startsWith("Return only a JSON value")).text;
     const schema = JSON.parse(instruction.split("\n").at(-1));
     expect(agent.supportsNativeStructuredOutput).toBe(false);
     expect(schema.type).toBe("object");
@@ -311,7 +311,7 @@ describe("flows model agents", () => {
       outputSchema: z.object({ value: z.number() }),
     });
     expect(agent.supportsNativeStructuredOutput).toBe(false);
-    expect(fake.getLastCall().system.at(-1).text).toContain('"value"');
+    expect(fake.getLastCall().system.some((part) => part.text.includes('"value"'))).toBe(true);
     expect(result.output).toEqual({ value: 7 });
   });
 
@@ -373,8 +373,8 @@ describe("flows model agents", () => {
     });
     expect(result.text).toBe("42");
     expect(requests).toHaveLength(2);
-    expect(requests[1].messages.map((message) => message.role)).toEqual(["user", "assistant", "tool"]);
-    expect(requests[1].messages.at(-1).content[0].content).toBe("42");
+    expect(requests[1].messages.map((message) => message.role)).toEqual(["user"]);
+    expect(requests[1].messages[0].content[0].text).toContain("42");
     expect(result.toolCalls[0]).toMatchObject({ toolName: "double", input: { value: 21 } });
     expect(result.toolResults[0]).toMatchObject({ toolName: "double", output: 42, isError: false });
     expect(starts).toHaveLength(1);
@@ -494,7 +494,7 @@ describe("flows model agents", () => {
       onStepEnd: (step) => steps.push(step),
     });
     expect(result.text).toBe("hello from flows model");
-    expect(fake.getLastCall().system[0].text).toBe("Keep context.");
+    expect(fake.getLastCall().system.some((part) => part.text === "Keep context.")).toBe(true);
     expect(fake.getLastCall().messages.map((message) => message.role)).toEqual(["user", "assistant"]);
     expect(steps).toHaveLength(1);
     expect(Array.isArray(steps[0].response.messages)).toBe(true);

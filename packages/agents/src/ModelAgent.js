@@ -1,4 +1,3 @@
-import * as ModelEvent from "@flows/model/ModelEvent";
 import * as ModelRequest from "@flows/model/ModelRequest";
 import * as OpenAICompatible from "@flows/model/OpenAICompatible";
 import * as RequestExecutor from "@flows/model/RequestExecutor";
@@ -8,7 +7,7 @@ import { SmithersError } from "@smthrs/errors/SmithersError";
 import { Effect, Redacted, Result, Stream } from "effect";
 import { z } from "zod";
 import { buildGenerateResult } from "./BaseCliAgent/buildGenerateResult.js";
-import { runAgentLikeHarness } from "./harness-adapter.js";
+import { runCellAgent, streamCellAgent } from "./cell-agent.js";
 
 const MAX_TOOL_STEPS = 100;
 const stopReasons = new Set(["stop", "length", "tool-calls", "content-filter", "error", "aborted", "unknown"]);
@@ -130,12 +129,6 @@ const timeoutOf = (timeout, key) => {
 };
 
 /** @param {...(AbortSignal | undefined)} signals */
-const combineSignals = (...signals) => {
-  const defined = signals.filter(Boolean);
-  if (defined.length === 0) return undefined;
-  return defined.length === 1 ? defined[0] : AbortSignal.any(defined);
-};
-
 /** @param {unknown} schema @param {string} text */
 const parseStructuredOutput = async (schema, text) => {
   if (!schema) return undefined;
@@ -150,28 +143,6 @@ const parseStructuredOutput = async (schema, text) => {
     return parsed.success ? parsed.data : undefined;
   }
   return parsedJson.value;
-};
-
-/**
- * Tool input schemas arrive in two shapes. A Zod schema validates through
- * `parseAsync`, while `zodSchema()`/`jsonSchema()` wrappers expose a
- * `validate` that returns a `{ success, value }` result instead of throwing.
- * Unwrapping the result matters: the tool must see its arguments, not the
- * envelope around them.
- * @param {any} schema @param {unknown} input @param {string} toolName
- */
-const validateToolInput = async (schema, input, toolName) => {
-  if (!schema) return input;
-  if (typeof schema.parseAsync === "function") return schema.parseAsync(input);
-  if (typeof schema.validate === "function") {
-    const result = await schema.validate(input);
-    if (!result || typeof result !== "object" || !("success" in result)) return result;
-    if (result.success) return result.value;
-    throw result.error instanceof Error
-      ? result.error
-      : new Error(`Tool ${toolName} received arguments that failed schema validation`);
-  }
-  return input;
 };
 
 /** @param {unknown} schema */
@@ -204,12 +175,25 @@ export class ModelAgent {
    * @param {import("@flows/harness/AgentStep").HostLike} host
    */
   run(step, host) {
-    return runAgentLikeHarness(this, {
-      ...step,
-      system: step.system ?? { text: "", digest: "" },
-      instructions: step.instructions ?? [],
-      prompt: step.prompt ?? { text: "", digest: "" },
-    }, host);
+    return Stream.unwrap(Effect.promise(() => this.resolveModel()).pipe(Effect.map((model) => {
+      const input = asInput(step.messages ?? step.prompt?.text ?? step.prompt ?? "");
+      return streamCellAgent({
+        model,
+        modelId: this.modelId,
+        messages: input.messages,
+        system: [this.opts.instructions, step.system?.text, ...input.system.map((part) => part.text)].filter(Boolean),
+        tools: { ...this.tools, ...(step.tools ?? {}) },
+        modelParams: ModelRequest.GenerationParams.make({
+          maxTokens: this.opts.maxOutputTokens,
+          temperature: this.opts.temperature,
+          topP: this.opts.topP,
+        }),
+        maxFrames: MAX_TOOL_STEPS,
+        abortSignal: step.abortSignal,
+        harnessStep: step,
+        harnessHost: host,
+      });
+    })));
   }
 
   async resolveModel() {
@@ -236,156 +220,69 @@ export class ModelAgent {
   async generate(args = {}) {
     const model = await this.resolveModel();
     const tools = { ...this.tools, ...(args.tools && typeof args.tools === "object" ? args.tools : {}) };
-    const definitions = Object.entries(tools).map(([name, value]) =>
-      ModelRequest.ToolDefinition.make({
-        name,
-        description: value.description ?? name,
-        parameters: schemaJson(value.inputSchema),
-      }),
-    );
     const input = "messages" in args ? asInput(args.messages) : asInput(args.prompt);
     const system = [
-      ...(this.opts.instructions ? [ModelRequest.SystemPart.make({ text: this.opts.instructions })] : []),
-      ...input.system,
-      ...(args.outputSchema ? [structuredOutputInstruction(args.outputSchema)] : []),
-    ];
+      this.opts.instructions,
+      ...input.system.map((part) => part.text),
+      ...(args.outputSchema ? [structuredOutputInstruction(args.outputSchema).text] : []),
+    ].filter(Boolean);
     const totalMs = timeoutOf(args.timeout, "totalMs");
     const stepMs = timeoutOf(args.timeout, "stepMs");
-    const totalSignal = totalMs === undefined ? undefined : AbortSignal.timeout(totalMs);
-    const generatedMessages = [];
-    let messages = [...input.messages];
-    let request;
-    let finalSettled;
-    let finalText = "";
-    const allToolCalls = [];
-    const allToolResults = [];
-    const steps = [];
-    const totalUsage = {};
-    const onStepEnd = args.onStepEnd ?? args.onStepFinish;
-
-    // Each turn settles with tool calls or a final answer. Interrupting
-    // runPromise interrupts the stream fiber and cancels the provider request.
-    for (let stepIndex = 0; stepIndex < MAX_TOOL_STEPS; stepIndex += 1) {
-      request = ModelRequest.ModelRequest.make({
-        modelId: this.modelId,
-        system,
-        messages,
-        tools: definitions,
-        params: ModelRequest.GenerationParams.make({
-          maxTokens: this.opts.maxOutputTokens,
-          temperature: this.opts.temperature,
-          topP: this.opts.topP,
-        }),
-      });
-      const values = [];
-      const stepSignal = stepMs === undefined ? undefined : AbortSignal.timeout(stepMs);
-      const signal = combineSignals(args.abortSignal, totalSignal, stepSignal);
-      await Effect.runPromise(
-        model.stream(request).pipe(
-          Stream.runForEach((event) =>
-            Effect.sync(() => {
-              values.push(event);
-              if (event.type === "text-delta") args.onStdout?.(event.text);
-            }),
-          ),
-          Effect.provideService(NodeHttpClient.Fetch)(globalThis.fetch),
-        ),
-        signal ? { signal } : undefined,
-      );
-
-      const settled = ModelEvent.settledMessage(values);
-      finalSettled = settled;
-      finalText = settled.message.content
-        .filter((part) => part.type === "text")
-        .map((part) => part.text)
-        .join("");
-      Object.assign(totalUsage, settled.usage);
-      const calls = settled.message.content.filter((part) => part.type === "tool-call");
-      const stepToolCalls = calls.map((call) => ({
-        type: "tool-call",
-        toolCallId: call.id,
-        toolName: call.name,
-        input: parseJson(call.arguments).value ?? {},
-      }));
-      const stepToolResults = [];
-      messages.push(settled.message);
-      generatedMessages.push(settled.message);
-
-      if (calls.length > 0) {
-        const results = [];
-        for (const call of calls) {
-          const tool = tools[call.name];
-          const parsedArguments = parseJson(call.arguments);
-          const toolCall = {
-            toolCallId: call.id,
-            toolName: call.name,
-            input: parsedArguments.value ?? {},
-          };
-          const event = { callId: call.id, toolCall };
-          await args.onToolExecutionStart?.(event);
-          let value;
-          let isError = false;
-          try {
-            if (!tool?.execute) throw new Error(`Tool ${call.name} is not executable`);
-            if (!parsedArguments.ok) throw new Error(`Tool ${call.name} received invalid JSON arguments`);
-            const parsed = await validateToolInput(tool.inputSchema, parsedArguments.value, call.name);
-            value = await tool.execute(parsed, {
-              abortSignal: signal,
-              toolCallId: call.id,
-              messages,
-              harnessStep: args.harnessStep,
-              harnessHost: args.harnessHost,
-            });
-          } catch (error) {
-            isError = true;
-            value = error instanceof Error ? error.message : String(error);
-          }
-          const resultPart = ModelRequest.ToolResultPart.make({
-            toolCallId: call.id,
-            content: jsonText(value),
-          });
-          results.push(resultPart);
-          const toolResult = {
-            type: "tool-result",
-            toolCallId: call.id,
-            toolName: call.name,
-            output: value,
-            isError,
-          };
-          stepToolResults.push(toolResult);
-          await args.onToolExecutionEnd?.({ ...event, result: value, isError });
-        }
-        const toolMessage = ModelRequest.Message.tool(results);
-        messages.push(toolMessage);
-        generatedMessages.push(toolMessage);
-      }
-
-      const step = {
-        text: finalText,
-        content: settled.message.content,
-        toolCalls: stepToolCalls,
-        toolResults: stepToolResults,
-        finishReason: settled.message.stopReason,
-        usage: settled.usage,
-        response: { messages: [settled.message] },
-      };
-      steps.push(step);
-      allToolCalls.push(...stepToolCalls);
-      allToolResults.push(...stepToolResults);
-      await onStepEnd?.(step);
-      if (calls.length === 0) break;
-      if (stepIndex === MAX_TOOL_STEPS - 1) {
-        throw new SmithersError("AGENT_EXECUTION_FAILED", `ModelAgent exceeded ${MAX_TOOL_STEPS} tool steps.`, {});
-      }
-    }
-
+    const timeoutSignal = totalMs === undefined && stepMs === undefined ? undefined : AbortSignal.timeout(totalMs ?? stepMs);
+    const signal = args.abortSignal && timeoutSignal ? AbortSignal.any([args.abortSignal, timeoutSignal]) : args.abortSignal ?? timeoutSignal;
+    const run = await runCellAgent({
+      model,
+      modelId: this.modelId,
+      messages: input.messages,
+      system,
+      tools,
+      modelParams: ModelRequest.GenerationParams.make({
+        maxTokens: this.opts.maxOutputTokens,
+        temperature: this.opts.temperature,
+        topP: this.opts.topP,
+      }),
+      maxFrames: MAX_TOOL_STEPS,
+      abortSignal: signal,
+      onToolExecutionStart: args.onToolExecutionStart,
+      onToolExecutionEnd: args.onToolExecutionEnd,
+      harnessStep: args.harnessStep,
+      harnessHost: args.harnessHost,
+    });
+    const finalText = run.text;
+    args.onStdout?.(finalText);
+    const settled = run.events.filter((event) => event._tag === "model-settled");
+    const generatedMessages = settled.map((event) => event.message);
+    const callsById = new Map(run.events.filter((event) => event._tag === "cell-call-started").map((event) => {
+      const id = `${event.call.identity.frame}:${event.call.identity.ordinal}`;
+      return [id, { type: "tool-call", toolCallId: id, toolName: event.call.flowName, input: event.call.input }];
+    }));
+    const allToolCalls = [...callsById.values()];
+    const allToolResults = run.events.filter((event) => event._tag === "cell-call-settled").map((event) => {
+      const id = `${event.identity.frame}:${event.identity.ordinal}`;
+      return { type: "tool-result", toolCallId: id, toolName: event.flowName, output: event.result.value, isError: event.result.outcome !== "success" };
+    });
+    const steps = settled.map((event, frame) => ({
+      text: frame === settled.length - 1 ? finalText : "",
+      content: event.message.content,
+      toolCalls: allToolCalls.filter((call) => call.toolCallId.startsWith(`${frame}:`)),
+      toolResults: allToolResults.filter((result) => result.toolCallId.startsWith(`${frame}:`)),
+      finishReason: event.message.stopReason,
+      usage: event.usage,
+      response: { messages: [event.message] },
+    }));
+    for (const step of steps) await (args.onStepEnd ?? args.onStepFinish)?.(step);
+    const totalUsage = settled.reduce((usage, event) => ({
+      inputTokens: (usage.inputTokens ?? 0) + (event.usage?.inputTokens ?? 0),
+      outputTokens: (usage.outputTokens ?? 0) + (event.usage?.outputTokens ?? 0),
+      totalTokens: (usage.totalTokens ?? 0) + (event.usage?.totalTokens ?? 0),
+    }), {});
     const output = await parseStructuredOutput(args.outputSchema, finalText);
-    const result = buildGenerateResult(finalText, output, request.modelId, {
+    const result = buildGenerateResult(finalText, output, this.modelId, {
       inputTokens: totalUsage.inputTokens,
       outputTokens: totalUsage.outputTokens,
       totalTokens: totalUsage.totalTokens ?? (totalUsage.inputTokens ?? 0) + (totalUsage.outputTokens ?? 0),
     });
-    result.finishReason = finalSettled.message.stopReason;
+    result.finishReason = run.events.findLast((event) => event._tag === "resolved")?.message.stopReason ?? "stop";
     result.toolCalls = allToolCalls;
     result.staticToolCalls = allToolCalls;
     result.toolResults = allToolResults;

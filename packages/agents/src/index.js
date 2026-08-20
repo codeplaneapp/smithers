@@ -98,6 +98,7 @@ export { AnthropicAgent } from "./AnthropicAgent.js";
 export { OpenAIAgent } from "./OpenAIAgent.js";
 export { ModelAgent } from "./ModelAgent.js";
 export { dynamicTool, jsonSchema, tool, zodSchema } from "./runtime-tool.js";
+export { runCellAgent, streamCellAgent } from "./cell-agent.js";
 export { HermesAgent } from "./HermesAgent.js";
 export { HermesCliAgent, createHermesCliCapabilityRegistry } from "./HermesCliAgent.js";
 export { OpenClawAgent, createOpenClawCapabilityRegistry } from "./OpenClawAgent.js";
