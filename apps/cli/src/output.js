@@ -9,6 +9,7 @@ import { RUN_ID_PATTERN } from "@smthrs/server/gatewayRoutes/RUN_ID_PATTERN";
 import { camelToSnake } from "@smthrs/db/utils/camelToSnake";
 import { EXIT_OK } from "./util/exitCodes.js";
 import { formatCliErrorForStderr, getCliErrorMapping } from "./util/errorMessage.js";
+import { resolveLatestIteration } from "./util/resolveLatestIteration.js";
 
 const NODE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
 
@@ -51,25 +52,6 @@ function formatValue(value) {
     return JSON.stringify(value);
   } catch {
     return String(value);
-  }
-}
-
-/**
- * @param {import("@smthrs/db/adapter").SmithersDb} adapter
- * @param {string} runId
- * @param {string} nodeId
- * @returns {Promise<number | null>}
- */
-async function resolveLatestIteration(adapter, runId, nodeId) {
-  try {
-    const iterations = await adapter.listNodeIterations(runId, nodeId);
-    if (!Array.isArray(iterations) || iterations.length === 0) return null;
-    return iterations.reduce((max, row) => {
-      const it = typeof row?.iteration === "number" ? row.iteration : 0;
-      return it > max ? it : max;
-    }, 0);
-  } catch {
-    return null;
   }
 }
 

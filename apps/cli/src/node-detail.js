@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { SmithersError } from "@smthrs/errors";
+import { selectLatestIteration } from "./util/resolveLatestIteration.js";
 /** @typedef {import("./AggregateNodeDetailParams.ts").AggregateNodeDetailParams} AggregateNodeDetailParams */
 /**
  * @typedef {{ total: number; failed: number; cancelled: number; succeeded: number; waiting: number; }} AttemptSummary
@@ -391,7 +392,7 @@ export function aggregateNodeDetailEffect(adapter, params) {
         }),
       );
     }
-    const resolvedIteration = params.iteration ?? Math.max(...nodeRows.map((row) => row.iteration));
+    const resolvedIteration = params.iteration ?? selectLatestIteration(nodeRows);
     const node = nodeRows.find((row) => row.iteration === resolvedIteration);
     if (!node) {
       return yield* Effect.fail(

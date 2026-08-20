@@ -8,6 +8,7 @@ import pc from "picocolors";
 import { getNodeDiffRoute } from "@smthrs/server/gatewayRoutes/getNodeDiff";
 import { EXIT_OK } from "./util/exitCodes.js";
 import { formatCliErrorForStderr, getCliErrorMapping } from "./util/errorMessage.js";
+import { resolveLatestIteration } from "./util/resolveLatestIteration.js";
 
 // ANSI CSI sequences: `ESC [ ... letter`. Strip covers colors (m), cursor
 // moves, etc. Only used when the caller disables color so that existing
@@ -152,25 +153,6 @@ function summaryFromInput(input) {
     files.push({ path: String(patch.path ?? ""), added, removed });
   }
   return { filesChanged: files.length, added: totalAdded, removed: totalRemoved, files };
-}
-
-/**
- * @param {SmithersDb} adapter
- * @param {string} runId
- * @param {string} nodeId
- * @returns {Promise<number | null>}
- */
-async function resolveLatestIteration(adapter, runId, nodeId) {
-  try {
-    const iterations = await adapter.listNodeIterations(runId, nodeId);
-    if (!Array.isArray(iterations) || iterations.length === 0) return null;
-    return iterations.reduce((max, row) => {
-      const it = typeof row?.iteration === "number" ? row.iteration : 0;
-      return it > max ? it : max;
-    }, 0);
-  } catch {
-    return null;
-  }
 }
 
 /**
