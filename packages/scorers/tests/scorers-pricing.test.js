@@ -185,6 +185,19 @@ describe("estimateCostUsd", () => {
     expect(cost).toBeCloseTo(4.05, 10);
   });
 
+  test("prices a flows usage event using its cached-input breakdown", () => {
+    const cost = estimateCostUsd({
+      type: "usage",
+      model: "claude-sonnet-5",
+      inputTokens: 1_200_000,
+      outputTokens: 100_000,
+      cachedInputTokens: 900_000,
+      cacheWriteTokens: 100_000,
+      totalTokens: 1_300_000,
+    });
+    expect(cost).toBeCloseTo(2.745, 10);
+  });
+
   test("providing inputTokens suppresses the blended-total path even with tokens set", () => {
     const cost = estimateCostUsd({
       model: "claude-sonnet-5",

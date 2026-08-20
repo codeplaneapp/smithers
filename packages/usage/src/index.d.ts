@@ -655,13 +655,14 @@ declare function accountUsageScore(report: UsageReport | undefined, model: strin
  * those rows with no-network quota sentinels instead of probing them again.
  *
  * @param {Account[]} accounts
- * @param {{ env?: NodeJS.ProcessEnv; modelFor?: (account: Account) => string | undefined; nowMs?: number; tieBreak?: Map<string, number> }} [options]
+ * @param {{ env?: NodeJS.ProcessEnv; modelFor?: (account: Account) => string | undefined; nowMs?: number; tieBreak?: Map<string, number>; modelEventsFor?: (account: Account) => Iterable<unknown> | undefined }} [options]
  */
 declare function orderAccountsByUsage(accounts: Account[], options?: {
     env?: NodeJS.ProcessEnv;
     modelFor?: (account: Account) => string | undefined;
     nowMs?: number;
     tieBreak?: Map<string, number>;
+    modelEventsFor?: (account: Account) => Iterable<unknown> | undefined;
 }): {
     label: string;
     provider: "claude-code" | "antigravity" | "codex" | "kimi" | "grok" | "anthropic-api" | "openai-api" | "gemini-api" | "xai-api";
@@ -723,4 +724,38 @@ type AccountAvailability = {
     reasons: string[];
 };
 
-export { PUBLISHED_CAPS, type UsageReport$6 as UsageReport, type UsageWindow$6 as UsageWindow, accountQuotaBlock, accountQuotaStatePath, accountUsageScore, anthropicHeaderUsage, buildUsageReport, classifyAccountAvailability, claudeKeychainSuffix, claudeOauthUsage, clearAccountQuotaLimit, clearAccountUsageCache, codexWhamUsage, decodeJwtClaims, effectiveUsedPercent, formatRelativeReset, formatUsageReports, getAccountUsage, getUsageForAccounts, googleUsage, grokUsage, humanizeDurationShort, kimiCodeUsage, openaiHeaderUsage, orderAccountsByUsage, parseAnthropicRateLimitHeaders, parseClaudeOauthUsage, parseCodexUsage, parseDurationSeconds, parseKimiUsage, parseOpenAiRateLimitHeaders, publishedCapForTier, readAccountQuotaState, readClaudeCredentials, readCodexCredentials, readKimiCredentials, readUsageCache, recordAccountQuotaLimit, refreshKimiToken, usageCachePath, writeUsageCache };
+/**
+ * Convert one flows `ModelEvent.Usage` event to Smithers' durable usage row.
+ * Returns null for non-usage events and for empty provider reports.
+ *
+ * @param {unknown} value
+ * @returns {{ inputTokens: number; freshInputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number; totalTokens: number } | null}
+ */
+declare function usageFromModelEvent(value: unknown): {
+    inputTokens: number;
+    freshInputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    reasoningTokens: number;
+    totalTokens: number;
+} | null;
+/**
+ * Fold persisted flows model events. Providers may refine a usage event before
+ * `settle`, so only the last usage report in each settled request is counted.
+ * Concatenated replay streams are therefore safe from cumulative double-counts.
+ *
+ * @param {Iterable<unknown>} values
+ */
+declare function foldModelUsageEvents(values: Iterable<unknown>): {
+    inputTokens: number;
+    freshInputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    reasoningTokens: number;
+    totalTokens: number;
+    requests: number;
+};
+
+export { PUBLISHED_CAPS, type UsageReport$6 as UsageReport, type UsageWindow$6 as UsageWindow, accountQuotaBlock, accountQuotaStatePath, accountUsageScore, anthropicHeaderUsage, buildUsageReport, classifyAccountAvailability, claudeKeychainSuffix, claudeOauthUsage, clearAccountQuotaLimit, clearAccountUsageCache, codexWhamUsage, decodeJwtClaims, effectiveUsedPercent, foldModelUsageEvents, formatRelativeReset, formatUsageReports, getAccountUsage, getUsageForAccounts, googleUsage, grokUsage, humanizeDurationShort, kimiCodeUsage, openaiHeaderUsage, orderAccountsByUsage, parseAnthropicRateLimitHeaders, parseClaudeOauthUsage, parseCodexUsage, parseDurationSeconds, parseKimiUsage, parseOpenAiRateLimitHeaders, publishedCapForTier, readAccountQuotaState, readClaudeCredentials, readCodexCredentials, readKimiCredentials, readUsageCache, recordAccountQuotaLimit, refreshKimiToken, usageCachePath, usageFromModelEvent, writeUsageCache };

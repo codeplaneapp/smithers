@@ -118,6 +118,88 @@ test("smithers usage --run reports a run's persisted token total (#1464 AWF-6)",
   expect(result.stderr).toContain("~$0.0200");
 }, 30_000);
 
+test("smithers usage --run replays flows model events with legacy-equivalent totals", async () => {
+  const repo = createTempRepo();
+  const { Database } = await import("bun:sqlite");
+  const { drizzle } = await import("drizzle-orm/bun-sqlite");
+  const { SmithersDb } = await import("@smthrs/db/adapter");
+  const { ensureSmithersTables } = await import("@smthrs/db/ensure");
+  const sqlite = new Database(repo.path("smithers.db"));
+  try {
+    const db = drizzle(sqlite);
+    const adapter = new SmithersDb(db);
+    ensureSmithersTables(db);
+    const now = Date.now();
+    await adapter.insertRun({ runId: "flows-usage-run", workflowName: "wf", status: "finished", createdAtMs: now });
+    const events = [
+      { type: "usage", inputTokens: 1_200, outputTokens: 340, cachedInputTokens: 900, cacheWriteTokens: 100 },
+      { type: "settle", stopReason: "tool-calls" },
+      { type: "usage", inputTokens: 800, outputTokens: 60, cachedInputTokens: 600, cacheWriteTokens: 50 },
+      { type: "settle", stopReason: "stop" },
+    ];
+    for (const [index, event] of events.entries()) {
+      const seq = index;
+      await adapter.insertEvent({
+        runId: "flows-usage-run",
+        seq,
+        timestampMs: now + seq,
+        type: "ModelEvent",
+        payloadJson: JSON.stringify({ type: "ModelEvent", event }),
+      });
+    }
+  } finally {
+    sqlite.close();
+  }
+
+  const result = runSmithers(["usage", "--run", "flows-usage-run"], { cwd: repo.dir, format: "json" });
+  expect(result.exitCode).toBe(0);
+  expect(result.json?.usage).toMatchObject({
+    inputTokens: 2_000,
+    freshInputTokens: 350,
+    outputTokens: 400,
+    cacheReadTokens: 1_500,
+    cacheWriteTokens: 150,
+    totalTokens: 2_400,
+  });
+  expect(result.stderr).toContain("2,400 tokens");
+}, 30_000);
+
+test("smithers usage --run keeps priced legacy usage while folding flows events", async () => {
+  const repo = createTempRepo();
+  const { Database } = await import("bun:sqlite");
+  const { drizzle } = await import("drizzle-orm/bun-sqlite");
+  const { SmithersDb } = await import("@smthrs/db/adapter");
+  const { ensureSmithersTables } = await import("@smthrs/db/ensure");
+  const sqlite = new Database(repo.path("smithers.db"));
+  try {
+    const db = drizzle(sqlite);
+    const adapter = new SmithersDb(db);
+    ensureSmithersTables(db);
+    const now = Date.now();
+    await adapter.insertRun({ runId: "mixed-usage-run", workflowName: "wf", status: "finished", createdAtMs: now });
+    await adapter.recordRunTokenUsage({
+      runId: "mixed-usage-run", nodeId: "agent", iteration: 0, attempt: 1,
+      inputTokens: 10, freshInputTokens: 10, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0,
+      costUsd: 0.0123, updatedAtMs: now,
+    });
+    for (const [seq, event] of [
+      { type: "usage", inputTokens: 1_200, outputTokens: 340, cachedInputTokens: 900, cacheWriteTokens: 100 },
+      { type: "settle", stopReason: "stop" },
+    ].entries()) {
+      await adapter.insertEvent({
+        runId: "mixed-usage-run", seq, timestampMs: now + seq, nodeId: "agent", iteration: 0, attempt: 1,
+        type: "ModelEvent", payloadJson: JSON.stringify({ type: "ModelEvent", event }),
+      });
+    }
+  } finally {
+    sqlite.close();
+  }
+  const result = runSmithers(["usage", "--run", "mixed-usage-run"], { cwd: repo.dir, format: "json" });
+  expect(result.exitCode).toBe(0);
+  expect(result.json?.usage).toMatchObject({ totalTokens: 1_540, costUsd: 0.0123, pricedAttempts: 1, attempts: 1 });
+  expect(result.stderr).toContain("~$0.0123");
+}, 30_000);
+
 test("smithers usage --run rejects an unknown run instead of reporting zero (#1464 AWF-6)", async () => {
   const repo = createTempRepo();
   // A run that spent no tokens and a run ID that never existed both SUM to

@@ -695,16 +695,20 @@ type ModelPrice$1 = ModelPrice$2;
  * assumption determines whether a coarse GPT-5.6 forecast crosses the 272K
  * long-context input threshold.
  *
- * @param {{ model: string, tokens?: number, inputTokens?: number, outputTokens?: number, cacheReadTokens?: number, cacheWriteTokens?: number }} usage
+ * @param {{ model: string, type?: "usage", tokens?: number, inputTokens?: number, outputTokens?: number, cachedInputTokens?: number, cacheReadTokens?: number, cacheWriteTokens?: number, reasoningTokens?: number, totalTokens?: number }} usage
  * @returns {number} dollars
  */
 declare function estimateCostUsd(usage: {
     model: string;
+    type?: "usage";
     tokens?: number;
     inputTokens?: number;
     outputTokens?: number;
+    cachedInputTokens?: number;
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
+    reasoningTokens?: number;
+    totalTokens?: number;
 }): number;
 
 /** @typedef {import("./WorkflowUiComplianceOptions.ts").WorkflowUiComplianceOptions} WorkflowUiComplianceOptions */

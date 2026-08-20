@@ -208,7 +208,7 @@ import {
   preflightConfigEntry,
 } from "./oneshot-preflight.js";
 import { listAccounts, removeAccount } from "@smthrs/accounts";
-import { getUsageForAccounts, formatUsageReports, readClaudeCredentials } from "@smthrs/usage";
+import { foldModelUsageEvents, getUsageForAccounts, formatUsageReports, readClaudeCredentials } from "@smthrs/usage";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
 import { runAgentAddWithTmuxLogin } from "./agent-commands/tmuxLogin.js";
 import { reauthClaudeAccounts } from "./agent-commands/reauthClaudeAccounts.js";
@@ -13418,7 +13418,40 @@ const cli = Cli.create({
             if (!(await adapter.getRun(runId))) {
               return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 });
             }
-            const usage = await adapter.getRunTokenUsage(runId);
+            let usage = await adapter.getRunTokenUsage(runId);
+            // Flows runs persist the provider stream as ModelEvent frames. A
+            // replay may not have legacy `_smithers_run_usage` rows, so fold
+            // those events directly while retaining the table as the fallback
+            // for pre-migration runs.
+            const modelEvents = [];
+            // listEvents is exclusive and flows journals begin at sequence 0.
+            let afterSeq = -1;
+            for (;;) {
+              const page = await adapter.listEvents(runId, afterSeq, 1_000);
+              if (page.length === 0) break;
+              modelEvents.push(...page);
+              afterSeq = Number(page.at(-1)?.seq ?? afterSeq);
+              if (page.length < 1_000) break;
+            }
+            const flowsUsage = foldModelUsageEvents(modelEvents);
+            if (flowsUsage.requests > 0) {
+              usage = {
+                runId,
+                inputTokens: flowsUsage.inputTokens,
+                freshInputTokens: flowsUsage.freshInputTokens,
+                outputTokens: flowsUsage.outputTokens,
+                cacheReadTokens: flowsUsage.cacheReadTokens,
+                cacheWriteTokens: flowsUsage.cacheWriteTokens,
+                reasoningTokens: flowsUsage.reasoningTokens,
+                totalTokens: flowsUsage.totalTokens,
+                // The legacy projection remains the pricing authority until
+                // flows model events carry the selected model/price snapshot.
+                // Keep its cost when both projections describe the run.
+                costUsd: usage.costUsd,
+                pricedAttempts: usage.pricedAttempts,
+                attempts: flowsUsage.requests,
+              };
+            }
             const cost = usage.costUsd == null ? "" : ` / ~$${usage.costUsd.toFixed(4)}`;
             process.stderr.write(
               `${runId}: ${usage.totalTokens.toLocaleString()} tokens${cost} ` +

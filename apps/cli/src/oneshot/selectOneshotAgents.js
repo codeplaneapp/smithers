@@ -2,6 +2,7 @@ import { resolveOneshotChain } from "./resolveOneshotChain.js";
 import { defaultConfigDir, listAccounts } from "@smthrs/accounts";
 import { orderAccountsByUsage } from "@smthrs/usage";
 import { registeredAgentId } from "../registered-agent-id.js";
+import { modelEventsByAccount } from "../account-model-events.js";
 
 const ACCOUNT_PROVIDERS = {
   claude: new Set(["claude-code", "anthropic-api"]),
@@ -87,11 +88,15 @@ async function createAgent(spec, cwd, account, env) {
  * @param {import("@smthrs/accounts").Account[]} accounts
  * @param {NodeJS.ProcessEnv} env
  */
-async function createAgentsForSpec(spec, cwd, accounts, env) {
+async function createAgentsForSpec(spec, cwd, accounts, env, modelEvents) {
   const providers = ACCOUNT_PROVIDERS[spec.engine];
   const matching = providers ? accounts.filter((account) => providers.has(account.provider)) : [];
   if (matching.length === 0) return [await createAgent(spec, cwd, undefined, env)];
-  const ordered = orderAccountsByUsage(matching, { env, modelFor: () => spec.model });
+  const ordered = orderAccountsByUsage(matching, {
+    env,
+    modelFor: () => spec.model,
+    modelEventsFor: (account) => modelEvents.get(account.label) ?? [],
+  });
   return Promise.all(ordered.map((account) => createAgent(spec, cwd, account, env)));
 }
 
@@ -103,13 +108,14 @@ export async function selectOneshotAgents(detections, options) {
   const env = options.env ?? process.env;
   const specs = resolveOneshotChain(detections, options);
   const accounts = listAccounts(env);
+  const modelEvents = await modelEventsByAccount(options.cwd);
   const accountsFor = (engine) => {
     const labels = detections.find((detection) => detection.id === engine)?.registeredAccountLabels ?? [];
     return accounts.filter((account) => labels.includes(account.label));
   };
   const expand = async (list) => {
     const groups = await Promise.all(
-      list.map((spec) => createAgentsForSpec(spec, options.cwd, accountsFor(spec.engine), env)),
+      list.map((spec) => createAgentsForSpec(spec, options.cwd, accountsFor(spec.engine), env, modelEvents)),
     );
     return groups.flat();
   };

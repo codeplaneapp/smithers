@@ -34,3 +34,4 @@ export {
   orderAccountsByUsage,
 } from "./accountSelection.js";
 export { classifyAccountAvailability, effectiveUsedPercent } from "./classifyAccountAvailability.js";
+export { usageFromModelEvent, foldModelUsageEvents } from "./modelUsage.js";

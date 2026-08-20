@@ -951,6 +951,13 @@ describe("getUsageForAccounts cache decisions", () => {
 });
 
 describe("quota-aware account selection", () => {
+  test("uses flows model usage to route equal-headroom accounts", () => {
+    const env = { SMITHERS_HOME: tempDir() };
+    const accounts = [{ label: "busy", provider: "claude-code", configDir: "/busy" }, { label: "idle", provider: "claude-code", configDir: "/idle" }];
+    const events = new Map([["busy", [{ type: "usage", inputTokens: 900, outputTokens: 100 }, { type: "settle" }]], ["idle", [{ type: "usage", inputTokens: 90, outputTokens: 10 }, { type: "settle" }]]]);
+    expect(orderAccountsByUsage(accounts, { env, modelEventsFor: (account) => events.get(account.label) }).map((account) => account.label)).toEqual(["idle", "busy"]);
+  });
+
   test("prefers model-specific headroom", () => {
     const env = { SMITHERS_HOME: tempDir() };
     const entry = (label, fiveHour, weekly, fable) => ({

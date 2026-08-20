@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import { accountsRoot, withAccountsLock } from "@smthrs/accounts";
 import { readUsageCache } from "./usageCache.js";
+import { foldModelUsageEvents } from "./modelUsage.js";
 
 /** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
@@ -191,7 +192,7 @@ export function accountUsageScore(report, model) {
  * those rows with no-network quota sentinels instead of probing them again.
  *
  * @param {Account[]} accounts
- * @param {{ env?: NodeJS.ProcessEnv; modelFor?: (account: Account) => string | undefined; nowMs?: number; tieBreak?: Map<string, number> }} [options]
+ * @param {{ env?: NodeJS.ProcessEnv; modelFor?: (account: Account) => string | undefined; nowMs?: number; tieBreak?: Map<string, number>; modelEventsFor?: (account: Account) => Iterable<unknown> | undefined }} [options]
  */
 export function orderAccountsByUsage(accounts, options = {}) {
   const env = options.env ?? process.env;
@@ -199,6 +200,7 @@ export function orderAccountsByUsage(accounts, options = {}) {
   const reports = readUsageCache(env).entries;
   const quota = readAccountQuotaState(env, nowMs).entries;
   const modelFor = options.modelFor ?? ((account) => account.model);
+  const modelUsage = new Map(accounts.map((account) => [account.label, options.modelEventsFor ? foldModelUsageEvents(options.modelEventsFor(account) ?? []).totalTokens : 0]));
   return [...accounts].sort((a, b) => {
     const aq = accountQuotaBlock(quota, a.label, modelFor(a), reports[a.label]?.report, nowMs);
     const bq = accountQuotaBlock(quota, b.label, modelFor(b), reports[b.label]?.report, nowMs);
@@ -208,6 +210,8 @@ export function orderAccountsByUsage(accounts, options = {}) {
       accountUsageScore(reports[a.label]?.report, modelFor(a)) -
       accountUsageScore(reports[b.label]?.report, modelFor(b));
     if (score !== 0) return score;
+    const tokenDelta = (modelUsage.get(a.label) ?? 0) - (modelUsage.get(b.label) ?? 0);
+    if (tokenDelta !== 0) return tokenDelta;
     const tie = (options.tieBreak?.get(a.label) ?? 0) - (options.tieBreak?.get(b.label) ?? 0);
     return tie !== 0 ? tie : a.label.localeCompare(b.label);
   });

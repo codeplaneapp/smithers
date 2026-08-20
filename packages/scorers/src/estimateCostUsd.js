@@ -45,10 +45,21 @@ function requestMultipliers(model, inputTokens) {
  * assumption determines whether a coarse GPT-5.6 forecast crosses the 272K
  * long-context input threshold.
  *
- * @param {{ model: string, tokens?: number, inputTokens?: number, outputTokens?: number, cacheReadTokens?: number, cacheWriteTokens?: number }} usage
+ * @param {{ model: string, type?: "usage", tokens?: number, inputTokens?: number, outputTokens?: number, cachedInputTokens?: number, cacheReadTokens?: number, cacheWriteTokens?: number, reasoningTokens?: number, totalTokens?: number }} usage
  * @returns {number} dollars
  */
 export function estimateCostUsd(usage) {
+  if (usage.type === "usage") {
+    const inputTokens = tokenCount(usage.inputTokens);
+    const cacheReadTokens = tokenCount(usage.cachedInputTokens ?? usage.cacheReadTokens);
+    const cacheWriteTokens = tokenCount(usage.cacheWriteTokens);
+    usage = {
+      ...usage,
+      inputTokens: Math.max(0, inputTokens - cacheReadTokens - cacheWriteTokens),
+      cacheReadTokens,
+      cacheWriteTokens,
+    };
+  }
   const price = modelTokenPrices(usage.model);
   const perMillion = (count, rate) => (tokenCount(count) / 1_000_000) * rate;
 

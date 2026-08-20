@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
 import { buildOneshotWorkflow } from "../src/oneshot/buildOneshotWorkflow.js";
 import { buildOneshotChildArgs } from "../src/oneshot/buildOneshotChildArgs.js";
 import { loadOneshotConfig } from "../src/oneshot/loadOneshotConfig.js";
@@ -461,6 +462,63 @@ test("oneshot spreads a Claude rung across every registered account, least used 
   expect(claudeIds.indexOf("smithers-account:claude-3")).toBeLessThan(claudeIds.indexOf("smithers-account:claude-1"));
   // Least-used usable account leads.
   expect(claudeIds[0]).toBe("smithers-account:claude-2");
+}, 60_000);
+
+test("oneshot production routing orders equal-quota accounts by persisted flows model events", async () => {
+  const home = temp("smithers-oneshot-flows-usage-");
+  const smithersHome = join(home, ".smithers");
+  const binDir = createExecutableDir();
+  writeExecutable(binDir, "claude", `#!${process.execPath}\nprocess.exit(1);\n`);
+  const labels = ["busy", "idle"];
+  const accounts = labels.map((label) => {
+    const configDir = join(smithersHome, "accounts", label);
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, ".credentials.json"),
+      JSON.stringify({ claudeAiOauth: { accessToken: `oauth-${label}`, expiresAt: Date.now() + 60_000 } }),
+    );
+    return { label, provider: "claude-code", configDir };
+  });
+  writeFileSync(join(smithersHome, "accounts.json"), JSON.stringify({ version: 1, accounts }));
+  writeFileSync(
+    join(smithersHome, "usage-cache.json"),
+    JSON.stringify({
+      version: 1,
+      entries: Object.fromEntries(labels.map((label) => [label, { report: { source: "oauth", windows: [] } }])),
+    }),
+  );
+
+  const sqlite = new Database(join(home, "smithers.db"));
+  try {
+    const db = drizzle(sqlite);
+    const adapter = new SmithersDb(db);
+    ensureSmithersTables(db);
+    const now = Date.now();
+    await adapter.insertRun({ runId: "routing-run", workflowName: "wf", status: "finished", createdAtMs: now });
+    await adapter.insertAttempt({
+      runId: "routing-run", nodeId: "agent", iteration: 0, attempt: 1, state: "finished", startedAtMs: now,
+      metaJson: JSON.stringify({ agentId: "smithers-account:busy" }),
+    });
+    for (const [seq, event] of [
+      { type: "usage", inputTokens: 900, outputTokens: 100 },
+      { type: "settle", stopReason: "stop" },
+    ].entries()) {
+      await adapter.insertEvent({
+        runId: "routing-run", seq, timestampMs: now + seq, nodeId: "agent", iteration: 0, attempt: 1,
+        type: "ModelEvent", payloadJson: JSON.stringify({ nodeId: "agent", iteration: 0, attempt: 1, event }),
+      });
+    }
+  } finally {
+    sqlite.close();
+  }
+
+  const env = { ...process.env, HOME: home, SMITHERS_HOME: smithersHome, PATH: `${binDir}${delimiter}${process.env.PATH}` };
+  const detections = detectAvailableAgents(env, { cwd: home });
+  const selected = await selectOneshotAgents(detections, { cwd: home, agent: "claude", env });
+  expect(selected.agents.slice(0, 2).map((agent) => agent.id)).toEqual([
+    "smithers-account:idle",
+    "smithers-account:busy",
+  ]);
 }, 60_000);
 
 describe("oneshot status updater", () => {
