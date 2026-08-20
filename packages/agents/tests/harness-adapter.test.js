@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import * as AgentEvent from "@flows/harness/AgentEvent";
 import * as ModelRequest from "@flows/model/ModelRequest";
-import { Effect, Option, Stream } from "effect";
+import { Effect, Layer, Option, Stream } from "effect";
+import { z } from "zod";
 import {
   AmpAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, CursorAgent, ForgeAgent, GeminiAgent,
   GrokAgent, HermesAgent, HermesCliAgent, KimiAgent, NanocodexAgent, OmpAgent, OpenClawAgent,
@@ -138,5 +139,161 @@ describe("Harness/AgentLike adapter", () => {
     expect(receivedHost).toBe(host);
     expect(roundTripped).toEqual(events);
     events.forEach((event, index) => expect(roundTripped[index]).toBeInstanceOf(event.constructor));
+  });
+
+  test("composed adapters preserve a Smithers checkpoint event exactly once", async () => {
+    const checkpoint = { codec: "third-party", version: 3, payload: { cursor: 9 } };
+    const checkpointEvent = new AgentEvent.ResumeToken({
+      eventType: "flows.harness.resume-token.v1",
+      agentEngine: "smithers-agent-checkpoint",
+      agentResume: JSON.stringify(checkpoint),
+      discardResumeSession: false,
+    });
+    const originalEvents = [checkpointEvent, events.at(-1)];
+    const harness = { run: () => Stream.fromIterable(originalEvents) };
+
+    const roundTripped = await collect(agentLikeToHarness(harnessToAgentLike(harness)).run(step, host));
+
+    expect(roundTripped).toEqual(originalEvents);
+    expect(roundTripped[0]).toBe(checkpointEvent);
+  });
+
+  test("legacy generate calls preserve tools, structured output, checkpoints, and callbacks", async () => {
+    const tools = { inspect: { description: "inspect", execute: () => "ok" } };
+    const checkpoint = { codec: "third-party", version: 1, payload: { cursor: 3 } };
+    let receivedStep;
+    let publishedCheckpoint;
+    let started = 0;
+    let settled = 0;
+    const harness = {
+      run(actualStep) {
+        receivedStep = actualStep;
+        return Stream.fromIterable([
+          events.find((event) => event._tag === "cell-call-started"),
+          events.find((event) => event._tag === "cell-call-settled"),
+          new AgentEvent.ResumeToken({ eventType: "flows.harness.resume-token.v1", agentEngine: "smithers-agent-checkpoint", agentResume: JSON.stringify(checkpoint), discardResumeSession: false }),
+          new AgentEvent.Resolved({ eventType: "flows.harness.resolved.v1", message: ModelRequest.Message.assistant('{"answer":42}') }),
+        ]);
+      },
+    };
+    const options = {
+      prompt: "solve",
+      tools,
+      outputSchema: z.object({ answer: z.number() }),
+      resumeCheckpoint: checkpoint,
+      checkpointMode: "resume",
+      onCheckpoint: async (value) => { publishedCheckpoint = value; },
+      onToolExecutionStart: () => { started += 1; },
+      onToolExecutionEnd: () => { settled += 1; },
+    };
+
+    const result = await harnessToAgentLike(harness).generate(options);
+
+    expect(receivedStep.input).toEqual({ _tag: "@smthrs/agents/harness-bridge.v1" });
+    expect(receivedStep.activeToolNames).toEqual(["inspect"]);
+    expect(receivedStep.toolDefinitions).toEqual([
+      ModelRequest.ToolDefinition.make({ name: "inspect", description: "inspect", parameters: {} }),
+    ]);
+    expect(result.output).toEqual({ answer: 42 });
+    expect(result.checkpoint).toEqual(checkpoint);
+    expect(publishedCheckpoint).toEqual(checkpoint);
+    expect(started).toBe(1);
+    expect(settled).toBe(1);
+  });
+
+  test("legacy result checkpoints survive both adapters", async () => {
+    const checkpoint = { codec: "third-party", version: 2, payload: ["state"] };
+    const original = { async generate(options) {
+      expect(options.tools.inspect).toBeDefined();
+      expect(options.outputSchema).toBeDefined();
+      return { text: '{"ok":true}', checkpoint };
+    } };
+    const roundTrip = harnessToAgentLike(agentLikeToHarness(original));
+    const result = await roundTrip.generate({
+      prompt: "go",
+      tools: { inspect: { execute: () => "ok" } },
+      outputSchema: z.object({ ok: z.boolean() }),
+    });
+    expect(result.output).toEqual({ ok: true });
+    expect(result.checkpoint).toEqual(checkpoint);
+  });
+
+  test("configured tools and engine resume state reach AgentLike on the ordinary HostLike path", async () => {
+    const checkpoint = { codec: "flows", version: 2, payload: ["resume"] };
+    let execution;
+    const agent = {
+      tools: { lookup: { execute: async ({ id }) => ({ id, found: true }) } },
+      async generate(options) {
+        execution = await options.tools.lookup.execute({ id: 7 });
+        expect(options.resumeCheckpoint).toEqual(checkpoint);
+        expect(options.checkpointMode).toBe("fork");
+        return { text: "used harness host" };
+      },
+    };
+    const result = await harnessToAgentLike(agentLikeToHarness(agent, {
+      resumeCheckpoint: checkpoint,
+      checkpointMode: "fork",
+    })).generate({ harnessStep: step, harnessHost: host });
+
+    expect(execution).toEqual({ id: 7, found: true });
+    expect(result.text).toBe("used harness host");
+  });
+
+  test("conventional third-party AgentLike diagnostics, tools, and rich result survive both adapters", async () => {
+    const diagnostic = { type: "action", action: "read", phase: "completed", detail: { path: "src/a.js" } };
+    const toolCall = { type: "tool-call", toolCallId: "call-7", toolName: "inspect", input: { path: "src/a.js" } };
+    const toolResult = { type: "tool-result", toolCallId: "call-7", toolName: "inspect", output: { lines: 4 }, isError: false };
+    const usage = { inputTokens: 11, outputTokens: 7, totalTokens: 18 };
+    const rich = {
+      text: "complete",
+      output: { answer: 42 },
+      toolCalls: [toolCall],
+      staticToolCalls: [toolCall],
+      toolResults: [toolResult],
+      staticToolResults: [toolResult],
+      steps: [{ text: "complete", toolCalls: [toolCall], toolResults: [toolResult], usage, finishReason: "stop" }],
+      usage,
+      totalUsage: usage,
+      finishReason: "stop",
+      response: { id: "response-1", modelId: "third-party", messages: [{ role: "assistant", content: "complete" }] },
+      warnings: [{ type: "unsupported-setting", setting: "temperature" }],
+      providerMetadata: { vendor: { traceId: "trace-9" } },
+    };
+    const original = {
+      async generate(options) {
+        options.onStderr("debug line\n");
+        await options.onEvent(diagnostic);
+        await options.onToolExecutionStart({ callId: "call-7", toolCall });
+        await options.onToolExecutionEnd({ callId: "call-7", toolCall, toolResult });
+        return rich;
+      },
+    };
+    const stderr = [];
+    const diagnostics = [];
+    const starts = [];
+    const ends = [];
+    const result = await harnessToAgentLike(agentLikeToHarness(original)).generate({
+      prompt: "inspect",
+      onStderr: (value) => stderr.push(value),
+      onEvent: (value) => { if (value.type !== "harness-event") diagnostics.push(value); },
+      onToolExecutionStart: (value) => starts.push(value),
+      onToolExecutionEnd: (value) => ends.push(value),
+    });
+
+    expect(stderr).toEqual(["debug line\n"]);
+    expect(diagnostics).toEqual([diagnostic]);
+    expect(starts).toEqual([{ callId: "call-7", toolCall }]);
+    expect(ends).toEqual([{ callId: "call-7", toolCall, toolResult }]);
+    for (const [key, value] of Object.entries(rich)) expect(result[key]).toEqual(value);
+  });
+
+  test("harness interruption follows the legacy abort signal", async () => {
+    let interrupted = false;
+    const harness = { run: () => Stream.never.pipe(Stream.ensuring(Effect.sync(() => { interrupted = true; }))) };
+    const controller = new AbortController();
+    const running = harnessToAgentLike(harness).generate({ prompt: "wait", abortSignal: controller.signal });
+    controller.abort();
+    await expect(running).rejects.toThrow();
+    expect(interrupted).toBe(true);
   });
 });

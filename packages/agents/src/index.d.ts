@@ -9,7 +9,7 @@ import { Model } from '@flows/model/Model';
 import * as _flows_harness_HarnessError from '@flows/harness/HarnessError';
 import { HarnessError } from '@flows/harness/HarnessError';
 import * as _flows_harness_AgentEvent from '@flows/harness/AgentEvent';
-import { Stream } from 'effect';
+import { Stream, Effect } from 'effect';
 import * as effect_Stream from 'effect/Stream';
 import '@smthrs/errors/SmithersError';
 import 'node:child_process';
@@ -783,6 +783,7 @@ declare class ModelAgent {
      */
     run(step: _flows_harness_AgentStep.AgentStep, host: _flows_harness_AgentStep.HostLike): Stream.Stream<_flows_harness_AgentEvent.TurnOpened | _flows_harness_AgentEvent.ModelDelta | _flows_harness_AgentEvent.ModelSettled | _flows_harness_AgentEvent.Elaborated | _flows_harness_AgentEvent.ChildProgress | _flows_harness_AgentEvent.ChildResult | _flows_harness_AgentEvent.CellProduced | _flows_harness_AgentEvent.CellCallStarted | _flows_harness_AgentEvent.CellCallSettled | _flows_harness_AgentEvent.CellSettled | _flows_harness_AgentEvent.TransitionApplied | _flows_harness_AgentEvent.Suspended | _flows_harness_AgentEvent.CompactionSettled | _flows_harness_AgentEvent.SteeringDrained | _flows_harness_AgentEvent.TurnClosed | _flows_harness_AgentEvent.PermissionRequired | _flows_harness_AgentEvent.ResumeToken | _flows_harness_AgentEvent.Aborted | _flows_harness_AgentEvent.Resolved, _flows_harness_HarnessError.HarnessError, never>;
     resolveModel(): Promise<any>;
+    resolveModelEffect(): Effect.Effect<any, never, never>;
     /** @param {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} [args] */
     generate(args?: AgentGenerateOptions$2): Promise<any>;
 }
@@ -1816,7 +1817,11 @@ type ElevenLabsTextToSpeechToolset = {
 };
 declare function createElevenLabsTextToSpeechTool(options: ElevenLabsTextToSpeechToolOptions): ElevenLabsTextToSpeechToolset;
 
-declare function agentLikeToHarness(agent: AgentLike$2): _flows_harness_Harness.Harness;
+declare function agentLikeToHarness(agent: AgentLike$2, runtime?: {
+    resumeCheckpoint?: AgentCheckpoint$1;
+    checkpointMode?: AgentCheckpointMode$1;
+    options?: AgentGenerateOptions$2;
+}): _flows_harness_Harness.Harness;
 declare function harnessToAgentLike(harness: _flows_harness_Harness.Harness): AgentLike$2;
 
 /**
