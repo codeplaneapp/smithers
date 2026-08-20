@@ -1,13 +1,10 @@
 import * as ModelRequest from "@flows/model/ModelRequest";
-import * as OpenAICompatible from "@flows/model/OpenAICompatible";
-import * as RequestExecutor from "@flows/model/RequestExecutor";
-import * as Route from "@flows/model/Route";
-import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import { SmithersError } from "@smthrs/errors/SmithersError";
-import { Effect, Redacted, Result, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { z } from "zod";
 import { buildGenerateResult } from "./BaseCliAgent/buildGenerateResult.js";
 import { runCellAgent, streamCellAgent } from "./cell-agent.js";
+import { resolveProviderModel } from "./model-provider.js";
 
 const MAX_TOOL_STEPS = 100;
 const stopReasons = new Set(["stop", "length", "tool-calls", "content-filter", "error", "aborted", "unknown"]);
@@ -100,14 +97,6 @@ const asInput = (input) => {
   return { system, messages };
 };
 
-/** @param {string} baseUrl */
-const normalizeOpenAICompatibleBaseUrl = (baseUrl) => {
-  const url = new URL(baseUrl);
-  const path = url.pathname.replace(/\/+$/, "");
-  url.pathname = path.toLowerCase().endsWith("/v1") ? path.slice(0, -3) || "/" : path || "/";
-  return url.toString();
-};
-
 /** @param {unknown} model @param {string | undefined} configured */
 const resolveModelId = (model, configured) => {
   if (typeof model === "string") return configured ?? model;
@@ -175,7 +164,7 @@ export class ModelAgent {
    * @param {import("@flows/harness/AgentStep").HostLike} host
    */
   run(step, host) {
-    return Stream.unwrap(Effect.promise(() => this.resolveModel()).pipe(Effect.map((model) => {
+    return Stream.unwrap(this.resolveModelEffect().pipe(Effect.map((model) => {
       const input = asInput(step.messages ?? step.prompt?.text ?? step.prompt ?? "");
       return streamCellAgent({
         model,
@@ -197,23 +186,11 @@ export class ModelAgent {
   }
 
   async resolveModel() {
-    if (typeof this.opts.model !== "string") return this.opts.model;
-    const envKey = this.family === "anthropic" ? process.env.ANTHROPIC_API_KEY : process.env.OPENAI_API_KEY;
-    const apiKey = Redacted.make(this.opts.apiKey ?? envKey ?? "");
-    const routeResult =
-      this.family === "anthropic"
-        ? Route.anthropic({ apiKey })
-        : this.opts.baseURL
-          ? OpenAICompatible.make({
-              id: "openai-compatible",
-              baseUrl: normalizeOpenAICompatibleBaseUrl(this.opts.baseURL),
-              apiKey,
-            })
-          : Route.openai({ apiKey });
-    const route = Result.getOrThrow(routeResult);
-    return Effect.runPromise(
-      Route.toModel(route).pipe(Effect.provide(RequestExecutor.layer), Effect.provide(NodeHttpClient.layerFetch)),
-    );
+    return Effect.runPromise(this.resolveModelEffect());
+  }
+
+  resolveModelEffect() {
+    return resolveProviderModel(this.opts, this.family);
   }
 
   /** @param {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} [args] */

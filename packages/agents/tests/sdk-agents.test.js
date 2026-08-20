@@ -174,6 +174,16 @@ describe("flows model agents", () => {
     expect(result.response.modelId).toBe("gpt-test");
   });
 
+  test("OpenAIAgent reports an invalid baseURL through its returned stream", async () => {
+    const agent = new OpenAIAgent({ model: "gpt-test", baseURL: "://invalid", apiKey: "none" });
+    let stream;
+    expect(() => {
+      stream = agent.run({ prompt: { text: "route" } }, {});
+    }).not.toThrow();
+    const exit = await Effect.runPromiseExit(Stream.runDrain(stream));
+    expect(exit._tag).toBe("Failure");
+  });
+
   test("prebuilt Models require an explicit modelId", () => {
     const fake = createFakeModel();
     expect(() => new OpenAIAgent({ model: fake.model })).toThrow(/requires modelId/);
