@@ -1,7 +1,9 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   BaseCliAgent,
   normalizeCodexConfig,
@@ -16,6 +18,50 @@ import {
 } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 import { zodToOpenAISchema } from "./zodToOpenAISchema.js";
+const execFileAsync = promisify(execFile);
+
+/** Codex config key that widens the `workspace-write` sandbox. */
+const WRITABLE_ROOTS_KEY = "sandbox_workspace_write.writable_roots";
+
+/**
+ * Absolute git directories for `cwd` that live outside it.
+ *
+ * A git worktree keeps its `.git` as a *file* pointing at a gitdir under the
+ * parent repository, and a submodule's gitdir sits under `.git/modules`. A
+ * sandbox scoped to the workspace therefore denies every git write — commits
+ * fail on the lock file, which reads as a mysterious `HEAD.lock` error rather
+ * than a permission error. Smithers' own `<Worktree>` lanes always produce
+ * this layout, so lanes and sandboxed agents would otherwise be mutually
+ * exclusive.
+ *
+ * Returns only paths that are not already inside `cwd`, so an ordinary
+ * repository contributes nothing and the emitted argv is unchanged.
+ *
+ * @param {string} cwd
+ * @returns {Promise<string[]>}
+ */
+export const externalGitDirs = async (cwd) => {
+  if (typeof cwd !== "string" || cwd.length === 0) return [];
+  let stdout = "";
+  try {
+    ({ stdout } = await execFileAsync("git", ["-C", cwd, "rev-parse", "--git-dir", "--git-common-dir"]));
+  } catch {
+    // Not a repository, or git is unavailable: nothing to widen.
+    return [];
+  }
+  const root = resolve(cwd);
+  const seen = new Set();
+  for (const line of stdout.split("\n")) {
+    const value = line.trim();
+    if (value.length === 0) continue;
+    const absolute = isAbsolute(value) ? resolve(value) : resolve(root, value);
+    const rel = relative(root, absolute);
+    const inside = rel.length === 0 || (!rel.startsWith("..") && !isAbsolute(rel));
+    if (!inside) seen.add(absolute);
+  }
+  return [...seen];
+};
+
 /** @typedef {import("./BaseCliAgent/BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./BaseCliAgent/CodexConfigOverrides.ts").CodexConfigOverrides} CodexConfigOverrides */
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
@@ -605,6 +651,24 @@ export class CodexAgent extends BaseCliAgent {
       args.push("--sandbox", "workspace-write");
     } else if (yoloEnabled || this.opts.dangerouslyBypassApprovalsAndSandbox) {
       args.push("--dangerously-bypass-approvals-and-sandbox");
+    }
+    // `workspace-write` permits writes under the workspace and /tmp only, so a
+    // worktree or submodule whose gitdir lives in the parent repository cannot
+    // be committed to. Widen the sandbox to those gitdirs alone. An explicit
+    // `writable_roots` in the caller's config wins, exactly as an explicit
+    // `sandbox` wins over `fullAuto` above.
+    const sandboxMode = !resumeSession && this.opts.fullAuto && !this.opts.sandbox
+      ? "workspace-write"
+      : this.opts.sandbox;
+    if (
+      !resumeSession &&
+      sandboxMode === "workspace-write" &&
+      !configOverrides.some((entry) => entry.startsWith(`${WRITABLE_ROOTS_KEY}=`))
+    ) {
+      const gitDirs = await externalGitDirs(params.cwd);
+      if (gitDirs.length > 0) {
+        args.push("-c", `${WRITABLE_ROOTS_KEY}=[${gitDirs.map((dir) => JSON.stringify(dir)).join(",")}]`);
+      }
     }
     if (!resumeSession) pushFlag(args, "--cd", this.opts.cd);
     if (this.opts.skipGitRepoCheck) args.push("--skip-git-repo-check");
