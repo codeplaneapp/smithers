@@ -104,6 +104,28 @@ first publish, Smithers may use a local `link:` overlay for development only;
 CI must install the published alpha. Gate: a scratch package installs the alpha
 from the registry and runs the flows quick-start program.
 
+### 0.2a Vendored flows, until the alpha publishes (LANDED)
+
+H1 to H4 are owner-only and not done, so there is no published alpha to depend
+on. The interim, on the stage-0 base as `ba5331f7`, is a vendored closure:
+
+- `scripts/vendor-flows.mjs` packs the flows packages from a sibling checkout
+  into `vendor/flows/` as tarballs, committed so a frozen install works for
+  everyone rather than only on the machine that has a flows checkout.
+- A private workspace package at `vendor/flows/` aliases each tarball under
+  `@flows/*`. **Import flows as `@flows/flow`, `@flows/plan`, `@flows/engine`,
+  and so on. Never import the bare `@smthrs/flow`**: the bare names belong to
+  this workspace.
+- The root `pnpm.overrides` are keyed by name *and version*
+  (`"@smthrs/engine@0.1.0"`), so they capture only the flows copies and never
+  this workspace's own package of the same name.
+- `vendor/flows/resolution.test.mjs` pins the rule: nine `@smthrs` names exist
+  in both trees, the bare name always resolves here, and the flows copy is only
+  reachable under its alias. It also runs the flows quick start in-process, so
+  the vendored engine is proven to execute, not merely install.
+- `vendor/flows/README.md` documents the swap that deletes the directory once
+  the alpha publishes.
+
 ### 0.3 Effect substrate bump
 
 Smithers pins `effect@4.0.0-beta.105` in at least ten manifests
