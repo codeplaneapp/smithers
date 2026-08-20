@@ -1,4 +1,5 @@
 import type { AgentCliEvent } from "./AgentCliEvent";
+import type { HostLike, AgentStep } from "@flows/harness/AgentStep";
 import type { AgentCheckpoint, AgentCheckpointMode, AgentCheckpointPublisher } from "../AgentCheckpoint";
 
 /**
@@ -20,6 +21,10 @@ type AgentGenerateOptionsBase = {
   onStdout?: (text: string) => void;
   onStderr?: (text: string) => void;
   onEvent?: (event: AgentCliEvent) => unknown;
+  /** Full flows input used when invoking a harness-backed AgentLike. */
+  harnessStep?: AgentStep;
+  /** Protected host layer used when invoking a harness-backed AgentLike. */
+  harnessHost?: HostLike;
   onProcess?: (event: {
     phase: "started" | "exited";
     pid: number | undefined;

@@ -81,6 +81,7 @@
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.108",
+    "@flows/harness": "0.1.0",
     "@flows/model": "0.1.0",
     "@smthrs/accounts": "workspace:*",
     "@smthrs/driver": "workspace:*",

@@ -520,10 +520,12 @@
         "typescript": "~6.0.3",
       },
       "peerDependencies": {
+        "@flows/harness": "0.1.0",
         "@flows/model": "0.1.0",
         "@modelcontextprotocol/sdk": "^1.29.0",
       },
       "optionalPeers": [
+        "@flows/harness",
         "@flows/model",
         "@modelcontextprotocol/sdk",
       ],

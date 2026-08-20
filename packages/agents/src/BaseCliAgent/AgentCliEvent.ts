@@ -1,4 +1,5 @@
 import type { AgentCliActionKind } from "./AgentCliActionKind";
+import type { AgentEvent } from "@flows/harness/AgentEvent";
 
 export type AgentCliActionPhase = "started" | "updated" | "completed";
 
@@ -38,4 +39,10 @@ export type AgentCliCompletedEvent = {
   usage?: Record<string, unknown>;
 };
 
-export type AgentCliEvent = AgentCliStartedEvent | AgentCliActionEvent | AgentCliCompletedEvent;
+/** Lossless bridge event used while legacy AgentLike consumers are ported. */
+export type AgentHarnessEvent = {
+  type: "harness-event";
+  event: AgentEvent;
+};
+
+export type AgentCliEvent = AgentCliStartedEvent | AgentCliActionEvent | AgentCliCompletedEvent | AgentHarnessEvent;

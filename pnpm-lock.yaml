@@ -1168,6 +1168,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0-rc.108
         version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1)
+      '@flows/harness':
+        specifier: 0.1.0
+        version: '@smthrs/harness@file:vendor/flows/smthrs-harness-0.1.0.tgz'
       '@flows/model':
         specifier: 0.1.0
         version: '@smthrs/model@file:vendor/flows/smthrs-model-0.1.0.tgz'

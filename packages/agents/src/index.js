@@ -2,6 +2,7 @@
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
 /** @typedef {import("./AgentLike.ts").AgentLike} AgentLike */
+/** @typedef {import("./BaseCliAgent/AgentCliEvent.ts").AgentHarnessEvent} AgentHarnessEvent */
 /** @typedef {import("./GenerateResult.ts").GenerateTextResult} GenerateTextResult */
 /** @typedef {import("./Tool.ts").Tool} Tool */
 /** @typedef {import("./Tool.ts").ToolSet} ToolSet */
@@ -84,6 +85,7 @@
 // @smithers-type-exports-end
 
 export { BaseCliAgent } from "./BaseCliAgent/index.js";
+export { agentLikeToHarness, harnessToAgentLike } from "./harness-adapter.js";
 export {
   DEFAULT_AGENT_CHECKPOINT_MAX_BYTES,
   agentProducesCheckpoint,

@@ -1,3 +1,5 @@
+import { AgentEvent } from '@flows/harness/AgentEvent';
+import { AgentStep, HostLike } from '@flows/harness/AgentStep';
 import * as _smthrs_errors_SmithersError from '@smthrs/errors/SmithersError';
 import { SmithersError as SmithersError$1 } from '@smthrs/errors/SmithersError';
 import { Effect } from 'effect';
@@ -98,7 +100,12 @@ type AgentCliCompletedEvent$1 = {
     resume?: string;
     usage?: Record<string, unknown>;
 };
-type AgentCliEvent$1 = AgentCliStartedEvent$1 | AgentCliActionEvent$1 | AgentCliCompletedEvent$1;
+/** Lossless bridge event used while legacy AgentLike consumers are ported. */
+type AgentHarnessEvent = {
+    type: "harness-event";
+    event: AgentEvent;
+};
+type AgentCliEvent$1 = AgentCliStartedEvent$1 | AgentCliActionEvent$1 | AgentCliCompletedEvent$1 | AgentHarnessEvent;
 
 /**
  * Loosely-typed generation options. The AI SDK passes a dynamic shape here
@@ -119,6 +126,10 @@ type AgentGenerateOptionsBase = {
     onStdout?: (text: string) => void;
     onStderr?: (text: string) => void;
     onEvent?: (event: AgentCliEvent$1) => unknown;
+    /** Full flows input used when invoking a harness-backed AgentLike. */
+    harnessStep?: AgentStep;
+    /** Protected host layer used when invoking a harness-backed AgentLike. */
+    harnessHost?: HostLike;
     onProcess?: (event: {
         phase: "started" | "exited";
         pid: number | undefined;
@@ -661,4 +672,4 @@ type PiExtensionUiRequest = PiExtensionUiRequest$2;
 type PiExtensionUiResponse = PiExtensionUiResponse$2;
 type RunCommandResult = RunCommandResult$2;
 
-export { pushFlag as $, type AgentGenerateOptions$2 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, type AgentCliStartedEvent as D, type AgentGenerateOptions as E, type CliUsageInfo as F, type GenerateTextResult$2 as G, type CodexConfigOverrides as H, type PiExtensionUiRequest as I, type PiExtensionUiResponse as J, asNumber as K, asString as L, buildGenerateResult as M, type NormalizedTokenUsage as N, combineNonEmpty as O, type PiExtensionUiRequest$2 as P, createAgentStdoutTextEmitter as Q, type RunCommandResult as R, createSyntheticIdGenerator as S, extractPrompt as T, extractTextFromJsonValue as U, extractUsageFromOutput as V, isLikelyRuntimeMetadata as W, isRecord as X, normalizeCodexConfig as Y, normalizeTokenUsage as Z, parseAnthropicStyleFileChanges as _, type AgentCheckpoint as a, pushList as a0, reconstructUnifiedDiff as a1, resolveTimeouts as a2, runAgentPromise as a3, runCommandEffect as a4, runRpcCommandEffect as a5, shouldSurfaceUnparsedStdout as a6, toolKindFromName as a7, truncate as a8, truncateToBytes as a9, tryParseJson as aa, type AgentFileChange$1 as b, type AgentCheckpointCapability as c, type AgentCheckpointFormat as d, type BaseCliAgentOptions as e, type PiExtensionUiResponse$2 as f, BaseCliAgent as g, type CodexConfigOverrides$2 as h, type AgentCliEvent$1 as i, type CliOutputInterpreter as j, type AgentCheckpointResult as k, type AgentCheckpointMode as l, type AgentCliActionKind$2 as m, type AgentCheckpointContinuationOptions as n, type AgentCheckpointJsonArray as o, type AgentCheckpointJsonObject as p, type AgentCheckpointJsonPrimitive as q, type AgentCheckpointJsonValue as r, type AgentCheckpointPublisher as s, type AgentFileChangeKind as t, type AgentCliActionEvent as u, type AgentCliActionKind as v, type AgentCliActionPhase as w, type AgentCliCompletedEvent as x, type AgentCliEvent as y, type AgentCliEventLevel as z };
+export { parseAnthropicStyleFileChanges as $, type AgentGenerateOptions$2 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, type AgentCliEventLevel as D, type AgentCliStartedEvent as E, type AgentGenerateOptions as F, type GenerateTextResult$2 as G, type CliUsageInfo as H, type CodexConfigOverrides as I, type PiExtensionUiRequest as J, type PiExtensionUiResponse as K, asNumber as L, asString as M, type NormalizedTokenUsage as N, buildGenerateResult as O, type PiExtensionUiRequest$2 as P, combineNonEmpty as Q, type RunCommandResult as R, createAgentStdoutTextEmitter as S, createSyntheticIdGenerator as T, extractPrompt as U, extractTextFromJsonValue as V, extractUsageFromOutput as W, isLikelyRuntimeMetadata as X, isRecord as Y, normalizeCodexConfig as Z, normalizeTokenUsage as _, type AgentCheckpoint as a, pushFlag as a0, pushList as a1, reconstructUnifiedDiff as a2, resolveTimeouts as a3, runAgentPromise as a4, runCommandEffect as a5, runRpcCommandEffect as a6, shouldSurfaceUnparsedStdout as a7, toolKindFromName as a8, truncate as a9, truncateToBytes as aa, tryParseJson as ab, type AgentFileChange$1 as b, type AgentCheckpointCapability as c, type AgentCheckpointFormat as d, type BaseCliAgentOptions as e, type PiExtensionUiResponse$2 as f, BaseCliAgent as g, type CodexConfigOverrides$2 as h, type AgentCliEvent$1 as i, type CliOutputInterpreter as j, type AgentCheckpointResult as k, type AgentCheckpointMode as l, type AgentCliActionKind$2 as m, type AgentCheckpointContinuationOptions as n, type AgentCheckpointJsonArray as o, type AgentCheckpointJsonObject as p, type AgentCheckpointJsonPrimitive as q, type AgentCheckpointJsonValue as r, type AgentCheckpointPublisher as s, type AgentFileChangeKind as t, type AgentHarnessEvent as u, type AgentCliActionEvent as v, type AgentCliActionKind as w, type AgentCliActionPhase as x, type AgentCliCompletedEvent as y, type AgentCliEvent as z };
