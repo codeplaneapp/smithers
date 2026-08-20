@@ -137,6 +137,16 @@ export function workspaceNameFor(key: string, slug: string): string {
   return "fm-" + key + "-" + sanitizeSlug(slug);
 }
 
+/**
+ * Bookmark the integrator leaves a finished stage on, in each repo that had
+ * lanes. The next stage's lanes branch from it, so stage N sees stage N-1's
+ * work; without that they branch from trunk and every earlier stage is
+ * invisible to them.
+ */
+export function stageBookmarkFor(key: string, stageId: string): string {
+  return "flows-migration/" + key + "/stage-" + sanitizeSlug(stageId);
+}
+
 /** Bookmark a lane commits onto. */
 export function bookmarkFor(key: string, slug: string): string {
   return "flows-migration/" + key + "/" + sanitizeSlug(slug);
@@ -234,7 +244,9 @@ export function parseLedger(
 
 /** Parse the `stages` input ("all", "1", "0,1") into an ordered stage id list. */
 export function parseStageSelection(raw: string): string[] {
-  const trimmed = String(raw ?? "").trim().toLowerCase();
+  const trimmed = String(raw ?? "")
+    .trim()
+    .toLowerCase();
   if (!trimmed || trimmed === "all" || trimmed === "*") return [...ALL_STAGES];
   const wanted = new Set(
     trimmed

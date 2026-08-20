@@ -21,6 +21,7 @@ import {
 } from "smthrs";
 import { z } from "zod/v4";
 import {
+  ALL_STAGES,
   type Lane,
   type LanePhase,
   type Ledger,
@@ -38,6 +39,8 @@ import {
   renderStageReportHtml,
   reportsDirFor,
   rowOk,
+  sanitizeSlug,
+  stageBookmarkFor,
   summarizeGate,
   unwrapRow,
   workspaceNameFor,
@@ -391,7 +394,9 @@ function runPreflight(input: Input): Preflight {
   if (flowsOk && !jjOk(flowsRoot)) notes.push("flows tree is not a jj repo; flows lanes cannot get workspaces");
 
   if (existsSync(join(smithersRoot, "smithers.db"))) {
-    notes.push("workspace db looks like SQLite, which stage 1 supports; a PGlite/Postgres workspace is blocked on flows gap 4");
+    notes.push(
+      "workspace db looks like SQLite, which stage 1 supports; a PGlite/Postgres workspace is blocked on flows gap 4",
+    );
   }
 
   const ok = flowsOk && jjOk(smithersRoot) && (!flowsOk || jjOk(flowsRoot));
@@ -420,6 +425,54 @@ function readdirSafe(dir: string): string[] {
 }
 
 /**
+ * The revision a lane starts from.
+ *
+ * A stage-N lane must branch from stage N-1's integration bookmark in its own
+ * repo, not from trunk: the integrator leaves each finished stage on
+ * `flows-migration/<key>/stage-<id>` and never moves trunk, so a lane that
+ * branches from trunk cannot see any earlier stage's work. Probes backwards
+ * through the stage order so a skipped or not-yet-integrated stage falls
+ * through to the one before it, and finally to the configured trunk.
+ */
+function revisionExists(revision: string, root: string): boolean {
+  const probe = jjSafe(["log", "-r", revision, "--no-graph", "-T", "commit_id.short()"], root);
+  return !probe.startsWith("ERROR:") && probe.trim().length > 0;
+}
+
+function resolveLaneBase(lane: Lane, input: Input, key: string, root: string): string {
+  // A declared dependency is not just an ordering constraint: the lane needs
+  // that dependency's CODE. Its commit lives on the dependency's lane
+  // bookmark, so base this lane there. With several dependencies the base is a
+  // merge of them, created without moving any working copy.
+  const deps = lane.dependsOn.map((dep) => bookmarkFor(key, dep)).filter((bm) => revisionExists(bm, root));
+  if (deps.length === 1) return deps[0];
+  if (deps.length > 1) {
+    const merged = "flows-migration/" + key + "/base-" + sanitizeSlug(lane.slug);
+    if (!revisionExists(merged, root)) {
+      // `--no-edit` keeps the shared checkout's working copy where it is. The
+      // merge is then identified by parentage, which is exact: it is the only
+      // commit that is a child of every dependency.
+      jjSafe(["new", "--no-edit", "-m", "chore(base): merge dependencies for " + lane.slug, ...deps], root);
+      const revset = deps.map((dep) => "children(" + dep + ")").join(" & ");
+      const found = jjSafe(["log", "-r", revset, "--no-graph", "-T", 'commit_id.short() ++ "\n"'], root);
+      const id = found.split("\n")[0].trim();
+      if (id && !id.startsWith("ERROR:")) {
+        jjSafe(["bookmark", "set", merged, "-r", id, "--allow-backwards"], root);
+      }
+    }
+    if (revisionExists(merged, root)) return merged;
+    return deps[deps.length - 1];
+  }
+
+  const index = ALL_STAGES.indexOf(lane.stage);
+  for (let earlier = index - 1; earlier >= 0; earlier -= 1) {
+    const bookmark = stageBookmarkFor(key, ALL_STAGES[earlier]);
+    if (revisionExists(bookmark, root)) return bookmark;
+  }
+  return input.baseRev;
+}
+
+/**
  * Create the lane's own jj workspace in whichever repo the lane targets, then
  * install dependencies in it. A fresh jj workspace has no node_modules, so a
  * lane check would fail for a reason that has nothing to do with the lane.
@@ -429,16 +482,25 @@ async function createLaneWorkspace(lane: Lane, input: Input, key: string): Promi
   const dir = laneDirFor(root, key, lane.slug);
   const name = workspaceNameFor(key, lane.slug);
   const bookmark = bookmarkFor(key, lane.slug);
+  const base = resolveLaneBase(lane, input, key, root);
   try {
     mkdirSync(workspaceRootFor(root, key), { recursive: true });
     if (!existsSync(join(dir, ".jj"))) {
       // `workspace add` leaves the new workspace on a fresh empty change whose
-      // parent is baseRev, which is exactly the lane's starting point.
-      jj(["workspace", "add", "--name", name, "--revision", input.baseRev, dir], root);
+      // parent is `base`, which is exactly the lane's starting point.
+      jj(["workspace", "add", "--name", name, "--revision", base, dir], root);
     }
     const ready = existsSync(join(dir, ".jj"));
     if (!ready) {
-      return { slug: lane.slug, ready: false, depsReady: false, dir, bookmark, baseRev: input.baseRev, summary: "Workspace directory was not created" };
+      return {
+        slug: lane.slug,
+        ready: false,
+        depsReady: false,
+        dir,
+        bookmark,
+        baseRev: base,
+        summary: "Workspace directory was not created",
+      };
     }
     jjSafe(["bookmark", "set", bookmark, "-r", "@", "--allow-backwards"], dir);
     const baseRev = jjSafe(["log", "-r", "@-", "--no-graph", "-T", "commit_id.short()"], dir);
@@ -449,12 +511,14 @@ async function createLaneWorkspace(lane: Lane, input: Input, key: string): Promi
       depsReady: install.exitCode === 0,
       dir,
       bookmark,
-      baseRev: baseRev.startsWith("ERROR:") ? input.baseRev : baseRev,
+      baseRev: baseRev.startsWith("ERROR:") ? base : baseRev,
       summary:
         "Workspace " +
         name +
         " at " +
         dir +
+        " on " +
+        base +
         (install.exitCode === 0
           ? " (dependencies installed)"
           : " (pnpm install exited " + install.exitCode + ", the lane must install before it can run checks)"),
@@ -499,9 +563,7 @@ async function runLaneGate(lane: Lane, dir: string, gateKey: string): Promise<Ga
     const result = await runProcess(parsed.binary, parsed.args, dir, GATE_TIMEOUT_MS);
     if (result.exitCode !== 0) {
       failures.push({ check, exitCode: result.exitCode });
-      chunks.push(
-        "$ " + check + "\nexit " + result.exitCode + "\n" + (result.stderr || result.stdout).slice(-4000),
-      );
+      chunks.push("$ " + check + "\nexit " + result.exitCode + "\n" + (result.stderr || result.stdout).slice(-4000));
     } else {
       chunks.push("$ " + check + "\nexit 0");
     }
@@ -515,7 +577,9 @@ async function runLaneGate(lane: Lane, dir: string, gateKey: string): Promise<Ga
     detail: chunks.join("\n\n").slice(-16_000),
     diffStat: diffStat.slice(0, 6000),
     commitId: commitId.startsWith("ERROR:") ? "" : commitId,
-    summary: ok ? "Gate green (" + lane.checks.length + " checks)" : "Gate failing: " + failures.map((f) => f.check).join(", "),
+    summary: ok
+      ? "Gate green (" + lane.checks.length + " checks)"
+      : "Gate failing: " + failures.map((f) => f.check).join(", "),
   };
 }
 
@@ -606,14 +670,21 @@ function ledgerPrompt(input: Input, preflight: Preflight | undefined): string {
     "Plan the flows migration as a ledger of PR-sized lanes.",
     "",
     "Read, in order:",
-    "1. " + input.specPath + " in the smithers repo (" + smithersRoot + "). It is the program spec and it is authoritative.",
+    "1. " +
+      input.specPath +
+      " in the smithers repo (" +
+      smithersRoot +
+      "). It is the program spec and it is authoritative.",
     "2. " + join(input.flowsRoot, "docs/architecture/smithers-replacement-gaps.md") + " and implementation-status.md.",
     "3. The two trees themselves. smithers: packages/{engine,graph,scheduler,driver,agents,db}. flows: packages/{flow,engine,engine-store,plan,journal,run-store,harness,model,core,std,patterns,flows}.",
     "",
     "Preflight facts from this run:",
     "- Colliding published package names: " + collisions,
     "- Notes: " + notes,
-    "- smithers effect pin: " + (preflight?.smithersEffectPin || "unknown") + ", flows effect pin: " + (preflight?.flowsEffectPin || "unknown"),
+    "- smithers effect pin: " +
+      (preflight?.smithersEffectPin || "unknown") +
+      ", flows effect pin: " +
+      (preflight?.flowsEffectPin || "unknown"),
     "",
     "Produce one entry per stage the spec defines (0, 1, 2, 3), each with at most " +
       input.maxLanesPerStage +
@@ -654,7 +725,8 @@ function implementPrompt(args: {
     "Repo: " + lane.repo + " (root " + repoRootFor(lane, args.input) + ")",
     "Workspace: " + workspace.dir + " (jj workspace, bookmark " + workspace.bookmark + ")",
     "Scopes: " + lane.scopes.join(", "),
-    "Checks that must pass: " + (lane.checks.length > 0 ? lane.checks.join(" | ") : "none declared, run the obvious scoped tests"),
+    "Checks that must pass: " +
+      (lane.checks.length > 0 ? lane.checks.join(" | ") : "none declared, run the obvious scoped tests"),
     "",
     "Goal:",
     lane.goal,
@@ -676,7 +748,12 @@ function implementPrompt(args: {
     .join("\n");
 }
 
-function reviewPrompt(args: { lane: Lane; workspace: Workspace; implement: Implement | undefined; gate: Gate | undefined }): string {
+function reviewPrompt(args: {
+  lane: Lane;
+  workspace: Workspace;
+  implement: Implement | undefined;
+  gate: Gate | undefined;
+}): string {
   return [
     "Review one lane of the flows migration as a senior reviewer. Be adversarial about correctness, not about style.",
     "",
@@ -703,7 +780,10 @@ function reviewPrompt(args: { lane: Lane; workspace: Workspace; implement: Imple
 }
 
 function integratePrompt(args: { stage: StageEntry; lanes: Lane[]; input: Input; key: string }): string {
-  const bySlug = args.lanes.map((lane) => "- " + lane.slug + " (" + lane.repo + ") at " + laneDirFor(repoRootFor(lane, args.input), args.key, lane.slug));
+  const bySlug = args.lanes.map(
+    (lane) =>
+      "- " + lane.slug + " (" + lane.repo + ") at " + laneDirFor(repoRootFor(lane, args.input), args.key, lane.slug),
+  );
   return [
     "Integrate the approved lanes of stage " + args.stage.id + " and prove the stage.",
     "",
@@ -714,8 +794,13 @@ function integratePrompt(args: { stage: StageEntry; lanes: Lane[]; input: Input;
     "",
     "Do this:",
     "1. In each repo, rebase the approved lane changes onto the current main and resolve conflicts. Keep one change per lane. Do not squash lanes together.",
-    "2. Leave the result on the bookmark `flows-migration/" + args.key + "/stage-" + args.stage.id + "` in each repo that has lanes.",
-    "3. Run the stage checks: " + (args.stage.checks.length > 0 ? args.stage.checks.join(" | ") : "pnpm typecheck in each repo that changed"),
+    "2. Leave the result on the bookmark `flows-migration/" +
+      args.key +
+      "/stage-" +
+      args.stage.id +
+      "` in each repo that has lanes.",
+    "3. Run the stage checks: " +
+      (args.stage.checks.length > 0 ? args.stage.checks.join(" | ") : "pnpm typecheck in each repo that changed"),
     "4. Fix integration breakage only. A lane's own defect goes back to that lane as feedback, it does not get patched here.",
     "",
     args.input.push
@@ -770,8 +855,10 @@ export default smithers((ctx) => {
   const artifactOf = (slug: string) => latest<Artifact>(ctx, outputs.fmArtifact, slug + ":artifact");
   const decisionRowOf = (slug: string) => ctx.latest(outputs.fmDecision, slug + ":approval");
   const decisionOfLane = (slug: string) => decisionOf(decisionRowOf(slug));
-  const integrateOf = (stageId: string) => latest<Integrate>(ctx, outputs.fmIntegrate, "stage-" + stageId + ":integrate");
-  const stageReportOf = (stageId: string) => latest<StageReport>(ctx, outputs.fmStageReport, "stage-" + stageId + ":report");
+  const integrateOf = (stageId: string) =>
+    latest<Integrate>(ctx, outputs.fmIntegrate, "stage-" + stageId + ":integrate");
+  const stageReportOf = (stageId: string) =>
+    latest<StageReport>(ctx, outputs.fmStageReport, "stage-" + stageId + ":report");
   const signoffOf = (stageId: string) => decisionOf(ctx.latest(outputs.fmDecision, "stage-" + stageId + ":signoff"));
 
   const buildRounds = (slug: string) => ctx.iterationCount(outputs.fmGate, slug + ":gate");
@@ -820,7 +907,11 @@ export default smithers((ctx) => {
     }));
 
   const everyStageDone = stages.length > 0 && stages.every((stage) => stageDone(stage));
-  const summaryReady = everyStageDone || (stages.length > 0 && stages.every((stage) => stageLanesSettled(stage) && stageReportOf(stage.id) !== undefined) && stages.some((stage) => signoffOf(stage.id) === "denied"));
+  const summaryReady =
+    everyStageDone ||
+    (stages.length > 0 &&
+      stages.every((stage) => stageLanesSettled(stage) && stageReportOf(stage.id) !== undefined) &&
+      stages.some((stage) => signoffOf(stage.id) === "denied"));
 
   return (
     <Workflow name="flows-migration">
@@ -906,7 +997,12 @@ export default smithers((ctx) => {
                                     reviewOf(slug)?.verdict === "reject" ? (reviewOf(slug)?.feedback ?? "") : "",
                                 })}
                               </Task>
-                              <Task id={slug + ":gate"} output={outputs.fmGate} timeoutMs={GATE_TIMEOUT_MS} continueOnFail>
+                              <Task
+                                id={slug + ":gate"}
+                                output={outputs.fmGate}
+                                timeoutMs={GATE_TIMEOUT_MS}
+                                continueOnFail
+                              >
                                 {() => runLaneGate(lane, laneCwd, slug + ":build")}
                               </Task>
                               <Task
@@ -918,7 +1014,12 @@ export default smithers((ctx) => {
                                 heartbeatTimeoutMs={HEARTBEAT_MS}
                                 continueOnFail
                               >
-                                {reviewPrompt({ lane, workspace, implement: implementOf(slug), gate: buildGateOf(slug) })}
+                                {reviewPrompt({
+                                  lane,
+                                  workspace,
+                                  implement: implementOf(slug),
+                                  gate: buildGateOf(slug),
+                                })}
                               </Task>
                             </Sequence>
                           </Loop>
@@ -988,7 +1089,12 @@ export default smithers((ctx) => {
                                   onDeny="continue"
                                   request={{
                                     title:
-                                      "Stage " + stage.id + " lane " + slug + " r" + (artifactOf(slug)?.revision ?? reviewRounds(slug) + 1),
+                                      "Stage " +
+                                      stage.id +
+                                      " lane " +
+                                      slug +
+                                      " r" +
+                                      (artifactOf(slug)?.revision ?? reviewRounds(slug) + 1),
                                     summary:
                                       lane.title +
                                       " (" +
