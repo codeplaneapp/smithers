@@ -68,7 +68,10 @@ const GRAPH_INPUT = {
   maxIterations: 1,
 };
 const GRAPH_CONCURRENCY = 2;
-const GRAPH_RENDER_TIMEOUT_MS = 10_000;
+// Renders take ~1-2s on a dev machine, but two concurrent CLI cold starts on a
+// shared CI runner have blown a 10s budget (friday-bot timed out twice in a
+// row). The budget guards against hangs, not slowness, so keep it generous.
+const GRAPH_RENDER_TIMEOUT_MS = 30_000;
 
 function findTopLevelExampleWorkflows() {
   return Array.from(new Bun.Glob("examples/*.jsx").scanSync({ cwd: REPO_ROOT })).sort();
