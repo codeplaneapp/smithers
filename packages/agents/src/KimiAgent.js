@@ -1,4 +1,14 @@
-import { mkdtempSync, cpSync, existsSync, readFileSync, writeFileSync, readdirSync, rmSync, renameSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  cpSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  readdirSync,
+  rmSync,
+  renameSync,
+} from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
@@ -14,6 +24,13 @@ import {
 } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 import { SmithersError } from "@smthrs/errors/SmithersError";
+import { logWarning } from "@smthrs/observability/logging";
+import { kimiWireLogPosition, readKimiWireUsageDelta } from "./kimiWireUsage.js";
+import {
+  copyKimiSessionState,
+  extractKimiSessionIdFromLine,
+  resolveKimiSessionFromIndex,
+} from "./kimiSessionRecovery.js";
 
 /**
  * Normalize kimi's real builtin file-mutating tools. Verified against the
@@ -257,6 +274,28 @@ async function ensureKimiCredentialsUsable(shareDir, agentId, agentModel) {
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
 /** @typedef {import("./BaseCliAgent/AgentCliEvent.ts").AgentCliEvent} AgentCliEvent */
 /** @typedef {import("./KimiAgentOptions.ts").KimiAgentOptions} KimiAgentOptions */
+/** @typedef {import("./KimiAgentOptions.ts").KimiWireUsageOptions} KimiWireUsageOptions */
+/** @typedef {import("./KimiAgentOptions.ts").KimiSessionRecoveryOptions} KimiSessionRecoveryOptions */
+
+/**
+ * @param {KimiAgentOptions["wireUsage"]} value
+ * @returns {KimiWireUsageOptions | undefined}
+ */
+function normalizeKimiWireUsageOption(value) {
+  if (value === true) return {};
+  if (value && typeof value === "object") return value;
+  return undefined;
+}
+
+/**
+ * @param {KimiAgentOptions["sessionRecovery"]} value
+ * @returns {KimiSessionRecoveryOptions | undefined}
+ */
+function normalizeKimiSessionRecoveryOption(value) {
+  if (value === true) return {};
+  if (value && typeof value === "object") return value;
+  return undefined;
+}
 
 /**
  * @param {KimiAgentOptions} [opts]
@@ -293,10 +332,23 @@ export class KimiAgent extends BaseCliAgent {
   capabilities;
   cliEngine = "kimi";
   issuedSessionId;
+  /** Actual resumable session id resolved from CLI output or the session index. */
+  actualSessionId;
+  /** Per-invocation runtime home (isolated when credentialDir/runtimeDir is used). */
+  invocationHome;
+  /** @type {{ path: string; byteOffset: number; options: import("./kimiWireUsage.js").KimiWireUsageReadOptions } | undefined} */
+  wireUsageBaseline;
   /**
    * @param {KimiAgentOptions} [opts]
    */
   constructor(opts = {}) {
+    if (opts.credentialDir && opts.configDir) {
+      throw new TypeError(
+        "KimiAgent: credentialDir and configDir are mutually exclusive. " +
+          "credentialDir treats the directory as a shared, read-only credential source and runs the CLI in an isolated runtime home; " +
+          "configDir points the live CLI at the directory itself.",
+      );
+    }
     super(opts, "KimiAgent");
     this.opts = opts;
     this.capabilities = createKimiCapabilityRegistry(opts);
@@ -309,6 +361,40 @@ export class KimiAgent extends BaseCliAgent {
     let didEmitCompleted = false;
     let finalAnswer = "";
     const nextSyntheticId = createSyntheticIdGenerator();
+    const sessionRecovery = normalizeKimiSessionRecoveryOption(this.opts.sessionRecovery);
+    let sessionRecoveryNotified = false;
+    /**
+     * Publish the actual resumable session id (resolved from CLI output or
+     * the on-disk session index) in place of the synthetic pre-launch id.
+     * @param {string} sessionId
+     * @param {"output" | "session-index"} source
+     */
+    const publishActualSession = (sessionId, source) => {
+      this.issuedSessionId = sessionId;
+      this.actualSessionId = sessionId;
+      if (!sessionRecovery || sessionRecoveryNotified) return;
+      sessionRecoveryNotified = true;
+      const homeDir = this.invocationHome;
+      const info = {
+        sessionId,
+        source,
+        homeDir,
+        stateDir: homeDir ? join(homeDir, "sessions", sessionId) : undefined,
+      };
+      try {
+        void Promise.resolve(sessionRecovery.onSessionResolved?.(info)).catch(() => undefined);
+      } catch {
+        // Hooks must never break output interpretation.
+      }
+    };
+    /**
+     * @param {string} line
+     */
+    const watchSessionLine = (line) => {
+      if (!sessionRecovery || sessionRecoveryNotified) return;
+      const id = extractKimiSessionIdFromLine(line);
+      if (id) publishActualSession(id, "output");
+    };
     // Tool-call names keyed by call id so the `role: "tool"` completion can
     // keep the same action kind as the `started` event (a WriteFile started
     // as `file_change` must not complete as a generic `tool` — nodeChat
@@ -319,6 +405,7 @@ export class KimiAgent extends BaseCliAgent {
      * @returns {AgentCliEvent[]}
      */
     const parseLine = (line) => {
+      watchSessionLine(line);
       const trimmed = line.trim();
       if (!trimmed) return [];
       let payload;
@@ -402,7 +489,34 @@ export class KimiAgent extends BaseCliAgent {
     };
     return {
       onStdoutLine: parseLine,
+      onStderrLine: (line) => {
+        watchSessionLine(line);
+        return [];
+      },
       onExit: (result) => {
+        if (sessionRecovery && !sessionRecoveryNotified && this.invocationHome) {
+          const fromIndex = resolveKimiSessionFromIndex(this.invocationHome, sessionRecovery);
+          if (fromIndex) publishActualSession(fromIndex.sessionId, "session-index");
+        }
+        const wireUsage = this.readWireUsageBaselineDelta();
+        if (sessionRecovery && this.opts.sessionStateDir && this.invocationHome && this.issuedSessionId) {
+          try {
+            copyKimiSessionState(
+              {
+                sourceHome: this.invocationHome,
+                targetHome: this.opts.sessionStateDir,
+                sessionId: this.issuedSessionId,
+              },
+              sessionRecovery,
+            );
+          } catch (error) {
+            logWarning(
+              "KimiAgent: failed to persist session state",
+              { error: error instanceof Error ? error.message : String(error) },
+              "agent.kimi",
+            );
+          }
+        }
         if (didEmitCompleted) return [];
         didEmitCompleted = true;
         return [
@@ -416,10 +530,32 @@ export class KimiAgent extends BaseCliAgent {
                 ? result.stderr.trim() || `Kimi exited with code ${result.exitCode}`
                 : undefined,
             resume: this.issuedSessionId,
+            ...(wireUsage ? { usage: wireUsage } : {}),
           },
         ];
       },
     };
+  }
+  /**
+   * Read the invocation-local usage delta from the wire log baselined at
+   * invocation start (and re-baselined after resumed session state was
+   * seeded). Returns undefined when wire usage tracking is off or no
+   * counters were recorded.
+   *
+   * @returns {import("./BaseCliAgent/NormalizedTokenUsage.ts").NormalizedTokenUsage | undefined}
+   */
+  readWireUsageBaselineDelta() {
+    const baseline = this.wireUsageBaseline;
+    if (!baseline) return undefined;
+    let delta;
+    try {
+      delta = readKimiWireUsageDelta(baseline.path, baseline.byteOffset, baseline.options);
+    } catch {
+      return undefined;
+    }
+    if (!delta) return undefined;
+    baseline.byteOffset = delta.byteOffset;
+    return Object.values(delta.usage).some((value) => typeof value === "number" && value > 0) ? delta.usage : undefined;
   }
   /**
    * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
@@ -488,40 +624,94 @@ export class KimiAgent extends BaseCliAgent {
     let commandEnv;
     let cleanup;
     // Isolate kimi metadata per invocation to avoid concurrent writes to
-    // ~/.kimi/kimi.json across parallel tasks. If caller explicitly provides
-    // configDir or KIMI_SHARE_DIR in opts.env, preserve that override.
+    // ~/.kimi/kimi.json across parallel tasks. Two isolation modes:
+    //
+    // - credentialDir (explicit): the directory is a SHARED, read-only
+    //   credential source. The live child never points at it; an isolated
+    //   per-invocation runtime home (runtimeDir or a fresh temp dir) is
+    //   seeded with the credentials and becomes KIMI_SHARE_DIR, so parallel
+    //   invocations cannot contend over mutable session/config state.
+    // - no explicit share dir: same isolation seeded from the default
+    //   ~/.kimi (or KIMI_SHARE_DIR env), preserving prior behavior.
+    //
+    // configDir (legacy) keeps pointing the live child at the given dir.
     const explicitShareDir = this.opts.configDir ?? this.opts.env?.KIMI_SHARE_DIR;
-    const sourceShareDir = explicitShareDir ?? process.env.KIMI_SHARE_DIR ?? join(homedir(), ".kimi");
+    const credentialSourceDir =
+      this.opts.credentialDir ?? explicitShareDir ?? process.env.KIMI_SHARE_DIR ?? join(homedir(), ".kimi");
+    const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
+    const callerSessionId = resumeSession ?? this.opts.session;
     // Refresh expired OAuth credentials in place using the stored refresh_token,
     // and only fail fast (non-retryable) if the refresh itself fails. This avoids
     // forcing the user to run `kimi login` every time their access_token rotates.
     await ensureKimiCredentialsUsable(
-      sourceShareDir,
+      credentialSourceDir,
       this.id ?? "<anonymous>",
       this.opts.model ?? this.model ?? "<unset>",
     );
-    if (!explicitShareDir) {
-      const isolatedShareDir = mkdtempSync(join(tmpdir(), "kimi-share-"));
-      if (existsSync(sourceShareDir)) {
+    const sessionRecovery = normalizeKimiSessionRecoveryOption(this.opts.sessionRecovery);
+    if (this.opts.credentialDir || !explicitShareDir) {
+      const createdRuntimeHome = !this.opts.runtimeDir;
+      const runtimeHome = this.opts.runtimeDir ?? mkdtempSync(join(tmpdir(), "kimi-runtime-"));
+      mkdirSync(runtimeHome, { recursive: true });
+      if (existsSync(credentialSourceDir)) {
         for (const name of ["config.toml", "credentials", "device_id", "latest_version.txt"]) {
-          const src = join(sourceShareDir, name);
+          const src = join(credentialSourceDir, name);
           if (existsSync(src)) {
             try {
-              cpSync(src, join(isolatedShareDir, name), { recursive: true });
+              cpSync(src, join(runtimeHome, name), { recursive: true });
             } catch {
               // Best-effort seed only; missing copy should not prevent execution.
             }
           }
         }
       }
-      commandEnv = { KIMI_SHARE_DIR: isolatedShareDir };
+      // Seed resumed session state into the isolated home so `kimi --session
+      // <id>` can find it. The durable sessionStateDir wins over the shared
+      // credential home as the seed source when it holds the session.
+      if (callerSessionId && sessionRecovery) {
+        const durableStateDir =
+          this.opts.sessionStateDir && existsSync(join(this.opts.sessionStateDir, "sessions", callerSessionId))
+            ? this.opts.sessionStateDir
+            : credentialSourceDir;
+        try {
+          copyKimiSessionState(
+            { sourceHome: durableStateDir, targetHome: runtimeHome, sessionId: callerSessionId },
+            sessionRecovery,
+          );
+        } catch (error) {
+          logWarning(
+            "KimiAgent: failed to seed resumed session state",
+            { error: error instanceof Error ? error.message : String(error) },
+            "agent.kimi",
+          );
+        }
+      }
+      this.invocationHome = runtimeHome;
+      commandEnv = { KIMI_SHARE_DIR: runtimeHome };
       cleanup = async () => {
-        rmSync(isolatedShareDir, { recursive: true, force: true });
+        if (createdRuntimeHome) {
+          rmSync(runtimeHome, { recursive: true, force: true });
+        }
       };
     } else if (this.opts.configDir) {
       // configDir takes precedence over any env-var inheritance: spawn the
       // CLI with KIMI_SHARE_DIR pointing at the user-specified path.
       commandEnv = { KIMI_SHARE_DIR: this.opts.configDir };
+      this.invocationHome = this.opts.configDir;
+    } else {
+      this.invocationHome = explicitShareDir;
+    }
+    // Baseline the wire log AFTER all seeding: usage recorded by prior
+    // invocations (or copied in with resumed session state) belongs to those
+    // invocations and must not be re-billed to this one.
+    const wireUsage = normalizeKimiWireUsageOption(this.opts.wireUsage);
+    if (wireUsage) {
+      const wirePath = wireUsage.path ?? (this.invocationHome ? join(this.invocationHome, "wire.jsonl") : undefined);
+      this.wireUsageBaseline = wirePath
+        ? { path: wirePath, byteOffset: kimiWireLogPosition(wirePath), options: wireUsage }
+        : undefined;
+    } else {
+      this.wireUsageBaseline = undefined;
     }
     if (this.opts.cliVersion === "0.29") {
       const dialect = this.buildCommand029(params);
@@ -559,8 +749,7 @@ export class KimiAgent extends BaseCliAgent {
     const finalMessageOnly = this.opts.finalMessageOnly ?? outputFormat === "text";
     if (finalMessageOnly) args.push("--final-message-only");
     // Other flags
-    const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
-    const sessionId = resumeSession ?? this.opts.session ?? randomUUID();
+    const sessionId = callerSessionId ?? randomUUID();
     this.issuedSessionId = sessionId;
     pushFlag(args, "--work-dir", this.opts.workDir ?? params.cwd);
     pushFlag(args, "--session", sessionId);

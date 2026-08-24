@@ -1,6 +1,6 @@
 import * as ai from 'ai';
 import { Tool as Tool$1, ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent } from 'ai';
-import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$f, h as CodexConfigOverrides, i as AgentCliEvent$1, j as CliOutputInterpreter$g, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-CaQ7SRm2.js';
+import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$f, h as CodexConfigOverrides, i as AgentCliEvent$1, N as NormalizedTokenUsage, j as CliOutputInterpreter$g, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-CyO4z-SC.js';
 import * as zod from 'zod';
 import '@smthrs/errors/SmithersError';
 import 'effect';
@@ -1362,6 +1362,47 @@ type PiGenerateOptions = {
     [key: string]: unknown;
 };
 
+type KimiWireUsageReadOptions = {
+    maxBytes?: number;
+    maxEntries?: number;
+};
+
+type KimiWireUsageOptions = {
+    /**
+     * Explicit wire log path. Defaults to `wire.jsonl` in the invocation's
+     * runtime home.
+     */
+    path?: string;
+    /** Maximum bytes read from the log in one delta pass. Default 8 MiB. */
+    maxBytes?: number;
+    /** Maximum usage.record entries processed in one delta pass. Default 10000. */
+    maxEntries?: number;
+};
+type KimiSessionRecoverySource = "output" | "session-index";
+type KimiSessionRecoveryInfo = {
+    /** The actual resumable session id resolved from the CLI. */
+    sessionId: string;
+    /** Where the id was resolved from. */
+    source: KimiSessionRecoverySource;
+    /** The invocation's runtime home. */
+    homeDir?: string;
+    /** The session's on-disk state directory inside the runtime home. */
+    stateDir?: string;
+};
+type KimiSessionRecoveryOptions = {
+    /**
+     * Called once when the actual resumable session id is resolved, either
+     * from CLI output during the invocation or from the on-disk session index
+     * at exit.
+     */
+    onSessionResolved?: (info: KimiSessionRecoveryInfo) => void | Promise<void>;
+    /** Maximum total bytes copied for one session's state. Default 64 MiB. */
+    maxBytes?: number;
+    /** Maximum files copied for one session's state. Default 5000. */
+    maxFiles?: number;
+    /** Maximum directories visited while walking session state. Default 1000. */
+    maxDirectories?: number;
+};
 type KimiAgentOptions$1 = BaseCliAgentOptions & {
     /**
      * Target CLI dialect for argv construction. The default (undefined) builds
@@ -1404,8 +1445,50 @@ type KimiAgentOptions$1 = BaseCliAgentOptions & {
      * `<configDir>/credentials` (instead of the user's default `~/.kimi/`).
      * Equivalent to passing `env: { KIMI_SHARE_DIR: <path> }` but uniform with
      * the other agents' `configDir` option.
+     *
+     * Note: the live child shares this directory. For parallel invocations
+     * prefer `credentialDir`, which keeps credentials shared but read-only and
+     * runs each invocation in an isolated runtime home.
      */
     configDir?: string;
+    /**
+     * Shared credential source directory, used read-only by the live child.
+     * KimiAgent refreshes expired OAuth credentials here, then seeds an
+     * isolated per-invocation runtime home (see `runtimeDir`) with the
+     * credential files and points the child's `KIMI_SHARE_DIR` at that home.
+     * Parallel invocations therefore share credentials without contending over
+     * mutable session/config state. Mutually exclusive with `configDir`.
+     */
+    credentialDir?: string;
+    /**
+     * Explicit per-invocation runtime/session home. Defaults to a fresh temp
+     * directory that is removed on cleanup; an explicit `runtimeDir` is
+     * caller-owned and preserved.
+     */
+    runtimeDir?: string;
+    /**
+     * Durable, caller-managed session state store. With `sessionRecovery`
+     * enabled, a resumed session's state is seeded from here into the isolated
+     * invocation home before launch, and the invocation's resulting state is
+     * copied back here at exit, so a later invocation can resume it.
+     */
+    sessionStateDir?: string;
+    /**
+     * Invocation-local usage extraction from the CLI's `wire.jsonl`
+     * `usage.record` entries (cache-read, cache-write, other-input, and output
+     * counters). The log position is baselined at invocation start, and
+     * re-baselined after resumed session state is seeded, so historical tokens
+     * are never re-billed. The delta is attached to the completed event as
+     * normalized usage.
+     */
+    wireUsage?: boolean | KimiWireUsageOptions;
+    /**
+     * Actual-session recovery. Resolve and publish the real resumable session
+     * id (from CLI output, or the on-disk session index at exit) instead of
+     * the synthetic pre-launch id, and copy its on-disk state between the
+     * isolated invocation home and `sessionStateDir` so resume works.
+     */
+    sessionRecovery?: boolean | KimiSessionRecoveryOptions;
 };
 
 declare class KimiAgent extends BaseCliAgent {
@@ -1417,10 +1500,29 @@ declare class KimiAgent extends BaseCliAgent {
     capabilities: AgentCapabilityRegistry$d;
     cliEngine: string;
     issuedSessionId: any;
+    /** Actual resumable session id resolved from CLI output or the session index. */
+    actualSessionId: any;
+    /** Per-invocation runtime home (isolated when credentialDir/runtimeDir is used). */
+    invocationHome: any;
+    /** @type {{ path: string; byteOffset: number; options: import("./kimiWireUsage.js").KimiWireUsageReadOptions } | undefined} */
+    wireUsageBaseline: {
+        path: string;
+        byteOffset: number;
+        options: KimiWireUsageReadOptions;
+    } | undefined;
     /**
      * @returns {CliOutputInterpreter}
      */
     createOutputInterpreter(): CliOutputInterpreter$7;
+    /**
+     * Read the invocation-local usage delta from the wire log baselined at
+     * invocation start (and re-baselined after resumed session state was
+     * seeded). Returns undefined when wire usage tracking is off or no
+     * counters were recorded.
+     *
+     * @returns {import("./BaseCliAgent/NormalizedTokenUsage.ts").NormalizedTokenUsage | undefined}
+     */
+    readWireUsageBaselineDelta(): NormalizedTokenUsage | undefined;
     /**
      * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
      * into {@link AgentFileChange} records. `action.detail.arguments` is the raw
