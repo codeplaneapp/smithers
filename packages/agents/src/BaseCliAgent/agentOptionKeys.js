@@ -196,6 +196,11 @@ export const CLI_AGENT_OPTION_KEYS = {
     "verbose",
     "debug",
     "configDir",
+    "credentialDir",
+    "runtimeDir",
+    "sessionStateDir",
+    "wireUsage",
+    "sessionRecovery",
   ],
   OmpAgent: [
     "provider",
