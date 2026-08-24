@@ -64,9 +64,23 @@ function installCycleTolerantStringify() {
       return original.call(JSON, value, replacer, space);
     } catch (err) {
       if (!isCycleError(err)) throw err;
+      // Every object is visited once, not once per reference. Tracking only the
+      // ancestor chain would be a more faithful cycle test (a shared acyclic
+      // reference is not a cycle), but a React dev element graph is a heavily
+      // shared DAG: re-expanding it at every reference blows up exponentially
+      // and the render dies with "Out of memory". Visit-once bounds the output,
+      // at the cost of printing a repeated object as "[Circular]".
       const seen = new WeakSet();
+      // The array form of `replacer` is a property allowlist, not a function.
+      // Passing `guard` replaces it, so apply the allowlist here or a cyclic
+      // `JSON.stringify(value, ["a"])` would silently emit every key.
+      const allowList = Array.isArray(replacer)
+        ? new Set(replacer.map((key) => (typeof key === "number" ? String(key) : key)))
+        : undefined;
       const guard = function (key, val) {
         if (typeof replacer === "function") val = replacer.call(this, key, val);
+        // Array elements are always included; the allowlist filters object keys.
+        if (allowList && key !== "" && !Array.isArray(this) && !allowList.has(key)) return undefined;
         if (typeof val !== "object" || val === null) return val;
         if (seen.has(val)) return "[Circular]";
         seen.add(val);
@@ -82,6 +96,53 @@ function installCycleTolerantStringify() {
     restored = true;
     JSON.stringify = original;
   };
+}
+/**
+ * Recognize a prompt whose MDX module never compiled to a component.
+ *
+ * With the preload inactive, Bun falls back to its file loader and the default
+ * export of `./prompt.mdx` is the module's own path, so `<MyPrompt />` builds a
+ * valid element whose `type` is that path and `renderToStaticMarkup` throws
+ * "Invalid tag: /abs/prompt.mdx". An `import * as MyPrompt` namespace object
+ * lands the same way with an object `type` that is not a React component. Both
+ * are preload failures, not component bugs, and both must keep the bunfig.toml
+ * hint rather than surfacing React's tag error.
+ *
+ * @param {unknown} prompt
+ * @returns {string | undefined} description of what the prompt resolved to
+ */
+function describeUncompiledMdxPrompt(prompt) {
+  if (!React.isValidElement(prompt)) return undefined;
+  const type = /** @type {{ type: unknown }} */ (prompt).type;
+  if (typeof type === "string") {
+    return /\.mdx?$/i.test(type)
+      ? `the prompt element type is the uncompiled MDX path "${type}" instead of a React component`
+      : undefined;
+  }
+  // forwardRef/memo/lazy components carry a `$$typeof` tag; a module namespace
+  // object or other plain object does not and can never render.
+  if (typeof type !== "object" || type === null) return undefined;
+  return /** @type {{ $$typeof?: unknown }} */ (type).$$typeof === undefined
+    ? "the prompt element type is a plain object instead of a React component"
+    : undefined;
+}
+
+/**
+ * @param {string} resolvedAs what the prompt resolved to instead of a component
+ * @param {unknown} err the render error this diagnosis replaces
+ * @returns {SmithersError}
+ */
+function mdxPreloadInactiveError(resolvedAs, err) {
+  return new SmithersError(
+    "MDX_PRELOAD_INACTIVE",
+    `MDX prompt could not be rendered — ${resolvedAs}.\n\n` +
+      `This usually means the MDX preload is not active. Common causes:\n` +
+      `  • bunfig.toml uses [run] preload instead of top-level preload (the [run] section doesn't apply to dynamic imports)\n` +
+      `  • bunfig.toml is not in the current working directory\n` +
+      `  • mdxPlugin() is not registered in the preload script\n` +
+      `  • The MDX file is imported without a default import (use: import MyPrompt from "./prompt.mdx")\n\n` +
+      `Original error: ${err instanceof Error ? err.message : String(err)}`,
+  );
 }
 /**
  * Render a prompt React node to plain markdown text.
@@ -123,6 +184,11 @@ export function renderPromptToText(prompt) {
       restoreStringify();
     }
   } catch (err) {
+    // An uncompiled MDX import is the signature the error code exists for, and
+    // it reaches here as a perfectly valid element, so test it before the
+    // isValidElement rethrow below.
+    const uncompiled = describeUncompiledMdxPrompt(prompt);
+    if (uncompiled) throw mdxPreloadInactiveError(uncompiled, err);
     // `String(reactElement)` is always "[object Object]", so that string
     // cannot distinguish "MDX preload inactive" from "the component threw".
     // A valid element that fails to render must surface the component's own
@@ -132,16 +198,7 @@ export function renderPromptToText(prompt) {
     // compile to a component) means the preload is missing.
     const result = String(prompt ?? "");
     if (result === "[object Object]") {
-      throw new SmithersError(
-        "MDX_PRELOAD_INACTIVE",
-        `MDX prompt could not be rendered — the prompt resolved to [object Object] instead of a React component.\n\n` +
-          `This usually means the MDX preload is not active. Common causes:\n` +
-          `  • bunfig.toml uses [run] preload instead of top-level preload (the [run] section doesn't apply to dynamic imports)\n` +
-          `  • bunfig.toml is not in the current working directory\n` +
-          `  • mdxPlugin() is not registered in the preload script\n` +
-          `  • The MDX file is imported without a default import (use: import MyPrompt from "./prompt.mdx")\n\n` +
-          `Original error: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      throw mdxPreloadInactiveError("the prompt resolved to [object Object] instead of a React component", err);
     }
     return result;
   }

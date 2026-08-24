@@ -73,4 +73,55 @@ describe("renderPromptToText", () => {
     }
     expect(caught?.code).toBe("MDX_PRELOAD_INACTIVE");
   });
+  test("an element whose type is an uncompiled .mdx path reports MDX_PRELOAD_INACTIVE", () => {
+    // With the preload inactive, Bun's file loader makes the default export of
+    // `./prompt.mdx` the module path, so `<MyPrompt />` is a VALID element whose
+    // type is that path and React throws "Invalid tag: ...". That React error is
+    // useless on its own; the preload diagnosis has to survive.
+    let caught;
+    try {
+      renderPromptToText(React.createElement("/abs/workflows/prompt.mdx", { x: 1 }));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught?.code).toBe("MDX_PRELOAD_INACTIVE");
+    expect(caught.message).toContain("/abs/workflows/prompt.mdx");
+    expect(caught.message).toContain("bunfig.toml");
+  });
+  test("an element whose type is a module namespace object reports MDX_PRELOAD_INACTIVE", () => {
+    let caught;
+    try {
+      renderPromptToText(React.createElement(/** @type {any} */ ({ frontmatter: {} })));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught?.code).toBe("MDX_PRELOAD_INACTIVE");
+  });
+  test("a real host element that throws is not misread as an uncompiled MDX import", () => {
+    function Broken() {
+      throw new Error("host child bug");
+    }
+    let caught;
+    try {
+      renderPromptToText(React.createElement("div", null, React.createElement(Broken)));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught?.code).not.toBe("MDX_PRELOAD_INACTIVE");
+    expect(caught.message).toContain("host child bug");
+  });
+  test("the cycle fallback honors an array replacer and visits each object once", () => {
+    const shared = { id: "shared" };
+    function PropsDump() {
+      const root = { a: shared, b: shared, drop: "no" };
+      root.self = root;
+      return <>{JSON.stringify(root, ["a", "b", "id", "self"])}</>;
+    }
+    const result = renderPromptToText(React.createElement(PropsDump));
+    // The array replacer is a property allowlist and still filters `drop`.
+    expect(result).not.toContain("drop");
+    // Visit-once: the cycle AND the second reference to `shared` collapse. That
+    // bounds a shared React element DAG, which would otherwise exhaust memory.
+    expect(result).toBe('{"a":{"id":"shared"},"b":"[Circular]","self":"[Circular]"}');
+  });
 });
