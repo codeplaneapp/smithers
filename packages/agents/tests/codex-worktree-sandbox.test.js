@@ -122,8 +122,8 @@ describe("CodexAgent sandbox widening for worktrees", () => {
       config: { [WRITABLE_ROOTS]: ["/custom/root"] },
     }).buildCommand({ prompt: "go", cwd: worktree, options: {} });
     try {
-      const overrides = cmd.args.filter((arg, i) =>
-        cmd.args[i - 1] === "-c" && typeof arg === "string" && arg.startsWith(`${WRITABLE_ROOTS}=`)
+      const overrides = cmd.args.filter(
+        (arg, i) => cmd.args[i - 1] === "-c" && typeof arg === "string" && arg.startsWith(`${WRITABLE_ROOTS}=`),
       );
       expect(overrides.length).toBe(1);
       expect(overrides[0]).toContain("/custom/root");
