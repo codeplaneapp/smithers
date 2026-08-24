@@ -19,6 +19,7 @@ import { combineNonEmpty } from "./combineNonEmpty.js";
 import { tryParseJson } from "./tryParseJson.js";
 import { extractTextFromJsonValue } from "./extractTextFromJsonValue.js";
 import { createAgentStdoutTextEmitter } from "./createAgentStdoutTextEmitter.js";
+import { assertKnownCliAgentOptions } from "./agentOptionKeys.js";
 import { buildGenerateResult } from "./buildGenerateResult.js";
 import { runCommandEffect } from "./runCommandEffect.js";
 import { sanitizeCliArgs } from "./sanitizeCliArgs.js";
@@ -653,6 +654,27 @@ function extractErrorFromJsonPayload(raw) {
   }
   return undefined;
 }
+
+const CLI_FAILURE_PREVIEW_CHARS = 200;
+
+/**
+ * Keep structured stdout useful when it is the only failure signal without
+ * copying an arbitrarily large provider event into the durable error/log line.
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+function summarizeStructuredFailureOutput(raw) {
+  const trimmed = stripOscSequences(raw).trim();
+  if (!trimmed) return "";
+  const metadataPrefix = trimmed.slice(0, 4_096);
+  const type = /"type"\s*:\s*"([^"\\]{1,80})"/.exec(metadataPrefix)?.[1];
+  const subtype = /"subtype"\s*:\s*"([^"\\]{1,80})"/.exec(metadataPrefix)?.[1];
+  const event = type ? (subtype ? `${type}/${subtype}` : type) : "unknown";
+  const preview = trimmed.slice(0, CLI_FAILURE_PREVIEW_CHARS).replace(/\r/g, "\\r").replace(/\n/g, "\\n");
+  const suffix = trimmed.length > CLI_FAILURE_PREVIEW_CHARS ? "…" : "";
+  return `CLI stdout fallback (event=${event}, bytes=${Buffer.byteLength(trimmed, "utf8")}, preview=${preview}${suffix})`;
+}
 /**
  * @param {string[]} args
  * @returns {string | undefined}
@@ -1130,12 +1152,15 @@ export class BaseCliAgent {
   idleTimeoutMs;
   maxOutputBytes;
   extraArgs;
+  onQuotaExceeded;
   /** @type {import("./CliRecoveryPolicy.ts").CliRecoveryPolicy | undefined} */
   recoveryPolicy;
   /**
    * @param {BaseCliAgentOptions} opts
+   * @param {string} [agentName]
    */
-  constructor(opts) {
+  constructor(opts, agentName = "BaseCliAgent") {
+    assertKnownCliAgentOptions(opts, agentName);
     this.id = opts.id ?? randomUUID();
     this.model = opts.model;
     this.systemPrompt = opts.systemPrompt ?? opts.instructions;
@@ -1147,6 +1172,7 @@ export class BaseCliAgent {
     this.idleTimeoutMs = opts.idleTimeoutMs;
     this.maxOutputBytes = opts.maxOutputBytes;
     this.extraArgs = opts.extraArgs;
+    this.onQuotaExceeded = opts.onQuotaExceeded;
     this.recoveryPolicy = opts.recoveryPolicy;
   }
   /**
@@ -1197,7 +1223,17 @@ export class BaseCliAgent {
         Effect.flatMap((durationMs) => Metric.update(taggedMetric(agentDurationMs, metricTags), durationMs)),
       );
     const agentCtx = { agentId: this.id, agentModel: this.model, agentEngine: resolveAgentEngineTag(this) };
-    const classifyQuota = (message, command) => classifyQuotaError(message, command, agentCtx);
+    const classifyQuota = (message, command) => {
+      const quota = classifyQuotaError(message, command, agentCtx);
+      if (quota && this.onQuotaExceeded) {
+        try {
+          this.onQuotaExceeded(/** @type {any} */ (quota.details ?? {}));
+        } catch {
+          // Quota persistence is best-effort and must not mask the provider error.
+        }
+      }
+      return quota;
+    };
     const program = Effect.all(
       [
         Metric.update(taggedMetric(agentInvocationsTotal, metricTags), 1),
@@ -1259,6 +1295,7 @@ export class BaseCliAgent {
           let stdoutBuffer = "";
           let stderrBuffer = "";
           let completedEvent = null;
+          let lastStructuredFailureOutput = "";
           /**
            * @param {AgentCliEvent[] | AgentCliEvent | null | undefined} eventPayload
            */
@@ -1289,6 +1326,9 @@ export class BaseCliAgent {
             }
             for (const line of lines) {
               if (!line) continue;
+              if (stream === "stdout" && (outputFormat === "json" || outputFormat === "stream-json")) {
+                lastStructuredFailureOutput = summarizeStructuredFailureOutput(line);
+              }
               emitEvents(stream === "stdout" ? interpreter.onStdoutLine?.(line) : interpreter.onStderrLine?.(line));
             }
             if (stream === "stdout") {
@@ -1382,11 +1422,16 @@ export class BaseCliAgent {
                 // exited with code N") carries less signal than stderr;
                 // only a real distilled message may outrank it.
                 const interpreterError = /exited with code/i.test(rawInterpreterError) ? "" : rawInterpreterError;
+                const rawStdout = result.stdout.trim();
+                const stdoutFallback =
+                  outputFormat === "json" || outputFormat === "stream-json"
+                    ? lastStructuredFailureOutput || summarizeStructuredFailureOutput(rawStdout)
+                    : rawStdout;
                 const errorText =
                   structuredError ||
                   interpreterError ||
                   filteredStderr ||
-                  result.stdout.trim() ||
+                  stdoutFallback ||
                   `CLI exited with code ${result.exitCode}`;
                 const quota = classifyQuota(errorText, commandSpec.command);
                 if (quota) {
