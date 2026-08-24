@@ -175,6 +175,87 @@ type AgentCheckpointContinuationOptions = {
 };
 type AgentGenerateOptions$2 = AgentGenerateOptionsBase & AgentCheckpointContinuationOptions;
 
+/**
+ * Facts the recovery orchestrator observed about a failed attempt, handed to
+ * the policy's classifier hook.
+ */
+type CliRecoveryAttemptInfo$1 = {
+    /** 0-based attempt index that just failed. */
+    attempt: number;
+    /** The provider/CLI error the attempt failed with. */
+    error: unknown;
+    /** Bounded tail of the attempt's captured stderr. */
+    stderrTail: string;
+    /** Bounded tail of the attempt's captured stdout. */
+    stdoutTail: string;
+    /**
+     * Whether the attempt emitted substantive model/tool/file activity
+     * (assistant messages, command executions, file changes, tool calls)
+     * before failing. Fresh retries are only safe before this point.
+     */
+    hadSubstantiveActivity: boolean;
+    /**
+     * The resume/session id the CLI emitted during this attempt, when any
+     * (from started/completed events).
+     */
+    resumeSession?: string;
+    /** Milliseconds since the recovery window started. */
+    elapsedMs: number;
+    /** Milliseconds left in the combined retry window, when bounded. */
+    remainingMs?: number;
+};
+type CliRecoveryClassification$1 = {
+    /**
+     * `retry-fresh`: discard the failed attempt and start a brand-new
+     * invocation. Only safe before substantive activity.
+     * `resume-session`: continue the exact emitted CLI session without
+     * replaying callbacks or workspace-changing work.
+     * `terminal`: do not retry; surface the provider error.
+     */
+    kind: "retry-fresh" | "resume-session" | "terminal";
+    /** Optional human-readable reason recorded in logs. */
+    reason?: string;
+    /** Optional provider-supplied delay before the next attempt. */
+    retryAfterMs?: number;
+};
+/**
+ * Typed provider retry/recovery policy for CLI agents. Designed for reuse
+ * across adapters (CodexAgent, and any other BaseCliAgent subclass).
+ */
+type CliRecoveryPolicy$1 = {
+    /**
+     * Classify a failed attempt. Return undefined (or kind "terminal") to
+     * surface the error without retrying.
+     */
+    classifyError: (info: CliRecoveryAttemptInfo$1) => CliRecoveryClassification$1 | undefined;
+    /** Total attempts including the first. Default 3. */
+    maxAttempts?: number;
+    /**
+     * Bound on the whole recovery window in milliseconds. Combined with the
+     * caller's total timeout: the effective window is the smaller of the two,
+     * measured from the start of the first attempt.
+     */
+    maxElapsedMs?: number;
+    /**
+     * Delay before the next attempt, as a function of the failed attempt
+     * index. Default: 1s doubling per attempt, capped at 30s. Capped by the
+     * remaining window and overridden by a classification's retryAfterMs.
+     */
+    backoffMs?: (attempt: number) => number;
+    /**
+     * Validate the resume/session id captured from CLI events before a
+     * resume-session retry uses it. When this rejects (or no id was emitted),
+     * the error surfaces instead of resuming an unverifiable session.
+     */
+    validateResumeSession?: (sessionId: string) => boolean;
+    /**
+     * Cap on quarantined callback output (events plus stdout/stderr text) per
+     * attempt, in bytes. Failed-attempt callbacks are buffered up to this cap
+     * and released only if the attempt turns out terminal. Default 1 MiB.
+     */
+    maxBufferedBytes?: number;
+};
+
 type BaseCliAgentOptions$2 = {
     id?: string;
     model?: string;
@@ -218,6 +299,15 @@ type BaseCliAgentOptions$2 = {
      *   fixed effort ladder), else unsupported for that adapter.
      */
     effort?: "low" | "medium" | "high" | "xhigh" | "max" | string;
+    /**
+     * Typed provider retry/recovery policy. When set, generate/stream wrap
+     * each invocation in a recovery loop: a failed attempt is classified by
+     * the policy, retried fresh before substantive activity or resumed on the
+     * exact emitted CLI session after it, with quarantined callbacks, bounded
+     * backoff under the combined caller/retry deadline, and caller
+     * cancellation honored throughout.
+     */
+    recoveryPolicy?: CliRecoveryPolicy$1;
 };
 
 type RunCommandResult$2 = {
@@ -528,6 +618,19 @@ type AgentFileChange = AgentFileChange$1;
  */
 declare function runAgentPromise<A>(effect: Effect.Effect<A, SmithersError$1, never>): Promise<A>;
 /**
+ * Build a ready-made classifier for providers that surface HTTP 429 (rate
+ * limit) failures, such as Codex routed through OpenRouter. Before
+ * substantive model/tool/file activity the attempt is retried fresh; after
+ * substantive activity the exact emitted CLI session is resumed. A 429 with
+ * no resumable session is terminal.
+ *
+ * @param {{ pattern?: RegExp }} [options]
+ * @returns {import("./CliRecoveryPolicy.ts").CliRecoveryPolicy["classifyError"]}
+ */
+declare function createHttp429RecoveryClassifier(options?: {
+    pattern?: RegExp;
+}): CliRecoveryPolicy$1["classifyError"];
+/**
  * @param {string} raw
  * @param {{ extractResultUsage?: (payload: Record<string, unknown>) => CliUsageInfo | null | undefined }} [options]
  * @returns {CliUsageInfo | undefined}
@@ -555,6 +658,8 @@ declare class BaseCliAgent {
     idleTimeoutMs: number | undefined;
     maxOutputBytes: number | undefined;
     extraArgs: string[] | undefined;
+    /** @type {import("./CliRecoveryPolicy.ts").CliRecoveryPolicy | undefined} */
+    recoveryPolicy: CliRecoveryPolicy$1 | undefined;
     /**
      * @param {AgentGenerateOptions | undefined} options
      * @param {AgentInvocationOperation} operation
@@ -566,6 +671,22 @@ declare class BaseCliAgent {
      * @returns {Promise<void>}
      */
     preflight(options?: AgentGenerateOptions$1): Promise<void>;
+    /**
+     * Run one invocation under the typed recovery policy. Failed attempts are
+     * classified by the policy: before substantive activity the attempt is
+     * retried fresh; after substantive activity the exact emitted CLI session
+     * is resumed. Failed-attempt callbacks are quarantined and released only
+     * for the terminal attempt, replayed lifecycle events are deduplicated on
+     * resume, the retry window is bounded under the combined caller/policy
+     * deadline, the final provider error is preserved, and caller
+     * cancellation aborts promptly even mid-backoff.
+     *
+     * @param {AgentGenerateOptions | undefined} options
+     * @param {AgentInvocationOperation} operation
+     * @param {import("./CliRecoveryPolicy.ts").CliRecoveryPolicy} policy
+     * @returns {Promise<GenerateTextResult<Record<string, never>, unknown>>}
+     */
+    runWithCliRecovery(options: AgentGenerateOptions$1 | undefined, operation: AgentInvocationOperation, policy: CliRecoveryPolicy$1): Promise<GenerateTextResult<Record<string, never>, unknown>>;
     /**
      * @param {AgentGenerateOptions} [options]
      * @returns {Promise<GenerateTextResult<Record<string, never>, unknown>>}
@@ -650,6 +771,9 @@ type AgentCliStartedEvent = AgentCliStartedEvent$1;
 type AgentGenerateOptions = AgentGenerateOptions$2;
 type BaseCliAgentOptions = BaseCliAgentOptions$2;
 type CliOutputInterpreter = CliOutputInterpreter$2;
+type CliRecoveryPolicy = CliRecoveryPolicy$1;
+type CliRecoveryAttemptInfo = CliRecoveryAttemptInfo$1;
+type CliRecoveryClassification = CliRecoveryClassification$1;
 type CliUsageInfo = CliUsageInfo$2;
 type NormalizedTokenUsage = NormalizedTokenUsage$2;
 type CodexConfigOverrides = CodexConfigOverrides$2;
@@ -657,4 +781,4 @@ type PiExtensionUiRequest = PiExtensionUiRequest$2;
 type PiExtensionUiResponse = PiExtensionUiResponse$2;
 type RunCommandResult = RunCommandResult$2;
 
-export { pushFlag as $, type AgentGenerateOptions$2 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, type AgentCliStartedEvent as D, type AgentGenerateOptions as E, type CliUsageInfo as F, type CodexConfigOverrides as G, type NormalizedTokenUsage as H, type PiExtensionUiRequest as I, type PiExtensionUiResponse as J, asNumber as K, asString as L, buildGenerateResult as M, type NormalizedTokenUsage$2 as N, combineNonEmpty as O, type PiExtensionUiRequest$2 as P, createAgentStdoutTextEmitter as Q, type RunCommandResult as R, createSyntheticIdGenerator as S, extractPrompt as T, extractTextFromJsonValue as U, extractUsageFromOutput as V, isLikelyRuntimeMetadata as W, isRecord as X, normalizeCodexConfig as Y, normalizeTokenUsage as Z, parseAnthropicStyleFileChanges as _, type AgentCheckpoint as a, pushList as a0, pushRepeated as a1, reconstructUnifiedDiff as a2, resolveTimeouts as a3, runAgentPromise as a4, runCommandEffect as a5, runRpcCommandEffect as a6, shouldSurfaceUnparsedStdout as a7, toolKindFromName as a8, truncate as a9, truncateToBytes as aa, tryParseJson as ab, type AgentFileChange$1 as b, type AgentCheckpointCapability as c, type AgentCheckpointFormat as d, type BaseCliAgentOptions as e, type PiExtensionUiResponse$2 as f, BaseCliAgent as g, type CodexConfigOverrides$2 as h, type AgentCliEvent$1 as i, type CliOutputInterpreter as j, type AgentCheckpointResult as k, type AgentCheckpointMode as l, type AgentCliActionKind$2 as m, type AgentCheckpointContinuationOptions as n, type AgentCheckpointJsonArray as o, type AgentCheckpointJsonObject as p, type AgentCheckpointJsonPrimitive as q, type AgentCheckpointJsonValue as r, type AgentCheckpointPublisher as s, type AgentFileChangeKind as t, type AgentCliActionEvent as u, type AgentCliActionKind as v, type AgentCliActionPhase as w, type AgentCliCompletedEvent as x, type AgentCliEvent as y, type AgentCliEventLevel as z };
+export { isRecord as $, type AgentGenerateOptions$2 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, type AgentCliStartedEvent as D, type AgentGenerateOptions as E, type CliRecoveryAttemptInfo as F, type CliRecoveryClassification as G, type CliRecoveryPolicy as H, type CliUsageInfo as I, type CodexConfigOverrides as J, type NormalizedTokenUsage as K, type PiExtensionUiRequest as L, type PiExtensionUiResponse as M, type NormalizedTokenUsage$2 as N, asNumber as O, type PiExtensionUiRequest$2 as P, asString as Q, type RunCommandResult as R, buildGenerateResult as S, combineNonEmpty as T, createAgentStdoutTextEmitter as U, createHttp429RecoveryClassifier as V, createSyntheticIdGenerator as W, extractPrompt as X, extractTextFromJsonValue as Y, extractUsageFromOutput as Z, isLikelyRuntimeMetadata as _, type AgentCheckpoint as a, normalizeCodexConfig as a0, normalizeTokenUsage as a1, parseAnthropicStyleFileChanges as a2, pushFlag as a3, pushList as a4, pushRepeated as a5, reconstructUnifiedDiff as a6, resolveTimeouts as a7, runAgentPromise as a8, runCommandEffect as a9, runRpcCommandEffect as aa, shouldSurfaceUnparsedStdout as ab, toolKindFromName as ac, truncate as ad, truncateToBytes as ae, tryParseJson as af, type AgentFileChange$1 as b, type AgentCheckpointCapability as c, type AgentCheckpointFormat as d, type BaseCliAgentOptions as e, type PiExtensionUiResponse$2 as f, BaseCliAgent as g, type CodexConfigOverrides$2 as h, type AgentCliEvent$1 as i, type CliOutputInterpreter as j, type AgentCheckpointResult as k, type AgentCheckpointMode as l, type AgentCliActionKind$2 as m, type AgentCheckpointContinuationOptions as n, type AgentCheckpointJsonArray as o, type AgentCheckpointJsonObject as p, type AgentCheckpointJsonPrimitive as q, type AgentCheckpointJsonValue as r, type AgentCheckpointPublisher as s, type AgentFileChangeKind as t, type AgentCliActionEvent as u, type AgentCliActionKind as v, type AgentCliActionPhase as w, type AgentCliCompletedEvent as x, type AgentCliEvent as y, type AgentCliEventLevel as z };

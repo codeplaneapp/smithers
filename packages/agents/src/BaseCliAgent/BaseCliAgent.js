@@ -763,6 +763,176 @@ function buildStreamResult(result) {
     fullStream: fullStream,
   };
 }
+const RECOVERY_DEFAULT_MAX_ATTEMPTS = 3;
+const RECOVERY_DEFAULT_MAX_BUFFERED_BYTES = 1024 * 1024;
+const RECOVERY_TAIL_BYTES = 4096;
+
+/**
+ * @param {number} attempt
+ * @returns {number}
+ */
+function defaultRecoveryBackoffMs(attempt) {
+  return Math.min(1000 * 2 ** attempt, 30000);
+}
+
+/**
+ * @param {unknown} error
+ * @param {AbortSignal | undefined} signal
+ * @returns {boolean}
+ */
+function isCallerAbortError(error, signal) {
+  if (signal?.aborted) return true;
+  if (!error || typeof error !== "object") return false;
+  const e = /** @type {{ code?: unknown; name?: unknown }} */ (error);
+  return e.code === "PROCESS_ABORTED" || e.name === "AbortError";
+}
+
+/**
+ * Substantive model/tool/file activity: assistant messages, command
+ * executions, file changes, and tool calls. Lifecycle/thinking noise does
+ * not count; a fresh retry is only safe before this point.
+ *
+ * @param {AgentCliEvent} event
+ * @returns {boolean}
+ */
+function isSubstantiveCliEvent(event) {
+  if (event?.type !== "action") return false;
+  if (event.entryType === "message") return true;
+  const kind = event.action?.kind;
+  return kind === "command" || kind === "file_change" || kind === "tool" || kind === "edit";
+}
+
+/**
+ * Dedup key for replayed lifecycle events. Codex resumes replay the prior
+ * items of the session, so a resumed attempt re-emits events already seen.
+ *
+ * @param {AgentCliEvent} event
+ * @returns {string | undefined}
+ */
+function recoveryEventDedupKey(event) {
+  if (event?.type === "started") return "started";
+  if (event?.type === "action" && event.action?.id) return `action:${event.action.id}:${event.phase}`;
+  return undefined;
+}
+
+/**
+ * Quarantine for one attempt's callbacks. Event/stdout/stderr output is
+ * buffered (bounded) until the attempt is classified: failed attempts drop
+ * their buffer, terminal attempts release it to the caller's callbacks.
+ *
+ * @param {number} maxBufferedBytes
+ */
+function createRecoveryQuarantine(maxBufferedBytes) {
+  let bufferedBytes = 0;
+  /** @type {AgentCliEvent[]} */
+  const events = [];
+  /** @type {string[]} */
+  const stdoutChunks = [];
+  /** @type {string[]} */
+  const stderrChunks = [];
+  let stdoutTail = "";
+  let stderrTail = "";
+  /**
+   * @param {unknown[]} sink
+   * @param {unknown} item
+   * @param {number} bytes
+   */
+  const push = (sink, item, bytes) => {
+    if (bufferedBytes + bytes > maxBufferedBytes) return;
+    bufferedBytes += bytes;
+    sink.push(item);
+  };
+  return {
+    /** @param {AgentCliEvent} event */
+    pushEvent(event) {
+      push(events, event, 256);
+    },
+    /** @param {string} chunk */
+    pushStdout(chunk) {
+      push(stdoutChunks, chunk, Buffer.byteLength(chunk, "utf8"));
+      stdoutTail = (stdoutTail + chunk).slice(-RECOVERY_TAIL_BYTES);
+    },
+    /** @param {string} chunk */
+    pushStderr(chunk) {
+      push(stderrChunks, chunk, Buffer.byteLength(chunk, "utf8"));
+      stderrTail = (stderrTail + chunk).slice(-RECOVERY_TAIL_BYTES);
+    },
+    /**
+     * Release the buffered callbacks to the caller (terminal attempt only).
+     * @param {AgentGenerateOptions | undefined} options
+     */
+    flush(options) {
+      for (const event of events) {
+        if (!options?.onEvent) break;
+        void Promise.resolve(options.onEvent(event)).catch(() => undefined);
+      }
+      if (options?.onStdout) {
+        for (const chunk of stdoutChunks) options.onStdout(chunk);
+      }
+      if (options?.onStderr) {
+        for (const chunk of stderrChunks) options.onStderr(chunk);
+      }
+    },
+    get stdoutTail() {
+      return stdoutTail;
+    },
+    get stderrTail() {
+      return stderrTail;
+    },
+  };
+}
+
+/**
+ * @param {number} ms
+ * @param {AbortSignal | undefined} signal
+ * @returns {Promise<void>}
+ */
+function abortableRecoverySleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (ms <= 0) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new SmithersError("PROCESS_ABORTED", "agent invocation aborted by caller during retry backoff"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Build a ready-made classifier for providers that surface HTTP 429 (rate
+ * limit) failures, such as Codex routed through OpenRouter. Before
+ * substantive model/tool/file activity the attempt is retried fresh; after
+ * substantive activity the exact emitted CLI session is resumed. A 429 with
+ * no resumable session is terminal.
+ *
+ * @param {{ pattern?: RegExp }} [options]
+ * @returns {import("./CliRecoveryPolicy.ts").CliRecoveryPolicy["classifyError"]}
+ */
+export function createHttp429RecoveryClassifier(options = {}) {
+  const pattern = options.pattern ?? /\b429\b|\btoo\s+many\s+requests\b|\brate\s*limit/i;
+  return (info) => {
+    const message = `${info.error instanceof Error ? info.error.message : String(info.error)}\n${info.stderrTail}`;
+    if (!pattern.test(message)) return { kind: "terminal" };
+    if (info.hadSubstantiveActivity) {
+      return info.resumeSession
+        ? { kind: "resume-session", reason: "provider-429-after-activity" }
+        : { kind: "terminal", reason: "provider-429-no-session" };
+    }
+    return { kind: "retry-fresh", reason: "provider-429-before-activity" };
+  };
+}
+
 /**
  * Fallback when truncated stdout lost the per-message usage events: the
  * interpreter's completed event carries the harness usage summary (#277).
@@ -949,6 +1119,8 @@ export class BaseCliAgent {
   idleTimeoutMs;
   maxOutputBytes;
   extraArgs;
+  /** @type {import("./CliRecoveryPolicy.ts").CliRecoveryPolicy | undefined} */
+  recoveryPolicy;
   /**
    * @param {BaseCliAgentOptions} opts
    */
@@ -964,6 +1136,7 @@ export class BaseCliAgent {
     this.idleTimeoutMs = opts.idleTimeoutMs;
     this.maxOutputBytes = opts.maxOutputBytes;
     this.extraArgs = opts.extraArgs;
+    this.recoveryPolicy = opts.recoveryPolicy;
   }
   /**
    * @param {AgentGenerateOptions | undefined} options
@@ -1546,10 +1719,168 @@ export class BaseCliAgent {
     }
   }
   /**
+   * Run one invocation under the typed recovery policy. Failed attempts are
+   * classified by the policy: before substantive activity the attempt is
+   * retried fresh; after substantive activity the exact emitted CLI session
+   * is resumed. Failed-attempt callbacks are quarantined and released only
+   * for the terminal attempt, replayed lifecycle events are deduplicated on
+   * resume, the retry window is bounded under the combined caller/policy
+   * deadline, the final provider error is preserved, and caller
+   * cancellation aborts promptly even mid-backoff.
+   *
+   * @param {AgentGenerateOptions | undefined} options
+   * @param {AgentInvocationOperation} operation
+   * @param {import("./CliRecoveryPolicy.ts").CliRecoveryPolicy} policy
+   * @returns {Promise<GenerateTextResult<Record<string, never>, unknown>>}
+   */
+  async runWithCliRecovery(options, operation, policy) {
+    const maxAttempts = policy.maxAttempts ?? RECOVERY_DEFAULT_MAX_ATTEMPTS;
+    const maxBufferedBytes = policy.maxBufferedBytes ?? RECOVERY_DEFAULT_MAX_BUFFERED_BYTES;
+    const callerSignal = options?.abortSignal;
+    const callerTimeouts = resolveTimeouts(options?.timeout, {
+      totalMs: this.timeoutMs,
+      idleMs: this.idleTimeoutMs,
+    });
+    // Combined caller/retry deadline: the smaller of the policy window and
+    // the caller's total timeout, measured from the first attempt.
+    const windowMs = Math.min(policy.maxElapsedMs ?? Infinity, callerTimeouts.totalMs ?? Infinity);
+    const startedAt = Date.now();
+    let attempt = 0;
+    /** @type {unknown} */
+    let firstError;
+    /** @type {string | undefined} */
+    let pendingResumeSession;
+    while (true) {
+      const quarantine = createRecoveryQuarantine(maxBufferedBytes);
+      /** @type {Set<string>} */
+      const seenEventKeys = new Set();
+      let hadSubstantiveActivity = false;
+      /** @type {string | undefined} */
+      let capturedResumeSession;
+      /** @param {AgentCliEvent} event */
+      const onEvent = (event) => {
+        if (isSubstantiveCliEvent(event)) hadSubstantiveActivity = true;
+        if (
+          (event?.type === "started" || event?.type === "completed") &&
+          typeof event.resume === "string" &&
+          event.resume.length > 0
+        ) {
+          capturedResumeSession = event.resume;
+        }
+        // Deduplicate replayed lifecycle events (a resumed attempt replays
+        // the session's earlier items).
+        const key = recoveryEventDedupKey(event);
+        if (key) {
+          if (seenEventKeys.has(key)) return;
+          seenEventKeys.add(key);
+        }
+        quarantine.pushEvent(event);
+      };
+      /** @param {string} chunk */
+      const onStdout = (chunk) => quarantine.pushStdout(String(chunk));
+      /** @param {string} chunk */
+      const onStderr = (chunk) => quarantine.pushStderr(String(chunk));
+      /** @type {AgentGenerateOptions} */
+      const attemptOptions = {
+        ...options,
+        onEvent,
+        onStdout,
+        onStderr,
+        resumeSession: attempt === 0 ? options?.resumeSession : (pendingResumeSession ?? options?.resumeSession),
+      };
+      try {
+        const result = await runAgentPromise(this.runGenerateEffect(attemptOptions, operation));
+        // Success: the attempt is terminal, release its quarantined
+        // callbacks, and return.
+        quarantine.flush(options);
+        return result;
+      } catch (error) {
+        if (isCallerAbortError(error, callerSignal)) {
+          throw error;
+        }
+        firstError ??= error;
+        const elapsedMs = Date.now() - startedAt;
+        const remainingMs = Number.isFinite(windowMs) ? Math.max(0, windowMs - elapsedMs) : undefined;
+        /** @type {import("./CliRecoveryPolicy.ts").CliRecoveryClassification | undefined} */
+        let classification;
+        try {
+          classification = policy.classifyError({
+            attempt,
+            error,
+            stderrTail: quarantine.stderrTail,
+            stdoutTail: quarantine.stdoutTail,
+            hadSubstantiveActivity,
+            resumeSession: capturedResumeSession,
+            elapsedMs,
+            remainingMs,
+          });
+        } catch {
+          classification = undefined;
+        }
+        const attemptsExhausted = attempt + 1 >= maxAttempts || remainingMs === 0;
+        let nextResumeSession;
+        if (classification?.kind === "retry-fresh" && !attemptsExhausted) {
+          nextResumeSession = undefined;
+        } else if (classification?.kind === "resume-session" && !attemptsExhausted) {
+          const candidate = capturedResumeSession;
+          const valid =
+            typeof candidate === "string" &&
+            candidate.length > 0 &&
+            (policy.validateResumeSession ? policy.validateResumeSession(candidate) : true);
+          if (!valid) {
+            classification = { kind: "terminal", reason: "resume-session-unverifiable" };
+          } else {
+            nextResumeSession = candidate;
+          }
+        }
+        if (!classification || classification.kind === "terminal" || attemptsExhausted) {
+          // Terminal attempt: release this attempt's quarantined callbacks,
+          // then surface the final provider error with the original error
+          // preserved as cause when the attempts produced different errors.
+          quarantine.flush(options);
+          if (firstError && firstError !== error && error && typeof error === "object") {
+            try {
+              const e = /** @type {{ cause?: unknown }} */ (error);
+              if (e.cause === undefined) e.cause = firstError;
+            } catch {
+              // Non-extensible error objects still surface unchanged.
+            }
+          }
+          throw error;
+        }
+        // Failed attempt: its quarantined callbacks are dropped, never
+        // delivered to the caller.
+        pendingResumeSession = nextResumeSession;
+        const backoff = Math.min(
+          classification.retryAfterMs ?? policy.backoffMs?.(attempt) ?? defaultRecoveryBackoffMs(attempt),
+          remainingMs ?? Infinity,
+        );
+        logInfo(
+          "agent attempt failed; retrying under recovery policy",
+          {
+            agentEngine: resolveAgentEngineTag(this),
+            agentOperation: operation,
+            attempt,
+            recoveryKind: classification.kind,
+            recoveryReason: classification.reason ?? null,
+            backoffMs: backoff,
+            resumeSession: pendingResumeSession ?? null,
+          },
+          `agent.${operation}`,
+        );
+        await abortableRecoverySleep(backoff, callerSignal);
+        attempt += 1;
+      }
+    }
+  }
+  /**
    * @param {AgentGenerateOptions} [options]
    * @returns {Promise<GenerateTextResult<Record<string, never>, unknown>>}
    */
   async generate(options) {
+    if (this.recoveryPolicy) {
+      return this.runWithCliRecovery(options, "generate", this.recoveryPolicy);
+    }
     return runAgentPromise(this.runGenerateEffect(options, "generate"));
   }
   /**
@@ -1557,6 +1888,10 @@ export class BaseCliAgent {
    * @returns {Promise<StreamTextResult<Record<string, never>, unknown>>}
    */
   async stream(options) {
+    if (this.recoveryPolicy) {
+      const result = await this.runWithCliRecovery(options, "stream", this.recoveryPolicy);
+      return buildStreamResult(result);
+    }
     const result = await runAgentPromise(
       this.runGenerateEffect(options, "stream").pipe(Effect.map((generateResult) => buildStreamResult(generateResult))),
     );

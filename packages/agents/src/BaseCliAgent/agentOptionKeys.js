@@ -13,6 +13,7 @@ export const BASE_CLI_AGENT_OPTION_KEYS = [
   "extraArgs",
   "onQuotaExceeded",
   "effort",
+  "recoveryPolicy",
 ];
 
 export const CLI_AGENT_OPTION_KEYS = {
