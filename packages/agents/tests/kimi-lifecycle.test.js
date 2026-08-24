@@ -22,17 +22,35 @@ const USAGE_LINE = (over = {}) =>
     usage: { cache_read_tokens: 10, cache_write_tokens: 5, other_input_tokens: 100, output_tokens: 7, ...over },
   });
 
+/** One `StatusUpdate` line in the shape the vendor CLI writes to wire.jsonl. */
+const STATUS_UPDATE_LINE = (over = {}) =>
+  JSON.stringify({
+    timestamp: 1777166287.7581902,
+    message: {
+      type: "StatusUpdate",
+      payload: {
+        token_usage: { input_cache_read: 10, input_cache_creation: 5, input_other: 100, output: 7, ...over },
+      },
+    },
+  });
+
 describe("kimiWireUsage", () => {
   test("normalizes a usage.record entry tolerantly", () => {
     expect(
       normalizeKimiWireUsageRecord({
+        type: "usage.record",
         usage: { cache_read_tokens: 1, cache_write_tokens: 2, other_input_tokens: 3, output_tokens: 4 },
       }),
     ).toEqual({ cacheReadTokens: 1, cacheWriteTokens: 2, inputTokens: 3, outputTokens: 4 });
     expect(
-      normalizeKimiWireUsageRecord({ cacheReadTokens: 1, cacheWriteTokens: 2, input_tokens: 3, outputTokens: 4 }),
+      normalizeKimiWireUsageRecord({
+        token_usage: { cacheReadTokens: 1, cacheWriteTokens: 2, input_tokens: 3, outputTokens: 4 },
+      }),
     ).toEqual({ cacheReadTokens: 1, cacheWriteTokens: 2, inputTokens: 3, outputTokens: 4 });
-    expect(normalizeKimiWireUsageRecord({ usage: {} })).toBeNull();
+    expect(normalizeKimiWireUsageRecord({ type: "usage.record", usage: {} })).toBeNull();
+    // A wire line that is not a usage record is never billed, even when it
+    // happens to carry numeric fields.
+    expect(normalizeKimiWireUsageRecord({ cacheReadTokens: 1, outputTokens: 4 })).toBeNull();
   });
 
   test("reads only the delta after the baseline offset", async () => {
@@ -210,6 +228,10 @@ describe("KimiAgent actual-session recovery", () => {
     });
     const command = await agent.buildCommand({ prompt: "hi", cwd: process.cwd(), options: {} });
     try {
+      // The CLI writes session state under the workspace-hash directory.
+      const stateDir = join(agent.invocationHome, "sessions", "workspace-hash-0001", "actual-session-1");
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(join(stateDir, "state.json"), "{}\n");
       const interpreter = agent.createOutputInterpreter();
       interpreter.onStdoutLine(JSON.stringify({ role: "assistant", content: "working" }));
       interpreter.onStderrLine("To resume this session: kimi -r actual-session-1");
@@ -221,7 +243,7 @@ describe("KimiAgent actual-session recovery", () => {
           sessionId: "actual-session-1",
           source: "output",
           homeDir: agent.invocationHome,
-          stateDir: join(agent.invocationHome, "sessions", "actual-session-1"),
+          stateDir,
         },
       ]);
     } finally {

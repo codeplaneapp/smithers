@@ -1419,18 +1419,25 @@ type PiGenerateOptions = {
 type KimiWireUsageReadOptions = {
     maxBytes?: number;
     maxEntries?: number;
+    maxDirectories?: number;
+    maxFiles?: number;
 };
 
 type KimiWireUsageOptions = {
     /**
-     * Explicit wire log path. Defaults to `wire.jsonl` in the invocation's
-     * runtime home.
+     * Explicit wire log path. By default every `wire.jsonl` under the
+     * invocation's runtime home is read, which is where the CLI writes them:
+     * `<home>/sessions/<workspace>/<session>/wire.jsonl`.
      */
     path?: string;
-    /** Maximum bytes read from the log in one delta pass. Default 8 MiB. */
+    /** Maximum bytes read from one log in one delta pass. Default 8 MiB. */
     maxBytes?: number;
-    /** Maximum usage.record entries processed in one delta pass. Default 10000. */
+    /** Maximum usage entries processed per log in one delta pass. Default 10000. */
     maxEntries?: number;
+    /** Maximum directories visited while discovering wire logs. Default 1000. */
+    maxDirectories?: number;
+    /** Maximum wire logs read in one delta pass. Default 200. */
+    maxFiles?: number;
 };
 type KimiSessionRecoverySource = "output" | "session-index";
 type KimiSessionRecoveryInfo = {
@@ -1528,12 +1535,13 @@ type KimiAgentOptions$1 = BaseCliAgentOptions & {
      */
     sessionStateDir?: string;
     /**
-     * Invocation-local usage extraction from the CLI's `wire.jsonl`
-     * `usage.record` entries (cache-read, cache-write, other-input, and output
-     * counters). The log position is baselined at invocation start, and
-     * re-baselined after resumed session state is seeded, so historical tokens
-     * are never re-billed. The delta is attached to the completed event as
-     * normalized usage.
+     * Invocation-local usage extraction from the CLI's `wire.jsonl`. Kimi stream
+     * JSON carries no token usage; the wire log records per-step counters on
+     * `StatusUpdate` messages (`token_usage.input_cache_read`,
+     * `input_cache_creation`, `input_other`, `output`). Every log under the
+     * invocation home is position-baselined at invocation start, and again after
+     * resumed session state is seeded, so historical tokens are never re-billed.
+     * The delta is attached to the completed event as normalized usage.
      */
     wireUsage?: boolean | KimiWireUsageOptions;
     /**
@@ -1558,10 +1566,23 @@ declare class KimiAgent extends BaseCliAgent {
     actualSessionId: any;
     /** Per-invocation runtime home (isolated when credentialDir/runtimeDir is used). */
     invocationHome: any;
-    /** @type {{ path: string; byteOffset: number; options: import("./kimiWireUsage.js").KimiWireUsageReadOptions } | undefined} */
+    /**
+     * Baseline for the invocation-local wire-usage delta. `path` reads one
+     * explicit log; `homeDir` snapshots every per-session log under the
+     * invocation home, which is where the vendor CLI writes them.
+     * @type {{
+     *   path?: string;
+     *   byteOffset?: number;
+     *   homeDir?: string;
+     *   files?: Map<string, number>;
+     *   options: import("./kimiWireUsage.js").KimiWireUsageReadOptions;
+     * } | undefined}
+     */
     wireUsageBaseline: {
-        path: string;
-        byteOffset: number;
+        path?: string;
+        byteOffset?: number;
+        homeDir?: string;
+        files?: Map<string, number>;
         options: KimiWireUsageReadOptions;
     } | undefined;
     /**
