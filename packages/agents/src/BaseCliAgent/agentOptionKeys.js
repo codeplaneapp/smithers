@@ -176,10 +176,12 @@ export const CLI_AGENT_OPTION_KEYS = {
     "tools",
   ],
   KimiAgent: [
+    "cliVersion",
     "workDir",
     "session",
     "continue",
     "thinking",
+    "addDir",
     "outputFormat",
     "finalMessageOnly",
     "quiet",

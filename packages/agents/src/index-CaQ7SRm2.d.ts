@@ -444,6 +444,20 @@ declare function pushFlag(args: string[], flag: string, value?: string | number 
  */
 declare function pushList(args: string[], flag: string, values?: string[]): void;
 
+/**
+ * Emit one flag/value pair per entry: `--flag a --flag b`.
+ *
+ * Use this for vendor flags whose parser accepts exactly one value per
+ * occurrence (clap `Vec<T>` without `num_args`, commander accumulating
+ * `argParser`). `pushList` would emit `--flag a b`, and the vendor then
+ * parses `b` as a positional argument.
+ *
+ * @param {string[]} args
+ * @param {string} flag
+ * @param {string[]} [values]
+ */
+declare function pushRepeated(args: string[], flag: string, values?: string[]): void;
+
 /** @typedef {import("./CodexConfigOverrides.ts").CodexConfigOverrides} CodexConfigOverrides */
 /**
  * @param {CodexConfigOverrides} [config]
@@ -521,9 +535,8 @@ declare function extractUsageFromOutput(raw: string): CliUsageInfo$1 | undefined
 declare class BaseCliAgent {
     /**
      * @param {BaseCliAgentOptions} opts
-     * @param {string} [agentName]
      */
-    constructor(opts: BaseCliAgentOptions$1, agentName?: string);
+    constructor(opts: BaseCliAgentOptions$1);
     version: string;
     /** @type {Record<string, unknown>} */
     tools: Record<string, unknown>;
@@ -539,13 +552,6 @@ declare class BaseCliAgent {
     idleTimeoutMs: number | undefined;
     maxOutputBytes: number | undefined;
     extraArgs: string[] | undefined;
-    onQuotaExceeded: ((details: {
-        agentId?: string;
-        agentEngine?: string;
-        agentModel?: string;
-        quotaResetAtMs?: number;
-        underlying?: string;
-    }) => void) | undefined;
     /**
      * @param {AgentGenerateOptions | undefined} options
      * @param {AgentInvocationOperation} operation
@@ -648,4 +654,4 @@ type PiExtensionUiRequest = PiExtensionUiRequest$2;
 type PiExtensionUiResponse = PiExtensionUiResponse$2;
 type RunCommandResult = RunCommandResult$2;
 
-export { pushList as $, type AgentGenerateOptions$2 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, type AgentCliStartedEvent as D, type AgentGenerateOptions as E, type CliUsageInfo as F, type CodexConfigOverrides as G, type PiExtensionUiRequest as H, type PiExtensionUiResponse as I, asNumber as J, asString as K, buildGenerateResult as L, combineNonEmpty as M, type NormalizedTokenUsage as N, createAgentStdoutTextEmitter as O, type PiExtensionUiRequest$2 as P, createSyntheticIdGenerator as Q, type RunCommandResult as R, extractPrompt as S, extractTextFromJsonValue as T, extractUsageFromOutput as U, isLikelyRuntimeMetadata as V, isRecord as W, normalizeCodexConfig as X, normalizeTokenUsage as Y, parseAnthropicStyleFileChanges as Z, pushFlag as _, type AgentCheckpoint as a, reconstructUnifiedDiff as a0, resolveTimeouts as a1, runAgentPromise as a2, runCommandEffect as a3, runRpcCommandEffect as a4, shouldSurfaceUnparsedStdout as a5, toolKindFromName as a6, truncate as a7, truncateToBytes as a8, tryParseJson as a9, type AgentFileChange$1 as b, type AgentCheckpointCapability as c, type AgentCheckpointFormat as d, type BaseCliAgentOptions as e, type PiExtensionUiResponse$2 as f, BaseCliAgent as g, type CodexConfigOverrides$2 as h, type AgentCliEvent$1 as i, type CliOutputInterpreter as j, type AgentCheckpointResult as k, type AgentCheckpointMode as l, type AgentCliActionKind$2 as m, type AgentCheckpointContinuationOptions as n, type AgentCheckpointJsonArray as o, type AgentCheckpointJsonObject as p, type AgentCheckpointJsonPrimitive as q, type AgentCheckpointJsonValue as r, type AgentCheckpointPublisher as s, type AgentFileChangeKind as t, type AgentCliActionEvent as u, type AgentCliActionKind as v, type AgentCliActionPhase as w, type AgentCliCompletedEvent as x, type AgentCliEvent as y, type AgentCliEventLevel as z };
+export { pushList as $, type AgentGenerateOptions$2 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, type AgentCliStartedEvent as D, type AgentGenerateOptions as E, type CliUsageInfo as F, type CodexConfigOverrides as G, type PiExtensionUiRequest as H, type PiExtensionUiResponse as I, asNumber as J, asString as K, buildGenerateResult as L, combineNonEmpty as M, type NormalizedTokenUsage as N, createAgentStdoutTextEmitter as O, type PiExtensionUiRequest$2 as P, createSyntheticIdGenerator as Q, type RunCommandResult as R, extractPrompt as S, extractTextFromJsonValue as T, extractUsageFromOutput as U, isLikelyRuntimeMetadata as V, isRecord as W, normalizeCodexConfig as X, normalizeTokenUsage as Y, parseAnthropicStyleFileChanges as Z, pushFlag as _, type AgentCheckpoint as a, pushRepeated as a0, reconstructUnifiedDiff as a1, resolveTimeouts as a2, runAgentPromise as a3, runCommandEffect as a4, runRpcCommandEffect as a5, shouldSurfaceUnparsedStdout as a6, toolKindFromName as a7, truncate as a8, truncateToBytes as a9, tryParseJson as aa, type AgentFileChange$1 as b, type AgentCheckpointCapability as c, type AgentCheckpointFormat as d, type BaseCliAgentOptions as e, type PiExtensionUiResponse$2 as f, BaseCliAgent as g, type CodexConfigOverrides$2 as h, type AgentCliEvent$1 as i, type CliOutputInterpreter as j, type AgentCheckpointResult as k, type AgentCheckpointMode as l, type AgentCliActionKind$2 as m, type AgentCheckpointContinuationOptions as n, type AgentCheckpointJsonArray as o, type AgentCheckpointJsonObject as p, type AgentCheckpointJsonPrimitive as q, type AgentCheckpointJsonValue as r, type AgentCheckpointPublisher as s, type AgentFileChangeKind as t, type AgentCliActionEvent as u, type AgentCliActionKind as v, type AgentCliActionPhase as w, type AgentCliCompletedEvent as x, type AgentCliEvent as y, type AgentCliEventLevel as z };
