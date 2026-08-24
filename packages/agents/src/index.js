@@ -98,6 +98,7 @@ export { PoolAgent, createPoolCapabilityRegistry } from "./PoolAgent.js";
 export { AmpAgent } from "./AmpAgent.js";
 export { AntigravityAgent } from "./AntigravityAgent.js";
 export { ClaudeCodeAgent } from "./ClaudeCodeAgent.js";
+export { createDeepSeekUsageNormalizer } from "./deepseekUsage.js";
 export { CodexAgent } from "./CodexAgent.js";
 export { CursorAgent } from "./CursorAgent.js";
 export { GeminiAgent } from "./GeminiAgent.js";

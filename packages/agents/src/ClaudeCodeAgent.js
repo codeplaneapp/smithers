@@ -467,16 +467,27 @@ export class ClaudeCodeAgent extends BaseCliAgent {
         if (!limitBannerText && resultText && isClaudeLimitBanner(resultText)) {
           limitBannerText = resultText;
         }
-        const isError = payload.is_error === true || subtype === "error" || Boolean(limitBannerText);
+        // Custom-provider usage normalization is typed and opt-in. A
+        // normalizer error (for example an ambiguous legacy alias) fails the
+        // invocation loudly instead of silently mis-billing tokens.
+        let resultUsage;
+        let usageError;
+        try {
+          resultUsage = this.normalizeResultUsage(payload);
+        } catch (error) {
+          usageError = error instanceof Error ? error.message : String(error);
+        }
+        const isError =
+          payload.is_error === true || subtype === "error" || Boolean(limitBannerText) || Boolean(usageError);
         didEmitCompleted = true;
         events.push({
           type: "completed",
           engine: this.cliEngine,
           ok: !isError,
           answer: !isError ? resultText || lastAssistantText || undefined : undefined,
-          error: isError ? limitBannerText || resultError || "Claude run failed" : undefined,
+          error: isError ? usageError || limitBannerText || resultError || "Claude run failed" : undefined,
           resume: asString(payload.session_id) ?? sessionId,
-          usage: isRecord(payload.usage) ? payload.usage : undefined,
+          ...(resultUsage !== undefined ? { usage: resultUsage } : {}),
         });
         return events;
       }
@@ -509,6 +520,37 @@ export class ClaudeCodeAgent extends BaseCliAgent {
         ];
       },
     };
+  }
+  /**
+   * Normalize the usage on a stream-json `result` payload. With the typed
+   * `normalizeUsage` option (for routing to an Anthropic-compatible custom
+   * provider such as DeepSeek), the hook receives the raw result payload and
+   * returns Smithers' normalized usage shape; without it, the Anthropic
+   * result-usage object passes through unchanged. The normalized value feeds
+   * completed events, generate results, stream results, and failures through
+   * the shared completed-event usage path.
+   *
+   * @param {Record<string, unknown>} payload
+   * @returns {unknown}
+   */
+  normalizeResultUsage(payload) {
+    const normalizer = this.opts.normalizeUsage;
+    if (!normalizer) {
+      return isRecord(payload.usage) ? payload.usage : undefined;
+    }
+    return normalizer(payload) ?? undefined;
+  }
+  /**
+   * Custom-provider usage hook for the raw-stdout extraction path in
+   * BaseCliAgent. Returns undefined without `normalizeUsage`, leaving the
+   * generic Anthropic accumulation in place.
+   *
+   * @param {Record<string, unknown>} payload
+   * @returns {import("./BaseCliAgent/NormalizedTokenUsage.ts").NormalizedTokenUsage | undefined}
+   */
+  normalizeCliResultUsage(payload) {
+    if (!this.opts.normalizeUsage) return undefined;
+    return this.normalizeResultUsage(payload);
   }
   /**
    * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})

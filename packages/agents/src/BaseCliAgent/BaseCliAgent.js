@@ -785,9 +785,10 @@ function usageFromCompletedEvent(completedEvent) {
 }
 /**
  * @param {string} raw
+ * @param {{ extractResultUsage?: (payload: Record<string, unknown>) => CliUsageInfo | null | undefined }} [options]
  * @returns {CliUsageInfo | undefined}
  */
-export function extractUsageFromOutput(raw) {
+export function extractUsageFromOutput(raw, options) {
   const lines = stripOscSequences(raw).split(/\r?\n/).filter(Boolean);
   const usage = {};
   let found = false;
@@ -829,6 +830,34 @@ export function extractUsageFromOutput(raw) {
       // Otherwise fall through so the usage is still captured.
       if (countedIncremental) {
         continue;
+      }
+      // Agent-provided custom-provider normalization wins over the generic
+      // accumulation below: a provider with non-Anthropic usage fields
+      // (DeepSeek's prompt_cache_* counters) would otherwise lose every
+      // counter except output_tokens.
+      if (options?.extractResultUsage) {
+        let normalized;
+        try {
+          normalized = options.extractResultUsage(parsed);
+        } catch {
+          normalized = undefined;
+        }
+        if (normalized) {
+          if (normalized.inputTokens) usage.inputTokens = (usage.inputTokens ?? 0) + normalized.inputTokens;
+          if (normalized.outputTokens) usage.outputTokens = (usage.outputTokens ?? 0) + normalized.outputTokens;
+          if (normalized.cacheReadTokens) {
+            usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) + normalized.cacheReadTokens;
+          }
+          if (normalized.cacheWriteTokens) {
+            usage.cacheWriteTokens = (usage.cacheWriteTokens ?? 0) + normalized.cacheWriteTokens;
+          }
+          if (normalized.reasoningTokens) {
+            usage.reasoningTokens = (usage.reasoningTokens ?? 0) + normalized.reasoningTokens;
+          }
+          if (normalized.totalTokens) usage.totalTokens = (usage.totalTokens ?? 0) + normalized.totalTokens;
+          found = true;
+          continue;
+        }
       }
     }
     if (parsed.type === "turn.completed" && parsed.usage) {
@@ -1279,7 +1308,10 @@ export class BaseCliAgent {
             const output = outputFileJson ?? tryParseJson(extractedText);
             // Extract token usage from raw stdout before text extraction strips it.
             // Each CLI harness embeds usage differently (NDJSON events, JSON stats, etc.)
-            const cliUsage = extractUsageFromOutput(result.stdout) ?? usageFromCompletedEvent(completedEvent);
+            const cliUsage =
+              extractUsageFromOutput(result.stdout, {
+                extractResultUsage: (payload) => this.normalizeCliResultUsage?.(payload),
+              }) ?? usageFromCompletedEvent(completedEvent);
             const usage = cliUsage
               ? {
                   inputTokens: cliUsage.inputTokens,

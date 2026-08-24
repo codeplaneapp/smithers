@@ -1,4 +1,5 @@
 import type { BaseCliAgentOptions } from "./BaseCliAgent/BaseCliAgentOptions";
+import type { NormalizedTokenUsage } from "./BaseCliAgent/NormalizedTokenUsage";
 
 export type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
   addDir?: string[];
@@ -48,6 +49,17 @@ export type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
   model?: string;
   noChrome?: boolean;
   noSessionPersistence?: boolean;
+  /**
+   * Custom-provider usage normalization. Receives the raw stream-json
+   * `result` payload and returns Smithers' normalized usage shape. Applied
+   * consistently to completed events, successful generate results, stream
+   * results, and failures. Use this when routing Claude Code to an
+   * Anthropic-compatible provider whose usage fields differ from Anthropic's
+   * (for example `createDeepSeekUsageNormalizer()` for DeepSeek's supported
+   * integration). Without it, the Anthropic result-usage object passes
+   * through unchanged.
+   */
+  normalizeUsage?: (rawResult: unknown) => NormalizedTokenUsage | null | undefined;
   outputFormat?: "text" | "json" | "stream-json";
   // `effort` is inherited from BaseCliAgentOptions (the shared first-class
   // reasoning-effort surface). Claude Code translates it in buildCommand by

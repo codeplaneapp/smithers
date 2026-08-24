@@ -78,6 +78,7 @@ export const CLI_AGENT_OPTION_KEYS = {
     "mcpDebug",
     "noChrome",
     "noSessionPersistence",
+    "normalizeUsage",
     "outputFormat",
     "permissionMode",
     "pluginDir",

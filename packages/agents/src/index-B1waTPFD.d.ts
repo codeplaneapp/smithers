@@ -529,9 +529,12 @@ type AgentFileChange = AgentFileChange$1;
 declare function runAgentPromise<A>(effect: Effect.Effect<A, SmithersError$1, never>): Promise<A>;
 /**
  * @param {string} raw
+ * @param {{ extractResultUsage?: (payload: Record<string, unknown>) => CliUsageInfo | null | undefined }} [options]
  * @returns {CliUsageInfo | undefined}
  */
-declare function extractUsageFromOutput(raw: string): CliUsageInfo$1 | undefined;
+declare function extractUsageFromOutput(raw: string, options?: {
+    extractResultUsage?: (payload: Record<string, unknown>) => CliUsageInfo$1 | null | undefined;
+}): CliUsageInfo$1 | undefined;
 declare class BaseCliAgent {
     /**
      * @param {BaseCliAgentOptions} opts
