@@ -663,9 +663,8 @@ export class CodexAgent extends BaseCliAgent {
     // be committed to. Widen the sandbox to those gitdirs alone. An explicit
     // `writable_roots` in the caller's config wins, exactly as an explicit
     // `sandbox` wins over `fullAuto` above.
-    const sandboxMode = !resumeSession && this.opts.fullAuto && !this.opts.sandbox
-      ? "workspace-write"
-      : this.opts.sandbox;
+    const sandboxMode =
+      !resumeSession && this.opts.fullAuto && !this.opts.sandbox ? "workspace-write" : this.opts.sandbox;
     if (
       !resumeSession &&
       sandboxMode === "workspace-write" &&
