@@ -275,7 +275,9 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
       }).generate({ prompt: "configured", rootDir: callWorkspace });
 
       const [command] = await capturedCommands(capture);
-      expect(command.data.workspace).toBe(callWorkspace);
+      // The adapter canonicalizes the workspace through realpath (see the
+      // "requested realpath" checkpoint test), so compare canonical paths.
+      expect(command.data.workspace).toBe(await realpath(callWorkspace));
       expect(command.data.auth).toEqual({ mode: "chatgpt", authFile: join(directory, "managed-auth.json") });
       expect(command.data.options).toEqual({
         instructions: "Complete replacement instructions.",
@@ -618,8 +620,8 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
         .map((line) => JSON.parse(line));
       expect(environments).toEqual([{ NANOCODEX_AUTH_FILE: firstAuthFile }, { NANOCODEX_AUTH_FILE: firstAuthFile }]);
       expect((await capturedCommands(capture)).map((command) => command.data.auth)).toEqual([
-        { mode: "chatgpt", authFile: firstAuthFile },
-        { mode: "chatgpt", authFile: firstAuthFile },
+        { mode: "chatgpt", authFile: await realpath(firstAuthFile) },
+        { mode: "chatgpt", authFile: await realpath(firstAuthFile) },
       ]);
     } finally {
       if (originalAuthFile === undefined) delete process.env.NANOCODEX_AUTH_FILE;
@@ -628,13 +630,16 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
   });
 
   test("materializes every bridge managed-auth fallback as an explicit absolute wire path", async () => {
+    // A relative candidate resolves against the canonical (realpath) workspace;
+    // absolute candidates that do not exist keep their verbatim path.
+    const canonicalDirectory = await realpath(directory);
     const cases = [
       {
         environment: {
           NANOCODEX_AUTH_FILE: "nanocodex-auth.json",
           CODEX_HOME: join(directory, "ignored-codex-home"),
         },
-        expected: join(directory, "nanocodex-auth.json"),
+        expected: join(canonicalDirectory, "nanocodex-auth.json"),
       },
       {
         environment: { CODEX_HOME: join(directory, "codex-home") },
@@ -672,8 +677,8 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
     });
     await direct.generate({ prompt: "process fallback" });
     const commands = await capturedCommands(capture);
-    expect(commands[0].data.workspace).toBe(directory);
-    expect(commands[1].data.workspace).toBe(process.cwd());
+    expect(commands[0].data.workspace).toBe(await realpath(directory));
+    expect(commands[1].data.workspace).toBe(await realpath(process.cwd()));
   });
 
   test("resumes the opaque snapshot in a fresh process and rejects incompatible policy/workspace", async () => {
