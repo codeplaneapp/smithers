@@ -641,8 +641,9 @@ declare function extractUsageFromOutput(raw: string, options?: {
 declare class BaseCliAgent {
     /**
      * @param {BaseCliAgentOptions} opts
+     * @param {string} [agentName]
      */
-    constructor(opts: BaseCliAgentOptions$1);
+    constructor(opts: BaseCliAgentOptions$1, agentName?: string);
     version: string;
     /** @type {Record<string, unknown>} */
     tools: Record<string, unknown>;
@@ -658,6 +659,13 @@ declare class BaseCliAgent {
     idleTimeoutMs: number | undefined;
     maxOutputBytes: number | undefined;
     extraArgs: string[] | undefined;
+    onQuotaExceeded: ((details: {
+        agentId?: string;
+        agentEngine?: string;
+        agentModel?: string;
+        quotaResetAtMs?: number;
+        underlying?: string;
+    }) => void) | undefined;
     /** @type {import("./CliRecoveryPolicy.ts").CliRecoveryPolicy | undefined} */
     recoveryPolicy: CliRecoveryPolicy$1 | undefined;
     /**
