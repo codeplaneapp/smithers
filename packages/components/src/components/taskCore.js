@@ -41,6 +41,49 @@ import { MemoryContext } from "../memory/MemoryContext.js";
  */
 
 /**
+ * `JSON.stringify` throws on cyclic structures, and React development builds
+ * make element graphs cyclic: every element carries an `_owner` (the fiber
+ * that created it, or a `{parent, type, owner, stack}` debug task from the
+ * dev server renderer), and those owners chain back into cycles. MDX layout
+ * semantics inject exactly such an element as `props.children`, so a prompt
+ * component that dumps its props (`{JSON.stringify(props)}`) crashes with
+ * "JSON.stringify cannot serialize cyclic structures" even when every data
+ * prop is plain JSON. While a prompt renders, swap in a stringify that first
+ * tries the stock behavior verbatim and, only when it hits a cycle, retries
+ * with a WeakSet guard that renders repeated objects as "[Circular]".
+ * `renderToStaticMarkup` is synchronous, so the swap cannot interleave with
+ * another render, and the original is always restored.
+ * @returns {() => void} restore function
+ */
+function installCycleTolerantStringify() {
+  const original = JSON.stringify;
+  const isCycleError = (err) =>
+    err instanceof TypeError && typeof err.message === "string" && /cycli|circular/i.test(err.message);
+  const stringify = /** @typeof JSON.stringify */ function (value, replacer, space) {
+    try {
+      return original.call(JSON, value, replacer, space);
+    } catch (err) {
+      if (!isCycleError(err)) throw err;
+      const seen = new WeakSet();
+      const guard = function (key, val) {
+        if (typeof replacer === "function") val = replacer.call(this, key, val);
+        if (typeof val !== "object" || val === null) return val;
+        if (seen.has(val)) return "[Circular]";
+        seen.add(val);
+        return val;
+      };
+      return original.call(JSON, value, guard, space);
+    }
+  };
+  JSON.stringify = stringify;
+  let restored = false;
+  return () => {
+    if (restored) return;
+    restored = true;
+    JSON.stringify = original;
+  };
+}
+/**
  * Render a prompt React node to plain markdown text.
  *
  * If the prompt is a React element (e.g. a compiled MDX component), we inject
@@ -71,10 +114,22 @@ export function renderPromptToText(prompt) {
     } else {
       element = React.createElement(React.Fragment, null, prompt);
     }
-    return decodeHtmlEntities(renderToStaticMarkup(element))
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
+    const restoreStringify = installCycleTolerantStringify();
+    try {
+      return decodeHtmlEntities(renderToStaticMarkup(element))
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    } finally {
+      restoreStringify();
+    }
   } catch (err) {
+    // `String(reactElement)` is always "[object Object]", so that string
+    // cannot distinguish "MDX preload inactive" from "the component threw".
+    // A valid element that fails to render must surface the component's own
+    // error, not a bunfig.toml hint.
+    if (React.isValidElement(prompt)) throw err;
+    // A prompt that is not a React element at all (the MDX module did not
+    // compile to a component) means the preload is missing.
     const result = String(prompt ?? "");
     if (result === "[object Object]") {
       throw new SmithersError(
