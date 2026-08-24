@@ -1,6 +1,6 @@
 import * as ai from 'ai';
 import { Tool as Tool$1, ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent } from 'ai';
-import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$f, h as CodexConfigOverrides, i as AgentCliEvent$1, j as CliOutputInterpreter$g, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-CvMSLAEd.js';
+import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$f, h as CodexConfigOverrides, i as AgentCliEvent$1, j as CliOutputInterpreter$g, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-CaQ7SRm2.js';
 import * as zod from 'zod';
 import '@smthrs/errors/SmithersError';
 import 'effect';
@@ -1363,10 +1363,28 @@ type PiGenerateOptions = {
 };
 
 type KimiAgentOptions$1 = BaseCliAgentOptions & {
+    /**
+     * Target CLI dialect for argv construction. The default (undefined) builds
+     * commands for the current Kimi CLI surface. `"0.29"` emits only flags the
+     * `@moonshot-ai/kimi-code@0.29.x` commander surface accepts: `-p/--prompt`,
+     * `--output-format`, `-m/--model`, `-y/--yolo`, `-c/--continue`,
+     * `--add-dir` (repeated), `--skills-dir`, `--agent`, `--agent-file`, and a
+     * caller-supplied `-S/--session`. Newer-only flags (`--print`,
+     * `--final-message-only`, `--work-dir`, `--thinking`/`--no-thinking`, the
+     * step/retry controls, the MCP config flags) are omitted, and Smithers never
+     * forwards a synthetic `--session` in this dialect.
+     */
+    cliVersion?: "0.29";
     workDir?: string;
     session?: string;
     continue?: boolean;
     thinking?: boolean;
+    /**
+     * Additional workspace directories. Serialized as one `--add-dir <dir>`
+     * pair per entry, which is what both the current CLI and the 0.29.x surface
+     * accept.
+     */
+    addDir?: string[];
     outputFormat?: "text" | "stream-json";
     finalMessageOnly?: boolean;
     quiet?: boolean;
@@ -1413,6 +1431,31 @@ declare class KimiAgent extends BaseCliAgent {
      */
     parseFileChanges(action: unknown): AgentFileChange$1[] | undefined;
     /**
+     * Build argv for the Kimi Code 0.29.x commander surface (verified against
+     * the unpacked `@moonshot-ai/kimi-code@0.29.1` npm tarball,
+     * `dist/main.mjs` createProgram). The 0.29.x CLI accepts only:
+     * `-S/--session [id]`, `-r/--resume [id]`, `-c/--continue`, `-y/--yolo`,
+     * `--auto`, `-m/--model <model>`, `-p/--prompt <prompt>`,
+     * `--output-format text|stream-json`, `--skills-dir <dir>` (repeatable),
+     * `--agent <name>`, `--agent-file <path>`, `--add-dir <dir>` (repeatable),
+     * and `--plan`. Newer flags (`--print`, `--final-message-only`,
+     * `--work-dir`, `--thinking`/`--no-thinking`, the step/retry controls, the
+     * MCP config flags, `--quiet`, `--verbose`, `--debug`) do not exist in
+     * 0.29.x and are never emitted here. A synthetic `--session` is never
+     * forwarded: only a real caller-supplied resumable session reaches argv.
+     *
+     * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+     */
+    buildCommand029(params: {
+        prompt: string;
+        systemPrompt?: string;
+        cwd: string;
+        options: any;
+    }): {
+        args: any[];
+        outputFormat: "text" | "stream-json";
+    };
+    /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
      */
     buildCommand(params: {
@@ -1422,7 +1465,7 @@ declare class KimiAgent extends BaseCliAgent {
         options: any;
     }): Promise<{
         command: string;
-        args: string[];
+        args: any[];
         outputFormat: "text" | "stream-json";
         env: {
             KIMI_SHARE_DIR: string;

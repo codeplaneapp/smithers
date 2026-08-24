@@ -440,6 +440,47 @@ export class KimiAgent extends BaseCliAgent {
     return parseKimiFileChanges(fileAction?.title ?? "", parsedArguments);
   }
   /**
+   * Build argv for the Kimi Code 0.29.x commander surface (verified against
+   * the unpacked `@moonshot-ai/kimi-code@0.29.1` npm tarball,
+   * `dist/main.mjs` createProgram). The 0.29.x CLI accepts only:
+   * `-S/--session [id]`, `-r/--resume [id]`, `-c/--continue`, `-y/--yolo`,
+   * `--auto`, `-m/--model <model>`, `-p/--prompt <prompt>`,
+   * `--output-format text|stream-json`, `--skills-dir <dir>` (repeatable),
+   * `--agent <name>`, `--agent-file <path>`, `--add-dir <dir>` (repeatable),
+   * and `--plan`. Newer flags (`--print`, `--final-message-only`,
+   * `--work-dir`, `--thinking`/`--no-thinking`, the step/retry controls, the
+   * MCP config flags, `--quiet`, `--verbose`, `--debug`) do not exist in
+   * 0.29.x and are never emitted here. A synthetic `--session` is never
+   * forwarded: only a real caller-supplied resumable session reaches argv.
+   *
+   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+   */
+  buildCommand029(params) {
+    const args = [];
+    const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
+    const sessionId = resumeSession ?? this.opts.session;
+    this.issuedSessionId = sessionId;
+    if (sessionId) args.push("--session", sessionId);
+    if (this.opts.continue) args.push("--continue");
+    const yoloEnabled = this.opts.yolo ?? this.yolo;
+    if (yoloEnabled) args.push("--yolo");
+    pushFlag(args, "--model", this.opts.model ?? this.model);
+    const outputFormat = this.opts.outputFormat ?? (params.options?.onEvent ? "stream-json" : "text");
+    pushFlag(args, "--output-format", outputFormat);
+    pushRepeated(args, "--add-dir", this.opts.addDir);
+    pushFlag(args, "--skills-dir", this.opts.skillsDir);
+    pushFlag(args, "--agent", this.opts.agent);
+    pushFlag(args, "--agent-file", this.opts.agentFile);
+    if (this.extraArgs?.length) args.push(...this.extraArgs);
+    const systemPrefix = params.systemPrompt ? `${params.systemPrompt}\n\n` : "";
+    const jsonReminder = params.prompt?.includes("REQUIRED OUTPUT")
+      ? "\n\nREMINDER: Your response MUST be ONLY the required raw JSON object. Do not include prose, markdown, or code fences. The first character must be `{` and the last character must be `}`.\n"
+      : "";
+    const fullPrompt = `${systemPrefix}${params.prompt ?? ""}${jsonReminder}`;
+    pushFlag(args, "--prompt", fullPrompt);
+    return { args, outputFormat };
+  }
+  /**
    * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
    */
   async buildCommand(params) {
@@ -482,6 +523,30 @@ export class KimiAgent extends BaseCliAgent {
       // CLI with KIMI_SHARE_DIR pointing at the user-specified path.
       commandEnv = { KIMI_SHARE_DIR: this.opts.configDir };
     }
+    if (this.opts.cliVersion === "0.29") {
+      const dialect = this.buildCommand029(params);
+      return {
+        command: "kimi",
+        args: dialect.args,
+        outputFormat: dialect.outputFormat,
+        env: commandEnv,
+        cleanup,
+        stdoutBannerPatterns: [/^YOLO mode is enabled\b[^\n]*/gm],
+        stdoutErrorPatterns: [
+          /^LLM not set/i,
+          /^LLM not supported/i,
+          /^Max steps reached/i,
+          /^Interrupted by user$/i,
+          /^Unknown error:/i,
+          /^Error:/i,
+          /Error code:\s*401\b[^\n]*/i,
+          /\binvalid_authentication_error\b/i,
+          /API\s*Key\s+appears to be invalid or may have expired/i,
+        ],
+        benignStderrPatterns: [/^\s*To resume this session: kimi -r [0-9a-f-]+\s*$/gim],
+        errorOnBannerOnly: true,
+      };
+    }
     // Print mode is required for non-interactive execution
     // Note: --print implicitly adds --yolo
     args.push("--print");
@@ -499,6 +564,9 @@ export class KimiAgent extends BaseCliAgent {
     this.issuedSessionId = sessionId;
     pushFlag(args, "--work-dir", this.opts.workDir ?? params.cwd);
     pushFlag(args, "--session", sessionId);
+    // kimi accepts one DIR per `--add-dir` occurrence (vendor help: "Can be
+    // specified multiple times").
+    pushRepeated(args, "--add-dir", this.opts.addDir);
     if (this.opts.continue) args.push("--continue");
     pushFlag(args, "--model", this.opts.model ?? this.model);
     const thinking = this.opts.thinking ?? true;
