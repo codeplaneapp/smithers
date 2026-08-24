@@ -30,6 +30,7 @@ export { runCommandEffect } from "./runCommandEffect.js";
 export { runRpcCommandEffect } from "./runRpcCommandEffect.js";
 export { pushFlag } from "./pushFlag.js";
 export { pushList } from "./pushList.js";
+export { pushRepeated } from "./pushRepeated.js";
 export { normalizeCodexConfig } from "./normalizeCodexConfig.js";
 export { reconstructUnifiedDiff } from "./reconstructUnifiedDiff.js";
 export { parseAnthropicStyleFileChanges } from "./parseAnthropicStyleFileChanges.js";

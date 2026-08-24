@@ -5,7 +5,7 @@ import { tmpdir, homedir } from "node:os";
 import {
   BaseCliAgent,
   pushFlag,
-  pushList,
+  pushRepeated,
   isRecord,
   asString,
   toolKindFromName,
@@ -506,8 +506,11 @@ export class KimiAgent extends BaseCliAgent {
     if (this.opts.quiet) args.push("--quiet");
     pushFlag(args, "--agent", this.opts.agent);
     pushFlag(args, "--agent-file", this.opts.agentFile);
-    pushList(args, "--mcp-config-file", this.opts.mcpConfigFile);
-    pushList(args, "--mcp-config", this.opts.mcpConfig);
+    // kimi accepts one FILE/TEXT per `--mcp-config-file`/`--mcp-config`
+    // occurrence (vendor help: "Add this option multiple times"), so repeated
+    // pairs are required; pushList would strand values as positionals.
+    pushRepeated(args, "--mcp-config-file", this.opts.mcpConfigFile);
+    pushRepeated(args, "--mcp-config", this.opts.mcpConfig);
     pushFlag(args, "--skills-dir", this.opts.skillsDir);
     pushFlag(args, "--max-steps-per-turn", this.opts.maxStepsPerTurn);
     pushFlag(args, "--max-retries-per-step", this.opts.maxRetriesPerStep);

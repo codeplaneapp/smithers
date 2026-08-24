@@ -2,6 +2,7 @@ import {
   BaseCliAgent,
   pushFlag,
   pushList,
+  pushRepeated,
   isRecord,
   asString,
   truncate,
@@ -577,7 +578,12 @@ export class ClaudeCodeAgent extends BaseCliAgent {
     if (this.opts.noSessionPersistence) args.push("--no-session-persistence");
     pushFlag(args, "--output-format", outputFormat);
     pushFlag(args, "--permission-mode", this.opts.permissionMode);
-    pushList(args, "--plugin-dir", this.opts.pluginDir);
+    // `--plugin-dir <path>` takes one value per occurrence in claude-code
+    // (commander non-variadic option; the CLI's own help documents
+    // "repeatable: --plugin-dir A --plugin-dir B.zip"). The other list flags
+    // above stay on pushList: their vendor declarations are variadic
+    // (`--add-dir <directories...>`, `--allowed-tools <tools...>`, etc.).
+    pushRepeated(args, "--plugin-dir", this.opts.pluginDir);
     if (this.opts.replayUserMessages) args.push("--replay-user-messages");
     const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
     pushFlag(args, "--resume", resumeSession ?? this.opts.resume);

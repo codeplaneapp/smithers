@@ -1,7 +1,7 @@
 import {
   BaseCliAgent,
   pushFlag,
-  pushList,
+  pushRepeated,
   isRecord,
   asString,
   truncate,
@@ -388,7 +388,12 @@ export class CursorAgent extends BaseCliAgent {
     if (this.opts.approveMcps) args.push("--approve-mcps");
     if (this.opts.trust ?? true) args.push("--trust");
     pushFlag(args, "--workspace", this.opts.workspace ?? params.cwd);
-    pushList(args, "--plugin-dir", this.opts.pluginDir);
+    // cursor-agent's commander parser accumulates `--plugin-dir` and
+    // `--header` as one value per occurrence (verified against the
+    // 2026.08.11 vendor bundle: both use an accumulating argParser on a
+    // non-variadic option). pushList would leak extra values into the
+    // positional prompt.
+    pushRepeated(args, "--plugin-dir", this.opts.pluginDir);
 
     const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
     const resume = resumeSession ?? this.opts.resume;
@@ -408,7 +413,7 @@ export class CursorAgent extends BaseCliAgent {
     }
     pushFlag(args, "--worktree-base", this.opts.worktreeBase);
     if (this.opts.skipWorktreeSetup) args.push("--skip-worktree-setup");
-    pushList(args, "--header", this.opts.header);
+    pushRepeated(args, "--header", this.opts.header);
     if (this.extraArgs?.length) args.push(...this.extraArgs);
 
     const systemPrefix = params.systemPrompt ? `${params.systemPrompt}\n\n` : "";
