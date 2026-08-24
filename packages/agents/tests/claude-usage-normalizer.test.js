@@ -151,6 +151,39 @@ process.stdout.write(JSON.stringify({
     }
   });
 
+  test("normalized result usage wins over incremental partial-message usage", async () => {
+    // With --include-partial-messages the stream also carries Anthropic-shaped
+    // message_start/message_delta counters. Those are the custom provider's
+    // numbers under Anthropic field names, so the normalizer must stay
+    // authoritative and the generate result must match the completed event.
+    const fake = await makeFakeClaude(`
+process.stdout.write(JSON.stringify({ type: "system", subtype: "init", session_id: "s-1" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 500, cache_read_input_tokens: 380 } } }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "message_delta", usage: { output_tokens: 42 } }) + "\\n");
+process.stdout.write(JSON.stringify({
+  type: "result",
+  subtype: "success",
+  result: "done",
+  session_id: "s-1",
+  usage: { prompt_cache_miss_tokens: 120, prompt_cache_hit_tokens: 380, output_tokens: 42 }
+}) + "\\n");
+`);
+    try {
+      process.env.PATH = prependPath(fake.dir, originalPath);
+      const agent = new ClaudeCodeAgent({
+        includePartialMessages: true,
+        normalizeUsage: createDeepSeekUsageNormalizer(),
+      });
+      const result = await agent.generate({ prompt: "hi" });
+      expect(result.usage.inputTokens).toBe(120);
+      expect(result.usage.outputTokens).toBe(42);
+      expect(result.usage.inputTokenDetails?.cacheReadTokens).toBe(380);
+      expect(result.usage.totalTokens).toBe(542);
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
   test("default Anthropic usage passthrough is unchanged without the option", () => {
     const agent = new ClaudeCodeAgent();
     const interpreter = agent.createOutputInterpreter();
