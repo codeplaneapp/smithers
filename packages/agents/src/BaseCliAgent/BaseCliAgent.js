@@ -953,6 +953,15 @@ function usageFromCompletedEvent(completedEvent) {
   };
   return Object.values(usage).some((value) => value !== undefined) ? usage : undefined;
 }
+/** Counter fields carried by {@link CliUsageInfo}. */
+const USAGE_COUNTER_KEYS = [
+  "inputTokens",
+  "outputTokens",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+  "reasoningTokens",
+  "totalTokens",
+];
 /**
  * @param {string} raw
  * @param {{ extractResultUsage?: (payload: Record<string, unknown>) => CliUsageInfo | null | undefined }} [options]
@@ -961,6 +970,8 @@ function usageFromCompletedEvent(completedEvent) {
 export function extractUsageFromOutput(raw, options) {
   const lines = stripOscSequences(raw).split(/\r?\n/).filter(Boolean);
   const usage = {};
+  /** Counters produced by a custom-provider normalizer, if one is supplied. */
+  const normalizedResultUsage = {};
   let found = false;
   let countedIncremental = false;
   for (const line of lines) {
@@ -993,18 +1004,12 @@ export function extractUsageFromOutput(raw, options) {
       continue;
     }
     if (parsed.type === "result") {
-      // Claude Code stream-json emits a terminal "result" event whose
-      // top-level usage summarizes tokens already accumulated from the
-      // per-message message_start/message_delta events. If we counted
-      // those incrementally, skip this event to avoid double-counting.
-      // Otherwise fall through so the usage is still captured.
-      if (countedIncremental) {
-        continue;
-      }
-      // Agent-provided custom-provider normalization wins over the generic
-      // accumulation below: a provider with non-Anthropic usage fields
-      // (DeepSeek's prompt_cache_* counters) would otherwise lose every
-      // counter except output_tokens.
+      // Agent-provided custom-provider normalization is authoritative for the
+      // whole invocation. It runs before the incremental short-circuit below:
+      // with --include-partial-messages the same provider counters also arrive
+      // under Anthropic field names on message_start/message_delta, and
+      // accumulating those would make the generate result disagree with the
+      // completed event's normalized usage.
       if (options?.extractResultUsage) {
         let normalized;
         try {
@@ -1013,21 +1018,23 @@ export function extractUsageFromOutput(raw, options) {
           normalized = undefined;
         }
         if (normalized) {
-          if (normalized.inputTokens) usage.inputTokens = (usage.inputTokens ?? 0) + normalized.inputTokens;
-          if (normalized.outputTokens) usage.outputTokens = (usage.outputTokens ?? 0) + normalized.outputTokens;
-          if (normalized.cacheReadTokens) {
-            usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) + normalized.cacheReadTokens;
+          for (const key of USAGE_COUNTER_KEYS) {
+            const value = normalized[key];
+            if (typeof value === "number" && value > 0) {
+              normalizedResultUsage[key] = (normalizedResultUsage[key] ?? 0) + value;
+            }
           }
-          if (normalized.cacheWriteTokens) {
-            usage.cacheWriteTokens = (usage.cacheWriteTokens ?? 0) + normalized.cacheWriteTokens;
-          }
-          if (normalized.reasoningTokens) {
-            usage.reasoningTokens = (usage.reasoningTokens ?? 0) + normalized.reasoningTokens;
-          }
-          if (normalized.totalTokens) usage.totalTokens = (usage.totalTokens ?? 0) + normalized.totalTokens;
           found = true;
           continue;
         }
+      }
+      // Claude Code stream-json emits a terminal "result" event whose
+      // top-level usage summarizes tokens already accumulated from the
+      // per-message message_start/message_delta events. If we counted
+      // those incrementally, skip this event to avoid double-counting.
+      // Otherwise fall through so the usage is still captured.
+      if (countedIncremental) {
+        continue;
       }
     }
     if (parsed.type === "turn.completed" && parsed.usage) {
@@ -1101,6 +1108,10 @@ export function extractUsageFromOutput(raw, options) {
       // not single JSON
     }
   }
+  // A custom-provider normalizer replaces the generic accumulation rather than
+  // adding to it, so every consumer of this function reports the same numbers
+  // the interpreter put on the completed event.
+  if (Object.keys(normalizedResultUsage).length > 0) return normalizedResultUsage;
   return found ? usage : undefined;
 }
 export class BaseCliAgent {

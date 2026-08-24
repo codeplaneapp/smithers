@@ -17,7 +17,7 @@ const DEEPSEEK_LEGACY_USAGE_ALIASES = ["cache_read_input_tokens", "cache_creatio
  */
 function counter(value) {
   const n = asNumber(value);
-  return typeof n === "number" && Number.isFinite(value) && n >= 0 ? n : undefined;
+  return typeof n === "number" && n >= 0 ? n : undefined;
 }
 
 /**
