@@ -669,7 +669,7 @@ new KimiAgent({
   maxStepsPerTurn?: number; maxRetriesPerStep?: number; maxRalphIterations?: number;
   verbose?: boolean; debug?: boolean; configDir?: string; // sets KIMI_SHARE_DIR (see below)
   credentialDir?: string; runtimeDir?: string; sessionStateDir?: string;
-  wireUsage?: boolean | { path?: string; maxBytes?: number; maxEntries?: number };
+  wireUsage?: boolean | { path?: string; maxBytes?: number; maxEntries?: number; maxFiles?: number; maxDirectories?: number };
   sessionRecovery?: boolean | {
     onSessionResolved?: (info: { sessionId: string; source: "output" | "session-index"; homeDir?: string; stateDir?: string }) => void;
     maxBytes?: number; maxFiles?: number; maxDirectories?: number;
@@ -687,19 +687,27 @@ the command builder emits only flags that CLI accepts (`--prompt`,
 the step/retry controls, the MCP config flags), and never forwards a synthetic
 `--session`. The default dialect (no `cliVersion`) is unchanged.
 
-`wireUsage` extracts invocation-local token usage from the CLI's `wire.jsonl`
-`usage.record` entries (cache-read, cache-write, other-input, and output
-counters). The log position is baselined at invocation start and re-baselined
-after resumed session state is seeded, so historical tokens are not re-billed.
-Reads enforce byte and entry bounds. The delta is attached to the completed
-event as normalized usage.
+`wireUsage` extracts invocation-local token usage from the CLI's `wire.jsonl`.
+Kimi stream JSON carries no token usage; the wire log records per-step counters
+on `StatusUpdate` messages (`token_usage.input_cache_read`,
+`input_cache_creation`, `input_other`, `output`). The CLI writes one log per
+session at `<home>/sessions/<workspace>/<session>/wire.jsonl`, so every log
+under the invocation home is position-baselined at invocation start and again
+after resumed session state is seeded; logs the invocation creates count in
+full and historical tokens are not re-billed. Reads enforce byte, entry,
+file, and directory bounds. The delta is attached to the completed event as
+normalized usage. Pass `path` to read one explicit log instead.
 
 `sessionRecovery` resolves and publishes the actual resumable session id from
 CLI output or the on-disk session index instead of the synthetic pre-launch id,
-and reports it through `onSessionResolved`. With `sessionStateDir` set, a
-resumed session's on-disk state is copied into the isolated invocation home
-before launch and persisted back at exit, so resume works across invocations.
-State copies enforce byte, file, and directory bounds.
+and reports it through `onSessionResolved`. The session index is the
+workspace-scoped directory tree the CLI writes
+(`<home>/sessions/<workspace>/<session>/`), so the published id is the session
+id `kimi -r` accepts, never the workspace directory that contains it. With
+`sessionStateDir` set, a resumed session's on-disk state is copied into the
+isolated invocation home before launch and persisted back at exit, preserving
+its workspace-scoped path, so resume works across invocations. State copies
+enforce byte, file, and directory bounds.
 
 `credentialDir` separates the shared credential source directory (read-only
 use by the live child) from an isolated per-invocation runtime home (`runtimeDir`

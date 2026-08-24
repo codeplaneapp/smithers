@@ -636,11 +636,13 @@ export class CodexAgent extends BaseCliAgent {
     for (const entry of configOverrides) {
       args.push("-c", entry);
     }
-    // codex-cli parses `--enable`/`--disable` as one FEATURE per occurrence
-    // (clap Vec without num_args; verified against codex-cli 0.149.0
-    // codex-rs/utils/cli/src/shared_options.rs and empirically: a second value
-    // becomes the positional PROMPT). `--image` is genuinely variadic
-    // (`num_args = 1..`), so it stays on pushList.
+    // codex-cli parses `--enable`/`--disable` as one FEATURE per occurrence.
+    // Verified against the installed vendor binary (codex-cli 0.149.0,
+    // `codex exec --help`): both are declared `--enable <FEATURE>` /
+    // `--disable <FEATURE>` and documented "(repeatable)", so a second value
+    // on the same flag becomes the positional PROMPT. `--image` is declared
+    // `-i, --image <FILE>...` and is genuinely variadic, so it stays on
+    // pushList.
     pushRepeated(args, "--enable", this.opts.enable);
     pushRepeated(args, "--disable", this.opts.disable);
     pushList(args, "--image", this.opts.image);
@@ -677,8 +679,9 @@ export class CodexAgent extends BaseCliAgent {
     }
     if (!resumeSession) pushFlag(args, "--cd", this.opts.cd);
     if (this.opts.skipGitRepoCheck) args.push("--skip-git-repo-check");
-    // `--add-dir` takes one DIR per occurrence in codex-cli; a second value
-    // would be parsed as the positional prompt (#1622).
+    // `--add-dir` is declared `--add-dir <DIR>` in codex-cli 0.149.0, so it
+    // takes one DIR per occurrence; a second value on the same flag would be
+    // parsed as the positional prompt (#1622).
     if (!resumeSession) pushRepeated(args, "--add-dir", this.opts.addDir);
     if (!resumeSession) {
       pushFlag(args, "--output-schema", this.opts.outputSchema);

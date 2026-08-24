@@ -389,10 +389,11 @@ export class CursorAgent extends BaseCliAgent {
     if (this.opts.trust ?? true) args.push("--trust");
     pushFlag(args, "--workspace", this.opts.workspace ?? params.cwd);
     // cursor-agent's commander parser accumulates `--plugin-dir` and
-    // `--header` as one value per occurrence (verified against the
-    // 2026.08.11 vendor bundle: both use an accumulating argParser on a
-    // non-variadic option). pushList would leak extra values into the
-    // positional prompt.
+    // `--header` as one value per occurrence. Verified against the unpacked
+    // 2026.08.11-e8db854 vendor bundle (`dist-package/index.js`): both are
+    // declared non-variadic (`--plugin-dir <path>`, `-H, --header <header>`)
+    // with an accumulating argParser. pushList would leak extra values into
+    // the positional prompt.
     pushRepeated(args, "--plugin-dir", this.opts.pluginDir);
 
     const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
