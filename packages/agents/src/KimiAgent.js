@@ -25,10 +25,16 @@ import {
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 import { SmithersError } from "@smthrs/errors/SmithersError";
 import { logWarning } from "@smthrs/observability/logging";
-import { kimiWireLogPosition, readKimiWireUsageDelta } from "./kimiWireUsage.js";
+import {
+  kimiWireBaseline,
+  kimiWireLogPosition,
+  readKimiWireUsageDelta,
+  readKimiWireUsageDeltaForHome,
+} from "./kimiWireUsage.js";
 import {
   copyKimiSessionState,
   extractKimiSessionIdFromLine,
+  findKimiSessionStateDir,
   resolveKimiSessionFromIndex,
 } from "./kimiSessionRecovery.js";
 
@@ -336,7 +342,18 @@ export class KimiAgent extends BaseCliAgent {
   actualSessionId;
   /** Per-invocation runtime home (isolated when credentialDir/runtimeDir is used). */
   invocationHome;
-  /** @type {{ path: string; byteOffset: number; options: import("./kimiWireUsage.js").KimiWireUsageReadOptions } | undefined} */
+  /**
+   * Baseline for the invocation-local wire-usage delta. `path` reads one
+   * explicit log; `homeDir` snapshots every per-session log under the
+   * invocation home, which is where the vendor CLI writes them.
+   * @type {{
+   *   path?: string;
+   *   byteOffset?: number;
+   *   homeDir?: string;
+   *   files?: Map<string, number>;
+   *   options: import("./kimiWireUsage.js").KimiWireUsageReadOptions;
+   * } | undefined}
+   */
   wireUsageBaseline;
   /**
    * @param {KimiAgentOptions} [opts]
@@ -379,7 +396,7 @@ export class KimiAgent extends BaseCliAgent {
         sessionId,
         source,
         homeDir,
-        stateDir: homeDir ? join(homeDir, "sessions", sessionId) : undefined,
+        stateDir: homeDir ? findKimiSessionStateDir(homeDir, sessionId, sessionRecovery) : undefined,
       };
       try {
         void Promise.resolve(sessionRecovery.onSessionResolved?.(info)).catch(() => undefined);
@@ -547,15 +564,25 @@ export class KimiAgent extends BaseCliAgent {
   readWireUsageBaselineDelta() {
     const baseline = this.wireUsageBaseline;
     if (!baseline) return undefined;
-    let delta;
+    /** @type {import("./BaseCliAgent/NormalizedTokenUsage.ts").NormalizedTokenUsage | undefined} */
+    let usage;
     try {
-      delta = readKimiWireUsageDelta(baseline.path, baseline.byteOffset, baseline.options);
+      if (baseline.homeDir) {
+        const delta = readKimiWireUsageDeltaForHome(baseline.homeDir, baseline.files ?? new Map(), baseline.options);
+        if (!delta) return undefined;
+        baseline.files = delta.baseline;
+        usage = delta.usage;
+      } else if (baseline.path) {
+        const delta = readKimiWireUsageDelta(baseline.path, baseline.byteOffset ?? 0, baseline.options);
+        if (!delta) return undefined;
+        baseline.byteOffset = delta.byteOffset;
+        usage = delta.usage;
+      }
     } catch {
       return undefined;
     }
-    if (!delta) return undefined;
-    baseline.byteOffset = delta.byteOffset;
-    return Object.values(delta.usage).some((value) => typeof value === "number" && value > 0) ? delta.usage : undefined;
+    if (!usage) return undefined;
+    return Object.values(usage).some((value) => typeof value === "number" && value > 0) ? usage : undefined;
   }
   /**
    * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
@@ -670,7 +697,8 @@ export class KimiAgent extends BaseCliAgent {
       // credential home as the seed source when it holds the session.
       if (callerSessionId && sessionRecovery) {
         const durableStateDir =
-          this.opts.sessionStateDir && existsSync(join(this.opts.sessionStateDir, "sessions", callerSessionId))
+          this.opts.sessionStateDir &&
+          findKimiSessionStateDir(this.opts.sessionStateDir, callerSessionId, sessionRecovery)
             ? this.opts.sessionStateDir
             : credentialSourceDir;
         try {
@@ -705,11 +733,23 @@ export class KimiAgent extends BaseCliAgent {
     // invocations (or copied in with resumed session state) belongs to those
     // invocations and must not be re-billed to this one.
     const wireUsage = normalizeKimiWireUsageOption(this.opts.wireUsage);
-    if (wireUsage) {
-      const wirePath = wireUsage.path ?? (this.invocationHome ? join(this.invocationHome, "wire.jsonl") : undefined);
-      this.wireUsageBaseline = wirePath
-        ? { path: wirePath, byteOffset: kimiWireLogPosition(wirePath), options: wireUsage }
-        : undefined;
+    if (wireUsage?.path) {
+      this.wireUsageBaseline = {
+        path: wireUsage.path,
+        byteOffset: kimiWireLogPosition(wireUsage.path),
+        options: wireUsage,
+      };
+    } else if (wireUsage && this.invocationHome) {
+      // The vendor writes one wire log per session, at
+      // `<home>/sessions/<workspace>/<session>/wire.jsonl`, and the session
+      // directory does not exist until the CLI has launched. Snapshot every
+      // log already present instead of a single fixed path: logs the
+      // invocation creates are absent from the snapshot and count in full.
+      this.wireUsageBaseline = {
+        homeDir: this.invocationHome,
+        files: kimiWireBaseline(this.invocationHome, wireUsage),
+        options: wireUsage,
+      };
     } else {
       this.wireUsageBaseline = undefined;
     }
