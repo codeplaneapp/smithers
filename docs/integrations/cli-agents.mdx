@@ -416,8 +416,42 @@ type BaseCliAgentOptions = {
   idleTimeoutMs?: number;            // Inactivity cap; resets on any stdout/stderr
   maxOutputBytes?: number;           // Truncate captured output
   extraArgs?: string[];              // Additional CLI flags appended to the command
+  recoveryPolicy?: CliRecoveryPolicy; // Provider retry/recovery policy (see below)
 };
 ```
+
+### Provider retry/recovery policy
+
+`recoveryPolicy` adds typed provider error recovery to `generate` and `stream`
+on every CLI agent. A failed attempt is classified by the policy: before
+substantive model/tool/file activity the attempt is retried fresh, and after
+substantive activity the exact emitted CLI session is resumed. Failed-attempt
+callbacks (events, stdout, stderr) are quarantined under a byte cap and released
+only for the terminal attempt, replayed lifecycle events are deduplicated on
+resume, backoff is bounded under the combined caller and policy deadline, and
+caller cancellation aborts promptly. The primary use is provider rate limits,
+for example Codex routed through OpenRouter returning HTTP 429.
+
+```ts
+import { CodexAgent } from "smthrs";
+import { createHttp429RecoveryClassifier } from "@smthrs/agents/BaseCliAgent";
+
+const agent = new CodexAgent({
+  recoveryPolicy: {
+    maxAttempts: 3,          // total attempts including the first
+    maxElapsedMs: 120_000,   // bound on the whole recovery window
+    backoffMs: (attempt) => 1000 * 2 ** attempt,
+    classifyError: createHttp429RecoveryClassifier(),
+  },
+});
+```
+
+`classifyError` receives the attempt's error, bounded stdout/stderr tails,
+whether substantive activity occurred, the resume id the CLI emitted, and the
+elapsed/remaining window. It returns `retry-fresh`, `resume-session`, or
+`terminal`. `validateResumeSession` can verify the captured resume id before a
+resume retry uses it; an unverifiable id surfaces the error instead of resuming
+blindly.
 
 Per-call timeout override:
 
@@ -443,6 +477,7 @@ new ClaudeCodeAgent({
   betas?: string[]; pluginDir?: string[]; resume?: string; sessionId?: string;
   mcpConfig?: string[]; mcpDebug?: boolean; maxBudgetUsd?: number; jsonSchema?: string;
   configDir?: string; apiKey?: string;
+  normalizeUsage?: (rawResult: unknown) => NormalizedTokenUsage | null | undefined;
   dangerouslySkipPermissions?: boolean; allowDangerouslySkipPermissions?: boolean; chrome?: boolean; noChrome?: boolean;
   continue?: boolean; forkSession?: boolean; noSessionPersistence?: boolean; replayUserMessages?: boolean;
   debug?: boolean | string; debugFile?: string; ide?: boolean; includePartialMessages?: boolean;
@@ -471,6 +506,28 @@ Setting `allowedTools` alone does not block `Bash`; the deny-list is what
 forbids it. Tool names follow the Claude Code convention (`Read`, `Write`,
 `Edit`, `Bash`, `WebFetch`, `Grep`, ...) and `Bash(git:*)`-style scoping is
 allowed.
+
+#### Custom-provider usage normalization
+
+When Claude Code is routed to an Anthropic-compatible custom provider whose
+usage fields differ from Anthropic's, pass `normalizeUsage`. The hook receives
+the raw stream-json result payload and returns the normalized usage shape; it
+applies consistently to completed events, generate results, stream results, and
+failures. For DeepSeek's supported Claude Code integration, use the shipped
+`createDeepSeekUsageNormalizer()`: it maps `prompt_cache_miss_tokens` to
+`inputTokens`, `prompt_cache_hit_tokens` to `cacheReadTokens`, and
+`output_tokens` to `outputTokens`, and rejects ambiguous legacy Anthropic
+aliases instead of silently mis-billing them.
+
+```ts
+import { ClaudeCodeAgent, createDeepSeekUsageNormalizer } from "smthrs";
+
+const deepseek = new ClaudeCodeAgent({
+  model: "deepseek-chat",
+  env: { ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic" },
+  normalizeUsage: createDeepSeekUsageNormalizer(),
+});
+```
 
 #### MCP servers (`mcpConfig`)
 
@@ -603,15 +660,52 @@ new PiAgent({
 ```ts
 import { KimiAgent } from "smthrs";
 new KimiAgent({
+  cliVersion?: "0.29";               // argv dialect for @moonshot-ai/kimi-code@0.29.x
   thinking?: boolean; outputFormat?: "text" | "stream-json";
   finalMessageOnly?: boolean; quiet?: boolean;
   agent?: "default" | "okabe"; agentFile?: string;
-  workDir?: string; session?: string; continue?: boolean;
+  workDir?: string; session?: string; continue?: boolean; addDir?: string[];
   skillsDir?: string; mcpConfigFile?: string[]; mcpConfig?: string[];
   maxStepsPerTurn?: number; maxRetriesPerStep?: number; maxRalphIterations?: number;
   verbose?: boolean; debug?: boolean; configDir?: string; // sets KIMI_SHARE_DIR (see below)
+  credentialDir?: string; runtimeDir?: string; sessionStateDir?: string;
+  wireUsage?: boolean | { path?: string; maxBytes?: number; maxEntries?: number };
+  sessionRecovery?: boolean | {
+    onSessionResolved?: (info: { sessionId: string; source: "output" | "session-index"; homeDir?: string; stateDir?: string }) => void;
+    maxBytes?: number; maxFiles?: number; maxDirectories?: number;
+  };
 });
 ```
+
+##### Kimi CLI dialects, usage, sessions, and homes
+
+`cliVersion: "0.29"` targets the `@moonshot-ai/kimi-code@0.29.x` argv surface:
+the command builder emits only flags that CLI accepts (`--prompt`,
+`--output-format`, `--model`, `--yolo`, `--continue`, `--skills-dir`, `--agent`,
+`--agent-file`, and repeated `--add-dir`), omits the newer-only flags
+(`--print`, `--final-message-only`, `--work-dir`, `--thinking`/`--no-thinking`,
+the step/retry controls, the MCP config flags), and never forwards a synthetic
+`--session`. The default dialect (no `cliVersion`) is unchanged.
+
+`wireUsage` extracts invocation-local token usage from the CLI's `wire.jsonl`
+`usage.record` entries (cache-read, cache-write, other-input, and output
+counters). The log position is baselined at invocation start and re-baselined
+after resumed session state is seeded, so historical tokens are not re-billed.
+Reads enforce byte and entry bounds. The delta is attached to the completed
+event as normalized usage.
+
+`sessionRecovery` resolves and publishes the actual resumable session id from
+CLI output or the on-disk session index instead of the synthetic pre-launch id,
+and reports it through `onSessionResolved`. With `sessionStateDir` set, a
+resumed session's on-disk state is copied into the isolated invocation home
+before launch and persisted back at exit, so resume works across invocations.
+State copies enforce byte, file, and directory bounds.
+
+`credentialDir` separates the shared credential source directory (read-only
+use by the live child) from an isolated per-invocation runtime home (`runtimeDir`
+or a fresh temp dir), so parallel invocations share credentials without
+contending over mutable session and config state. `credentialDir` and
+`configDir` are mutually exclusive.
 
 Unlike the other agents, `KimiAgent`'s `configDir` sets the **`KIMI_SHARE_DIR`**
 environment variable for that invocation (Kimi has no separate config-dir flag),
@@ -783,6 +877,6 @@ On clean exit the workflow resumes in detached mode. Grok, Cursor, Vibe, OpenCod
 
 - **Yolo defaults.** `yolo: true` (default) maps to each CLI's "skip approvals" flag (`--dangerously-skip-permissions`, `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--dangerously-allow-all`). Set `yolo: false` or use the agent-specific approval option for tighter control.
 - **Pi rpc mode** sends prompts as JSON over stdin and is required for `onExtensionUiRequest` callbacks; text/json modes pass the prompt as a positional arg with `files` emitted as `@path`.
-- **Kimi share dir.** `KimiAgent` auto-creates an isolated `KIMI_SHARE_DIR` per invocation to prevent `kimi.json` corruption under concurrent runs. Pass `configDir` (or `env.KIMI_SHARE_DIR`) to pin a specific directory instead.
+- **Kimi share dir.** `KimiAgent` auto-creates an isolated `KIMI_SHARE_DIR` per invocation to prevent `kimi.json` corruption under concurrent runs. Pass `configDir` (or `env.KIMI_SHARE_DIR`) to pin a specific directory instead, or `credentialDir` to keep credentials shared but read-only while each invocation runs in its own runtime home.
 - **Antigravity config.** `AntigravityAgent` launches the `agy` binary and passes `configDir`/`geminiDir` as both `--gemini_dir` and `GEMINI_DIR`, matching Antigravity's `~/.gemini/antigravity-cli` config root. Current `agy` prompts use `-p`, extra directories use `--add-dir`, and native resume uses `--conversation`.
 - **Non-idempotent retries.** When a `<Task>` retries, Smithers prepends a warning listing previously-called side-effect tools so the agent can verify external state before re-invoking them.
