@@ -67,7 +67,7 @@ export { Gateway } from '@smthrs/server/gateway';
 import * as _smthrs_scorers from '@smthrs/scorers';
 export { aggregateScores, createScorer, estimateCostUsd, faithfulnessScorer, latencyScorer, llmJudge, modelTokenPrices, relevancyScorer, runScorersAsync, runScorersBatch, schemaAdherenceScorer, smithersScorers, toxicityScorer } from '@smthrs/scorers';
 import * as _smthrs_agents from '@smthrs/agents';
-export { AmpAgent, AnthropicAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, CursorAgent, DEFAULT_AGENT_CHECKPOINT_MAX_BYTES, ForgeAgent, GeminiAgent, GrokAgent, HermesAgent, HermesCliAgent, KimiAgent, NanocodexAgent, OmpAgent, OpenAIAgent, OpenClawAgent, OpenCodeAgent, PiAgent, PoolAgent, VibeAgent, agentProducesCheckpoint, agentSupportsCheckpoint, cloneAgentCheckpoint, createGrokCapabilityRegistry, createHttpTool, createOmpCapabilityRegistry, fallbackAgents, hashAgentCheckpointCapabilities } from '@smthrs/agents';
+export { AmpAgent, AnthropicAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, CursorAgent, DEFAULT_AGENT_CHECKPOINT_MAX_BYTES, ForgeAgent, GeminiAgent, GrokAgent, HermesAgent, HermesCliAgent, KimiAgent, NanocodexAgent, OmpAgent, OpenAIAgent, OpenClawAgent, OpenCodeAgent, PiAgent, PoolAgent, VibeAgent, agentProducesCheckpoint, agentSupportsCheckpoint, cloneAgentCheckpoint, createDeepSeekUsageNormalizer, createGrokCapabilityRegistry, createHttpTool, createOmpCapabilityRegistry, fallbackAgents, hashAgentCheckpointCapabilities } from '@smthrs/agents';
 import * as _smthrs_agents_capability_registry from '@smthrs/agents/capability-registry';
 export { hashCapabilityRegistry } from '@smthrs/agents/capability-registry';
 export { ERROR_REFERENCE_URL } from '@smthrs/errors/ERROR_REFERENCE_URL';

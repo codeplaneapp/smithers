@@ -1,6 +1,6 @@
 import * as ai from 'ai';
 import { Tool as Tool$1, ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent } from 'ai';
-import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$f, h as CodexConfigOverrides, i as AgentCliEvent$1, N as NormalizedTokenUsage, j as CliOutputInterpreter$g, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-CyO4z-SC.js';
+import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$f, N as NormalizedTokenUsage$1, h as CodexConfigOverrides, i as AgentCliEvent$1, j as CliOutputInterpreter$g, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-B1waTPFD.js';
 import * as zod from 'zod';
 import '@smthrs/errors/SmithersError';
 import 'effect';
@@ -1033,6 +1033,17 @@ type ClaudeCodeAgentOptions$1 = BaseCliAgentOptions & {
     model?: string;
     noChrome?: boolean;
     noSessionPersistence?: boolean;
+    /**
+     * Custom-provider usage normalization. Receives the raw stream-json
+     * `result` payload and returns Smithers' normalized usage shape. Applied
+     * consistently to completed events, successful generate results, stream
+     * results, and failures. Use this when routing Claude Code to an
+     * Anthropic-compatible provider whose usage fields differ from Anthropic's
+     * (for example `createDeepSeekUsageNormalizer()` for DeepSeek's supported
+     * integration). Without it, the Anthropic result-usage object passes
+     * through unchanged.
+     */
+    normalizeUsage?: (rawResult: unknown) => NormalizedTokenUsage$1 | null | undefined;
     outputFormat?: "text" | "json" | "stream-json";
     permissionMode?: "acceptEdits" | "bypassPermissions" | "default" | "delegate" | "dontAsk" | "plan";
     pluginDir?: string[];
@@ -1059,6 +1070,28 @@ declare class ClaudeCodeAgent extends BaseCliAgent {
      * @returns {CliOutputInterpreter}
      */
     createOutputInterpreter(): CliOutputInterpreter$c;
+    /**
+     * Normalize the usage on a stream-json `result` payload. With the typed
+     * `normalizeUsage` option (for routing to an Anthropic-compatible custom
+     * provider such as DeepSeek), the hook receives the raw result payload and
+     * returns Smithers' normalized usage shape; without it, the Anthropic
+     * result-usage object passes through unchanged. The normalized value feeds
+     * completed events, generate results, stream results, and failures through
+     * the shared completed-event usage path.
+     *
+     * @param {Record<string, unknown>} payload
+     * @returns {unknown}
+     */
+    normalizeResultUsage(payload: Record<string, unknown>): unknown;
+    /**
+     * Custom-provider usage hook for the raw-stdout extraction path in
+     * BaseCliAgent. Returns undefined without `normalizeUsage`, leaving the
+     * generic Anthropic accumulation in place.
+     *
+     * @param {Record<string, unknown>} payload
+     * @returns {import("./BaseCliAgent/NormalizedTokenUsage.ts").NormalizedTokenUsage | undefined}
+     */
+    normalizeCliResultUsage(payload: Record<string, unknown>): NormalizedTokenUsage$1 | undefined;
     /**
      * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
      * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
@@ -1089,6 +1122,27 @@ declare class ClaudeCodeAgent extends BaseCliAgent {
 }
 type ClaudeCodeAgentOptions = ClaudeCodeAgentOptions$1;
 type CliOutputInterpreter$c = CliOutputInterpreter$f;
+
+/**
+ * Build a usage normalizer for DeepSeek's supported Claude Code integration.
+ * The returned function receives the raw result payload and returns
+ * Smithers' normalized usage shape:
+ *
+ * - `prompt_cache_miss_tokens` -> `inputTokens` (uncached input)
+ * - `prompt_cache_hit_tokens` -> `cacheReadTokens`
+ * - `output_tokens` -> `outputTokens`
+ * - `totalTokens` is the sum of the three.
+ *
+ * Ambiguous legacy Anthropic aliases (`input_tokens`,
+ * `cache_read_input_tokens`, `cache_creation_input_tokens`) are rejected
+ * with a descriptive error rather than silently misread. Payloads without
+ * any provider counters return undefined so the caller can fall back to its
+ * default handling.
+ *
+ * @returns {(rawResult: unknown) => NormalizedTokenUsage | undefined}
+ */
+declare function createDeepSeekUsageNormalizer(): (rawResult: unknown) => NormalizedTokenUsage | undefined;
+type NormalizedTokenUsage = NormalizedTokenUsage$1;
 
 type CodexAgentOptions$1 = BaseCliAgentOptions & {
     config?: CodexConfigOverrides;
@@ -1522,7 +1576,7 @@ declare class KimiAgent extends BaseCliAgent {
      *
      * @returns {import("./BaseCliAgent/NormalizedTokenUsage.ts").NormalizedTokenUsage | undefined}
      */
-    readWireUsageBaselineDelta(): NormalizedTokenUsage | undefined;
+    readWireUsageBaselineDelta(): NormalizedTokenUsage$1 | undefined;
     /**
      * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
      * into {@link AgentFileChange} records. `action.detail.arguments` is the raw
@@ -2515,4 +2569,4 @@ type TranscriptionProvider = TranscriptionProvider$1;
 type TranscriptionToolInput = TranscriptionToolInput$1;
 type TranscriptionToolResult = TranscriptionToolResult$1;
 
-export { type AgentCapabilityRegistry, type AgentCheckpoint, type AgentCheckpointCapability, type AgentCheckpointContinuationOptions, type AgentCheckpointFormat, type AgentCheckpointJsonArray, type AgentCheckpointJsonObject, type AgentCheckpointJsonPrimitive, type AgentCheckpointJsonValue, type AgentCheckpointMode, type AgentCheckpointPublisher, type AgentCheckpointResult, type AgentFileChange, type AgentFileChangeKind, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, type AudioHostResolver, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, CursorAgent, type CursorAgentOptions, DEFAULT_AGENT_CHECKPOINT_MAX_BYTES, type FallbackAgentProvider, type FallbackAgentsOptions, ForgeAgent, GeminiAgent, GrokAgent, type GrokAgentOptions, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, NanocodexAgent, type NanocodexAgentOptions, type NanocodexAuth, type NanocodexGenerateOptions, type NanocodexReasoningMode, type NanocodexThinking, OmpAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PinnedAudioTransport, type PinnedAudioTransportRequest, PoolAgent, type PoolAgentOptions, type ResolvedAudioAddress, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, agentProducesCheckpoint, agentSupportsCheckpoint, cloneAgentCheckpoint, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGrokCapabilityRegistry, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOmpCapabilityRegistry, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, fallbackAgents, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashAgentCheckpointCapabilities, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentCheckpoint, type AgentCheckpointCapability, type AgentCheckpointContinuationOptions, type AgentCheckpointFormat, type AgentCheckpointJsonArray, type AgentCheckpointJsonObject, type AgentCheckpointJsonPrimitive, type AgentCheckpointJsonValue, type AgentCheckpointMode, type AgentCheckpointPublisher, type AgentCheckpointResult, type AgentFileChange, type AgentFileChangeKind, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, type AudioHostResolver, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, CursorAgent, type CursorAgentOptions, DEFAULT_AGENT_CHECKPOINT_MAX_BYTES, type FallbackAgentProvider, type FallbackAgentsOptions, ForgeAgent, GeminiAgent, GrokAgent, type GrokAgentOptions, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, NanocodexAgent, type NanocodexAgentOptions, type NanocodexAuth, type NanocodexGenerateOptions, type NanocodexReasoningMode, type NanocodexThinking, OmpAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PinnedAudioTransport, type PinnedAudioTransportRequest, PoolAgent, type PoolAgentOptions, type ResolvedAudioAddress, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, agentProducesCheckpoint, agentSupportsCheckpoint, cloneAgentCheckpoint, createBraveSearchProvider, createDeepSeekUsageNormalizer, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGrokCapabilityRegistry, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOmpCapabilityRegistry, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, fallbackAgents, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashAgentCheckpointCapabilities, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };

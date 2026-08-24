@@ -366,6 +366,7 @@ export {
   AmpAgent,
   AntigravityAgent,
   ClaudeCodeAgent,
+  createDeepSeekUsageNormalizer,
   CodexAgent,
   CursorAgent,
   GeminiAgent,
