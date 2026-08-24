@@ -1,3 +1,5 @@
+import type { CliRecoveryPolicy } from "./CliRecoveryPolicy";
+
 export type BaseCliAgentOptions = {
   id?: string;
   model?: string;
@@ -41,4 +43,13 @@ export type BaseCliAgentOptions = {
    *   fixed effort ladder), else unsupported for that adapter.
    */
   effort?: "low" | "medium" | "high" | "xhigh" | "max" | string;
+  /**
+   * Typed provider retry/recovery policy. When set, generate/stream wrap
+   * each invocation in a recovery loop: a failed attempt is classified by
+   * the policy, retried fresh before substantive activity or resumed on the
+   * exact emitted CLI session after it, with quarantined callbacks, bounded
+   * backoff under the combined caller/retry deadline, and caller
+   * cancellation honored throughout.
+   */
+  recoveryPolicy?: CliRecoveryPolicy;
 };

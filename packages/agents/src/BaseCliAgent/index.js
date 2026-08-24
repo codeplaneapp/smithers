@@ -9,6 +9,9 @@
 /** @typedef {import("./AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
 /** @typedef {import("./BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
+/** @typedef {import("./CliRecoveryPolicy.ts").CliRecoveryPolicy} CliRecoveryPolicy */
+/** @typedef {import("./CliRecoveryPolicy.ts").CliRecoveryAttemptInfo} CliRecoveryAttemptInfo */
+/** @typedef {import("./CliRecoveryPolicy.ts").CliRecoveryClassification} CliRecoveryClassification */
 /** @typedef {import("./CliUsageInfo.ts").CliUsageInfo} CliUsageInfo */
 /** @typedef {import("./NormalizedTokenUsage.ts").NormalizedTokenUsage} NormalizedTokenUsage */
 /** @typedef {import("./CodexConfigOverrides.ts").CodexConfigOverrides} CodexConfigOverrides */
@@ -34,7 +37,12 @@ export { pushRepeated } from "./pushRepeated.js";
 export { normalizeCodexConfig } from "./normalizeCodexConfig.js";
 export { reconstructUnifiedDiff } from "./reconstructUnifiedDiff.js";
 export { parseAnthropicStyleFileChanges } from "./parseAnthropicStyleFileChanges.js";
-export { BaseCliAgent, extractUsageFromOutput, runAgentPromise } from "./BaseCliAgent.js";
+export {
+  BaseCliAgent,
+  extractUsageFromOutput,
+  runAgentPromise,
+  createHttp429RecoveryClassifier,
+} from "./BaseCliAgent.js";
 export {
   isRecord,
   asString,
