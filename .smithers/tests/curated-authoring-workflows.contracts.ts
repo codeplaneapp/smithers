@@ -13,7 +13,6 @@ export const workflowClarify = {
   route: {
     tier: "workflow",
     reason: "Ordered stages plus a human gate need durability.",
-    oneshotCommand: null,
   },
   name: "report-workflow",
   goal: "Build reports",

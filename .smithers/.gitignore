@@ -9,7 +9,7 @@ workflows/.api-ab-benchmark/
 sandboxes/
 state/
 tmp/
-# per-run goal briefs handed to oneshot; scratch input, not repo content
+# per-run goal briefs; scratch input, not repo content
 goals/
 *.db
 *.sqlite

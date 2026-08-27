@@ -344,7 +344,7 @@ test.describe.serial("served Smithers Monitor", () => {
     await expect(terminalDialog).toHaveAccessibleDescription(
       "Interactive run controls, activity, changes, and terminal for Reopen session: intake · codex.",
     );
-    await expect(page.getByTestId("oneshot-hijack-terminal")).toBeVisible();
+    await expect(page.getByTestId("hijack-terminal")).toBeVisible();
     await terminalDialog.getByRole("button", { name: "Close" }).click();
     await expect(terminalDialog).toHaveCount(0);
     await expect(hijack).toBeFocused();

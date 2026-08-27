@@ -79,16 +79,11 @@ const inputSchema = z.object({
 const clarifiedSpecSchema = z.looseObject({
   route: z
     .object({
-      tier: z.enum(["direct", "oneshot", "workflow"]),
+      tier: z.enum(["direct", "workflow"]),
       reason: z.string().describe("One sentence: why this tier fits."),
-      oneshotCommand: z
-        .string()
-        .nullable()
-        .default(null)
-        .describe('For tier "oneshot": the exact smithers oneshot command to run instead of building a workflow.'),
     })
     .describe(
-      "Right-size the request BEFORE building anything. direct = a trivial edit the operator should just make; oneshot = one strong agent finishes it in one context window (route to `smithers oneshot`); workflow = the task genuinely needs ordered stages, durability, approvals, loops, or reuse. Only tier `workflow` proceeds to design.",
+      "Right-size the request BEFORE building anything. direct = a trivial edit the operator should just make; workflow = everything else. Only tier `workflow` proceeds to design.",
     ),
   name: z.string().describe("Proposed kebab-case workflow id."),
   goal: z.string().describe("One sentence: what the finished workflow accomplishes."),
@@ -297,16 +292,13 @@ export default smithers((ctx) => {
     ctx.outputMaybe("skillVerification", { nodeId: "skill-verification" });
   const skillReady = skillVerification?.exists === true && skillVerification.containsWorkflowMetadata === true;
 
-  // Tier-0 routing: a request one strong agent can finish in one context
-  // window is a `smithers oneshot`, not a workflow — stop before provisioning
-  // instead of scaffolding gates, loops, and a UI around a simple task.
+  // Tier-0 routing: a trivial edit the operator should just make is not a
+  // workflow — stop before provisioning instead of scaffolding gates, loops,
+  // and a UI around a simple task.
   // Output rows store nested objects as JSON strings; unwrap defensively.
   const rawRoute = clarify?.route;
-  const route =
-    typeof rawRoute === "string"
-      ? (JSON.parse(rawRoute) as { tier?: string; reason?: string; oneshotCommand?: string | null })
-      : rawRoute;
-  const routeTier = route?.tier === "oneshot" || route?.tier === "direct" ? route.tier : "workflow";
+  const route = typeof rawRoute === "string" ? (JSON.parse(rawRoute) as { tier?: string; reason?: string }) : rawRoute;
+  const routeTier = route?.tier === "direct" ? "direct" : "workflow";
   const routedSimple = clarify !== undefined && routeTier !== "workflow";
 
   const designed = design !== undefined;
@@ -343,7 +335,7 @@ export default smithers((ctx) => {
             ? "designed"
             : "incomplete";
   const terminalSummary = routedSimple
-    ? `No workflow needed (${routeTier}): ${route?.reason ?? clarify?.goal ?? "the request fits a single agent."}`
+    ? `No workflow needed (${routeTier}): ${route?.reason ?? clarify?.goal ?? "this is a trivial edit."}`
     : (documentation?.summary ??
       scaffold?.summary ??
       design?.summary ??
@@ -570,10 +562,7 @@ export default smithers((ctx) => {
               const nextSteps =
                 terminalStatus === "routed-simple"
                   ? [
-                      routeTier === "oneshot"
-                        ? (route?.oneshotCommand ??
-                          `smithers oneshot "${clarify?.goal ?? "the task"}"  # one strong agent, no workflow file`)
-                        : `# ${route?.reason ?? "Trivial edit: just do it directly."}`,
+                      `# ${route?.reason ?? "Trivial edit: just do it directly."}`,
                       `smithers workflow run create-workflow --prompt "build it as a workflow anyway: ${clarify?.goal ?? ""}"  # override the routing`,
                     ]
                   : terminalStatus === "built"
