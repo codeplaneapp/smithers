@@ -62,7 +62,6 @@ const CORE_PAGES = [
   "concepts/provenance.mdx",
   "guides/context-engineering.mdx",
   "guides/agent-operating-playbook.mdx",
-  "guides/oneshot.mdx",
   // JSX surface (single page now — installation + quickstart are stubs)
   "jsx/overview.mdx",
   // CLI catalog

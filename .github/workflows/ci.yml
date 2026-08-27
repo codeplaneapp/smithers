@@ -225,7 +225,7 @@ jobs:
         if: runner.os == 'Linux' && matrix.shard != 0
         # Same weighted balancer as Windows, nothing excluded. The generous
         # per-package timeout covers the real-backend migrate and e2e suites
-        # (apps/cli's detached-oneshot engines push it past 20 on a loaded
+        # (apps/cli's detached engines push it past 20 on a loaded
         # runner). The example graph smoke gets a fresh Bun process below and
         # is skipped only in this duplicate package invocation.
         env:
