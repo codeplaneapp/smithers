@@ -495,7 +495,7 @@ type ResolveSmithersBackendChoiceOptions = {
  * instead, so an operator's `--backend` / `SMITHERS_BACKEND` / config pin is
  * honored everywhere rather than only on the paths that happen to call the full
  * resolver. Reading a marker file directly is what let a stale `migrated.json`
- * override an explicit pin and lock `smithers oneshot` out of a workspace.
+ * override an explicit pin and lock inline workflows out of a workspace.
  *
  * Precedence is the same as the full resolver: explicit → env → config →
  * `.smithers/backend.json` → `.smithers/migrated.json` → `sqlite`.

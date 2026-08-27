@@ -188,7 +188,7 @@ const PACKAGE_EXECUTABLES = new Set(["npm", "bun", "pip"]);
 const GIT_REMOTE_OPS = new Set(["push", "pull", "fetch", "clone", "remote"]);
 const URL_SCHEMES = ["http://", "https://"];
 const NETWORK_DISABLED_HINT =
-  "Loopback TCP stays reachable (localhost, 127.0.0.1, *.localhost); outbound unix sockets and real egress require allowNetwork: true (--allow-network on up/eval/oneshot).";
+  "Loopback TCP stays reachable (localhost, 127.0.0.1, *.localhost); outbound unix sockets and real egress require allowNetwork: true (--allow-network on up/eval).";
 // git's global options come before the subcommand, and these consume the next
 // argument, so `git -C /repo fetch` still resolves to the `fetch` subcommand.
 const GIT_VALUE_FLAGS = new Set(["-C", "-c", "--exec-path", "--git-dir", "--namespace", "--work-tree"]);

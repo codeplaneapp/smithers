@@ -40,7 +40,7 @@ describe("taskContextEnv", () => {
   });
 
   // The recursion guard the orchestration skills read: an agent running inside a
-  // node must never route its prompt back through `smithers oneshot`. Without a
+  // node must never route its prompt back through `smithers up`. Without a
   // marker at spawn, a codex node with the smithers skill installed hijacks its
   // own prompt into a child run (bug 01kzweq27e2645ty9x5yezkrwk).
   test("marks every spawned node agent as being inside a run", () => {

@@ -2,7 +2,7 @@
  * Recursion marker every Smithers-spawned agent process carries. Its presence,
  * not its value, is the signal that the process is already executing a node
  * inside a run, so the orchestration skills must not route the node's own prompt
- * back through `smithers oneshot` / `smithers up` / the Smithers MCP tools. The
+ * back through `smithers up` / the Smithers MCP tools. The
  * value is `<runId>/<nodeId>` (or just `<runId>` when the node id is unknown) so
  * a human reading the environment can tell which node it belongs to.
  *

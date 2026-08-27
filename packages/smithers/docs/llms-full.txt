@@ -1980,7 +1980,7 @@ And one rule about the operator boundary:
 > query `_smithers_*`; never import `openSmithersStore` or CLI-internal
 > `findAndOpenDb`; and never probe stores by adding `--backend` to `ps` or
 > `inspect`. Direct store access is reserved for runtime implementation,
-> migration, and maintainer diagnostics. One-shot public CLI commands are fine;
+> migration, and maintainer diagnostics. Single public CLI commands are fine;
 > durable automation goes through the Gateway.
 
 And a rule about how hard to push before involving the human:
@@ -2038,14 +2038,12 @@ and explain the code.
 | "Migrate this subsystem, but show me the plan first." | Run research and planning first, then pause on an approval gate. After approval, execute milestones in worktrees and merge only validated chunks. |
 | "Something went wrong in the run. What happened?" | Run `why`, inspect events and node output, summarize the blocker, propose options, and continue operating. Do not ask the human to debug from the terminal. |
 
-Route a most-trivial edit that takes only a few turns directly. Route any clear
-single-goal task through `smithers oneshot`, which launches quickly in the
-background with a live chat and diff UI; one strong agent finishes repo-wide
-goals of up to roughly 300k tokens in a single oneshot run, so a large goal
-alone never justifies a workflow. Use a full workflow when the task is
+Handle a clear single-goal task directly, or run it as a regular workflow with
+`bunx smthrs up <file.tsx>`; `bunx smthrs workflow run create-workflow --prompt
+"..."` builds the workflow file for you. Use a full workflow when the task is
 genuinely multi-goal in shape: staged phases, approval gates, durable loops,
-parallel work, or a need for reuse. Clarify ambiguous goals before launching
-either form.
+parallel work, or a need for reuse. Clarify ambiguous goals before
+launching.
 
 ## Context engineering
 
@@ -2335,210 +2333,6 @@ Before closing:
 
 ---
 
-## Oneshot
-
-> Run one well-scoped goal with a single strong agent in the background, with optional review and a live dashboard. No workflow file to author.
-
-`smithers oneshot` is the built-in minimal workflow: one agent, one goal, no
-authoring. It launches in the background by default and serves a live
-dashboard with chat, diff, hijack, pause, and cancel controls.
-
-Its long-running `implement` and optional `review` tasks use the existing
-per-task `heartbeatTimeoutMs` override with a 10-minute inactivity window. Live
-tool execution, output streaming, and owned CLI subprocesses refresh that
-window; an agent with no activity still fails. This does not raise the global
-heartbeat default.
-
-```bash
-bunx smthrs oneshot "add a loading spinner to the login button"
-bunx smthrs oneshot --goal-file TICKET.md
-```
-
-## When to use it
-
-Route work in three tiers:
-
-1. **Trivial asks** (a typo, a rename, an edit under about 10 agent turns): do
-   them directly. If the stored trivial preference is `oneshot`, launch oneshot
-   with `--model opus` or `--model terra`: those are the only two slots allowed
-   for trivial oneshot (never sol, luna, kimi, or any other tier), and no other
-   model belongs in a trivial routing explanation. Trivial means one tiny
-   change in one place: an ask that bundles multiple coordinated edits (a flag
-   plus its help text plus a test, code plus docs) is tier 2 oneshot work, not
-   trivial, no matter how fast it would be.
-2. **Clear single-goal asks**, small or repo-wide: `smithers oneshot`. One
-   strong agent routinely finishes hours-long goals in a single oneshot run of
-   up to roughly 300k tokens, so a large goal is not a reason to leave this
-   tier. The worker manages its own context across the run, so "it will not
-    fit in one context window" is not a reason either. When explaining a
-    routing decision, name the task shape and the seat it routes to (UI goals
-    lead with kimi: opencode, then pi, then the kimi CLI, backed by claude
-    opus or fable; every other goal leads with claude opus) and which seat
-    you picked.
-3. **Genuinely multi-goal work** (human approval gates, staged phases that
-   need different agents or models, parallel fan-out, durable loops, or a
-   reusable procedure): build and run a real workflow.
-
-Size does not pick the route; shape does. A task with one finish line belongs
-in oneshot no matter how much work it implies. Real asks that fit a single
-oneshot run, each historically completed by one strong agent in under 300k
-tokens:
-
-- "Go through the entire codebase and make sure every feature is documented."
-- "Run `pnpm up --latest` on every package and make sure all builds still pass."
-- "Make CI green on this branch: rebase on main, fix failures, push until green."
-- "Replace every use of library X with library Y and get all tests passing."
-- "Read review.md, address every review comment, delete the artifacts when done."
-
-Authoring a workflow for asks like these is overengineering: it pays authoring
-latency and review overhead for durability the task does not need. Escalate to
-tier 3 only when the task requires a workflow-only feature (an approval gate,
-phases needing different models, parallel lanes, reuse). Neither "it feels
-big" nor the existence of a seeded workflow with a matching name (`audit`,
-`review`, `upgrade`) qualifies: shape decides, not the catalog. Pick exactly
-one route and commit to it; never answer with a menu of alternative routes or
-a hybrid of oneshot plus a workflow.
-
-Explicit overrides win over inference: "oneshot" forces oneshot, "oneshot with
-review" adds `--review on`, "oneshot without review" adds `--review off`.
-Ambiguous goals deserve clarifying questions to the user before anything
-launches; wait for the answers rather than substituting assumptions or an
-exploratory plan for them. "Make the settings page better" gets a reply that
-is ONLY clarifying questions, covering both the target (which settings page?)
-and the goal (what is wrong today? what does better mean? what counts as
-done?). The entire reply is the questions: never a plan whose first step is to
-find out, and never a provisional plan under an assumed answer.
-
-## Agents and models
-
-With no `--model` or `--agent`, oneshot classifies the goal and routes by task
-shape (registry v8). A UI-flavored goal (interface, page, component, styling,
-layout, responsive, animation, theme, dashboard, and similar keywords) leads
-with Kimi K3: OpenCode's `kimi-for-coding/k3` seat first, then kimi through
-the Pi CLI (`pi --provider kimi-coding --model k3`), then the Kimi CLI's
-`kimi-code/k3`. When no kimi seat is usable, the UI chain falls back to Claude
-Opus 5, then Fable 5; Codex Sol is only ever the last-resort UI rung. Every
-other goal, including tedious backend work (migrations, backfills, renames,
-test burndowns), runs the default chain: Claude Opus 5 first (the default
-implementer), then Codex Sol, then Kimi K3, then Fable, with pi's kimi-coding
-seat closing the chain.
-
-Every rung is availability-gated: oneshot selects only from the agents
-detected usable on the machine, the claude seats fall back to opencode when
-the Claude CLI is unavailable, and the kimi seats all run Kimi K3 (1M-token
-context). When an engine has several registered accounts, each rung runs on
-the account with the most cached quota headroom for that rung's model:
-rate-limited seats sink, and a model-scoped cap such as the Fable weekly
-limit routes Fable rungs to seats that can still serve them. An explicit `--model` (a slot: `sol`, `terra`, `luna`, `kimi`,
-`fable`, `opus`, `sonnet`; or a canonical model id) or `--agent` (`codex`,
-`kimi`, `claude-code`, `opencode`, `pi`) always overrides classification; the
-default `auto` follows the task shape, with review on Sol at high reasoning
-effort.
-
-Run `bunx smthrs oneshot --status "<goal>"` before first use.
-It prints the usable agents, the goal's classified `taskType`, the resolved
-model chain, and the stored preferences as JSON; when no usable agent is
-detected, oneshot is unavailable and work should go through the direct or
-workflow route instead. Oneshot being unavailable never means the
-orchestrating agent is unavailable: a simple task still gets done directly, a
-multi-goal one still gets a workflow, and "no routing path exists" is never
-the answer.
-
-## Review and trivial preferences
-
-Two stored preferences shape routing, kept in the global Smithers config:
-
-- **Review** (`--set-review on|off`): add one review-and-polish round after the
-  implement pass. Higher quality, slower. Recommended on.
-- **Trivial** (`--set-trivial direct|oneshot`): whether the most-trivial asks
-  run directly or still launch oneshot. Recommended direct.
-
-`--review on|off` overrides the stored review preference for one run.
-
-## Dirty working copies
-
-Oneshot runs directly in `--cwd`, so a stale detached lineage, foreign WIP, or
-`.jjconflict*` tree can be swept into a goal commit and make landing unsafe.
-The default `--preflight auto` warns and prepends agent-judged triage
-instructions; use `warn` to warn without injection or `off` to skip assessment.
-
-### Sharing a directory with another run
-
-Preflight treats dirty paths as pre-existing work the agent may snapshot into
-its own commit. That is only true when nothing else is producing them. Launch
-therefore asks the workspace store which runs are still working in `--cwd`,
-using the same PID-verified liveness `bunx smthrs ps` reports. A run whose engine
-is dead does not count.
-
-When another run is live there, preflight names it, and the injected
-instructions flip: the agent commits only the paths its own goal work touches,
-by explicit pathspec, and leaves every other path alone. It does not snapshot,
-stash, revert, or gitignore anything, because those changes belong to a run
-that is still editing them.
-
-The two clean fixes are to wait for that run, or to relaunch with `--cwd`
-pointing at an isolated worktree. `--preflight force-commit` keeps the old
-behavior for the case where you know the tree is yours.
-
-Two launches that race inside the scan window can still each see an empty
-store and proceed. Sequential launches, the common case, are covered.
-
-## Watching and steering a oneshot
-
-Every launch CTA tells the operator to offer the monitor to the user. Open it
-directly with:
-
-```bash
-bunx smthrs monitor ONESHOT_RUN_ID
-```
-
-For a built-in oneshot, this opens the dedicated oneshot monitor. It includes
-the live implement and review transcripts, diff, durable event log, pause and
-cancel controls, plus:
-
-- **Steer**: send a message from the chat composer. Delivery is shown as
-  `queued`, `delivered`, `agent-acked`, or an explicit failure. Claude Code is
-  currently supported by interrupting at the next recorded agent-event
-  boundary, resuming the same Claude session with the appended message, then
-  resuming the Smithers run. If delivery fails after handoff, the monitor clears
-  the hijack request and returns control to Smithers so the run is not stranded.
-  Codex, Kimi, and OpenCode are shown as unsupported
-  because their current headless sessions do not provide an equally reliable
-  live message boundary. Use `bunx smthrs hijack RUN_ID` for
-  interactive takeover.
-- **Restart**: after confirmation, cancel the active attempt if needed and
-  launch a fresh run from the durable `builtinResume` argv recorded at the
-  original launch. The UI follows the new run id.
-- **Cheap narrator**: while the monitor remains attached, the Luna/trivial
-  model tier tails recorded agent activity and emits short status lines. It
-  stops after the attachment lease expires, so an unattended oneshot does not
-  pay narration cost. Lines are persisted as run events and reappear after a
-  monitor reattaches.
-
-The oneshot UI, the `chat-create` run UI, and the Monitor's node-row hijack
-view are all the same shared `OneshotSurface` component from
-`smthrs/gateway-ui`: goal and status cards, chat, diff, events,
-and an embedded PTY terminal for hijack and reopen. The Monitor hosts it in a
-dialog that can maximize to the viewport and restore.
-
-Steering and restart requests and outcomes are durable run events shown by
-`bunx smthrs status RUN_ID`, `events RUN_ID`, and
-`timeline RUN_ID`. Narrator lines are durable `NodeOutput` events shown by
-`events RUN_ID --raw` and by a later monitor attachment.
-
-On an interactive TTY, `--interactive` opens the full-screen TUI monitor
-instead of the detached default. `--detach false` runs in the foreground.
-
-## Overriding the built-in workflow
-
-A workspace can replace the built-in pipeline with
-`.smithers/workflows/oneshot.tsx`; the CLI passes `goal`, `review`, and
-`model` input fields to it, and uses `.smithers/ui/oneshot.tsx` as the
-dashboard when present. See Custom workflow UIs.
-
-
----
-
 ## JSX API
 
 > Author workflows as JSX trees. Smithers renders the tree, dispatches ready tasks, persists outputs, and re-renders. Branching and parallelism are plain JSX conditionals.
@@ -2639,7 +2433,7 @@ Always invoke as `bunx smthrs <command>` (see Installation for why). Use `--help
 
 ## Conventions
 
-- Run control is workspace-scoped. The workspace Gateway is the default control plane for controllers, Bun cron jobs, monitors, bots, and custom clients; use `smthrs/gateway-client` or Gateway RPC/REST rather than opening SQLite/PGlite/Postgres or querying `_smithers_*` tables. One-shot CLI commands are also a supported abstraction boundary. Direct stores are runtime/migration/maintainer-diagnostic internals.
+- Run control is workspace-scoped. The workspace Gateway is the default control plane for controllers, Bun cron jobs, monitors, bots, and custom clients; use `smthrs/gateway-client` or Gateway RPC/REST rather than opening SQLite/PGlite/Postgres or querying `_smithers_*` tables. Single CLI invocations are also a supported abstraction boundary. Direct stores are runtime/migration/maintainer-diagnostic internals.
 - `smithers gateway status --format json` discovers the verified singleton URL for the current workspace. Do not parse its runtime state file, assume port 7331, or pass `--backend` to `ps`/`inspect`/other control commands to search another store. `--backend` is for Gateway/workflow bootstrap and explicit migration diagnostics only.
 - Task root: tools run from the project root (the nearest directory containing a `.smithers/`, walking up from the working directory). `up`, `workflow run`, `graph`, and `eval` all resolve the root this way, so the launch form never changes where tasks run. Override with `--root`; a resume without `--root` reuses the root the run was originally launched with.
 - Boolean flags accept either bare form (`--watch`) or explicit `--watch true|false`.
@@ -2672,10 +2466,10 @@ the run-wide and group caps compose.
 
 ## Launch attribution
 
-`up`, `workflow run`, `oneshot`, and `chat-create` accept
+`up`, `workflow run`, and `chat-create` accept
 `--started-by-harness`, `--started-by-session`, and `--started-by-prompt`.
 They persist optional self-reported launch provenance; the prompt is never
-copied from workflow input, `--prompt`, or a oneshot goal. Short-lived CLI
+copied from workflow input or `--prompt`. Short-lived CLI
 launches best-effort infer Codex/Claude harness/session markers when those
 identity flags are omitted. Use explicit fields for Kimi, OpenCode, and other
 harnesses with a known session.
@@ -2736,7 +2530,7 @@ To take a live run anyway, ask for it by name:
 bunx smthrs up workflow.tsx --resume --run-id RUN_ID --steal-ownership
 ```
 
-`--steal-ownership` is accepted by `up`, `oneshot`, `retry-task`, and
+`--steal-ownership` is accepted by `up`, `retry-task`, and
 `timetravel` (and as `stealOwnership` on the `run_workflow` and `time_travel`
 MCP tools). It also subsumes the weaker heartbeat-freshness check, so it never
 needs to be combined with `--force`. The gateway's `resumeRun` RPC deliberately
@@ -2832,7 +2626,7 @@ The status header shrinks to a compact one-liner on terminals narrower than 100 
 
 A detached run (`up --detach` / `run --detach`) and an MCP `run_workflow` background launch both execute where the user has no live view of progress. To close that gap, the CLI returns a `monitoring` block with the run and prints agent-directed guidance in the "Next steps" CTA: offer the user one of these ways to watch the run, then set up whichever they pick.
 
-1. **Smithers Monitor (live, zero setup):** run `bunx smthrs monitor RUN_ID`. A built-in oneshot opens its dedicated transcript, steer, restart, and attachment-scoped cheap narrator surface. Other runs open the all-runs workspace view focused on that run (status, execution tree, events, approvals). See the Smithers Monitor.
+1. **Smithers Monitor (live, zero setup):** run `bunx smthrs monitor RUN_ID`. It opens the all-runs workspace view focused on that run (status, execution tree, events, approvals). See the Smithers Monitor.
 2. **Status-report cron (hands-off):** a Bun job that every 5 minutes calls Gateway `getRun` and reports the status; use `streamRunEventsResilient` while the process is awake.
 3. **Live custom UI (richest, most work):** run `bunx smthrs ui RUN_ID` when the workflow declares a `.smithers/ui/<workflow>.tsx` UI with `<UI entry="../ui/<workflow>.tsx" />`, otherwise author the UI source and declaration first. See custom workflow UIs.
 4. **Quick HTML page (fastest):** write a static status page from Gateway `getRun` / `getDevToolsSnapshot`, open it, and refresh it about every 5 minutes.
@@ -2906,7 +2700,7 @@ See Time-travel API and Revert for the programmatic surface.
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[114]:
+commands[113]:
   - name: add
     purpose: Install a workflow pack from GitHub, npm, or a local file
     args[1]{name,type,required,desc}:
@@ -3123,9 +2917,9 @@ commands[114]:
     flags[1]{name,short,type,default,desc}:
       delete,,boolean,false,With apply delete owned hooks removed from the registry
   - name: monitor
-    purpose: Open the Smithers Monitor. A built-in oneshot opens its dedicated live transcript, honest steering delivery, restart, and attachment-scoped cheap narrator controls. Other runs use the all-runs workspace view. Resolves the workspace's singleton gateway (--gateway probe, then runtime-state discovery, then legacy port probe, then autostart) and opens the browser
+    purpose: Open the Smithers Monitor, an all-runs workspace view. Resolves the workspace's singleton gateway (--gateway probe, then runtime-state discovery, then legacy port probe, then autostart) and opens the browser
     args[1]{name,type,required,desc}:
-      runId,string,false,Focus this run; built-in oneshots open their dedicated monitor
+      runId,string,false,Focus this run
     flags[6]{name,short,type,default,desc}:
       gateway,g,string,,Gateway base URL (default http://127.0.0.1:<port>)
       port,,number,7331,Gateway port when --gateway is not set
@@ -3221,26 +3015,6 @@ commands[114]:
       started-by-harness,,string,,Durable self-reported launch harness
       started-by-session,,string,,Durable self-reported harness session
       started-by-prompt,,string,,Explicit durable launch context
-  - name: oneshot
-    purpose: Run one well-scoped goal with a strong agent in the background, with optional review and a live UI
-    args[1]{name,type,required,desc}:
-      goal,string,false,Goal to complete; required unless using --status or a preference setter
-    flags[15]{name,short,type,default,desc}:
-      goal-file,,string,,Read a long goal from a file
-      model,,string,auto,Model slot or canonical model id
-      agent,,enum,,codex|kimi|claude-code|opencode
-      review,,enum,stored,Review preference for this run (on|off)
-      set-review,,enum,,Persist the review preference (on|off)
-      set-trivial,,enum,,Persist trivial-task routing (direct|oneshot)
-      status,,boolean,false,Print usable agents model chain and stored preferences as JSON
-      cwd,,string,.,Working directory for the task
-      preflight,,enum,auto,Dirty-working-copy preflight (auto|warn|off)
-      detach,d,boolean,true,Run in the background; --detach false runs in the foreground
-      interactive,,boolean,false,Open the full-screen TUI monitor
-      open,,boolean,true,Open the run UI after launch
-      started-by-harness,,string,,Durable self-reported launch harness
-      started-by-session,,string,,Durable self-reported harness session
-      started-by-prompt,,string,,Explicit durable launch context; never inferred from the goal
   - name: hijack
     purpose: Hand off the latest resumable agent session or Smithers-managed conversation
     args[1]{name,type,required,desc}:
@@ -12364,8 +12138,8 @@ tokens, never hex-plus-alpha.
 
 | Component | What it renders | Key props |
 | --- | --- | --- |
-| `OneshotSurface` | The shared single-agent run surface used by the standalone oneshot/chat UI and the Monitor: goal, model chain, KPIs, live chat, diff, events, hijack candidates, and an embedded PTY terminal. Hosted variants can maximize to the viewport. | `runId`, `variant`, `initialTab`, `hijackNodeId`, `defaultMaximized`, `onClose` |
-| `HijackCandidateButton` | A candidate-aware Hijack/Reopen trigger for hosts embedding `OneshotSurface`; it uses the provider Gateway URL, auth, and polling internally and only renders for a resumable node session. | `runId`, `nodeId`, `runStatus`, `nodeLive`, `onOpen` |
+| `RunSurface` | The generic single-run surface used by the standalone chat UI and the Monitor: status KPIs, live chat, diff, events, and a hijack terminal tab. Hosted variants can maximize to the viewport. | `runId`, `variant`, `initialTab`, `hijackNodeId`, `title`, `defaultMaximized`, `onClose` |
+| `HijackCandidateButton` | A candidate-aware Hijack/Reopen trigger for hosts embedding `RunSurface`; it uses the provider Gateway URL, auth, and polling internally and only renders for a resumable node session. | `runId`, `nodeId`, `runStatus`, `nodeLive`, `onOpen` |
 | `SimpleWorkflowDashboard` | A complete one-workflow dashboard: prompt box + Start button, run list, node tree, structured event log, a live per-node chat pane (click a node to follow it), and a `MonitorButton` header link. The one-component UI. | `workflow`, `title`, `promptPlaceholder`, `inputFromPrompt`, `runLimit` |
 | `WorkflowUiShell` | The standard page scaffold: injects the style guide, renders a topbar (title, meta, actions), and wraps your content. | `title`, `meta`, `actions` |
 | `WorkflowUiStyles` | Just the shared style-guide `<style>` block, when you bring your own layout. | `mode`, `extra` |
@@ -14714,13 +14488,11 @@ A run id that doesn't exist isn't a `RunState`. It's an error
 
 ## The Smithers Monitor
 
-> A zero-setup live web UI over workspace runs, with a dedicated transcript, steer, restart, and cheap narrator surface for built-in oneshots.
+> A zero-setup live web UI over every run in the workspace.
 
 The Smithers Monitor is a live browser view over **every run in the workspace**,
 all on one page. It ships inside the CLI with no `.smithers/` pack or UI code
-required. Passing a built-in oneshot run id opens that run's dedicated monitor
-instead, including live transcripts, steering, restart, and a cheap narrator
-that runs only while the monitor stays attached.
+required. Passing a run id opens the same page focused on that run.
 
 ## 10-second quickstart
 
@@ -14729,7 +14501,7 @@ bunx smthrs monitor              # open the monitor over all runs
 bunx smthrs monitor --no-open    # print the URL instead of opening a browser
 ```
 
-The command resolves the workspace's singleton gateway like `bunx smthrs ui` does: explicit `--gateway` probe, then runtime-state discovery, then the legacy port probe on `--port` (default 7331). It **autostarts** `bunx smthrs gateway` when none is running (disable with `--no-autostart`; `--no-daemon` or `SMITHERS_NO_DAEMON=1` disables daemonized autostart), opens `/workflows/oneshot?runId=` for a built-in oneshot or `/monitor?runId=` otherwise, and prints a `{ opened, url, gateway, runId, view }` envelope.
+The command resolves the workspace's singleton gateway like `bunx smthrs ui` does: explicit `--gateway` probe, then runtime-state discovery, then the legacy port probe on `--port` (default 7331). It **autostarts** `bunx smthrs gateway` when none is running (disable with `--no-autostart`; `--no-daemon` or `SMITHERS_NO_DAEMON=1` disables daemonized autostart), opens `/monitor?runId=`, and prints a `{ opened, url, gateway, runId, view }` envelope.
 
 When the resolved gateway requires a bearer token, the printed/opened URL
 routes through the gateway's browser session handoff
@@ -14748,10 +14520,6 @@ non-loopback bind is never served unauthenticated). The CLI then prints one
 handoff URL per dialable interface (Tailscale `100.x` first, then LAN), so
 the `--no-open` output is copy-pasteable to another machine. See
 Remote access.
-
-See Watching and steering a oneshot
-for the steering engine matrix, durable delivery states, restart semantics, and
-narrator cost discipline.
 
 ## What you see
 
@@ -14772,7 +14540,7 @@ The overview is organized around triage: what needs you first, what is running n
 
 | Surface | What it is for |
 | --- | --- |
-| `bunx smthrs monitor [RUN_ID]` | Watch all runs, or open the dedicated monitor when `RUN_ID` is a built-in oneshot. |
+| `bunx smthrs monitor [RUN_ID]` | Watch all runs, optionally focused on `RUN_ID`. |
 | `bunx smthrs ui` | Open **one workflow's own custom UI** (`.smithers/ui/<workflow>.tsx`), built for its domain. |
 | `bunx smthrs ps` / `logs` / `inspect` | The terminal watch loop: scriptable, agent-drivable, works over SSH. See the CLI catalog. |
 
@@ -15053,10 +14821,6 @@ const fableFallback = new ClaudeCodeAgent({ model: "claude-fable-5" });
 const smartFallbackChain = [reviewer, fableFallback];
 ```
 
-### Oneshot task routing
-
-Oneshot routes by task shape before anything else (registry v8). A UI-flavored goal (interface, page, component, styling, layout, responsive, animation, theme, dashboard, and similar keywords; the classifier is apps/cli/src/oneshot/classifyOneshotGoal.js) leads with Kimi K3: OpenCode's `kimi-for-coding/k3` seat first, then kimi through the Pi CLI (`pi --provider kimi-coding --model k3`), then the Kimi CLI's `kimi-code/k3`; when no kimi seat is usable the UI chain falls back to Claude Opus 5, then Fable 5, and Codex Sol is only ever the last-resort UI rung. Every other goal, including tedious backend work (migrations, backfills, renames, test burndowns), runs the default chain led by Claude Opus 5 with Codex Sol, Kimi K3, and Fable 5 behind it, and pi's kimi-coding seat closes that chain. Every rung is availability-gated: oneshot selects only from agents detected usable on the machine, an explicit `--model` or `--agent` always overrides classification, and `smithers oneshot --status` reports the goal's taskType and the resolved chain.
-
 Fable 5 is not a Codex tier. Anthropic describes it as a model for ambitious, long, complex knowledge and coding work; developers can use `claude-fable-5` through the Claude API at $10 per million input tokens and $50 per million output tokens. Anthropic's July 1 redeployment restored access globally on Claude Platform, Claude.ai, Claude Code, and Claude Cowork. For Pro, Max, Team, and select Enterprise plans, Anthropic said Fable 5 would be included for up to 50% of weekly usage limits through July 12, 2026 at 11:59:59 PM PT ([promotion details](https://support.claude.com/en/articles/15424964-claude-fable-5-promotional-access)), after which use requires usage credits; standard Enterprise has no included allowance. Anthropic said it would re-enable AWS, Google Cloud, and Microsoft Foundry as quickly as possible, while its current Fable page lists availability through available marketplaces and those cloud platforms, so cloud-provider and account availability should be treated as conditional rather than universal. Its updated safeguards can reroute blocked requests to Opus 4.8 and can false-positive more often during routine coding and debugging. In current Claude applications and Claude Code behavior, that Fable-to-Opus switching is enabled by default, while API customers must opt in and configure the fallback themselves ([default product behavior and API opt-in](https://support.claude.com/en/articles/15363606-why-claude-switched-models-in-your-conversation-with-fable-5)). Treat this as current product behavior, not a permanent provider guarantee. Smithers gives Claude the building and orchestration seats outright: Opus 5 holds the implementer and orchestrator defaults (substantial implementation plus gating, scope, direction, progress, done-or-not) and Fable holds planning and the most ambitious builds, with each backing the other up; Fable also remains the non-Codex fallback for Sol-backed review. Codex-backed research, validation, mid-tier, and tool-heavy checking roles fall back to Sonnet instead, not Fable; the cited sources do not establish a general latency comparison. Automatic fallback pools do not silently run Fable in parallel with a healthy Codex path; an explicit Claude/OpenCode workflow may choose it directly. In Claude Code the model id is `claude-fable-5`; the OpenCode configuration uses the provider-qualified id `anthropic/claude-fable-5`. See [Anthropic's Fable 5 announcement](https://www.anthropic.com/news/claude-fable-5-mythos-5) and [July redeployment update](https://www.anthropic.com/news/redeploying-fable-5).
 
 ## Anthropic
@@ -15161,7 +14925,7 @@ Frontier-class performance at a fraction of the cost. The floor of the Gemini li
 
 current · engines: `grok`
 
-xAI's current Grok Build default and latest frontier model. Smithers uses this exact id for the Grok CLI and oneshot fallback rung; the CLI also accepts API-key authentication through XAI_API_KEY. See the official Grok Build model catalog and CLI documentation.
+xAI's current Grok Build default and latest frontier model. Smithers uses this exact id for the Grok CLI; the CLI also accepts API-key authentication through XAI_API_KEY. See the official Grok Build model catalog and CLI documentation.
 
 ## Moonshot AI
 
@@ -15261,7 +15025,6 @@ Rewrite these on sight; the daily research job does the same sweep mechanically.
 - Any change to models bumps version by exactly 1 and refreshes updatedAt.
 - Deprecated entries keep their replacedBy id for one release so sweeps know what to rewrite, then get deleted.
 - Building and gating seats are Claude-held: Opus 5 is the default implementer and orchestrator (scope, direction, progress, done-or-not, approve/deny) and Fable 5 holds planning. GPT-5.6 keeps the checking seats (Sol reviews, Terra validates), but Sol and Terra never orchestrate, gate, or carry default implementation, and Luna is for trivial, minimal-risk work only.
-- Oneshot routing is task-shaped: UI-flavored goals lead with Kimi K3, every other goal leads with Claude Opus 5, and every rung is availability-gated so oneshot only ever selects an agent that is usable on the machine.
 
 
 ===============================================================================
@@ -20351,7 +20114,7 @@ This runs `grok login --device-auth` with an isolated `GROK_HOME` and registers
 its `configDir`. For API billing, register `--provider xai-api --api-key ...`;
 Smithers supplies the key only through `XAI_API_KEY`, never argv or events, and
 uses an isolated `GROK_HOME` so ambient subscription credentials cannot win.
-Both account kinds participate in `fallbackAgents()` and oneshot routing.
+Both account kinds participate in `fallbackAgents()` pools.
 Persisted 429 reset times make a limited account sink to the end of its pool.
 
 xAI publishes limits and shows them in its console, but exposes no live account
@@ -24304,13 +24067,6 @@ present, it contains `kind` (`signal`, `rpc`, `cli`, or `engine`) plus optional
 | `RunContinuedAsNew` | `runId`, `newRunId`, `iteration`, `carriedStateSize`, `ancestryDepth?`, `timestampMs` |
 | `RunHijackRequested` | `runId`, `target?`, `timestampMs` |
 | `RunHijacked` | `runId`, `nodeId`, `iteration`, `attempt`, `engine`, `mode`, `resume?`, `cwd`, `timestampMs` |
-| `OneshotSteerQueued` | `runId`, `nodeId`, `messageId`, `message`, `engine`, `delivery`, `timestampMs` |
-| `OneshotSteerDelivered` | `runId`, `nodeId`, `messageId`, `engine`, `delivery`, `timestampMs` |
-| `OneshotSteerAcknowledged` | `runId`, `nodeId`, `messageId`, `engine`, `delivery`, `timestampMs` |
-| `OneshotSteerFailed` | `runId`, `nodeId`, `messageId`, `message?`, `engine?`, `delivery`, `error`, `resumed?`, `recoveryError?`, `timestampMs` |
-| `OneshotRestartRequested` | `runId`, `restartedAsRunId`, `priorStatus`, `timestampMs` |
-| `OneshotRestartLaunched` | `runId`, `restartedAsRunId`, `pid`, `timestampMs` |
-| `OneshotRestartFailed` | `runId`, `restartedAsRunId`, `error`, `timestampMs` |
 | `SandboxCreated` | `runId`, `sandboxId`, `runtime`, `configJson`, `timestampMs` |
 | `SandboxShipped` | `runId`, `sandboxId`, `runtime`, `bundleSizeBytes`, `timestampMs` |
 | `SandboxHeartbeat` | `runId`, `sandboxId`, `remoteRunId?`, `progress?`, `timestampMs` |

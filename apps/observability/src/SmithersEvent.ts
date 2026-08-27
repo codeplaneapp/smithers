@@ -194,68 +194,6 @@ export type SmithersEvent =
       timestampMs: number;
     }
   | {
-      type: "OneshotSteerQueued";
-      runId: string;
-      nodeId: "steer";
-      messageId: string;
-      message: string;
-      engine: string;
-      delivery: "queued";
-      timestampMs: number;
-    }
-  | {
-      type: "OneshotSteerDelivered";
-      runId: string;
-      nodeId: "steer";
-      messageId: string;
-      engine: string;
-      delivery: "delivered";
-      timestampMs: number;
-    }
-  | {
-      type: "OneshotSteerAcknowledged";
-      runId: string;
-      nodeId: "steer";
-      messageId: string;
-      engine: string;
-      delivery: "agent-acked";
-      timestampMs: number;
-    }
-  | {
-      type: "OneshotSteerFailed";
-      runId: string;
-      nodeId: "steer";
-      messageId: string;
-      message?: string;
-      engine?: string;
-      delivery: "failed";
-      error: string;
-      resumed?: boolean;
-      recoveryError?: string;
-      timestampMs: number;
-    }
-  | {
-      type: "OneshotRestartRequested";
-      runId: string;
-      restartedAsRunId: string;
-      priorStatus: string;
-      timestampMs: number;
-    }
-  | {
-      type: "OneshotRestartLaunched";
-      runId: string;
-      restartedAsRunId: string;
-      pid: number | null;
-      timestampMs: number;
-    }
-  | {
-      type: "OneshotRestartFailed";
-      runId: string;
-      restartedAsRunId: string;
-      error: string;
-      timestampMs: number;
-    }
-  | {
       type: "SandboxCreated";
       runId: string;
       sandboxId: string;

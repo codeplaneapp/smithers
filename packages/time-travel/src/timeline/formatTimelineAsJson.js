@@ -31,7 +31,6 @@ function formatTimelineAsJsonInternal(tree, depth, activePath) {
     return {
       runId: tree.timeline.runId,
       branch: tree.timeline.branch,
-      ...(tree.timeline.controls?.length ? { controls: tree.timeline.controls } : {}),
       frames: tree.timeline.frames.map((f) => ({
         frameNo: f.frameNo,
         createdAtMs: f.createdAtMs,
