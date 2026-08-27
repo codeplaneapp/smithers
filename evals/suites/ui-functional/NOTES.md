@@ -14,7 +14,7 @@ against what actually rendered.
   runner emits a `SKIP` verdict.
 - The candidate model must be runnable locally. On a stock checkout only the
   **claude-backed** models resolve out of the box:
-  - `haiku`, `sonnet` — via the `claude` CLI. ✅ both one-shot the full dashboard.
+  - `haiku`, `sonnet` — via the `claude` CLI. ✅ both build the full dashboard first-try.
   - `gemini` — needs the `gemini` CLI to actually serve `gemini-3.5-flash`; it
     fails **preflight** locally if that model isn't available to the CLI. This is
     an environment block, not a docs gap.

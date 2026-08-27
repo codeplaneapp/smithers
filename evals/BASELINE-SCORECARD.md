@@ -2,30 +2,30 @@
 
 # Fluency Scorecard
 
-> 18 case results across 7 report(s). Lower one-shot rate = docs that need work.
+> 18 case results across 7 report(s). Lower first-try rate = docs that need work.
 
 ## Overall
 
 - **Pass rate:** 89% (16/18)
-- **One-shot rate:** 78%
+- **First-try rate:** 78%
 - **Mean correctness score:** 0.89
 
 ### By model
 
-| Key | n | pass | one-shot | mean score |
+| Key | n | pass | first-try | mean score |
 | --- | --- | --- | --- | --- |
 | haiku | 17 | 88% | 82% | 0.88 |
 | sonnet | 1 | 100% | 0% | 1.00 |
 
 ### By tier
 
-| Key | n | pass | one-shot | mean score |
+| Key | n | pass | first-try | mean score |
 | --- | --- | --- | --- | --- |
 | weak | 18 | 89% | 78% | 0.89 |
 
 ### By area
 
-| Key | n | pass | one-shot | mean score |
+| Key | n | pass | first-try | mean score |
 | --- | --- | --- | --- | --- |
 | components-control-flow | 7 | 100% | 86% | 1.00 |
 | cli | 4 | 100% | 100% | 1.00 |

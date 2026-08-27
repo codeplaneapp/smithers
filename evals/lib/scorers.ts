@@ -18,20 +18,20 @@ function asReport(output: unknown): Partial<CandidateReport> {
   return (output ?? {}) as Partial<CandidateReport>;
 }
 
-/** Did the weak model one-shot it cleanly? 1.0 = first-try, no friction, no
+/** Did the weak model get it right first-try, cleanly? 1.0 = first-try, no friction, no
  * blockers. Graded, not binary, so "completed but fumbled" is distinguishable. */
-export const oneShotScorer = createScorer({
-  id: "one-shot",
-  name: "One-Shot",
+export const firstTryScorer = createScorer({
+  id: "first-try",
+  name: "First-Try",
   description: "Whether the candidate produced a correct answer first-try with no dead-ends.",
   score: async ({ output }) => {
     const r = asReport(output);
     const friction = r.friction?.length ?? 0;
     const blockers = r.blockers?.length ?? 0;
     if (blockers > 0) return { score: 0.1, reason: `blocked (${blockers})` };
-    if (r.oneShot && friction === 0) return { score: 1, reason: "clean one-shot" };
-    if (r.oneShot) return { score: 0.8, reason: `one-shot with ${friction} friction note(s)` };
-    return { score: 0.4, reason: `not one-shot, ${friction} friction note(s)` };
+    if (r.firstTry && friction === 0) return { score: 1, reason: "clean first-try" };
+    if (r.firstTry) return { score: 0.8, reason: `first-try with ${friction} friction note(s)` };
+    return { score: 0.4, reason: `not first-try, ${friction} friction note(s)` };
   },
 });
 

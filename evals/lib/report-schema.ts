@@ -3,7 +3,7 @@
 //   evalVerdict     — what the independent verifier produces (the hard pass/fail)
 //
 // Assertions in cases.jsonl gate on `verdict[0].passed`, NEVER on the candidate's
-// self-reported `oneShot`. Self-report is signal for the scorecard, not ground truth.
+// self-reported `firstTry`. Self-report is signal for the scorecard, not ground truth.
 import { z } from "zod/v4";
 
 /** A single friction point the candidate hit — the load-bearing data for
@@ -49,7 +49,7 @@ export const candidateReport = z.object({
       "other",
     ])
     .describe("What kind of artifact `artifact` is."),
-  oneShot: z
+  firstTry: z
     .boolean()
     .describe(
       "TRUE only if you produced a correct, complete answer on the first attempt with no dead-ends, no guessing, and no doc gaps. Be honest — a false here is valuable signal, not a failure.",

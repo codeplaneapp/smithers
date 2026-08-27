@@ -57,7 +57,7 @@ const { Workflow, Task, Sequence, smithers, outputs } = createSmithers(
 const DRAFT_PROMPT = (issue: string, area: string | null, tier: string | null) =>
   [
     "You convert a reported friction/struggle with Smithers into ONE well-formed fluency-eval task.",
-    "A fluency eval hands a (usually weak) model a Smithers task and checks it can one-shot it from the docs.",
+    "A fluency eval hands a (usually weak) model a Smithers task and checks it can get it right first-try from the docs.",
     "",
     `REPORTED ISSUE:\n${issue}`,
     area ? `AREA HINT: ${area}` : "",

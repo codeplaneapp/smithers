@@ -1,7 +1,7 @@
 # Smithers Agent-Fluency Evals
 
-> Can a **weak model**, given only Smithers' docs + skills + CLI, **one-shot** a real
-> Smithers task? Every eval here answers that question for one feature, and when the
+> Can a **weak model**, given only Smithers' docs + skills + CLI, complete a real
+> Smithers task **first-try**? Every eval here answers that question for one feature, and when the
 > answer is "no," it tells us *exactly which doc to fix*.
 
 ## Why this exists
@@ -17,7 +17,7 @@ These evals turn that into a **repeatable regression gate**:
 2. A **candidate** `<Task>` — run on a deliberately weak model — attempts one real
    Smithers task (author a workflow, find the right CLI verb, query the run DB, add an
    approval gate, …) using only the shipped docs/skills.
-3. The candidate emits a **typed self-report**: `oneShot` (did I get it first-try with
+3. The candidate emits a **typed self-report**: `firstTry` (did I get it first-try with
    no dead-ends?), plus structured `friction` (what was missing / ambiguous / wrong in
    the docs) — see `lib/report-schema.ts`.
 4. A **verify** step (deterministic where possible, judge otherwise) independently sets
@@ -25,7 +25,7 @@ These evals turn that into a **repeatable regression gate**:
 5. **Scorers** grade non-binary quality (schema adherence, friction severity, docs-gap
    likelihood) so trends improve over time even before a case flips green.
 
-The payoff: a red eval or a low one-shot rate points straight at a doc/skill/API to
+The payoff: a red eval or a low first-try rate points straight at a doc/skill/API to
 improve. The harness aggregates every run into a **scorecard** ranking the feature
 areas and friction themes most worth fixing.
 
@@ -52,9 +52,9 @@ evals/
   agents.ts            # the eval model matrix (weak + sota pools, selectable by name)
   tsconfig.json        # mirrors examples/ module resolution
   lib/
-    report-schema.ts   # CandidateReport + EvalResult schemas (oneShot, friction, blockers)
+    report-schema.ts   # CandidateReport + EvalResult schemas (firstTry, friction, blockers)
     model-matrix.ts    # name -> agent resolution + tier metadata
-    scorers.ts         # oneShotScorer, frictionScorer, docsGapScorer (+ builtins)
+    scorers.ts         # firstTryScorer, frictionScorer, docsGapScorer (+ builtins)
     verify.ts          # deterministic verifiers (graph-renders, contains, jsonl-valid, …)
     eval-kit.ts        # createFluencyEval(): candidate -> verify -> report scaffold
   suites/<area>/       # one feature area per wave
@@ -64,7 +64,7 @@ evals/
   harness/
     run-suite.ts       # run one suite across the model matrix
     run-all.ts         # run every suite x matrix -> scorecard
-    scorecard.ts       # aggregate: per-feature one-shot rate, ranked friction -> docs-to-fix
+    scorecard.ts       # aggregate: per-feature first-try rate, ranked friction -> docs-to-fix
   new-eval.tsx         # "issue -> eval" generator workflow (turn any friction report into a case)
   _inventory/          # raw exploration outputs (coverage slices, mined real usage)
 ```
@@ -112,7 +112,7 @@ spend **no model**:
 
 **UI evals** additionally attach the `ui-quality` llmJudge scorer, which scores a
 candidate's `gateway-react` bundle 0-1 on hook usage, loading/empty/error states, UX, and
-accessibility — "did it one-shot a UI, and how good is it?"
+accessibility — "did it build a working UI first-try, and how good is it?"
 
 ## Closing the loop: docs fixes + library issues
 
@@ -120,7 +120,7 @@ The point of a red eval is to fix the thing it found. The `eval-gap-triage` work
 the surfaced friction and, per gap, decides:
 
 - **docs fix** → a precise patch to a `docs/*.mdx` source file (then `pnpm docs:llms`), which
-  raises one-shot odds directly. 8 such fixes shipped on this branch.
+  raises first-try odds directly. 8 such fixes shipped on this branch.
 - **library fix** → a GitHub issue **citing the eval + a source-grounded suggested solution**
   (issues #295–#298 on this branch: run-status masking, `z.number()`→INTEGER, `<Worktree>`
   path anchoring, `waiting-event` overload). Filed when the robust fix is code, not docs.

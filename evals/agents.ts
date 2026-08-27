@@ -1,7 +1,7 @@
 // The eval model matrix.
 //
 // Weak models are the point: they stress the docs. If Haiku/Sonnet/Gemini/Kimi
-// can one-shot a Smithers task from the shipped docs, the docs are good. SOTA
+// can complete a Smithers task first-try from the shipped docs, the docs are good. SOTA
 // models (opus/codex) are reserved for the one job weak models legitimately
 // can't do — authoring genuinely complex multi-feature workflows — and for the
 // judge/verify role.

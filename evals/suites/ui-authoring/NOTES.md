@@ -1,6 +1,6 @@
 # ui-authoring — notes
 
-Authoring UI evals: can a (usually weak) candidate model one-shot a custom
+Authoring UI evals: can a (usually weak) candidate model build a custom
 workflow UI bundle (single `.tsx`)? Each case's `verify.kind` is `build`, so the
 `buildVerify` gate (`evals/lib/verify.ts`) transpiles the candidate artifact and
 requires the `verify.must` API tokens to appear in the source. The `ui-quality`

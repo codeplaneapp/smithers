@@ -1,5 +1,5 @@
 // Aggregate every eval report under .report/ into a scorecard: pass rate and
-// one-shot rate sliced by area/model/tier, plus a ranked list of friction
+// first-try rate sliced by area/model/tier, plus a ranked list of friction
 // themes — the prioritized "docs/APIs to fix" list that is the point of all this.
 //
 //   bun evals/harness/scorecard.ts            # build SCORECARD.md + print summary
@@ -18,22 +18,22 @@ type CaseResult = {
   input?: { area?: string; feature?: string; model?: string; taskId?: string };
   metadata?: { area?: string; feature?: string; tier?: string; source?: string };
   output?: {
-    candidate?: Array<{ oneShot?: boolean; confidence?: number; friction?: Friction[]; summary?: string }>;
+    candidate?: Array<{ firstTry?: boolean; confidence?: number; friction?: Friction[]; summary?: string }>;
     verdict?: Array<{ score?: number; reason?: string }>;
     quality?: Array<{ score?: number; reason?: string }>;
   };
 };
 type Report = { suiteId: string; results: CaseResult[] };
 
-type Bucket = { n: number; passed: number; oneShot: number; scoreSum: number; scoreN: number };
-const empty = (): Bucket => ({ n: 0, passed: 0, oneShot: 0, scoreSum: 0, scoreN: 0 });
+type Bucket = { n: number; passed: number; firstTry: number; scoreSum: number; scoreN: number };
+const empty = (): Bucket => ({ n: 0, passed: 0, firstTry: 0, scoreSum: 0, scoreN: 0 });
 
 function add(b: Record<string, Bucket>, key: string, r: CaseResult) {
   const bk = (b[key] ??= empty());
   bk.n += 1;
   if (r.passed) bk.passed += 1;
   const cand = r.output?.candidate?.[0];
-  if (cand?.oneShot) bk.oneShot += 1;
+  if (cand?.firstTry) bk.firstTry += 1;
   const score = r.output?.verdict?.[0]?.score;
   if (typeof score === "number") {
     bk.scoreSum += score;
@@ -47,9 +47,9 @@ function pct(num: number, den: number): string {
 
 function table(title: string, b: Record<string, Bucket>): string[] {
   const rows = Object.entries(b).sort((a, c) => c[1].n - a[1].n);
-  const out = [`### ${title}`, "", "| Key | n | pass | one-shot | mean score |", "| --- | --- | --- | --- | --- |"];
+  const out = [`### ${title}`, "", "| Key | n | pass | first-try | mean score |", "| --- | --- | --- | --- | --- |"];
   for (const [k, v] of rows) {
-    out.push(`| ${k} | ${v.n} | ${pct(v.passed, v.n)} | ${pct(v.oneShot, v.n)} | ${v.scoreN ? (v.scoreSum / v.scoreN).toFixed(2) : "—"} |`);
+    out.push(`| ${k} | ${v.n} | ${pct(v.passed, v.n)} | ${pct(v.firstTry, v.n)} | ${v.scoreN ? (v.scoreSum / v.scoreN).toFixed(2) : "—"} |`);
   }
   out.push("");
   return out;
@@ -105,10 +105,10 @@ function main() {
 
   const md: string[] = [];
   md.push("# Fluency Scorecard", "");
-  md.push(`> ${all.length} case results across ${reports.length} report(s). Lower one-shot rate = docs that need work.`, "");
+  md.push(`> ${all.length} case results across ${reports.length} report(s). Lower first-try rate = docs that need work.`, "");
   md.push("## Overall", "");
   md.push(`- **Pass rate:** ${pct(overall.passed, overall.n)} (${overall.passed}/${overall.n})`);
-  md.push(`- **One-shot rate:** ${pct(overall.oneShot, overall.n)}`);
+  md.push(`- **First-try rate:** ${pct(overall.firstTry, overall.n)}`);
   md.push(`- **Mean correctness score:** ${overall.scoreN ? (overall.scoreSum / overall.scoreN).toFixed(2) : "—"}`, "");
   if (uiQuality.length > 0) {
     const mean = uiQuality.reduce((a, b) => a + b, 0) / uiQuality.length;
@@ -138,7 +138,7 @@ function main() {
 
   const out = join(REPORT_DIR, "SCORECARD.md");
   writeFileSync(out, md.join("\n") + "\n");
-  console.log(`Pass ${pct(overall.passed, overall.n)} · one-shot ${pct(overall.oneShot, overall.n)} · n=${overall.n}`);
+  console.log(`Pass ${pct(overall.passed, overall.n)} · first-try ${pct(overall.firstTry, overall.n)} · n=${overall.n}`);
   console.log(`Scorecard → ${out}`);
 }
 

@@ -10,10 +10,10 @@
 //      per-suite cases.jsonl.
 //
 //   2. OPTIMIZE — a <Loop> that runs the (weak-model) eval suites, scores
-//      pass-rate + one-shot-rate, and hands the worst features + friction themes
+//      pass-rate + first-try-rate, and hands the worst features + friction themes
 //      to a fixer agent (same mix) that fixes the ROOT CAUSE in docs/*.mdx and
 //      regenerates the bundles — repeating until the suite hits the target
-//      (100% pass / 99% one-shot) or maxIterations.
+//      (100% pass / 99% first-try) or maxIterations.
 //
 //   bunx smthrs up evals/feature-eval-factory.tsx --detach \
 //     --input '{"genConcurrency":4,"optimizeModel":"haiku"}'
@@ -95,7 +95,7 @@ const inputSchema = z.object({
   maxCasesPerSuite: z.number().int().min(1).max(200).default(8).describe("Cases per suite per iteration (cost cap)."),
   maxIterations: z.number().int().min(1).max(20).default(3).describe("Optimization-loop iteration cap."),
   targetPass: z.number().min(0).max(1).default(1.0).describe("Target pass rate."),
-  targetOneShot: z.number().min(0).max(1).default(0.99).describe("Target one-shot rate."),
+  targetFirstTry: z.number().min(0).max(1).default(0.99).describe("Target first-try rate."),
 });
 
 // ── outputs ───────────────────────────────────────────────────────────────
@@ -128,8 +128,8 @@ const runEvalResult = z.object({
   n: z.number(),
   passed: z.number(),
   passRate: z.number(),
-  oneShot: z.number(),
-  oneShotRate: z.number(),
+  firstTry: z.number(),
+  firstTryRate: z.number(),
   worstFeatures: z.array(z.object({ feature: z.string(), passRate: z.number(), n: z.number() })).default([]),
   frictionThemes: z.array(z.object({ kind: z.string(), detail: z.string(), docPointer: z.string().nullable().default(null), count: z.number() })).default([]),
   failures: z.array(z.object({ caseId: z.string(), feature: z.string(), reason: z.string() })).default([]),
@@ -373,7 +373,7 @@ type CaseRow = {
   input?: { model?: string; feature?: string };
   metadata?: { feature?: string };
   output?: {
-    candidate?: Array<{ oneShot?: boolean; friction?: Array<{ kind?: string; detail?: string; docPointer?: string | null }> }>;
+    candidate?: Array<{ firstTry?: boolean; friction?: Array<{ kind?: string; detail?: string; docPointer?: string | null }> }>;
     verdict?: Array<{ reason?: string }>;
   };
 };
@@ -406,7 +406,7 @@ function runEvalsAndScore(opts: {
 
   const n = rows.length;
   const passed = rows.filter((r) => r.passed).length;
-  const oneShot = rows.filter((r) => r.output?.candidate?.[0]?.oneShot).length;
+  const firstTry = rows.filter((r) => r.output?.candidate?.[0]?.firstTry).length;
 
   const feat: Record<string, { n: number; passed: number }> = {};
   const friction: Record<string, { kind: string; detail: string; docPointer: string | null; count: number }> = {};
@@ -442,21 +442,21 @@ function runEvalsAndScore(opts: {
     n,
     passed,
     passRate: n ? passed / n : 0,
-    oneShot,
-    oneShotRate: n ? oneShot / n : 0,
+    firstTry,
+    firstTryRate: n ? firstTry / n : 0,
     worstFeatures,
     frictionThemes,
     failures: failures.slice(0, 25),
   };
 }
 
-function fixPrompt(run: z.infer<typeof runEvalResult> | undefined, targetPass: number, targetOneShot: number): string {
+function fixPrompt(run: z.infer<typeof runEvalResult> | undefined, targetPass: number, targetFirstTry: number): string {
   if (!run) return "Awaiting the eval report. Output noChange:true.";
-  const green = run.passRate >= targetPass && run.oneShotRate >= targetOneShot;
+  const green = run.passRate >= targetPass && run.firstTryRate >= targetFirstTry;
   return [
-    "You are improving Smithers so that a WEAK model can one-shot real tasks from the shipped docs.",
+    "You are improving Smithers so that a WEAK model can complete real tasks first-try from the shipped docs.",
     `LATEST EVAL REPORT (round ${run.round}, model ${run.model}, suites ${run.suites.join(", ")}):`,
-    `  pass ${(run.passRate * 100).toFixed(0)}% (${run.passed}/${run.n}) · one-shot ${(run.oneShotRate * 100).toFixed(0)}% · target ${(targetPass * 100).toFixed(0)}%/${(targetOneShot * 100).toFixed(0)}%`,
+    `  pass ${(run.passRate * 100).toFixed(0)}% (${run.passed}/${run.n}) · first-try ${(run.firstTryRate * 100).toFixed(0)}% · target ${(targetPass * 100).toFixed(0)}%/${(targetFirstTry * 100).toFixed(0)}%`,
     green
       ? "The suite already MEETS the target. Make NO changes; output noChange:true with a one-line summary."
       : [
@@ -467,7 +467,7 @@ function fixPrompt(run: z.infer<typeof runEvalResult> | undefined, targetPass: n
           "SAMPLE FAILURES:",
           run.failures.slice(0, 12).map((f) => `  - ${f.caseId} (${f.feature}): ${f.reason}`).join("\n") || "  (none)",
           "",
-          "FIX THE ROOT CAUSE so the NEXT run one-shots these:",
+          "FIX THE ROOT CAUSE so the NEXT run gets these right first-try:",
           "  • Prefer fixing the DOCS at source: edit the relevant docs/*.mdx (NOT the generated llms-*.txt),",
           "    making the missing/ambiguous/wrong thing clear and correct. Ground every fix in the real source.",
           "  • After editing docs, regenerate the bundles: run `pnpm docs:llms` (CI gates on check-docs/check-llms).",
@@ -491,7 +491,7 @@ export default smithers((ctx) => {
     maxCasesPerSuite: asNum(input.maxCasesPerSuite, 8),
     maxIterations: asNum(input.maxIterations, 3),
     targetPass: asNum(input.targetPass, 1.0),
-    targetOneShot: asNum(input.targetOneShot, 0.99),
+    targetFirstTry: asNum(input.targetFirstTry, 0.99),
   };
   const allGroups = parseFeatureGroups(FEATURES);
   const wanted = cfg.groups.length ? new Set(cfg.groups) : null;
@@ -506,7 +506,7 @@ export default smithers((ctx) => {
 
   const runs = (ctx.outputs.runEval ?? []) as Array<z.infer<typeof runEvalResult>>;
   const latestRun = runs[runs.length - 1];
-  const targetMet = !!latestRun && latestRun.passRate >= cfg.targetPass && latestRun.oneShotRate >= cfg.targetOneShot;
+  const targetMet = !!latestRun && latestRun.passRate >= cfg.targetPass && latestRun.firstTryRate >= cfg.targetFirstTry;
   const iterationIndex = runs.length; // 0-based index of the iteration about to run
 
   return (
@@ -536,7 +536,7 @@ export default smithers((ctx) => {
           {() => mergeAndRegenerate()}
         </Task>
 
-        {/* ── Phase 2: optimization loop toward 100% pass / 99% one-shot ── */}
+        {/* ── Phase 2: optimization loop toward 100% pass / 99% first-try ── */}
         {merge && cfg.runOptimization ? (
           <Loop until={targetMet} maxIterations={cfg.maxIterations} onMaxReached="return-last">
             <Sequence>
@@ -559,7 +559,7 @@ export default smithers((ctx) => {
                 timeoutMs={45 * 60_000}
                 heartbeatTimeoutMs={15 * 60_000}
               >
-                {fixPrompt(latestRun, cfg.targetPass, cfg.targetOneShot)}
+                {fixPrompt(latestRun, cfg.targetPass, cfg.targetFirstTry)}
               </Task>
             </Sequence>
           </Loop>

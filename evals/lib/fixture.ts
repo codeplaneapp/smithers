@@ -52,7 +52,7 @@ const SCORES: ScoreRow[] = [
   ["r1", "implement", "faithfulness", 0.8],
   ["r3", "review", "faithfulness", 0.6],
   ["r4", "plan", "faithfulness", 1.0],
-  ["r1", "implement", "one-shot", 1.0],
+  ["r1", "implement", "first-try", 1.0],
 ];
 
 /** Known answers, asserted by the db-query cases (kept here as documentation). */

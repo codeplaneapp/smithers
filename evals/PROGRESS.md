@@ -7,8 +7,8 @@
 ## North star
 
 Weak models (Haiku / Sonnet / Gemini / Kimi), given only Smithers' shipped docs + skills
-+ CLI, should **one-shot** real Smithers tasks. Each eval = a Smithers workflow whose
-candidate Task self-reports `oneShot` + `friction`; an independent verify step sets
++ CLI, should complete real Smithers tasks **first-try**. Each eval = a Smithers workflow whose
+candidate Task self-reports `firstTry` + `friction`; an independent verify step sets
 `passed`; scorers grade quality. Failures and friction → a prioritized list of docs/APIs
 to fix. Target: up to ~1000 evals, built wave by wave, every wave verified (renders +
 dry-runs) before moving on.
@@ -30,8 +30,8 @@ dry-runs) before moving on.
 - [x] P3 — db-query wave: `lib/fixture.ts` (deterministic run-history DB) + `query` verify (runs the
       candidate's SQL) + `db-query` suite (11 cases). Live-proven: haiku wrote correct SQL → pass.
 - [x] P3 — Docs fix at source: corrected `llmJudge` + scorer `sampling` API in `skills/eval-writer/SKILL.md`.
-- [x] P4 — Baseline scorecard snapshot (`evals/BASELINE-SCORECARD.md`): pass 89% / one-shot 78% on a
-      bounded weak-model run. **Surfaced a real gap: memory authoring ~33% pass / 0% one-shot**
+- [x] P4 — Baseline scorecard snapshot (`evals/BASELINE-SCORECARD.md`): pass 89% / first-try 78% on a
+      bounded weak-model run. **Surfaced a real gap: memory authoring ~33% pass / 0% first-try**
       ("memory store access within a workflow undocumented; guessed store.setFact()").
 - [x] P5 — Codex review (`codex exec review --base main`) — both findings fixed (graph-verify fresh-checkout
       ENOENT; `new-eval` `friction` alias). Also fixed via self-review + sampling: equals JSX-bracket
@@ -94,11 +94,11 @@ Tier = which model tier the candidate runs on.
 ## Decisions / invariants
 
 - Assertions gate on the **verifier's** `passed`, never the candidate's self-reported
-  `oneShot`. Self-report is signal, not ground truth.
+  `firstTry`. Self-report is signal, not ground truth.
 - Deterministic verify wherever feasible (no model spend in the gate). Judge verify only
   for genuinely open-ended correctness, on a SOTA model.
 - Every case carries `metadata: { area, feature, tier, source }` so the scorecard can
-  slice one-shot rate by feature and trace each case to its origin.
+  slice first-try rate by feature and trace each case to its origin.
 - Keep CI green: `evals/` is not a workspace; it ships its own `tsconfig.json` and a
   `typecheck:evals` script. Never let new files trip `check:docs` / `check:llms` /
   `check:deps`.
@@ -111,16 +111,16 @@ Tier = which model tier the candidate runs on.
 - Decide whether to register `evals/` suites in the seeded pack / starters.
 - Wire `typecheck:evals` into CI once the suite stabilizes.
 
-## Goal 2: improve one-shot odds + UI evals + library issues (in progress)
+## Goal 2: improve first-try odds + UI evals + library issues (in progress)
 
 - [x] eval-gap-triage **workflow** (multi-agent) classified surfaced gaps → docs vs library.
-- [x] **5 docs fixes applied** (raise one-shot odds): workflow-import equivalence (components/workflow),
+- [x] **5 docs fixes applied** (raise first-try odds): workflow-import equivalence (components/workflow),
       native-vs-prompt structured output (integrations/sdk-agents), ctx optional (jsx/overview),
       memory store mid-run via createMemoryStore (concepts/memory), succeeded-masks-failures caveat
       (runtime/run-state). Bundles regenerated; check:docs/llms green.
 - [x] **Library issue #295** opened — run reports finished while fan-out agents failed; cites
       real-usage `ru-run-completed-but-failed` + a source-grounded fix (degraded status / failedChildren).
-- [x] **UI-authoring suite** (`build` verify + `ui-quality` llmJudge): one-shot a gateway-react UI bundle,
+- [x] **UI-authoring suite** (`build` verify + `ui-quality` llmJudge): build a gateway-react UI bundle first-try,
       AI scores quality. Live-proven (sonnet). Corpus now **1028 cases / 22 suites**.
 - [x] Retry triage **workflow** for the 4 rate-limited gaps → **3 more docs fixes** (how-it-works
       auto-migration, components/worktree relative-path footgun, runtime/run-state waiting-event overload)
@@ -135,7 +135,7 @@ Tier = which model tier the candidate runs on.
       effect-api, Aspects/budgets, scheduling/Poller, sandbox runtimes, advanced components, time-travel,
       openapi tools) → append to curated-tasks → regenerate (toward broader coverage).
 - [x] Expansion tasks applied (1340 cases / 24 suites). UI quality is now a first-class awaited
-      judge **Task** (was a droppable async scorer): live-demoed sonnet one-shot a UI bundle → build
+      judge **Task** (was a droppable async scorer): live-demoed sonnet building a UI bundle first-try → build
       PASS + **quality 1.00** persisted + surfaced in the scorecard ("UI quality (AI-judged)").
 - [x] **guidance-interactive suite** (6 cases, `contains` verify): when handing a human a
       copy-paste command, the agent must include `--interactive` where supported (and never

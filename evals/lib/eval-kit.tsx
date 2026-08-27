@@ -6,13 +6,13 @@
 //
 // One candidate <Task> (weak model under test) → one verify step (deterministic
 // compute child, or a judge <Task> on a sota model). The candidate self-reports
-// oneShot + friction; the verifier sets the hard `passed` the case asserts on.
+// firstTry + friction; the verifier sets the hard `passed` the case asserts on.
 import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { EVAL_DB_PATH } from "./paths.js";
 import { resolveCandidate, resolveJudge } from "./model-matrix.js";
 import { candidateReport, type CandidateReport, evalVerdict, type EvalVerdict, qualityScore } from "./report-schema.js";
-import { docsGapScorer, frictionScorer, oneShotScorer, schemaAdherenceScorer } from "./scorers.js";
+import { docsGapScorer, firstTryScorer, frictionScorer, schemaAdherenceScorer } from "./scorers.js";
 import { computeVerdict, normalizeVerify, type VerifyKind } from "./verify.js";
 
 /** Node ids of the three judge panelists (the fan-out). The aggregator keeps the
@@ -94,7 +94,7 @@ const inputSchema = z.object({
   feature: z.string().default("unknown").describe("Specific feature id this exercises."),
   task: z
     .string()
-    .default("Describe the Smithers task to one-shot.")
+    .default("Describe the Smithers task to complete first-try.")
     .describe("The exact instruction handed to the candidate."),
   model: z.string().default("sonnet").describe("Candidate model name from evals/agents.ts."),
   context: z.string().nullable().default(null).describe("Optional extra context/files for the candidate."),
@@ -102,7 +102,7 @@ const inputSchema = z.object({
   judgeModel: z.string().default("opus").describe("Model for judge-verify + sampled docs-gap scorer."),
 });
 
-const DEFAULT_TASK = "Describe the Smithers task to one-shot.";
+const DEFAULT_TASK = "Describe the Smithers task to complete first-try.";
 
 const DOCS_PREAMBLE =
   "You are an AI agent using Smithers (a durable control plane for coding agents) for a real task. " +
@@ -194,7 +194,7 @@ function candidatePrompt(task: string, context: string | null, kind: VerifyKind)
     "",
     artifactContract(kind),
     "",
-    "Then fill the structured output honestly: set `oneShot` true ONLY if you got it right first-try with no guessing or doc gaps, and list every friction point in `friction`.",
+    "Then fill the structured output honestly: set `firstTry` true ONLY if you got it right first-try with no guessing or doc gaps, and list every friction point in `friction`.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -285,7 +285,7 @@ export function createFluencyEval(opts: FluencyEvalOptions) {
     // (a fire-and-forget judge scorer gets dropped when the judge is slow).
     const scorers = {
       schema: { scorer: schemaAdherenceScorer() },
-      oneShot: { scorer: oneShotScorer },
+      firstTry: { scorer: firstTryScorer },
       friction: { scorer: frictionScorer },
       docsGap: { scorer: docsGapScorer(judge), sampling: { type: "ratio" as const, rate: 0.34 } },
     };
