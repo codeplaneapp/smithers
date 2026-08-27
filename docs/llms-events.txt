@@ -307,13 +307,6 @@ present, it contains `kind` (`signal`, `rpc`, `cli`, or `engine`) plus optional
 | `RunContinuedAsNew` | `runId`, `newRunId`, `iteration`, `carriedStateSize`, `ancestryDepth?`, `timestampMs` |
 | `RunHijackRequested` | `runId`, `target?`, `timestampMs` |
 | `RunHijacked` | `runId`, `nodeId`, `iteration`, `attempt`, `engine`, `mode`, `resume?`, `cwd`, `timestampMs` |
-| `OneshotSteerQueued` | `runId`, `nodeId`, `messageId`, `message`, `engine`, `delivery`, `timestampMs` |
-| `OneshotSteerDelivered` | `runId`, `nodeId`, `messageId`, `engine`, `delivery`, `timestampMs` |
-| `OneshotSteerAcknowledged` | `runId`, `nodeId`, `messageId`, `engine`, `delivery`, `timestampMs` |
-| `OneshotSteerFailed` | `runId`, `nodeId`, `messageId`, `message?`, `engine?`, `delivery`, `error`, `resumed?`, `recoveryError?`, `timestampMs` |
-| `OneshotRestartRequested` | `runId`, `restartedAsRunId`, `priorStatus`, `timestampMs` |
-| `OneshotRestartLaunched` | `runId`, `restartedAsRunId`, `pid`, `timestampMs` |
-| `OneshotRestartFailed` | `runId`, `restartedAsRunId`, `error`, `timestampMs` |
 | `SandboxCreated` | `runId`, `sandboxId`, `runtime`, `configJson`, `timestampMs` |
 | `SandboxShipped` | `runId`, `sandboxId`, `runtime`, `bundleSizeBytes`, `timestampMs` |
 | `SandboxHeartbeat` | `runId`, `sandboxId`, `remoteRunId?`, `progress?`, `timestampMs` |

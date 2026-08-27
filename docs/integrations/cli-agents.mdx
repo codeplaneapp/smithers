@@ -754,7 +754,7 @@ This runs `grok login --device-auth` with an isolated `GROK_HOME` and registers
 its `configDir`. For API billing, register `--provider xai-api --api-key ...`;
 Smithers supplies the key only through `XAI_API_KEY`, never argv or events, and
 uses an isolated `GROK_HOME` so ambient subscription credentials cannot win.
-Both account kinds participate in `fallbackAgents()` and oneshot routing.
+Both account kinds participate in `fallbackAgents()` pools.
 Persisted 429 reset times make a limited account sink to the end of its pool.
 
 xAI publishes limits and shows them in its console, but exposes no live account

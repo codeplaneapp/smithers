@@ -48,15 +48,8 @@ export SMITHERS_LOG_FORMAT=json
 
 With the OTEL env enabled, every agent task emits canonical trace events
 (`AgentTraceEvent` / `AgentTraceSummary`) plus persisted provider session
-transcript rows, and exports them to the collector. Run any agent workflow;
-a one-shot task is enough:
-
-```bash
-bun run apps/cli/src/index.js oneshot "reply with the word ok" \
-  --annotations '{"custom.demo":true,"custom.ticket":"OBS-123"}'
-```
-
-Or launch a workflow with an explicit run id:
+transcript rows, and exports them to the collector. Launch any agent workflow
+with an explicit run id:
 
 ```bash
 bun run apps/cli/src/index.js up .smithers/workflows/smoketest.tsx \

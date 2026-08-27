@@ -216,7 +216,6 @@
             "pages": [
               "cli/quickstart",
               "cli/overview",
-              "guides/oneshot",
               "guides/agent-operating-playbook",
               "guides/evals-quickstart",
               "guides/testing-workflows",

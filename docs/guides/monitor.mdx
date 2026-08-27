@@ -1,13 +1,11 @@
 ---
 title: The Smithers Monitor
-description: A zero-setup live web UI over workspace runs, with a dedicated transcript, steer, restart, and cheap narrator surface for built-in oneshots.
+description: A zero-setup live web UI over every run in the workspace.
 ---
 
 The Smithers Monitor is a live browser view over **every run in the workspace**,
 all on one page. It ships inside the CLI with no `.smithers/` pack or UI code
-required. Passing a built-in oneshot run id opens that run's dedicated monitor
-instead, including live transcripts, steering, restart, and a cheap narrator
-that runs only while the monitor stays attached.
+required. Passing a run id opens the same page focused on that run.
 
 ## 10-second quickstart
 
@@ -18,7 +16,7 @@ bunx smthrs monitor --no-open    # print the URL instead of opening a browser
 bunx smthrs monitor --gateway http://127.0.0.1:7331   # use an explicit Gateway
 ```
 
-The command resolves the workspace's singleton gateway like `bunx smthrs ui` does: explicit `--gateway` probe, then runtime-state discovery, then the legacy port probe on `--port` (default 7331). It **autostarts** `bunx smthrs gateway` when none is running (disable with `--no-autostart`; `--no-daemon` or `SMITHERS_NO_DAEMON=1` disables daemonized autostart), opens `/workflows/oneshot?runId=` for a built-in oneshot or `/monitor?runId=` otherwise, and prints a `{ opened, url, gateway, runId, view }` envelope.
+The command resolves the workspace's singleton gateway like `bunx smthrs ui` does: explicit `--gateway` probe, then runtime-state discovery, then the legacy port probe on `--port` (default 7331). It **autostarts** `bunx smthrs gateway` when none is running (disable with `--no-autostart`; `--no-daemon` or `SMITHERS_NO_DAEMON=1` disables daemonized autostart), opens `/monitor?runId=`, and prints a `{ opened, url, gateway, runId, view }` envelope.
 
 When the resolved gateway requires a bearer token, the printed/opened URL
 routes through the gateway's [browser session handoff](/integrations/gateway#browser-session-handoff)
@@ -37,10 +35,6 @@ non-loopback bind is never served unauthenticated). The CLI then prints one
 handoff URL per dialable interface (Tailscale `100.x` first, then LAN), so
 the `--no-open` output is copy-pasteable to another machine. See
 [Remote access](/integrations/gateway#remote-access-tailscale--ssh--lan).
-
-See [Watching and steering a oneshot](/guides/oneshot#watching-and-steering-a-oneshot)
-for the steering engine matrix, durable delivery states, restart semantics, and
-narrator cost discipline.
 
 ## What you see
 
@@ -61,7 +55,7 @@ The overview is organized around triage: what needs you first, what is running n
 
 | Surface | What it is for |
 | --- | --- |
-| `bunx smthrs monitor [RUN_ID]` | Watch all runs, or open the dedicated monitor when `RUN_ID` is a built-in oneshot. |
+| `bunx smthrs monitor [RUN_ID]` | Watch all runs, optionally focused on `RUN_ID`. |
 | [`bunx smthrs ui`](/guides/custom-workflow-ui) | Open **one workflow's own custom UI** (`.smithers/ui/<workflow>.tsx`), built for its domain. |
 | `bunx smthrs ps` / `logs` / `inspect` | The terminal watch loop: scriptable, agent-drivable, works over SSH. See the [CLI catalog](/cli/overview). |
 

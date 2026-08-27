@@ -57,7 +57,7 @@ And one rule about the operator boundary:
 > query `_smithers_*`; never import `openSmithersStore` or CLI-internal
 > `findAndOpenDb`; and never probe stores by adding `--backend` to `ps` or
 > `inspect`. Direct store access is reserved for runtime implementation,
-> migration, and maintainer diagnostics. One-shot public CLI commands are fine;
+> migration, and maintainer diagnostics. Single public CLI commands are fine;
 > durable automation goes through the Gateway.
 
 And a rule about how hard to push before involving the human:
@@ -115,14 +115,12 @@ and explain the code.
 | "Migrate this subsystem, but show me the plan first." | Run research and planning first, then pause on an approval gate. After approval, execute milestones in worktrees and merge only validated chunks. |
 | "Something went wrong in the run. What happened?" | Run `why`, inspect events and node output, summarize the blocker, propose options, and continue operating. Do not ask the human to debug from the terminal. |
 
-Route a most-trivial edit that takes only a few turns directly. Route any clear
-single-goal task through `smithers oneshot`, which launches quickly in the
-background with a live chat and diff UI; one strong agent finishes repo-wide
-goals of up to roughly 300k tokens in a single oneshot run, so a large goal
-alone never justifies a workflow. Use a full workflow when the task is
+Handle a clear single-goal task directly, or run it as a regular workflow with
+`bunx smthrs up <file.tsx>`; `bunx smthrs workflow run create-workflow --prompt
+"..."` builds the workflow file for you. Use a full workflow when the task is
 genuinely multi-goal in shape: staged phases, approval gates, durable loops,
-parallel work, or a need for reuse. Clarify ambiguous goals before launching
-either form.
+parallel work, or a need for reuse. Clarify ambiguous goals before
+launching.
 
 ## Context engineering
 

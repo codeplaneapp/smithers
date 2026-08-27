@@ -20,19 +20,18 @@ autonomously with `--input '{"review":false}'`.
 ## When NOT to use it
 
 The clarify stage right-sizes every request before anything is built. A
-most-trivial edit is routed back to be done directly, and a clear, well-scoped
-task one strong agent can finish in one context window is routed to
-[`smithers oneshot`](/guides/oneshot); both end the run at status
-`routed-simple` with the exact command to run instead. Structure is a cost:
-the OrchBench benchmark (`benchmarks/orchbench/RESULTS.md` in the repo)
-measured a solo frontier agent outscoring a three-model review panel at half
+most-trivial edit, and a clear, well-scoped task one strong agent can finish in
+one context window, are routed back to be done directly; both end the run at
+status `routed-simple`. Structure is a cost: the OrchBench benchmark
+(`benchmarks/orchbench/RESULTS.md` in the repo) measured a solo frontier agent
+outscoring a three-model review panel at half
 the wall clock, so `create-workflow` only proceeds when the task genuinely
 needs ordered stages, durability, approvals, loops, or reuse. To force a
 workflow anyway, say so in the prompt.
 
 ## Stages
 
-1. **clarify**: right-size the request (direct edit, `smithers oneshot`, or a real workflow), then turn the freeform ask into a structured, buildable spec (goal, trigger, inputs, stages, loops, human gates, success criteria).
+1. **clarify**: right-size the request (direct edit or a real workflow), then turn the freeform ask into a structured, buildable spec (goal, trigger, inputs, stages, loops, human gates, success criteria).
 2. **provision**: pull the relevant `llms-*.txt` docs, find the closest `examples/` template, pick components, and **install the worker skills** the new workflow needs (`bunx smthrs skills add`).
 3. **design**: produce the concrete graph blueprint (schemas, tasks, JSX shape, prompts to author).
 4. **approve-design**: durable human approval gate (skippable via `review: false`).

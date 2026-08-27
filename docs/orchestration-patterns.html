@@ -181,7 +181,6 @@
         key: "composite", index: "02 / 03", title: "Composite patterns",
         note: "Reusable arrangements made by combining primitives into a recognizable strategy.",
         items: [
-          ["Oneshot", "Hand one clear goal to a single strong agent running durably in the background; most single-goal asks need no graph at all.", { c: [[["Goal","data"]], [["Strong agent"]], [["Review","decision"]], [["Done","action"]]] }, "apps/cli · smithers oneshot"],
           ["Fan-out / fan-in", "Split a large job into independent parallel parts and merge their results to improve throughput while retaining one outcome.", "fan", "examples/fan-out-fan-in.jsx"],
           ["Map / reduce", "Apply the same operation to every item and fold the outputs into a summary when batch work shares one shape.", "mapreduce", "examples/fan-out-fan-in.jsx · merge stage"],
           ["Staged pipeline", "Chain typed refinement stages (outline, draft, edit, publish) so each stage builds on validated output from the last.", { c: [[["Outline"]], [["Draft"]], [["Edit"]], [["Publish","action"]]] }, "examples/waterfall.jsx · <ContentPipeline>"],
@@ -336,7 +335,6 @@
     const DOCS = "https://smithers.sh";
     const kebab = (s) => s.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
     const CLI_LINKS = {
-      "smithers oneshot": DOCS + "/guides/oneshot",
       "smithers eval": DOCS + "/guides/evals-quickstart",
       "smithers fork / replay": DOCS + "/guides/time-travel-quickstart",
       "smithers cron": DOCS + "/cli/overview",

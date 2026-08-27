@@ -29,8 +29,8 @@ tokens, never hex-plus-alpha.
 
 | Component | What it renders | Key props |
 | --- | --- | --- |
-| `OneshotSurface` | The shared single-agent run surface used by the standalone oneshot/chat UI and the Monitor: goal, model chain, KPIs, live chat, diff, events, hijack candidates, and an embedded PTY terminal. Hosted variants can maximize to the viewport. | `runId`, `variant`, `initialTab`, `hijackNodeId`, `defaultMaximized`, `onClose` |
-| `HijackCandidateButton` | A candidate-aware Hijack/Reopen trigger for hosts embedding `OneshotSurface`; it uses the provider Gateway URL, auth, and polling internally and only renders for a resumable node session. | `runId`, `nodeId`, `runStatus`, `nodeLive`, `onOpen` |
+| `RunSurface` | The generic single-run surface used by the standalone chat UI and the Monitor: status KPIs, live chat, diff, events, and a hijack terminal tab. Hosted variants can maximize to the viewport. | `runId`, `variant`, `initialTab`, `hijackNodeId`, `title`, `defaultMaximized`, `onClose` |
+| `HijackCandidateButton` | A candidate-aware Hijack/Reopen trigger for hosts embedding `RunSurface`; it uses the provider Gateway URL, auth, and polling internally and only renders for a resumable node session. | `runId`, `nodeId`, `runStatus`, `nodeLive`, `onOpen` |
 | `SimpleWorkflowDashboard` | A complete one-workflow dashboard: prompt box + Start button, run list, node tree, structured event log, a live per-node chat pane (click a node to follow it), and a `MonitorButton` header link. The one-component UI. | `workflow`, `title`, `promptPlaceholder`, `inputFromPrompt`, `runLimit` |
 | `WorkflowUiShell` | The standard page scaffold: injects the style guide, renders a topbar (title, meta, actions), and wraps your content. | `title`, `meta`, `actions` |
 | `WorkflowUiStyles` | Just the shared style-guide `<style>` block, when you bring your own layout. | `mode`, `extra` |
