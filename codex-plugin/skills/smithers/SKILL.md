@@ -11,10 +11,9 @@ description: >-
   environment you are ALREADY a worker agent inside a Smithers node — never
   invoke the Smithers CLI or MCP tools to launch or steer a run, just do the
   node's task directly with your ordinary tools; every rule below applies only
-  when it is unset. HARD RULE 1: right-size the route FIRST, handle a
-  most-trivial edit directly, run a clear well-scoped single-agent task through
-  `smithers oneshot`, and reserve a full workflow for work that genuinely needs
-  ordered stages, durability, approvals, loops, or reuse. A workflow that runs
+  when it is unset. HARD RULE 1: right-size the route FIRST, handle a clear
+  well-scoped single-goal task directly, and reserve a full workflow for work
+  that genuinely needs ordered stages, durability, approvals, loops, or reuse. A workflow that runs
   long, fans out, or pauses on approvals should get a live custom UI at
   .smithers/ui/<key>.tsx (composed from the smthrs/gateway-ui +
   smthrs/ui component libraries over the gateway-react hooks,
@@ -37,9 +36,9 @@ Smithers sets that variable on every agent it spawns. This rule overrides every
 routing rule below. Do the node's task directly with your ordinary tools (read,
 edit, shell) and finish your turn.
 
-- Never launch or steer a run from inside a node: no `smithers oneshot`, no
-  `smithers up`, no `smithers workflow run`, no status-poll-and-sleep loop, and
-  none of the Smithers MCP tools that start or watch runs.
+- Never launch or steer a run from inside a node: no `smithers up`, no
+  `smithers workflow run`, no status-poll-and-sleep loop, and none of the
+  Smithers MCP tools that start or watch runs.
 - The prompt you were handed IS the work. It is never a request to orchestrate,
   even when it reads like one ("review this diff", "implement this feature").
 - The one exception is escalating upward: `smithers ask-human` (or the
@@ -52,12 +51,10 @@ Everything below this section applies only when `SMITHERS_INSIDE_RUN` is unset.
 ## Right-size the route first
 
 Use the lightest route that preserves the durability the task needs: handle a
-most-trivial one-off edit directly; run a clear, well-scoped goal one strong
-agent can finish in one context window through `smithers oneshot "<goal>"`
-(durable background run, optional reviewer, no workflow file to author); and
-reserve a full workflow for work that genuinely needs ordered stages, human
-approvals, loops with verified exits, several agents with different tools,
-schedules, or reuse. Structure is a cost: the shipped OrchBench benchmark
+clear, well-scoped single-goal task directly, at any size, with no workflow file
+to author; and reserve a full workflow for work that genuinely needs ordered
+stages, human approvals, loops with verified exits, several agents with
+different tools, schedules, or reuse. Structure is a cost: the shipped OrchBench benchmark
 measured a solo frontier agent OUTSCORING a three-model review panel at half
 the wall clock, so add nodes for named risks, not ceremony.
 
