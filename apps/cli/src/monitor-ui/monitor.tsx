@@ -34,7 +34,7 @@ import {
   type UseGatewayRunTreeResult,
 } from "smthrs/gateway-react";
 import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smthrs/gateway-client";
-import { HijackCandidateButton, OneshotSurface, WorkflowUiStyles } from "smthrs/gateway-ui";
+import { HijackCandidateButton, RunSurface, WorkflowUiStyles } from "smthrs/gateway-ui";
 import {
   Alert,
   AlertDescription,
@@ -4941,11 +4941,11 @@ function NodeInspector({
         </Chip>
       </header>
       {hijackSession ? (
-        // The hand-off surface is the shared oneshot UI (goal, KPIs, chat,
-        // diff, events, and the PTY terminal), opened on its terminal tab and
+        // The hand-off surface is the shared run UI (KPIs, chat, diff,
+        // events, and the PTY terminal), opened on its terminal tab and
         // maximizable to fill the viewport — the monitor owns no hijack markup
         // of its own.
-        <OneshotSurface
+        <RunSurface
           runId={runId}
           variant="overlay"
           initialTab="terminal"
@@ -6257,7 +6257,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-modal-head .mon-kicker { flex: 1; }
 .mon-modal-frame { flex: 1; border: 0; width: 100%; background: var(--bg); }
 
-/* PTY hand-off: the shared <OneshotSurface> owns the terminal and its chrome;
+/* PTY hand-off: the shared <RunSurface> owns the terminal and its chrome;
    the monitor only sizes and themes the panel it renders into. */
 .mon-hijack-surface { padding: var(--sp-2) var(--sp-3); background: var(--surface); color: var(--text); outline-color: var(--ring-border); }
 

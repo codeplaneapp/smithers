@@ -17,15 +17,6 @@ export const RUN_STATUS_RECENT_WINDOW_MS = 10 * 60 * 1000;
 /** Bottleneck stays a few ids, never a wall. */
 const MAX_BOTTLENECK_NODES = 3;
 const MAX_ERROR_SNIPPET_CHARS = 70;
-const ONESHOT_CONTROL_EVENT_TYPES = [
-  "OneshotSteerQueued",
-  "OneshotSteerDelivered",
-  "OneshotSteerAcknowledged",
-  "OneshotSteerFailed",
-  "OneshotRestartRequested",
-  "OneshotRestartLaunched",
-  "OneshotRestartFailed",
-];
 
 /**
  * @param {unknown} value
@@ -229,7 +220,6 @@ export function parseFrameDependsOn(xmlJson) {
  * @property {{ parkedCount: number; parkedNodeIds: string[]; resetAtMs: number | null } | null} quota
  * @property {{ operation: string; opId: string | null; crossedCount: number; blockingCount: number; revertibleCount: number; warningCount: number; lateCompletion: boolean; archivedByOp: string | null; timestampMs: number } | undefined} [attention]
  * @property {{ operation: string; warningCount: number; timestampMs: number } | undefined} [information]
- * @property {{ kind: "steer" | "restart"; status: string; messageId?: string; restartedAsRunId?: string; error?: string; timestampMs: number } | undefined} [oneshotControl]
  * @property {{ harness?: string; sessionId?: string; detected?: true } | undefined} [startedBy]
  * @property {number | null} startedAtMs
  * @property {number | null} finishedAtMs
@@ -696,40 +686,6 @@ function latestWarningEffectBoundaryInformation(rows) {
   return undefined;
 }
 
-/** @param {any[][]} groups @returns {RunStatusSummary["oneshotControl"]} */
-function latestOneshotControl(groups) {
-  const latest = groups
-    .flat()
-    .sort((left, right) => (right.timestampMs ?? 0) - (left.timestampMs ?? 0) || (right.seq ?? 0) - (left.seq ?? 0))[0];
-  if (!latest) return undefined;
-  const payload = parseObjectJson(latest.payloadJson);
-  const timestampMs = parseNumber(payload.timestampMs) ?? parseNumber(latest.timestampMs) ?? Date.now();
-  if (String(latest.type).startsWith("OneshotSteer")) {
-    const status =
-      typeof payload.delivery === "string"
-        ? payload.delivery
-        : latest.type === "OneshotSteerAcknowledged"
-          ? "agent-acked"
-          : "unknown";
-    return {
-      kind: "steer",
-      status,
-      ...(typeof payload.messageId === "string" ? { messageId: payload.messageId } : {}),
-      ...(typeof payload.error === "string" ? { error: payload.error } : {}),
-      timestampMs,
-    };
-  }
-  const status =
-    latest.type === "OneshotRestartLaunched" ? "launched" : latest.type.endsWith("Failed") ? "failed" : "requested";
-  return {
-    kind: "restart",
-    status,
-    ...(typeof payload.restartedAsRunId === "string" ? { restartedAsRunId: payload.restartedAsRunId } : {}),
-    ...(typeof payload.error === "string" ? { error: payload.error } : {}),
-    timestampMs,
-  };
-}
-
 /**
  * Load the rows `summarizeRunStatus` needs and derive the summary.
  *
@@ -761,23 +717,21 @@ export async function buildRunStatusSummary(adapter, runId, options = {}) {
       return null;
     }
   };
-  const [nodes, attempts, lastFrame, forcedBoundaryEvents, liveness, finishedEvents, ...oneshotControlEventGroups] =
-    await Promise.all([
-      adapter.listNodes(runId),
-      adapter.listAttemptsForRun(runId),
-      adapter.getLastFrame(runId),
-      adapter.listEventsByType(runId, "SideEffectBoundaryCrossed"),
-      // Same derivation `ps` uses, so the two commands can never disagree about
-      // whether a run is alive. A liveness probe that throws must not sink the
-      // whole summary — fall back to the row-only classification.
-      computeRunStateFromRow(adapter, livenessRun, options.nowMs != null ? { now: options.nowMs } : {}).catch(
-        rowOnlyLiveness,
-      ),
-      // listEventsByType returns a RunnableEffect on some adapters, not a bare
-      // Promise — normalize before attaching the fallback or `.catch` explodes.
-      Promise.resolve(adapter.listEventsByType(runId, "RunFinished")).catch(() => []),
-      ...ONESHOT_CONTROL_EVENT_TYPES.map((type) => adapter.listEventsByType(runId, type)),
-    ]);
+  const [nodes, attempts, lastFrame, forcedBoundaryEvents, liveness, finishedEvents] = await Promise.all([
+    adapter.listNodes(runId),
+    adapter.listAttemptsForRun(runId),
+    adapter.getLastFrame(runId),
+    adapter.listEventsByType(runId, "SideEffectBoundaryCrossed"),
+    // Same derivation `ps` uses, so the two commands can never disagree about
+    // whether a run is alive. A liveness probe that throws must not sink the
+    // whole summary — fall back to the row-only classification.
+    computeRunStateFromRow(adapter, livenessRun, options.nowMs != null ? { now: options.nowMs } : {}).catch(
+      rowOnlyLiveness,
+    ),
+    // listEventsByType returns a RunnableEffect on some adapters, not a bare
+    // Promise — normalize before attaching the fallback or `.catch` explodes.
+    Promise.resolve(adapter.listEventsByType(runId, "RunFinished")).catch(() => []),
+  ]);
   const finishedPayload = parseEventPayloadJson(finishedEvents?.at(-1)?.payloadJson);
   const failedChildren =
     Number.isSafeInteger(finishedPayload?.failedChildren) && finishedPayload.failedChildren > 0
@@ -799,12 +753,10 @@ export async function buildRunStatusSummary(adapter, runId, options = {}) {
   });
   const attention = latestForcedEffectBoundaryAttention(forcedBoundaryEvents ?? []);
   const information = latestWarningEffectBoundaryInformation(forcedBoundaryEvents ?? []);
-  const oneshotControl = latestOneshotControl(oneshotControlEventGroups);
   return {
     ...summary,
     ...(attention ? { attention } : {}),
     ...(information ? { information } : {}),
-    ...(oneshotControl ? { oneshotControl } : {}),
   };
 }
 
@@ -881,14 +833,6 @@ export function renderRunStatusHuman(summary) {
     lines.push(
       `${label("Info")}${summary.information.operation} recorded ${count} side-effect warning${count === 1 ? "" : "s"}; no crossing was forced`,
     );
-  }
-  if (summary.oneshotControl) {
-    const target =
-      summary.oneshotControl.kind === "restart" && summary.oneshotControl.restartedAsRunId
-        ? ` · ${summary.oneshotControl.restartedAsRunId}`
-        : "";
-    const error = summary.oneshotControl.error ? ` · ${summary.oneshotControl.error}` : "";
-    lines.push(`${label("Control")}${summary.oneshotControl.kind} ${summary.oneshotControl.status}${target}${error}`);
   }
   return lines.join("\n");
 }

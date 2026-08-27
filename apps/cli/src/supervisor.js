@@ -10,7 +10,7 @@ import { SmithersError } from "@smthrs/errors";
 import { isTerminalClaudeMirrorRunStatus } from "./claude-mirror/isTerminalClaudeMirrorRunStatus.js";
 import { findAndOpenDb } from "./find-db.js";
 import { resumeRunDetached, resumeRunDetachedLogFile } from "./resume-detached.js";
-import { buildBuiltinRelaunch, describeResumeTarget, resolveResumeTarget } from "./resume-target.js";
+import { describeResumeTarget, resolveResumeTarget } from "./resume-target.js";
 /** @typedef {import("./RunAutoResumeSkipReason.ts").RunAutoResumeSkipReason} RunAutoResumeSkipReason */
 /** @typedef {import("./ResumeTarget.ts").ResumeTarget} ResumeTarget */
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
@@ -380,9 +380,9 @@ function emitSkipEventEffect(options, runId, reason) {
 /** Policy name of the durable alert raised when auto-resume is abandoned. */
 export const SUPERVISOR_GAVE_UP_ALERT_POLICY = "supervisor_auto_resume_gave_up";
 // Alert messages are capped at DB_ALERT_MESSAGE_MAX_LENGTH (4096) by the db
-// layer. The give-up diagnostic embeds the manual resume command, which for a
-// built-in oneshot contains the whole goal, so truncate rather than let the
-// insert throw and lose the alert entirely.
+// layer. The give-up diagnostic embeds the manual resume command and a log
+// tail, so truncate rather than let the insert throw and lose the alert
+// entirely.
 const GIVE_UP_ALERT_MESSAGE_MAX_LENGTH = 2048;
 
 /**
@@ -489,10 +489,7 @@ function giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorAttempts,
       return "skipped";
     }
     const logFile = resumeRunDetachedLogFile(target, run.runId);
-    const manualResumeArgs =
-      target.kind === "workflow-file"
-        ? ["up", target.workflowPath, "--resume", "--run-id", run.runId, "--force"]
-        : buildBuiltinRelaunch(target, { runId: run.runId, resume: true }).args;
+    const manualResumeArgs = ["up", target.workflowPath, "--resume", "--run-id", run.runId, "--force"];
     const manualResumeCommand = ["smithers", ...manualResumeArgs].map(shellQuoteArg).join(" ");
     const logTail = options.deps.readDetachedLogTail(logFile);
     const errorInfo = {

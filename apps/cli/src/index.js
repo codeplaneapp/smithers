@@ -189,24 +189,6 @@ import { aggregateNodeDetailEffect, renderNodeDetailHuman } from "./node-detail.
 import { diagnoseRunEffect, diagnosisCtaCommands, renderWhyDiagnosisHuman } from "./why-diagnosis.js";
 import { buildRunStatusSummary, renderRunStatusHuman, runStatusCtaCommands } from "./run-status.js";
 import { detectAvailableAgents, formatNoUsableAgentsMessage } from "./agent-detection.js";
-import { buildOneshotWorkflow } from "./oneshot/buildOneshotWorkflow.js";
-import { buildOneshotChildArgs } from "./oneshot/buildOneshotChildArgs.js";
-import { findActiveRunsInCwd } from "./oneshot/findActiveRunsInCwd.js";
-import { loadOneshotConfig } from "./oneshot/loadOneshotConfig.js";
-import { saveOneshotConfig } from "./oneshot/saveOneshotConfig.js";
-import { resolveOneshotChain } from "./oneshot/resolveOneshotChain.js";
-import { classifyOneshotGoal } from "./oneshot/classifyOneshotGoal.js";
-import { rewriteOneshotBooleanValues } from "./oneshot/rewriteOneshotBooleanValues.js";
-import { resolveOneshotResumeSettings } from "./oneshot/resolveOneshotResumeSettings.js";
-import { selectOneshotAgents } from "./oneshot/selectOneshotAgents.js";
-import { createOneshotMonitorControl } from "./oneshot/monitor-control.js";
-import { oneshotCta } from "./oneshot/oneshotCta.js";
-import {
-  assessWorkingCopy,
-  buildPreflightNotice,
-  needsPreflightNotice,
-  preflightConfigEntry,
-} from "./oneshot-preflight.js";
 import { listAccounts, removeAccount } from "@smthrs/accounts";
 import { getUsageForAccounts, formatUsageReports, readClaudeCredentials } from "@smthrs/usage";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
@@ -291,12 +273,7 @@ import {
 import { findAndOpenSupervisorDb, parseDurationMs, supervisorLoopEffect, supervisorPollEffect } from "./supervisor.js";
 import { DEFAULT_LIFECYCLE_EVENT_TYPES, renderAttemptPool, tallyAttemptPool } from "./observability-helpers.js";
 import { buildDurabilityRunOptions } from "./up-engine-options.js";
-import {
-  BUILTIN_RESUME_CONFIG_KEY,
-  buildBuiltinRelaunch,
-  buildBuiltinResumeConfig,
-  resolveResumeTarget,
-} from "./resume-target.js";
+import { resolveResumeTarget } from "./resume-target.js";
 import { WATCH_MIN_INTERVAL_MS, runWatchLoop, watchIntervalSecondsToMs } from "./watch.js";
 import { runMcpModeIfRequested } from "./mcp/mcp-mode.js";
 import {
@@ -3050,58 +3027,6 @@ const interactiveRunOption = z
     "Pick a workflow and its inputs through interactive terminal prompts, then launch the full-screen TUI monitor for the run (TTY only)",
   );
 const upRunOptions = upOptions.extend({ interactive: interactiveRunOption });
-const oneshotArgs = z.object({
-  goal: z.string().optional().describe("Goal to complete; required unless using --status or a preference setter"),
-});
-const oneshotOptions = z
-  .object({
-    goalFile: z.string().optional().describe("Read a long goal from a file"),
-    model: z.string().optional().describe("Model slot or canonical model id"),
-    agent: z
-      .enum(["codex", "grok", "kimi", "claude-code", "opencode", "pi"])
-      .optional()
-      .describe("Force an agent engine"),
-    review: z.enum(["on", "off"]).optional().describe("Review preference for this run"),
-    setReview: z.enum(["on", "off"]).optional().describe("Persist the review preference"),
-    setTrivial: z.enum(["direct", "oneshot"]).optional().describe("Persist trivial-task routing"),
-    status: z.boolean().default(false).describe("Print usable agents, model chain, and preferences as JSON"),
-    cwd: z.string().default(".").describe("Working directory for the task"),
-    preflight: z
-      .enum(["auto", "warn", "off", "force-commit"])
-      .default("auto")
-      .describe(
-        "Dirty-working-copy preflight: auto warns and has the agent triage the tree first, warn only warns, off skips it, force-commit lets the agent snapshot the tree even while another run works in the same cwd",
-      ),
-    runId: z.string().optional().describe("Run ID to create or resume (used by `smithers supervise` to recover a run)"),
-    resume: z
-      .boolean()
-      .default(false)
-      .describe("Resume the existing run named by --run-id instead of starting a new one"),
-    force: z.boolean().default(false).describe("With --resume, resume even when the run still looks active"),
-    stealOwnership: z
-      .boolean()
-      .default(false)
-      .describe("With --resume, attach even though the run still has a live driver. --force does NOT grant this"),
-    resumeClaimOwner: z.string().optional().describe("Internal durable resume claim owner"),
-    resumeClaimHeartbeat: z.number().int().min(1).optional().describe("Internal durable resume claim heartbeat"),
-    resumeRestoreOwner: z.string().optional().describe("Internal durable resume restore owner"),
-    resumeRestoreHeartbeat: z.number().int().min(1).optional().describe("Internal durable resume restore heartbeat"),
-    detach: z.boolean().default(true).describe("Run in the background; pass false for foreground"),
-    open: z.boolean().default(true).describe("Open the run UI after launch"),
-    startedByHarness: z
-      .string()
-      .optional()
-      .describe("Launch harness attribution (durably stored; environment may fill this when omitted)"),
-    startedBySession: z
-      .string()
-      .optional()
-      .describe("Launch harness session attribution (durably stored; environment may fill this when omitted)"),
-    startedByPrompt: z
-      .string()
-      .optional()
-      .describe("Explicit launch-context attribution (durably stored; never inferred from the goal)"),
-  })
-  .extend({ interactive: interactiveRunOption });
 const evalOptions = z.object({
   cases: z.string().describe("JSON or JSONL eval case file"),
   suite: z.string().optional().describe("Stable suite ID used in run IDs and report paths"),
@@ -3892,23 +3817,8 @@ async function deriveResumeWorkflowPath(runId) {
       { runId, workflowPath: run.workflowPath, configJson: run.configJson },
       { workflowExists: (workflowPath) => existsSync(workflowPath) },
     );
-    if (target?.kind === "workflow-file") {
+    if (target) {
       return { workflowPath: target.workflowPath };
-    }
-    if (target?.kind === "builtin") {
-      let relaunchArgs;
-      try {
-        relaunchArgs = buildBuiltinRelaunch(target, { runId, resume: true }).args;
-      } catch {
-        relaunchArgs = [target.command, ...target.args];
-      }
-      return {
-        error: {
-          code: "RUN_NOT_RESUMABLE_HERE",
-          message: `Run ${runId} was started by built-in \`smithers ${target.command}\` and has no workflow file; resume it with:\n  smithers ${relaunchArgs.join(" ")}`,
-          exitCode: 4,
-        },
-      };
     }
     return {
       error: {
@@ -5411,9 +5321,8 @@ async function resolveSupervisorObservationSource(c) {
 const MONITOR_UI_MOUNT_PATH = "/monitor";
 /**
  * `smithers monitor` — open the Smithers Monitor, a live web UI over every
- * run in this workspace. A focused built-in oneshot opens its dedicated
- * transcript/steer/restart surface; other runs use the all-runs page served at
- * /monitor.
+ * run in this workspace, served at /monitor. An optional run id focuses that
+ * run.
  */
 async function runMonitorCommand(c) {
   const fail = (code, message) => c.error({ code, message, exitCode: 1 });
@@ -5423,32 +5332,13 @@ async function runMonitorCommand(c) {
   }
   const { base, token } = resolved;
   const runId = c.args.runId;
-  let oneshot = false;
-  if (runId) {
-    const response = await fetch(`${base}/v1/api/runs/${encodeURIComponent(runId)}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    }).catch(() => null);
-    if (response?.ok) {
-      const body = await response.json().catch(() => null);
-      const run = body?.data ?? body;
-      let config;
-      try {
-        config = typeof run?.configJson === "string" ? JSON.parse(run.configJson) : run?.configJson;
-      } catch {
-        config = null;
-      }
-      oneshot = config?.[BUILTIN_RESUME_CONFIG_KEY]?.command === "oneshot";
-    }
-  }
-  const url = oneshot
-    ? `${base}/workflows/oneshot?runId=${encodeURIComponent(runId)}`
-    : `${base}${MONITOR_UI_MOUNT_PATH}${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`;
+  const url = `${base}${MONITOR_UI_MOUNT_PATH}${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`;
   const primaryBase = reachableGatewayUrls(base)[0] ?? base;
   const browserUrl = gatewayBrowserHandoffUrl(primaryBase, rebaseGatewayUrl(url, primaryBase), token);
   const opened = c.options.open ? openInBrowser(browserUrl) : false;
   const printedUrl = printBrowserGatewayUrl({ label: "Monitor URL:", base, url, token, opened });
   return c.ok(
-    { opened, url: printedUrl, gateway: base, runId: runId ?? null, view: oneshot ? "oneshot" : "all-runs" },
+    { opened, url: printedUrl, gateway: base, runId: runId ?? null, view: "all-runs" },
     {
       cta: {
         description: "The monitor shows every run this gateway owns, live.",
@@ -6015,11 +5905,6 @@ async function runGatewayCommand(options) {
         env: { ...process.env, FORCE_COLOR: process.env.FORCE_COLOR ?? "1" },
       };
     };
-    const oneshotMonitor = createOneshotMonitorControl({
-      cliEntry,
-      cancelRun: (adapter, runId) => cascadeCancelRun(adapter, runId),
-    });
-    backendCleanups.push(() => oneshotMonitor.dispose());
     /** @type {(workflowKey: string) => Promise<void>} */
     let refreshWorkflowRegistry = async () => {};
     gateway = new Gateway({
@@ -6051,7 +5936,6 @@ async function runGatewayCommand(options) {
         ? { ui: { entry: monitorUiEntry, path: "/monitor", title: "Smithers Monitor" } }
         : {}),
       hijackPty,
-      oneshotMonitor,
     });
     const workspaceApi = await openSmithersBackend(
       {},
@@ -6091,7 +5975,7 @@ async function runGatewayCommand(options) {
       for (const discovered of discoveredWorkflows) {
         gateway.register(discovered.id, readOnlyWorkflow, {
           system: discovered.system,
-          ui: discovered.id === "oneshot" ? { entry: ONESHOT_UI_ENTRY, title: "Oneshot" } : true,
+          ui: true,
         });
         workflows.push(discovered.id);
       }
@@ -6108,21 +5992,13 @@ async function runGatewayCommand(options) {
         workflows.push("workspace");
       }
     }
-    // A discovered oneshot is an intentional workspace override. Do not let
-    // the built-in shell claim the key before its module can load.
-    if (!gateway.workflows.has("oneshot") && !discoveredWorkflows.some((discovered) => discovered.id === "oneshot")) {
-      gateway.register("oneshot", workspaceWorkflow, {
-        ui: { entry: ONESHOT_UI_ENTRY, title: "Oneshot" },
-      });
-      workflows.push("oneshot");
-    }
     // `chat-create` persists one-task auto-hijacked runs directly instead of
     // discovering a workflow module. Register a DB-backed shell under its
     // persisted workflow name so `smithers ui <chatRunId>` resolves to the
-    // same shared oneshot/hijack surface.
+    // shared run/hijack surface.
     if (!gateway.workflows.has("chat") && !discoveredWorkflows.some((discovered) => discovered.id === "chat")) {
       gateway.register("chat", workspaceWorkflow, {
-        ui: { entry: ONESHOT_UI_ENTRY, title: "Chat" },
+        ui: { entry: CHAT_UI_ENTRY, title: "Chat" },
       });
       workflows.push("chat");
     }
@@ -8656,19 +8532,7 @@ function cliCancellationAttribution(detail) {
 const CLI_DESCRIPTION =
   "Durable AI workflow orchestrator. Run, monitor, and manage workflow executions. " +
   "--json is accepted on every command as shorthand for `--format json`; after events, timeline, tree, diff, output, rewind, snapshots, and restore it is command-scoped and emits that command's raw JSON payload instead.";
-const ONESHOT_UI_ENTRY = fileURLToPath(new URL("./oneshot/oneshot-ui.tsx", import.meta.url));
-
-/** @param {string} runId @param {string} cwd */
-function openOneshotUi(runId, cwd) {
-  const openerSpawn = smithersRuntimeSpawn([fileURLToPath(import.meta.url), "ui", runId, "--workflow", "oneshot"]);
-  const opener = spawn(openerSpawn.command, openerSpawn.args, {
-    cwd,
-    detached: true,
-    stdio: "ignore",
-    env: process.env,
-  });
-  opener.unref();
-}
+const CHAT_UI_ENTRY = fileURLToPath(new URL("./chat/chat-ui.tsx", import.meta.url));
 
 /** @param {import("./DiscoveredWorkflow.ts").DiscoveredWorkflow} discovered */
 function workflowGatewayRegistration(discovered, listenerRegistry, env = process.env) {
@@ -8686,16 +8550,7 @@ function workflowGatewayRegistration(discovered, listenerRegistry, env = process
     }
     webhook = { secret, source: "github" };
   }
-  if (discovered.id !== "oneshot") {
-    return { system: discovered.system, entryFile: discovered.entryFile, ...(webhook ? { webhook } : {}) };
-  }
-  const conventionUi = discovered.packDir ? join(discovered.packDir, "ui", "oneshot.tsx") : undefined;
-  return {
-    system: discovered.system,
-    entryFile: discovered.entryFile,
-    ui: { entry: conventionUi && existsSync(conventionUi) ? conventionUi : ONESHOT_UI_ENTRY, title: "Oneshot" },
-    ...(webhook ? { webhook } : {}),
-  };
+  return { system: discovered.system, entryFile: discovered.entryFile, ...(webhook ? { webhook } : {}) };
 }
 
 function applyListenerIngressConfig(gateway, listenerRegistry, env = process.env) {
@@ -8789,489 +8644,6 @@ const cli = Cli.create({
         }
       }
       return runInitCommand(c, fail);
-    },
-  })
-  // =========================================================================
-  // smithers oneshot [goal]
-  // =========================================================================
-  .command("oneshot", {
-    description: "Run one well-scoped goal with a strong agent in the background, with optional review and a live UI.",
-    args: oneshotArgs,
-    options: oneshotOptions,
-    alias: { detach: "d" },
-    async run(c) {
-      const fail = makeFail(c);
-      if (
-        !c.options.goalFile &&
-        typeof c.args.goal === "string" &&
-        Buffer.byteLength(c.args.goal, "utf8") > CLI_TEXT_ARGUMENT_MAX_LENGTH
-      ) {
-        return fail({
-          code: "ONESHOT_GOAL_TOO_LARGE",
-          message: "Inline goals above 64KB must be supplied with --goal-file <path>.",
-          exitCode: 4,
-        });
-      }
-      const taskCwd = resolve(process.cwd(), c.options.cwd);
-      if (!existsSync(taskCwd))
-        return fail({ code: "PATH_NOT_FOUND", message: `Path does not exist: ${taskCwd}`, exitCode: 4 });
-      if (!statSync(taskCwd).isDirectory())
-        return fail({ code: "PATH_NOT_DIRECTORY", message: `Path is not a directory: ${taskCwd}`, exitCode: 4 });
-      let config = loadOneshotConfig();
-      if (c.options.setReview) {
-        config = { ...config, review: c.options.setReview, announced: true };
-        saveOneshotConfig(config);
-      }
-      if (c.options.setTrivial) {
-        config = { ...config, trivial: c.options.setTrivial, announced: true };
-        saveOneshotConfig(config);
-      }
-      const detections = detectAvailableAgents(process.env, { cwd: taskCwd });
-      const relevant = detections.filter((item) => ["claude", "codex", "kimi", "opencode", "pi"].includes(item.id));
-      const usable = relevant.filter((item) => item.usable && !item.deprecated);
-      if (c.options.status) {
-        let chain = [];
-        try {
-          chain = resolveOneshotChain(detections, {
-            model: c.options.model,
-            agent: c.options.agent,
-            goal: c.args.goal,
-          });
-        } catch (error) {
-          if (c.options.model || c.options.agent) {
-            return fail({
-              code: error instanceof SmithersError ? error.code : "ONESHOT_MODEL_FAILED",
-              message: error?.message ?? String(error),
-              exitCode: 4,
-            });
-          }
-        }
-        return c.ok({
-          usableAgents: usable.map((item) => item.id),
-          taskType: classifyOneshotGoal(c.args.goal),
-          chain,
-          preferences: { review: config.review, trivial: config.trivial },
-          announced: config.announced,
-        });
-      }
-      let goal = c.args.goal;
-      let goalFile = c.options.goalFile ? resolve(process.cwd(), c.options.goalFile) : undefined;
-      if (goalFile) {
-        try {
-          goal = readFileSync(goalFile, "utf8");
-        } catch (error) {
-          return fail({ code: "GOAL_FILE_READ_FAILED", message: error?.message ?? String(error), exitCode: 4 });
-        }
-      }
-      let resumeSettings;
-      if (c.options.resume) {
-        if (!c.options.runId) {
-          return fail({
-            code: "ONESHOT_RESUME_RUN_ID_REQUIRED",
-            message: "Pass --run-id to resume an existing oneshot run.",
-            exitCode: 4,
-          });
-        }
-        let cleanup;
-        try {
-          const opened = await findAndOpenDb(taskCwd);
-          cleanup = opened.cleanup;
-          const run = await opened.adapter.getRun(c.options.runId);
-          if (!run) {
-            return fail({
-              code: "RUN_NOT_FOUND",
-              message: `Run not found: ${c.options.runId}`,
-              exitCode: 4,
-            });
-          }
-          resumeSettings = resolveOneshotResumeSettings(run.configJson);
-          if (!resumeSettings) {
-            return fail({
-              code: "ONESHOT_RESUME_CONFIG_MISSING",
-              message: `Run ${c.options.runId} does not contain a complete persisted oneshot goal.`,
-              exitCode: 4,
-            });
-          }
-        } catch (error) {
-          return fail({
-            code: error instanceof SmithersError ? error.code : "ONESHOT_RESUME_LOAD_FAILED",
-            message: error?.message ?? String(error),
-            exitCode: 4,
-          });
-        } finally {
-          cleanup?.();
-        }
-
-        const changed = [
-          goal?.trim() && goal !== resumeSettings.goal ? "goal" : null,
-          c.options.review !== undefined && c.options.review !== resumeSettings.review ? "review" : null,
-          c.options.model !== undefined && c.options.model !== resumeSettings.model ? "model" : null,
-          c.options.agent !== undefined && c.options.agent !== resumeSettings.agent ? "agent" : null,
-        ].filter(Boolean);
-        if (changed.length > 0) {
-          return fail({
-            code: "ONESHOT_RESUME_INPUT_MISMATCH",
-            message: `Cannot change persisted oneshot ${changed.join(", ")} while resuming; omit the override or start a new run.`,
-            exitCode: 4,
-          });
-        }
-        goal = resumeSettings.goal;
-        goalFile ??= resumeSettings.goalFile;
-      }
-      if (!goal?.trim()) {
-        if (c.options.setReview || c.options.setTrivial) return c.ok({ preferences: config });
-        return fail({
-          code: "ONESHOT_GOAL_REQUIRED",
-          message: "Provide a goal or --goal-file, or use --status/--set-review/--set-trivial alone.",
-          exitCode: 4,
-        });
-      }
-      if (usable.length === 0)
-        return fail({ code: "NO_USABLE_AGENTS", message: formatNoUsableAgentsMessage(relevant), exitCode: 4 });
-      const model = resumeSettings?.model ?? c.options.model;
-      const agent = resumeSettings?.agent ?? c.options.agent;
-      const review = (resumeSettings?.review ?? c.options.review ?? config.review ?? "off") === "on";
-      const localPack = resolvePackDirs(taskCwd).find((entry) => entry.scope === "local");
-      const overrideEntry = localPack ? join(localPack.packDir, "workflows", "oneshot.tsx") : undefined;
-      const hasOverride = Boolean(overrideEntry && existsSync(overrideEntry));
-      const effectiveRunId =
-        c.options.runId ??
-        process.env.SMITHERS_ONESHOT_RUN_ID ??
-        `oneshot-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
-      // Dirty-working-copy preflight. The agent runs directly in `--cwd`, so a
-      // tree that already carries foreign work will have it swept into the
-      // agent's commits. Warn the operator, and in `auto` mode make triaging
-      // that work the agent's first job.
-      const preflightMode = c.options.resume ? "off" : c.options.preflight;
-      const preflightSummary = preflightMode === "off" ? null : assessWorkingCopy(taskCwd);
-      // Concurrent runs in one cwd. "Pre-existing work" is only pre-existing if
-      // no other run is producing it. Three oneshot runs sharing a cwd on
-      // 2026-08-13 each treated the others' in-flight diffs as inert and
-      // committed them (bug 01kzzaqfx1g9qaefqxrderdz4m). `force-commit` is the
-      // explicit opt-in to the old behavior. Read-only and soft: an unreadable
-      // store yields no active runs and the launch proceeds as before.
-      const activeRunsInCwd =
-        preflightMode === "off" || preflightMode === "force-commit"
-          ? []
-          : await (async () => {
-              let opened;
-              try {
-                opened = await findAndOpenDb(taskCwd);
-              } catch {
-                return [];
-              }
-              try {
-                return await findActiveRunsInCwd(opened.adapter, taskCwd, { excludeRunId: effectiveRunId });
-              } catch {
-                return [];
-              } finally {
-                await opened.cleanup?.();
-              }
-            })();
-      const preflightNotice =
-        preflightSummary && (needsPreflightNotice(preflightSummary) || activeRunsInCwd.length > 0)
-          ? buildPreflightNotice(preflightSummary, effectiveRunId, activeRunsInCwd)
-          : null;
-      if (preflightNotice) {
-        runSync(
-          Effect.logWarning(preflightNotice.warning).pipe(
-            Effect.annotateLogs({
-              runId: effectiveRunId,
-              cwd: taskCwd,
-              ...preflightSummary.dirty,
-              detachedHead: preflightSummary.detachedHead,
-              ...(activeRunsInCwd.length > 0
-                ? { activeRunsInCwd: activeRunsInCwd.map((run) => run.runId).join(",") }
-                : {}),
-            }),
-          ),
-        );
-        process.stderr.write(`${preflightNotice.warning}\n`);
-      }
-      // Only the branches that actually build the workflow prepend the
-      // preamble: a detached launch re-runs this command in the child, which
-      // assesses the same tree itself.
-      const goalForWorkflow =
-        preflightNotice && (preflightMode === "auto" || preflightMode === "force-commit")
-          ? `${preflightNotice.preamble}\n\n${goal}`
-          : goal;
-      if (c.options.interactive) {
-        if (!Boolean(process.stdin.isTTY && process.stdout.isTTY)) {
-          return fail({
-            code: "INTERACTIVE_REQUIRES_TTY",
-            message: "--interactive needs an interactive terminal (TTY).",
-            exitCode: 4,
-          });
-        }
-        return runTuiCommand(
-          {
-            ...c,
-            options: {
-              ...upOptions.parse({}),
-              interactive: true,
-              runId: c.options.runId,
-              resume: c.options.resume,
-              force: c.options.force,
-              stealOwnership: c.options.stealOwnership,
-              resumeClaimOwner: c.options.resumeClaimOwner,
-              resumeClaimHeartbeat: c.options.resumeClaimHeartbeat,
-              resumeRestoreOwner: c.options.resumeRestoreOwner,
-              resumeRestoreHeartbeat: c.options.resumeRestoreHeartbeat,
-              startedByHarness: c.options.startedByHarness,
-              startedBySession: c.options.startedBySession,
-              startedByPrompt: c.options.startedByPrompt,
-            },
-          },
-          fail,
-          {
-            cwd: taskCwd,
-            preselect: {
-              id: "oneshot",
-              displayName: "Oneshot",
-              description: goal,
-              entryFile: hasOverride ? overrideEntry : ONESHOT_UI_ENTRY,
-            },
-            suppliedInput: {},
-            buildDetachedArgs: ({ indexPath }) =>
-              buildOneshotChildArgs({
-                cliPath: indexPath,
-                goal,
-                goalFile,
-                cwd: taskCwd,
-                review: review ? "on" : "off",
-                model,
-                agent,
-                preflight: preflightMode,
-                runId: c.options.runId,
-                resume: c.options.resume,
-                force: c.options.force,
-                stealOwnership: c.options.stealOwnership,
-                resumeClaimOwner: c.options.resumeClaimOwner,
-                resumeClaimHeartbeat: c.options.resumeClaimHeartbeat,
-                resumeRestoreOwner: c.options.resumeRestoreOwner,
-                resumeRestoreHeartbeat: c.options.resumeRestoreHeartbeat,
-                open: false,
-                startedByHarness: c.options.startedByHarness,
-                startedBySession: c.options.startedBySession,
-                startedByPrompt: c.options.startedByPrompt,
-              }),
-            childEnv: ({ runId }) => ({ SMITHERS_ONESHOT_RUN_ID: runId }),
-          },
-        );
-      }
-      if (c.options.detach) {
-        await reapDetachedRunLogs({ cwd: taskCwd });
-        const logFile = resolveDetachedRunLogFile(effectiveRunId, { cwd: taskCwd });
-        mkdirSync(dirname(logFile), { recursive: true });
-        const childArgs = buildOneshotChildArgs({
-          cliPath: fileURLToPath(import.meta.url),
-          goal,
-          goalFile,
-          cwd: taskCwd,
-          review: review ? "on" : "off",
-          model,
-          agent,
-          preflight: preflightMode,
-          runId: c.options.runId,
-          resume: c.options.resume,
-          force: c.options.force,
-          stealOwnership: c.options.stealOwnership,
-          resumeClaimOwner: c.options.resumeClaimOwner,
-          resumeClaimHeartbeat: c.options.resumeClaimHeartbeat,
-          resumeRestoreOwner: c.options.resumeRestoreOwner,
-          resumeRestoreHeartbeat: c.options.resumeRestoreHeartbeat,
-          open: c.options.open,
-          startedByHarness: c.options.startedByHarness,
-          startedBySession: c.options.startedBySession,
-          startedByPrompt: c.options.startedByPrompt,
-        });
-        const admissionNonce = crypto.randomUUID();
-        const fd = openSync(logFile, "a");
-        let child;
-        try {
-          const oneshotSpawn = smithersRuntimeSpawn(childArgs);
-          child = spawn(oneshotSpawn.command, oneshotSpawn.args, {
-            cwd: taskCwd,
-            detached: true,
-            stdio: ["ignore", fd, fd],
-            env: {
-              ...process.env,
-              SMITHERS_ONESHOT_RUN_ID: effectiveRunId,
-              [DETACHED_RUN_LOG_FILE_ENV]: logFile,
-              [DETACHED_ADMISSION_NONCE_ENV]: admissionNonce,
-            },
-          });
-        } finally {
-          closeSync(fd);
-        }
-        child.unref();
-        const admission = await waitForDetachedAdmission({ child, logFile, nonce: admissionNonce });
-        if (!admission.admitted) {
-          terminateUnadmittedChild(child);
-          const tail = admission.tail.trimEnd();
-          const message = `${admission.reason}\nDetached child log (${logFile}):\n${tail || "(empty)"}`;
-          process.stderr.write(`${message}\n`);
-          return fail({ code: "DETACHED_ADMISSION_FAILED", message, exitCode: 1 });
-        }
-        return c.ok(
-          { runId: effectiveRunId, pid: child.pid, logFile, workflowName: "oneshot" },
-          {
-            cta: oneshotCta(effectiveRunId, taskCwd),
-          },
-        );
-      }
-      if (hasOverride) {
-        if (c.options.open) openOneshotUi(effectiveRunId, taskCwd);
-        const overrideContext = {
-          ...c,
-          ok: (data) => c.ok(data, { cta: oneshotCta(effectiveRunId, taskCwd) }),
-        };
-        return executeUpCommand(
-          overrideContext,
-          overrideEntry,
-          {
-            ...upOptions.parse({}),
-            runId: effectiveRunId,
-            resume: c.options.resume,
-            force: c.options.force,
-            stealOwnership: c.options.stealOwnership,
-            resumeClaimOwner: c.options.resumeClaimOwner,
-            resumeClaimHeartbeat: c.options.resumeClaimHeartbeat,
-            resumeRestoreOwner: c.options.resumeRestoreOwner,
-            resumeRestoreHeartbeat: c.options.resumeRestoreHeartbeat,
-            input: JSON.stringify({
-              goal: goalForWorkflow,
-              review: review ? "on" : "off",
-              model: model ?? "auto",
-            }),
-            root: taskCwd,
-            startedByHarness: c.options.startedByHarness,
-            startedBySession: c.options.startedBySession,
-            startedByPrompt: c.options.startedByPrompt,
-          },
-          fail,
-          {
-            oneshot: {
-              review,
-              goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal,
-              preflight: preflightConfigEntry(preflightMode, preflightSummary, activeRunsInCwd),
-            },
-          },
-        );
-      }
-      try {
-        const selected = await selectOneshotAgents(detections, {
-          cwd: taskCwd,
-          model,
-          agent,
-          goal,
-        });
-        const workflow = await buildOneshotWorkflow({
-          cwd: taskCwd,
-          goal: goalForWorkflow,
-          agents: selected.agents,
-          reviewAgents: selected.reviewAgents,
-          review,
-        });
-        setupSqliteCleanup(workflow);
-        if (c.options.open) openOneshotUi(effectiveRunId, taskCwd);
-        const detachedLogFile = process.env[DETACHED_RUN_LOG_FILE_ENV];
-        startDetachedRunLogRotation({ logFile: detachedLogFile });
-        delete process.env[DETACHED_RUN_LOG_FILE_ENV];
-        const startedBy = resolveCliStartedBy({
-          harness: c.options.startedByHarness,
-          sessionId: c.options.startedBySession,
-          prompt: c.options.startedByPrompt,
-        });
-        // Oneshot builds its workflow in-process from the selected agent chain,
-        // so there is no `.tsx` for `supervise` to re-run. Record the argv that
-        // reconstructs it instead; without this a detached oneshot that loses
-        // its engine can never be auto-resumed (it was skipped forever with
-        // "workflow file not found at (missing path)").
-        let builtinResumeGoalArgs = [goal];
-        // Same ceiling the launch path enforces on an inline goal. A goal that
-        // launches but is re-inlined into the resume argv above the CLI's own
-        // limit is a run that executes once and can never be resumed, so both
-        // sides read one constant.
-        if (Buffer.byteLength(goal, "utf8") > CLI_TEXT_ARGUMENT_MAX_LENGTH) {
-          const smithersHome =
-            process.env.SMITHERS_HOME ||
-            (process.env.HOME ? resolve(process.env.HOME, ".smithers") : resolve(taskCwd, ".smithers"));
-          const resumeGoalDir = resolve(smithersHome, "resume-goals");
-          const resumeGoalPath = resolve(
-            resumeGoalDir,
-            `${crypto.createHash("sha256").update(effectiveRunId).digest("hex")}.txt`,
-          );
-          mkdirSync(resumeGoalDir, { recursive: true });
-          writeFileSync(resumeGoalPath, goal, { mode: 0o600 });
-          builtinResumeGoalArgs = ["--goal-file", resumeGoalPath];
-        }
-        const builtinResume = buildBuiltinResumeConfig({
-          command: "oneshot",
-          args: [
-            ...builtinResumeGoalArgs,
-            "--cwd",
-            taskCwd,
-            "--detach",
-            "false",
-            // A resume re-enters an existing run: never re-open the UI.
-            "--open",
-            "false",
-            "--review",
-            review ? "on" : "off",
-            "--preflight",
-            preflightMode,
-            ...(model ? ["--model", model] : []),
-            ...(agent ? ["--agent", agent] : []),
-          ],
-          cwd: taskCwd,
-        });
-        const resumeClaim =
-          c.options.resumeClaimOwner && c.options.resumeClaimHeartbeat
-            ? {
-                claimOwnerId: c.options.resumeClaimOwner,
-                claimHeartbeatAtMs: c.options.resumeClaimHeartbeat,
-                restoreRuntimeOwnerId: c.options.resumeRestoreOwner ?? null,
-                restoreHeartbeatAtMs: c.options.resumeRestoreHeartbeat ?? null,
-              }
-            : undefined;
-        const result = await Effect.runPromise(
-          runWorkflow(workflow, {
-            input: {},
-            runId: effectiveRunId,
-            rootDir: taskCwd,
-            config: {
-              ...(detachedLogFile ? { logFile: detachedLogFile } : {}),
-              oneshot: {
-                chain: selected.chain,
-                review,
-                goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal,
-                preflight: preflightConfigEntry(preflightMode, preflightSummary, activeRunsInCwd),
-              },
-              [BUILTIN_RESUME_CONFIG_KEY]: builtinResume,
-            },
-            ...buildDurabilityRunOptions({
-              resume: c.options.resume,
-              force: c.options.force,
-              stealOwnership: c.options.stealOwnership,
-            }),
-            resumeClaim,
-            startedBy,
-            onProgress: buildProgressReporter(),
-            signal: setupAbortSignal().signal,
-          }),
-        );
-        process.exitCode = formatStatusExitCode(result.status);
-        return c.ok(summarizeRunResult(result), {
-          cta: result.runId ? oneshotCta(result.runId, taskCwd) : undefined,
-        });
-      } catch (error) {
-        return fail({
-          code: error instanceof SmithersError ? error.code : "ONESHOT_FAILED",
-          message: error?.message ?? String(error),
-          exitCode: 1,
-        });
-      }
     },
   })
   .command("add", {
@@ -13104,12 +12476,9 @@ const cli = Cli.create({
   // =========================================================================
   .command("monitor", {
     description:
-      "Open the Smithers Monitor: a live web UI over every run in this workspace. A focused built-in oneshot opens its transcript, steering, restart, and cheap narrator controls. Starts the workspace Gateway automatically if none is running; pass --no-autostart or --gateway <url> to opt out.",
+      "Open the Smithers Monitor: a live web UI over every run in this workspace. Starts the workspace Gateway automatically if none is running; pass --no-autostart or --gateway <url> to opt out.",
     args: z.object({
-      runId: z
-        .string()
-        .optional()
-        .describe("Focus this run; built-in oneshots open their dedicated transcript, steer, and restart monitor."),
+      runId: z.string().optional().describe("Focus this run in the monitor."),
     }),
     options: z.object({
       cwd: workspaceCwdOption,
@@ -14212,7 +13581,6 @@ async function main() {
   argv = rewriteEventsJsonFlagArgv(argv);
   argv = rewriteDevtoolsJsonFlagArgv(argv);
   argv = rewriteTimelineJsonFlagArgv(argv);
-  argv = rewriteOneshotBooleanValues(argv);
   if (await runRawJsonTimelineCommandIfMatched(argv)) {
     return;
   }

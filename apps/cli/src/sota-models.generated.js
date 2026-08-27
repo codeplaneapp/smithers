@@ -291,7 +291,7 @@ export const SOTA_MODELS = Object.freeze([
     ],
     "badges": [],
     "roles": [],
-    "description": "xAI's current Grok Build default and latest frontier model. Smithers uses this exact id for the Grok CLI and oneshot fallback rung; the CLI also accepts API-key authentication through XAI_API_KEY. See the official Grok Build model catalog and CLI documentation."
+    "description": "xAI's current Grok Build default and latest frontier model. Smithers uses this exact id for the Grok CLI; the CLI also accepts API-key authentication through XAI_API_KEY. See the official Grok Build model catalog and CLI documentation."
   },
   {
     "id": "gemini-3.1-pro-preview",

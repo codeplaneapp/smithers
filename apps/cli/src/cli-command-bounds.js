@@ -12,11 +12,6 @@ const CLI_HANDLER_BOUNDS_WRAPPED = Symbol("smithers.cliHandlerBoundsWrapped");
  * @param {string} value
  */
 export function validateCliStringArgument(path, value) {
-  // Oneshot validates its positional goal by UTF-8 bytes in the command
-  // handler so oversized input can return actionable --goal-file guidance.
-  if (path === "args.goal") {
-    return;
-  }
   // Strip array indices, keep the last dotted segment as the field name.
   const trimmed = path.replace(/\[\d+\]/g, "");
   const lastDot = trimmed.lastIndexOf(".");

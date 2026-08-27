@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildBuiltinRelaunch } from "./resume-target.js";
 import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
 import { smithersRuntimeSpawn } from "./node-loader/smithersRuntimeSpawn.js";
 
@@ -21,22 +20,14 @@ function normalizeResumeTarget(target) {
 }
 
 /**
- * Argv (after the CLI entry path) that resumes `runId` for a given target.
- *
- * A workflow-file run resumes through `up <file> --resume`. A built-in run has
- * no file, so it re-runs its own recorded subcommand with the run-identity
- * flags appended — `smithers oneshot <goal…> --run-id <id> --resume --force`.
- * Both end up in the same engine resume path; only the way the workflow object
- * is reconstructed differs.
+ * Argv (after the CLI entry path) that resumes `runId` for a given target
+ * through `up <file> --resume`.
  *
  * @param {ResumeTarget} target
  * @param {string} runId
  * @returns {string[]}
  */
 export function buildResumeArgs(target, runId) {
-  if (target.kind === "builtin") {
-    return buildBuiltinRelaunch(target, { runId, resume: true }).args;
-  }
   return ["up", target.workflowPath, "--resume", "--run-id", runId, "-d", "--force"];
 }
 

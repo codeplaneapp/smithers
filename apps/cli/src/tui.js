@@ -2180,7 +2180,7 @@ export async function runTuiCommand(
         runId,
         workflowId: workflow.id,
         entryFile: workflow.entryFile,
-        uiExists: workflow.id === "oneshot" || customUiExists(workflow.id, launchCwd),
+        uiExists: customUiExists(workflow.id, launchCwd),
       })) {
         log.message(pc.dim("  ") + line);
       }

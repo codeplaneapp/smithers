@@ -18,14 +18,13 @@ export async function openInlineWorkflowStore(cwd, schemas) {
   // Ask the shared resolver, not a marker file. Reading `.smithers/migrated.json`
   // directly used to override `--backend sqlite`, `SMITHERS_BACKEND=sqlite`, and
   // a `backend` field in smithers.config.ts, so once a workspace had ever been
-  // migrated to pglite there was no way to run an inline workflow in it at all
-  // and `smithers oneshot` was permanently unavailable there.
+  // migrated to pglite there was no way to run an inline workflow in it at all.
   const { backend, source } = await resolveSmithersBackendPreference({ cwd });
   if (backend !== "sqlite")
     throw new SmithersError(
       "BACKEND_MISMATCH",
       `This workspace's store is ${backend} (selected by ${source}), but inline workflows currently support only sqlite. ` +
-        `Pin sqlite for this workspace to run inline workflows such as \`smithers oneshot\`: set SMITHERS_BACKEND=sqlite, ` +
+        `Pin sqlite for this workspace to run inline workflows such as \`smithers chat-create\`: set SMITHERS_BACKEND=sqlite, ` +
         `add \`backend: "sqlite"\` to .smithers/smithers.config.ts, or write {"backend":"sqlite"} to .smithers/backend.json.`,
     );
   const sqlite = new Database(resolve(anchorDir ?? cwd, "smithers.db"));

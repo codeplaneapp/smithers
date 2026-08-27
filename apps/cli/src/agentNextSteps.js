@@ -44,10 +44,6 @@ function buildHumanNextSteps(context = {}) {
     commands.push({ command: `graph ${workflowFile}`, description: "Diagram how this workflow runs" });
   }
   commands.push({
-    command: 'oneshot "<goal>"',
-    description: "Run a clear single-agent task in the background, no workflow file",
-  });
-  commands.push({
     command: 'make-workflow "<describe the workflow>"',
     description: "Build your own workflow from a description",
   });
@@ -106,9 +102,8 @@ export function buildAgentNextSteps(context = {}) {
   const runRef = runId ?? "<runId>";
   const uiFile = `.smithers/ui/${workflowId ?? "<workflowId>"}.tsx`;
   const buildWorkflowLine =
-    "Ask the user clarifying questions about what they want next, then route it by size: " +
-    'a clear single-agent task runs as `smithers oneshot "<goal>"` (background, durable, no workflow file); ' +
-    'genuinely multi-stage / approval-gated / reusable work goes through `smithers workflow run create-workflow --prompt "<what the workflow should do>"` (or `smithers make-workflow`).';
+    "Ask the user clarifying questions about what they want next, then build or iterate a workflow for it " +
+    'through `smithers workflow run create-workflow --prompt "<what the workflow should do>"` (or `smithers make-workflow`).';
   const commands = [];
   const lines = ["Suggest to the user:"];
   if (uiOpened) {
@@ -159,10 +154,6 @@ export function buildAgentNextSteps(context = {}) {
     step += 1;
     lines.push(`${step}. ${buildWorkflowLine}`);
   }
-  commands.push({
-    command: 'oneshot "<goal>"',
-    description: "Run a clear single-agent task in the background, no workflow file",
-  });
   commands.push({
     command: 'workflow run create-workflow --prompt "<describe the workflow>"',
     description: "Have smithers build a new workflow from a description",
