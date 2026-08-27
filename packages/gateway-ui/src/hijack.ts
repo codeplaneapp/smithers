@@ -6,7 +6,7 @@
  * serves an interactive hand-off over the /v1/pty/hijack websocket, which
  * spawns `smithers hijack <runId> --target <nodeId>` in a real PTY. These
  * helpers decide when a host shows the affordance and build the websocket URL;
- * the terminal itself lives in ./OneshotSurface.tsx.
+ * the terminal itself lives in ./RunSurface.tsx.
  */
 
 import { normalizeStatus } from "@smthrs/ui";

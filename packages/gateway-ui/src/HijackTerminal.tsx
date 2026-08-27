@@ -100,7 +100,7 @@ export function HijackTerminal({ runId, nodeId, onStatus, style }: HijackTermina
 
   return (
     <Terminal
-      data-testid="oneshot-hijack-terminal"
+      data-testid="hijack-terminal"
       style={{ height: "100%", minHeight: 320, ...style }}
       onReady={(instance) => {
         terminalRef.current = instance;

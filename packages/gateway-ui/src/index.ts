@@ -120,11 +120,11 @@ export { GatewayCheckpointControls, type GatewayCheckpointControlsProps } from "
 export { SmithersCanvasNode, SmithersNodeHandles } from "./SmithersCanvasNode";
 export {
   HijackCandidateButton,
-  OneshotSurface,
+  RunSurface,
   type HijackCandidateButtonProps,
-  type OneshotSurfaceProps,
-  type OneshotSurfaceTab,
-} from "./OneshotSurface";
+  type RunSurfaceProps,
+  type RunSurfaceTab,
+} from "./RunSurface";
 export { HijackTerminal, type HijackTerminalProps } from "./HijackTerminal";
 export {
   hijackActionFor,

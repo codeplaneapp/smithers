@@ -26,7 +26,7 @@ Component map:
   selection), `NodeChatStream`, `GatewayApprovalList` (`ApprovalPanel` is its
   compatibility alias), `LaunchButton`,
   `WorkflowPicker`, `ConnectionBadge`, `NodeOutputView`, `NodeOutputCard`.
-- `OneshotSurface` composes the oneshot run view; `HijackTerminal` owns its PTY
+- `RunSurface` composes the single-run view; `HijackTerminal` owns its PTY
   websocket and terminal adapter.
 - `SimpleWorkflowDashboard` — the batteries-included composition of the above.
 - `WorkflowGraph` — an n8n-style ReactFlow + dagre DAG canvas built from a

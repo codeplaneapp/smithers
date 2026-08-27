@@ -246,14 +246,6 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
         const runId = decodeURIComponent(hijackCandidatesMatch[1]!);
         return ok({ candidates: state.hijackCandidates[runId] ?? [] });
       }
-      // POST /v1/api/runs/:id/oneshot-monitor/:action (attach | steer | restart)
-      const oneshotControlMatch = path.match(/^\/v1\/api\/runs\/([^/]+)\/oneshot-monitor\/([a-z]+)$/);
-      if (oneshotControlMatch && request.method === "POST") {
-        const action = oneshotControlMatch[2]!;
-        if (action === "attach") return ok({ narrator: true });
-        if (action === "steer") return ok({ status: "queued", messageId: "steer-1" });
-        return ok({ restartedAsRunId: "run-restarted" });
-      }
       // POST /v1/api/runs (launchRun)
       if (path === "/v1/api/runs" && request.method === "POST") {
         const body = (await request.json().catch(() => ({}))) as {
