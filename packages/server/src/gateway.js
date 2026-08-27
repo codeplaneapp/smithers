@@ -1909,9 +1909,6 @@ function requiredScopeForMethod(method, registry) {
   if (method.startsWith("config.")) {
     return "run:admin";
   }
-  if (method.startsWith("oneshotMonitor")) {
-    return "run:write";
-  }
   if (registry && isExtensionMethod(method)) {
     const extScope = registry.requiredScopeForMethod(method);
     if (extScope) {
@@ -2365,9 +2362,6 @@ const RUN_SCOPED_GATEWAY_METHODS = new Set([
   "streamDevTools",
   "listHijackCandidates",
   "hijackRun",
-  "oneshotMonitorAttach",
-  "oneshotMonitorSteer",
-  "oneshotMonitorRestart",
   "rewindRun",
   "jumpToFrame",
   "devtools.jumpToFrame",
@@ -2703,9 +2697,6 @@ function apiMutationCollections(method) {
     case "resumeRun":
     case "cancelRun":
     case "rewindRun":
-    case "oneshotMonitorAttach":
-    case "oneshotMonitorSteer":
-    case "oneshotMonitorRestart":
       return apiCollections("runs", "run_events", "nodes", "node_outputs");
     case "submitApproval":
       return apiCollections("approvals", "runs", "run_events", "nodes");
@@ -3079,13 +3070,6 @@ export class Gateway {
     // /v1/pty/hijack websocket channel — the Gateway itself never guesses
     // how to resume an agent CLI session.
     this.hijackPty = typeof options.hijackPty === "function" ? options.hijackPty : null;
-    this.oneshotMonitor =
-      options.oneshotMonitor &&
-      typeof options.oneshotMonitor.attach === "function" &&
-      typeof options.oneshotMonitor.steer === "function" &&
-      typeof options.oneshotMonitor.restart === "function"
-        ? options.oneshotMonitor
-        : null;
     /** @type {Set<{ runId?: string; dispose: () => void }>} */
     this.ptySessions = new Set();
     // Set by close() so PTY teardown during shutdown does not spawn fresh
@@ -4761,25 +4745,6 @@ a { color: var(--brand); }</style>
         mutation: true,
       };
     }
-    const oneshotMonitorAction = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/oneshot-monitor\/(attach|steer|restart)$/);
-    if (httpMethod === "POST" && oneshotMonitorAction) {
-      const action = oneshotMonitorAction[2];
-      return {
-        method:
-          action === "attach"
-            ? "oneshotMonitorAttach"
-            : action === "steer"
-              ? "oneshotMonitorSteer"
-              : "oneshotMonitorRestart",
-        direct: "oneshotMonitor",
-        params: {
-          ...body,
-          runId: decodeURIComponent(oneshotMonitorAction[1]),
-          action,
-        },
-        mutation: true,
-      };
-    }
     const runHijackCandidates = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/hijack-candidates$/);
     if (httpMethod === "GET" && runHijackCandidates) {
       // HTTP-API-only read (no RPC method): which nodes of a run have a
@@ -5137,38 +5102,6 @@ a { color: var(--brand); }</style>
             }
             const attempts = await resolved.adapter.listAttemptsForRun(runId);
             return responseOk(requestId, { runId, candidates: hijackCandidatesFromAttempts(attempts) });
-          }
-          if (route.direct === "oneshotMonitor") {
-            const runId = asString(route.params.runId);
-            const action = asString(route.params.action);
-            if (!runId || !action) {
-              return responseError(requestId, "InvalidInput", "runId and monitor action are required");
-            }
-            if (!this.oneshotMonitor) {
-              return responseError(requestId, "InvalidInput", "Oneshot monitor controls are not configured");
-            }
-            const resolved = await this.resolveRun(runId);
-            if (!resolved) {
-              return responseError(requestId, "RunNotFound", `Run not found: ${runId}`);
-            }
-            try {
-              if (action === "attach") {
-                return responseOk(requestId, await this.oneshotMonitor.attach({ runId, adapter: resolved.adapter }));
-              }
-              if (action === "steer") {
-                const message = asString(route.params.message);
-                if (!message) {
-                  return responseError(requestId, "InvalidInput", "Steering message is required");
-                }
-                return responseOk(
-                  requestId,
-                  await this.oneshotMonitor.steer({ runId, message, adapter: resolved.adapter }),
-                );
-              }
-              return responseOk(requestId, await this.oneshotMonitor.restart({ runId, adapter: resolved.adapter }));
-            } catch (error) {
-              return responseError(requestId, "InvalidInput", error instanceof Error ? error.message : String(error));
-            }
           }
           return this.routeRequest(context, frame);
         });
