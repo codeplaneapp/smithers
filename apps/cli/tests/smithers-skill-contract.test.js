@@ -74,26 +74,15 @@ test("skill makes workflow tests an indivisible registered authoring rule", () =
   expect(skill).toContain("never substitutes for the registered test");
 });
 
-// Agents were overengineering large single-goal asks (make CI green, repo-wide
-// docs audits, dependency upgrades) into full workflows. The skill must keep
-// routing those to `smithers oneshot`: the scale claim (one strong agent
-// one-shots up to ~300k tokens, proven by real /goal prompts) and the
-// shape-not-size rule. The oneshot-routing eval suite pins the behavior
-// end-to-end; this pins the wording that makes it pass.
-test("skill routes large single-goal asks to oneshot, not workflows", () => {
-  const skill = readRepoFile("skills/smithers/SKILL.md");
-
-  expect(skill).toContain("Size does not pick the route; shape does.");
-  expect(skill).toMatch(/roughly 300k\s+tokens/);
-  // The old caps that pushed anything big into workflow authoring. (The skill
-  // may still MENTION context windows to refute them as a routing reason.)
-  expect(skill).not.toContain("fits in roughly 100k tokens");
-  expect(skill).not.toMatch(/finish\s+in one context window/);
-  // The plugin skill must carry the same routing doctrine (it had none).
-  const plugin = readRepoFile("claude-plugin/skills/smithers/SKILL.md");
-  expect(plugin).toContain("smithers oneshot");
-  expect(plugin).toContain("Size does not pick the route; shape does.");
-  expect(plugin).toMatch(/roughly 300k\s+tokens/);
+// `smithers oneshot` was removed. No skill may keep routing agents to it.
+test("skills no longer route to the removed oneshot command", () => {
+  for (const path of [
+    "skills/smithers/SKILL.md",
+    "claude-plugin/skills/smithers/SKILL.md",
+    "codex-plugin/skills/smithers/SKILL.md",
+  ]) {
+    expect(readRepoFile(path), path).not.toMatch(/oneshot/i);
+  }
 });
 
 test("smithers skill documents current agents command and LoopUntilScored source", () => {
@@ -113,8 +102,8 @@ test("smithers skill documents current agents command and LoopUntilScored source
 
 // Bug 01kzweq27e2645ty9x5yezkrwk: a review node dispatched a codex agent whose
 // harness had this skill installed. The "route any clear single-goal ask through
-// oneshot" rule hijacked the node's own prompt — the agent launched a CHILD
-// oneshot, polled `smithers status` in a sleep loop for ~30 minutes, then edited
+// smithers" rule hijacked the node's own prompt — the agent launched a CHILD
+// run, polled `smithers status` in a sleep loop for ~30 minutes, then edited
 // the tree it was told to review. Smithers now sets SMITHERS_INSIDE_RUN on every
 // agent it spawns; every skill that teaches orchestration must state the guard
 // FIRST, ahead of the routing rules it overrides.
@@ -133,7 +122,7 @@ test.each(ORCHESTRATION_SKILLS)("%s guards against recursing into Smithers from 
   expect(skill).toContain("SMITHERS_INSIDE_RUN");
   expect(skill).toMatch(/if you are already inside a smithers run, do not use smithers/i);
   // The guard must come before the routing rules it overrides, or an agent that
-  // reads top-down acts on "route this through oneshot" first.
+  // reads top-down acts on "route this through smithers" first.
   const guardIndex = skill.search(/##[^\n]*already inside a Smithers run/i);
   const routingIndex = skill.search(/^##[^\n]*(Right-size the route|Route first|Default)/im);
   expect(guardIndex).toBeGreaterThan(-1);

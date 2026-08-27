@@ -1933,8 +1933,8 @@ describe("monitor theme contract", () => {
   });
 });
 
-test("monitor delegates hijack UI to the shared maximizable oneshot surface", () => {
-  expect(monitorSource).toContain("<OneshotSurface");
+test("monitor delegates hijack UI to the shared maximizable run surface", () => {
+  expect(monitorSource).toContain("<RunSurface");
   expect(monitorSource).toContain('variant="overlay"');
   expect(monitorSource).toContain('initialTab="terminal"');
   expect(monitorSource).not.toContain("function HijackTerminal(");

@@ -258,51 +258,6 @@ test("approve --watch: 'y' approves the gate, then lingers on the terminal run",
   }
 }, 30_000);
 
-test("approve --watch: a committed built-in decision preserves its recorded auto-resume target", async () => {
-  const repo = createTempRepo();
-  const { sqlite, adapter } = openRepoDb(repo);
-  try {
-    const runId = "watch-resume-run";
-    await seedApprovalGate(adapter, runId, "gate");
-    const builtinResume = { command: "oneshot", args: ["watch built-in", "--agent", "codex"], cwd: repo.dir };
-    await adapter.updateRun(runId, {
-      workflowPath: null,
-      configJson: JSON.stringify({ builtinResume }),
-    });
-    const stdin = new PassThrough();
-    /** @type {string[]} */
-    const out = [];
-    /** @type {string[]} */
-    const resumeCalls = [];
-    const done = runApproveWatch({
-      adapter,
-      runId,
-      stdin,
-      emit: (t) => out.push(t),
-      pollIntervalMs: 40,
-      linger: async () => {},
-      resumeDetached: async (_adapter, run, id) => {
-        expect(run.workflowPath).toBeNull();
-        expect(JSON.parse(run.configJson).builtinResume).toEqual(builtinResume);
-        resumeCalls.push(id);
-        return { resumed: true };
-      },
-    });
-    await waitForText(() => out.join(""), "approval needed");
-    stdin.write("y");
-    await waitForText(() => out.join(""), "approved gate");
-    // The committed decision drove the auto-resume seam + a resuming notice.
-    await waitForText(() => out.join(""), `resuming ${runId}`);
-    expect(resumeCalls).toEqual([runId]);
-
-    await adapter.updateRun(runId, { status: "finished", finishedAtMs: Date.now() });
-    const result = await done;
-    expect(result.cancelled).toBe(false);
-  } finally {
-    sqlite.close();
-  }
-}, 30_000);
-
 test("approve --watch: a FAILED commit does NOT invoke resumeDetached (no false auto-resume)", async () => {
   const repo = createTempRepo();
   const { sqlite, adapter } = openRepoDb(repo);

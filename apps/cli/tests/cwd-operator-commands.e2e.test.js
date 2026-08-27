@@ -80,7 +80,7 @@ test("operator commands can target a run store outside the launching workspace",
   expect(cancel.json).toMatchObject({ runId, status: "cancelled" });
 });
 
-test("oneshot CTA commands expose an explicit workspace option", () => {
+test("run CTA commands expose an explicit workspace option", () => {
   const repo = createTempRepo();
   for (const command of ["ps", "status", "inspect", "chat", "hijack", "pause", "cancel", "ui", "monitor"]) {
     const help = runSmithers([command, "--help"], {

@@ -451,9 +451,9 @@ test("a discovered workspace workflow overrides the built-in fallback", async ()
   }
 }, 60_000);
 
-test("a discovered oneshot workflow overrides the built-in fallback", async () => {
+test("the built-in chat shell serves the shared run UI", async () => {
   const repo = createTempRepo();
-  writeTestWorkflow(repo, ".smithers/workflows/oneshot.tsx");
+  writeTestWorkflow(repo, ".smithers/workflows/hello.tsx");
   const { env } = makeStateDirEnv();
   const port = await findOpenPort();
   const gateway = await startGateway(repo, env, ["--port", String(port)]);
@@ -465,9 +465,8 @@ test("a discovered oneshot workflow overrides the built-in fallback", async () =
       body: JSON.stringify({}),
     });
     const body = await response.json();
-    const oneshot = body.payload.find((workflow) => workflow.key === "oneshot");
     const chat = body.payload.find((workflow) => workflow.key === "chat");
-    expect(oneshot).toBeDefined();
+    expect(body.payload.find((workflow) => workflow.key === "oneshot")).toBeUndefined();
     expect(chat).toMatchObject({
       hasUi: true,
       uiPath: "/workflows/chat",

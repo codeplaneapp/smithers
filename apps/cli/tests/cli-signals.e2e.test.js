@@ -264,7 +264,7 @@ testIfDeps(
   60_000,
 );
 
-// Regression: four detached oneshot engines died ~10 minutes in leaving
+// Regression: four detached engines died ~10 minutes in leaving
 // `engine-heartbeat-stale` and NO error in the run log — the last lines were
 // ordinary agent activity, so an operator could not tell "killed" from "hung".
 // SIGHUP was the unhandled case: Node's default action for it is silent

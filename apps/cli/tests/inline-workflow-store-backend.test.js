@@ -6,10 +6,10 @@ import { z } from "zod";
 import { openInlineWorkflowStore } from "../src/openInlineWorkflowStore.js";
 
 /**
- * Inline workflows (the machinery behind `smithers oneshot`) are sqlite-only.
+ * Inline workflows (the machinery behind `smithers chat-create`) are sqlite-only.
  * The refusal used to read `.smithers/migrated.json` directly, which outranked
- * every operator pin: once a workspace had been migrated to pglite, `oneshot`
- * could never run there again, and neither `SMITHERS_BACKEND=sqlite` nor a
+ * every operator pin: once a workspace had been migrated to pglite, inline
+ * workflows could never run there again, and neither `SMITHERS_BACKEND=sqlite` nor a
  * `backend` field in smithers.config.ts could talk it out of that. These tests
  * pin the precedence the shared resolver defines.
  */

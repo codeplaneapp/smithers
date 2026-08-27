@@ -41,14 +41,6 @@ describe("CLI command input bounds", () => {
     );
   });
 
-  test("defers only args.goal to oneshot's actionable byte-aware limit", () => {
-    const oversized = "g".repeat(CLI_TEXT_ARGUMENT_MAX_LENGTH + 1);
-    expect(() => assertCliArgumentBounds({ goal: oversized }, "args")).not.toThrow();
-    expect(() => assertCliArgumentBounds({ goal: oversized }, "options")).toThrow(
-      new RegExp(`maximum length of ${CLI_TEXT_ARGUMENT_MAX_LENGTH}`),
-    );
-  });
-
   test("recurses through arrays and keeps field-specific limits after array indexes", () => {
     expect(() =>
       assertCliArgumentBounds({ targets: [{ name: "n".repeat(CLI_IDENTIFIER_MAX_LENGTH + 1) }] }, "args"),

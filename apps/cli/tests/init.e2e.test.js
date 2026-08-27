@@ -330,7 +330,7 @@ test(
   INIT_INSTALL_TIMEOUT_MS,
 );
 test(
-  "smithers init --template keeps the curated scaffold and returns the starter's oneshot request",
+  "smithers init --template keeps the curated scaffold and returns the starter's create-workflow request",
   () => {
     const repo = createTempRepo();
     const env = buildInitEnv(repo.dir);
@@ -344,10 +344,10 @@ test(
     expect(repo.exists(".smithers/workflows/create-workflow.tsx")).toBe(true);
     expect(repo.exists(".smithers/workflows/implement.tsx")).toBe(false);
     expect(result.json.template.id).toBe("idea-to-tickets");
-    // Single-deliverable starters route to `smithers oneshot` (see
-    // starter-gallery.js), not to a create-workflow authoring run.
-    expect(result.json.template.workflow).toBe("oneshot");
-    expect(result.json.template.command).toStartWith("bunx smthrs oneshot ");
+    // Every starter is a request for the portable create-workflow builder
+    // (see starter-gallery.js).
+    expect(result.json.template.workflow).toBe("create-workflow");
+    expect(result.json.template.command).toStartWith("bunx smthrs workflow run create-workflow --prompt ");
     expect(result.json.install).toMatchObject({
       reason: "skip-install",
       status: "skipped",
