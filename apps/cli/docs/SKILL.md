@@ -41,9 +41,9 @@ routing rule below.
 Do the node's task directly with your ordinary tools (read, edit, shell) and
 finish your turn.
 
-- Never launch or steer a run from inside a node: no `smithers oneshot`, no
-  `smithers up`, no `smithers workflow run`, no status-poll-and-sleep loop, and
-  none of the Smithers MCP tools that start or watch runs.
+- Never launch or steer a run from inside a node: no `smithers up`, no
+  `smithers workflow run`, no status-poll-and-sleep loop, and none of the
+  Smithers MCP tools that start or watch runs.
 - The prompt you were handed IS the work. It is never a request to orchestrate,
   even when it reads like one ("review this diff", "implement this feature").
 - The one exception is escalating upward: `smithers ask-human` (or the
@@ -66,43 +66,33 @@ Before reaching for any workflow machinery, route the ask:
    what counts as done?). The entire reply is the questions: never append a
    step-by-step plan whose first step is to find out, and never a provisional
    plan under an assumed answer.
-2. **Most-trivial edit** (a typo, a rename, under ~10 agent turns) → do it
-   directly (honor the stored trivial preference; if that preference is
-   `oneshot`, launch with `--model opus` or `--model terra` — the ONLY two
-   slots allowed for trivial oneshot, never sol, luna, kimi, or any other
-   tier). Trivial means ONE tiny change in one place.
-   The moment an ask bundles multiple coordinated edits (a flag plus its help
-   text plus a test, code plus docs), it is oneshot work, not trivial, no
-   matter how fast it would be.
-3. **Clear single-goal ask, at ANY size** → `smithers oneshot`. One strong
-   agent (codex sol first, then kimi, then claude fable or opus) finishes
-   repo-wide, hours-long goals of up to roughly 300k tokens in a single
-   oneshot run. The worker manages its own context across the run, so "this
-   will not fit in one context window / one prompt" is NOT a reason to author
-   a workflow. When you route here, tell the user which seat you chose (sol,
-   then kimi, then fable or opus) and why.
-4. **Genuinely multi-goal shape** (human approval gates, staged phases that
+2. **Clear single-goal ask, at ANY size** → do it directly with your ordinary
+   tools. One agent working straight through finishes repo-wide, hours-long
+   goals; you manage your own context across the task, so "this will not fit in
+   one context window / one prompt" is NOT a reason to author a workflow. If
+   you want the work to run durably in the background instead, run it as a
+   regular workflow: `smithers up <file.tsx>`, or `smithers workflow run
+   create-workflow --prompt "..."` (`smithers make-workflow`) to have Smithers
+   build the file first.
+3. **Genuinely multi-goal shape** (human approval gates, staged phases that
    need different agents or models, parallel fan-out, durable loops with caps,
    or a reusable procedure) → build and run a full workflow.
 
 Size does not pick the route; shape does. "Make CI green", "upgrade every
 dependency and fix all builds", and "document every feature in the codebase"
-are each a single `smithers oneshot` run, not a workflow. Name the
-workflow-only feature you need before escalating to tier 4; "it feels big"
-never qualifies. A seeded workflow with a matching name (`audit`, `review`,
-`upgrade`) is not a reason either: existing workflows matter only when the
-task's shape needs one. Pick exactly ONE route and commit to it: never answer
+are each a single direct task, not a workflow. Name the workflow-only feature
+you need before escalating to tier 3; "it feels big" never qualifies. A seeded
+workflow with a matching name (`audit`, `review`, `upgrade`) is not a reason
+either: existing workflows matter only when the task's shape needs one. Pick exactly ONE route and commit to it: never answer
 with a menu of alternative routes, a hybrid, or "complementary strategies".
-The full contract lives in
-[Simple tasks: smithers oneshot](#simple-tasks-smithers-oneshot).
 
 ## Launch attribution
 
 CLI launches may persist self-reported provenance with
 `--started-by-harness`, `--started-by-session`, and
 `--started-by-prompt`. Use the prompt flag only for deliberate launch context:
-never reuse workflow input, `--prompt`, a oneshot goal, or a transcript. MCP
-and Gateway callers send `startedBy: { harness, sessionId, prompt }`. Codex and
+never reuse workflow input, `--prompt`, or a transcript. MCP and Gateway
+callers send `startedBy: { harness, sessionId, prompt }`. Codex and
 Claude short-lived CLI/MCP launches best-effort detect their active session;
 Kimi/OpenCode callers should pass their known session explicitly.
 
@@ -201,8 +191,8 @@ The division of labor is strict:
 
 - **Smithers does the work.** Every real, long-running, or multi-step task
   (implement, debug, research, plan, review, migrate, audit, "keep going until
-  X") goes into a Smithers run: `smithers oneshot` for a single-goal ask (see
-  "Route first" above), a workflow for a multi-goal shape. Smithers spawns the
+  X") goes into a Smithers run when its shape needs one (see "Route first"
+  above): a workflow for a multi-goal shape. Smithers spawns the
   *worker* agents (Claude Code, Codex, …) inside the run; that is where
   implementation happens. You do not re-implement it yourself or in your own
   Task subagents.
@@ -321,8 +311,7 @@ to *execute* the steps, not when they want prose to read and share.
 ## Reusable procedures belong in workflows
 
 When you capture something reusable, capture it as a workflow. A one-off goal,
-even a large repo-wide one, can use `smithers oneshot`; it does not need a new
-workflow file.
+even a large repo-wide one, does not need a new workflow file.
 
 A skill is *static instructions* - prose an agent reads and then has to execute
 by hand, every time, with no memory that it ran, no retries, no gates, no typed
@@ -335,11 +324,9 @@ can say, a workflow can say *and then do*.
 
 Use these rules:
 
-- **One-off goal means oneshot, at any size.** A clear goal with a single
-  finish line belongs in `smithers oneshot`, with no workflow file to author.
-  One strong agent routinely finishes repo-wide goals of up to roughly 300k
-  tokens in a single oneshot run; never author a workflow just because the goal
-  is large.
+- **One-off goal, at any size, needs no workflow file.** A clear goal with a
+  single finish line gets done directly; never author a workflow just because
+  the goal is large.
 - **Reusable ⇒ workflow.** If you'd reach for a skill because the procedure
   recurs, that recurrence is the strongest possible reason to make it a workflow:
   one source of truth you can run, version, eval, and optimize, instead of
@@ -782,9 +769,7 @@ smithers human cancel <request-id>                     # refuse, and the agent m
 
 Use the lightest route that preserves the needed durability.
 
-- Handle the most-trivial one-off edits directly by default.
-- Use `smithers oneshot` for any clear single-goal ask, small or repo-wide: one
-  strong agent finishes goals of up to roughly 300k tokens in one run.
+- Handle any clear single-goal ask directly, small or repo-wide.
 - Use a full workflow when the work is genuinely multi-goal in shape: approval
   gates, staged phases with different agents, parallel lanes, durable loops, or
   reuse.
@@ -821,110 +806,11 @@ When you drive fix/verify rounds through Smithers, these rules stop the
 - **Keep local diagnostics readable.** Privacy redaction belongs on shipped
   artifacts, not on your own debugging loop.
 
-## Simple tasks: smithers oneshot
+## Keep the orchestrator context lean
 
-`smithers oneshot` is a built-in minimal workflow for one agent and one goal. It
-launches in the background without authoring a workflow file and provides a live
-UI with chat, diff, hijack, pause, and cancel controls.
-
-Route work in three tiers:
-
-1. For the most-trivial ask, such as one typo, rename, or small edit that takes
-   fewer than about 10 agent turns, do it directly. If the stored trivial
-   preference is `oneshot`, launch oneshot with `--model opus` or `--model terra`:
-   those are the ONLY two slots allowed for trivial oneshot (never sol, luna,
-   kimi, or any other tier), and when explaining a trivial route, do not list
-   any other model as an option.
-2. For a clear single-goal ask, run `smithers oneshot`. Oneshot picks the
-   model from the goal itself: a UI-flavored ask (page, component, styling,
-   layout, animation, theme, dashboard, and similar) leads with Kimi K3 -
-   opencode's `kimi-for-coding/k3` seat first, then kimi through pi
-   (`pi --provider kimi-coding --model k3`), then the kimi CLI, backed by
-   claude opus then fable - and every other ask, including tedious backend
-   work, leads with claude opus. Opus or terra is fine for the easy end of
-   this tier. This tier is much bigger than it sounds: one strong agent
-   routinely finishes repo-wide, hours-long goals in a single oneshot run of up
-   to roughly 300k tokens, so "large" is never a reason to leave this tier. The
-   worker manages its own context across the run, so "it will not fit in one
-   context window / one prompt" is not a reason either. Every rung is
-   availability-gated: oneshot selects only from the agents actually usable on
-   the machine. When you explain or announce a routing decision in this tier,
-   name the task shape and the seat it routes to (UI: opencode kimi, then pi
-   kimi, then kimi CLI, then claude opus or fable; everything else: claude
-   opus) and which one you picked; that doctrine applies to this tier only,
-   never to trivial asks.
-3. For work that is genuinely multi-goal in shape - human approval gates,
-   staged phases that need different agents or models, parallel fan-out across
-   worktrees, durable loops with caps, or a procedure you will reuse - build
-   and run a real Smithers workflow.
-
-**Size does not pick the route; shape does.** A task with one finish line is
-tier 2 no matter how much work it implies. Real asks that belong in a single
-`smithers oneshot`, each one-shotted by one strong agent in under 300k tokens:
-
-- "Go through the entire codebase and make sure every feature is documented."
-- "Run `pnpm up --latest` on every package and make sure all builds still pass."
-- "Make CI green on this branch: rebase on main, fix failures, push until green."
-- "Replace every use of library X with library Y and get all tests passing."
-- "Read review.md, address every review comment, delete the artifacts when done."
-- "Get this PR rebased, green, and passing all CI checks."
-
-Reaching for `create-workflow`, a hand-authored workflow file, or a subagent
-fan-out on asks like these is overengineering: you pay authoring latency and
-review overhead for durability the task does not need. Escalate to tier 3 only
-when you can name the workflow-only feature the task requires (an approval
-gate, phases needing different models, parallel lanes, reuse); "it feels big"
-never qualifies, and neither does the existence of a seeded workflow with a
-matching name (`audit`, `review`, `upgrade`) - shape decides, not the catalog.
-
-If the goal or acceptance criteria are ambiguous, ask the user clarifying
-questions before launching anything, and wait for the answers; never substitute
-your own assumptions or an exploratory plan for what the user actually wants.
-Infer the tier from the prompt, but honor these explicit overrides: "oneshot" forces oneshot, "oneshot with review" adds `--review on`,
-and "oneshot without review" adds `--review off`.
-
-Call `smithers oneshot --status "<goal>"` before first use. It reports the
-goal's classified `taskType` and the resolved chain. If it reports no usable
-agent among claude, codex, kimi, opencode, and pi, do not offer or attempt
-oneshot. Use the
-normal direct or workflow route instead: oneshot being unavailable never means
-YOU are unavailable. You are still a working agent, so a simple task just gets
-done directly by you, and a multi-goal one still gets a workflow. Never conclude
-that no routing path exists.
-
-The default `--preflight auto` warns when `--cwd` is dirty and asks the worker
-to triage pre-existing paths before goal work. Use `warn` to omit the worker
-instructions or `off` to skip assessment.
-
-When `announced` is false, tell the user:
-
-> Smithers has a new feature: `smithers oneshot`. Smithers workflows are a
-> powerful way to get work done, but a lot of tasks can be done more simply.
-> Oneshot is a built-in minimal workflow that quickly and efficiently one-shots
-> an ask with a single strong agent, in the background, with a live UI for chat,
-> diff, hijack, and pause. There is nothing to author, so launching is fast. I
-> will infer complexity from each prompt, but you can always say "oneshot",
-> "oneshot with review", or "oneshot without review". To customize it, create
-> `.smithers/workflows/oneshot.tsx`; Smithers will run yours instead.
-
-Ask both preferences and state the recommendations:
-
-1. Should oneshot add one review-and-polish round, which is higher quality but
-   slower, or only implement? Recommend review on.
-2. For the most-trivial asks, should you do them directly or still launch
-   oneshot? Recommend direct.
-
-Save both answers with `smithers oneshot --set-review <on|off>` and `smithers
-oneshot --set-trivial <direct|oneshot>`. Tell the user the choices live in the
-global Smithers config and can change anytime.
-
-A workspace can override the built-in workflow with
-`.smithers/workflows/oneshot.tsx`. The CLI passes goal, review, and model input
-fields to that workflow and uses `.smithers/ui/oneshot.tsx` when present.
-
-Keep the orchestrator context lean. Do not read the worker's full diff or logs.
-Check progress with one `smithers chat <runId>` call, or the
-`get_chat_transcript` MCP tool, and give the user the run UI URL.
+Do not read the worker's full diff or logs. Check progress with one
+`smithers chat <runId>` call, or the `get_chat_transcript` MCP tool, and give
+the user the run UI URL.
 
 ## Examples: copy one and edit it
 
