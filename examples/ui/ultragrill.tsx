@@ -237,7 +237,7 @@ function App() {
       .map((e) => ({ seq: e.seq, idx: workerIndex(e.nodeId)!, state: classify(e.type) }));
   }, [events]);
   const latestWorkerIdx = workerActivity.length ? Math.max(...workerActivity.map((w) => w.idx)) : null;
-  // Worker output is fetched on a one-shot RPC; remount the pane whenever another
+  // Worker output is fetched with a single RPC; remount the pane whenever another
   // worker turn finishes so it re-reads the freshly-produced node output.
   const workerDoneCount = useMemo(
     () => new Set(workerActivity.filter((w) => w.state === "done").map((w) => w.idx)).size,

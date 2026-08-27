@@ -36,7 +36,7 @@ Set `durable` to `true` when the work genuinely needs at least one of:
 - **approval** — a human gate before continuing.
 - **loops** — iterate until a condition holds (e.g. implement until review passes).
 
-Set `durable` to `false` for a single, short, one-shot action a worker agent can
+Set `durable` to `false` for a single, short action a worker agent can
 finish in one pass — even if it touches files or runs a command. Bias toward
 `false` for genuinely small asks.
 

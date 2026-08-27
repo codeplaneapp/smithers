@@ -96,7 +96,7 @@ const contractSchema = z.looseObject({
 const routeSchema = z.looseObject({
   selectedRoute: z
     .enum(["single_task", "skills", "workflow", "manual"])
-    .describe("How the work is carried out: a one-shot task, a set of skills, a durable workflow, or hand to a human."),
+    .describe("How the work is carried out: a single task, a set of skills, a durable workflow, or hand to a human."),
   selectedSkills: z.array(z.string()).default([]).describe("Skills the executor should load, best-first."),
   selectedWorkflow: z
     .string()

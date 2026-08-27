@@ -48,8 +48,8 @@ const inputSchema = z.object({
 
 // 1. The classifier's verdict: what kind of task this is, and whether it needs a
 //    durable workflow (ordering, crash-recovery, approvals, loops) or can run as
-//    a single one-shot task. recommendedWorkflow is enum-enforced so a
-//    hallucinated workflow id fails validation instead of flowing downstream.
+//    a single task. recommendedWorkflow is enum-enforced so a hallucinated
+//    workflow id fails validation instead of flowing downstream.
 const classifySchema = z.looseObject({
   mode: z
     .enum([
