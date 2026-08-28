@@ -246,7 +246,6 @@
     "@milkdown/crepe": "7.21.2",
     "@xyflow/react": "^12.10.2",
     "dagre": "^0.8.5",
-    "electrobun": "^1.18.1",
-    "nanoid": "3.3.18"
+    "electrobun": "^1.18.1"
   }
 }
