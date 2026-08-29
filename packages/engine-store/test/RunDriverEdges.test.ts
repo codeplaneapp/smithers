@@ -774,6 +774,36 @@ describe("RunDriver cancellation paths", () => {
     }))
 
   /**
+   * X-11: the durable engine has ONE cancellation path.
+   *
+   * `interruptUnsafe` promises forced cancellation without cleanup, and the
+   * durable driver answered it with `interrupt` — a cooperative, durable,
+   * cascading cancellation that runs every finalizer. A caller reaching for
+   * the unsafe path to tear a wedged run down got the safe one and no
+   * indication that its request had been reinterpreted. rc.0 refuses it
+   * instead, so the feature cannot appear to half-work.
+   */
+  it.effect("refuses interruptUnsafe with a typed unsupported failure", () =>
+    Effect.gen(function*() {
+      const result = yield* withCrypto(provideJournal(Effect.gen(function*() {
+        const store = yield* RunStore.RunStore
+        const driver = yield* makeDriver()
+        yield* store.create("unsafe-interrupt", stateJson(EdgeFlow._tag))
+        const failure = yield* Effect.flip(driver.interruptUnsafe(EdgeFlow, "unsafe-interrupt"))
+        return { failure, row: yield* store.get("unsafe-interrupt") }
+      })))
+
+      expect(result.failure).toBeInstanceOf(FlowRuntime.CancelRequestFailed)
+      expect(result.failure.code).toBe("unsafe_interrupt_unsupported")
+      expect(result.failure.executionId).toBe("unsafe-interrupt")
+      expect(result.failure.reason).toContain("interrupt")
+      // The refusal changes nothing: no cancellation was requested, so the
+      // caller can still ask for the supported one.
+      expect(result.row.cancelRequestedAtMs).toBeNull()
+      expect(result.row.status).toBe("pending")
+    }))
+
+  /**
    * B-03, the other half: the sweep queries stop OFFERING a settled run's
    * timers, and the terminal transition stops leaving them pending in the
    * first place. Both matter — the in-memory state without a `runs` view

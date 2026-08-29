@@ -2150,7 +2150,27 @@ export const make = (
       execute,
       poll,
       interrupt,
-      interruptUnsafe: Effect.fn("FlowEngine.interruptUnsafe")(interrupt),
+      // The durable engine has ONE cancellation path (rc-contract §7). The
+      // port promises forced cancellation without cleanup; nothing here can
+      // deliver that — a durable run is closed by a fenced transition whose
+      // finalizers, cascade, and interruption record are the point — and
+      // answering with `interrupt` silently reinterpreted the caller's
+      // request as the safe one. Refusing is what keeps the excluded feature
+      // from appearing to half-work; `interrupt` is the supported request and
+      // is still available to the same caller. The memory engine, which does
+      // have two behaviors, is unchanged.
+      interruptUnsafe: Effect.fn("FlowEngine.interruptUnsafe")((
+        _flow: Flow.Any,
+        executionId: string
+      ) =>
+        Effect.fail(
+          new FlowRuntime.CancelRequestFailed({
+            code: "unsafe_interrupt_unsupported",
+            executionId,
+            reason:
+              "the durable engine has one cancellation path, interrupt, which is durable and cascades to linked children; interruptUnsafe would force cancellation without cleanup and is not supported"
+          })
+        )),
       resume: Effect.fn("FlowEngine.resume")((flow, executionId) =>
         Effect.annotateCurrentSpan({ executionId, flow: flow._tag }).pipe(
           Effect.andThen(scheduleResume(flow._tag, executionId, "operator")),
