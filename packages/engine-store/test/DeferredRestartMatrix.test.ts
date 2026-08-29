@@ -8,6 +8,7 @@ import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { TestClock } from "effect/testing"
 import * as DurableEngineState from "../src/DurableEngineState.ts"
@@ -601,5 +602,80 @@ describe("registration does not re-arm a settled run (B-03)", () => {
       // And the wake the live run did get was a real one: it re-entered the
       // handler and settled.
       expect(result.liveRow.status).toBe("completed")
+    }))
+})
+
+/**
+ * The same rule inside the in-memory state, which is what most engine tests
+ * and every embedded composition run on. It has no SQL to join, so it asks
+ * the `runs` view the composition gives it, exactly as `waitingRuns` does,
+ * and stays permissive when there is none.
+ */
+describe("the in-memory sweep queries skip settled runs (B-03)", () => {
+  const flowName = "DeferredRestart/Memory"
+  const runs = new Map<string, DurableEngineState.MemoryRunView>()
+  const state = DurableEngineState.makeMemory({
+    runs: (runId) => Option.fromNullishOr(runs.get(runId)),
+    listRuns: () => runs.entries()
+  })
+
+  const memoryOwner: Ownership.OwnerId = { hostId: "memory-host", pid: 9, nonce: "memory" }
+
+  /**
+   * The rows a run leaves behind, written the way a run writes them — a clock
+   * is owner-fenced, so it is scheduled while the run is still running under
+   * its owner — and then left in `status`.
+   */
+  const seed = (runId: string, status: RunStore.RunStatus) =>
+    Effect.gen(function*() {
+      runs.set(runId, { status: "running", owner: memoryOwner, heartbeatAtMs: 0 })
+      yield* state.completeDeferred({
+        flowName,
+        executionId: runId,
+        deferredName: "gate",
+        exit: Exit.void,
+        completedAtMs: 0
+      })
+      yield* state.scheduleClock({
+        flowName,
+        executionId: runId,
+        clockName: "clock",
+        deferredName: "gate",
+        dueAtMs: 1_000,
+        completedAtMs: null
+      }, memoryOwner)
+      runs.set(runId, { status, owner: null })
+    })
+
+  it.effect("lists a run that can still make progress and skips one that cannot", () =>
+    Effect.gen(function*() {
+      // Every live status, every terminal one, and a row whose run the view
+      // does not know — that last one stays listed, because an unknown run is
+      // not evidence of a settled one.
+      yield* seed("memory-pending", "pending")
+      yield* seed("memory-running", "running")
+      yield* seed("memory-suspended", "suspended")
+      yield* seed("memory-completed", "completed")
+      yield* seed("memory-failed", "failed")
+      yield* seed("memory-cancelled", "cancelled")
+      yield* seed("memory-unknown", "running")
+      runs.delete("memory-unknown")
+
+      const live = ["memory-pending", "memory-running", "memory-suspended", "memory-unknown"]
+      expect((yield* state.completedDeferreds(flowName)).map((row) => row.executionId).sort()).toEqual(live.sort())
+      expect((yield* state.pendingClocks({ flowName })).map((row) => row.executionId).sort()).toEqual(live.sort())
+    }))
+
+  it.effect("completes only the named run's uncompleted clock rows", () =>
+    Effect.gen(function*() {
+      yield* state.completeRunClocks("memory-running", 42)
+      // A second call finds nothing left to do and leaves the first
+      // completion time alone.
+      yield* state.completeRunClocks("memory-running", 99)
+      const running = yield* state.clock({ flowName, executionId: "memory-running", clockName: "clock" })
+      const other = yield* state.clock({ flowName, executionId: "memory-pending", clockName: "clock" })
+      expect(Option.isSome(running) ? running.value.completedAtMs : undefined).toBe(42)
+      // Another run's timer is untouched: this closes one run, not the table.
+      expect(Option.isSome(other) ? other.value.completedAtMs : undefined).toBeNull()
     }))
 })

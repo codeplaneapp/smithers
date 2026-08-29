@@ -214,4 +214,64 @@ describe("a parked run of an unregistered flow still cancels (B-01)", () => {
       // durable request for a worker that registers the flow.
       expect(result.warnings.filter((message) => message.includes("b01-child"))).toHaveLength(1)
     }))
+
+  it.effect("leaves the run alone when the claim is lost to another worker", () =>
+    Effect.gen(function*() {
+      const result = yield* withCrypto(provideJournal(
+        Effect.gen(function*() {
+          const store = yield* RunStore.RunStore
+          const state = yield* DurableEngineState.DurableEngineState
+          const journal = yield* Journal.Journal
+          const first: Ownership.OwnerId = { hostId: "b01-host", pid: 11, nonce: "first" }
+          const second: Ownership.OwnerId = { hostId: "b01-host", pid: 12, nonce: "second" }
+
+          // A parked, cancel-requested run whose claim another worker already
+          // holds. Cancelling is fenced like every other close: the sweeping
+          // process claims first, and the one that loses the compare-and-swap
+          // must leave the run to the worker that won it.
+          yield* store.create("b01-contended", JSON.stringify({
+            version: 1,
+            flowName: TestFlow._tag,
+            payload: {}
+          }))
+          yield* store.claimAndOwn(
+            "b01-contended",
+            { status: "pending", owner: null, heartbeatAtMs: null },
+            first,
+            0
+          )
+          yield* store.transitionOwned("b01-contended", first, "suspended", undefined)
+          expect(
+            (yield* store.claim(
+              "b01-contended",
+              { status: "suspended", owner: null, heartbeatAtMs: null },
+              second,
+              0
+            ))._tag
+          ).toBe("Claimed")
+          yield* state.park("b01-contended", { reason: "event" }, second)
+          yield* store.requestCancel("b01-contended", 1_000)
+
+          yield* makeDriver("owner-loses-claim")
+          yield* TestClock.adjust(Duration.toMillis(Ownership.heartbeatInterval))
+
+          yield* journal.flush
+          const entries = yield* journal.entries({ runId: "b01-contended" as never, limit: 200 })
+          return {
+            row: yield* store.get("b01-contended"),
+            decisions: entries.entries
+              .filter((entry) => entry.eventType === "flows.engine.run-decision")
+              .map((entry) => (entry.payload as { readonly decision: string }).decision),
+            interrupted: entries.entries.filter((entry) => entry.eventType === "flows.engine.interrupted").length
+          }
+        })
+      ))
+
+      // Nothing was closed, and the durable request is still there for the
+      // worker holding the claim.
+      expect(result.row.status).toBe("suspended")
+      expect(result.row.cancelRequestedAtMs).toBe(1_000)
+      expect(result.decisions).toContain("claim-lost")
+      expect(result.interrupted).toBe(0)
+    }))
 })

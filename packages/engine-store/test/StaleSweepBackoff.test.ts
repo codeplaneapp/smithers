@@ -24,6 +24,7 @@ import { Flow, FlowRuntime } from "@smthrs/flow"
 import { Journal, SqlJournal } from "@smthrs/journal"
 import { Node } from "@smthrs/plan"
 import { Ownership, RunStore } from "@smthrs/run-store"
+import * as Clock from "effect/Clock"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -180,5 +181,59 @@ describe("the stale-running sweep backs off refused rows (B-04)", () => {
       expect(result.refusalsLast).toBe(1)
       // Nothing was stolen from a live owner.
       expect(result.statuses).toEqual(["running", "running"])
+    }))
+
+  it.effect("forgets a refusal once its row leaves the stale window", () =>
+    Effect.gen(function*() {
+      const result = yield* run(Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        const writer = yield* DurableWriter.DurableWriter
+        const probed: Array<number> = []
+        const driver = yield* RunDriver.make({
+          owner: { hostId: "sweep-host", pid: 1, nonce: "sweeper" },
+          journalSource: "stale-sweep-backoff",
+          isAlive: (_expectedOwner, context) =>
+            Effect.sync(() => {
+              probed.push(context.nowMs)
+              return true
+            }),
+          engine: Effect.succeed(fakeEngine)
+        })
+        yield* driver.register(TestFlow, () => Effect.succeed("never reached"))
+        yield* insertStaleRun(1)
+
+        /** Rewrites the row's lease, which is what a stalling owner does. */
+        const setHeartbeat = (heartbeatAtMs: number) =>
+          writer.write(sql`
+            UPDATE flows_runs SET heartbeat_at_ms = ${heartbeatAtMs} WHERE run_id = ${runIdOf(1)}
+          `).pipe(Effect.orDie)
+
+        // Three refusals in a row: the wait doubles each time, so by the third
+        // the row is deferred for several ticks.
+        yield* TestClock.adjust(staleAfterMs + heartbeatMs)
+        yield* TestClock.adjust(heartbeatMs * 2)
+        yield* TestClock.adjust(heartbeatMs * 4)
+        const afterThreeRefusals = probed.length
+
+        // The owner starts heartbeating again, so the row leaves the stale
+        // window entirely and the sweep stops seeing it.
+        const nowMs = yield* Clock.currentTimeMillis
+        yield* setHeartbeat(nowMs)
+        yield* TestClock.adjust(heartbeatMs)
+        const whileFresh = probed.length
+
+        // …and then stalls again, under a new lease. The refusal the driver
+        // was holding was about the old one, so this stall is arbitrated now
+        // rather than waiting out a backoff it did not earn.
+        yield* setHeartbeat((yield* Clock.currentTimeMillis) - staleAfterMs - 1)
+        yield* TestClock.adjust(heartbeatMs)
+        return { afterThreeRefusals, whileFresh, afterNewLease: probed.length }
+      }))
+
+      expect(result.afterThreeRefusals).toBe(3)
+      // A row outside the stale window is not probed at all.
+      expect(result.whileFresh).toBe(3)
+      // The new stall is probed on the first tick that sees it.
+      expect(result.afterNewLease).toBe(4)
     }))
 })
