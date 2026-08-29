@@ -29,8 +29,14 @@ import * as TestStores from "../src/test/TestStores.ts"
 import { opaqueHandlerBody } from "./fixtures/OpaqueHandlerBody.ts"
 import { withCrypto } from "./Sha256.ts"
 
-const hourMs = 60 * 60 * 1000
-const dayMs = 24 * hourMs
+// The cases age runs by advancing the virtual clock, and every millisecond of
+// virtual time the composition's scheduled work has to be stepped through
+// costs real time. Two seconds of virtual age with a one-second threshold
+// exercises the same before/after cutoff comparison a day would.
+const agingMs = 2_000
+const thresholdMs = 1_000
+/** Far enough out that no seeded clock deadline comes due mid-case. */
+const distantDeadlineMs = 30 * 24 * 60 * 60 * 1000
 
 const owner: Ownership.OwnerId = { hostId: "retention-host", pid: 11, nonce: "retention-nonce" }
 
@@ -132,7 +138,7 @@ const seedDependents = (runId: string) =>
       executionId: runId,
       clockName: `${runId}-clock`,
       deferredName: `${runId}-deferred`,
-      dueAtMs: 10 * dayMs,
+      dueAtMs: distantDeadlineMs,
       completedAtMs: null
     }, owner)
     yield* state.completeDeferred({
@@ -199,7 +205,7 @@ describe("retention", () => {
         }
         yield* state.recordRunParent("aged-failed", "aged-completed")
 
-        yield* TestClock.adjust(dayMs)
+        yield* TestClock.adjust(agingMs)
 
         // A terminal run inside the retention window, and a live one.
         yield* activate("fresh-completed")
@@ -209,7 +215,7 @@ describe("retention", () => {
         yield* seedDependents("still-running")
 
         const before = yield* footprint("still-running")
-        const report = yield* retain.retain({ olderThanMs: hourMs })
+        const report = yield* retain.retain({ olderThanMs: thresholdMs })
         const after = yield* footprint("still-running")
 
         expect([...report.runIds].sort()).toEqual(["aged-cancelled", "aged-completed", "aged-failed"])
@@ -272,8 +278,8 @@ describe("retention", () => {
         yield* finish("doomed-child", "completed")
         yield* finish("doomed-parent", "completed")
 
-        yield* TestClock.adjust(dayMs)
-        const report = yield* retain.retain({ olderThanMs: hourMs })
+        yield* TestClock.adjust(agingMs)
+        const report = yield* retain.retain({ olderThanMs: thresholdMs })
 
         expect([...report.runIds].sort()).toEqual(["doomed-child", "doomed-parent"])
         expect([...report.retainedForLiveDescendants].sort()).toEqual(["grandparent", "parent"])
@@ -296,11 +302,11 @@ describe("retention", () => {
         yield* activate("aged")
         yield* seedDependents("aged")
         yield* finish("aged", "completed")
-        yield* TestClock.adjust(dayMs)
+        yield* TestClock.adjust(agingMs)
 
-        const planned = yield* retain.retain({ olderThanMs: hourMs, dryRun: true })
+        const planned = yield* retain.retain({ olderThanMs: thresholdMs, dryRun: true })
         const untouched = yield* footprint("aged")
-        const executed = yield* retain.retain({ olderThanMs: hourMs })
+        const executed = yield* retain.retain({ olderThanMs: thresholdMs })
 
         expect(planned.dryRun).toBe(true)
         expect(planned.runIds).toEqual(["aged"])
@@ -323,9 +329,9 @@ describe("retention", () => {
         const retain = yield* RetentionOps.make()
         yield* activate("aged")
         yield* finish("aged", "completed")
-        yield* TestClock.adjust(dayMs)
+        yield* TestClock.adjust(agingMs)
 
-        const report = yield* retain.retain({ olderThanMs: hourMs })
+        const report = yield* retain.retain({ olderThanMs: thresholdMs })
 
         expect(report.runIds).toEqual(["aged"])
         expect(report.archiveEntries).toBe(0)
@@ -345,11 +351,11 @@ describe("retention", () => {
           yield* activate(runId)
           yield* finish(runId, "completed")
         }
-        yield* TestClock.adjust(dayMs)
+        yield* TestClock.adjust(agingMs)
 
-        const first = yield* retain.retain({ olderThanMs: hourMs, limit: 2 })
-        const second = yield* retain.retain({ olderThanMs: hourMs, limit: 2 })
-        const third = yield* retain.retain({ olderThanMs: hourMs, limit: 2 })
+        const first = yield* retain.retain({ olderThanMs: thresholdMs, limit: 2 })
+        const second = yield* retain.retain({ olderThanMs: thresholdMs, limit: 2 })
+        const third = yield* retain.retain({ olderThanMs: thresholdMs, limit: 2 })
 
         expect(first.runs).toBe(2)
         expect(second.runs).toBe(1)
@@ -369,10 +375,10 @@ describe("retention", () => {
         const sql = yield* Effect.service(SqlClient.SqlClient)
         yield* activate("aged")
         yield* finish("aged", "completed")
-        yield* TestClock.adjust(dayMs)
+        yield* TestClock.adjust(agingMs)
         yield* sql`DROP TABLE flows_attempts`.pipe(Effect.orDie)
 
-        const exit = yield* Effect.exit(retain.retain({ olderThanMs: hourMs }))
+        const exit = yield* Effect.exit(retain.retain({ olderThanMs: thresholdMs }))
 
         expect(exit._tag).toBe("Failure")
         if (exit._tag !== "Failure") return
@@ -394,10 +400,10 @@ describe("retention", () => {
         const sql = yield* Effect.service(SqlClient.SqlClient)
         yield* activate("aged")
         yield* finish("aged", "completed")
-        yield* TestClock.adjust(dayMs)
+        yield* TestClock.adjust(agingMs)
         yield* sql`DROP TABLE flows_runs`.pipe(Effect.orDie)
 
-        const exit = yield* Effect.exit(retain.retain({ olderThanMs: hourMs }))
+        const exit = yield* Effect.exit(retain.retain({ olderThanMs: thresholdMs }))
 
         expect(exit._tag).toBe("Failure")
         if (exit._tag !== "Failure") return
@@ -443,16 +449,20 @@ describe("retention", () => {
           isAlive: () => Effect.succeed(false)
         })
 
-        // A live run parked on a durable deferred, and a finished run beside it.
-        const engine = yield* makeEngine
-        yield* engine.register(ReplayFlow, handler)
-        yield* engine.execute(ReplayFlow, { executionId: "parked-run", payload: {}, discard: true })
+        // The finished neighbour ages first, before an engine exists: advancing
+        // the virtual clock while one is composed steps every scheduled fiber
+        // it holds through the whole interval.
         yield* activate("aged-neighbour")
         yield* seedDependents("aged-neighbour")
         yield* finish("aged-neighbour", "completed")
+        yield* TestClock.adjust(agingMs)
 
-        yield* TestClock.adjust(dayMs)
-        const report = yield* retain.retain({ olderThanMs: hourMs })
+        // A live run parked on a durable deferred, beside the aged one.
+        const engine = yield* makeEngine
+        yield* engine.register(ReplayFlow, handler)
+        yield* engine.execute(ReplayFlow, { executionId: "parked-run", payload: {}, discard: true })
+
+        const report = yield* retain.retain({ olderThanMs: thresholdMs })
         expect(report.runIds).toEqual(["aged-neighbour"])
 
         // The parked run replays from its own journal and reaches its result.
