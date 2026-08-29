@@ -47,7 +47,7 @@ const smithers = (...args: ReadonlyArray<string>): Invocation => {
   const result = spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
     cwd: project,
     encoding: "utf8",
-    timeout: 120_000
+    timeout: 240_000
   })
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" }
 }
@@ -61,7 +61,15 @@ const json = (...args: ReadonlyArray<string>): any => {
 /** The seven statuses rc-contract section 4.1 pins `ps --status` to. */
 const statuses = ["accepted", "running", "parked", "waiting-approval", "cancelled", "completed", "failed"]
 
-describe("one project, from init to gc", () => {
+/**
+ * Every case starts real `smithers` processes, and each start parses the whole
+ * module graph through Node's type stripping. That is seconds on an idle
+ * machine and much longer on a loaded one, so this suite carries its own
+ * finite budget rather than the package's 30 s default.
+ */
+const processBudget = { timeout: 300_000 }
+
+describe("one project, from init to gc", processBudget, () => {
   let runId = ""
 
   it("scaffolds a project and discovers the flow in it", () => {
@@ -70,7 +78,25 @@ describe("one project, from init to gc", () => {
     expect(scaffolded).toMatchObject({ name: "hello", created: true })
     expect(existsSync(join(project, "flows", "hello", "flow.mdx"))).toBe(true)
     expect(json("ls")).toEqual({ _tag: "flows", items: [{ flowId: "hello", description: expect.any(String) }] })
-  }, 180_000)
+  })
+
+  it("parks an unapproved plan with the parked exit status", () => {
+    const card = json("plan", "hello") as { readonly approval: unknown }
+    const approval = JSON.stringify(card.approval)
+
+    const parked = smithers("run", approval, "--json")
+
+    // Exit 3 is the parked status in the rc-contract section 4 table, and it
+    // is the one code a caller cannot learn from the payload alone: the run
+    // did not fail, it is waiting for a decision.
+    expect(parked.status).toBe(3)
+    expect(JSON.parse(parked.stdout)).toMatchObject({ _tag: "Parked", status: "waiting-approval" })
+
+    // Approving the same payload launches it, so the park was a gate and not a
+    // dead end.
+    expect(json("approve", approval, "--scope", "run")).toMatchObject({ _tag: "Accepted" })
+    json("down")
+  })
 
   it("launches the discovered flow detached and returns only the receipt's run id", () => {
     const launched = json("up", "hello", "-d")
@@ -78,7 +104,10 @@ describe("one project, from init to gc", () => {
     // The receipt's own field. rc.0 has no `--run-id`, so this is the only
     // place a caller learns which run it started.
     expect(launched.runId).toMatch(/^run-/)
-    expect(launched).toMatchObject({ detached: true, logFile: join(project, ".flows", "logs", `${launched.runId}.log`) })
+    expect(launched).toMatchObject({
+      detached: true,
+      logFile: join(project, ".flows", "logs", `${launched.runId}.log`)
+    })
     runId = launched.runId
 
     // The launch returned because the child proved it persisted the run, not
@@ -86,7 +115,7 @@ describe("one project, from init to gc", () => {
     const log = readFileSync(launched.logFile, "utf8")
     const nonce = log.split("=run:")[1]?.split(" ")[0] ?? ""
     expect(Detached.admittedRunId(log, nonce)).toBe(runId)
-  }, 180_000)
+  })
 
   it("lists the run, filtered by a status from the pinned vocabulary", () => {
     const listed = json("ps")
@@ -99,14 +128,14 @@ describe("one project, from init to gc", () => {
       .toContain(runId)
     // An eighth status is not a status.
     expect(smithers("ps", "--status", "sleeping").status).toBe(2)
-  }, 180_000)
+  })
 
   it("streams the run's own control events", () => {
     const events = json("logs", runId)
 
     expect(events.map((event: { readonly kind: string }) => event.kind)).toContain("control.run.accepted")
     expect(new Set(events.map((event: { readonly runId: string }) => event.runId))).toEqual(new Set([runId]))
-  }, 180_000)
+  })
 
   it("delivers two different signals rather than replaying the first one's receipt", () => {
     const first = json("signal", runId, JSON.stringify({ name: "go", payload: { attempt: 1 } }))
@@ -119,7 +148,7 @@ describe("one project, from init to gc", () => {
     // A different payload is a different mutation, and keying on the run alone
     // silently dropped it (rc-contract section 5.1).
     expect(second.receiptId).not.toBe(first.receiptId)
-  }, 180_000)
+  })
 
   it("decides an in-run approval another process registered", async () => {
     const engine = NodeControl.engineDurable(project)
@@ -154,7 +183,7 @@ describe("one project, from init to gc", () => {
     // The decision is durable and cross-process: a resumed attempt reads it
     // instead of parking again.
     expect(readBack.resolved).toBe(true)
-  }, 180_000)
+  })
 
   it("keeps namespaced memory in the control database across processes", () => {
     expect(json("memory", "set", "reviewer", "sol")).toMatchObject({ key: "reviewer", written: true })
@@ -163,7 +192,7 @@ describe("one project, from init to gc", () => {
 
     expect(json("memory", "rm", "reviewer")).toMatchObject({ key: "reviewer", removed: true })
     expect(json("memory", "list").map((entry: { readonly key: string }) => entry.key)).not.toContain("reviewer")
-  }, 180_000)
+  })
 
   it("queues a steer for the run to drain at its turn close", () => {
     json("steer", runId, "--message", "prefer the smaller change")
@@ -172,7 +201,7 @@ describe("one project, from init to gc", () => {
     // Durable and attributed: the message is on the notification queue, not in
     // the sending process, so a later `ps` from any process reports it.
     expect(run.steering.pending).toBeGreaterThan(0)
-  }, 180_000)
+  })
 
   it("says a run recorded no node output rather than inventing one", () => {
     const result = smithers("output", runId, "result")
@@ -183,7 +212,7 @@ describe("one project, from init to gc", () => {
     expect(result.status).toBe(2)
     expect(result.stdout).toBe("")
     expect(result.stderr).toContain(runId)
-  }, 180_000)
+  })
 
   it("reports the project it resolved, both databases, and the Node floor", () => {
     const report = smithers("doctor")
@@ -193,13 +222,13 @@ describe("one project, from init to gc", () => {
     expect(report.stdout).toContain(join(project, ".flows", "control.db"))
     expect(report.stdout).toContain(join(project, ".flows", "engine.db"))
     expect(report.stdout).toContain("node:")
-  }, 180_000)
+  })
 
   it("cancels the run durably", () => {
     expect(json("cancel", runId)).toMatchObject({ _tag: "Terminal", runId, status: "cancelled" })
     expect(json("ps").items.find((entry: { readonly runId: string }) => entry.runId === runId).status)
       .toBe("cancelled")
-  }, 180_000)
+  })
 
   it("takes every remaining run down", () => {
     const launched = json("up", "hello", "-d")
@@ -213,7 +242,7 @@ describe("one project, from init to gc", () => {
     expect(after.find((entry) => entry.runId === launched.runId)!.status).toBe("cancelled")
     expect(after.every((entry) => entry.status === "cancelled")).toBe(true)
     json("down")
-  }, 180_000)
+  })
 
   it("reports what gc would delete, then deletes it", () => {
     const planned = json("gc", "--older-than", "0s", "--dry-run")
@@ -230,5 +259,5 @@ describe("one project, from init to gc", () => {
 
     json("gc", "--older-than", "0s")
     expect(json("ps").items).toEqual([])
-  }, 180_000)
+  })
 })

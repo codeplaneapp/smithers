@@ -108,6 +108,20 @@ describe("resolveJjBinary", () => {
     expect(Resolve.describe(resolved)).toContain("not found")
   })
 
+  it("searches every PATH entry before giving up on the bare name", () =>
+    staged((directory) => {
+      // A populated PATH that simply holds no jj: the search runs to the end
+      // and reports the absence, rather than stopping at the first entry.
+      write(join(directory, "git"), 0o755)
+      const resolved = Resolve.resolveJjBinary({
+        environment: { PATH: `${directory}${delimiter}${join(directory, "nowhere")}` },
+        platform: "linux"
+      })
+
+      expect(resolved).toMatchObject({ path: "jj", source: "path", executable: false })
+      expect(resolved.hint).toContain("No jj on PATH")
+    }))
+
   it("treats an empty PATH the same as an unset one", () => {
     expect(Resolve.resolveJjBinary({ environment: { PATH: "" }, platform: "linux" }).path).toBe("jj")
   })
