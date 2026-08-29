@@ -156,10 +156,63 @@ describe("one project, from init to gc", () => {
     expect(readBack.resolved).toBe(true)
   }, 180_000)
 
+  it("keeps namespaced memory in the control database across processes", () => {
+    expect(json("memory", "set", "reviewer", "sol")).toMatchObject({ key: "reviewer", written: true })
+    expect(json("memory", "get", "reviewer")).toBe("sol")
+    expect(json("memory", "list").map((entry: { readonly key: string }) => entry.key)).toContain("reviewer")
+
+    expect(json("memory", "rm", "reviewer")).toMatchObject({ key: "reviewer", removed: true })
+    expect(json("memory", "list").map((entry: { readonly key: string }) => entry.key)).not.toContain("reviewer")
+  }, 180_000)
+
+  it("queues a steer for the run to drain at its turn close", () => {
+    json("steer", runId, "--message", "prefer the smaller change")
+
+    const run = json("ps").items.find((entry: { readonly runId: string }) => entry.runId === runId)
+    // Durable and attributed: the message is on the notification queue, not in
+    // the sending process, so a later `ps` from any process reports it.
+    expect(run.steering.pending).toBeGreaterThan(0)
+  }, 180_000)
+
+  it("says a run recorded no node output rather than inventing one", () => {
+    const result = smithers("output", runId, "result")
+
+    // A node id the run does not have is the argument being wrong, so this is
+    // the usage status, and the message names the run rather than printing an
+    // empty document to stdout.
+    expect(result.status).toBe(2)
+    expect(result.stdout).toBe("")
+    expect(result.stderr).toContain(runId)
+  }, 180_000)
+
+  it("reports the project it resolved, both databases, and the Node floor", () => {
+    const report = smithers("doctor")
+
+    expect(report.status).toBe(0)
+    expect(report.stdout).toContain(project)
+    expect(report.stdout).toContain(join(project, ".flows", "control.db"))
+    expect(report.stdout).toContain(join(project, ".flows", "engine.db"))
+    expect(report.stdout).toContain("node:")
+  }, 180_000)
+
   it("cancels the run durably", () => {
     expect(json("cancel", runId)).toMatchObject({ _tag: "Terminal", runId, status: "cancelled" })
     expect(json("ps").items.find((entry: { readonly runId: string }) => entry.runId === runId).status)
       .toBe("cancelled")
+  }, 180_000)
+
+  it("takes every remaining run down", () => {
+    const launched = json("up", "hello", "-d")
+    expect(json("ps").items.some((entry: { readonly status: string }) => entry.status !== "cancelled")).toBe(true)
+
+    json("down")
+
+    // `down` is `Control.list` then `cancel`, so a second one is a no-op
+    // rather than an error on runs that are already terminal.
+    const after = json("ps").items as ReadonlyArray<{ readonly runId: string; readonly status: string }>
+    expect(after.find((entry) => entry.runId === launched.runId)!.status).toBe("cancelled")
+    expect(after.every((entry) => entry.status === "cancelled")).toBe(true)
+    json("down")
   }, 180_000)
 
   it("reports what gc would delete, then deletes it", () => {
@@ -176,6 +229,6 @@ describe("one project, from init to gc", () => {
     expect(json("ps").items.map((entry: { readonly runId: string }) => entry.runId)).toContain(runId)
 
     json("gc", "--older-than", "0s")
-    expect(json("ps").items.map((entry: { readonly runId: string }) => entry.runId)).not.toContain(runId)
+    expect(json("ps").items).toEqual([])
   }, 180_000)
 })

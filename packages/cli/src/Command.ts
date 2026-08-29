@@ -644,8 +644,11 @@ const docs = Command.make("docs", { full: Flag.boolean("full") }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
     const bundle = Docs.read(config.full)
+    // A missing bundle is reported once, on stderr, with exit 1. Printing it
+    // to stdout as well put the same paragraph in both streams and put an
+    // error message inside the document a caller was piping somewhere.
+    if (!bundle.found) return yield* Effect.fail(new CliError.UnsupportedError({ message: bundle.text }))
     yield* Console.log(bundle.text)
-    if (!bundle.found) yield* Effect.fail(new CliError.UnsupportedError({ message: bundle.text }))
   })).pipe(Command.withDescription(Verb.find("docs")!.help))
 
 const migrate = Command.make("migrate", {
