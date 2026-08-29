@@ -24,7 +24,7 @@ pnpm exec smithers-build test '//scripts/repo-contract/...'
 | `barrels.test.mjs` | `@smthrs/flows` re-exports exactly the namespaces it lists, declares every package it re-exports, and every published root export points at a file that exists. |
 | `test-script-wiring.test.mjs` | Every workspace member with tests has a `test` script, and the pnpm workspace and the root manifest name the same members. |
 | `fault-skips.test.mjs` | No focused or parked test in `e2e/`, and every conditional skip and inverted expectation is declared with its reason. |
-| `machine-paths.test.mjs` | No tracked file under `evals/` names one machine's home directory. Recorded material — wave reports, archives, the authoring corpus — is exempt, because rewriting it would falsify a record. |
+| `machine-paths.test.mjs` | No tracked file under `e2e/`, `evals/` or `scripts/` names one machine's home directory. Recorded material — wave reports, archives, the authoring corpus — is exempt, because rewriting it would falsify a record. |
 
 ## Ported from Smithers 0.x
 

@@ -2,16 +2,24 @@
  * No operator rig may name one machine's home directory.
  *
  * `evals/swebench` is operator-run tooling that arrived from another checkout,
- * and it arrived carrying `/Users/williamcory/flows/flows` in a committed
- * measurement record. A path like that is invisible until somebody else runs
- * the rig: it resolves to nothing on their machine, and the record it sits in
- * claims to describe a checkout that is not the one under test.
+ * and it arrived carrying that checkout's absolute directory — `/Users`, an
+ * operator's name, `flows/flows` — in a committed measurement record. A path
+ * like that is invisible until somebody else runs the rig: it resolves to
+ * nothing on their machine, and the record it sits in claims to describe a
+ * checkout that is not the one under test.
  *
- * So the gate is a class, not one file. Every tracked file under `evals/` is
- * read, and any absolute home-directory path in it fails. `git ls-files` is the
- * file list, because the untracked working files a wave leaves behind — pinned
- * subjects, extracted testbeds, virtualenvs — legitimately hold absolute paths
- * and are gitignored for exactly that reason.
+ * The gate's own prose therefore names no such path either. Writing the example
+ * out is what tripped it the first time it ran over `scripts/`.
+ *
+ * So the gate is a class, not one file. Every tracked file under `e2e/`,
+ * `evals/` and `scripts/` is read, and any absolute home-directory path in it
+ * fails. `git ls-files` is the file list, because the untracked working files a
+ * wave leaves behind — pinned subjects, extracted testbeds, virtualenvs —
+ * legitimately hold absolute paths and are gitignored for exactly that reason.
+ *
+ * It covers `e2e/` because the same mistake landed there under its own name: a
+ * debug probe committed with the author's checkout path in a dynamic `import`,
+ * which runs on one machine and throws on every other.
  *
  * Run it with `node --test "scripts/repo-contract/*.test.mjs"`.
  */
@@ -31,9 +39,12 @@ const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..")
  */
 const homePath = /(?:\/Users|\/home)\/[A-Za-z0-9._-]+\//
 
-/** Every tracked file under `evals/`, as repository-relative paths. */
+/** The directories this gate reads, as repository-relative prefixes. */
+const scanned = ["e2e", "evals", "scripts"]
+
+/** Every tracked file under {@link scanned}, as repository-relative paths. */
 const tracked = () => {
-  const result = spawnSync("git", ["ls-files", "--", "evals"], { cwd: root, encoding: "utf8" })
+  const result = spawnSync("git", ["ls-files", "--", ...scanned], { cwd: root, encoding: "utf8" })
   assert.equal(result.status, 0, `git ls-files failed: ${result.stderr}`)
   return result.stdout.split("\n").filter((line) => line.length > 0)
 }
@@ -54,9 +65,9 @@ const isRecorded = (path) =>
   || path.startsWith("evals/swebench/archive/")
   || path.startsWith("evals/authoring/data/")
 
-describe("the operator rigs under evals/", () => {
+describe("the rigs and gates outside the packages", () => {
   it("has files to check", () => {
-    assert.ok(tracked().length > 0, "git ls-files found no tracked file under evals/")
+    assert.ok(tracked().length > 0, `git ls-files found no tracked file under ${scanned.join(", ")}`)
   })
 
   it("names no machine's home directory in a file the rig reads", () => {
