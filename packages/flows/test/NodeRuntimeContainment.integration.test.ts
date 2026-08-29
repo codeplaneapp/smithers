@@ -36,6 +36,8 @@
 import { afterAll, describe, expect, it } from "@effect/vitest"
 import * as Capability from "@smthrs/capability/Capability"
 import * as Permission from "@smthrs/capability/Permission"
+import * as Heartbeat from "@smthrs/run-store/Heartbeat"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
@@ -51,6 +53,14 @@ import { Action, Flow, FlowRuntime, Interpreter, RunStore as RunStorePackage } f
 import * as NodeRuntime from "../src/NodeRuntime.ts"
 
 const { RunStore } = RunStorePackage
+
+/**
+ * How long an owner may take to notice a cancel another process wrote.
+ *
+ * The cancel poll rides the heartbeat, so this is the whole difference
+ * between the flow-level deadline and the Exec-level one.
+ */
+const heartbeatMs = Duration.toMillis(Heartbeat.heartbeatInterval)
 
 const directory = mkdtempSync(join(tmpdir(), "flows-containment-"))
 
@@ -219,9 +229,17 @@ const cancelFromAnotherDriver = (options: {
         yield* Effect.sleep("100 millis")
         row = yield* runs.get(executionId)
       }
-      const cancelledAt = Date.now()
       const left = yield* Effect.promise(() => waitForNoSurvivor(script, options.graceMs + 1_000))
-      const clearedMs = Date.now() - cancelledAt
+
+      // Measured from the durable cancel REQUEST, which is the row the second
+      // driver wrote and the earliest instant the owner could have started
+      // killing anything. The obvious clock to start — the moment the row
+      // reads `cancelled` — makes the bound vacuous: the owner writes that
+      // status after the action's scope has closed, and the scope does not
+      // close until the escalation has landed, so the group is always already
+      // gone and any budget holds. Same process, so both timestamps come off
+      // one clock.
+      const clearedMs = Date.now() - (row.cancelRequestedAtMs ?? Number.NaN)
 
       // The run settled durably. The fiber that asked for it has not, which is
       // the cancel-durability lane's defect and not this suite's subject.
@@ -252,14 +270,28 @@ describe.skipIf(process.platform === "win32")("a cancelled run", () => {
   }, 120_000)
 
   it("kills a SIGTERM-ignoring group inside the containment grace", async () => {
-    const graceMs = 400
+    // The grace is longer here than in the Exec-level case, and deliberately
+    // longer than the heartbeat, because the clock this case can read starts
+    // at the durable cancel REQUEST and the owner may take a whole tick to
+    // notice it. At 400 ms the poll latency alone satisfied a `>= graceMs`
+    // lower bound, so a cooperative child passed it too and the assertion
+    // measured the heartbeat rather than the escalation. At 3 s the escalation
+    // is the term that dominates, and the bound discriminates again.
+    const graceMs = 3_000
     const outcome = await Effect.runPromise(
       cancelFromAnotherDriver({ label: "stubborn", prefix: "trap \"\" TERM; ", graceMs })
     )
 
     expect(outcome.status).toBe("cancelled")
     expect(outcome.left).toEqual([])
-    expect(outcome.clearedMs).toBeLessThan(graceMs + 1_000)
+    // The lower bound is what stops this passing vacuously: a group that had
+    // honoured `SIGTERM` would be gone within a tick, well before the grace
+    // expired. The upper bound is the contract's `forceKillAfter` plus one
+    // second, widened by the one heartbeat tick an owner may take to notice a
+    // cancel another process wrote — the difference between this case and the
+    // Exec-level one, where the interrupt is delivered in-process.
+    expect(outcome.clearedMs).toBeGreaterThanOrEqual(graceMs)
+    expect(outcome.clearedMs).toBeLessThan(graceMs + heartbeatMs + 1_000)
   }, 120_000)
 
   it("records what the guarded spawn started, so a crash leaves it discoverable", async () => {
