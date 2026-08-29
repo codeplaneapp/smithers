@@ -37,3 +37,9 @@ export * as DatabaseMetrics from "./DatabaseMetrics.ts"
  * @slop
  */
 export * as Migrations from "./Migrations.ts"
+
+/**
+ * @category models
+ * @since 1.0.0
+ */
+export * as UnsupportedBackend from "./UnsupportedBackend.ts"

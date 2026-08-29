@@ -19,6 +19,7 @@ driver is platform-specific, so they live under explicit subpaths.
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `@smthrs/database`                                  | `DurableWriter` and `Service` expose transaction-scoped `write(effect)`. `DatabaseErrorCode`, `DatabaseError`, and `fromSqlError` normalize driver failures. `make` builds over a SQL client; `layer` composes over the context's `SqlClient`; `makeNoop` and `layerNoop` provide an unsupported stub. |
 | `@smthrs/database/node/NodeDatabase`                | **Node only.** `NodeDatabaseOptions` configures the SQLite connection; `layer(options)` provides Effect's `SqlClient`. `UnsupportedDatabase`, `UnsupportedDatabaseCode`, and `isUnsupportedDatabase` describe the two opens 1.0.0-rc.0 refuses.                                                        |
+| `@smthrs/database/UnsupportedBackend`               | `ignoredNames(environment)` lists the `SMITHERS_TEST_PG_URL` and `SMITHERS_POSTGRES*` names 1.0.0-rc.0 ignores; `ignoredNotice(name)` is the one line each of them gets. Browser-safe: strings only.                                                                                                   |
 | `@smthrs/database/cloudflare/DurableObjectDatabase` | **Cloudflare Workers only.** `DurableObjectDatabaseOptions` takes the object's `ctx.storage`; `make` and `layer(options)` provide Effect's `SqlClient` over its SQLite storage.                                                                                                                        |
 | `@smthrs/database/cloudflare/SqlStorageLike`        | The structural view of `ctx.storage` the driver is typed against, so no consumer needs `@cloudflare/workers-types` to satisfy it.                                                                                                                                                                      |
 | `@smthrs/database/test/TestDatabase`                | **Node only.** `layer` provides the production Node client and the writer over a fresh `:memory:` database.                                                                                                                                                                                            |
@@ -71,6 +72,24 @@ A file a peer holds locked is not one of those cases. The probe retries on the
 same ladder the open uses, so a 0.x `smithers.db` is refused whether or not a
 0.x writer held it at that moment; a lock nobody releases exhausts the ladder
 and raises SQLite's own lock error, exactly as an unguarded open would.
+
+## Environment names 1.0.0-rc.0 ignores
+
+`UnsupportedBackend.ignoredNames(process.env)` lists the connection strings a
+0.x PostgreSQL or PGlite deployment exports — `SMITHERS_TEST_PG_URL` and every
+`SMITHERS_POSTGRES*` name — and `ignoredNotice(name)` is the line each one
+gets:
+
+```
+ignored: SMITHERS_POSTGRES_URL has no effect in 1.0.0-rc.0 (SQLite only)
+```
+
+It is a notice, not a refusal: nothing about the run changes, and the exit code
+does not move. Ignoring such a name in silence is what the notice exists to
+prevent, because a project would otherwise run against SQLite believing it ran
+against PostgreSQL. Choosing a backend is the separate case: `SMITHERS_BACKEND`
+and `--backend` with any value but `sqlite` exit 1 with `unsupported_database`
+(the CLI owns that refusal).
 
 The file check exists because 1.0.0-rc.0 does not load 0.x run state. Without
 it, pointing the runtime at a 0.x `smithers.db` would add `flows_*` tables
