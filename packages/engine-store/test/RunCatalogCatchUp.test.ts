@@ -89,6 +89,37 @@ describe("run catalog catch-up", () => {
       expect(listed.whole).toEqual(["run-0", "run-1", "run-2", "run-3"])
     }))
 
+  it.effect("keeps the newest runs across the hot-backup restore path", () =>
+    Effect.gen(function*() {
+      const source = yield* temporaryFile
+      const backup = join(yield* Effect.promise(() => mkdtemp(join(tmpdir(), "run-catalog-backup-"))), "engine.db")
+
+      // The read orders by the run table's physical row order, which is the
+      // order the workspace gained its runs. `VACUUM INTO` is the backup this
+      // release ships (rc-contract section 2) and a restore is a copy of its
+      // output, so the tail a follower sees has to survive one — including
+      // after retention has deleted rows out of the middle and the end, which
+      // is when SQLite reuses row identifiers.
+      yield* onFile(source)(Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        for (const index of [0, 1, 2, 3, 4]) yield* create(`run-${index}`)
+        yield* sql`DELETE FROM flows_runs WHERE ${sql.in("run_id", ["run-1", "run-4"])}`.pipe(Effect.orDie)
+        yield* create("run-5")
+        yield* sql`VACUUM INTO ${backup}`.pipe(Effect.orDie)
+      }))
+
+      const restored = yield* onFile(backup)(Effect.gen(function*() {
+        const catalog = yield* RunCatalogOps.make()
+        return {
+          bounded: yield* catalog.listRunIds({ limit: 2 }),
+          whole: yield* catalog.listRunIds()
+        }
+      }))
+
+      expect(restored.whole).toEqual(["run-0", "run-2", "run-3", "run-5"])
+      expect(restored.bounded).toEqual(["run-3", "run-5"])
+    }))
+
   it.effect("fails typed when the run table is not there", () =>
     Effect.gen(function*() {
       const filename = yield* temporaryFile

@@ -86,7 +86,13 @@ export interface ListOptions {
  * @since 0.1.0
  */
 export interface Service {
-  /** Every run the workspace has, oldest first, bounded by the read. */
+  /**
+   * Every run the workspace has, oldest first, bounded by the read. "Oldest"
+   * is the run table's own row order, which is the order `RunStore.create`
+   * inserted them: SQLite hands a new row an identifier above every one in
+   * the table, and reuses one only after the highest is deleted, so deletion
+   * by retention does not reorder what is left.
+   */
   readonly listRunIds: (options?: ListOptions) => Effect.Effect<ReadonlyArray<string>, RunCatalogError>
 }
 
@@ -129,6 +135,15 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient> =>
     // own b-tree, so the bound costs one seek rather than a sort of every
     // run: `flows_runs` carries no index on `created_at_ms`, and two runs
     // created in the same millisecond do not order by it at all.
+    //
+    // `flows_runs` has a TEXT primary key, so its `rowid` is not an alias of
+    // a declared column and SQLite documents that a rebuild may reassign it.
+    // The order the rebuild leaves is what this read depends on, not the
+    // numbers, and `VACUUM INTO` — the hot backup this release ships, and the
+    // only rebuild in the supported path (rc-contract section 2) — preserves
+    // it. `RunCatalogCatchUp.test.ts` pins that across a real backup and
+    // reopen, including after retention has deleted rows out of the middle
+    // and the end.
     const listRunIds: Service["listRunIds"] = Effect.fn("RunCatalog.listRunIds")((options?: ListOptions) =>
       sql<{ readonly run_id: string }>`
         SELECT run_id FROM flows_runs
