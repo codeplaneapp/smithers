@@ -16,12 +16,13 @@
  * One delegating node is therefore the whole lowering, and every runtime
  * decision the descriptor carries rides it:
  *
- * - the declared cache policy becomes key material captured on the delegating
- *   node, so a changed policy is a changed step key, and the flow's
- *   `@smthrs/flow` `CacheEnvironment.CachePolicyAnnotation`, which is where
- *   `@smthrs/patterns`' `withCache` puts one too. Read {@link Lowered.cache}
- *   for what rc.0 does and does not do with it: the annotation is declaration
- *   identity here, not a dispatch instruction;
+ * - the declared cache policy goes onto the ACTION the bridged flow
+ *   dispatches, which is the value `@smthrs/engine-store` `ActionPersistence`
+ *   reads a policy off: `ttlMs` bounds the age of the row the engine may
+ *   serve and `scope` narrows the address it is stored under. Declaring one is
+ *   also what makes the delegation a single dispatched step at all; read
+ *   {@link Lowered.cache} and {@link dispatchedAction} for the shape and for
+ *   the one gate a policy still has to pass;
  * - `Node.priority` becomes the delegating node's priority, which is what
  *   reaches `NodeDraft.priority` and `@smthrs/engine-store`'s `PlanScheduler`.
  *   The rc.0 `up` path settles a flow through `@smthrs/flow` `Interpreter`,
@@ -44,13 +45,15 @@ import * as Annotations from "@smthrs/core/Annotations"
 import * as CoreFlow from "@smthrs/core/Flow"
 import * as CoreMarkdown from "@smthrs/core/Markdown"
 import * as CorePlacement from "@smthrs/core/Placement"
-import type { Implementations } from "@smthrs/flow/Action"
+import * as Action from "@smthrs/flow/Action"
 import * as CacheEnvironment from "@smthrs/flow/CacheEnvironment"
 import * as RuntimeFlow from "@smthrs/flow/Flow"
-import type { FlowRuntime } from "@smthrs/flow/FlowRuntime"
+import { FlowInstance, type FlowRuntime } from "@smthrs/flow/FlowRuntime"
 import * as Interpreter from "@smthrs/flow/Interpreter"
+import type * as FileSet from "@smthrs/plan/FileSet"
 import * as PlanNode from "@smthrs/plan/Node"
 import * as Context from "effect/Context"
+import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
@@ -140,16 +143,35 @@ export type Invocation = typeof Invocation.Type
  * A registered `@smthrs/flow` flow a descriptor may delegate to.
  *
  * Structural on purpose: a `Flow.make(...)` value satisfies it, and so does a
- * test double that records what it was called with. The bridge needs the tag
- * to resolve a name and `call` to place the delegation in the caller's plan;
- * it never executes a delegate itself.
+ * test double. The bridge needs the tag to resolve a name, and both ways of
+ * reaching the flow, because the descriptor decides which one it uses: a
+ * declared cache policy makes the delegation one dispatched step and a child
+ * execution beneath it, and no policy leaves it a call in the caller's plan.
+ * See {@link fromDescriptor} for the choice and {@link Lowered.cache} for why
+ * it is a choice at all.
  *
  * @category models
  * @since 0.1.0
  */
 export interface Delegate {
   readonly _tag: string
+  /**
+   * Places the delegation in the caller's plan. This is the shape a descriptor
+   * that declares no cache policy takes: the delegate's own topology — its
+   * fan-out, its priorities, its waits — is part of the plan the engine builds
+   * for the bridged flow, and a host reading that plan sees the real work.
+   */
   readonly call: (payload: any) => PlanNode.Node<any, any, any>
+  /**
+   * Runs the delegate as an execution of its own. This is the shape a
+   * descriptor that DECLARES a cache policy takes, because a result can only
+   * be recorded and served again if the delegation is one dispatched step;
+   * see {@link fromDescriptor}.
+   */
+  readonly execute: (
+    payload: any,
+    options?: { readonly executionId?: string | undefined }
+  ) => Effect.Effect<any, any, any>
 }
 
 /**
@@ -206,12 +228,23 @@ export interface Lowered {
   /**
    * The declared cache policy, or `undefined` when none was declared.
    *
-   * In rc.0 this is declaration identity, not a dispatch instruction. It enters
-   * the delegating node's captured key material, so a changed policy is a
-   * changed step key, and it is annotated on the bridged flow under the
-   * identifier `@smthrs/engine-store` reads a policy off a dispatched action.
-   * Nothing carries a flow's annotation bag onto the actions its delegate
-   * dispatches, so neither `ttlMs` nor `scope` narrows a cache row here.
+   * A declared policy is what makes a discovered flow's result reusable, and
+   * declaring one changes the shape of the plan: the delegation becomes one
+   * dispatched action ({@link dispatchedAction}) instead of the delegate's own
+   * call, because a result can only be recorded and served again if it is one
+   * step. The policy rides that action under the annotation
+   * `@smthrs/engine-store` `ActionPersistence` reads a policy off, so `ttlMs`
+   * bounds the age of the row the engine may serve and `scope` narrows the
+   * address it is stored under. It also enters the delegating node's captured
+   * key material, so a changed policy is a changed step key.
+   *
+   * One gate remains, and it is the engine's: `ActionPersistence` reuses a
+   * `sealed` dispatch and nothing else. A descriptor that names a delegate flow
+   * inherits authority discovery cannot read, so it projects the conservative
+   * wildcard and its effective tier is `irreversible`; its policy reaches
+   * admission and is refused there. A descriptor whose own capabilities project
+   * a `sealed` tier — an agent-backed skill declaring what it may touch — is
+   * the one whose recorded result travels.
    */
   readonly cache: CacheEnvironment.CachePolicy | undefined
   /**
@@ -229,13 +262,14 @@ export interface Lowered {
 
 /**
  * What a registration layer still needs from its host: the flow runtime it
- * registers with, and the action implementation table its body's delegate
- * resolves calls through.
+ * registers with, the action implementation table a driver resolves the
+ * bridged dispatch through, and the `Crypto` the bridge derives its delegate's
+ * child execution id with.
  *
  * @category models
  * @since 0.1.0
  */
-export type Registration = FlowRuntime | Implementations
+export type Registration = FlowRuntime | Action.Implementations | Crypto.Crypto
 
 /**
  * One discovered flow, made runnable.
@@ -420,19 +454,14 @@ const captured = (lowered: Lowered): Readonly<Record<string, unknown>> => ({
  *
  * Placement is stored under `@smthrs/flow`'s own placement key, which
  * `@smthrs/flow` `Graph` reads while building the plan. The cache policy is
- * stored under `CacheEnvironment.CachePolicyAnnotation`. That is the identifier
- * `@smthrs/engine-store` `ActionPersistence` reads a policy under, and the one
- * `@smthrs/patterns`' `withCache` writes on a flow. What `ActionPersistence`
- * reads it off, though, is a DISPATCHED ACTION.
+ * stored under `CacheEnvironment.CachePolicyAnnotation`, the identifier
+ * `@smthrs/patterns`' `withCache` writes on a flow, so a host reading the
+ * bridged flow back sees the same declaration the descriptor made.
  *
- * A flow's bag is not an action's bag, and rc.0 carries nothing between them:
- * `@smthrs/flow` `Interpreter` dispatches the actions a delegate's own body
- * names and never consults the enclosing flow's annotations. So the policy
- * lowered here bounds nothing at dispatch today. It is kept because it is
- * where a policy belongs and because the delegating node's captured key
- * material, which is the half that does change behavior, has to agree with it.
- * `packages/registry/test/ExecutableEngine.test.ts` pins the current behavior
- * with a `scope: "run"` descriptor that does NOT re-execute.
+ * A flow's bag is not an action's bag, and nothing carries one onto the other:
+ * `@smthrs/engine-store` `ActionPersistence` reads a policy off the DISPATCHED
+ * ACTION. That copy is written by {@link dispatchedAction}, which is the half
+ * that reaches admission. This bag is the declaration surface.
  */
 const annotationsOf = (lowered: Lowered): Context.Context<never> => {
   let bag = Context.empty()
@@ -442,6 +471,31 @@ const annotationsOf = (lowered: Lowered): Context.Context<never> => {
   }
   return bag
 }
+
+/**
+ * The filesystem boundary a descriptor's own effect declaration lowers to.
+ *
+ * A descriptor declares reads and writes as strings plus a `mode`, because it
+ * is serializable metadata read without evaluating anything. An action's
+ * `Action.FileBoundary` wants measured inputs or globs on the read side and
+ * patterns on the write side. A declared read carries no digest at discovery
+ * time, so the whole read set lowers to one glob the host expands and
+ * measures; `@smthrs/engine-store` keeps a globbed read set out of the
+ * cross-run cache, so a descriptor that declares reads is boundary-checked but
+ * not reused. `hermetic` says the two sets are complete, which is exactly what
+ * a `hard` boundary enforces, and `expected` records a deviation rather than
+ * refusing the result.
+ *
+ * The patterns are the author's, not the bridge's: an unusable one is refused
+ * by the host that prepares the boundary, naming the path.
+ */
+const boundaryOf = (descriptor: Descriptor.FlowDescriptor): Action.FileBoundary => ({
+  readSet: descriptor.effects.reads.length === 0
+    ? []
+    : [{ _tag: "Glob", include: descriptor.effects.reads as FileSet.Glob["include"] }],
+  writeSet: descriptor.effects.writes,
+  boundaryMode: descriptor.effects.mode === "hermetic" ? "hard" : "expected"
+})
 
 /**
  * The loaded body of one descriptor: the prompt it renders, and the annotation
@@ -511,6 +565,78 @@ const loadModule = (
   })
 
 /**
+ * The one action a policy-declaring descriptor's bridged flow dispatches, and
+ * the layer carrying its implementation.
+ *
+ * The declaration is a thin named seam: `Declared.toLayer` builds the action it
+ * dispatches from the declaration's own tier and idempotency key and carries no
+ * `metadata`, and an action with no file boundary is never cacheable. The
+ * dispatched unit that carries the descriptor's declarations is therefore the
+ * inline action the implementation returns — its tier, its identity, its file
+ * boundary, and the `CacheEnvironment.CachePolicyAnnotation`
+ * `@smthrs/engine-store` `ActionPersistence` reads off a DISPATCHED action to
+ * bound a row's age by `ttlMs` and narrow its address by `scope`.
+ *
+ * The delegate runs underneath as a CHILD EXECUTION derived from the parent's —
+ * the same derivation `@smthrs/flow` `Interpreter` uses for a `.child()`
+ * boundary — so it keeps its own execution, journal lineage, and retry policy
+ * beneath the step rather than being hidden inside it. Deriving the id from the
+ * parent's is what keeps two runs' children apart: the ambient default derives
+ * an id from the flow tag and the payload, so two runs invoking the same
+ * descriptor the same way would otherwise be one child execution, and a
+ * descriptor that declared nothing would reuse a result anyway.
+ */
+const dispatchedAction = (options: {
+  readonly tag: string
+  readonly descriptor: Descriptor.FlowDescriptor
+  readonly delegate: Delegate
+  readonly cache: CacheEnvironment.CachePolicy
+}) => {
+  const { cache, delegate, descriptor, tag } = options
+  const declaration = Action.make(tag, {
+    payload: Invocation,
+    success: Schema.Unknown,
+    error: Schema.Unknown
+  })
+  const layer = declaration.toLayer((envelope: Invocation) =>
+    CacheEnvironment.withCache(
+      Action.make({
+        name: `${tag}/run`,
+        success: Schema.Unknown,
+        error: Schema.Unknown,
+        // The descriptor's own reversibility tier, declared or inferred from its
+        // projected authority, and never widened here. It is also the gate on
+        // reuse: `ActionPersistence` caches a `sealed` dispatch and nothing
+        // else, so a policy on a descriptor whose authority projects to
+        // `irreversible` — which is every descriptor naming a delegate flow,
+        // because the delegate's authority is not statically visible — reaches
+        // admission and is refused there rather than being dropped here.
+        tier: descriptor.effects.tier,
+        // The cross-run address: the delegate, the whole envelope — the
+        // descriptor's declaration AND the caller's input, so one caller's
+        // recorded answer is never served to the next caller's question — and
+        // the policy itself, because `ActionPersistence` assumes a changed
+        // `ttlMs` is a changed step key when it fences its own expiry verdict.
+        idempotencyKey: { delegate: delegate._tag, invocation: envelope, cache },
+        metadata: boundaryOf(descriptor),
+        execute: Effect.gen(function*() {
+          const instance = yield* FlowInstance
+          const executionId = yield* Interpreter.childExecutionId(
+            instance.executionId,
+            tag,
+            delegate._tag,
+            envelope
+          )
+          return yield* delegate.execute(envelope, { executionId })
+        })
+      }),
+      cache
+    )
+  )
+  return { declaration, layer }
+}
+
+/**
  * Makes one discovered descriptor runnable.
  *
  * The body is loaded — a module through the loader, markdown through
@@ -561,11 +687,29 @@ export const fromDescriptor = (
       capabilities: descriptor.capabilities,
       flows: descriptor.flows
     })
-    // The policy travels twice, exactly as `@smthrs/patterns`' `withCache`
-    // sends it: as an annotation on the flow, and as captured identity on the
-    // node, so two descriptors declaring different policies are two
-    // declarations with two step keys. Only the second half reaches the rc.0
-    // runtime; see `annotationsOf`.
+    // WHAT THE BRIDGED FLOW DISPATCHES, AND WHY IT DEPENDS ON THE POLICY.
+    //
+    // Without a cache policy the delegation is a CALL: the delegate's node goes
+    // into the plan the engine builds for this flow, so its fan-out, its
+    // priorities, and its waits are the caller's plan and a host reading that
+    // plan sees the real work. That shape is not a step the engine can record —
+    // it is many steps — so there is nothing there for a policy to govern.
+    //
+    // A declared policy asks for exactly that: one recorded unit, served again
+    // when a later run asks the same question. A descriptor that declares one
+    // therefore dispatches `dispatchedAction` instead of calling the delegate,
+    // and the delegate runs underneath it as a child execution.
+    const bridge = lowered.cache === undefined ? undefined : dispatchedAction({
+      tag: `registry/${descriptor.name}`,
+      descriptor,
+      delegate,
+      cache: lowered.cache
+    })
+    // The policy travels three ways: as an annotation on the flow (the
+    // declaration surface a host reads back), as captured identity on the
+    // delegating node, so two descriptors declaring different policies are two
+    // declarations with two step keys, and — the half that reaches admission —
+    // onto the action the bridged flow dispatches, above.
     const identity = PlanNode.capture(captured(lowered), (value: unknown) => value)
     // The BODY's identity is captured too, and it has to be. A plan-time
     // function JavaScript cannot inspect gets process-local identity, so a
@@ -587,8 +731,10 @@ export const fromDescriptor = (
         ...captured(lowered)
       },
       (payload: Payload) => {
-        const called = delegate.call(invocation(payload.input ?? null))
-        const carried = lowered.cache === undefined ? called : PlanNode.map(called, identity)
+        const envelope = invocation(payload.input ?? null)
+        const carried = bridge === undefined
+          ? delegate.call(envelope)
+          : PlanNode.map(bridge.declaration.call(envelope), identity)
         return lowered.priority === undefined ? carried : PlanNode.priority(carried, lowered.priority)
       }
     )
@@ -605,7 +751,12 @@ export const fromDescriptor = (
       lowered,
       invocation,
       flow,
-      layer: Interpreter.layer(flow)
+      // The cast erases the requirement `bridge` minted for itself. Its key is
+      // built from a tag this function computes, so no caller can spell the
+      // type, and nothing outside the bridged flow's own body asks for it.
+      layer: (bridge === undefined
+        ? Interpreter.layer(flow)
+        : Layer.merge(Interpreter.layer(flow), bridge.layer)) as Layer.Layer<never, never, Registration>
     }
   })
 

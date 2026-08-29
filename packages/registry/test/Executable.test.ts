@@ -7,6 +7,7 @@
  * mistake surfaced at dispatch reaches an operator as an empty `AnyOf` defect
  * that names nothing.
  */
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
 import { describe, expect, it } from "@effect/vitest"
@@ -384,7 +385,13 @@ describe("annotation lowering", () => {
       expect(keys(first.flow)).not.toEqual(keys(other.flow))
       // An undeclared policy captures nothing, so a flow that never declared
       // one keys exactly as it did before the policy existed.
-      expect(keys(none.flow).length).toBeLessThan(keys(first.flow).length)
+      // And the two plans are not the same plan. A declared policy makes the
+      // delegation one dispatched action the engine can record; without one the
+      // delegate's own call is the plan, exactly as it was before a policy
+      // could be declared at all.
+      expect(keys(none.flow)).not.toEqual(keys(first.flow))
+      expect(keys(first.flow).some((material) => material.includes(`"action":"registry/greet"`))).toBe(true)
+      expect(keys(none.flow).some((material) => material.includes(`"flow":"test/echo"`))).toBe(true)
     }).pipe(Effect.provide(platform)))
 
   it.effect("lowers a priority a flow states through Node.priority on its body", () =>
@@ -400,6 +407,11 @@ describe("the host's catalog", () => {
     Effect.gen(function*() {
       const built = yield* Executable.catalog(options())
       expect(built.executables.map((executable) => executable.descriptor.name).sort()).toEqual([
+        "cacheable",
+        "cacheable-expiring",
+        "cacheable-plain",
+        "cacheable-reads",
+        "cacheable-scoped",
         "changelog",
         "greet",
         "scoped",
@@ -420,6 +432,11 @@ describe("the host's catalog", () => {
       const built = yield* Executable.catalog(options({ load: () => Effect.succeed({}) }))
       expect(built.executables.map((executable) => executable.descriptor.name)).toEqual(["changelog"])
       expect(built.refused.map((failure) => `${failure.flow}:${failure.code}`).sort()).toEqual([
+        "cacheable-expiring:invalid_module",
+        "cacheable-plain:invalid_module",
+        "cacheable-reads:invalid_module",
+        "cacheable-scoped:invalid_module",
+        "cacheable:invalid_module",
         "greet:invalid_module",
         "orphan:missing_delegate",
         "scoped:invalid_module",
@@ -446,7 +463,19 @@ describe("the project registry", () => {
     Effect.gen(function*() {
       const registry = yield* Registry.Registry
       const names = (yield* registry.list()).map((entry) => entry.name).sort()
-      expect(names).toEqual(["changelog", "greet", "orphan", "scoped", "tuned", "undecided"])
+      expect(names).toEqual([
+        "cacheable",
+        "cacheable-expiring",
+        "cacheable-plain",
+        "cacheable-reads",
+        "cacheable-scoped",
+        "changelog",
+        "greet",
+        "orphan",
+        "scoped",
+        "tuned",
+        "undecided"
+      ])
     }).pipe(
       Effect.provide(Executable.layerProject({ root: projectRoot })),
       Effect.provide(platform)
@@ -684,7 +713,7 @@ describe("registration", () => {
       const built = yield* Effect.provide(
         Executable.Catalog,
         Executable.layer(options()).pipe(
-          Layer.provideMerge(Layer.merge(runtime, Action.layerImplementations))
+          Layer.provideMerge(Layer.mergeAll(runtime, Action.layerImplementations, NodeCrypto.layer))
         )
       ).pipe(Effect.provide(Logger.layer([capture])))
 
@@ -706,10 +735,34 @@ describe("registration", () => {
         } as never
       )
       yield* Layer.build(
+        // `Crypto` is part of the registration requirement now: the action the
+        // bridged flow dispatches derives its delegate's child execution id.
         Executable.layer(options()).pipe(
-          Layer.provideMerge(Layer.merge(runtime, Action.layerImplementations))
+          Layer.provideMerge(Layer.mergeAll(runtime, Action.layerImplementations, NodeCrypto.layer))
         )
       )
-      expect(registered.sort()).toEqual(["changelog", "greet", "scoped", "tuned"])
+      // One registration per runnable flow, plus a second for each descriptor
+      // that declares a cache policy: `@smthrs/flow` `Action.toLayer` registers
+      // a flow form for the action such a flow dispatches, which is how a
+      // driver expanding a persisted plan finds the code for that node. A
+      // descriptor declaring no policy calls its delegate directly and adds
+      // nothing to the runtime's registry.
+      expect(registered.sort()).toEqual([
+        "cacheable",
+        "cacheable-expiring",
+        "cacheable-plain",
+        "cacheable-reads",
+        "cacheable-scoped",
+        "changelog",
+        "greet",
+        "registry/cacheable",
+        "registry/cacheable-expiring",
+        "registry/cacheable-reads",
+        "registry/cacheable-scoped",
+        "registry/scoped",
+        "registry/tuned",
+        "scoped",
+        "tuned"
+      ])
     }).pipe(Effect.scoped, Effect.provide(registryLayer), Effect.provide(platform)))
 })
