@@ -60,6 +60,7 @@ export const publishedPackages = [
   "@smthrs/keys",
   "@smthrs/mcp",
   "@smthrs/memory",
+  "@smthrs/migrate",
   "@smthrs/model",
   "@smthrs/notifications",
   "@smthrs/observability",
