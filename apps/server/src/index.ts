@@ -1994,10 +1994,10 @@ const handleBrowserFetch = async (request: Request): Promise<Response> => {
 
 /**
  * Same-origin guard for the API surface. These routes spend the deployment's
- * own credentials — `/api/approvals/decision` submits a decision under the
- * seam's injected identity — and a `text/plain` or form POST from another site
- * is not preflighted, so nothing else would stop a page anywhere from driving
- * them. Requests without an `Origin` (same-origin GETs, top-level OAuth
+ * own credentials — `/api/workflow/rpc` relays a gateway procedure under the
+ * credential the Worker holds and the browser never sees — and a `text/plain`
+ * or form POST from another site is not preflighted, so nothing else would
+ * stop a page anywhere from driving them. Requests without an `Origin` (same-origin GETs, top-level OAuth
  * navigation, curl, the e2e) are untouched.
  */
 const isCrossOriginRequest = (request: Request, url: URL): boolean => {
