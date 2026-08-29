@@ -9,6 +9,11 @@ import { readFileSync } from "node:fs"
  * sequence of the `control.agent.cell-settled` event that rejected it. All five
  * are legitimate cells: the only imports in them are inside a `bash` command's
  * Python heredoc or a `grep` pattern.
+ *
+ * They are records, not teaching. Wave 5 ran on the filing surface, so several
+ * of them end in `return { intent: … }`, which the sandbox now refuses. They
+ * stay verbatim: aligning them to `ctx.done` would rewrite what the model
+ * actually wrote.
  */
 export const rejectedCellNames = [
   "astropy-8707-seq82",

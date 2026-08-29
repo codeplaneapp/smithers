@@ -3,11 +3,10 @@
  * file that imports the Electrobun SDK: it starts the local origin, then
  * opens one window at it. The origin is the only transport between the SPA
  * and this process; RPC carries just the two native doors (the folder dialog
- * and the system browser), and both have HTTP fallbacks.
+ * and the system browser). Neither privileged operation has an HTTP fallback.
  */
 import { BrowserView, BrowserWindow, Utils } from "electrobun/main"
 import type { SmithersNativeRPC } from "smithers-shared/NativeRPC"
-import { inspectLocalRepository } from "./LocalRepository"
 import { defaultDistDir, startLocalServer } from "./server"
 
 const headless = Bun.env.SMITHERS_LOCAL_HEADLESS === "1"
@@ -29,7 +28,8 @@ const server = await startLocalServer({
   port: Number.isInteger(port) && port >= 0 ? port : 0,
   distDir: defaultDistDir(import.meta.dir),
   chatStub: Bun.env.SMITHERS_CHAT_STUB === "1",
-  openExternal
+  cloudMode: Bun.env.SMITHERS_LOCAL_MODE === "offline" ? "offline" : "hybrid",
+  allowManualRepositoryPaths: headless
 })
 
 if (headless) {
@@ -46,7 +46,7 @@ if (headless) {
           })
           const selectedPath = selectedPaths.find((path) => path.trim() !== "")
           if (selectedPath === undefined) return { status: "cancelled" } as const
-          return inspectLocalRepository(selectedPath, access)
+          return server.authorizeRepository(selectedPath, access)
         },
         openExternal: async ({ url }) => ({ opened: await openExternal(url) })
       },
@@ -67,5 +67,15 @@ if (headless) {
     }
   })
 }
+
+let shuttingDown = false
+const shutdown = async (): Promise<void> => {
+  if (shuttingDown) return
+  shuttingDown = true
+  await server.stop()
+  process.exit(0)
+}
+process.on("SIGINT", () => void shutdown())
+process.on("SIGTERM", () => void shutdown())
 
 console.log("Smithers app started!")

@@ -158,4 +158,15 @@ describe("McpFlows.mcp", () => {
     expect(result.outcome).toBe("success")
     expect(result.value).toEqual({ content: [{ type: "text", text: "5" }], isError: false })
   })
+
+  it("uses conservative metadata defaults for an incomplete tool description", async () => {
+    const source = McpFlows.mcp({
+      server: "partial",
+      tools: [{ name: "run", description: undefined, inputSchema: undefined }],
+      callTool: () => Effect.succeed({ content: [], isError: false })
+    })
+    const [binding] = await execute(source.bindings())
+    expect(binding!.descriptor.description).toBe("MCP tool \"run\" on server \"partial\"")
+    expect(binding!.descriptor.input).toMatchObject({ document: { type: "object" } })
+  })
 })

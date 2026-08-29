@@ -51,8 +51,20 @@ export interface ContractContext {
 
 export interface Harness {
   readonly label: string
-  /** Enables assertions that require two genuine file-backed connections. */
+  /**
+   * Enables assertions that require a real driver: savepoint nesting, rollback
+   * on a defect or an interrupt, and a multi-megabyte blob round trip. An
+   * implementation whose isolation only exists in-process cannot demonstrate
+   * any of them.
+   */
   readonly realDriver: boolean
+  /**
+   * Enables the one assertion that additionally requires two genuine
+   * connections over one store. A backend with a single connection — a
+   * Durable Object owns exactly one SQLite database on one thread — has no
+   * second connection to contend with and cannot produce the lock error.
+   */
+  readonly crossConnection: boolean
   /** Runs `body` against a freshly created, empty store. */
   readonly run: <A, E>(body: (context: ContractContext) => Effect.Effect<A, E, never>) => Effect.Effect<A, E>
 }
@@ -222,7 +234,7 @@ export const describeContract = (harness: Harness): void => {
         expect(result).toEqual({ matched: 1, unmatched: 0 })
       }))
 
-    if (harness.realDriver) {
+    if (harness.crossConnection) {
       it.effect("classifies a genuine SQLITE_BUSY from a second file connection as retryable", () =>
         Effect.gen(function*() {
           const error = yield* harness.run((context) =>
@@ -240,7 +252,9 @@ export const describeContract = (harness: Harness): void => {
           expect(SqlError.isSqlError(error)).toBe(true)
           expect(WriteRetry.isRetryableWriteError(error)).toBe(true)
         }))
+    }
 
+    if (harness.realDriver) {
       it.effect("rolls a failed nested write back to its savepoint while the outer write commits", () =>
         Effect.gen(function*() {
           const result = yield* harness.run((context) =>

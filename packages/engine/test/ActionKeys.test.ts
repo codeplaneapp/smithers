@@ -21,9 +21,9 @@ const provideHost = <A, E>(
   self: Effect.Effect<
     A,
     E,
-    FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance | Scope.Scope
+    Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance | Scope.Scope
   >
-): Effect.Effect<A, E> =>
+): Effect.Effect<A, E, Crypto.Crypto> =>
   self.pipe(
     Effect.scoped,
     Effect.provideService(

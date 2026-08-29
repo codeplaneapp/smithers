@@ -1,14 +1,15 @@
 import { expect, test } from "@playwright/test"
 import type { Page } from "@playwright/test"
-import { cpSync, existsSync, mkdtempSync } from "node:fs"
+import { cpSync, existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { localApiGet, localApiPost } from "./localApi"
 
 /*
  * Lane L3 (docs/LOCAL-APP.md "Auto-load flow"): opening a repository through
- * the chrome loads its Smithers targets, the stubbed panel turn renders an
- * html card, and a Run button inside that card's frame streams a target run
- * into a target-run card. The demo repository proves the loader at scale
+ * the chrome loads its Smithers targets into a trusted typed card, and that
+ * card's parent-owned Run button streams a target run into a target-run card.
+ * The demo repository proves the loader at scale
  * (>= 82 targets); target execution happens in a throwaway copy of the
  * build-cli force-spec fixture, never in the demo checkout.
  */
@@ -20,10 +21,10 @@ const FORCE = "/Users/williamcory/artsy/force"
 const FIXTURE = resolve(__dirname, "../../../../packages/build-cli/test/fixtures/force-spec")
 
 const targetsCard = (page: Page) => page.locator(".smithers-card[data-kind=\"targets\"]")
-const htmlCard = (page: Page) => page.locator(".smithers-card[data-kind=\"html\"]")
 const repoCard = (page: Page) => page.locator(".smithers-card[data-kind=\"repo\"]")
 const runCard = (page: Page) => page.locator(".smithers-card[data-kind=\"target-run\"]")
-const htmlFrame = (page: Page) => page.locator("iframe[data-testid^=\"html-card-frame-\"]")
+const opened: Array<string> = []
+const temporary: Array<string> = []
 
 /** The chrome's Open repository, answered through the window.prompt fallback. */
 const openRepo = async (page: Page, path: string): Promise<void> => {
@@ -42,10 +43,28 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test("opening the demo repository loads its targets and the stub panel", async ({ page }) => {
+test.afterEach(async ({ page, request }) => {
+  try {
+    if (opened.length > 0) {
+      const listed = await localApiGet(page, request, "/api/repos")
+      if (listed.ok()) {
+        const { repos } = (await listed.json()) as { repos: Array<{ id: string; path: string }> }
+        for (const repo of repos) {
+          if (opened.includes(repo.path)) await localApiPost(page, request, "/api/repo/close", { repoId: repo.id })
+        }
+      }
+    }
+  } finally {
+    opened.length = 0
+    for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true })
+  }
+})
+
+test("opening the demo repository loads its trusted target card", async ({ page }) => {
   test.skip(!existsSync(FORCE), `${FORCE} is not on this machine`)
   await page.goto("/")
   await openRepo(page, FORCE)
+  opened.push(realpathSync(FORCE))
   await expect(page.getByTestId("repo-chip")).toHaveText("artsy/force")
   await expect(repoCard(page)).toBeVisible()
 
@@ -56,30 +75,25 @@ test("opening the demo repository loads its targets and the stub panel", async (
   await expect.poll(() => targets.locator("[data-target-row]").count(), { timeout: 60_000 }).toBeGreaterThanOrEqual(82)
   await expect(targets.locator("[data-target-row=\"//:detectSecrets\"]")).toBeVisible()
 
-  const panel = htmlCard(page)
-  await expect(panel).toBeVisible({ timeout: 30_000 })
-  const frame = htmlFrame(page)
-  await expect(frame).toBeVisible()
-  const frameId = await frame.getAttribute("data-testid")
-  expect(frameId).toMatch(/^html-card-frame-html-/)
-  await expect(page.frameLocator("iframe[data-testid^=\"html-card-frame-\"]").getByTestId("stub-panel")).toBeVisible()
   await expect(page.locator(".smithers-chat-message[data-role=\"assistant\"]").last()).toContainText("Loaded 82 targets for artsy/force")
+  await expect(page.locator(".smithers-card[data-kind=\"html\"]")).toHaveCount(0)
 })
 
-test("a Run button inside the panel streams a target run to completion", async ({ page, request }) => {
+test("a trusted Run button streams a target run to completion", async ({ page, request }) => {
   const copy = mkdtempSync(join(tmpdir(), "smithers-force-spec-"))
+  temporary.push(copy)
   cpSync(FIXTURE, copy, { recursive: true })
 
   await page.goto("/")
   await openRepo(page, copy)
+  const copyPath = realpathSync(copy)
+  opened.push(copyPath)
   await expect(repoCard(page)).toBeVisible()
   await expect.poll(() => targetsCard(page).locator("[data-target-row]").count(), { timeout: 60_000 }).toBeGreaterThanOrEqual(81)
-  await expect(htmlCard(page)).toBeVisible({ timeout: 30_000 })
-
-  // The stub offers the first three targets; //.github:dangerCi renders a workflow file and exits 0 with no network.
-  const inner = page.frameLocator("iframe[data-testid^=\"html-card-frame-\"]")
-  await expect(inner.getByTestId("stub-panel")).toBeVisible()
-  await inner.getByTestId("stub-run-dangerCi").click()
+  // //.github:dangerCi renders a workflow file and exits 0 with no network.
+  const danger = targetsCard(page).locator('[data-target-row="//.github:dangerCi"]')
+  await expect(danger).toBeVisible()
+  await danger.getByRole("button", { name: "Run //.github:dangerCi" }).click()
 
   const run = runCard(page)
   await expect(run).toBeVisible()
@@ -92,43 +106,40 @@ test("a Run button inside the panel streams a target run to completion", async (
   await expect(run.locator("[data-run-status]")).toHaveAttribute("data-run-status", "done")
   await expect(run).toContainText("exit 0")
 
-  // The maximized html card offers Open in tab (L2's card tabs); the tab renders the same card with its frame.
-  const panelId = (await htmlCard(page).getAttribute("data-testid"))?.replace(/^card-/, "") ?? ""
-  expect(panelId).toMatch(/^html-/)
-  await htmlCard(page).getByTestId(`card-maximize-${panelId}`).click()
-  await expect(htmlCard(page)).toHaveAttribute("data-maximized", "true")
-  await page.getByTestId(`card-open-in-tab-${panelId}`).click()
+  // The maximized targets card offers Open in tab; the tab renders the same trusted card.
+  const targetsId = (await targetsCard(page).getAttribute("data-testid"))?.replace(/^card-/, "") ?? ""
+  expect(targetsId).toMatch(/^targets-/)
+  await targetsCard(page).getByTestId(`card-maximize-${targetsId}`).click()
+  await expect(targetsCard(page)).toHaveAttribute("data-maximized", "true")
+  await page.getByTestId(`card-open-in-tab-${targetsId}`).click()
   // openCardTab coins the tab id as `card-${cardId}` (state/controller/tabs.ts), and the
   // chrome renders `tab-${tab.id}` / `tab-body-${tab.id}` over it. Compose the id the same
   // way so the literal pin checks each half against the prefixes the app really builds.
-  const cardTabId = `card-${panelId}`
+  const cardTabId = `card-${targetsId}`
   const tab = page.getByTestId(`tab-${cardTabId}`)
   await expect(tab).toHaveAttribute("data-active", "true")
   const tabBody = page.getByTestId(`tab-body-${cardTabId}`)
   await expect(tabBody).toBeVisible()
-  await expect(tabBody.getByTestId(`html-card-frame-${panelId}`)).toBeVisible()
-  await expect(tabBody.frameLocator("iframe").getByTestId("stub-panel")).toBeVisible()
+  await expect(tabBody.locator('[data-target-row="//.github:dangerCi"]')).toBeVisible()
   await page.getByTestId("tab-main").click()
 
-  const listed = await request.get("/api/repos")
+  const listed = await localApiGet(page, request, "/api/repos")
   expect(listed.status()).toBe(200)
   const { repos } = (await listed.json()) as { repos: Array<{ path: string; smithers: { detected: boolean } }> }
-  const paths = repos.map((repo) => repo.path)
-  expect(paths.some((path) => path.endsWith(copy.slice(copy.lastIndexOf("/"))))).toBe(true)
-  if (existsSync(FORCE)) expect(paths).toContain(FORCE)
-  expect(repos.every((repo) => repo.smithers.detected)).toBe(true)
+  expect(repos.find((repo) => repo.path === copyPath)?.smithers.detected).toBe(true)
 })
 
 test("a directory without Smithers files opens as a repo card and loads no targets", async ({ page }) => {
   const plain = mkdtempSync(join(tmpdir(), "smithers-plain-"))
+  temporary.push(plain)
   await page.goto("/")
   await openRepo(page, plain)
+  opened.push(realpathSync(plain))
   const card = repoCard(page)
   await expect(card).toBeVisible()
   await expect(card).toContainText("no WORKSPACE.ts")
   await expect(page.getByTestId("repo-chip")).toBeVisible()
-  // Nothing else follows: no targets card, no panel, no run.
+  // Nothing else follows: no targets card or run.
   await page.waitForTimeout(1500)
   await expect(targetsCard(page)).toHaveCount(0)
-  await expect(htmlCard(page)).toHaveCount(0)
 })

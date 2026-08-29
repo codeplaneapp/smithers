@@ -2,8 +2,8 @@ import { constants } from "node:fs"
 import { access, realpath, stat } from "node:fs/promises"
 import { basename } from "node:path"
 import type {
+  InspectLocalRepositoryResult,
   LocalRepositoryInspection,
-  PickLocalRepositoryResult,
   RepositoryAccess
 } from "smithers-shared/NativeRepository"
 
@@ -46,7 +46,7 @@ const sanitizeRemoteUrl = (remoteUrl: string | null): string | null => {
   }
 }
 
-const permissionError = (accessMode: RepositoryAccess): PickLocalRepositoryResult => ({
+const permissionError = (accessMode: RepositoryAccess): InspectLocalRepositoryResult => ({
   status: "error",
   code: "permission-denied",
   message: accessMode === "read-write"
@@ -57,7 +57,7 @@ const permissionError = (accessMode: RepositoryAccess): PickLocalRepositoryResul
 export const inspectLocalRepository = async (
   selectedPath: string,
   accessMode: RepositoryAccess
-): Promise<PickLocalRepositoryResult> => {
+): Promise<InspectLocalRepositoryResult> => {
   let selectedDirectory: string
   try {
     selectedDirectory = await realpath(selectedPath)

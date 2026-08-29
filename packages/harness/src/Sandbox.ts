@@ -60,7 +60,7 @@ export type SandboxErrorCode = typeof SandboxErrorCode.Type
 export class SandboxError extends Schema.TaggedError<SandboxError>()("flows/harness/SandboxError", {
   code: SandboxErrorCode,
   message: Schema.String,
-  cause: Schema.optional(Schema.Unknown)
+  cause: Schema.optional(Schema.Defect())
 }) {}
 
 /**

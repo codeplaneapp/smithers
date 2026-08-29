@@ -34,7 +34,7 @@ export const releaseSmoke = Smithers.NodeTest({
 ## Attributes
 
 | Name      | Type                     | Default  | Description                                                                    |
-| --------- | ------------------------ | -------- | -------------------------------------------------------------------------------- |
+| --------- | ------------------------ | -------- | ------------------------------------------------------------------------------ |
 | `runtime` | `Runtime.Runtime`        | required | The declared interpreter. Never a hardcoded `node`.                            |
 | `runner`  | `Runner`                 | required | How the program is started. See [Runners](#runners).                           |
 | `srcs`    | `Array<Input.Declared>`  | required | What the program reads beyond its own entry point, digested as key material.   |
@@ -48,10 +48,10 @@ The runner is a discriminated union, so the fields one form does not have are
 fields a BUILD.ts file cannot write: no argument list on a test-runner run, no
 file list on an entry-point run.
 
-| Constructor                | Renders (Node)              | Renders (Bun)          |
-| -------------------------- | --------------------------- | ---------------------- |
-| `testRunner([a, b])`       | `node --test a b`           | `bun test a b`         |
-| `entrypoint(file, [args])` | `node <file> <args...>`     | `bun <file> <args...>` |
+| Constructor                | Renders (Node)          | Renders (Bun)          |
+| -------------------------- | ----------------------- | ---------------------- |
+| `testRunner([a, b])`       | `node --test a b`       | `bun test a b`         |
+| `entrypoint(file, [args])` | `node <file> <args...>` | `bun <file> <args...>` |
 
 Every spelling difference between interpreters is resolved by
 [`Runtime`](../../concepts/targets.md), so switching the workspace runtime
@@ -78,7 +78,7 @@ None. A gate's product is its exit code.
 ## Channels and status
 
 |          |                                             |
-| -------- | --------------------------------------------- |
+| -------- | ------------------------------------------- |
 | Kinds    | `test`                                      |
 | Success  | `Exec.Result`                               |
 | Error    | `Exec.ExecError`                            |

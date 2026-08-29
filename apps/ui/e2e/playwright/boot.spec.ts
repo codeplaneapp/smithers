@@ -2,8 +2,7 @@ import { expect, test } from "@playwright/test"
 
 /*
  * M0 boot (LOCAL-APP.md, "Test tiers"): the local origin answers, the SPA
- * renders its chat surface, and the sign-in door is present without gating
- * anything.
+ * renders its chat surface, and advertises only the services in bootstrap.
  */
 
 test("GET /api/health answers ok with node and sandbox", async ({ request }) => {
@@ -24,12 +23,15 @@ test("GET /api/health answers ok with node and sandbox", async ({ request }) => 
   expect(typeof body.sandbox.enforced).toBe("boolean")
 })
 
-test("the app boots: title, transcript, composer, and the sign-in button", async ({ page }) => {
+test("the offline local app boots without advertising unavailable cloud identity", async ({ page }) => {
   await page.goto("/")
   await expect(page).toHaveTitle(/Smithers/)
   await expect(page.getByTestId("transcript")).toBeVisible()
   await expect(page.getByTestId("composer-input")).toBeVisible()
-  await expect(page.getByTestId("chrome-sign-in")).toBeVisible()
+  await expect(page.getByTestId("chrome-sign-in")).toHaveCount(0)
+  await expect(page.locator('.smithers-chat-message[data-role="assistant"]')).toContainText(
+    "doesn't provide Smithers identity"
+  )
   // Anonymous is the open state: the composer invites, nothing gates.
   await expect(page.getByTestId("composer-input")).toBeEnabled()
 })

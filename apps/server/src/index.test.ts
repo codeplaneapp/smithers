@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import worker, { TurnCancelRegistry, withStartSessionHandoff } from "./index"
+import { AppBootstrapSchema } from "smithers-shared/AppBootstrap"
+import worker, { TurnCancelRegistry } from "./index"
 import type { TurnCancelNamespace, TurnCancelStorage, WorkerEnv } from "./index"
 
 const assetsEnv = (html = "<html><body>smithers</body></html>"): WorkerEnv => ({
@@ -32,30 +33,37 @@ const post = (path: string, body: unknown): Request =>
   })
 
 describe("smithers mvp worker", () => {
-  test("the trusted Start session handoff overwrites a forged client value", async () => {
-    const forged = encodeURIComponent(JSON.stringify({ status: 200, body: JSON.stringify({ login: "forged" }) }))
-    const request = new Request("https://mvp.test/", {
-      headers: { "x-smithers-start-session": forged }
-    })
-    const handedOff = await withStartSessionHandoff(
-      request,
-      new Response(JSON.stringify({ status: "signed-out" }), { status: 200 })
-    )
-    const encoded = handedOff.headers.get("x-smithers-start-session")
-    expect(encoded).not.toBeNull()
-    expect(JSON.parse(decodeURIComponent(encoded ?? ""))).toEqual({
-      status: 200,
-      body: JSON.stringify({ status: "signed-out" })
-    })
-    expect(encoded).not.toBe(forged)
-  })
-
   test("serves the SPA with the cross-origin isolation headers OPFS needs", async () => {
     const response = await worker.fetch(new Request("https://mvp.test/"), assetsEnv())
     expect(response.status).toBe(200)
     expect(response.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin")
     expect(response.headers.get("Cross-Origin-Embedder-Policy")).toBe("require-corp")
     expect(await response.text()).toContain("smithers")
+  })
+
+  test("describes the cloud runtime before the SPA selects adapters", async () => {
+    const response = await worker.fetch(
+      new Request("https://mvp.test/api/bootstrap"),
+      {
+        ...assetsEnv(),
+        SMITHERS_BUILD_SHA: "build-abc",
+        SMITHERS_CHAT_AUTH_TOKEN: "chat-token",
+        IDENTITY_UPSTREAM_URL: "https://identity.test",
+        SMITHERS_CLOUD_API_BASE_URL: "https://cloud.test",
+        BILLING_CHECKOUT_ENABLED: "1"
+      }
+    )
+
+    expect(response.status).toBe(200)
+    expect(AppBootstrapSchema.parse(await response.json())).toEqual({
+      apiVersion: 1,
+      host: "cloud",
+      version: "1.0.0",
+      buildSha: "build-abc",
+      capabilities: ["agent", "identity", "jjhub", "billing.checkout"],
+      authFlow: "redirect",
+      sandbox: null
+    })
   })
 
   test("rejects a turn body over the 1 MB cap with 413", async () => {
@@ -2216,4 +2224,3 @@ describe("the browser tool route (§2d)", () => {
     }
   })
 })
-

@@ -19,7 +19,6 @@
     "canary:rollback": "bun scripts/canary/rollback-probe.ts"
   },
   "dependencies": {
-    "@tanstack/react-start": "1.168.48",
     "smithers-shared": "workspace:*"
   },
   "devDependencies": {

@@ -23,6 +23,7 @@ import { clearTargetGraphCache, queryTargetGraph } from "./TargetGraph"
 let repo = ""
 let cli = ""
 const node: NodeSidecar = { path: process.execPath, version: "v22.19.0" }
+const fixtureTimeoutMs = 30_000
 
 beforeEach(async () => {
   clearTargetGraphCache()
@@ -35,10 +36,17 @@ if (args[0] === "graph") process.stdout.write(JSON.stringify({ graph: "//src:bui
 else process.stdout.write(JSON.stringify({ targets: [] }))
 `
   )
+}, fixtureTimeoutMs)
+
+afterEach(async () => {
+  await rm(repo, { recursive: true, force: true })
+}, fixtureTimeoutMs)
+
+test("the event loop keeps running while the graph route fingerprints the workspace", async () => {
   /*
-   * A workspace wide and deep enough that a synchronous walk of it is
-   * measurable: 40 packages x 40 nested directories, each carrying a
-   * declaration the digest has to stat.
+   * Only the blocking benchmark needs a large tree. Building it in the shared
+   * hook made two unrelated correctness tests pay for 3,200 filesystem calls
+   * apiece and made the suite sensitive to machine load.
    */
   for (let pkg = 0; pkg < 40; pkg++) {
     for (let depth = 0; depth < 40; depth++) {
@@ -47,13 +55,6 @@ else process.stdout.write(JSON.stringify({ targets: [] }))
       await writeFile(join(dir, "PACKAGE.ts"), `export const p${pkg}d${depth} = 1\n`)
     }
   }
-})
-
-afterEach(async () => {
-  await rm(repo, { recursive: true, force: true })
-})
-
-test("the event loop keeps running while the graph route fingerprints the workspace", async () => {
   /* A 10ms heartbeat: how late it fires is how long the loop was held. */
   const gaps: Array<number> = []
   let previous = performance.now()
@@ -75,9 +76,12 @@ test("the event loop keeps running while the graph route fingerprints the worksp
    * scheduling slices.
    */
   expect(Math.max(...gaps)).toBeLessThan(60)
-})
+}, 120_000)
 
 test("a declaration edit still invalidates the cached graph", async () => {
+  const declarationDir = join(repo, "pkg-7", "nested-11")
+  await mkdir(declarationDir, { recursive: true })
+  await writeFile(join(declarationDir, "PACKAGE.ts"), "export const original = 1\n")
   const first = await queryTargetGraph({ repoId: "r", repo, node, cli })
   expect(first.digest).toMatch(/^[0-9a-f]{64}$/)
   /* An untouched workspace keeps the digest: the cache is allowed to serve. */
@@ -92,7 +96,7 @@ test("a declaration edit still invalidates the cached graph", async () => {
   await mkdir(join(repo, "brand-new"), { recursive: true })
   await writeFile(join(repo, "brand-new", "PACKAGE.ts"), "export const fresh = 1\n")
   expect((await queryTargetGraph({ repoId: "r", repo, node, cli })).digest).not.toBe(after.digest)
-})
+}, 30_000)
 
 test("a repository that cannot be read fingerprints to a stable digest rather than throwing", async () => {
   const empty = await mkdtemp(join(tmpdir(), "smithers-empty-"))
@@ -103,4 +107,4 @@ test("a repository that cannot be read fingerprints to a stable digest rather th
   } finally {
     await rm(empty, { recursive: true, force: true })
   }
-})
+}, 30_000)

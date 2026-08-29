@@ -1,7 +1,6 @@
 import {
   Badge,
   Button,
-  ChatComposer,
   ChatMessage,
   ChatTranscript,
   EmptyState,
@@ -12,34 +11,25 @@ import {
   Suggestion,
   SuggestionGroup
 } from "@smthrs/ui"
-import { MarkdownEditor, MarkdownEditorStyles } from "@smthrs/ui/adapters/markdown-editor"
 import { useLiveQuery } from "@tanstack/react-db"
 import {
   BookOpen,
-  ChevronDown,
   Copy,
-  FolderGit2,
-  GitPullRequest,
-  HardDrive,
   Moon,
-  Plug,
   Plus,
   RotateCcw,
-  Server,
   Sparkles,
   Sun,
   Trash2
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
-import type { KeyboardEvent, ReactNode, RefObject } from "react"
+import { lazy, Suspense, useRef, useState } from "react"
+import type { PointerEvent as ReactPointerEvent } from "react"
 import { CardView } from "./ChatCards"
+import { Composer } from "./Composer"
 import { ConnectorsSurface } from "./ConnectorsSurface"
 import { useController } from "./ControllerContext"
 import { DevtoolsPanel } from "./DevtoolsPanel"
-import { composeRefs, stampFlows, stampTestIds } from "./FlowStamp"
-
-/** The Playwright contract's handle on the composer textarea (LOCAL-APP.md); spread past the prop type's excess check. */
-const COMPOSER_INPUT_TEST_ID: Record<string, string> = { "data-testid": "composer-input" }
+import { stampFlows } from "./FlowStamp"
 import { tabOutOf } from "./FocusRing"
 import { RichMarkdown } from "./RichMarkdown"
 import type { Card, Message, Suggestion as SuggestionBinding } from "./state/AppState"
@@ -52,6 +42,10 @@ import { TabBodies } from "./tabs/TabBodies"
 import { timeLabel } from "./Timestamps"
 import { ToastStack } from "./ToastStack"
 import { useCardRows } from "./state/useCardRows"
+
+const MarkdownEditorSurface = lazy(() =>
+  import("./MarkdownEditorSurface").then((module) => ({ default: module.MarkdownEditorSurface }))
+)
 
 const systemNoteLabel = (message: Message): string => {
   if (message.statusDetail !== undefined) return `Turn interrupted — ${message.statusDetail}`
@@ -95,581 +89,6 @@ function CopyMessageButton({
   )
 }
 
-/*
- * The composer's surface menu (§2c′): the surface buttons collapse into ONE
- * compact dropdown so the toolbar never accumulates horizontally. Every
- * entry is a direct command binding (never a prompt string), state-aware,
- * keyboard-complete (ArrowDown opens, arrows move, Enter invokes, Escape
- * closes). `/` remains the full command surface; this is the pointer subset.
- *
- * C-1 (wave 13): the trigger itself is the /surfaces command — the open state
- * lives in the session collection and the button dispatches through the
- * registry, so the affordance and the command are the same act.
- */
-function ComposerMenu({
-  surface,
-  open,
-  triggerRef
-}: {
-  readonly surface: "chat" | "world" | "connectors"
-  readonly open: boolean
-  /*
-   * The trigger is owned here but refocused from two places — this menu's own
-   * exits, and the shell's Escape handler — so the shell holds the ref and
-   * hands it down. Reaching back through `document` for a node this package
-   * renders is a query against our own DOM; a ref IS the handle.
-   */
-  readonly triggerRef: RefObject<HTMLButtonElement | null>
-}) {
-  const controller = useController()
-  const [highlighted, setHighlighted] = useState(0)
-  const menuRef = useRef<HTMLDivElement>(null)
-  /* The entries are a fixed list, so index-assigned refs stay aligned with the DOM. */
-  const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
-
-  /*
-   * A pointer press outside the menu dismisses it.
-   *
-   * §5.15: dismissing by pointer used to leave focus wherever the press
-   * landed, because the item that HAD focus was unmounted with the menu — so
-   * a Tab after a pointer dismissal restarted from the transcript viewport.
-   * Dismissing returns to the trigger, exactly as Escape does, so the menu
-   * has one exit however it is closed.
-   */
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: PointerEvent): void => {
-      const root = menuRef.current
-      if (root === null || !(event.target instanceof Node) || root.contains(event.target)) return
-      const heldFocus = root.contains(document.activeElement)
-      controller.runCommand("surfaces")
-      if (!heldFocus) return
-      requestAnimationFrame(() => {
-        triggerRef.current?.focus()
-      })
-    }
-    document.addEventListener("pointerdown", onPointerDown)
-    return () => document.removeEventListener("pointerdown", onPointerDown)
-  }, [open, controller, triggerRef])
-
-  const entries = [
-    {
-      flow: "connect",
-      label: "Connect",
-      icon: <Plug size={14} aria-hidden="true" />,
-      active: surface === "connectors"
-    },
-    {
-      flow: "world",
-      label: WORLD_DISPLAY_NAME,
-      icon: <BookOpen size={14} aria-hidden="true" />,
-      active: surface === "world"
-    }
-  ] as const
-
-  const openMenu = (): void => {
-    setHighlighted(0)
-    controller.runCommand("surfaces")
-    requestAnimationFrame(() => {
-      itemRefs.current[0]?.focus()
-    })
-  }
-
-  const closeMenu = (): void => {
-    controller.runCommand("surfaces")
-    requestAnimationFrame(() => {
-      triggerRef.current?.focus()
-    })
-  }
-
-  const onTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
-    if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
-      event.preventDefault()
-      if (open) {
-        closeMenu()
-      } else {
-        openMenu()
-      }
-    }
-  }
-
-  const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === "Escape") {
-      event.preventDefault()
-      closeMenu()
-      return
-    }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault()
-      const next = event.key === "ArrowDown"
-        ? (highlighted + 1) % entries.length
-        : (highlighted + entries.length - 1) % entries.length
-      setHighlighted(next)
-      itemRefs.current[next]?.focus()
-    }
-  }
-
-  return (
-    <div className="composer-menu" ref={menuRef}>
-      <Button
-        ref={triggerRef}
-        variant="ghost"
-        size="sm"
-        className="composer-action composer-menu-trigger"
-        data-flow="surfaces"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Surfaces"
-        title="Surfaces"
-        onClick={() => (open ? closeMenu() : openMenu())}
-        onKeyDown={onTriggerKeyDown}
-      >
-        <Plug size={14} aria-hidden="true" />
-        <ChevronDown size={12} aria-hidden="true" />
-      </Button>
-      {open ?
-        (
-          <div className="composer-menu-list" role="menu" aria-label="Surfaces" onKeyDown={onMenuKeyDown}>
-            {entries.map((entry, index) => (
-              <button
-                type="button"
-                key={entry.flow}
-                ref={(node) => {
-                  itemRefs.current[index] = node
-                }}
-                role="menuitem"
-                className="composer-menu-item"
-                data-flow={entry.flow}
-                data-active={entry.active}
-                aria-pressed={entry.active}
-                tabIndex={index === highlighted ? 0 : -1}
-                onFocus={() => setHighlighted(index)}
-                onClick={() => {
-                  if (open) controller.runCommand("surfaces")
-                  controller.runCommand(entry.flow)
-                }}
-              >
-                {entry.icon}
-                {entry.label}
-              </button>
-            ))}
-          </div>
-        ) :
-        null}
-    </div>
-  )
-}
-
-/*
- * The composer's connect corner (bottom-left): the connection state as a chip,
- * the repository origins as a menu. Disconnected it reads "Connect";
- * connected it names the repository (`+N` for the rest) or the GitHub login.
- * Every entry is a command binding: local repositories pick through
- * connector.add, GitHub through auth.sign-in / repos.watch, Smithers Cloud
- * stays an honest "coming soon", and full management is one entry away
- * through /connect.
- */
-function ComposerConnect({
-  open,
-  triggerRef
-}: {
-  /* C-1 mirror: the open state is the session's, not this component's. */
-  readonly open: boolean
-  /* The shell closes this session menu too, so it owns the focus handle. */
-  readonly triggerRef: RefObject<HTMLButtonElement | null>
-}) {
-  const controller = useController()
-  const { collections } = controller.store
-  const { data: connectorRows } = useLiveQuery(collections.connectors)
-  const { data: operationRows } = useLiveQuery(collections.connectorOperations)
-  const { data: identityRows } = useLiveQuery(collections.identitySessions)
-  const menuRef = useRef<HTMLDivElement>(null)
-  /*
-   * The entries are built as DATA below so index-assigned refs stay aligned
-   * with the DOM through every conditional entry. Arrow keys, Escape, and
-   * open-and-focus-the-first-entry read these refs — never `document`, whose
-   * only job here would be to find nodes this package itself rendered.
-   */
-  const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
-
-  /* A pointer press outside the menu dismisses it without moving focus. */
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: PointerEvent): void => {
-      const root = menuRef.current
-      if (root !== null && event.target instanceof Node && !root.contains(event.target)) {
-        controller.closeConnectMenu()
-      }
-    }
-    document.addEventListener("pointerdown", onPointerDown)
-    return () => document.removeEventListener("pointerdown", onPointerDown)
-  }, [open, controller])
-
-  const connectors = [...connectorRows].sort((left, right) => left.name.localeCompare(right.name))
-  const operation = operationRows.find((candidate) => candidate.id === "connector-operation") ??
-    collections.connectorOperations.get("connector-operation")
-  const selecting = operation?.phase === "selecting-local-repository"
-  const identity = identityRows[0]
-  const signedIn = identity?.state === "signed-in"
-  const connected = signedIn || connectors.length > 0
-  const label = connectors.length > 0
-    ? `${connectors[0].name}${connectors.length > 1 ? ` +${connectors.length - 1}` : ""}`
-    : signedIn
-    ? `GitHub · ${identity?.login ?? "connected"}`
-    : "Connect"
-
-  const entries: ReadonlyArray<{
-    readonly key: string
-    readonly flow: string
-    readonly active?: boolean
-    readonly disabled?: boolean
-    readonly content: ReactNode
-    /* The command the entry invokes, and its argument when it takes one. */
-    readonly args?: string
-  }> = [
-    ...connectors.map((connector) => ({
-      key: connector.id,
-      flow: "connect",
-      active: true,
-      content: (
-        <>
-          <FolderGit2 size={14} aria-hidden="true" />
-          <span className="composer-connect-name">{connector.name}</span>
-          <span className="composer-connect-branch">{connector.branch ?? "detached"}</span>
-        </>
-      )
-    })),
-    ...(controller.nativeRepositoriesAvailable
-      ? [
-        {
-          key: "connector.add",
-          flow: "connector.add",
-          disabled: selecting,
-          content: (
-            <>
-              <HardDrive size={14} aria-hidden="true" />
-              {selecting ? "Choosing a repository…" : "Add local repository…"}
-            </>
-          ),
-          args: "read"
-        }
-      ]
-      : []),
-    signedIn
-      ? {
-        key: "repos.watch",
-        flow: "repos.watch",
-        content: (
-          <>
-            <GitPullRequest size={14} aria-hidden="true" />
-            Choose GitHub repositories…
-          </>
-        )
-      }
-      : {
-        key: "auth.sign-in",
-        flow: "auth.sign-in",
-        content: (
-          <>
-            <GitPullRequest size={14} aria-hidden="true" />
-            Connect GitHub…
-          </>
-        )
-      },
-    /*
-     * §1.1: signed out, sign-in is the ONE offered next step. Both of
-     * these need a session — clicking either only defers into the
-     * sign-in above it — so presenting them as available work makes
-     * the app look like it offers four ways in when it has one.
-     */
-    ...(signedIn
-      ? [
-        {
-          key: "repos.import",
-          flow: "repos.import",
-          content: (
-            <>
-              <Server size={14} aria-hidden="true" />
-              Import to Smithers Cloud…
-            </>
-          )
-        },
-        {
-          key: "connect",
-          flow: "connect",
-          content: (
-            <>
-              <Plug size={14} aria-hidden="true" />
-              Open connectors
-            </>
-          )
-        }
-      ]
-      : [])
-  ]
-
-  /* The entry indices a keyboard can land on; a disabled entry is skipped. */
-  const enabledEntries = entries.flatMap((entry, index) => (entry.disabled === true ? [] : [index]))
-
-  const toggleConnectMenu = (): void => {
-    controller.toggleConnectMenu()
-    if (!open) {
-      requestAnimationFrame(() => {
-        itemRefs.current[enabledEntries[0] ?? -1]?.focus()
-      })
-    }
-  }
-
-  const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === "Escape") {
-      event.preventDefault()
-      controller.closeConnectMenu()
-      triggerRef.current?.focus()
-      return
-    }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault()
-      if (enabledEntries.length === 0) return
-      const current = enabledEntries.findIndex(
-        (index) => itemRefs.current[index] === document.activeElement
-      )
-      const next = event.key === "ArrowDown"
-        ? (current + 1) % enabledEntries.length
-        : (current - 1 + enabledEntries.length) % enabledEntries.length
-      itemRefs.current[enabledEntries[next] ?? -1]?.focus()
-    }
-  }
-
-  return (
-    <div className="composer-menu composer-connect" ref={menuRef}>
-      <Button
-        ref={triggerRef}
-        variant="ghost"
-        size="sm"
-        className="composer-action composer-connect-trigger"
-        data-flow="connect"
-        data-connected={connected}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={connected ? `Connected: ${label}` : "Connect a repository"}
-        title={connected ? "Connected repositories" : "Connect a repository"}
-        onClick={toggleConnectMenu}
-      >
-        {connectors.length > 0 ? <FolderGit2 size={14} aria-hidden="true" /> : <Plug size={14} aria-hidden="true" />}
-        <span className="composer-connect-label">{label}</span>
-        <ChevronDown size={12} aria-hidden="true" />
-      </Button>
-      {open ?
-        (
-          <div
-            className="composer-menu-list composer-connect-list"
-            role="menu"
-            aria-label="Repository connections"
-            onKeyDown={onMenuKeyDown}
-          >
-            {entries.map((entry, index) => (
-              <button
-                type="button"
-                key={entry.key}
-                ref={(node) => {
-                  itemRefs.current[index] = node
-                }}
-                role="menuitem"
-                className="composer-menu-item"
-                data-flow={entry.flow}
-                data-active={entry.active === true ? "true" : undefined}
-                disabled={entry.disabled}
-                onClick={() => {
-                  controller.closeConnectMenu()
-                  if (entry.args === undefined) controller.runCommand(entry.flow)
-                  else controller.runCommandArgs(entry.flow, entry.args)
-                }}
-              >
-                {entry.content}
-              </button>
-            ))}
-          </div>
-        ) :
-        null}
-    </div>
-  )
-}
-
-/*
- * The composer, and everything a keystroke touches.
- *
- * §hot path: the draft is the ONE piece of session state that changes per
- * character, and it used to be read by the shell — so every keystroke
- * re-rendered App, and App renders the entire transcript. The draft
- * subscription lives HERE instead, behind the shell's draft-less projection,
- * so typing re-renders this subtree and nothing above it. The slash menu is
- * part of the same hot path (it is a function of the draft) and moved with it.
- */
-function Composer({
-  typing,
-  surface,
-  surfacesMenuOpen,
-  connectMenuOpen,
-  surfacesTriggerRef,
-  connectTriggerRef,
-  autoFocus,
-  placeholder
-}: {
-  readonly typing: boolean
-  readonly surface: "chat" | "world" | "connectors"
-  readonly surfacesMenuOpen: boolean
-  readonly connectMenuOpen: boolean
-  readonly surfacesTriggerRef: RefObject<HTMLButtonElement | null>
-  readonly connectTriggerRef: RefObject<HTMLButtonElement | null>
-  readonly autoFocus: boolean
-  readonly placeholder: string
-}) {
-  const controller = useController()
-  const { collections } = controller.store
-  const { data: draftRows } = useLiveQuery((q) =>
-    q
-      .from({ session: collections.sessions })
-      .select(({ session }) => ({ id: session.id, draft: session.draft }))
-  )
-  const [slashMenu, setSlashMenu] = useState<{ draft: string; index: number; dismissed: boolean }>({
-    draft: "",
-    index: 0,
-    dismissed: false
-  })
-  const draft = draftRows[0]?.draft ?? controller.store.session().draft
-
-  const slashQuery = draft.startsWith("/") && !draft.slice(1).includes(" ")
-    ? draft.slice(1).toLowerCase()
-    : undefined
-  /*
-   * §5.2: the listing used to be suppressed for the whole duration of a turn,
-   * which made `typing -> chat.stop` — the first clause of the recommendation
-   * order — unreachable in the shipped UI, and left the composer with no way
-   * to invoke any flow mid-turn (the component blocks submit while busy, so
-   * Enter only reaches a flow through this menu).
-   */
-  const slashMatches = slashQuery === undefined ? [] : controller.slashItems(slashQuery)
-  const slashMenuLive = slashMenu.draft === draft ? slashMenu : { draft, index: 0, dismissed: false }
-  const slashOpen = slashMatches.length > 0 && !slashMenuLive.dismissed
-  const slashHighlighted = Math.min(slashMenuLive.index, slashMatches.length - 1)
-
-  const runSlashCommand = (name: string): void => {
-    setSlashMenu({ draft: "", index: 0, dismissed: false })
-    controller.changeDraft("")
-    controller.runCommand(name)
-  }
-
-  const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (event.key === "Escape" && typing) {
-      event.preventDefault()
-      controller.runCommand("chat.stop")
-      return
-    }
-    if (!slashOpen) return
-    if (event.key === "ArrowDown") {
-      event.preventDefault()
-      setSlashMenu({
-        draft,
-        index: (slashHighlighted + 1) % slashMatches.length,
-        dismissed: false
-      })
-      return
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault()
-      setSlashMenu({
-        draft,
-        index: (slashHighlighted + slashMatches.length - 1) % slashMatches.length,
-        dismissed: false
-      })
-      return
-    }
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault()
-      const command = slashMatches.length === 1 ? slashMatches[0] : slashMatches[slashHighlighted]
-      if (command !== undefined) runSlashCommand(command.flow.name)
-      return
-    }
-    if (event.key === "Escape") {
-      event.preventDefault()
-      setSlashMenu({ draft, index: slashHighlighted, dismissed: true })
-    }
-  }
-
-  return (
-    <>
-      {slashOpen ?
-        (
-          <div className="slash-menu" role="listbox" aria-label="Slash commands">
-            {slashMatches.map((item, index) => (
-              <button
-                type="button"
-                key={item.flow.name}
-                role="option"
-                aria-selected={index === slashHighlighted}
-                data-highlighted={index === slashHighlighted ? "true" : "false"}
-                data-gold={item.recommended}
-                data-flow={item.flow.name}
-                className="slash-menu-item"
-                onMouseEnter={() => setSlashMenu({ draft, index, dismissed: false })}
-                onClick={() => runSlashCommand(item.flow.name)}
-              >
-                <span className="slash-menu-name">/{item.flow.name}</span>
-                <span className="slash-menu-description">{item.flow.summary}</span>
-              </button>
-            ))}
-          </div>
-        ) :
-        null}
-      {
-        /*
-         * §6.1: Send and Stop are rendered by the composer component,
-         * which takes no pass-through attributes, so the law's own
-         * marker is stamped here. See LIBRARY-CHANGE-REQUESTS.md.
-         */
-      }
-      <div
-        className="composer-flow-stamp"
-        ref={composeRefs(
-          stampFlows([
-            [".sui-chat-composer-send", "send"],
-            [".sui-chat-composer-stop", "chat.stop"]
-          ]),
-          stampTestIds([
-            [".sui-chat-composer-input", "composer-input"],
-            [".sui-chat-composer-send", "composer-send"]
-          ])
-        )}
-      >
-        <ChatComposer
-          className="smithers-composer"
-          value={draft}
-          onValueChange={controller.changeDraft}
-          onSubmit={(text) => {
-            controller.runCommandArgs("send", text)
-          }}
-          onStop={() => controller.runCommand("chat.stop")}
-          placeholder={placeholder}
-          lifecycleStatus={typing ? "submitted" : "ready"}
-          textareaProps={{ autoFocus, onKeyDown: onComposerKeyDown, ...COMPOSER_INPUT_TEST_ID }}
-          actions={
-            <div className="composer-actions">
-              <ComposerConnect
-                open={connectMenuOpen}
-                triggerRef={connectTriggerRef}
-              />
-              <ComposerMenu
-                surface={surface}
-                open={surfacesMenuOpen}
-                triggerRef={surfacesTriggerRef}
-              />
-            </div>
-          }
-        />
-      </div>
-    </>
-  )
-}
 
 function App() {
   const controller = useController()
@@ -701,12 +120,16 @@ function App() {
       surface: session.surface,
       selectedWorldDocumentId: session.selectedWorldDocumentId,
       maximizedCardId: session.maximizedCardId,
+      activeWorkspaceId: session.activeWorkspaceId,
+      activeBranchId: session.activeBranchId,
+      activeFrameId: session.activeFrameId,
       devtoolsOpen: session.devtoolsOpen,
       surfacesMenuOpen: session.surfacesMenuOpen,
       connectMenuOpen: session.connectMenuOpen,
       pendingWorldDeleteId: session.pendingWorldDeleteId,
       activeTabId: session.activeTabId,
-      tabMenuOpen: session.tabMenuOpen
+      tabMenuOpen: session.tabMenuOpen,
+      resetConfirmOpen: session.resetConfirmOpen
     }))
   )
   const { data: worldDocumentRows } = useLiveQuery(collections.worldDocuments)
@@ -722,8 +145,6 @@ function App() {
    * a projection, never an authority, and the local-state version was
    * bypassed entirely by `/world.delete <id>` typed into the composer.
    */
-  /* §28.4: the transcript is destroyed with no undo, so the act asks first. */
-  const [confirmReset, setConfirmReset] = useState(false)
   /* The surfaces trigger, refocused by this shell's Escape and by the menu itself. */
   const surfacesTriggerRef = useRef<HTMLButtonElement>(null)
   /* The connect trigger has the same shell-level Escape exit as surfaces. */
@@ -743,6 +164,25 @@ function App() {
   const identity = identityRows[0]
   const billing = billingRows[0]
   const toasts = toastRows
+
+  /*
+   * Outside-pointer dismissal belongs to the shell that owns both menus.
+   * Capture keeps the original click working and removes global listeners —
+   * React remains a projection, and controller disposal owns every external
+   * subscription. If focus was inside Surfaces, return it to its trigger.
+   */
+  const onShellPointerDownCapture = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const target = event.target
+    if (!(target instanceof Element)) return
+    if (session.surfacesMenuOpen && target.closest(".composer-surfaces") === null) {
+      const heldFocus = document.activeElement?.closest(".composer-surfaces") !== null
+      controller.runCommand("surfaces")
+      if (heldFocus) requestAnimationFrame(() => surfacesTriggerRef.current?.focus())
+    }
+    if (session.connectMenuOpen === true && target.closest(".composer-connect") === null) {
+      controller.closeConnectMenu()
+    }
+  }
   /*
    * One page: the chat. Auth is a conversation state, never a view — a
    * definitive signed-out or non-allowlisted answer opens the transcript
@@ -778,7 +218,7 @@ function App() {
       id: "auth-state",
       role: "smithers",
       text:
-        "This build isn't connected to Smithers' identity service, so GitHub sign-in and repository features are off here. Everything local still works — the World, the browser, local repositories, and workflows on connected work. Use the deployed app for the signed-in experience.",
+        "This host doesn't provide Smithers identity, so GitHub sign-in and jjhub account features are unavailable. Commands supported by this host remain available below. Use a jjhub Cloud deployment with identity configured for the signed-in experience.",
       status: "complete",
       createdAt: 0,
       ordinal: 0
@@ -800,15 +240,13 @@ function App() {
    */
   const watched = watchedRows[0]
   const needsSelection = identity?.state === "signed-in" && identity.allowlisted &&
-    (watched === undefined || watched.selected === null)
+    (watched === undefined || watched.selected === null) &&
+    controller.commands.find("repos.watch") !== undefined
   const suggestions: ReadonlyArray<SuggestionBinding> = needsSelection
     ? [{ id: "choose-repos", label: "Choose repos to watch", flow: "repos.watch", emphasis: "primary" }]
     : []
-  // A Vite dev build unlocks the admin chrome (devtools, reset) with no
-  // session — dev has no identity seam to grant admin, and the machinery
-  // panel is what dev is for. Mirrors the registry snapshot's rule.
-  const isAdmin = (identity?.state === "signed-in" && identity.admin) ||
-    (import.meta.env.DEV as boolean | string | undefined) === true
+  // Admin chrome follows the same capability-filtered registry as every act.
+  const isAdmin = controller.commands.find("admin.devtools") !== undefined
 
   /*
    * §2a″ (wave 12 §4): auth is a conversation STATE, and a state shows only
@@ -833,7 +271,9 @@ function App() {
     // data-flow binding against exactly this surface.
     <div
       className="app-shell"
+      data-frame-maximized={session.maximizedCardId !== null}
       data-flows={controller.commands.all().map((command) => command.name).join(" ")}
+      onPointerDownCapture={onShellPointerDownCapture}
       onKeyDown={(event) => {
         if (event.defaultPrevented) return
         if (event.key === "Escape" && session.maximizedCardId !== null) {
@@ -872,7 +312,6 @@ function App() {
       }}
     >
       <SmithersUiStyles />
-      <MarkdownEditorStyles />
 
       {/* The chrome bar: the tab strip upper-left, the repo chip and chrome actions right. */}
       <ChromeBar />
@@ -951,6 +390,9 @@ function App() {
                     maximized={session.maximizedCardId === entry.card.id}
                     onMaximize={(id) => controller.runCommandArgs("card.maximize", id)}
                     onMinimize={() => controller.runCommand("card.minimize")}
+                    onFrameBack={() => controller.runCommand("frame.back")}
+                    onFrameForward={() => controller.runCommand("frame.forward")}
+                    onForkFrame={() => controller.runCommand("frame.fork")}
                     onOpenInTab={(id) => controller.runCommandArgs("tab.card", id)}
                     onConnectGitHub={() => controller.runCommand("auth.sign-in")}
                     onConnectLocal={() => controller.runCommandArgs("connector.add", "read")}
@@ -1108,7 +550,8 @@ function App() {
              */
           }
           <div className="corner-chrome">
-            {billing !== undefined && billing.state !== "unknown" ?
+            {billing !== undefined && billing.state !== "unknown" &&
+                controller.commands.find("billing.balance") !== undefined ?
               (
                 <Button
                   variant="outline"
@@ -1131,10 +574,10 @@ function App() {
                   variant="outline"
                   size="icon"
                   className="corner-reset-btn"
-                  data-flow="reset"
+                  data-flow="admin.reset.ask"
                   aria-label="Reset conversation"
                   title="Reset conversation"
-                  onClick={() => setConfirmReset(true)}
+                  onClick={() => controller.runCommand("admin.reset.ask")}
                 >
                   <RotateCcw size={14} />
                 </Button>
@@ -1236,12 +679,14 @@ function App() {
                             tabOutOf(event, event.currentTarget)
                           }}
                         >
-                          <MarkdownEditor
-                            value={selectedWorldDocument.body}
-                            resetKey={selectedWorldDocument.id}
-                            aria-label={`Edit ${selectedWorldDocument.title}`}
-                            onChange={(body) => controller.changeWorldDocument(selectedWorldDocument.id, body)}
-                          />
+                          <Suspense fallback={<p className="smithers-card-note">Loading editor…</p>}>
+                            <MarkdownEditorSurface
+                              value={selectedWorldDocument.body}
+                              resetKey={selectedWorldDocument.id}
+                              label={`Edit ${selectedWorldDocument.title}`}
+                              onChange={(body) => controller.changeWorldDocument(selectedWorldDocument.id, body)}
+                            />
+                          </Suspense>
                         </div>
                       </>
                     ) :
@@ -1286,7 +731,7 @@ function App() {
          */
       }
       <ConfirmDialog
-        open={confirmReset}
+        open={session.resetConfirmOpen === true}
         title="Start a fresh conversation?"
         body={`${
           messages.length === 1 ? "1 message" : `${messages.length} messages`
@@ -1294,10 +739,9 @@ function App() {
         confirmLabel="Discard and start fresh"
         destructive
         onConfirm={() => {
-          setConfirmReset(false)
           controller.runCommand("reset")
         }}
-        onCancel={() => setConfirmReset(false)}
+        onCancel={() => controller.runCommand("admin.reset.cancel")}
       />
 
       {/* The one shared toast stack: every background flow past 300ms reports here. */}

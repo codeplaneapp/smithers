@@ -30,6 +30,7 @@ const connect = (filename: string) =>
 const nodeFileHarness: Harness = {
   label: "NodeDatabase, two connections over one file",
   realDriver: true,
+  crossConnection: true,
   run: (body) =>
     Effect.acquireUseRelease(
       Effect.sync(() => mkdtempSync(join(tmpdir(), "flows-db-contract-"))),

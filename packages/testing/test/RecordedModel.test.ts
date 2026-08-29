@@ -1,10 +1,14 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ProductionModelRequest from "@smthrs/model/ModelRequest"
-import { Effect, Fiber, Stream } from "effect"
+import { Cause, Effect, type Exit, Fiber, Option, Result, Stream } from "effect"
 import { decode, type Fixture } from "../src/Fixture.ts"
 import type { ModelRequestLike } from "../src/ModelLike.ts"
 import { make, scripted } from "../src/RecordedModel.ts"
+import { ReplayHarnessMismatchError, UnscriptedModelError } from "../src/TestingError.ts"
 import journal from "./fixtures/small-run/journal.json" with { type: "json" }
+
+const defectOf = (exit: Exit.Exit<unknown, unknown>): unknown =>
+  exit._tag === "Failure" ? Option.getOrUndefined(Result.getSuccess(Cause.findDefect(exit.cause))) : undefined
 
 const request = (text: string, modelId = "openai:gpt-5-mini"): ModelRequestLike => ({
   modelId,
@@ -56,21 +60,36 @@ describe("RecordedModel", () => {
       expect([...events]).toEqual(fixture.calls[0]!.events)
     }))
 
-  it.effect("fails loudly for an unscripted request", () =>
+  it.effect("dies for an unscripted request", () =>
     Effect.gen(function*() {
       const replay = yield* make(fixture)
-      const error = yield* Stream.runCollect(replay.model.stream(request("An unrecorded prompt."))).pipe(Effect.flip)
-      expect("_tag" in error && error._tag).toBe("UnscriptedModelError")
+      const exit = yield* Stream.runCollect(replay.model.stream(request("An unrecorded prompt."))).pipe(Effect.exit)
+      expect(defectOf(exit)).toBeInstanceOf(UnscriptedModelError)
     }))
 
-  it.effect("fails when the fixture model identity differs", () =>
+  it.effect("dies when the fixture model identity differs", () =>
     Effect.gen(function*() {
       const mismatch: Fixture = {
         calls: [{ ...fixture.calls[0]!, model: "anthropic:claude-sonnet-4" }]
       }
       const replay = yield* make(mismatch)
-      const error = yield* Stream.runCollect(replay.model.stream(mismatch.calls[0]!.request)).pipe(Effect.flip)
-      expect("_tag" in error && error._tag).toBe("ReplayHarnessMismatchError")
+      const exit = yield* Stream.runCollect(replay.model.stream(mismatch.calls[0]!.request)).pipe(Effect.exit)
+      expect(defectOf(exit)).toBeInstanceOf(ReplayHarnessMismatchError)
+    }))
+
+  it.effect("replays the recorded events before the recorded failure", () =>
+    Effect.gen(function*() {
+      const failing: Fixture = {
+        calls: [{ ...fixture.calls[0]!, failure: { code: "context_overflow", message: "prompt is too long" } }]
+      }
+      const replay = yield* make(failing)
+      const seen: Array<unknown> = []
+      const error = yield* replay.model.stream(failing.calls[0]!.request).pipe(
+        Stream.runForEach((event) => Effect.sync(() => seen.push(event))),
+        Effect.flip
+      )
+      expect(seen).toEqual(failing.calls[0]!.events)
+      expect(error).toEqual({ code: "context_overflow", message: "prompt is too long" })
     }))
 
   it.effect("reports untouched fixture calls", () =>

@@ -139,7 +139,7 @@ const fromRequest = Effect.fn("OpenAIChatCompletions.fromRequest")((
 ): Effect.Effect<Body, ModelError> => Effect.succeed(buildBody(request)))
 
 const ChunkToolCall = Schema.Struct({
-  index: Schema.Number,
+  index: Schema.optional(Schema.Number),
   id: Schema.optional(Schema.String),
   function: Schema.optional(Schema.Struct({
     name: Schema.optional(Schema.String),
@@ -187,6 +187,8 @@ export interface State {
   readonly callIdByIndex: Readonly<Record<number, string>>
   readonly textOpen: boolean
   readonly settled: boolean
+  readonly usage?: typeof ChunkUsage.Type
+  readonly responseId?: string
 }
 
 const TEXT_ID = "text-0"
@@ -211,7 +213,8 @@ const stopReasonOf = (reason: string): StopReason =>
 
 const settle = (
   state: State,
-  stopReason: StopReason
+  stopReason: StopReason,
+  usage: ModelEvent.ModelEvent | undefined
 ): { readonly state: State; readonly events: ReadonlyArray<ModelEvent.ModelEvent> } =>
   state.settled
     ? { state, events: [] }
@@ -219,17 +222,33 @@ const settle = (
       state: { ...state, settled: true },
       events: [
         ...(state.textOpen ? [ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: TEXT_ID })] : []),
-        ModelEvent.ModelEvent.Settle({ type: "settle", stopReason })
+        ...(usage === undefined ? [] : [usage]),
+        ModelEvent.ModelEvent.Settle({
+          type: "settle",
+          stopReason,
+          ...(state.responseId === undefined ? {} : { responseId: state.responseId })
+        })
       ]
     }
+
+const toolIndex = (state: State, call: typeof ChunkToolCall.Type): number => {
+  if (call.index !== undefined) return call.index
+  if (call.id !== undefined) {
+    for (const [index, callId] of Object.entries(state.callIdByIndex)) {
+      if (callId === call.id) return Number(index)
+    }
+  }
+  return Object.keys(state.callIdByIndex).reduce((next, index) => Math.max(next, Number(index) + 1), 0)
+}
 
 const stepToolCall = (
   state: State,
   call: typeof ChunkToolCall.Type
 ): { readonly state: State; readonly events: ReadonlyArray<ModelEvent.ModelEvent> } | ModelError => {
-  const existingId = state.callIdByIndex[call.index]
+  const index = toolIndex(state, call)
+  const existingId = state.callIdByIndex[index]
   if (existingId === undefined) {
-    const id = call.id ?? `tool-${call.index}`
+    const id = call.id ?? `tool-${index}`
     const name = call.function?.name
     if (name === undefined) {
       return new ModelError({
@@ -242,7 +261,7 @@ const stepToolCall = (
       ? ToolStream.start(state.tools, { callId: id, name })
       : ToolStream.delta(ToolStream.start(state.tools, { callId: id, name }), id, initialArguments)
     return {
-      state: { ...state, tools, callIdByIndex: { ...state.callIdByIndex, [call.index]: id } },
+      state: { ...state, tools, callIdByIndex: { ...state.callIdByIndex, [index]: id } },
       events: [
         ModelEvent.ModelEvent.ToolCallStart({ type: "tool-call-start", id, name }),
         ...(initialArguments === undefined || initialArguments === ""
@@ -280,8 +299,12 @@ const stepEvent = (
   const choice = event.choices?.[0]
   if (choice === undefined) return { state, events: usage === undefined ? [] : [usage] }
   const delta = choice.delta
-  const events: Array<ModelEvent.ModelEvent> = usage === undefined ? [] : [usage]
-  let current = state
+  const events: Array<ModelEvent.ModelEvent> = []
+  let current: State = {
+    ...state,
+    ...(event.usage === undefined || event.usage === null ? {} : { usage: event.usage }),
+    ...(event.id === undefined ? {} : { responseId: event.id })
+  }
   if (delta?.content !== undefined && delta.content !== null && delta.content !== "") {
     if (!current.textOpen) {
       current = { ...current, textOpen: true }
@@ -308,7 +331,11 @@ const stepEvent = (
         ModelEvent.ModelEvent.ToolCallEnd({ type: "tool-call-end", id: callId, arguments: ended.completed.arguments })
       )
     }
-    const terminal = settle(current, stopReasonOf(choice.finish_reason))
+    const terminal = settle(
+      current,
+      Object.keys(current.callIdByIndex).length > 0 ? "tool-calls" : stopReasonOf(choice.finish_reason),
+      usageEvent(event.usage ?? current.usage)
+    )
     return { state: terminal.state, events: [...events, ...terminal.events] }
   }
   return { state: current, events }

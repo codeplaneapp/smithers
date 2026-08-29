@@ -32,7 +32,8 @@ const repo = (id: string, name = id): Repo => ({
   path: `/repos/${id}`,
   name,
   git: null,
-  smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts" }
+  smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts", workspaces: [] },
+  warnings: []
 })
 
 const harness = (id: Harness["id"], status: Harness["status"] = "binary-only"): Harness => ({

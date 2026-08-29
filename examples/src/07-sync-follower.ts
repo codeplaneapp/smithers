@@ -40,8 +40,8 @@ export const main: Effect.Effect<Summary> = Effect.gen(function*() {
   const journal = yield* Journal.Journal
 
   // History the follower has never seen.
-  yield* journal.emitDurable(entry(0, "run.started"))
-  yield* journal.emitDurable(entry(1, "step.recorded"))
+  yield* journal.emitDurableUnfenced(entry(0, "run.started"))
+  yield* journal.emitDurableUnfenced(entry(1, "step.recorded"))
 
   const pair = yield* TestSocket.makePair()
   const follower = yield* TestSync.connect(pair)
@@ -51,7 +51,7 @@ export const main: Effect.Effect<Summary> = Effect.gen(function*() {
   ).pipe(Effect.forkChild({ startImmediately: true }))
 
   // A live entry committed after the subscription opened.
-  yield* journal.emitDurable(entry(2, "run.completed"))
+  yield* journal.emitDurableUnfenced(entry(2, "run.completed"))
 
   const entries = Array.from(yield* Fiber.join(collected))
   return {

@@ -60,6 +60,18 @@ export * as AgentSession from "./AgentSession.ts"
 export * as ChildFlows from "./ChildFlows.ts"
 
 /**
+ * @category constructors
+ * @since 0.1.0
+ */
+export * as PromoteFlows from "./PromoteFlows.ts"
+
+/**
+ * @category services
+ * @since 0.1.0
+ */
+export * as FlowStore from "./FlowStore.ts"
+
+/**
  * @category services
  * @since 0.1.0
  */
@@ -88,3 +100,9 @@ export * as InMemoryWorkspaceSandbox from "./InMemoryWorkspaceSandbox.ts"
  * @since 0.1.0
  */
 export * as AgentAction from "./AgentAction.ts"
+
+/**
+ * @category services
+ * @since 0.1.0
+ */
+export * as EventSink from "./EventSink.ts"

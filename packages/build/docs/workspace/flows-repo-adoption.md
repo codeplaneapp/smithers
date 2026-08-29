@@ -63,6 +63,7 @@ record, not a design.
   target types that made it possible.
 
 ## Not yet adopted
+
 - **Caching.** TsBuild, Typecheck, Vitest, EsLint, and Dprint are
   `cache: false`: their input contracts are not yet complete key material
   (the external toolchain versions are not folded in). Until they opt in,

@@ -433,6 +433,60 @@ const shardCountOf = (target: Target.AnyTarget, seen = new Set<Target.AnyTarget>
  */
 const affectedSuffix = " --affected-base \"$(git merge-base HEAD \"origin/${GITHUB_BASE_REF:-main}\")\""
 
+/** Appends one run value, rendering line arrays and multiline strings as one script. */
+const renderRun = (lines: Array<string>, prefix: string, run: string | ReadonlyArray<string>): void => {
+  const script = typeof run === "string" ? run : run.join("\n")
+  if (!script.includes("\n")) {
+    lines.push(`${prefix}run: ${scalar(script)}`)
+    return
+  }
+  lines.push(`${prefix}run: |`)
+  for (const line of script.split("\n")) lines.push(`${prefix}  ${line}`)
+}
+
+/** Appends one raw step without inserting checkout, setup, or another command. */
+const renderStep = (lines: Array<string>, step: GithubTarget.Step): void => {
+  const propertyIndent = "        "
+  if (step.name !== undefined) lines.push(`      - name: ${scalar(step.name)}`)
+  else if ("uses" in step) lines.push(`      - uses: ${scalar(step.uses)}`)
+  else {
+    const script = typeof step.run === "string" ? step.run : step.run.join("\n")
+    if (script.includes("\n")) {
+      lines.push("      - run: |")
+      for (const line of script.split("\n")) lines.push(`          ${line}`)
+    } else {
+      lines.push(`      - run: ${scalar(script)}`)
+    }
+  }
+  if (step.id !== undefined) lines.push(`${propertyIndent}id: ${scalar(step.id)}`)
+  if (step.if !== undefined) lines.push(`${propertyIndent}if: ${scalar(step.if)}`)
+  if (step.name !== undefined) {
+    if ("uses" in step) lines.push(`${propertyIndent}uses: ${scalar(step.uses)}`)
+    else renderRun(lines, propertyIndent, step.run)
+  }
+  if ("with" in step && step.with !== undefined) {
+    lines.push(`${propertyIndent}with:`, ...mapping(step.with, `${propertyIndent}  `))
+  }
+  if ("shell" in step && step.shell !== undefined) {
+    lines.push(`${propertyIndent}shell: ${scalar(step.shell)}`)
+  }
+  if ("workingDirectory" in step && step.workingDirectory !== undefined) {
+    lines.push(`${propertyIndent}working-directory: ${scalar(step.workingDirectory)}`)
+  }
+  if (step.env !== undefined) lines.push(`${propertyIndent}env:`, ...mapping(step.env, `${propertyIndent}  `))
+}
+
+/** Appends policy shared by target-derived and raw-step jobs. */
+const renderJobPolicy = (
+  lines: Array<string>,
+  workflow: (typeof GithubTarget.WorkflowAttrs)["Type"]
+): void => {
+  if (workflow.jobName !== undefined) lines.push(`    name: ${scalar(workflow.jobName)}`)
+  if (workflow.condition !== undefined) lines.push(`    if: ${scalar(workflow.condition)}`)
+  lines.push(`    runs-on: ${scalar(workflow.runsOn ?? "ubuntu-latest")}`)
+  if (workflow.environment !== undefined) lines.push(`    environment: ${scalar(workflow.environment)}`)
+}
+
 /** Renders one workflow YAML for a validated `Github.Workflow` target. */
 const renderWorkflow = (
   label: string,
@@ -492,14 +546,13 @@ const renderWorkflow = (
     const inputs = Object.entries(workflow.on.workflowDispatch.inputs)
     if (inputs.length > 0) lines.push("    inputs:")
     for (const [name, input] of inputs) {
-      lines.push(`      ${name}:`)
+      lines.push(`      ${scalar(name)}:`)
       if (input.description !== undefined) lines.push(`        description: ${scalar(input.description)}`)
       if (input.required !== undefined) lines.push(`        required: ${input.required ? "true" : "false"}`)
       if (input.default !== undefined) {
-        const value = typeof input.default === "string" ? scalar(input.default) : String(input.default)
-        lines.push(`        default: ${value}`)
+        lines.push(`        default: ${typeof input.default === "string" ? scalar(input.default) : input.default}`)
       }
-      if (input.type !== undefined) lines.push(`        type: ${input.type}`)
+      lines.push(`        type: ${input.type}`)
       if (input.options !== undefined) {
         lines.push("        options:")
         for (const option of input.options) lines.push(`          - ${scalar(option)}`)
@@ -523,15 +576,19 @@ const renderWorkflow = (
     }
   }
   if (workflow.permissions !== undefined) {
-    lines.push("permissions:")
-    lines.push(...mapping(workflow.permissions, "  "))
+    lines.push("permissions:", ...mapping(workflow.permissions, "  "))
   }
-  if (workflow.env !== undefined) {
-    lines.push("env:")
-    lines.push(...mapping(workflow.env, "  "))
-  }
+  if (workflow.env !== undefined) lines.push("env:", ...mapping(workflow.env, "  "))
   lines.push("jobs:")
   const seen = new Set<string>()
+  if (workflow.steps !== undefined) {
+    const jobId = jobIdOf(`//:${workflow.name}`)
+    seen.add(jobId)
+    lines.push(`  ${jobId}:`)
+    renderJobPolicy(lines, workflow)
+    lines.push("    steps:")
+    for (const step of workflow.steps) renderStep(lines, step)
+  }
   for (const run of runs) {
     const runLabel = run.label
     const shards = shardCountOf(run.target)
@@ -573,41 +630,6 @@ const renderWorkflow = (
     const command = [...toolchain.exec, `'${runLabel}'`].join(" ") +
       (workflow.affected === true ? affectedSuffix : "")
     lines.push(`      - run: ${scalar(command)}`)
-  }
-  if (workflow.steps !== undefined) {
-    const jobId = jobIdOf(`//:${workflow.name}`)
-    if (seen.has(jobId)) {
-      throw new GithubRenderError(
-        "duplicate_job_id",
-        `custom steps for workflow ${workflow.name} collide with ${jobId}`
-      )
-    }
-    lines.push(`  ${jobId}:`)
-    if (workflow.jobName !== undefined) lines.push(`    name: ${scalar(workflow.jobName)}`)
-    if (workflow.condition !== undefined) lines.push(`    if: ${scalar(workflow.condition)}`)
-    lines.push(`    runs-on: ${scalar(workflow.runsOn ?? "ubuntu-latest")}`)
-    if (workflow.environment !== undefined) lines.push(`    environment: ${scalar(workflow.environment)}`)
-    lines.push("    steps:")
-    for (const step of workflow.steps) {
-      if (step.name !== undefined) lines.push(`      - name: ${scalar(step.name)}`)
-      else if ("uses" in step) lines.push(`      - uses: ${scalar(step.uses)}`)
-      else lines.push(`      - run: ${scalar(step.run)}`)
-      const propertyIndent = step.name === undefined ? "        " : "        "
-      if (step.name !== undefined) {
-        if ("uses" in step) lines.push(`${propertyIndent}uses: ${scalar(step.uses)}`)
-        else lines.push(`${propertyIndent}run: ${scalar(step.run)}`)
-      }
-      if (step.id !== undefined) lines.push(`${propertyIndent}id: ${scalar(step.id)}`)
-      if (step.if !== undefined) lines.push(`${propertyIndent}if: ${scalar(step.if)}`)
-      if ("shell" in step && step.shell !== undefined) lines.push(`${propertyIndent}shell: ${scalar(step.shell)}`)
-      if ("workingDirectory" in step && step.workingDirectory !== undefined) {
-        lines.push(`${propertyIndent}working-directory: ${scalar(step.workingDirectory)}`)
-      }
-      if ("with" in step && step.with !== undefined) {
-        lines.push(`${propertyIndent}with:`, ...mapping(step.with, `${propertyIndent}  `))
-      }
-      if (step.env !== undefined) lines.push(`${propertyIndent}env:`, ...mapping(step.env, `${propertyIndent}  `))
-    }
   }
   return `${lines.join("\n")}\n`
 }

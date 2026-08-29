@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
-import type { PickLocalRepositoryResult } from "smithers-shared/NativeRepository"
+import type { InspectLocalRepositoryResult } from "smithers-shared/NativeRepository"
 import { inspectLocalRepository } from "./LocalRepository"
 
 const directories: Array<string> = []
@@ -78,7 +78,7 @@ const repository = async (): Promise<string> => {
   return directory
 }
 
-const connected = (result: PickLocalRepositoryResult) => {
+const connected = (result: InspectLocalRepositoryResult) => {
   if (result.status !== "connected") throw new Error(`expected connected, got ${JSON.stringify(result)}`)
   return result.repository
 }

@@ -224,7 +224,7 @@ describe("EngineStore.make liveness", () => {
       )
       expect(wakes).toHaveLength(1)
       expect(wakes[0]).toMatchObject({
-        sourceId: 'layer-test:wake:["EngineStoreLayer/Flow","historical-deferred","answer"]',
+        sourceId: "layer-test:wake:[\"EngineStoreLayer/Flow\",\"historical-deferred\",\"answer\"]",
         sourceSeq: 0
       })
     }))

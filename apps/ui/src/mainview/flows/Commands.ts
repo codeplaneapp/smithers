@@ -14,6 +14,7 @@
 import * as Cell from "@smthrs/harness/Cell"
 import type * as Descriptor from "@smthrs/registry/Descriptor"
 import { Effect } from "effect"
+import { hasCapability } from "smithers-shared/AppBootstrap"
 import type { AgentToolCall, AgentToolSpec } from "./agentTools"
 import { agentToolSpecs, executeAgentToolCall, userOnlyError } from "./agentTools"
 import type { CommandActions } from "./Flows"
@@ -124,7 +125,12 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
   const base = baseFlows(actions)
   const admin = adminFlows(actions)
 
-  const entries = (): ReadonlyArray<FlowEntry> => actions.snapshot().admin ? [...base, ...admin] : base
+  const available = (entry: FlowEntry): boolean =>
+    actions.bootstrap === undefined ||
+    (entry.metadata.runtime ?? []).every((capability) => hasCapability(actions.bootstrap!, capability))
+
+  const entries = (): ReadonlyArray<FlowEntry> =>
+    (actions.snapshot().admin ? [...base, ...admin] : base).filter(available)
 
   const items = (): ReadonlyArray<CatalogItem> => entries().map(itemOf)
 

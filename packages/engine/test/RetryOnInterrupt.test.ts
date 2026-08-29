@@ -4,6 +4,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Action, Flow, FlowRuntime } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
 import { Clock, Effect, Exit, Fiber, Schedule, Schema } from "effect"
+import type * as Crypto from "effect/Crypto"
 import type * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
 import { FlowEngine } from "../src/index.ts"
@@ -21,7 +22,7 @@ const effect = (
   body: () => Effect.Effect<
     void,
     unknown,
-    Scope.Scope | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance
+    Crypto.Crypto | Scope.Scope | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance
   >
 ) =>
   it.effect(name, () =>

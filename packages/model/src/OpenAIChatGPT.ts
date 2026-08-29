@@ -13,7 +13,7 @@
  * @since 0.1.0
  */
 import * as Result from "effect/Result"
-import * as Auth from "./Auth.ts"
+import type * as Auth from "./Auth.ts"
 import * as Endpoint from "./Endpoint.ts"
 import * as Framing from "./Framing.ts"
 import * as OpenAIResponses from "./OpenAIResponses.ts"

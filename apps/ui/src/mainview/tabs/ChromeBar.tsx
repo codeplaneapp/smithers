@@ -31,6 +31,11 @@ export function ChromeBar() {
   const available = harnessRows.filter((harness) => harness.status !== "unavailable")
   const unavailable = harnessRows.filter((harness) => harness.status === "unavailable")
   const repo = repoRows[0]
+  const canOpenLocalRepositories = controller.commands.find("repo.open") !== undefined
+  const canOpenTerminal = controller.commands.find("tab.terminal") !== undefined
+  const canOpenHarnesses = controller.commands.find("tab.harness") !== undefined
+  const canSignIn = controller.commands.find("auth.sign-in") !== undefined
+  const canAddTab = canOpenTerminal || canOpenHarnesses
 
   return (
     <div className="chrome-bar">
@@ -69,7 +74,7 @@ export function ChromeBar() {
             )}
           </div>
         ))}
-        <div className="tab-add">
+        {canAddTab ? <div className="tab-add">
           <button
             type="button"
             className="tab-add-trigger"
@@ -93,7 +98,7 @@ export function ChromeBar() {
                   onClick={() => controller.runCommand("tab.menu")}
                 />
                 <div className="tab-add-menu" role="menu" aria-label="New tab" data-testid="tab-add-menu">
-                  <button
+                  {canOpenTerminal ? <button
                     type="button"
                     role="menuitem"
                     className="tab-add-item"
@@ -102,8 +107,8 @@ export function ChromeBar() {
                     onClick={() => controller.runCommand("tab.terminal")}
                   >
                     <span>Terminal</span>
-                  </button>
-                  {available.map((harness) => (
+                  </button> : null}
+                  {canOpenHarnesses ? available.map((harness) => (
                     <button
                       type="button"
                       role="menuitem"
@@ -116,8 +121,8 @@ export function ChromeBar() {
                       <span>{harness.displayName}</span>
                       <span className="tab-add-account">{harness.account?.email ?? harness.account?.label ?? ""}</span>
                     </button>
-                  ))}
-                  {unavailable.map((harness) => (
+                  )) : null}
+                  {canOpenHarnesses ? unavailable.map((harness) => (
                     <button
                       type="button"
                       role="menuitem"
@@ -131,20 +136,20 @@ export function ChromeBar() {
                       <span>{harness.displayName}</span>
                       <span className="tab-add-account">{harness.status}</span>
                     </button>
-                  ))}
+                  )) : null}
                 </div>
               </>
             ) :
             null}
-        </div>
+        </div> : null}
       </div>
       <div className="chrome-actions">
-        {repo === undefined ? null : (
+        {!canOpenLocalRepositories || repo === undefined ? null : (
           <span className="repo-chip" data-testid="repo-chip" title={repo.path}>
             {repo.name}
           </span>
         )}
-        <button
+        {canOpenLocalRepositories ? <button
           type="button"
           className="chrome-action"
           data-flow="repo.open"
@@ -152,9 +157,9 @@ export function ChromeBar() {
           onClick={() => controller.runCommand("repo.open")}
         >
           Open repository
-        </button>
+        </button> : null}
         {/* Sign-in is an option, never a gate (docs/LOCAL-APP.md); the door closes once signed in. */}
-        {identity?.state === "signed-in" ? null : (
+        {!canSignIn || identity?.state === "signed-in" ? null : (
           <button
             type="button"
             className="chrome-action"

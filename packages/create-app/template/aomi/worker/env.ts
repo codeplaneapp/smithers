@@ -1,0 +1,32 @@
+/**
+ * The Worker's bindings, as `wrangler.jsonc` declares them.
+ *
+ * Every value the Worker reads from the platform is named here. Nothing else
+ * in `worker/` touches `globalThis` for configuration, so a missing binding is
+ * a type error at the call site rather than an `undefined` at request time.
+ */
+import type { AppSession } from "./AppSession.ts"
+
+export interface Env {
+  /** The built SPA in `dist/client`. Serves every path the API does not claim. */
+  readonly ASSETS: Fetcher
+  /** One Durable Object per chat session: messages, cards, saved flows. */
+  readonly SESSIONS: DurableObjectNamespace<AppSession>
+  /**
+   * Provider credentials for the agent seat, one per provider `worker/seats.ts`
+   * knows. A seat resolves against the binding for the provider it names, so a
+   * deployment only sets the one its AGENT.ts seats use. `wrangler secret put`.
+   */
+  readonly ANTHROPIC_API_KEY?: string
+  readonly OPENAI_API_KEY?: string
+  /** Upstream JSON-RPC the Tevm fork reads state from. Optional in mock mode. */
+  readonly TEVM_FORK_RPC_URL?: string
+  /** The app name from `PACKAGE.ts`, echoed by `GET /api/health`. */
+  readonly APP_NAME: string
+  /**
+   * Milestone-1 switch. Anything but `"0"` streams the mock turn; `"0"` asks
+   * for the real `Agent.run` path, which does not yet run under workerd (see
+   * `worker/turn.ts` and TODO.md).
+   */
+  readonly APP_MOCK_TURN?: string
+}

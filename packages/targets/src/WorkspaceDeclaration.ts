@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema"
 import { type AgentsDeclaration, isAgentsDeclaration } from "./AgentTarget.ts"
 import * as Config from "./Config.ts"
 import * as Input from "./Input.ts"
+import * as LocalRepository from "./LocalRepository.ts"
 import { isSmithersCloudDeclaration, type SmithersCloudDeclaration } from "./MemoryTarget.ts"
 import * as PackageManager from "./PackageManager.ts"
 import * as Reference from "./Reference.ts"
@@ -397,6 +398,7 @@ export interface WorkspaceDeclaration {
   readonly sandboxes: SandboxesDeclaration | undefined
   readonly agents: AgentsDeclaration | undefined
   readonly gitHooks: GitHooks | undefined
+  readonly repos: Readonly<Record<string, LocalRepository.Declaration>> | undefined
 }
 
 /**
@@ -439,6 +441,7 @@ export interface WorkspaceOptions {
   readonly sandboxes?: SandboxesDeclaration | undefined
   readonly agents?: AgentsDeclaration | undefined
   readonly gitHooks?: GitHooks | undefined
+  readonly repos?: Readonly<Record<string, LocalRepository.Declaration>> | undefined
 }
 
 const knownOptions: ReadonlySet<string> = new Set([
@@ -453,10 +456,23 @@ const knownOptions: ReadonlySet<string> = new Set([
   "memory",
   "sandboxes",
   "agents",
-  "gitHooks"
+  "gitHooks",
+  "repos"
 ])
 
 const workspaceName = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+/** Normalizes one portable workspace-relative repository path. */
+const repositoryPath = (value: string): string => {
+  if (value === "" || value.includes("\0") || /^[\\/]|^[A-Za-z]:/.test(value)) {
+    throw new TypeError(`Workspace repo path must be relative: ${JSON.stringify(value)}`)
+  }
+  const segments = value.split(/[\\/]/).filter((segment) => segment !== "" && segment !== ".")
+  if (segments.length === 0 || segments.includes("..")) {
+    throw new TypeError(`Workspace repo path must remain inside the workspace: ${JSON.stringify(value)}`)
+  }
+  return segments.join("/")
+}
 
 /**
  * Declares the workspace: its name plus the typed host and toolchain
@@ -557,6 +573,29 @@ export const Workspace = (name: string, options: WorkspaceOptions): WorkspaceDec
   if (options.agents !== undefined && !isAgentsDeclaration(options.agents)) {
     throw new TypeError("Workspace agents must be an S.Agents declaration")
   }
+  let repos: Readonly<Record<string, LocalRepository.Declaration>> | undefined
+  if (options.repos !== undefined) {
+    if (typeof options.repos !== "object" || options.repos === null) {
+      throw new TypeError("Workspace repos must be a name-to-S.LocalRepository record")
+    }
+    const validated: Record<string, LocalRepository.Declaration> = {}
+    const paths = new Set<string>()
+    for (const [repoName, repo] of Object.entries(options.repos)) {
+      if (!workspaceName.test(repoName)) {
+        throw new TypeError(`Workspace repo name is not portable: ${JSON.stringify(repoName)}`)
+      }
+      if (!LocalRepository.isDeclaration(repo)) {
+        throw new TypeError(`Workspace repo ${repoName} must be an S.LocalRepository declaration`)
+      }
+      const normalized = repositoryPath(repo.path)
+      if (paths.has(normalized)) {
+        throw new TypeError(`Workspace repo paths must be distinct: ${JSON.stringify(normalized)}`)
+      }
+      paths.add(normalized)
+      validated[repoName] = LocalRepository.Declaration.make({ path: normalized, branch: repo.branch })
+    }
+    repos = Object.freeze(validated)
+  }
   let gitHooks: GitHooks | undefined
   if (options.gitHooks !== undefined) {
     if (typeof options.gitHooks !== "object" || options.gitHooks === null) {
@@ -595,6 +634,7 @@ export const Workspace = (name: string, options: WorkspaceOptions): WorkspaceDec
   value["sandboxes"] = options.sandboxes
   value["agents"] = options.agents
   value["gitHooks"] = gitHooks
+  value["repos"] = repos
   return Object.freeze(value) as unknown as WorkspaceDeclaration
 }
 

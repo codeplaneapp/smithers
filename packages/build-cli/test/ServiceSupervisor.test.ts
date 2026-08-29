@@ -164,6 +164,53 @@ describe("spec validation", () => {
   })
 })
 
+describe("prepare", () => {
+  it("runs prepare before the process is spawned, and a failing prepare does not block the spawn", async () => {
+    const directory = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-service-prepare-"))
+    const marker = NodePath.join(directory, "prepared")
+    try {
+      await run(Effect.scoped(Effect.gen(function*() {
+        const supervisor = yield* ServiceSupervisor.make
+        // The service refuses to run unless the marker already exists, so a
+        // live handle is only possible if prepare ran first. The second
+        // prepare command exits non-zero: prepare is best-effort, like
+        // cleanup, and must not turn a stale-state sweep into a failure.
+        const handle = yield* supervisor.acquire({
+          key: "//x:prepared",
+          cwd: directory,
+          argv: [
+            process.execPath,
+            "-e",
+            `if (!require('node:fs').existsSync(${
+              JSON.stringify(marker)
+            })) process.exit(3); setInterval(() => {}, 1000)`
+          ],
+          prepare: [
+            [process.execPath, "-e", `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ok')`],
+            [process.execPath, "-e", "process.exit(1)"]
+          ]
+        })
+        expect(alive(handle.pid)).toBe(true)
+      })))
+    } finally {
+      await Fs.rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it("refuses a prepare entry that is not a non-empty argv", async () => {
+    const error = await run(Effect.scoped(Effect.gen(function*() {
+      const supervisor = yield* ServiceSupervisor.make
+      return yield* Effect.flip(supervisor.acquire({
+        key: "//x:bad-prepare",
+        cwd: process.cwd(),
+        argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
+        prepare: [[]] as unknown as ReadonlyArray<readonly [string, ...Array<string>]>
+      }))
+    }))) as ServiceSupervisor.ServiceError
+    expect(error.reason).toBe("invalid-spec")
+  })
+})
+
 describe("readiness", () => {
   it("supports exec readiness and runs init only after readiness", async () => {
     const port = await freePort()

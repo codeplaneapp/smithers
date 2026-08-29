@@ -7,7 +7,7 @@ import type { TargetRun } from "./Targets"
 
 test("run history persists and reloads ordered events", async () => {
   const repo = await mkdtemp(join(tmpdir(), "smithers-history-"))
-  const run: TargetRun = { runId: "run-1", repoId: "repo-1", repo, label: "//:test", labels: ["//:test"], status: "running", exitCode: null, startedAt: 100 }
+  const run: TargetRun = { runId: "run-1", repoId: "repo-1", repo, workspace: ".", label: "//:test", labels: ["//:test"], status: "running", exitCode: null, startedAt: 100 }
   const history = createTargetRunHistory()
   await history.start(run)
   history.event(run, { type: "started", runId: run.runId, label: run.label, labels: [...run.labels], at: 100 })
@@ -27,7 +27,7 @@ test("run history persists and reloads ordered events", async () => {
 
 test("a run interrupted by a restart reloads as failed, not stuck running", async () => {
   const repo = await mkdtemp(join(tmpdir(), "smithers-history-"))
-  const run: TargetRun = { runId: "run-2", repoId: "repo-1", repo, label: "//:test", labels: ["//:test"], status: "running", exitCode: null, startedAt: 100 }
+  const run: TargetRun = { runId: "run-2", repoId: "repo-1", repo, workspace: ".", label: "//:test", labels: ["//:test"], status: "running", exitCode: null, startedAt: 100 }
   const history = createTargetRunHistory()
   await history.start(run)
   history.event(run, { type: "started", runId: run.runId, label: run.label, labels: [...run.labels], at: 100 })
@@ -45,7 +45,7 @@ test("a run interrupted by a restart reloads as failed, not stuck running", asyn
 
 test("replay orders every frame by its run-local sequence", async () => {
   const repo = await mkdtemp(join(tmpdir(), "smithers-history-"))
-  const run: TargetRun = { runId: "run-seq", repoId: "repo-1", repo, label: "//:test", labels: ["//:test"], status: "running", exitCode: null, startedAt: 100 }
+  const run: TargetRun = { runId: "run-seq", repoId: "repo-1", repo, workspace: ".", label: "//:test", labels: ["//:test"], status: "running", exitCode: null, startedAt: 100 }
   const history = createTargetRunHistory()
   await history.start(run)
   history.event(run, { type: "started", runId: run.runId, label: run.label, labels: [...run.labels], at: 100, seq: 0 })

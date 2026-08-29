@@ -2,13 +2,15 @@
  * @smthrs/database public API.
  *
  * This entry point is the driver-neutral write boundary, so it stays
- * browser-bundleable. The drivers themselves are Node-only — `node:sqlite`
- * through `@effect/sql-sqlite-node` — and live under explicit subpaths, the
- * way `effect` keeps platform packages out of its own root:
+ * browser-bundleable. Each driver is platform-specific and lives under an
+ * explicit subpath, the way `effect` keeps platform packages out of its own
+ * root: the Node driver is `node:sqlite` through `@effect/sql-sqlite-node`,
+ * and the Cloudflare driver runs on a Durable Object's own SQLite storage.
  *
  * ```ts
  * import { DurableWriter } from "@smthrs/database"
  * import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
+ * import * as DurableObjectDatabase from "@smthrs/database/cloudflare/DurableObjectDatabase"
  * import * as TestDatabase from "@smthrs/database/test/TestDatabase"
  * ```
  *

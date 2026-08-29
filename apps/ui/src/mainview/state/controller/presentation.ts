@@ -9,12 +9,12 @@ export interface PresentationController {
   readonly showChat: () => void
   readonly showWorld: () => void
   readonly showConnectors: () => void
-  readonly maximizeCard: (id: string) => string | void
-  readonly minimizeCard: () => void
   readonly toggleDevtools: () => void
   readonly toggleSurfacesMenu: () => void
   readonly toggleConnectMenu: () => void
   readonly closeConnectMenu: () => void
+  readonly askReset: () => void
+  readonly cancelReset: () => void
   readonly describeAgentBackend: (backend: string) => string | { readonly value: string }
   readonly debugSnapshot: () => { readonly value: string }
   readonly debugEvents: () => { readonly value: string }
@@ -104,15 +104,6 @@ export const createPresentationController = (
     })
   }
 
-  const maximizeCard = (id: string): string | void => {
-    if (ctx.store.collections.cards.get(id) === undefined) return `There is no card with id ${id}.`
-    ctx.store.dispatch({ type: "card.maximized", actor: "user", id })
-  }
-
-  const minimizeCard = (): void => {
-    ctx.store.dispatch({ type: "card.minimized", actor: "user" })
-  }
-
   const toggleDevtools = (): void => {
     // The command registers only for admins; the guard keeps the state
     // honest even if a stale binding fires in a non-admin session.
@@ -145,6 +136,16 @@ export const createPresentationController = (
   const closeConnectMenu = (): void => {
     if (ctx.store.session().connectMenuOpen !== true) return
     ctx.store.dispatch({ type: "connect-menu.toggled", actor: "user", open: false })
+  }
+
+  const askReset = (): void => {
+    if (ctx.store.session().resetConfirmOpen === true) return
+    ctx.store.dispatch({ type: "conversation.reset.asked", actor: "user", open: true })
+  }
+
+  const cancelReset = (): void => {
+    if (ctx.store.session().resetConfirmOpen !== true) return
+    ctx.store.dispatch({ type: "conversation.reset.asked", actor: "user", open: false })
   }
 
   /*
@@ -463,12 +464,12 @@ export const createPresentationController = (
     showChat,
     showWorld,
     showConnectors,
-    maximizeCard,
-    minimizeCard,
     toggleDevtools,
     toggleSurfacesMenu,
     toggleConnectMenu,
     closeConnectMenu,
+    askReset,
+    cancelReset,
     describeAgentBackend,
     debugSnapshot,
     debugEvents,

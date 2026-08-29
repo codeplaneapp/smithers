@@ -1,6 +1,7 @@
 import { Smithers as S } from "@smthrs/targets"
 import type * as Target from "@smthrs/targets/Target"
 import * as Fs from "node:fs/promises"
+import { createRequire } from "node:module"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
@@ -21,7 +22,39 @@ afterAll(async () => {
 })
 
 const forceSpec = NodePath.resolve(import.meta.dirname, "fixtures/force-spec")
+const stepsSpec = NodePath.resolve(import.meta.dirname, "fixtures/steps-form")
 const goldenRoot = NodePath.resolve(import.meta.dirname, "fixtures/github-render")
+const originalRoot = NodePath.join(goldenRoot, "originals")
+
+interface YamlModule {
+  readonly parse: (source: string) => unknown
+}
+
+const yaml = createRequire(NodePath.resolve(import.meta.dirname, "../../targets/package.json"))("yaml") as YamlModule
+
+/** Normalizes YAML representation details that do not change GitHub's input. */
+const normalizeYaml = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(normalizeYaml)
+  if (typeof value === "number") return String(value)
+  if (typeof value === "string") return value.endsWith("\n") ? value.slice(0, -1) : value
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, normalizeYaml(child)])
+    )
+  }
+  return value
+}
+
+/** Parses one workflow while omitting its display name, which package mode derives from its file name. */
+const comparableWorkflow = (source: string): unknown => {
+  const parsed = yaml.parse(source)
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new TypeError("expected a YAML workflow mapping")
+  }
+  const body: Record<string, unknown> = { ...parsed }
+  delete body["name"]
+  return normalizeYaml(body)
+}
 
 const openIndex = async (): Promise<PackageIndex> => {
   const discovery = await PackageDiscovery.discover(forceSpec)
@@ -31,6 +64,19 @@ const openIndex = async (): Promise<PackageIndex> => {
 
 const renderForce = async (): Promise<GithubRender.CiRender> => {
   const index = await openIndex()
+  const [row] = index.resolve("//.github:github")
+  return GithubRender.render({
+    ciGen: row!.target,
+    workspace: index.workspace,
+    resolve: index,
+    packageDir: row!.packagePath
+  })
+}
+
+const renderSteps = async (): Promise<GithubRender.CiRender> => {
+  const discovery = await PackageDiscovery.discover(stepsSpec)
+  const loaded = await PackageLoader.load(discovery)
+  const index = PackageIndex.make(loaded)
   const [row] = index.resolve("//.github:github")
   return GithubRender.render({
     ciGen: row!.target,
@@ -122,6 +168,15 @@ describe("force-spec CI generation goldens", () => {
       process.chdir(previous)
     }
     expect(second.files).toEqual(first.files)
+  })
+})
+
+describe("steps-form fixture", () => {
+  it("loads package mode and renders the expected workflow YAML", async () => {
+    const rendered = await renderSteps()
+    expect(rendered.files.map((file) => file.path)).toEqual(["workflows/manual.yml"])
+    const golden = await Fs.readFile(NodePath.join(goldenRoot, "workflows/manual.yml"), "utf8")
+    expect(rendered.files[0]!.content).toBe(golden)
   })
 })
 
@@ -399,6 +454,222 @@ describe("triggers", () => {
 
   it("rejects a release activity GitHub does not define", () => {
     expect(() => S.Github.Workflow({ name: "release", on: { release: ["tagged"] }, run: [] } as never)).toThrow()
+  })
+
+  it("renders workflow policy, typed inputs, and raw steps before target-derived jobs", () => {
+    const run = anyTarget()
+    const workflow = S.Github.Workflow({
+      name: "coordinate",
+      on: {
+        pullRequest: { types: ["opened", "ready_for_review"] },
+        issues: { types: ["opened", "labeled"] },
+        workflowDispatch: {
+          inputs: {
+            force_publish: {
+              description: "Publish even when unchanged",
+              required: true,
+              default: false,
+              type: "boolean"
+            }
+          }
+        }
+      },
+      permissions: { contents: "read", "pull-requests": "write", issues: "read" },
+      env: { CARGO_TERM_COLOR: "always" },
+      environment: "prod",
+      condition: "github.event_name != 'pull_request' || github.event.pull_request.state == 'open'",
+      jobName: "Coordinate",
+      runsOn: "blacksmith-4vcpu-ubuntu-2404",
+      steps: [
+        { uses: "actions/checkout@v4", with: { "fetch-depth": "0" } },
+        {
+          name: "Coordinate",
+          id: "coordinate",
+          if: "inputs.force_publish",
+          run: ["echo first", "echo second"],
+          shell: "bash",
+          workingDirectory: ".smithers",
+          env: { GH_TOKEN: "${{ github.token }}" }
+        }
+      ],
+      run: [run]
+    })
+    const ciGen = S.Github.CiGen({ workflows: [workflow] })
+    const rendered = GithubRender.render({
+      ciGen,
+      workspace: unitWorkspace,
+      resolve: resolver([
+        [ciGen, "//.github:github"],
+        [run, "//:verify"]
+      ]),
+      packageDir: ".github"
+    })
+    const content = rendered.files.find((file) => file.path === "workflows/coordinate.yml")!.content
+
+    expect(content).toContain(
+      "  pull_request:\n    types:\n      - opened\n      - ready_for_review\n" +
+        "  issues:\n    types:\n      - opened\n      - labeled\n"
+    )
+    expect(content).toContain(
+      "  workflow_dispatch:\n    inputs:\n      force_publish:\n" +
+        "        description: Publish even when unchanged\n        required: true\n" +
+        "        default: false\n        type: boolean\n"
+    )
+    expect(content).toContain("permissions:\n  contents: read\n  pull-requests: write\n  issues: read\n")
+    expect(content).toContain("env:\n  CARGO_TERM_COLOR: always\n")
+    expect(content).toContain(
+      "  coordinate:\n    name: Coordinate\n" +
+        "    if: \"github.event_name != 'pull_request' || github.event.pull_request.state == 'open'\"\n" +
+        "    runs-on: blacksmith-4vcpu-ubuntu-2404\n    environment: prod\n"
+    )
+    expect(content).toContain(
+      "      - name: Coordinate\n        id: coordinate\n        if: inputs.force_publish\n        run: |\n" +
+        "          echo first\n          echo second\n        shell: bash\n" +
+        "        working-directory: \".smithers\"\n        env:\n          GH_TOKEN: \"${{ github.token }}\"\n"
+    )
+    expect(content.indexOf("  coordinate:\n")).toBeLessThan(content.indexOf("  verify:\n"))
+  })
+})
+
+describe("design-partner workflow originals", () => {
+  it("preserves publish-sdk job and step structure through YAML", async () => {
+    const workflow = S.Github.Workflow({
+      name: "publish-sdk",
+      on: {
+        push: { branches: ["main"] },
+        workflowDispatch: {
+          inputs: {
+            force_publish: {
+              description: "Publish the current SDK version even if it was already present on main",
+              required: true,
+              default: false,
+              type: "boolean"
+            }
+          }
+        }
+      },
+      env: { CARGO_TERM_COLOR: "always" },
+      environment: "prod",
+      jobName: "Publish aomi-sdk",
+      runsOn: "blacksmith-4vcpu-ubuntu-2404",
+      steps: [
+        { uses: "actions/checkout@v4", with: { "fetch-depth": "0" } },
+        {
+          name: "Check SDK version bump",
+          id: "sdk-version",
+          env: {
+            SDK_BASE_SHA: "${{ github.event_name == 'push' && github.event.before || github.sha }}",
+            FORCE_PUBLISH: "${{ inputs.force_publish || false }}"
+          },
+          run: [
+            "args=(",
+            "  --base \"$SDK_BASE_SHA\"",
+            "  --head \"${{ github.sha }}\"",
+            "  --github-output \"$GITHUB_OUTPUT\"",
+            ")",
+            "if [ \"$FORCE_PUBLISH\" = \"true\" ]; then",
+            "  args+=(--force-publish)",
+            "fi",
+            "python3 scripts/check_sdk_version_bump.py \"${args[@]}\""
+          ]
+        },
+        {
+          name: "Install Rust",
+          if: "steps.sdk-version.outputs.publish_sdk == 'true'",
+          uses: "dtolnay/rust-toolchain@stable",
+          with: { toolchain: "1.91" }
+        },
+        {
+          name: "Restore cargo cache",
+          if: "steps.sdk-version.outputs.publish_sdk == 'true'",
+          uses: "Swatinem/rust-cache@v2"
+        },
+        {
+          name: "Publish summary",
+          if: "steps.sdk-version.outputs.publish_sdk == 'true'",
+          run: "echo \"Publishing aomi-sdk v${{ steps.sdk-version.outputs.sdk_version }}\""
+        },
+        {
+          name: "Publish aomi-sdk",
+          if: "steps.sdk-version.outputs.publish_sdk == 'true'",
+          run: "cargo publish -p aomi-sdk",
+          env: { CARGO_REGISTRY_TOKEN: "${{ secrets.CARGO_REGISTRY_TOKEN }}" }
+        },
+        {
+          name: "Skip publish when SDK is unchanged",
+          if: "steps.sdk-version.outputs.publish_sdk != 'true'",
+          run: "echo \"SDK unchanged on this main push; skipping publish.\""
+        }
+      ]
+    })
+    const ciGen = S.Github.CiGen({ workflows: [workflow] })
+    const rendered = GithubRender.render({
+      ciGen,
+      workspace: unitWorkspace,
+      resolve: resolver([[ciGen, "//.github:github"]]),
+      packageDir: ".github"
+    })
+    const original = await Fs.readFile(NodePath.join(originalRoot, "publish-sdk.yml"), "utf8")
+    expect(comparableWorkflow(rendered.files[0]!.content)).toEqual(comparableWorkflow(original))
+  })
+
+  it("preserves coordinate job and step structure through YAML", async () => {
+    const workflow = S.Github.Workflow({
+      name: "coordinate",
+      on: {
+        pullRequest: { types: ["opened", "reopened", "ready_for_review", "labeled"] },
+        issues: { types: ["opened", "labeled"] }
+      },
+      permissions: { contents: "read", "pull-requests": "write", issues: "read" },
+      concurrency: { group: "coordinate-${{ github.repository }}", cancelInProgress: false },
+      condition: "github.event_name != 'pull_request' || github.event.pull_request.state == 'open'",
+      steps: [
+        {
+          name: "Checkout coordinator",
+          uses: "actions/checkout@v4",
+          with: {
+            repository: "aomi-labs/aomi-scrum",
+            token: "${{ secrets.SMITHER_COORDINATOR_TOKEN }}"
+          }
+        },
+        { uses: "oven-sh/setup-bun@v2", with: { "bun-version": "1.3" } },
+        {
+          uses: "actions/cache@v4",
+          with: {
+            path: ".smithers/state",
+            key: "coordinate-state-${{ github.repository }}-${{ github.run_id }}",
+            "restore-keys": "coordinate-state-${{ github.repository }}-"
+          }
+        },
+        { name: "Install workflow deps", workingDirectory: ".smithers", run: "bun install" },
+        {
+          name: "Run coordinate (this repo only)",
+          env: {
+            SMITHER_OPENAI_API_KEY: "${{ secrets.SMITHER_OPENAI_API_KEY }}",
+            ANTHROPIC_API_KEY: "${{ secrets.SMITHER_ANTHROPIC_API_KEY }}",
+            SMITHER_DISCORD_WEBHOOK_URL: "${{ secrets.SMITHER_DISCORD_WEBHOOK_URL }}",
+            GH_TOKEN: "${{ github.token }}",
+            PR_NUMBER: "${{ github.event.pull_request.number }}"
+          },
+          run: [
+            "INPUT=\"{\\\"dryRun\\\":false,\\\"minSeverity\\\":\\\"high\\\",\\\"repos\\\":[\\\"${{ github.repository }}\\\"]\"",
+            "[ -n \"$PR_NUMBER\" ] && INPUT=\"$INPUT,\\\"prNumber\\\":$PR_NUMBER\"",
+            "INPUT=\"$INPUT}\"",
+            "echo \"input: $INPUT\"",
+            "bunx smithers-orchestrator up .smithers/workflows/coordinate.tsx --input \"$INPUT\""
+          ]
+        }
+      ]
+    })
+    const ciGen = S.Github.CiGen({ workflows: [workflow] })
+    const rendered = GithubRender.render({
+      ciGen,
+      workspace: unitWorkspace,
+      resolve: resolver([[ciGen, "//.github:github"]]),
+      packageDir: ".github"
+    })
+    const original = await Fs.readFile(NodePath.join(originalRoot, "coordinate.yaml"), "utf8")
+    expect(comparableWorkflow(rendered.files[0]!.content)).toEqual(comparableWorkflow(original))
   })
 
   it("renders typed pull request and issue triggers plus dispatch inputs", () => {

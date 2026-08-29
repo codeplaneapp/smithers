@@ -31,7 +31,7 @@ export interface PtyCreateInput {
 
 export type PtyCreateResult =
   | { readonly status: "ok"; readonly session: PtySession }
-  | { readonly status: "error"; readonly code: "bad_cwd" | "unknown_harness" | "harness_unavailable" | "spawn_failed"; readonly message: string }
+  | { readonly status: "error"; readonly code: "bad_cwd" | "unknown_harness" | "harness_unavailable" | "capacity_reached" | "spawn_failed"; readonly message: string }
 
 export interface PtyManager {
   readonly create: (input: PtyCreateInput) => Promise<PtyCreateResult>
@@ -60,6 +60,8 @@ export interface PtyManagerOptions {
   readonly sandboxHost?: SandboxHost
   /** Grace between SIGHUP and SIGKILL on kill. */
   readonly killGraceMs?: number
+  /** Maximum simultaneously live child processes; default 8. */
+  readonly maxSessions?: number
   readonly log?: (line: string) => void
 }
 
@@ -146,7 +148,7 @@ export const childEnv = (
   return env
 }
 
-const newSessionId = (): string => `pty-${randomBytes(4).toString("hex")}`
+const newSessionId = (): string => `pty-${randomBytes(16).toString("hex")}`
 
 const isDirectory = (path: string): boolean => {
   try {
@@ -171,11 +173,16 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
   const shell = options.shell ?? (env.SHELL !== undefined && env.SHELL !== "" ? env.SHELL : "/bin/zsh")
   const sandboxHost = options.sandboxHost ?? currentSandboxHost(env)
   const killGraceMs = options.killGraceMs ?? 2000
+  const maxSessions = options.maxSessions ?? 8
   const sessions = new Map<string, LiveSession>()
 
   const topic = (sessionId: string): string => `pty:${sessionId}`
 
   const create: PtyManager["create"] = async (input) => {
+    const liveCount = [...sessions.values()].filter((session) => session.record.alive).length
+    if (liveCount >= maxSessions) {
+      return { status: "error", code: "capacity_reached", message: `At most ${maxSessions} terminal sessions may run at once.` }
+    }
     const cwd = expandCwd(input.cwd, home)
     if (!isDirectory(cwd)) return { status: "error", code: "bad_cwd", message: `${cwd} is not a directory.` }
     let argv: Array<string>

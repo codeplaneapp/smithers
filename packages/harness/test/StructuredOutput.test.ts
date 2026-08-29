@@ -29,6 +29,13 @@ describe("StructuredOutput.instructions", () => {
     expect(JSON.stringify(StructuredOutput.jsonSchema(Review))).not.toContain("$defs")
   })
 
+  it("names the call that finishes a cell and never a returned transition", () => {
+    const text = StructuredOutput.instructions(Review)
+    expect(text).toContain("ctx.done(output)")
+    expect(text).not.toContain("intent: \"complete\"")
+    expect(text).not.toContain("return {")
+  })
+
   it("renders a schema with no fields at all", () => {
     expect(StructuredOutput.instructions(Schema.Struct({}))).toContain("Required output shape")
   })
@@ -170,6 +177,7 @@ describe("StructuredOutput.decode", () => {
     const text = StructuredOutput.correction(failure!)
     expect(text).toContain("did not validate")
     expect(text).toContain(failure!.issues[0]!)
+    expect(text).toContain("ctx.done(output)")
   })
 
   it("reports an empty answer as a miss digested on the empty candidate", () => {

@@ -49,6 +49,12 @@ const eventSchema = Schema.Union([
     arguments: Schema.optionalKey(Schema.String)
   }),
   Schema.Struct({
+    type: Schema.Literal("tool-result"),
+    id: Schema.String,
+    output: Schema.String,
+    isError: Schema.optionalKey(Schema.Boolean)
+  }),
+  Schema.Struct({
     type: Schema.Literal("usage"),
     inputTokens: Schema.optionalKey(Schema.Number),
     outputTokens: Schema.optionalKey(Schema.Number),
@@ -56,6 +62,12 @@ const eventSchema = Schema.Union([
     cachedInputTokens: Schema.optionalKey(Schema.Number),
     cacheWriteTokens: Schema.optionalKey(Schema.Number),
     totalTokens: Schema.optionalKey(Schema.Number)
+  }),
+  Schema.Struct({
+    type: Schema.Literal("retry"),
+    attempt: Schema.Int,
+    code: Schema.String,
+    delayMillis: Schema.Number
   }),
   Schema.Struct({
     type: Schema.Literal("settle"),
@@ -139,12 +151,17 @@ const requestSchema = Schema.Struct({
   system: Schema.Array(textPartSchema),
   messages: Schema.Array(messageSchema),
   tools: Schema.Array(toolSchema),
-  params: paramsSchema
+  params: paramsSchema,
+  toolChoice: Schema.optionalKey(Schema.Literal("none"))
 })
 
+// The codes are exactly `/model/ModelError`'s `ModelErrorCode`. Permission and
+// grant-store codes are `/capability/Permission`'s, and the model package never
+// emits one as a provider failure.
 const failureSchema = Schema.Struct({
   code: Schema.Literals([
     "invalid_request",
+    "context_overflow",
     "no_route",
     "authentication",
     "rate_limited",
@@ -152,14 +169,8 @@ const failureSchema = Schema.Struct({
     "content_policy",
     "provider_internal",
     "transport",
+    "call_timeout",
     "invalid_provider_output",
-    "permission_required",
-    "permission_denied",
-    "duplicate_request",
-    "request_not_found",
-    "journal_failed",
-    "store_closed",
-    "invalid_resolution",
     "unknown"
   ]),
   message: Schema.String,
@@ -212,12 +223,24 @@ const invalid = (path: string): never => {
  * @since 0.0.0
  */
 export const canonicalRequestDigest = (request: ModelRequestLike): string =>
-  JSON.stringify(canonicalize(requestValue(request)))
+  JSON.stringify(canonicalize(recordedRequest(request)))
 
 const optional = <K extends string, A>(key: K, value: A | undefined): { readonly [P in K]?: A } =>
   value === undefined ? {} : { [key]: value } as { readonly [P in K]?: A }
 
-const requestValue = (request: ModelRequestLike): unknown => ({
+/**
+ * Projects a request onto the plain JSON data a fixture stores.
+ *
+ * The production `ModelRequest` is a `Schema.Class` whose messages, tools, and
+ * params are class instances. A recorder that stored one verbatim would write a
+ * fixture whose shape depends on the class, and {@link canonicalRequestDigest}
+ * rejects any value that is not a plain object. This copy keeps the recorded
+ * request, the decoded fixture, and the digest input the same value.
+ *
+ * @category encoding
+ * @since 0.0.0
+ */
+export const recordedRequest = (request: ModelRequestLike): ModelRequestLike => ({
   modelId: request.modelId,
   system: request.system.map((part) => ({ type: part.type, text: part.text })),
   messages: request.messages.map((message) => {
@@ -276,7 +299,8 @@ const requestValue = (request: ModelRequestLike): unknown => ({
     ...optional("stopSequences", request.params.stopSequences),
     ...optional("thinkingBudget", request.params.thinkingBudget),
     ...optional("reasoningEffort", request.params.reasoningEffort)
-  }
+  },
+  ...optional("toolChoice", request.toolChoice)
 })
 
 const canonicalize = (value: unknown, path = "$", ancestors = new Set<object>()): unknown => {

@@ -383,6 +383,9 @@ describe("CellTurn in repl mode", () => {
   })
 
   it("refuses a returned transition and names the call that replaces it", async () => {
+    // The scripted cells keep the old filing surface on purpose: this is the
+    // shape the sandbox rejects, so aligning them to ctx.done would delete the
+    // rejection this test exists to pin.
     const { events } = await run({
       script: [
         emits(`return { intent: "complete", output: "done" }`),

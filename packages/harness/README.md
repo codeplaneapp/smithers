@@ -12,6 +12,8 @@ The primary loop is cell-first. A frame is `model -> generated cell -> realm eva
 
 The production QuickJS binding never runs an unbounded cell. When a caller omits limits, each evaluation gets a 128 MiB heap ceiling, 1,000 interpreter interrupt checks, and a 30-second wall-clock deadline. A caller may raise any individual ceiling explicitly; omitted ceilings retain their defaults, so a partial override cannot accidentally disable the others.
 
+The controller also keeps the script itself, for the one host that needs it. A frame throws its cell away once the realm has evaluated it, so a model that wants to turn the script it just ran into a saved flow has nothing to read back. `CellHistory` is where the source goes: the controller appends each cell as it executes it, before evaluation, so a cell that raised is still part of what the run ran. The service is optional — a host that offers no way to save a flow binds nothing and the controller records nothing — and `@smthrs/agent/PromoteFlows` is what reads it.
+
 Every `ctx.call` inside a cell is its own keyed, journaled, permission-gated boundary at the tier the flow declares — a cell is never one opaque activity. That is what makes a crash or a permission park mid-cell recoverable: the cell source re-executes from the top, boundaries that already settled replay their recorded values, and execution reaches the parked call deterministically.
 
 ## Flows are the only capability primitive
@@ -32,6 +34,7 @@ The root entry point exports these namespaces; each is also importable from `@sm
 | `Cell`             | `Language`, `Source`, `digestOf`, `source`, `ContextEntry`, `Continue`, `Complete`, `Park`, `Transition`, `renderText`, `RejectionCode`, `Settled`, `Raised`, `Rejected`, `Outcome`, `FlowProjection`, `project`, `CallFailureCode`, `defaultCallFailureCode`, `callFailureHint`, `CallIdentity`, `declarationDigest`, `Call`, `baseCheckpoint`, `checkpoint`, `checkpointOf`, `CallResult`, `callFailure`, `Extracted`, `extract`                                                         | Models cell source, its transition, its outcomes, and every call identity.        |
 | `CellTurn`         | `defaultMaxFrames`, `State`, `Input`, `make`, `teach`, `run`                                                                                                                                                                                                                                                                                                                                                                                                                               | Runs the cell-first controller as a stream of agent events.                       |
 | `CellValidation`   | `Validation`, `validate`, `normalize`                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Parses a cell at the boundary and reports what the parse alone can decide.        |
+| `CellHistory`      | `ExecutedCell`, `Service`, `CellHistory`, `make`, `makeCells`, `makeNoop`, `layer`, `layerCells`, `layerNoop`                                                                                                                                                                                                                                                                                                                                                                              | Records the source of every cell the current turn executed.                       |
 | `CellCalls`        | `Implementation`, `Prompt`, `PromptRunner`, `Options`, `Resolver`, `make`                                                                                                                                                                                                                                                                                                                                                                                                                  | Resolves the flow calls a cell makes against the registry and dispatches them.    |
 | `Compaction`       | `summaryInstruction`, `InvalidStep`, `Summarizer`, `CompactionStep`, `TokenAccounting`, `shouldCompact`, `selectPrefix`, `declare`, `summaryRequest`, `apply`                                                                                                                                                                                                                                                                                                                              | Selects and applies deterministic context compaction.                             |
 | `ContextWindow`    | `TypeId`, `SegmentKind`, `SegmentZone`, `Content`, `ContextWindowErrorCode`, `ContextWindowError`, `Segment`, `ContextWindow`, `SegmentInput`, `MakeOptions`, `makeSegment`, `make`, `empty`, `appendTurn`, `activateTools`, `prefixDigest`, `compactPrefix`, `compact`, `render`                                                                                                                                                                                                          | Maintains immutable, zoned context segments and their rendered projection.        |
@@ -47,6 +50,48 @@ The root entry point exports these namespaces; each is also importable from `@sm
 | `Transcript`       | `TranscriptErrorCode`, `TranscriptError`, `ProjectedMessage`, `ProjectedState`, `CellEvidence`, `projectStateResult`, `projectResult`                                                                                                                                                                                                                                                                                                                                                      | Projects journal entries into model-facing transcript state.                      |
 | `VariablesPanel`   | `bound`, `Binding`, `Stamp`, `Ledger`, `stamp`, `render`                                                                                                                                                                                                                                                                                                                                                                                                                                   | Renders what the realm holds and when each name was last bound.                   |
 
-`@smthrs/harness/QuickJSSandbox` exports `make` and `layer`: the QuickJS-WASM `Sandbox` binding, which runs the same single-file build on Node and in a browser and enforces the default ceilings above. It is also the one binding that offers `Sandbox.openRealm`, the persistent realm every run holds for its whole life (`docs/specs/Concepts/Repl Realm.md`).
+`@smthrs/harness/QuickJSSandbox` exports `make` and `layer`: the QuickJS-WASM `Sandbox` binding, which runs the same single-file build on Node and in a browser and enforces the default ceilings above. It is also the one binding that offers `Sandbox.openRealm`, the persistent realm every run holds for its whole life (`docs/specs/Concepts/Repl Realm.md`). It also exports `VariantService`, `Variant`, `layerVariantLive`, `layerVariant`, `makeWithVariant` and `layerWithVariant`, which are how a host names the build instead of taking the default; see below.
 
 `@smthrs/harness/package.json` is also exported. `internal/*` and nested `*/index` subpaths are not public.
+
+## Naming the QuickJS build
+
+`make` and `layer` compile the single-file build from bytes, which is what Node and a browser want. Some runtimes forbid that. Cloudflare's workerd runs no WebAssembly it did not compile itself: `WebAssembly.compile` over bytes fails at runtime, and the only module a worker can instantiate is one its toolchain bundled and handed over as an import.
+
+`QuickJSSandbox.Variant` is that seam. `layerVariantLive` provides the single-file default and `layerVariant(variant)` provides a build the host names; `layerWithVariant` and `makeWithVariant` are the sandbox over whichever one is in context. `@smthrs/agent/Agent` carries the same pair: `layerDefaults` is unchanged and `layerDefaultsWithVariant` takes the build from context.
+
+A worker names its build with the `.wasm` module its bundler compiled:
+
+```ts
+import wasmfile from "@jitl/quickjs-wasmfile-release-sync"
+import wasmModule from "@jitl/quickjs-wasmfile-release-sync/wasm"
+import * as QuickJSSandbox from "@smthrs/harness/QuickJSSandbox"
+import { Layer } from "effect"
+import { newVariant } from "quickjs-emscripten-core"
+
+const layer = QuickJSSandbox.layerWithVariant.pipe(
+  Layer.provide(QuickJSSandbox.layerVariant(newVariant(wasmfile, { wasmModule })))
+)
+```
+
+`test/QuickJSVariant.test.ts` runs a cell against a variant built that way under Node, reading and compiling the `.wasm` file itself in place of the bundler.
+
+## The workerd smoke
+
+`test/workerd/` is a wrangler project that imports the sandbox, names the bundled `.wasm` module, and runs one cell in its `fetch` handler. It is not a pnpm workspace member, because wrangler ships the workerd binary and nothing else in the repository needs it.
+
+```sh
+cd packages/harness/test/workerd
+npm install
+node smoke.mjs
+```
+
+`smoke.mjs` starts `wrangler dev`, waits for the worker, and fails unless the cell completed. `npm run dev` serves the same worker on `http://127.0.0.1:8799` for hand inspection.
+
+The smoke is **not** part of `pnpm --filter @smthrs/harness run test`. It needs a separate install and a downloaded runtime, so `test/WorkerdSmoke.test.ts` skips unless `FLOWS_WORKERD_SMOKE=1` is set:
+
+```sh
+FLOWS_WORKERD_SMOKE=1 pnpm --filter @smthrs/harness run test
+```
+
+`FLOWS_WORKERD_PORT` and `FLOWS_WORKERD_STARTUP_MS` override the port and the readiness deadline.

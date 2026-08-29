@@ -152,6 +152,30 @@ describe("Route.prepare", () => {
     await expect(Route.prepare(compatible, request).pipe(Effect.runPromise)).resolves.toMatchObject({ routeId: "groq" })
   })
 
+  it("mounts the live Chat Completions route on compatible provider base paths", async () => {
+    const groq = Result.getOrThrow(Route.openaiCompatible({
+      id: "groq-chat",
+      baseUrl: "https://api.groq.com/openai/v1",
+      apiKey: Redacted.make("compatible-secret")
+    }))
+
+    expect(groq.protocol.id).toBe("openai-chat-completions")
+    expect(groq.protocol.supportsDeferred("gpt-5.4")).toBe(false)
+    expect(groq.endpoint.url).toBe("https://api.groq.com/openai/v1/chat/completions")
+
+    const gemini = Result.getOrThrow(Route.openaiCompatible({
+      id: "gemini-chat",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+      apiKey: Redacted.make("compatible-secret")
+    }))
+    expect(gemini.endpoint.url).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    )
+    await expect(Route.prepare(gemini, request).pipe(Effect.runPromise)).resolves.toMatchObject({
+      protocolId: "openai-chat-completions"
+    })
+  })
+
   it("carries an OpenAI-compatible deployment's own headers and rejects an unusable base URL", async () => {
     const withHeaders = Result.getOrThrow(OpenAICompatible.make({
       id: "vllm",

@@ -34,6 +34,7 @@ import type * as NodeArtifact from "@smthrs/targets/NodeArtifact"
 import type * as NpmTarget from "@smthrs/targets/NpmTarget"
 import * as Outward from "@smthrs/targets/Outward"
 import type * as Reference from "@smthrs/targets/Reference"
+import * as RepoTarget from "@smthrs/targets/RepoTarget"
 import * as RustToolchain from "@smthrs/targets/RustToolchain"
 import * as Shell from "@smthrs/targets/Shell"
 import * as Target from "@smthrs/targets/Target"
@@ -66,6 +67,7 @@ import * as OverlayExec from "./OverlayExec.ts"
 import type * as PackageIndexModule from "./PackageIndex.ts"
 import * as PackageTree from "./PackageTree.ts"
 import * as Planner from "./Planner.ts"
+import * as RepoResolution from "./RepoResolution.ts"
 import * as Reporter from "./Reporter.ts"
 import * as Resolver from "./Resolver.ts"
 import * as RspackRunner from "./RspackRunner.ts"
@@ -141,6 +143,7 @@ const implementedRules: ReadonlySet<string> = new Set([
   "Github.CiGen",
   "Github.Pr",
   "Memory.Retain",
+  "Repo.Target",
   "Foundry.Build",
   "Foundry.Test",
   "Foundry.Fmt",
@@ -372,6 +375,11 @@ export type LaneData =
     readonly crates: ReadonlyArray<CrateRow> | undefined
     /** The workspace-relative binaries this build produces, for tool edges. */
     readonly binaries: ReadonlyArray<string>
+  }
+  | {
+    readonly kind: "repo-target"
+    readonly resolution: RepoResolution.Resolution
+    readonly git: RepoResolution.GitState
   }
 
 /**
@@ -653,6 +661,12 @@ interface PlanContext {
   readonly closureResults: Map<string, Compose.ClosureResult>
   /** Bundler resolve label → resolved graph digest (plan-time, memoized). */
   readonly graphDigests: Map<string, string>
+  /** Repo.Target declaration → child query result for this operation. */
+  readonly repoResolutions: RepoResolution.ResolutionCache
+  /** Whether Repo.Target must ask the child CLI for its inert plan. */
+  readonly childPlan: boolean
+  /** Whether the parent invocation selected write mode. */
+  readonly write: boolean
 }
 
 /** Opens (once) the cache store the planner uses for closure rows and graph digests. */
@@ -1258,6 +1272,7 @@ const expandInputs = async (
     if (declaration._tag === "Glob") {
       const matches = await Input.expandGlob(context.root, packagePath, declaration, {
         cacheDirectory: context.cacheDirectory,
+        repositoryBoundaries: Object.values(context.index.workspace.repos ?? {}).map((repo) => repo.path),
         signal: context.signal
       })
       const files = await Input.digestFiles(context.root, matches, { signal: context.signal })
@@ -1460,6 +1475,39 @@ const visit = async (
   }
   if (!implementedRules.has(rule)) {
     noteRefusal(refusalFor(rule))
+  }
+  let repositoryResolution: RepoResolution.Resolution | undefined
+  let repositoryState: RepoResolution.GitState | undefined
+  if (rule === "Repo.Target") {
+    // Keep child declarations out of this process: query through the same CLI
+    // and reduce a refusing child to node data rather than a parent-load error.
+    RepoTarget.attrsOf(target)
+    repositoryResolution = await RepoResolution.resolve(
+      context.index,
+      target,
+      context.repoResolutions,
+      context.signal
+    )
+    if (repositoryResolution.refusal !== undefined) {
+      noteRefusal(repositoryResolution.refusal)
+    } else {
+      try {
+        repositoryState = await RepoResolution.gitState(repositoryResolution, context.signal)
+      } catch (cause) {
+        noteRefusal(`child repository @${repositoryResolution.repoName}: ${Diagnostic.message(cause)}`)
+      }
+      if (context.childPlan && refusal === undefined) {
+        try {
+          await RepoResolution.execute(repositoryResolution, {
+            plan: true,
+            write: context.write,
+            signal: context.signal
+          })
+        } catch (cause) {
+          noteRefusal(`child repository @${repositoryResolution.repoName} plan refused: ${Diagnostic.message(cause)}`)
+        }
+      }
+    }
   }
   // The services edge: every declared service must be a Serve target; the
   // consumer acquires it (readiness-gated) before dispatch and releases it
@@ -2361,6 +2409,11 @@ const visit = async (
         binaries: rule === "Cargo.Build" ? Cargo.binaries(attrs) : []
       }
       break
+    case "Repo.Target":
+      if (repositoryResolution !== undefined && repositoryState !== undefined) {
+        lane = { kind: "repo-target", resolution: repositoryResolution, git: repositoryState }
+      }
+      break
     default:
       lane = undefined
   }
@@ -2434,6 +2487,7 @@ const visit = async (
       for (const pattern of writeSet) {
         const matches = await Input.expandGlob(context.root, "", pattern, {
           cacheDirectory: context.cacheDirectory,
+          repositoryBoundaries: Object.values(context.index.workspace.repos ?? {}).map((repo) => repo.path),
           signal: context.signal
         })
         const files = await Input.digestFiles(context.root, matches, { signal: context.signal })
@@ -2521,7 +2575,8 @@ const visit = async (
     rule === "Overlay" ||
     (rule === "Changesets.Version" && mode === "check") ||
     rule === "Go.Test" || rule === "Go.Fuzz" || rule === "Go.Binary" || rule === "Go.ModDownload" ||
-    (rule === "Go.Lint" && mode === "check") || (rule === "Go.Generate" && mode === "check")
+    (rule === "Go.Lint" && mode === "check") || (rule === "Go.Generate" && mode === "check") ||
+    (rule === "Repo.Target" && repositoryState?.dirty === false)
   )
 
   const keyMaterial: Planner.KeyMaterial = {
@@ -2550,7 +2605,18 @@ const visit = async (
       submodules: lane?.kind === "submodules"
         ? lane.plan.gitlinks.map((link) => ({ path: link.path, sha: link.sha }))
         : null,
-      writeSetState
+      writeSetState,
+      repository: repositoryResolution === undefined || repositoryState === undefined
+        ? null
+        : {
+          name: repositoryResolution.repoName,
+          path: repositoryResolution.repoPath,
+          label: repositoryResolution.label,
+          args: repositoryResolution.args,
+          head: repositoryState.head,
+          dirty: repositoryState.dirty,
+          status: repositoryState.status
+        }
     },
     layers: [],
     capabilities: capabilitiesFor(rule, mode, sandbox)
@@ -2580,7 +2646,12 @@ const visit = async (
   const node: PackageNode = {
     label,
     target: rule,
-    kinds: metadata.kinds,
+    kinds: await RepoResolution.effectiveKinds(
+      context.index,
+      target,
+      context.repoResolutions,
+      context.signal
+    ),
     attrs,
     dependencies: executionDeps,
     declaredInputs,
@@ -2723,9 +2794,13 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
   const log = Reporter.of(options).note
   const rows = index.resolve(options.pattern)
   const verb = options.verb
+  const repoResolutions: RepoResolution.ResolutionCache = new Map()
   const selected = verb === "auto"
     ? rows
-    : rows.filter((row) => Target.metadata(row.target).kinds.includes(verb))
+    : (await Promise.all(rows.map(async (row) => ({
+      row,
+      kinds: await RepoResolution.effectiveKinds(index, row.target, repoResolutions, options.signal)
+    })))).filter((entry) => entry.kinds.includes(verb)).map((entry) => entry.row)
   if (verb !== "auto" && rows.length === 1 && selected.length === 0) {
     throw new Error(`target selected by ${options.pattern} does not support the ${verb} verb`)
   }
@@ -2776,7 +2851,10 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
     crateSets: new Map(),
     closureDigests: new Map(),
     closureResults: new Map(),
-    graphDigests: new Map()
+    graphDigests: new Map(),
+    repoResolutions,
+    childPlan: options.plan === true,
+    write: options.write === true
   }
   const roots: Array<string> = []
   try {
@@ -3018,7 +3096,16 @@ export const execute = async (
       timeoutMs: node.timeoutMs
     }
     const exit = await Effect.runPromiseExit(
-      Exec.run({ workspaceRoot, cacheDirectory }, payload),
+      Exec.run({
+        workspaceRoot,
+        cacheDirectory,
+        ...(process.env["SMTHRS_REPO_CHILD"] === "1"
+          ? {
+            onStdout: (chunk: Uint8Array) => process.stdout.write(chunk),
+            onStderr: (chunk: Uint8Array) => process.stderr.write(chunk)
+          }
+          : {})
+      }, payload),
       { signal }
     )
     if (Exit.isSuccess(exit)) {
@@ -4230,6 +4317,27 @@ export const execute = async (
             }
             await Fs.rm(absolute, { recursive: true, force: true })
           }
+          return green("ran")
+        }
+        case "Repo.Target": {
+          if (node.lane?.kind !== "repo-target") return fail("repository target planned no child resolution")
+          const cached = await cacheGet(node)
+          if (cached !== undefined) return green("hit")
+          if (node.sandbox !== "none") {
+            log(
+              `${node.label}  sandbox: outer child CLI runs unconfined so the child can enforce its own target sandboxes`
+            )
+          }
+          await RepoResolution.execute(node.lane.resolution, {
+            write: options.write,
+            signal
+          })
+          await cachePut(node, {
+            kind: "repo-target",
+            repo: node.lane.resolution.repoName,
+            label: node.lane.resolution.label,
+            head: node.lane.git.head
+          })
           return green("ran")
         }
         case "Shell.Build":

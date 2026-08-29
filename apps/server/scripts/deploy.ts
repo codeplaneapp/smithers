@@ -1,6 +1,6 @@
 /**
- * Scripted deploy: build the TanStack Start client and Worker (apps/ui), then
- * deploy that generated Wrangler bundle, recording a receipt (git sha +
+ * Scripted deploy: build the shared Vite SPA, then deploy this package's
+ * Worker with its checked-in Wrangler config, recording a receipt (git sha +
  * timestamp + wrangler version id) either way.
  *
  *   bun scripts/deploy.ts --dry-run
@@ -59,22 +59,22 @@ const run = async (
 const gitSha = (await run(["git", "rev-parse", "HEAD"], { cwd: serverDir, capture: true })).output.trim()
 const gitDirty = (await run(["git", "status", "--porcelain"], { cwd: serverDir, capture: true })).output.trim() !== ""
 
-console.log(`[deploy] building TanStack Start in ${uiDir}, stamped ${gitSha}${gitDirty ? " (dirty tree)" : ""}...`)
-const build = await run(["bun", "run", "build"], { cwd: uiDir, env: { SMITHERS_BUILD_SHA: gitSha } })
+console.log(`[deploy] building the web SPA in ${uiDir}, stamped ${gitSha}${gitDirty ? " (dirty tree)" : ""}...`)
+const build = await run(["bun", "run", "build:web"], { cwd: uiDir, env: { SMITHERS_BUILD_SHA: gitSha } })
 if (build.exitCode !== 0) {
   console.error("[deploy] vite build failed.")
   process.exit(build.exitCode)
 }
 
-console.log(`[deploy] ${dryRun ? "dry-run " : ""}wrangler deploy of the Start/Worker build...`)
-const startConfig = `${uiDir}/dist/server/wrangler.json`
+console.log(`[deploy] ${dryRun ? "dry-run " : ""}wrangler deploy of the Worker and SPA assets...`)
+const workerConfig = `${serverDir}/wrangler.jsonc`
 const deployArgs = [
   "bun",
   "x",
   "wrangler@4.124.0",
   "deploy",
   "--config",
-  startConfig,
+  workerConfig,
   ...(dryRun ? ["--dry-run"] : [])
 ]
 const deploy = await run(deployArgs, { cwd: serverDir, capture: true })

@@ -50,6 +50,110 @@ export const ci = Smithers.GithubCiGen({
 })
 ```
 
+## Package mode: `Github.Workflow`
+
+`PACKAGE.ts` workspaces declare a file set rather than the BUILD-era job table.
+`Github.Workflow` describes one workflow, `Github.Setup` describes the shared
+composite setup action used by target-derived jobs, and `Github.CiGen` owns the
+generated files:
+
+```ts
+const publish = Smithers.Github.Workflow({
+  name: "publish-sdk",
+  on: {
+    push: { branches: ["main"] },
+    workflowDispatch: {
+      inputs: {
+        force_publish: {
+          description: "Publish even when unchanged",
+          required: true,
+          default: false,
+          type: "boolean"
+        }
+      }
+    }
+  },
+  env: { CARGO_TERM_COLOR: "always" },
+  environment: "prod",
+  jobName: "Publish SDK",
+  runsOn: "blacksmith-4vcpu-ubuntu-2404",
+  steps: [
+    { uses: "actions/checkout@v4", with: { "fetch-depth": "0" } },
+    {
+      name: "Publish",
+      if: "inputs.force_publish",
+      run: ["cargo test -p sdk", "cargo publish -p sdk"],
+      env: { CARGO_REGISTRY_TOKEN: "${{ secrets.CARGO_REGISTRY_TOKEN }}" }
+    }
+  ]
+})
+
+const github = Smithers.Github.CiGen({
+  workflows: [publish],
+  changes: ["workflows/**"]
+})
+```
+
+The package-mode workflow attributes are:
+
+| Name          | Type                         | Default           | Description                                                                                                                                                 |
+| ------------- | ---------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | `string`                     | required          | Workflow display name, job id for a raw-step job, and the stem of `workflows/<name>.yml`.                                                                   |
+| `on`          | `On`                         | required          | Trigger table described below.                                                                                                                              |
+| `setup`       | `Github.Setup`               | optional          | Shared composite action inserted into target-derived jobs after checkout.                                                                                   |
+| `affected`    | `boolean`                    | optional          | Gives target-derived jobs full checkout history and passes the merge base to the CLI.                                                                       |
+| `run`         | `Array<Target>`              | `[]`              | Targets rendered as generated jobs. Each job checks out the repository, invokes `setup` when declared, and runs its target label through the workspace CLI. |
+| `steps`       | `Array<Step>`                | optional          | Raw ordered steps rendered into a job named from the workflow. The generator inserts nothing into this list.                                                |
+| `env`         | `Record<string, string>`     | optional          | Workflow-level environment.                                                                                                                                 |
+| `permissions` | `Record<string, Permission>` | optional          | Workflow token permissions; each value is `read`, `write`, or `none`.                                                                                       |
+| `concurrency` | `Concurrency`                | optional          | `group` plus `cancelInProgress`; the latter accepts a boolean or an event name.                                                                             |
+| `environment` | `string`                     | optional          | Deployment environment on every generated job.                                                                                                              |
+| `condition`   | `string`                     | optional          | Raw job-level `if:` condition on every generated job.                                                                                                       |
+| `jobName`     | `string`                     | optional          | Operator-facing name on every generated job.                                                                                                                |
+| `runsOn`      | `string`                     | `"ubuntu-latest"` | Runner label on every generated job.                                                                                                                        |
+
+`steps` may replace `run` or accompany it. When both are present, the raw-step
+job is emitted first, followed by the target-derived jobs in `run` order. A raw
+step list must declare its own checkout and tool setup; `setup` remains the
+prelude for target-derived jobs only. A workflow using `setup` also makes
+`actions/setup/action.yml`, so the owning `Github.CiGen` write set must include
+`actions/setup/**` beside `workflows/**`. Check and write refuse a rendered file
+outside that set.
+
+### Package-mode triggers
+
+| Name               | Type                                           | Description                                                                        |
+| ------------------ | ---------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `pullRequest`      | `boolean \| { branches?, types? }`             | A simple pull-request trigger or filters using GitHub pull-request activity names. |
+| `issues`           | `{ types?: Array<IssueActivity> }`             | Issue activity filters.                                                            |
+| `push`             | `{ branches: Array<string> }`                  | Push branches.                                                                     |
+| `schedule`         | `Array<string>`                                | Five-field cron expressions, rendered as GitHub's `schedule: [{ cron }]` form.     |
+| `release`          | `Array<ReleaseActivity>`                       | GitHub release activity names.                                                     |
+| `workflowDispatch` | `boolean \| { inputs: Record<string, Input> }` | A manual trigger, optionally with typed inputs.                                    |
+
+A dispatch input accepts `description`, `required`, `default`, and a required
+`type` (`boolean`, `choice`, `environment`, or `string`). A `choice` input may
+also declare `options`.
+
+### Raw step
+
+| Name               | Type                      | Description                                                                             |
+| ------------------ | ------------------------- | --------------------------------------------------------------------------------------- |
+| `name`             | `string`                  | Optional operator-facing step name.                                                     |
+| `id`               | `string`                  | Optional step id.                                                                       |
+| `uses`             | `string`                  | Action reference. Exclusive with `run`.                                                 |
+| `with`             | `Record<string, string>`  | Action inputs.                                                                          |
+| `run`              | `string \| Array<string>` | Shell script. Array entries are joined with newlines and rendered as one literal block. |
+| `env`              | `Record<string, string>`  | Step environment.                                                                       |
+| `if`               | `string`                  | Raw step condition.                                                                     |
+| `shell`            | `string`                  | Shell for a `run` step.                                                                 |
+| `workingDirectory` | `string`                  | Working directory for a `run` step, rendered as GitHub's `working-directory`.           |
+
+The raw form exists to migrate an established GitHub job without changing its
+step structure or scripts. It is a package-mode escape hatch; the BUILD-era
+`GithubCiGen` contract below still admits only target invocations and derives
+every command.
+
 ## Modes
 
 | Mode    | Behavior                                                                                                   |
@@ -63,33 +167,33 @@ explicit `smthrs build` of a `mode: "write"` target generates a file.
 
 ## Attributes
 
-| Name               | Type                            | Default                      | Description                                                                                                                                            |
-| ------------------ | ------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workflowName`     | `string`                        | `"CI"`                       | Generated workflow name.                                                                                                                               |
-| `pushBranches`     | `Array<string>`                 | `["main"]`                   | Generated push branches.                                                                                                                               |
-| `pullRequest`      | `boolean`                       | `true`                       | Generated pull-request trigger.                                                                                                                        |
-| `workflowDispatch` | `boolean`                       | `true`                       | Generated manual trigger.                                                                                                                              |
-| `cancelInProgress` | `boolean`                       | `true`                       | Generated concurrency policy.                                                                                                                          |
-| `packageManager`   | `PackageManager.PackageManager` | required                     | The declared package manager. Every job installs with it and runs the smthrs binary through it, so a workspace that switches managers is regenerated.   |
-| `cacheUrlSecret`   | `Secret.Secret`                 | optional                     | The declared secret supplying the remote-cache endpoint override. Every generated target step reads the repository secret of the same name.             |
-| `cacheTokenSecret` | `Secret.Secret`                 | optional                     | The declared secret supplying the remote-cache bearer token.                                                                                           |
-| `jobs`             | `Array<Job>`                    | `[]`                         | Jobs rendered by `write` and `check`; the render refuses an empty list.                                                                                |
-| `gates`            | `Array<Gate>`                   | `[]`                         | Target invocations the pipeline must still perform, optionally in one named job. Checked structurally against the declared steps, never against text.  |
-| `requiredJobs`     | `Array<string>`                 | `[]`                         | Job ids the workflow must define, in every mode.                                                                                                       |
-| `output`           | `string`                        | `".github/workflows/ci.yml"` | Workspace-relative workflow path.                                                                                                                      |
-| `mode`             | `"check" \| "write"`            | `"check"`                    | Output handling described above.                                                                                                                       |
+| Name               | Type                            | Default                      | Description                                                                                                                                           |
+| ------------------ | ------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflowName`     | `string`                        | `"CI"`                       | Generated workflow name.                                                                                                                              |
+| `pushBranches`     | `Array<string>`                 | `["main"]`                   | Generated push branches.                                                                                                                              |
+| `pullRequest`      | `boolean`                       | `true`                       | Generated pull-request trigger.                                                                                                                       |
+| `workflowDispatch` | `boolean`                       | `true`                       | Generated manual trigger.                                                                                                                             |
+| `cancelInProgress` | `boolean`                       | `true`                       | Generated concurrency policy.                                                                                                                         |
+| `packageManager`   | `PackageManager.PackageManager` | required                     | The declared package manager. Every job installs with it and runs the smthrs binary through it, so a workspace that switches managers is regenerated. |
+| `cacheUrlSecret`   | `Secret.Secret`                 | optional                     | The declared secret supplying the remote-cache endpoint override. Every generated target step reads the repository secret of the same name.           |
+| `cacheTokenSecret` | `Secret.Secret`                 | optional                     | The declared secret supplying the remote-cache bearer token.                                                                                          |
+| `jobs`             | `Array<Job>`                    | `[]`                         | Jobs rendered by `write` and `check`; the render refuses an empty list.                                                                               |
+| `gates`            | `Array<Gate>`                   | `[]`                         | Target invocations the pipeline must still perform, optionally in one named job. Checked structurally against the declared steps, never against text. |
+| `requiredJobs`     | `Array<string>`                 | `[]`                         | Job ids the workflow must define, in every mode.                                                                                                      |
+| `output`           | `string`                        | `".github/workflows/ci.yml"` | Workspace-relative workflow path.                                                                                                                     |
+| `mode`             | `"check" \| "write"`            | `"check"`                    | Output handling described above.                                                                                                                      |
 
 ### Job
 
-| Name              | Type                     | Default  | Description                                                                             |
-| ----------------- | ------------------------ | -------- | --------------------------------------------------------------------------------------- |
-| `id`              | `string`                 | required | GitHub job id: a letter or `_`, then letters, digits, `-`, `_`.                          |
-| `name`            | `string`                 | optional | Operator-facing job name.                                                                |
-| `runsOn`          | `string`                 | required | One runner label, or a label set `[a, b]`.                                              |
-| `timeoutMinutes`  | `number`                 | optional | A whole number from 1 to 360.                                                            |
-| `continueOnError` | `boolean`                | optional | Advisory lane.                                                                          |
-| `toolchain`       | `CiToolchain.Toolchain`  | required | What the runner must provide before the first target runs. See [CiToolchain](#citoolchain). |
-| `steps`           | `Array<TargetStep>`      | required | The target invocations this job performs. A job with none is refused.                    |
+| Name              | Type                    | Default  | Description                                                                                 |
+| ----------------- | ----------------------- | -------- | ------------------------------------------------------------------------------------------- |
+| `id`              | `string`                | required | GitHub job id: a letter or `_`, then letters, digits, `-`, `_`.                             |
+| `name`            | `string`                | optional | Operator-facing job name.                                                                   |
+| `runsOn`          | `string`                | required | One runner label, or a label set `[a, b]`.                                                  |
+| `timeoutMinutes`  | `number`                | optional | A whole number from 1 to 360.                                                               |
+| `continueOnError` | `boolean`               | optional | Advisory lane.                                                                              |
+| `toolchain`       | `CiToolchain.Toolchain` | required | What the runner must provide before the first target runs. See [CiToolchain](#citoolchain). |
+| `steps`           | `Array<TargetStep>`     | required | The target invocations this job performs. A job with none is refused.                       |
 
 ### TargetStep
 
@@ -106,12 +210,12 @@ a declaration that cannot be written.
 
 ### Gate
 
-| Name      | Type        | Default  | Description                                                     |
-| --------- | ----------- | -------- | ----------------------------------------------------------------- |
-| `name`    | `string`    | required | Operator-facing name, used in the failure message.              |
+| Name      | Type        | Default  | Description                                                      |
+| --------- | ----------- | -------- | ---------------------------------------------------------------- |
+| `name`    | `string`    | required | Operator-facing name, used in the failure message.               |
 | `verb`    | `Verb.Verb` | required | The verb the invocation must run under. `Verb.Ci` satisfies any. |
-| `pattern` | `string`    | required | The exact pattern it must run over.                             |
-| `job`     | `string`    | optional | The job id the invocation must appear in.                       |
+| `pattern` | `string`    | required | The exact pattern it must run over.                              |
+| `job`     | `string`    | optional | The job id the invocation must appear in.                        |
 
 A gate is a claim about coverage that outlives the job list: "the docs verb
 still runs over the packages". It is checked against the declared steps, so it
@@ -126,16 +230,16 @@ requirement into steps, in the order a runner needs them: checkout, workflow
 lint, package-manager setup, interpreters, install, language toolchains, runner
 assertions, then the job's target steps, then artifact collection.
 
-| Name           | Type                          | Default  | Renders                                                                                  |
-| -------------- | ----------------------------- | -------- | ------------------------------------------------------------------------------------------ |
-| `submodules`   | `boolean`                     | `false`  | `actions/checkout@v4` with `submodules: recursive`.                                       |
-| `install`      | `boolean`                     | `true`   | The manager's setup action and its frozen, script-free install.                           |
-| `runtimes`     | `Array<RuntimeSetup>`         | `[]`     | `CiToolchain.Node({ runtime, release })` / `CiToolchain.Bun({ runtime, release })`.        |
-| `rust`         | `RustSetup`                   | optional | `CiToolchain.Rust({ toolchain })` — `rustup toolchain install`, plus the cache by default. |
-| `jj`           | `JjSetup`                     | optional | `CiToolchain.Jj({ release })` — the pinned jj-cli, and a colocated repository.             |
-| `browser`      | `SystemBrowser`               | optional | `CiToolchain.Browser({ executable, reason })` — asserts the runner image ships it.         |
-| `workflowLint` | `WorkflowLint`                | optional | `CiToolchain.Actionlint({ release, workflows })`.                                          |
-| `artifacts`    | `ArtifactUpload`              | optional | `CiToolchain.Artifacts({ artifact, sources })` — collect and upload.                        |
+| Name           | Type                  | Default  | Renders                                                                                    |
+| -------------- | --------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| `submodules`   | `boolean`             | `false`  | `actions/checkout@v4` with `submodules: recursive`.                                        |
+| `install`      | `boolean`             | `true`   | The manager's setup action and its frozen, script-free install.                            |
+| `runtimes`     | `Array<RuntimeSetup>` | `[]`     | `CiToolchain.Node({ runtime, release })` / `CiToolchain.Bun({ runtime, release })`.        |
+| `rust`         | `RustSetup`           | optional | `CiToolchain.Rust({ toolchain })` — `rustup toolchain install`, plus the cache by default. |
+| `jj`           | `JjSetup`             | optional | `CiToolchain.Jj({ release })` — the pinned jj-cli, and a colocated repository.             |
+| `browser`      | `SystemBrowser`       | optional | `CiToolchain.Browser({ executable, reason })` — asserts the runner image ships it.         |
+| `workflowLint` | `WorkflowLint`        | optional | `CiToolchain.Actionlint({ release, workflows })`.                                          |
+| `artifacts`    | `ArtifactUpload`      | optional | `CiToolchain.Artifacts({ artifact, sources })` — collect and upload.                       |
 
 Every version a runner downloads is enumerated by the schema, for the reason
 `Runtime.NodeVersion` is enumerated: the set of versions a workspace may pin is

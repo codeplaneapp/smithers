@@ -33,11 +33,12 @@ describe("detectSmithers", () => {
       detected: true,
       workspaceFile: ".smithers/WORKSPACE.ts",
       declarationFiles: [".smithers/WORKSPACE.ts"],
-      reason: ".smithers/WORKSPACE.ts present; 1 file import smthrs"
+      reason: "1 workspace detected",
+      workspaces: [{ path: ".", title: basename(root) }]
     })
   })
 
-  test("PACKAGE.ts files count, single quotes count, node_modules and .git are skipped", async () => {
+  test("PACKAGE.ts files count as declarations, single quotes count, node_modules and .git are skipped", async () => {
     const root = await scratch()
     await writeFile(join(root, "WORKSPACE.ts"), "export const Workspace = {}\n")
     await mkdir(join(root, "src", "deep"), { recursive: true })
@@ -51,6 +52,7 @@ describe("detectSmithers", () => {
     expect(verdict.detected).toBe(true)
     expect(verdict.workspaceFile).toBe("WORKSPACE.ts")
     expect(verdict.declarationFiles).toEqual(["src/PACKAGE.ts"])
+    expect(verdict.workspaces).toEqual([{ path: ".", title: basename(root) }])
   })
 
   test("no WORKSPACE.ts is not a workspace, whatever else imports smthrs", async () => {
@@ -60,18 +62,62 @@ describe("detectSmithers", () => {
       detected: false,
       workspaceFile: null,
       declarationFiles: [],
-      reason: "no WORKSPACE.ts"
+      reason: "no WORKSPACE.ts",
+      workspaces: []
     })
   })
 
-  test("a WORKSPACE.ts that does not import smthrs is not a workspace", async () => {
+  test("a WORKSPACE.ts that does not import smthrs still detects; declarationFiles is simply empty", async () => {
+    // The plugin contract (LOCAL-APP.md "Repository detection"): detection is
+    // the presence of WORKSPACE.ts files alone — detected iff workspaces is
+    // nonempty. The imports scan stays as the informational declarationFiles.
     const root = await scratch()
     await writeFile(join(root, "WORKSPACE.ts"), "import { x } from \"./x\"\n")
     expect(detectSmithers(root)).toEqual({
-      detected: false,
+      detected: true,
       workspaceFile: "WORKSPACE.ts",
       declarationFiles: [],
-      reason: "WORKSPACE.ts does not import smthrs"
+      reason: "1 workspace detected",
+      workspaces: [{ path: ".", title: basename(root) }]
+    })
+  })
+
+  test("child workspaces are discovered two levels deep, skipping vendored and generated trees", async () => {
+    const root = await scratch()
+    await mkdir(join(root, ".smithers"))
+    await writeFile(join(root, ".smithers", "WORKSPACE.ts"), WORKSPACE)
+    // Depth 1 and depth 2 count.
+    await mkdir(join(root, "aomi", ".smithers"), { recursive: true })
+    await writeFile(join(root, "aomi", ".smithers", "WORKSPACE.ts"), WORKSPACE)
+    await mkdir(join(root, "packages", "sdk"), { recursive: true })
+    await writeFile(join(root, "packages", "sdk", "WORKSPACE.ts"), WORKSPACE)
+    // Depth 3 does not.
+    await mkdir(join(root, "packages", "deep", "deeper"), { recursive: true })
+    await writeFile(join(root, "packages", "deep", "deeper", "WORKSPACE.ts"), WORKSPACE)
+    // The skip list does not.
+    for (const skipped of ["node_modules", ".git", ".flows", "dist", "build", "target"]) {
+      await mkdir(join(root, skipped), { recursive: true })
+      await writeFile(join(root, skipped, "WORKSPACE.ts"), WORKSPACE)
+    }
+    const verdict = detectSmithers(root)
+    expect(verdict.detected).toBe(true)
+    expect(verdict.workspaces).toEqual([
+      { path: ".", title: basename(root) },
+      { path: "aomi", title: "aomi" },
+      { path: "packages/sdk", title: "sdk" }
+    ])
+    expect(verdict.reason).toBe("3 workspaces detected")
+  })
+
+  test("a root without its own WORKSPACE.ts still detects through its children", async () => {
+    const root = await scratch()
+    await mkdir(join(root, "aomi", ".smithers"), { recursive: true })
+    await writeFile(join(root, "aomi", ".smithers", "WORKSPACE.ts"), WORKSPACE)
+    const verdict = detectSmithers(root)
+    expect(verdict).toMatchObject({
+      detected: true,
+      workspaceFile: null,
+      workspaces: [{ path: "aomi", title: "aomi" }]
     })
   })
 })
@@ -101,7 +147,8 @@ describe("repository records", () => {
       path: root,
       name: basename(root),
       git: null,
-      smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts" }
+      warnings: [],
+      smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts", workspaces: [] }
     })
   })
 

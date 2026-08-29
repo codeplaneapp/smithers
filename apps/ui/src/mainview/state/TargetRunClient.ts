@@ -19,6 +19,8 @@ export interface TargetRunClient {
 export interface TargetRunClientOptions {
   /** The `/ws` URL; undefined where no socket can exist (tests, server render). */
   readonly socketUrl: () => string | undefined
+  /** Per-launch local capability carried as a WebSocket subprotocol. */
+  readonly socketProtocols?: () => ReadonlyArray<string>
   readonly reconnectMs?: number
 }
 
@@ -46,7 +48,8 @@ export const createTargetRunClient = (options: TargetRunClientOptions): TargetRu
     if (disposed || socket !== undefined) return
     const url = options.socketUrl()
     if (url === undefined) return
-    const opened = new WebSocket(url)
+    const protocols = options.socketProtocols?.() ?? []
+    const opened = protocols.length === 0 ? new WebSocket(url) : new WebSocket(url, [...protocols])
     socket = opened
     opened.onopen = () => {
       if (socket !== opened) return

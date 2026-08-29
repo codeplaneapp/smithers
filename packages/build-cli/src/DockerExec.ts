@@ -239,6 +239,10 @@ export const serviceSpec = async (options: {
     readiness,
     health: attrs.health,
     stop: attrs.stop,
+    // The name is deterministic per label, so a run that died without its
+    // finalizer leaves a container that would make the next `docker run`
+    // refuse with "name already in use". Removing it first is idempotent.
+    prepare: [[tool.path, "rm", "-f", name]],
     init,
     cleanup: [[tool.path, "rm", "-f", name]]
   }

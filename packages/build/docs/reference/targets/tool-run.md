@@ -13,10 +13,14 @@ const fireworksKey = Smithers.Secret("FIREWORKS_API_KEY")
 export const sftLaunch = Smithers.ToolRun({
   command: "firectl",
   args: [
-    "supervised-fine-tuning-job", "create",
-    "--base-model", "kimi-k3",
-    "--dataset", "pilot-sft-v0",
-    "--output-model", "smithers-authoring-pilot-v0"
+    "supervised-fine-tuning-job",
+    "create",
+    "--base-model",
+    "kimi-k3",
+    "--dataset",
+    "pilot-sft-v0",
+    "--output-model",
+    "smithers-authoring-pilot-v0"
   ],
   inputs: [],
   deps: [],
@@ -47,17 +51,17 @@ is [Dev](dev.md).
 
 ## Attributes
 
-| Name                | Type                        | Default    | Description                                                                                     |
-| ------------------- | --------------------------- | ---------- | ----------------------------------------------------------------------------------------------- |
-| `command`           | `string`                    | required   | The executable. Spawned directly, not through a shell.                                          |
-| `args`              | `Array<string>`             | required   | Arguments passed after the executable.                                                          |
-| `inputs`            | `Array<Input.Declared>`     | required   | Input declarations digested as key material and as ordering.                                    |
-| `deps`              | `Array<Target.Target>`      | required   | Dependency targets. A `run` target may depend on a check that must pass first.                  |
-| `secrets`           | `Array<Secret>`             | `[]`       | Environment variables the substituting proxy fills at spawn. Never enter the plan or the key.   |
-| `env`               | `Record<string, string>`    | `{}`       | Non-secret environment merged over the confined base.                                           |
-| `expectedExitCodes` | `Array<number>`             | `[0]`      | Exit codes treated as success.                                                                  |
-| `timeoutMs`         | `number`                    | ten minutes | Overrides the shared exec runner's process-lifetime bound.                                      |
-| `cwd`               | `string`                    | `"."`      | Workspace-relative directory the command runs in.                                               |
+| Name                | Type                     | Default     | Description                                                                                   |
+| ------------------- | ------------------------ | ----------- | --------------------------------------------------------------------------------------------- |
+| `command`           | `string`                 | required    | The executable. Spawned directly, not through a shell.                                        |
+| `args`              | `Array<string>`          | required    | Arguments passed after the executable.                                                        |
+| `inputs`            | `Array<Input.Declared>`  | required    | Input declarations digested as key material and as ordering.                                  |
+| `deps`              | `Array<Target.Target>`   | required    | Dependency targets. A `run` target may depend on a check that must pass first.                |
+| `secrets`           | `Array<Secret>`          | `[]`        | Environment variables the substituting proxy fills at spawn. Never enter the plan or the key. |
+| `env`               | `Record<string, string>` | `{}`        | Non-secret environment merged over the confined base.                                         |
+| `expectedExitCodes` | `Array<number>`          | `[0]`       | Exit codes treated as success.                                                                |
+| `timeoutMs`         | `number`                 | ten minutes | Overrides the shared exec runner's process-lifetime bound.                                    |
+| `cwd`               | `string`                 | `"."`       | Workspace-relative directory the command runs in.                                             |
 
 ## Command
 
@@ -82,19 +86,19 @@ runs still receives the credential; a plan a human reads never shows it. See
 
 ## Channels
 
-| Channel | Type            |
-| ------- | --------------- |
-| Success | `Exec.Result`   |
+| Channel | Type             |
+| ------- | ---------------- |
+| Success | `Exec.Result`    |
 | Error   | `Exec.ExecError` |
 
 ## Status
 
-|           |                                        |
-| --------- | -------------------------------------- |
-| Kinds     | `run`                                  |
-| Verb gate | `run` only                             |
-| Cacheable | Never                                  |
-| Executes  | Yes, through `ExecIrreversibleLive`    |
+|           |                                     |
+| --------- | ----------------------------------- |
+| Kinds     | `run`                               |
+| Verb gate | `run` only                          |
+| Cacheable | Never                               |
+| Executes  | Yes, through `ExecIrreversibleLive` |
 
 ## Why it is gated and never cached
 

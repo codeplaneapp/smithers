@@ -10,7 +10,8 @@ import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { realpath, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join, relative } from "node:path"
-import type { Repo } from "smithers-shared/LocalApp"
+import type { Repo, RepoWorkspace } from "smithers-shared/LocalApp"
+import { readRepoPlugin } from "./RepoPlugin"
 import { currentSandboxHost, probePolicy, wrapSandbox } from "./Sandbox"
 
 export type SmithersDetection = Repo["smithers"]
@@ -18,6 +19,10 @@ export type SmithersDetection = Repo["smithers"]
 const WORKSPACE_FILES = ["WORKSPACE.ts", ".smithers/WORKSPACE.ts"] as const
 const ROOT_DECLARATION_FILES = ["WORKSPACE.ts", ".smithers/WORKSPACE.ts", "BUILD.ts"] as const
 const SKIPPED_DIRS = new Set(["node_modules", ".git", ".flows", "dist", "build"])
+/** The workspace discovery walk skips the manifest dir too, so `.smithers` itself is never reported as a workspace. */
+const WORKSPACE_SKIPPED_DIRS = new Set([...SKIPPED_DIRS, "target", ".smithers"])
+/** Child workspaces are discovered at depth 1 and 2 below the root. */
+const MAX_WORKSPACE_DEPTH = 2
 /** Deep enough for any package layout; keeps a runaway tree from stalling the open. */
 const MAX_WALK_DEPTH = 12
 
@@ -67,29 +72,63 @@ const packageFiles = (root: string): Array<string> => {
   return found.sort()
 }
 
+/** The directory's own workspace file, or null. */
+const workspaceFileOf = (dir: string): string | null => WORKSPACE_FILES.find((file) => isFile(join(dir, file))) ?? null
+
+const childDirs = (dir: string): Array<string> => {
+  let entries: Array<import("node:fs").Dirent>
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  return entries
+    .filter((entry) => entry.isDirectory() && !WORKSPACE_SKIPPED_DIRS.has(entry.name))
+    .map((entry) => join(dir, entry.name))
+    .sort()
+}
+
 /**
- * The detection verdict for a root directory. Detected when a WORKSPACE.ts
- * (root or .smithers/) exists and at least one declaration file imports
- * smthrs; `reason` names the negative verdict.
+ * The root and child workspaces (LOCAL-APP.md "Repository detection"):
+ * every directory up to two levels deep that carries WORKSPACE.ts or
+ * .smithers/WORKSPACE.ts. The root is "."; a child's title is its last
+ * segment.
+ */
+export const discoverWorkspaces = (root: string): Array<RepoWorkspace> => {
+  const found: Array<RepoWorkspace> = []
+  if (workspaceFileOf(root) !== null) found.push({ path: ".", title: basename(root) })
+  let frontier = childDirs(root)
+  for (let depth = 1; depth <= MAX_WORKSPACE_DEPTH && frontier.length > 0; depth += 1) {
+    const next: Array<string> = []
+    for (const dir of frontier) {
+      if (workspaceFileOf(dir) !== null) found.push({ path: relative(root, dir), title: basename(dir) })
+      if (depth < MAX_WORKSPACE_DEPTH) next.push(...childDirs(dir))
+    }
+    frontier = next
+  }
+  return found
+}
+
+/**
+ * The detection verdict for a root directory. Detected iff the workspace
+ * list is nonempty; `reason` names the negative verdict.
  */
 export const detectSmithers = (root: string): SmithersDetection => {
-  const workspaceFile = WORKSPACE_FILES.find((file) => isFile(join(root, file))) ?? null
-  if (workspaceFile === null) {
-    return { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts" }
+  const workspaces = discoverWorkspaces(root)
+  if (workspaces.length === 0) {
+    return { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts", workspaces }
   }
   const candidates = [
     ...ROOT_DECLARATION_FILES.map((file) => join(root, file)).filter(isFile),
     ...packageFiles(root)
   ]
   const declarationFiles = [...new Set(candidates.filter(importsSmthrs).map((file) => relative(root, file)))]
-  if (declarationFiles.length === 0) {
-    return { detected: false, workspaceFile, declarationFiles: [], reason: `${workspaceFile} does not import smthrs` }
-  }
   return {
     detected: true,
-    workspaceFile,
+    workspaceFile: workspaceFileOf(root),
     declarationFiles,
-    reason: `${workspaceFile} present; ${declarationFiles.length} file${declarationFiles.length === 1 ? "" : "s"} import smthrs`
+    reason: `${workspaces.length} workspace${workspaces.length === 1 ? "" : "s"} detected`,
+    workspaces
   }
 }
 
@@ -147,6 +186,8 @@ export const inspectRepo = async (path: string): Promise<InspectRepoResult> => {
   const [branch, remote] = inside
     ? await Promise.all([git(root, ["branch", "--show-current"]), git(root, ["remote", "get-url", "origin"])])
     : [null, null]
+  const smithers = detectSmithers(root)
+  const manifest = readRepoPlugin(root, smithers.workspaces.map((workspace) => workspace.path))
   return {
     status: "ok",
     repo: {
@@ -154,7 +195,9 @@ export const inspectRepo = async (path: string): Promise<InspectRepoResult> => {
       path: root,
       name: ownerNameOf(remote) ?? basename(root),
       git: inside ? { branch, remote } : null,
-      smithers: detectSmithers(root)
+      warnings: manifest.warnings,
+      ...(manifest.plugin === undefined ? {} : { plugin: manifest.plugin }),
+      smithers
     }
   }
 }

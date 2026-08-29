@@ -95,7 +95,9 @@ describe("Journal.transact across the journal and run stores", () => {
 
       const exit = yield* journal.transact(Effect.gen(function*() {
         yield* runs.create(run, "{}")
-        yield* journal.emitDurableUnfenced(input(run, sourceId("driver"), "flows.engine.run-decision", { decision: "created" }))
+        yield* journal.emitDurableUnfenced(
+          input(run, sourceId("driver"), "flows.engine.run-decision", { decision: "created" })
+        )
         return yield* Effect.fail(new Rejected("state transition rejected after the WAL append"))
       })).pipe(Effect.exit)
 
@@ -118,7 +120,9 @@ describe("Journal.transact across the journal and run stores", () => {
       const exit = yield* journal.transact(Effect.gen(function*() {
         yield* runs.create(run, "{}")
         yield* journal.transact(
-          journal.emitDurableUnfenced(input(run, sourceId("driver"), "flows.engine.run-decision", { decision: "nested" }))
+          journal.emitDurableUnfenced(
+            input(run, sourceId("driver"), "flows.engine.run-decision", { decision: "nested" })
+          )
         )
         return yield* Effect.fail(new Rejected("outer rejected after the inner append"))
       })).pipe(Effect.exit)

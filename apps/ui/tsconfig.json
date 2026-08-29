@@ -35,6 +35,7 @@
     "dist",
     "build",
     ".hutch",
-    "../../package/dist"
+    "../../package/dist",
+    "e2e/fixtures"
   ]
 }

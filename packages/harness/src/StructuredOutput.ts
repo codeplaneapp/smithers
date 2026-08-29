@@ -111,9 +111,10 @@ export const digest = (schema: Schema.Top): string => Digest.digest(Digest.canon
 /**
  * The system teaching that tells a run what its final `output` must be.
  *
- * Written against the cell contract: the loop's answer is the `output` field of
- * a `complete` transition, so the instruction is about that field and not about
- * the assistant message around it.
+ * Written against the cell contract: a cell finishes by calling
+ * `ctx.done(output)`, and the sandbox rejects a returned transition, so the
+ * instruction is about the argument of that call and not about the assistant
+ * message around it.
  *
  * @category prompts
  * @since 0.1.0
@@ -122,9 +123,9 @@ export const digest = (schema: Schema.Top): string => Digest.digest(Digest.canon
 export const instructions = (schema: Schema.Top): string =>
   `## Required output shape
 
-When you return \`{ intent: "complete", ... }\`, the \`output\` field must be a
-string holding exactly ONE JSON document that validates against this JSON
-Schema. No prose, no explanation, and no code fence around it.
+Finish by calling \`ctx.done(output)\`. The \`output\` you pass must be a string
+holding exactly ONE JSON document that validates against this JSON Schema. No
+prose, no explanation, and no code fence around it.
 
 \`\`\`json
 ${JSON.stringify(jsonSchema(schema), null, 2)}
@@ -144,8 +145,9 @@ ${JSON.stringify(jsonSchema(schema), null, 2)}
 export const correction = (failure: StructuredOutputFailure): string =>
   `## Your previous answer did not validate
 
-The output you returned could not be decoded against the required schema.
-Return the same information again as ONE JSON document that validates.
+The output you passed to \`ctx.done\` could not be decoded against the required
+schema. Call \`ctx.done(output)\` again with the same information as ONE JSON
+document that validates.
 
 Validation issues:
 ${failure.issues.map((issue) => `- ${issue}`).join("\n")}`

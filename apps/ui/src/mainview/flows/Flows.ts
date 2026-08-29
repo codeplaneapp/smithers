@@ -23,6 +23,7 @@ import * as Flow from "@smthrs/core/Flow"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import { Effect, Schema } from "effect"
 import type { RepositoryAccess } from "smithers-shared/NativeRepository"
+import type { RuntimeCapability } from "smithers-shared/AppBootstrap"
 import type { AppController } from "../state/AppController"
 import { PALETTES, WORLD_DISPLAY_NAME } from "../state/AppState"
 import type { CommandState, FlowEntry, FlowMetadata } from "./registry"
@@ -118,6 +119,8 @@ interface Declaration<I extends Payload> extends FlowMetadata {
   readonly capabilities?: ReadonlyArray<string>
   /** Browser mechanics the human clicks: never disclosed to, or callable by, the model. */
   readonly userOnly?: boolean
+  /** Bootstrap capabilities required for this flow to exist in the registry. */
+  readonly runtime?: ReadonlyArray<RuntimeCapability>
 }
 
 /**
@@ -151,8 +154,8 @@ const NoPayload = Schema.Struct({})
 const RepoTarget = Schema.Struct({ repo: Schema.optional(Schema.String) })
 /** A card id, the handle every id-scoped card act takes. */
 const CardTarget = Schema.Struct({ cardId: Schema.String })
-/** A Smithers target: the repository it belongs to and its label. */
-const TargetRef = Schema.Struct({ repoId: Schema.String, label: Schema.String })
+/** A Smithers target: the repository it belongs to, its detected workspace, and its label. */
+const TargetRef = Schema.Struct({ repoId: Schema.String, label: Schema.String, workspace: Schema.optional(Schema.String) })
 /** A positive issue or pull-request number beside its optional repo. */
 const NumberedTarget = Schema.Struct({
   number: Schema.Number,
@@ -262,6 +265,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "repos.watch",
     summary: "Choose which repositories Smithers watches",
+    runtime: ["identity"],
     args: "[repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -270,6 +274,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "repos.watch.toggle",
     summary: "Toggle a repository in the chooser",
+    runtime: ["identity"],
     hidden: true,
     userOnly: true,
     args: "<fullName>",
@@ -279,6 +284,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "repos.watch.all",
     summary: "Select every repository in the chooser",
+    runtime: ["identity"],
     hidden: true,
     userOnly: true,
     input: NoPayload,
@@ -287,6 +293,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "repos.watch.none",
     summary: "Select no repositories in the chooser",
+    runtime: ["identity"],
     hidden: true,
     userOnly: true,
     input: NoPayload,
@@ -295,6 +302,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "repos.watch.confirm",
     summary: "Confirm the watched-repositories selection",
+    runtime: ["identity"],
     hidden: true,
     userOnly: true,
     input: NoPayload,
@@ -315,6 +323,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* The browser tool + surface (§2d/§2d′): read a page; embed its card. */
     name: "browser",
     summary: "Open a web page as a card Smithers can read",
+    runtime: ["agent"],
     args: "<url>",
     capabilities: ["session:net-read"],
     input: Schema.Struct({ url: Schema.String }),
@@ -332,6 +341,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "flow.create",
     summary: "Create a Smithers workflow from a description",
+    runtime: ["jjhub"],
     args: "<description> [owner/repo]",
     requires: ["signed-in", "repos-selected"],
     capabilities: ["outbound:launch"],
@@ -353,6 +363,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "flow.repo.choose",
     summary: "Choose which watched repository a workflow belongs to",
+    runtime: ["jjhub"],
     hidden: true,
     userOnly: true,
     args: "<owner/repo>",
@@ -368,6 +379,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "flow.run.stop",
     summary: "Stop watching a run",
+    runtime: ["jjhub"],
     hidden: true,
     userOnly: true,
     args: "<cardId>",
@@ -377,6 +389,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "flow.run.retry",
     summary: "Check a run again",
+    runtime: ["jjhub"],
     hidden: true,
     userOnly: true,
     args: "<cardId>",
@@ -386,6 +399,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "flow.list",
     summary: "List the workflows on your workspace",
+    runtime: ["jjhub"],
     requires: ["signed-in"],
     input: NoPayload,
     handler: () => actions.listWorkspaceWorkflows()
@@ -393,6 +407,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "flow.run",
     summary: "Run a workflow on your workspace",
+    runtime: ["jjhub"],
     args: "<name> [owner/repo]",
     requires: ["signed-in", "repos-selected"],
     capabilities: ["outbound:launch"],
@@ -419,6 +434,30 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     userOnly: true,
     input: NoPayload,
     handler: () => actions.minimizeCard()
+  }),
+  flow({
+    name: "frame.back",
+    summary: "Go to the previous frame",
+    hidden: true,
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.frameBack()
+  }),
+  flow({
+    name: "frame.forward",
+    summary: "Go to the next frame",
+    hidden: true,
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.frameForward()
+  }),
+  flow({
+    name: "frame.fork",
+    summary: "Fork the current frame",
+    hidden: true,
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.forkFrame()
   }),
   flow({
     name: "copy-message",
@@ -472,6 +511,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "connector.add",
     summary: "Connect a local repository",
+    runtime: ["local.repositories"],
     hidden: true,
     args: "<read|read-write>",
     input: Schema.Struct({ access: Schema.Literals(["read", "read-write"]) }),
@@ -482,6 +522,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "connector.downgrade",
     summary: "Make a connector read-only",
+    runtime: ["local.repositories"],
     hidden: true,
     args: "<connectorId>",
     input: Schema.Struct({ connectorId: Schema.String }),
@@ -490,14 +531,34 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     }
   }),
   flow({
+    name: "connector.remove.ask",
+    summary: "Ask before disconnecting a repository",
+    runtime: ["local.repositories"],
+    hidden: true,
+    userOnly: true,
+    args: "<connectorId>",
+    input: Schema.Struct({ connectorId: Schema.String }),
+    handler: ({ connectorId }) => actions.askConnectorRemoval(connectorId)
+  }),
+  flow({
     name: "connector.remove",
     summary: "Disconnect a repository",
+    runtime: ["local.repositories"],
     hidden: true,
     args: "<connectorId>",
     input: Schema.Struct({ connectorId: Schema.String }),
     handler: ({ connectorId }) => {
       actions.removeConnector(connectorId)
     }
+  }),
+  flow({
+    name: "connector.remove.cancel",
+    summary: "Keep a connected repository",
+    runtime: ["local.repositories"],
+    hidden: true,
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.cancelConnectorRemoval()
   }),
   flow({
     name: "world.new-note",
@@ -546,6 +607,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "auth.sign-in",
     summary: "Sign in with GitHub",
+    runtime: ["identity"],
     userOnly: true,
     input: NoPayload,
     handler: () => actions.signIn()
@@ -558,6 +620,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "auth.prompt",
     summary: "Offer the GitHub sign-in step in the chat",
+    runtime: ["identity"],
     input: NoPayload,
     handler: () => actions.promptSignIn()
   }),
@@ -566,6 +629,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
 		   case of a listing that names a step the user cannot take (§1.2). */
     name: "auth.sign-out",
     summary: "Sign out of Smithers",
+    runtime: ["identity"],
     userOnly: true,
     requires: ["signed-in"],
     input: NoPayload,
@@ -574,6 +638,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "auth.request-access",
     summary: "Request access to Smithers",
+    runtime: ["identity"],
     userOnly: true,
     requires: ["signed-in"],
     input: NoPayload,
@@ -593,6 +658,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "billing.balance",
     summary: "Show your balance",
+    runtime: ["identity"],
     requires: ["signed-in"],
     input: NoPayload,
     handler: () => actions.showBalance()
@@ -609,6 +675,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "repos.import",
     summary: "Import a GitHub repository into Smithers Cloud",
+    runtime: ["jjhub"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -617,6 +684,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "issues.list",
     summary: "List a repository's issues",
+    runtime: ["jjhub"],
     args: "[open|closed|all] [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -628,6 +696,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "issues.view",
     summary: "Open an issue with its comments",
+    runtime: ["jjhub"],
     args: "<number> [owner/repo]",
     requires: ["signed-in"],
     input: NumberedTarget,
@@ -636,6 +705,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "issues.create",
     summary: "Create an issue",
+    runtime: ["jjhub"],
     args: "<title> [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({ title: Schema.String, repo: Schema.optional(Schema.String) }),
@@ -644,6 +714,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "issues.close",
     summary: "Close an issue",
+    runtime: ["jjhub"],
     args: "<number> [owner/repo]",
     requires: ["signed-in"],
     input: NumberedTarget,
@@ -652,6 +723,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "issues.reopen",
     summary: "Reopen a closed issue",
+    runtime: ["jjhub"],
     args: "<number> [owner/repo]",
     requires: ["signed-in"],
     input: NumberedTarget,
@@ -660,6 +732,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "issues.comment",
     summary: "Comment on an issue",
+    runtime: ["jjhub"],
     args: "<number> <text> [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -672,6 +745,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "prs.list",
     summary: "List a repository's pull requests",
+    runtime: ["jjhub"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -680,6 +754,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "prs.view",
     summary: "Open a pull request with reviews and checks",
+    runtime: ["jjhub"],
     args: "<number> [owner/repo]",
     requires: ["signed-in"],
     input: NumberedTarget,
@@ -688,6 +763,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "prs.create",
     summary: "Open a pull request",
+    runtime: ["jjhub"],
     args: "<title> [from:<bookmark>] [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -705,6 +781,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "prs.land",
     summary: "Land a pull request (queues the merge)",
+    runtime: ["jjhub"],
     userOnly: true,
     args: "<number> [owner/repo]",
     requires: ["signed-in"],
@@ -714,6 +791,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "prs.review",
     summary: "Review a pull request",
+    runtime: ["jjhub"],
     args: "<number> approve|request-changes|comment [text] [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -727,6 +805,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "keys.list",
     summary: "List your provider API keys (masked)",
+    runtime: ["keys.byok"],
     requires: ["signed-in"],
     input: NoPayload,
     handler: () => actions.listKeys()
@@ -735,6 +814,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* Removing a credential is the human's destructive act: user-only. */
     name: "keys.remove",
     summary: "Remove a provider API key",
+    runtime: ["keys.byok"],
     userOnly: true,
     args: "<provider>",
     requires: ["signed-in"],
@@ -744,6 +824,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "notifications.list",
     summary: "Show your notifications",
+    runtime: ["jjhub"],
     requires: ["signed-in"],
     input: NoPayload,
     handler: () => actions.listNotifications()
@@ -751,6 +832,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "notifications.read",
     summary: "Mark every notification read",
+    runtime: ["jjhub"],
     requires: ["signed-in"],
     input: NoPayload,
     handler: () => actions.markNotificationsRead()
@@ -758,6 +840,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "env.view",
     summary: "Show a repository's agent environment",
+    runtime: ["jjhub"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -766,6 +849,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "env.set",
     summary: "Set an agent-environment variable",
+    runtime: ["jjhub"],
     args: "<NAME=value> [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({ assignment: Schema.String, repo: Schema.optional(Schema.String) }),
@@ -774,6 +858,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "branches.list",
     summary: "List a repository's branches (bookmarks)",
+    runtime: ["jjhub"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -787,6 +872,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "files.list",
     summary: "List a repository directory",
+    runtime: ["jjhub"],
     args: "[path] [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({ path: Schema.String, repo: Schema.optional(Schema.String) }),
@@ -795,6 +881,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "files.read",
     summary: "Read a file from a repository",
+    runtime: ["jjhub"],
     args: "<path> [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({ path: Schema.String, repo: Schema.optional(Schema.String) }),
@@ -803,6 +890,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "repos.app",
     summary: "Check the Smithers GitHub App on a repository",
+    runtime: ["jjhub"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -836,6 +924,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "tab.terminal",
     summary: "Open a terminal tab",
+    runtime: ["local.terminal"],
     hidden: true,
     userOnly: true,
     input: NoPayload,
@@ -844,6 +933,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "tab.harness",
     summary: "Open a harness tab",
+    runtime: ["local.harnesses"],
     hidden: true,
     userOnly: true,
     args: "<harnessId>",
@@ -905,29 +995,27 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* The chrome's "Open repository": the native folder dialog, or a typed path. */
     name: "repo.open",
     summary: "Open a local repository",
+    runtime: ["local.repositories"],
     hidden: true,
     userOnly: true,
     input: NoPayload,
     handler: () => actions.openLocalRepo()
   }),
-  /*
-   * The html card's bridge (docs/LOCAL-APP.md "Auto-load flow"): a panel's
-   * `run` message runs one target as a streamed target-run card; `open`
-   * points at the target's row in the targets card. Both are the human's
-   * click inside the frame, so neither is disclosed to the model.
-   */
+  /* Trusted target-card actions. Both remain user-only and undisclosed. */
   flow({
     name: "target.run",
     summary: "Run a Smithers target",
+    runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
-    args: "<repoId> <label>",
+    args: "<repoId> [workspace] <label>",
     input: TargetRef,
-    handler: ({ repoId, label }) => actions.runTarget(repoId, label)
+    handler: ({ repoId, label, workspace }) => actions.runTarget(repoId, workspace ?? ".", label)
   }),
   flow({
     name: "target.open",
     summary: "Show a Smithers target in its targets card",
+    runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
     args: "<repoId> <label>",
@@ -945,6 +1033,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "target.graph",
     summary: "Show the target graph",
+    runtime: ["local.targets"],
     args: "[repoId] [label]",
     input: Schema.Struct({ repoId: Schema.optional(Schema.String), label: Schema.optional(Schema.String) }),
     handler: ({ repoId, label }) => actions.showGraph(repoId, label)
@@ -953,6 +1042,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* The graph drawer's focus: pin one label, or clear the focus when none is named. */
     name: "target.graph.focus",
     summary: "Focus the target graph on one label, or clear the focus details",
+    runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
     args: "<repoId> [label]",
@@ -962,6 +1052,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "target.timeline",
     summary: "Show one target run's timeline",
+    runtime: ["local.targets"],
     args: "[repoId] <runId>",
     input: Schema.Struct({ repoId: Schema.optional(Schema.String), runId: Schema.optional(Schema.String) }),
     handler: ({ repoId, runId }) => actions.showRunTimeline(repoId, runId)
@@ -969,6 +1060,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "target.history",
     summary: "Show the repository's target run history",
+    runtime: ["local.targets"],
     args: "[repoId]",
     input: Schema.Struct({ repoId: Schema.optional(Schema.String) }),
     handler: ({ repoId }) => actions.showRunHistory(repoId)
@@ -976,6 +1068,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "target.runs.select",
     summary: "Replay a recorded run into the timeline and the graph",
+    runtime: ["local.targets"],
     hidden: true,
     args: "[repoId] <runId>",
     input: Schema.Struct({ repoId: Schema.optional(Schema.String), runId: Schema.String }),
@@ -985,6 +1078,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* The replay scrubber: the slider's own act (time travel), user-triggered only. */
     name: "target.run.scrub",
     summary: "Replay a recorded run up to a cursor",
+    runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
     args: "<runId> <cursor>",
@@ -994,6 +1088,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "target.affected",
     summary: "Show what the working-tree diff affects",
+    runtime: ["local.targets"],
     args: "[repoId]",
     input: Schema.Struct({ repoId: Schema.optional(Schema.String) }),
     handler: ({ repoId }) => actions.showAffected(repoId)
@@ -1001,6 +1096,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "target.ci",
     summary: "Show the CI matrix the target graph implies",
+    runtime: ["local.targets"],
     args: "[repoId]",
     input: Schema.Struct({ repoId: Schema.optional(Schema.String) }),
     handler: ({ repoId }) => actions.showCiMatrix(repoId)
@@ -1009,6 +1105,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* The graph drawer's "open" affordance for a declaration site. */
     name: "target.source.open",
     summary: "Open a target's declaration source",
+    runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
     args: "<repoId> <file[:line]>",
@@ -1032,6 +1129,22 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
  */
 export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
   flow({
+    name: "admin.reset.ask",
+    summary: "Ask before discarding the conversation",
+    hidden: true,
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.askReset()
+  }),
+  flow({
+    name: "admin.reset.cancel",
+    summary: "Keep the current conversation",
+    hidden: true,
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.cancelReset()
+  }),
+  flow({
     /*
      * §17.4: no top-up or checkout flow is exposed to an MVP account. Every
      * alpha account IS an MVP account, so these two register in the admin
@@ -1042,6 +1155,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
      */
     name: "billing.upgrade",
     summary: "Upgrade your plan (opens Stripe checkout)",
+    runtime: ["billing.checkout"],
     userOnly: true,
     args: "[plan]",
     requires: ["signed-in"],
@@ -1051,6 +1165,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
   flow({
     name: "billing.portal",
     summary: "Manage billing (opens the Stripe portal)",
+    runtime: ["billing.checkout"],
     userOnly: true,
     requires: ["signed-in"],
     input: NoPayload,
@@ -1131,6 +1246,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
   flow({
     name: "admin.allowlist.add",
     summary: "Add a GitHub login to the allowlist",
+    runtime: ["identity"],
     args: "<login>",
     input: Schema.Struct({ login: Schema.String }),
     handler: ({ login }) => actions.adminAllowlist("add", login)
@@ -1138,6 +1254,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
   flow({
     name: "admin.allowlist.remove",
     summary: "Remove a GitHub login from the allowlist",
+    runtime: ["identity"],
     args: "<login>",
     input: Schema.Struct({ login: Schema.String }),
     handler: ({ login }) => actions.adminAllowlist("remove", login)
@@ -1145,6 +1262,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
   flow({
     name: "admin.grant",
     summary: "Grant balance to a login (asks for confirmation first)",
+    runtime: ["identity"],
     args: "<amountUsd> <login>",
     input: Schema.Struct({ amountUsd: Schema.Number, login: Schema.String }),
     handler: ({ amountUsd, login }) => actions.adminGrant(amountUsd, login)
@@ -1152,6 +1270,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
   flow({
     name: "admin.grant.confirm",
     summary: "Confirm a pending balance grant",
+    runtime: ["identity"],
     hidden: true,
     args: "<cardId>",
     capabilities: ["approve:self"],
@@ -1162,6 +1281,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
   flow({
     name: "admin.grant.cancel",
     summary: "Cancel a pending balance grant",
+    runtime: ["identity"],
     hidden: true,
     args: "<cardId>",
     userOnly: true,
@@ -1171,12 +1291,14 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
   flow({
     name: "admin.requests",
     summary: "Show the request-access queue",
+    runtime: ["identity"],
     input: NoPayload,
     handler: () => actions.adminRequests()
   }),
   flow({
     name: "admin.queue.approve",
     summary: "Approve a request-access queue entry",
+    runtime: ["identity"],
     hidden: true,
     args: "<login>",
     capabilities: ["approve:self"],
@@ -1187,6 +1309,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
   flow({
     name: "admin.health",
     summary: "What failed overnight? Service health, charges, queue depth",
+    runtime: ["identity"],
     input: NoPayload,
     handler: () => actions.adminHealth()
   })

@@ -16,7 +16,10 @@ const cwd = "packages/build/infra"
 const sources = [
   Smithers.glob("//packages/build/infra/worker/**/*.ts"),
   Smithers.glob("//packages/build/infra/scripts/**/*.ts"),
-  Smithers.file("alchemy.run.ts")
+  Smithers.file("alchemy.run.ts"),
+  Smithers.file("tsconfig.worker.json"),
+  Smithers.file("tsconfig.node.json"),
+  Smithers.file("tsconfig.test.json")
 ]
 
 /**
@@ -30,7 +33,7 @@ export const check = Smithers.Typecheck({
   srcs: sources,
   deps: [],
   tsconfig: Smithers.file("tsconfig.json"),
-  buildMode: false,
+  buildMode: true,
   incremental: false,
   cwd
 })

@@ -4,6 +4,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Action, Flow, FlowRuntime, Interpreter, RetryPolicy } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
 import { Clock, Effect, Exit, Fiber, Layer, Option, Random, Schema } from "effect"
+import type * as Crypto from "effect/Crypto"
 import type * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
 import { FlowEngine } from "../src/index.ts"
@@ -139,7 +140,7 @@ const effect = (
   body: () => Effect.Effect<
     void,
     unknown,
-    Scope.Scope | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance
+    Crypto.Crypto | Scope.Scope | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance
   >,
   executionId = "retry-policy"
 ) =>
@@ -373,4 +374,3 @@ describe("restart resume", () => {
       expect(attemptLog[3]!.at - attemptLog[2]!.at).toBe(400)
     }))
 })
-import type * as Crypto from "effect/Crypto"

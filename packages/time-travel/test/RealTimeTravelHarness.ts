@@ -17,6 +17,7 @@ import * as AttemptStore from "@smthrs/run-store/AttemptStore"
 import type { OwnerId } from "@smthrs/run-store/Ownership"
 import * as RunStore from "@smthrs/run-store/RunStore"
 import * as CacheStore from "@smthrs/step-cache/CacheStore"
+import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
@@ -160,9 +161,13 @@ const CompensableParked = Flow.make("time-travel/e2e/compensable-parked", {
 
 type StepEffect = Effect.Effect<string>
 
-const flowWiring = (
+const flowWiring = <ROut>(
   runtime: FlowRuntime.FlowRuntime["Service"],
-  implementation: Layer.Layer<never, never, Action.Implementations | FlowRuntime.FlowRuntime>
+  implementation: Layer.Layer<
+    ROut,
+    never,
+    Crypto.Crypto | Action.Implementations | FlowRuntime.FlowRuntime
+  >
 ) =>
   implementation.pipe(
     Layer.provideMerge(Action.layerImplementations),

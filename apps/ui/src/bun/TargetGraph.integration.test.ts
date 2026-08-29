@@ -20,6 +20,8 @@ import {
   RunReplayResponseSchema,
   TargetGraphResponseSchema
 } from "smithers-shared/TargetGraph"
+import { TargetsQueryResponseSchema } from "smithers-shared/LocalApp"
+import { LOCAL_SESSION_HEADER } from "smithers-shared/LocalSession"
 import type { RunReplayResponse, TargetGraphResponse } from "smithers-shared/TargetGraph"
 import { findNode } from "./Node"
 import { clearTargetGraphCache } from "./TargetGraph"
@@ -48,6 +50,7 @@ beforeAll(async () => {
     port: 0,
     distDir: dist,
     chatStub: true,
+    allowManualRepositoryPaths: true,
     ...(node === null ? {} : { node }),
     home: homedir(),
     harnesses: async () => [],
@@ -66,7 +69,7 @@ afterAll(async () => {
 const post = async (route: string, body: unknown): Promise<Response> =>
   fetch(`${base}${route}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", [LOCAL_SESSION_HEADER]: server.sessionToken },
     body: JSON.stringify(body)
   })
 
@@ -75,6 +78,15 @@ const openRepo = async (path: string): Promise<string> => {
   expect(response.status).toBe(200)
   const body = await response.json() as { repo: { id: string } }
   return body.repo.id
+}
+
+const targetIdOf = async (repoId: string, label: string): Promise<string> => {
+  const response = await post("/api/targets/query", { repoId })
+  expect(response.status).toBe(200)
+  const targets = TargetsQueryResponseSchema.parse(await response.json())
+  const targetId = targets.targets.find((target) => target.label === label)?.id
+  if (targetId === undefined) throw new Error(`target ${label} was not returned by the repository query`)
+  return targetId
 }
 
 const graphOf = async (repoId: string, extra: Record<string, unknown> = {}): Promise<TargetGraphResponse> => {
@@ -153,7 +165,7 @@ test.skipIf(!haveForce)("the ci route answers the workflows the workspace really
 
 test.skipIf(!haveE2E)("a real run of //src:typeCheck streams node frames and a critical path", async () => {
   const repoId = await openRepo(FORCE_E2E)
-  const started = await post("/api/targets/run", { repoId, label: "//src:typeCheck" })
+  const started = await post("/api/targets/run", { repoId, targetId: await targetIdOf(repoId, "//src:typeCheck") })
   expect(started.status).toBe(200)
   const { runId } = await started.json() as { runId: string }
   expect(runId).toMatch(/^[0-9a-f-]{36}$/)
@@ -201,7 +213,7 @@ test.skipIf(!haveE2E)("a real run of //src:typeCheck streams node frames and a c
 
 test.skipIf(!haveE2E)("history and replay round-trip through the repository's own disk", async () => {
   const repoId = await openRepo(FORCE_E2E)
-  const started = await post("/api/targets/run", { repoId, label: "//src:srcs" })
+  const started = await post("/api/targets/run", { repoId, targetId: await targetIdOf(repoId, "//src:srcs") })
   const { runId } = await started.json() as { runId: string }
 
   const deadline = Date.now() + BUDGET - 30_000
@@ -230,6 +242,7 @@ test.skipIf(!haveE2E)("history and replay round-trip through the repository's ow
     port: 0,
     distDir: secondDist,
     chatStub: true,
+    allowManualRepositoryPaths: true,
     ...(node === null ? {} : { node }),
     home: homedir(),
     harnesses: async () => [],
@@ -239,13 +252,13 @@ test.skipIf(!haveE2E)("history and replay round-trip through the repository's ow
     const secondBase = `http://127.0.0.1:${second.port}`
     const open = await fetch(`${secondBase}/api/repo/open`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", [LOCAL_SESSION_HEADER]: second.sessionToken },
       body: JSON.stringify({ path: FORCE_E2E })
     })
     const reopened = (await open.json() as { repo: { id: string } }).repo.id
     const history = await fetch(`${secondBase}/api/targets/runs`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", [LOCAL_SESSION_HEADER]: second.sessionToken },
       body: JSON.stringify({ repoId: reopened })
     })
     const rebuilt = RunHistoryResponseSchema.parse(await history.json())
@@ -253,7 +266,7 @@ test.skipIf(!haveE2E)("history and replay round-trip through the repository's ow
 
     const replayed = await fetch(`${secondBase}/api/targets/runs/replay`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", [LOCAL_SESSION_HEADER]: second.sessionToken },
       body: JSON.stringify({ runId })
     })
     expect(replayed.status).toBe(200)
@@ -262,7 +275,7 @@ test.skipIf(!haveE2E)("history and replay round-trip through the repository's ow
     expect(parsed.events.length).toBeGreaterThan(0)
     expect(parsed.events.at(-1)?.type).toBe("exit")
   } finally {
-    second.stop()
+    await second.stop()
     await rm(secondDist, { recursive: true, force: true })
   }
 }, BUDGET)

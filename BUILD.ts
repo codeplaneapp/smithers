@@ -9,6 +9,11 @@ export const workspaceTsconfig = Smithers.file("//tsconfig.json")
 export const rootJSDocConfig = Smithers.file("//eslint.jsdoc.js")
 const workspace = Smithers.pnpmWorkspace("//pnpm-workspace.yaml")
 
+export const knownFiles = Smithers.Generate({
+  script: Smithers.file("//scripts/generate-known-files.mjs"),
+  changes: ["known-files.d.ts"]
+})
+
 export const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
 export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0", runtime })
 
@@ -26,6 +31,7 @@ export const tsconfig = Smithers.Tsconfig({
     paths: { "*": ["./*"] }
   },
   include: [
+    "known-files.d.ts",
     "BUILD.ts",
     "apps/*/BUILD.ts",
     "ci/BUILD.ts",

@@ -1,0 +1,279 @@
+/**
+ * One pipeline flow run, projected onto a single `flow-run` card.
+ *
+ * `POST /api/flows/run` answers with an execution id and nothing else, so this
+ * is where the run's progress becomes visible. Every step transition rewrites
+ * the same card and emits it as a `card.update` frame. `AppSession` persists
+ * each version under the card's id, so `GET /api/session?id=` always returns
+ * the latest one and a shell that reloads mid-run sees where the run got to.
+ *
+ * The card id is the execution id. A run therefore owns exactly one card for
+ * its whole life, which is what makes `card.update` the right frame: the shell
+ * replaces a card it already has rather than growing the transcript per step.
+ *
+ * Like `turnImpl.ts`, this ships a mock path and a live path.
+ * `env.APP_MOCK_TURN !== "0"` walks the stages without calling a model; `"0"`
+ * asks for {@link liveRun}, which is written out in full and does not run under
+ * workerd yet for the three reasons listed at `worker/turnImpl.ts`.
+ */
+import type { AgentSpec, AnyFlowSpec, SandboxSpec, ToolsSpec } from "@smthrs/create-app/app"
+import { layerFor, materializeFlow } from "@smthrs/create-app/runtime"
+import type { FlowRunCard } from "@smthrs/create-app/ui"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
+import type { FlowRunRequest, TurnFrame } from "../src/api.ts"
+import { flows } from "../routes.gen.ts"
+import { layerCrypto } from "./crypto.ts"
+import type { Env } from "./env.ts"
+import { seatsFor } from "./seats.ts"
+
+/** How a run ended, which is what the session's row in the Recent column reports. */
+export type Phase = FlowRunCard["phase"]
+
+/** One row of the card's step list. */
+export type Step = FlowRunCard["steps"][number]
+
+export interface FlowRunOptions {
+  readonly env: Env
+  readonly request: FlowRunRequest
+  /** The card id as well as the run id; see the module comment. */
+  readonly executionId: string
+  /** Aborted by `POST /api/agent/turn/cancel`. */
+  readonly signal: AbortSignal
+  readonly emit: (frame: TurnFrame) => void
+}
+
+/** One routed flow, as `routes.gen.ts` records it. */
+interface FlowRoute {
+  readonly id: string
+  readonly spec: AnyFlowSpec
+  readonly agent: AgentSpec
+  readonly sandbox: SandboxSpec
+  readonly tools: ToolsSpec
+}
+
+const routeFor = (flowId: string): FlowRoute | undefined =>
+  (flows as unknown as ReadonlyArray<FlowRoute>).find((flow) => flow.id === flowId)
+
+// ---------------------------------------------------------------------------
+// The card
+// ---------------------------------------------------------------------------
+
+/**
+ * The one card a run writes, and the only thing that writes it.
+ *
+ * Steps are held here rather than rebuilt per frame because a step's status
+ * moves twice (pending to running to settled) and the frame has to carry the
+ * whole list each time: `card.update` replaces a card, it does not patch one.
+ */
+class RunCard {
+  private steps: Array<Step> = []
+
+  constructor(
+    private readonly flowId: string,
+    private readonly executionId: string,
+    private readonly emit: (frame: TurnFrame) => void
+  ) {}
+
+  /** Declares the steps up front, all pending, so the shell can size the list. */
+  plan(names: ReadonlyArray<string>): void {
+    this.steps = names.map((name) => ({ name, status: "pending" }))
+    this.update("running")
+  }
+
+  /** Moves one step to a new status and republishes the card. */
+  step(name: string, status: Step["status"]): void {
+    const index = this.steps.findIndex((step) => step.name === name)
+    if (index === -1) this.steps.push({ name, status })
+    else this.steps[index] = { name, status }
+    this.update("running")
+  }
+
+  /**
+   * Ends the run.
+   *
+   * A step still marked `running` when the run ends would leave a spinner the
+   * shell has no way to clear, so an unsettled step inherits the run's fate.
+   */
+  settle(phase: Phase, extra: { readonly result?: unknown; readonly error?: string } = {}): Phase {
+    const settled: Step["status"] = phase === "completed" ? "done" : "failed"
+    this.steps = this.steps.map((step) =>
+      step.status === "pending" || step.status === "running" ? { name: step.name, status: settled } : step
+    )
+    this.update(phase, extra)
+    return phase
+  }
+
+  /** Replaces the whole card. `steps` is copied so a later mutation cannot reach it. */
+  private update(phase: Phase, extra: { readonly result?: unknown; readonly error?: string } = {}): void {
+    this.emit({
+      type: "card.update",
+      card: {
+        kind: "flow-run",
+        id: this.executionId,
+        flowId: this.flowId,
+        executionId: this.executionId,
+        phase,
+        steps: [...this.steps],
+        ...(extra.result === undefined ? {} : { result: extra.result }),
+        ...(extra.error === undefined ? {} : { error: extra.error })
+      }
+    })
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Entry
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs one pipeline flow and returns the phase it ended on.
+ *
+ * The caller (`AppSession.driveFlow`) turns that phase into the session's
+ * status. A throw from here is the caller's to render, and it writes its own
+ * failed card for it; every path this function handles itself settles the card
+ * before returning.
+ */
+export const runFlowRun = async (options: FlowRunOptions): Promise<Phase> => {
+  const card = new RunCard(options.request.flowId, options.executionId, options.emit)
+  const route = routeFor(options.request.flowId)
+  // The router refuses an unrouted flow before the object is woken
+  // (`worker/router.ts`, `flowRunRefusal`). This repeats the check because
+  // `AppSession.runFlow` is also reachable from a Durable Object stub call,
+  // which does not pass through the router.
+  if (route === undefined) {
+    return card.settle("failed", { error: `No flow is routed as "${options.request.flowId}".` })
+  }
+  const mock = options.env.APP_MOCK_TURN !== "0"
+  return mock ? mockRun(options, route, card) : liveRun(options, route, card)
+}
+
+// ---------------------------------------------------------------------------
+// The mock run
+// ---------------------------------------------------------------------------
+
+/**
+ * The stages a mock run walks, per flow.
+ *
+ * A flow spec declares no stage list. The build pipeline names its stages in
+ * `flows/build/AGENT.ts` and returns them in `BuildPlan.steps`, so they are
+ * repeated here; any other flow gets a single step named after itself.
+ *
+ * TODO(milestone-3): this table goes away with the mock path. A live run reads
+ * its steps from the flow's own output ({@link declaredSteps}).
+ */
+const MOCK_STEPS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  build: ["describe", "plan", "generate", "validate", "smoke"]
+}
+
+const mockSteps = (flowId: string): ReadonlyArray<string> => MOCK_STEPS[flowId] ?? [flowId]
+
+/**
+ * The milestone-1 run: every stage settles, no model is called.
+ *
+ * It exists so the Recent column, the `flow-run` card, and cancel are all
+ * reachable before the agent path lands. Cancellation is checked between
+ * stages, which is the same granularity the live path gets from the engine.
+ */
+const mockRun = async (options: FlowRunOptions, route: FlowRoute, card: RunCard): Promise<Phase> => {
+  const names = mockSteps(route.id)
+  card.plan(names)
+  for (const name of names) {
+    if (options.signal.aborted) return card.settle("cancelled")
+    card.step(name, "running")
+    card.step(name, "done")
+  }
+  return card.settle("completed", {
+    result: { flowId: route.id, payload: options.request.payload, steps: names }
+  })
+}
+
+// ---------------------------------------------------------------------------
+// The real run
+// ---------------------------------------------------------------------------
+
+/** The step list shape a pipeline flow may return, as `BuildPlan` does. */
+const DeclaredSteps = Schema.Struct({
+  steps: Schema.Array(Schema.Struct({
+    name: Schema.String,
+    status: Schema.Literals(["pending", "running", "done", "failed", "cached"])
+  }))
+})
+
+const decodeDeclaredSteps = Schema.decodeUnknownOption(DeclaredSteps)
+
+/**
+ * The steps a flow's own output declares, or none.
+ *
+ * A pipeline flow reports what it did in its typed output; `BuildPlan.steps` is
+ * exactly this shape. A flow whose output has no `steps` field runs as one
+ * step, so the read is optional rather than required.
+ */
+const declaredSteps = (output: unknown): ReadonlyArray<Step> => {
+  const decoded = decodeDeclaredSteps(output)
+  return Option.isNone(decoded) ? [] : decoded.value.steps.map((step) => ({ ...step }))
+}
+
+const failureMessage = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "The run failed."
+
+/**
+ * One run on the real agent.
+ *
+ * A pipeline flow runs to completion from its payload, so unlike a turn there
+ * is nothing to stream token by token: the card moves once when the run starts
+ * and once when it settles, and the settled card carries the flow's typed
+ * output as `result`.
+ *
+ * TODO(upstream): this path cannot run inside workerd yet, for the three
+ * reasons written out at `worker/turnImpl.ts` (`liveTurn`): the QuickJS variant
+ * `Agent.layerDefaults` compiles, the tool sources missing from
+ * `AgentAction.layerHost`, and the absent Durable Object journal driver.
+ */
+const liveRun = async (options: FlowRunOptions, route: FlowRoute, card: RunCard): Promise<Phase> => {
+  const { env, request, signal } = options
+  // `AnyFlowSpec` erases the payload's field types, so the struct built from it
+  // reports `unknown` decoding services and no usable value type. The cast
+  // states what the erased type already guarantees: a flow payload is a struct
+  // of plain schemas, decodable with no services. `materializeFlow` erases the
+  // same way, which is why `execute` takes the decoded value back untyped.
+  const PayloadOf = Schema.Struct(route.spec.payload) as unknown as Schema.Codec<Record<string, unknown>>
+  const payload = Schema.decodeUnknownOption(PayloadOf)(request.payload)
+  if (Option.isNone(payload)) {
+    return card.settle("failed", {
+      error: `The payload does not match what "${route.id}" declares. Expected keys: ${
+        Object.keys(route.spec.payload).join(", ")
+      }.`
+    })
+  }
+
+  card.plan([route.id])
+  card.step(route.id, "running")
+
+  const materialized = materializeFlow(route.id, route.spec, route.agent)
+  const layer = layerFor({
+    agent: route.agent,
+    sandbox: route.sandbox,
+    tools: route.tools,
+    seats: seatsFor(env),
+    crypto: layerCrypto
+  })
+
+  const program = materialized.flow
+    .execute(payload.value, { executionId: options.executionId })
+    .pipe(Effect.provide(layer))
+
+  try {
+    const output = await Effect.runPromise(program, { signal })
+    const steps = declaredSteps(output)
+    if (steps.length > 0) for (const step of steps) card.step(step.name, step.status)
+    return card.settle("completed", { result: output })
+  } catch (cause) {
+    // An abort and a failure land on the same rejection, and the shell renders
+    // them differently: a cancelled run is the user's doing, a failed one is
+    // the app's.
+    if (signal.aborted) return card.settle("cancelled")
+    return card.settle("failed", { error: failureMessage(cause) })
+  }
+}

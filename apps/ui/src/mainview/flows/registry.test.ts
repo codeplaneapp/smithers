@@ -1,5 +1,6 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
+import type { AppBootstrap } from "smithers-shared/AppBootstrap"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "../state/AppController"
 import { PALETTES } from "../state/AppState"
@@ -34,9 +35,12 @@ const unavailableRepositories: NativeRepositories = {
   })
 }
 
-const freshController = async () => {
+const freshController = async (bootstrap?: AppBootstrap) => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-  return { store, controller: createAppController(store, unavailableRepositories, unavailableAgent) }
+  return {
+    store,
+    controller: createAppController(store, unavailableRepositories, unavailableAgent, { bootstrap })
+  }
 }
 
 const chatState: CommandState = {
@@ -340,6 +344,45 @@ describe("§17.4 — no checkout is exposed to an MVP account", () => {
 })
 
 describe("command registry bindings", () => {
+  test("bootstrap capabilities are the single registration gate for local and cloud flows", async () => {
+    const local = await freshController({
+      apiVersion: 1,
+      host: "local",
+      version: "test",
+      buildSha: "local",
+      capabilities: ["local.repositories", "local.targets", "local.terminal", "local.harnesses"],
+      authFlow: "none",
+      sandbox: { platform: "darwin", mode: "enforced" }
+    })
+    const localNames = local.controller.commands.all().map((command) => command.name)
+    expect(localNames).toContain("repo.open")
+    expect(localNames).toContain("target.run")
+    expect(localNames).toContain("tab.terminal")
+    expect(localNames).not.toContain("auth.sign-in")
+    expect(localNames).not.toContain("issues.list")
+    expect(localNames).not.toContain("flow.run")
+    expect(localNames).not.toContain("browser")
+
+    const cloud = await freshController({
+      apiVersion: 1,
+      host: "cloud",
+      version: "test",
+      buildSha: "cloud",
+      capabilities: ["agent", "identity", "jjhub"],
+      authFlow: "redirect",
+      sandbox: null
+    })
+    const cloudNames = cloud.controller.commands.all().map((command) => command.name)
+    expect(cloudNames).toContain("auth.sign-in")
+    expect(cloudNames).toContain("issues.list")
+    expect(cloudNames).toContain("flow.run")
+    expect(cloudNames).toContain("browser")
+    expect(cloudNames).not.toContain("repo.open")
+    expect(cloudNames).not.toContain("target.run")
+    expect(cloudNames).not.toContain("tab.terminal")
+    expect(cloudNames).not.toContain("keys.list")
+  })
+
   test("every registered action executes through the one run path", async () => {
     const { store, controller } = await freshController()
     const names = controller.commands.all().map((command) => command.name)
@@ -369,12 +412,17 @@ describe("command registry bindings", () => {
       "flow.run",
       "card.maximize",
       "card.minimize",
+      "frame.back",
+      "frame.forward",
+      "frame.fork",
       "copy-message",
       "approval.approve",
       "approval.deny",
       "connector.add",
       "connector.downgrade",
+      "connector.remove.ask",
       "connector.remove",
+      "connector.remove.cancel",
       "world.new-note",
       "world.select",
       "world.delete",
@@ -513,7 +561,13 @@ describe("command registry bindings", () => {
     expect(adminNames).toContain("admin.requests")
     expect(adminNames).toContain("admin.health")
     expect(adminNames).toContain("reset")
+    expect(adminNames).toContain("admin.reset.ask")
+    expect(adminNames).toContain("admin.reset.cancel")
     expect(adminNames).toContain("admin.devtools")
+    expect((await controller.commands.run("admin.reset.ask")).status).toBe("executed")
+    expect(store.session().resetConfirmOpen).toBe(true)
+    expect((await controller.commands.run("admin.reset.cancel")).status).toBe("executed")
+    expect(store.session().resetConfirmOpen).toBe(false)
     // The debug reads compose the admin-only registry + trigger axis.
     expect(adminNames).toContain("debug.snapshot")
     expect(adminNames).toContain("debug.events")

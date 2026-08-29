@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, realpath, rm, stat, utimes, writeFile } from "node:fs/p
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AffectedResponseSchema, CiMatrixResponseSchema, RunHistoryResponseSchema, RunReplayResponseSchema, TargetGraphResponseSchema } from "smithers-shared/TargetGraph"
+import { TargetsQueryResponseSchema } from "smithers-shared/LocalApp"
+import { LOCAL_SESSION_HEADER } from "smithers-shared/LocalSession"
 import { startLocalServer } from "../server"
 import type { LocalServer } from "../server"
 
@@ -12,7 +14,9 @@ let server: LocalServer
 let repoId = ""
 
 const post = (path: string, body: unknown): Promise<Response> => fetch(`${server.origin}${path}`, {
-  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
+  method: "POST",
+  headers: { "content-type": "application/json", [LOCAL_SESSION_HEADER]: server.sessionToken },
+  body: JSON.stringify(body)
 })
 
 beforeAll(async () => {
@@ -39,13 +43,13 @@ beforeAll(async () => {
   await git("add", ".")
   await git("commit", "-m", "fixture")
   await writeFile(join(repo, "src", "app.ts"), "export const app = 2\n")
-  server = await startLocalServer({ port: 0, distDir: root, chatStub: true, node: { path: process.execPath, version: "v22.19.0" }, buildCli: cli, log: () => {} })
+  server = await startLocalServer({ port: 0, distDir: root, chatStub: true, allowManualRepositoryPaths: true, node: { path: process.execPath, version: "v22.19.0" }, buildCli: cli, log: () => {} })
   const opened = await post("/api/repo/open", { path: repo })
   repoId = ((await opened.json()) as { repo: { id: string } }).repo.id
 })
 
 afterAll(async () => {
-  server.stop()
+  await server.stop()
   await rm(root, { recursive: true, force: true })
   await rm(repo, { recursive: true, force: true })
 })
@@ -92,7 +96,10 @@ describe("POST /api/targets/graph", () => {
   })
 
   test("history lists a completed run and replay returns ordered events", async () => {
-    const started = await post("/api/targets/run", { repoId, label: "//:lint" })
+    const targets = TargetsQueryResponseSchema.parse(await (await post("/api/targets/query", { repoId })).json())
+    const targetId = targets.targets.find((target) => target.label === "//:lint")?.id
+    expect(targetId).toBeDefined()
+    const started = await post("/api/targets/run", { repoId, targetId })
     const runId = ((await started.json()) as { runId: string }).runId
     await new Promise((resolve) => setTimeout(resolve, 1_200))
     const history = RunHistoryResponseSchema.parse(await (await post("/api/targets/runs", { repoId })).json())

@@ -144,12 +144,10 @@ const await_: <Success extends Schema.Constraint, Error extends Schema.Constrain
     const engine = yield* FlowRuntime
     const instance = yield* FlowInstance
     ;(instance.awaitedDeferreds ??= new Set()).add(self.name)
-    ;(globalThis as any).__dbg?.("deferred.await enter " + self.name)
     const exit = yield* Flow.wrapActionResult(
       engine.deferredResult(self),
       Option.isNone
     )
-    ;(globalThis as any).__dbg?.("deferred.await read " + self.name + " none=" + String(Option.isNone(exit)))
     if (Option.isNone(exit)) {
       return yield* Flow.suspend(instance)
     }

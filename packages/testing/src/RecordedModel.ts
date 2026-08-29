@@ -57,7 +57,10 @@ export interface Replay {
   readonly controller: RecordedModel
 }
 
-const noCall = (request: ModelRequestLike) => Stream.fail(new UnscriptedModelError({ request }))
+// A request with no recording, and a fixture recorded against another model,
+// both say the fixture does not describe this run. Neither is a provider
+// failure, so both are defects rather than typed errors: see `ModelLikeError`.
+const noCall = (request: ModelRequestLike) => Stream.die(new UnscriptedModelError({ request }))
 
 type Selection =
   | { readonly _tag: "Call"; readonly call: RecordedCall }
@@ -69,7 +72,9 @@ const requestShapeDigest = (request: ModelRequestLike): string => canonicalReque
 /**
  * Builds a replay model and its controller. Calls are claimed before the
  * returned stream starts, so stream interruption leaves no pending claim or
- * background replay fiber.
+ * background replay fiber. A request the fixture does not describe dies with
+ * `UnscriptedModelError`, and a fixture recorded against another model dies
+ * with `ReplayHarnessMismatchError`.
  *
  * @category constructors
  * @since 0.0.0
@@ -105,13 +110,15 @@ export const make = (fixture: Fixture, options: Options = {}): Effect.Effect<Rep
         const selection = claim(request).pipe(Effect.map((selected): Stream.Stream<ModelEventLike, ModelLikeError> => {
           if (selected._tag === "Unscripted") return noCall(request)
           if (selected._tag === "Mismatch") {
-            return Stream.fail(
+            return Stream.die(
               new ReplayHarnessMismatchError({ expected: selected.expected, actual: selected.actual })
             )
           }
           const call = selected.call
           const events = Stream.fromIterable(call.events)
-          return call.failure === undefined ? events : Stream.concat(events)(Stream.fail(call.failure))
+          // The recorded failure ends the recorded events; `Stream.concat` is
+          // data-last, so the failure is the argument and the events the self.
+          return call.failure === undefined ? events : Stream.concat(Stream.fail(call.failure))(events)
         }))
         return Stream.unwrap(selection)
       }

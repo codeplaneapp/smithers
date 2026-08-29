@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "flows-harness-workerd-smoke",
+  "main": "worker.ts",
+  "compatibility_date": "2025-09-01",
+  // The harness itself reaches no Node builtin, but the packages it imports for
+  // canonical JSON and schema decoding do. The flag costs nothing here and
+  // keeps the smoke about WebAssembly rather than about module resolution.
+  "compatibility_flags": ["nodejs_compat"]
+}

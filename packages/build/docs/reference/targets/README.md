@@ -38,13 +38,13 @@ exists for future additions and is unused. See
 
 ## Test
 
-| Target                               | Kinds  | Cacheable | Status   | Summary                                         |
-| ------------------------------------ | ------ | --------- | -------- | ----------------------------------------------- |
-| [Vitest](vitest.md)                  | `test` | Never     | Executes | Runs `vitest run` over a declared test set.     |
-| [VitestCoverage](vitest-coverage.md) | `test` | Never     | Executes | Runs `vitest run` with coverage and thresholds. |
-| [VitestWatch](vitest-watch.md)       | `run`  | Never     | Executes | Runs an interactive `vitest watch` session.     |
+| Target                               | Kinds  | Cacheable | Status   | Summary                                                     |
+| ------------------------------------ | ------ | --------- | -------- | ----------------------------------------------------------- |
+| [Vitest](vitest.md)                  | `test` | Never     | Executes | Runs `vitest run` over a declared test set.                 |
+| [VitestCoverage](vitest-coverage.md) | `test` | Never     | Executes | Runs `vitest run` with coverage and thresholds.             |
+| [VitestWatch](vitest-watch.md)       | `run`  | Never     | Executes | Runs an interactive `vitest watch` session.                 |
 | [NodeTest](node-test.md)             | `test` | Never     | Executes | Runs one JavaScript program whose exit code is the verdict. |
-| [CargoTest](cargo.md)                | `test` | Never     | Executes | Runs `cargo test` under the declared Rust toolchain. |
+| [CargoTest](cargo.md)                | `test` | Never     | Executes | Runs `cargo test` under the declared Rust toolchain.        |
 
 ## Lint
 
@@ -76,16 +76,16 @@ exists for future additions and is unused. See
 
 ## Install, release, and processes
 
-| Target                             | Kinds | Cacheable | Status                                  | Summary                                                            |
-| ---------------------------------- | ----- | --------- | --------------------------------------- | ------------------------------------------------------------------ |
-| [PnpmWorkspace](pnpm-workspace.md) | `run` | Never     | Executes                                | Runs the smthrs install flow for a pnpm workspace.                 |
-| [NewPackage](new-package.md)       | `run` | Never     | Executes                                | Scaffolds one package named with the invocation's `--name` option. |
-| [Changesets](changesets.md)        | `run` | Never     | Executes                                | Reports Changesets status or applies versioning.                   |
-| [NpmPublish](npm-publish.md)       | `run` | Never     | Executes (dry-run by default)           | Publishes a package to an npm registry.                            |
-| [JsrPublish](jsr-publish.md)       | `run` | Never     | Executes (dry-run by default)           | Publishes a package to JSR.                                        |
-| [Clean](clean.md)                  | `run` | Never     | Executes                                | Deletes explicitly declared generated paths.                       |
-| [Dev](dev.md)                      | `run` | Never     | Executes                                | Runs a long-lived development or watch command.                    |
-| [ToolRun](tool-run.md)             | `run` | Never     | Executes                                | Runs one arbitrary external command for its irreversible side effect. |
+| Target                             | Kinds | Cacheable | Status                        | Summary                                                               |
+| ---------------------------------- | ----- | --------- | ----------------------------- | --------------------------------------------------------------------- |
+| [PnpmWorkspace](pnpm-workspace.md) | `run` | Never     | Executes                      | Runs the smthrs install flow for a pnpm workspace.                    |
+| [NewPackage](new-package.md)       | `run` | Never     | Executes                      | Scaffolds one package named with the invocation's `--name` option.    |
+| [Changesets](changesets.md)        | `run` | Never     | Executes                      | Reports Changesets status or applies versioning.                      |
+| [NpmPublish](npm-publish.md)       | `run` | Never     | Executes (dry-run by default) | Publishes a package to an npm registry.                               |
+| [JsrPublish](jsr-publish.md)       | `run` | Never     | Executes (dry-run by default) | Publishes a package to JSR.                                           |
+| [Clean](clean.md)                  | `run` | Never     | Executes                      | Deletes explicitly declared generated paths.                          |
+| [Dev](dev.md)                      | `run` | Never     | Executes                      | Runs a long-lived development or watch command.                       |
+| [ToolRun](tool-run.md)             | `run` | Never     | Executes                      | Runs one arbitrary external command for its irreversible side effect. |
 
 ## File sets
 

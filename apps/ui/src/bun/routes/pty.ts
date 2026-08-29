@@ -12,16 +12,18 @@ import { json, jsonError, readJson, Router } from "../routes"
 import type { WsMessageHandler } from "../server"
 
 export const PTY_PATH = "/api/pty"
+export const PTY_INPUT_MAX_BYTES = 64 * 1024
 
 const geometry = z.number().int().min(1).max(1000)
 
 export const PtyCreateRequestSchema = z.object({
   kind: z.enum(["terminal", "harness"]),
-  cwd: z.string(),
+  /** Omitted means home; repository paths are resolved from this opaque id. */
+  repoId: z.string().min(1).optional(),
   cols: geometry,
   rows: geometry,
   harnessId: z.enum(HARNESS_IDS).optional()
-})
+}).strict()
 
 export const PtyResizeRequestSchema = z.object({ cols: geometry, rows: geometry })
 
@@ -30,7 +32,17 @@ export interface PtyRouteHost {
   readonly onMessage: (type: string, handler: WsMessageHandler) => () => void
 }
 
-export const registerPtyRoutes = (host: PtyRouteHost, manager: PtyManager): void => {
+export interface PtyRepositoryResolver {
+  readonly resolveRepo: (
+    repoId: string
+  ) => { readonly status: "ok"; readonly path: string } | { readonly status: "not-found" | "permission-denied" }
+}
+
+export const registerPtyRoutes = (
+  host: PtyRouteHost,
+  manager: PtyManager,
+  repositories: PtyRepositoryResolver
+): void => {
   const { router } = host
 
   router.add("GET", PTY_PATH, () => json({ sessions: manager.list() }))
@@ -40,14 +52,25 @@ export const registerPtyRoutes = (host: PtyRouteHost, manager: PtyManager): void
     if ("error" in parsed) return parsed.error
     const body = PtyCreateRequestSchema.safeParse(parsed.body)
     if (!body.success) {
-      return jsonError(400, "invalid_request", "Body must be { kind, cwd, cols, rows } with an optional harnessId.")
+      return jsonError(400, "invalid_request", "Body must be { kind, cols, rows } with optional repoId and harnessId.")
     }
     if (body.data.kind === "harness" && body.data.harnessId === undefined) {
       return jsonError(400, "invalid_request", "A harness session needs a harnessId.")
     }
-    const result = await manager.create(body.data)
+    const resolved = body.data.repoId === undefined
+      ? ({ status: "ok", path: "~" } as const)
+      : repositories.resolveRepo(body.data.repoId)
+    if (resolved.status !== "ok") {
+      return resolved.status === "not-found"
+        ? jsonError(404, "repo_not_found", `No open repository with id ${body.data.repoId}.`)
+        : jsonError(403, "repository_read_only", "A terminal requires read-write repository access.")
+    }
+    const result = await manager.create({ ...body.data, cwd: resolved.path })
     if (result.status === "error") {
-      const status = result.code === "spawn_failed" ? 500 : result.code === "unknown_harness" ? 404 : 400
+      const status = result.code === "spawn_failed" ? 500
+        : result.code === "unknown_harness" ? 404
+        : result.code === "capacity_reached" ? 429
+        : 400
       return jsonError(status, result.code, result.message)
     }
     return json({ sessionId: result.session.sessionId }, 201)
@@ -73,6 +96,10 @@ export const registerPtyRoutes = (host: PtyRouteHost, manager: PtyManager): void
     const { sessionId, data } = message
     if (typeof sessionId !== "string" || typeof data !== "string") {
       socket.send(JSON.stringify({ type: "error", message: "pty.input needs a sessionId and data." }))
+      return
+    }
+    if (new TextEncoder().encode(data).byteLength > PTY_INPUT_MAX_BYTES) {
+      socket.send(JSON.stringify({ type: "error", message: `pty.input is capped at ${PTY_INPUT_MAX_BYTES} bytes.` }))
       return
     }
     if (!manager.write(sessionId, data)) {

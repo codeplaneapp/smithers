@@ -17,11 +17,13 @@ export default defineConfig({
       // each other's coverage scratch state (issues #115/#121).
       reportsDirectory: join(tmpdir(), `flows-mcp-coverage-${process.pid}`),
       include: ["src/**"],
+      // Every source path is exercised by the deterministic stdio fixture, so
+      // anything short of 100 is new untested code rather than a known gap.
       thresholds: {
-        branches: 69,
-        functions: 65,
-        lines: 87,
-        statements: 85
+        branches: 100,
+        functions: 100,
+        lines: 100,
+        statements: 100
       }
     }
   }

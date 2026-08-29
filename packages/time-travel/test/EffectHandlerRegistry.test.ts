@@ -540,7 +540,12 @@ describe("EffectHandlerRegistry", () => {
         code: "invalid",
         message: "irreversible effect invalid-boundary requires an idempotency key"
       })
-    }))
+    }).pipe(
+      Effect.provideService(
+        Journal.Journal,
+        Journal.makeNoop({ emitDurable: () => Effect.die("invalid boundaries must not use the journal") })
+      )
+    ))
 
   it.effect("reports a succeeded-boundary persistence failure after the action has completed", () =>
     Effect.gen(function*() {

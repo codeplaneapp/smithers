@@ -17,6 +17,6 @@ test("typing 'say ok' and sending renders the stub reply", async ({ page }) => {
   await page.getByTestId("composer-send").click()
   // The user's own bubble first, then the assistant's streamed text.
   await expect(page.locator(".smithers-chat-message[data-role=\"user\"]")).toContainText("say ok")
-  const assistant = page.locator(".smithers-chat-message[data-role=\"assistant\"]")
+  const assistant = page.locator(".smithers-chat-message[data-role=\"assistant\"]", { hasText: "stub: say ok" })
   await expect(assistant).toContainText("stub: say ok", { timeout: 15_000 })
 })

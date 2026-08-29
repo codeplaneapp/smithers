@@ -12,6 +12,7 @@ import { Clock, Effect, Option, Result, Schema, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import * as AgentEvent from "../src/AgentEvent.ts"
 import type * as Cell from "../src/Cell.ts"
+import * as CellHistory from "../src/CellHistory.ts"
 import * as CellTurn from "../src/CellTurn.ts"
 import * as Compaction from "../src/Compaction.ts"
 import * as ContextWindow from "../src/ContextWindow.ts"
@@ -174,6 +175,11 @@ const run = async (options: {
    * measurement a checkout larger than the host's path bound produces.
    */
   readonly treeComplete?: boolean
+  /**
+   * The history the controller records executed cells into. Omitted is the
+   * host that offers no way to save a flow, which binds none.
+   */
+  readonly history?: CellHistory.Service
 }): Promise<Run> => {
   const model = ScriptedModel.make(options.script)
   const engine = ScriptedEngine.make(model.model, [], options.calls ?? [], options.tree, options.treeComplete)
@@ -189,6 +195,10 @@ const run = async (options: {
     Effect.provide(QuickJSSandbox.layer),
     Effect.provide(Steering.layerNoop()),
     (effect) => options.clock === undefined ? effect : Effect.provideService(effect, Clock.Clock, options.clock),
+    (effect) =>
+      options.history === undefined
+        ? effect
+        : Effect.provideService(effect, CellHistory.CellHistory, options.history),
     Effect.result,
     Effect.runPromise
   )
@@ -276,6 +286,40 @@ describe("CellTurn", () => {
     // whole-evaluation backstop is armed and journaled with the rest.
     expect(armed[0]?.totalMs).toBe(Sandbox.defaultLimits.totalMs)
     expect(events[0]?._tag).toBe("discipline-armed")
+  })
+
+  it("records the source of every cell it executes for a host that keeps one", async () => {
+    const history = await Effect.runPromise(CellHistory.make)
+    await run({
+      history,
+      script: [
+        emits(`console.log("alpha")`),
+        emits(`ctx.done("done")`)
+      ]
+    })
+
+    // The script the model may promote into a saved flow is the turn's own
+    // cells, in the order they ran.
+    expect(await Effect.runPromise(history.cells())).toEqual([
+      { ordinal: 0, source: `console.log("alpha")` },
+      { ordinal: 1, source: `ctx.done("done")` }
+    ])
+  })
+
+  it("keeps the script of a cell that raised, because the run still ran it", async () => {
+    const history = await Effect.runPromise(CellHistory.make)
+    await run({
+      history,
+      script: [
+        emits(`throw new Error("boom")`),
+        emits(`ctx.done("done")`)
+      ]
+    })
+
+    expect((await Effect.runPromise(history.cells())).map((cell) => cell.source)).toEqual([
+      `throw new Error("boom")`,
+      `ctx.done("done")`
+    ])
   })
 
   it("hands the armed model-call budget to every sealed step it opens", async () => {

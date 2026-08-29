@@ -1,4 +1,10 @@
 /**
+ * Public declarations for the CLI's single-instance Effect resolver.
+ *
+ * @since 0.1.0
+ */
+
+/**
  * Installs the CLI's single-instance Effect module resolver.
  *
  * @category loading

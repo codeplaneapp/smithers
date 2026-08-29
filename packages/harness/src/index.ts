@@ -84,6 +84,12 @@ export * as Sandbox from "./Sandbox.ts"
 export * as CellTurn from "./CellTurn.ts"
 
 /**
+ * @category services
+ * @since 0.1.0
+ */
+export * as CellHistory from "./CellHistory.ts"
+
+/**
  * @category constructors
  * @since 0.1.0
  */

@@ -97,6 +97,13 @@ export interface ServiceSpec {
   readonly readiness?: Readiness | undefined
   readonly health?: Health | undefined
   readonly stop?: Stop | undefined
+  /**
+   * Best-effort commands run before the process is spawned. A service whose
+   * runtime holds a name or a port outside the process tree — a Docker
+   * container name survives a hard-killed run — clears its own leftovers here
+   * so the previous run's death cannot fail this one.
+   */
+  readonly prepare?: ReadonlyArray<readonly [string, ...Array<string>]> | undefined
   /** Commands run after readiness and before the service is handed to consumers. */
   readonly init?: ReadonlyArray<readonly [string, ...Array<string>]> | undefined
   /** Best-effort commands run during finalization after the process stop contract. */
@@ -279,6 +286,7 @@ const canonicalize = (spec: ServiceSpec): string =>
       : "http" in spec.readiness
       ? { http: spec.readiness.http, timeout: spec.readiness.timeout }
       : { exec: spec.readiness.exec, timeout: spec.readiness.timeout },
+    prepare: spec.prepare ?? [],
     init: spec.init ?? [],
     cleanup: spec.cleanup ?? [],
     stop: spec.stop === undefined ? null : { grace: spec.stop.grace, signal: spec.stop.signal }
@@ -356,7 +364,7 @@ const parseSpec = (spec: ServiceSpec): ParsedSpec => {
     stopSignal = spec.stop.signal as NodeJS.Signals
     stopGraceMs = parseDurationMs(spec.stop.grace, `service ${spec.key} stop.grace`)
   }
-  for (const [name, commands] of [["init", spec.init], ["cleanup", spec.cleanup]] as const) {
+  for (const [name, commands] of [["prepare", spec.prepare], ["init", spec.init], ["cleanup", spec.cleanup]] as const) {
     if (commands !== undefined) {
       if (
         !Array.isArray(commands) ||
@@ -746,10 +754,13 @@ const runInit = (parsed: ParsedSpec, tail: () => string): Effect.Effect<void, Se
     return yield* Effect.void
   })
 
-/** Runs best-effort cleanup commands during scope finalization. */
-const runCleanup = (parsed: ParsedSpec): Effect.Effect<void> =>
+/** Runs one list of best-effort commands to completion, ignoring their exit status. */
+const runBestEffort = (
+  parsed: ParsedSpec,
+  commands: ReadonlyArray<readonly [string, ...Array<string>]> | undefined
+): Effect.Effect<void> =>
   Effect.gen(function*() {
-    for (const argv of parsed.spec.cleanup ?? []) {
+    for (const argv of commands ?? []) {
       yield* Effect.callback<void>((resume) => {
         const child = NodeChildProcess.execFile(
           argv[0],
@@ -765,6 +776,12 @@ const runCleanup = (parsed: ParsedSpec): Effect.Effect<void> =>
       })
     }
   }).pipe(Effect.asVoid)
+
+/** Runs best-effort prepare commands before the service process is spawned. */
+const runPrepare = (parsed: ParsedSpec): Effect.Effect<void> => runBestEffort(parsed, parsed.spec.prepare)
+
+/** Runs best-effort cleanup commands during scope finalization. */
+const runCleanup = (parsed: ParsedSpec): Effect.Effect<void> => runBestEffort(parsed, parsed.spec.cleanup)
 
 /**
  * Spawns one service in its own process group, awaits readiness, and starts
@@ -784,6 +801,7 @@ const startService = (parsed: ParsedSpec): Effect.Effect<RunningService, Service
         Effect.fail(new ServiceError({ key, reason, message, outputTail: tail.read() }))
       )
     }
+    yield* runPrepare(parsed)
     const child = yield* Effect.try({
       try: () =>
         NodeChildProcess.spawn(parsed.spec.argv[0], parsed.spec.argv.slice(1), {

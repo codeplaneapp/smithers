@@ -102,9 +102,14 @@ const prepared: Route.PreparedRequest = {
 }
 
 /**
- * A scripted model: it answers each call with one cell whose `complete` output
- * is the JSON the declared schema asks for. A real seat streams the same events
- * from a provider.
+ * A scripted model: it answers each call with one fenced `cell` block.
+ *
+ * A cell does not return its transition. It runs in a REPL realm that outlives
+ * the frame and states its intent by calling: `ctx.done(output)` completes the
+ * run, `ctx.park(reason, message)` waits durably, and a cell that calls neither
+ * gets another frame. The host renders a structured `output` as canonical JSON,
+ * which is the text the declared schema decodes. A real seat streams the same
+ * events from a provider.
  */
 const scripted: Model.Model = Model.make({
   stream: (request) =>
@@ -127,7 +132,7 @@ const scripted: Model.Model = Model.make({
           summary: "Durable workflows record every step so a restart resumes instead of repeating.",
           keyPoints: ["steps are journaled", "replay is deterministic"]
         }
-      const cell = `return { intent: "complete", state: {}, output: ${JSON.stringify(JSON.stringify(answer))} }`
+      const cell = `ctx.done(${JSON.stringify(answer)})`
       return Stream.fromIterable([
         ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "cell" }),
         ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "cell", text: "```cell\n" + cell + "\n```" }),
@@ -188,12 +193,14 @@ const SimpleWorkflowLayer = Layer.mergeAll(
 
 /**
  * Runs the workflow. The result is `ArticleResult`-typed all the way out: no
- * caller parses model text.
+ * caller parses model text. `orDie` runs after the layer is provided, so a
+ * sandbox that fails to build is a defect here too rather than an error the
+ * caller has to handle.
  */
 export const main: Effect.Effect<typeof ArticleResult.Type> = SimpleWorkflow.execute(
   { topic: "durable workflows" },
   { executionId: "agent-step-1" }
 ).pipe(
-  Effect.orDie,
-  Effect.provide(SimpleWorkflowLayer)
+  Effect.provide(SimpleWorkflowLayer),
+  Effect.orDie
 )

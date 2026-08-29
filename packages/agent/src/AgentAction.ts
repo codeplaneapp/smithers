@@ -61,9 +61,11 @@ import * as Context from "effect/Context"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { Agent } from "./Agent.ts"
+import { EventSink } from "./EventSink.ts"
 import * as Seat from "./Seat.ts"
 import { SeatResolver } from "./SeatResolver.ts"
 
@@ -311,6 +313,15 @@ export const make = <
       const seats = yield* SeatResolver
       const agent = yield* Agent
       const instance = yield* FlowRuntime.FlowInstance
+      // Resolved once, before the first attempt, and asked nothing further. A
+      // composition either equips its steps with somewhere to send events as
+      // they happen or it does not, and the absence is the buffered behavior
+      // this action has always had rather than a failure.
+      const sink = yield* Effect.serviceOption(EventSink)
+      const observe = Option.match(sink, {
+        onNone: () => (_event: AgentEvent.AgentEvent): Effect.Effect<void> => Effect.void,
+        onSome: (service) => service.emit
+      })
       const seat = yield* seats.resolve(options.seat)
       const task = options.prompt(payload)
       const system = [
@@ -352,7 +363,17 @@ export const make = <
             capabilityEnvelope: host.capabilityEnvelope,
             limits: host.limits,
             maxFrames: options.maxFrames ?? host.maxFrames
-          }).pipe(Stream.runForEach((event) => Effect.sync(() => events.push(event))))
+          }).pipe(
+            // The buffer is what the decode reads, so it is filled first and
+            // the sink is handed the event afterwards: a sink that fails to
+            // return still leaves the run's own record of the event complete.
+            Stream.runForEach((event) =>
+              Effect.suspend(() => {
+                events.push(event)
+                return observe(event)
+              })
+            )
+          )
           const answer = completedOutput(events)
           if (answer === undefined) {
             return yield* new HarnessError({

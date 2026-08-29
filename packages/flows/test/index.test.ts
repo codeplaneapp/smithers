@@ -121,7 +121,7 @@ describe("barrel", () => {
   it("excludes the smthrs build tooling, and there is some to exclude", () => {
     // Same guard as the platform bundles above: the tooling group must remain
     // represented rather than turning its exclusion into a silent no-op.
-    expect(packageNamesForGroup("tooling").sort()).toEqual(["build", "build-cli", "targets"])
+    expect(packageNamesForGroup("tooling").sort()).toEqual(["build", "build-cli", "create-app", "targets"])
     expect(expected.filter((name) => name.startsWith("Build"))).toEqual([])
   })
 

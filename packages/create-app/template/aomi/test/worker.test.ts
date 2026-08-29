@@ -1,0 +1,407 @@
+/**
+ * The Worker's API, exercised through {@link handle} with stub bindings.
+ *
+ * `worker/index.ts` imports `cloudflare:workers` for the Durable Object class,
+ * which only workerd resolves. `worker/router.ts` deliberately does not, so the
+ * whole API can be driven on plain Node: every route is a call to `handle` with
+ * a fake `Env` whose `SESSIONS` namespace hands back an in-memory double of
+ * `AppSession`.
+ *
+ * What this covers is the routing contract: which object a route reaches, what
+ * it refuses, and whether the body decodes with the schema in `src/api.ts`.
+ * `AppSession`'s own SQL behaviour needs real Durable Object storage and is not
+ * tested here.
+ */
+import type { FlowRunCard } from "@smthrs/create-app/ui"
+import * as Schema from "effect/Schema"
+import { beforeEach, describe, expect, test } from "vitest"
+import {
+  type AppCard,
+  CancelResponse,
+  FlowList,
+  FlowRunResponse,
+  type FlowSummary,
+  Routes,
+  SessionList,
+  SessionState,
+  type SessionSummary
+} from "../src/api.ts"
+import type { Env } from "../worker/env.ts"
+import { type Phase, runFlowRun } from "../worker/flowRunImpl.ts"
+import { INDEX_SESSION } from "../worker/registry.ts"
+import { handle } from "../worker/router.ts"
+
+// ---------------------------------------------------------------------------
+// The doubles
+// ---------------------------------------------------------------------------
+
+/**
+ * An in-memory `AppSession`.
+ *
+ * Only the methods the router calls are implemented, and each one records what
+ * it was called with, so a test asserts on the call rather than on state the
+ * router never reads back.
+ */
+class FakeSession {
+  readonly turns: Array<unknown> = []
+  readonly runs: Array<unknown> = []
+  readonly cancels: Array<string> = []
+  readonly rows: Array<SessionSummary> = []
+  cards: Array<AppCard> = []
+  saved: Array<FlowSummary> = []
+  cancelled = true
+
+  constructor(readonly name: string) {}
+
+  turn(request: unknown): Response {
+    this.turns.push(request)
+    return new Response(`{"type":"done","output":null}\n`, {
+      headers: { "content-type": "application/x-ndjson; charset=utf-8" }
+    })
+  }
+
+  cancel(sessionId: string): { cancelled: boolean } {
+    this.cancels.push(sessionId)
+    return { cancelled: this.cancelled }
+  }
+
+  state(id: string): typeof SessionState.Type {
+    return { id, messages: [], cards: this.cards, busy: false }
+  }
+
+  listFlows(): ReadonlyArray<FlowSummary> {
+    return this.saved
+  }
+
+  runFlow(request: { readonly flowId: string }): { executionId: string } {
+    this.runs.push(request)
+    return { executionId: `exec-${this.runs.length}` }
+  }
+
+  sessions(): ReadonlyArray<SessionSummary> {
+    return this.rows
+  }
+}
+
+interface Harness {
+  readonly env: Env
+  /** The double for one session id, created on first reference. */
+  readonly session: (id: string) => FakeSession
+  /** Every request that fell through to the assets binding. */
+  readonly assetRequests: Array<string>
+}
+
+const harness = (): Harness => {
+  const sessions = new Map<string, FakeSession>()
+  const assetRequests: Array<string> = []
+  const session = (id: string): FakeSession => {
+    const existing = sessions.get(id)
+    if (existing !== undefined) return existing
+    const created = new FakeSession(id)
+    sessions.set(id, created)
+    return created
+  }
+  const env = {
+    APP_NAME: "aomi",
+    // The routing tests must not depend on which turn implementation is
+    // compiled in, and the mock is what a default deploy runs.
+    APP_MOCK_TURN: "1",
+    // The id is the name: a Durable Object id is opaque to the router, which
+    // only ever passes it straight back to `get`.
+    SESSIONS: {
+      idFromName: (name: string) => name,
+      get: (id: string) => session(id)
+    },
+    ASSETS: {
+      fetch: (request: Request) => {
+        assetRequests.push(new URL(request.url).pathname)
+        return Promise.resolve(new Response("<!doctype html>", { headers: { "content-type": "text/html" } }))
+      }
+    }
+  } as unknown as Env
+  return { env, session, assetRequests }
+}
+
+const get = (path: string): Request => new Request(`https://aomi.smithers.sh${path}`)
+
+const post = (path: string, body: unknown): Request =>
+  new Request(`https://aomi.smithers.sh${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  })
+
+let app: Harness
+
+beforeEach(() => {
+  app = harness()
+})
+
+// ---------------------------------------------------------------------------
+// Health and fallthrough
+// ---------------------------------------------------------------------------
+
+describe("GET /api/health", () => {
+  test("reports the app name and the build", async () => {
+    const response = await handle(get(Routes.health), app.env)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ ok: true, build: "dev", app: "aomi" })
+  })
+})
+
+describe("fallthrough", () => {
+  test("an unrouted /api path is this Worker's own 404, not the SPA's", async () => {
+    const response = await handle(get("/api/nope"), app.env)
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ error: "No route for /api/nope." })
+    expect(app.assetRequests).toEqual([])
+  })
+
+  test("every other path is served by the assets binding", async () => {
+    const response = await handle(get("/build/deep/link"), app.env)
+    expect(response.status).toBe(200)
+    expect(app.assetRequests).toEqual(["/build/deep/link"])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Turns
+// ---------------------------------------------------------------------------
+
+describe("POST /api/agent/turn", () => {
+  test("forwards to the object named by sessionId and streams its body back", async () => {
+    const turn = { sessionId: "s1", flowId: "chat", message: "balance of vitalik.eth" }
+    const response = await handle(post(Routes.turn, turn), app.env)
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toContain("application/x-ndjson")
+    expect(await response.text()).toBe(`{"type":"done","output":null}\n`)
+    expect(app.session("s1").turns).toEqual([turn])
+    expect(app.session("s2").turns).toEqual([])
+  })
+
+  test("refuses a body that is not a TurnRequest", async () => {
+    const response = await handle(post(Routes.turn, { sessionId: "s1", flowId: "chat" }), app.env)
+    expect(response.status).toBe(400)
+    expect(app.session("s1").turns).toEqual([])
+  })
+
+  test("refuses a body that is not JSON", async () => {
+    const request = new Request(`https://aomi.smithers.sh${Routes.turn}`, { method: "POST", body: "not json" })
+    expect((await handle(request, app.env)).status).toBe(400)
+  })
+
+  test("refuses a GET", async () => {
+    expect((await handle(get(Routes.turn), app.env)).status).toBe(405)
+  })
+})
+
+describe("POST /api/agent/turn/cancel", () => {
+  test("aborts the named session and answers with what it did", async () => {
+    const response = await handle(post(Routes.turnCancel, { sessionId: "s1" }), app.env)
+    expect(response.status).toBe(200)
+    expect(Schema.decodeUnknownSync(CancelResponse)(await response.json())).toEqual({ cancelled: true })
+    expect(app.session("s1").cancels).toEqual(["s1"])
+  })
+
+  test("reports a session that had nothing to abort", async () => {
+    app.session("s1").cancelled = false
+    const response = await handle(post(Routes.turnCancel, { sessionId: "s1" }), app.env)
+    expect(Schema.decodeUnknownSync(CancelResponse)(await response.json())).toEqual({ cancelled: false })
+  })
+
+  test("refuses a body with no sessionId", async () => {
+    expect((await handle(post(Routes.turnCancel, {}), app.env)).status).toBe(400)
+  })
+
+  test("refuses a GET", async () => {
+    expect((await handle(get(Routes.turnCancel), app.env)).status).toBe(405)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
+
+describe("GET /api/session", () => {
+  test("with no id, reads the registry object and answers a SessionList", async () => {
+    app.session(INDEX_SESSION).rows.push({ id: "s1", title: "arb bot", status: "ready", stage: "build", at: 7 })
+    const response = await handle(get(Routes.session), app.env)
+    expect(response.status).toBe(200)
+    expect(Schema.decodeUnknownSync(SessionList)(await response.json())).toEqual({
+      sessions: [{ id: "s1", title: "arb bot", status: "ready", stage: "build", at: 7 }]
+    })
+  })
+
+  test("a Worker with no runs answers an empty column, not a 404", async () => {
+    const response = await handle(get(Routes.session), app.env)
+    expect(response.status).toBe(200)
+    expect(Schema.decodeUnknownSync(SessionList)(await response.json())).toEqual({ sessions: [] })
+  })
+
+  test("an empty id is the list form, not a session named the empty string", async () => {
+    await handle(get(`${Routes.session}?id=`), app.env)
+    expect(app.session("").state("").id).toBe("")
+    const response = await handle(get(`${Routes.session}?id=`), app.env)
+    expect(Schema.decodeUnknownSync(SessionList)(await response.json())).toEqual({ sessions: [] })
+  })
+
+  test("with an id, answers that session's SessionState", async () => {
+    app.session("s1").cards = [{ kind: "html", id: "c1", html: "<p>hi</p>" }]
+    const response = await handle(get(`${Routes.session}?id=s1`), app.env)
+    expect(response.status).toBe(200)
+    expect(Schema.decodeUnknownSync(SessionState)(await response.json())).toEqual({
+      id: "s1",
+      messages: [],
+      cards: [{ kind: "html", id: "c1", html: "<p>hi</p>" }],
+      busy: false
+    })
+  })
+
+  test("refuses a POST", async () => {
+    expect((await handle(post(Routes.session, {}), app.env)).status).toBe(405)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Flows
+// ---------------------------------------------------------------------------
+
+describe("GET /api/flows", () => {
+  test("with no session, lists the routed flows only", async () => {
+    const response = await handle(get(Routes.flows), app.env)
+    expect(response.status).toBe(200)
+    const { flows } = Schema.decodeUnknownSync(FlowList)(await response.json())
+    expect(flows.every((flow) => flow.source === "file")).toBe(true)
+    expect(flows.map((flow) => flow.id).sort()).toEqual(["build", "chat"])
+  })
+
+  test("reports which routed flows are chat flows", async () => {
+    const { flows } = Schema.decodeUnknownSync(FlowList)(
+      await (await handle(get(Routes.flows), app.env)).json()
+    )
+    expect(flows.find((flow) => flow.id === "chat")?.chat).toBe(true)
+    expect(flows.find((flow) => flow.id === "build")?.chat).toBe(false)
+  })
+
+  test("with a session, appends that session's saved flows", async () => {
+    app.session("s1").saved = [{ id: "arb", description: "arb scan", source: "saved", chat: false }]
+    const { flows } = Schema.decodeUnknownSync(FlowList)(
+      await (await handle(get(`${Routes.flows}?sessionId=s1`), app.env)).json()
+    )
+    expect(flows.filter((flow) => flow.source === "saved")).toEqual([
+      { id: "arb", description: "arb scan", source: "saved", chat: false }
+    ])
+    // The routed flows come first, so a saved flow never hides a file one.
+    expect(flows[flows.length - 1]?.id).toBe("arb")
+  })
+
+  test("refuses a POST", async () => {
+    expect((await handle(post(Routes.flows, {}), app.env)).status).toBe(405)
+  })
+})
+
+describe("POST /api/flows/run", () => {
+  test("starts a routed pipeline flow and answers with its execution id", async () => {
+    const run = { sessionId: "s1", flowId: "build", payload: { app: "arb", prompt: "build it" } }
+    const response = await handle(post(Routes.flowRun, run), app.env)
+    expect(response.status).toBe(200)
+    expect(Schema.decodeUnknownSync(FlowRunResponse)(await response.json())).toEqual({ executionId: "exec-1" })
+    expect(app.session("s1").runs).toEqual([run])
+  })
+
+  test("refuses a chat flow and names the route that does take it", async () => {
+    const response = await handle(post(Routes.flowRun, { sessionId: "s1", flowId: "chat", payload: {} }), app.env)
+    expect(response.status).toBe(400)
+    expect((await response.json() as { error: string }).error).toContain(Routes.turn)
+    expect(app.session("s1").runs).toEqual([])
+  })
+
+  test("refuses an unrouted flow without waking the session", async () => {
+    const response = await handle(post(Routes.flowRun, { sessionId: "s1", flowId: "saved/arb", payload: {} }), app.env)
+    expect(response.status).toBe(400)
+    expect((await response.json() as { error: string }).error).toContain("saved/arb")
+    expect(app.session("s1").runs).toEqual([])
+  })
+
+  test("refuses a body that is not a FlowRunRequest", async () => {
+    expect((await handle(post(Routes.flowRun, { flowId: "build" }), app.env)).status).toBe(400)
+  })
+
+  test("refuses a GET", async () => {
+    expect((await handle(get(Routes.flowRun), app.env)).status).toBe(405)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The run itself
+// ---------------------------------------------------------------------------
+
+/**
+ * The mock run, which is what a default deploy executes. The live path calls a
+ * model and does not run under workerd yet (`worker/flowRunImpl.ts`).
+ */
+describe("runFlowRun", () => {
+  const runCards = async (
+    flowId: string,
+    signal: AbortSignal = new AbortController().signal
+  ): Promise<{ readonly phase: Phase; readonly cards: ReadonlyArray<FlowRunCard> }> => {
+    const cards: Array<FlowRunCard> = []
+    const phase = await runFlowRun({
+      env: { APP_MOCK_TURN: "1" } as unknown as Env,
+      request: { sessionId: "s1", flowId, payload: { app: "arb", prompt: "build it" } },
+      executionId: "exec-1",
+      signal,
+      emit: (frame) => {
+        expect(frame.type).toBe("card.update")
+        if (frame.type === "card.update" && frame.card.kind === "flow-run") cards.push(frame.card)
+      }
+    })
+    return { phase, cards }
+  }
+
+  test("replaces one card for the whole run", async () => {
+    const { cards } = await runCards("build")
+    expect(cards.length).toBeGreaterThan(1)
+    expect(new Set(cards.map((card) => card.id))).toEqual(new Set(["exec-1"]))
+    expect(new Set(cards.map((card) => card.executionId))).toEqual(new Set(["exec-1"]))
+  })
+
+  test("declares every step before running any of them", async () => {
+    const { cards } = await runCards("build")
+    const first = cards[0]
+    expect(first?.phase).toBe("running")
+    expect(first?.steps.map((step) => step.status)).toEqual(first?.steps.map(() => "pending"))
+    expect(first?.steps.map((step) => step.name)).toEqual(["describe", "plan", "generate", "validate", "smoke"])
+  })
+
+  test("settles completed with every step done", async () => {
+    const { phase, cards } = await runCards("build")
+    const last = cards[cards.length - 1]
+    expect(phase).toBe("completed")
+    expect(last?.phase).toBe("completed")
+    expect(last?.steps.every((step) => step.status === "done")).toBe(true)
+    expect(last?.error).toBeUndefined()
+  })
+
+  test("carries the payload back on the settled card", async () => {
+    const { cards } = await runCards("build")
+    expect(cards[cards.length - 1]?.result).toMatchObject({ flowId: "build", payload: { app: "arb" } })
+  })
+
+  test("an aborted run settles cancelled with no step left running", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const { phase, cards } = await runCards("build", controller.signal)
+    const last = cards[cards.length - 1]
+    expect(phase).toBe("cancelled")
+    expect(last?.phase).toBe("cancelled")
+    expect(last?.steps.some((step) => step.status === "running" || step.status === "pending")).toBe(false)
+  })
+
+  test("an unrouted flow settles failed and names itself", async () => {
+    const { phase, cards } = await runCards("saved/arb")
+    expect(phase).toBe("failed")
+    expect(cards).toHaveLength(1)
+    expect(cards[0]?.error).toContain("saved/arb")
+  })
+})

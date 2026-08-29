@@ -110,9 +110,10 @@ export const jsdocConvention = [
 
       "flows-jsdoc/module-header": "error",
 
-      // `@category` and `@since` are the house tags; everything else must be a
-      // real JSDoc tag, so a typo is reported rather than silently ignored.
-      "jsdoc/check-tag-names": ["error", { definedTags: ["category", "since"] }]
+      // `@category` and `@since` are the house tags.
+      // `@slop` marks declarations identified by the slop sweep.
+      // Everything else must be a real JSDoc tag.
+      "jsdoc/check-tag-names": ["error", { definedTags: ["category", "since", "slop"] }]
     }
   }
 ]

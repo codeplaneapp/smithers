@@ -229,11 +229,28 @@ interface CapturedMetadata {
 /** @private */
 type CapturedFunction = { readonly [CapturedTypeId]?: CapturedMetadata }
 
-const ephemeralNonceBytes = new Uint8Array(16)
-globalThis.crypto.getRandomValues(ephemeralNonceBytes)
-const ephemeralNonce = [...ephemeralNonceBytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")
 const ephemeralIdentities = new WeakMap<object, string>()
 let ephemeralOrdinal = 0
+let ephemeralNonce: string | undefined
+
+/**
+ * Returns the process-local nonce, seeding it on first use.
+ *
+ * The seed is deliberately lazy. Cloudflare Workers rejects any script that
+ * calls `crypto.getRandomValues` while the module evaluates, with upload error
+ * 10021, so reading entropy at module scope would stop every bundle containing
+ * this package from deploying.
+ *
+ * @private
+ */
+const nonce = (): string => {
+  if (ephemeralNonce === undefined) {
+    const bytes = new Uint8Array(16)
+    globalThis.crypto.getRandomValues(bytes)
+    ephemeralNonce = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")
+  }
+  return ephemeralNonce
+}
 
 /** @private */
 const captureError = (path: string, reason: string): TypeError =>
@@ -478,7 +495,7 @@ export const functionIdentity = (operation: unknown): FunctionIdentity => {
   const source = metadata?.source ?? Function.prototype.toString.call(operation)
   let ephemeral = ephemeralIdentities.get(operation)
   if (metadata === undefined && ephemeral === undefined) {
-    ephemeral = `${ephemeralNonce}:${ephemeralOrdinal++}`
+    ephemeral = `${nonce()}:${ephemeralOrdinal++}`
     ephemeralIdentities.set(operation, ephemeral)
   }
   return {

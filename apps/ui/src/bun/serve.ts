@@ -15,12 +15,19 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) {
 const server = await startLocalServer({
   port,
   distDir: defaultDistDir(import.meta.dir),
-  chatStub: Bun.env.SMITHERS_CHAT_STUB === "1"
+  chatStub: Bun.env.SMITHERS_CHAT_STUB === "1",
+  cloudMode: Bun.env.SMITHERS_LOCAL_MODE === "hybrid" ? "hybrid" : "offline",
+  // This process has no native picker. Manual path entry is an explicit
+  // development/test capability, never the packaged app's default.
+  allowManualRepositoryPaths: true
 })
 
-const shutdown = (): void => {
-  server.stop()
+let shuttingDown = false
+const shutdown = async (): Promise<void> => {
+  if (shuttingDown) return
+  shuttingDown = true
+  await server.stop()
   process.exit(0)
 }
-process.on("SIGINT", shutdown)
-process.on("SIGTERM", shutdown)
+process.on("SIGINT", () => void shutdown())
+process.on("SIGTERM", () => void shutdown())

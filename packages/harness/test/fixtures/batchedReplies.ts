@@ -20,6 +20,11 @@ import { readFileSync } from "node:fs"
  * - `astropy-8707-seq77` is one state-echo block emitted twice, byte for byte.
  *   De-duplication is what keeps it a frame that runs.
  *
+ * They are records, not teaching. Wave 10 ran on the filing surface, so their
+ * blocks end in `return { intent: … }`, which the sandbox now refuses. They stay
+ * verbatim: aligning them to `ctx.done` would rewrite what the model actually
+ * wrote, and `CellTurn.test.ts` pins the refusal they draw.
+ *
  * @since 0.1.0
  */
 export const batchedReplyNames = [

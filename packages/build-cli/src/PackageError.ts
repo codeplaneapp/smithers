@@ -21,6 +21,8 @@
  */
 export type Code =
   | "workspace_root_invalid"
+  | "local_repository_invalid"
+  | "nested_workspace_undeclared"
   | "inventory_failed"
   | "invalid_inventory_path"
   | "inventory_limit_exceeded"

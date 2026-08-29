@@ -17,13 +17,13 @@ describe("Cell.extract", () => {
       "First I look:",
       fenced("cell", "const files = await ctx.call(\"fs/list\", { path: \".\" })"),
       "then I decide:",
-      fenced("cell", "return { intent: \"complete\", state: {}, output: files.length + \" entries\" }")
+      fenced("cell", "ctx.done(files.length + \" entries\")")
     ].join("\n\n")
 
     const extracted = Result.getOrThrow(Cell.extract(text))
     expect(extracted.source.text).toBe(
       "const files = await ctx.call(\"fs/list\", { path: \".\" })\n" +
-        "return { intent: \"complete\", state: {}, output: files.length + \" entries\" }"
+        "ctx.done(files.length + \" entries\")"
     )
     expect(extracted.source.language).toBe("javascript")
     expect(extracted.blocks).toBe(2)
@@ -46,7 +46,9 @@ describe("Cell.extract", () => {
 
   it("stops at the first block that returns, because a return ends the function", () => {
     // The documented semantics of concatenation, stated as a test rather than
-    // as prose: block two is dead code the compiler still has to accept.
+    // as prose: block two is dead code the compiler still has to accept. The
+    // blocks keep the old filing surface on purpose. This test is about what a
+    // return does to the concatenated program, so it needs a return in it.
     const text = [
       fenced("cell", "return { intent: \"complete\", state: {}, output: \"first\" }"),
       fenced("cell", "return { intent: \"complete\", state: {}, output: \"second\" }")
@@ -120,7 +122,7 @@ describe("Cell.extract", () => {
   })
 
   it("finds no cell in an unterminated fence", () => {
-    const extracted = Cell.extract("```cell\nreturn { intent: \"complete\", output: \"x\" }")
+    const extracted = Cell.extract("```cell\nctx.done(\"x\")")
     expect(extracted._tag).toBe("Failure")
     expect((extracted as Result.Failure<never, Cell.Rejected>).failure.code).toBe("no_cell")
   })
@@ -152,7 +154,7 @@ describe("Cell.extract", () => {
     for (
       const body of [
         "import { readFile } from \"node:fs\"\nreturn null",
-        "const important = ctx.flows\nreturn { intent: \"park\" }"
+        "const important = ctx.flows\nctx.park(\"waiting-input\", \"who owns this?\")"
       ]
     ) {
       expect(Cell.extract(fenced("cell", body))._tag, body).toBe("Success")

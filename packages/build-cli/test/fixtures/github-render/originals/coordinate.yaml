@@ -1,0 +1,59 @@
+name: coordinate
+
+# Collision radar (github.com/aomi-labs/aomi-scrum). On PR/issue events, checks THIS
+# repo for work that may collide, pings the people involved + the Discord channel,
+# and comments findings on the triggering PR. HIGH severity, last-week scope, idempotent.
+# Requires repo secrets: SMITHER_OPENAI_API_KEY, SMITHER_DISCORD_WEBHOOK_URL,
+# SMITHER_COORDINATOR_TOKEN (a PAT with read on aomi-labs/aomi-scrum).
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, labeled]
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+concurrency:
+  group: coordinate-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  coordinate:
+    # Active PRs only: skip merged/closed PRs (labeling a merged PR still emits events).
+    if: github.event_name != 'pull_request' || github.event.pull_request.state == 'open'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout coordinator
+        uses: actions/checkout@v4
+        with:
+          repository: aomi-labs/aomi-scrum
+          token: ${{ secrets.SMITHER_COORDINATOR_TOKEN }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+      - uses: actions/cache@v4
+        with:
+          path: .smithers/state
+          key: coordinate-state-${{ github.repository }}-${{ github.run_id }}
+          restore-keys: |
+            coordinate-state-${{ github.repository }}-
+      - name: Install workflow deps
+        working-directory: .smithers
+        run: bun install
+      - name: Run coordinate (this repo only)
+        env:
+          SMITHER_OPENAI_API_KEY: ${{ secrets.SMITHER_OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.SMITHER_ANTHROPIC_API_KEY }}
+          SMITHER_DISCORD_WEBHOOK_URL: ${{ secrets.SMITHER_DISCORD_WEBHOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          INPUT="{\"dryRun\":false,\"minSeverity\":\"high\",\"repos\":[\"${{ github.repository }}\"]"
+          [ -n "$PR_NUMBER" ] && INPUT="$INPUT,\"prNumber\":$PR_NUMBER"
+          INPUT="$INPUT}"
+          echo "input: $INPUT"
+          bunx smithers-orchestrator up .smithers/workflows/coordinate.tsx --input "$INPUT"

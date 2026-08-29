@@ -207,6 +207,23 @@ describe.sequential("Docker package execution", () => {
   })
 })
 
+describe("Docker service spec", () => {
+  it("removes its own stale container before running and after stopping", async () => {
+    const docker = await DockerExec.resolveDocker()
+    if (!docker.ok) return
+    const spec = await DockerExec.serviceSpec({
+      label: "//:dockerService",
+      cwd: process.cwd(),
+      attrs: { image: "alpine", command: ["sleep", "60"] } as never
+    })
+    if ("error" in spec) throw new Error(spec.error)
+    const name = DockerExec.containerName("//:dockerService")
+    expect(spec.argv.slice(1, 5)).toEqual(["run", "--rm", "--name", name])
+    expect(spec.prepare).toEqual([[docker.path, "rm", "-f", name]])
+    expect(spec.cleanup).toEqual([[docker.path, "rm", "-f", name]])
+  })
+})
+
 describe("host refusals and Anvil secret resolution", () => {
   it("plans a typed Mise refusal from the declared config when mise is absent", async () => {
     const root = await workspace()

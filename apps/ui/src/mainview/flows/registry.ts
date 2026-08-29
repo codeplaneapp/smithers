@@ -15,6 +15,7 @@
  * dependency on Effect or the harness.
  */
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
+import type { RuntimeCapability } from "smithers-shared/AppBootstrap"
 
 /**
  * The UI-catalog concerns wrapped around one registered flow.
@@ -45,6 +46,8 @@ export interface FlowMetadata {
    * because a model must not enqueue work that fires after its turn ends.
    */
   readonly requires?: ReadonlyArray<string>
+  /** Host services this flow needs; unavailable flows do not register. */
+  readonly runtime?: ReadonlyArray<RuntimeCapability>
 }
 
 /**

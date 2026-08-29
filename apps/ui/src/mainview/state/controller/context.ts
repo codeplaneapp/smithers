@@ -5,6 +5,7 @@ import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
 import type { AppServices } from "../AppController"
 import type { AppStore } from "../AppStore"
 import type { ImpossibleAskClass } from "../Instructions"
+import type { RepositoryOpenRequest } from "./targets"
 import type { WorkflowRpcResult } from "./workflows"
 
 export interface PendingToolCall {
@@ -86,8 +87,8 @@ export interface ControllerContext {
   stopWorkflowPumps: () => void
   contextMessages: () => ReadonlyArray<AgentChatMessage>
   openRepoChooser: (preselect?: string) => Promise<string | void>
-  /** Open a repository by path on the local origin (controller/targets.ts binds it). */
-  openRepo: (path: string) => Promise<string | void>
+  /** Open a repository through a native grant or explicit headless path. */
+  openRepo: (request: RepositoryOpenRequest) => Promise<string | void>
   workflowRpc: (repo: string, method: string, params: unknown) => Promise<WorkflowRpcResult>
   commands: CommandRegistry
   withToast: <T>(

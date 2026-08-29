@@ -96,6 +96,7 @@
     "@effect/platform-node": "4.0.0-rc.108",
     "@effect/vitest": "4.0.0-rc.108",
     "@eslint/js": "9.39.1",
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
     "@types/node": "25.9.5",
     "@vitest/coverage-v8": "4.1.9",
     "dprint": "0.55.2",

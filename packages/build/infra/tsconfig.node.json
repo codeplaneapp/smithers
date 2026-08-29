@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "vitest/globals"
+    ]
+  },
+  "include": [
+    "BUILD.ts",
+    "alchemy.run.ts",
+    "scripts/**/*.ts",
+    "vitest.config.ts"
+  ]
+}

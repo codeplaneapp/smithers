@@ -6,7 +6,7 @@
   },
   "type": "module",
   "scripts": {
-    "check": "tsc --noEmit",
+    "check": "tsc -b tsconfig.json --force",
     "deploy": "node scripts/deploy.ts --stage prod",
     "deploy:dev": "node scripts/deploy.ts",
     "test": "vitest run"

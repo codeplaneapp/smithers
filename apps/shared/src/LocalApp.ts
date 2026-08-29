@@ -32,16 +32,147 @@ export const HarnessSchema = z.object({
 })
 export type Harness = z.infer<typeof HarnessSchema>
 
+/*
+ * The repo plugin manifest (apps/ui/docs/LOCAL-APP.md "Plugin manifest"):
+ * the parsed contents of a repository's `.smithers/UI.json`. Strict at every
+ * level — an additional root, group or entry key rejects the file — so a
+ * hand-edited manifest fails loudly at open instead of rendering a guess.
+ */
+export const REPO_PLUGIN_GROUP_KINDS = ["recipe", "lint", "workflow", "check"] as const
+
+/** A target label: `//pkg:name` (`//:name` for the root package). */
+export const TARGET_LABEL = /^\/\/[^\s:]*:[^\s:]+$/
+
+export const RepoPluginGroupSchema = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    kind: z.enum(REPO_PLUGIN_GROUP_KINDS)
+  })
+  .strict()
+export type RepoPluginGroup = z.infer<typeof RepoPluginGroupSchema>
+
+const entryShape = {
+  id: z.string(),
+  group: z.string(),
+  workspace: z.string(),
+  label: z.string().regex(TARGET_LABEL, "a label is `//pkg:name`"),
+  title: z.string(),
+  summary: z.string()
+}
+
+/*
+ * The wire entry: approval and agentic are required so the schema's input
+ * and output types agree (TanStack DB's persisted collections demand it).
+ * The manifest FILE may omit them — parseRepoPlugin applies the defaults.
+ */
+export const RepoPluginEntrySchema = z
+  .object({ ...entryShape, approval: z.boolean(), agentic: z.boolean() })
+  .strict()
+export type RepoPluginEntry = z.infer<typeof RepoPluginEntrySchema>
+
+/* The manifest file's entry: approval/agentic optional, defaulting to false. */
+const RepoPluginEntryFileSchema = z
+  .object({ ...entryShape, approval: z.boolean().optional(), agentic: z.boolean().optional() })
+  .strict()
+
+/** `path: message`, or just the message for a root-level issue. */
+const issueText = (issue: { readonly path: ReadonlyArray<PropertyKey>; readonly message: string }): string =>
+  issue.path.length === 0 ? issue.message : `${issue.path.join(".")}: ${issue.message}`
+
+const groupRefs = (
+  manifest: { readonly groups: ReadonlyArray<{ readonly id: string }>; readonly entries: ReadonlyArray<{ readonly id: string; readonly group: string }> },
+  ctx: z.RefinementCtx
+): void => {
+  const groups = new Set(manifest.groups.map((group) => group.id))
+  for (const entry of manifest.entries) {
+    if (!groups.has(entry.group)) {
+      ctx.addIssue({ code: "custom", message: `entry ${entry.id} names an undeclared group ${entry.group}` })
+    }
+  }
+}
+
+export const RepoPluginSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    name: z.string(),
+    title: z.string(),
+    summary: z.string(),
+    groups: z.array(RepoPluginGroupSchema),
+    entries: z.array(RepoPluginEntrySchema)
+  })
+  .strict()
+  .superRefine(groupRefs)
+export type RepoPlugin = z.infer<typeof RepoPluginSchema>
+
+const RepoPluginFileSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    name: z.string(),
+    title: z.string(),
+    summary: z.string(),
+    groups: z.array(RepoPluginGroupSchema),
+    entries: z.array(RepoPluginEntryFileSchema)
+  })
+  .strict()
+  .superRefine(groupRefs)
+
+/**
+ * The manifest validated against the repository's detected workspaces: every
+ * entry's workspace must be one of them. Omitted approval/agentic flags
+ * default to false. Shape failures and stray workspaces come back as issues
+ * — the caller turns them into repo warnings, never a 500.
+ */
+export const parseRepoPlugin = (
+  value: unknown,
+  workspaces: ReadonlyArray<string>
+): { readonly plugin: RepoPlugin } | { readonly issues: ReadonlyArray<string> } => {
+  const file = RepoPluginFileSchema.safeParse(value)
+  if (!file.success) {
+    return { issues: file.error.issues.map(issueText) }
+  }
+  const normalized = {
+    ...file.data,
+    entries: file.data.entries.map((entry) => ({ ...entry, approval: entry.approval ?? false, agentic: entry.agentic ?? false }))
+  }
+  const parsed = RepoPluginSchema.safeParse(normalized)
+  if (!parsed.success) {
+    return { issues: parsed.error.issues.map(issueText) }
+  }
+  const known = new Set(workspaces)
+  const stray = parsed.data.entries.filter((entry) => !known.has(entry.workspace))
+  if (stray.length > 0) {
+    return {
+      issues: stray.map((entry) => `entry ${entry.id} names an undetected workspace ${entry.workspace}`)
+    }
+  }
+  return { plugin: parsed.data }
+}
+
+export const RepoWorkspaceSchema = z.object({
+  /** Relative to the repo root; "." for the root itself. */
+  path: z.string(),
+  /** The last path segment, or the repo name for the root. */
+  title: z.string()
+})
+export type RepoWorkspace = z.infer<typeof RepoWorkspaceSchema>
+
 export const RepoSchema = z.object({
   id: z.string(),
   path: z.string(),
   name: z.string(),
   git: z.object({ branch: z.string().nullable(), remote: z.string().nullable() }).nullable(),
+  /** Loader and manifest problems surfaced at open; empty when the open was clean. */
+  warnings: z.array(z.string()),
+  /** The parsed `.smithers/UI.json`; absent when the repo declares none (or an invalid one). */
+  plugin: RepoPluginSchema.optional(),
   smithers: z.object({
     detected: z.boolean(),
     workspaceFile: z.string().nullable(),
     declarationFiles: z.array(z.string()),
-    reason: z.string()
+    reason: z.string(),
+    /** Root and child workspaces (LOCAL-APP.md "Repository detection"); detection is nonempty. */
+    workspaces: z.array(RepoWorkspaceSchema)
   })
 })
 export type Repo = z.infer<typeof RepoSchema>
@@ -63,13 +194,23 @@ export type PtySession = z.infer<typeof PtySessionSchema>
  */
 export const TARGET_KINDS = ["build", "test", "lint", "run", "docs"] as const
 
-export const TargetSchema = z.object({
+export const TargetDefinitionSchema = z.object({
   label: z.string(),
   target: z.string(),
   kinds: z.array(z.string()),
   package: z.string(),
-  name: z.string()
+  name: z.string(),
+  /** The detected workspace the loader ran in ("." for the repo root). */
+  workspace: z.string()
 })
+export type TargetDefinition = z.infer<typeof TargetDefinitionSchema>
+
+/*
+ * The browser receives an opaque id minted by the local repository authority.
+ * Optional keeps previously persisted target cards readable; a legacy row has
+ * no runnable capability until the repository is queried again.
+ */
+export const TargetSchema = TargetDefinitionSchema.extend({ id: z.string().min(1).optional() })
 export type Target = z.infer<typeof TargetSchema>
 
 /** `POST /api/targets/query` */

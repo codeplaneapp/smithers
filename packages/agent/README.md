@@ -72,6 +72,12 @@ never by assembling one from a model and a route it happened to hold.
 the QuickJS sandbox and an empty steering source — with browser-safe defaults. A
 host that accepts mid-run messages provides its own `Steering.layer` instead.
 
+`Agent.layerDefaultsWithVariant` is the same pair over the QuickJS build the
+host names, taken from `QuickJSSandbox.Variant`. A runtime that refuses to
+compile WebAssembly from bytes, such as Cloudflare's workerd, uses it and
+provides `QuickJSSandbox.layerVariant(variant)` beneath. See
+`packages/harness/README.md` for how a worker builds that variant.
+
 `flows` is an ordered list of `FlowBinding.Source`s; plugin `cellFlows` handlers
 run after them, in resolution order. The composed catalog is what the model is
 shown _and_ what the boundary resolves against, so the declaration digest a cell
@@ -217,6 +223,28 @@ const layer = Layer.mergeAll(
 )
 ```
 
+### Watching it run
+
+A step answers with one decoded value, which it only knows at the end. Provide
+`EventSink` to also receive each agent event as it happens: token deltas, the
+cell that was produced, the calls it made. The step still buffers every event
+for the decode, so the answer, the correction budget, and the failures are the
+same with a sink as without one.
+
+```ts
+import { EventSink } from "@smthrs/agent"
+import * as Effect from "effect/Effect"
+
+const watched = Layer.merge(
+  layer,
+  EventSink.layer({ emit: (event) => Effect.sync(() => render(event)) })
+)
+```
+
+`emit` runs inside the frame that produced the event, and that frame holds the
+engine's write transaction. A sink pushes onto a queue, writes to a socket, or
+resolves a deferred. A sink that waits on a durable write stalls the run.
+
 ## The engine port
 
 `@smthrs/harness` owns the _port_ — `sealStep`, `call`, `splice`, `record`,
@@ -291,23 +319,34 @@ const program = Effect.gen(function*() {
 - **`suspend`** is a real durable suspension (`Flow.suspend`). The execution
   parks and the engine can resume it, rather than the port failing.
 
+## Saving the script a run just wrote
+
+A run that solved something once solved it as a script: a few cells that read the right things, called the right boundaries, and printed an answer. `PromoteFlows` is how that script becomes a flow anyone can call again, and it is two ordinary flows rather than a new affordance.
+
+`flows/show-script` hands the model its own turn back — the source of every cell it executed, in order — together with the rules a saved flow has to follow and the file skeleton to fill in. It reads `@smthrs/harness/CellHistory`, the optional service the cell controller records into, so a host that keeps no history reports an empty script instead of failing. `flows/write-flow` takes the three files that come back — the flow, its end-to-end test, and the fixture that test replays — and writes them through a `FlowStore`. When a `Registry` is in context it is refreshed afterwards, which is what makes the saved flow appear in `ctx.flows` on the next frame rather than the next run.
+
+`FlowStore` is where the files land, and the host decides where that is: `FlowStore.layerFileSystem(root)` writes `<root>/flows/<id>/{flow.ts,flow.e2e.ts,fixtures/<id>.json}` through Effect's `FileSystem`, `FlowStore.layerMemory()` keeps them in a map, and `FlowStore.layerNoop()` refuses with a message the model can read. The store is also the last place an id is still text, so `FlowStore.validateId` runs before any path is built from it: `../escape` is refused as a bad id rather than caught as a surprising write. The rules and the skeleton are the host's too — `PromoteFlows.Options` replaces both for a host whose flows are laid out differently.
+
 ## Public API
 
 The root entry point exports these namespaces; each is also importable from `@smthrs/agent/<Module>`.
 
-| Module                     | Public exports                                                                                                                                                                                            | Description                                                                             |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `FlowEngineLike`           | `RouteResolver`, `routeResolver`, `ChildRunner`, `CallRunner`, `WorkspaceCallRunner`, `workspaceRelative`, `callBoundary`, `callMaterial`, `appendBatch`, `sandboxed`, `Options`, `make`, `layer`         | Executes the `@smthrs/harness` engine port on the durable engine from `@smthrs/engine`. |
-| `Agent`                    | `Options`, `Service`, `Agent`, `make`, `makeNoop`, `layer`, `layerNoop`, `layerDefaults`                                                                                                                  | Composes the durable cell loop and emits it as a `Stream<AgentEvent>`.                  |
-| `Seat`                     | `Seat`, `make`, `SeatUnresolved`, `modelIdOf`                                                                                                                                                             | Models the resolved seat a run streams from, and the failure of resolving one.          |
-| `SeatResolver`             | `Service`, `SeatResolver`, `make`, `makeNoop`, `layer`, `layerNoop`, `contextWindowTokensFor`                                                                                                             | Turns a declared seat string into a live model, and holds the credentials that takes.   |
-| `CellPlugin`               | `hooks`, `make`, `registry`, `flows`, `fromBindings`, `modelRequest`, `identity`                                                                                                                          | Hosts the cell registry, flow, and model-request hooks on the shared plugin kernel.     |
-| `StandardFlows`            | `filesystem`, `shell`, `memory`, `WaitInput`, `WaitOutput`, `waitFlow`, `clock`, `AskInput`, `AskOutput`, `askFlow`, `ApprovalUnavailable`, `Asker`, `approval`, `askerNoop`                              | Expresses the built-in host capabilities as ordinary executable flows.                  |
-| `AgentSession`             | `Options`, `trace`, `patterns`, `waitForRunning`, `waitForParked`, `preserveDriverInterrupt`, `registerDriver`, `settleDriverFailure`, `make`, `layer`                                                    | Runs one control-plane launch as one durable agent session.                             |
-| `ChildFlows`               | `SpawnInput`, `SpawnOutput`, `SendInput`, `SendOutput`, `AwaitInput`, `AwaitOutput`, `spawnFlow`, `sendFlow`, `awaitFlow`, `ChildError`, `Children`, `makeNoop`, `source`                                 | Expresses detached subagent lifecycle as ordinary executable flows.                     |
-| `WorkspaceSandbox`         | Every export of [`@smthrs/engine-store/WorkspaceSandbox`](../engine-store/README.md), including `Service`, `WorkspaceSandbox`, `make`, `layer`, `Host`, `makeHosted`, `makeMemory`, and `layerFileSystem` | Re-exports the canonical workspace transaction contract, unchanged.                     |
-| `InMemoryWorkspaceSandbox` | `InitialFiles`, `HostFile`, `InMemoryWorkspaceSandbox`, `make`                                                                                                                                            | Builds that contract's conformance sandbox over an in-memory host.                      |
-| `AgentAction`              | `Host`, `makeHost`, `layerHost`, `AgentFailure`, `PayloadSchemaOf`, `Options`, `AgentAction`, `make`                                                                                                      | Declares a model-backed step as an ordinary action and ships its implementation.        |
+| Module                     | Public exports                                                                                                                                                                                                   | Description                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `FlowEngineLike`           | `RouteResolver`, `routeResolver`, `ChildRunner`, `CallRunner`, `WorkspaceCallRunner`, `workspaceRelative`, `callBoundary`, `callMaterial`, `appendBatch`, `sandboxed`, `Options`, `make`, `layer`                | Executes the `@smthrs/harness` engine port on the durable engine from `@smthrs/engine`. |
+| `Agent`                    | `Options`, `Service`, `Agent`, `make`, `makeNoop`, `layer`, `layerNoop`, `layerDefaults`, `layerDefaultsWithVariant`                                                                                             | Composes the durable cell loop and emits it as a `Stream<AgentEvent>`.                  |
+| `Seat`                     | `Seat`, `make`, `SeatUnresolved`, `modelIdOf`                                                                                                                                                                    | Models the resolved seat a run streams from, and the failure of resolving one.          |
+| `SeatResolver`             | `Service`, `SeatResolver`, `make`, `makeNoop`, `layer`, `layerNoop`, `contextWindowTokensFor`                                                                                                                    | Turns a declared seat string into a live model, and holds the credentials that takes.   |
+| `CellPlugin`               | `hooks`, `make`, `registry`, `flows`, `fromBindings`, `modelRequest`, `identity`                                                                                                                                 | Hosts the cell registry, flow, and model-request hooks on the shared plugin kernel.     |
+| `StandardFlows`            | `filesystem`, `shell`, `memory`, `WaitInput`, `WaitOutput`, `waitFlow`, `clock`, `AskInput`, `AskOutput`, `askFlow`, `ApprovalUnavailable`, `Asker`, `approval`, `askerNoop`                                     | Expresses the built-in host capabilities as ordinary executable flows.                  |
+| `AgentSession`             | `Options`, `trace`, `patterns`, `waitForRunning`, `waitForParked`, `preserveDriverInterrupt`, `registerDriver`, `settleDriverFailure`, `make`, `layer`                                                           | Runs one control-plane launch as one durable agent session.                             |
+| `ChildFlows`               | `SpawnInput`, `SpawnOutput`, `SendInput`, `SendOutput`, `AwaitInput`, `AwaitOutput`, `spawnFlow`, `sendFlow`, `awaitFlow`, `ChildError`, `Children`, `makeNoop`, `source`                                        | Expresses detached subagent lifecycle as ordinary executable flows.                     |
+| `PromoteFlows`             | `bestPractices`, `flowTemplate`, `ShowScriptInput`, `ShowScriptOutput`, `WriteFlowInput`, `WriteFlowOutput`, `showScriptFlow`, `writeFlowFlow`, `Options`, `source`                                              | Turns the script the model just ran into a saved flow, as two ordinary flows.           |
+| `FlowStore`                | `FlowStoreErrorCode`, `FlowStoreError`, `idPattern`, `validateId`, `SavedFlow`, `WriteResult`, `Service`, `FlowStore`, `makeMemory`, `makeFileSystem`, `makeNoop`, `layerMemory`, `layerFileSystem`, `layerNoop` | Writes a saved flow's files and lists the flows a host already holds.                   |
+| `WorkspaceSandbox`         | Every export of [`@smthrs/engine-store/WorkspaceSandbox`](../engine-store/README.md), including `Service`, `WorkspaceSandbox`, `make`, `layer`, `Host`, `makeHosted`, `makeMemory`, and `layerFileSystem`        | Re-exports the canonical workspace transaction contract, unchanged.                     |
+| `InMemoryWorkspaceSandbox` | `InitialFiles`, `HostFile`, `InMemoryWorkspaceSandbox`, `make`                                                                                                                                                   | Builds that contract's conformance sandbox over an in-memory host.                      |
+| `AgentAction`              | `Host`, `makeHost`, `layerHost`, `AgentFailure`, `PayloadSchemaOf`, `Options`, `AgentAction`, `make`                                                                                                             | Declares a model-backed step as an ordinary action and ships its implementation.        |
+| `EventSink`                | `Service`, `EventSink`, `make`, `makeNoop`, `layer`, `layerNoop`                                                                                                                                                 | Hands a host each agent event while the step runs, instead of only after it decodes.    |
 
 `@smthrs/agent/package.json` is also exported. `internal/*` and nested `*/index` subpaths are not public.
 

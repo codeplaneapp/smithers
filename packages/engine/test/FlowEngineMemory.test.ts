@@ -776,11 +776,7 @@ describe("flow definition surface", () => {
     // UNDER the parent's rather than beside it: that is what answers the child
     // flow's requirement where the parent's implementation asks for it.
     const layer = Layer.mergeAll(
-      parentActionDeclaration.toLayer(() =>
-        child.execute({ n: 1 }, { executionId: "child-run-f" }).pipe(
-          Effect.catchTag("SchemaError", (error) => Effect.die(error))
-        )
-      ),
+      parentActionDeclaration.toLayer(() => Effect.orDie(child.execute({ n: 1 }, { executionId: "child-run-f" }))),
       Interpreter.layer(parent)
     ).pipe(
       Layer.provideMerge(Action.layerImplementations),

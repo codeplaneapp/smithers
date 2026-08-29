@@ -335,11 +335,13 @@ export const make = (
                 address.flowName,
                 address.executionId,
                 "deferred",
-                `${dependencies.journalSource}:wake:${JSON.stringify([
-                  address.flowName,
-                  address.executionId,
-                  address.deferredName
-                ])}`
+                `${dependencies.journalSource}:wake:${
+                  JSON.stringify([
+                    address.flowName,
+                    address.executionId,
+                    address.deferredName
+                  ])
+                }`
               ),
             { discard: true }
           )

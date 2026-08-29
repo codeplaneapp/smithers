@@ -59,11 +59,11 @@ argv, so the split is one level down.
 `rustup` pin. `rustup` reads `rust-toolchain.toml` and installs exactly what it
 pins — components and targets included — so the pin cannot drift from what runs.
 
-| Name     | Type     | Default                 | Description                                             |
+| Name     | Type     | Default                 | Description                                               |
 | -------- | -------- | ----------------------- | --------------------------------------------------------- |
 | `pin`    | `string` | `"rust-toolchain.toml"` | The file `rustup` reads. Declared, so it is key material. |
-| `rustup` | `string` | `"rustup"`              | The installer executable.                                |
-| `cargo`  | `string` | `"cargo"`               | The build-tool executable.                               |
+| `rustup` | `string` | `"rustup"`              | The installer executable.                                 |
+| `cargo`  | `string` | `"cargo"`               | The build-tool executable.                                |
 
 The declaration is inert data. `RustToolchain.install(toolchain)` renders
 `rustup toolchain install`, which is what [GithubCiGen](github-ci-gen.md)
@@ -72,11 +72,11 @@ renders the argv these targets run.
 
 ## Checks
 
-| Constructor                                                     | Renders                                                   |
-| --------------------------------------------------------------- | ----------------------------------------------------------- |
-| `Cargo.Fmt()`                                                   | `cargo fmt --check`                                       |
-| `Cargo.Clippy({ allTargets?, locked?, denyWarnings? })`         | `cargo clippy --all-targets --locked -- -D warnings`      |
-| `Cargo.Test({ locked? })`                                       | `cargo test --locked`                                     |
+| Constructor                                             | Renders                                              |
+| ------------------------------------------------------- | ---------------------------------------------------- |
+| `Cargo.Fmt()`                                           | `cargo fmt --check`                                  |
+| `Cargo.Clippy({ allTargets?, locked?, denyWarnings? })` | `cargo clippy --all-targets --locked -- -D warnings` |
+| `Cargo.Test({ locked? })`                               | `cargo test --locked`                                |
 
 Every clippy option defaults to `true`, which is the gate form: a declaration
 that wants less has to say so. `-D warnings` goes after `--`; passed before it,
@@ -86,13 +86,13 @@ be either would make every declaration a question about which one it is.
 
 ## Attributes
 
-| Name        | Type                            | Default  | Description                                                       |
-| ----------- | ------------------------------- | -------- | ------------------------------------------------------------------- |
-| `toolchain` | `RustToolchain.RustToolchain`   | required | The declared toolchain, and therefore the pin the gate is keyed on. |
-| `check`     | `LintCheck` / `TestCheck`       | required | Which gate this target runs.                                      |
-| `srcs`      | `Array<Input.Declared>`         | required | Crate sources, manifests, and the lockfile.                       |
-| `deps`      | `Array<Target.Target>`          | required | Dependency targets.                                               |
-| `cwd`       | `string`                        | `"."`    | Where cargo runs. Defaults to the root that owns `Cargo.lock`.    |
+| Name        | Type                          | Default  | Description                                                         |
+| ----------- | ----------------------------- | -------- | ------------------------------------------------------------------- |
+| `toolchain` | `RustToolchain.RustToolchain` | required | The declared toolchain, and therefore the pin the gate is keyed on. |
+| `check`     | `LintCheck` / `TestCheck`     | required | Which gate this target runs.                                        |
+| `srcs`      | `Array<Input.Declared>`       | required | Crate sources, manifests, and the lockfile.                         |
+| `deps`      | `Array<Target.Target>`        | required | Dependency targets.                                                 |
+| `cwd`       | `string`                      | `"."`    | Where cargo runs. Defaults to the root that owns `Cargo.lock`.      |
 
 ## Outputs
 
@@ -100,12 +100,12 @@ None. A gate's product is its exit code.
 
 ## Channels and status
 
-|          |                                                                             |
-| -------- | ----------------------------------------------------------------------------- |
-| Kinds    | `lint` (CargoLint), `test` (CargoTest)                                      |
-| Success  | `Exec.Result`                                                               |
-| Error    | `Exec.ExecError`                                                            |
-| Executes | Yes, on a host with the declared toolchain installed.                       |
+|          |                                                       |
+| -------- | ----------------------------------------------------- |
+| Kinds    | `lint` (CargoLint), `test` (CargoTest)                |
+| Success  | `Exec.Result`                                         |
+| Error    | `Exec.ExecError`                                      |
+| Executes | Yes, on a host with the declared toolchain installed. |
 
 ## See also
 

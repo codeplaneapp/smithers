@@ -45,6 +45,19 @@ export interface Discovery {
   readonly packageFiles: ReadonlyArray<string>
   /** The cache directory the walk pruned. */
   readonly cacheDirectory: string
+  /** Declared opaque child repositories, sorted by name. */
+  readonly repositories: ReadonlyArray<RepositoryBoundary>
+}
+
+/**
+ * One named opaque child-repository boundary.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface RepositoryBoundary {
+  readonly name: string
+  readonly path: string
 }
 
 /**
@@ -109,6 +122,7 @@ interface Walk {
   readonly workspaceFile: string
   readonly signal: AbortSignal | undefined
   readonly found: Array<string>
+  readonly repositories: ReadonlySet<string>
   directories: number
   entries: number
 }
@@ -169,10 +183,29 @@ const walkDirectory = async (walk: Walk, relative: string): Promise<void> => {
   // inventory: `walk.found` is sorted by the caller, so discovery order never
   // escapes this function.
   const directories: Array<string> = []
+  const nestedMarker = entries.find((child) =>
+    child.name === "WORKSPACE.ts" && !child.isDirectory() &&
+    (relative !== "" && (relative !== ".smithers" || NodePath.posix.dirname(relative) !== "."))
+  )
+  if (nestedMarker !== undefined) {
+    const marker = relative === "" ? nestedMarker.name : `${relative}/${nestedMarker.name}`
+    const repositoryPath = relative.endsWith("/.smithers")
+      ? NodePath.posix.dirname(relative)
+      : relative
+    const suggested = (NodePath.posix.basename(repositoryPath) || "repo").replace(/[^A-Za-z0-9._-]/g, "-")
+    throw new PackageError(
+      "nested_workspace_undeclared",
+      `nested workspace ${marker} is not declared; add repos: { ${suggested}: S.LocalRepository(${
+        JSON.stringify(repositoryPath)
+      }) } to the root Workspace declaration`,
+      { path: marker }
+    )
+  }
   for (const child of entries) {
     walk.signal?.throwIfAborted()
     if (child.name === ".git" || child.name === "node_modules") continue
     const childRelative = relative === "" ? child.name : `${relative}/${child.name}`
+    if (walk.repositories.has(childRelative)) continue
     if (pruned(walk, childRelative)) continue
     if (child.name === "PACKAGE.ts" && !child.isDirectory()) {
       if (child.isSymbolicLink()) {
@@ -193,7 +226,19 @@ const walkDirectory = async (walk: Walk, relative: string): Promise<void> => {
     if (child.isDirectory()) directories.push(childRelative)
   }
   await Promise.all(directories.map(async (childRelative) => {
-    if (!(await nestedWorkspace(walk, childRelative))) await walkDirectory(walk, childRelative)
+    if (walk.repositories.has(childRelative)) return
+    if (await nestedWorkspace(walk, childRelative)) {
+      const marker = `${childRelative}/WORKSPACE.ts`
+      const nested = await workspaceFileOf(NodePath.join(walk.root, childRelative))
+      throw new PackageError(
+        "nested_workspace_undeclared",
+        `nested workspace ${nested === undefined ? marker : `${childRelative}/${nested}`} is not declared; ` +
+          `add repos: { ${NodePath.posix.basename(childRelative).replace(/[^A-Za-z0-9._-]/g, "-")}: ` +
+          `S.LocalRepository(${JSON.stringify(childRelative)}) } to the root Workspace declaration`,
+        { path: nested === undefined ? marker : `${childRelative}/${nested}` }
+      )
+    }
+    await walkDirectory(walk, childRelative)
   }))
 }
 
@@ -218,11 +263,15 @@ export const discover = async (
   root: string,
   options: {
     readonly cacheDirectory?: string | undefined
+    readonly repositories?: Readonly<Record<string, { readonly path: string }>> | undefined
     readonly signal?: AbortSignal | undefined
   } = {}
 ): Promise<Discovery> => {
   const canonical = await SafeFs.canonicalRoot(root)
   const cacheDirectory = posix(options.cacheDirectory ?? ".flows")
+  const repositories = Object.entries(options.repositories ?? {})
+    .map(([name, repository]) => ({ name, path: repository.path }))
+    .sort((left, right) => byCodeUnit(left.name, right.name))
   let workspaceFile: string | undefined
   for (const candidate of [".smithers/WORKSPACE.ts", "WORKSPACE.ts"]) {
     let present: boolean
@@ -246,12 +295,38 @@ export const discover = async (
       { path: posix(NodePath.relative(process.cwd(), canonical)) || "." }
     )
   }
+  for (const repository of repositories) {
+    const absolute = NodePath.join(canonical, ...repository.path.split("/"))
+    let directory = false
+    try {
+      directory = (await Fs.stat(absolute)).isDirectory()
+    } catch {
+      // Report the stable repository diagnostic below.
+    }
+    if (!directory) {
+      throw new PackageError(
+        "local_repository_invalid",
+        `workspace repo ${JSON.stringify(repository.name)} path is not a directory: ${repository.path}`,
+        { path: repository.path }
+      )
+    }
+    const marker = await workspaceFileOf(absolute)
+    if (marker === undefined) {
+      throw new PackageError(
+        "local_repository_invalid",
+        `workspace repo ${JSON.stringify(repository.name)} at ${repository.path} has no .smithers/WORKSPACE.ts ` +
+          "and no WORKSPACE.ts",
+        { path: repository.path }
+      )
+    }
+  }
   const walk: Walk = {
     root: canonical,
     cacheDirectory,
     workspaceFile,
     signal: options.signal,
     found: [],
+    repositories: new Set(repositories.map((repository) => repository.path)),
     directories: 0,
     entries: 0
   }
@@ -280,5 +355,5 @@ export const discover = async (
     }
     folded.set(key, file)
   }
-  return { root: canonical, workspaceFile, packageFiles, cacheDirectory }
+  return { root: canonical, workspaceFile, packageFiles, cacheDirectory, repositories }
 }

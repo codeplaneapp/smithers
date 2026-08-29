@@ -43,7 +43,14 @@ const repo = (id: string): Repo => ({
   path: `/tmp/${id}`,
   name: id,
   git: { branch: "main", remote: null },
-  smithers: { detected: true, workspaceFile: null, declarationFiles: ["PACKAGE.ts"], reason: "declared" }
+  warnings: [],
+  smithers: {
+    detected: true,
+    workspaceFile: null,
+    declarationFiles: ["PACKAGE.ts"],
+    reason: "declared",
+    workspaces: [{ path: ".", title: id }]
+  }
 })
 
 /** The whole backend as one answer: every target-graph route replies with it. */

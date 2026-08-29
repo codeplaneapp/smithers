@@ -475,3 +475,23 @@ export const layerDefaults: Layer.Layer<Sandbox.Sandbox | Steering.Source, Sandb
   QuickJSSandbox.layer,
   Steering.layerNoop()
 )
+
+/**
+ * {@link layerDefaults} over the QuickJS build the host names.
+ *
+ * The steering default is unchanged; only the sandbox differs. A host whose
+ * runtime refuses to compile WebAssembly from bytes, such as Cloudflare's
+ * workerd, provides `QuickJSSandbox.layerVariant(variant)` beneath this and
+ * builds that variant from a `.wasm` module import.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerDefaultsWithVariant: Layer.Layer<
+  Sandbox.Sandbox | Steering.Source,
+  Sandbox.SandboxError,
+  QuickJSSandbox.Variant
+> = Layer.merge(
+  QuickJSSandbox.layerWithVariant,
+  Steering.layerNoop()
+)

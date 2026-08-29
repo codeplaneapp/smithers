@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { RepoSchema, TargetSchema } from "./LocalApp"
+import { RepoPluginSchema, RepoSchema, TargetSchema } from "./LocalApp"
 import {
   AffectedCardPayloadSchema,
   CiMatrixCardPayloadSchema,
@@ -453,8 +453,9 @@ export const CardSchema = z.discriminatedUnion("kind", [
   }),
   /*
    * The local app's repository cards (apps/ui/docs/LOCAL-APP.md "Cards"):
-   * the opened repository, its loaded targets, the agent-authored (or
-   * template) HTML panel, and one streamed target run.
+   * the opened repository, its trusted typed target list, and one streamed
+   * target run. The legacy html variant remains decodable for existing rows,
+   * but the product no longer creates executable model-authored panels.
    */
   z.object({
     ...cardBaseShape,
@@ -465,7 +466,7 @@ export const CardSchema = z.discriminatedUnion("kind", [
       status: z.enum(["pending", "done", "failed"]),
       targets: z.array(TargetSchema),
       warnings: z.array(z.string()),
-      /** The row the panel's `open` bridge message pointed at; the list highlights it. */
+      /** The row an explicit target.open flow pointed at; the list highlights it. */
       highlighted: z.string().optional()
     })
   }),
@@ -506,7 +507,17 @@ export const CardSchema = z.discriminatedUnion("kind", [
   z.object({ ...cardBaseShape, kind: z.literal("run-timeline"), payload: RunTimelineCardPayloadSchema }),
   z.object({ ...cardBaseShape, kind: z.literal("run-history"), payload: RunHistoryCardPayloadSchema }),
   z.object({ ...cardBaseShape, kind: z.literal("affected"), payload: AffectedCardPayloadSchema }),
-  z.object({ ...cardBaseShape, kind: z.literal("ci-matrix"), payload: CiMatrixCardPayloadSchema })
+  z.object({ ...cardBaseShape, kind: z.literal("ci-matrix"), payload: CiMatrixCardPayloadSchema }),
+  /*
+   * The repo plugin card (LOCAL-APP.md "Plugin manifest"): the repository's
+   * parsed `.smithers/UI.json`, upserted ahead of the targets card when the
+   * manifest is valid. Each entry's Run rides the existing `target.run` flow.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("repo-plugin"),
+    payload: z.object({ repoId: z.string(), manifest: RepoPluginSchema })
+  })
 ])
 export type Card = z.infer<typeof CardSchema>
 

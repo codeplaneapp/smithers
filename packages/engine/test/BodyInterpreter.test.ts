@@ -8,6 +8,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Action, Flow, FlowRuntime, Interpreter, StepIdentity } from "@smthrs/flow"
 import { Node, Planned } from "@smthrs/plan"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Schema } from "effect"
+import type * as Crypto from "effect/Crypto"
 import { FlowEngine } from "../src/index.ts"
 import { withCrypto } from "./Crypto.ts"
 
@@ -160,7 +161,7 @@ describe("bodied flow on the memory engine", () => {
           yield* Effect.yieldNow
           yield* Deferred.succeed(release, undefined)
           return [yield* Fiber.join(first), yield* Fiber.join(duplicate)]
-        }).pipe(Effect.provide(layer)) as Effect.Effect<ReadonlyArray<unknown>, unknown>)
+        }).pipe(Effect.provide(layer)) as Effect.Effect<ReadonlyArray<unknown>, unknown, Crypto.Crypto>)
       }))
 
       expect(results).toEqual([43, 43])

@@ -333,14 +333,16 @@ describe("concurrent capture", () => {
     await write("tree/nested/deeper/c.txt", "c")
     for (let index = 0; index < 40; index += 1) await write(`tree/nested/bulk-${index}.txt`, `bulk ${index}`)
     const measured = await measureOutput(root, ".", "tree")
-    expect(measured.contentDigest).toBe(await expectedDigest(NodePath.join(root, "tree"), [
-      ["file", "a.txt"],
-      ["directory", "nested"],
-      ["file", "nested/b.txt"],
-      ["directory", "nested/deeper"],
-      ["file", "nested/deeper/c.txt"],
-      ...Array.from({ length: 40 }, (_, index) => ["file", `nested/bulk-${index}.txt`] as const)
-    ]))
+    expect(measured.contentDigest).toBe(
+      await expectedDigest(NodePath.join(root, "tree"), [
+        ["file", "a.txt"],
+        ["directory", "nested"],
+        ["file", "nested/b.txt"],
+        ["directory", "nested/deeper"],
+        ["file", "nested/deeper/c.txt"],
+        ...Array.from({ length: 40 }, (_, index) => ["file", `nested/bulk-${index}.txt`] as const)
+      ])
+    )
   })
 
   it("is deterministic across repeated captures of one tree", async () => {

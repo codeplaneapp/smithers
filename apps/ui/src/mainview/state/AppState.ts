@@ -30,6 +30,47 @@ export const MessageSchema = z.object({
 })
 export type Message = z.infer<typeof MessageSchema>
 
+export const DEFAULT_WORKSPACE_ID = "workspace-main"
+export const DEFAULT_BRANCH_ID = "branch-main"
+
+export const rootFrameId = (branchId: string): string => `frame-root:${branchId}`
+export const cardFrameId = (branchId: string, cardId: string): string => `frame-card:${branchId}:${cardId}`
+
+export const WorkspaceSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  createdAt: z.number(),
+  revision: z.number().int().nonnegative()
+})
+export type Workspace = z.infer<typeof WorkspaceSchema>
+
+export const BranchSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  title: z.string(),
+  parentBranchId: z.string().nullable(),
+  forkedFromFrameId: z.string().nullable(),
+  forkedAtRevision: z.number().int().nonnegative().nullable(),
+  createdAt: z.number(),
+  revision: z.number().int().nonnegative()
+})
+export type Branch = z.infer<typeof BranchSchema>
+
+export const FrameSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  branchId: z.string(),
+  kind: z.enum(["root", "card"]),
+  parentFrameId: z.string().nullable(),
+  cardId: z.string().nullable(),
+  presentation: z.enum(["embedded", "maximized"]),
+  stateRevision: z.number().int().nonnegative(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  revision: z.number().int().nonnegative()
+})
+export type Frame = z.infer<typeof FrameSchema>
+
 /*
  * The shared toast stack (the 300ms law, 2026-08-09): background work that has
  * not settled within 300ms states what is running on ONE store-backed corner
@@ -118,6 +159,10 @@ export const SessionSchema = z.object({
   selectedWorldDocumentId: z.string().nullable(),
   /** The card currently maximized (a presentation transition; null = embedded). */
   maximizedCardId: z.string().nullable(),
+  /** Durable navigation scope; optional only for rows written before frames existed. */
+  activeWorkspaceId: z.string().optional(),
+  activeBranchId: z.string().optional(),
+  activeFrameId: z.string().optional(),
   /** The admin dev-tools panel (§2b/§2d) — only ever true for admin sessions. */
   devtoolsOpen: z.boolean(),
   /** The composer surfaces menu (the /surfaces command's open state). */
@@ -139,6 +184,8 @@ export const SessionSchema = z.object({
    * `=== true` / `!== true` for that reason.
    */
   connectMenuOpen: z.boolean().optional(),
+  /** Admin reset confirmation; optional for sessions persisted before this field. */
+  resetConfirmOpen: z.boolean().optional(),
   /*
    * The note `/world.delete` is asking about (§10.6, §28.4). Deleting is not
    * undoable, so the flow ASKS and the answer is an act of its own — and the
@@ -147,6 +194,8 @@ export const SessionSchema = z.object({
    * sessions persisted before the field parse without a schema reset.
    */
   pendingWorldDeleteId: z.string().nullable().optional(),
+  /** Repository whose disconnect confirmation is open. */
+  pendingConnectorRemovalId: z.string().nullable().optional(),
   /*
    * The one deferred command (requirement axis): a user-invoked command whose
    * requirement (e.g. signed-in) was unmet parks HERE while the fulfilling
@@ -428,6 +477,7 @@ export type AppTransition =
     actor: "system"
   }
   | { type: "conversation.reset"; actor: "user" }
+  | { type: "conversation.reset.asked"; actor: "user"; open: boolean }
   | {
     /*
      * /clear (Wave 10, §2h): the sweep already ran and kept what
@@ -447,6 +497,20 @@ export type AppTransition =
     id: string
   }
   | { type: "card.minimized"; actor: "user" }
+  | {
+    type: "frame.navigated"
+    actor: "user" | "system"
+    workspaceId: string
+    branchId: string
+    frameId: string
+  }
+  | {
+    type: "frame.forked"
+    actor: "user"
+    branch: Branch
+    rootFrame: Frame
+    selectedFrame: Frame
+  }
   | {
     /* The admin dev-tools panel opens/closes (registered only for admins). */
     type: "devtools.toggled"
@@ -581,6 +645,7 @@ export type AppTransition =
     id: string
     access: RepositoryAccess
   }
+  | { type: "connector.removal.asked"; actor: "user"; id: string | null }
   | {
     type: "connector.removed"
     actor: "user"
@@ -733,10 +798,15 @@ export const initialSession = (theme: Session["theme"]): Session => ({
   surface: "chat",
   selectedWorldDocumentId: "world-home",
   maximizedCardId: null,
+  activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+  activeBranchId: DEFAULT_BRANCH_ID,
+  activeFrameId: rootFrameId(DEFAULT_BRANCH_ID),
   devtoolsOpen: false,
   surfacesMenuOpen: false,
   connectMenuOpen: false,
+  resetConfirmOpen: false,
   pendingWorldDeleteId: null,
+  pendingConnectorRemovalId: null,
   activeTabId: MAIN_TAB_ID,
   tabMenuOpen: false,
   pendingTabCloseId: null,

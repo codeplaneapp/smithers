@@ -11,6 +11,7 @@ export default defineConfig({
     { text: "Architecture", link: "/architecture" },
     { text: "Data structures", link: "/data-structures" },
     { text: "Package structure", link: "/package-structure" },
+    { text: "Building an app", link: "/create-app" },
     {
       text: "Examples",
       items: [

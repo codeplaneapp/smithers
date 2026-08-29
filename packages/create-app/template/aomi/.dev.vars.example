@@ -1,0 +1,14 @@
+# Copy to .dev.vars for local development. .dev.vars is gitignored.
+# In production these are Cloudflare secrets, not vars:
+#   wrangler secret put ANTHROPIC_API_KEY --config worker/wrangler.jsonc
+#   wrangler secret put TEVM_FORK_RPC_URL --config worker/wrangler.jsonc
+
+# The agent seat's credential. AGENT.ts declares anthropic:claude-sonnet-4-5.
+ANTHROPIC_API_KEY=
+
+# JSON-RPC the Tevm fork reads chain state from. Any archive-capable endpoint.
+TEVM_FORK_RPC_URL=
+
+# 1 streams the mock turn (milestone 1). 0 asks for the real Agent.run path,
+# which does not run under workerd yet — see worker/README.md.
+APP_MOCK_TURN=1

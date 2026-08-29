@@ -134,8 +134,10 @@ export const connect = (
           }
         })
       ),
-      Effect.mapError(() => closed(options.server, "stdout closed")),
-      Effect.tapError(rejectPending),
+      // A clean EOF is still a closed MCP connection. Node reports an
+      // ordinary child exit by ending stdout successfully, so only handling
+      // stream failures would leave an in-flight request waiting forever.
+      Effect.ensuring(rejectPending(closed(options.server, "stdout closed"))),
       Effect.ignore,
       Effect.forkScoped
     )

@@ -1,4 +1,5 @@
 import { HarnessesResponseSchema, PtyCreateResponseSchema, ReposResponseSchema } from "smithers-shared/LocalApp"
+import { hasCapability } from "smithers-shared/AppBootstrap"
 import { MAIN_TAB_ID } from "../AppState"
 import type { Repo, TabRow } from "../AppState"
 import type { ControllerContext } from "./context"
@@ -63,6 +64,10 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
   const activeRepo = (): Repo | undefined => [...collections.repos.values()][0]
 
   const cwd = (): string => activeRepo()?.path ?? HOME_CWD
+  const sessionRepository = (): { readonly repoId: string } | Record<never, never> => {
+    const repo = activeRepo()
+    return repo === undefined ? {} : { repoId: repo.id }
+  }
 
   const createSession = async (body: Record<string, unknown>): Promise<string> => {
     const response = await ctx.boundedFetch(`${baseUrl}/api/pty`, {
@@ -80,7 +85,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
     let sessionId: string
     const directory = cwd()
     try {
-      sessionId = await createSession({ kind: "terminal", cwd: directory, cols: DEFAULT_COLS, rows: DEFAULT_ROWS })
+      sessionId = await createSession({ kind: "terminal", ...sessionRepository(), cols: DEFAULT_COLS, rows: DEFAULT_ROWS })
     } catch (error) {
       return `Could not start a terminal: ${error instanceof Error ? error.message : String(error)}`
     }
@@ -102,7 +107,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
     try {
       sessionId = await createSession({
         kind: "harness",
-        cwd: directory,
+        ...sessionRepository(),
         cols: DEFAULT_COLS,
         rows: DEFAULT_ROWS,
         harnessId: harness.id
@@ -227,23 +232,40 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
 
   const openLocalRepo: TabsController["openLocalRepo"] = async () => {
     if (ctx.repositories.available) {
-      // The native shell: the existing folder-dialog flow (connector.add),
-      // then the picked root opens on the local origin like a typed path.
-      const started = Date.now()
-      const outcome = await ctx.commands.run("connector.add", "read")
-      if (outcome.status === "failed") return outcome.error
-      const picked = [...collections.connectors.values()]
-        .filter((connector) => connector.updatedAt >= started)
-        .sort((left, right) => right.updatedAt - left.updatedAt)[0]
-      if (picked === undefined) return
-      return ctx.openRepo(picked.root)
+      store.dispatch({ type: "connector.local.requested", actor: "user", access: "read-write" })
+      try {
+        const result = await ctx.repositories.pickLocalRepository("read-write")
+        if (result.status === "cancelled") {
+          store.dispatch({ type: "connector.local.cancelled", actor: "user" })
+          return
+        }
+        if (result.status === "error") {
+          store.dispatch({ type: "connector.local.failed", actor: "system", message: result.message })
+          return result.message
+        }
+        const { authorizationId, ...repository } = result.repository
+        store.dispatch({
+          type: "connector.local.connected",
+          actor: "system",
+          access: "read-write",
+          repository
+        })
+        return ctx.openRepo({ authorizationId, displayName: repository.name })
+      } catch {
+        const message = "The native repository picker stopped responding. Try again."
+        store.dispatch({ type: "connector.local.failed", actor: "system", message })
+        return message
+      }
+    }
+    if (ctx.services.bootstrap === undefined || !hasCapability(ctx.services.bootstrap, "local.repository-path-entry")) {
+      return "Opening a repository needs the Smithers native app."
     }
     if (typeof window === "undefined" || typeof window.prompt !== "function") {
       return "Opening a repository needs the Smithers app."
     }
     const path = (window.prompt("Repository path") ?? "").trim()
     if (path === "") return
-    return ctx.openRepo(path)
+    return ctx.openRepo({ path })
   }
 
   const notePtyExit: TabsController["notePtyExit"] = (sessionId, code) => {

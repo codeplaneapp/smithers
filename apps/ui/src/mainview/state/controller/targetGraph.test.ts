@@ -49,7 +49,14 @@ const REPO: Repo = {
   path: "/tmp/force",
   name: "force",
   git: { branch: "main", remote: null },
-  smithers: { detected: true, workspaceFile: null, declarationFiles: ["PACKAGE.ts"], reason: "declared" }
+  warnings: [],
+  smithers: {
+    detected: true,
+    workspaceFile: null,
+    declarationFiles: ["PACKAGE.ts"],
+    reason: "declared",
+    workspaces: [{ path: ".", title: "force" }]
+  }
 }
 
 const GRAPH = fixtureTargetGraph("force")

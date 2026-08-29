@@ -1,7 +1,6 @@
 import { Alert, AlertDescription, AlertTitle, Badge, Button, Separator } from "@smthrs/ui"
 import { useLiveQuery } from "@tanstack/react-db"
 import { FolderGit2, GitPullRequest, HardDrive, Plug, Server, Trash2 } from "lucide-react"
-import { useState } from "react"
 import type { KeyboardEvent } from "react"
 import { useController } from "./ControllerContext"
 import { ConfirmDialog, SurfaceHeader } from "./SurfaceChrome"
@@ -21,13 +20,32 @@ export function ConnectorsSurface() {
   const { data: connectorRows } = useLiveQuery(collections.connectors)
   const { data: operationRows } = useLiveQuery(collections.connectorOperations)
   const { data: identityRows } = useLiveQuery(collections.identitySessions)
+  const { data: sessionRows } = useLiveQuery((q) =>
+    q.from({ session: collections.sessions }).select(({ session }) => ({
+      id: session.id,
+      pendingConnectorRemovalId: session.pendingConnectorRemovalId
+    }))
+  )
   const connectors = [...connectorRows].sort((left, right) => left.name.localeCompare(right.name))
   const operation = operationRows.find((candidate) => candidate.id === "connector-operation") ??
     collections.connectorOperations.get("connector-operation")
   const selecting = operation?.phase === "selecting-local-repository"
   const identity = identityRows[0]
   const signedIn = identity?.state === "signed-in"
-  const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null)
+  const githubAvailable = controller.commands.find(signedIn ? "auth.sign-out" : "auth.sign-in") !== undefined
+  const localAvailable = controller.nativeRepositoriesAvailable &&
+    controller.commands.find("connector.add") !== undefined
+  const cloudAvailable = controller.commands.find("repos.import") !== undefined
+  const emptyGuidance = cloudAvailable
+    ? signedIn
+      ? "Import a GitHub repository into Smithers Cloud and it appears here."
+      : "Connecting GitHub above is the first step; imported repositories appear here."
+    : localAvailable
+    ? "Choose Local repository above to connect work from this machine."
+    : controller.commands.find("repo.open") !== undefined
+    ? "Use Open repository in the top bar to inspect work on this machine."
+    : "No repository service is available in this runtime."
+  const pendingRemovalId = sessionRows[0]?.pendingConnectorRemovalId ?? null
   const pendingRemoval = connectors.find((candidate) => candidate.id === pendingRemovalId)
 
   interface StoreRow {
@@ -47,7 +65,7 @@ export function ConnectorsSurface() {
   }
 
   const rows: ReadonlyArray<StoreRow> = [
-    {
+    ...(githubAvailable ? [{
       key: "github",
       icon: "github",
       name: "GitHub",
@@ -55,8 +73,8 @@ export function ConnectorsSurface() {
       action: signedIn
         ? { kind: "badge", label: `Connected ✓ as ${identity?.login ?? "you"}`, variant: "success" }
         : { kind: "button", label: "Connect", flow: "auth.sign-in" }
-    },
-    ...(controller.nativeRepositoriesAvailable
+    } satisfies StoreRow] : []),
+    ...(localAvailable
       ? [
         {
           key: "local",
@@ -73,11 +91,10 @@ export function ConnectorsSurface() {
         } satisfies StoreRow
       ]
       : []),
-    {
+    ...(cloudAvailable ? [{
       /*
-       * No longer "coming soon": repos.import mirrors a GitHub repository
-       * into Smithers Cloud (the platform proxy's import job), tracked by
-       * the repo-import card.
+       * repos.import mirrors a GitHub repository into Smithers Cloud and is
+       * tracked by the repo-import card.
        *
        * §1.1: importing needs a session, and pressing it signed out only
        * defers into the GitHub row above. Offering it as available work
@@ -91,7 +108,7 @@ export function ConnectorsSurface() {
       action: signedIn
         ? { kind: "button", label: "Import", flow: "repos.import" }
         : { kind: "badge", label: "Needs GitHub", variant: "outline" }
-    }
+    } satisfies StoreRow] : [])
   ]
 
   const rowIcon = (icon: StoreRow["icon"]) =>
@@ -205,12 +222,8 @@ export function ConnectorsSurface() {
                 <FolderGit2 size={20} />
                 <div>
                   <strong>No repositories connected</strong>
-                  <span>
-                    {signedIn
-                      ? "Import a GitHub repository into Smithers Cloud and it appears here."
-                      : "Connecting GitHub above is the first step; imported repositories appear here."}
-                  </span>
-                  {signedIn ?
+                  <span>{emptyGuidance}</span>
+                  {signedIn && cloudAvailable ?
                     (
                       <Button
                         size="sm"
@@ -247,6 +260,7 @@ export function ConnectorsSurface() {
                           <Button
                             variant="ghost"
                             size="sm"
+                            data-flow="connector.downgrade"
                             onClick={() => controller.runCommandArgs("connector.downgrade", connector.id)}
                           >
                             Make read-only
@@ -258,7 +272,8 @@ export function ConnectorsSurface() {
                         size="icon"
                         aria-label={`Remove ${connector.name}`}
                         title={`Remove ${connector.name}`}
-                        onClick={() => setPendingRemovalId(connector.id)}
+                        data-flow="connector.remove.ask"
+                        onClick={() => controller.runCommandArgs("connector.remove.ask", connector.id)}
                       >
                         <Trash2 size={14} />
                       </Button>
@@ -278,9 +293,8 @@ export function ConnectorsSurface() {
         destructive
         onConfirm={() => {
           if (pendingRemoval !== undefined) controller.runCommandArgs("connector.remove", pendingRemoval.id)
-          setPendingRemovalId(null)
         }}
-        onCancel={() => setPendingRemovalId(null)}
+        onCancel={() => controller.runCommand("connector.remove.cancel")}
       />
     </section>
   )

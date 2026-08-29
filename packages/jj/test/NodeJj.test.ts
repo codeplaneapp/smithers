@@ -126,7 +126,9 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
       const lane = join(repository, "..", `empty-revision-${process.pid}`)
       const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.workspaceAdd("empty", lane, ""))))
 
-      expect(error.code).toBe("invalid_ref")
+      // The union member that carries `code` is JjFailure; a PlatformError
+      // here would be a spawn, which this case asserts never happens.
+      expect(error).toHaveProperty("code", "invalid_ref")
       expect(error.message).toContain("jj workspaceAdd")
       expect(existsSync(lane)).toBe(false)
     }))

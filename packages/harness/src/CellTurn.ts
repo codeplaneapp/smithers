@@ -24,6 +24,7 @@ import { Clock, Effect, Option, Queue, Result, Schema, Stream } from "effect"
 import * as AgentEvent from "./AgentEvent.ts"
 import * as CallLedger from "./CallLedger.ts"
 import * as Cell from "./Cell.ts"
+import * as CellHistory from "./CellHistory.ts"
 import * as CellValidation from "./CellValidation.ts"
 import * as Compaction from "./Compaction.ts"
 import * as ContextWindow from "./ContextWindow.ts"
@@ -2032,6 +2033,15 @@ const frame = (
     // run holds, and forgetting it would leak a stored tree nothing can name.
     const minted: Array<string> = []
     const mint = minter(state, cell, engine, minted, emit)
+    // The script the model may promote into a saved flow. It is recorded before
+    // the realm evaluates the cell, so a cell that raises is still part of what
+    // the run ran. A host that offers no way to save a flow binds no history and
+    // nothing is kept.
+    const history = yield* Effect.serviceOption(CellHistory.CellHistory)
+    yield* Option.match(history, {
+      onNone: () => Effect.void,
+      onSome: (recorder) => recorder.record(cell.text)
+    })
     const evaluated = yield* realm.evaluate({ cell, frame: state.frame, call: observing, mint })
     const outcome = evaluated.outcome
     const bindings = evaluated.bindings

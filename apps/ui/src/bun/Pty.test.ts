@@ -96,7 +96,7 @@ describe("sessions", () => {
     const created = await m.create({ kind: "terminal", cwd: "~", cols: 80, rows: 24 })
     if (created.status !== "ok") throw new Error(created.message)
     const { sessionId } = created.session
-    expect(sessionId).toMatch(/^pty-[0-9a-f]{8}$/)
+    expect(sessionId).toMatch(/^pty-[0-9a-f]{32}$/)
     expect(created.session).toMatchObject({ kind: "terminal", cwd: scratch, alive: true })
     expect(created.session.pid).toBeGreaterThan(0)
     expect(m.list().map((session) => session.sessionId)).toEqual([sessionId])

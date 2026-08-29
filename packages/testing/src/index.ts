@@ -40,8 +40,17 @@ export * as Conformance from "./Conformance.ts"
 /** @since 0.0.0 @category models */
 export * as RecordedModel from "./RecordedModel.ts"
 
+/** @since 0.0.0 @category models */
+export * as RecordingModel from "./RecordingModel.ts"
+
+/** @since 0.0.0 @category models */
+export * as CachedModel from "./CachedModel.ts"
+
 /** @since 0.0.0 @category fixtures */
 export * as Fixture from "./Fixture.ts"
+
+/** @since 0.0.0 @category services */
+export * as FixtureStore from "./FixtureStore.ts"
 
 /** @since 0.0.0 @category layers */
 export * as MemoryEngine from "./MemoryEngine.ts"

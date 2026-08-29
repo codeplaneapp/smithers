@@ -15,10 +15,11 @@ import { ModelError } from "@smthrs/model/ModelError"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
 import type * as Route from "@smthrs/model/Route"
 import * as Registry from "@smthrs/registry/Registry"
-import { Effect, Layer, Option, Schema, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
 import * as AgentAction from "../src/AgentAction.ts"
+import * as EventSink from "../src/EventSink.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as Seat from "../src/Seat.ts"
 import * as SeatResolver from "../src/SeatResolver.ts"
@@ -673,5 +674,142 @@ describe("AgentAction refusals that never reach the provider", () => {
     // A provider refusal is not a decode miss, so the correction budget is
     // untouched: the run is asked once and the step fails.
     expect(attempts).toBe(1)
+  })
+})
+
+describe("AgentAction event sink", () => {
+  const decodes = answering(`{"approved":true,"issues":[]}`)
+
+  it("hands every event to the host sink as it happens, before the step resolves", async () => {
+    const requests: Array<string> = []
+    const seen: Array<string> = []
+    const outcome = await Effect.runPromise(
+      Effect.gen(function*() {
+        const reached = yield* Deferred.make<void>()
+        const gate = yield* Deferred.make<void>()
+        let settled = false
+        // The sink holds the third event inside the run. Whatever it has seen
+        // when the gate is still shut is what it saw while the model was still
+        // working, which is the whole claim: the events are not a replay of a
+        // buffer handed over at the end.
+        const sink = EventSink.layer({
+          emit: (event) =>
+            Effect.suspend(() => {
+              seen.push(event._tag)
+              return seen.length === 3
+                ? Effect.andThen(Deferred.succeed(reached, void 0), Deferred.await(gate))
+                : Effect.void
+            })
+        })
+        const fiber = yield* ReviewFlow.execute({ diff: "-  old\n+  new" }, { executionId: "sink-order" }).pipe(
+          Effect.tap(() => Effect.sync(() => (settled = true))),
+          Effect.provide(
+            Layer.merge(
+              stack(
+                Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)),
+                host,
+                scripted([decodes], requests)
+              ),
+              sink
+            )
+          ),
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* Deferred.await(reached)
+        const during = [...seen]
+        const settledDuring = settled
+        yield* Deferred.succeed(gate, void 0)
+        const value = yield* Fiber.join(fiber)
+        return { during, settledDuring, value }
+      })
+    )
+
+    expect(outcome.settledDuring).toBe(false)
+    expect(outcome.during).toEqual(["discipline-armed", "turn-opened", "model-delta"])
+    expect(outcome.value).toEqual({ approved: true, issues: [] })
+    // The decode still reads the buffered run, so the step's answer is
+    // unchanged by the sink watching it.
+    expect(seen).toContain("transition-applied")
+    expect(seen.length).toBeGreaterThan(outcome.during.length)
+  })
+
+  it("sees the correction attempt's events as well as the first attempt's", async () => {
+    const requests: Array<string> = []
+    const turns: Array<number> = []
+    let frames = 0
+    const result = await Effect.runPromise(
+      ReviewFlow.execute({ diff: "-  old\n+  new" }, { executionId: "sink-corrections" }).pipe(
+        Effect.provide(
+          Layer.merge(
+            stack(
+              Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)),
+              host,
+              scripted([answering("Looks fine to me."), decodes], requests)
+            ),
+            EventSink.layer({
+              emit: (event) =>
+                Effect.sync(() => {
+                  frames++
+                  if (event._tag === "turn-opened") turns.push(frames)
+                })
+            })
+          )
+        )
+      )
+    )
+
+    expect(result).toEqual({ approved: true, issues: [] })
+    // Two provider calls, and the sink saw a turn open for each of them: a
+    // re-prompt is a new run and its events reach the host like any other.
+    expect(requests).toHaveLength(2)
+    expect(turns).toHaveLength(2)
+  })
+
+  it("drops every event under the explicit noop, leaving the step's answer unchanged", async () => {
+    const requests: Array<string> = []
+    // `layerNoop()` writes down what a composition with no sink already does,
+    // so the step it wraps must answer exactly as the sink-less runs above do.
+    const result = await Effect.runPromise(
+      ReviewFlow.execute({ diff: "-  old\n+  new" }, { executionId: "sink-noop" }).pipe(
+        Effect.provide(
+          Layer.merge(
+            stack(
+              Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)),
+              host,
+              scripted([decodes], requests)
+            ),
+            EventSink.layerNoop()
+          )
+        )
+      )
+    )
+
+    expect(result).toEqual({ approved: true, issues: [] })
+    expect(requests).toHaveLength(1)
+  })
+
+  it("lets an override replace the noop's method", async () => {
+    const requests: Array<string> = []
+    const seen: Array<string> = []
+    const result = await Effect.runPromise(
+      ReviewFlow.execute({ diff: "-  old\n+  new" }, { executionId: "sink-noop-override" }).pipe(
+        Effect.provide(
+          Layer.merge(
+            stack(
+              Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)),
+              host,
+              scripted([decodes], requests)
+            ),
+            EventSink.layerNoop({ emit: (event) => Effect.sync(() => seen.push(event._tag)) })
+          )
+        )
+      )
+    )
+
+    expect(result).toEqual({ approved: true, issues: [] })
+    // The override is the only method the service has, so it saw the same run
+    // the layer form sees.
+    expect(seen.slice(0, 3)).toEqual(["discipline-armed", "turn-opened", "model-delta"])
+    expect(seen).toContain("transition-applied")
   })
 })

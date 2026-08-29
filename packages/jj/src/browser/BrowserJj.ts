@@ -169,9 +169,14 @@ const instantiate = async (options: BrowserJjOptions): Promise<AbiExports> => {
     ...(options.onStderr === undefined ? {} : { onStderr: options.onStderr })
   })
   const imports: WebAssembly.Imports = { wasi_snapshot_preview1: { ...wasi.imports } }
-  const instance = options.wasm instanceof WebAssembly.Module
-    ? await WebAssembly.instantiate(options.wasm, imports)
-    : (await WebAssembly.instantiate(options.wasm, imports)).instance
+  // The two `instantiate` overloads return different shapes, and the lib
+  // definitions disagree across type environments (lib.dom returns a
+  // `WebAssemblyInstantiatedSource` for bytes; workers-types returns the
+  // instance for both). Discriminate the value, not the overload.
+  const instantiated: unknown = await WebAssembly.instantiate(options.wasm as never, imports)
+  const instance = instantiated instanceof WebAssembly.Instance
+    ? instantiated
+    : (instantiated as { readonly instance: WebAssembly.Instance }).instance
   const exports = instance.exports as Record<string, unknown>
   const missing = REQUIRED_EXPORTS.filter((name) =>
     name === "memory" ? !(exports[name] instanceof WebAssembly.Memory) : typeof exports[name] !== "function"

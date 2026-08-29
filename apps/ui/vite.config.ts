@@ -60,7 +60,7 @@ export const buildStamp = (): Plugin => {
       this.emitFile({
         type: "asset",
         fileName: BUILD_STAMP_ASSET,
-        source: `${JSON.stringify({ worker: "smithers-local-app", gitSha, builtAt }, null, "\t")}\n`
+        source: `${JSON.stringify({ app: "smithers-ui", gitSha, builtAt }, null, "\t")}\n`
       })
     }
   }
@@ -90,6 +90,27 @@ export default defineConfig({
   root: `${here}src/mainview`,
   build: {
     outDir: `${here}dist`,
-    emptyOutDir: true
+    emptyOutDir: true,
+    // Milkdown ships one indivisible 818 kB ESM module, now behind the World
+    // editor's dynamic import. Keep warnings meaningful for every other chunk.
+    chunkSizeWarningLimit: 900,
+    /*
+     * Keep first-load chunks independently cacheable and below the browser's
+     * long-task-sized warning threshold. Feature-heavy editors/graphs already
+     * form async boundaries; this splits their shared initial dependencies
+     * without a brittle package-name manualChunks table.
+     */
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [{
+            name: "initial",
+            tags: ["$initial"],
+            entriesAware: true,
+            maxSize: 400 * 1024
+          }]
+        }
+      }
+    }
   }
 })

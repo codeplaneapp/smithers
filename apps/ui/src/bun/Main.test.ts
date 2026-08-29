@@ -190,8 +190,9 @@ describe("the native RPC surface", () => {
       status: "connected",
       repository: { root, name: basename(root), branch: "main", remoteUrl: null }
     })
-    const picked = report.results.pick as { repository: { head: string } }
+    const picked = report.results.pick as { repository: { head: string; authorizationId: string } }
     expect(picked.repository.head).toMatch(/^[0-9a-f]{40}$/)
+    expect(picked.repository.authorizationId).toMatch(/^[A-Za-z0-9_-]{43}$/)
   })
 
   test("openExternal refuses every scheme but http and https", async () => {

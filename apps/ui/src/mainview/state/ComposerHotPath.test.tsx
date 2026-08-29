@@ -245,8 +245,10 @@ describe("the connect menu's open state lives in the store", () => {
     })
     expect(store.session().connectMenuOpen).toBe(true)
 
+    const transcript = view.host.querySelector<HTMLElement>(".smithers-transcript")
+    expect(transcript).not.toBeNull()
     await view.act(() => {
-      document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }))
+      transcript?.dispatchEvent(new Event("pointerdown", { bubbles: true }))
     })
 
     expect(store.session().connectMenuOpen).toBe(false)

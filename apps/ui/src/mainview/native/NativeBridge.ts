@@ -1,5 +1,4 @@
 import { Electroview } from "electrobun/view"
-import { OPEN_EXTERNAL_PATH } from "smithers-shared/AgentApiRoutes"
 import type { AgentTurnFrame, StartAgentTurnRequest, StartAgentTurnResult } from "smithers-shared/NativeAgent"
 import type { PickLocalRepositoryResult, RepositoryAccess } from "smithers-shared/NativeRepository"
 import type { SmithersNativeRPC } from "smithers-shared/NativeRPC"
@@ -16,29 +15,13 @@ const rpc = (() => {
   return nativeRpc
 })()
 
-/** The HTTP fallback for the native door: the local origin opens the system browser. */
-const httpOpenExternal = async (url: string): Promise<boolean> => {
-  try {
-    const response = await fetch(OPEN_EXTERNAL_PATH, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ url })
-    })
-    if (!response.ok) return false
-    const body = (await response.json().catch(() => undefined)) as { ok?: unknown } | undefined
-    return body?.ok === true
-  } catch {
-    return false
-  }
-}
-
 /**
- * Open a URL in the system browser: through the native shell when the page
- * runs inside it, else through the local origin's /api/open-external.
- * Either way the sign-in handoff can run OAuth outside the webview.
+ * Native shell capability. Pure web has no privileged external-navigation
+ * fallback; its identity port uses ordinary browser navigation instead.
  */
+export const nativeShellAvailable = rpc !== undefined
 export const nativeOpenExternal: (url: string) => Promise<boolean> = rpc === undefined
-  ? httpOpenExternal
+  ? async () => false
   : async (url) => (await rpc.proxy.request.openExternal({ url })).opened
 
 export interface NativeRepositories {

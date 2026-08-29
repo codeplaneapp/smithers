@@ -17,11 +17,23 @@
  * interrupted frame disposes the runtime, which is the only thing holding the
  * cell alive.
  *
+ * Which QuickJS build is compiled is a seam. The default compiles the
+ * single-file build from bytes, which is what Node and a browser want. A host
+ * whose runtime forbids compiling WebAssembly from bytes at runtime, such as
+ * Cloudflare's workerd, provides {@link Variant} instead and names a build
+ * whose module came from its toolchain.
+ *
  * @since 0.1.0
  */
-import variant from "@jitl/quickjs-singlefile-browser-release-sync"
+import singlefile from "@jitl/quickjs-singlefile-browser-release-sync"
 import { Context, Effect, Layer, Option, Schema, type Scope } from "effect"
-import type { QuickJSContext, QuickJSHandle, QuickJSRuntime, QuickJSWASMModule } from "quickjs-emscripten-core"
+import type {
+  QuickJSContext,
+  QuickJSHandle,
+  QuickJSRuntime,
+  QuickJSSyncVariant,
+  QuickJSWASMModule
+} from "quickjs-emscripten-core"
 import { newQuickJSWASMModuleFromVariant } from "quickjs-emscripten-core"
 import * as Cell from "./Cell.ts"
 import type { HarnessError } from "./HarnessError.ts"
@@ -380,7 +392,61 @@ export const cacheSuccessful = <A>(load: () => Promise<A>): () => Promise<A> => 
   }
 }
 
-const wasmModule = cacheSuccessful(() => newQuickJSWASMModuleFromVariant(variant))
+/**
+ * The QuickJS build the sandbox compiles.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface VariantService {
+  readonly variant: QuickJSSyncVariant
+}
+
+/**
+ * The QuickJS build the sandbox compiles.
+ *
+ * @category services
+ * @since 0.1.0
+ */
+export class Variant extends Context.Service<Variant, VariantService>()(
+  "flows/harness/QuickJSSandbox/Variant"
+) {}
+
+/**
+ * Provides the single-file build, which Node and a browser both compile.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerVariantLive: Layer.Layer<Variant> = Layer.succeed(Variant)({ variant: singlefile })
+
+/**
+ * Provides a build the host names.
+ *
+ * A workerd host builds one with `newVariant(baseVariant, { wasmModule })` from
+ * a `.wasm` module import, because that runtime instantiates a module the
+ * toolchain compiled and refuses to compile one from bytes.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerVariant = (variant: QuickJSSyncVariant): Layer.Layer<Variant> => Layer.succeed(Variant)({ variant })
+
+/**
+ * One compiled module per build, so two sandboxes over one variant share it.
+ *
+ * Keyed weakly: a variant a host builds per request is collectable with the
+ * module it produced.
+ */
+const compiled = new WeakMap<QuickJSSyncVariant, () => Promise<QuickJSWASMModule>>()
+
+const loaderFor = (variant: QuickJSSyncVariant): () => Promise<QuickJSWASMModule> => {
+  const known = compiled.get(variant)
+  if (known !== undefined) return known
+  const loader = cacheSuccessful(() => newQuickJSWASMModuleFromVariant(variant))
+  compiled.set(variant, loader)
+  return loader
+}
 
 /**
  * Synchronous monotonic-enough clock required by QuickJS's interrupt callback.
@@ -1078,21 +1144,36 @@ export const loadModule = (
   })
 
 /**
- * Constructs the QuickJS sandbox, compiling the WebAssembly module once.
+ * Constructs the QuickJS sandbox over the build the host names, compiling the
+ * WebAssembly module once.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const makeWithVariant: Effect.Effect<Sandbox.Sandbox, Sandbox.SandboxError, ComputeClock | Variant> = Effect
+  .gen(function*() {
+    const clock = yield* ComputeClock
+    const { variant } = yield* Variant
+    const module = yield* loadModule(loaderFor(variant))
+    return Sandbox.make({
+      capabilities,
+      openRealm: (options) => openRealm(module, options, clock)
+    })
+  })
+
+/**
+ * Constructs the QuickJS sandbox over the single-file build.
+ *
+ * The build is fixed here rather than left in the requirements, so the clock
+ * stays the only seam this constructor asks its caller to fill. A host that
+ * names its own build uses {@link makeWithVariant}.
  *
  * @category constructors
  * @since 0.1.0
  * @slop
  */
-export const makeWithClock: Effect.Effect<Sandbox.Sandbox, Sandbox.SandboxError, ComputeClock> = Effect.gen(
-  function*() {
-    const clock = yield* ComputeClock
-    const module = yield* loadModule(wasmModule)
-    return Sandbox.make({
-      capabilities,
-      openRealm: (options) => openRealm(module, options, clock)
-    })
-  }
+export const makeWithClock: Effect.Effect<Sandbox.Sandbox, Sandbox.SandboxError, ComputeClock> = makeWithVariant.pipe(
+  Effect.provide(layerVariantLive)
 )
 
 /**
@@ -1106,7 +1187,17 @@ export const make: Effect.Effect<Sandbox.Sandbox, Sandbox.SandboxError> = makeWi
 )
 
 /**
- * Provides the QuickJS sandbox.
+ * Provides the QuickJS sandbox over the build the host names.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerWithVariant: Layer.Layer<Sandbox.Sandbox, Sandbox.SandboxError, Variant> = Layer.effect(
+  Sandbox.Sandbox
+)(makeWithVariant.pipe(Effect.provide(layerClockLive)))
+
+/**
+ * Provides the QuickJS sandbox over the single-file build.
  *
  * @category layers
  * @since 0.1.0

@@ -67,8 +67,7 @@ const entry = (seq: number, runId?: string): JournalEvent.Entry =>
     meta: null
   }) as unknown as JournalEvent.Entry
 
-const sequences = (events: ReadonlyArray<ControlEvent>): ReadonlyArray<number> =>
-  events.map((event) => event.sequence)
+const sequences = (events: ReadonlyArray<ControlEvent>): ReadonlyArray<number> => events.map((event) => event.sequence)
 
 describe("ControlLive.watch failures", () => {
   it("reports a journal that cannot stream or page as an unavailable watch", async () => {
@@ -160,7 +159,9 @@ describe("ControlLive.watch snapshots", () => {
       Journal.makeNoop({
         entries: (options) =>
           Effect.succeed({
-            entries: [options.after === undefined ? entry(1, "run-extreme") : entry(Number.MAX_SAFE_INTEGER, "run-extreme")],
+            entries: [
+              options.after === undefined ? entry(1, "run-extreme") : entry(Number.MAX_SAFE_INTEGER, "run-extreme")
+            ],
             hasMore: false
           })
       })
@@ -197,11 +198,13 @@ describe("ControlLive.watch snapshots", () => {
     }))
 
     const partitions = new Set(observed.events.map((event) => event.runId))
-    expect(partitions).toEqual(new Set([
-      `plan:${observed.card.planId}`,
-      `plan:${observed.orphan.planId}`,
-      observed.runId
-    ]))
+    expect(partitions).toEqual(
+      new Set([
+        `plan:${observed.card.planId}`,
+        `plan:${observed.orphan.planId}`,
+        observed.runId
+      ])
+    )
   })
 })
 

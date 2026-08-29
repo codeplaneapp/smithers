@@ -26,6 +26,7 @@ const connect = (layer: Layer.Layer<DurableWriter.DurableWriter | SqlClient.SqlC
 const memoryHarness: Harness = {
   label: "TestDatabase, one shared in-memory connection",
   realDriver: false,
+  crossConnection: false,
   run: (body) =>
     Effect.scoped(Effect.gen(function*() {
       const side = yield* connect(TestDatabase.layer)

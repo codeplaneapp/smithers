@@ -14,6 +14,7 @@ import * as Target from "@smthrs/targets/Target"
 import { Cli, z } from "incur"
 import * as NodePath from "node:path"
 import * as Ansi from "./Ansi.ts"
+import * as CreateApp from "./CreateApp.ts"
 import * as Diagnostic from "./Diagnostic.ts"
 import { runInstall } from "./engine.ts"
 import * as Executor from "./Executor.ts"
@@ -25,6 +26,7 @@ import * as PackageIndex from "./PackageIndex.ts"
 import * as PackageLoader from "./PackageLoader.ts"
 import * as Planner from "./Planner.ts"
 import * as Query from "./Query.ts"
+import * as RepoResolution from "./RepoResolution.ts"
 import * as Reporter from "./Reporter.ts"
 import {
   ensureGitignored,
@@ -255,28 +257,29 @@ const openPackageIndex = async (
   runtime.signal?.throwIfAborted()
   const root = await PackageDiscovery.findWorkspaceRoot(NodePath.resolve(flags.workspace))
   if (root === undefined) return undefined
-  // The flag wins; otherwise the WORKSPACE-declared cache directory must
-  // reach the prune set before the package walk, or a workspace with a
-  // non-default cache directory would index its own cache artifacts. The
-  // probe evaluates only WORKSPACE.ts and is forgiving — on failure the
-  // full load reports the real diagnostic under the default prune.
-  let cacheDirectory = flags.cacheDir === undefined ? undefined : Config.normalizeCacheDirectory(flags.cacheDir)
-  if (cacheDirectory === undefined) {
-    const workspaceFile = await PackageDiscovery.workspaceFileOf(root)
-    if (workspaceFile !== undefined) {
-      cacheDirectory = await PackageLoader.probeCacheDirectory(root, workspaceFile)
-    }
-  }
-  const discovery = await PackageDiscovery.discover(root, { cacheDirectory, signal: runtime.signal })
+  // Evaluate the one root declaration before walking: both its cache and its
+  // opaque child repositories are discovery boundaries. The full graph load
+  // imports the same module instance together with the admitted Packages.
+  const workspaceFile = await PackageDiscovery.workspaceFileOf(root)
+  if (workspaceFile === undefined) return undefined
+  const workspace = await PackageLoader.loadWorkspaceDeclaration(root, workspaceFile)
+  const cacheDirectory = flags.cacheDir === undefined
+    ? workspace.cache.directory
+    : Config.normalizeCacheDirectory(flags.cacheDir)
+  const discovery = await PackageDiscovery.discover(root, {
+    cacheDirectory,
+    repositories: workspace.repos,
+    signal: runtime.signal
+  })
   const loaded = await PackageLoader.load(discovery)
   return PackageIndex.PackageIndex.make(loaded, process.cwd())
 }
 
 /** Package-mode `query`: the same listing shape BUILD mode prints. */
-const packageQuery = (
+const packageQuery = async (
   index: PackageIndex.PackageIndex,
   expression: string
-): Query.Listing | Query.Dependencies => {
+): Promise<Query.Listing | Query.Dependencies> => {
   const dependencyMatch = expression.match(/^deps\((.+)\)$/)
   if (dependencyMatch?.[1] !== undefined) {
     const rows = index.resolve(dependencyMatch[1].trim())
@@ -300,34 +303,63 @@ const packageQuery = (
       edges: index.edges(rows)
     }
   }
+  const cache: RepoResolution.ResolutionCache = new Map()
+  const rows = index.resolve(expression)
   return {
     query: expression,
-    targets: index.resolve(expression).map((row) => ({
-      label: row.label,
-      target: Target.metadata(row.target).target,
-      kinds: Target.metadata(row.target).kinds
+    targets: await Promise.all(rows.map(async (row) => {
+      const metadata = Target.metadata(row.target)
+      const resolution = metadata.target === "Repo.Target"
+        ? await RepoResolution.resolve(index, row.target, cache)
+        : undefined
+      return {
+        label: row.label,
+        target: metadata.target,
+        kinds: await RepoResolution.effectiveKinds(index, row.target, cache),
+        ...(resolution?.refusal === undefined ? {} : { refusal: resolution.refusal })
+      }
     }))
   }
 }
 
-/** Package-mode `graph`: labeled nodes plus classified edges. */
-const packageGraph = (index: PackageIndex.PackageIndex, pattern: string): {
+/** Package-mode `graph`: labeled nodes plus classified local and repository edges. */
+const packageGraph = async (index: PackageIndex.PackageIndex, pattern: string): Promise<{
   readonly rows: ReadonlyArray<GraphOutput.PackageRow>
-  readonly edges: ReadonlyArray<PackageIndex.Edge>
+  readonly edges: ReadonlyArray<GraphOutput.PackageEdge>
   readonly data: unknown
-} => {
-  const selected = index.resolve(pattern)
-  const edges = index.edges(selected)
-  const rows = selected.map((row) => ({ label: row.label, target: Target.metadata(row.target).target }))
+}> => {
+  const rows = index.resolve(pattern)
+  const localEdges = index.edges(rows)
+  const cache: RepoResolution.ResolutionCache = new Map()
+  const resolutions = await Promise.all(rows.map(async (row) =>
+    Target.metadata(row.target).target === "Repo.Target"
+      ? { row, resolution: await RepoResolution.resolve(index, row.target, cache) }
+      : undefined
+  ))
+  const repositoryEdges = resolutions
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined)
+    .map(({ resolution, row }) => ({ from: row.label, to: resolution.externalLabel, kind: "repo" as const }))
+  const edges = [...localEdges, ...repositoryEdges]
+  const renderRows = rows.map((row) => ({ label: row.label, target: Target.metadata(row.target).target }))
+  const targets = await Promise.all(rows.map(async (row) => {
+    const resolution = resolutions.find((entry) => entry?.row === row)?.resolution
+    return {
+      label: row.label,
+      target: Target.metadata(row.target).target,
+      kinds: await RepoResolution.effectiveKinds(index, row.target, cache),
+      ...(resolution?.refusal === undefined ? {} : { refusal: resolution.refusal })
+    }
+  }))
+  const text = GraphOutput.packageText(renderRows, edges)
   return {
-    rows,
+    rows: renderRows,
     edges,
     data: {
       pattern,
       format: "text",
-      graph: GraphOutput.packageText(rows, edges),
+      graph: text,
       roots: rows.map((row) => row.label),
-      targets: rows,
+      targets,
       edges,
       warnings: []
     }
@@ -626,6 +658,33 @@ export const makeCli = (config: RuntimeConfig = {}) =>
         }
       }
     })
+    .command("create-app", {
+      description: "Scaffold a Smithers app from a @smthrs/create-app template",
+      args: z.object({ dir: z.string().describe("Directory to create; its name becomes the app name") }),
+      options: z.object({
+        template: z.string().default("default").describe("Template name: default or aomi"),
+        link: z.boolean().default(true).describe(
+          "Point @smthrs/* dependencies at the checkout the templates came from; --no-link keeps versions"
+        )
+      }),
+      alias: { template: "t" },
+      async run(context) {
+        try {
+          return await CreateApp.scaffold({
+            directory: context.args.dir,
+            template: context.options.template,
+            link: context.options.link
+          })
+        } catch (cause) {
+          return context.error({
+            code: "create_app_failed",
+            exitCode: 1,
+            message: Diagnostic.message(cause),
+            retryable: false
+          })
+        }
+      }
+    })
     .command("build", {
       description: "Execute the build targets selected by a pattern",
       args: patternArgument,
@@ -763,7 +822,7 @@ export const makeCli = (config: RuntimeConfig = {}) =>
           const index = await openPackageIndex(context.options, config)
           let result: Query.Listing | Query.Dependencies
           if (index !== undefined) {
-            result = packageQuery(index, context.args.expr)
+            result = await packageQuery(index, context.args.expr)
           } else {
             const { workspace } = await openWorkspace(context.options, config, false)
             result = await Query.run(workspace, context.args.expr)
@@ -785,7 +844,7 @@ export const makeCli = (config: RuntimeConfig = {}) =>
         try {
           const index = await openPackageIndex(context.options, config)
           if (index !== undefined) {
-            const { data, edges, rows } = packageGraph(index, context.args.pattern)
+            const { data, edges, rows } = await packageGraph(index, context.args.pattern)
             if (context.options.mermaid) return data
             return present(context, config, data, (style) => GraphOutput.packageText(rows, edges, style))
           }

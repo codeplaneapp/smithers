@@ -3,8 +3,8 @@ import type { PickLocalRepositoryResult, RepositoryAccess } from "./NativeReposi
 /*
  * The two native doors the local app keeps on Electrobun RPC (LOCAL-APP.md,
  * "Runtime topology"). Chat rides the local HTTP origin (/api/chat/*), so the
- * agent requests and the agentFrame message are gone; both doors here have
- * HTTP fallbacks so the SPA runs unchanged in Playwright chromium.
+ * agent requests and the agentFrame message are gone. Privileged native
+ * operations deliberately have no renderer-controlled HTTP fallback.
  */
 /*
  * Structurally an Electrobun `ElectrobunRPCSchema` (`{ bun, webview }`, each

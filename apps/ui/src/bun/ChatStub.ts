@@ -1,43 +1,12 @@
 import type { StartAgentTurnRequest } from "smithers-shared/NativeAgent"
 import type { AgentTurnFrame } from "smithers-shared/NativeAgent"
-import { defaultTargetsMessage, escapeHtml, parseTargetsInstructions, TARGETS_PANEL_MARKER } from "smithers-shared/TargetsPanel"
 import type { CloudAgent } from "./CloudAgent"
 
 /*
  * SMITHERS_CHAT_STUB=1: a deterministic CloudAgent so the Playwright suite and
  * CI run offline. It streams one reasoning delta, then the text
- * `stub: <last user message>`, then done. When the instructions carry the
- * targets-panel marker it answers the exact `{ message, html }` JSON the
- * auto-load flow parses (LOCAL-APP.md, "Auto-load flow").
+ * `stub: <last user message>`, then done.
  */
-
-export { TARGETS_PANEL_MARKER }
-
-/** How many of the repository's targets the stub panel offers a Run button for. */
-export const STUB_PANEL_BUTTONS = 3
-
-/**
- * The stub's `{ message, html }` for the targets prompt: the real target list
- * read back out of the instructions, one Run button (posting the bridge
- * message) for each of the first STUB_PANEL_BUTTONS targets.
- */
-export const stubTargetsReply = (instructions: string): { readonly message: string; readonly html: string } => {
-  const parsed = parseTargetsInstructions(instructions)
-  const targets = parsed?.targets ?? []
-  const repoName = parsed?.repoName === undefined || parsed.repoName === "" ? "the repository" : parsed.repoName
-  const buttons = targets
-    .slice(0, STUB_PANEL_BUTTONS)
-    .map((target) =>
-      `<button type="button" data-testid="stub-run-${escapeHtml(target.name)}" onclick="parent.postMessage({smithers:'run',label:'${
-        escapeHtml(target.label)
-      }'},'*')">Run ${escapeHtml(target.label)}</button>`
-    )
-    .join("")
-  return {
-    message: defaultTargetsMessage(targets.length, repoName),
-    html: `<div data-testid="stub-panel"><h1>Targets</h1><p>${targets.length} targets (stub panel)</p>${buttons}</div>`
-  }
-}
 
 const lastUserMessage = (request: StartAgentTurnRequest): string => {
   for (let index = request.messages.length - 1; index >= 0; index -= 1) {
@@ -48,9 +17,6 @@ const lastUserMessage = (request: StartAgentTurnRequest): string => {
 }
 
 export const stubReply = (request: StartAgentTurnRequest): string => {
-  if (request.instructions.includes(TARGETS_PANEL_MARKER)) {
-    return JSON.stringify(stubTargetsReply(request.instructions))
-  }
   return `stub: ${lastUserMessage(request)}`
 }
 

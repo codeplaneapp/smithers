@@ -21,6 +21,7 @@ import {
   WORKFLOW_RPC_PATH,
   WORKFLOW_STREAM_PATH
 } from "smithers-shared/AgentApiRoutes"
+import { APP_API_VERSION, APP_BOOTSTRAP_PATH } from "smithers-shared/AppBootstrap"
 import { AgentRuntimeContextSchema, composeAgentInstructions } from "smithers-shared/AgentContext"
 import { browserFetch, browserFetchResponseBody, resolveHostOverHttps } from "smithers-shared/BrowserFetch"
 import type { StartAgentTurnRequest } from "smithers-shared/NativeAgent"
@@ -40,8 +41,6 @@ import {
 import type { GatewaySessionNamespace } from "./gateway"
 import { spendTurn, turnLimitResponse, TurnRateLimiter } from "./turnLimit"
 import type { TurnLimitNamespace } from "./turnLimit"
-
-declare const __SMITHERS_START__: boolean | undefined
 
 /* The per-user gateway session registry (Wave 11) — wrangler binds this DO. */
 export { GatewaySessionRegistry }
@@ -281,6 +280,7 @@ const readStubJson = async <T>(response: Response): Promise<T | undefined> =>
 
 export interface WorkerEnv {
   readonly ASSETS: { readonly fetch: (request: Request) => Promise<Response> }
+  readonly SMITHERS_BUILD_SHA?: string
   readonly SMITHERS_CHAT_URL?: string
   readonly SMITHERS_CHAT_ORIGIN?: string
   /**
@@ -2341,7 +2341,9 @@ const platformProxyMatch = (pathname: string, method: string): boolean =>
   PLATFORM_PROXY_RULES.some(
     (rule) =>
       rule.methods.includes(method) &&
-      (rule.exact !== undefined ? pathname === rule.exact : pathname.startsWith(rule.prefix ?? " "))
+      (rule.exact !== undefined
+        ? pathname === rule.exact
+        : rule.prefix !== undefined && pathname.startsWith(rule.prefix))
   )
 
 const handlePlatformProxy = async (request: Request, env: WorkerEnv, url: URL): Promise<Response> => {
@@ -2420,18 +2422,6 @@ const handlePlatformProxy = async (request: Request, env: WorkerEnv, url: URL): 
   return new Response(upstream.body, { status: upstream.status, headers: out })
 }
 
-const START_SESSION_HEADER = "x-smithers-start-session"
-
-/** Replace any client-supplied value with the session resolved for the Start branch. */
-export const withStartSessionHandoff = async (request: Request, sessionResponse: Response): Promise<Request> => {
-  const sessionEnvelope = encodeURIComponent(
-    JSON.stringify({ status: sessionResponse.status, body: await sessionResponse.text() })
-  )
-  const startHeaders = new Headers(request.headers)
-  startHeaders.set(START_SESSION_HEADER, sessionEnvelope)
-  return new Request(request, { headers: startHeaders })
-}
-
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url)
@@ -2440,6 +2430,26 @@ export default {
       return json(403, {
         status: "error",
         message: "This API only answers requests from its own origin."
+      })
+    }
+    if (url.pathname === APP_BOOTSTRAP_PATH) {
+      if (request.method !== "GET") return json(405, { status: "error", message: "Method not allowed." })
+      const identity = (env.IDENTITY_UPSTREAM_URL?.trim() ?? "") !== ""
+      const jjhub = (env.SMITHERS_CLOUD_API_BASE_URL?.trim() ?? "") !== ""
+      const agent = Boolean(env.SMITHERS_CHAT_AUTH_TOKEN?.trim() || env.CHAT_PRODUCT_SERVICE_TOKEN?.trim())
+      return json(200, {
+        apiVersion: APP_API_VERSION,
+        host: "cloud",
+        version: "1.0.0",
+        buildSha: env.SMITHERS_BUILD_SHA?.trim() || "unknown",
+        capabilities: [
+          ...(agent ? ["agent"] : []),
+          ...(identity ? ["identity"] : []),
+          ...(jjhub ? ["jjhub"] : []),
+          ...(checkoutEnabled(env) ? ["billing.checkout"] : [])
+        ],
+        authFlow: identity ? "redirect" : "none",
+        sandbox: null
       })
     }
     if (url.pathname === CANCEL_PATH) {
@@ -2545,20 +2555,6 @@ export default {
     // Any other /api/* path is an unknown route: the same canonical 404 the
     // admin surface answers non-admins with, so nothing is enumerable.
     if (url.pathname.startsWith("/api/")) return notFound()
-    /*
-     * Vite replaces this guarded import in the Cloudflare Start build. Bun's
-     * unit tests and a plain Wrangler invocation retain the asset fallback,
-     * so the API Worker remains importable without Start's virtual manifest.
-     */
-    if (typeof __SMITHERS_START__ !== "undefined" && __SMITHERS_START__) {
-      const { default: start } = await import("@tanstack/react-start/server-entry")
-      // Resolve once at the trusted boundary; the server function reads this
-      // request header, and a client-supplied value is always overwritten here.
-      const sessionRequest = new Request(new URL(AUTH_SESSION_PATH, request.url), request)
-      const sessionResponse = await probeAuthSession(sessionRequest, env)
-      const response = await start.fetch(await withStartSessionHandoff(request, sessionResponse))
-      return withIsolationHeaders(response)
-    }
     return withIsolationHeaders(await env.ASSETS.fetch(request))
   }
 }

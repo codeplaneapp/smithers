@@ -4,17 +4,27 @@ import { localStorageCollectionOptions } from "@tanstack/db"
 import type { InferSchemaOutput, StorageApi, StorageEventApi } from "@tanstack/db"
 import { createCollection, createTransaction } from "@tanstack/react-db"
 import type { Transaction } from "@tanstack/react-db"
-import { enforceSchemaVersion, readRecordedBackend, recordBackend } from "../chain/SchemaVersion"
-import { openSqliteKeyValueStorage } from "../chain/SqliteKeyValueStorage"
+import {
+  APP_SCHEMA_VERSION,
+  enforceSchemaVersion,
+  readRecordedBackend,
+  recordBackend
+} from "../chain/SchemaVersion"
+import { openSqliteRowStorage } from "../chain/SqliteRowStorage"
 import { openTransactionalStorage } from "../chain/TransactionalStorage"
-import type { TransactionalStorage } from "../chain/TransactionalStorage"
+import type { LegacyCollectionSpec, TransactionalStorage } from "../chain/TransactionalStorage"
 import { PALETTE_MIRROR_KEY, rememberAppearance, THEME_MIRROR_KEY } from "./Appearance"
 import {
   BillingAccountSchema,
+  BranchSchema,
   CardSchema,
+  cardFrameId,
   ChainEventRecordSchema,
   ConnectorOperationSchema,
   DEFAULT_PALETTE,
+  DEFAULT_BRANCH_ID,
+  DEFAULT_WORKSPACE_ID,
+  FrameSchema,
   HarnessSchema,
   IdentitySessionSchema,
   initialBillingAccount,
@@ -27,21 +37,25 @@ import {
   mainTab,
   MessageSchema,
   RepoSchema,
+  rootFrameId,
   SessionSchema,
   TabSchema,
   ToastSchema,
   ToolCallRecordSchema,
   TransitionRecordSchema,
   WatchedReposSchema,
+  WorkspaceSchema,
   WORLD_DISPLAY_NAME,
   WorldDocumentSchema
 } from "./AppState"
 import type {
   AppTransition,
   BillingAccount,
+  Branch,
   Card,
   ChainEventRecord,
   ConnectorOperation,
+  Frame,
   Harness,
   IdentitySession,
   LocalRepositoryConnector,
@@ -55,6 +69,7 @@ import type {
   ToolCallRecord,
   TransitionRecord,
   WatchedRepos,
+  Workspace,
   WorldDocument
 } from "./AppState"
 
@@ -165,6 +180,9 @@ export type PersistenceBackend =
     readonly kind: "opfs"
     readonly storage: StorageApi
     readonly storageEventApi: StorageEventApi
+    readonly beginBatch: () => void
+    readonly commitBatch: () => void
+    readonly abortBatch: () => void
     readonly flush: () => Promise<void>
     readonly close: () => Promise<void>
   }
@@ -181,6 +199,28 @@ interface ResolvedPersistence {
 }
 
 const OPFS_DATABASE_NAME = "smithers-mvp.sqlite"
+
+const PERSISTED_COLLECTION_SPECS: ReadonlyArray<LegacyCollectionSpec> = [
+  { id: "app-sessions", schema: SessionSchema },
+  { id: "app-messages", schema: MessageSchema },
+  { id: "app-connectors", schema: LocalRepositoryConnectorSchema },
+  { id: "app-connector-operations", schema: ConnectorOperationSchema },
+  { id: "world-documents", schema: WorldDocumentSchema },
+  { id: "app-cards", schema: CardSchema },
+  { id: "app-transitions", schema: TransitionRecordSchema },
+  { id: "app-identity-sessions", schema: IdentitySessionSchema },
+  { id: "app-billing-accounts", schema: BillingAccountSchema },
+  { id: "app-toasts", schema: ToastSchema },
+  { id: "app-watched-repos", schema: WatchedReposSchema },
+  { id: "app-tool-calls", schema: ToolCallRecordSchema },
+  { id: "app-chain-events", schema: ChainEventRecordSchema },
+  { id: "app-tabs", schema: TabSchema },
+  { id: "app-harnesses", schema: HarnessSchema },
+  { id: "app-repos", schema: RepoSchema },
+  { id: "app-workspaces", schema: WorkspaceSchema },
+  { id: "app-branches", schema: BranchSchema },
+  { id: "app-frames", schema: FrameSchema }
+]
 /** Attempts spent waiting out a locked access-handle pool. See `openOpfsDatabase`. */
 const OPFS_OPEN_ATTEMPTS = 5
 /** The whole OPFS open, retries included. A store that never answers must not hang boot. */
@@ -310,7 +350,10 @@ const resolvePersistence = async (): Promise<ResolvedPersistence> => {
   }
   try {
     const database = await openOpfsDatabaseWithinBudget(recorded === "opfs" ? OPFS_OPEN_ATTEMPTS : 1)
-    const sqlite = await openSqliteKeyValueStorage(database).catch(async (error) => {
+    const sqlite = await openSqliteRowStorage(database, {
+      collections: PERSISTED_COLLECTION_SPECS,
+      schemaVersion: APP_SCHEMA_VERSION
+    }).catch(async (error) => {
       await database.close?.()
       throw error
     })
@@ -320,6 +363,9 @@ const resolvePersistence = async (): Promise<ResolvedPersistence> => {
         kind: "opfs",
         storage: sqlite.storage,
         storageEventApi: inertStorageEvents,
+        beginBatch: sqlite.beginBatch,
+        commitBatch: sqlite.commitBatch,
+        abortBatch: sqlite.abortBatch,
         flush: sqlite.flush,
         close: sqlite.close
       },
@@ -398,6 +444,9 @@ export interface AppCollections {
   readonly tabs: ReturnType<typeof createTabCollection>
   readonly harnesses: ReturnType<typeof createHarnessCollection>
   readonly repos: ReturnType<typeof createRepoCollection>
+  readonly workspaces: ReturnType<typeof createWorkspaceCollection>
+  readonly branches: ReturnType<typeof createBranchCollection>
+  readonly frames: ReturnType<typeof createFrameCollection>
 }
 
 export interface WorldStateSnapshot {
@@ -544,6 +593,27 @@ const createRepoCollection = (backend: PersistenceBackend) =>
     schema: RepoSchema
   })
 
+const createWorkspaceCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-workspaces",
+    getKey: (workspace: Workspace) => workspace.id,
+    schema: WorkspaceSchema
+  })
+
+const createBranchCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-branches",
+    getKey: (branch: Branch) => branch.id,
+    schema: BranchSchema
+  })
+
+const createFrameCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-frames",
+    getKey: (frame: Frame) => frame.id,
+    schema: FrameSchema
+  })
+
 /** The strip's order: main first, then creation order. */
 const orderedTabs = (collections: Pick<AppCollections, "tabs">): Array<TabRow> =>
   [...collections.tabs.values()].sort((left, right) => left.ordinal - right.ordinal)
@@ -565,7 +635,10 @@ const seed = async (collections: AppCollections): Promise<void> => {
     collections.chainEvents.preload(),
     collections.tabs.preload(),
     collections.harnesses.preload(),
-    collections.repos.preload()
+    collections.repos.preload(),
+    collections.workspaces.preload(),
+    collections.branches.preload(),
+    collections.frames.preload()
   ])
 
   if (collections.sessions.get(SESSION_ID) === undefined) {
@@ -607,6 +680,72 @@ const seed = async (collections: AppCollections): Promise<void> => {
   }
   if (collections.tabs.get(MAIN_TAB_ID) === undefined) {
     await collections.tabs.insert(mainTab()).isPersisted.promise
+  }
+  if (collections.workspaces.get(DEFAULT_WORKSPACE_ID) === undefined) {
+    await collections.workspaces.insert({
+      id: DEFAULT_WORKSPACE_ID,
+      title: "Smithers",
+      createdAt: Date.now(),
+      revision: 0
+    }).isPersisted.promise
+  }
+  if (collections.branches.get(DEFAULT_BRANCH_ID) === undefined) {
+    await collections.branches.insert({
+      id: DEFAULT_BRANCH_ID,
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      title: "Main",
+      parentBranchId: null,
+      forkedFromFrameId: null,
+      forkedAtRevision: null,
+      createdAt: Date.now(),
+      revision: 0
+    }).isPersisted.promise
+  }
+  const defaultRootFrameId = rootFrameId(DEFAULT_BRANCH_ID)
+  if (collections.frames.get(defaultRootFrameId) === undefined) {
+    await collections.frames.insert({
+      id: defaultRootFrameId,
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      branchId: DEFAULT_BRANCH_ID,
+      kind: "root",
+      parentFrameId: null,
+      cardId: null,
+      presentation: "embedded",
+      stateRevision: 0,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      revision: 0
+    }).isPersisted.promise
+  }
+  const session = collections.sessions.get(SESSION_ID)
+  const workspaceId = session?.activeWorkspaceId ?? DEFAULT_WORKSPACE_ID
+  const branchId = session?.activeBranchId ?? DEFAULT_BRANCH_ID
+  for (const card of collections.cards.values()) {
+    const id = cardFrameId(branchId, card.id)
+    if (collections.frames.get(id) !== undefined) continue
+    await collections.frames.insert({
+      id,
+      workspaceId,
+      branchId,
+      kind: "card",
+      parentFrameId: rootFrameId(branchId),
+      cardId: card.id,
+      presentation: session?.maximizedCardId === card.id ? "maximized" : "embedded",
+      stateRevision: session?.revision ?? 0,
+      createdAt: card.createdAt,
+      updatedAt: Date.now(),
+      revision: session?.revision ?? 0
+    }).isPersisted.promise
+  }
+  if (session?.maximizedCardId !== null && session?.maximizedCardId !== undefined) {
+    const id = cardFrameId(branchId, session.maximizedCardId)
+    if (collections.frames.get(id) !== undefined && session.activeFrameId !== id) {
+      await collections.sessions.update(SESSION_ID, (draft) => {
+        draft.activeWorkspaceId = workspaceId
+        draft.activeBranchId = branchId
+        draft.activeFrameId = id
+      }).isPersisted.promise
+    }
   }
 }
 
@@ -656,6 +795,15 @@ const forgetAccountState = (collections: AppCollections): void => {
     const keys = [...(collection as { keys: () => Iterable<string> }).keys()]
     if (keys.length > 0) (collection as { delete: (keys: string[]) => void }).delete(keys)
   }
+  const cardFrameKeys = [...collections.frames.values()]
+    .filter((frame) => frame.kind === "card")
+    .map((frame) => frame.id)
+  if (cardFrameKeys.length > 0) collections.frames.delete(cardFrameKeys)
+  collections.sessions.update(SESSION_ID, (draft) => {
+    const branchId = draft.activeBranchId ?? DEFAULT_BRANCH_ID
+    draft.maximizedCardId = null
+    draft.activeFrameId = rootFrameId(branchId)
+  })
   const reset = initialBillingAccount()
   if (collections.billingAccounts.get("billing") === undefined) {
     collections.billingAccounts.insert(reset)
@@ -694,32 +842,12 @@ export const createAppStore = async (
    */
   const persistedLocally = storageOf(resolvedBackend)
   let transactional: TransactionalStorage | undefined
-  if (persistedLocally !== undefined) {
+  if (persistedLocally !== undefined && resolvedBackend.kind === "localStorage") {
     enforceSchemaVersion(persistedLocally)
-    /*
-     * Ruling A: every backend writes through the same single-blob facade
-     * (docs/persistence.md). Open recovers any interrupted commit and
-     * migrates/quarantines the envelope BEFORE the first collection reads.
-     */
+    /* Open recovers any interrupted localStorage commit and migrates or
+     * quarantines the envelope before the first collection reads it. */
     transactional = await openTransactionalStorage(persistedLocally, {
-      collections: [
-        { id: "app-sessions", schema: SessionSchema },
-        { id: "app-messages", schema: MessageSchema },
-        { id: "app-connectors", schema: LocalRepositoryConnectorSchema },
-        { id: "app-connector-operations", schema: ConnectorOperationSchema },
-        { id: "world-documents", schema: WorldDocumentSchema },
-        { id: "app-cards", schema: CardSchema },
-        { id: "app-transitions", schema: TransitionRecordSchema },
-        { id: "app-identity-sessions", schema: IdentitySessionSchema },
-        { id: "app-billing-accounts", schema: BillingAccountSchema },
-        { id: "app-toasts", schema: ToastSchema },
-        { id: "app-watched-repos", schema: WatchedReposSchema },
-        { id: "app-tool-calls", schema: ToolCallRecordSchema },
-        { id: "app-chain-events", schema: ChainEventRecordSchema },
-        { id: "app-tabs", schema: TabSchema },
-        { id: "app-harnesses", schema: HarnessSchema },
-        { id: "app-repos", schema: RepoSchema }
-      ]
+      collections: PERSISTED_COLLECTION_SPECS
     })
     resolvedBackend = { ...resolvedBackend, storage: transactional.storage }
   }
@@ -739,7 +867,10 @@ export const createAppStore = async (
     chainEvents: createChainEventCollection(resolvedBackend),
     tabs: createTabCollection(resolvedBackend),
     harnesses: createHarnessCollection(resolvedBackend),
-    repos: createRepoCollection(resolvedBackend)
+    repos: createRepoCollection(resolvedBackend),
+    workspaces: createWorkspaceCollection(resolvedBackend),
+    branches: createBranchCollection(resolvedBackend),
+    frames: createFrameCollection(resolvedBackend)
   }
 
   await seed(collections)
@@ -801,34 +932,36 @@ export const createAppStore = async (
         collections.chainEvents.utils.acceptMutations(transaction),
         collections.tabs.utils.acceptMutations(transaction),
         collections.harnesses.utils.acceptMutations(transaction),
-        collections.repos.utils.acceptMutations(transaction)
+        collections.repos.utils.acceptMutations(transaction),
+        collections.workspaces.utils.acceptMutations(transaction),
+        collections.branches.utils.acceptMutations(transaction),
+        collections.frames.utils.acceptMutations(transaction)
       ])
     /*
-     * The one atomic commit point per logical transition: inside the batch
-     * every collection's write accumulates into a single envelope commit,
-     * so every projection of the transition changes or none does
-     * (docs/persistence.md). The OPFS backend keeps SQLite's own WAL.
+     * One atomic commit per logical transition: SQLite batches row changes in
+     * one transaction; localStorage batches collection strings in one WAL
+     * envelope. Every projection changes or none does.
      */
-    if (transactional === undefined) {
+    const batch = resolvedBackend.kind === "opfs" ? resolvedBackend : transactional
+    if (batch === undefined) {
       await fanOut()
       return
     }
     /*
-     * The one atomic commit point per logical transition: between begin and
-     * commit every collection's write accumulates into a single envelope
-     * commit, so every projection of the transition changes or none does
+     * Between begin and commit every collection write accumulates in the
+     * backend's transaction, so every projection changes or none does
      * (docs/persistence.md). The commit runs synchronously as the fan-out
      * settles — deferring it even a microtask would leave the transaction
      * uncommitted when the next dispatch mutates, which TanStack answers
      * with an optimistic rollback/replay that revisits a revision.
      */
-    transactional.beginBatch()
+    batch.beginBatch()
     try {
       await fanOut()
-      transactional.commitBatch()
+      batch.commitBatch()
       if (resolvedBackend.kind === "opfs") await resolvedBackend.flush()
     } catch (error) {
-      transactional.abortBatch()
+      batch.abortBatch()
       throw error
     }
   }
@@ -844,6 +977,28 @@ export const createAppStore = async (
     })
 
     transaction.mutate(() => {
+      const activeWorkspaceId = current.activeWorkspaceId ?? DEFAULT_WORKSPACE_ID
+      const activeBranchId = current.activeBranchId ?? DEFAULT_BRANCH_ID
+      const ensureCardFrame = (cardId: string): Frame => {
+        const id = cardFrameId(activeBranchId, cardId)
+        const existing = collections.frames.get(id)
+        if (existing !== undefined) return existing
+        const frame: Frame = {
+          id,
+          workspaceId: activeWorkspaceId,
+          branchId: activeBranchId,
+          kind: "card",
+          parentFrameId: rootFrameId(activeBranchId),
+          cardId,
+          presentation: "embedded",
+          stateRevision: revision,
+          createdAt,
+          updatedAt: createdAt,
+          revision
+        }
+        collections.frames.insert(frame)
+        return frame
+      }
       switch (transition.type) {
         case "composer.changed":
           collections.sessions.update(SESSION_ID, (draft) => {
@@ -1032,15 +1187,26 @@ export const createAppStore = async (
           // A reset conversation is empty — it does not re-seed a welcome.
           const cardKeys = [...collections.cards.keys()]
           if (cardKeys.length > 0) collections.cards.delete(cardKeys)
+          const cardFrameKeys = [...collections.frames.values()].filter((frame) => frame.kind === "card").map((frame) => frame.id)
+          if (cardFrameKeys.length > 0) collections.frames.delete(cardFrameKeys)
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.draft = ""
             draft.phase = "idle"
             draft.composerOwner = "user"
             draft.maximizedCardId = null
+            draft.activeFrameId = rootFrameId(activeBranchId)
+            draft.resetConfirmOpen = false
             draft.revision = revision
           })
           break
         }
+
+        case "conversation.reset.asked":
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.resetConfirmOpen = transition.open
+            draft.revision = revision
+          })
+          break
 
         case "conversation.cleared": {
           // /clear (§2h): the sweep already kept what mattered in world
@@ -1049,6 +1215,8 @@ export const createAppStore = async (
           if (keys.length > 0) collections.messages.delete(keys)
           const cardKeys = [...collections.cards.keys()]
           if (cardKeys.length > 0) collections.cards.delete(cardKeys)
+          const cardFrameKeys = [...collections.frames.values()].filter((frame) => frame.kind === "card").map((frame) => frame.id)
+          if (cardFrameKeys.length > 0) collections.frames.delete(cardFrameKeys)
           collections.messages.insert({
             id: `message-${revision}-cleared`,
             role: "smithers",
@@ -1064,6 +1232,7 @@ export const createAppStore = async (
             draft.phase = "idle"
             draft.composerOwner = "user"
             draft.maximizedCardId = null
+            draft.activeFrameId = rootFrameId(activeBranchId)
             draft.revision = revision
           })
           break
@@ -1071,15 +1240,100 @@ export const createAppStore = async (
 
         case "card.maximized":
           if (collections.cards.get(transition.id) === undefined) return
+          {
+            const frame = ensureCardFrame(transition.id)
+            const previousFrameId = current.activeFrameId
+            if (previousFrameId !== undefined && previousFrameId !== frame.id && collections.frames.get(previousFrameId) !== undefined) {
+              collections.frames.update(previousFrameId, (draft) => {
+                draft.presentation = "embedded"
+                draft.updatedAt = createdAt
+                draft.revision = revision
+              })
+            }
+            collections.frames.update(frame.id, (draft) => {
+              draft.presentation = "maximized"
+              draft.stateRevision = revision
+              draft.updatedAt = createdAt
+              draft.revision = revision
+            })
+          }
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.maximizedCardId = transition.id
+            draft.activeWorkspaceId = activeWorkspaceId
+            draft.activeBranchId = activeBranchId
+            draft.activeFrameId = cardFrameId(activeBranchId, transition.id)
             draft.revision = revision
           })
           break
 
         case "card.minimized":
+          if (current.activeFrameId !== undefined && collections.frames.get(current.activeFrameId) !== undefined) {
+            collections.frames.update(current.activeFrameId, (draft) => {
+              draft.presentation = "embedded"
+              draft.updatedAt = createdAt
+              draft.revision = revision
+            })
+          }
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.maximizedCardId = null
+            draft.activeWorkspaceId = activeWorkspaceId
+            draft.activeBranchId = activeBranchId
+            draft.activeFrameId = rootFrameId(activeBranchId)
+            draft.revision = revision
+          })
+          break
+
+        case "frame.navigated": {
+          const workspace = collections.workspaces.get(transition.workspaceId)
+          const branch = collections.branches.get(transition.branchId)
+          const frame = collections.frames.get(transition.frameId)
+          if (
+            workspace === undefined ||
+            branch?.workspaceId !== workspace.id ||
+            frame?.workspaceId !== workspace.id ||
+            frame.branchId !== branch.id ||
+            (frame.cardId !== null && collections.cards.get(frame.cardId) === undefined)
+          ) return
+          if (current.activeFrameId !== undefined && current.activeFrameId !== frame.id && collections.frames.get(current.activeFrameId) !== undefined) {
+            collections.frames.update(current.activeFrameId, (draft) => {
+              draft.presentation = "embedded"
+              draft.updatedAt = createdAt
+              draft.revision = revision
+            })
+          }
+          collections.frames.update(frame.id, (draft) => {
+            draft.presentation = frame.kind === "card" ? "maximized" : "embedded"
+            draft.updatedAt = createdAt
+            draft.revision = revision
+          })
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.activeWorkspaceId = workspace.id
+            draft.activeBranchId = branch.id
+            draft.activeFrameId = frame.id
+            draft.maximizedCardId = frame.cardId
+            draft.revision = revision
+          })
+          break
+        }
+
+        case "frame.forked":
+          if (
+            collections.branches.get(transition.branch.id) !== undefined ||
+            collections.frames.get(transition.rootFrame.id) !== undefined ||
+            collections.frames.get(transition.selectedFrame.id) !== undefined ||
+            transition.branch.workspaceId !== transition.rootFrame.workspaceId ||
+            transition.branch.workspaceId !== transition.selectedFrame.workspaceId ||
+            transition.branch.id !== transition.rootFrame.branchId ||
+            transition.branch.id !== transition.selectedFrame.branchId
+          ) return
+          collections.branches.insert(transition.branch)
+          collections.frames.insert(transition.rootFrame)
+          if (transition.selectedFrame.id !== transition.rootFrame.id) collections.frames.insert(transition.selectedFrame)
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.activeWorkspaceId = transition.branch.workspaceId
+            draft.activeBranchId = transition.branch.id
+            draft.activeFrameId = transition.selectedFrame.id
+            draft.maximizedCardId = transition.selectedFrame.cardId
             draft.revision = revision
           })
           break
@@ -1373,7 +1627,11 @@ export const createAppStore = async (
             kind: "local-repository",
             status: "connected",
             access: transition.access,
-            ...transition.repository,
+            name: transition.repository.name,
+            root: transition.repository.root,
+            head: transition.repository.head,
+            branch: transition.repository.branch,
+            remoteUrl: transition.repository.remoteUrl,
             capabilities: [...repositoryCapabilities(transition.repository.root, transition.access)],
             createdAt: existing?.createdAt ?? createdAt,
             updatedAt: createdAt,
@@ -1414,10 +1672,19 @@ export const createAppStore = async (
           })
           break
 
+        case "connector.removal.asked":
+          if (transition.id !== null && collections.connectors.get(transition.id) === undefined) return
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.pendingConnectorRemovalId = transition.id
+            draft.revision = revision
+          })
+          break
+
         case "connector.removed":
           if (collections.connectors.get(transition.id) === undefined) return
           collections.connectors.delete(transition.id)
           collections.sessions.update(SESSION_ID, (draft) => {
+            if (draft.pendingConnectorRemovalId === transition.id) draft.pendingConnectorRemovalId = null
             draft.revision = revision
           })
           break
@@ -1450,6 +1717,12 @@ export const createAppStore = async (
               Object.assign(draft, transition.card)
             })
           }
+          const frame = ensureCardFrame(transition.card.id)
+          collections.frames.update(frame.id, (draft) => {
+            draft.stateRevision = revision
+            draft.updatedAt = createdAt
+            draft.revision = revision
+          })
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.revision = revision
           })
@@ -1464,6 +1737,14 @@ export const createAppStore = async (
           collections.cards.update(transition.id, (draft) => {
             Object.assign(draft, transition.patch)
           })
+          for (const frame of collections.frames.values()) {
+            if (frame.cardId !== transition.id || frame.branchId !== activeBranchId) continue
+            collections.frames.update(frame.id, (draft) => {
+              draft.stateRevision = revision
+              draft.updatedAt = createdAt
+              draft.revision = revision
+            })
+          }
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.revision = revision
           })

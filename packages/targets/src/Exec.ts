@@ -669,7 +669,9 @@ const spawnTool = (
   cwd: string,
   payload: Payload,
   sensitiveEnv: ReadonlyArray<string>,
-  secretEnv: Readonly<Record<string, string>>
+  secretEnv: Readonly<Record<string, string>>,
+  onStdout?: ((chunk: Uint8Array) => void) | undefined,
+  onStderr?: ((chunk: Uint8Array) => void) | undefined
 ): Effect.Effect<Spawned, ExecError> =>
   Effect.callback<Spawned, ExecError>((resume) => {
     const [executable, ...args] = payload.argv
@@ -736,10 +738,16 @@ const spawnTool = (
       return Effect.sync(() => killTree(child))
     }
     child.stdout.on("data", (chunk: Buffer) => {
-      if (!settled) append(stdout, chunk)
+      if (!settled) {
+        append(stdout, chunk)
+        onStdout?.(chunk)
+      }
     })
     child.stderr.on("data", (chunk: Buffer) => {
-      if (!settled) append(stderr, chunk)
+      if (!settled) {
+        append(stderr, chunk)
+        onStderr?.(chunk)
+      }
     })
     child.stdout.on("error", pipeFailed("stdout"))
     child.stderr.on("error", pipeFailed("stderr"))
@@ -841,6 +849,10 @@ export const run = (
     readonly workspaceRoot: string
     readonly cacheDirectory?: string | undefined
     readonly sensitiveEnv?: ReadonlyArray<string> | undefined
+    /** Receives stdout bytes as the child produces them. */
+    readonly onStdout?: ((chunk: Uint8Array) => void) | undefined
+    /** Receives stderr bytes as the child produces them. */
+    readonly onStderr?: ((chunk: Uint8Array) => void) | undefined
   },
   untrustedPayload: Payload
 ): Effect.Effect<Result, ExecError> => {
@@ -879,7 +891,7 @@ export const run = (
     ({ cwd, resolved, sensitiveEnv }) =>
       withSecretEnvironment(resolved.secrets, diagnostic, (secretEnv) =>
         Effect.flatMap(
-          spawnTool(cwd, resolved, sensitiveEnv, secretEnv),
+          spawnTool(cwd, resolved, sensitiveEnv, secretEnv, options.onStdout, options.onStderr),
           (output) =>
             resolved.expectedExitCodes.includes(output.exitCode)
               ? Effect.succeed({

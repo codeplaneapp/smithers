@@ -397,6 +397,9 @@ const graphDigest = async (discovery: Discovery, scannedFiles: ReadonlyArray<str
     // No .smithers directory: the root WORKSPACE.ts fallback is in use.
   }
   const digests: Array<string> = []
+  for (const repository of discovery.repositories) {
+    digests.push(`repo\0${repository.name}\0${repository.path}`)
+  }
   for (const file of [...files].sort(byCodeUnit)) {
     const digest = await SafeFs.digestFile(NodePath.join(discovery.root, file), { what: file })
     digests.push(`${file}\0${digest ?? "absent"}`)
@@ -569,21 +572,42 @@ export const load = async (discovery: Discovery): Promise<LoadedGraph> => {
  * @category loading
  * @since 0.1.0
  */
+export const loadWorkspaceDeclaration = async (
+  root: string,
+  workspaceFile: string
+): Promise<WorkspaceDeclaration.WorkspaceDeclaration> => {
+  let namespace: unknown
+  try {
+    namespace = await tsImport(pathToFileURL(NodePath.join(root, workspaceFile)).href, {
+      parentURL: import.meta.url,
+      tsconfig: false
+    })
+  } catch (cause) {
+    if (cause instanceof PackageError) throw cause
+    throw new PackageError(
+      "module_import_failed",
+      `evaluating the workspace declaration failed: ${undefinedNamespaceHint(Diagnostic.message(cause))}`,
+      { path: workspaceFile, cause }
+    )
+  }
+  return validateWorkspaceModule(namespace, workspaceFile)
+}
+
+/**
+ * Evaluates only WORKSPACE.ts to learn its cache directory. Failures stay
+ * forgiving here so the full graph load can report the typed diagnostic.
+ *
+ * @category loading
+ * @since 0.1.0
+ */
 export const probeCacheDirectory = (root: string, workspaceFile: string): Promise<string | undefined> => {
   const key = `${root}\0${workspaceFile}`
   const existing = probes.get(key)
   if (existing !== undefined) return existing
-  const probed = (async (): Promise<string | undefined> => {
-    try {
-      const namespace = await tsImport(pathToFileURL(NodePath.join(root, workspaceFile)).href, {
-        parentURL: import.meta.url,
-        tsconfig: false
-      })
-      return validateWorkspaceModule(namespace, workspaceFile).cache.directory
-    } catch {
-      return undefined
-    }
-  })()
+  const probed = loadWorkspaceDeclaration(root, workspaceFile).then(
+    (workspace) => workspace.cache.directory,
+    () => undefined
+  )
   probes.set(key, probed)
   return probed
 }

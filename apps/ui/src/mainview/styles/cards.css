@@ -267,17 +267,24 @@
  * fallback; the chat stays mounted beneath the backdrop. */
 .card-maximize-backdrop {
 	position: fixed;
-	inset: 0;
+	inset: 0 0 8.5rem;
 	z-index: 65;
 	background: rgb(20 17 12 / 45%);
 }
 .smithers-card[data-maximized="true"] {
 	position: fixed;
-	inset: 1.5rem;
+	inset: 1.5rem 1.5rem 8.5rem;
 	z-index: 70;
 	overflow: auto;
 	margin: 0;
 	background: var(--card, #fffefa);
+}
+
+/* A frame may expand, but the conversation remains the app: its composer is
+ * visible and interactive throughout the explicit maximize transition. */
+.app-shell[data-frame-maximized="true"] .composer-wrap {
+	position: relative;
+	z-index: 75;
 }
 @media (prefers-reduced-motion: no-preference) {
 	.smithers-card[data-maximized="true"] {
@@ -534,6 +541,56 @@
 	margin: 0.5rem 0 0.25rem;
 	font-size: 0.75rem;
 	font-weight: 600;
+	color: var(--muted-foreground, #6b6457);
+}
+.targets-card-workspace-name {
+	margin: 0.5rem 0 0;
+	font-size: 0.8125rem;
+	font-weight: 600;
+}
+.repo-plugin-card {
+	display: flex;
+	flex-direction: column;
+	gap: 0.375rem;
+}
+.repo-plugin-summary,
+.repo-plugin-row-summary {
+	margin: 0;
+	font-size: 0.8125rem;
+	word-break: break-word;
+}
+.repo-plugin-group-title {
+	margin: 0.5rem 0 0.25rem;
+	font-size: 0.75rem;
+	font-weight: 600;
+	color: var(--muted-foreground, #6b6457);
+}
+.repo-plugin-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+.repo-plugin-row {
+	padding: 0.25rem 0.25rem;
+	border-bottom: 1px solid var(--border, #e4ddcf);
+	font-size: 0.8125rem;
+}
+.repo-plugin-row-head {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+.repo-plugin-row-title {
+	flex: 1;
+	min-width: 0;
+	font-weight: 500;
+}
+.repo-plugin-badges {
+	display: flex;
+	gap: 0.25rem;
+	flex-wrap: wrap;
+}
+.repo-plugin-row-summary {
 	color: var(--muted-foreground, #6b6457);
 }
 .targets-card-list,

@@ -42,3 +42,8 @@ test("default expressions remain outside the declaration convention", () => {
   const source = "/** Module prose.\n * @since 0.1.0\n */\n\nconst value = 1\nexport default value\n"
   assert.equal(conventionMessages(source).length, 0)
 })
+
+test("slop is an accepted declaration marker", () => {
+  const source = "/** Module prose.\n * @since 0.1.0\n */\n\n/** Value prose.\n * @category values\n * @since 0.1.0\n * @slop\n */\nexport const value = 1\n"
+  assert.equal(conventionMessages(source).length, 0)
+})

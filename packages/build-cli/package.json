@@ -55,6 +55,7 @@
     "@effect/platform-node": "4.0.0-rc.108",
     "@effect/platform-node-shared": "4.0.0-rc.108",
     "@smthrs/canonical": "0.1.0",
+    "@smthrs/create-app": "0.1.0",
     "@smthrs/crypto": "0.1.0",
     "@smthrs/engine": "0.1.0",
     "@smthrs/flow": "0.1.0",

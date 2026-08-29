@@ -42,7 +42,7 @@ const collect = async (script: string): Promise<{ frames: Array<TargetRunEvent>;
   const { cli, node } = await fakeCli(script)
   const frames: Array<TargetRunEvent> = []
   const runner = createTargetRunner({ publish: () => {}, cli, autoStartMs: 5, onEvent: (_run, frame) => frames.push(frame) })
-  const run = runner.start({ repoId: "r", repo: scratch, label: "//src:build", node, edges: [] })
+  const run = runner.start({ repoId: "r", repo: scratch, workspace: ".", label: "//src:build", node, edges: [] })
   runner.attach(run.runId)
   await new Promise<void>((resolve) => {
     const timer = setInterval(() => {
@@ -118,7 +118,7 @@ else process.stdout.write(JSON.stringify({ targets: [{ label: "//src:build", tar
 test("a chatty run does not grow the in-memory run store without bound", async () => {
   const history = createTargetRunHistory()
   const run: TargetRun = {
-    runId: "chatty", repoId: "r", repo: scratch, label: "//src:build", labels: ["//src:build"],
+    runId: "chatty", repoId: "r", repo: scratch, workspace: ".", label: "//src:build", labels: ["//src:build"],
     startedAt: Date.now(), status: "running", exitCode: null
   }
   await history.start(run)

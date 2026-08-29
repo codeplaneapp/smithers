@@ -430,8 +430,7 @@ describe("DeferredPersistence", () => {
         const service = yield* DeferredPersistence.make({
           owner,
           journalSource: "deferred-test",
-          scheduleResume: (_flowName, _executionId, _reason, sourceId) =>
-            Effect.sync(() => sourceIds.push(sourceId!))
+          scheduleResume: (_flowName, _executionId, _reason, sourceId) => Effect.sync(() => sourceIds.push(sourceId!))
         }).pipe(
           Effect.provideService(DurableEngineState.DurableEngineState, state),
           Effect.provideService(Journal.Journal, makeJournal([]))
@@ -441,8 +440,8 @@ describe("DeferredPersistence", () => {
       })))
 
       expect(sourceIds).toEqual([
-        'deferred-test:wake:["DeferredPersistence/Test","historical-completion","answer"]',
-        'deferred-test:wake:["DeferredPersistence/Test","historical-completion","answer"]'
+        "deferred-test:wake:[\"DeferredPersistence/Test\",\"historical-completion\",\"answer\"]",
+        "deferred-test:wake:[\"DeferredPersistence/Test\",\"historical-completion\",\"answer\"]"
       ])
     }))
 })

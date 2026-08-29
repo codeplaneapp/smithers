@@ -1,0 +1,41 @@
+{
+  "name": "__APP_NAME__",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "A Smithers app: file-routed flows and panes, deployed as a Cloudflare Worker",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "wrangler deploy",
+    "routes": "smthrs-routes",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:record": "SMTHRS_RECORD=1 vitest run"
+  },
+  "dependencies": {
+    "@smthrs/core": "0.1.0",
+    "@smthrs/create-app": "0.1.0",
+    "@smthrs/harness": "0.1.0",
+    "@smthrs/targets": "0.1.0",
+    "effect": "4.0.0-rc.108",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.53.0",
+    "@cloudflare/workers-types": "^4.20260604.1",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "6.0.3",
+    "vite": "^8.2.1",
+    "vitest": "4.1.9",
+    "wrangler": "^4.124.0"
+  }
+}

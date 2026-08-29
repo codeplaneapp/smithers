@@ -6,8 +6,8 @@
  */
 import { existsSync, realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { dirname, resolve } from "node:path"
-import type { Target } from "smithers-shared/LocalApp"
+import { dirname, join, resolve } from "node:path"
+import type { RepoWorkspace, TargetDefinition } from "smithers-shared/LocalApp"
 import { splitLabel } from "smithers-shared/LocalApp"
 import { criticalPath } from "smithers-shared/TargetGraph"
 import type { GraphEdge, NodeTiming, RunSummary, TargetRunEvent } from "smithers-shared/TargetGraph"
@@ -65,10 +65,11 @@ const isTargetRow = (value: unknown): value is { label: string; target?: unknown
   typeof value === "object" && value !== null && typeof (value as { label?: unknown }).label === "string"
 
 /**
- * The loader's `{ targets: [{ label, target, kinds }] }` listing as Targets,
- * or an error message when the text is not that shape.
+ * The loader's `{ targets: [{ label, target, kinds }] }` listing as Targets
+ * tagged with the workspace the loader ran in, or an error message when the
+ * text is not that shape.
  */
-export const mapTargets = (stdout: string): { readonly targets: Array<Target> } | { readonly error: string } => {
+export const mapTargets = (stdout: string, workspace: string): { readonly targets: Array<TargetDefinition> } | { readonly error: string } => {
   let parsed: unknown
   try {
     parsed = JSON.parse(stdout)
@@ -86,52 +87,52 @@ export const mapTargets = (stdout: string): { readonly targets: Array<Target> } 
       label: row.label,
       target: typeof row.target === "string" ? row.target : "",
       kinds: Array.isArray(row.kinds) ? row.kinds.filter((kind): kind is string => typeof kind === "string") : [],
-      ...splitLabel(row.label)
+      ...splitLabel(row.label),
+      workspace
     }))
   }
 }
 
 export interface TargetsQueryResult {
-  readonly targets: Array<Target>
+  readonly targets: Array<TargetDefinition>
   readonly warnings: Array<string>
   readonly durationMs: number
 }
 
 export interface TargetsQueryOptions {
   readonly repo: string
+  /**
+   * The detected workspaces the query fans out over (one loader run each,
+   * cwd = join(repo, workspace.path)). Absent or empty queries the root alone.
+   */
+  readonly workspaces?: ReadonlyArray<RepoWorkspace>
   readonly node: NodeSidecar | null
   readonly cli?: string
   readonly sandboxHost?: SandboxHost
   readonly timeoutMs?: number
 }
 
-/**
- * `node <cli> query '//...' --format json` in the repository under the loader
- * policy. Loader errors become warnings and an empty list, never a throw.
- */
-export const queryTargets = async (options: TargetsQueryOptions): Promise<TargetsQueryResult> => {
-  const started = Date.now()
-  const cli = options.cli ?? resolveBuildCli()
+/** The directory a workspace's loader (and runner) executes in. */
+export const workspaceCwd = (repo: string, workspace: string): string =>
+  workspace === "." ? repo : join(repo, workspace)
+
+/** One loader run at one workspace's cwd; errors come back as warnings, never a throw. */
+const queryWorkspace = async (
+  options: TargetsQueryOptions & { readonly node: NodeSidecar; readonly cli: string },
+  workspace: string
+): Promise<{ readonly targets: Array<TargetDefinition>; readonly warnings: Array<string> }> => {
   const warnings: Array<string> = []
-  if (options.node === null) {
-    warnings.push("No Node.js >= 22.19 was found for the smthrs loader (SMITHERS_NODE, PATH, nvm, homebrew).")
-    return { targets: [], warnings, durationMs: Date.now() - started }
-  }
-  if (!existsSync(cli)) {
-    warnings.push(`The smthrs loader is missing at ${cli} (set SMITHERS_BUILD_CLI).`)
-    return { targets: [], warnings, durationMs: Date.now() - started }
-  }
+  const cwd = workspaceCwd(options.repo, workspace)
   const wrapped = wrapSandbox(
-    [options.node.path, cli, "query", "//...", "--format", "json"],
-    loaderPolicy(sandboxPathsFor(options.repo)),
+    [options.node.path, options.cli, "query", "//...", "--format", "json"],
+    loaderPolicy(sandboxPathsFor(cwd)),
     options.sandboxHost ?? currentSandboxHost()
   )
   let child: ReturnType<typeof Bun.spawn>
   try {
-    child = Bun.spawn([...wrapped.argv], { cwd: options.repo, stdout: "pipe", stderr: "pipe", stdin: "ignore" })
+    child = Bun.spawn([...wrapped.argv], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore" })
   } catch (error) {
-    warnings.push(`The loader could not start: ${error instanceof Error ? error.message : String(error)}`)
-    return { targets: [], warnings, durationMs: Date.now() - started }
+    return { targets: [], warnings: [`The loader could not start: ${error instanceof Error ? error.message : String(error)}`] }
   }
   const timer = setTimeout(() => child.kill(), options.timeoutMs ?? QUERY_TIMEOUT_MS)
   const [code, stdout, stderr] = await Promise.all([
@@ -140,15 +141,49 @@ export const queryTargets = async (options: TargetsQueryOptions): Promise<Target
     new Response(child.stderr as ReadableStream).text()
   ])
   clearTimeout(timer)
-  const mapped = mapTargets(stdout)
+  const mapped = mapTargets(stdout, workspace)
   if ("error" in mapped) {
     warnings.push(code === 0 ? mapped.error : `The loader exited ${code}: ${mapped.error}`)
     const trimmed = stderr.trim()
     if (trimmed !== "") warnings.push(trimmed.slice(0, 2000))
-    return { targets: [], warnings, durationMs: Date.now() - started }
+    return { targets: [], warnings }
   }
   if (code !== 0) warnings.push(`The loader exited ${code}.`)
-  return { targets: mapped.targets, warnings, durationMs: Date.now() - started }
+  return { targets: mapped.targets, warnings }
+}
+
+/**
+ * `node <cli> query '//...' --format json` once per detected workspace, each
+ * at its own cwd under the loader policy and each with its own timeout. One
+ * workspace's failure is a warning and never blocks the others.
+ */
+export const queryTargets = async (options: TargetsQueryOptions): Promise<TargetsQueryResult> => {
+  const started = Date.now()
+  const cli = options.cli ?? resolveBuildCli()
+  const warnings: Array<string> = []
+  const node = options.node
+  if (node === null) {
+    warnings.push("No Node.js >= 22.19 was found for the smthrs loader (SMITHERS_NODE, PATH, nvm, homebrew).")
+    return { targets: [], warnings, durationMs: Date.now() - started }
+  }
+  if (!existsSync(cli)) {
+    warnings.push(`The smthrs loader is missing at ${cli} (set SMITHERS_BUILD_CLI).`)
+    return { targets: [], warnings, durationMs: Date.now() - started }
+  }
+  const workspaces = options.workspaces === undefined || options.workspaces.length === 0
+    ? ["."]
+    : options.workspaces.map((workspace) => workspace.path)
+  // A lone root query keeps the historical, unprefixed warning text.
+  const lone = workspaces.length === 1 && workspaces[0] === "."
+  const settled = await Promise.all(
+    workspaces.map(async (workspace) => ({ workspace, ...(await queryWorkspace({ ...options, node, cli }, workspace)) }))
+  )
+  const targets: Array<TargetDefinition> = []
+  for (const result of settled) {
+    targets.push(...result.targets)
+    for (const warning of result.warnings) warnings.push(lone ? warning : `[${result.workspace}] ${warning}`)
+  }
+  return { targets, warnings, durationMs: Date.now() - started }
 }
 
 export type TargetRunStatus = "pending" | "running" | "done" | "failed"
@@ -157,6 +192,8 @@ export interface TargetRun {
   readonly runId: string
   readonly repoId: string
   readonly repo: string
+  /** The detected workspace the run executes in ("." for the repo root). */
+  readonly workspace: string
   readonly label: string
   readonly labels: ReadonlyArray<string>
   readonly startedAt: number
@@ -171,11 +208,24 @@ export interface TargetRunnerOptions {
   readonly autoStartMs?: number
   readonly log?: (line: string) => void
   readonly onEvent?: (run: TargetRun, event: TargetRunEvent) => void
+  /** Maximum pending/running children; default 4. */
+  readonly maxActiveRuns?: number
+  /** Maximum retained run handles; settled handles are evicted oldest-first. */
+  readonly maxRetainedRuns?: number
+}
+
+export class TargetRunCapacityError extends Error {
+  readonly code = "target_run_capacity"
 }
 
 export interface TargetRunner {
   /** Registers a run; the child starts on `attach`, or after `autoStartMs`. */
-  readonly start: (run: { readonly repoId: string; readonly repo: string; readonly label: string; readonly node: NodeSidecar; readonly edges?: ReadonlyArray<GraphEdge> }) => TargetRun
+  readonly start: (run: {
+    readonly repoId: string
+    readonly repo: string
+    readonly workspace: string
+    readonly label: string
+    readonly node: NodeSidecar; readonly edges?: ReadonlyArray<GraphEdge> }) => TargetRun
   /** A subscriber is listening: spawn now if not yet started. */
   readonly attach: (runId: string) => boolean
   readonly cancel: (runId: string) => boolean
@@ -327,6 +377,8 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
     nextSeq: number
   }
   const runs = new Map<string, Live>()
+  const maxActiveRuns = options.maxActiveRuns ?? 4
+  const maxRetainedRuns = options.maxRetainedRuns ?? 64
 
   /*
    * Every frame the backend records is stamped with a run-local monotonic
@@ -382,7 +434,7 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
     let child: ReturnType<typeof Bun.spawn>
     try {
       child = Bun.spawn([live.node.path, cli, live.run.label], {
-        cwd: live.run.repo,
+        cwd: workspaceCwd(live.run.repo, live.run.workspace),
         stdout: "pipe",
         stderr: "pipe",
         stdin: "ignore"
@@ -394,7 +446,7 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
       return
     }
     live.child = child
-    log(`target-run ${live.run.runId}: ${live.run.label} in ${live.run.repo} (pid ${child.pid})`)
+    log(`target-run ${live.run.runId}: ${live.run.label} in ${workspaceCwd(live.run.repo, live.run.workspace)} (pid ${child.pid})`)
     void Promise.all([
       pump(child.stdout as ReadableStream<Uint8Array>, live, "stdout"),
       pump(child.stderr as ReadableStream<Uint8Array>, live, "stderr")
@@ -420,10 +472,21 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
   }
 
   return {
-    start: ({ repoId, repo, label, node, edges = [] }) => {
+    start: ({ repoId, repo, workspace, label, node, edges = [] }) => {
+      const active = [...runs.values()].filter((live) => live.run.status === "pending" || live.run.status === "running")
+      if (active.length >= maxActiveRuns) {
+        throw new TargetRunCapacityError(`At most ${maxActiveRuns} target runs may execute at once.`)
+      }
+      while (runs.size >= maxRetainedRuns) {
+        const settled = [...runs].find(([, live]) => live.run.status !== "pending" && live.run.status !== "running")
+        if (settled === undefined) {
+          throw new TargetRunCapacityError(`At most ${maxRetainedRuns} target runs may be retained.`)
+        }
+        runs.delete(settled[0])
+      }
       const startedAt = Date.now()
       const labels = label.split(/\s+/).filter((part) => part.startsWith("//"))
-      const run: TargetRun = { runId: crypto.randomUUID(), repoId, repo, label, labels, startedAt, status: "pending", exitCode: null }
+      const run: TargetRun = { runId: crypto.randomUUID(), repoId, repo, workspace, label, labels, startedAt, status: "pending", exitCode: null }
       const live: Live = { run, node, edges, parser: createRunStdoutParser({ edges, startedAt }), child: undefined, timer: undefined, summaryEmitted: false, nextSeq: 0 }
       runs.set(run.runId, live)
       live.timer = setTimeout(() => spawn(live), options.autoStartMs ?? 1000)

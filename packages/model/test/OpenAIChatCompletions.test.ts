@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect"
+import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import * as Events from "../src/ModelEvent.ts"
 import * as Request from "../src/ModelRequest.ts"
@@ -11,6 +12,15 @@ const streamRequest = Request.ModelRequest.make({
   tools: [],
   params: Request.GenerationParams.make()
 })
+
+const fixture = (name: string): ReadonlyArray<string> =>
+  readFileSync(new URL(`./fixtures/openai-chat/${name}`, import.meta.url), "utf8")
+    .trim()
+    .split("\n\n")
+    .flatMap((block) => {
+      const data = block.split("\n").find((line) => line.startsWith("data: "))?.slice(6)
+      return data === undefined || data === "" || data === "[DONE]" ? [] : [data]
+    })
 
 const step = (
   state: ReturnType<typeof OpenAIChatCompletions.protocol.stream.initial>,
@@ -84,6 +94,39 @@ describe("OpenAIChatCompletions.protocol.body", () => {
 })
 
 describe("OpenAIChatCompletions.protocol.stream", () => {
+  it("replays a recorded Gemini text completion and settles once", () => {
+    expect(replayData(fixture("text.sse"))).toEqual([
+      { type: "text-start", id: "text-0" },
+      { type: "text-delta", id: "text-0", text: "ok" },
+      { type: "text-end", id: "text-0" },
+      { type: "usage", inputTokens: 6, outputTokens: 1, totalTokens: 77 },
+      { type: "settle", stopReason: "stop", responseId: "YLGPaoe0GcCm1MkPxerGiQg" }
+    ])
+  })
+
+  it("replays a recorded Gemini tool call whose stop finish reason follows the streamed call", () => {
+    expect(replayData(fixture("tool-call.sse"))).toEqual([
+      { type: "tool-call-start", id: "call_457349", name: "get_weather" },
+      { type: "tool-call-delta", id: "call_457349", arguments: "{\"city\":\"Paris\"}" },
+      { type: "tool-call-end", id: "call_457349", arguments: "{\"city\":\"Paris\"}" },
+      { type: "usage", inputTokens: 54, outputTokens: 16, totalTokens: 128 },
+      { type: "settle", stopReason: "tool-calls", responseId: "YbGPao_THuGw1MkPgpuuqAg" }
+    ])
+  })
+
+  it("separates recorded parallel Gemini tool calls that omit indexes", () => {
+    expect(replayData(fixture("parallel-tool-calls.sse"))).toEqual([
+      { type: "tool-call-start", id: "call_365409", name: "get_weather" },
+      { type: "tool-call-delta", id: "call_365409", arguments: "{\"city\":\"Paris\"}" },
+      { type: "tool-call-start", id: "call_365410", name: "get_weather" },
+      { type: "tool-call-delta", id: "call_365410", arguments: "{\"city\":\"Tokyo\"}" },
+      { type: "tool-call-end", id: "call_365409", arguments: "{\"city\":\"Paris\"}" },
+      { type: "tool-call-end", id: "call_365410", arguments: "{\"city\":\"Tokyo\"}" },
+      { type: "usage", inputTokens: 64, outputTokens: 32, totalTokens: 154 },
+      { type: "settle", stopReason: "tool-calls", responseId: "YrGPavuGIbah9MoP5_XUmAg" }
+    ])
+  })
+
   it("replays a plain-text completion captured from a real Ollama server", () => {
     const events = replayData([
       "{\"id\":\"chatcmpl-709\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Paris\"},\"finish_reason\":null}]}",
@@ -94,7 +137,7 @@ describe("OpenAIChatCompletions.protocol.stream", () => {
       Events.ModelEvent.TextStart({ type: "text-start", id: "text-0" }),
       Events.ModelEvent.TextDelta({ type: "text-delta", id: "text-0", text: "Paris" }),
       Events.ModelEvent.TextEnd({ type: "text-end", id: "text-0" }),
-      Events.ModelEvent.Settle({ type: "settle", stopReason: "stop" }),
+      Events.ModelEvent.Settle({ type: "settle", stopReason: "stop", responseId: "chatcmpl-709" }),
       Events.ModelEvent.Usage({ inputTokens: 29, outputTokens: 2, totalTokens: 31 })
     ])
   })
@@ -117,7 +160,7 @@ describe("OpenAIChatCompletions.protocol.stream", () => {
         id: "call_sx8k7q8i",
         arguments: "{\"answer\":\"Paris\"}"
       }),
-      Events.ModelEvent.Settle({ type: "settle", stopReason: "tool-calls" }),
+      Events.ModelEvent.Settle({ type: "settle", stopReason: "tool-calls", responseId: "chatcmpl-204" }),
       Events.ModelEvent.Usage({ inputTokens: 155, outputTokens: 29, totalTokens: 184 })
     ])
   })

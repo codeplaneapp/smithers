@@ -25,15 +25,15 @@ export const releasePack = Smithers.NodeBinary({
 
 ## Attributes
 
-| Name      | Type                     | Default  | Description                                                                |
-| --------- | ------------------------ | -------- | ---------------------------------------------------------------------------- |
-| `runtime` | `Runtime.Runtime`        | required | The declared interpreter. Never a hardcoded `node`.                        |
-| `entry`   | `Input.File`             | required | The program. A `//`-rooted path is workspace-relative.                     |
-| `args`    | `Array<string>`          | required | Arguments passed after the entry point, at most 64.                        |
-| `srcs`    | `Array<Input.Declared>`  | required | What the program reads beyond its own entry point.                         |
-| `deps`    | `Array<Target.Target>`   | required | Dependency targets.                                                        |
-| `env`     | `Record<string, string>` | `{}`     | Environment merged over the host bootstrap environment.                    |
-| `cwd`     | `string`                 | `"."`    | Workspace-relative directory the program runs in.                          |
+| Name      | Type                     | Default  | Description                                             |
+| --------- | ------------------------ | -------- | ------------------------------------------------------- |
+| `runtime` | `Runtime.Runtime`        | required | The declared interpreter. Never a hardcoded `node`.     |
+| `entry`   | `Input.File`             | required | The program. A `//`-rooted path is workspace-relative.  |
+| `args`    | `Array<string>`          | required | Arguments passed after the entry point, at most 64.     |
+| `srcs`    | `Array<Input.Declared>`  | required | What the program reads beyond its own entry point.      |
+| `deps`    | `Array<Target.Target>`   | required | Dependency targets.                                     |
+| `env`     | `Record<string, string>` | `{}`     | Environment merged over the host bootstrap environment. |
+| `cwd`     | `string`                 | `"."`    | Workspace-relative directory the program runs in.       |
 
 ## Command
 
@@ -52,7 +52,7 @@ produced it.
 ## Channels and status
 
 |          |                                             |
-| -------- | --------------------------------------------- |
+| -------- | ------------------------------------------- |
 | Kinds    | `build`                                     |
 | Success  | `Exec.Result`                               |
 | Error    | `Exec.ExecError`                            |

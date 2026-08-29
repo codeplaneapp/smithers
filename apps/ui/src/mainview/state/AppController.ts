@@ -1,4 +1,5 @@
 import type { FetchLike } from "smithers-shared/NativeAgent"
+import type { AppBootstrap } from "smithers-shared/AppBootstrap"
 import type { RepositoryAccess } from "smithers-shared/NativeRepository"
 import { createCommandRegistry } from "../flows/Commands"
 import type { CommandRegistry } from "../flows/Commands"
@@ -6,6 +7,8 @@ import type { CatalogItem } from "../flows/Commands"
 import type { SlashItem } from "../flows/registry"
 import { flowRequirements } from "../flows/registry"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import { localSocketProtocols } from "../runtime/LocalSession"
+import type { FrameHistoryPort } from "../runtime/FrameHistory"
 import type { AppStore } from "./AppStore"
 import { createPtyClient, pageSocketUrl } from "./PtyClient"
 import type { PtyClient } from "./PtyClient"
@@ -14,6 +17,7 @@ import { createAuthBillingController } from "./controller/auth-billing"
 import { createConnectorController } from "./controller/connectors"
 import { createControllerContext } from "./controller/context"
 import { createFailureController } from "./controller/failures"
+import { createFramesController } from "./controller/frames"
 import { createPresentationController } from "./controller/presentation"
 import { createTabsController } from "./controller/tabs"
 import type { TabsController } from "./controller/tabs"
@@ -50,6 +54,7 @@ import type { SeamContext } from "./seams/SeamContext"
 
 export interface AppController {
   readonly store: AppStore
+  readonly bootstrap: AppBootstrap | undefined
   readonly nativeAgentAvailable: boolean
   readonly nativeRepositoriesAvailable: boolean
   /** The command registry: every interactive affordance routes through it. */
@@ -62,11 +67,15 @@ export interface AppController {
   readonly showChat: () => void
   readonly showWorld: () => void
   readonly showConnectors: () => void
+  readonly askReset: () => void
+  readonly cancelReset: () => void
   readonly runCommand: (name: string) => boolean
   readonly runCommandArgs: (name: string, args: string) => boolean
   readonly connectLocalRepository: (access: RepositoryAccess) => Promise<void>
   readonly makeConnectorReadOnly: (id: string) => void
-  readonly removeConnector: (id: string) => void
+  readonly askConnectorRemoval: (id: string) => string | void
+  readonly cancelConnectorRemoval: () => void
+  readonly removeConnector: (id: string) => string | void
   readonly selectWorldDocument: (id: string) => string | void
   readonly changeWorldDocument: (id: string, body: string) => void
   readonly createWorldDocument: () => void
@@ -109,6 +118,9 @@ export interface AppController {
   /* Card maximize/minimize — the user's presentation transition (§2d′). */
   readonly maximizeCard: (id: string) => string | void
   readonly minimizeCard: () => void
+  readonly frameBack: () => void
+  readonly frameForward: () => void
+  readonly forkFrame: () => string | void
   /* The local-app tabs (docs/LOCAL-APP.md "Tabs"); see controller/tabs.ts. */
   readonly openTerminalTab: TabsController["openTerminalTab"]
   readonly openHarnessTab: TabsController["openHarnessTab"]
@@ -263,6 +275,8 @@ export interface AppController {
  */
 export interface AppServices {
   readonly fetchImpl?: FetchLike
+  readonly bootstrap?: AppBootstrap
+  readonly frameHistory?: FrameHistoryPort
   readonly baseUrl?: string
   /** The toast debounce (the 300ms law); injectable so tests pin both sides of it. */
   readonly toastDebounceMs?: number
@@ -370,12 +384,12 @@ export const createAppController = (
     showChat,
     showWorld,
     showConnectors,
-    maximizeCard,
-    minimizeCard,
     toggleDevtools,
     toggleSurfacesMenu,
     toggleConnectMenu,
     closeConnectMenu,
+    askReset,
+    cancelReset,
     describeAgentBackend,
     debugSnapshot,
     debugEvents,
@@ -388,6 +402,14 @@ export const createAppController = (
     toggleTheme,
     setPalette
   } = createPresentationController(ctx, adminHealth)
+
+  const {
+    maximizeCard,
+    minimizeCard,
+    frameBack,
+    frameForward,
+    forkFrame
+  } = createFramesController(ctx, services.frameHistory)
 
   const {
     openTerminalTab,
@@ -404,20 +426,19 @@ export const createAppController = (
     notePtyExit,
     installKeyboard
   } = createTabsController(ctx)
-  const pty = createPtyClient({ http, baseUrl, socketUrl: pageSocketUrl })
+  const pty = createPtyClient({ http, baseUrl, socketUrl: pageSocketUrl, socketProtocols: localSocketProtocols })
   ctx.onDispose(pty.dispose)
-  const targetRuns = createTargetRunClient({ socketUrl: pageSocketUrl })
+  const targetRuns = createTargetRunClient({ socketUrl: pageSocketUrl, socketProtocols: localSocketProtocols })
   ctx.onDispose(targetRuns.dispose)
   const targetGraph = createTargetGraphController(ctx, {
     nextOrdinal: nextTranscriptOrdinal,
     runs: targetRuns,
     devFixtures: createTargetGraphDevFixtures()
   })
-  const { openRepo, runTarget, openTarget, installBridge } = createTargetsController(ctx, {
+  const { openRepo, runTarget, openTarget } = createTargetsController(ctx, {
     nextOrdinal: nextTranscriptOrdinal,
     loadRepos,
     runs: targetRuns,
-    surfaceCommandFailure,
     onRunStarted: targetGraph.noteRunStarted
   })
   ctx.openRepo = openRepo
@@ -574,6 +595,8 @@ export const createAppController = (
     openFirstRunRepos,
     connectLocalRepository,
     makeConnectorReadOnly,
+    askConnectorRemoval,
+    cancelConnectorRemoval,
     removeConnector
   } = createConnectorController(ctx, promptSignIn)
   ctx.openRepoChooser = openRepoChooser
@@ -585,6 +608,7 @@ export const createAppController = (
    * embedded cards and record via:"agent", never user chrome.
    */
   const commands = createCommandRegistry({
+    bootstrap: services.bootstrap,
     changeDraft,
     withAgentActor: async <T>(work: () => Promise<T>): Promise<T> => {
       ctx.commandActor = "smithers"
@@ -595,6 +619,8 @@ export const createAppController = (
       }
     },
     reset,
+    askReset,
+    cancelReset,
     stop,
     send,
     showChat,
@@ -602,6 +628,8 @@ export const createAppController = (
     showConnectors,
     connectLocalRepository,
     makeConnectorReadOnly,
+    askConnectorRemoval,
+    cancelConnectorRemoval,
     removeConnector,
     selectWorldDocument,
     changeWorldDocument,
@@ -627,6 +655,9 @@ export const createAppController = (
     resumeWorkflowRuns,
     maximizeCard,
     minimizeCard,
+    frameBack,
+    frameForward,
+    forkFrame,
     openTerminalTab,
     openHarnessTab,
     openCardTab,
@@ -746,9 +777,6 @@ export const createAppController = (
   watchIdentityAcrossTabs()
   // Cmd+T / Cmd+W / Cmd+1..9 on the document, released with the controller.
   if (typeof document !== "undefined") ctx.onDispose(installKeyboard(document))
-  // The html cards' iframe bridge (run / open), released with the controller.
-  if (typeof window !== "undefined") ctx.onDispose(installBridge(window))
-
   const dispose = (): void => {
     // The pumps first (they hold EventSources and timers), then the
     // registered finalizers (the agent subscription, identity listeners,
@@ -771,6 +799,7 @@ export const createAppController = (
 
   return {
     store,
+    bootstrap: services.bootstrap,
     nativeAgentAvailable: agent.available,
     nativeRepositoriesAvailable: repositories.available,
     tappedFetch: http,
@@ -778,6 +807,8 @@ export const createAppController = (
     slashItems: (needle) => commands.slashItems(needle),
     changeDraft,
     reset,
+    askReset,
+    cancelReset,
     stop,
     send,
     showChat,
@@ -787,6 +818,8 @@ export const createAppController = (
     runCommandArgs,
     connectLocalRepository,
     makeConnectorReadOnly,
+    askConnectorRemoval,
+    cancelConnectorRemoval,
     removeConnector,
     selectWorldDocument,
     changeWorldDocument,
@@ -812,6 +845,9 @@ export const createAppController = (
     resumeWorkflowRuns,
     maximizeCard,
     minimizeCard,
+    frameBack,
+    frameForward,
+    forkFrame,
     openTerminalTab,
     openHarnessTab,
     openCardTab,

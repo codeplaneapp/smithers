@@ -15,14 +15,19 @@
     "skipLibCheck": true,
     "strict": true,
     "target": "ES2023",
-    "types": [
-      "@cloudflare/workers-types",
-      "node",
-      "vitest/globals"
-    ],
+    "types": [],
     "verbatimModuleSyntax": true
   },
-  "include": [
-    "./**/*.ts"
+  "files": [],
+  "references": [
+    {
+      "path": "./tsconfig.worker.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
+    },
+    {
+      "path": "./tsconfig.test.json"
+    }
   ]
 }

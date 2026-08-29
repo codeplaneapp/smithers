@@ -218,7 +218,8 @@ describe("the tabs collection", () => {
           path: "/tmp/force",
           name: "artsy/force",
           git: null,
-          smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts" }
+          smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts", workspaces: [] },
+          warnings: []
         }
       ]
     })

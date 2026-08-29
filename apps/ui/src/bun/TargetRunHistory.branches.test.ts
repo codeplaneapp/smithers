@@ -23,7 +23,7 @@ afterEach(async () => {
 
 const BASE = 1_700_000_000_000
 const runOf = (runId: string, startedAt = BASE): TargetRun => ({
-  runId, repoId: "force", repo, label: "//src:typeCheck", labels: ["//src:typeCheck"],
+  runId, repoId: "force", repo, workspace: ".", label: "//src:typeCheck", labels: ["//src:typeCheck"],
   startedAt, status: "running", exitCode: null
 })
 

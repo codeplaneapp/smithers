@@ -219,7 +219,7 @@ export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo 
     expect(index.targets().map((row) => row.label)).toEqual(["//generated:run"])
   })
 
-  it("prunes package files owned by a nested workspace", async () => {
+  it("refuses package files owned by an undeclared nested workspace", async () => {
     const root = await temporaryWorkspace()
     await write(root, "WORKSPACE.ts", workspaceModule)
     await write(
@@ -233,7 +233,7 @@ export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo 
       "demo/PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"\nexport const Package = S.Package({ targets: { nested: S.Shell.Test({ command: "true" }) } })\n`
     )
-    expect((await openIndex(root)).targets().map((row) => row.label)).toEqual(["//:root"])
+    await expect(openIndex(root)).rejects.toMatchObject({ code: "nested_workspace_undeclared" })
   })
 
   it("keeps packages under the .smithers directory that holds this workspace's own descriptor", async () => {

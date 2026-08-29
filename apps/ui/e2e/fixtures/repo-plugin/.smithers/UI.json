@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "name": "repo-plugin-fixture",
+  "title": "Repo plugin fixture",
+  "summary": "The tiny two-workspace fixture behind the repo-plugin card spec.",
+  "groups": [
+    { "id": "checks", "title": "Checks", "kind": "check" },
+    { "id": "recipes", "title": "Recipes", "kind": "recipe" }
+  ],
+  "entries": [
+    {
+      "id": "hello",
+      "group": "checks",
+      "workspace": ".",
+      "label": "//:hello",
+      "title": "Hello check",
+      "summary": "Prints plugin-hello from the root workspace."
+    },
+    {
+      "id": "polish",
+      "group": "recipes",
+      "workspace": "tools",
+      "label": "//:polish",
+      "title": "Polish recipe",
+      "summary": "Prints plugin-polish from the tools workspace.",
+      "approval": true,
+      "agentic": true
+    }
+  ]
+}

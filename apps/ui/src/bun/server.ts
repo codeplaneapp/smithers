@@ -6,19 +6,28 @@
  * Chromium.
  */
 import type { Server, ServerWebSocket } from "bun"
+import { randomBytes } from "node:crypto"
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, normalize, resolve } from "node:path"
 import {
   AUTH_ROUTE_PREFIX,
   AUTH_SESSION_PATH,
+  CANCEL_PATH,
   CHAT_CANCEL_PATH,
   CHAT_TURN_PATH,
   HEALTH_PATH,
   IDENTITY_ROUTE_PREFIX,
-  OPEN_EXTERNAL_PATH
+  TURN_PATH
 } from "smithers-shared/AgentApiRoutes"
+import { APP_API_VERSION, APP_BOOTSTRAP_PATH } from "smithers-shared/AppBootstrap"
 import { AgentRuntimeContextSchema } from "smithers-shared/AgentContext"
+import {
+  isLocalSessionToken,
+  localSessionProtocol,
+  LOCAL_SESSION_HEADER,
+  LOCAL_SESSION_META
+} from "smithers-shared/LocalSession"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "smithers-shared/NativeAgent"
 import { createChatStub } from "./ChatStub"
 import { createCloudAgent } from "./CloudAgent"
@@ -28,7 +37,10 @@ import { findNode } from "./Node"
 import type { NodeSidecar } from "./Node"
 import { binDirOf, createPtyManager } from "./Pty"
 import type { PtyManager } from "./Pty"
+import { createRepositoryAuthority } from "./RepositoryAuthority"
+import type { RepositoryAuthority } from "./RepositoryAuthority"
 import { json, jsonError, readJson, Router } from "./routes"
+import type { RouteHandler } from "./routes"
 import { registerRepoTargetRoutes } from "./routes/repoTargets"
 import { registerTargetGraphRoutes } from "./routes/targetGraph"
 import { registerHarnessRoutes } from "./routes/harnesses"
@@ -48,6 +60,9 @@ export const CLIENT_ERROR_MAX_BODY = 16 * 1024
 
 /** Long conversations are replayed on every turn, so the cap is generous, not tight. */
 const MAX_BODY_BYTES = 1024 * 1024
+const MAX_WS_FRAME_BYTES = 128 * 1024
+const MAX_WS_SUBSCRIPTIONS = 64
+const MAX_WS_TOPIC_CHARS = 256
 
 export interface LocalServerOptions {
   /** 0 (the default) picks a free port. */
@@ -56,6 +71,8 @@ export interface LocalServerOptions {
   readonly distDir: string
   /** SMITHERS_CHAT_STUB=1: the deterministic stub instead of chat.smithers.sh. */
   readonly chatStub?: boolean
+  /** Offline has no network egress; hybrid explicitly enables Smithers Cloud. */
+  readonly cloudMode?: "offline" | "hybrid"
   readonly chat?: { readonly chatUrl?: string; readonly origin?: string }
   /**
    * Where `/api/auth/*` and `/api/identity/*` are forwarded so the sign-in
@@ -64,19 +81,22 @@ export interface LocalServerOptions {
    */
   readonly identityUpstream?: string | null
   readonly version?: string
-  /** Opens a URL in the system browser; the native shell supplies Utils.openExternal. */
-  readonly openExternal?: (url: string) => Promise<boolean>
+  readonly buildSha?: string
+  /** Headless/dev-only escape hatch. Native production accepts picker grants only. */
+  readonly allowManualRepositoryPaths?: boolean
   /** A pre-resolved Node sidecar; the default probes once at startup. */
   readonly node?: NodeSidecar | null
   /** The smthrs build-cli entry for the targets lane; the default resolves it from the checkout (or SMITHERS_BUILD_CLI). */
   readonly buildCli?: string
-  /** The home directory `cwd: "~"` expands to and `/api/health` reports; default `os.homedir()`. */
+  /** The home directory used for PTYs without a repoId and reported by `/api/health`. */
   readonly home?: string
   /** The harness table behind `GET /api/harnesses` and harness tabs; default `detectHarnesses`. */
   readonly harnesses?: HarnessDetector
   /** The PTY manager behind `/api/pty*`; the default spawns real sessions. */
   readonly pty?: (deps: { readonly publish: LocalServer["publish"]; readonly harnesses: HarnessDetector; readonly home: string; readonly pathPrepend: () => Promise<ReadonlyArray<string>>; readonly log: (line: string) => void }) => PtyManager
   readonly log?: (line: string) => void
+  /** Test/replay override; production generates 256 fresh random bits. */
+  readonly sessionToken?: string
 }
 
 export interface WsSocketData {
@@ -91,13 +111,17 @@ export type WsMessageHandler = (message: Readonly<Record<string, unknown>>, sock
 export interface LocalServer {
   readonly origin: string
   readonly port: number
+  readonly sessionToken: string
+  readonly websocketProtocol: string
   readonly router: Router
   readonly server: Server<WsSocketData>
   /** Sends one JSON frame to every socket subscribed to the topic. */
   readonly publish: (topic: string, message: unknown) => void
   /** Registers the handler for one client frame type (e.g. "pty.input"). Returns the unregister. */
   readonly onMessage: (type: string, handler: WsMessageHandler) => () => void
-  readonly stop: () => void
+  /** Native-only door: inspect a picked path and mint a one-shot HTTP grant. */
+  readonly authorizeRepository: RepositoryAuthority["authorize"]
+  readonly stop: () => Promise<void>
 }
 
 /**
@@ -137,30 +161,6 @@ interface TurnWriter {
 }
 
 const encoder = new TextEncoder()
-
-const defaultOpenExternal = async (url: string): Promise<boolean> => {
-  const argv = process.platform === "darwin"
-    ? ["/usr/bin/open", url]
-    : process.platform === "win32"
-    ? ["cmd", "/c", "start", "", url]
-    : ["xdg-open", url]
-  try {
-    const child = Bun.spawn(argv, { stdout: "ignore", stderr: "ignore", stdin: "ignore" })
-    return (await child.exited) === 0
-  } catch {
-    return false
-  }
-}
-
-const webUrl = (value: unknown): URL | undefined => {
-  if (typeof value !== "string") return undefined
-  try {
-    const parsed = new URL(value)
-    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed : undefined
-  } catch {
-    return undefined
-  }
-}
 
 /** The stub's stand-in for the identity seam: signed out, nothing else configured. */
 const stubIdentity = (pathname: string): Response =>
@@ -208,25 +208,59 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
   const version = options.version ?? APP_VERSION
   const sandboxHost = currentSandboxHost()
   const nodeProbe: Promise<NodeSidecar | null> = options.node === undefined ? findNode() : Promise.resolve(options.node)
-  const identityUpstream = options.chatStub === true ? null : options.identityUpstream === undefined ? DEFAULT_IDENTITY_UPSTREAM : options.identityUpstream
-  const openExternal = options.openExternal ?? defaultOpenExternal
+  const remoteEnabled = options.cloudMode === "hybrid"
+  const identityUpstream = options.chatStub === true || !remoteEnabled
+    ? null
+    : options.identityUpstream === undefined
+    ? DEFAULT_IDENTITY_UPSTREAM
+    : options.identityUpstream
   const home = options.home ?? homedir()
   const harnesses: HarnessDetector = options.harnesses ?? (() => detectHarnesses())
+  const sessionToken = options.sessionToken ?? randomBytes(32).toString("base64url")
+  if (!isLocalSessionToken(sessionToken)) throw new Error("Local server session token must be 256-bit base64url.")
+  const websocketProtocol = localSessionProtocol(sessionToken)
+  const repositoryAuthority = createRepositoryAuthority()
 
   const writers = new Map<string, TurnWriter>()
   const publishFrame = (frame: AgentTurnFrame): void => writers.get(frame.runId)?.write(frame)
-  const agent: CloudAgent = options.chatStub === true
+  const agent: CloudAgent | undefined = options.chatStub === true
     ? createChatStub(publishFrame)
-    : createCloudAgent(publishFrame, {
+    : remoteEnabled
+    ? createCloudAgent(publishFrame, {
       chatUrl: options.chat?.chatUrl ?? Bun.env.SMITHERS_CHAT_URL,
       origin: options.chat?.origin ?? Bun.env.SMITHERS_CHAT_ORIGIN ?? DEFAULT_CHAT_ORIGIN
     })
+    : undefined
   const finish = (runId: string, writer: TurnWriter): void => {
     if (writers.get(runId) === writer) writers.delete(runId)
     writer.end()
   }
 
   const router = new Router()
+
+  router.add("GET", APP_BOOTSTRAP_PATH, () => {
+    const enforced = sandboxEnforced(sandboxHost)
+    return json({
+      apiVersion: APP_API_VERSION,
+      host: "local",
+      version,
+      buildSha: options.buildSha ?? Bun.env.SMITHERS_BUILD_SHA ?? "unknown",
+      capabilities: [
+        ...(agent === undefined ? [] : ["agent"]),
+        ...(identityUpstream === null ? [] : ["identity"]),
+        "local.repositories",
+        ...(options.allowManualRepositoryPaths === true ? ["local.repository-path-entry"] : []),
+        "local.targets",
+        "local.terminal",
+        "local.harnesses"
+      ],
+      authFlow: identityUpstream === null ? "none" : "both",
+      sandbox: {
+        platform: process.platform,
+        mode: enforced ? "enforced" : sandboxHost.disabled ? "unavailable" : "trusted-only"
+      }
+    })
+  })
 
   router.add("GET", HEALTH_PATH, async () =>
     json({
@@ -238,7 +272,8 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       sandbox: { platform: process.platform, enforced: sandboxEnforced(sandboxHost) }
     }))
 
-  router.add("POST", CHAT_TURN_PATH, async ({ request }) => {
+  const handleChatTurn: RouteHandler = async ({ request }) => {
+    if (agent === undefined) return jsonError(503, "agent_unavailable", "No agent provider is configured in local-only mode.")
     const length = Number(request.headers.get("content-length") ?? "0")
     if (length > MAX_BODY_BYTES) return jsonError(413, "body_too_large", "Request body is too large.")
     const parsed = await readJson(request)
@@ -303,9 +338,12 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       status: 200,
       headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" }
     })
-  })
+  }
+  router.add("POST", TURN_PATH, handleChatTurn)
+  router.add("POST", CHAT_TURN_PATH, handleChatTurn)
 
-  router.add("POST", CHAT_CANCEL_PATH, async ({ request }) => {
+  const handleChatCancel: RouteHandler = async ({ request }) => {
+    if (agent === undefined) return jsonError(503, "agent_unavailable", "No agent provider is configured in local-only mode.")
     const parsed = await readJson(request)
     if ("error" in parsed) return parsed.error
     const runId = typeof parsed.body === "object" && parsed.body !== null && "runId" in parsed.body ? parsed.body.runId : undefined
@@ -316,17 +354,9 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     const writer = writers.get(runId)
     if (writer !== undefined) finish(runId, writer)
     return json({ ok: true, status: result.status })
-  })
-
-  router.add("POST", OPEN_EXTERNAL_PATH, async ({ request }) => {
-    const parsed = await readJson(request)
-    if ("error" in parsed) return parsed.error
-    const url = webUrl(typeof parsed.body === "object" && parsed.body !== null && "url" in parsed.body ? parsed.body.url : undefined)
-    // http(s) only: the page must not be able to launch arbitrary local
-    // schemes through the privileged side.
-    if (url === undefined) return jsonError(400, "invalid_url", "Body must be { url } with an http or https URL.")
-    return json({ ok: await openExternal(url.toString()) })
-  })
+  }
+  router.add("POST", CANCEL_PATH, handleChatCancel)
+  router.add("POST", CHAT_CANCEL_PATH, handleChatCancel)
 
   // The runtime error ingest the SPA posts to (state/ClientErrors.ts holds
   // the client half of this contract): logged, never persisted.
@@ -366,12 +396,21 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     if (!existsSync(index)) {
       return jsonError(503, "spa_missing", `No built SPA at ${distDir}. Run \`vite build\` first.`)
     }
-    // SPA fallback: every route the page owns renders index.html.
-    return new Response(Bun.file(index), {
+    // SPA fallback: every route the page owns renders index.html. Only this
+    // response receives the per-launch capability; static assets never do.
+    const html = await Bun.file(index).text()
+    const sessionMeta = `<meta name="${LOCAL_SESSION_META}" content="${sessionToken}">`
+    const injected = /<head(?:\s[^>]*)?>/i.test(html)
+      ? html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${sessionMeta}`)
+      : `${sessionMeta}${html}`
+    return new Response(injected, {
       headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }
     })
   }
 
+  /* Filled immediately after Bun chooses the port, before callers can reach it. */
+  let origin = ""
+  let expectedHost = ""
   const server = Bun.serve<WsSocketData>({
     hostname: "127.0.0.1",
     port: options.port ?? 0,
@@ -379,12 +418,38 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     fetch: async (request, bunServer) => {
       const url = new URL(request.url)
       const { pathname } = url
+      if (request.headers.get("host") !== expectedHost) {
+        return jsonError(421, "invalid_host", "This local server accepts only its loopback origin.")
+      }
       if (pathname === "/" || pathname.startsWith("/api/")) log(`${request.method} ${pathname}`)
       if (pathname === "/ws") {
-        const upgraded = bunServer.upgrade(request, { data: { topics: new Set<string>() } })
+        const requestOrigin = request.headers.get("origin")
+        if (requestOrigin !== null && requestOrigin !== origin) {
+          return jsonError(403, "invalid_origin", "WebSocket origin does not match the local app.")
+        }
+        const protocols = (request.headers.get("sec-websocket-protocol") ?? "")
+          .split(",")
+          .map((value) => value.trim())
+        if (!protocols.includes(websocketProtocol)) {
+          return jsonError(401, "local_session_required", "The local session capability is required.")
+        }
+        const upgraded = bunServer.upgrade(request, {
+          data: { topics: new Set<string>() },
+          headers: { "sec-websocket-protocol": websocketProtocol }
+        })
         return upgraded ? undefined : jsonError(400, "upgrade_failed", "Expected a WebSocket upgrade.")
       }
       if (pathname.startsWith("/api/")) {
+        /* Health remains public for process-supervisor readiness probes. */
+        if (pathname !== HEALTH_PATH) {
+          if (request.headers.get(LOCAL_SESSION_HEADER) !== sessionToken) {
+            return jsonError(401, "local_session_required", "The local session capability is required.")
+          }
+          const requestOrigin = request.headers.get("origin")
+          if (requestOrigin !== null && requestOrigin !== origin) {
+            return jsonError(403, "invalid_origin", "Request origin does not match the local app.")
+          }
+        }
         const matched = router.match(request.method, pathname)
         if (matched !== undefined) {
           try {
@@ -406,6 +471,9 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       return serveStatic(pathname)
     },
     websocket: {
+      maxPayloadLength: MAX_WS_FRAME_BYTES,
+      backpressureLimit: 1024 * 1024,
+      closeOnBackpressureLimit: true,
       open: () => {},
       message: (socket, raw) => {
         let parsed: unknown
@@ -422,11 +490,15 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
         const message = parsed as Record<string, unknown> & { readonly type: string }
         if (message.type === "subscribe" || message.type === "unsubscribe") {
           const topic = message.topic
-          if (typeof topic !== "string" || topic === "") {
+          if (typeof topic !== "string" || topic === "" || topic.length > MAX_WS_TOPIC_CHARS) {
             socket.send(JSON.stringify({ type: "error", message: "subscribe needs a topic." }))
             return
           }
           if (message.type === "subscribe") {
+            if (!socket.data.topics.has(topic) && socket.data.topics.size >= MAX_WS_SUBSCRIPTIONS) {
+              socket.send(JSON.stringify({ type: "error", message: `At most ${MAX_WS_SUBSCRIPTIONS} topics may be subscribed.` }))
+              return
+            }
             socket.subscribe(topic)
             socket.data.topics.add(topic)
           } else {
@@ -441,7 +513,14 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
           socket.send(JSON.stringify({ type: "error", message: `No handler for ${message.type}.` }))
           return
         }
-        for (const handler of handlers) handler(message, socket)
+        for (const handler of handlers) {
+          try {
+            handler(message, socket)
+          } catch (error) {
+            log(`WebSocket ${message.type} handler failed: ${error instanceof Error ? error.message : String(error)}`)
+            socket.send(JSON.stringify({ type: "error", message: "The WebSocket request failed." }))
+          }
+        }
       },
       close: (socket) => {
         for (const topic of socket.data.topics) socket.unsubscribe(topic)
@@ -451,46 +530,63 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
   })
 
   const port = server.port ?? 0
-  const origin = `http://127.0.0.1:${port}`
+  origin = `http://127.0.0.1:${port}`
+  expectedHost = `127.0.0.1:${port}`
   log(`SMITHERS_LOCAL_ORIGIN=${origin}`)
 
   const publish: LocalServer["publish"] = (topic, message) => {
     server.publish(topic, JSON.stringify(message))
   }
 
-  // L4: the harness table and the PTY sessions (routes/harnesses.ts, routes/pty.ts).
+  // L3: one repository authority feeds targets and every child-process cwd.
+  const routeHost = { router, publish, onMessage }
+  const repoTargets = registerRepoTargetRoutes(routeHost, {
+    node: nodeProbe,
+    authority: repositoryAuthority,
+    allowManualRepositoryPaths: options.allowManualRepositoryPaths,
+    log,
+    ...(options.buildCli === undefined ? {} : { cli: options.buildCli })
+  })
+
+  // L4: the harness table and PTY sessions. Browser input carries a repo id,
+  // never a filesystem path; the server resolves the authorized cwd here.
   registerHarnessRoutes(router, harnesses)
   const ptyDeps = { publish, harnesses, home, pathPrepend: async () => binDirOf((await nodeProbe)?.path), log }
   const pty = options.pty === undefined ? createPtyManager(ptyDeps) : options.pty(ptyDeps)
-  registerPtyRoutes({ router, onMessage }, pty)
+  registerPtyRoutes(routeHost, pty, {
+    resolveRepo: (repoId) => repoTargets.resolveRepo(repoId, "read-write")
+  })
 
   const local: LocalServer = {
     origin,
     port,
+    sessionToken,
+    websocketProtocol,
     router,
     server,
     publish,
     onMessage,
-    stop: () => {
+    authorizeRepository: repositoryAuthority.authorize,
+    stop: async () => {
       for (const [runId, writer] of writers) {
-        agent.cancel(runId)
+        agent?.cancel(runId)
         writer.end()
       }
       writers.clear()
       // Every child dies with the server; nothing keeps a shell alive past the app.
-      void pty.killAll()
+      await pty.killAll()
+      repositoryAuthority.clear()
       server.stop(true)
     }
   }
-  // Lane L3: /api/repo/*, /api/targets/* and the target-run topics.
-  const repoTargets = registerRepoTargetRoutes(local, { node: nodeProbe, log, ...(options.buildCli === undefined ? {} : { cli: options.buildCli }) })
   const targetGraph = registerTargetGraphRoutes(local, { repos: repoTargets.repos, history: repoTargets.history, node: nodeProbe, ...(options.buildCli === undefined ? {} : { cli: options.buildCli }) })
+  let stopPromise: Promise<void> | undefined
   return {
     ...local,
-    stop: () => {
+    stop: () => stopPromise ??= (async () => {
       targetGraph.stop()
       repoTargets.stop()
-      local.stop()
-    }
+      await local.stop()
+    })()
   }
 }

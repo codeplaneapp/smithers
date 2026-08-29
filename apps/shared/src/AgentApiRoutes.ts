@@ -75,7 +75,6 @@ export const ADMIN_ERRORS_PATH = "/api/admin/errors"
  */
 export const CHAT_TURN_PATH = "/api/chat/turn"
 export const CHAT_CANCEL_PATH = "/api/chat/cancel"
-export const OPEN_EXTERNAL_PATH = "/api/open-external"
 export const HEALTH_PATH = "/api/health"
 export const TARGET_GRAPH_PATH = "/api/targets/graph"
 export const TARGET_RUNS_PATH = "/api/targets/runs"

@@ -45,7 +45,7 @@ export type TranscriptErrorCode = typeof TranscriptErrorCode.Type
 export class TranscriptError extends Schema.TaggedError<TranscriptError>()("flows/harness/TranscriptError", {
   code: TranscriptErrorCode,
   message: Schema.String,
-  cause: Schema.optional(Schema.Unknown)
+  cause: Schema.optional(Schema.Defect())
 }) {}
 
 /**

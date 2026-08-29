@@ -16,7 +16,9 @@ export interface ConnectorController {
   readonly openFirstRunRepos: () => Promise<void>
   readonly connectLocalRepository: (access: RepositoryAccess) => Promise<void>
   readonly makeConnectorReadOnly: (id: string) => void
-  readonly removeConnector: (id: string) => void
+  readonly askConnectorRemoval: (id: string) => string | void
+  readonly cancelConnectorRemoval: () => void
+  readonly removeConnector: (id: string) => string | void
 }
 
 export const createConnectorController = (
@@ -400,7 +402,18 @@ export const createConnectorController = (
     })
   }
 
-  const removeConnector = (id: string): void => {
+  const askConnectorRemoval = (id: string): string | void => {
+    if (store.collections.connectors.get(id) === undefined) return `There is no connector with id ${id}.`
+    store.dispatch({ type: "connector.removal.asked", actor: "user", id })
+  }
+
+  const cancelConnectorRemoval = (): void => {
+    if (store.session().pendingConnectorRemovalId === null) return
+    store.dispatch({ type: "connector.removal.asked", actor: "user", id: null })
+  }
+
+  const removeConnector = (id: string): string | void => {
+    if (store.session().pendingConnectorRemovalId !== id) return "Ask before disconnecting this repository."
     store.dispatch({ type: "connector.removed", actor: "user", id })
   }
 
@@ -413,6 +426,8 @@ export const createConnectorController = (
     openFirstRunRepos,
     connectLocalRepository,
     makeConnectorReadOnly,
+    askConnectorRemoval,
+    cancelConnectorRemoval,
     removeConnector
   }
 }

@@ -131,16 +131,20 @@ describe("RunCoordinator", () => {
     const capture = Logger.make((entry) => {
       logs.push({ level: entry.logLevel, message: entry.message })
     })
-    return Effect.scoped(Effect.gen(function*() {
-      const coordinator = yield* RunCoordinator.make<string, string, never>({
-        drain: () => Effect.fail("boom")
-      })
-      yield* coordinator.wake("run")
-      yield* Effect.yieldNow
-      expect(logs.some((entry) =>
-        entry.level === "Warn" && String(entry.message).includes("coordinated drain failed for run")
-      )).toBe(true)
-    }).pipe(Effect.provide(Logger.layer([capture]))))
+    return Effect.scoped(
+      Effect.gen(function*() {
+        const coordinator = yield* RunCoordinator.make<string, string, never>({
+          drain: () => Effect.fail("boom")
+        })
+        yield* coordinator.wake("run")
+        yield* Effect.yieldNow
+        expect(
+          logs.some((entry) =>
+            entry.level === "Warn" && String(entry.message).includes("coordinated drain failed for run")
+          )
+        ).toBe(true)
+      }).pipe(Effect.provide(Logger.layer([capture])))
+    )
   })
 
   effect("distinguishes direct runs from coalesced wakes", () =>

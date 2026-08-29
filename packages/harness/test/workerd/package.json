@@ -1,0 +1,13 @@
+{
+  "name": "flows-harness-workerd-smoke",
+  "private": true,
+  "type": "module",
+  "description": "Runs one harness cell inside workerd, to prove the QuickJS build stays a seam a Cloudflare host can fill",
+  "scripts": {
+    "dev": "wrangler dev --ip 127.0.0.1 --port 8799",
+    "smoke": "node smoke.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "4.45.0"
+  }
+}

@@ -379,8 +379,6 @@ const makeExecute = Effect.fnUntraced(function*<
   // narrowing is written as "not complete" so the third result variant needs
   // no unreachable arm of its own.
   if (result._tag !== "Complete") {
-    // eslint-disable-next-line no-console
-    (globalThis as any).__dbg?.("Action.makeExecute suspending " + action.name)
     yield* Effect.annotateCurrentSpan({ outcome: "suspended" })
     return yield* Flow.suspend(instance)
   }

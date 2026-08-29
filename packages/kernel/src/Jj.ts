@@ -102,7 +102,9 @@ export const layer: Layer.Layer<
               Effect.andThen(
                 jj.workspaceAdd(
                   name,
-                  path.normalize(path.isAbsolute(destination) ? destination : path.resolve(workspace.root, destination)),
+                  path.normalize(
+                    path.isAbsolute(destination) ? destination : path.resolve(workspace.root, destination)
+                  ),
                   revision
                 )
               )

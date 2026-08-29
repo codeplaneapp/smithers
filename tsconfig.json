@@ -11,6 +11,7 @@
     }
   },
   "include": [
+    "known-files.d.ts",
     "BUILD.ts",
     "apps/*/BUILD.ts",
     "ci/BUILD.ts",

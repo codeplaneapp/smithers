@@ -2,8 +2,9 @@
 
 Durable write boundary for the flows persistence packages. It provides the
 shared write policy (`DurableWriter`), normalized database failures, and
-Node/in-memory SQLite client layers; queries go through Effect's own
-`SqlClient` service, and journal schema and queries stay in `@smthrs/journal`.
+Node, Cloudflare Durable Object, and in-memory SQLite client layers; queries go
+through Effect's own `SqlClient` service, and journal schema and queries stay
+in `@smthrs/journal`.
 
 ```sh
 pnpm add @smthrs/database
@@ -11,15 +12,17 @@ pnpm add @smthrs/database
 
 ## Public API
 
-The root is the driver-neutral contract and bundles for the browser. The drivers
-are Node-only — `node:sqlite` through `@effect/sql-sqlite-node` — so they live
-under explicit subpaths.
+The root is the driver-neutral contract and bundles for the browser. Each
+driver is platform-specific, so they live under explicit subpaths.
 
-| Import                               | Public exports                                                                                                                                                                                                                                                                                         |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `@smthrs/database`                   | `DurableWriter` and `Service` expose transaction-scoped `write(effect)`. `DatabaseErrorCode`, `DatabaseError`, and `fromSqlError` normalize driver failures. `make` builds over a SQL client; `layer` composes over the context's `SqlClient`; `makeNoop` and `layerNoop` provide an unsupported stub. |
-| `@smthrs/database/node/NodeDatabase` | **Node only.** `NodeDatabaseOptions` configures the SQLite connection; `layer(options)` provides Effect's `SqlClient`.                                                                                                                                                                                 |
-| `@smthrs/database/test/TestDatabase` | **Node only.** `layer` provides the production Node client and the writer over a fresh `:memory:` database.                                                                                                                                                                                            |
+| Import                                              | Public exports                                                                                                                                                                                                                                                                                         |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@smthrs/database`                                  | `DurableWriter` and `Service` expose transaction-scoped `write(effect)`. `DatabaseErrorCode`, `DatabaseError`, and `fromSqlError` normalize driver failures. `make` builds over a SQL client; `layer` composes over the context's `SqlClient`; `makeNoop` and `layerNoop` provide an unsupported stub. |
+| `@smthrs/database/node/NodeDatabase`                | **Node only.** `NodeDatabaseOptions` configures the SQLite connection; `layer(options)` provides Effect's `SqlClient`.                                                                                                                                                                                 |
+| `@smthrs/database/cloudflare/DurableObjectDatabase` | **Cloudflare Workers only.** `DurableObjectDatabaseOptions` takes the object's `ctx.storage`; `make` and `layer(options)` provide Effect's `SqlClient` over its SQLite storage.                                                                                                                        |
+| `@smthrs/database/cloudflare/SqlStorageLike`        | The structural view of `ctx.storage` the driver is typed against, so no consumer needs `@cloudflare/workers-types` to satisfy it.                                                                                                                                                                      |
+| `@smthrs/database/test/TestDatabase`                | **Node only.** `layer` provides the production Node client and the writer over a fresh `:memory:` database.                                                                                                                                                                                            |
+| `@smthrs/database/test/DurableObjectStorageFake`    | **Node only.** `make()` returns an in-process fake of `ctx.storage` over `node:sqlite`, so Durable Object code is testable without workerd.                                                                                                                                                            |
 
 Any Effect `SqlClient` works underneath `DurableWriter.layer()`, so a browser or
 Postgres client gets the same normalized errors and write retry — see
@@ -44,6 +47,28 @@ Effect.runPromise(program)
 
 SQLite busy, locked, I/O, and lock-timeout writes are retried. Constraints,
 syntax errors, and arbitrary application errors are not.
+
+## Cloudflare Durable Objects
+
+`DurableObjectDatabase.layer({ storage: ctx.storage })` satisfies the same
+`DurableWriter` contract, and `test/contract/DatabaseWriteContract.ts` runs
+against it. Three platform facts shape it:
+
+- `ctx.storage.sql.exec` is synchronous, so the connection is built out of
+  `Effect.try` with no promise and no statement cache.
+- The platform reserves `BEGIN`, `COMMIT`, and `ROLLBACK`, so the outermost
+  transaction is `ctx.storage.transaction`. `transactionSync` is not usable:
+  it commits when its closure _returns_, and a `write` body is an arbitrary
+  `Effect` that may suspend.
+- An object owns one database on one thread, so write transactions are
+  serialized by the client's connection semaphore rather than by a
+  database-level lock.
+
+`test/workerd/` runs the platform-specific claims against real workerd behind
+`FLOWS_WORKERD_BIN`; see the README there. Everywhere else the driver runs
+against `test/DurableObjectStorageFake`, which mirrors the platform over
+`node:sqlite`. `@smthrs/flows/CloudflareRuntime` composes the whole engine on
+top.
 
 ## Why `DurableWriter.write` instead of bare `sql.withTransaction`
 

@@ -47,6 +47,7 @@ Private-alpha operators should also read the [alpha notes](alpha-notes.md) for c
 
 ## Package reference
 
+- [Package-mode local repositories](reference/local-repositories.md) — opaque nested workspaces, explicit input boundaries, and `S.Repo.Target`
 - [`@smthrs/flows`](reference/flows.md) — barrel package re-exporting everything below
 - [`@smthrs/database`](reference/database.md)
 - [`@smthrs/jj`](reference/jj.md)

@@ -8,7 +8,7 @@ npm install @smthrs/fs
 
 ## Public API
 
-The current source tree has no `src/index.ts`, so consumers must use the public module subpaths shown below.
+`@smthrs/fs` re-exports every public module from its root, and each module is also importable from its own subpath.
 
 | Import                   | Public exports                                                          | Description                                                                |
 | ------------------------ | ----------------------------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -22,9 +22,7 @@ The current source tree has no `src/index.ts`, so consumers must use the public 
 | `@smthrs/fs/Route`       | `Kind`, `Route`, `Name`, `Input`, `Output`, `load`                      | Defines route models and lazily loads selected module routes.              |
 
 ```ts
-import * as Command from "@smthrs/fs/Command"
-import * as FileRouter from "@smthrs/fs/FileRouter"
-import * as FlowInvoker from "@smthrs/fs/FlowInvoker"
+import { Command, FileRouter, FlowInvoker } from "@smthrs/fs"
 import { Effect, Layer } from "effect"
 
 const invoker = FlowInvoker.make({ invoke: () => Effect.succeed({}) })
@@ -36,4 +34,4 @@ const program = Effect.gen(function*() {
 }).pipe(Effect.provide(Layer.succeed(FlowInvoker.FlowInvoker, invoker)))
 ```
 
-The manifest also declares root and `@smthrs/fs/vite` entries, but their target files are absent and those imports currently fail. `@smthrs/fs/package.json` is exported; `internal/*` and nested `*/index` subpaths are blocked.
+`@smthrs/fs/package.json` is exported; `internal/*` and nested `*/index` subpaths are blocked. There is no `@smthrs/fs/vite` entry: nothing in this tree consumes one, so the manifest does not promise it. `vite` stays an optional peer dependency for whenever that entry is built.

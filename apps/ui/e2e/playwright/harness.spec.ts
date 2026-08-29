@@ -3,6 +3,7 @@ import type { Response } from "@playwright/test"
 import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { localApiDelete, localApiGet } from "./localApi"
 
 /*
  * Lane L4 (docs/LOCAL-APP.md "Harness detection"): `GET /api/harnesses`
@@ -50,7 +51,10 @@ const codexSignedIn = (): boolean => {
 const isPtyCreate = (response: Response): boolean =>
   response.request().method() === "POST" && /\/api\/pty$/.test(response.url())
 
+let openedSessionId: string | undefined
+
 test.beforeEach(async ({ page }) => {
+  openedSessionId = undefined
   await page.addInitScript(() => {
     try {
       window.localStorage.clear()
@@ -60,8 +64,15 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test("GET /api/harnesses lists every contract id; claude and codex are signed in on this machine", async ({ request }) => {
-  const response = await request.get("/api/harnesses")
+test.afterEach(async ({ page, request }) => {
+  if (openedSessionId === undefined) return
+  await localApiDelete(page, request, `/api/pty/${openedSessionId}`)
+  openedSessionId = undefined
+})
+
+test("GET /api/harnesses lists every contract id; claude and codex are signed in on this machine", async ({ page, request }) => {
+  await page.goto("/")
+  const response = await localApiGet(page, request, "/api/harnesses")
   expect(response.status()).toBe(200)
   const { harnesses } = (await response.json()) as { harnesses: Array<HarnessRow> }
   expect(harnesses.map((harness) => harness.id)).toEqual(HARNESS_IDS)
@@ -86,13 +97,13 @@ test("GET /api/harnesses lists every contract id; claude and codex are signed in
   expect(codex?.account?.email).toMatch(/@/)
 })
 
-test("the + menu lists Claude Code with the signed-in email; its tab shows the Claude Code banner", async ({ page, request }) => {
+test("the + menu lists the signed-in Claude account and launches Claude Code", async ({ page, request }) => {
   const email = claudeEmail()
   test.skip(email === undefined, "~/.claude.json has no oauthAccount: Claude Code is not signed in on this machine")
-  const { harnesses } = (await (await request.get("/api/harnesses")).json()) as { harnesses: Array<HarnessRow> }
+  await page.goto("/")
+  const { harnesses } = (await (await localApiGet(page, request, "/api/harnesses")).json()) as { harnesses: Array<HarnessRow> }
   test.skip(harnesses.find((harness) => harness.id === "claude")?.binary === null, "claude is not installed on this machine")
 
-  await page.goto("/")
   await page.getByTestId("tab-add").click()
   const row = page.getByTestId("tab-add-harness-claude")
   await expect(row).toContainText("Claude Code")
@@ -104,16 +115,22 @@ test("the + menu lists Claude Code with the signed-in email; its tab shows the C
   const response = await creating
   expect(response.status()).toBe(201)
   const { sessionId } = (await response.json()) as { sessionId: string }
+  openedSessionId = sessionId
   await expect(page.getByTestId(`tab-${sessionId}`)).toHaveAttribute("data-active", "true")
   await expect(page.getByTestId(`tab-${sessionId}`)).toContainText("Claude Code")
 
-  const listed = (await (await request.get("/api/pty")).json()) as { sessions: Array<{ sessionId: string; kind: string; harnessId?: string }> }
+  const listed = (await (await localApiGet(page, request, "/api/pty")).json()) as { sessions: Array<{ sessionId: string; kind: string; harnessId?: string }> }
   expect(listed.sessions.find((session) => session.sessionId === sessionId)).toMatchObject({ kind: "harness", harnessId: "claude" })
 
-  // The banner: "Claude Code" next to the logo, then the version, under the harness sandbox (probed 2026-08-26).
+  /*
+   * A previously trusted workspace shows the versioned banner. A fresh temp
+   * workspace stops at Claude's safety question instead. Both prove the real
+   * CLI launched; the test must not mutate the user's trust configuration.
+   */
   const terminal = page.getByTestId(`terminal-${sessionId}`)
   await expect(terminal.locator(".xterm-rows")).toContainText("Claude Code", { timeout: 30_000 })
-  await expect(terminal.locator(".xterm-rows")).toContainText(/v\d+\.\d+\.\d+/, { timeout: 30_000 })
+  await expect.poll(async () => terminal.locator(".xterm-rows").textContent(), { timeout: 30_000 })
+    .toMatch(/v\d+\.\d+\.\d+|Quick safety check/)
 
   await page.getByTestId(`tab-close-${sessionId}`).click()
   const dialog = page.getByRole("dialog")
@@ -122,8 +139,9 @@ test("the + menu lists Claude Code with the signed-in email; its tab shows the C
   await expect(page.getByTestId(`tab-${sessionId}`)).toHaveCount(0)
   await expect
     .poll(async () => {
-      const { sessions } = (await (await request.get("/api/pty")).json()) as { sessions: Array<{ sessionId: string }> }
+      const { sessions } = (await (await localApiGet(page, request, "/api/pty")).json()) as { sessions: Array<{ sessionId: string }> }
       return sessions.some((session) => session.sessionId === sessionId)
     }, { timeout: 15_000 })
     .toBe(false)
+  openedSessionId = undefined
 })

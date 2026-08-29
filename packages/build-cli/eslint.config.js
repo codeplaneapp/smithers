@@ -81,8 +81,14 @@ export default tseslint.config(
   {
     files: ["src/**/*.{js,cjs,mjs}"],
     rules: {
-      "import/no-unresolved": ["error", { ignore: ["^tsx/esm/api$"] }]
+      "import/no-unresolved": ["error", { ignore: ["^tsx/esm/api$", "^@smthrs/targets$"] }]
     }
   },
-  ...jsdocConvention
+  ...jsdocConvention,
+  {
+    files: ["src/**/*.ts"],
+    rules: {
+      "jsdoc/check-tag-names": ["error", { definedTags: ["category", "since", "slop"] }]
+    }
+  }
 )

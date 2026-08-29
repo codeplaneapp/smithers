@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { TargetRunFrame } from "smithers-shared/LocalApp"
@@ -38,23 +38,25 @@ const LISTING = JSON.stringify({
 })
 
 describe("mapTargets", () => {
-  test("maps the loader listing 1:1 and splits labels into package and name", () => {
-    const mapped = mapTargets(LISTING)
+  test("maps the loader listing 1:1, splits labels into package and name, and tags the workspace", () => {
+    const mapped = mapTargets(LISTING, ".")
     expect("targets" in mapped && mapped.targets).toEqual([
-      { label: "//src:lint", target: "Shell.Test", kinds: ["test", "lint"], package: "//src", name: "lint" },
-      { label: "//:detectSecrets", target: "Shell.Test", kinds: ["test"], package: "//", name: "detectSecrets" },
-      { label: "//src/Apps/Auction:srcs", target: "Filegroup", kinds: ["build"], package: "//src/Apps/Auction", name: "srcs" }
+      { label: "//src:lint", target: "Shell.Test", kinds: ["test", "lint"], package: "//src", name: "lint", workspace: "." },
+      { label: "//:detectSecrets", target: "Shell.Test", kinds: ["test"], package: "//", name: "detectSecrets", workspace: "." },
+      { label: "//src/Apps/Auction:srcs", target: "Filegroup", kinds: ["build"], package: "//src/Apps/Auction", name: "srcs", workspace: "." }
     ])
+    const nested = mapTargets(LISTING, "aomi-sdk")
+    expect("targets" in nested && nested.targets.every((target) => target.workspace === "aomi-sdk")).toBe(true)
   })
 
   test("a loader error envelope and non-JSON both become messages", () => {
-    expect(mapTargets(JSON.stringify({ code: "query_failed", message: "boom" }))).toEqual({
+    expect(mapTargets(JSON.stringify({ code: "query_failed", message: "boom" }), ".")).toEqual({
       error: "query_failed: boom"
     })
-    const bad = mapTargets("not json")
+    const bad = mapTargets("not json", ".")
     expect("error" in bad && bad.error).toContain("did not answer JSON")
-    expect(mapTargets(JSON.stringify({ targets: [{ nope: 1 }, { label: "//a:b" }] }))).toEqual({
-      targets: [{ label: "//a:b", target: "", kinds: [], package: "//a", name: "b" }]
+    expect(mapTargets(JSON.stringify({ targets: [{ nope: 1 }, { label: "//a:b" }] }), ".")).toEqual({
+      targets: [{ label: "//a:b", target: "", kinds: [], package: "//a", name: "b", workspace: "." }]
     })
   })
 })
@@ -105,7 +107,45 @@ describe("queryTargets", () => {
     const result = await queryTargets({ repo: dir, node: bunSidecar, cli, sandboxHost: noSandbox })
     expect(result.warnings).toEqual([])
     expect(result.targets.map((target) => target.label)).toEqual(["//src:lint", "//:detectSecrets", "//src/Apps/Auction:srcs"])
+    expect(result.targets.every((target) => target.workspace === ".")).toBe(true)
     expect(result.durationMs).toBeGreaterThanOrEqual(0)
+  })
+
+  test("fans out once per workspace: each loader runs at its own cwd, one failure cannot block the others", async () => {
+    const dir = await scratch()
+    await mkdir(join(dir, "ok"))
+    await mkdir(join(dir, "broken"))
+    const cli = join(dir, "fanout-cli.js")
+    await writeFile(
+      cli,
+      [
+        "const cwd = process.cwd()",
+        "if (cwd.endsWith(\"broken\")) {",
+        "  console.log(JSON.stringify({ code: \"query_failed\", message: \"WORKSPACE.ts: boom\" }))",
+        "  process.exit(1)",
+        "}",
+        "const name = cwd.endsWith(\"ok\") ? \"ok\" : \"root\"",
+        "console.log(JSON.stringify({ query: \"//...\", targets: [{ label: `//:${name}`, target: \"Shell.Test\", kinds: [\"test\"] }] }))"
+      ].join("\n")
+    )
+    const result = await queryTargets({
+      repo: dir,
+      workspaces: [
+        { path: ".", title: "root" },
+        { path: "ok", title: "ok" },
+        { path: "broken", title: "broken" }
+      ],
+      node: bunSidecar,
+      cli,
+      sandboxHost: noSandbox
+    })
+    expect(result.targets.map((target) => [target.workspace, target.label])).toEqual([
+      [".", "//:root"],
+      ["ok", "//:ok"]
+    ])
+    expect(result.warnings).toHaveLength(1)
+    expect(result.warnings[0]).toContain("broken")
+    expect(result.warnings[0]).toContain("query_failed: WORKSPACE.ts: boom")
   })
 
   test("a loader failure is warnings and an empty list", async () => {
@@ -154,7 +194,7 @@ describe("createTargetRunner", () => {
     )
     const sink = collect()
     const runner = createTargetRunner({ publish: sink.publish, cli, autoStartMs: 60_000 })
-    const run = runner.start({ repoId: "r1", repo: dir, label: "//src:lint", node: bunSidecar })
+    const run = runner.start({ repoId: "r1", repo: dir, workspace: ".", label: "//src:lint", node: bunSidecar })
     expect(run.status).toBe("pending")
     expect(runner.attach(run.runId)).toBe(true)
     await sink.exited(run.runId)
@@ -173,13 +213,32 @@ describe("createTargetRunner", () => {
     runner.stop()
   })
 
+  test("a run in a child workspace runs at the joined cwd", async () => {
+    const dir = await scratch()
+    await mkdir(join(dir, "aomi-sdk"))
+    const cli = join(dir, "ws-cli.js")
+    await writeFile(cli, "console.log(process.cwd())")
+    const sink = collect()
+    const runner = createTargetRunner({ publish: sink.publish, cli, autoStartMs: 60_000 })
+    const run = runner.start({ repoId: "r1", repo: dir, workspace: "aomi-sdk", label: "//:clippyFix", node: bunSidecar })
+    expect(run.workspace).toBe("aomi-sdk")
+    runner.attach(run.runId)
+    await sink.exited(run.runId)
+    const stdout = sink.frames
+      .filter((entry) => entry.runId === run.runId && entry.frame.type === "stdout")
+      .map((entry) => (entry.frame as { data: string }).data)
+      .join("")
+    expect(stdout).toBe(`${join(dir, "aomi-sdk")}\n`)
+    runner.stop()
+  })
+
   test("a run nobody attaches to starts on its own", async () => {
     const dir = await scratch()
     const cli = join(dir, "auto-cli.js")
     await writeFile(cli, "console.log(\"auto\")")
     const sink = collect()
     const runner = createTargetRunner({ publish: sink.publish, cli, autoStartMs: 10 })
-    const run = runner.start({ repoId: "r1", repo: dir, label: "//:x", node: bunSidecar })
+    const run = runner.start({ repoId: "r1", repo: dir, workspace: ".", label: "//:x", node: bunSidecar })
     await sink.exited(run.runId)
     expect(runner.get(run.runId)).toMatchObject({ status: "done", exitCode: 0 })
     runner.stop()
@@ -189,7 +248,7 @@ describe("createTargetRunner", () => {
     const dir = await scratch()
     const sink = collect()
     const runner = createTargetRunner({ publish: sink.publish, cli: join(dir, "never.js"), autoStartMs: 60_000 })
-    const run = runner.start({ repoId: "r1", repo: dir, label: "//:x", node: bunSidecar })
+    const run = runner.start({ repoId: "r1", repo: dir, workspace: ".", label: "//:x", node: bunSidecar })
     expect(runner.cancel(run.runId)).toBe(true)
     expect(sink.frames.map((entry) => entry.frame)).toEqual([
       { type: "error", message: "Cancelled before it started.", seq: 0 },

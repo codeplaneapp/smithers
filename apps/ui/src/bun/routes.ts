@@ -34,8 +34,12 @@ export const jsonError = (status: number, code: string, message: string): Respon
 export const notImplemented = (what: string): Response =>
   jsonError(501, "not_implemented", `${what} is not implemented in this build.`)
 
-/** Body as JSON, or a 400 the caller returns as-is. */
+/** Body as JSON, or a typed content/parse error the caller returns as-is. */
 export const readJson = async (request: Request): Promise<{ readonly body: unknown } | { readonly error: Response }> => {
+  const mediaType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase()
+  if (mediaType !== "application/json") {
+    return { error: jsonError(415, "unsupported_media_type", "Request body must use application/json.") }
+  }
   const text = await request.text()
   if (text.trim() === "") return { body: undefined }
   try {

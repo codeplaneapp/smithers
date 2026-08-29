@@ -1,0 +1,293 @@
+/**
+ * The promote tool: turn the script the agent just ran into a saved flow.
+ *
+ * `flows/show-script` hands the model its own current turn back — the source of
+ * every cell it executed, in order — plus the house rules a saved flow has to
+ * follow and the file template to fill in. `flows/write-flow` takes the three
+ * files that come back and writes them through a {@link FlowStore}.
+ *
+ * Both halves are upstream work in progress. `packages/harness` is to ship the
+ * `CellHistory` service and `packages/agent` + `packages/std` the two bindings,
+ * with the filesystem `FlowStore` upstream and the Durable Object one here
+ * (TODO.md, the `~/flows/flows` section). This module is the app-local stand-in
+ * with the same shapes, so deleting it later is a change of import path.
+ */
+import * as Flow from "@smthrs/core/Flow"
+import * as FlowBinding from "@smthrs/harness/FlowBinding"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
+import type { FlowSummary } from "../src/api.ts"
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/** The one failure either binding reports to a cell. */
+export class PromoteError extends Schema.TaggedError<PromoteError>()("aomi/tools/PromoteError", {
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown)
+}) {}
+
+// ---------------------------------------------------------------------------
+// CellHistory
+// ---------------------------------------------------------------------------
+
+/** One executed cell of the current turn. */
+export interface ExecutedCell {
+  readonly ordinal: number
+  readonly source: string
+}
+
+/**
+ * The source of every cell the current turn executed, oldest first.
+ *
+ * TODO(upstream): `packages/harness` records this already for the transcript;
+ * it needs to be exposed as a service (TODO.md).
+ */
+export interface CellHistoryService {
+  readonly cells: () => Effect.Effect<ReadonlyArray<ExecutedCell>>
+}
+
+/** Service tag for the current turn's executed cells. */
+export class CellHistory extends Context.Service<CellHistory, CellHistoryService>()("aomi/tools/CellHistory") {}
+
+/** A history over a fixed cell list. */
+export const makeCells = (cells: ReadonlyArray<ExecutedCell>): CellHistoryService =>
+  CellHistory.of({ cells: () => Effect.succeed(cells) })
+
+/** An empty history: `flows/show-script` reports that nothing has run yet. */
+export const makeNoopHistory = (overrides: Partial<CellHistoryService> = {}): CellHistoryService =>
+  CellHistory.of({ cells: () => Effect.succeed([]), ...overrides })
+
+/** Provides a history over a fixed cell list. */
+export const layerCells = (cells: ReadonlyArray<ExecutedCell>): Layer.Layer<CellHistory> =>
+  Layer.succeed(CellHistory)(makeCells(cells))
+
+/** Provides an empty in-memory history. */
+export const layerNoopHistory = (overrides: Partial<CellHistoryService> = {}): Layer.Layer<CellHistory> =>
+  Layer.sync(CellHistory)(() => makeNoopHistory(overrides))
+
+// ---------------------------------------------------------------------------
+// FlowStore
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a saved flow's files land.
+ *
+ * The app root writes into the session's Durable Object (`worker/FlowStore.ts`)
+ * so a flow saved in the browser survives without a filesystem. Upstream ships
+ * the filesystem implementation of the same interface.
+ */
+export interface FlowStoreService {
+  readonly write: (
+    id: string,
+    files: Record<string, string>
+  ) => Effect.Effect<{ readonly files: ReadonlyArray<string> }, PromoteError>
+  readonly list: () => Effect.Effect<ReadonlyArray<FlowSummary>, PromoteError>
+}
+
+/** Service tag for saved-flow storage. */
+export class FlowStore extends Context.Service<FlowStore, FlowStoreService>()("aomi/tools/FlowStore") {}
+
+/**
+ * An in-memory store over `written`, keyed by path.
+ *
+ * Good enough for a test and for the milestone-1 composition; it forgets
+ * everything when the isolate goes away, which is exactly why the Worker binds
+ * the Durable Object one instead.
+ */
+export const makeMemoryStore = (written: Map<string, string> = new Map()): FlowStoreService =>
+  FlowStore.of({
+    write: (_id, files) =>
+      Effect.sync(() => {
+        for (const [path, source] of Object.entries(files)) written.set(path, source)
+        return { files: Object.keys(files) }
+      }),
+    list: () => Effect.succeed([])
+  })
+
+/** A store that accepts nothing. */
+export const makeNoopStore = (overrides: Partial<FlowStoreService> = {}): FlowStoreService => {
+  const unavailable = (method: string) =>
+    Effect.fail(
+      new PromoteError({ message: `FlowStore.${method} is unavailable in this composition; no flow was saved.` })
+    )
+  return FlowStore.of({
+    write: () => unavailable("write"),
+    list: () => unavailable("list"),
+    ...overrides
+  })
+}
+
+/** Provides the in-memory store. */
+export const layerMemoryStore = (written: Map<string, string> = new Map()): Layer.Layer<FlowStore> =>
+  Layer.succeed(FlowStore)(makeMemoryStore(written))
+
+/** Provides a store that refuses every call with a message the model can read. */
+export const layerNoopStore = (overrides: Partial<FlowStoreService> = {}): Layer.Layer<FlowStore> =>
+  Layer.sync(FlowStore)(() => makeNoopStore(overrides))
+
+// ---------------------------------------------------------------------------
+// The house rules and the file template
+// ---------------------------------------------------------------------------
+
+/**
+ * What a saved flow has to get right, in the order it matters.
+ *
+ * This text is teaching, not documentation: the model reads it once, then
+ * writes three files. Every line names a decision it is about to make.
+ */
+export const bestPractices = [
+  "Inputs are idempotent. A saved flow runs again on a payload, so every value the script read from the conversation becomes a payload field. Nothing is hardcoded from this turn.",
+  "No secrets in the source. Keys, tokens, and signed URLs come from the host, never from the flow file.",
+  "One ctx.call per boundary. Each call is separately journaled and replayed, so do not batch two chain reads into one call or wrap a call in a retry loop the engine already owns.",
+  "The output is typed. Declare a Schema.Struct for what the flow returns and fill every field; a caller must never parse prose.",
+  "The e2e test is fixture-cached. Write flow.e2e.ts with cachedModelTest against a recorded fixture so the test runs offline; re-record with SMTHRS_RECORD=1."
+].join("\n")
+
+/** The flow.ts skeleton `flows/write-flow` expects back, filled in. */
+export const flowTemplate = `import { defineFlow } from "@smthrs/create-app/app"
+import * as Schema from "effect/Schema"
+
+export const Flow = defineFlow({
+  description: "<one line the flow list shows>",
+  payload: { /* every value this script read from the conversation */ },
+  output: Schema.Struct({ /* typed fields, no prose blobs */ }),
+  prompt: (payload) => \`<the instruction, built from payload>\`,
+  system: ["<anything the root AGENT.ts does not already teach>"]
+})
+`
+
+// ---------------------------------------------------------------------------
+// Schemas
+// ---------------------------------------------------------------------------
+
+export const ShowScriptInput = Schema.Struct({
+  bestPractices: Schema.optionalKey(
+    Schema.String.annotate({ description: "Extra guidance to append after the house rules" })
+  )
+})
+export type ShowScriptInput = typeof ShowScriptInput.Type
+
+export const ShowScriptOutput = Schema.Struct({
+  cells: Schema.Array(Schema.Struct({
+    ordinal: Schema.Number.annotate({ description: "Zero-based execution order within this turn" }),
+    source: Schema.String.annotate({ description: "The cell's JavaScript, as it ran" })
+  })),
+  bestPractices: Schema.String.annotate({ description: "House rules a saved flow has to follow" }),
+  template: Schema.String.annotate({ description: "The flow.ts skeleton to fill in" })
+})
+export type ShowScriptOutput = typeof ShowScriptOutput.Type
+
+export const WriteFlowInput = Schema.Struct({
+  id: Schema.String.annotate({
+    description: "Flow id and directory name; lowercase letters, digits, and hyphens, starting with a letter"
+  }),
+  description: Schema.String.annotate({ description: "One line the flow list shows" }),
+  flowSource: Schema.String.annotate({ description: "Complete flow.ts source" }),
+  testSource: Schema.String.annotate({ description: "Complete flow.e2e.ts source, using cachedModelTest" }),
+  fixtureJson: Schema.String.annotate({ description: "Recorded model fixture as JSON text" })
+})
+export type WriteFlowInput = typeof WriteFlowInput.Type
+
+export const WriteFlowOutput = Schema.Struct({
+  files: Schema.Array(Schema.String).annotate({ description: "Paths written, app-root relative" })
+})
+export type WriteFlowOutput = typeof WriteFlowOutput.Type
+
+// ---------------------------------------------------------------------------
+// Flow declarations
+// ---------------------------------------------------------------------------
+
+const showScriptFlow = Flow.make({
+  name: "flows/show-script",
+  description:
+    "Return the source of every cell this turn has executed, plus the house rules and the file template a saved flow uses. Call it before flows/write-flow.",
+  input: ShowScriptInput,
+  output: ShowScriptOutput,
+  capabilities: [],
+  effects: undefined
+})
+
+const writeFlowFlow = Flow.make({
+  name: "flows/write-flow",
+  description:
+    "Save a flow: writes flow.ts, flow.e2e.ts, and its fixture under flows/<id>/. The id must be lowercase letters, digits, and hyphens.",
+  input: WriteFlowInput,
+  output: WriteFlowOutput,
+  capabilities: [],
+  effects: undefined
+})
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
+/** The router's own rule for a routable flow directory (@smthrs/create-app/router). */
+const FLOW_ID = /^[a-z][a-z0-9-]*$/
+
+const filesFor = (input: WriteFlowInput): Record<string, string> => ({
+  [`flows/${input.id}/flow.ts`]: input.flowSource,
+  [`flows/${input.id}/flow.e2e.ts`]: input.testSource,
+  [`flows/${input.id}/fixtures/${input.id}.json`]: input.fixtureJson
+})
+
+// ---------------------------------------------------------------------------
+// The source
+// ---------------------------------------------------------------------------
+
+/** The promote flows, bound to the history and store the host built. */
+export const promoteSource = (services: Context.Context<CellHistory | FlowStore>): FlowBinding.Source =>
+  FlowBinding.source("flows", [
+    FlowBinding.provide(
+      FlowBinding.make({
+        flow: showScriptFlow,
+        handler: (input) =>
+          Effect.gen(function*() {
+            const history = yield* CellHistory
+            const cells = yield* history.cells()
+            const extra = input.bestPractices
+            return {
+              cells: cells.map((cell) => ({ ordinal: cell.ordinal, source: cell.source })),
+              bestPractices: extra === undefined ? bestPractices : `${bestPractices}\n${extra}`,
+              template: flowTemplate
+            }
+          })
+      }),
+      services
+    ),
+    FlowBinding.provide(
+      FlowBinding.make({
+        flow: writeFlowFlow,
+        handler: (input) =>
+          Effect.gen(function*() {
+            if (!FLOW_ID.test(input.id)) {
+              return yield* Effect.fail(
+                new PromoteError({
+                  message:
+                    `"${input.id}" is not a routable flow id. Use lowercase letters, digits, and hyphens, starting with a letter, then reissue flows/write-flow.`
+                })
+              )
+            }
+            // TODO(milestone-3): also typecheck flowSource before it is stored;
+            // a saved flow that does not compile breaks `//:typeCheck` for the
+            // whole app, and the model can fix it in this turn.
+            const store = yield* FlowStore
+            const written = yield* store.write(input.id, filesFor(input))
+            return { files: written.files }
+          })
+      }),
+      services
+    )
+  ])
+
+/**
+ * The source TOOLS.ts composes today: an empty cell history and an in-memory
+ * store. The Worker builds its own per turn with the recorded cells and the
+ * session's Durable Object store.
+ */
+export const promote: FlowBinding.Source = promoteSource(
+  Context.add(Context.make(CellHistory, makeNoopHistory()), FlowStore, makeMemoryStore())
+)

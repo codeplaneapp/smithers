@@ -48,9 +48,12 @@ describe("journal store plan assertions", () => {
     const journalEntries = await Effect.runPromise(
       Effect.gen(function*() {
         const journal = yield* JournalPackage.Journal.Journal
+        // The durable channel is fenced since 28309cc84. This test seeds
+        // entries to assert a plan against them; no engine owns the run, so
+        // the ownerless channel is the honest one.
         const runId = "journal-store-plan" as JournalPackage.JournalEvent.RunId
         const sourceId = "journal-store-plan" as JournalPackage.JournalEvent.SourceId
-        yield* journal.emitDurable({
+        yield* journal.emitDurableUnfenced({
           runId,
           sourceId,
           eventType: "step.completed",
@@ -61,7 +64,7 @@ describe("journal store plan assertions", () => {
             value: { idempotencyKey: "read-pr:1" }
           }
         })
-        yield* journal.emitDurable({
+        yield* journal.emitDurableUnfenced({
           runId,
           sourceId,
           eventType: "effect.completed",

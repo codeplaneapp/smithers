@@ -176,7 +176,7 @@ export function glob(
  * @category constructors
  * @since 0.1.0
  */
-export const file = (path: string): File => File.make({ path })
+export const file = <KnownFile extends string = string>(path: KnownFile): File => File.make({ path })
 
 /**
  * Creates a declared git diff input without invoking git.
@@ -416,6 +416,8 @@ interface Scan {
   readonly io: SafeFs.Io
   readonly cacheDirectory: string
   readonly packageScoped: boolean
+  readonly repositoryBoundaries: ReadonlyArray<string>
+  readonly enteredRepositories: ReadonlySet<string>
   readonly found: Array<string>
   readonly limits: ScanLimits
   readonly signal: AbortSignal | undefined
@@ -646,6 +648,13 @@ const walk = async (
     const child = relative === "" ? entry.name : `${relative}/${entry.name}`
     const directory = entry.isDirectory()
     if (isWorkspaceStatePath(scan.cacheDirectory, child)) continue
+    const repository = scan.repositoryBoundaries.find((boundary) => child === boundary)
+    if (directory && repository !== undefined && !scan.enteredRepositories.has(repository)) continue
+    if (
+      scan.repositoryBoundaries.some((boundary) =>
+        child === `${boundary}/.flows` || child.startsWith(`${boundary}/.flows/`)
+      )
+    ) continue
     if (isIgnored(next, child, directory)) continue
     if (directory) directories.push(child)
     else if (entry.isFile()) addFile(scan, child)
@@ -713,6 +722,8 @@ export const expandGlob = async (
     readonly cacheDirectory?: string | undefined
     readonly io?: SafeFs.Io | undefined
     readonly limits?: Partial<ScanLimits> | undefined
+    /** Opaque child repositories that broad globs must not descend into. */
+    readonly repositoryBoundaries?: ReadonlyArray<string> | undefined
     readonly signal?: AbortSignal | undefined
   } = {}
 ): Promise<ReadonlyArray<string>> => {
@@ -733,11 +744,18 @@ export const expandGlob = async (
   if (start.split("/").includes("node_modules")) return []
   if (isWorkspaceStatePath(cacheDirectory, start)) return []
   const io = options.io ?? SafeFs.defaultIo
+  const repositoryBoundaries = [...new Set((options.repositoryBoundaries ?? []).map((path) => resolvePath("", path)))]
+    .sort()
+  const enteredRepositories = new Set(
+    repositoryBoundaries.filter((boundary) => start === boundary || start.startsWith(`${boundary}/`))
+  )
   const scan: Scan = {
     root: await SafeFs.canonicalRoot(workspaceRoot, io),
     io,
     cacheDirectory,
     packageScoped: true,
+    repositoryBoundaries,
+    enteredRepositories,
     found: [],
     limits: validatedScanLimits(options.limits),
     signal: options.signal,
@@ -799,6 +817,8 @@ export const discoverFiles = async (
       options.cacheDirectory ?? Config.defaultCacheDirectory
     ),
     packageScoped: false,
+    repositoryBoundaries: [],
+    enteredRepositories: new Set(),
     found: [],
     limits: validatedScanLimits(options.limits),
     signal: options.signal,

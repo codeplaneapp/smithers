@@ -10,6 +10,7 @@
  *
  * @since 0.1.0
  */
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Attr from "./Attr.ts"
 import * as Input from "./Input.ts"
@@ -67,7 +68,7 @@ export const ReleaseActivity = Schema.Literals([
 export type ReleaseActivity = typeof ReleaseActivity.Type
 
 /**
- * A `pull_request` trigger activity type.
+ * Schema for the pull-request activity types accepted by GitHub Actions.
  *
  * @category schemas
  * @since 0.1.0
@@ -97,7 +98,15 @@ export const PullRequestActivity = Schema.Literals([
 ])
 
 /**
- * An `issues` trigger activity type.
+ * A pull-request activity type accepted by GitHub Actions.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type PullRequestActivity = typeof PullRequestActivity.Type
+
+/**
+ * Schema for the issue activity types accepted by GitHub Actions.
  *
  * @category schemas
  * @since 0.1.0
@@ -122,7 +131,15 @@ export const IssueActivity = Schema.Literals([
 ])
 
 /**
- * One `workflow_dispatch` input declaration.
+ * An issue activity type accepted by GitHub Actions.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type IssueActivity = typeof IssueActivity.Type
+
+/**
+ * Schema for one typed manual-dispatch input.
  *
  * @category schemas
  * @since 0.1.0
@@ -131,9 +148,17 @@ export const WorkflowDispatchInput = Schema.Struct({
   description: Schema.optional(Schema.String),
   required: Schema.optional(Schema.Boolean),
   default: Schema.optional(Schema.Union([Schema.String, Schema.Boolean, Schema.Number])),
-  type: Schema.optional(Schema.Literals(["boolean", "choice", "environment", "string"])),
+  type: Schema.Literals(["boolean", "choice", "environment", "string"]),
   options: Schema.optional(Schema.Array(Schema.String))
 })
+
+/**
+ * One typed manual-dispatch input.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type WorkflowDispatchInput = typeof WorkflowDispatchInput.Type
 
 /**
  * Schema for a generated workflow's trigger table. `schedule` takes
@@ -173,7 +198,7 @@ export const Concurrency = Schema.Struct({
 })
 
 /**
- * The access level one `permissions` scope grants a job.
+ * Schema for one repository permission level in a generated workflow.
  *
  * @category schemas
  * @since 0.1.0
@@ -181,30 +206,51 @@ export const Concurrency = Schema.Struct({
 export const Permission = Schema.Literals(["read", "write", "none"])
 
 /**
- * One rendered workflow step: an action `uses` step or a `run` step.
+ * One repository permission level in a generated workflow.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Permission = typeof Permission.Type
+
+const stepBase = {
+  name: Schema.optional(Schema.NonEmptyString),
+  id: Schema.optional(Schema.NonEmptyString),
+  env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  if: Schema.optional(Schema.NonEmptyString)
+}
+
+/**
+ * Schema for one raw GitHub Actions step in declaration order.
+ *
+ * An action step names `uses`; a shell step names `run`, either as one string
+ * or as lines the renderer joins with newlines. The two forms are exclusive so
+ * a declaration cannot emit a step GitHub would reject for naming both.
  *
  * @category schemas
  * @since 0.1.0
  */
 export const Step = Schema.Union([
   Schema.Struct({
-    name: Schema.optional(Schema.NonEmptyString),
-    id: Schema.optional(Schema.NonEmptyString),
+    ...stepBase,
     uses: Schema.NonEmptyString,
-    with: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-    env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-    if: Schema.optional(Schema.NonEmptyString)
+    with: Schema.optional(Schema.Record(Schema.String, Schema.String))
   }),
   Schema.Struct({
-    name: Schema.optional(Schema.NonEmptyString),
-    id: Schema.optional(Schema.NonEmptyString),
-    run: Schema.NonEmptyString,
+    ...stepBase,
+    run: Schema.Union([Schema.NonEmptyString, Schema.NonEmptyArray(Schema.String)]),
     shell: Schema.optional(Schema.NonEmptyString),
-    workingDirectory: Schema.optional(Schema.NonEmptyString),
-    env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-    if: Schema.optional(Schema.NonEmptyString)
+    workingDirectory: Schema.optional(Schema.NonEmptyString)
   })
 ])
+
+/**
+ * One raw GitHub Actions step.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Step = typeof Step.Type
 
 /**
  * Attrs for {@link Workflow}.
@@ -222,10 +268,12 @@ export const WorkflowAttrs = Schema.Struct({
   condition: Schema.optional(Schema.NonEmptyString),
   jobName: Schema.optional(Schema.NonEmptyString),
   runsOn: Schema.optional(Schema.NonEmptyString),
-  steps: Schema.optional(Schema.Array(Step)),
+  steps: Schema.optional(Schema.NonEmptyArray(Step)),
   setup: Schema.optional(Target.Target),
   affected: Schema.optional(Schema.Boolean),
-  run: Schema.Array(Target.Target)
+  run: Schema.Array(Target.Target).pipe(
+    Schema.withConstructorDefault(Effect.succeed<ReadonlyArray<Target.AnyTarget>>([]))
+  )
 })
 
 const workflowDefinition = Target.make("Github.Workflow", {
