@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,10 +7,12 @@ import { Effect } from "effect";
 import { buildPullRequestReview } from "../src/github/buildPullRequestReview.ts";
 import { listPullRequestFiles } from "../src/github/listPullRequestFiles.ts";
 import { resolvePullRequest } from "../src/github/resolvePullRequest.ts";
+import { runGh } from "../src/github/runGh.ts";
 import { Review } from "../src/workflow/reviewFlow.ts";
 import { layerMemory } from "../src/workflow/reviewLayer.ts";
 import { reviewSeatResolver } from "../src/workflow/reviewSeatResolver.ts";
 import { resolveReviewSeats } from "../src/workflow/reviewSeats.ts";
+import { GH_CREDENTIAL_REASON, ghCredentialsAvailable, liveSuiteGate } from "./support/liveSuite.ts";
 import { scriptedSeats } from "./workflow/scriptedSeats.ts";
 
 /**
@@ -28,23 +30,12 @@ import { scriptedSeats } from "./workflow/scriptedSeats.ts";
  */
 const DEFAULT_PR = "https://github.com/cli/cli/pull/9000";
 
-function ghAvailable(): boolean {
-  const bin = process.env.SMITHERS_GH_BIN || "gh";
-  const which = spawnSync(process.platform === "win32" ? "where" : "which", [bin], { encoding: "utf8" });
-  if (which.status !== 0) return false;
-  if (process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim()) return true;
-  return spawnSync(bin, ["auth", "status"], { encoding: "utf8" }).status === 0;
-}
-
-const enabled = ghAvailable();
-const skipReason = enabled
-  ? ""
-  : "live GitHub credentials absent: set GITHUB_TOKEN (or run `gh auth login`) and install the gh CLI";
-
-if (!enabled) {
-  // Printed, not silent: a suite that skips has to say what it did not prove.
-  console.log(`[review e2e] skipped — ${skipReason}`);
-}
+// Printed, not silent: a suite that skips has to say what it did not prove.
+const enabled = liveSuiteGate({
+  tag: "review e2e",
+  enabled: ghCredentialsAvailable(),
+  reason: GH_CREDENTIAL_REASON,
+});
 
 const tempDirs: string[] = [];
 afterAll(() => {
@@ -104,10 +95,7 @@ describe.skipIf(!enabled)("review a real pull request (live GitHub)", () => {
 
     // A real clone of a real repository, shallow around the PR's own commits.
     const repoDir = join(dir, "repo");
-    execFileSync("gh", ["repo", "clone", slug, repoDir, "--", "--filter=blob:none", "--no-checkout"], {
-      stdio: "pipe",
-      env: process.env,
-    });
+    await runGh(dir, ["repo", "clone", slug, repoDir, "--", "--filter=blob:none", "--no-checkout"]);
 
     const pr = await resolvePullRequest(repoDir, target);
     expect(pr.number).toBeGreaterThan(0);
@@ -124,13 +112,11 @@ describe.skipIf(!enabled)("review a real pull request (live GitHub)", () => {
     // The base branch's tip is the wrong end for a merged PR: the head would
     // already be an ancestor of it and the range would be empty. GitHub records
     // the exact commit the PR was opened against, so ask for that.
-    const base = JSON.parse(
-      execFileSync("gh", ["api", `repos/${pr.owner}/${pr.repo}/pulls/${pr.number}`, "--jq", "{sha: .base.sha}"], {
-        cwd: repoDir,
-        encoding: "utf8",
-        env: process.env,
-      }),
-    ).sha as string;
+    const base = (
+      JSON.parse(
+        await runGh(repoDir, ["api", `repos/${pr.owner}/${pr.repo}/pulls/${pr.number}`, "--jq", "{sha: .base.sha}"]),
+      ) as { sha: string }
+    ).sha;
     execFileSync("git", ["fetch", "origin", base], { cwd: repoDir, stdio: "pipe" });
     execFileSync("git", ["checkout", "--detach", "refs/smithers-review/head"], { cwd: repoDir, stdio: "pipe" });
     const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoDir, encoding: "utf8" }).trim();

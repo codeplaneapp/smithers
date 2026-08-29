@@ -3,13 +3,23 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { publishWalkthrough } from "../src/cli/publishWalkthrough.ts";
+import { liveSuiteGate } from "./support/liveSuite.ts";
 
 // Live test against the deployed publish service (real network, real R2).
 // Opt in with SMITHERS_REVIEW_E2E=1; needs publish credentials in the
 // environment or ~/.smithers-review.json.
-const enabled =
-  process.env.SMITHERS_REVIEW_E2E === "1" &&
-  (Boolean(process.env.SMITHERS_REVIEW_PUBLISH_TOKEN) || existsSync(join(homedir(), ".smithers-review.json")));
+const credentialed =
+  Boolean(process.env.SMITHERS_REVIEW_PUBLISH_TOKEN) || existsSync(join(homedir(), ".smithers-review.json"));
+
+// Printed, not silent: a suite that skips has to say what it did not prove.
+const enabled = liveSuiteGate({
+  tag: "publish e2e",
+  enabled: process.env.SMITHERS_REVIEW_E2E === "1" && credentialed,
+  reason:
+    process.env.SMITHERS_REVIEW_E2E === "1"
+      ? "publish credentials absent: set SMITHERS_REVIEW_PUBLISH_TOKEN or write ~/.smithers-review.json"
+      : "live publish is opt-in: set SMITHERS_REVIEW_E2E=1 with publish credentials",
+});
 
 describe.skipIf(!enabled)("publish service (live)", () => {
   test("publishes a walkthrough and serves it back verbatim", async () => {

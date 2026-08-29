@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { gateEvent } from "../../action/src/gateEvent.ts";
+import { runGh } from "../../src/github/runGh.ts";
+import { GH_CREDENTIAL_REASON, ghCredentialsAvailable, liveSuiteGate } from "../support/liveSuite.ts";
 
 /**
  * What `.github/workflows/pr-review.yml` does with a real GitHub event.
@@ -19,17 +21,14 @@ import { gateEvent } from "../../action/src/gateEvent.ts";
  *
  * Skips with a named reason when the `gh` CLI has no credential.
  */
-function ghAvailable(): boolean {
-  const bin = process.env.SMITHERS_GH_BIN || "gh";
-  if (spawnSync(process.platform === "win32" ? "where" : "which", [bin]).status !== 0) return false;
-  if (process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim()) return true;
-  return spawnSync(bin, ["auth", "status"]).status === 0;
-}
+const enabled = liveSuiteGate({
+  tag: "pr-review e2e",
+  enabled: ghCredentialsAvailable(),
+  reason: GH_CREDENTIAL_REASON,
+});
 
-const enabled = ghAvailable();
-if (!enabled) {
-  console.log("[pr-review e2e] skipped — set GITHUB_TOKEN (or run `gh auth login`) and install the gh CLI");
-}
+/** This app's own directory: any real directory works as gh's cwd for an API call. */
+const PKG_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 const workflow = parse(
   readFileSync(new URL("../../../../.github/workflows/pr-review.yml", import.meta.url), "utf8"),
@@ -77,13 +76,12 @@ describe.skipIf(!enabled)("the gate against a live GitHub pull request", () => {
   const number = match ? Number(match[3]) : Number(target.split("#")[1]);
 
   /** The `pull_request` payload GitHub would hand the workflow, from the API. */
-  function livePullRequest(): Record<string, unknown> {
-    const raw = execFileSync("gh", ["api", `repos/${slug}/pulls/${number}`], { encoding: "utf8", env: process.env });
-    return JSON.parse(raw) as Record<string, unknown>;
+  async function livePullRequest(): Promise<Record<string, unknown>> {
+    return JSON.parse(await runGh(PKG_ROOT, ["api", `repos/${slug}/pulls/${number}`])) as Record<string, unknown>;
   }
 
-  test("reviews a real same-repo pull request and reports its number", () => {
-    const pr = livePullRequest();
+  test("reviews a real same-repo pull request and reports its number", async () => {
+    const pr = await livePullRequest();
     const decision = gateEvent({
       eventName: "pull_request",
       payload: { action: "synchronize", pull_request: pr },
@@ -95,19 +93,20 @@ describe.skipIf(!enabled)("the gate against a live GitHub pull request", () => {
     }
   }, 120_000);
 
-  test("skips the same real pull request when the action does not change the diff", () => {
-    const decision = gateEvent({ eventName: "pull_request", payload: { action: "labeled", pull_request: livePullRequest() } });
+  test("skips the same real pull request when the action does not change the diff", async () => {
+    const pr = await livePullRequest();
+    const decision = gateEvent({ eventName: "pull_request", payload: { action: "labeled", pull_request: pr } });
     expect(decision.run).toBe(false);
     if (!decision.run) expect(decision.reason).toContain("labeled");
   }, 120_000);
 
-  test("the gate step writes the outputs the workflow's later steps read", () => {
+  test("the gate step writes the outputs the workflow's later steps read", async () => {
     // The real composite step, spawned the way action.yml spawns it.
     const dir = mkdtempSync(join(tmpdir(), "pr-review-gate-"));
     try {
       const eventPath = join(dir, "event.json");
       const outputPath = join(dir, "output");
-      const pr = livePullRequest();
+      const pr = await livePullRequest();
       writeFileSync(eventPath, JSON.stringify({ action: "synchronize", pull_request: pr }));
       writeFileSync(outputPath, "");
       const gate = fileURLToPath(new URL("../../action/src/runGate.ts", import.meta.url));

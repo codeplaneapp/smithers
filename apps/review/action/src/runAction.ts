@@ -10,7 +10,7 @@ import { materializeInferenceCredentials } from "./materializeInferenceCredentia
 import { resolveInferenceEnv } from "./resolveInferenceEnv.ts";
 import { runReview } from "./runReview.ts";
 import { upsertStatusComment } from "./upsertStatusComment.ts";
-import { runGh } from "../../src/github/runGh.ts";
+import { ghBin, runGh } from "../../src/github/runGh.ts";
 
 interface ReviewSummary {
   files?: number;
@@ -182,7 +182,10 @@ async function main(): Promise<void> {
   }
 
   if (decision.eventName === "issue_comment") {
-    execFileSync("gh", ["pr", "checkout", String(decision.prNumber)], {
+    // ghBin(), not a literal: every other GitHub call in this action honors
+    // SMITHERS_GH_BIN, and a checkout that spawns a different binary than the
+    // fork check would either crash or check out under another credential.
+    execFileSync(ghBin(), ["pr", "checkout", String(decision.prNumber)], {
       cwd: workspace,
       stdio: "inherit",
       env: { ...process.env, GH_TOKEN: process.env.GH_TOKEN ?? "" },

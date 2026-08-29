@@ -16,6 +16,7 @@ import { buildPullRequestReview } from "../github/buildPullRequestReview.ts";
 import { listPullRequestFiles } from "../github/listPullRequestFiles.ts";
 import { postPullRequestReview } from "../github/postPullRequestReview.ts";
 import { resolvePullRequest, type PullRequestTarget } from "../github/resolvePullRequest.ts";
+import { ghBin } from "../github/runGh.ts";
 import { supersedePriorReviews } from "../github/supersedePriorReviews.ts";
 import { fenceFor } from "../text/fenceFor.ts";
 import { Review } from "../workflow/reviewFlow.ts";
@@ -104,7 +105,7 @@ export async function runReview(args: ReviewArgs): Promise<void> {
 
   let pr: PullRequestTarget | null = null;
   if (args.pr) {
-    if (!whichBinary(process.env.SMITHERS_GH_BIN || "gh")) {
+    if (!whichBinary(ghBin())) {
       console.error(
         "smithers-review: --pr needs the `gh` CLI — install https://cli.github.com and run `gh auth login`",
       );

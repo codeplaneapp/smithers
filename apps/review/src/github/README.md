@@ -2,8 +2,10 @@
 
 PR integration via the `gh` CLI.
 
-- `runGh.ts` — spawns `gh` (honors `SMITHERS_GH_BIN`); `runGhJsonLines`
-  handles `--paginate` with per-item `@json` output.
+- `runGh.ts` — `ghBin()` resolves which `gh` to spawn (`SMITHERS_GH_BIN`
+  overrides it) and is the only place that reads the override, so a preflight
+  check and the call it guards cannot disagree; `runGh` spawns it;
+  `runGhJsonLines` handles `--paginate` with per-item `@json` output.
 - `resolvePullRequest.ts` — resolves PR coordinates (repo, number, base/head).
 - `listPullRequestFiles.ts` + `parsePatchCommentableLines.ts` — determine
   which new-side lines can hold inline comments.
