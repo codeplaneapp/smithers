@@ -6,12 +6,15 @@
  * fixtures; the script is gone, so what survives is the audit itself, run
  * against the real matrix.
  *
- * The two failure modes are different. A focused test (`.only`) silently drops
+ * The failure modes are different. A focused test (`.only`) silently drops
  * every other case in its file, and a `.todo` reports as a pass. Both are
- * refused outright. A conditional skip is legitimate — cases 12 and 21 need the
- * `jj` binary — but every one has to be listed here with the condition it
- * skips on, so "this case has not run in six months" is a fact somebody chose
- * rather than one nobody noticed.
+ * refused outright, and so is an inverted expectation (`.fails`): a test that
+ * passes because the product still has the defect it describes reports a green
+ * matrix over a known leak, and a gap belongs in `e2e/fault-gaps.md` where a
+ * reader looking for gaps will find it. A conditional skip is legitimate —
+ * cases 12 and 21 need the `jj` binary — but every one has to be listed here
+ * with the condition it skips on, so "this case has not run in six months" is
+ * a fact somebody chose rather than one nobody noticed.
  *
  * Run it with `node --test "scripts/repo-contract/*.test.mjs"`.
  */
@@ -39,19 +42,6 @@ const allowedSkips = new Map([
   [
     "faults/case21-jj-pointer-integrity.test.ts",
     "Needs the jj binary to take and restore real snapshots. Skips locally without it and throws on CI."
-  ]
-])
-
-/**
- * The inverted expectations the matrix carries: a test that passes because the
- * product still has the gap it describes, and turns red when the gap closes.
- * Each one is a pin on a known defect, so each one is listed with its reason.
- */
-const allowedInversions = new Map([
-  [
-    "faults/case22-secret-never-in-journal.test.ts",
-    "The default logger does not redact, so a credential still reaches the operator's terminal. Pinned in "
-    + "e2e/fault-gaps.md; the test turns red the moment redaction reaches the log path."
   ]
 ])
 
@@ -97,20 +87,21 @@ describe("the fault-suite skip audit", () => {
     }
   })
 
-  it("allows an inverted expectation only where one is declared", () => {
+  it("refuses an inverted expectation, which reports green over a known defect", () => {
     for (const source of sources) {
       const inverted = [...source.text.matchAll(/\b(?:it|test)\.fails\b/g)]
-      if (inverted.length === 0) continue
-      assert.ok(
-        allowedInversions.has(source.relative),
-        `${source.relative} pins a defect with .fails and has no row in allowedInversions`
+      assert.equal(
+        inverted.length,
+        0,
+        `${source.relative} pins a defect with .fails. A case that passes because the product is still broken `
+          + "belongs in e2e/fault-gaps.md, not in the matrix."
       )
     }
   })
 
-  it("keeps both allow-lists pointed at files that exist", () => {
+  it("keeps the skip allow-list pointed at files that exist", () => {
     const present = new Set(sources.map((source) => source.relative))
-    for (const relative of [...allowedSkips.keys(), ...allowedInversions.keys()]) {
+    for (const relative of allowedSkips.keys()) {
       assert.ok(present.has(relative), `the allow-list names ${relative}, which is not in the matrix any more`)
     }
   })

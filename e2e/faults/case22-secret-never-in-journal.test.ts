@@ -8,8 +8,13 @@
  * out — a secret that is committed and merely hidden by a getter is still a
  * durable, broadly readable leak.
  *
- * The child's stdout and stderr are checked for the same reason: an operator's
- * terminal is a place a secret can end up.
+ * The journal is where the leak would be permanent: every committed row is
+ * replayed to sync subscribers and to time travel, so redaction happens on the
+ * write path and this case reads what the write path left behind. The
+ * operator's terminal is the other place a credential can surface; rc.0 has no
+ * redacting logger, that is a Phase 5 §5.2 deliverable, and the gap is recorded
+ * in `e2e/fault-gaps.md` rather than pinned here as a test that would pass
+ * because the leak happens.
  */
 import * as SqliteClient from "@effect/sql-sqlite-node/SqliteClient"
 import * as Effect from "effect/Effect"
@@ -67,31 +72,16 @@ describe("case22 a secret never reaches the journal", () => {
     expect(child.output).toContain("RESULT=ok")
 
     const committed = await journalText(filename)
-    // The run really was recorded, so the absence below is about redaction and
-    // not about an empty table.
+    // The run really was recorded, so the absences below are about redaction
+    // and not about an empty table.
     expect(committed).toContain("e2e/secret/deploy")
+    expect(committed).toContain("succeeded")
     expect(committed).not.toContain(secret)
-    // And it is redacted rather than merely truncated away.
-    expect(committed).toMatch(/\[REDACTED/)
-  }, 120_000)
-
-  /**
-   * ADVISORY, and deliberately inverted.
-   *
-   * The journal redacts; the default logger does not, so a careless action that
-   * logs a credential still puts it on the operator's terminal. That is a
-   * Phase 5 deliverable (`docs/migration/rc-contract.md` §5.2, process and
-   * child-agent containment) and it has not landed, so the expectation is
-   * checked in as `it.fails`: it passes today BECAUSE the leak happens, and it
-   * turns red the moment redaction reaches the log path — which is the signal
-   * to delete this wrapper and fold the assertion into the case above.
-   *
-   * Pinned in `fault-gaps.md`.
-   */
-  it.fails("redacts the credential out of the operator's terminal", async () => {
-    const filename = join(directory, "logs.sqlite")
-    const child = await runChild(filename, "case22-logs")
-    expect(child.code).toBe(0)
-    expect(child.output).not.toContain(secret)
+    // Structurally, by field name: the payload the run was created with.
+    expect(committed).toContain('"apiKey":"[REDACTED]"')
+    // And textually, in a value no field name covers: the action returned a
+    // string with the credential spliced into it, which is the shape a
+    // careless integration actually leaks.
+    expect(committed).toContain("token=[REDACTED]")
   }, 120_000)
 })
