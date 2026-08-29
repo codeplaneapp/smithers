@@ -89,7 +89,7 @@ describe("RecordedModel", () => {
         Effect.flip
       )
       expect(seen).toEqual(failing.calls[0]!.events)
-      expect(error).toEqual({ code: "context_overflow", message: "prompt is too long" })
+      expect(error).toEqual({ _tag: modelErrorTag, code: "context_overflow", message: "prompt is too long" })
     }))
 
   it.effect("replays a recorded refusal as a tagged model error", () =>

@@ -125,7 +125,7 @@ export const make = (fixture: Fixture, options: Options = {}): Effect.Effect<Rep
           // failure the recording captured.
           return call.failure === undefined
             ? events
-            : Stream.concat(Stream.fail({ _tag: modelErrorTag, ...call.failure }))(events)
+            : Stream.concat(Stream.fail<ModelLikeError>({ _tag: modelErrorTag, ...call.failure }))(events)
         }))
         return Stream.unwrap(selection)
       }
