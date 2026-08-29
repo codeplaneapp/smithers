@@ -10,6 +10,7 @@ import { Flow, Node } from "@smthrs/core"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { PatternError } from "./PatternError.ts"
+import * as Quarantine from "./Quarantine.ts"
 
 /**
  * How per-check outcomes reduce to one verdict.
@@ -25,9 +26,11 @@ export type Strategy = "all-pass" | "majority" | "any-pass"
  * `checks` is keyed by check id, so two checks cannot share an id, and the
  * checks run in the record's key order.
  *
- * `continueOnFail` does not change the declared topology. Every check is
- * declared either way, and the option is captured, so a tolerant suite and a
- * fail-fast suite have different step identity.
+ * `continueOnFail` changes the declared topology as well as the run: a
+ * tolerant suite joins its checks with {@link Quarantine.all} under the
+ * `quarantine` policy, so the declaration carries one recovery arm per check
+ * and the join cannot fail on a check's behalf. The option is captured too, so
+ * a tolerant suite and a fail-fast suite have different step identity.
  *
  * @category models
  * @since 0.1.0
@@ -90,9 +93,11 @@ const merge = (left: unknown, right: unknown): Record<string, unknown> => ({
 /**
  * Classifies one check's row as a pass.
  *
- * A missing row is a failure: the check produced nothing. An object row fails
- * when it carries `passed: false`, `ok: false`, `failed: true`, or an `error`
- * other than `undefined`, `null`, or `false`. Anything else passes.
+ * A missing row is a failure: the check produced nothing. A
+ * {@link Quarantine.Quarantined} marker is a failure too: the check itself
+ * failed and the join isolated it, so the suite has no row to read. An object
+ * row fails when it carries `passed: false`, `ok: false`, `failed: true`, or an
+ * `error` other than `undefined`, `null`, or `false`. Anything else passes.
  *
  * @category introspection
  * @since 0.1.0
@@ -100,6 +105,7 @@ const merge = (left: unknown, right: unknown): Record<string, unknown> => ({
 export const passed = (row: unknown): boolean => {
   if (row === null || row === undefined) return false
   if (typeof row !== "object") return true
+  if (Quarantine.isQuarantined(row)) return false
   const record = row as Record<string, unknown>
   if (record.passed === false || record.ok === false || record.failed === true) return false
   return record.error === undefined || record.error === null || record.error === false
@@ -152,9 +158,12 @@ const bound = (value: number): boolean => Number.isSafeInteger(value) && value >
  * rules out a duplicate: a repeated id could otherwise overwrite the earlier
  * check's member and drop it from the plan.
  *
- * The declared flow joins its members with `Node.all`, which fails the join on
- * the first failing member and interrupts the rest, whatever `continueOnFail`
- * says. Only {@link run} honors `continueOnFail` today.
+ * `continueOnFail` picks the join. A tolerant suite joins each batch with
+ * {@link Quarantine.all} under the `quarantine` policy: every check gains a
+ * recovery arm, a failing check settles as a {@link Quarantine.Quarantined}
+ * marker its siblings ignore, and {@link passed} reads that marker as a failed
+ * check. A fail-fast suite joins under `halt`, which is the plain `Node.all`
+ * that fails on the first failing member and interrupts the rest.
  *
  * @category constructors
  * @since 0.1.0
@@ -190,7 +199,9 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
         for (const [id, flow] of declared.slice(offset, offset + options.concurrency)) {
           members[id] = call(flow, { check: id, input })
         }
-        return Node.all(members)
+        return Quarantine.all(members, {
+          policy: options.continueOnFail ? "quarantine" : "halt"
+        })
       }
       let batches = batchAt(0)
       for (let offset = options.concurrency; offset < declared.length; offset += options.concurrency) {

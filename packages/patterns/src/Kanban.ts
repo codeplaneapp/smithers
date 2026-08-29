@@ -10,6 +10,7 @@ import { Flow, Node } from "@smthrs/core"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { PatternError } from "./PatternError.ts"
+import * as Quarantine from "./Quarantine.ts"
 
 /**
  * One card on the board.
@@ -138,9 +139,16 @@ const bound = (value: number): boolean => Number.isSafeInteger(value) && value >
  * `make` throws a `PatternError` when there are no columns, no items, a
  * duplicate item id, or a concurrency that is not a positive safe integer.
  *
- * The declared flow halts the whole board on the first failing item, because
- * `Node.all` fails the join on the first failing member and interrupts the
- * rest. Only {@link run} drops a rejected item and lets the others finish.
+ * A column joins its batch with {@link Quarantine.all} under the `quarantine`
+ * policy, because one rejected card is not a reason to interrupt the cards
+ * beside it — which is the same call {@link run} makes. A rejected card
+ * settles as a {@link Quarantine.Quarantined} marker naming the item.
+ *
+ * The declaration does not drop a quarantined card from the later columns: a
+ * plan has no branch, so the card travels on with its marker as `previous` and
+ * the column flow decides what a quarantined predecessor means. `run` has the
+ * value in hand and does drop it, so a board's declared call count is an upper
+ * bound on the calls a pass makes.
  *
  * @category constructors
  * @since 0.1.0
@@ -175,7 +183,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
           previous: previous === undefined ? undefined : (previous as Record<string, unknown>)[item.id]
         })
       }
-      return Node.all(members)
+      return Quarantine.all(members, { policy: "quarantine" })
     }
     let batches = batchAt(0)
     for (let offset = options.concurrency; offset < options.items.length; offset += options.concurrency) {
