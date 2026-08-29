@@ -1,41 +1,41 @@
 import { describe, expect, test } from "bun:test";
 import { resolveInferenceEnv } from "../../action/src/resolveInferenceEnv.ts";
 
-const base = { anthropicBaseUrl: "https://review.example/anthropic", sessionToken: "srs_session" };
+const session = { anthropicBaseUrl: "https://review.test/api/anthropic", sessionToken: "srs_tok" };
 
 describe("resolveInferenceEnv", () => {
-  test("defaults to proxy mode with the session token as the API key", () => {
-    const resolved = resolveInferenceEnv(base);
+  test("a bring-your-own Anthropic key wins and never sets a base URL", () => {
+    const resolved = resolveInferenceEnv({ ...session, anthropicApiKey: "sk-ant-byo" });
+    expect(resolved.mode).toBe("byo-anthropic");
+    expect(resolved.env).toEqual({ ANTHROPIC_API_KEY: "sk-ant-byo" });
+  });
+
+  test("a bring-your-own OpenAI key moves both seats onto the openai provider", () => {
+    const resolved = resolveInferenceEnv({ ...session, openaiApiKey: "sk-oai-byo" });
+    expect(resolved.mode).toBe("byo-openai");
+    expect(resolved.env.OPENAI_API_KEY).toBe("sk-oai-byo");
+    // A seat's provider is the half ahead of the colon, and it decides which
+    // credential is read: an openai key with anthropic: seats resolves nothing.
+    expect(resolved.env.SMITHERS_REVIEW_SEAT).toStartWith("openai:");
+    expect(resolved.env.SMITHERS_REVIEW_CHEAP_SEAT).toStartWith("openai:");
+  });
+
+  test("Anthropic wins over OpenAI when both are set", () => {
+    const resolved = resolveInferenceEnv({ ...session, anthropicApiKey: "sk-ant", openaiApiKey: "sk-oai" });
+    expect(resolved.mode).toBe("byo-anthropic");
+  });
+
+  test("blank keys are treated as unset", () => {
+    const resolved = resolveInferenceEnv({ ...session, anthropicApiKey: "  ", openaiApiKey: "" });
+    expect(resolved.mode).toBe("proxy");
+  });
+
+  test("the default is the metered proxy, pointed at the session's origin", () => {
+    const resolved = resolveInferenceEnv(session);
     expect(resolved.mode).toBe("proxy");
     expect(resolved.env).toEqual({
-      ANTHROPIC_BASE_URL: "https://review.example/anthropic",
-      ANTHROPIC_API_KEY: "srs_session",
+      ANTHROPIC_BASE_URL: "https://review.test/api/anthropic",
+      ANTHROPIC_API_KEY: "srs_tok",
     });
-  });
-
-  test("CODEX_AUTH_JSON selects codex subscription mode and switches the engine", () => {
-    const resolved = resolveInferenceEnv({ ...base, codexAuthJson: '{"auth_mode":"chatgpt"}' });
-    expect(resolved.mode).toBe("codex-subscription");
-    expect(resolved.env).toEqual({ SMITHERS_REVIEW_ENGINE: "codex" });
-  });
-
-  test("CLAUDE_CODE_OAUTH_TOKEN selects claude subscription mode with no overrides", () => {
-    const resolved = resolveInferenceEnv({ ...base, claudeCodeOauthToken: "sk-ant-oat01-example" });
-    expect(resolved.mode).toBe("claude-subscription");
-    expect(resolved.env).toEqual({});
-  });
-
-  test("codex wins over claude when both subscription secrets are present", () => {
-    const resolved = resolveInferenceEnv({
-      ...base,
-      codexAuthJson: '{"auth_mode":"chatgpt"}',
-      claudeCodeOauthToken: "sk-ant-oat01-example",
-    });
-    expect(resolved.mode).toBe("codex-subscription");
-  });
-
-  test("blank secrets do not count as subscription mode", () => {
-    const resolved = resolveInferenceEnv({ ...base, codexAuthJson: "   ", claudeCodeOauthToken: "" });
-    expect(resolved.mode).toBe("proxy");
   });
 });

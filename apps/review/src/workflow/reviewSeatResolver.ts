@@ -15,6 +15,10 @@ import * as Seat from "@smthrs/agent/Seat";
 import * as SeatResolver from "@smthrs/agent/SeatResolver";
 import * as GrantStore from "@smthrs/kernel/GrantStore";
 import * as KernelHttpClient from "@smthrs/kernel/HttpClient";
+import * as AnthropicMessages from "@smthrs/model/AnthropicMessages";
+import * as Auth from "@smthrs/model/Auth";
+import * as Endpoint from "@smthrs/model/Endpoint";
+import * as Framing from "@smthrs/model/Framing";
 import type * as ModelError from "@smthrs/model/ModelError";
 import * as RequestExecutor from "@smthrs/model/RequestExecutor";
 import * as Route from "@smthrs/model/Route";
@@ -22,7 +26,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as Redacted from "effect/Redacted";
-import type * as Result from "effect/Result";
+import * as Result from "effect/Result";
 import { SEAT, type ReviewSeats } from "./reviewSeats.ts";
 
 /**
@@ -72,6 +76,26 @@ const executorLayer = RequestExecutor.layer.pipe(
   Layer.provide(GrantStore.layerNoop),
   Layer.provide(FetchHttpClient.layer),
 );
+
+/**
+ * Anthropic's Messages surface at a caller-chosen origin.
+ *
+ * `Route.anthropic` pins `https://api.anthropic.com`, which is right for a
+ * direct key and wrong for the metered proxy the GitHub Action runs behind: the
+ * service mints a session-scoped key and points the run at its own origin.
+ * `ANTHROPIC_BASE_URL` is the same variable 0.x used for that, so a caller's
+ * configuration carries over unchanged.
+ */
+const anthropicAt = (baseUrl: string, apiKey: Redacted.Redacted<string>) =>
+  Result.map(Endpoint.make({ url: baseUrl, path: "/v1/messages" }), (endpoint) =>
+    Route.make({
+      id: "anthropic",
+      protocol: AnthropicMessages.protocol,
+      endpoint,
+      auth: Auth.apiKeyHeader("x-api-key", apiKey),
+      framing: Framing.sse,
+      headers: { "anthropic-version": "2023-06-01" },
+    }));
 
 const seatOf = <Body, Frame, Event, State>(
   configured: Result.Result<Route.Route<Body, Frame, Event, State>, ModelError.ModelError>,
@@ -141,8 +165,16 @@ export function reviewSeatResolver(
               );
             }
             const credential = Redacted.make(key);
+            const anthropicBaseUrl = environment.ANTHROPIC_BASE_URL?.trim();
             return provider === "anthropic"
-              ? seatOf(Route.anthropic({ apiKey: credential }), executor, seat, modelId)
+              ? seatOf(
+                anthropicBaseUrl === undefined || anthropicBaseUrl === ""
+                  ? Route.anthropic({ apiKey: credential })
+                  : anthropicAt(anthropicBaseUrl, credential),
+                executor,
+                seat,
+                modelId,
+              )
               : provider === "openrouter"
               ? seatOf(
                 Route.openaiCompatible({

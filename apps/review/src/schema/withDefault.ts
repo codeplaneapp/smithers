@@ -24,8 +24,17 @@ import * as Schema from "effect/Schema";
  * @since 1.0.0
  * @category constructors
  */
-export const withDefault = <S extends Schema.Codec<any, any>>(schema: S, value: S["Encoded"]) =>
-  schema.pipe(Schema.withDecodingDefaultKey(Effect.succeed(value)));
+export const withDefault = <S extends Schema.Codec<any, any> & Schema.WithoutConstructorDefault>(
+  schema: S,
+  value: S["Encoded"],
+) =>
+  // Both halves, because both are real entry points. `Flow.execute` and
+  // `Action.call` build a payload through the CONSTRUCTOR, so a caller that
+  // omits `narrate` must get the declared default there; decoding is what a
+  // model answer and a stored payload come back through.
+  Schema.withDecodingDefaultKey<Schema.withConstructorDefault<S>>(Effect.succeed(value))(
+    Schema.withConstructorDefault<S>(Effect.succeed(value))(schema),
+  );
 
 /**
  * A mutable array field with an empty-array default.

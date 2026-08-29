@@ -1,60 +1,32 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, expect, test } from "bun:test";
 import { materializeInferenceCredentials } from "../../action/src/materializeInferenceCredentials.ts";
 
-const tempDirs: string[] = [];
-afterEach(() => {
-  while (tempDirs.length > 0) rmSync(tempDirs.pop()!, { recursive: true, force: true });
-});
-
 describe("materializeInferenceCredentials", () => {
-  test("scrubs CODEX_AUTH_JSON from the env in every mode, keeps CLAUDE_CODE_OAUTH_TOKEN", () => {
-    for (const mode of ["proxy", "claude-subscription"] as const) {
-      const env: Record<string, string | undefined> = {
-        CODEX_AUTH_JSON: '{"secret":"top"}',
-        CLAUDE_CODE_OAUTH_TOKEN: "claude-tok",
-      };
-      const home = materializeInferenceCredentials({ mode, codexAuthJson: env.CODEX_AUTH_JSON, env });
-      expect(home).toBeNull();
-      expect("CODEX_AUTH_JSON" in env).toBe(false);
-      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("claude-tok");
-    }
-  });
+  test("scrubs every raw credential the caller may have set", () => {
+    const env: Record<string, string | undefined> = {
+      CODEX_AUTH_JSON: "{}",
+      CLAUDE_CODE_OAUTH_TOKEN: "oauth",
+      ANTHROPIC_API_KEY: "sk-ant",
+      OPENAI_API_KEY: "sk-oai",
+      PATH: "/usr/bin",
+    };
 
-  test("scrubs a whitespace-only CODEX_AUTH_JSON too", () => {
-    const env: Record<string, string | undefined> = { CODEX_AUTH_JSON: "   " };
-    materializeInferenceCredentials({ mode: "proxy", codexAuthJson: env.CODEX_AUTH_JSON, env });
+    const removed = materializeInferenceCredentials({ env });
+
+    expect(new Set(removed)).toEqual(
+      new Set(["CODEX_AUTH_JSON", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]),
+    );
     expect("CODEX_AUTH_JSON" in env).toBe(false);
+    expect("CLAUDE_CODE_OAUTH_TOKEN" in env).toBe(false);
+    expect("ANTHROPIC_API_KEY" in env).toBe(false);
+    expect("OPENAI_API_KEY" in env).toBe(false);
+    // Everything else is left exactly as it was.
+    expect(env.PATH).toBe("/usr/bin");
   });
 
-  test("codex mode materializes auth.json (0600) into an isolated CODEX_HOME and scrubs the env var", () => {
-    const runnerTemp = mkdtempSync(join(tmpdir(), "runner-temp-"));
-    tempDirs.push(runnerTemp);
-    const secret = '{"tokens":{"access":"abc"}}';
-    const env: Record<string, string | undefined> = { CODEX_AUTH_JSON: secret, RUNNER_TEMP: runnerTemp };
-
-    const codexHome = materializeInferenceCredentials({ mode: "codex-subscription", codexAuthJson: secret, env });
-
-    expect(codexHome).toBe(join(runnerTemp, ".smithers-codex-home"));
-    // codex-subscription mode always returns a path (asserted non-null above).
-    expect(env.CODEX_HOME).toBe(codexHome!);
-    // The secret is on disk for the codex CLI, but no longer in the environment
-    // the agent subprocesses inherit.
-    expect("CODEX_AUTH_JSON" in env).toBe(false);
-    const authPath = join(codexHome!, "auth.json");
-    expect(readFileSync(authPath, "utf8")).toBe(secret);
-    // 0600: owner-only, so a same-user process needs the path — not readable via env.
-    expect(statSync(authPath).mode & 0o777).toBe(0o600);
-  });
-
-  test("codex mode honors an explicit CODEX_HOME", () => {
-    const explicit = mkdtempSync(join(tmpdir(), "codex-home-"));
-    tempDirs.push(explicit);
-    const env: Record<string, string | undefined> = { CODEX_AUTH_JSON: "{}", CODEX_HOME: explicit };
-    const codexHome = materializeInferenceCredentials({ mode: "codex-subscription", codexAuthJson: "{}", env });
-    expect(codexHome).toBe(explicit);
-    expect(readFileSync(join(explicit, "auth.json"), "utf8")).toBe("{}");
+  test("reports nothing when the environment carries no raw credential", () => {
+    const env: Record<string, string | undefined> = { PATH: "/usr/bin" };
+    expect(materializeInferenceCredentials({ env })).toEqual([]);
+    expect(env).toEqual({ PATH: "/usr/bin" });
   });
 });

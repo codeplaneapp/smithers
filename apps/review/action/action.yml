@@ -1,5 +1,5 @@
 name: smithers review
-description: Review pull requests with smithers. Zero secrets — the service authenticates your repo via GitHub OIDC, runs the agents on metered inference, and posts the review onto the PR.
+description: Review pull requests with smithers. Zero secrets — the service authenticates your repo via GitHub OIDC, runs the review on metered inference, and posts the review onto the PR.
 author: smithers
 
 inputs:
@@ -37,7 +37,7 @@ runs:
       if: steps.gate.outputs.should-run == 'true'
       uses: pnpm/action-setup@v6.0.8
       with:
-        version: 10.10.0
+        version: 11.21.0
         run_install: false
 
     - name: Set up node
@@ -52,20 +52,6 @@ runs:
       env:
         SMITHERS_ACTION_PATH: ${{ github.action_path }}
       run: pnpm -C "$SMITHERS_ACTION_PATH/../../.." install --frozen-lockfile
-
-    - name: Install Claude Code CLI
-      if: steps.gate.outputs.should-run == 'true' && env.CODEX_AUTH_JSON == ''
-      shell: bash
-      run: npm install -g @anthropic-ai/claude-code
-
-    - name: Install Codex CLI
-      if: steps.gate.outputs.should-run == 'true' && env.CODEX_AUTH_JSON != ''
-      shell: bash
-      run: |
-        npm install -g @openai/codex
-        codex_bin="$(npm prefix -g)/bin"
-        "$codex_bin/codex" --version
-        echo "$codex_bin" >> "$GITHUB_PATH"
 
     - name: Check out the user's repository
       if: steps.gate.outputs.should-run == 'true'
@@ -85,9 +71,11 @@ runs:
         GITHUB_WORKSPACE: ${{ github.workspace }}
         GH_TOKEN: ${{ github.token }}
         SMITHERS_REVIEW_QUIZ: ${{ inputs.quiz }}
-        # Optional BYO-subscription secrets, passed straight through from the
-        # caller's job env. runAction picks the engine from whichever is set;
-        # absent, inference goes through the metered proxy.
-        CODEX_AUTH_JSON: ${{ env.CODEX_AUTH_JSON }}
-        CLAUDE_CODE_OAUTH_TOKEN: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
+        # Optional bring-your-own inference keys, passed straight through from
+        # the caller's job env. `resolveInferenceEnv` picks the provider from
+        # whichever is set; absent, inference goes through the metered proxy.
+        # The review itself never sees these: `materializeInferenceCredentials`
+        # scrubs them and re-supplies only what the chosen mode needs.
+        ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
+        OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
       run: bun "$SMITHERS_ACTION_PATH/src/runAction.ts"

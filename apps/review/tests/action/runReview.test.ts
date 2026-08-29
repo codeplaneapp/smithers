@@ -5,13 +5,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runReview } from "../../action/src/runReview.ts";
 
-const FAKE_BUN = fileURLToPath(
-  new URL(process.platform === "win32" ? "./fixtures/fake-bun.cmd" : "./fixtures/fake-bun", import.meta.url),
+const FAKE_NODE = fileURLToPath(
+  new URL(process.platform === "win32" ? "./fixtures/fake-node.cmd" : "./fixtures/fake-node", import.meta.url),
 );
 
 afterEach(() => {
-  delete process.env.SMITHERS_FAKE_BUN_LOG;
-  delete process.env.SMITHERS_FAKE_BUN_EXIT;
+  delete process.env.SMITHERS_FAKE_NODE_LOG;
+  delete process.env.SMITHERS_FAKE_NODE_EXIT;
 });
 
 describe("runReview", () => {
@@ -24,13 +24,13 @@ describe("runReview", () => {
       inferenceEnv: { ANTHROPIC_BASE_URL: "http://proxy", ANTHROPIC_API_KEY: "srs_tok" },
       publishUrl: "https://review.test",
       publishToken: "srs_tok",
-      bunPath: FAKE_BUN,
+      nodePath: FAKE_NODE,
     });
     expect(code).toBe(0);
   });
 
   test("resolves with non-zero when the process exits non-zero", async () => {
-    process.env.SMITHERS_FAKE_BUN_EXIT = "7";
+    process.env.SMITHERS_FAKE_NODE_EXIT = "7";
     const code = await runReview({
       smithersRoot: tmpdir(),
       workspace: tmpdir(),
@@ -38,15 +38,15 @@ describe("runReview", () => {
       inferenceEnv: {},
       publishUrl: "https://review.test",
       publishToken: "srs_tok",
-      bunPath: FAKE_BUN,
+      nodePath: FAKE_NODE,
     });
     expect(code).toBe(7);
   });
 
   test("passes the CLI path derived from smithersRoot as the first argument", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "smithers-root-"));
-    const log = join(tmp, "bun-log.json");
-    process.env.SMITHERS_FAKE_BUN_LOG = log;
+    const log = join(tmp, "node-log.json");
+    process.env.SMITHERS_FAKE_NODE_LOG = log;
     try {
       await runReview({
         smithersRoot: tmp,
@@ -55,10 +55,10 @@ describe("runReview", () => {
         inferenceEnv: {},
         publishUrl: "https://review.test",
         publishToken: "srs_tok",
-        bunPath: FAKE_BUN,
+        nodePath: FAKE_NODE,
       });
       const logged = (await Bun.file(log).json()) as { cwd: string; args: string[] };
-      expect(logged.args[0]).toBe(join(tmp, "apps", "review", "src", "cli", "main.ts"));
+      expect(logged.args[0]).toBe(join(tmp, "apps", "review", "bin", "smithers-review.mjs"));
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
@@ -66,8 +66,8 @@ describe("runReview", () => {
 
   test("passes workspace, --pr, prNumber, and --publish as arguments", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "smithers-root-"));
-    const log = join(tmp, "bun-log.json");
-    process.env.SMITHERS_FAKE_BUN_LOG = log;
+    const log = join(tmp, "node-log.json");
+    process.env.SMITHERS_FAKE_NODE_LOG = log;
     try {
       await runReview({
         smithersRoot: tmp,
@@ -76,7 +76,7 @@ describe("runReview", () => {
         inferenceEnv: {},
         publishUrl: "https://review.test",
         publishToken: "srs_tok",
-        bunPath: FAKE_BUN,
+        nodePath: FAKE_NODE,
       });
       const logged = (await Bun.file(log).json()) as { cwd: string; args: string[] };
       expect(logged.args[1]).toBe("/some/workspace");
@@ -90,8 +90,8 @@ describe("runReview", () => {
 
   test("appends --quiz <mode> when quiz is set, and omits it otherwise", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "smithers-root-"));
-    const log = join(tmp, "bun-log.json");
-    process.env.SMITHERS_FAKE_BUN_LOG = log;
+    const log = join(tmp, "node-log.json");
+    process.env.SMITHERS_FAKE_NODE_LOG = log;
     try {
       await runReview({
         smithersRoot: tmp,
@@ -101,7 +101,7 @@ describe("runReview", () => {
         publishUrl: "https://review.test",
         publishToken: "srs_tok",
         quiz: "on",
-        bunPath: FAKE_BUN,
+        nodePath: FAKE_NODE,
       });
       let logged = (await Bun.file(log).json()) as { args: string[] };
       expect(logged.args.slice(-2)).toEqual(["--quiz", "on"]);
@@ -113,7 +113,7 @@ describe("runReview", () => {
         inferenceEnv: {},
         publishUrl: "https://review.test",
         publishToken: "srs_tok",
-        bunPath: FAKE_BUN,
+        nodePath: FAKE_NODE,
       });
       logged = (await Bun.file(log).json()) as { args: string[] };
       expect(logged.args).not.toContain("--quiz");
@@ -124,8 +124,8 @@ describe("runReview", () => {
 
   test("runs with smithersRoot as cwd, not the workspace", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "smithers-root-"));
-    const log = join(tmp, "bun-log.json");
-    process.env.SMITHERS_FAKE_BUN_LOG = log;
+    const log = join(tmp, "node-log.json");
+    process.env.SMITHERS_FAKE_NODE_LOG = log;
     try {
       await runReview({
         smithersRoot: tmp,
@@ -134,7 +134,7 @@ describe("runReview", () => {
         inferenceEnv: {},
         publishUrl: "https://review.test",
         publishToken: "srs_tok",
-        bunPath: FAKE_BUN,
+        nodePath: FAKE_NODE,
       });
       const logged = (await Bun.file(log).json()) as { cwd: string; args: string[] };
       // cwd should be smithersRoot; use realpath to resolve macOS symlinks (/tmp → /private/tmp)

@@ -93,88 +93,88 @@ is spent, the action skips with a notice instead of failing your checks.
 
 ### Use your own subscription (optional)
 
-If you own the repo and have a Claude or ChatGPT subscription, the review
-agents can run on your subscription instead of the service's metered
-inference. Repo registration, quota counting, and walkthrough hosting work
-exactly as before; only the inference moves to your seat, so your metered
-spend on the service stays zero.
+If you own the repo you can pay for its inference directly instead of using the
+service's metered inference. Repo registration, quota counting, and walkthrough
+hosting work exactly as before; only the inference moves to your key, so your
+metered spend on the service stays zero.
 
-**ChatGPT (Codex) — recommended.** Log in once on any machine and copy the
-credential into a repo secret:
-
-```sh
-codex login                      # opens the ChatGPT device-auth flow
-gh secret set CODEX_AUTH_JSON < ~/.codex/auth.json
-```
-
-Then pass it through in the job:
+Set one of these as a repo secret and pass it through in the job:
 
 ```yaml
   review:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: smithersai/smithers/apps/review/action@main
 ```
 
-**Claude.** Mint a token with `claude setup-token` and set it as the
-`CLAUDE_CODE_OAUTH_TOKEN` repo secret, passed through the same way. The
-action prefers Codex when both secrets are present.
+`OPENAI_API_KEY` works the same way and moves both seats onto the `openai:`
+provider. The action prefers Anthropic when both are set, and it scrubs the raw
+secret out of the environment before the review starts: the run reads an
+untrusted diff, so it is handed only the credential its chosen mode needs.
 
-Use this only for repos you own. A personal subscription must not serve
-other people's repos: both providers' consumer terms forbid backing a
-multi-tenant service from one seat. For that, fund the platform API key.
+0.x offered two subscription modes instead, one per CLI agent: it wrote your
+`~/.codex/auth.json` for the Codex CLI, or forwarded `CLAUDE_CODE_OAUTH_TOKEN`
+to the Claude Code CLI. This release runs no CLI subprocess — a seat resolves to
+a provider route — so the credential is an API key and there is nothing to
+materialize on disk. `CODEX_AUTH_JSON` and `CLAUDE_CODE_OAUTH_TOKEN` are
+ignored.
 
 ## Run it from the terminal
 
-The CLI runs through the main Smithers binary against any repo on your machine.
-It prefers your logged-in Codex CLI (Sol for review/verification, Luna for
-narration/quiz) and falls back to Claude when Codex is unavailable. Run
-`codex login` for the default path; the fallback accepts a logged-in `claude`
-CLI, a `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or an
-`ANTHROPIC_API_KEY`:
+`review` is not a Smithers engine verb. This package ships its own bin,
+`smithers-review`, which runs the same flow against any repo on your machine:
 
 ```sh
-bunx smthrs review --help
+node apps/review/bin/smithers-review.mjs --help
 ```
 
 ```sh
 # review the working tree of a repo, write .smithers-review/walkthrough.html
-bunx smthrs review /path/to/repo
+smithers-review /path/to/repo
 
 # review a branch against main, open the walkthrough when done
-bunx smthrs review /path/to/repo --from main --to HEAD --open
+smithers-review /path/to/repo --from main --to HEAD --open
 
 # review one commit
-bunx smthrs review /path/to/repo --commit abc1234
+smithers-review /path/to/repo --commit abc1234
 
 # review GitHub PR #123 and post the review onto it (via gh)
-bunx smthrs review /path/to/repo --pr 123
+smithers-review /path/to/repo --pr 123
 
 # publish the walkthrough to the share service and print an unlisted URL
-bunx smthrs review /path/to/repo --pr 123 --publish
+smithers-review /path/to/repo --pr 123 --publish
 
-# no agents: deterministic story, no review findings (works offline)
-bunx smthrs review /path/to/repo --no-review --no-narrate
+# no seats: deterministic story, no review findings (works offline)
+smithers-review /path/to/repo --no-review --no-narrate
 ```
 
-The standalone package bin, `smithers-review`, accepts the same options and
-remains useful for package-level testing in this monorepo.
+The repo path defaults to the current directory. Seats are `provider:model`
+strings, and the provider ahead of the colon decides which credential is read:
 
-The repo path defaults to the current directory. Run `bunx smthrs review --help` for all
-options. `--publish` needs a publish service URL in
-`SMITHERS_REVIEW_PUBLISH_URL` and an API key (`srk_…`, operator-issued) in
-`SMITHERS_REVIEW_PUBLISH_TOKEN`; both can also be set in
-`~/.smithers-review.json`.
+| Variable | What it sets |
+| --- | --- |
+| `SMITHERS_REVIEW_SEAT` | Reviewing and verifying seat. Default `anthropic:claude-sonnet-4-5`. |
+| `SMITHERS_REVIEW_CHEAP_SEAT` | Narrating and quizzing seat. Default `anthropic:claude-haiku-4-5`. |
+| `SMITHERS_REVIEW_VERIFY_SEAT` | Overrides the verifying seat alone. |
+| `SMITHERS_REVIEW_NARRATE_SEAT` | Overrides the narrating seat alone. |
+| `SMITHERS_REVIEW_QUIZ_SEAT` | Overrides the quizzing seat alone. |
+| `ANTHROPIC_API_KEY` | Credential for `anthropic:` seats. |
+| `OPENAI_API_KEY` | Credential for `openai:` seats. |
+| `OPENROUTER_API_KEY` | Credential for `openrouter:` seats. |
+| `ANTHROPIC_BASE_URL` | Sends `anthropic:` seats to a proxy origin instead of `api.anthropic.com`. |
+
+`--publish` needs a publish service URL in `SMITHERS_REVIEW_PUBLISH_URL` and an
+API key (`srk_…`, operator-issued) in `SMITHERS_REVIEW_PUBLISH_TOKEN`; both can
+also be set in `~/.smithers-review.json`.
 
 ## The service
 
 The hosted side is a Cloudflare Worker at `https://review.jjhub.tech`:
 session minting from GitHub OIDC tokens, an Anthropic-compatible metered
-inference proxy, walkthrough hosting on R2, usage accounting in D1, and a
-Prometheus `/metrics` endpoint feeding Grafana Cloud spend dashboards.
+inference proxy, walkthrough hosting on R2, and usage accounting in D1.
 Design: `.smithers/specs/smithers-review-cloud.md`.
 
 Not built yet, tracked as issues: Stripe subscriptions, self-serve signup

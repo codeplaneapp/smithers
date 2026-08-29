@@ -1,37 +1,42 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+/**
+ * Scrubs raw inference credentials out of the environment the review
+ * subprocess inherits.
+ *
+ * The review reads an untrusted pull-request diff, and the environment it runs
+ * under is the one channel a prompt-injected model call could read a secret
+ * back out of. Everything the run legitimately needs is re-supplied by
+ * `resolveInferenceEnv`, so the raw caller-supplied variables are deleted here.
+ *
+ * 0.x also wrote a Codex `auth.json` into an isolated `CODEX_HOME`, because the
+ * Codex CLI reads a file rather than a variable. rc.0 runs no CLI subprocess,
+ * so there is nothing to materialize and nothing on disk to protect.
+ *
+ * @since 1.0.0
+ */
+
+/** The variables a caller may set that must not reach the review subprocess. */
+const RAW_CREDENTIALS = [
+  "CODEX_AUTH_JSON",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+] as const;
 
 /**
- * Prepare the environment for the review subprocess once the inference mode is
- * resolved:
+ * Deletes every raw credential variable from `env`, returning the names removed.
  *
- * 1. Scrub the raw ChatGPT credential (CODEX_AUTH_JSON) from `env` so it never
- *    rides into the agent processes that read the untrusted PR diff (runReview
- *    spreads the environment into them). The codex CLI reads
- *    $CODEX_HOME/auth.json, not this var, so nothing downstream needs it.
- *    Defence-in-depth only: agents run as the same user and can still read the
- *    file — this closes the `printenv CODEX_AUTH_JSON` recovery channel.
- *    CLAUDE_CODE_OAUTH_TOKEN is intentionally left intact (the claude CLI reads
- *    it at runtime).
- * 2. In codex-subscription mode, materialize auth.json into an isolated
- *    CODEX_HOME (mode 0600) outside the workspace and point env.CODEX_HOME at it,
- *    so the secret never has to be the user's real ~/.codex and the untrusted PR
- *    tree the agents traverse can never read it.
- *
- * Returns the CODEX_HOME used (codex-subscription mode) or null.
+ * @since 1.0.0
+ * @category constructors
  */
 export function materializeInferenceCredentials(input: {
-  mode: "codex-subscription" | "claude-subscription" | "proxy";
-  codexAuthJson: string | undefined;
   env: Record<string, string | undefined>;
-}): string | null {
-  const { env } = input;
-  delete env.CODEX_AUTH_JSON;
-  if (input.mode !== "codex-subscription") return null;
-  const codexHome = env.CODEX_HOME?.trim() || join(env.RUNNER_TEMP?.trim() || tmpdir(), ".smithers-codex-home");
-  mkdirSync(codexHome, { recursive: true });
-  writeFileSync(join(codexHome, "auth.json"), input.codexAuthJson ?? "", { mode: 0o600 });
-  env.CODEX_HOME = codexHome;
-  return codexHome;
+}): ReadonlyArray<string> {
+  const removed: string[] = [];
+  for (const name of RAW_CREDENTIALS) {
+    if (input.env[name] !== undefined) {
+      delete input.env[name];
+      removed.push(name);
+    }
+  }
+  return removed;
 }

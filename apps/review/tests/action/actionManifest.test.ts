@@ -5,6 +5,8 @@ import { parse } from "yaml";
 type ActionStep = {
   name?: string;
   run?: string;
+  uses?: string;
+  with?: Record<string, unknown>;
   "working-directory"?: string;
 };
 
@@ -16,18 +18,27 @@ function readSteps(): ActionStep[] {
 }
 
 describe("review action manifest", () => {
-  test("pins Codex resolution to the npm-installed CLI ahead of Bun", () => {
-    const steps = readSteps();
-    const installIndex = steps.findIndex((step) => step.name === "Install Codex CLI");
-    const reviewIndex = steps.findIndex((step) => step.name === "Authenticate and review");
-    const install = steps[installIndex]?.run ?? "";
+  test("pins pnpm to the workspace's own version", () => {
+    const setup = readSteps().find((step) => step.uses?.startsWith("pnpm/action-setup"));
+    // The action installs this repository's workspace with --frozen-lockfile.
+    // A pnpm whose lockfile format differs from the committed one fails that
+    // install, so the pin has to track the root package manager.
+    expect(setup?.with?.version).toBe("11.21.0");
+  });
 
-    expect(installIndex).toBeGreaterThanOrEqual(0);
-    expect(reviewIndex).toBeGreaterThan(installIndex);
-    expect(install).toContain("npm install -g @openai/codex");
-    expect(install).toContain('codex_bin="$(npm prefix -g)/bin"');
-    expect(install).toContain('"$codex_bin/codex" --version');
-    expect(install).toContain('echo "$codex_bin" >> "$GITHUB_PATH"');
+  test("installs no agent CLI: rc.0 seats are provider routes, not subprocesses", () => {
+    const runs = readSteps().map((step) => step.run ?? "").join("\n");
+    expect(runs).not.toContain("@openai/codex");
+    expect(runs).not.toContain("@anthropic-ai/claude-code");
+  });
+
+  test("forwards the bring-your-own inference keys and no raw subscription secret", () => {
+    const review = readSteps().find((step) => step.name === "Authenticate and review");
+    const env = (review as { env?: Record<string, string> }).env ?? {};
+    expect(env.ANTHROPIC_API_KEY).toBe("${{ env.ANTHROPIC_API_KEY }}");
+    expect(env.OPENAI_API_KEY).toBe("${{ env.OPENAI_API_KEY }}");
+    expect(env.CODEX_AUTH_JSON).toBeUndefined();
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
   // #1546: Bun reads bunfig.toml from its cwd. A `bun` step started inside the
@@ -43,5 +54,15 @@ describe("review action manifest", () => {
     for (const step of bunSteps) {
       expect(step["working-directory"]).toStartWith("${{ github.action_path }}");
     }
+  });
+
+  test("checks the caller's repository out after the gate and before the review", () => {
+    const steps = readSteps();
+    const gate = steps.findIndex((step) => step.name === "Gate the event");
+    const checkout = steps.findIndex((step) => step.uses?.startsWith("actions/checkout"));
+    const review = steps.findIndex((step) => step.name === "Authenticate and review");
+    expect(gate).toBeGreaterThanOrEqual(0);
+    expect(checkout).toBeGreaterThan(gate);
+    expect(review).toBeGreaterThan(checkout);
   });
 });

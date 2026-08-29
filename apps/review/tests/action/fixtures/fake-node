@@ -1,13 +1,13 @@
 #!/bin/sh
-# Test fixture: a fake `bun` for apps/review/tests/action/runReview.test.ts.
+# Test fixture: a fake `node` for apps/review/tests/action/runReview.test.ts.
 #
 # Checked in and executable (not written at test time) so spawning it never
 # races a fresh write-then-exec.
 #
 # Records the invocation (cwd via `pwd -P`, args) to the JSON file named by
-# $SMITHERS_FAKE_BUN_LOG, then exits with the code in $SMITHERS_FAKE_BUN_EXIT
+# $SMITHERS_FAKE_NODE_LOG, then exits with the code in $SMITHERS_FAKE_NODE_EXIT
 # (default 0).
-log=$SMITHERS_FAKE_BUN_LOG
+log=$SMITHERS_FAKE_NODE_LOG
 if [ -n "$log" ]; then
   {
     printf '{"cwd":"%s","args":[' "$(pwd -P)"
@@ -20,4 +20,4 @@ if [ -n "$log" ]; then
     printf ']}'
   } > "$log"
 fi
-exit "${SMITHERS_FAKE_BUN_EXIT:-0}"
+exit "${SMITHERS_FAKE_NODE_EXIT:-0}"

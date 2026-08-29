@@ -189,22 +189,20 @@ async function main(): Promise<void> {
     });
   }
 
-  const codexAuthJson = process.env.CODEX_AUTH_JSON;
   const inference = resolveInferenceEnv({
     anthropicBaseUrl: session.anthropicBaseUrl,
     sessionToken: session.token,
-    codexAuthJson,
-    claudeCodeOauthToken: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+    openaiApiKey: process.env.OPENAI_API_KEY,
   });
-  // Scrub CODEX_AUTH_JSON and (in codex mode) materialize an isolated CODEX_HOME
-  // before spawning the review CLI — see materializeInferenceCredentials.
-  materializeInferenceCredentials({ mode: inference.mode, codexAuthJson, env: process.env });
-  if (inference.mode === "codex-subscription") {
-    console.log("::notice::smithers review: inference runs on this repo's own ChatGPT (Codex) subscription.");
-  } else if (inference.mode === "claude-subscription") {
-    console.log(
-      "::notice::smithers review: inference runs on this repo's own Claude subscription (CLAUDE_CODE_OAUTH_TOKEN is set).",
-    );
+  // Scrub every raw caller-supplied credential before spawning the review CLI:
+  // the run reads an untrusted diff, and `inference.env` re-supplies exactly
+  // what it needs. See materializeInferenceCredentials.
+  materializeInferenceCredentials({ env: process.env });
+  if (inference.mode === "byo-anthropic") {
+    console.log("::notice::smithers review: inference runs on this repo's own ANTHROPIC_API_KEY.");
+  } else if (inference.mode === "byo-openai") {
+    console.log("::notice::smithers review: inference runs on this repo's own OPENAI_API_KEY.");
   }
 
   const summaryPath = join(process.env.RUNNER_TEMP?.trim() || tmpdir(), `smithers-review-summary-${process.pid}.json`);
