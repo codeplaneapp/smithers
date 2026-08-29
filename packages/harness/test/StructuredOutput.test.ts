@@ -62,6 +62,31 @@ describe("StructuredOutput.digest", () => {
   })
 })
 
+describe("StructuredOutput.issuesDigest", () => {
+  const failure = (issues: ReadonlyArray<string>) =>
+    new StructuredOutput.StructuredOutputFailure({
+      schema: "sha256:schema",
+      candidate: "sha256:candidate",
+      corrections: 1,
+      limit: 2,
+      issues,
+      message: "did not validate"
+    })
+
+  it("says whether two rejections were wrong in the same way", () => {
+    expect(StructuredOutput.issuesDigest(failure(["approved: expected boolean"]))).toBe(
+      StructuredOutput.issuesDigest(failure(["approved: expected boolean"]))
+    )
+    expect(StructuredOutput.issuesDigest(failure(["approved: expected boolean"]))).not.toBe(
+      StructuredOutput.issuesDigest(failure(["issues: expected array"]))
+    )
+    // Order is part of what the validator said, so it is part of the digest.
+    expect(StructuredOutput.issuesDigest(failure(["a", "b"]))).not.toBe(
+      StructuredOutput.issuesDigest(failure(["b", "a"]))
+    )
+  })
+})
+
 describe("StructuredOutput.lastBalanced", () => {
   it("returns the container whose matching close ends last", () => {
     expect(StructuredOutput.lastBalanced("{\"a\":1} then {\"b\":2}")).toBe("{\"b\":2}")

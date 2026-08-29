@@ -6,6 +6,7 @@
 import { Context, Effect, Layer, Ref, Stream } from "effect"
 import { canonicalRequestDigest, type Fixture, type RecordedCall } from "./Fixture.ts"
 import {
+  modelErrorTag,
   type ModelEventLike,
   ModelLike,
   type ModelLike as ModelLikeService,
@@ -118,7 +119,13 @@ export const make = (fixture: Fixture, options: Options = {}): Effect.Effect<Rep
           const events = Stream.fromIterable(call.events)
           // The recorded failure ends the recorded events; `Stream.concat` is
           // data-last, so the failure is the argument and the events the self.
-          return call.failure === undefined ? events : Stream.concat(Stream.fail(call.failure))(events)
+          // Stamped with the tag: a fixture stores a refusal's FIELDS, and a
+          // consumer that classifies one — the agent's quota park matches
+          // `_tag` — would not recognize a bare structural object as the
+          // failure the recording captured.
+          return call.failure === undefined
+            ? events
+            : Stream.concat(Stream.fail({ _tag: modelErrorTag, ...call.failure }))(events)
         }))
         return Stream.unwrap(selection)
       }

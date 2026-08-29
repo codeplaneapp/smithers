@@ -236,14 +236,43 @@ export const FlowBody = Schema.Union([FlowBodyPrompt, FlowBodyModule])
 export type FlowBody = typeof FlowBody.Type
 
 /**
+ * The pack a descriptor was discovered in, when it came from one.
+ *
+ * `origin` is what decided a name collision: a `local` pack shadows an
+ * `installed` one, so an operator reading a descriptor can tell which half of
+ * the merge it survived.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const PackRef = Schema.Struct({
+  name: Schema.NonEmptyString,
+  version: Schema.NonEmptyString,
+  origin: Schema.Literals(["local", "installed"])
+})
+
+/**
+ * The pack a descriptor was discovered in.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type PackRef = typeof PackRef.Type
+
+/**
  * Opaque source information retained with each discovered entry.
+ *
+ * `pack` is absent for a descriptor discovered from a plain source, which is
+ * every source the single-source registry scans. It is present only when a
+ * pack manifest named the directory the entry was found in.
  *
  * @category models
  * @since 0.1.0
  */
 export class Provenance extends Schema.Class<Provenance>("flows/registry/Provenance")({
   source: Schema.String,
-  root: Schema.String
+  root: Schema.String,
+  pack: Schema.optional(PackRef)
 }) {}
 
 /**
@@ -289,6 +318,7 @@ export const DiscoveryWarningCode = Schema.Literals([
   "duplicate_name",
   "frontmatter_parse_error",
   "root_level_entry",
+  "shadowed",
   "unreadable"
 ])
 

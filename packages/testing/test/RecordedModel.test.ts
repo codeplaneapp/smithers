@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as ProductionModelRequest from "@smthrs/model/ModelRequest"
 import { Cause, Effect, type Exit, Fiber, Option, Result, Stream } from "effect"
 import { decode, type Fixture } from "../src/Fixture.ts"
-import type { ModelRequestLike } from "../src/ModelLike.ts"
+import { modelErrorTag, type ModelRequestLike } from "../src/ModelLike.ts"
 import { make, scripted } from "../src/RecordedModel.ts"
 import { ReplayHarnessMismatchError, UnscriptedModelError } from "../src/TestingError.ts"
 import journal from "./fixtures/small-run/journal.json" with { type: "json" }
@@ -90,6 +90,31 @@ describe("RecordedModel", () => {
       )
       expect(seen).toEqual(failing.calls[0]!.events)
       expect(error).toEqual({ code: "context_overflow", message: "prompt is too long" })
+    }))
+
+  it.effect("replays a recorded refusal as a tagged model error", () =>
+    Effect.gen(function*() {
+      // A fixture stores a refusal's fields, not its tag. A consumer that
+      // classifies one matches on the tag — the agent parks a run on a quota
+      // refusal that way — so a replay that failed with a bare structural
+      // object would not reproduce the recording it came from.
+      const refusing: Fixture = {
+        calls: [{
+          ...fixture.calls[0]!,
+          events: [],
+          failure: { code: "rate_limited", message: "Too many requests", retryAfterMillis: 3_000, httpStatus: 429 }
+        }]
+      }
+      const replay = yield* make(refusing)
+      const error = yield* Stream.runCollect(replay.model.stream(refusing.calls[0]!.request)).pipe(Effect.flip)
+
+      expect(error).toEqual({
+        _tag: modelErrorTag,
+        code: "rate_limited",
+        message: "Too many requests",
+        retryAfterMillis: 3_000,
+        httpStatus: 429
+      })
     }))
 
   it.effect("reports untouched fixture calls", () =>

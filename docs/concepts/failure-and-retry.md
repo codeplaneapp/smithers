@@ -96,6 +96,30 @@ const booked = yield* Saga.run(order, {
 
 `Saga.make` declares the same shape as topology: one `Catch` per step whose arm calls that step's compensation and re-raises, so the plan lists the compensation calls in reverse order before anything runs.
 
+## Waits that are not failures
+
+A provider that answers `rate_limited` or `quota_exceeded` is not reporting a
+defect: it is naming a time to come back. A model-backed step
+(`@smthrs/agent/AgentAction`) treats a classified refusal as a wait rather than
+an attempt:
+
+- `QuotaPolicy` decides whether the refusal names a deadline and what that
+  deadline is, and refuses to park at all beyond its configured ceiling.
+- The park is a durable suspension under `annotateWaiting({ reason: "quota" })`,
+  so a supervisor sees a parked run with a wake time.
+- The retry is `Action.retry`, so it runs as a NEW attempt of the same step and
+  the step's own correction budget is untouched.
+
+The engine records a provider refusal as the model step's result, which is what
+makes a replay free. A quota refusal is the exception: it says nothing about the
+request, so it fails the sealed action instead of being recorded, and no cache
+row outlives the window.
+
+Spending is bounded separately. `@smthrs/agent/Budget` accumulates token usage
+across a run's model calls, keyed by each step's content key so a replayed step
+counts exactly once, and refuses, warns, or latches before the next call
+according to the policy an approved `Envelope.budget` carried.
+
 ## Tiers
 
 | Tier | Meaning | Retry rule |

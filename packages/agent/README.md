@@ -197,10 +197,73 @@ const Research = AgentAction.make("docs/Research", {
 The declared output schema is rendered into the run's system teaching and
 enforced against the run's final answer; a decode miss spends a correction slot
 on a re-prompt before it becomes a typed `StructuredOutputFailure`. The host
-half is `AgentAction.Host` — the registry, the sandbox budget, and the catalog
-every model-backed action in a composition shares — plus `SeatResolver` and
+half is `AgentAction.Host`, the registry, the sandbox budget, and the catalog
+every model-backed action in a composition shares, plus `SeatResolver` and
 `Agent`. A test swaps the whole model for a scripted one by providing a
 different `SeatResolver`.
+
+`Host` also carries the defaults a step inherits: `defaultCorrections` (the
+correction budget for a step that declares none), `modelRetryPolicy` (the
+transport retry ladder one model call runs under, which `Schedule.recurs(0)`
+turns off), `maxQuotaParks` (how many quota waits one step may take), `system`,
+`maxFrames`, and `capabilityEnvelope`.
+
+### The structured-output correction policy
+
+Three numbers decide how hard a step tries to answer in shape, and each is
+declared where the person who cares about it works:
+
+| Where                     | What it says                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------ |
+| `Options.corrections`     | This step's budget. Zero makes a first miss terminal.                          |
+| `Host.defaultCorrections` | The composition's budget for steps that declare none. One when neither is set. |
+| `Options.repair`          | One bounded ask after the budget is spent.                                     |
+
+A correction repeats the task verbatim and appends the validation issues: it
+assumes the model can still answer the question it was asked. A repair does not.
+It is the author's own prompt, written from the failure, asked exactly once, and
+decoded by the same schema:
+
+```ts
+const Review = AgentAction.make("review/Diff", {
+  payload: { diff: Schema.String },
+  output: Schema.Struct({ approved: Schema.Boolean, issues: Schema.Array(Schema.String) }),
+  seat: "anthropic:claude-sonnet-4-5",
+  prompt: ({ diff }) => `Review this diff:\n${diff}`,
+  corrections: 2,
+  repair: {
+    prompt: (failure) => `Return ONLY the JSON review. The last answer failed with: ${failure.issues.join("; ")}`
+  }
+})
+```
+
+Every rejection writes one `flows.agent.structured-output-rejected.v1` record on
+the journal's lossy channel, carrying the action, the attempt, the budget, the
+schema digest, and a digest of the issues. The record exists because the final
+failure only describes the LAST candidate: a run that answered three times
+should say so in its own trail, and two runs that spent their budget the same
+way should be distinguishable without the answers themselves being journaled.
+A composition without a journal, such as the reference memory engine or a test,
+writes nothing and behaves the same otherwise.
+
+The record is evidence, not a decision: nothing in the ladder reads it back,
+and compaction may drop it without changing what the run does.
+
+What makes the ladder durable is the step underneath it. Each attempt is a
+whole cell run under its own session and its own prompt, so its model call is a
+distinct sealed step with its own content key and its own attempt row on the
+journal's durable channel. A run that settles and is asked again replays the
+entire ladder, corrections included, and pays the provider nothing, including
+when the second ask arrives on a different engine over the same database.
+
+The rung is readable as well as distinct. A session is key material and is
+hashed into the step key, so three distinct keys say a ladder ran and not which
+call was the ask. `AgentAction` sets `FlowEngineLike.Correction` around each
+rung and the port stamps the ordinal onto that rung's own `RecordedModelStep`,
+so a projection reading the run's sealed steps gets `correction: 0` for the ask
+and `1`, `2` for its re-prompts. The field is optional: a model call outside a
+ladder has no ordinal, and a record written before the field existed still
+decodes for a parked run resuming onto a newer package.
 
 ### Composing it
 
@@ -259,6 +322,119 @@ const watched = Layer.merge(
 `emit` runs inside the frame that produced the event, and that frame holds the
 engine's write transaction. A sink pushes onto a queue, writes to a socket, or
 resolves a deferred. A sink that waits on a durable write stalls the run.
+
+## Quota-aware waits
+
+A `rate_limited` or `quota_exceeded` answer is not a defect report: the provider
+is saying when to come back. `QuotaPolicy` is the classifier that reads it, and
+`AgentAction` is what parks on it.
+
+```ts
+import { QuotaPolicy } from "@smthrs/agent"
+
+// In the composition, beside the host and the seat resolver.
+const quota = QuotaPolicy.layerDefault({ maxWaitMillis: 900_000 })
+```
+
+The classifier answers one question, whether this refusal is a wait and until
+when, in order of how much the provider actually said: `resetAtEpochMillis`, then
+`retryAfterMillis`, then a delay parsed out of the message text, then
+`Config.defaultWaitMillis`. A deadline beyond `Config.maxWaitMillis` is not a
+wait at all: the classifier answers `None` and the original `ModelError`
+propagates, because a run parked for a day is indistinguishable from a run that
+hung. `QuotaPolicy.layerNoop()`, and providing nothing, which is the default,
+keeps today's behavior, where the refusal fails the step.
+
+A classified refusal parks for real:
+
+- the decision is a **recorded step**, so a replay waits out the deadline the
+  first pass chose instead of computing a new one;
+- `annotateWaiting({ reason: "quota", wakeAt })` and `DurableClock.sleep`
+  suspend the run, so a supervisor sees a parked run with a wake time and
+  `waitingRuns({ reason: "quota" })` finds it;
+- the retry runs under `Action.retry`, so the re-issued model call is a new
+  attempt of the same step rather than a replay of the one the provider
+  refused, and the step's correction budget is untouched;
+- `Host.maxQuotaParks` bounds it, because a window still closed after its own
+  deadline is not one a run waits out forever.
+
+One more thing changes at the engine port: `FlowEngineLike` records a provider
+refusal as the sealed step's result, which is right for every failure except
+this one. A quota refusal says nothing about the request, because the same bytes
+succeed a minute later, so recording it under a content key would pin
+"this prompt is refused" into the shared cache and make the wake pointless. A
+classified refusal fails the sealed action instead, which records an attempt
+rather than a result.
+
+## Budgets
+
+`Sandbox.Limits` bounds one cell and `Agent.Options.maxFrames` bounds one loop.
+Neither accumulates, so `Envelope.budget`, the tokens and milliseconds a control
+plane approved for a plan, bound nothing until `Budget` existed.
+
+```ts
+import { Budget } from "@smthrs/agent"
+
+const budget = Budget.layer({
+  tokens: { max: 200_000, onExceeded: "fail" },
+  latency: { maxMillis: 900_000 }
+})
+
+// Or straight from what the control plane approved:
+const approved = Budget.layerFromEnvelope(envelope)
+```
+
+Enforcement sits at the model boundary in `FlowEngineLike`, which every model
+call passes through, so a step that assembles its own loop cannot evade a budget
+declared for the run. Three rules make it usable:
+
+- **The accumulator is per run, keyed by the model step's content key, and
+  projected from the journal.** Every accounted call writes a
+  `flows.agent.usage.v1` record on the journal's DURABLE channel, and a budget
+  entering a run folds that run's records back before it decides anything. The
+  projection is what makes the budget survive a restart: the engine resumes a
+  run from its recorded NODE results and never re-enters a settled step, so an
+  in-memory accumulator would start a resumed run at zero and hand it a second
+  full allowance. The record is durable rather than lossy for the same reason:
+  the lossy channel is droppable telemetry, and a dropped record here would
+  hand out that second allowance silently. The content key is the other half: a
+  recovered record and its own live call are the same key, so the call counts
+  once.
+- **One instance serves every run.** A composition provides `Budget` above its
+  engine, so the tally is keyed by execution id. `Budget.usageOf(runId)` reads
+  one run's spend, from its live accumulator when the run is here and from its
+  records when it is not. `Budget.defaultMaxRuns` bounds how many tallies are
+  held in memory; `Budget.layer(policy, { maxRuns })` sets it.
+- **Refusal is a projection.** The check runs _before_ a call and projects its
+  cost as the largest call the run has made. A budget that noticed afterwards
+  would always be exceeded by the call that exceeded it.
+- **The first call is never refused.** With nothing recorded, the only honest
+  projection is zero.
+- **The accounting fails closed.** A record that could not be written, a ledger
+  that could not be read, and a ledger longer than one recovery reads
+  (`Budget.defaultRecoveryEntries`, overridable with
+  `Budget.layer(policy, { recoveryEntries })`) all raise
+  `Budget.AccountingUnavailable` rather than answering. Each of them is a run
+  whose spend is UNKNOWN, and a budget that read an unknown as zero would hand
+  a resumed run its whole allowance back and report itself healthy. The step
+  that made the call fails instead; its sealed model step replays from the
+  recorded answer, so a re-dispatch pays the ledger again and not the provider.
+  The `flows.agent.budget-warning.v1` record is the one this module still lets
+  go: nothing reads it back.
+
+`onExceeded` decides what running out means: `fail` reports a typed
+`BudgetExceeded { scope, used, max, next }` at the step, `warn` writes a
+`flows.agent.budget-warning.v1` journal record and proceeds, and
+`skip-remaining` latches, so every later model call in the run fails typed
+`skipped` without asking a provider anything. Providing no `Budget` layer
+accounts nothing and refuses nothing.
+
+A latched refusal is its own failure, `Budget.Skipped`, carrying the
+`BudgetExceeded` it latched on. The distinction is what an operator needs: one
+step broke the budget and every other step was stopped by it. It is
+quarantine-compatible, naming a verdict no retry can change, and
+`Budget.neverRetrySkipped(policy)` adds its tag to a retry policy so a ladder
+that would otherwise re-dispatch a skipped step gives up on the first refusal.
 
 ## The engine port
 
@@ -346,23 +522,25 @@ A run that solved something once solved it as a script: a few cells that read th
 
 The root entry point exports these namespaces; each is also importable from `@smthrs/agent/<Module>`.
 
-| Module                     | Public exports                                                                                                                                                                                                   | Description                                                                             |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `FlowEngineLike`           | `RouteResolver`, `routeResolver`, `ChildRunner`, `CallRunner`, `WorkspaceCallRunner`, `workspaceRelative`, `callBoundary`, `callMaterial`, `appendBatch`, `sandboxed`, `Options`, `make`, `layer`                | Executes the `@smthrs/harness` engine port on the durable engine from `@smthrs/engine`. |
-| `Agent`                    | `Options`, `Service`, `Agent`, `make`, `makeNoop`, `layer`, `layerNoop`, `layerDefaults`, `layerDefaultsWithVariant`                                                                                             | Composes the durable cell loop and emits it as a `Stream<AgentEvent>`.                  |
-| `Seat`                     | `Seat`, `make`, `SeatUnresolved`, `modelIdOf`                                                                                                                                                                    | Models the resolved seat a run streams from, and the failure of resolving one.          |
-| `SeatResolver`             | `Service`, `SeatResolver`, `make`, `makeNoop`, `layer`, `layerNoop`, `contextWindowTokensFor`                                                                                                                    | Turns a declared seat string into a live model, and holds the credentials that takes.   |
-| `CellPlugin`               | `hooks`, `make`, `registry`, `flows`, `fromBindings`, `modelRequest`, `identity`                                                                                                                                 | Hosts the cell registry, flow, and model-request hooks on the shared plugin kernel.     |
-| `StandardFlows`            | `filesystem`, `shell`, `memory`, `WaitInput`, `WaitOutput`, `waitFlow`, `clock`, `AskInput`, `AskOutput`, `askFlow`, `ApprovalUnavailable`, `Asker`, `approval`, `askerNoop`                                     | Expresses the built-in host capabilities as ordinary executable flows.                  |
-| `AgentSession`             | `Options`, `trace`, `patterns`, `waitForRunning`, `waitForParked`, `preserveDriverInterrupt`, `registerDriver`, `settleDriverFailure`, `make`, `layer`                                                           | Runs one control-plane launch as one durable agent session.                             |
-| `ChildFlows`               | `SpawnInput`, `SpawnOutput`, `SendInput`, `SendOutput`, `AwaitInput`, `AwaitOutput`, `spawnFlow`, `sendFlow`, `awaitFlow`, `ChildError`, `Children`, `makeNoop`, `source`                                        | Expresses detached subagent lifecycle as ordinary executable flows.                     |
-| `EngineChildren`           | `Options`, `ChildState`, `childExecutionId`, `make`, `layer`                                                                                                                                                     | Implements the `Children` port as real durable runs on this host's engine.              |
-| `PromoteFlows`             | `bestPractices`, `flowTemplate`, `ShowScriptInput`, `ShowScriptOutput`, `WriteFlowInput`, `WriteFlowOutput`, `showScriptFlow`, `writeFlowFlow`, `Options`, `source`                                              | Turns the script the model just ran into a saved flow, as two ordinary flows.           |
-| `FlowStore`                | `FlowStoreErrorCode`, `FlowStoreError`, `idPattern`, `validateId`, `SavedFlow`, `WriteResult`, `Service`, `FlowStore`, `makeMemory`, `makeFileSystem`, `makeNoop`, `layerMemory`, `layerFileSystem`, `layerNoop` | Writes a saved flow's files and lists the flows a host already holds.                   |
-| `WorkspaceSandbox`         | Every export of [`@smthrs/engine-store/WorkspaceSandbox`](../engine-store/README.md), including `Service`, `WorkspaceSandbox`, `make`, `layer`, `Host`, `makeHosted`, `makeMemory`, and `layerFileSystem`        | Re-exports the canonical workspace transaction contract, unchanged.                     |
-| `InMemoryWorkspaceSandbox` | `InitialFiles`, `HostFile`, `InMemoryWorkspaceSandbox`, `make`                                                                                                                                                   | Builds that contract's conformance sandbox over an in-memory host.                      |
-| `AgentAction`              | `Host`, `makeHost`, `layerHost`, `AgentFailure`, `PayloadSchemaOf`, `Options`, `AgentAction`, `make`                                                                                                             | Declares a model-backed step as an ordinary action and ships its implementation.        |
-| `EventSink`                | `Service`, `EventSink`, `make`, `makeNoop`, `layer`, `layerNoop`                                                                                                                                                 | Hands a host each agent event while the step runs, instead of only after it decodes.    |
+| Module                     | Public exports                                                                                                                                                                                                                                                                                                                                                                                                                    | Description                                                                             |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `FlowEngineLike`           | `RouteResolver`, `routeResolver`, `ChildRunner`, `CallRunner`, `WorkspaceCallRunner`, `workspaceRelative`, `callBoundary`, `callMaterial`, `appendBatch`, `sandboxed`, `RecordedModelStep`, `Correction`, `Options`, `make`, `layer`                                                                                                                                                                                              | Executes the `@smthrs/harness` engine port on the durable engine from `@smthrs/engine`. |
+| `Agent`                    | `Options`, `Service`, `Agent`, `make`, `makeNoop`, `layer`, `layerNoop`, `layerDefaults`, `layerDefaultsWithVariant`                                                                                                                                                                                                                                                                                                              | Composes the durable cell loop and emits it as a `Stream<AgentEvent>`.                  |
+| `Seat`                     | `Seat`, `make`, `SeatUnresolved`, `modelIdOf`                                                                                                                                                                                                                                                                                                                                                                                     | Models the resolved seat a run streams from, and the failure of resolving one.          |
+| `SeatResolver`             | `Service`, `SeatResolver`, `make`, `makeNoop`, `layer`, `layerNoop`, `contextWindowTokensFor`                                                                                                                                                                                                                                                                                                                                     | Turns a declared seat string into a live model, and holds the credentials that takes.   |
+| `CellPlugin`               | `hooks`, `make`, `registry`, `flows`, `fromBindings`, `modelRequest`, `identity`                                                                                                                                                                                                                                                                                                                                                  | Hosts the cell registry, flow, and model-request hooks on the shared plugin kernel.     |
+| `StandardFlows`            | `filesystem`, `shell`, `memory`, `WaitInput`, `WaitOutput`, `waitFlow`, `clock`, `AskInput`, `AskOutput`, `askFlow`, `ApprovalUnavailable`, `Asker`, `approval`, `askerNoop`                                                                                                                                                                                                                                                      | Expresses the built-in host capabilities as ordinary executable flows.                  |
+| `AgentSession`             | `Options`, `trace`, `patterns`, `waitForRunning`, `waitForParked`, `preserveDriverInterrupt`, `registerDriver`, `settleDriverFailure`, `make`, `layer`                                                                                                                                                                                                                                                                            | Runs one control-plane launch as one durable agent session.                             |
+| `ChildFlows`               | `SpawnInput`, `SpawnOutput`, `SendInput`, `SendOutput`, `AwaitInput`, `AwaitOutput`, `spawnFlow`, `sendFlow`, `awaitFlow`, `ChildError`, `Children`, `makeNoop`, `source`                                                                                                                                                                                                                                                         | Expresses detached subagent lifecycle as ordinary executable flows.                     |
+| `EngineChildren`           | `Options`, `ChildState`, `childExecutionId`, `make`, `layer`                                                                                                                                                                                                                                                                                                                                                                      | Implements the `Children` port as real durable runs on this host's engine.              |
+| `PromoteFlows`             | `bestPractices`, `flowTemplate`, `ShowScriptInput`, `ShowScriptOutput`, `WriteFlowInput`, `WriteFlowOutput`, `showScriptFlow`, `writeFlowFlow`, `Options`, `source`                                                                                                                                                                                                                                                               | Turns the script the model just ran into a saved flow, as two ordinary flows.           |
+| `FlowStore`                | `FlowStoreErrorCode`, `FlowStoreError`, `idPattern`, `validateId`, `SavedFlow`, `WriteResult`, `Service`, `FlowStore`, `makeMemory`, `makeFileSystem`, `makeNoop`, `layerMemory`, `layerFileSystem`, `layerNoop`                                                                                                                                                                                                                  | Writes a saved flow's files and lists the flows a host already holds.                   |
+| `WorkspaceSandbox`         | Every export of [`@smthrs/engine-store/WorkspaceSandbox`](../engine-store/README.md), including `Service`, `WorkspaceSandbox`, `make`, `layer`, `Host`, `makeHosted`, `makeMemory`, and `layerFileSystem`                                                                                                                                                                                                                         | Re-exports the canonical workspace transaction contract, unchanged.                     |
+| `InMemoryWorkspaceSandbox` | `InitialFiles`, `HostFile`, `InMemoryWorkspaceSandbox`, `make`                                                                                                                                                                                                                                                                                                                                                                    | Builds that contract's conformance sandbox over an in-memory host.                      |
+| `Budget`                   | `OnExceeded`, `TokenBudget`, `LatencyBudget`, `Policy`, `BudgetExceeded`, `skippedTag`, `Skipped`, `nonRetryableTags`, `neverRetrySkipped`, `AccountingUnavailable`, `Usage`, `Verdict`, `Service`, `Budget`, `looseRunId`, `defaultMaxRuns`, `defaultRecoveryEntries`, `Options`, `make`, `makeNoop`, `layer`, `layerNoop`, `current`, `tokensOf`, `policyFromEnvelope`, `layerFromEnvelope`, `budgetWarningEvent`, `usageEvent` | Accumulates what a run spends on model calls and enforces its approved ceiling.         |
+| `QuotaPolicy`              | `ParkSource`, `Park`, `Service`, `QuotaClassifier`, `Config`, `make`, `makeNoop`, `layerNoop`, `makeDefault`, `layerDefault`, `parseDelay`, `modelErrorOf`, `current`, `defaultWaitMillis`, `maxWaitMillis`, `defaultMaxParks`, `quotaParkedEvent`                                                                                                                                                                                | Classifies a provider refusal as a wait, and names the deadline it bought.              |
+| `AgentAction`              | `Host`, `makeHost`, `layerHost`, `AgentFailure`, `PayloadSchemaOf`, `Repair`, `Options`, `InvalidCorrectionBudget`, `structuredOutputRejectedEvent`, `AgentAction`, `make`                                                                                                                                                                                                                                                        | Declares a model-backed step as an ordinary action and ships its implementation.        |
+| `EventSink`                | `Service`, `EventSink`, `make`, `makeNoop`, `layer`, `layerNoop`                                                                                                                                                                                                                                                                                                                                                                  | Hands a host each agent event while the step runs, instead of only after it decodes.    |
 
 `@smthrs/agent/package.json` is also exported. `internal/*` and nested `*/index` subpaths are not public.
 

@@ -44,7 +44,7 @@
  * @since 0.1.0
  */
 import type * as Capability from "@smthrs/capability/Capability"
-import { Action, type Flow, FlowRuntime } from "@smthrs/flow"
+import { Action, DurableClock, type Flow, FlowRuntime } from "@smthrs/flow"
 import type * as AgentEvent from "@smthrs/harness/AgentEvent"
 import type * as CellCalls from "@smthrs/harness/CellCalls"
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
@@ -52,20 +52,28 @@ import { HarnessError } from "@smthrs/harness/HarnessError"
 import type * as Sandbox from "@smthrs/harness/Sandbox"
 import type * as Steering from "@smthrs/harness/Steering"
 import * as StructuredOutput from "@smthrs/harness/StructuredOutput"
+import { Journal, JournalEvent } from "@smthrs/journal"
+import type * as Model from "@smthrs/model/Model"
 import type * as ModelRequest from "@smthrs/model/ModelRequest"
 import type { FlowsHooks, PluginInput } from "@smthrs/plugin"
 import type { FlowsConfig } from "@smthrs/plugin/Config"
 import { PluginError } from "@smthrs/plugin/PluginError"
 import type * as Registry from "@smthrs/registry/Registry"
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import type * as Crypto from "effect/Crypto"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import type * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { Agent } from "./Agent.ts"
+import * as Budget from "./Budget.ts"
 import { EventSink } from "./EventSink.ts"
+import * as FlowEngineLike from "./FlowEngineLike.ts"
+import * as QuotaPolicy from "./QuotaPolicy.ts"
 import * as Seat from "./Seat.ts"
 import { SeatResolver } from "./SeatResolver.ts"
 
@@ -96,6 +104,37 @@ export interface Host {
   readonly system?: ReadonlyArray<string> | undefined
   readonly capabilityEnvelope?: ReadonlyArray<Capability.CapabilityPattern> | undefined
   readonly maxFrames?: number | undefined
+  /**
+   * How many times a decode miss may be re-prompted when an action declares no
+   * budget of its own.
+   *
+   * This is the composition-wide default the old engine spelled
+   * `maxSchemaRetries`: one number an operator raises for a whole run rather
+   * than editing every declaration. {@link Options.corrections} always wins,
+   * including when it is zero, so a step that has declared a first miss
+   * terminal stays terminal under a generous host. Omitting both leaves the
+   * budget at one.
+   */
+  readonly defaultCorrections?: number | undefined
+  /**
+   * Overrides the bounded transport retry schedule at the model boundary for
+   * every model-backed action in this composition.
+   *
+   * Forwarded to `Agent.Options.modelRetryPolicy`. A host that classifies its
+   * own quota parks (see {@link module:QuotaPolicy}) sets this to keep the
+   * transport ladder from spending a run's wall clock on a refusal a park will
+   * wait out properly.
+   */
+  readonly modelRetryPolicy?: Schedule.Schedule<unknown, Model.ModelFailure> | undefined
+  /**
+   * How many times one ask may park on a quota refusal before the refusal is
+   * reported.
+   *
+   * Defaults to {@link module:QuotaPolicy.defaultMaxParks}. The bound is per
+   * ask: a step that parks, answers, and is then corrected starts its next ask
+   * with a full allowance, because the correction is a different question.
+   */
+  readonly maxQuotaParks?: number | undefined
 }
 
 /**
@@ -111,10 +150,20 @@ export const Host: Context.Service<Host, Host> = Context.Service(
 /**
  * Constructs a host composition value.
  *
+ * A composition default that is not a non-negative safe integer is refused
+ * here rather than at the first decode miss, for the same reason a declaration
+ * is: an unbounded correction budget is a run that re-prompts forever, and the
+ * cheapest place to say so is where the number was written.
+ *
  * @category constructors
  * @since 0.1.0
  */
-export const makeHost = (host: Host): Host => Host.of(host)
+export const makeHost = (host: Host): Host => {
+  if (host.defaultCorrections !== undefined) {
+    checkCorrections(host.defaultCorrections, "AgentAction.Host defaultCorrections")
+  }
+  return Host.of(host)
+}
 
 /**
  * Provides one host composition to every model-backed action in a run.
@@ -129,8 +178,12 @@ export const layerHost = (host: Host): Layer.Layer<Host> => Layer.succeed(Host)(
  *
  * `StructuredOutputFailure` is the one an author handles: the model answered
  * and the answer did not fit the declared schema after its correction budget.
- * `SeatUnresolved` is the host having no model for the declared seat. The other
- * two are the composition failing underneath it.
+ * `SeatUnresolved` is the host having no model for the declared seat.
+ * `BudgetExceeded` is the run having spent what it was approved for, reported
+ * at the step that would have overspent. `Budget.Skipped` is every later model
+ * call in a run whose budget declared `skip-remaining`: a verdict no retry can
+ * change, which is why {@link module:Budget.neverRetrySkipped} exists. The
+ * other two are the composition failing underneath it.
  *
  * @category models
  * @since 0.1.0
@@ -138,6 +191,8 @@ export const layerHost = (host: Host): Layer.Layer<Host> => Layer.succeed(Host)(
 export const AgentFailure = Schema.Union([
   StructuredOutput.StructuredOutputFailure,
   Seat.SeatUnresolved,
+  Budget.BudgetExceeded,
+  Budget.Skipped,
   HarnessError,
   PluginError
 ])
@@ -160,6 +215,30 @@ export type AgentFailure = typeof AgentFailure.Type
  */
 export type PayloadSchemaOf<Payload extends Schema.Struct.Fields | Flow.AnyStructSchema> = Payload extends
   Schema.Struct.Fields ? Schema.Struct<Payload> : Payload
+
+/**
+ * The bounded repair ask made after a correction budget is spent.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Repair<Payload> {
+  /**
+   * The repair prompt, written from the failure and the step's own payload.
+   *
+   * The failure carries the declared schema's digest, the issues the last
+   * candidate raised, and how many corrections were spent, so a prompt can say
+   * what to fix without the author restating the schema.
+   */
+  readonly prompt: (
+    failure: StructuredOutput.StructuredOutputFailure,
+    payload: Payload
+  ) => string
+  /** The seat the repair runs on. Defaults to the step's own seat. */
+  readonly seat?: string | undefined
+  /** Stable system teaching for the repair. Defaults to the step's own. */
+  readonly system?: ReadonlyArray<string> | undefined
+}
 
 /**
  * What an author declares about one model-backed step.
@@ -189,10 +268,27 @@ export interface Options<
   /**
    * How many times a decode miss may be re-prompted before the step fails.
    *
-   * One by default, which matches the harness's existing "correct once, then
-   * report" posture. Zero declares that a first miss is terminal.
+   * Falls back to {@link Host.defaultCorrections}, and then to one, which
+   * matches the harness's existing "correct once, then report" posture. Zero
+   * declares that a first miss is terminal, and beats a generous host default
+   * rather than being read as "unset".
    */
   readonly corrections?: number | undefined
+  /**
+   * One bounded repair ask made after the correction budget is spent.
+   *
+   * A correction re-prompt repeats the task verbatim and adds the validation
+   * issues: it assumes the model can still answer the question it was asked. A
+   * repair does not. It is the author's own prompt, written about the failure,
+   * and it is asked exactly once — the old engine's repair task, which ran
+   * after `maxSchemaRetries` was exhausted rather than as another rung of the
+   * same ladder.
+   *
+   * Its answer is decoded by the same declared schema. A repair that does not
+   * validate either fails the action with its own failure, which is the last
+   * evidence the boundary has.
+   */
+  readonly repair?: Repair<PayloadSchemaOf<Payload>["Type"]> | undefined
   readonly modelParams?: ModelRequest.GenerationParams | undefined
   readonly maxFrames?: number | undefined
 }
@@ -211,6 +307,70 @@ export class InvalidCorrectionBudget extends Schema.TaggedError<InvalidCorrectio
     message: Schema.String
   }
 ) {}
+
+/**
+ * Refuses a correction budget that is not a non-negative safe integer.
+ *
+ * Shared by the declaration and the composition default so both refuse the
+ * same values with the same error.
+ */
+const checkCorrections = (corrections: number, subject: string): void => {
+  if (!Number.isSafeInteger(corrections) || corrections < 0) {
+    throw new InvalidCorrectionBudget({
+      corrections,
+      message: `${subject} must be a non-negative safe integer`
+    })
+  }
+}
+
+/**
+ * The journal event one rejected answer writes.
+ *
+ * A run that answered three times is one run with one final failure, and the
+ * failure says only how the LAST candidate was wrong. The record is the rest of
+ * the story: which attempt was rejected, against which schema, and a digest of
+ * the issues, so two runs that spent their budget the same way can be told
+ * apart without the answers themselves being journaled.
+ *
+ * @category records
+ * @since 0.1.0
+ */
+export const structuredOutputRejectedEvent = "flows.agent.structured-output-rejected.v1"
+
+/** The recorded step that decides one park, so a replay waits the same deadline. */
+const quotaParkActivityName = "agent/quota-park"
+
+/** The journal source every record this module writes is attributed to. */
+const recordSource = JournalEvent.SourceId.make("/agent/action")
+
+/**
+ * Writes one record on the journal's lossy channel, when the composition has a
+ * journal at all.
+ *
+ * Optional on purpose: a model-backed action runs on the reference memory
+ * engine as readily as on the durable one, and a step that demanded a journal
+ * would make the memory composition unbuildable. Lossy is the channel a
+ * client-side trail takes (`AgentSession` writes its own the same way): these
+ * are evidence about a run, not the run's own lifecycle state, and a durable
+ * emit from inside a flow body queues behind the transaction the body is in.
+ */
+const record = (
+  eventType: string,
+  runId: string,
+  payload: Record<string, unknown>
+): Effect.Effect<void> =>
+  Effect.gen(function*() {
+    const journal = yield* Effect.serviceOption(Journal.Journal)
+    if (Option.isNone(journal)) return
+    yield* journal.value.emitLossy(
+      new JournalEvent.Input({
+        runId: JournalEvent.RunId.make(runId),
+        sourceId: recordSource,
+        eventType,
+        payload
+      })
+    ).pipe(Effect.ignore)
+  })
 
 /**
  * A declared model-backed action, plus the layer that implements it.
@@ -258,6 +418,53 @@ const completedOutput = (
 }
 
 /**
+ * Makes a failure survive the action boundary's encoder.
+ *
+ * `HarnessError.cause` is `Schema.Unknown`, and what the cell controller puts
+ * there is a live error INSTANCE — a `ModelError` most of the time. Encoding
+ * the action's failure then fails the union outright, so the caller of a
+ * model-backed step that hit a provider refusal received a schema issue naming
+ * every member of `AgentFailure` instead of the refusal. The provider's code,
+ * its reset fields, and its message were all in the cause and none of them
+ * reached the flow.
+ *
+ * Rendering the cause to plain JSON keeps every field and loses only the
+ * prototype, which no consumer of `cause` may depend on anyway: it is typed
+ * `unknown`. A cause that cannot be rendered at all — a cycle, a function — is
+ * kept as its string form rather than dropped, because "something failed and we
+ * cannot say what" is worse than a rendered approximation.
+ */
+/**
+ * Reports a refused budget as the budget failure, not as a harness one.
+ *
+ * The model boundary can only fail with what its port declares, so a refusal
+ * travels from {@link module:FlowEngineLike} wrapped in a `HarnessError`. The
+ * step is where an author reads it, and at a step "this run has spent its
+ * tokens" is a different fact from "the model call failed" — it names no
+ * provider, and no retry of the call will change it.
+ */
+const budgetFailure = (failure: AgentFailure): AgentFailure =>
+  failure instanceof HarnessError &&
+    (failure.cause instanceof Budget.BudgetExceeded || failure.cause instanceof Budget.Skipped)
+    ? failure.cause
+    : failure
+
+const encodableFailure = (failure: AgentFailure): AgentFailure => {
+  if (!(failure instanceof HarnessError) || failure.cause === undefined) return failure
+  const cause = failure.cause
+  let rendered: unknown
+  try {
+    // A primitive cause round-trips to itself, so it needs no branch of its
+    // own; only a value JSON cannot express at all reaches the arm below.
+    rendered = JSON.parse(JSON.stringify(cause))
+  } catch {
+    /* v8 ignore next -- `JSON.stringify` throws only on a cyclic object or a BigInt, and every cause reaching this boundary is a decoded provider or harness failure whose fields are primitives; the arm exists so a future cause shape cannot take the action down with a TypeError instead of reporting the failure it was carrying */
+    rendered = String(cause)
+  }
+  return new HarnessError({ code: failure.code, message: failure.message, cause: rendered })
+}
+
+/**
  * Declares a model-backed action and ships its implementation.
  *
  * The returned value is used exactly like any other declared action — `.call()`
@@ -293,12 +500,8 @@ export const make = <
   tag: Tag,
   options: Options<Payload, Output>
 ): AgentAction<Tag, PayloadSchemaOf<Payload>, Output> => {
-  const limit = options.corrections ?? 1
-  if (!Number.isSafeInteger(limit) || limit < 0) {
-    throw new InvalidCorrectionBudget({
-      corrections: limit,
-      message: "AgentAction corrections must be a non-negative safe integer"
-    })
+  if (options.corrections !== undefined) {
+    checkCorrections(options.corrections, "AgentAction corrections")
   }
   type PayloadSchema = PayloadSchemaOf<Payload>
   const declared = Action.make(tag, {
@@ -323,17 +526,210 @@ export const make = <
         onSome: (service) => service.emit
       })
       const seat = yield* seats.resolve(options.seat)
+      const quota = yield* QuotaPolicy.current
+      const maxParks = host.maxQuotaParks ?? QuotaPolicy.defaultMaxParks
       const task = options.prompt(payload)
+      // The declaration decides, the composition supplies the default, and one
+      // is the floor. Zero is a declared decision, so `??` and not `||`.
+      const limit = options.corrections ?? host.defaultCorrections ?? 1
       const system = [
         ...(host.system ?? []),
         ...(options.system ?? []),
         StructuredOutput.instructions(options.output)
       ]
 
+      /**
+       * Waits out a quota refusal instead of failing on it.
+       *
+       * The park is a real durable wait — `annotateWaiting` classifies the
+       * suspension as `quota` and `DurableClock.sleep` holds the deadline — so
+       * a supervisor sees a parked run with a wake time rather than a run that
+       * stalled, and a process that dies during the wait resumes into it.
+       * The one-millisecond `inMemoryThreshold` is deliberate: a two-second
+       * window is still a park, and `DurableClock.sleep`'s default threshold
+       * would run any wait of a minute or less as an in-memory sleep, hiding it
+       * from every operator view. One millisecond rather than zero because the
+       * option is read for truthiness, so zero silently means "unset".
+       *
+       * `Action.retry` is what makes the retry a retry: it bumps the attempt
+       * the enclosing dispatches run under, so the re-issued model call is a
+       * NEW attempt of the same step rather than a replay of the attempt the
+       * provider refused. The step's own correction budget is untouched, which
+       * is the old engine's rule that a quota wait is not a failed attempt.
+       *
+       * `waiting` is mutable because the classification is made once, where the
+       * clock is, and read by the retry predicate immediately after it; the
+       * predicate has no clock of its own and must not guess a second instant.
+       */
+      const waitOutQuota = <A, E, R>(
+        session: string,
+        effect: Effect.Effect<A, E, R>
+      ): Effect.Effect<A, E, R | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance | Crypto.Crypto> => {
+        let waiting = false
+        let parked = 0
+        return Action.retry(
+          effect.pipe(
+            Effect.tapError((error) =>
+              Effect.gen(function*() {
+                if (parked >= maxParks) return
+                // The decision is a RECORDED step, not a computation the body
+                // repeats. A park is read off the wall clock, so a replay that
+                // classified afresh would choose a new deadline every time the
+                // body re-ran and the run would park again on every resume.
+                // Recording it also puts the wake time and its source in the
+                // run's own evidence, where an operator reads them.
+                const decision = yield* Action.make({
+                  name: quotaParkActivityName,
+                  success: Schema.NullOr(QuotaPolicy.Park),
+                  tier: "sealed",
+                  execute: Effect.gen(function*() {
+                    const now = yield* Clock.currentTimeMillis
+                    const park = quota.classify(error, now)
+                    if (Option.isNone(park)) return null
+                    yield* record(QuotaPolicy.quotaParkedEvent, instance.executionId, {
+                      action: tag,
+                      session,
+                      wakeAt: park.value.wakeAt,
+                      source: park.value.source
+                    })
+                    return park.value
+                  })
+                })
+                if (decision === null) return
+                parked++
+                waiting = true
+                const now = yield* Clock.currentTimeMillis
+                yield* FlowRuntime.annotateWaiting({ reason: "quota", wakeAt: decision.wakeAt })
+                yield* DurableClock.sleep({
+                  name: `${tag}/quota/${session}#${parked}`,
+                  duration: Duration.millis(Math.max(0, decision.wakeAt - now)),
+                  inMemoryThreshold: 1
+                })
+              })
+            )
+          ),
+          {
+            while: () => {
+              const again = waiting
+              waiting = false
+              return again
+            },
+            times: maxParks
+          }
+        )
+      }
+
+      /**
+       * One whole cell run, under its own session and prompt.
+       *
+       * `correction` is the ladder rung this ask is, and it travels into the
+       * engine port rather than only into the session string: the session is
+       * key material and is hashed, so a reader of the run's sealed steps
+       * could see three model calls and not which of them was the ask. The
+       * port stamps the ordinal onto each rung's own durable record.
+       */
+      const ask = (
+        session: string,
+        prompt: string,
+        teaching: ReadonlyArray<string>,
+        seatId: string,
+        correction: number | undefined
+      ): Effect.Effect<
+        string,
+        AgentFailure,
+        | FlowRuntime.FlowRuntime
+        | FlowRuntime.FlowInstance
+        | Sandbox.Sandbox
+        | Steering.Source
+        | Crypto.Crypto
+      > =>
+        waitOutQuota(
+          session,
+          Effect.gen(function*() {
+            const resolved = seatId === options.seat ? seat : yield* seats.resolve(seatId)
+            const events: Array<AgentEvent.AgentEvent> = []
+            yield* agent.run({
+              session,
+              seat: resolved,
+              prompt,
+              system: teaching,
+              registry: host.registry,
+              flows: host.flows,
+              implementations: host.implementations,
+              plugins: host.plugins,
+              config: host.config,
+              modelParams: options.modelParams,
+              modelRetryPolicy: host.modelRetryPolicy,
+              capabilityEnvelope: host.capabilityEnvelope,
+              limits: host.limits,
+              maxFrames: options.maxFrames ?? host.maxFrames
+            }).pipe(
+              // The buffer is what the decode reads, so it is filled first and
+              // the sink is handed the event afterwards: a sink that fails to
+              // return still leaves the run's own record of the event complete.
+              Stream.runForEach((event) =>
+                Effect.suspend(() => {
+                  events.push(event)
+                  return observe(event)
+                })
+              )
+            )
+            const answer = completedOutput(events)
+            if (answer === undefined) {
+              return yield* new HarnessError({
+                code: "model_failed",
+                message: `The agent action "${tag}" ended without a completed answer`
+              })
+            }
+            return answer
+          }).pipe(Effect.provideService(FlowEngineLike.Correction, correction))
+        )
+
+      /**
+       * The bounded repair, or the exhausted failure when none was declared.
+       *
+       * It asks once. A repair that misses too reports its own failure rather
+       * than the correction ladder's: it is the last thing the boundary saw,
+       * and an operator reading the run needs to know the repair ran and what
+       * it answered, not what the third correction said.
+       */
+      const repair = (
+        failure: StructuredOutput.StructuredOutputFailure
+      ): Effect.Effect<
+        Output["Type"],
+        AgentFailure,
+        | FlowRuntime.FlowRuntime
+        | FlowRuntime.FlowInstance
+        | Sandbox.Sandbox
+        | Steering.Source
+        | Crypto.Crypto
+        | Output["DecodingServices"]
+      > => {
+        const declaredRepair = options.repair
+        if (declaredRepair === undefined) return Effect.fail(failure)
+        return ask(
+          `${instance.executionId}/${tag}#repair`,
+          declaredRepair.prompt(failure, payload),
+          declaredRepair.system === undefined ? system : [
+            ...(host.system ?? []),
+            ...declaredRepair.system,
+            StructuredOutput.instructions(options.output)
+          ],
+          declaredRepair.seat ?? options.seat,
+          // The repair is not a rung of the ladder: it is the one ask that
+          // follows the ladder's exhaustion, and numbering it `limit + 1`
+          // would present it as a correction the policy never allowed.
+          undefined
+        ).pipe(
+          Effect.flatMap((answer) => StructuredOutput.decode(options.output, answer, { corrections: limit, limit }))
+        )
+      }
+
       // One attempt is one whole cell run. The correction re-prompt is a NEW
-      // run under a distinct session, so its sealed step keys differ from the
-      // attempt it is correcting and a replay reproduces both rather than
-      // collapsing them onto one recorded model call.
+      // run under a distinct session carrying the diagnostics, so its sealed
+      // step keys differ from the attempt it is correcting and a replay
+      // reproduces both rather than collapsing them onto one recorded model
+      // call.
       const attempt = (
         correction: number,
         prompt: string
@@ -347,55 +743,31 @@ export const make = <
         | Crypto.Crypto
         | Output["DecodingServices"]
       > =>
-        Effect.gen(function*() {
-          const events: Array<AgentEvent.AgentEvent> = []
-          yield* agent.run({
-            session: `${instance.executionId}/${tag}#${correction}`,
-            seat,
-            prompt,
-            system,
-            registry: host.registry,
-            flows: host.flows,
-            implementations: host.implementations,
-            plugins: host.plugins,
-            config: host.config,
-            modelParams: options.modelParams,
-            capabilityEnvelope: host.capabilityEnvelope,
-            limits: host.limits,
-            maxFrames: options.maxFrames ?? host.maxFrames
-          }).pipe(
-            // The buffer is what the decode reads, so it is filled first and
-            // the sink is handed the event afterwards: a sink that fails to
-            // return still leaves the run's own record of the event complete.
-            Stream.runForEach((event) =>
-              Effect.suspend(() => {
-                events.push(event)
-                return observe(event)
-              })
-            )
-          )
-          const answer = completedOutput(events)
-          if (answer === undefined) {
-            return yield* new HarnessError({
-              code: "model_failed",
-              message: `The agent action "${tag}" ended without a completed answer`
-            })
-          }
-          return yield* StructuredOutput.decode(options.output, answer, {
-            corrections: correction,
-            limit
-          }).pipe(
-            Effect.catchTag("/harness/StructuredOutputFailure", (failure) =>
-              correction >= limit
-                ? Effect.fail(failure)
-                : attempt(
-                  correction + 1,
-                  `${task}\n\n${StructuredOutput.correction(failure)}`
-                ))
-          )
-        })
+        ask(`${instance.executionId}/${tag}#${correction}`, prompt, system, options.seat, correction).pipe(
+          Effect.flatMap((answer) =>
+            StructuredOutput.decode(options.output, answer, { corrections: correction, limit })
+          ),
+          Effect.catchTag("/harness/StructuredOutputFailure", (failure) =>
+            record(structuredOutputRejectedEvent, instance.executionId, {
+              action: tag,
+              attempt: correction,
+              limit,
+              schema: failure.schema,
+              candidate: failure.candidate,
+              issuesDigest: StructuredOutput.issuesDigest(failure)
+            }).pipe(
+              Effect.andThen(
+                correction >= limit
+                  ? repair(failure)
+                  : attempt(correction + 1, `${task}\n\n${StructuredOutput.correction(failure)}`)
+              )
+            ))
+        )
 
-      return yield* attempt(0, task)
+      return yield* attempt(0, task).pipe(
+        Effect.mapError(budgetFailure),
+        Effect.mapError(encodableFailure)
+      )
     })
 
   return {

@@ -72,7 +72,9 @@ import * as Route from "@smthrs/model/Route"
 import * as PersistedPlan from "@smthrs/plan/Plan"
 import * as StepKey from "@smthrs/plan/StepKey"
 import * as Checkpoints from "@smthrs/std/Checkpoints"
-import { Context, Crypto, Duration, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
+import { Clock, Context, Crypto, Duration, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
+import * as Budget from "./Budget.ts"
+import * as QuotaPolicy from "./QuotaPolicy.ts"
 import * as WorkspaceObservation from "./WorkspaceObservation.ts"
 import type * as WorkspaceSandbox from "./WorkspaceSandbox.ts"
 
@@ -464,9 +466,48 @@ export const RecordedModelStep = Schema.Union([
   Schema.Array(ModelEvent.ModelEvent),
   Schema.Struct({
     events: Schema.Array(ModelEvent.ModelEvent),
-    error: Schema.optional(ModelError.ModelError)
+    error: Schema.optional(ModelError.ModelError),
+    /**
+     * Which structured-output correction this call belonged to, when the
+     * caller was running a correction ladder.
+     *
+     * The ordinal is durable twice over, and only one of the two is readable.
+     * Each correction is its own session — `${executionId}/${tag}#${n}` — so
+     * the ladder's rungs already have distinct sealed step keys and a replay
+     * reproduces all of them; but a session is KEY MATERIAL, hashed into a
+     * digest, and nothing downstream can read an ordinal back out of it. An
+     * operator or a projection reading a run's steps could see three sealed
+     * model calls and not which was the ask and which were its corrections.
+     * The field is that answer, on the record itself.
+     *
+     * Optional because it is absent from two honest cases: a model call made
+     * outside a correction ladder, and a record written before this field
+     * existed, which a parked run may still resume onto.
+     */
+    correction: Schema.optional(Schema.Int)
   })
 ])
+
+/**
+ * The correction ordinal the model calls made under it belong to.
+ *
+ * {@link module:AgentAction} sets it around each rung of its structured-output
+ * correction ladder, and this port stamps it onto the rung's sealed record. It
+ * is deliberately NOT key material: the session already distinguishes the
+ * rungs, and folding the ordinal into the key as well would change nothing
+ * about which calls are distinct while making every recorded step un-replayable
+ * by a caller that numbers its ladder differently.
+ *
+ * Absent by default, which is the honest reading of a model call made outside
+ * any ladder.
+ *
+ * @category context
+ * @since 0.1.0
+ */
+export const Correction = Context.Reference<number | undefined>(
+  "@smthrs/agent/FlowEngineLike/Correction",
+  { defaultValue: () => undefined }
+)
 
 /**
  * Reads either {@link RecordedModelStep} branch as the object form.
@@ -476,8 +517,11 @@ export const RecordedModelStep = Schema.Union([
  */
 export const normalizeRecordedModelStep = (
   recorded: typeof RecordedModelStep.Type
-): { readonly events: ReadonlyArray<ModelEvent.ModelEvent>; readonly error?: ModelError.ModelError | undefined } =>
-  "events" in recorded ? recorded : { events: recorded, error: undefined }
+): {
+  readonly events: ReadonlyArray<ModelEvent.ModelEvent>
+  readonly error?: ModelError.ModelError | undefined
+  readonly correction?: number | undefined
+} => "events" in recorded ? recorded : { events: recorded, error: undefined, correction: undefined }
 
 /**
  * Every failure `Model.stream` may report, as one encodable schema. The engine
@@ -731,7 +775,8 @@ export const recordModelStep = (
   model: Model.Model,
   request: ModelRequest.ModelRequest,
   policy: Schedule.Schedule<unknown, Model.ModelFailure>,
-  budgetMillis?: number | undefined
+  budgetMillis?: number | undefined,
+  correction?: number | undefined
 ): Effect.Effect<typeof RecordedModelStep.Type, Exclude<Model.ModelFailure, ModelError.ModelError>> => {
   const retries: Array<ModelEvent.ModelEvent> = []
   let attempt = 0
@@ -816,13 +861,47 @@ export const recordModelStep = (
           message: "The model response stream ended without a settlement"
         })
       ))
+  // Spread rather than always present: a call outside a correction ladder has
+  // no ordinal, and writing one anyway would make every ordinary model step
+  // claim to be correction zero of a ladder that never ran.
+  const ladder = correction === undefined ? {} : { correction }
   return attemptOnce.pipe(
     Effect.retry(schedule),
-    Effect.map((events) => ({ events: [...retries, ...events] })),
+    Effect.map((events) => ({ ...ladder, events: [...retries, ...events] })),
     Effect.catchIf(
       (error): error is ModelError.ModelError => error instanceof ModelError.ModelError,
-      (error) => Effect.succeed({ events: retries, error })
+      (error) => Effect.succeed({ ...ladder, events: retries, error })
     )
+  )
+}
+
+/**
+ * Refuses to record a refusal the composition will park on.
+ *
+ * {@link recordModelStep} folds a `ModelError` into the step's recorded VALUE
+ * on purpose: a provider's refusal is evidence, and a replay that re-issued it
+ * would ask the provider again for an answer it already gave. A quota refusal
+ * is the one class where that is wrong. It says nothing about the request — the
+ * same bytes succeed a minute later — so recording it under a content key would
+ * pin "this prompt is refused" into the shared cache and make the wake
+ * pointless: the retried call would replay the refusal forever.
+ *
+ * Failing the sealed action instead records an attempt, not a result. The park
+ * retries under a new attempt number, which re-dispatches, and no cache row
+ * outlives the window.
+ *
+ * With the no-op classifier — the default — nothing is classified and this is
+ * the identity.
+ */
+const unlessParked = (quota: QuotaPolicy.Service) =>
+(
+  recorded: typeof RecordedModelStep.Type
+): Effect.Effect<typeof RecordedModelStep.Type, ModelError.ModelError> => {
+  const error = normalizeRecordedModelStep(recorded).error
+  if (error === undefined) return Effect.succeed(recorded)
+  return Effect.flatMap(
+    Clock.currentTimeMillis,
+    (now) => Option.isSome(quota.classify(error, now)) ? Effect.fail(error) : Effect.succeed(recorded)
   )
 }
 
@@ -843,6 +922,19 @@ const boundaryActivityName = (name: string): string => `harness/boundary/${name}
 
 const engineFailed = (message: string, cause: unknown): HarnessError.HarnessError =>
   new HarnessError.HarnessError({ code: "engine_failed", message, cause })
+
+/**
+ * Reports a budget that could not account this run.
+ *
+ * It is an engine failure rather than a model one because nothing about the
+ * provider or the prompt is wrong: the seam that says what the run may spend
+ * cannot answer, and a run that kept calling anyway would be spending an
+ * envelope nobody is holding. The step fails and can be re-dispatched — the
+ * sealed model step replays from its recorded answer, so a retry pays the
+ * ledger again, not the provider.
+ */
+const accountingFailed = (cause: Budget.AccountingUnavailable): HarnessError.HarnessError =>
+  engineFailed(cause.message, cause)
 
 /**
  * Supplies the hashing service `@smthrs/plan`'s step-key compiler runs under.
@@ -1125,6 +1217,28 @@ export const make = (
       Stream.unwrap(
         Effect.gen(function*() {
           const key = yield* seal(step, options.route)
+          // The composition's spending ceiling, applied where every model call
+          // in the run passes: a step that assembles its own loop cannot evade
+          // a budget declared for the whole run. `warn` journals inside the
+          // budget itself and falls through here.
+          const verdict = yield* budget.check.pipe(Effect.mapError(accountingFailed))
+          if (verdict._tag === "refuse") {
+            return yield* Effect.fail(
+              new HarnessError.HarnessError({
+                code: "model_failed",
+                message: verdict.failure.message,
+                // The verdict decides which failure this is: the step that
+                // broke the budget reports `BudgetExceeded`, and every call
+                // after a `skip-remaining` latch reports `Budget.Skipped`.
+                cause: verdict.failure
+              })
+            )
+          }
+          // Read OUTSIDE the activity, from the caller's context: the ladder
+          // rung is the caller's fact about this call, and it has to be on the
+          // record the activity writes rather than discovered by whatever
+          // re-executes it.
+          const correction = yield* Correction
           const recorded = yield* Action.make({
             name: sealStepActivityName,
             success: RecordedModelStep,
@@ -1137,10 +1251,18 @@ export const make = (
               options.modelRetryPolicy ?? defaultModelRetryPolicy,
               // The controller's armed budget, carried on the step, so the
               // number a run journals as armed is the number it ran under.
-              step.modelCallMs
-            )
+              step.modelCallMs,
+              correction
+            ).pipe(Effect.flatMap(unlessParked(quota)))
           })
           const normalized = normalizeRecordedModelStep(recorded)
+          // Accounted after the step settles. The accumulator is keyed by the
+          // step key, so a step whose body really did re-run counts once, and
+          // a resumed run folds back what it recorded before the restart from
+          // the budget's own durable usage records.
+          yield* budget.record(key, ModelEvent.ModelEvent.settledMessage(normalized.events).usage).pipe(
+            Effect.mapError(accountingFailed)
+          )
           const replay = Stream.fromIterable(normalized.events)
           return normalized.error === undefined
             ? replay
@@ -1234,6 +1356,8 @@ export const make = (
     // not, and the controller reads the absence as "unobserved" and says so in
     // the journal rather than presenting declared writes as measurements.
     const observer = yield* Effect.serviceOption(WorkspaceObservation.Observer)
+    const quota = yield* QuotaPolicy.current
+    const budget = yield* Budget.current
     const observe = Option.match(observer, {
       onNone: (): Effect.Effect<Option.Option<EngineLike.Observation>, HarnessError.HarnessError> =>
         Effect.succeed(Option.none()),

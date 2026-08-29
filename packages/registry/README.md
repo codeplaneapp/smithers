@@ -10,14 +10,15 @@ npm install @smthrs/registry
 
 The root entry point exports these namespaces; each is also importable from `@smthrs/registry/<Module>`.
 
-| Module          | Public exports                                                                                                                                                                                                                                                                                                                                         | Description                                                                                |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| `Descriptor`    | `EffectTier`, `Placement`, `EffectDeclaration`, `SchemaRefMarkdownArgs`, `SchemaRefMarkdownOutput`, `SchemaRefModule`, `SchemaRefNone`, `SchemaRef`, `BodyRefMarkdown`, `BodyRefModule`, `BodyRef`, `FlowBodyPrompt`, `FlowBodyModule`, `FlowBody`, `Provenance`, `Source`, `DiscoveryWarningCode`, `DiscoveryWarning`, `FlowDescriptor`, `SourceScan` | Defines the serializable descriptor, body, schema, source, provenance, and warning models. |
-| `Disclosure`    | `toEntries`, `toXml`                                                                                                                                                                                                                                                                                                                                   | Projects descriptors to compact entries or Agent Skills XML.                               |
-| `Discovery`     | `Discovery`, `make`, `layer`, `makeNoop`, `layerNoop`                                                                                                                                                                                                                                                                                                  | Defines and implements metadata-only source scanning over FileSystem and Path.             |
-| `MarkdownFlow`  | `Input`, `Output`, `FromMarkdownOptions`, `FromMarkdownResult`, `fromMarkdown`, `loadBody`, `renderPrompt`, `toCoreFrontmatter`                                                                                                                                                                                                                        | Parses Markdown metadata, loads prompt bodies lazily, and renders invocation prompts.      |
-| `Registry`      | `Config`, `Registry`, `make`, `layer`, `layerFromDescriptors`, `makeNoop`, `layerNoop`                                                                                                                                                                                                                                                                 | Provides ordered discovery, lookup, visibility, lazy body loading, refresh, and warnings.  |
-| `RegistryError` | `DiscoveryErrorCode`, `DiscoveryError`, `RegistryErrorCode`, `RegistryError`, `RegistryFailure`, `discoveryError`, `registryError`                                                                                                                                                                                                                     | Defines typed discovery and registry failures and constructors.                            |
+| Module          | Public exports                                                                                                                                                                                                                                                                                                                                                    | Description                                                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `Descriptor`    | `EffectTier`, `Placement`, `EffectDeclaration`, `SchemaRefMarkdownArgs`, `SchemaRefMarkdownOutput`, `SchemaRefModule`, `SchemaRefNone`, `SchemaRef`, `BodyRefMarkdown`, `BodyRefModule`, `BodyRef`, `FlowBodyPrompt`, `FlowBodyModule`, `FlowBody`, `PackRef`, `Provenance`, `Source`, `DiscoveryWarningCode`, `DiscoveryWarning`, `FlowDescriptor`, `SourceScan` | Defines the serializable descriptor, body, schema, source, provenance, and warning models. |
+| `Disclosure`    | `toEntries`, `toXml`                                                                                                                                                                                                                                                                                                                                              | Projects descriptors to compact entries or Agent Skills XML.                               |
+| `Discovery`     | `Discovery`, `make`, `layer`, `makeNoop`, `layerNoop`                                                                                                                                                                                                                                                                                                             | Defines and implements metadata-only source scanning over FileSystem and Path.             |
+| `MarkdownFlow`  | `Input`, `Output`, `FromMarkdownOptions`, `FromMarkdownResult`, `fromMarkdown`, `loadBody`, `renderPrompt`, `toCoreFrontmatter`                                                                                                                                                                                                                                   | Parses Markdown metadata, loads prompt bodies lazily, and renders invocation prompts.      |
+| `Pack`          | `Origin`, `Requires`, `Manifest`, `Installed`, `File`, `Scan`, `read`, `digest`, `compatible`, `sources`, `attribute`, `merge`, `checkCompatible`                                                                                                                                                                                                                 | Reads pack manifests, addresses their contents, and merges packs by origin.                |
+| `Registry`      | `Config`, `Registry`, `make`, `layer`, `layerFromDescriptors`, `layerFromPacks`, `makeNoop`, `layerNoop`                                                                                                                                                                                                                                                          | Provides ordered discovery, lookup, visibility, lazy body loading, refresh, and warnings.  |
+| `RegistryError` | `DiscoveryErrorCode`, `DiscoveryError`, `RegistryErrorCode`, `RegistryError`, `RegistryFailure`, `discoveryError`, `registryError`                                                                                                                                                                                                                                | Defines typed discovery and registry failures and constructors.                            |
 
 ```ts
 import { Registry } from "@smthrs/registry"
@@ -30,3 +31,44 @@ const program = Effect.gen(function*() {
 ```
 
 Use `Discovery.layer` with `Registry.layer(config)` for filesystem discovery, or `Registry.layerFromDescriptors(entries)` for an in-memory snapshot with lazy body access. `@smthrs/registry/package.json` is also exported; `internal/*` and nested `*/index` subpaths are blocked.
+
+## Workflow packs
+
+A pack is a directory with a `pack.json` manifest, the shareable unit a project installs rather than copies:
+
+```json
+{
+  "name": "review-pack",
+  "version": "1.2.0",
+  "flows": ["flows"],
+  "skills": ["skills"],
+  "requires": { "smithers": ">=1.0.0" }
+}
+```
+
+`Pack.read(fs, path, dir)` decodes one manifest and fails `RegistryError { code: "invalid_pack" }` when it is missing, unparseable, or incomplete. `Pack.digest(manifest, files)` is the content address a lock file records: it covers the manifest and every measured file by its own hash under its pack-relative path, so re-reading the same bytes in a different order produces the same digest and editing a flow body changes it.
+
+`Registry.layerFromPacks(packs, { runtimeVersion })` scans a set of packs into one registry:
+
+```ts
+import { Discovery, Pack, Registry } from "@smthrs/registry"
+import { Effect, Layer } from "effect"
+
+const registry = Registry.layerFromPacks(
+  [
+    { manifest: projectManifest, dir: "/repo/.flows/review-pack", origin: "local" },
+    { manifest: vendoredManifest, dir: "/repo/node_modules/review-pack", origin: "installed" }
+  ],
+  { runtimeVersion: "1.0.0" }
+).pipe(Layer.provide(Discovery.layer))
+```
+
+Three rules govern the merge:
+
+- **Precedence is the origin, not the list order.** Every `local` pack outranks every `installed` one, so a project pack shadows a vendored flow of the same name wherever the host listed it.
+- **A shadowed flow is reported, not dropped silently.** The loser becomes a `DiscoveryWarning { code: "shadowed" }` naming both packs and versions, readable through `registry.warnings()`.
+- **Compatibility is checked before anything is scanned.** A pack whose `requires.smithers` range this runtime does not satisfy fails `RegistryError { code: "incompatible_pack" }` at load rather than at the first call into one of its flows. The range grammar is `*`, an exact version, and the `>=`, `>`, `<=`, `<`, `^`, `~` comparators, space-separated as a conjunction. `^` and `~` read the way npm reads them: `^` allows everything up to the next bump of the left-most non-zero field, so `^1.2.0` accepts `1.9.0` while `^0.2.3` refuses `0.9.0` and `^0.0.3` accepts only `0.0.3`. A range the parser cannot read is refused rather than assumed compatible.
+
+Every descriptor a pack contributes carries `provenance.pack` with the pack name, version, and origin, so a catalog entry says where it came from.
+
+The `pack add | remove | list | update | eject` CLI verbs are not part of this package. This is the runtime contract underneath them: it reads manifests from directories a caller names and holds no filesystem policy of its own.

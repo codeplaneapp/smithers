@@ -110,6 +110,17 @@ export type ModelEventLike =
   }
 
 /**
+ * The tag every `/model/ModelError` carries.
+ *
+ * Copied as a literal for the same reason the shape below is: this package
+ * does not depend on `@smthrs/model`.
+ *
+ * @since 0.0.0
+ * @category errors
+ */
+export const modelErrorTag = "flows/model/ModelError"
+
+/**
  * The public error shape of `/model/ModelError`, copied structurally
  * without importing the model package.
  *
@@ -123,6 +134,16 @@ export type ModelEventLike =
  * @category errors
  */
 export interface ModelErrorLike {
+  /**
+   * The tag `/model/ModelError` carries on the wire.
+   *
+   * Optional because a recorded fixture stores the fields and not the tag, and
+   * required in everything a replay HANDS BACK: a consumer that classifies a
+   * provider refusal — the quota park is the one in tree — matches on the tag,
+   * so a replayed refusal without one is not the failure that was recorded.
+   * {@link module:RecordedModel} stamps it.
+   */
+  readonly _tag?: typeof modelErrorTag | undefined
   readonly code:
     | "invalid_request"
     | "context_overflow"

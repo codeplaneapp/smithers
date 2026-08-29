@@ -112,3 +112,15 @@ export * as AgentAction from "./AgentAction.ts"
  * @since 0.1.0
  */
 export * as EventSink from "./EventSink.ts"
+
+/**
+ * @category services
+ * @since 0.1.0
+ */
+export * as QuotaPolicy from "./QuotaPolicy.ts"
+
+/**
+ * @category services
+ * @since 0.1.0
+ */
+export * as Budget from "./Budget.ts"

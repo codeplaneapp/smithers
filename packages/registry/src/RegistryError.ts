@@ -52,6 +52,8 @@ export const RegistryErrorCode = Schema.Literals([
   "system_collision",
   "body_unavailable",
   "not_prompt_flow",
+  "invalid_pack",
+  "incompatible_pack",
   "unknown"
 ])
 

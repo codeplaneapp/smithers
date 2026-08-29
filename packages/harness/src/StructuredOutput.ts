@@ -132,6 +132,21 @@ ${JSON.stringify(jsonSchema(schema), null, 2)}
 \`\`\``
 
 /**
+ * The digest of one failure's rendered validation issues.
+ *
+ * Two rejections that raised the same issues share this digest, which is what a
+ * record carries instead of the issues themselves: a journal that repeated the
+ * validator's prose for every correction would grow with the model's verbosity,
+ * and what an operator actually asks is whether the second answer was wrong the
+ * same way as the first.
+ *
+ * @category identity
+ * @since 0.1.0
+ */
+export const issuesDigest = (failure: StructuredOutputFailure): string =>
+  Digest.digest(Digest.canonical([...failure.issues]))
+
+/**
  * The correction teaching appended when a candidate failed to decode.
  *
  * It restates the schema and the bounded diagnostics and nothing else: a

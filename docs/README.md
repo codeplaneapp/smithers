@@ -58,6 +58,8 @@ Private-alpha operators should also read the [alpha notes](alpha-notes.md) for c
 - [`@smthrs/run-store`](reference/run-store.md)
 - [`@smthrs/step-cache`](reference/step-cache.md)
 - [`@smthrs/artifacts`](reference/artifacts.md)
+- [`@smthrs/registry`](reference/registry.md)
+- [`@smthrs/agent`](reference/agent.md)
 - [`@smthrs/capability`](reference/capability.md)
 - [`@smthrs/kernel`](reference/kernel.md)
 - [`@smthrs/canonical`](reference/canonical.md)

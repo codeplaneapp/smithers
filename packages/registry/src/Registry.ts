@@ -12,6 +12,7 @@ import * as FileSystem from "effect/FileSystem"
 import { DiscoveryWarning, type FlowBody, FlowBodyModule, type FlowDescriptor, type Source } from "./Descriptor.ts"
 import { Discovery } from "./Discovery.ts"
 import * as MarkdownFlow from "./MarkdownFlow.ts"
+import * as Pack from "./Pack.ts"
 import type { DiscoveryError, RegistryError } from "./RegistryError.ts"
 import { registryError } from "./RegistryError.ts"
 
@@ -281,14 +282,66 @@ export const layer = (
  * @since 0.1.0
  */
 export const layerFromDescriptors = (
-  entries: ReadonlyArray<FlowDescriptor>
+  entries: ReadonlyArray<FlowDescriptor>,
+  warnings: ReadonlyArray<DiscoveryWarning> = []
 ): Layer.Layer<Registry, never, FileSystem.FileSystem | Path.Path> =>
   Layer.effect(
     Registry,
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const state = yield* Ref.make(snapshotFrom(entries, []))
+      const state = yield* Ref.make(snapshotFrom(entries, warnings))
+      return fromRef(state, fs, path, Effect.void)
+    })
+  )
+
+/**
+ * Scans a set of installed packs and constructs a registry over their merged
+ * descriptors.
+ *
+ * This is the multi-source half of the registry. `layer` merges ordered
+ * sources first-found, which is the right rule when the caller controls the
+ * order; a pack set does not work that way. Precedence here is the pack's
+ * `origin` — every `local` pack outranks every `installed` one — so a project
+ * pack shadows a vendored flow of the same name whatever order the host
+ * happened to list them in, and the shadowed definition is reported as a
+ * `shadowed` warning naming both packs.
+ *
+ * Every pack's `requires.smithers` is checked before anything is scanned, so a
+ * pack written against a newer runtime fails `incompatible_pack` at load
+ * rather than at the first call into one of its flows.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerFromPacks = (
+  packs: ReadonlyArray<Pack.Installed>,
+  options: { readonly runtimeVersion: string }
+): Layer.Layer<
+  Registry,
+  RegistryError | DiscoveryError,
+  Discovery | FileSystem.FileSystem | Path.Path
+> =>
+  Layer.effect(
+    Registry,
+    Effect.gen(function*() {
+      const discovery = yield* Discovery
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const scans: Array<Pack.Scan> = []
+      for (const pack of packs) {
+        yield* Pack.checkCompatible(pack, options.runtimeVersion)
+        const entries: Array<FlowDescriptor> = []
+        const warnings: Array<DiscoveryWarning> = []
+        for (const source of Pack.sources(pack, path)) {
+          const scan = yield* discovery.scan(source)
+          entries.push(...scan.entries)
+          warnings.push(...scan.warnings)
+        }
+        scans.push({ pack, entries, warnings })
+      }
+      const merged = Pack.merge(scans)
+      const state = yield* Ref.make(snapshotFrom(merged.entries, merged.warnings))
       return fromRef(state, fs, path, Effect.void)
     })
   )
