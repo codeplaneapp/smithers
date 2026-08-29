@@ -11,6 +11,7 @@
  *
  * @since 0.1.0
  */
+import type * as Capability from "@smthrs/capability/Capability"
 import * as Effects from "@smthrs/core/Effects"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import { Effect, Schema } from "effect"
@@ -43,12 +44,47 @@ const Result = Schema.Struct({
 })
 
 /**
- * The conservative effect envelope every MCP tool flow declares.
+ * The authority every MCP tool flow declares.
  *
  * An MCP tool is opaque code this adapter does not control, the same
  * situation `@smthrs/registry/MarkdownFlow` calls "unprojectable authority"
- * for a skill with no declared `capabilities`: the honest declaration is the
- * wildcard, not a guess.
+ * for a skill with no declared `capabilities`: the honest declaration is
+ * everything, not a guess.
+ *
+ * It is spelled out one action at a time because the cell boundary reads a
+ * declared capability with `Capability.parse`, which takes an exact
+ * `namespace:operation:resource` and rejects anything else. The bare `"*"`
+ * this module used to declare parsed as nothing, and an unparseable
+ * declaration is treated as unauthorized, so every MCP tool was refused with
+ * `capability_refused` before it ran even under an unrestricted envelope. The
+ * strings below say the same thing and say it in the vocabulary the boundary
+ * reads, so a run whose envelope covers everything reaches the tool and a run
+ * with a narrower envelope still does not.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const capabilities: ReadonlyArray<string> = (
+  [
+    "fs:read",
+    "fs:write",
+    "net:get",
+    "net:post",
+    "model:call",
+    "proc:spawn",
+    "jj:status",
+    "jj:diff",
+    "jj:snapshot",
+    "jj:restore",
+    "jj:workspace-add",
+    "jj:workspace-forget",
+    "jj:root",
+    "jj:revert"
+  ] satisfies ReadonlyArray<Capability.Action>
+).map((action) => `${action}:**`)
+
+/**
+ * The conservative effect envelope every MCP tool flow declares.
  *
  * @category effects
  * @since 0.1.0
@@ -67,7 +103,7 @@ const toolBinding = (client: McpClient.McpClient, tool: McpClient.ToolDescriptio
     flow: {
       name: `mcp/${client.server}/${tool.name}`,
       description: tool.description ?? `MCP tool "${tool.name}" on server "${client.server}"`,
-      capabilities: ["*"],
+      capabilities,
       effects,
       input: Args,
       output: Result
