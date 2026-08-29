@@ -8,11 +8,19 @@
  * join-or-claim — one takes the claim and the other either joins the result or
  * loses the fence — and the invariant underneath it is that the step runs once
  * more, not twice.
+ *
+ * Both halves are here, because each can hold while the other breaks. The
+ * first test is the engine's: two hosts drive the same parked run and the step
+ * dispatches once, which is idempotence. The second is the control plane's:
+ * two control planes ask to resume the same suspended run at the same instant
+ * and exactly one is admitted, which is the fence. An engine whose attempt
+ * rows deduplicate perfectly would pass the first test with no fence at all.
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
+import { raceForClaim, suspendedRun } from "../harness/claimRace.ts"
 import { journalEventTypes, waitingRow } from "../harness/durableState.ts"
 import { killProcess } from "../harness/killProcess.ts"
 import { spawnWaitChild } from "../harness/waitChild.ts"
@@ -66,5 +74,24 @@ describe("case06 concurrent resume against a sweep", () => {
 
     const events = await journalEventTypes(filename, executionId)
     expect(events.filter((type) => type === "flows.engine.deferred-completed")).toHaveLength(1)
+  }, 180_000)
+
+  it("admits one control plane to the claim and refuses the other with ClaimLost", async () => {
+    const filename = join(directory, "fence.sqlite")
+    const runId = await suspendedRun(filename)
+
+    // Two planes, two identities, one row. The barrier releases them together,
+    // so the winner is decided by the compare-and-swap and not by which
+    // process finished booting first.
+    const attempts = await raceForClaim(filename, runId, join(directory, "fence.go"), ["sweep", "operator"])
+
+    const won = attempts.filter((attempt) => attempt.outcome.startsWith("won:"))
+    const lost = attempts.filter((attempt) => attempt.outcome.startsWith("lost:"))
+    expect(won).toHaveLength(1)
+    expect(lost).toHaveLength(1)
+    // The refusal is the typed fence error, not a transport failure or a
+    // generic defect: a loser that crashed would also produce one winner.
+    expect(lost[0]?.outcome).toBe("lost:/control/ClaimLost")
+    expect(won[0]?.outcome).toBe("won:Accepted")
   }, 180_000)
 })
