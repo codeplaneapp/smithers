@@ -42,34 +42,38 @@ interface Tracker {
 }
 
 /**
- * A journal whose per-run streams report when they are attached and released,
- * so a subscription that outlives its consumer is observable.
+ * A journal whose per-run reads report when they are open, so both shapes of
+ * per-subscription state are observable: the run streams a run-scoped
+ * subscription attaches, and the paged reads a workspace subscription's tail
+ * keeps open. Both are what the fan-out bound bounds. The tracked read yields
+ * once before it answers so concurrent reads of one round genuinely overlap;
+ * a read that resolved synchronously would report a peak of one however wide
+ * the fan-out was.
  */
-const trackedJournal = (byRun: Record<string, ReadonlyArray<JournalEvent.Entry>>, tracker: Tracker) =>
-  Journal.layerNoop({
-    entries: ({ after, limit, runId: id }: any) => {
-      const all = (byRun[id] ?? []).filter((value) => after === undefined || value.seq > after)
-      const page = all.slice(0, limit)
-      return Effect.succeed({ entries: page, hasMore: page.length < all.length })
-    },
+const trackedJournal = (byRun: Record<string, ReadonlyArray<JournalEvent.Entry>>, tracker: Tracker) => {
+  const opened = Effect.sync(() => {
+    tracker.open += 1
+    tracker.opened += 1
+    tracker.peak = Math.max(tracker.peak, tracker.open)
+  })
+  const closed = Effect.sync(() => {
+    tracker.open -= 1
+  })
+  return Journal.layerNoop({
+    entries: ({ after, limit, runId: id }: any) =>
+      Effect.gen(function*() {
+        yield* opened
+        yield* Effect.yieldNow
+        const all = (byRun[id] ?? []).filter((value) => after === undefined || value.seq > after)
+        const page = all.slice(0, limit)
+        return { entries: page, hasMore: page.length < all.length }
+      }).pipe(Effect.ensuring(closed)),
     stream: ({ afterSequence, runId: id }: any) =>
       Stream.fromIterable(
         (byRun[id] ?? []).filter((value) => afterSequence === undefined || value.seq > afterSequence)
-      ).pipe(
-        Stream.onStart(
-          Effect.sync(() => {
-            tracker.open += 1
-            tracker.opened += 1
-            tracker.peak = Math.max(tracker.peak, tracker.open)
-          })
-        ),
-        Stream.ensuring(
-          Effect.sync(() => {
-            tracker.open -= 1
-          })
-        )
-      )
+      ).pipe(Stream.onStart(opened), Stream.ensuring(closed))
   } as any)
+}
 
 const workspace = (runs: number, perRun: number) => {
   const byRun: Record<string, ReadonlyArray<JournalEvent.Entry>> = {}

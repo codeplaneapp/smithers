@@ -163,8 +163,14 @@ describe("SyncServer.subscribe over a workspace scope", () => {
     Effect.gen(function*() {
       const frames = yield* (
         Effect.gen(function*() {
+          // A workspace subscription serves its runs through the paged
+          // `entries` read, not through a per-run follow stream.
           const server = yield* makeServer([busy, empty], {
-            stream: ({ runId: id }) => Stream.fromIterable([entry(id, 0), entry(id, 1)])
+            entries: ({ after, runId: id }) =>
+              Effect.succeed({
+                entries: [entry(id, 0), entry(id, 1)].filter((value) => after === undefined || value.seq > after),
+                hasMore: false
+              })
           })
           return yield* Stream.runCollect(
             server.subscribe({ scope: workspace, cursors: [], credit: 3 })
