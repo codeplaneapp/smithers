@@ -170,10 +170,12 @@ who remembers the earlier list does not go looking for them above.
 
 ## Coverage
 
-Every exclusion id in Table B of the Phase 5 triage appears exactly once above,
-except the two whose feature shipped (X-05 and X-15, listed as residuals B-R1
-and B-R2) and HARDEN-1, which is a code-hardening sweep rather than a released
-behavior.
+Every exclusion id in Table B of the Phase 5 triage appears exactly once above.
+Two Table B rows carry two ids each because the feature shipped and only a
+residual remains: `X-05 / B-R1` is one residual and `X-15 / B-R2` is one
+residual (SPEC AMENDMENT 5), and each is listed once, under the residual id.
+HARDEN-1 is a code-hardening sweep rather than a released behavior and has no
+section.
 
 | Exclusion | Section |
 | --- | --- |
