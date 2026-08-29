@@ -89,3 +89,16 @@ export const Effects = Context.Service<EffectsModel.Declaration>("flows/core/Ann
  * @slop
  */
 export const Lane = Context.Service<LaneOptions>("flows/core/Annotations/Lane")
+
+/**
+ * Annotation key for a node's scheduling priority.
+ *
+ * The value is a signed integer that orders ready work: a scheduler runs a
+ * higher number before a lower one. Priority is a scheduling hint, never part
+ * of step identity, so raising it never invalidates a cached step.
+ *
+ * @category annotations
+ * @since 0.1.0
+ * @slop
+ */
+export const Priority = Context.Service<number>("flows/core/Annotations/Priority")

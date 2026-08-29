@@ -28,6 +28,74 @@ const result = yield* Action.retry(
 
 The engine claims an attempt row before execution. A previously completed attempt is decoded and replayed. A conflicting active attempt is rejected or suspended according to persisted state; it is not silently run twice.
 
+## Pattern retry
+
+`@smthrs/patterns` `WithRetry` decorates a flow declaration with the retry policy and supplies the Effect that performs it. The option names match `RetryPolicy`, so a pattern policy and an engine policy translate one to one.
+
+```ts
+import { WithRetry } from "@smthrs/patterns"
+
+const resilient = WithRetry.withRetry(Publish, {
+  attempts: 4,
+  backoff: { initialMs: 100, factor: 2, maxMs: 250 },
+  nonRetryable: ["examples/Fatal"]
+})
+```
+
+The delay before attempt `n + 1` is `min(initialMs * factor^(n - 1), maxMs)`, so the ladder above waits 100 ms, 200 ms, then 250 ms. There is no jitter: a declaration built twice describes the same waits. The decorator refuses a backoff it cannot use: `initialMs` must be positive and finite, `factor` at least 1, and `maxMs` at least `initialMs`. A failure whose `_tag` appears in `nonRetryable` ends the sequence on its first occurrence, whatever the attempt budget allows.
+
+`attempts`, `backoff`, and `nonRetryable` all enter the decorated flow's name and key material, so changing a policy produces a different declaration rather than reusing the old one's cached steps.
+
+`WithRetry.retryEffect` performs the retry at the Effect boundary. Fiber interruption is not a typed failure, so cancelling a run never consumes an attempt.
+
+## Error boundaries
+
+`@smthrs/patterns` `TryCatchFinally` composes the three arms an error boundary needs: a protected body, a recovery arm filtered by error schema, and a finalizer.
+
+```ts
+import { TryCatchFinally } from "@smthrs/patterns"
+
+const guarded = TryCatchFinally.run(request, {
+  try: (request) => publish(request),
+  catchErrors: (error) => error._tag === "Timeout",
+  catch: (error) => Effect.succeed(retryLater(error)),
+  finally: () => releaseLock(request)
+})
+```
+
+The finalizer runs after success, after recovery, after a failure no handler claimed, and after interruption. A finalizer that fails on its own raises `PatternError { code: "finalizer_failed" }`. A body failure outranks a finalizer failure, so cleanup trouble never hides the reason the body failed.
+
+`TryCatchFinally.make` declares the same boundary as topology: one `Catch` carrying the filter schema, and a finalizer call on both the settled arm and the unhandled arm. The unhandled arm ends in `Node.fail`, which states that the finalizer cleans up and hands the failure back.
+
+## Sagas
+
+A saga answers "the third call failed and the first two already changed the world". `@smthrs/patterns` `Saga` pairs each forward step with the call that undoes it and unwinds in reverse.
+
+```ts
+import { Saga } from "@smthrs/patterns"
+
+const booked = yield* Saga.run(order, {
+  steps: [
+    { id: "hold", action: holdSeat, compensation: releaseSeat },
+    { id: "charge", action: chargeCard, compensation: refundCard },
+    { id: "ticket", action: issueTicket, compensation: voidTicket }
+  ],
+  onFailure: "compensate"
+})
+```
+
+`onFailure` picks what a step failure does to the completed work, and defaults to `compensate`:
+
+| Policy | Behavior |
+| --- | --- |
+| `compensate` | Unwind, then return `{ compensated: true, failure }` |
+| `compensate-and-fail` | Unwind, then re-raise the original failure |
+| `fail` | Leave the completed work alone |
+
+`run` registers one scope finalizer per completed step, so the unwind is LIFO and runs on interruption as well as on failure. A compensation that fails does not stop the ones behind it: every failing step id is collected and the run fails `PatternError { code: "compensation_failed" }` naming them, because state left dirty outranks the failure that started the unwind. A compensation that dies counts as a failed compensation, so a defect inside an undo never hides the residue or the failure that started the unwind.
+
+`Saga.make` declares the same shape as topology: one `Catch` per step whose arm calls that step's compensation and re-raises, so the plan lists the compensation calls in reverse order before anything runs.
+
 ## Tiers
 
 | Tier | Meaning | Retry rule |

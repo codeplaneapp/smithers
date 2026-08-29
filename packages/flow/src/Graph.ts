@@ -571,6 +571,13 @@ interface Visit {
    * call has to be satisfiable under.
    */
   readonly placement: unknown
+  /**
+   * The scheduling priority in force here: the nearest enclosing node's, unless
+   * this node states its own. It rides the walk rather than the AST because
+   * inheritance is lexical — annotating a container prioritizes everything
+   * beneath it that stayed silent.
+   */
+  readonly priority: number | undefined
   readonly substitutions: ReadonlyMap<string, string>
   readonly stack: ReadonlyArray<Flow.Any>
   readonly prerequisite: string | undefined
@@ -620,6 +627,7 @@ export const build = (
     readonly capabilities: ReadonlyArray<string>
     readonly effects: Annotations.Effects | undefined
     readonly placement: unknown
+    readonly priority: number | undefined
     readonly tier: KeyMaterial.KeyMaterial["kind"]
     readonly nondeterministic?: true | undefined
     readonly body: unknown
@@ -652,7 +660,15 @@ export const build = (
       dependencies: entry.dependencies,
       capabilities: entry.capabilities,
       placement: entry.placement,
-      draft: { id: entry.id, material, effects: entry.effects ?? emptyEffects },
+      // Priority reaches the compiled plan through the draft and stays OUT of
+      // `material`: it orders ready work without changing what the work
+      // produces, so raising it must not re-key a step.
+      draft: {
+        id: entry.id,
+        material,
+        effects: entry.effects ?? emptyEffects,
+        ...(entry.priority === undefined ? {} : { priority: entry.priority })
+      },
       ast: entry.ast,
       payload: entry.payload
     })
@@ -673,6 +689,8 @@ export const build = (
     readonly capabilities: ReadonlyArray<string>
     /** The placement of the flow this call is written inside. */
     readonly placement: unknown
+    /** The priority in force at this call, already including the call's own. */
+    readonly priority: number | undefined
     readonly substitutions: ReadonlyMap<string, string>
     readonly stack: ReadonlyArray<Flow.Any>
     readonly dependencies: Array<string>
@@ -707,6 +725,7 @@ export const build = (
         capabilities: call.capabilities,
         effects: declaredEffects(annotations),
         placement,
+        priority: call.priority,
         tier: "sealed",
         body: {
           _tag: "FlowCall",
@@ -755,6 +774,7 @@ export const build = (
           // satisfy; a callee that declared none keeps running under the
           // caller's.
           placement: placement ?? call.placement,
+          priority: call.priority,
           substitutions: call.substitutions,
           stack: [...call.stack, target],
           prerequisite: undefined
@@ -818,6 +838,8 @@ export const build = (
       })
     }
     const { ast, capabilities, depth, id, placement, stack, substitutions } = request
+    // A node's own priority wins; otherwise it inherits the enclosing one.
+    const priority = ast.priority ?? request.priority
     const dependencies: Array<string> = []
     const inputs: Array<KeyMaterial.InputRef> = []
     const depend = (from: string, reason: EdgeReason): void => {
@@ -834,6 +856,7 @@ export const build = (
       depth: depth + 1,
       capabilities,
       placement,
+      priority,
       substitutions: options.substitutions ?? substitutions,
       stack,
       prerequisite: options.prerequisite
@@ -853,6 +876,7 @@ export const build = (
           payload: hydrate(ast.payload, substitutions, id),
           capabilities,
           placement,
+          priority,
           substitutions,
           stack,
           dependencies,
@@ -871,6 +895,7 @@ export const build = (
           capabilities,
           effects: declaredEffects(annotations),
           placement: declaredPlacement(annotations),
+          priority,
           tier: declared?.tier ?? "sealed",
           nondeterministic: declared?.nondeterministic,
           body: {
@@ -898,6 +923,7 @@ export const build = (
           capabilities,
           effects: undefined,
           placement: undefined,
+          priority,
           tier: "sealed",
           body: { _tag: ast._tag },
           inputs: [...payloadInputs(value, id), ...inputs],
@@ -922,6 +948,7 @@ export const build = (
             capabilities,
             effects: undefined,
             placement: undefined,
+            priority,
             tier: "sealed",
             body: { _tag: ast._tag, members },
             inputs,
@@ -945,6 +972,7 @@ export const build = (
               capabilities,
               effects: undefined,
               placement: undefined,
+              priority,
               tier: "sealed",
               body: { _tag: ast._tag, mapper: ast.mapper },
               inputs,
@@ -978,6 +1006,7 @@ export const build = (
               capabilities,
               effects: undefined,
               placement: undefined,
+              priority,
               tier: "sealed",
               body: { _tag: ast._tag, continuation: ast.continuation, static: ast.next !== undefined },
               inputs,
@@ -1009,6 +1038,7 @@ export const build = (
               capabilities,
               effects: undefined,
               placement: undefined,
+              priority,
               tier: "sealed",
               body: { _tag: ast._tag, predicate: ast.predicate },
               inputs,
@@ -1044,6 +1074,7 @@ export const build = (
               capabilities,
               effects: undefined,
               placement: undefined,
+              priority,
               tier: "sealed",
               body: { _tag: ast._tag, filter: ast.filter },
               inputs,
@@ -1065,6 +1096,7 @@ export const build = (
       depth: 0,
       capabilities: [],
       placement: undefined,
+      priority: undefined,
       substitutions: new Map(),
       stack: [],
       prerequisite: undefined
@@ -1087,6 +1119,7 @@ export const build = (
       // Nothing encloses the entry, so its own declared placement is what the
       // body it splices has to be satisfiable under, not a constraint on it.
       placement: undefined,
+      priority: undefined,
       substitutions: new Map(),
       stack: [],
       dependencies: [],

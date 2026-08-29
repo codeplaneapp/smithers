@@ -18,7 +18,9 @@
  * Adapted from the agent repo's `@smthrs/core` `internal/node.ts`. `Dynamic`
  * does not come across — a model call is an ordinary action here — and
  * neither do annotations, which are `Context` values and would break
- * serializability.
+ * serializability. Scheduling priority is the one thing that does cross, as
+ * the plain JSON field {@link Scheduled.priority} rather than as an
+ * annotation, because the scheduler has to read it out of a stored plan.
  *
  * @since 0.1.0
  */
@@ -49,13 +51,32 @@ export const TypeId = "~@smthrs/plan/Node" as const
 export type TypeId = typeof TypeId
 
 /**
+ * What every AST variant carries besides its own shape: an optional scheduling
+ * priority.
+ *
+ * A priority is JSON, not a `Context` annotation, which is why it can live in
+ * the AST at all: the whole point of dropping core's annotations was to keep a
+ * plan shippable, storable, and diffable. It is a scheduling HINT — the plan
+ * compiler copies it onto the node draft and the scheduler orders ready work by
+ * it, while key material never reads it, so raising a priority reorders work
+ * without re-keying a single step.
+ *
+ * @since 0.1.0
+ * @private
+ * @slop
+ */
+export interface Scheduled {
+  readonly priority?: number | undefined
+}
+
+/**
  * A constant, known before anything runs.
  *
  * @since 0.1.0
  * @private
  * @slop
  */
-export interface Succeed {
+export interface Succeed extends Scheduled {
   readonly _tag: "Succeed"
   readonly value: unknown
 }
@@ -68,7 +89,7 @@ export interface Succeed {
  * @private
  * @slop
  */
-export interface All {
+export interface All extends Scheduled {
   readonly _tag: "All"
   readonly nodes: Readonly<Record<string, NodeAst>>
 }
@@ -81,7 +102,7 @@ export interface All {
  * @private
  * @slop
  */
-export interface Map {
+export interface Map extends Scheduled {
   readonly _tag: "Map"
   readonly first: NodeAst
   readonly mapper: FunctionIdentity
@@ -96,7 +117,7 @@ export interface Map {
  * @private
  * @slop
  */
-export interface AndThen {
+export interface AndThen extends Scheduled {
   readonly _tag: "AndThen"
   readonly first: NodeAst
   readonly continuation: FunctionIdentity
@@ -113,7 +134,7 @@ export interface AndThen {
  * @private
  * @slop
  */
-export interface Branch {
+export interface Branch extends Scheduled {
   readonly _tag: "Branch"
   readonly subject: string
   readonly first: NodeAst
@@ -141,7 +162,7 @@ export interface Branch {
  * @private
  * @slop
  */
-export interface Catch {
+export interface Catch extends Scheduled {
   readonly _tag: "Catch"
   readonly subject: string
   readonly protected: NodeAst
@@ -177,7 +198,7 @@ export type CallMode = "inline" | "boundary" | "handoff"
  * @private
  * @slop
  */
-export interface FlowCall {
+export interface FlowCall extends Scheduled {
   readonly _tag: "FlowCall"
   readonly flow: string
   readonly mode: CallMode
@@ -192,7 +213,7 @@ export interface FlowCall {
  * @private
  * @slop
  */
-export interface ActionCall {
+export interface ActionCall extends Scheduled {
   readonly _tag: "ActionCall"
   readonly action: string
   readonly payload: unknown
@@ -724,3 +745,36 @@ export const filter = (ast: Catch): Schema.Top | undefined => filters.get(ast)
  * @slop
  */
 export const declaration = (ast: ActionCall | FlowCall): unknown => declarations.get(ast)
+
+/**
+ * Copies an AST with a scheduling priority attached.
+ *
+ * The copy is shallow and the side tables are re-filed against it, because a
+ * function, a predicate, a filter schema, and a declaration are keyed by the
+ * exact AST object they belong to: a copy that left them behind would silently
+ * lose the continuation the graph walk has to evaluate.
+ *
+ * @since 0.1.0
+ * @private
+ * @slop
+ */
+export const withPriority = (ast: NodeAst, priority: number): NodeAst => {
+  const prioritized = { ...ast, priority }
+  if (ast._tag === "AndThen" || ast._tag === "Map") {
+    const deferred = operations.get(ast)
+    if (deferred !== undefined) operations.set(prioritized as AndThen | Map, deferred)
+  }
+  if (ast._tag === "Branch") {
+    const decision = predicates.get(ast)
+    if (decision !== undefined) predicates.set(prioritized as Branch, decision)
+  }
+  if (ast._tag === "Catch") {
+    const schema = filters.get(ast)
+    if (schema !== undefined) filters.set(prioritized as Catch, schema)
+  }
+  if (ast._tag === "ActionCall" || ast._tag === "FlowCall") {
+    const target = declarations.get(ast)
+    if (target !== undefined) declarations.set(prioritized as ActionCall | FlowCall, target)
+  }
+  return prioritized
+}

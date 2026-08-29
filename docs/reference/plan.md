@@ -55,6 +55,16 @@ write-set overlaps, and derives the plan digest. It performs no I/O — declared
 `effects` carry read and write *paths*, never digests, because measuring a path
 is run-time work.
 
+`Node.priority(node, n)` is the authoring call that attaches the hint, and
+`Node.declaredPriority(ast)` reads back the value a node states, or `undefined`
+when it inherits one. `NodeDraft.priority` is the hint an author attached that
+way. `Plan.compile` copies it onto the plan node, defaulting to zero, and folds
+it into the plan digest, because the order a human approved is part of what
+they approved. It is deliberately absent from a node's key: a node scheduled
+ahead of another computes the same result, so re-keying it would throw away a
+legitimate cache hit. `PlanScheduler` orders ready nodes by that priority plus
+one aging point per capacity-constrained pass.
+
 `Plan.append(plan, drafts)` grows a plan. Nodes already in it keep their id,
 key, edges, and generation byte for byte; the new nodes arrive pre-keyed
 against them at the next generation. `Plan.generationNodes` returns the newest

@@ -131,7 +131,11 @@ export interface DynamicOptions {
  * @since 0.0.0
  * @slop
  */
-export const NodeBuildErrorCode = Schema.Literals(["invalid_all_member", "invalid_continuation"])
+export const NodeBuildErrorCode = Schema.Literals([
+  "invalid_all_member",
+  "invalid_continuation",
+  "invalid_priority"
+])
 
 /**
  * Stable code emitted by node construction or continuation failures.
@@ -172,6 +176,21 @@ export const isNode = (value: unknown): value is Any => Predicate.hasProperty(va
  * @slop
  */
 export const succeed = <A>(value: A): Node<A> => internal.makeNode<A>(internal.succeed(value, Annotations.empty))
+
+/**
+ * A node that always fails with the given typed error.
+ *
+ * Use it to re-raise inside a `catch` recovery arm, so a plan shows that the
+ * arm cleans up and hands the failure back rather than absorbing it. The error
+ * enters key material, so two failures carrying different data are two
+ * declarations.
+ *
+ * @category constructors
+ * @since 0.1.0
+ * @slop
+ */
+export const fail = <E>(error: E): Node<never, E> =>
+  internal.makeNode<never, E>(internal.fail(error, Annotations.empty))
 
 /**
  * Constructs a node that combines a record of independent child nodes.
@@ -280,6 +299,74 @@ export const andThen: {
     )
 )
 
+/**
+ * The statically planned recovery arm, and the optional schema selecting which
+ * typed failures it handles.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface CatchOptions<E, B, E2, Handled = E> {
+  readonly error?: Schema.Schema<Handled> | undefined
+  readonly onFailure: (error: Handled) => Node<B, E2>
+}
+
+/**
+ * Recovers a node's typed failures with a statically planned arm.
+ *
+ * The arm is built once, while planning, against a symbolic error that names
+ * the protected node, so the recovery topology is visible before anything
+ * runs. With no schema the whole typed error channel is handled; with one, the
+ * remainder stays in the error type.
+ *
+ * @category sequencing
+ * @since 0.1.0
+ * @slop
+ */
+const catch_: {
+  <Handled, B, E2>(
+    options: CatchOptions<unknown, B, E2, Handled> & { readonly error: Schema.Schema<Handled> }
+  ): <A, E>(self: Node<A, E>) => Node<A | B, Exclude<E, Handled> | E2>
+  <E, B, E2>(
+    options: CatchOptions<E, B, E2> & { readonly error?: undefined }
+  ): <A>(self: Node<A, E>) => Node<A | B, E2>
+  <A, E, Handled, B, E2>(
+    self: Node<A, E>,
+    options: CatchOptions<E, B, E2, Handled> & { readonly error: Schema.Schema<Handled> }
+  ): Node<A | B, Exclude<E, Handled> | E2>
+  <A, E, B, E2>(
+    self: Node<A, E>,
+    options: CatchOptions<E, B, E2> & { readonly error?: undefined }
+  ): Node<A | B, E2>
+} = dual(
+  2,
+  <A, E, Handled, B, E2>(
+    self: Node<A, E>,
+    options: CatchOptions<E, B, E2, Handled>
+  ): Node<A | B, Exclude<E, Handled> | E2> =>
+    internal.makeNode<A | B, Exclude<E, Handled> | E2>(
+      internal.catch_(
+        self.ast,
+        (error) => options.onFailure(error as Handled),
+        options.onFailure,
+        options.error,
+        Annotations.empty
+      )
+    )
+)
+
+export {
+  /**
+   * Recovers a node's typed failures with a statically planned arm.
+   *
+   * @category sequencing
+   * @since 0.1.0
+   * @slop
+   */
+  catch_ as catch
+}
+
 const annotate = <A, E, I, S>(
   self: Node<A, E>,
   key: Context.Key<I, S>,
@@ -306,6 +393,36 @@ export const within: {
   2,
   <A, E>(self: Node<A, E>, placement: Placement.Placement): Node<A, E> =>
     annotate(self, Annotations.Placement, placement)
+)
+
+/**
+ * Adds a scheduling priority annotation to a node without changing the
+ * original.
+ *
+ * A scheduler runs ready work with a higher number first. Children inherit the
+ * value lexically, so annotating a container prioritizes everything under it
+ * that does not state its own. Priority never enters key material: it orders
+ * work without changing what the work produces.
+ *
+ * @category annotations
+ * @since 0.1.0
+ * @slop
+ */
+export const priority: {
+  (value: number): <A, E>(self: Node<A, E>) => Node<A, E>
+  <A, E>(self: Node<A, E>, value: number): Node<A, E>
+} = dual(
+  2,
+  <A, E>(self: Node<A, E>, value: number): Node<A, E> => {
+    if (!Number.isSafeInteger(value)) {
+      throw new NodeBuildError({
+        code: "invalid_priority",
+        member: "priority",
+        message: `Node.priority expects a safe integer, received ${value}`
+      })
+    }
+    return annotate(self, Annotations.Priority, value)
+  }
 )
 
 /**

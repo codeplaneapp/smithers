@@ -151,6 +151,8 @@ The pure, pipeable authoring AST. Building a node records an inspectable, closur
 | `andThen` | combinator | a node or a builder sequenced after this one |
 | `branch` | combinator | `if` runs at run time on the real value; `then` and `else` are built once at plan time |
 | `catch` | combinator | a statically planned typed-failure arm, optionally selected by a schema |
+| `priority` | combinator | a scheduling hint copied onto `NodeDraft.priority`; inherited lexically, never part of a node key |
+| `declaredPriority` | accessor | the priority a node states, or `undefined` when it inherits |
 | `Node`, `Any`, `Success`, `Error` | interfaces + types | the node type and its variance helpers |
 | `BranchOptions`, `CatchOptions` | interfaces | the two arm declarations |
 | `Ast`, `FunctionIdentity`, `TypeId` | types | the stored AST and the digest standing in for a plan-time function |
@@ -195,6 +197,7 @@ The refusals a plan-time build raises instead of producing a wrong plan. Each ca
 | `invalid_continuation` | a branch arm, catch arm, or continuation did not return a node |
 | `recursion_requires_boundary` | a flow calls itself inline instead of using a trampoline handoff or an explicit child boundary |
 | `placement_requires_boundary` | an inline call's callee declares a placement the enclosing flow cannot satisfy |
+| `invalid_priority` | `Node.priority` received a value that is not a safe integer |
 
 `GraphBuildErrorCode` is a closed schema literal, so a caller may switch on it and a new refusal is a deliberate addition rather than a new free-form string.
 

@@ -17,7 +17,10 @@ export const PatternErrorCode = Schema.Literals([
   "recursion_bound",
   "envelope_conflict",
   "invalid_decorator",
-  "exhausted"
+  "exhausted",
+  "finalizer_failed",
+  "quarantined",
+  "compensation_failed"
 ])
 
 /**

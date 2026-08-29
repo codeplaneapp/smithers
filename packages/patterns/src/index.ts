@@ -80,3 +80,31 @@ export * as MapReduce from "./MapReduce.ts"
  * @slop
  */
 export * as Recursion from "./Recursion.ts"
+
+/**
+ * @category patterns
+ * @since 0.1.0
+ * @slop
+ */
+export * as Bounded from "./Bounded.ts"
+
+/**
+ * @category patterns
+ * @since 0.1.0
+ * @slop
+ */
+export * as TryCatchFinally from "./TryCatchFinally.ts"
+
+/**
+ * @category patterns
+ * @since 0.1.0
+ * @slop
+ */
+export * as Quarantine from "./Quarantine.ts"
+
+/**
+ * @category patterns
+ * @since 0.1.0
+ * @slop
+ */
+export * as Saga from "./Saga.ts"

@@ -31,7 +31,9 @@ import * as Schema from "effect/Schema"
  * which no plan could serialize or hash; `payload_too_deep` is a payload
  * nested past the build bound, which has to be flattened into shallower data;
  * `graph_too_deep` is authored topology nested past the build bound, which
- * has to be split with `.child()` boundaries or trampoline handoffs. The two
+ * has to be split with `.child()` boundaries or trampoline handoffs;
+ * `invalid_priority` is a scheduling priority that is not a safe integer,
+ * which no ordering could compare. The two
  * depth refusals exist because graph building walks with an explicit stack
  * and refuses at a bound, rather than recursing until the native stack
  * overflows without a typed error.
@@ -48,7 +50,8 @@ export const GraphBuildErrorCode = Schema.Literals([
   "placement_requires_boundary",
   "cyclic_payload",
   "payload_too_deep",
-  "graph_too_deep"
+  "graph_too_deep",
+  "invalid_priority"
 ])
 
 /**

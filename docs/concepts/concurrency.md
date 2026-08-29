@@ -17,6 +17,24 @@ The enclosing flow handler does not complete until both effects complete. Error 
 
 Actions receive ordinals from a counter scoped to the action's **name**, not from one per-run counter bumped in fiber-arrival order (issue #73), and the name is folded into the ordinal step key. Two distinct actions running concurrently — `Effect.all([chargeCard, sendEmail], { concurrency: "unbounded" })` — therefore keep their identities no matter how a replay interleaves them. What remains order-sensitive: repeated invocations of the *same* action in one run are numbered in allocation order, and changing branch structure before an action can still change which invocation occupies which number. For cross-run cache reuse, or to pin identity across concurrent invocations of one action, declare a cache key input instead of relying on an ordinal.
 
+## Bounded fan-out and quarantine
+
+`@smthrs/patterns` supplies the two join policies a fan-out needs.
+
+`Bounded.all(members, { concurrency, priority? })` splits a named record into batches of `concurrency` and sequences the batches, so a plan states how many calls can be in flight. Members are ordered by priority, highest first, with declaration order breaking a tie. A member that carries its own `Node.priority` keeps it; the rest inherit the container's. Priority never enters key material, so raising it does not invalidate a cached step. `Bounded.run` is the Effect form and follows `Effect.forEach`: the first failure interrupts the members still in flight.
+
+`Quarantine.all(members, { policy })` chooses what a failing member does to its siblings. Under `quarantine` each member gains a recovery arm that succeeds with `{ _tag: "Quarantined", member, error }`, so the join returns a record of settled values and markers and no sibling is interrupted on another's behalf. Under `halt` the join is the ordinary one. `Quarantine.run` mirrors both, and `Quarantine.settle(result)` fails `PatternError { code: "quarantined" }` listing the isolated members when the caller wants halt-after-join.
+
+Quarantine isolates typed failures. A defect and an interruption still propagate, because neither is a result the flow declared.
+
+## Priority
+
+`Node.priority(node, n)` attaches a scheduling priority. A higher number goes first when more work is ready than the run has capacity for. Both node models carry it: `@smthrs/core` records it as the `Annotations.Priority` annotation for the plan-time surface `@smthrs/patterns` reads, and `@smthrs/plan` records it as a plain JSON field on the AST, because a stored plan has to keep it and a `Context` value is not serializable.
+
+`Graph.build` copies the value onto `NodeDraft.priority`, `Plan.compile` copies that onto the plan node, and `PlanScheduler` orders ready nodes by declared priority plus one aging point per capacity-constrained pass, so a low-priority node still runs rather than starving. Inheritance is lexical: a node takes the priority of the nearest enclosing node that declares one, and a node that declares its own keeps it.
+
+Priority changes latency and nothing else. It never enters key material, so raising it reorders work without invalidating a cached step. It does enter the plan digest, because the ordering is part of what a human approves.
+
 ## Durable races
 
 `Action.raceAll` and `DurableDeferred.raceAll` preserve the flow abstractions while racing alternatives. They are distinct from a planned graph-level race node. Use them only when every loser has acceptable interruption semantics.

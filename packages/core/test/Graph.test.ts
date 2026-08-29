@@ -423,6 +423,133 @@ describe("Graph", () => {
     ])
   })
 
+  it("expands a catch into the protected node and its recovery arm", () => {
+    const graph = Graph.build(
+      Node.catch(Node.dynamic({ model: "writer" }), { onFailure: () => Node.succeed("fallback") })
+    )
+
+    expect(Graph.nodes(graph).map((node) => node.id)).toEqual(["root", "root.catch", "root.recover"])
+    expect(Graph.nodes(graph)[0]?.kind).toBe("Catch")
+    expect(Graph.edges(graph)).toEqual([
+      { from: "root.catch", to: "root", reason: "value" },
+      { from: "root.catch", to: "root.recover", reason: "continuation" },
+      { from: "root.recover", to: "root", reason: "value" }
+    ])
+    expect(Graph.nodes(graph).find((node) => node.id === "root.recover")?.keyMaterial.inputs).toContainEqual({
+      _tag: "Pending",
+      from: "root.catch"
+    })
+  })
+
+  it("records the catch filter schema in key material", () => {
+    const filtered = Graph.build(
+      Node.catch(Node.dynamic({ model: "writer" }), {
+        error: Schema.Struct({ _tag: Schema.Literal("Timeout") }),
+        onFailure: () => Node.succeed("fallback")
+      })
+    )
+    const unfiltered = Graph.build(
+      Node.catch(Node.dynamic({ model: "writer" }), { onFailure: () => Node.succeed("fallback") })
+    )
+    const body = (graph: Graph.Graph) => Graph.nodes(graph)[0]?.keyMaterial.body as { readonly error?: unknown }
+
+    expect(body(filtered).error).toBeDefined()
+    expect(body(unfiltered).error).toBeUndefined()
+    expect(body(filtered)).not.toEqual(body(unfiltered))
+  })
+
+  it("hands the recovery arm a symbolic error that names the protected node", () => {
+    const graph = Graph.build(
+      Node.catch(Node.dynamic({ model: "writer" }), {
+        onFailure: (error) => Node.succeed({ reason: (error as { readonly message: string }).message })
+      })
+    )
+
+    expect(Graph.nodes(graph).find((node) => node.id === "root.recover")?.keyMaterial.body).toEqual({
+      _tag: "Succeed",
+      value: { reason: { _tag: "PlannedInput", path: ["message"] } }
+    })
+  })
+
+  it("rejects a recovery arm that does not return a node", () => {
+    const invalid = Node.catch(Node.succeed("ok"), {
+      onFailure: (() => "not a node") as unknown as () => Node.Node<string>
+    })
+
+    expect(() => Graph.build(invalid)).toThrow(Node.NodeBuildError)
+  })
+
+  it("plans a failing leaf and carries the failure into key material", () => {
+    const graph = Graph.build(Node.fail({ _tag: "Timeout", after: 30 }))
+    const other = Graph.build(Node.fail({ _tag: "Timeout", after: 60 }))
+
+    expect(Graph.nodes(graph).map((node) => node.id)).toEqual(["root"])
+    expect(Graph.nodes(graph)[0]?.kind).toBe("Fail")
+    expect(Graph.nodes(graph)[0]?.keyMaterial.body).toEqual({
+      _tag: "Fail",
+      error: { _tag: "Timeout", after: 30 }
+    })
+    expect(Graph.nodes(other)[0]?.keyMaterial.body).not.toEqual(Graph.nodes(graph)[0]?.keyMaterial.body)
+  })
+
+  it("re-raises from a recovery arm", () => {
+    const graph = Graph.build(
+      Node.catch(Node.dynamic({ model: "writer" }), {
+        onFailure: (error) => Node.fail(error)
+      })
+    )
+
+    expect(Graph.nodes(graph).map((node) => node.id)).toEqual(["root", "root.catch", "root.recover"])
+    expect(Graph.nodes(graph).find((node) => node.id === "root.recover")?.kind).toBe("Fail")
+    expect(Graph.nodes(graph).find((node) => node.id === "root.recover")?.keyMaterial.body).toEqual({
+      _tag: "Fail",
+      error: { _tag: "PlannedInput", path: [] }
+    })
+  })
+
+  it("carries an explicit priority onto the graph node and inherits it lexically", () => {
+    const graph = Graph.build(
+      Node.andThen(
+        Node.priority(Node.all({ scan: Node.succeed("scan") }), 5),
+        () => Node.succeed("done")
+      )
+    )
+    const node = (id: string) => Graph.nodes(graph).find((candidate) => candidate.id === id)
+
+    expect(node("root.andThen")?.priority).toBe(5)
+    expect(node("root.andThen")?.annotations.priority).toBe(5)
+    expect(node("root.andThen.all.scan")?.priority).toBe(5)
+    expect(node("root.then")?.priority).toBeUndefined()
+    expect(node("root")?.priority).toBeUndefined()
+  })
+
+  it("lets a child priority override the inherited one", () => {
+    const graph = Graph.build(
+      Node.priority(Node.all({ urgent: Node.priority(Node.succeed("a"), 9), normal: Node.succeed("b") }), 1)
+    )
+    const node = (id: string) => Graph.nodes(graph).find((candidate) => candidate.id === id)
+
+    expect(node("root.all.urgent")?.priority).toBe(9)
+    expect(node("root.all.normal")?.priority).toBe(1)
+  })
+
+  it("keeps priority out of key material so scheduling order cannot change step identity", () => {
+    const body = () => Node.succeed("scan")
+    const plain = keyMaterial(Graph.build(Flow.make({ body })))
+    const prioritized = keyMaterial(Graph.build(Flow.make({ body: () => Node.priority(body(), 7) })))
+
+    expect(prioritized).toEqual(plain)
+  })
+
+  it("rejects a priority that is not a safe integer", () => {
+    expect(() => Node.priority(Node.succeed("a"), 1.5)).toThrow(Node.NodeBuildError)
+    try {
+      Node.priority(Node.succeed("a"), 1.5)
+    } catch (error) {
+      expect(error).toMatchObject({ code: "invalid_priority", member: "priority" })
+    }
+  })
+
   it("throws the typed flow error for declaration-only graphs", () => {
     expect(() => Graph.build(Flow.make({ name: "declared" }))).toThrow(Flow.FlowError)
   })

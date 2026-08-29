@@ -45,6 +45,17 @@ export interface Succeed {
  * @private
  * @slop
  */
+export interface Fail {
+  readonly _tag: "Fail"
+  readonly error: unknown
+  readonly annotations: Context.Context<never>
+}
+
+/**
+ * @since 0.0.0
+ * @private
+ * @slop
+ */
 export interface All {
   readonly _tag: "All"
   readonly nodes: Readonly<Record<string, NodeAst>>
@@ -88,6 +99,19 @@ export interface Map {
   readonly _tag: "Map"
   readonly first: NodeAst
   readonly mapper: FunctionIdentity
+  readonly annotations: Context.Context<never>
+}
+
+/**
+ * @since 0.0.0
+ * @private
+ * @slop
+ */
+export interface Catch {
+  readonly _tag: "Catch"
+  readonly first: NodeAst
+  readonly handler: FunctionIdentity
+  readonly error: unknown | undefined
   readonly annotations: Context.Context<never>
 }
 
@@ -260,11 +284,11 @@ export interface FlowCall {
  * @private
  * @slop
  */
-export type NodeAst = Succeed | All | Dynamic | AndThen | Map | FlowCall
+export type NodeAst = Succeed | Fail | All | Dynamic | AndThen | Map | FlowCall | Catch
 
 type Operation = (value: unknown) => unknown
 
-const operations = new WeakMap<AndThen | Map, Operation>()
+const operations = new WeakMap<AndThen | Map | Catch, Operation>()
 const flows = new WeakMap<FlowCall, unknown>()
 
 /**
@@ -333,6 +357,17 @@ export const makeNode = <A = unknown, E = never>(ast: NodeAst): Node<A, E> =>
 export const succeed = (value: unknown, annotations: Context.Context<never>): Succeed => ({
   _tag: "Succeed",
   value,
+  annotations
+})
+
+/**
+ * @since 0.0.0
+ * @private
+ * @slop
+ */
+export const fail = (error: unknown, annotations: Context.Context<never>): Fail => ({
+  _tag: "Fail",
+  error,
   annotations
 })
 
@@ -432,7 +467,30 @@ export const map = (
  * @private
  * @slop
  */
-export const operation = (ast: AndThen | Map): Operation | undefined => operations.get(ast)
+export const catch_ = (
+  first: NodeAst,
+  operation: Operation,
+  identitySource: unknown,
+  error: unknown | undefined,
+  annotations: Context.Context<never>
+): Catch => {
+  const ast: Catch = {
+    _tag: "Catch",
+    first,
+    handler: functionIdentity(identitySource),
+    error,
+    annotations
+  }
+  operations.set(ast, operation)
+  return ast
+}
+
+/**
+ * @since 0.0.0
+ * @private
+ * @slop
+ */
+export const operation = (ast: AndThen | Map | Catch): Operation | undefined => operations.get(ast)
 
 /**
  * @since 0.0.0
@@ -475,9 +533,9 @@ export const withAnnotations = (
     ...ast,
     annotations
   }
-  if (ast._tag === "AndThen" || ast._tag === "Map") {
+  if (ast._tag === "AndThen" || ast._tag === "Map" || ast._tag === "Catch") {
     const deferred = operations.get(ast)
-    if (deferred !== undefined) operations.set(annotated as AndThen | Map, deferred)
+    if (deferred !== undefined) operations.set(annotated as AndThen | Map | Catch, deferred)
   }
   if (ast._tag === "FlowCall") {
     const target = flows.get(ast)

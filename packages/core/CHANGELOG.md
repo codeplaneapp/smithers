@@ -7,6 +7,10 @@
 - Added the Schema-first `Flow` and pipeable `Node` builders, placement and
   effect annotations, markdown lowering, graph introspection, and digest-free
   key-material handoff.
+- Added `Node.priority` and the `Annotations.Priority` key, carried onto the
+  graph node and inherited lexically. Priority stays out of key material.
+- Added `Node.catch`, which recovers a node's typed failures with a statically
+  planned arm, and `Node.fail`, which re-raises from one.
 
 ### Fixed
 

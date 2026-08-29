@@ -24,7 +24,8 @@ describe("GraphBuildError", () => {
       "placement_requires_boundary",
       "cyclic_payload",
       "payload_too_deep",
-      "graph_too_deep"
+      "graph_too_deep",
+      "invalid_priority"
     ])
   })
 })

@@ -463,4 +463,107 @@ describe("internal/node call factories", () => {
     Object.defineProperty(arraySymbol, Symbol("extra"), { value: 1 })
     expect(() => Node.capture({ arraySymbol }, () => undefined)).toThrow(/unsupported array key Symbol\(extra\)/)
   })
+  it("records a scheduling priority on the node it annotates and leaves the original alone", () => {
+    const plain = Node.succeed(1)
+    const urgent = Node.priority(plain, 9)
+
+    expect(urgent.ast).toEqual({ _tag: "Succeed", value: 1, priority: 9 })
+    expect(Node.declaredPriority(urgent.ast)).toBe(9)
+    // The original is unchanged, so one node used at two positions can carry
+    // two priorities.
+    expect(Node.declaredPriority(plain.ast)).toBeUndefined()
+    expect(Node.declaredPriority(Node.priority(9)(plain).ast)).toBe(9)
+    expect(Node.declaredPriority(Node.priority(urgent, 1).ast)).toBe(1)
+  })
+
+  it("keeps the side tables reachable through a prioritized copy", () => {
+    // The AST is copied to attach the priority. A copy that left the side
+    // tables behind would silently drop the continuation, the predicate, the
+    // filter schema, or the declaration the graph walk needs.
+    const mapped = Node.priority(Node.map(Node.succeed(1), (value: number) => value + 1), 3)
+    expect(Node.mapper(mapped.ast)?.(1)).toBe(2)
+
+    const sequenced = Node.priority(Node.andThen(Node.succeed(1), () => Node.succeed(2)), 3)
+    const builder = Node.continuation(tagged(sequenced.ast, "AndThen"))
+    expect(Node.isNode(builder?.(Planned.make("upstream")))).toBe(true)
+
+    const decided = Node.priority(
+      Node.branch(Node.succeed(1), {
+        if: (value: number) => value > 0,
+        then: () => Node.succeed("yes"),
+        else: () => Node.succeed("no")
+      }),
+      3
+    )
+    expect(Node.predicate(decided.ast)?.(1)).toBe(true)
+
+    const protectedNode = Node.priority(
+      Node.catch(Node.succeed(1) as Node.Node<number, { readonly _tag: "Boom" }>, {
+        error: Schema.Struct({ _tag: Schema.Literal("Boom") }),
+        onFailure: () => Node.succeed(0)
+      }),
+      3
+    )
+    expect(Node.catchFilter(protectedNode.ast)).toBeDefined()
+
+    const declared = { action: "build" }
+    const called = Node.priority(Node.actionCall(declared, "build", { target: "all" }), 3)
+    expect(Node.declaration(tagged(called.ast, "ActionCall"))).toBe(declared)
+  })
+
+  it("attaches a priority to an AST that carries no side-table entry", () => {
+    // An AST reaches `priority` without a side-table entry when it did not
+    // come from the constructors: a shallow copy, or a plan decoded from
+    // storage. Re-filing must copy what the table holds and invent nothing,
+    // so the accessors keep reporting `undefined` instead of handing the
+    // graph walk an entry belonging to another node.
+    const detached = <A, E, R>(node: Node.Node<A, E, R>): Node.Node<A, E, R> =>
+      internal.makeNode<A, E, R>({ ...node.ast } as internal.NodeAst)
+
+    const mapped = Node.priority(detached(Node.map(Node.succeed(1), (value: number) => value + 1)), 3)
+    expect(Node.declaredPriority(mapped.ast)).toBe(3)
+    expect(Node.mapper(mapped.ast)).toBeUndefined()
+
+    const decided = Node.priority(
+      detached(
+        Node.branch(Node.succeed(1), {
+          if: (value: number) => value > 0,
+          then: () => Node.succeed("yes"),
+          else: () => Node.succeed("no")
+        })
+      ),
+      3
+    )
+    expect(Node.declaredPriority(decided.ast)).toBe(3)
+    expect(Node.predicate(decided.ast)).toBeUndefined()
+
+    const protectedNode = Node.priority(
+      detached(
+        Node.catch(Node.succeed(1) as Node.Node<number, { readonly _tag: "Boom" }>, {
+          error: Schema.Struct({ _tag: Schema.Literal("Boom") }),
+          onFailure: () => Node.succeed(0)
+        })
+      ),
+      3
+    )
+    expect(Node.declaredPriority(protectedNode.ast)).toBe(3)
+    expect(Node.catchFilter(protectedNode.ast)).toBeUndefined()
+
+    const called = Node.priority(detached(Node.actionCall({ action: "build" }, "build", { target: "all" })), 3)
+    expect(Node.declaredPriority(called.ast)).toBe(3)
+    expect(Node.declaration(tagged(called.ast, "ActionCall"))).toBeUndefined()
+  })
+
+  it("refuses a priority that is not a safe integer", () => {
+    for (const value of [1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 2]) {
+      let refusal: unknown
+      try {
+        Node.priority(Node.succeed(1), value)
+      } catch (error) {
+        refusal = error
+      }
+      expect(refusal).toBeInstanceOf(GraphBuildError)
+      expect((refusal as GraphBuildError).code).toBe("invalid_priority")
+    }
+  })
 })

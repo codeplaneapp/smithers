@@ -18,3 +18,11 @@
   `KeyMaterial` → `StepKey` compiler revived from the module deleted at
   `f5f3dda` — now producing `@smthrs/keys` `Key` values rather than a second
   digest format.
+- Added `Node.priority`, which attaches a scheduling priority to a node, and
+  `Node.declaredPriority`, which reads one back. The value is a plain JSON
+  field on the AST rather than a `Context` annotation, so a stored plan keeps
+  it. `Plan.compile` copies it from `NodeDraft.priority` onto the plan node and
+  folds it into the plan digest a human approves; it never enters a node's key
+  material, so raising a priority reorders work without re-keying a step. A
+  priority that is not a safe integer is a `GraphBuildError` with the new
+  `invalid_priority` code.

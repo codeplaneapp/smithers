@@ -450,6 +450,47 @@ const catch_: {
 export { catch_ as catch }
 
 /**
+ * Attaches a scheduling priority to a node, leaving the original unchanged.
+ *
+ * The scheduler runs ready work with a higher number first, so a priority
+ * changes LATENCY and nothing else. It never enters key material: a node
+ * ordered ahead of another still computes the same result, so re-keying it
+ * would throw away a legitimate cache hit. Children inherit the value
+ * lexically when the graph is built, and a child that states its own keeps it.
+ *
+ * @since 0.1.0
+ * @category annotations
+ * @slop
+ */
+export const priority: {
+  (value: number): <A, E, R>(self: Node<A, E, R>) => Node<A, E, R>
+  <A, E, R>(self: Node<A, E, R>, value: number): Node<A, E, R>
+} = dual(
+  2,
+  <A, E, R>(self: Node<A, E, R>, value: number): Node<A, E, R> => {
+    if (!Number.isSafeInteger(value)) {
+      throw new GraphBuildError({
+        code: "invalid_priority",
+        node: self.ast._tag,
+        path: [],
+        message: `Node.priority expects a safe integer, received ${value}`
+      })
+    }
+    return internal.makeNode<A, E, R>(internal.withPriority(self.ast, value))
+  }
+)
+
+/**
+ * Reads the scheduling priority a node carries, or `undefined` when it states
+ * none and inherits from whatever encloses it.
+ *
+ * @since 0.1.0
+ * @category accessors
+ * @slop
+ */
+export const declaredPriority = (ast: Ast): number | undefined => ast.priority
+
+/**
  * Constructs the flow-call node used by `@smthrs/flow` without making flow
  * calls part of the public authoring surface of this package.
  *

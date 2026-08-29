@@ -44,6 +44,7 @@ interface InternalNode {
   effectiveEffects: Effects.Declaration | undefined
   placement: Placement.Placement | undefined
   lane: Annotations.LaneOptions | undefined
+  priority: number | undefined
   capabilities: ReadonlyArray<string>
   annotations: AnnotationsProjection
   keyMaterial: KeyMaterial.KeyMaterial | undefined
@@ -72,6 +73,7 @@ export interface AnnotationsProjection {
   readonly placement: Placement.Placement | undefined
   readonly effects: Effects.Declaration | undefined
   readonly lane: Annotations.LaneOptions | undefined
+  readonly priority: number | undefined
 }
 
 /**
@@ -89,6 +91,7 @@ export interface GraphNode {
   readonly effectiveEffects: Effects.Declaration | undefined
   readonly placement: Placement.Placement | undefined
   readonly lane: Annotations.LaneOptions | undefined
+  readonly priority: number | undefined
   readonly capabilities: ReadonlyArray<string>
   readonly annotations: AnnotationsProjection
   readonly keyMaterial: KeyMaterial.KeyMaterial
@@ -242,7 +245,8 @@ const option = <I, S>(context: Context.Context<never>, key: Context.Key<I, S>): 
 const annotationProjection = (context: Context.Context<never>): AnnotationsProjection => ({
   placement: option(context, Annotations.Placement),
   effects: option(context, Annotations.Effects),
-  lane: option(context, Annotations.Lane)
+  lane: option(context, Annotations.Lane),
+  priority: option(context, Annotations.Priority)
 })
 
 const withoutEffects = (context: Context.Context<never>): Context.Context<never> =>
@@ -363,6 +367,8 @@ const declarationBody = (
   switch (ast._tag) {
     case "Succeed":
       return { _tag: ast._tag, value: reflection(ast.value) }
+    case "Fail":
+      return { _tag: ast._tag, error: reflection(ast.error) }
     case "All":
       return { _tag: ast._tag, keys: Object.keys(ast.nodes) }
     case "Dynamic":
@@ -387,6 +393,12 @@ const declarationBody = (
       return { _tag: ast._tag, mapper: ast.mapper }
     case "AndThen":
       return { _tag: ast._tag, continuation: ast.continuation, static: ast.next !== undefined }
+    case "Catch":
+      return {
+        _tag: ast._tag,
+        handler: ast.handler,
+        error: ast.error === undefined ? undefined : schemaIdentity(ast.error as Schema.Top)
+      }
   }
 }
 
@@ -450,6 +462,7 @@ export const build = (
       effectiveEffects,
       placement: projection.placement,
       lane: projection.lane,
+      priority: projection.priority,
       capabilities: normalizedCapabilities,
       annotations: projection,
       keyMaterial: undefined
@@ -470,6 +483,7 @@ export const build = (
     const childAnnotations = withoutEffects(annotations)
     switch (ast._tag) {
       case "Succeed":
+      case "Fail":
         break
       case "All": {
         for (const key of Object.keys(ast.nodes)) {
@@ -534,6 +548,43 @@ export const build = (
           )
           depend(continuation.id, "value")
         }
+        break
+      }
+      case "Catch": {
+        const first = visit(
+          ast.first,
+          `${id}.catch`,
+          childAnnotations,
+          normalizedCapabilities,
+          narrowedEnvelope
+        )
+        depend(first.id, "value")
+        const handler = internal.operation(ast)
+        if (handler === undefined) {
+          throw new Node.NodeBuildError({
+            code: "invalid_continuation",
+            member: id,
+            message: `Node.catch at "${id}" has no recovery builder`
+          })
+        }
+        const arm = handler(plannedValue(first.id))
+        if (!Node.isNode(arm)) {
+          throw new Node.NodeBuildError({
+            code: "invalid_continuation",
+            member: id,
+            message: `Node.catch at "${id}" must return a Node`
+          })
+        }
+        const recovery = visit(
+          arm.ast,
+          `${id}.recover`,
+          childAnnotations,
+          normalizedCapabilities,
+          narrowedEnvelope,
+          noInput,
+          [{ from: first.id, reason: "continuation" }]
+        )
+        depend(recovery.id, "value")
         break
       }
       case "FlowCall": {
@@ -730,11 +781,13 @@ export const build = (
       effectiveEffects: mergeEffects,
       placement,
       lane: undefined,
+      priority: undefined,
       capabilities,
       annotations: {
         placement,
         effects: mergeEffects,
-        lane: undefined
+        lane: undefined,
+        priority: undefined
       },
       keyMaterial: {
         version: "flows/key-material/v1",

@@ -32,3 +32,7 @@
   `FlowEngine.FlowEngine` is `FlowRuntime.FlowRuntime`, `FlowEngine.FlowInstance`
   is `FlowRuntime.FlowInstance`, and `FlowEngine.annotateWaiting` and
   `FlowEngine.FlowCycleDetected` moved with them.
+- `Graph.build` copies an authored `Node.priority` onto `NodeDraft.priority`,
+  so `PlanScheduler` orders ready work by it. A node inherits the priority of
+  the nearest enclosing node that declares one, and a node that declares its
+  own keeps it. Priority stays out of key material.
