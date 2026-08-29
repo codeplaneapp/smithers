@@ -161,6 +161,73 @@ describe("SyncServer bounded fan-out liveness", () => {
       expect(Option.isSome(settled)).toBe(true)
     }))
 
+  it.live("serves an entry appended to every covered run after the subscription attached", () =>
+    Effect.gen(function*() {
+      // Every case above has its entries in place before `subscribe`, so the
+      // first round serves them and the live path is never exercised. This is
+      // the live path: more covered runs than the fan-out bound, over the real
+      // journal, and every run gains an entry AFTER the follower attached. A
+      // bound that fills its slots with the first `concurrency` runs serves no
+      // run's live entry at all; a round that visits every run serves all of
+      // them, on the round after the append.
+      const runs = 5
+      const concurrency = 2
+      const { ids } = workspace(runs)
+      const { record, seen } = recorder()
+      // What the first round served, read from outside the subscription: a
+      // starved subscription never completes, and the counts still have to
+      // name the runs it served rather than time out with nothing to say.
+      let replayed = 0
+      const database = Layer.provideMerge(DurableWriter.layer(), NodeDatabase.layer({ filename: ":memory:" }))
+      const journal = SqlJournal.layer({ capacity: 64, overflow: "reject" }).pipe(
+        Layer.provide(Layer.provideMerge(JournalMigrations.layer, database))
+      )
+      const append = (durable: Journal.Service, id: JournalEvent.RunId, eventType: string) =>
+        durable.emitDurableUnfenced(
+          new JournalEvent.Input({ runId: id, sourceId: sourceId("source"), eventType, payload: { id } }, {
+            disableChecks: true
+          })
+        )
+      const settled = yield* (
+        Effect.gen(function*() {
+          const durable = yield* Journal.Journal
+          for (const id of ids) yield* append(durable, id, "created")
+          const server = yield* SyncServer.makeLiveWith({ concurrency, tailIntervalMs: 25 })
+          const follower = yield* Effect.forkChild(
+            Stream.runDrain(
+              server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: runs * 2 }).pipe(
+                Stream.tap(record)
+              )
+            ),
+            { startImmediately: true }
+          )
+          // The first round has to have served every seeded run before the
+          // live appends, or the test cannot tell a live entry from a replayed
+          // one.
+          yield* Effect.sleep("10 millis").pipe(
+            Effect.repeat({ until: () => seen.length >= runs, times: 200 })
+          )
+          replayed = seen.length
+          for (const id of ids) yield* append(durable, id, "live")
+          return yield* Fiber.join(follower)
+        }).pipe(
+          Effect.provide(Layer.mergeAll(
+            journal,
+            RunCatalog.layerStatic(ids),
+            SyncPrincipal.layerWorkspace("fan-out-suite")
+          )),
+          Effect.scoped,
+          Effect.timeoutOption("10 seconds")
+        )
+      )
+
+      // Every run was served twice: its seeded entry, then its live one.
+      expect(seen.slice(0, runs).sort()).toEqual(["run-0", "run-1", "run-2", "run-3", "run-4"])
+      expect(seen.slice(runs).sort()).toEqual(["run-0", "run-1", "run-2", "run-3", "run-4"])
+      expect(replayed).toBe(runs)
+      expect(Option.isSome(settled)).toBe(true)
+    }))
+
   it.live("walks one run's backlog across pages inside a single round", () =>
     Effect.gen(function*() {
       // A run with more unserved entries than one page must not be served one
