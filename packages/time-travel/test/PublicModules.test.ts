@@ -55,12 +55,7 @@ const runFork = (
   dependencies = forkDeps
 ) =>
   Effect.scoped(
-    Fork.fork({
-      parentRunId: "parent",
-      frame,
-      workspaceName: "fork-workspace",
-      workspacePath: "/tmp/fork-workspace"
-    }).pipe(
+    Fork.fork({ parentRunId: "parent", frame, workspaceRoot: "/tmp/lanes" }).pipe(
       Effect.provide(Layer.succeed(RunStore.RunStore, runs)),
       Effect.provide(Layer.succeed(TimeTravelStore, store)),
       Effect.provide(Layer.succeed(Jj.Jj, jj)),
@@ -184,10 +179,11 @@ describe("Fork.fork", () => {
         })
       )
 
+      const lane = Fork.workspaceNameFor(result.runId)
       expect(result).toMatchObject({ edge: { parentRunId: "parent", parentSeq: 0, kind: "fork" } })
       expect(calls).toEqual([
-        "add:fork-workspace:/tmp/fork-workspace",
-        "forget:fork-workspace"
+        `add:${lane}:/tmp/lanes/${lane}`,
+        `forget:${lane}`
       ])
     }))
 
@@ -196,12 +192,7 @@ describe("Fork.fork", () => {
       const addFailure = yield* (
         Effect.flip(
           Effect.scoped(
-            Fork.fork({
-              parentRunId: "parent",
-              frame,
-              workspaceName: "fork-workspace",
-              workspacePath: "/tmp/fork-workspace"
-            }).pipe(
+            Fork.fork({ parentRunId: "parent", frame, workspaceRoot: "/tmp/lanes" }).pipe(
               Effect.provide(Layer.succeed(RunStore.RunStore, RunStore.makeNoop({ get: () => Effect.succeed(row()) }))),
               Effect.provide(Layer.succeed(TimeTravelStore, MemoryTimeTravelStore.make())),
               Effect.provide(Layer.succeed(Jj.Jj, Jj.makeNoop({}))),
@@ -213,12 +204,7 @@ describe("Fork.fork", () => {
       const readFailure = yield* (
         Effect.flip(
           Effect.scoped(
-            Fork.fork({
-              parentRunId: "parent",
-              frame,
-              workspaceName: "fork-workspace",
-              workspacePath: "/tmp/fork-workspace"
-            }).pipe(
+            Fork.fork({ parentRunId: "parent", frame, workspaceRoot: "/tmp/lanes" }).pipe(
               Effect.provide(Layer.succeed(RunStore.RunStore, RunStore.makeNoop())),
               Effect.provide(Layer.succeed(TimeTravelStore, MemoryTimeTravelStore.make())),
               Effect.provide(Layer.succeed(Jj.Jj, Jj.makeNoop({}))),
@@ -245,12 +231,7 @@ describe("Fork.fork", () => {
         const failure = yield* (
           Effect.flip(
             Effect.scoped(
-              Fork.fork({
-                parentRunId: "parent",
-                frame,
-                workspaceName: "fork-workspace",
-                workspacePath: "/tmp/fork-workspace"
-              }).pipe(
+              Fork.fork({ parentRunId: "parent", frame, workspaceRoot: "/tmp/lanes" }).pipe(
                 Effect.provide(
                   Layer.succeed(RunStore.RunStore, RunStore.makeNoop({ get: () => Effect.succeed(liveRow) }))
                 ),

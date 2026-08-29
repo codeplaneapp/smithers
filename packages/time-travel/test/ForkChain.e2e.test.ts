@@ -7,6 +7,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { existsSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { workspaceNameFor } from "../src/internal/Fork.ts"
 import { TimeTravel } from "../src/TimeTravel.ts"
 import { jjInstalled, runReal, runState, withRealFixture } from "./RealTimeTravelHarness.ts"
 
@@ -82,7 +83,7 @@ describe.skipIf(!jjInstalled)("real public fork chain", () => {
               })
             )
 
-            const childWorkspace = join(workspaceRoot, "flows-fork-fork-root-2")
+            const childWorkspace = join(workspaceRoot, workspaceNameFor(first.child.runId))
             expect(existsSync(childWorkspace)).toBe(true)
             expect(first.cached.result).toEqual({ value: "cached" })
 
@@ -122,8 +123,7 @@ describe.skipIf(!jjInstalled)("real public fork chain", () => {
               })
             )
 
-            const grandchildSlug = `flows-fork-${first.child.runId}-3`.replace(/[^A-Za-z0-9._-]/g, "-")
-            const grandchildWorkspace = join(workspaceRoot, grandchildSlug)
+            const grandchildWorkspace = join(workspaceRoot, workspaceNameFor(second.grandchild.runId))
             expect(existsSync(grandchildWorkspace)).toBe(true)
             expect(grandchildWorkspace).not.toBe(childWorkspace)
             expect(second.parentRows).toEqual(first.parentRows)

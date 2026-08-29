@@ -324,7 +324,12 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
         Effect.sync(() => archived.some((record) => record.runId === runId && record.seq === seq))
       ))
     ),
-    createFork: Effect.fn("TimeTravelStore.createFork")((parentRunId, frame) =>
+    nextForkId: Effect.fn("TimeTravelStore.nextForkId")((parentRunId, frame) =>
+      Effect.annotateCurrentSpan({ parentRunId, lineageId: frame.lineageId, seq: frame.seq }).pipe(
+        Effect.andThen(Effect.sync(() => `${parentRunId}:fork:${++sequence}`))
+      )
+    ),
+    createFork: Effect.fn("TimeTravelStore.createFork")((parentRunId, frame, childRunId) =>
       Effect.annotateCurrentSpan({ parentRunId, lineageId: frame.lineageId, seq: frame.seq }).pipe(
         Effect.andThen(atomic(() => {
           fail("createFork:start")
@@ -337,7 +342,7 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
             }
             currentRunId = edges.find((edge) => edge.childRunId === currentRunId)?.parentRunId
           }
-          const runId = `${parentRunId}:fork:${++sequence}`
+          const runId = childRunId ?? `${parentRunId}:fork:${++sequence}`
           const prefix = records.filter((record) => record.runId === parentRunId && record.seq <= frame.seq)
           fail("createFork:copy")
           records.push(...prefix.map((record) => ({ ...record, runId, eventId: `fork:${runId}:${record.seq}` })))

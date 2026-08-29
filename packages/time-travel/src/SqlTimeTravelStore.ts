@@ -381,6 +381,29 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
         )
       )
 
+    /**
+     * The id the next fork off this frame carries.
+     *
+     * The ordinal counts the edges already hanging off `(parent, seq)`, so a
+     * frame forked twice numbers its children 1 and 2 rather than handing both
+     * the same name. It is read here, outside any transaction, so a caller can
+     * mint the id BEFORE it provisions the child's workspace; `createFork`
+     * reads it again inside its own transaction for the caller that mints
+     * nothing, and the run table's primary key is what settles a race between
+     * two mints that were never separated by a commit.
+     */
+    const nextForkIdFor = (
+      parentRunId: string,
+      frame: TimeTravelStore.Snapshot["frame"]
+    ): Effect.Effect<string, TimeTravelError> =>
+      sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM flows_time_travel_edges
+        WHERE parent_run_id = ${parentRunId} AND parent_seq = ${frame.seq}
+      `.pipe(
+        Effect.map((rows) => `${parentRunId}:fork:${frame.seq}:${Number(rows[0]!.count) + 1}`),
+        Effect.mapError(mapError)
+      )
+
     return TimeTravelStore.make({
       snapshotAt: Effect.fn("TimeTravelStore.snapshotAt")((runId, frame) =>
         Effect.annotateCurrentSpan({ runId, lineageId: frame.lineageId, seq: frame.seq }).pipe(Effect.andThen(
@@ -614,7 +637,12 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
           )
         ))
       ),
-      createFork: Effect.fn("TimeTravelStore.createFork")((parentRunId, frame) =>
+      nextForkId: Effect.fn("TimeTravelStore.nextForkId")((parentRunId, frame) =>
+        Effect.annotateCurrentSpan({ parentRunId, lineageId: frame.lineageId, seq: frame.seq }).pipe(
+          Effect.andThen(nextForkIdFor(parentRunId, frame))
+        )
+      ),
+      createFork: Effect.fn("TimeTravelStore.createFork")((parentRunId, frame, childRunId) =>
         Effect.annotateCurrentSpan({ parentRunId, lineageId: frame.lineageId, seq: frame.seq }).pipe(Effect.andThen(
           writer.write(
             Effect.gen(function*() {
@@ -648,11 +676,7 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
             `
                 currentRunId = parentEdges[0]?.parent_run_id
               }
-              const existing = yield* sql<{ readonly count: number }>`
-            SELECT COUNT(*) AS count FROM flows_time_travel_edges
-            WHERE parent_run_id = ${parentRunId} AND parent_seq = ${frame.seq}
-          `
-              const runId = `${parentRunId}:fork:${frame.seq}:${Number(existing[0]!.count) + 1}`
+              const runId = childRunId ?? (yield* nextForkIdFor(parentRunId, frame))
               const nowMs = yield* Clock.currentTimeMillis
               /**
                * THE CHILD'S STATE IS THE STATE **AT** THE FRAME.

@@ -24,6 +24,7 @@ import * as Option from "effect/Option"
 import * as Random from "effect/Random"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as CompensationHandlers from "../src/CompensationHandlers.ts"
+import * as Fork from "../src/internal/Fork.ts"
 import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
 import { TimeTravel } from "../src/TimeTravel.ts"
 import type { Audit } from "../src/TimeTravelStore.ts"
@@ -206,8 +207,10 @@ describe("TimeTravel", () => {
 
       expect(fork.edge).toMatchObject({ parentRunId: "run", parentSeq: 1, kind: "fork" })
       expect(fork.runId).toBe("run:fork:1")
-      // Derived, never caller-supplied: the position names the lane.
-      expect(workspaces).toEqual(["flows-fork-run-1@.flows/forks/flows-fork-run-1"])
+      // Derived, never caller-supplied: the CHILD names the lane, so a second
+      // fork of this frame lands beside this one rather than on top of it.
+      const lane = Fork.workspaceNameFor(fork.runId)
+      expect(workspaces).toEqual([`${lane}@.flows/forks/${lane}`])
     }))
 
   it.effect("rewinds at a position with the ownership claim wired internally", () =>
@@ -248,7 +251,8 @@ describe("TimeTravel", () => {
         workspaces
       )
 
-      expect(workspaces).toEqual(["flows-fork-run-1@/tmp/lanes/flows-fork-run-1"])
+      const lane = Fork.workspaceNameFor("run:fork:1")
+      expect(workspaces).toEqual([`${lane}@/tmp/lanes/${lane}`])
       expect(result.archive.archived).toBe(2)
     }))
 
