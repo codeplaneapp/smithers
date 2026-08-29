@@ -9,10 +9,10 @@ import { describe, expect, it } from "vitest"
  * A host decides its kill policy once, by decorating that service
  * (`ContainedSpawner` adds `forceKillAfter ?? graceMs` and a `ProcessLedger`
  * record), and every module that resolves the tag inherits the deadline and
- * the journal entry for free. A module that reaches for `node:child_process`
- * instead inherits neither: its children outlive a cancel by however long
- * they choose, and a hard-killed host leaves them with nothing recording that
- * they exist, so the next incarnation cannot reap them.
+ * the journal entry for free. A module that reaches for `child_process` (or
+ * `cluster`) instead inherits neither: its children outlive a cancel by
+ * however long they choose, and a hard-killed host leaves them with nothing
+ * recording that they exist, so the next incarnation cannot reap them.
  *
  * No behavioral test can see that. The bypassing module works, its own suite
  * is green, and the only symptom is a process still running on someone's
@@ -25,9 +25,10 @@ import { describe, expect, it } from "vitest"
  * The exceptions are named here with the reason each one is bounded, not
  * derived from what happens to be in the tree. The list is checked in both
  * directions, the way the coverage-gate deferral next door is: an unlisted
- * importer fails, and a listed file that no longer imports
- * `node:child_process` fails too, so the list expires on its own instead of
- * quietly widening the exemption.
+ * importer fails, and a listed file that no longer imports a process-starting
+ * module fails too, so the list expires on its own instead of quietly widening
+ * the exemption. The matcher itself is pinned against fixtures, because every
+ * spelling it fails to recognize is a bypass that reads as compliance.
  */
 describe("child-process containment conformance", () => {
   const packagesDir = resolve(import.meta.dirname, "..", "..")
@@ -86,18 +87,35 @@ describe("child-process containment conformance", () => {
   ])
 
   /**
-   * An import of `node:child_process`, in any of the three forms that
-   * actually bind the module.
+   * The specifier of a module that starts a process, in either spelling.
+   *
+   * The `node:` prefix is optional because omitting it binds exactly the same
+   * module, and nothing in this repository requires the prefix: no
+   * `packages/*\/eslint.config.js` configures `unicorn/prefer-node-protocol`
+   * or `no-restricted-imports`. A gate that matched only the prefixed
+   * spelling would therefore be one token wide.
+   *
+   * `cluster` is here beside `child_process` because `cluster.fork()` starts
+   * a process the same way and inherits the same nothing: no kill deadline,
+   * no ledger record. Nothing under `packages/*\/src` imports it today, so
+   * the exemption list below is unaffected. Threads are out of scope: a
+   * `node:worker_threads` worker dies with the process that made it.
+   */
+  const spawningModule = String.raw`["'](?:node:)?(?:child_process|cluster)["']`
+
+  /**
+   * An import of a process-starting module, in any of the three forms that
+   * actually bind it.
    *
    * Prose is deliberately not matched. Six modules name `node:child_process`
    * in a doc comment to say what they do or do not do, and a scan that
    * flagged those would push authors toward describing the boundary less
    * clearly, which is the opposite of the point.
    */
-  const importsChildProcess = (source: string): boolean =>
-    /^\s*import\s[^\n]*?from\s*["']node:child_process["']/m.test(source)
-    || /\bimport\s*\(\s*["']node:child_process["']\s*\)/.test(source)
-    || /\brequire\s*\(\s*["']node:child_process["']\s*\)/.test(source)
+  const importsSpawningModule = (source: string): boolean =>
+    new RegExp(String.raw`^\s*import\s[^\n]*?from\s*${spawningModule}`, "m").test(source)
+    || new RegExp(String.raw`\bimport\s*\(\s*${spawningModule}\s*\)`).test(source)
+    || new RegExp(String.raw`\brequire\s*\(\s*${spawningModule}\s*\)`).test(source)
 
   const isDirectory = (path: string) => {
     try {
@@ -131,9 +149,32 @@ describe("child-process containment conformance", () => {
   }
 
   const importers = sources
-    .filter(({ path }) => importsChildProcess(readFileSync(path, "utf8")))
+    .filter(({ path }) => importsSpawningModule(readFileSync(path, "utf8")))
     .map(({ id }) => id)
     .sort()
+
+  it("recognizes every specifier that binds a process-starting module", () => {
+    // The gate is only as wide as its matcher, and the matcher is the one part
+    // of this suite that scanning the tree cannot exercise: nothing under
+    // `packages/*/src` spells the bare specifier today, so a matcher that
+    // missed it would look exactly like a matcher that works, right up to the
+    // day someone writes it. `import { spawn } from "child_process"` binds the
+    // same module as the `node:`-prefixed form, and no eslint config in this
+    // repository requires the prefix, so both spellings are pinned here.
+    for (const specifier of ["node:child_process", "child_process", "node:cluster", "cluster"]) {
+      expect(importsSpawningModule(`import { spawn } from "${specifier}"\n`), specifier).toBe(true)
+      expect(importsSpawningModule(`import spawner from '${specifier}'\n`), specifier).toBe(true)
+      expect(importsSpawningModule(`const spawner = require("${specifier}")\n`), specifier).toBe(true)
+      expect(importsSpawningModule(`const spawner = await import("${specifier}")\n`), specifier).toBe(true)
+    }
+
+    // Prose that names the module to describe a boundary is not an import, and
+    // an importer of a different module that merely reads alike is not one
+    // either.
+    expect(importsSpawningModule(" * Resolves the tag instead of node:child_process.\n")).toBe(false)
+    expect(importsSpawningModule("// never child_process, always the tag\n")).toBe(false)
+    expect(importsSpawningModule("import { Worker } from \"node:worker_threads\"\n")).toBe(false)
+  })
 
   it("scans a universe that could actually contain a bypass", () => {
     // Guards the guard: a broken walk or a renamed directory would make every
