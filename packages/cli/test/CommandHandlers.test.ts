@@ -8,19 +8,30 @@
  * `--json`/`--quiet` presentation flags that change what the other flags mean.
  */
 import { NodeServices } from "@effect/platform-node"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { Control as ControlService, type ControlSchema } from "@smthrs/control"
 import * as TestControl from "@smthrs/control/test/TestControl"
 import { Cause, Effect, Exit, Layer, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { Command } from "effect/unstable/cli"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import * as CliError from "../src/CliError.ts"
 import { cli } from "../src/Command.ts"
 import * as ExecutorOwnership from "../src/ExecutorOwnership.ts"
 import * as Output from "../src/Output.ts"
+import * as Project from "../src/Project.ts"
 import { packageVersion } from "../src/Version.ts"
 
 const runCommand = Command.runWith(cli, { version: packageVersion })
+
+/** Temporary directories one case created, removed after it. */
+const staged: Array<string> = []
+
+afterEach(() => {
+  while (staged.length > 0) rmSync(staged.pop()!, { recursive: true, force: true })
+})
 
 /** The lines one invocation logged, joined; empty when the verb printed nothing. */
 const text = Effect.fnUntraced(function*(args: ReadonlyArray<string>) {
@@ -555,5 +566,71 @@ describe("exit statuses", () => {
     if (Exit.isFailure(exit)) {
       expect(String(Cause.squash(exit.cause))).not.toContain("system/test")
     }
+  })
+})
+
+describe("the claude mirror verbs", () => {
+  /** A project root the mirror's subscription registry can write into. */
+  const projectRoot = (): string => {
+    const directory = mkdtempSync(join(tmpdir(), "smithers-claude-"))
+    staged.push(directory)
+    return directory
+  }
+
+  it("blocks a tick until the run moves past --after-seq, then returns the frame", async () => {
+    const root = projectRoot()
+
+    const frame = await run(
+      Effect.gen(function*() {
+        const launched = yield* launch()
+        // The run has events past sequence 0, so a blocking tick wakes on the
+        // first pass rather than waiting out its deadline.
+        return yield* json(["--json", "claude", "tick", launched.runId, "--after-seq", "0", "--wait", "--timeout-ms", "5000"])
+      }).pipe(Effect.provide(Project.layer(root))),
+      testControl
+    )
+
+    expect(frame).toMatchObject({ contract: 2, timedOut: false })
+    expect((frame as { readonly seq: number }).seq).toBeGreaterThan(0)
+  })
+
+  it("returns a timed-out frame rather than blocking forever on a run that never moves", async () => {
+    const root = projectRoot()
+
+    const frame = await run(
+      json(["--json", "claude", "tick", "run-nothing-happens", "--wait", "--timeout-ms", "250"]).pipe(
+        Effect.provide(Project.layer(root))
+      ),
+      testControl
+    )
+
+    // The mirror reads `timedOut` to decide whether to tick again, so a
+    // deadline must produce a frame, never a failure.
+    expect(frame).toMatchObject({ contract: 2, status: "unknown", timedOut: true, seq: 0 })
+  })
+
+  it("returns one frame immediately without --wait", async () => {
+    const root = projectRoot()
+
+    const frame = await run(
+      json(["--json", "claude", "tick", "run-nothing-happens"]).pipe(Effect.provide(Project.layer(root))),
+      testControl
+    )
+
+    expect(frame).toMatchObject({ status: "unknown", timedOut: false })
+  })
+
+  it("takes node-wait's run id as a positional argument, beside the node id", async () => {
+    const root = projectRoot()
+
+    const settled = await run(
+      Effect.gen(function*() {
+        const launched = yield* launch()
+        return yield* json(["--json", "claude", "node-wait", launched.runId, "step", "--timeout-ms", "250"])
+      }).pipe(Effect.provide(Project.layer(root))),
+      testControl
+    )
+
+    expect(settled).toMatchObject({ nodeId: "step" })
   })
 })

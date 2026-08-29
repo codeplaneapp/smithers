@@ -24,11 +24,12 @@ const PLUGIN_SKILLS = {
 };
 
 /** Commands, flags, and APIs 1.0 removed (rc-contract.md section 4.2). */
+// rc-contract section 4.2 keeps `inspect`, `why`, `events`, `resume`,
+// `gateway`, and `workflow list` as aliases, so none of them belongs here.
 const REMOVED = [
   "smithers ui",
   "smithers gui",
   "smithers monitor",
-  "smithers inspect",
   "smithers graph",
   "smithers tree",
   "smithers eval",
@@ -86,7 +87,10 @@ for (const [agent, path] of Object.entries(PLUGIN_SKILLS)) {
       const [guidance, migration] = text.split("## Migrating a 0.x project");
       assert.ok(migration !== undefined, `${path} must tell an agent what to do with a 0.x project`);
       for (const removed of REMOVED) {
-        assert.ok(!guidance.includes(removed), `${path} still names "${removed}"`);
+        // Whole tokens: `smithers logs` is a shipped verb that starts with the
+        // removed alias `smithers log`, and substring matching confuses them.
+        const named = new RegExp(`${removed.replaceAll(/[.*+?^${}()|[\]\\-]/g, "\\$&")}(?![A-Za-z0-9_-])`);
+        assert.ok(!named.test(guidance), `${path} still names "${removed}"`);
       }
       assert.ok(migration.includes(".smithers/workflows/"), "the detection hint names the 0.x pack path");
     });

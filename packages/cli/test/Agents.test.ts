@@ -12,7 +12,6 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import * as Agents from "../src/Agents.ts"
-import * as Verb from "../src/Verb.ts"
 
 const staged: Array<string> = []
 
@@ -114,18 +113,47 @@ describe("registering the MCP server", () => {
 })
 
 describe("the smithers skill", () => {
-  it("is generated from the shipped verb table, so it cannot describe a removed verb", () => {
-    const contents = Agents.skill(Verb.shipped)
+  it("is the curated file this repository ships, not a rendering of the verb table", () => {
+    const curated = Agents.skill()
 
-    expect(contents).toContain("name: smithers")
-    for (const verb of Verb.shipped) expect(contents).toContain(`\`smithers ${verb.name}\``)
-    expect(contents).not.toContain("smithers rewind")
-    expect(contents).not.toContain("smithers hijack")
+    expect(curated._tag).toBe("found")
+    if (curated._tag !== "found") return
+    expect(curated.contents).toBe(readFileSync(curated.path, "utf8"))
+    expect(curated.contents).toContain("name: smithers")
+    // The curated skill teaches what a verb list cannot: the routing rules and
+    // the verbs 1.0 removed. A generated stub carries neither.
+    expect(curated.contents).toContain("SMITHERS_INSIDE_RUN")
+    expect(curated.contents).toContain("### Removed in 1.0")
+  })
+
+  it("prefers the packaged copy, and falls back to the curated source in a checkout", () => {
+    const directory = home()
+    const docs = join(directory, "packages", "cli", "docs")
+    mkdirSync(docs, { recursive: true })
+    mkdirSync(join(directory, "skills", "smithers"), { recursive: true })
+    writeFileSync(join(directory, "skills", "smithers", "SKILL.md"), "checkout", "utf8")
+
+    expect(Agents.skill(docs)).toMatchObject({ _tag: "found", contents: "checkout" })
+
+    writeFileSync(join(docs, "SKILL.md"), "packaged", "utf8")
+
+    expect(Agents.skill(docs)).toMatchObject({ _tag: "found", contents: "packaged" })
+  })
+
+  it("reports a missing curated skill rather than installing something else", () => {
+    const docs = join(home(), "packages", "cli", "docs")
+
+    const curated = Agents.skill(docs)
+
+    expect(curated._tag).toBe("missing")
+    if (curated._tag !== "missing") return
+    expect(curated.searched).toEqual(Agents.skillSources(docs))
+    expect(Agents.skillMissing(curated.searched)).toContain("pnpm docs:llms")
   })
 
   it("installs, reports where, and is idempotent", () => {
     const directory = home()
-    const contents = Agents.skill(Verb.shipped)
+    const contents = "the curated skill"
 
     const first = Agents.addSkill(Agents.find("claude")!, contents, directory)
 

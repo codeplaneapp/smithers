@@ -171,7 +171,7 @@ function shouldMirror(node) {
 
 function watcherPrompt(nodeId) {
   return 'Watch exactly one Smithers node until it is terminal. Run this command (re-run it while the JSON says timedOut true, up to 40 times):\n' +
-    `RUN-EXACTLY: ${CLI} claude node-wait ${shellQuote(nodeId)} --run-id ${shellQuote(runId)} --timeout-ms ${NODE_WAIT_TIMEOUT_MS} --json\n` +
+    `RUN-EXACTLY: ${CLI} claude node-wait ${shellQuote(runId)} ${shellQuote(nodeId)} --timeout-ms ${NODE_WAIT_TIMEOUT_MS} --json\n` +
     'Then return plain text only, built from the final JSON: if vanished is true return [skipped]; ' +
     'if state is failed return [failed] followed by the output; if state is cancelled return [cancelled]; ' +
     'otherwise return the output text (or [no output] when empty). Do not perform the node\'s work; only observe.'

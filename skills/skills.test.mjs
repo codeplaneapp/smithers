@@ -18,6 +18,8 @@ import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import * as Option from "effect/Option";
+import * as Unsupported from "../packages/cli/src/Unsupported.ts";
+import * as Verb from "../packages/cli/src/Verb.ts";
 import * as MarkdownFlow from "../packages/registry/src/MarkdownFlow.ts";
 
 const skillsRoot = dirname(fileURLToPath(import.meta.url));
@@ -31,41 +33,33 @@ const SKILLS = readdirSync(skillsRoot, { withFileTypes: true })
   .sort();
 
 /**
- * Verbs, flags, and APIs 1.0 removed. A curated skill that names one teaches an
- * agent to run something that exits 1 with a migration message.
- *
- * `rc-contract.md` section 4.2 is the authority for the verbs; the JSX entries
- * come from PLAN.md Phase 1.
+ * Every alias rc-contract section 4.2 keeps. Naming one of these is correct,
+ * not a defect: `inspect`, `why`, `events`, `resume`, `gateway`, and
+ * `workflow list` all still resolve.
  */
-const REMOVED = [
-  "smithers replay",
-  "smithers rewind",
-  "smithers fork",
-  "smithers hijack",
-  "smithers pause",
-  "smithers ui",
-  "smithers gui",
-  "smithers monitor",
-  "smithers eval",
-  "smithers scores",
-  "smithers chat",
-  "smithers ask",
-  "smithers agents",
-  "smithers usage",
-  "smithers cron",
-  "smithers listeners",
-  "smithers make-workflow",
-  "smithers starters",
-  "smithers share",
-  "smithers upgrade",
-  "smithers workflow run",
-  "smithers human",
-  "smithers ask-human",
+const ALIASES = Verb.shipped.flatMap((entry) => entry.aliases);
+
+/**
+ * `smithers <verb>` for every verb the CLI itself registers as removed.
+ *
+ * Read from `Unsupported.removedVerbs` rather than copied, because a
+ * hand-copied list drifts: the copy this replaced called `smithers inspect`
+ * removed, when it is a surviving alias of `status`. A group verb contributes
+ * its removed subcommands, not its bare name, so `workflow list` (an alias of
+ * `ls`) is not swept up with `workflow run`.
+ */
+const REMOVED_VERBS = Unsupported.removedVerbs.flatMap((entry) =>
+  entry.subcommands === undefined
+    ? [`smithers ${entry.name}`]
+    : entry.subcommands.map((subcommand) => `smithers ${entry.name} ${subcommand}`)
+);
+
+/**
+ * The 0.x flags, JSX APIs, and pack paths 1.0 removed. These have no CLI table
+ * to read: PLAN.md Phase 1 deleted them from the tree.
+ */
+const REMOVED_APIS = [
   "ask-human",
-  "smithers tree",
-  "smithers graph",
-  "smithers timeline",
-  "smithers inspect",
   "docs-full",
   "--backend",
   "--hot",
@@ -80,6 +74,22 @@ const REMOVED = [
   ".smithers/ui",
   ".smithers/prompts",
 ];
+
+/**
+ * Verbs, flags, and APIs 1.0 removed. A curated skill that names one teaches an
+ * agent to run something that exits 1 with a migration message.
+ */
+const REMOVED = [...REMOVED_VERBS, ...REMOVED_APIS];
+
+/**
+ * Whether a document names one removed token as a whole token.
+ *
+ * Substring matching reads `smithers logs` as the removed alias
+ * `smithers log`, so the boundary is what separates a real defect from a
+ * shipped verb that starts the same way.
+ */
+const names = (text, removed) =>
+  new RegExp(`${removed.replaceAll(/[.*+?^${}()|[\]\\-]/g, "\\$&")}(?![A-Za-z0-9_-])`).test(text);
 
 /** Where the removed vocabulary is legitimate: the pages that say it is gone. */
 const ALLOWED_TO_NAME_REMOVED = new Set(["smithers", "migrate-smithers-v1"]);
@@ -129,7 +139,7 @@ describe("the curated skill set", () => {
       it(`${name} names nothing 1.0 removed`, () => {
         const text = readFileSync(path, "utf8");
         for (const removed of REMOVED) {
-          assert.ok(!text.includes(removed), `${name}/SKILL.md still names "${removed}"`);
+          assert.ok(!names(text, removed), `${name}/SKILL.md still names "${removed}"`);
         }
       });
     }
@@ -148,6 +158,24 @@ describe("the smithers on-ramp", () => {
   it("states the clean break from the 0.x JSX stack", () => {
     assert.match(text, /no JSX workflow API/);
     assert.match(text, /`smithers migrate`/);
+  });
+
+  /** The rows of the on-ramp's command table, which is where a verb has to appear. */
+  const commandTable = text
+    .split("\n")
+    .filter((line) => line.startsWith("| `"))
+    .join("\n");
+
+  it("treats no surviving alias as a removed verb", () => {
+    // rc-contract section 4.2 keeps six aliases. A removed-verb list that
+    // swept one up would fail every skill that documents it correctly.
+    for (const alias of ALIASES) {
+      assert.ok(
+        !REMOVED_VERBS.includes(`smithers ${alias}`),
+        `${alias} survives as an alias of a shipped verb, so it is not a removed verb`,
+      );
+    }
+    assert.ok(ALIASES.includes("inspect") && ALIASES.includes("workflow list"), "the alias set must be non-empty");
   });
 
   it("documents every rc.0 verb that ships", () => {
@@ -180,7 +208,11 @@ describe("the smithers on-ramp", () => {
       "update",
       "bug",
     ]) {
-      assert.ok(text.includes(`\`${verb}`) || text.includes(`| \`${verb}`), `the on-ramp omits the verb ${verb}`);
+      // The verb has to open a backticked span in a table row and end there:
+      // a bare `includes("`run")` also matches `` `run_workflow` ``, so the
+      // check passed on verbs the table never listed.
+      const listed = new RegExp("`" + verb.replaceAll("-", "\\-") + "(?![A-Za-z0-9_-])");
+      assert.ok(listed.test(commandTable), `the on-ramp's command table omits the verb ${verb}`);
     }
   });
 

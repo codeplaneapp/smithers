@@ -25,6 +25,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
+import * as Capability from "../packages/capability/src/Capability.ts";
 import * as Discovery from "../packages/registry/src/Discovery.ts";
 import * as MarkdownFlow from "../packages/registry/src/MarkdownFlow.ts";
 import * as Detect from "../packages/migrate/src/Detect.ts";
@@ -132,6 +133,76 @@ describe("the staged prompt bodies", () => {
         "props.schema",
       ]) {
         assert.ok(!text.includes(removed), `${name} still mentions "${removed}"`);
+      }
+    });
+  }
+});
+
+describe("the capabilities the staged prompt bodies declare", () => {
+  const files = markdownFlows();
+
+  /** A command line each `proc:spawn` grant has to permit to be worth anything. */
+  const COMMANDS = ["pnpm test", "git push origin main", "node scripts/check-docs.mjs"];
+
+  for (const file of files) {
+    const name = relative(flowsRoot, dirname(file)).split("\\").join("/");
+
+    it(`${name} declares capabilities the permission kernel can parse`, () => {
+      const declared = MarkdownFlow.fromMarkdown({
+        text: readFileSync(file, "utf8"),
+        path: relative(repoRoot, file).split("\\").join("/"),
+        baseDirectory: dirname(file),
+        naming: "path",
+        name: Option.some(name),
+        dirBasename: name.split("/").pop(),
+        provenance: { source: "project", root: flowsRoot },
+      }).descriptor.value.capabilities;
+
+      for (const literal of declared) {
+        // The registry stores whatever string the frontmatter carries, so a
+        // typo inside a resource is silently accepted here and only refused
+        // later, at the cell boundary, when the action asks for a capability
+        // nobody granted. Parse each literal the way the kernel does.
+        const parsed = Capability.parse(literal);
+        assert.ok(Option.isSome(parsed), `${literal} is not a capability the kernel can parse`);
+        assert.equal(
+          parsed.value.resource,
+          parsed.value.resource.trim(),
+          `${literal} has whitespace around its resource, which no request can match`,
+        );
+      }
+    });
+
+    it(`${name} grants a real command line where it asks to spawn one`, () => {
+      const declared = MarkdownFlow.fromMarkdown({
+        text: readFileSync(file, "utf8"),
+        path: relative(repoRoot, file).split("\\").join("/"),
+        baseDirectory: dirname(file),
+        naming: "path",
+        name: Option.some(name),
+        dirBasename: name.split("/").pop(),
+        provenance: { source: "project", root: flowsRoot },
+      }).descriptor.value.capabilities;
+
+      const spawns = declared.filter((literal) => literal.startsWith("proc:spawn"));
+      if (spawns.length === 0) return;
+
+      for (const command of COMMANDS) {
+        const request = Capability.make("proc:spawn", command);
+        assert.ok(
+          spawns.some((literal) => {
+            const parsed = Capability.parse(literal);
+            return Option.isSome(parsed) &&
+              Capability.matches(
+                new Capability.CapabilityPattern({
+                  action: parsed.value.action,
+                  resource: parsed.value.resource,
+                }),
+                request,
+              );
+          }),
+          `${name} declares ${JSON.stringify(spawns)} but none of them permits \`${command}\``,
+        );
       }
     });
   }

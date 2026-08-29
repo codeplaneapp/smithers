@@ -104,9 +104,12 @@ describe("the commands it builds", () => {
     const find = (prefix) => commands.find((command) => command.startsWith(prefix));
     assert.equal(find("up "), "up ${shellQuote(String(workflowArgs.flow))} -d${dataFlag} --json");
     assert.equal(find("claude tick"), "claude tick ${shellQuote(runId)} --after-seq ${seq}${waitFlag} --json");
+    // Two positionals in the CLI's own order, run id first. 0.x wrote the node
+    // id positionally and the run id as `--run-id`; rc.0 takes both
+    // positionally, and `effect/unstable/cli` exits 2 on the undeclared flag.
     assert.equal(
       find("claude node-wait"),
-      "claude node-wait ${shellQuote(nodeId)} --run-id ${shellQuote(runId)} --timeout-ms ${NODE_WAIT_TIMEOUT_MS} --json",
+      "claude node-wait ${shellQuote(runId)} ${shellQuote(nodeId)} --timeout-ms ${NODE_WAIT_TIMEOUT_MS} --json",
     );
   });
 
@@ -215,10 +218,10 @@ describe("what it tells the operator", () => {
   });
 
   it("names no removed verb", () => {
+    // rc-contract section 4.2 keeps `inspect`, `why`, `events`, `resume`,
+    // `gateway`, and `workflow list` as aliases; naming one is correct.
     for (const removed of [
       "smithers ui ",
-      "smithers inspect",
-      "workflow list",
       "smithers workflow run",
       "smithers monitor",
       "smithers graph",

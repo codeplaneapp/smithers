@@ -764,7 +764,9 @@ const sessionId = (raw: Option.Option<string>): string =>
 const claudeTick = Command.make("tick", {
   runId: Argument.string("run-id"),
   session: claudeSession,
-  afterSeq: Flag.integer("after-seq").pipe(Flag.withDefault(0))
+  afterSeq: Flag.integer("after-seq").pipe(Flag.withDefault(0)),
+  wait: Flag.boolean("wait"),
+  timeout: Flag.integer("timeout-ms").pipe(Flag.withDefault(120_000))
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -773,16 +775,28 @@ const claudeTick = Command.make("tick", {
     // Following a run is subscribing: every tick re-asserts the entry, so a
     // registry lost to a crash repairs itself on the next frame.
     yield* Effect.sync(() => ClaudeMirror.subscribe(projectRoot, config.runId, sessionId(config.session)))
-    const collected = yield* eventsOf(control, config.runId)
-    const run = yield* summaryOf(control, config.runId)
-    const digest = Forensics.digest(collected)
-    yield* renderJson(
-      ClaudeMirror.frame(config.runId, run, collected, {
+    // `--wait` is what makes a mirror affordable. Without it a follower polls
+    // on its own clock and spends one agent turn per poll on a run that has
+    // not moved; with it the process blocks here, in one cheap loop, and the
+    // follower spends a turn only when the run actually changed. A deadline
+    // always produces a frame with `timedOut: true` rather than a failure, so
+    // the follower can tick again without treating expiry as an error.
+    const deadline = Date.now() + config.timeout
+    for (;;) {
+      const collected = yield* eventsOf(control, config.runId)
+      const run = yield* summaryOf(control, config.runId)
+      const digest = Forensics.digest(collected)
+      const expired = Date.now() >= deadline
+      const frame = ClaudeMirror.frame(config.runId, run, collected, {
         afterSeq: config.afterSeq,
-        parked: { question: digest.parkedQuestion, approval: digest.parkedApproval }
+        parked: { question: digest.parkedQuestion, approval: digest.parkedApproval },
+        timedOut: config.wait && expired
       })
-    )
-  })).pipe(Command.withDescription("Print one mirror frame for a run"))
+      const moved = run !== undefined && (frame.seq > config.afterSeq || ClaudeMirror.isTerminal(frame.status))
+      if (!config.wait || moved || expired) return yield* renderJson(frame)
+      yield* Effect.sleep("250 millis")
+    }
+  })).pipe(Command.withDescription("Print one mirror frame for a run; --wait blocks until the run moves"))
 
 const claudeNodeWait = Command.make("node-wait", {
   runId: Argument.string("run-id"),
@@ -910,8 +924,11 @@ const skillsAdd = Command.make("add", { agent: Flag.string("agent").pipe(Flag.op
         })
       )
     }
-    const contents = Agents.skill(Verb.shipped)
-    yield* render(yield* Effect.sync(() => targets.map((agent) => Agents.addSkill(agent, contents))))
+    const curated = Agents.skill()
+    if (curated._tag === "missing") {
+      return yield* Effect.fail(new CliError.UnsupportedError({ message: Agents.skillMissing(curated.searched) }))
+    }
+    yield* render(yield* Effect.sync(() => targets.map((agent) => Agents.addSkill(agent, curated.contents))))
   })).pipe(Command.withDescription("Install the smithers skill into an agent"))
 
 const skillsList = Command.make("list", {}, () =>
