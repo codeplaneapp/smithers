@@ -107,7 +107,10 @@ tracked top-level area in the current repository. Each entry must be one of:
 - `keep`: independent of the runtime and safe to retain unchanged;
 - `delete`: obsolete, duplicated, generated, or a superseded proof of concept;
 - `decide`: blocked on an explicit product decision, with an owner and exit
-  condition.
+  condition;
+- `import`: a flows-side area copied in Phase 2 by the Phase 1/2 driver; root
+  files that must be merged with a surviving file are marked `reconcile` in the
+  row's notes.
 
 No `decide` entries may remain at RC time.
 
