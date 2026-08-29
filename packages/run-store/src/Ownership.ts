@@ -190,6 +190,14 @@ export const leaseLiveness = (
  * browser composition has no process table to ask, so it keeps
  * {@link leaseLiveness}.
  *
+ * `@smthrs/platform-node`'s `HostLiveness.isAlive` asks the same question of
+ * the same process table and differs in one deliberate place: it answers
+ * `true` for an owner on another host, which refuses the steal outright, while
+ * this check answers `false` and lets the expired lease decide. The difference
+ * matters after a host dies for good — under the refusing answer its runs are
+ * never reclaimed by anyone, because no other machine can ever produce
+ * evidence about its pids.
+ *
  * @since 0.1.0
  * @category ownership
  */
