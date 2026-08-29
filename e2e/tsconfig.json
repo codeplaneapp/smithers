@@ -17,5 +17,5 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["harness/**/*", "faults/**/*", "fixtures/**/*", "budgets/**/*", "ci/**/*", "*.ts"]
+  "include": ["harness/**/*", "faults/**/*", "fixtures/**/*", "budgets/**/*", "ci/**/*", "vitest.config.ts"]
 }

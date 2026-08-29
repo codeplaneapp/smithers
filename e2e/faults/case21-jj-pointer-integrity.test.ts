@@ -29,13 +29,15 @@ const jjInstalled = (() => {
   }
 })()
 
-describe.runIf(Boolean(process.env.CI) && !jjInstalled)("case21 (CI guard)", () => {
-  it("fails loudly when CI has no jj on PATH", () => {
-    throw new Error(
-      "jj is not installed on this runner, so case21 silently skipped. Install jj in the e2e CI job."
-    )
-  })
-})
+// A missing binary is a hard failure on CI and a quiet skip locally. It is a
+// module-level throw rather than a guard suite so that a runner WITH jj emits
+// no skipped test: the fault runner reads a skip as an incomplete case, and a
+// permanently incomplete case is indistinguishable from a broken one.
+if (!jjInstalled && Boolean(process.env.CI)) {
+  throw new Error(
+    "jj is not installed on this runner, so this case would silently skip. Install jj in the e2e CI job."
+  )
+}
 
 describe.skipIf(!jjInstalled)("case21 jj pointer integrity", () => {
   let repository: string
