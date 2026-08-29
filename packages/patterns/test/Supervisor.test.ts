@@ -1,0 +1,352 @@
+import { describe, it } from "@effect/vitest"
+import { Flow, Graph, Node } from "@smthrs/core"
+import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
+import * as Latch from "effect/Latch"
+import * as Schema from "effect/Schema"
+import { expect } from "vitest"
+import { PatternError } from "../src/PatternError.ts"
+import * as Supervisor from "../src/Supervisor.ts"
+
+const step = Flow.make({
+  input: Schema.Unknown,
+  output: Schema.Unknown,
+  body: (input) => Node.succeed(input)
+})
+
+const literal = (node: Graph.GraphNode): Record<string, unknown> => {
+  const first = node.keyMaterial.inputs[0]
+  if (first === undefined || first._tag !== "Literal") return {}
+  const value = first.value
+  return typeof value === "object" && value !== null ? value as Record<string, unknown> : {}
+}
+
+const phase = (node: Graph.GraphNode): unknown => literal(node).phase
+
+const calls = (graph: Graph.Graph): ReadonlyArray<Graph.GraphNode> =>
+  Graph.nodes(graph).filter((node) => node.kind === "FlowCall")
+
+const inPhase = (graph: Graph.Graph, name: string): ReadonlyArray<Graph.GraphNode> =>
+  calls(graph).filter((node) => phase(node) === name)
+
+const plan = {
+  tasks: [
+    { id: "a", workerType: "coder" },
+    { id: "b", workerType: "coder" },
+    { id: "c", workerType: "tester" }
+  ]
+}
+
+const goal = { goal: "ship the feature", tasks: plan.tasks }
+
+describe("Supervisor", () => {
+  it("declares one worker call per plan task per round and a single finalize", () => {
+    const supervisor = Supervisor.make({
+      plan: step,
+      workers: { coder: step, tester: step },
+      review: step,
+      finalize: step,
+      maxRounds: 3,
+      concurrency: 2
+    })
+
+    expect(Flow.isFlow(supervisor)).toBe(true)
+    const graph = Graph.build(supervisor, goal)
+    expect(calls(graph)).toHaveLength(14)
+    expect(inPhase(graph, "plan")).toHaveLength(1)
+    expect(inPhase(graph, "work")).toHaveLength(9)
+    expect(inPhase(graph, "review")).toHaveLength(3)
+    expect(inPhase(graph, "finalize")).toHaveLength(1)
+    expect(Graph.diagnostics(graph)).toEqual([])
+  })
+
+  it("routes each declared worker call to the task's workerType", () => {
+    const coder = Flow.make({ input: Schema.Unknown, output: Schema.Unknown, body: (input) => Node.succeed(input) })
+    const tester = Flow.make({ input: Schema.Unknown, output: Schema.Unknown, body: () => Node.succeed("tested") })
+    const graph = Graph.build(
+      Supervisor.make({
+        plan: step,
+        workers: { coder, tester },
+        review: step,
+        finalize: step,
+        maxRounds: 1,
+        concurrency: 3
+      }),
+      goal
+    )
+    const routed = inPhase(graph, "work").map((node) => literal(node).task)
+
+    expect(routed).toEqual(plan.tasks)
+  })
+
+  it("threads the previous round's review into the next round's worker calls", () => {
+    const graph = Graph.build(
+      Supervisor.make({
+        plan: step,
+        workers: { coder: step, tester: step },
+        review: step,
+        finalize: step,
+        maxRounds: 2,
+        concurrency: 3
+      }),
+      goal
+    )
+    const firstReview = inPhase(graph, "review").find((node) => literal(node).round === 1)
+    const second = inPhase(graph, "work").filter((node) => literal(node).round === 2)
+
+    expect(firstReview).toBeDefined()
+    expect(second).toHaveLength(3)
+    for (const node of second) {
+      const refs = node.keyMaterial.inputs.filter((ref) => ref._tag === "Ref" && ref.from === firstReview!.id)
+      expect(refs.map((ref) => ref._tag === "Ref" ? ref.path.join(".") : "").sort()).toEqual(["", "retriable"])
+    }
+    for (const node of inPhase(graph, "work").filter((node) => literal(node).round === 1)) {
+      expect(node.keyMaterial.inputs.some((ref) => ref._tag === "Ref" && ref.from === firstReview!.id)).toBe(false)
+    }
+  })
+
+  it("batches declared worker calls at the concurrency bound", () => {
+    const workers = { coder: step, tester: step }
+    const wide = Graph.build(
+      Supervisor.make({ plan: step, workers, review: step, finalize: step, maxRounds: 1, concurrency: 3 }),
+      goal
+    )
+    const narrow = Graph.build(
+      Supervisor.make({ plan: step, workers, review: step, finalize: step, maxRounds: 1, concurrency: 1 }),
+      goal
+    )
+
+    expect(Graph.nodes(wide).filter((node) => node.kind === "All")).toHaveLength(1)
+    expect(Graph.nodes(narrow).filter((node) => node.kind === "All")).toHaveLength(3)
+    expect(calls(wide)).toHaveLength(calls(narrow).length)
+  })
+
+  it("refuses to declare a plan it cannot route", () => {
+    const supervisor = Supervisor.make({
+      plan: step,
+      workers: { coder: step },
+      review: step,
+      finalize: step,
+      maxRounds: 1,
+      concurrency: 1
+    })
+
+    expect(() => Graph.build(supervisor, "ship the feature")).toThrow(PatternError)
+    expect(() => Graph.build(supervisor, { tasks: [] })).toThrow(PatternError)
+    expect(() => Graph.build(supervisor, { tasks: [{ id: "a" }] })).toThrow(PatternError)
+    expect(() =>
+      Graph.build(supervisor, { tasks: [{ id: "a", workerType: "coder" }, { id: "a", workerType: "coder" }] })
+    )
+      .toThrow(PatternError)
+    expect(() => Graph.build(supervisor, { tasks: [{ id: "a", workerType: "painter" }] })).toThrow(PatternError)
+  })
+
+  it("rejects invalid bounds", () => {
+    expect(() =>
+      Supervisor.make({
+        plan: step,
+        workers: { coder: step },
+        review: step,
+        finalize: step,
+        maxRounds: 0,
+        concurrency: 1
+      })
+    ).toThrow(PatternError)
+    expect(() =>
+      Supervisor.make({
+        plan: step,
+        workers: { coder: step },
+        review: step,
+        finalize: step,
+        maxRounds: 1,
+        concurrency: 0
+      })
+    ).toThrow(PatternError)
+    expect(() =>
+      Supervisor.make({
+        plan: step,
+        workers: {},
+        review: step,
+        finalize: step,
+        maxRounds: 1,
+        concurrency: 1
+      })
+    ).toThrow(PatternError)
+  })
+
+  it.effect("re-delegates only the retriable tasks and finalizes every output", () =>
+    Effect.gen(function*() {
+      const attempts: Array<string> = []
+      const reviews = [{ allDone: false, retriable: ["b"] }, { allDone: true, retriable: [] }]
+      let bFailures = 0
+
+      const result = yield* Supervisor.run("goal", {
+        maxRounds: 3,
+        concurrency: 2,
+        plan: () => Effect.succeed(plan),
+        worker: ({ round, task }) =>
+          Effect.suspend(() => {
+            attempts.push(`${round}:${task.id}`)
+            if (task.id === "b" && bFailures === 0) {
+              bFailures += 1
+              return Effect.fail("b exploded")
+            }
+            return Effect.succeed(`${task.id}-done`)
+          }),
+        review: ({ round }) => Effect.succeed(reviews[round - 1]!),
+        finalize: ({ results }) =>
+          Effect.succeed(results.map((outcome) => outcome._tag === "Done" ? outcome.output : `${outcome.id}-failed`))
+      })
+
+      expect(attempts).toEqual(["1:a", "1:b", "1:c", "2:b"])
+      expect(result.exhausted).toBe(false)
+      expect(result).toMatchObject({ rounds: 2, final: ["a-done", "b-done", "c-done"] })
+    }))
+
+  it.effect("reports the last review as exhausted when the round bound is reached", () =>
+    Effect.gen(function*() {
+      let finalized = 0
+      const review = { allDone: false, retriable: ["a", "b", "c"] }
+
+      const result = yield* Supervisor.run("goal", {
+        maxRounds: 2,
+        concurrency: 3,
+        plan: () => Effect.succeed(plan),
+        worker: ({ task }) => Effect.succeed(`${task.id}-done`),
+        review: () => Effect.succeed(review),
+        finalize: () =>
+          Effect.sync(() => {
+            finalized += 1
+            return "never"
+          })
+      })
+
+      expect(result).toEqual({ exhausted: true, rounds: 2, review })
+      expect(finalized).toBe(0)
+    }))
+
+  it.effect("stops when an unfinished review names nothing to re-delegate", () =>
+    Effect.gen(function*() {
+      const review = { allDone: false, retriable: [] }
+      const rounds: Array<number> = []
+
+      const result = yield* Supervisor.run("goal", {
+        maxRounds: 5,
+        concurrency: 3,
+        plan: () => Effect.succeed(plan),
+        worker: ({ round, task }) =>
+          Effect.suspend(() => {
+            rounds.push(round)
+            return Effect.succeed(`${task.id}-done`)
+          }),
+        review: () => Effect.succeed(review),
+        finalize: () => Effect.succeed("never")
+      })
+
+      expect(result).toEqual({ exhausted: true, rounds: 1, review })
+      expect(rounds).toEqual([1, 1, 1])
+    }))
+
+  it.effect("never runs more workers at once than the concurrency bound", () =>
+    Effect.gen(function*() {
+      // The test holds every started worker on `held`, so the round cannot make
+      // progress on its own: what runs concurrently is what the bound admits,
+      // not what the scheduler happened to interleave.
+      const held = yield* Latch.make()
+      const saturated = yield* Latch.make()
+      const entered: Array<string> = []
+      let inFlight = 0
+      let peak = 0
+
+      const running = yield* Supervisor.run("goal", {
+        maxRounds: 1,
+        concurrency: 2,
+        plan: () =>
+          Effect.succeed({
+            tasks: ["a", "b", "c", "d", "e", "f"].map((id) => ({ id, workerType: "coder" }))
+          }),
+        worker: ({ task }) =>
+          Effect.gen(function*() {
+            inFlight += 1
+            peak = Math.max(peak, inFlight)
+            entered.push(task.id)
+            if (entered.length === 2) yield* Latch.open(saturated)
+            yield* Latch.await(held)
+            inFlight -= 1
+            return "ok"
+          }),
+        review: () => Effect.succeed({ allDone: true, retriable: [] }),
+        finalize: () => Effect.succeed("done")
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+
+      yield* Latch.await(saturated)
+
+      // Both slots are taken and neither can finish, so no third worker started.
+      expect(entered).toEqual(["a", "b"])
+      expect(inFlight).toBe(2)
+
+      yield* Latch.open(held)
+      const result = yield* Fiber.join(running)
+
+      expect(result).toEqual({ exhausted: false, rounds: 1, final: "done" })
+      expect(entered).toEqual(["a", "b", "c", "d", "e", "f"])
+      expect(peak).toBe(2)
+    }))
+
+  it.effect("rejects a plan whose task ids repeat instead of reviewing one outcome twice", () =>
+    Effect.gen(function*() {
+      let ran = 0
+
+      const failure = yield* Supervisor.run("goal", {
+        maxRounds: 2,
+        concurrency: 2,
+        plan: () => Effect.succeed({ tasks: [{ id: "a", workerType: "coder" }, { id: "a", workerType: "coder" }] }),
+        worker: () =>
+          Effect.sync(() => {
+            ran += 1
+            return "ok"
+          }),
+        review: () => Effect.succeed({ allDone: true }),
+        finalize: () => Effect.succeed("done")
+      }).pipe(Effect.flip)
+
+      expect(failure).toBeInstanceOf(PatternError)
+      expect((failure as PatternError).message).toBe("Supervisor task ids must be unique")
+      expect(ran).toBe(0)
+    }))
+
+  it.effect("rejects invalid runtime bounds", () =>
+    Effect.gen(function*() {
+      const failure = yield* Supervisor.run("goal", {
+        maxRounds: 0,
+        concurrency: 1,
+        plan: () => Effect.succeed(plan),
+        worker: () => Effect.succeed("ok"),
+        review: () => Effect.succeed({ allDone: true }),
+        finalize: () => Effect.succeed("done")
+      }).pipe(Effect.flip)
+
+      expect(failure).toBeInstanceOf(PatternError)
+    }))
+
+  it("gives two concurrency bounds different step identity at the same topology", () => {
+    const material = (concurrency: number) =>
+      Graph.nodes(Graph.build(
+        Supervisor.make({
+          plan: step,
+          workers: { coder: step },
+          review: step,
+          finalize: step,
+          maxRounds: 1,
+          concurrency
+        }),
+        { goal: "ship the feature", tasks: [{ id: "a", workerType: "coder" }] }
+      ))
+
+    const one = material(1)
+    const two = material(2)
+
+    expect(one.map((node) => node.kind)).toEqual(two.map((node) => node.kind))
+    expect(one.map((node) => node.keyMaterial.body)).not.toEqual(two.map((node) => node.keyMaterial.body))
+  })
+})
