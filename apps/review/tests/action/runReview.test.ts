@@ -14,6 +14,11 @@ afterEach(() => {
   delete process.env.SMITHERS_FAKE_NODE_EXIT;
 });
 
+// Every test here spawns a real process. Bun's 5 s default is a cold-start
+// budget, not a correctness one: the first spawn on a loaded machine has
+// exceeded it. Each test carries an explicit budget instead.
+const SPAWN_BUDGET = 30_000;
+
 describe("runReview", () => {
   test("resolves with 0 when the process exits 0", async () => {
     const code = await runReview({
@@ -27,7 +32,7 @@ describe("runReview", () => {
       nodePath: FAKE_NODE,
     });
     expect(code).toBe(0);
-  });
+  }, SPAWN_BUDGET);
 
   test("resolves with non-zero when the process exits non-zero", async () => {
     process.env.SMITHERS_FAKE_NODE_EXIT = "7";
@@ -41,7 +46,7 @@ describe("runReview", () => {
       nodePath: FAKE_NODE,
     });
     expect(code).toBe(7);
-  });
+  }, SPAWN_BUDGET);
 
   test("passes the CLI path derived from smithersRoot as the first argument", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "smithers-root-"));
@@ -62,7 +67,7 @@ describe("runReview", () => {
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
-  });
+  }, SPAWN_BUDGET);
 
   test("passes workspace, --pr, prNumber, and --publish as arguments", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "smithers-root-"));
@@ -86,7 +91,7 @@ describe("runReview", () => {
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
-  });
+  }, SPAWN_BUDGET);
 
   test("appends --quiz <mode> when quiz is set, and omits it otherwise", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "smithers-root-"));
@@ -120,7 +125,7 @@ describe("runReview", () => {
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
-  });
+  }, SPAWN_BUDGET);
 
   test("runs with smithersRoot as cwd, not the workspace", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "smithers-root-"));
@@ -142,5 +147,5 @@ describe("runReview", () => {
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
-  });
+  }, SPAWN_BUDGET);
 });
