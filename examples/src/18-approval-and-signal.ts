@@ -33,7 +33,7 @@
 import { Control, ControlLive, ControlRuntime, SqlControlRuntime } from "@smthrs/control"
 import * as ControlExecutor from "@smthrs/control/ControlExecutor"
 import type * as ControlSchema from "@smthrs/control/ControlSchema"
-import { Action, DurableDeferred, Flow, Interpreter, WaitFor } from "@smthrs/flow"
+import { Action, DurableDeferred, Flow, FlowRuntime, Interpreter, WaitFor } from "@smthrs/flow"
 import { Journal, type JournalEvent } from "@smthrs/journal"
 import { NotificationQueue } from "@smthrs/notifications"
 import { Registry } from "@smthrs/registry"
@@ -91,7 +91,7 @@ export const deliverSignals = (
 ): Effect.Effect<
   ReadonlyArray<string>,
   never,
-  ControlRuntime.ControlRuntime | DurableDeferred.DurableDeferred.Requirements
+  ControlRuntime.ControlRuntime | FlowRuntime.FlowRuntime
 > =>
   Effect.gen(function*() {
     const runtime = yield* ControlRuntime.ControlRuntime

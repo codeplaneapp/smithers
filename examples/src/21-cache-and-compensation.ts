@@ -143,12 +143,17 @@ export const Package = Flow.make("examples/Package", {
 /** The declared atom the compensating flow's body names. */
 export const Apply = Action.make("examples/ApplyMigration", {
   payload: { migration: Schema.String },
-  success: Schema.String
+  success: Schema.String,
+  // The retry ladder can still run out, so the failure stays declared rather
+  // than swallowed. It does not happen here — attempt two succeeds — and a
+  // caller that hid it would turn an exhausted migration into a silent one.
+  error: Interrupted
 })
 
 export const Migrate = Flow.make("examples/Migrate", {
   payload: { migration: Schema.String },
   success: Schema.String,
+  error: Interrupted,
   body: (payload: { readonly migration: string }) => Apply.call(payload)
 })
 

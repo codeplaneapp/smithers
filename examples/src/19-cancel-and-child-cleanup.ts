@@ -99,7 +99,11 @@ const stateOf = (row: {
 })
 
 /** The engine, on the real Node host, with permission to spawn. */
-const host = (filename: string, hostId: string, registrations: Layer.Layer<never, never, never>) =>
+const host = <Registered, RegistrationRequirements>(
+  filename: string,
+  hostId: string,
+  registrations: Layer.Layer<Registered, never, RegistrationRequirements>
+) =>
   NodeRuntime.layerHost(
     {
       filename,
@@ -163,11 +167,14 @@ export const cascade = (filename: string): Effect.Effect<CascadeSummary> =>
         // transition and the descendants' cancel requests commit together.
         yield* Deploy.interrupt(deployRunId)
         yield* until(
-          Effect.map(runs.get(deployRunId), (row) => row.status === "cancelled"),
+          Effect.map(runs.get(deployRunId), (row) => row.status === "cancelled").pipe(Effect.orDie),
           5_000
         )
         yield* until(
-          Effect.map(runs.get(childId), (row) => row.cancelRequestedAtMs !== null || row.status === "cancelled"),
+          Effect.map(
+            runs.get(childId),
+            (row) => row.cancelRequestedAtMs !== null || row.status === "cancelled"
+          ).pipe(Effect.orDie),
           5_000
         )
         const after = yield* Effect.forEach([deployRunId, childId], (runId) =>
