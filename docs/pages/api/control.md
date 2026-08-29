@@ -1,3 +1,7 @@
+---
+description: "@smthrs/control: the control services, their RPC group, the server and client, and the SQL control runtime."
+---
+
 # `@smthrs/control`
 
 This page is the public API reference for the control plane: the

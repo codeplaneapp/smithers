@@ -8,6 +8,11 @@ The journal is an append-only history, and a long-lived run makes it unbounded. 
 
 The design follows Temporal, where the durable "snapshot" is mutable state pinned to a history offset and a reader of trimmed history gets a typed error, never a silently shortened history (`reference/temporal/common/persistence/history_manager.go`).
 
+A checkpoint here is a journal checkpoint. Two other things in Smithers carry
+the same word: `ctx.checkpoint()` inside an agent cell pins a git tree, and
+Smithers 0.x had worktree-lane checkpoints, which 1.0.0-rc.0 does not have at
+all. See [time travel](/concepts/time-travel).
+
 ## Checkpoint
 
 ```ts

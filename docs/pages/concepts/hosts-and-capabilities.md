@@ -1,3 +1,7 @@
+---
+description: "The closed host surface, the permission kernel that decorates it, and the transaction that captures a hermetic boundary."
+---
+
 # Hosts and capabilities
 
 This page describes the portable host surface and the permission kernel that mediates side effects. It covers engine-facing filesystem, process, network, and workspace operations, not higher-level application policy.

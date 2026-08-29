@@ -1,3 +1,7 @@
+---
+description: "Inspect, fork, and rewind over recorded history, and what of it the release candidate actually ships."
+---
+
 # Time travel
 
 This page explains the inspect, fork, and rewind operations of the one
@@ -51,9 +55,13 @@ result or cancellation fields and clones its attempt rows. The fork can
 therefore be claimed and driven after engine layers restart. The existing
 `flows_time_travel_edges` row remains the lineage source of truth.
 
-Run state and attempts are not currently versioned by journal frame. A fork
-uses the parent's current persisted snapshot and attempts; automatic
-frame-addressed engine snapshots remain planned integration.
+A fork's state is the state at the frame. `SqlTimeTravelStore.createFork`
+folds it from the run-decision records in the journal prefix and copies only
+the attempts that prefix can explain, rather than copying the parent's current
+row. The parent's current state is used only as a compatibility fallback, when
+an older journal carries no frame-derived state. What remains planned
+integration is the automatic creation of frame-addressed snapshots by ordinary
+execution; the fold does not need them.
 
 A cloned attempt row is addressed by its sealed cache key, and a cache key
 computed under an undeclared `Action.CurrentCacheEnvironment` is scoped to
@@ -92,5 +100,27 @@ Step 8 is why recovery is not an operation: building `TimeTravel.layer` finishes
 ## Current integration boundary
 
 The time-travel package is implemented and tested as a protocol library, but `EngineStore` does not automatically create every snapshot, lineage edge, or effect-boundary record it consumes. Applications must wire those records and migrations explicitly. Automatic end-to-end integration is **Planned**.
+
+## What 1.0.0-rc.0 ships
+
+Time travel is a library API in this release, and only a library API.
+
+| Surface | 1.0.0-rc.0 |
+| --- | --- |
+| `TimeTravel.inspect`, `replay`, `fork`, `rewind` | available from `@smthrs/time-travel` |
+| CLI verbs | none. `smithers replay`, `rewind`, `fork`, `timetravel`, `snapshots`, `restore`, and `revert` exit 1 with a migration message |
+| MCP tools | none. `replay_run`, `fork_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, and `time_travel` answer with the `unsupported` envelope |
+| Composition | not composed into `NodeControl`, and the CLI does not install migration block 5000 |
+
+A program that wants time travel provides `TimeTravelStore` and calls the
+service itself. Nothing in the command line reaches it.
+
+The word "checkpoint" means two different things in this release, and neither
+is a worktree lane. On the journal it is the durable state that replays a run
+from an offset, described in
+[checkpoints and compaction](/compaction). Inside an agent cell it is
+`ctx.checkpoint()`, a pinned git tree taken by `@smthrs/std` `Checkpoints`.
+There is no `Checkpoint` host capability and no lane lifecycle; see
+[known limitations](/release/known-limitations).
 
 See [Determinism and replay](/concepts/determinism-and-replay), [Subflows](/concepts/subflows), and the [`@smthrs/time-travel` reference](/api/time-travel).

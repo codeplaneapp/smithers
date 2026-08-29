@@ -1,3 +1,7 @@
+---
+description: "The durable event journal and the run, attempt, and cache stores beside it: semantics, invariants, and ordering."
+---
+
 # Journal
 
 This page explains the durable event journal in `@smthrs/journal` and the adjacent run, attempt, and cache stores in `@smthrs/run-store` and `@smthrs/step-cache`. It focuses on semantics and invariants; the [package reference](/api/journal) lists exact exported types.

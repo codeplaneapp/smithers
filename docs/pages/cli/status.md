@@ -9,7 +9,7 @@ Show control status.
 ## Usage
 
 ```sh
-smithers status [flags] [<run-id>]
+smithers status [flags] [RUN_ID]
 ```
 
 ## Behavior

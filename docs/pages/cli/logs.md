@@ -9,7 +9,7 @@ Read run events; --follow streams future events.
 ## Usage
 
 ```sh
-smithers logs [flags] [<run-id>]
+smithers logs [flags] [RUN_ID]
 ```
 
 ## Behavior

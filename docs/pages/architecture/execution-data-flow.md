@@ -1,3 +1,7 @@
+---
+description: "One flow execution traced through the packages: the call, ownership, action persistence, suspension, and replay."
+---
+
 # Execution and data flow
 
 This page traces one flow execution through the current implementation, from a typed flow call to ownership, action persistence, suspension, and replay. It focuses on cross-package data flow rather than individual API signatures.

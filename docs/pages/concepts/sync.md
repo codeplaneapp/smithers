@@ -1,3 +1,7 @@
+---
+description: "Read-only journal replication: cursor-based reads and credit-bounded subscriptions over Effect RPC."
+---
+
 # Journal synchronization
 
 This page defines the current journal replication protocol in `@smthrs/sync`: cursor-based reads and credit-bounded subscriptions over Effect RPC. It does not describe bidirectional event writes.

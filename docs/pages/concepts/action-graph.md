@@ -1,3 +1,7 @@
+---
+description: "Content-addressed actions, explicit Effect dependencies, hermetic boundaries, and cached results: the Bazel-like properties and their current limits."
+---
+
 # Flows and the action graph
 
 This page explains the repository’s Bazel-like properties—content-addressed actions, explicit Effect dependencies, hermetic-boundary contracts, and cached results—while distinguishing them from the static action planner that is not yet implemented.

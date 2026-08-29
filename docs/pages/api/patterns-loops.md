@@ -1,3 +1,7 @@
+---
+description: "The loop-shaped patterns: review loops, recursion with fuel, and bounded iteration."
+---
+
 # Bounded loops in `@smthrs/patterns`
 
 This page is the public API reference for the loop-shaped patterns:

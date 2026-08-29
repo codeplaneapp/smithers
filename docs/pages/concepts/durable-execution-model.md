@@ -1,3 +1,7 @@
+---
+description: "What survives process loss, what is replayed, and where durability begins and ends."
+---
+
 # Durable execution model
 
 This page defines the runtime model implemented by `@smthrs/engine`, `@smthrs/engine-store`, and `@smthrs/journal`. It explains what survives process loss, what is replayed, and where the current durability boundary stops.

@@ -1,3 +1,7 @@
+---
+description: "The two delegation patterns: handing work to a sub-agent and routing it to the right one."
+---
+
 # Delegation patterns
 
 This page is the public API reference for the two delegation patterns in

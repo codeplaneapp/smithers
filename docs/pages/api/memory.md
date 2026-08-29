@@ -1,3 +1,7 @@
+---
+description: "@smthrs/memory: durable cross-run facts, message history, notes, and recall."
+---
+
 # Memory
 
 [`@smthrs/memory`](https://github.com/smithersai/smithers/blob/main/packages/memory/README.md) stores durable cross-run

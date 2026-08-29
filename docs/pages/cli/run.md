@@ -15,7 +15,7 @@ smithers run [flags] <plan-payload>
 ## Forms
 
 - `smithers run <approval-payload>`
-- `smithers run --resume <run-id>`
+- `smithers run --resume RUN_ID`
 
 ## Behavior
 

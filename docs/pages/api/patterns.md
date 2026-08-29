@@ -1,3 +1,7 @@
+---
+description: "@smthrs/patterns: higher-order flow patterns and the decorators that compose them."
+---
+
 # `@smthrs/patterns`
 
 This page is the public API reference for the higher-order flow patterns:

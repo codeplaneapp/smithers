@@ -1,3 +1,7 @@
+---
+description: "How a flow starts another flow, what happens to the child when the parent ends, and how lineage is recorded."
+---
+
 # Subflows
 
 This page explains how a flow starts another registered flow, what happens to that child when the parent ends, and how a fire-and-forget child is started, steered, and collected later.
@@ -69,7 +73,7 @@ Every flow execution needs either an explicit `executionId` or a flow-level `ide
 
 ## Interruption
 
-The engine contract exposes `interrupt` and `interruptUnsafe`. The memory engine lets `interrupt` resume cooperatively so flow cleanup can run, while `interruptUnsafe` interrupts its fiber. `EngineStore` maps both to the same durable interruption path, and that path cascades over `flows_run_parents`: a cancellation observed from durable state (another CLI, another worker, a lease recovery) reaches every linked descendant, whether or not the observing process ever spawned them.
+The engine contract exposes `interrupt` and `interruptUnsafe`. The memory engine lets `interrupt` resume cooperatively so flow cleanup can run, while `interruptUnsafe` interrupts its fiber. The durable engine has one cancellation path: `interrupt` is durable, and `interruptUnsafe` fails with `unsafe_interrupt_unsupported` rather than forcing a stop without cleanup. That one path, and that path cascades over `flows_run_parents`: a cancellation observed from durable state (another CLI, another worker, a lease recovery) reaches every linked descendant, whether or not the observing process ever spawned them.
 
 ## Lineage
 

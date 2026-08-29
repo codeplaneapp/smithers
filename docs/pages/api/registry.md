@@ -1,3 +1,7 @@
+---
+description: "@smthrs/registry: flow discovery over flows/**, the descriptors it produces, and the catalog a host registers."
+---
+
 # `@smthrs/registry`
 
 This page is the public API reference for **flow discovery and the catalog a

@@ -1,3 +1,7 @@
+---
+description: "The trust boundary of the control server: what it accepts, from whom, and where authorization stops."
+---
+
 # Control-plane trust posture
 
 The alpha control server has a deliberately small trust boundary: it accepts

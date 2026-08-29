@@ -1,3 +1,7 @@
+---
+description: "Which entry points bundle for a browser, which stay Node-only, and the gate that executes both halves of the claim."
+---
+
 # Browser support
 
 Browser support is a hard requirement of this repository, and it is met the only way an Effect codebase can meet it: **host access goes through a layer**, so a module that only depends on contracts never resolves a `node:` built-in. This page states exactly which entry points honour that today, which do not, and what proves it.

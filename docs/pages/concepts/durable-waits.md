@@ -23,7 +23,7 @@ This page covers the six ways that happens.
 
 Each writes a waiting row with a reason (`timer`, `event`, `approval`, or
 `quota`) and a wake time where one exists. `smithers ps --status parked` lists
-them, and `smithers status <run-id>` says which primitive is holding the run.
+them, and `smithers status RUN_ID` says which primitive is holding the run.
 
 The wait is durable, not the caller. Nothing is lost when the process that
 started the run exits while it is parked.

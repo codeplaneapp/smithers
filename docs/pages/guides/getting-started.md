@@ -1,3 +1,7 @@
+---
+description: "Run a typed flow on the in-memory engine: the shortest executable path through @smthrs/flow and @smthrs/engine."
+---
+
 # Getting started
 
 This guide runs a typed flow with the in-memory engine. It is the shortest executable path through `@smthrs/flow` and `@smthrs/engine`; it does not provide process-crash durability.

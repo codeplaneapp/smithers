@@ -1,3 +1,7 @@
+---
+description: "@smthrs/notifications: the durable notification queue and the admission policy that bounds it."
+---
+
 # `@smthrs/notifications`
 
 This page is the public API reference for the durable notification queue and

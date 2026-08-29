@@ -36,6 +36,8 @@ import {
 } from "./docs-contract.mjs"
 import { cliCatalog } from "./docs-help.mjs"
 import { routePlan } from "./docs-routes.mjs"
+import { rewrite as normalizeInvocations } from "./normalize-bunx.ts"
+import { rewrite as normalizePlaceholders } from "./normalize-placeholders.ts"
 
 const CHECK = process.argv.includes("--check")
 
@@ -682,6 +684,13 @@ for (const [name, rpc] of rpcEntries) {
 // -----------------------------------------------------------------------------
 // Write or check
 // -----------------------------------------------------------------------------
+
+// The generated pages answer to the same prose gates as the hand-written ones,
+// so they are normalized here rather than fixed afterwards, which would leave
+// `--check` reporting drift against its own output.
+for (const [path, content] of [...pages]) {
+  pages.set(path, normalizePlaceholders(normalizeInvocations(content)))
+}
 
 let drifted = 0
 for (const [path, content] of [...pages].sort(([left], [right]) => left.localeCompare(right))) {

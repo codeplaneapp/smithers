@@ -1,3 +1,7 @@
+---
+description: "The six patterns that coordinate several agents as a team: Supervisor, Intervene, CheckSuite, Kanban, Runbook, and MergeQueue."
+---
+
 # Team topologies in `@smthrs/patterns`
 
 This page is the reference for the six `@smthrs/patterns` modules that coordinate several agents as a team: `Supervisor`, `Intervene`, `CheckSuite`, `Kanban`, `Runbook`, and `MergeQueue`. They build on the composition primitives `Pattern`, `WithApproval`, and `MapReduce`, which are in [`@smthrs/patterns`](/concepts/subflows).

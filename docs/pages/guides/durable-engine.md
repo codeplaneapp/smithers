@@ -1,3 +1,7 @@
+---
+description: "The services the durable engine requires, a local SQL composition, and what to replace before deploying more than one process."
+---
+
 # Assembling a durable engine
 
 This guide describes the services required by `@smthrs/engine-store` and gives a local SQL-backed composition pattern. It also identifies which services must be replaced before a multi-process deployment is durable.

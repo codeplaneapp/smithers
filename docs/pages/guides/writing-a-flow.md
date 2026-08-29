@@ -1,3 +1,7 @@
+---
+description: "Define schemas, put side effects behind actions, suspend durably, retry deliberately, and declare a model call."
+---
+
 # Writing a flow
 
 This guide shows how to define schemas, execute named actions, suspend on durable primitives, and register a handler. It focuses on code that can replay safely.

@@ -1,3 +1,7 @@
+---
+description: "How Smithers uses Effect services, layers, schemas, typed failures, defects, and interruption."
+---
+
 # Effect integration and error taxonomy
 
 This page explains how Smithers uses Effect services, layers, schemas, typed failures, defects, and infrastructure interruption. It covers the execution engine’s error model, not application-specific error design.

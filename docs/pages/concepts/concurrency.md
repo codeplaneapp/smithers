@@ -1,3 +1,7 @@
+---
+description: "Concurrency that exists today: handler fibers, bounded fan-out, priority, durable races, queue workers, and run exclusion."
+---
+
 # Concurrency
 
 This page explains concurrency that exists in flow handlers, actions, durable queues, ownership, and journal admission. It separates those mechanisms from the planned static graph scheduler.

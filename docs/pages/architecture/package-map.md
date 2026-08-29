@@ -1,3 +1,7 @@
+---
+description: "The package boundaries and the direction dependencies actually run between them."
+---
+
 # Package map
 
 This page defines the repository’s package boundaries and actual workspace dependency direction. It is an architecture map, not an API reference; follow each package link for its exported types and functions.

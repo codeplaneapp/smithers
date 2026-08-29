@@ -9,7 +9,7 @@ Cancel a durable run.
 ## Usage
 
 ```sh
-smithers cancel [flags] <run-id>
+smithers cancel [flags] RUN_ID
 ```
 
 ## Behavior

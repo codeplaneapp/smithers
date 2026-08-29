@@ -1,3 +1,7 @@
+---
+description: "The replay contract: what a flow body may do, how an action is memoized, and how replay differs from a time-travel projection."
+---
+
 # Determinism and replay
 
 This page defines the replay contract for flow authors and engine implementers. It covers current handler re-execution, action memoization, suspension, and the distinction between engine replay and time-travel projection.

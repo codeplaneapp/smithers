@@ -9,7 +9,7 @@ Deliver a durable JSON signal to a run.
 ## Usage
 
 ```sh
-smithers signal [flags] <run-id> <signal-json>
+smithers signal [flags] RUN_ID <signal-json>
 ```
 
 ## Behavior

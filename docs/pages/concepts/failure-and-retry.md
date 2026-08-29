@@ -1,3 +1,7 @@
+---
+description: "Flow outcomes, action attempts, retry policy, error boundaries, sagas, and the waits that are not failures."
+---
+
 # Failure and retry
 
 This page describes the retry and terminal-failure rules implemented by flows, actions, run ownership, and time-travel recovery. It does not define a flow-wide graph failure scheduler, which is planned.

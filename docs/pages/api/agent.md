@@ -1,3 +1,7 @@
+---
+description: "@smthrs/agent: the production cell loop, AgentAction, AgentSession, seats, and the plugin surface a host provides."
+---
+
 # `@smthrs/agent`
 
 This page is the public API reference for the **agent**: the production cell
