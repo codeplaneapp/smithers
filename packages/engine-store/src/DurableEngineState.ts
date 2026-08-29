@@ -702,8 +702,7 @@ const decodeDeferredRow = (input: unknown): Effect.Effect<DeferredRow> =>
     )
   )
 
-const decodeClockRow = (input: unknown): Effect.Effect<ClockRow> =>
-  decodeClockRowResult(input).pipe(Effect.orDie)
+const decodeClockRow = (input: unknown): Effect.Effect<ClockRow> => decodeClockRowResult(input).pipe(Effect.orDie)
 
 /** {@link decodeClockRow} with its parse failure left in the error channel. */
 const decodeClockRowResult = (input: unknown): Effect.Effect<ClockRow, unknown> =>

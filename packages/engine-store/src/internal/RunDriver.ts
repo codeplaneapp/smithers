@@ -2186,7 +2186,8 @@ export const make = (
             reason:
               "the durable engine has one cancellation path, interrupt, which is durable and cascades to linked children; interruptUnsafe would force cancellation without cleanup and is not supported"
           })
-        )),
+        )
+      ),
       resume: Effect.fn("FlowEngine.resume")((flow, executionId) =>
         Effect.annotateCurrentSpan({ executionId, flow: flow._tag }).pipe(
           Effect.andThen(scheduleResume(flow._tag, executionId, "operator")),

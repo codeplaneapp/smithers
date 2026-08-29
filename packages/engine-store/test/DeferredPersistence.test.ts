@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import { FlowEngine } from "@smthrs/engine"
 import { DurableClock, DurableDeferred, Flow, FlowRuntime } from "@smthrs/flow"
-import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import { Journal, JournalEvent } from "@smthrs/journal"
 import { Node } from "@smthrs/plan"
 import * as Effect from "effect/Effect"
@@ -485,47 +485,49 @@ describe("a malformed sweep row is skipped, not fatal (B-08)", () => {
       const events: Array<string> = []
 
       yield* withCrypto(
-        Effect.scoped(Effect.gen(function*() {
-          const sql = yield* Effect.service(SqlClient.SqlClient)
-          const state = yield* DurableEngineState.make
-          yield* seedRun(sql, "readable-run")
-          yield* seedRun(sql, "corrupt-run")
+        Effect.scoped(
+          Effect.gen(function*() {
+            const sql = yield* Effect.service(SqlClient.SqlClient)
+            const state = yield* DurableEngineState.make
+            yield* seedRun(sql, "readable-run")
+            yield* seedRun(sql, "corrupt-run")
 
-          // Readable rows: one completion and one pending clock.
-          yield* state.completeDeferred({
-            flowName: TestFlow._tag,
-            executionId: "readable-run",
-            deferredName: "answer",
-            exit: Exit.succeed("ready"),
-            completedAtMs: 1
-          })
-          yield* sql`
+            // Readable rows: one completion and one pending clock.
+            yield* state.completeDeferred({
+              flowName: TestFlow._tag,
+              executionId: "readable-run",
+              deferredName: "answer",
+              exit: Exit.succeed("ready"),
+              completedAtMs: 1
+            })
+            yield* sql`
             INSERT INTO flows_clock_deadlines
               (flow_name, execution_id, clock_name, deferred_name, due_at_ms, completed_at_ms)
             VALUES (${TestFlow._tag}, 'readable-run', 'readable-clock', 'answer', 60000, NULL)
           `.pipe(Effect.orDie)
 
-          // The corrupt pair. A BLOB satisfies the table's `length(...) > 0`
-          // check and its TEXT affinity — SQLite does not coerce a blob — and
-          // fails the row schema, which is what a page-level corruption or a
-          // foreign writer leaves behind.
-          yield* sql`
+            // The corrupt pair. A BLOB satisfies the table's `length(...) > 0`
+            // check and its TEXT affinity — SQLite does not coerce a blob — and
+            // fails the row schema, which is what a page-level corruption or a
+            // foreign writer leaves behind.
+            yield* sql`
             INSERT INTO flows_deferred_completions
               (flow_name, execution_id, deferred_name, exit_json, metadata_json, completed_at_ms)
             VALUES (${TestFlow._tag}, 'corrupt-run', x'00ff', '{}', NULL, 1)
           `.pipe(Effect.orDie)
-          yield* sql`
+            yield* sql`
             INSERT INTO flows_clock_deadlines
               (flow_name, execution_id, clock_name, deferred_name, due_at_ms, completed_at_ms)
             VALUES (${TestFlow._tag}, 'corrupt-run', x'00ff', 'answer', 60000, NULL)
           `.pipe(Effect.orDie)
 
-          const service = yield* build(state, makeJournal(events), resumes)
-          yield* service.sweepDue(TestFlow._tag)
-        }).pipe(
-          Effect.provide(migratedDatabase),
-          Effect.provide(Logger.layer([capture]))
-        )) as Effect.Effect<void>
+            const service = yield* build(state, makeJournal(events), resumes)
+            yield* service.sweepDue(TestFlow._tag)
+          }).pipe(
+            Effect.provide(migratedDatabase),
+            Effect.provide(Logger.layer([capture]))
+          )
+        ) as Effect.Effect<void>
       )
 
       // The registration survived, and every readable row was swept.
@@ -537,11 +539,10 @@ describe("a malformed sweep row is skipped, not fatal (B-08)", () => {
       // operator needs to find and repair them.
       const warnings = logs.filter((message) => message.includes("malformed"))
       expect(warnings).toHaveLength(2)
-      expect(warnings.some((message) =>
-        message.includes("deferred completion") && message.includes("corrupt-run")
-      )).toBe(true)
-      expect(warnings.some((message) =>
-        message.includes("clock deadline") && message.includes("corrupt-run")
-      )).toBe(true)
+      expect(warnings.some((message) => message.includes("deferred completion") && message.includes("corrupt-run")))
+        .toBe(true)
+      expect(warnings.some((message) => message.includes("clock deadline") && message.includes("corrupt-run"))).toBe(
+        true
+      )
     }))
 })

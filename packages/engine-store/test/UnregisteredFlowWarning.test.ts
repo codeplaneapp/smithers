@@ -159,12 +159,15 @@ describe("a parked run of an unregistered flow still cancels (B-01)", () => {
           // A linked child, admitted by the run before it parked. The edge is
           // the durable subflow DAG, which is what a cascade walks — and the
           // only representation a process that never spawned the child has.
-          yield* store.create("b01-child", JSON.stringify({
-            version: 1,
-            flowName: TestFlow._tag,
-            payload: {},
-            parentExecutionId: "b01-parked"
-          }))
+          yield* store.create(
+            "b01-child",
+            JSON.stringify({
+              version: 1,
+              flowName: TestFlow._tag,
+              payload: {},
+              parentExecutionId: "b01-parked"
+            })
+          )
           yield* state.recordRunParent("b01-child", "b01-parked")
 
           // The control-only process: it has the store and the sweeper, and it
@@ -229,11 +232,14 @@ describe("a parked run of an unregistered flow still cancels (B-01)", () => {
           // holds. Cancelling is fenced like every other close: the sweeping
           // process claims first, and the one that loses the compare-and-swap
           // must leave the run to the worker that won it.
-          yield* store.create("b01-contended", JSON.stringify({
-            version: 1,
-            flowName: TestFlow._tag,
-            payload: {}
-          }))
+          yield* store.create(
+            "b01-contended",
+            JSON.stringify({
+              version: 1,
+              flowName: TestFlow._tag,
+              payload: {}
+            })
+          )
           yield* store.claimAndOwn(
             "b01-contended",
             { status: "pending", owner: null, heartbeatAtMs: null },

@@ -576,8 +576,11 @@ describe("registration does not re-arm a settled run (B-03)", () => {
           )
         ).pipe(
           Effect.provide(TestStores.layerAt(":memory:")),
-          Effect.provide(TestClock.layer())
-        ) as Effect.Effect<{
+          Effect.provide(TestClock.layer()),
+          Effect.orDie
+          // The `as never` flow casts above erase the requirement channel, so
+          // it re-widens to `unknown` here and has to be restated.
+        ) as unknown as Effect.Effect<{
           readonly settled: ReadonlyArray<{ readonly wakes: number; readonly armed: number }>
           readonly live: { readonly wakes: number; readonly armed: number }
           readonly pendingBefore: ReadonlyArray<string>
