@@ -1,13 +1,22 @@
 import { spawnSync } from "node:child_process";
 
 /**
+ * The gh executable this process spawns.
+ *
+ * `SMITHERS_GH_BIN` overrides it, for non-standard installs and for hermetic
+ * tests that inject a fake gh by absolute path. Every caller resolves the
+ * binary here, so a preflight check and the call it guards can never disagree
+ * about which gh they mean.
+ */
+export function ghBin(): string {
+  return process.env.SMITHERS_GH_BIN || "gh";
+}
+
+/**
  * Run the gh CLI in a repo directory; resolves stdout, throws with stderr.
  */
 export async function runGh(repoDir: string, args: string[], stdin?: string): Promise<string> {
-  // Honor an explicit gh path (non-standard installs, and hermetic tests that
-  // inject a fake gh by absolute path).
-  const ghBin = process.env.SMITHERS_GH_BIN || "gh";
-  const result = spawnSync(ghBin, args, {
+  const result = spawnSync(ghBin(), args, {
     cwd: repoDir,
     input: stdin ?? undefined,
     encoding: "utf8",
