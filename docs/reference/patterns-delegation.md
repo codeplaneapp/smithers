@@ -17,10 +17,10 @@ is in flight.
 Each of these modules therefore has two halves, and they answer different
 questions:
 
-| Half | Question it answers | Value |
-| --- | --- | --- |
+| Half   | Question it answers                         | Value                                             |
+| ------ | ------------------------------------------- | ------------------------------------------------- |
 | `make` | What is the most work this can possibly do? | a `Flow` whose graph is the conservative topology |
-| `run` | What did the model actually ask for? | an `Effect` executing the authored plan |
+| `run`  | What did the model actually ask for?        | an `Effect` executing the authored plan           |
 
 `make` is what a host reads to budget, place, and admit the work in advance.
 `run` is what executes. They agree by construction: `make` declares one leaf
@@ -92,7 +92,7 @@ uses to index leaf outputs.
 ### Running
 
 ```ts
-const result = yield* Trellis.run("ship the release notes", {
+const result = yield * Trellis.run("ship the release notes", {
   envelope: { fuel: 6, depth: 3, fanout: 3 },
   author: ({ prompt, remaining }) => planner(prompt, remaining),
   leaf: ({ goal, seat, path }) => worker(goal, seat, path),
@@ -157,7 +157,10 @@ bound is refused `fanout_exceeded`. Raise `maxDepth` to widen all three at once.
    maxDepth, fanout: maxDepth }`.
 4. Each leaf climbs the tier ladder weakest first. A tier spends `maxAttempts`
    retries before the next tier is admitted, and a tier whose result `review`
-   rejects escalates exactly the way a tier that failed does.
+   rejects escalates exactly the way a tier that failed does. The runtime now
+   consumes `Escalation.run`'s reworked `Reached`/`Exhausted` result directly:
+   only a reached attempt contributes its output, while exhaustion becomes
+   `leaf_failed` before the leaf can reach settlement.
 5. `review` sees the assembled leaf outputs, then `settle` receives the prompt,
    goal, plan, leaf outputs in plan order, the review, and whether derisk was
    exhausted.

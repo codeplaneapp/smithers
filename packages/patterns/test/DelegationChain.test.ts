@@ -166,6 +166,46 @@ describe("DelegationChain", () => {
       expect(attempts).toBe(bounds.tierOrder.length * bounds.maxAttempts)
     }))
 
+  it.effect("fails an exhausted rejected ladder without settling its leaf", () =>
+    Effect.gen(function*() {
+      const attempts = new Map<string, number>()
+      const reviewed: Array<string> = []
+      let settled = false
+      const failure = yield* DelegationChain.run("ship it", {
+        ...bounds,
+        refine: () => Effect.succeed("goal"),
+        plan: () => Effect.succeed({ sequence: [{ agent: { goal: "a" } }] }),
+        derisk: () => Effect.succeed({ approved: true }),
+        execute: {
+          weak: ({ tier }) =>
+            Effect.suspend(() => {
+              const attempt = (attempts.get(tier) ?? 0) + 1
+              attempts.set(tier, attempt)
+              return attempt === bounds.maxAttempts ? Effect.succeed(`${tier}-candidate`) : Effect.fail("retry")
+            }),
+          strong: ({ tier }) =>
+            Effect.suspend(() => {
+              const attempt = (attempts.get(tier) ?? 0) + 1
+              attempts.set(tier, attempt)
+              return attempt === bounds.maxAttempts ? Effect.succeed(`${tier}-candidate`) : Effect.fail("retry")
+            })
+        },
+        review: (request) =>
+          Effect.sync(() => {
+            if (request.stage === "leaf") reviewed.push(request.tier)
+            return { approved: request.stage === "chain" }
+          }),
+        settle: ({ leaves }) => Effect.sync(() => (settled = true, leaves))
+      }).pipe(Effect.flip)
+
+      expect(failure).toBeInstanceOf(DelegationChain.DelegationError)
+      expect((failure as DelegationChain.DelegationError).code).toBe("leaf_failed")
+      expect((failure as DelegationChain.DelegationError).path).toBe("root.sequence[0]")
+      expect(attempts).toEqual(new Map([["weak", bounds.maxAttempts], ["strong", bounds.maxAttempts]]))
+      expect(reviewed).toEqual(["weak", "strong"])
+      expect(settled).toBe(false)
+    }))
+
   it.effect("hands settle every leaf output in plan order", () =>
     Effect.gen(function*() {
       const settled = yield* DelegationChain.run("ship it", {

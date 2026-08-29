@@ -422,8 +422,9 @@ interface Attempt {
  * The derisk loop stops at the first approved round. Each leaf climbs the tier
  * ladder weakest first, spending `maxAttempts` retries on a tier before the
  * next one is admitted; a tier whose result the review rejects escalates the
- * same way a tier that failed does. A leaf no tier settles fails
- * `leaf_failed` naming its plan path, and no later stage runs.
+ * same way a tier that failed does. Only a reached rung contributes its
+ * `result.output`; an exhausted ladder fails `leaf_failed` naming the leaf's
+ * plan path, and no later stage runs.
  *
  * `maxDepth` is the whole plan envelope: the derisked plan may hold at most
  * `maxDepth` leaves, nest `maxDepth` levels, and put `maxDepth` members in one
@@ -494,6 +495,17 @@ export const run = <Settled, E1, R1, E2, R2, E3, R3, E4, R4, E5, R5, E6, R6>(
                 accepted
               )
         }).pipe(
+          Effect.flatMap((reached) =>
+            "accepted" in reached && reached.accepted === false
+              ? Effect.fail(
+                new DelegationError({
+                  code: "leaf_failed",
+                  path: leaf.path,
+                  message: `No tier settled the leaf at ${leaf.path} within ${options.maxAttempts} attempts each`
+                })
+              )
+              : Effect.succeed(reached.result)
+          ),
           Effect.tap((attempt) => Effect.sync(() => outputs.set(leaf.path, attempt.output))),
           Effect.catchTag(
             "flows/patterns/PatternError",
