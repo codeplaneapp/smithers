@@ -23,14 +23,30 @@
  * collecting step's payload. A planned value may be passed; it may never be
  * computed on. So the report is built by an action that receives five strings,
  * not by a function in the body that tries to concatenate placeholders.
+ *
+ * **The same gate, declared on disk.** The second half of the file runs the
+ * identical topology from `16-project/flows/gate/flow.ts`, a flow the project
+ * declares rather than one this file names. `@smthrs/registry`'s `Executable`
+ * bridge loads that descriptor, resolves the delegate the host registered for
+ * it, and lowers the priority the file declares onto the delegating node. It is
+ * the same annotation `Node.priority` writes, arriving from a file rather than
+ * from a call, which is what makes priority a property of the declaration
+ * instead of a property of the code that happens to hold it.
  */
-import { Action, Flow, Graph, Interpreter } from "@smthrs/flow"
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import * as NodePath from "@effect/platform-node/NodePath"
+import { Action, Flow, type FlowRuntime, Graph, Interpreter } from "@smthrs/flow"
 import { Journal, type JournalEvent } from "@smthrs/journal"
 import { Node } from "@smthrs/plan"
 import type * as Planned from "@smthrs/plan/Planned"
+import { Executable } from "@smthrs/registry"
+import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+import gateModule from "./16-project/flows/gate/flow.ts"
 import { durableEngine } from "./durable-layer.ts"
 
 /**
@@ -110,43 +126,195 @@ export const declaredBatches: ReadonlyArray<ReadonlyArray<string>> = batches(spe
 
 const priorityOf = (name: string): number => specs.find((spec) => spec.name === name)?.priority ?? 0
 
+/** The requirements the gate's two actions carry. */
+type GateRequirements = Action.Requirement<"examples/Check" | "examples/Collect">
+
+/**
+ * The gate's topology, given the thing being gated.
+ *
+ * It is a plain function so the two declarations below can share it: one takes
+ * a target directly, the other takes the envelope a discovered descriptor is
+ * invoked with. A body is an ordinary function of its payload, so "the same
+ * gate under a different payload" needs no indirection beyond this.
+ */
+const gateBody = (target: string): Node.Node<string, never, GateRequirements> => {
+  const stage = (
+    index: number,
+    after: Schema.Json,
+    collected: Readonly<Record<string, Planned.Planned<string>>>
+  ): Node.Node<string, never, GateRequirements> => {
+    const batch = declaredBatches[index]
+    if (batch === undefined) {
+      return Collect.call({
+        lint: collected.lint!,
+        types: collected.types!,
+        unit: collected.unit!,
+        audit: collected.audit!,
+        licence: collected.licence!
+      })
+    }
+    const members: Record<string, Node.Node<string, never, Action.Requirement<"examples/Check">>> = {}
+    for (const name of batch) {
+      members[name] = Node.priority(Check.call({ name, target, after }), priorityOf(name))
+    }
+    return Node.andThen(
+      Node.all(members),
+      (verdicts: Planned.Planned<Readonly<Record<string, string>>>) => {
+        const next: Record<string, Planned.Planned<string>> = { ...collected }
+        const fields = verdicts as unknown as Readonly<Record<string, Planned.Planned<string>>>
+        for (const name of batch) next[name] = fields[name]!
+        return stage(index + 1, verdicts as unknown as Schema.Json, next)
+      }
+    )
+  }
+  return stage(0, null, {})
+}
+
 /** The release gate: five checks, two at a time, one report. */
 export const Gate = Flow.make("examples/Gate", {
   payload: { target: Schema.String },
   success: Schema.String,
-  body: ({ target }: { readonly target: string }) => {
-    const stage = (
-      index: number,
-      after: Schema.Json,
-      collected: Readonly<Record<string, Planned.Planned<string>>>
-    ): Node.Node<string, never, Action.Requirement<"examples/Check" | "examples/Collect">> => {
-      const batch = declaredBatches[index]
-      if (batch === undefined) {
-        return Collect.call({
-          lint: collected.lint!,
-          types: collected.types!,
-          unit: collected.unit!,
-          audit: collected.audit!,
-          licence: collected.licence!
-        })
-      }
-      const members: Record<string, Node.Node<string, never, Action.Requirement<"examples/Check">>> = {}
-      for (const name of batch) {
-        members[name] = Node.priority(Check.call({ name, target, after }), priorityOf(name))
-      }
-      return Node.andThen(
-        Node.all(members),
-        (verdicts: Planned.Planned<Readonly<Record<string, string>>>) => {
-          const next: Record<string, Planned.Planned<string>> = { ...collected }
-          const fields = verdicts as unknown as Readonly<Record<string, Planned.Planned<string>>>
-          for (const name of batch) next[name] = fields[name]!
-          return stage(index + 1, verdicts as unknown as Schema.Json, next)
-        }
-      )
-    }
-    return stage(0, null, {})
-  }
+  body: ({ target }: { readonly target: string }) => gateBody(target)
 })
+
+/**
+ * The delegate the discovered gate runs on.
+ *
+ * A discovered descriptor says WHAT should run; the host says HOW, by
+ * registering a flow under the name the descriptor delegates to. The payload is
+ * `Executable.Invocation` rather than the gate's own schema because one
+ * delegate serves many descriptors: the envelope carries the caller's input,
+ * the descriptor's name, and the decisions the bridge lowered off it.
+ */
+export const GateRunner = Flow.make("examples/GateRunner", {
+  payload: Executable.Invocation,
+  success: Schema.String,
+  body: (invocation: Executable.Invocation) =>
+    gateBody((invocation.input as { readonly target?: string } | null)?.target ?? "release")
+})
+
+/** The project whose `flows/` directory declares the gate. */
+export const projectRoot: string = join(dirname(fileURLToPath(import.meta.url)), "16-project")
+
+/** The name discovery derives for `flows/gate/flow.ts` from its directory. */
+export const discoveredFlow = "gate"
+
+/** The priority the declaration on disk carries. */
+export const declaredOnDiskPriority = 7
+
+/**
+ * How the discovered descriptor is loaded and what it may delegate to.
+ *
+ * `load` is supplied rather than left to the bridge's default dynamic import
+ * because this example runs under a TypeScript-aware runner: a static import is
+ * the same module the default loader would produce, without asking the runtime
+ * to evaluate a `.ts` file on its own. A packaged host keeps the default.
+ */
+const bridge: Executable.Options = {
+  delegates: [GateRunner],
+  load: () => Effect.succeed({ default: gateModule })
+}
+
+/** The platform services discovery and body loading read the project through. */
+const platform = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)
+
+/** `<projectRoot>/flows/**`, scanned, with bodies still unread. */
+const registry = Executable.layerProject({ root: projectRoot }).pipe(Layer.provide(platform), Layer.orDie)
+
+/**
+ * Starts the bridged flow.
+ *
+ * A bridged flow declares open requirements — the bridge cannot know at the
+ * type level what the delegate a descriptor names will need — so the launch is
+ * narrowed here rather than letting `any` widen every effect downstream.
+ */
+const start = (
+  executable: Executable.Executable,
+  target: string,
+  executionId: string
+): Effect.Effect<string, never, FlowRuntime.FlowRuntime | Crypto.Crypto> =>
+  (executable.flow.execute({ input: { target } }, { executionId }) as Effect.Effect<
+    string,
+    unknown,
+    FlowRuntime.FlowRuntime | Crypto.Crypto
+  >).pipe(Effect.orDie)
+
+/** What one run of the gate the project declared observed. */
+export interface DiscoveredSummary {
+  /** The descriptor name discovery derived from the directory. */
+  readonly flow: string
+  /** The flow the descriptor delegates to. */
+  readonly delegate: string
+  /** The priority the bridge lowered off the declaration. */
+  readonly lowered: number | undefined
+  /** Every priority the built plan's nodes carry, in plan order. */
+  readonly planned: ReadonlyArray<number>
+  /** The report the discovered gate produced. */
+  readonly report: string
+  /** The most checks that were ever running at the same moment. */
+  readonly maxInFlight: number
+}
+
+/**
+ * Runs the gate the project declared on disk.
+ *
+ * Nothing below names the gate: discovery finds `flows/gate/flow.ts`, the
+ * bridge lowers the priority that file declares onto the delegating node, and
+ * the plan the engine drives is the plan `main` builds — the same five checks,
+ * the same bound of two, the same report.
+ */
+export const discovered = (filename: string): Effect.Effect<DiscoveredSummary> =>
+  Effect.gen(function*() {
+    let inFlight = 0
+    let maxInFlight = 0
+
+    const check = Check.toLayer(({ name }) =>
+      Effect.gen(function*() {
+        inFlight += 1
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        yield* Effect.sleep("25 millis")
+        inFlight -= 1
+        return `${name}:clean`
+      })
+    )
+
+    const collect = Collect.toLayer((verdicts) =>
+      Effect.succeed(
+        [verdicts.lint, verdicts.types, verdicts.unit, verdicts.audit, verdicts.licence].join(" ")
+      )
+    )
+
+    const executable = yield* Executable.fromRegistry(discoveredFlow, bridge).pipe(
+      Effect.provide(Layer.merge(registry, platform)),
+      Effect.orDie
+    )
+
+    // The plan, before anything runs. The delegating node carries the priority
+    // the file declared, beside the priorities the body states itself.
+    const planned = Graph.nodes(Graph.build(executable.flow, { input: { target: "release" } }))
+      .map((node) => node.draft.priority)
+      .filter((priority): priority is number => priority !== undefined)
+
+    const report = yield* Effect.scoped(
+      start(executable, "release", "gate-discovered").pipe(
+        Effect.provide(
+          Layer.mergeAll(check, collect, Interpreter.layer(GateRunner), executable.layer).pipe(
+            Layer.provideMerge(Action.layerImplementations),
+            Layer.provideMerge(durableEngine(filename, "examples-gate-discovered"))
+          )
+        )
+      )
+    )
+
+    return {
+      flow: executable.descriptor.name,
+      delegate: executable.delegate,
+      lowered: executable.lowered.priority,
+      planned,
+      report,
+      maxInFlight
+    } satisfies DiscoveredSummary
+  }).pipe(Effect.orDie)
 
 /** The priority each check carries in the built plan, by check name. */
 export const declaredPriorities = (target = "release"): Readonly<Record<string, number | undefined>> => {

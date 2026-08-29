@@ -3,7 +3,14 @@ import * as Effect from "effect/Effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { declaredBatches, declaredPriorities, main } from "../src/16-fan-out-fan-in.ts"
+import {
+  declaredBatches,
+  declaredOnDiskPriority,
+  declaredPriorities,
+  discovered,
+  discoveredFlow,
+  main
+} from "../src/16-fan-out-fan-in.ts"
 
 const directory = mkdtempSync(join(tmpdir(), "flows-examples-"))
 
@@ -44,4 +51,28 @@ it.live("runs at most two checks at a time and joins every verdict", () =>
     // times.
     expect(summary.dispatches).toEqual({ lint: 1, types: 1, unit: 1, audit: 1, licence: 1 })
     expect(summary.eventTypes).toContain("flows.engine.attempt-started")
+  }), { timeout: 60_000 })
+
+// `it.live` for the same reason `main`'s test is: the checks overlap on the
+// real clock.
+it.live("runs the same gate when the project declares it on disk", () =>
+  Effect.gen(function*() {
+    const summary = yield* discovered(join(directory, "discovered.sqlite"))
+
+    // Nothing in the example names this flow; the directory it was found in
+    // does, and the frontmatter-free module says what it delegates to.
+    expect(summary.flow).toBe(discoveredFlow)
+    expect(summary.delegate).toBe("examples/GateRunner")
+
+    // The priority the file declares is lowered onto the delegating node, so it
+    // reaches the plan the same way `Node.priority` does inside a body.
+    expect(summary.lowered).toBe(declaredOnDiskPriority)
+    expect(summary.planned).toContain(declaredOnDiskPriority)
+    // And it sits beside the priorities the body states itself.
+    expect(summary.planned).toContain(9)
+    expect(summary.planned).toContain(5)
+
+    // Same topology, so same bound and same report.
+    expect(summary.maxInFlight).toBe(2)
+    expect(summary.report).toBe("lint:clean types:clean unit:clean audit:clean licence:clean")
   }), { timeout: 60_000 })

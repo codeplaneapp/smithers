@@ -20,6 +20,15 @@ const sources = Smithers.glob("//examples/src/**/*.ts")
 const tests = Smithers.glob("//examples/test/**/*.ts")
 
 /**
+ * The example projects examples 16 and 24 discover flows in.
+ *
+ * `<root>/flows/**` is read off disk at run time rather than imported, so the
+ * markdown descriptors are declared inputs of their own. The module descriptor
+ * beside them is already a `src/**\/*.ts` source.
+ */
+const fixtures = Smithers.glob("//examples/src/**/*.mdx")
+
+/**
  * Checks the examples and their tests against the workspace tsconfig.
  *
  * @since 0.1.0
@@ -44,7 +53,7 @@ export const check = Smithers.Typecheck({
 export const suite = Smithers.Vitest({
   packageManager,
   tests: [tests],
-  sources: [sources],
+  sources: [sources, fixtures],
   deps: [],
   config: Smithers.file("vitest.config.ts"),
   environment: "node",
