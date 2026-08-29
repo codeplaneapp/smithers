@@ -1,4 +1,0 @@
-[test]
-# Pin Bun's native Response/ReadableStream/fetch before any test file can
-# register happy-dom; tests/inMemoryGateway.ts needs the natives for Bun.serve.
-preload = ["./tests/pinNativeGlobals.ts"]

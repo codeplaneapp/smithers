@@ -1,8 +1,0 @@
----
-title: Observability
-description: Folded into the CLI overview.
----
-
-This material is now in [CLI Overview](/cli/overview).
-
-OpenTelemetry export is opt-in via `createSmithersObservabilityLayer({ enabled, endpoint, serviceName, logFormat })` or the `SMITHERS_OTEL_ENABLED` / `OTEL_EXPORTER_OTLP_ENDPOINT` env vars. The HTTP server exposes `GET /metrics` in Prometheus text format; a local Prometheus + Grafana stack ships at `observability/docker-compose.otel.yml`.

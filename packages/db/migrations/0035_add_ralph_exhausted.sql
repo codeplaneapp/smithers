@@ -1,1 +1,0 @@
-ALTER TABLE _smithers_ralph ADD COLUMN exhausted INTEGER NOT NULL DEFAULT 0;

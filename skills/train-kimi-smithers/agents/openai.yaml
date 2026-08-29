@@ -1,4 +1,0 @@
-interface:
-  display_name: "Train Kimi for Smithers"
-  short_description: "Prepare and run Kimi Smithers fine-tuning"
-  default_prompt: "Use $train-kimi-smithers to prepare, validate, launch, and evaluate a Kimi fine-tune for Smithers workflow authoring."

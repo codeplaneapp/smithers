@@ -1,8 +1,0 @@
----
-title: Production Project Structure
-description: Folded into Recipes.
----
-
-This material is now in [Recipes](/recipes).
-
-For 5+ tasks, use a three-file-per-step pattern: `Component.schema.ts` (Zod), `Component.mdx` (prompt, auto-injects `{props.schema}`), `Component.tsx` (Task wiring). Keep `workflow.tsx` pure composition; centralize `createSmithers()` in `smithers.ts`, agents in `agents.ts`, shared knobs (timeouts, max iterations) in `config.ts`.

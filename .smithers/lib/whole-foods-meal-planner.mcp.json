@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "meal_planner": {
-      "command": "bun",
-      "args": [".smithers/lib/whole-foods-meal-planner-mcp.ts"]
-    }
-  }
-}

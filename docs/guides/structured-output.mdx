@@ -1,8 +1,0 @@
----
-title: Structured Output
-description: Folded into How It Works.
----
-
-This material is now in [How It Works](/how-it-works#tasks-three-modes).
-
-Schema-validation failures trigger up to 3 in-attempt repair prompts (`MAX_SCHEMA_RETRIES = 3`, Zod errors appended) before the attempt fails; `retries={2}` (3 attempts, each 1 generation plus up to 3 repairs) therefore gives up to 12 chances at valid JSON. `runId`, `nodeId`, and `iteration` are stripped from agent responses before validation and auto-populated on write.

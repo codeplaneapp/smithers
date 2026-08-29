@@ -1,8 +1,0 @@
----
-title: Debugging
-description: Folded into the CLI overview.
----
-
-Moved to [CLI Overview](/cli/overview).
-
-Per-run NDJSON event log: `.smithers/executions/<runId>/logs/stream.ndjson` (one `SmithersEvent` per line). One-shot inspection commands: `inspect`, `logs --follow`, `chat`, `why`, `node`, `ps`, `graph`. Controllers and monitors use Gateway `getRun`, `streamRunEventsResilient`, `getDevToolsSnapshot`, and `getNodeOutput`. Never query SQLite/PGlite/Postgres or `_smithers_*` tables directly: they're runtime/maintainer-diagnostic internals, outside the debugging client API.

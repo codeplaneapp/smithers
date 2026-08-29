@@ -1,9 +1,0 @@
-[submodule "trellis"]
-	path = trellis
-	url = git@github.com:smithersai/trellis.git
-	# The benchmark lab is scratch space: it accumulates run databases, recordings,
-	# and in-flight experiment edits. Without this, every one of those shows up as
-	# ` M trellis` in the superproject, which fails the release script's clean-tree
-	# guard (scripts/publish.mjs) on any checkout that has the submodule populated.
-	# A change to the *pinned commit* still reports normally.
-	ignore = dirty

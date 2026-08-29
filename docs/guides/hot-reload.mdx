@@ -1,8 +1,0 @@
----
-title: Hot Reload
-description: Folded into Recipes.
----
-
-Moved to [Recipes](/recipes#hot-reload-while-authoring).
-
-Schema-shape changes are blocked at reload time and require a restart to avoid output-table corruption; in-flight tasks always finish with the code they were launched with. Advanced `RunOptions.hot` fields: `rootDir`, `outDir` (default `.smithers/hmr` under `rootDir` or the workflow entry directory), `maxGenerations` (default 3), `cancelUnmounted` (default false), `debounceMs` (default 100).

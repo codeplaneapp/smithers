@@ -1,8 +1,0 @@
-/**
- * The `getNodeDiff` view-model shaping moved to
- * `@smthrs/ui-core` (research/tui-parity/01-packages.md
- * phase 2). Re-exported here so the existing relative imports across
- * packages/tui (and its tests) keep working; ui-core is the single source
- * of truth — do not add logic to this file.
- */
-export * from "@smthrs/ui-core/runs/diffUtils";
