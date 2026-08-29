@@ -23,7 +23,6 @@ import {
   removedFlags,
   removedRpcs,
   removedForms,
-  removalMessage,
   exclusions,
   publishedPackages,
   releaseNotes,
@@ -207,6 +206,18 @@ for (const command of documentedCommands) {
 
 const importSource = async (path) => import(pathToFileURL(join(repoRoot, path)).href)
 
+const Unsupported = await importSource("packages/cli/src/Unsupported.ts")
+
+/**
+ * The exact refusal each removed verb prints, keyed by verb.
+ *
+ * `verbError` anchors on the verb's own name, so the link a reader follows from
+ * their terminal is the heading this file writes.
+ */
+const refusals = new Map(
+  Unsupported.removedVerbs.map((verb) => [verb.name, Unsupported.message(verb.name, verb.reason, verb.name)])
+)
+
 const { ControlRpcs } = await importSource("packages/control/src/ControlRpcs.ts")
 const GatewaySchema = await importSource("packages/gateway/src/GatewaySchema.ts")
 
@@ -378,7 +389,13 @@ for (const [name, rpc] of rpcEntries) {
   lines.push("")
   for (const name of names) {
     const entry = removed.get(name)
-    lines.push(`### ${name}`, "", "```", removalMessage(name, entry.reason.replace(/`/g, "")), "```", "")
+    // Byte for byte what the binary prints. The contract decides which verbs are
+    // removed; the binary owns the sentence it puts on a terminal, and the two
+    // spell the same reasons with different code marks. An operator pastes this
+    // line from their shell, so a block that quietly differs is not a quotation.
+    const refusal = refusals.get(name)
+    if (refusal === undefined) throw new Error(`generate-docs-pages: the binary does not refuse ${name}`)
+    lines.push(`### ${name}`, "", "```", refusal, "```", "")
     if (entry.spellings.some((spelling) => spelling !== name)) {
       lines.push(`Removed forms: ${entry.spellings.map((spelling) => `\`${spelling}\``).join(", ")}.`, "")
     }

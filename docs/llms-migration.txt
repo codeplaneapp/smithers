@@ -251,13 +251,13 @@ CLI reference lists the commands that ship.
 #### add
 
 ```
-smithers add was removed in 1.0.0-rc.0: JSX pack tooling is gone; smithers migrate replaces upgrade. See https://smithers.sh/migration/1.0#add
+smithers add was removed in 1.0.0-rc.0: JSX pack tooling is gone; `smithers migrate` replaces `upgrade`. See https://smithers.sh/migration/1.0#add
 ```
 
 #### agents
 
 ```
-smithers agents was removed in 1.0.0-rc.0: moved to the plugins repository or deferred (cron returns on @smthrs/triggers; listeners returns with the GitHub integration). See https://smithers.sh/migration/1.0#agents
+smithers agents was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#agents
 ```
 
 Removed forms: `agents add|list|reauth|remove|test|capabilities|doctor`.
@@ -265,7 +265,7 @@ Removed forms: `agents add|list|reauth|remove|test|capabilities|doctor`.
 #### alerts
 
 ```
-smithers alerts was removed in 1.0.0-rc.0: moved to the plugins repository or deferred (cron returns on @smthrs/triggers; listeners returns with the GitHub integration). See https://smithers.sh/migration/1.0#alerts
+smithers alerts was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#alerts
 ```
 
 #### ask
@@ -277,7 +277,7 @@ smithers ask was removed in 1.0.0-rc.0: removed with the JSX inline workflow. Se
 #### ask-human
 
 ```
-smithers ask-human was removed in 1.0.0-rc.0: approvals park the run; use ps --status waiting-approval, approve, deny; the MCP ask_human tool keeps its name and returns the unsupported envelope (§4.1). See https://smithers.sh/migration/1.0#ask-human
+smithers ask-human was removed in 1.0.0-rc.0: approvals park the run; use `ps --status waiting-approval`, `approve`, and `deny`. See https://smithers.sh/migration/1.0#ask-human
 ```
 
 #### chat
@@ -295,13 +295,13 @@ smithers chat-create was removed in 1.0.0-rc.0: removed with the JSX inline work
 #### claude-shell
 
 ```
-smithers claude-shell was removed in 1.0.0-rc.0: moved to the plugins repository or deferred (cron returns on @smthrs/triggers; listeners returns with the GitHub integration). See https://smithers.sh/migration/1.0#claude-shell
+smithers claude-shell was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#claude-shell
 ```
 
 #### cron
 
 ```
-smithers cron was removed in 1.0.0-rc.0: moved to the plugins repository or deferred (cron returns on @smthrs/triggers; listeners returns with the GitHub integration). See https://smithers.sh/migration/1.0#cron
+smithers cron was removed in 1.0.0-rc.0: moved to the plugins repository or deferred (cron returns on @smthrs/triggers). See https://smithers.sh/migration/1.0#cron
 ```
 
 Removed forms: `cron start|add|list|rm`.
@@ -315,13 +315,13 @@ smithers diff was removed in 1.0.0-rc.0: time travel is a library API (@smthrs/t
 #### docs-full
 
 ```
-smithers docs-full was removed in 1.0.0-rc.0: docs-full becomes docs --full; the other eleven are the 0.x COMMAND_ALIASES did-you-mean hint keys (apps/cli/src/index.js:12994-13008), each answering with the rc.0 verb (ps, ls, cancel, up, status, logs, --help); the two remaining 0.x hint keys ls and status are real rc.0 commands (§4.1) and are not registered here. Only inspect, why, events, resume, gateway, workflow list survive as aliases. See https://smithers.sh/migration/1.0#docs-full
+smithers docs-full was removed in 1.0.0-rc.0: `docs-full` becomes `docs --full`. See https://smithers.sh/migration/1.0#docs-full
 ```
 
 #### eject
 
 ```
-smithers eject was removed in 1.0.0-rc.0: JSX pack tooling is gone; smithers migrate replaces upgrade. See https://smithers.sh/migration/1.0#eject
+smithers eject was removed in 1.0.0-rc.0: JSX pack tooling is gone; `smithers migrate` replaces `upgrade`. See https://smithers.sh/migration/1.0#eject
 ```
 
 #### eval
@@ -333,7 +333,7 @@ smithers eval was removed in 1.0.0-rc.0: not part of the engine release. See htt
 #### exec
 
 ```
-smithers exec was removed in 1.0.0-rc.0: docs-full becomes docs --full; the other eleven are the 0.x COMMAND_ALIASES did-you-mean hint keys (apps/cli/src/index.js:12994-13008), each answering with the rc.0 verb (ps, ls, cancel, up, status, logs, --help); the two remaining 0.x hint keys ls and status are real rc.0 commands (§4.1) and are not registered here. Only inspect, why, events, resume, gateway, workflow list survive as aliases. See https://smithers.sh/migration/1.0#exec
+smithers exec was removed in 1.0.0-rc.0: use `up`. See https://smithers.sh/migration/1.0#exec
 ```
 
 #### fork
@@ -351,19 +351,19 @@ smithers graph was removed in 1.0.0-rc.0: time travel is a library API (@smthrs/
 #### gui
 
 ```
-smithers gui was removed in 1.0.0-rc.0: replaced by smithers serve and the Electrobun product UI; the 0.x terminal monitor (smithers-mon, packages/tui) is deleted, and a run monitor on the new projections is new work, not a port. See https://smithers.sh/migration/1.0#gui
+smithers gui was removed in 1.0.0-rc.0: replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted. See https://smithers.sh/migration/1.0#gui
 ```
 
 #### help
 
 ```
-smithers help was removed in 1.0.0-rc.0: docs-full becomes docs --full; the other eleven are the 0.x COMMAND_ALIASES did-you-mean hint keys (apps/cli/src/index.js:12994-13008), each answering with the rc.0 verb (ps, ls, cancel, up, status, logs, --help); the two remaining 0.x hint keys ls and status are real rc.0 commands (§4.1) and are not registered here. Only inspect, why, events, resume, gateway, workflow list survive as aliases. See https://smithers.sh/migration/1.0#help
+smithers help was removed in 1.0.0-rc.0: use `--help`. See https://smithers.sh/migration/1.0#help
 ```
 
 #### herdr
 
 ```
-smithers herdr was removed in 1.0.0-rc.0: moved to the plugins repository or deferred (cron returns on @smthrs/triggers; listeners returns with the GitHub integration). See https://smithers.sh/migration/1.0#herdr
+smithers herdr was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#herdr
 ```
 
 Removed forms: `herdr status|attach|open|clean`.
@@ -371,19 +371,19 @@ Removed forms: `herdr status|attach|open|clean`.
 #### hermes
 
 ```
-smithers hermes was removed in 1.0.0-rc.0: moved to the plugins repository or deferred (cron returns on @smthrs/triggers; listeners returns with the GitHub integration). See https://smithers.sh/migration/1.0#hermes
+smithers hermes was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#hermes
 ```
 
 #### hijack
 
 ```
-smithers hijack was removed in 1.0.0-rc.0: not available; use steer, signal, approve, deny, cancel, run --resume. See https://smithers.sh/migration/1.0#hijack
+smithers hijack was removed in 1.0.0-rc.0: not available; use `steer`, `signal`, `approve`, `deny`, `cancel`, `run --resume`. See https://smithers.sh/migration/1.0#hijack
 ```
 
 #### human
 
 ```
-smithers human was removed in 1.0.0-rc.0: approvals park the run; use ps --status waiting-approval, approve, deny; the MCP ask_human tool keeps its name and returns the unsupported envelope (§4.1). See https://smithers.sh/migration/1.0#human
+smithers human was removed in 1.0.0-rc.0: approvals park the run; use `ps --status waiting-approval`, `approve`, and `deny`. See https://smithers.sh/migration/1.0#human
 ```
 
 Removed forms: `human list|resolve`.
@@ -391,61 +391,61 @@ Removed forms: `human list|resolve`.
 #### kill
 
 ```
-smithers kill was removed in 1.0.0-rc.0: docs-full becomes docs --full; the other eleven are the 0.x COMMAND_ALIASES did-you-mean hint keys (apps/cli/src/index.js:12994-13008), each answering with the rc.0 verb (ps, ls, cancel, up, status, logs, --help); the two remaining 0.x hint keys ls and status are real rc.0 commands (§4.1) and are not registered here. Only inspect, why, events, resume, gateway, workflow list survive as aliases. See https://smithers.sh/migration/1.0#kill
+smithers kill was removed in 1.0.0-rc.0: use `cancel`. See https://smithers.sh/migration/1.0#kill
 ```
 
 #### list
 
 ```
-smithers list was removed in 1.0.0-rc.0: docs-full becomes docs --full; the other eleven are the 0.x COMMAND_ALIASES did-you-mean hint keys (apps/cli/src/index.js:12994-13008), each answering with the rc.0 verb (ps, ls, cancel, up, status, logs, --help); the two remaining 0.x hint keys ls and status are real rc.0 commands (§4.1) and are not registered here. Only inspect, why, events, resume, gateway, workflow list survive as aliases. See https://smithers.sh/migration/1.0#list
+smithers list was removed in 1.0.0-rc.0: use `ls`. See https://smithers.sh/migration/1.0#list
 ```
 
 #### list-runs
 
 ```
-smithers list-runs was removed in 1.0.0-rc.0: docs-full becomes docs --full; the other eleven are the 0.x COMMAND_ALIASES did-you-mean hint keys (apps/cli/src/index.js:12994-13008), each answering with the rc.0 verb (ps, ls, cancel, up, status, logs, --help); the two remaining 0.x hint keys ls and status are real rc.0 commands (§4.1) and are not registered here. Only inspect, why, events, resume, gateway, workflow list survive as aliases. See https://smithers.sh/migration/1.0#list-runs
+smithers list-runs was removed in 1.0.0-rc.0: use `ps`. See https://smithers.sh/migration/1.0#list-runs
 ```
 
 #### listeners
 
 ```
-smithers listeners was removed in 1.0.0-rc.0: moved to the plugins repository or deferred (cron returns on @smthrs/triggers; listeners returns with the GitHub integration). See https://smithers.sh/migration/1.0#listeners
+smithers listeners was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#listeners
 ```
 
 #### log
 
 ```
-smithers log was removed in 1.0.0-rc.0: docs-full becomes docs --full; the other eleven are the 0.x COMMAND_ALIASES did-you-mean hint keys (apps/cli/src/index.js:12994-13008), each answering with the rc.0 verb (ps, ls, cancel, up, status, logs, --help); the two remaining 0.x hint keys ls and status are real rc.0 commands (§4.1) and are not registered here. Only inspect, why, events, resume, gateway, workflow list survive as aliases. See https://smithers.sh/migration/1.0#log
+smithers log was removed in 1.0.0-rc.0: use `logs`. See https://smithers.sh/migration/1.0#log
 ```
 
 #### make-workflow
 
 ```
-smithers make-workflow was removed in 1.0.0-rc.0: JSX pack tooling is gone; smithers migrate replaces upgrade. See https://smithers.sh/migration/1.0#make-workflow
+smithers make-workflow was removed in 1.0.0-rc.0: JSX pack tooling is gone; `smithers migrate` replaces `upgrade`. See https://smithers.sh/migration/1.0#make-workflow
 ```
 
 #### monitor
 
 ```
-smithers monitor was removed in 1.0.0-rc.0: replaced by smithers serve and the Electrobun product UI; the 0.x terminal monitor (smithers-mon, packages/tui) is deleted, and a run monitor on the new projections is new work, not a port. See https://smithers.sh/migration/1.0#monitor
+smithers monitor was removed in 1.0.0-rc.0: replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted. See https://smithers.sh/migration/1.0#monitor
 ```
 
 #### node
 
 ```
-smithers node was removed in 1.0.0-rc.0: use output, logs --json, and the node-output projection. See https://smithers.sh/migration/1.0#node
+smithers node was removed in 1.0.0-rc.0: use `output`, `logs --json`, and the node-output projection. See https://smithers.sh/migration/1.0#node
 ```
 
 #### observability
 
 ```
-smithers observability was removed in 1.0.0-rc.0: moved to the plugins repository or deferred (cron returns on @smthrs/triggers; listeners returns with the GitHub integration). See https://smithers.sh/migration/1.0#observability
+smithers observability was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#observability
 ```
 
 #### openapi
 
 ```
-smithers openapi was removed in 1.0.0-rc.0: moved to the plugins repository or deferred (cron returns on @smthrs/triggers; listeners returns with the GitHub integration). See https://smithers.sh/migration/1.0#openapi
+smithers openapi was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#openapi
 ```
 
 Removed forms: `openapi list|generate`.
@@ -459,7 +459,7 @@ smithers optimize was removed in 1.0.0-rc.0: not part of the engine release. See
 #### packs
 
 ```
-smithers packs was removed in 1.0.0-rc.0: JSX pack tooling is gone; smithers migrate replaces upgrade. See https://smithers.sh/migration/1.0#packs
+smithers packs was removed in 1.0.0-rc.0: JSX pack tooling is gone; `smithers migrate` replaces `upgrade`. See https://smithers.sh/migration/1.0#packs
 ```
 
 Removed forms: `packs list|update`.
@@ -467,19 +467,19 @@ Removed forms: `packs list|update`.
 #### pause
 
 ```
-smithers pause was removed in 1.0.0-rc.0: not available; use steer, signal, approve, deny, cancel, run --resume. See https://smithers.sh/migration/1.0#pause
+smithers pause was removed in 1.0.0-rc.0: not available; use `steer`, `signal`, `approve`, `deny`, `cancel`, `run --resume`. See https://smithers.sh/migration/1.0#pause
 ```
 
 #### release
 
 ```
-smithers release was removed in 1.0.0-rc.0: review follows apps/review's Phase 4 disposition (not an rc.0 verb); release and test reserved verbs have no body. See https://smithers.sh/migration/1.0#release
+smithers release was removed in 1.0.0-rc.0: not an rc.0 verb. See https://smithers.sh/migration/1.0#release
 ```
 
 #### remove
 
 ```
-smithers remove was removed in 1.0.0-rc.0: JSX pack tooling is gone; smithers migrate replaces upgrade. See https://smithers.sh/migration/1.0#remove
+smithers remove was removed in 1.0.0-rc.0: JSX pack tooling is gone; `smithers migrate` replaces `upgrade`. See https://smithers.sh/migration/1.0#remove
 ```
 
 #### replay
@@ -509,7 +509,7 @@ smithers revert was removed in 1.0.0-rc.0: time travel is a library API (@smthrs
 #### review
 
 ```
-smithers review was removed in 1.0.0-rc.0: review follows apps/review's Phase 4 disposition (not an rc.0 verb); release and test reserved verbs have no body. See https://smithers.sh/migration/1.0#review
+smithers review was removed in 1.0.0-rc.0: not an rc.0 verb. See https://smithers.sh/migration/1.0#review
 ```
 
 #### rewind
@@ -521,7 +521,7 @@ smithers rewind was removed in 1.0.0-rc.0: time travel is a library API (@smthrs
 #### runs
 
 ```
-smithers runs was removed in 1.0.0-rc.0: docs-full becomes docs --full; the other eleven are the 0.x COMMAND_ALIASES did-you-mean hint keys (apps/cli/src/index.js:12994-13008), each answering with the rc.0 verb (ps, ls, cancel, up, status, logs, --help); the two remaining 0.x hint keys ls and status are real rc.0 commands (§4.1) and are not registered here. Only inspect, why, events, resume, gateway, workflow list survive as aliases. See https://smithers.sh/migration/1.0#runs
+smithers runs was removed in 1.0.0-rc.0: use `ps`. See https://smithers.sh/migration/1.0#runs
 ```
 
 #### scores
@@ -533,13 +533,13 @@ smithers scores was removed in 1.0.0-rc.0: not part of the engine release. See h
 #### share
 
 ```
-smithers share was removed in 1.0.0-rc.0: JSX pack tooling is gone; smithers migrate replaces upgrade. See https://smithers.sh/migration/1.0#share
+smithers share was removed in 1.0.0-rc.0: JSX pack tooling is gone; `smithers migrate` replaces `upgrade`. See https://smithers.sh/migration/1.0#share
 ```
 
 #### show
 
 ```
-smithers show was removed in 1.0.0-rc.0: docs-full becomes docs --full; the other eleven are the 0.x COMMAND_ALIASES did-you-mean hint keys (apps/cli/src/index.js:12994-13008), each answering with the rc.0 verb (ps, ls, cancel, up, status, logs, --help); the two remaining 0.x hint keys ls and status are real rc.0 commands (§4.1) and are not registered here. Only inspect, why, events, resume, gateway, workflow list survive as aliases. See https://smithers.sh/migration/1.0#show
+smithers show was removed in 1.0.0-rc.0: use `status`. See https://smithers.sh/migration/1.0#show
 ```
 
 #### snapshot-hook
@@ -557,19 +557,19 @@ smithers snapshots was removed in 1.0.0-rc.0: time travel is a library API (@smt
 #### start
 
 ```
-smithers start was removed in 1.0.0-rc.0: docs-full becomes docs --full; the other eleven are the 0.x COMMAND_ALIASES did-you-mean hint keys (apps/cli/src/index.js:12994-13008), each answering with the rc.0 verb (ps, ls, cancel, up, status, logs, --help); the two remaining 0.x hint keys ls and status are real rc.0 commands (§4.1) and are not registered here. Only inspect, why, events, resume, gateway, workflow list survive as aliases. See https://smithers.sh/migration/1.0#start
+smithers start was removed in 1.0.0-rc.0: use `up`. See https://smithers.sh/migration/1.0#start
 ```
 
 #### starters
 
 ```
-smithers starters was removed in 1.0.0-rc.0: JSX pack tooling is gone; smithers migrate replaces upgrade. See https://smithers.sh/migration/1.0#starters
+smithers starters was removed in 1.0.0-rc.0: JSX pack tooling is gone; `smithers migrate` replaces `upgrade`. See https://smithers.sh/migration/1.0#starters
 ```
 
 #### stop
 
 ```
-smithers stop was removed in 1.0.0-rc.0: docs-full becomes docs --full; the other eleven are the 0.x COMMAND_ALIASES did-you-mean hint keys (apps/cli/src/index.js:12994-13008), each answering with the rc.0 verb (ps, ls, cancel, up, status, logs, --help); the two remaining 0.x hint keys ls and status are real rc.0 commands (§4.1) and are not registered here. Only inspect, why, events, resume, gateway, workflow list survive as aliases. See https://smithers.sh/migration/1.0#stop
+smithers stop was removed in 1.0.0-rc.0: use `cancel`. See https://smithers.sh/migration/1.0#stop
 ```
 
 #### supervise
@@ -587,13 +587,13 @@ smithers supervisor was removed in 1.0.0-rc.0: the run driver's heartbeat sweep 
 #### tail
 
 ```
-smithers tail was removed in 1.0.0-rc.0: use output, logs --json, and the node-output projection. See https://smithers.sh/migration/1.0#tail
+smithers tail was removed in 1.0.0-rc.0: use `output`, `logs --json`, and the node-output projection. See https://smithers.sh/migration/1.0#tail
 ```
 
 #### test
 
 ```
-smithers test was removed in 1.0.0-rc.0: review follows apps/review's Phase 4 disposition (not an rc.0 verb); release and test reserved verbs have no body. See https://smithers.sh/migration/1.0#test
+smithers test was removed in 1.0.0-rc.0: not an rc.0 verb. See https://smithers.sh/migration/1.0#test
 ```
 
 #### timeline
@@ -611,7 +611,7 @@ smithers timetravel was removed in 1.0.0-rc.0: time travel is a library API (@sm
 #### token
 
 ```
-smithers token was removed in 1.0.0-rc.0: moved to the plugins repository or deferred (cron returns on @smthrs/triggers; listeners returns with the GitHub integration). See https://smithers.sh/migration/1.0#token
+smithers token was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#token
 ```
 
 Removed forms: `token issue|exec|revoke`.
@@ -631,19 +631,19 @@ smithers tree was removed in 1.0.0-rc.0: time travel is a library API (@smthrs/t
 #### ui
 
 ```
-smithers ui was removed in 1.0.0-rc.0: replaced by smithers serve and the Electrobun product UI; the 0.x terminal monitor (smithers-mon, packages/tui) is deleted, and a run monitor on the new projections is new work, not a port. See https://smithers.sh/migration/1.0#ui
+smithers ui was removed in 1.0.0-rc.0: replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted. See https://smithers.sh/migration/1.0#ui
 ```
 
 #### upgrade
 
 ```
-smithers upgrade was removed in 1.0.0-rc.0: JSX pack tooling is gone; smithers migrate replaces upgrade. See https://smithers.sh/migration/1.0#upgrade
+smithers upgrade was removed in 1.0.0-rc.0: JSX pack tooling is gone; `smithers migrate` replaces `upgrade`. See https://smithers.sh/migration/1.0#upgrade
 ```
 
 #### usage
 
 ```
-smithers usage was removed in 1.0.0-rc.0: moved to the plugins repository or deferred (cron returns on @smthrs/triggers; listeners returns with the GitHub integration). See https://smithers.sh/migration/1.0#usage
+smithers usage was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#usage
 ```
 
 #### what
@@ -655,7 +655,7 @@ smithers what was removed in 1.0.0-rc.0: removed with the JSX inline workflow. S
 #### workflows
 
 ```
-smithers workflows was removed in 1.0.0-rc.0: docs-full becomes docs --full; the other eleven are the 0.x COMMAND_ALIASES did-you-mean hint keys (apps/cli/src/index.js:12994-13008), each answering with the rc.0 verb (ps, ls, cancel, up, status, logs, --help); the two remaining 0.x hint keys ls and status are real rc.0 commands (§4.1) and are not registered here. Only inspect, why, events, resume, gateway, workflow list survive as aliases. See https://smithers.sh/migration/1.0#workflows
+smithers workflows was removed in 1.0.0-rc.0: use `ls`. See https://smithers.sh/migration/1.0#workflows
 ```
 
 #### worktrees
