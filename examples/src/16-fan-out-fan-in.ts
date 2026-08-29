@@ -24,6 +24,12 @@
  * computed on. So the report is built by an action that receives five strings,
  * not by a function in the body that tries to concatenate placeholders.
  *
+ * **A member replays, it does not re-dispatch.** `main` drives the gate twice
+ * under one execution id. Every check's verdict is recorded against its own
+ * step key, and the keys are stable because the batch a check lands in is a
+ * total function of the declaration order. So the second drive rebuilds the
+ * same five keys, reads five recorded verdicts, and dispatches nothing.
+ *
  * **The same gate, declared on disk.** The second half of the file runs the
  * identical topology from `16-project/flows/gate/flow.ts`, a flow the project
  * declares rather than one this file names. `@smthrs/registry`'s `Executable`
@@ -331,11 +337,13 @@ export const declaredPriorities = (target = "release"): Readonly<Record<string, 
 export interface Summary {
   /** The report the fan-in step produced. */
   readonly report: string
+  /** The report a re-drive of the same execution id produced. */
+  readonly replayed: string
   /** The order the checks started in. */
   readonly started: ReadonlyArray<string>
   /** The most checks that were ever running at the same moment. */
   readonly maxInFlight: number
-  /** How many times each check's body ran. */
+  /** How many times each check's body ran, across BOTH executions. */
   readonly dispatches: Readonly<Record<string, number>>
   /** The distinct lifecycle events the run journalled. */
   readonly eventTypes: ReadonlyArray<string>
@@ -374,10 +382,15 @@ export const main = (filename: string): Effect.Effect<Summary> =>
     const observed = yield* Effect.scoped(
       Effect.gen(function*() {
         const report = yield* Gate.execute({ target: "release" }, { executionId: "gate-1" })
+        // The same execution id, so this is a re-drive rather than a second
+        // gate. Each fan-out member's verdict is already recorded against its
+        // own step key, so the batch is rebuilt from durable state and no check
+        // dispatches again.
+        const replayed = yield* Gate.execute({ target: "release" }, { executionId: "gate-1" })
         const journal = yield* Journal.Journal
         yield* journal.flush
         const page = yield* journal.entries({ runId: "gate-1" as JournalEvent.RunId, limit: 500 })
-        return { report, eventTypes: [...new Set(page.entries.map((entry) => entry.eventType))] }
+        return { report, replayed, eventTypes: [...new Set(page.entries.map((entry) => entry.eventType))] }
       }).pipe(
         Effect.provide(
           Layer.mergeAll(check, collect, Interpreter.layer(Gate)).pipe(
@@ -390,6 +403,7 @@ export const main = (filename: string): Effect.Effect<Summary> =>
 
     return {
       report: observed.report,
+      replayed: observed.replayed,
       started,
       maxInFlight,
       dispatches,

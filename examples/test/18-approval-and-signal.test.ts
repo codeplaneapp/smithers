@@ -24,7 +24,18 @@ it.effect("gates a launch on a plan approval and ends a durable wait with a sign
     expect(summary.plan.deniedDecision).toBe("denied")
     expect(summary.plan.deniedLaunch).toBe("/control/ClaimLost")
 
-    // The run really parked, and the engine recorded what on.
+    // The first drive parked INSIDE the run, on the token the clearance step
+    // registered for itself. `approval` rather than `event`: the run is waiting
+    // for a person, not for a fact to arrive.
+    expect(summary.run.firstPark).toBe("parked")
+    expect(summary.run.firstWaitingFor).toBe("approval")
+
+    // The step ran twice and read the token both times: unresolved on the
+    // drive that parked, resolved on the drive after an operator decided. It
+    // did not run a third time, because by then its result was recorded.
+    expect(summary.run.clearanceReads).toEqual([false, true])
+
+    // The run parked again after the gate opened, this time on its signal.
     expect(summary.run.parked).toBe("parked")
     expect(summary.run.waitingFor).toBe("event")
 

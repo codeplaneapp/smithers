@@ -23,6 +23,29 @@
  * the run the watch follows is `flows/ship/flow.mdx` executing through the
  * `examples/RemoteShip` flow its frontmatter delegates to.
  *
+ * **One chain, not two halves.** `ControlExecutor` is the seam between the
+ * plane and a real engine, and {@link executorLayer} below is the whole bridge:
+ * it resolves the approved plan's flow out of the registry, starts a durable
+ * run under the run id the plane just minted, and mirrors what that run did
+ * back onto the plane's row. So the run the client watches is the run the
+ * client planned and approved, addressed by the id the `Accepted` receipt
+ * handed back. Nothing in this file starts a run out of band.
+ *
+ * It forks rather than runs inline, and the fork waits on a latch, for the
+ * reason `AgentSession` does the same: `Control.run` writes `running` on the
+ * row after the executor answers `accepted`, so an executor that let the run
+ * park first would have that write land on top of the park. Releasing the latch
+ * after the receipt is in hand orders the two writes.
+ *
+ * **Two databases, one journal.** The plane and the engine keep their own run
+ * tables, which is what `smithers` itself does: `.flows/control.db` holds plans,
+ * approvals, and the plane's projection of each run, `.flows/engine.db` holds
+ * the durable execution state. They cannot share one, because a plane run row
+ * and an engine run row are different documents under the same key. They DO
+ * share the journal, and that is what makes `watch` worth having: one stream
+ * carries `control.run.accepted` and `flows.engine.attempt-started` in the order
+ * they happened.
+ *
  * The server binds `127.0.0.1` on an ephemeral port and authenticates nothing,
  * which is a decision for a loopback example and nothing else. A control plane
  * that listens anywhere else needs a real authenticator; `ControlRpcs` ships a
@@ -32,21 +55,29 @@ import { NodeHttpClient, NodeHttpServer, NodeSocket } from "@effect/platform-nod
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
-import { Control, ControlClient, ControlLive, type ControlRuntime, SqlControlRuntime } from "@smthrs/control"
+import { Control, ControlClient, ControlLive, ControlRuntime, SqlControlRuntime } from "@smthrs/control"
 import * as ControlExecutor from "@smthrs/control/ControlExecutor"
 import * as ControlRpcs from "@smthrs/control/ControlRpcs"
 import type * as ControlSchema from "@smthrs/control/ControlSchema"
 import * as ControlServer from "@smthrs/control/ControlServer"
+import * as DurableWriter from "@smthrs/database/DurableWriter"
+import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import { Action, Flow, type FlowRuntime, Interpreter, WaitFor } from "@smthrs/flow"
 import { NotificationQueue } from "@smthrs/notifications"
 import { Executable, Registry } from "@smthrs/registry"
+import { Migrations as RunStoreMigrations, RunStore } from "@smthrs/run-store"
 import type * as Crypto from "effect/Crypto"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
+import type * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import type * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
+import { mkdirSync } from "node:fs"
 import { createServer } from "node:http"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -73,9 +104,6 @@ export const projectRoot: string = join(dirname(fileURLToPath(import.meta.url)),
 
 /** The name discovery derives for `flows/ship/flow.mdx` from its directory. */
 export const discoveredFlow = "ship"
-
-/** The run the remote client watches. */
-export const watchedRunId = "remote-ship"
 
 /** The platform services discovery and body loading read the project through. */
 const platform = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)
@@ -130,33 +158,42 @@ export interface Summary {
   readonly beforeApproval: string
   /** The receipt `run` answered after it was approved. */
   readonly afterApproval: string
+  /** The run id that receipt named, which is the run the executor started. */
+  readonly watchedRunId: string | undefined
   /** The flows the executor was handed, in launch order. */
   readonly launched: ReadonlyArray<string>
   /** The runs `list` reported, over the same connection. */
   readonly listed: ReadonlyArray<string>
-  /** The status `list` reported for the parked run. */
+  /** The status `list` reported for the approved plan's run. */
   readonly parked: string | undefined
   /** The control events the WebSocket watch replayed, oldest first. */
   readonly watched: ReadonlyArray<string>
 }
 
+/** The plane's status for an engine run that has stopped for now. */
+const planeStatus = (status: RunStore.RunStatus): ControlSchema.RunStatus =>
+  status === "suspended"
+    ? "parked"
+    : status === "completed" || status === "failed" || status === "cancelled" || status === "running"
+    ? status
+    : "accepted"
+
 /**
  * Serves the control plane on loopback and drives it entirely through the RPC
  * client.
+ *
+ * @param root a directory the two SQLite files are created in
  */
-export const main = (filename: string): Effect.Effect<Summary> =>
+export const main = (root: string): Effect.Effect<Summary> =>
   Effect.gen(function*() {
     const launched: Array<string> = []
+    const driving: Array<{
+      readonly runId: string
+      readonly start: Deferred.Deferred<void>
+      readonly fiber: Fiber.Fiber<unknown, unknown>
+    }> = []
 
-    const executor = ControlExecutor.layer(
-      ControlExecutor.make({
-        launch: ({ plan }) =>
-          Effect.sync(() => {
-            launched.push(plan.card.flowId)
-            return "pending" as const
-          })
-      })
-    )
+    yield* Effect.sync(() => mkdirSync(root, { recursive: true }))
 
     // What the plane may be asked to plan is what discovery found. The scan
     // happens once, here, so the runtime is configured with the descriptors on
@@ -175,17 +212,79 @@ export const main = (filename: string): Effect.Effect<Summary> =>
       envelope: { capabilities: descriptor.capabilities, flows: descriptor.flows, budget: {} }
     }))
 
+    /**
+     * The plane's own database: plans, approvals, and its projection of each
+     * run. It is not the engine's, because a plane run row and an engine run
+     * row are different documents that would otherwise collide on one key.
+     */
+    const planeStores = RunStore.layer.pipe(
+      Layer.provideMerge(RunStoreMigrations.layer),
+      Layer.provideMerge(DurableWriter.layer()),
+      Layer.provideMerge(NodeDatabase.layer({ filename: join(root, "control.sqlite") }))
+    )
+
+    // `Layer.provide`, not `provideMerge`: the plane's run store stays inside
+    // the plane. Exporting it would put two different `RunStore`s in one
+    // context, and everything below would read whichever won.
+    const controlRuntime = SqlControlRuntime.layer({
+      flows,
+      owner: { hostId: "examples-gateway", pid: 1, nonce: "gateway" }
+    }).pipe(Layer.provide(planeStores), Layer.orDie)
+
+    /**
+     * The acceptance port, wired to the durable engine.
+     *
+     * It is handed the stored plan and the run row the plane just minted, and
+     * it starts THAT run: `run.runId` is the execution id, so the events the
+     * engine journals and the row the plane projects name one run.
+     *
+     * Then it mirrors. The plane cannot see into the engine's database, so an
+     * executor that walked away after starting the run would leave every run
+     * reading `running` forever. Reading the engine's own row back and writing
+     * the plane's vocabulary onto the plane's row is the whole of that duty:
+     * the engine calls a parked run `suspended`, an operator calls it `parked`.
+     */
+    const executorLayer = Layer.effect(ControlExecutor.ControlExecutor)(
+      Effect.gen(function*() {
+        const plane = yield* ControlRuntime.ControlRuntime
+        const services = yield* Effect.context<
+          | FlowRuntime.FlowRuntime
+          | Crypto.Crypto
+          | Registry.Registry
+          | RunStore.RunStore
+          | FileSystem.FileSystem
+          | Path.Path
+        >()
+
+        const mirror = (runId: string) =>
+          Effect.gen(function*() {
+            const runs = yield* RunStore.RunStore
+            const row = yield* runs.get(runId)
+            const fence = yield* plane.claimFence(runId as ControlSchema.RunId)
+            yield* plane.writeStatus(runId as ControlSchema.RunId, fence, planeStatus(row.status))
+          }).pipe(Effect.orDie)
+
+        return ControlExecutor.make({
+          launch: ({ plan, run }) =>
+            Effect.gen(function*() {
+              launched.push(plan.card.flowId)
+              const executable = yield* Executable.fromRegistry(plan.card.flowId, bridge)
+              const start = yield* Deferred.make<void>()
+              const fiber = Effect.runForkWith(services)(
+                Deferred.await(start).pipe(
+                  Effect.andThen(launch(executable, plan.decodedInput as Schema.Json, run.runId)),
+                  Effect.andThen(mirror(run.runId))
+                )
+              )
+              driving.push({ runId: run.runId, start, fiber })
+              return "accepted" as const
+            }).pipe(Effect.provide(services), Effect.orDie)
+        })
+      })
+    ).pipe(Layer.provideMerge(controlRuntime))
+
     const controlPlane = ControlLive.layer.pipe(
-      Layer.provideMerge(
-        Layer.mergeAll(
-          SqlControlRuntime.layer({
-            flows,
-            owner: { hostId: "examples-gateway", pid: 1, nonce: "gateway" }
-          }).pipe(Layer.orDie),
-          NotificationQueue.layer,
-          executor
-        )
-      )
+      Layer.provideMerge(Layer.merge(executorLayer, NotificationQueue.layer))
     )
 
     // Every discovered descriptor is registered as a durable flow, beside the
@@ -197,20 +296,16 @@ export const main = (filename: string): Effect.Effect<Summary> =>
       Executable.layer(bridge).pipe(Layer.orDie)
     ).pipe(Layer.provideMerge(Action.layerImplementations))
 
-    // One database beneath the plane and the engine, so the events the client
-    // watches are the ones the run wrote.
+    // The engine, and the journal both halves write to. The plane keeps its own
+    // run table above; it shares this journal, so one `watch` stream carries the
+    // plane's decisions and the engine's execution in the order they happened.
     const stack = Layer.merge(controlPlane, registrations).pipe(
-      Layer.provideMerge(durableEngine(filename, "examples-gateway")),
+      Layer.provideMerge(durableEngine(join(root, "engine.sqlite"), "examples-gateway")),
       Layer.provideMerge(Layer.merge(registry, platform))
     )
 
     return yield* Effect.scoped(
       Effect.gen(function*() {
-        // A real durable run of the DISCOVERED flow, so the watch reports the
-        // descriptor's own execution and not a stand-in declared in this file.
-        const executable = yield* Executable.fromRegistry(discoveredFlow, bridge).pipe(Effect.orDie)
-        yield* launch(executable, { build: "v2.0.0" }, watchedRunId)
-
         // The server: the same `Control` service, mounted as RPC.
         const served = HttpRouter.serve(
           ControlServer.layerHttp.pipe(
@@ -267,6 +362,15 @@ export const main = (filename: string): Effect.Effect<Summary> =>
               ...launch,
               idempotencyKey: "remote:after" as ControlSchema.IdempotencyKey
             })
+            const watchedRunId = afterApproval._tag === "Accepted" ? afterApproval.runId : undefined
+
+            // The receipt is in hand, so the plane has finished writing
+            // `running`. Releasing the latch now lets the run reach its durable
+            // wait, and joining it makes the park observable rather than racy.
+            yield* Effect.forEach(driving, (started) =>
+              Deferred.succeed(started.start, void 0).pipe(
+                Effect.andThen(Fiber.join(started.fiber))
+              ))
 
             const listed = yield* control.list({ _tag: "runs", filters: {} })
             const runs = listed._tag === "runs" ? listed.items : []
@@ -274,7 +378,10 @@ export const main = (filename: string): Effect.Effect<Summary> =>
             // `follow: false` asks for a finite snapshot of what is already
             // durable, which is what makes this assertable. Omitting it opens
             // the live stream a UI subscribes to and never ends.
-            const watched = yield* control.watch({ runId: watchedRunId as ControlSchema.RunId, follow: false }).pipe(
+            const watched = watchedRunId === undefined ? [] : yield* control.watch({
+              runId: watchedRunId,
+              follow: false
+            }).pipe(
               Stream.map((event) => event.kind),
               Stream.runCollect
             )
@@ -286,6 +393,7 @@ export const main = (filename: string): Effect.Effect<Summary> =>
               plannedEnvelope: card.envelope.flows,
               beforeApproval: beforeApproval._tag,
               afterApproval: afterApproval._tag,
+              watchedRunId,
               launched: [...launched],
               listed: runs.map((run) => run.runId),
               parked: runs.find((run) => run.runId === watchedRunId)?.status,

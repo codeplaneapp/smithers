@@ -13,9 +13,14 @@
  * refuse. The digest is why an approval cannot be re-aimed at a different plan
  * afterwards.
  *
- * **A node approval gates something inside a run that already started.** It is
- * a durable token registered against the run and resolved exactly once, so a
- * resumed attempt reads the decision instead of asking again.
+ * **A node approval gates something inside a run that already started.** The
+ * {@link Clearance} step below registers a durable token against its own run
+ * and parks the run under `approval` while that token is undecided. Nothing
+ * outside the run asks for it. `Control.approve` refuses a token that was never
+ * registered, so an operator can only decide a request a step actually made.
+ * Registration is idempotent and answers the token's current state, which is
+ * what lets the drive after the decision read it and run through instead of
+ * asking again.
  *
  * **A signal is a durable fact delivered to a run.** `Control.signal` records
  * it and deliberately resumes nothing: a signal says something happened, it
@@ -24,11 +29,12 @@
  * its smallest — read the signals the control plane admitted, and complete the
  * `WaitFor` wait point they name.
  *
- * The run itself parks for real: `WaitFor` annotates the park as `event` with a
- * wake token, the engine writes the waiting reason on the run row and releases
- * the run, and `execute` returns while the run stays parked. The control plane
- * and the engine share one SQLite file, which is what lets the plane steer a
- * run it did not start.
+ * Both parks are real, and the run row says which is which. The clearance step
+ * annotates its park as `approval` with the request id as the wake token, and
+ * `WaitFor` annotates the later one as `event`. Either way the engine writes the
+ * waiting reason on the run row and releases the run, and `execute` returns
+ * while the run stays parked. The control plane and the engine share one SQLite
+ * file, which is what lets the plane steer a run it did not start.
  */
 import { Control, ControlLive, ControlRuntime, SqlControlRuntime } from "@smthrs/control"
 import * as ControlExecutor from "@smthrs/control/ControlExecutor"
@@ -36,18 +42,72 @@ import type * as ControlSchema from "@smthrs/control/ControlSchema"
 import { Action, DurableDeferred, Flow, FlowRuntime, Interpreter, WaitFor } from "@smthrs/flow"
 import { Journal, type JournalEvent } from "@smthrs/journal"
 import { NotificationQueue } from "@smthrs/notifications"
+import { Node } from "@smthrs/plan"
 import { Registry } from "@smthrs/registry"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import { durableEngine } from "./durable-layer.ts"
 
+/** The empty capability envelope this flow is planned under. */
+const envelope: ControlSchema.Envelope = { capabilities: [], flows: [], budget: {} }
+
+/** The id the clearance step registers its approval token under. */
+export const clearanceRequestId = "ship-clearance"
+
+/**
+ * What the clearance request is a decision ABOUT.
+ *
+ * A node approval carries a digest for the same reason a plan approval does: it
+ * pins what was reviewed, so a decision cannot be re-aimed at a different
+ * request afterwards. It is deliberately not the plan's digest. The two gates
+ * are separate mechanisms and a run that was never planned still has steps
+ * worth gating.
+ */
+export const clearanceDigest = "examples/Ship:clearance"
+
+/** The exact approval request the step registers and an operator decides. */
+export const clearanceRequest = (
+  runId: string
+): Extract<ControlSchema.ApprovalTarget, { readonly _tag: "Node" }> => ({
+  _tag: "Node",
+  runId: runId as ControlSchema.RunId,
+  requestId: clearanceRequestId,
+  digest: clearanceDigest,
+  envelope
+})
+
+/**
+ * The wait point the clearance park awaits.
+ *
+ * Nothing ever completes it, which is the point: an approval is not a value
+ * arriving, it is a decision recorded somewhere else. The wake is the operator
+ * re-driving the run, and the step reads the decision off the token rather than
+ * off this deferred.
+ */
+const clearanceGate = DurableDeferred.make(`Approval/${clearanceRequestId}`, { success: Schema.Json })
+
+/**
+ * The in-run approval gate, as an ordinary step.
+ *
+ * It is the step that registers the token, not the caller, so the request
+ * exists exactly when a run has reached the thing that needs deciding.
+ */
+export const Clearance = Action.make("examples/Clearance", {
+  payload: { requestId: Schema.String },
+  success: Schema.String
+})
+
 /** The flow both halves of the example are about. */
 export const Ship = Flow.make("examples/Ship", {
   payload: { build: Schema.String },
   success: Schema.Json,
   error: WaitFor.WaitForRequestInvalid,
-  body: () => WaitFor.action.call({ name: "ship" })
+  body: () =>
+    Node.andThen(
+      Clearance.call({ requestId: clearanceRequestId }),
+      () => WaitFor.action.call({ name: "ship" })
+    )
 })
 
 /** The wait point the run parks on, and the resolver's half of it. */
@@ -55,9 +115,6 @@ export const gate = WaitFor.deferred("ship")
 
 /** The engine run the node approval and the signal are aimed at. */
 export const shipRunId = "examples-ship"
-
-/** The empty capability envelope this flow is planned under. */
-const envelope: ControlSchema.Envelope = { capabilities: [], flows: [], budget: {} }
 
 /**
  * The control-plane flow catalog.
@@ -128,6 +185,12 @@ export interface PlanGate {
 
 /** What the in-run gates did. */
 export interface RunGates {
+  /** The status the run had after the drive that reached the clearance step. */
+  readonly firstPark: string
+  /** What the engine recorded that first park as waiting for. */
+  readonly firstWaitingFor: string | undefined
+  /** What the clearance step read off its token, once per time it ran. */
+  readonly clearanceReads: ReadonlyArray<boolean>
   /** The status the control plane reported for the parked run. */
   readonly parked: string
   /** What the engine recorded the run as waiting for. */
@@ -158,6 +221,30 @@ const receipt = (value: { readonly _tag: string }): string => value._tag
 export const main = (filename: string): Effect.Effect<Summary> =>
   Effect.gen(function*() {
     let launches = 0
+    const clearanceReads: Array<boolean> = []
+
+    /**
+     * The clearance step's implementation: register, read, park or proceed.
+     *
+     * `registerApproval` is the whole gate. It creates the token the first time
+     * and answers the existing one afterwards, so this handler asks the same
+     * question on every attempt and gets a different answer once somebody has
+     * decided. Parking rather than failing is the honest shape: the run has
+     * done nothing wrong, it is waiting for a person.
+     */
+    const clearance = Clearance.toLayer(({ requestId }) =>
+      Effect.gen(function*() {
+        const instance = yield* FlowRuntime.FlowInstance
+        const runtime = yield* ControlRuntime.ControlRuntime
+        const token = yield* Effect.orDie(runtime.registerApproval(clearanceRequest(instance.executionId)))
+        clearanceReads.push(token.resolved)
+        if (token.resolved) return token.tokenId
+        // The request id is the wake token an operator's tooling matches on.
+        yield* FlowRuntime.annotateWaiting({ reason: "approval", token: requestId })
+        yield* DurableDeferred.await(clearanceGate)
+        return token.tokenId
+      })
+    )
 
     /**
      * The acceptance port. It records the launch and answers `pending`, which
@@ -188,13 +275,15 @@ export const main = (filename: string): Effect.Effect<Summary> =>
       )
     )
 
-    const registrations = Layer.mergeAll(WaitFor.layer, Interpreter.layer(Ship)).pipe(
-      Layer.provideMerge(Action.layerImplementations)
-    )
-
     // One database beneath both, so the plane steers the runs the engine owns.
-    const stack = Layer.merge(controlPlane, registrations).pipe(
-      Layer.provideMerge(durableEngine(filename, "examples-approval"))
+    const plane = controlPlane.pipe(Layer.provideMerge(durableEngine(filename, "examples-approval")))
+
+    // The clearance step reads the control plane, so the registrations are
+    // built OVER the plane rather than beside it. That is the dependency the
+    // gate is: a step that consults a decision needs the service that holds it.
+    const stack = Layer.mergeAll(clearance, WaitFor.layer, Interpreter.layer(Ship)).pipe(
+      Layer.provideMerge(Action.layerImplementations),
+      Layer.provideMerge(plane)
     )
 
     return yield* Effect.scoped(
@@ -257,32 +346,37 @@ export const main = (filename: string): Effect.Effect<Summary> =>
         )
 
         // -------------------------------------------------------- the run gates
-        // A real durable run that parks. `execute` returns the moment the wait
-        // point is durable; nothing is driving the run after that.
+        // A real durable run that parks. `execute` returns the moment the park
+        // is durable; nothing is driving the run after that.
+        //
+        // Drive one reaches the clearance step, which registers its own token,
+        // finds it undecided, and parks the run under `approval`.
         yield* Ship.execute({ build: "v1.4.0" }, { executionId: shipRunId, discard: true })
-        const listed = yield* control.list({ _tag: "runs", filters: { runId: shipRunId } })
-        const row = listed._tag === "runs" ? listed.items[0] : undefined
+        const first = yield* control.list({ _tag: "runs", filters: { runId: shipRunId } })
+        const firstRow = first._tag === "runs" ? first.items[0] : undefined
 
-        // The in-run approval. Registration is idempotent — an executor calls it
-        // on every parked attempt — and answers the token's current state, so a
-        // resumed attempt reads the decision instead of asking again.
-        const request = {
-          _tag: "Node" as const,
-          runId: shipRunId as ControlSchema.RunId,
-          requestId: "ship-approval",
-          digest: card.digest,
-          envelope: card.envelope
-        }
-        yield* runtime.registerApproval(request)
+        // The decision, taken from outside the run against the token the STEP
+        // registered. `approve` looks the token up rather than creating one, so
+        // this call could not have run before the step parked.
+        const request = clearanceRequest(shipRunId)
         const approvalReceipt = yield* control.approve({
           target: request,
           scope: "once",
           idempotencyKey: "approve:node" as ControlSchema.IdempotencyKey
         })
+        // Resolved exactly once: `lookupApproval` refuses a resolved token, so
+        // the refusal IS the durable evidence that the decision stuck.
         const token = yield* runtime.lookupApproval(request).pipe(
           Effect.map((found) => found.resolved),
           Effect.orElseSucceed(() => true)
         )
+
+        // Drive two: the same step runs again, reads the resolved token, and
+        // lets the run through to its next wait instead of asking a second
+        // time.
+        yield* Ship.execute({ build: "v1.4.0" }, { executionId: shipRunId, discard: true })
+        const listed = yield* control.list({ _tag: "runs", filters: { runId: shipRunId } })
+        const row = listed._tag === "runs" ? listed.items[0] : undefined
 
         // The signal. It records a fact and resumes nothing.
         yield* control.signal({
@@ -313,6 +407,9 @@ export const main = (filename: string): Effect.Effect<Summary> =>
             launches
           },
           run: {
+            firstPark: firstRow?.status ?? "unknown",
+            firstWaitingFor: firstRow?.waitingReason,
+            clearanceReads: [...clearanceReads],
             parked: row?.status ?? "unknown",
             waitingFor: row?.waitingReason,
             approvalReceipt: receipt(approvalReceipt),

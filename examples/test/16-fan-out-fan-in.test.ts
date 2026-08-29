@@ -41,14 +41,17 @@ it.live("runs at most two checks at a time and joins every verdict", () =>
     const summary = yield* main(join(directory, "gate.sqlite"))
 
     expect(summary.report).toBe("lint:clean types:clean unit:clean audit:clean licence:clean")
+    // A re-drive under the same execution id reads every recorded verdict back.
+    // The fan-out members replay rather than dispatch a second time.
+    expect(summary.replayed).toBe(summary.report)
     // The bound is topology, so it holds at run time as well as in the plan.
     expect(summary.maxInFlight).toBe(2)
     // The release blocker and the licence check share the first batch.
     expect(summary.started.slice(0, 2).sort()).toEqual(["audit", "licence"])
     expect(summary.started.slice(2, 4).sort()).toEqual(["lint", "types"])
     expect(summary.started[4]).toBe("unit")
-    // Every check ran exactly once: a fan-out is five steps, not one step five
-    // times.
+    // Every check ran exactly once across BOTH executions: a fan-out is five
+    // steps, not one step five times, and a replayed member is not a sixth.
     expect(summary.dispatches).toEqual({ lint: 1, types: 1, unit: 1, audit: 1, licence: 1 })
     expect(summary.eventTypes).toContain("flows.engine.attempt-started")
   }), { timeout: 60_000 })
