@@ -4,6 +4,13 @@
   "private": true,
   "type": "module",
   "description": "Smithers closed-alpha Cloudflare Worker: same-origin agent API, gateway relay, and host for the smithers-ui build",
+  "exports": {
+    "./package.json": "./package.json",
+    "./*": {
+      "types": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
   "scripts": {
     "deploy:dry-run": "bun scripts/deploy.ts --dry-run",
     "deploy": "bun scripts/deploy.ts",
