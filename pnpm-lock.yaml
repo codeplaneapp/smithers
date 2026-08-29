@@ -313,6 +313,12 @@ importers:
       '@smthrs/artifacts':
         specifier: 1.0.0-rc.0
         version: link:../packages/artifacts
+      '@smthrs/control':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/control
+      '@smthrs/core':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/core
       '@smthrs/database':
         specifier: 1.0.0-rc.0
         version: link:../packages/database
@@ -322,6 +328,9 @@ importers:
       '@smthrs/engine-store':
         specifier: 1.0.0-rc.0
         version: link:../packages/engine-store
+      '@smthrs/evals':
+        specifier: 0.1.0
+        version: link:../packages/evals
       '@smthrs/flow':
         specifier: 1.0.0-rc.0
         version: link:../packages/flow
@@ -346,9 +355,15 @@ importers:
       '@smthrs/model':
         specifier: 1.0.0-rc.0
         version: link:../packages/model
+      '@smthrs/notifications':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/notifications
       '@smthrs/observability':
         specifier: 1.0.0-rc.0
         version: link:../packages/observability
+      '@smthrs/patterns':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/patterns
       '@smthrs/plan':
         specifier: 1.0.0-rc.0
         version: link:../packages/plan
@@ -364,6 +379,12 @@ importers:
       '@smthrs/run-store':
         specifier: 1.0.0-rc.0
         version: link:../packages/run-store
+      '@smthrs/sandbox':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/sandbox
+      '@smthrs/std':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/std
       '@smthrs/step-cache':
         specifier: 1.0.0-rc.0
         version: link:../packages/step-cache
@@ -1104,6 +1125,21 @@ importers:
       '@eslint/js':
         specifier: 9.39.1
         version: 9.39.1
+      '@smthrs/engine-store':
+        specifier: 1.0.0-rc.0
+        version: link:../engine-store
+      '@smthrs/flow':
+        specifier: 1.0.0-rc.0
+        version: link:../flow
+      '@smthrs/jj':
+        specifier: 1.0.0-rc.0
+        version: link:../jj
+      '@smthrs/step-cache':
+        specifier: 1.0.0-rc.0
+        version: link:../step-cache
+      '@smthrs/time-travel':
+        specifier: 1.0.0-rc.0
+        version: link:../time-travel
       '@types/node':
         specifier: 25.9.5
         version: 25.9.5
@@ -1548,6 +1584,12 @@ importers:
       '@eslint/js':
         specifier: 9.39.1
         version: 9.39.1
+      '@smthrs/core':
+        specifier: 1.0.0-rc.0
+        version: link:../core
+      '@smthrs/patterns':
+        specifier: 1.0.0-rc.0
+        version: link:../patterns
       '@smthrs/platform-node':
         specifier: 1.0.0-rc.0
         version: link:../platform-node
@@ -1766,6 +1808,9 @@ importers:
       '@smthrs/plan':
         specifier: 1.0.0-rc.0
         version: link:../plan
+      '@smthrs/platform-node':
+        specifier: 1.0.0-rc.0
+        version: link:../platform-node
       '@smthrs/run-store':
         specifier: 1.0.0-rc.0
         version: link:../run-store
@@ -2528,6 +2573,9 @@ importers:
       '@eslint/js':
         specifier: 9.39.1
         version: 9.39.1
+      '@smthrs/database':
+        specifier: 1.0.0-rc.0
+        version: link:../database
       '@types/node':
         specifier: 25.9.5
         version: 25.9.5
@@ -2674,6 +2722,9 @@ importers:
       '@eslint/js':
         specifier: 9.39.1
         version: 9.39.1
+      '@smthrs/flow':
+        specifier: 1.0.0-rc.0
+        version: link:../flow
       '@types/node':
         specifier: 25.9.5
         version: 25.9.5
@@ -2933,6 +2984,9 @@ importers:
       '@eslint/js':
         specifier: 9.39.1
         version: 9.39.1
+      '@smthrs/journal':
+        specifier: 1.0.0-rc.0
+        version: link:../journal
       '@types/node':
         specifier: 25.9.5
         version: 25.9.5
