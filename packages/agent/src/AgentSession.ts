@@ -657,15 +657,32 @@ export const requestCancel = (
   Effect.gen(function*() {
     const runs = yield* RunStore.RunStore
     const at = yield* Clock.currentTimeMillis
-    const outcome = yield* runs.requestCancel(input.runId, at).pipe(
-      Effect.mapError((cause) =>
-        new PersistenceError({
-          operation: "AgentSession.requestCancel",
-          message: `The engine could not record a cancellation for ${input.runId}`,
-          cause
-        })
-      )
+    const failure = (runId: string) => (cause: unknown) =>
+      new PersistenceError({
+        operation: "AgentSession.requestCancel",
+        message: `The engine could not record a cancellation for ${runId}`,
+        cause
+      })
+    // The row is read BEFORE the request. `RunStore.requestCancel` has no
+    // status predicate yet (triage B-02), so a settled row would take the
+    // column and answer `AlreadyRequested` forever after — and `Control.cancel`
+    // would then transition a stale control row to `cancelled` over an engine
+    // row reading `completed`, which is the terminal disagreement B-11 forbids.
+    //
+    // The read is a guard, not the answer: a store that cannot answer `get` —
+    // a stub host, a missing row — leaves the request itself to decide, which
+    // is exactly what this port did before the guard existed. The read and the
+    // write are not one transaction either: a run that settles between them
+    // takes a cancel request nobody acts on, the harmless direction, and the
+    // one `RunDriver`'s cancel poll already ignores.
+    const current = yield* runs.get(input.runId).pipe(
+      Effect.map((row) => row.status as string | undefined),
+      Effect.catch(() => Effect.succeed(undefined))
     )
+    if (current === "completed" || current === "failed" || current === "cancelled") {
+      return { _tag: "Terminal", status: current } as const
+    }
+    const outcome = yield* runs.requestCancel(input.runId, at).pipe(Effect.mapError(failure(input.runId)))
     return outcome._tag === "NotFound" ? "unknown" : "recorded"
   })
 

@@ -43,19 +43,40 @@ export interface CancelRequest {
 }
 
 /**
+ * The engine row a cancel request arrived too late for.
+ *
+ * It carries the ENGINE's status rather than a bare marker because the control
+ * plane cannot read that row: in the shipped CLI the two `flows_runs` tables
+ * live in two files (`.flows/control.db` and `.flows/engine.db`), so the port
+ * is the only place the plane learns what actually became of the run.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface CancelTerminal {
+  readonly _tag: "Terminal"
+  readonly status: "completed" | "failed" | "cancelled"
+}
+
+/**
  * What the executor did with a cancel request.
  *
  * `recorded` means `cancel_requested_at_ms` is set on the engine row — by this
  * call or by an earlier one — so the owning process stops the run at its next
  * cancel poll whichever process asked. `unknown` means this executor's engine
  * has no row for the run at all, which is the honest answer for a run another
- * composition launched into a database this one does not share.
+ * composition launched into a database this one does not share. A
+ * {@link CancelTerminal} means the engine row has already settled, so there is
+ * nothing left to stop: recording intent on it would be a request no process
+ * can ever act on, and answering `recorded` let `Control.cancel` write a
+ * terminal control status the engine row does not have (triage B-11).
  *
  * @category models
  * @since 0.1.0
  * @slop
  */
-export type CancelRecord = "recorded" | "unknown"
+export type CancelRecord = "recorded" | "unknown" | CancelTerminal
 
 /**
  * One signal to deliver to a run's open wait point.

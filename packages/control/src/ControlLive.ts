@@ -29,6 +29,7 @@ import {
   type RunNotFound,
   Unavailable
 } from "./ControlError.ts"
+import type { CancelRecord } from "./ControlExecutor.ts"
 import { ControlExecutor } from "./ControlExecutor.ts"
 import { ControlRuntime } from "./ControlRuntime.ts"
 import type {
@@ -318,10 +319,12 @@ export const layer: Layer.Layer<
      * that answers `unknown` has an engine that never heard of the run, which
      * is the same situation with a different messenger.
      */
-    const executorRequestCancel = (runId: RunId): Effect.Effect<void, PersistenceError> =>
+    const executorRequestCancel = (
+      runId: RunId
+    ): Effect.Effect<CancelRecord, PersistenceError> =>
       Option.isNone(executor)
-        ? Effect.void
-        : Effect.asVoid(executor.value.requestCancel({ runId }))
+        ? Effect.succeed("unknown" as const)
+        : executor.value.requestCancel({ runId })
 
     const wake = (
       run: RunSummary,
@@ -754,20 +757,6 @@ export const layer: Layer.Layer<
             if (terminal(current.status)) {
               return { _tag: "Terminal", runId: current.runId, status: current.status }
             }
-            const principal = yield* runtime.stampPrincipal(input.principal)
-            // Attribution first, and in the mutation's own transaction. A
-            // cancellation that committed without it would be durable and
-            // anonymous, and nothing afterwards could say who asked.
-            yield* emit(
-              input.runId,
-              Cancellation.requestedEventType,
-              json({
-                runId: input.runId,
-                source: "control",
-                principal,
-                ...(input.reason === undefined ? {} : { reason: input.reason })
-              })
-            )
             // The durable half, and the only half that reaches a run another
             // process owns: fibers are process-local, so an interrupt can only
             // stop a run this process is driving. The executor writes
@@ -779,7 +768,32 @@ export const layer: Layer.Layer<
             // attribution event, no terminal control status — because a
             // control row that says `cancelled` while the engine row is still
             // running is the one state an operator can never recover from.
-            yield* executorRequestCancel(input.runId)
+            //
+            // It runs BEFORE the attribution event for the mirror-image
+            // reason. The control row this plane read may be stale — the two
+            // `flows_runs` tables are two files in the shipped CLI — and an
+            // engine row that has already settled makes the cancel a request
+            // nobody can act on. Attributing and transitioning it anyway is
+            // exactly the terminal disagreement B-11 forbids, so the engine's
+            // own status becomes the receipt and nothing else happens.
+            const record = yield* executorRequestCancel(input.runId)
+            if (typeof record !== "string") {
+              return { _tag: "Terminal", runId: input.runId, status: record.status }
+            }
+            const principal = yield* runtime.stampPrincipal(input.principal)
+            // Attribution before the interrupt, and in the mutation's own
+            // transaction. A cancellation that committed without it would be
+            // durable and anonymous, and nothing afterwards could say who asked.
+            yield* emit(
+              input.runId,
+              Cancellation.requestedEventType,
+              json({
+                runId: input.runId,
+                source: "control",
+                principal,
+                ...(input.reason === undefined ? {} : { reason: input.reason })
+              })
+            )
             const run = yield* runtime.interrupt(input.runId).pipe(
               // Another live process owns the run. The request is durable and
               // that process will act on it, so the honest receipt is

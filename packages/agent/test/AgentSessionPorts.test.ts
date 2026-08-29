@@ -145,6 +145,30 @@ describe("AgentSession.requestCancel", () => {
     expect(observed.repeated.cancelRequestedAtMs).toBe(observed.after.cancelRequestedAtMs)
   })
 
+  it("reports a settled engine row as terminal, and records nothing on it", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const store = yield* RunStore.RunStore
+      yield* parkedRun("ports-cancel-terminal", "approval")
+      // Settle the run through the engine itself, so the terminal row is the
+      // one the engine actually writes rather than a fixture.
+      yield* AgentSession.deliverSignal({
+        runId: "ports-cancel-terminal",
+        signal: { name: "approval", payload: { approved: true } }
+      })
+      const status = yield* settled("ports-cancel-terminal")
+
+      const record = yield* AgentSession.requestCancel({ runId: "ports-cancel-terminal" })
+      return { status, record, row: yield* store.get("ports-cancel-terminal") }
+    }))
+
+    expect(observed.status).toBe("completed")
+    // Not "recorded": nothing can act on a cancellation of a finished run, and
+    // answering "recorded" let `Control.cancel` write a terminal control status
+    // the engine row does not have (triage B-11).
+    expect(observed.record).toEqual({ _tag: "Terminal", status: "completed" })
+    expect(observed.row.cancelRequestedAtMs).toBeNull()
+  })
+
   it("reports a run the engine never heard of as unknown, not as a failure", async () => {
     const observed = await run(AgentSession.requestCancel({ runId: "ports-absent" }))
     expect(observed).toBe("unknown")

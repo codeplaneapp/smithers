@@ -53,6 +53,24 @@ const Gated = Flow.make("engine-waits/gated", {
     )
 })
 
+/**
+ * Two wait points in one run, so a second signal has something to land on.
+ *
+ * rc-contract 5.1 words the acceptance as "two different signals to ONE run
+ * are two mutations". Two runs each parked once prove the idempotency key is
+ * per payload; they do not prove a run that has already taken one signal can
+ * take another, which is the part a shared `cli:signal:<runId>` key broke.
+ */
+const Twice = Flow.make("engine-waits/twice", {
+  payload: {},
+  success: Schema.Json,
+  error: WaitFor.WaitForRequestInvalid,
+  body: () =>
+    WaitFor.action.call({ name: "first" }).pipe(
+      Node.andThen(() => WaitFor.action.call({ name: "second" }))
+    )
+})
+
 const jj = Jj.make({
   snapshot: () => Effect.succeed({ changeId: "engine-waits" as never }),
   restore: () => Effect.void,
@@ -79,7 +97,8 @@ const marks: Array<string> = []
 const engine = Layer.mergeAll(
   Mark.toLayer(({ label }) => Effect.sync(() => (marks.push(label), label))),
   WaitFor.layer,
-  Interpreter.layer(Gated)
+  Interpreter.layer(Gated),
+  Interpreter.layer(Twice)
 ).pipe(
   Layer.provideMerge(Action.layerImplementations),
   Layer.provideMerge(
@@ -163,6 +182,31 @@ const settled = (runId: string, attempts = 2_000): Effect.Effect<string, unknown
     if (row.status !== "suspended" || attempts <= 0) return row.status
     yield* Effect.yieldNow
     return yield* settled(runId, attempts - 1)
+  })
+
+/**
+ * Polls the run's waiting row until it names `deferredName`, or gives up.
+ *
+ * A wake is not instantaneous: completing the first deferred re-drives the
+ * execution, and the second `WaitFor` call parks it again a few storage writes
+ * later. Reading the row once would race that replay.
+ */
+const waitingOn = (
+  runId: string,
+  deferredName: string,
+  attempts = 2_000
+): Effect.Effect<string, unknown, DurableEngineState.DurableEngineState> =>
+  Effect.gen(function*() {
+    const state = yield* DurableEngineState.DurableEngineState
+    const waiting = yield* state.waiting(runId)
+    const token = Option.isSome(waiting) ? waiting.value.token : null
+    if (token !== null) {
+      const parsed = yield* Schema.decodeEffect(DurableDeferred.TokenParsed.FromString)(token).pipe(Effect.orDie)
+      if (parsed.deferredName === deferredName) return token
+    }
+    if (attempts <= 0) return yield* Effect.die(`run ${runId} never parked on ${deferredName}`)
+    yield* Effect.yieldNow
+    return yield* waitingOn(runId, deferredName, attempts - 1)
   })
 
 /** Starts the gated flow and returns once it is parked on its wait point. */
@@ -290,6 +334,47 @@ describe("signalling a run parked on a wait point", () => {
     expect(observed.firstRecorded).toEqual([{ name: "first", payload: { step: 1 } }])
     expect(observed.secondRecorded).toEqual([{ name: "second", payload: { step: 2 } }])
     expect(observed.secondStatus).toBe("completed")
+  })
+
+  it("lands two different signals on ONE run, each on its own wait point", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const runtime = yield* ControlRuntime
+        yield* Twice.execute({}, { executionId: "signal-one-run", discard: true })
+        yield* waitingOn("signal-one-run", "WaitFor/first")
+
+        const first = yield* control.signal({
+          runId: "signal-one-run",
+          signal: { name: "first", payload: { step: 1 } },
+          idempotencyKey: "signal:one-run:first"
+        })
+        // The run has to reach its SECOND park before the second signal can
+        // land: that is the state a shared idempotency key never let it use.
+        yield* waitingOn("signal-one-run", "WaitFor/second")
+        const second = yield* control.signal({
+          runId: "signal-one-run",
+          signal: { name: "second", payload: { step: 2 } },
+          idempotencyKey: "signal:one-run:second"
+        })
+        return {
+          first,
+          second,
+          status: yield* settled("signal-one-run"),
+          recorded: yield* runtime.deliveredSignals("signal-one-run")
+        }
+      }),
+      true
+    )
+
+    expect(observed.first._tag).toBe("Accepted")
+    expect(observed.second._tag).toBe("Accepted")
+    // Both mutations landed, in order, against one run.
+    expect(observed.recorded).toEqual([
+      { name: "first", payload: { step: 1 } },
+      { name: "second", payload: { step: 2 } }
+    ])
+    expect(observed.status).toBe("completed")
   })
 
   it("records a signal no executor could deliver, for the next start to pick up", async () => {

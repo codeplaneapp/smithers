@@ -255,6 +255,49 @@ describe("cancelling a run another process owns", () => {
   })
 })
 
+/**
+ * An executor whose engine row has already settled.
+ *
+ * This is the shipped CLI's shape, not a contrivance: `.flows/control.db` and
+ * `.flows/engine.db` are two files with two `flows_runs` tables, so a run
+ * process killed after the engine's terminal write and before the control
+ * status transition leaves the control row non-terminal while the engine row
+ * is `completed`. The port is the only place the control plane can learn that.
+ */
+const settledEngine = (status: "completed" | "failed" | "cancelled") =>
+  ControlExecutor.layer(
+    ControlExecutor.makeNoop({
+      requestCancel: Effect.fn("TestExecutor.requestCancel")(() => Effect.succeed({ _tag: "Terminal", status }))
+    })
+  )
+
+describe("cancelling a run whose engine row has already settled", () => {
+  it("answers the engine's terminal receipt and leaves the control row alone", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const runtime = yield* ControlRuntime
+        const runId = yield* start("stale-control-row")
+        const before = yield* runtime.getRun(runId)
+
+        const receipt = yield* control.cancel({ runId, idempotencyKey: "cancel:stale" })
+        return { runId, before, receipt, after: yield* runtime.getRun(runId), kinds: yield* kinds(runId) }
+      }),
+      settledEngine("completed")
+    )
+
+    // The receipt carries the ENGINE's status, which is the only true one.
+    expect(observed.receipt).toEqual({ _tag: "Terminal", runId: observed.runId, status: "completed" })
+    // The control row is not transitioned and the interrupt never runs: a
+    // control row reading `cancelled` over an engine row reading `completed`
+    // is the terminal disagreement B-11 forbids.
+    expect(observed.after.status).toBe(observed.before.status)
+    expect(observed.after.status).not.toBe("cancelled")
+    // No attribution event either: nobody cancelled anything.
+    expect(observed.kinds).not.toContain(Cancellation.requestedEventType)
+  })
+})
+
 describe("a cancel the engine refuses", () => {
   it("fails typed and leaves the control row exactly where it was", async () => {
     const observed = await run(
