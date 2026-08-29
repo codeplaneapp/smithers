@@ -21,7 +21,7 @@ const budget = loadBudget<MemoryBudget>("memory")
 const subscribers = 5
 const events = 500
 
-beforeAll(() => suite.start())
+beforeAll(() => suite.start(), 180_000)
 afterAll(() => suite.stop())
 
 const settle = async (): Promise<number> => {

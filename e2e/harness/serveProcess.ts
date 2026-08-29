@@ -1,11 +1,20 @@
 /**
  * The served control plane, out of process, and the clients that talk to it.
  *
- * `startControlServer` spawns `fixtures/controlServerChild.ts` and waits for its
- * ready line; `controlClient` builds the shipped `ControlClient` over Node's
- * HTTP and WebSocket transports, the same pair `@smthrs/cli` uses for a
- * `--remote` invocation. The WebSocket constructor is the tracked one from
- * {@link ../harness/dropWebSocket.ts}, so a suite can cut the live socket.
+ * `startServe` runs the product's own `smithers serve` — the executable
+ * `@smthrs/cli` declares as its bin, resolved through Node, not a fixture that
+ * re-composes the same layers. That distinction is the whole point of the
+ * gateway family: a suite that builds the server itself proves that a
+ * composition works, while an operator's complaint is always about the command
+ * they typed. Everything the verb decides on the way up — which bind it will
+ * accept, which authentication layer it installs, which database file it
+ * opens, whether it stays alive — is therefore under test here rather than
+ * assumed.
+ *
+ * `controlClient` builds the shipped `ControlClient` over Node's HTTP and
+ * WebSocket transports, the same pair `@smthrs/cli` uses for a `--remote`
+ * invocation. The WebSocket constructor is the tracked one from
+ * {@link ./dropWebSocket.ts}, so a suite can cut the live socket.
  *
  * @since 1.0.0
  */
@@ -16,25 +25,93 @@ import { RpcSerialization } from "effect/unstable/rpc"
 import { Socket } from "effect/unstable/socket"
 import { type ChildProcess, spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { fileURLToPath } from "node:url"
+import { readFileSync } from "node:fs"
+import { createRequire } from "node:module"
+import { createServer } from "node:net"
+import { dirname, join, resolve } from "node:path"
 import { trackingWebSocketConstructor, type TrackedWebSockets } from "./dropWebSocket.ts"
 import { killProcess } from "./killProcess.ts"
 
-const child = fileURLToPath(new URL("../fixtures/controlServerChild.ts", import.meta.url))
+/**
+ * The `smithers` executable, read out of `@smthrs/cli`'s own manifest.
+ *
+ * Hard-coding `packages/cli/bin/smithers.mjs` would keep passing after the
+ * package stopped shipping it. Reading `bin` is the same discipline the
+ * swebench wrapper uses: run what the package says it installs.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const smithersBin: string = (() => {
+  const manifest = createRequire(import.meta.url).resolve("@smthrs/cli/package.json")
+  const bin = (JSON.parse(readFileSync(manifest, "utf8")) as { readonly bin: Record<string, string> }).bin.smithers
+  if (bin === undefined) throw new Error("@smthrs/cli declares no `smithers` bin")
+  return resolve(dirname(manifest), bin)
+})()
+
+/** Where `smithers serve` keeps the control database for a project root. */
+const controlDatabase = (root: string): string => join(root, ".flows", "control.db")
+
+/** An unused loopback port, held only long enough to learn its number. */
+const freePort = (): Promise<number> =>
+  new Promise((resolvePort, reject) => {
+    const probe = createServer()
+    probe.once("error", reject)
+    probe.listen({ host: "127.0.0.1", port: 0 }, () => {
+      const address = probe.address()
+      if (address === null || typeof address === "string") {
+        probe.close()
+        reject(new Error("could not learn an ephemeral port"))
+        return
+      }
+      const { port } = address
+      probe.close(() => resolvePort(port))
+    })
+  })
+
+const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms))
 
 /**
- * A running served control plane.
+ * Whether the control RPC route is mounted and answering on `port`.
+ *
+ * A TCP connection is not the readiness signal: the HTTP server accepts before
+ * the RPC router is attached, so a suite that raced on `connect` would send its
+ * first plan into a 404. The probe therefore asks the route itself, and treats
+ * any answer other than "no such route" as served.
+ */
+const serving = async (port: number): Promise<boolean> => {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/rpc`, {
+      method: "POST",
+      headers: { "content-type": "application/ndjson" },
+      body: "\n"
+    })
+    await response.text()
+    return response.status !== 404
+  } catch {
+    return false
+  }
+}
+
+/**
+ * A running `smithers serve`.
  *
  * @since 1.0.0
  * @category models
  */
-export interface ControlServerProcess {
+export interface ServeProcess {
   readonly pid: number
   readonly port: number
   /** The base URL; `/rpc` and `/rpc/ws` hang off it. */
   readonly url: string
   /** The bearer credential the server was started with. */
   readonly token: string
+  /** The project root the verb was pointed at. */
+  readonly root: string
+  /** The control database `serve` opened under that root. */
+  readonly databasePath: string
+  /** The command line, for a failure message that can be re-run by hand. */
+  readonly argv: ReadonlyArray<string>
   readonly process: ChildProcess
   readonly stderr: () => string
   /** Kills the server and waits for the operating system to reap it. */
@@ -42,43 +119,60 @@ export interface ControlServerProcess {
 }
 
 /**
- * Starts a served control plane over `filename`.
+ * Options for {@link startServe}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface ServeOptions {
+  /** Overrides the generated bearer credential. */
+  readonly credential?: string | undefined
+  /** How long the verb gets to bind and mount its routes. */
+  readonly timeoutMs?: number | undefined
+}
+
+/**
+ * Starts `smithers serve` against `root` and waits until it answers RPC.
  *
  * @since 1.0.0
  * @category constructors
  */
-export const startControlServer = async (filename: string): Promise<ControlServerProcess> => {
-  const token = `e2e-${randomUUID()}`
-  const process_ = spawn(process.execPath, [child, filename, token], { stdio: ["ignore", "pipe", "pipe"] })
+export const startServe = async (root: string, options: ServeOptions = {}): Promise<ServeProcess> => {
+  const token = options.credential ?? `e2e-${randomUUID()}`
+  const timeoutMs = options.timeoutMs ?? 120_000
+  const port = await freePort()
+  const argv = [smithersBin, "serve", "--root", root, "--port", String(port), "--credential", token]
+  const process_ = spawn(process.execPath, argv, { stdio: ["ignore", "pipe", "pipe"], cwd: root })
   const pid = process_.pid
-  if (pid === undefined) throw new Error("control server child has no pid")
+  if (pid === undefined) throw new Error("smithers serve has no pid")
 
   let stderr = ""
+  let exited: number | null | undefined
   process_.stderr?.setEncoding("utf8")
   process_.stderr?.on("data", (chunk: string) => {
     stderr += chunk
   })
-
-  const port = await new Promise<number>((resolve, reject) => {
-    let buffered = ""
-    const timer = setTimeout(() => reject(new Error(`control server never became ready\n${stderr}`)), 60_000)
-    process_.stdout?.setEncoding("utf8")
-    process_.stdout?.on("data", (chunk: string) => {
-      buffered += chunk
-      const newline = buffered.indexOf("\n")
-      if (newline < 0) return
-      clearTimeout(timer)
-      resolve((JSON.parse(buffered.slice(0, newline)) as { readonly port: number }).port)
-    })
-    process_.once("error", (cause) => {
-      clearTimeout(timer)
-      reject(cause)
-    })
-    process_.once("exit", (code) => {
-      clearTimeout(timer)
-      reject(new Error(`control server exited with ${String(code)} before it was ready\n${stderr}`))
-    })
+  process_.stdout?.setEncoding("utf8")
+  process_.stdout?.on("data", (chunk: string) => {
+    stderr += chunk
   })
+  process_.once("exit", (code) => {
+    exited = code
+  })
+
+  const command = `${process.execPath} ${argv.join(" ")}`
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (exited !== undefined) {
+      throw new Error(`smithers serve exited with ${String(exited)} before it served\n${command}\n${stderr}`)
+    }
+    if (await serving(port)) break
+    if (Date.now() >= deadline) {
+      process_.kill("SIGKILL")
+      throw new Error(`smithers serve never answered on ${port} within ${timeoutMs}ms\n${command}\n${stderr}`)
+    }
+    await sleep(100)
+  }
 
   let stopped = false
   return {
@@ -86,6 +180,9 @@ export const startControlServer = async (filename: string): Promise<ControlServe
     port,
     url: `http://127.0.0.1:${port}`,
     token,
+    root,
+    databasePath: controlDatabase(root),
+    argv,
     process: process_,
     stderr: () => stderr,
     stop: async () => {

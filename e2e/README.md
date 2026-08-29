@@ -15,8 +15,12 @@ Concretely:
 
 - Crash cases kill a real operating-system process with `SIGKILL` and resume in
   a fresh one, against a SQLite file on disk.
-- Gateway cases talk to a control plane running in another process over a real
-  socket, authenticated with a real bearer credential.
+- Gateway cases talk to `smithers serve` — the product's own command, spawned
+  from the bin `@smthrs/cli` declares — over a real socket, authenticated with a
+  real bearer credential. The suite never composes a server of its own: which
+  bind the verb accepts, which authentication layer it installs, and which
+  database file it opens are the verb's decisions, and they are what a case
+  built on a hand-composed server would stop covering.
 - Time-travel cases drive `@smthrs/time-travel` over a real Jujutsu workspace.
 - Provider cases stop and kill a real child process and read the typed health
   state that produces.
@@ -25,9 +29,9 @@ Concretely:
 
 - `harness/` — the fault primitives: `killProcess`, `dropWebSocket`,
   `freezeSqliteLock`, `skewClock`, `stallSandbox`, plus the child-runner
-  protocol (`engineChild`, `waitChild`) and the served control plane
-  (`serveProcess`). Each has its own suite; a harness that lies makes every case
-  built on it a lie too.
+  protocol (`engineChild`, `waitChild`), `smithers serve` (`serveProcess`), and
+  the two-plane claim race (`claimRace`). Each primitive has its own suite; a
+  harness that lies makes every case built on it a lie too.
 - `fixtures/` — the programs a harness spawns. They are separate processes
   because a test cannot kill itself.
 - `faults/` — one file per case, named after what it injects.

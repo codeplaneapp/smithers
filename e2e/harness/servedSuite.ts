@@ -1,6 +1,10 @@
 /**
- * One served control plane per gateway case, and the plumbing every case
+ * One `smithers serve` process per gateway case, and the plumbing every case
  * repeats.
+ *
+ * Each case gets its own project root and its own server so that a case that
+ * kills the process, floods the journal, or is refused at the door cannot
+ * change what the next case sees.
  *
  * @since 1.0.0
  */
@@ -9,10 +13,11 @@ import * as Effect from "effect/Effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { controlClient, type ClientOptions, type ControlServerProcess, startControlServer } from "./serveProcess.ts"
+import { controlClient, type ClientOptions, type ServeProcess, startServe } from "./serveProcess.ts"
 
 /**
- * A served control plane plus a scratch directory, both owned by one case.
+ * A served control plane plus the project root it was pointed at, both owned
+ * by one case.
  *
  * @since 1.0.0
  * @category models
@@ -20,7 +25,7 @@ import { controlClient, type ClientOptions, type ControlServerProcess, startCont
 export interface ServedSuite {
   readonly start: () => Promise<void>
   readonly stop: () => Promise<void>
-  readonly server: () => ControlServerProcess
+  readonly server: () => ServeProcess
   /** Runs an effect through a fresh remote client with a valid credential. */
   readonly remote: <A, E>(body: Effect.Effect<A, E, Control.Control>) => Promise<A>
   /** Runs an effect through a client built with explicit options. */
@@ -39,10 +44,10 @@ export interface ServedSuite {
  */
 export const servedSuite = (label: string): ServedSuite => {
   let directory: string | undefined
-  let server: ControlServerProcess | undefined
+  let server: ServeProcess | undefined
 
-  const current = (): ControlServerProcess => {
-    if (server === undefined) throw new Error(`${label}: the served control plane has not been started`)
+  const current = (): ServeProcess => {
+    if (server === undefined) throw new Error(`${label}: smithers serve has not been started`)
     return server
   }
 
@@ -60,7 +65,7 @@ export const servedSuite = (label: string): ServedSuite => {
   return {
     start: async () => {
       directory = mkdtempSync(join(tmpdir(), `smithers-e2e-${label}-`))
-      server = await startControlServer(join(directory, "control.sqlite"))
+      server = await startServe(directory)
     },
     stop: async () => {
       await server?.stop()

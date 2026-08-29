@@ -16,7 +16,7 @@ import { servedSuite } from "../harness/servedSuite.ts"
 
 const suite = servedSuite("case25")
 
-beforeAll(() => suite.start())
+beforeAll(() => suite.start(), 180_000)
 afterAll(() => suite.stop())
 
 const plan = Effect.gen(function*() {

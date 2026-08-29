@@ -20,7 +20,7 @@ import { servedSuite } from "../harness/servedSuite.ts"
 
 const suite = servedSuite("case15")
 
-beforeAll(() => suite.start())
+beforeAll(() => suite.start(), 180_000)
 afterAll(() => suite.stop())
 
 describe("case15 WebSocket drop and reconnect", () => {

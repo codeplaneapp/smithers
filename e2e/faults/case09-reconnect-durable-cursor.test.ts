@@ -20,7 +20,7 @@ import { servedSuite } from "../harness/servedSuite.ts"
 const suite = servedSuite("case09")
 const budget = loadBudget<LatencyBudget>("latency")
 
-beforeAll(() => suite.start())
+beforeAll(() => suite.start(), 180_000)
 afterAll(() => suite.stop())
 
 const history = (runId: string, afterSequence?: number) =>
