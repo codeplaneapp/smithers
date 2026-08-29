@@ -13,7 +13,7 @@
  *
  * Run: node scripts/generate-docs-pages.mjs [--check]
  */
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, relative } from "node:path"
 import { pathToFileURL } from "node:url"
 import {
@@ -64,7 +64,30 @@ const aliases = survivingAliases(contractSource)
 const available = availableCommands(contractSource)
 const retiredRpcs = removedRpcs(contractSource)
 
+/** Imports a TypeScript source module of this workspace by repository path. */
+const importSource = async (path) => import(pathToFileURL(join(repoRoot, path)).href)
+
+/** The CLI's own removal registry: the refusals and reasons a terminal prints. */
+const Unsupported = await importSource("packages/cli/src/Unsupported.ts")
+
 const pages = new Map()
+
+/**
+ * The reason the binary prints when a removed flag is used.
+ *
+ * The contract spells a flag with its values (`--backend pglite|postgres`)
+ * where the binary registers the name alone, and it files the global
+ * `--backend` under a parent the binary leaves empty, so the lookup is by name
+ * with the parent as a tiebreak. Returns `undefined` for a contract row the
+ * binary does not carry, and the caller keeps the contract's wording.
+ */
+const spokenFlagReason = (parent, flag) => {
+  const name = flag.replace(/^--/, "").split(/[\s|]/)[0]
+  const matches = Unsupported.removedFlags.filter((entry) => entry.flag === name)
+  const exact = matches.find((entry) => entry.parent === parent)
+  return (exact ?? matches[0])?.reason
+}
+
 
 // -----------------------------------------------------------------------------
 // CLI
@@ -116,7 +139,10 @@ for (const command of documentedCommands) {
       "| Flag | Reason |",
       "| --- | --- |"
     )
-    for (const flag of parentFlags) body.push(`| \`${cell(flag.flag)}\` | ${cell(contractProse(flag.reason))} |`)
+    for (const flag of parentFlags) {
+      const reason = spokenFlagReason(flag.parent, flag.flag) ?? flag.reason
+      body.push(`| \`${cell(flag.flag)}\` | ${cell(contractProse(reason))} |`)
+    }
     body.push("")
   }
   body.push(
@@ -203,10 +229,6 @@ for (const command of documentedCommands) {
 // -----------------------------------------------------------------------------
 // Control plane
 // -----------------------------------------------------------------------------
-
-const importSource = async (path) => import(pathToFileURL(join(repoRoot, path)).href)
-
-const Unsupported = await importSource("packages/cli/src/Unsupported.ts")
 
 /**
  * The exact refusal each removed verb prints, keyed by verb.
@@ -376,7 +398,13 @@ for (const [name, rpc] of rpcEntries) {
     "| --- | --- |"
   ]
   for (const name of names) {
-    lines.push(`| [\`smithers ${name}\`](#${name}) | ${cell(contractProse(removed.get(name).reason))} |`)
+    // The reason a reader is given is the binary's, the same string the block
+    // below quotes. The contract's own cell explains the removal to the
+    // migration's record and cites phases and dispositions a reader has no way
+    // to look up.
+    const reason = Unsupported.removedVerbs.find((verb) => verb.name === name)?.reason
+    if (reason === undefined) throw new Error(`generate-docs-pages: the binary does not refuse ${name}`)
+    lines.push(`| [\`smithers ${name}\`](#${name}) | ${cell(contractProse(reason))} |`)
   }
   lines.push("")
   for (const form of forms) {
@@ -384,7 +412,9 @@ for (const [name, rpc] of rpcEntries) {
   }
   lines.push("### Removed flags", "", "| Command | Flag | Reason |", "| --- | --- | --- |")
   for (const flag of flags) {
-    lines.push(`| \`${cell(flag.parent)}\` | \`${cell(flag.flag)}\` | ${cell(contractProse(flag.reason))} |`)
+    // Same rule as the verbs: the binary owns the sentence a reader is given.
+    const reason = spokenFlagReason(flag.parent, flag.flag) ?? flag.reason
+    lines.push(`| \`${cell(flag.parent)}\` | \`${cell(flag.flag)}\` | ${cell(contractProse(reason))} |`)
   }
   lines.push("")
   for (const name of names) {
@@ -444,10 +474,24 @@ for (const [name, rpc] of rpcEntries) {
     "| Package | Purpose | Browser |",
     "| --- | --- | --- |"
   )
+  // Most published packages are documented by an API page named after them.
+  // Two are documented somewhere else instead: the CLI has its own reference
+  // section, and the migration tool is documented with the migration guide
+  // because an operator reaches it from the 0.x upgrade path, not from the API.
+  const documentedElsewhere = new Map([
+    ["@smthrs/cli", "/cli"],
+    ["@smthrs/migrate", "/migration/migrate-tool"]
+  ])
   for (const row of publishedPackages()) {
-    const link = pages.has(`docs/pages/api/${row.name.replace("@smthrs/", "")}.md`)
-      ? `[\`${row.name}\`](/api/${row.name.replace("@smthrs/", "")})`
-      : `\`${row.name}\``
+    // The API pages are written by hand, so they are on disk and never in the
+    // generated-page map. Asking the map put every package in the table as
+    // bare text with its reference page one directory away.
+    const apiRoute = `/api/${row.name.replace("@smthrs/", "")}`
+    const hasApiPage = [".md", ".mdx"].some((extension) =>
+      existsSync(join(repoRoot, `docs/pages${apiRoute}${extension}`))
+    )
+    const route = hasApiPage ? apiRoute : documentedElsewhere.get(row.name)
+    const link = route === undefined ? `\`${row.name}\`` : `[\`${row.name}\`](${route})`
     lines.push(`| ${link} | ${cell(contractProse(row.purpose))} | ${cell(row.browser)} |`)
   }
   pages.set("docs/pages/release/support-matrix.md", replaceRegion(readFileSync(page, "utf8"), "support-matrix", lines.join("\n")))

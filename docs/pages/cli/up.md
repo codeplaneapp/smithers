@@ -39,7 +39,7 @@ These flags existed in Smithers 0.x. `smithers up` declares each one so it fails
 | `--steal-ownership` | the run driver's heartbeat sweep owns recovery |
 | `--resume-claim-*` | the run driver's heartbeat sweep owns recovery |
 | `--resume-restore-*` | the run driver's heartbeat sweep owns recovery |
-| `--max-concurrency &lt;n&gt;` | no per-launch concurrency override exists in the imported engine; parallelism is declared by the flow and bounded by plan admission (section 5.2). Plue's `runArgs` and `agent.ts` drop the flag (section 10) |
+| `--max-concurrency &lt;n&gt;` | parallelism is declared by the flow and bounded by plan admission |
 
 ## Source
 

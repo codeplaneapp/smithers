@@ -46,7 +46,24 @@ export const mdxText = (text) =>
 export const cell = (text) => mdxText(text).replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ").trim()
 
 /** Clauses that address the migration's own record rather than a reader. */
-const internalReference = /import reference|ledger |Phase [1-9]|triage|flows-cli|`Command\.ts|at HEAD/
+const internalReference = /import reference|ledger |Phase [1-9]|triage|flows-cli|`Command\.ts|at HEAD|rule \(/
+
+/**
+ * A parenthesis, including one level of nesting, so `(PLAN Phase 6, rule (e))`
+ * is one group rather than a truncated one.
+ */
+const parenthesis = /\s*\((?:[^()]|\([^()]*\))*\)/g
+
+/**
+ * Removes the parentheses that cite the contract, keeping the sentence.
+ *
+ * A contract row is often one sentence that ends in a phase or rule citation.
+ * Judging the whole sentence by that citation deleted the only description the
+ * package had, so the citation is removed first and the sentence is judged on
+ * what is left.
+ */
+const withoutInternalParentheses = (sentence) =>
+  sentence.replace(parenthesis, (group) => (internalReference.test(group) ? "" : group))
 
 /**
  * Turns contract prose into page prose.
@@ -56,14 +73,21 @@ const internalReference = /import reference|ledger |Phase [1-9]|triage|flows-cli
  * sentences are dropped here: a command page says what the command does, and
  * the contract stays the place that records why.
  */
-export const contractProse = (text) =>
-  text
-    .replace(/\\\|/g, "|")
-    .replace(/§\s*/g, "section ")
-    .split(/(?<=\.)\s+(?=[A-Z`(])/)
+export const contractProse = (text) => {
+  const expanded = text.replace(/\\\|/g, "|").replace(/§\s*/g, "section ")
+  const sentences = expanded.split(/(?<=\.)\s+(?=[A-Z`(])/)
+  const kept = sentences.filter((sentence) => !internalReference.test(sentence)).join(" ").trim()
+  if (kept !== "") return kept
+  // Every sentence addressed the migration's record. A blank table cell tells
+  // a reader less than the contract's own wording does, so the citations come
+  // out of the parentheses that carry them and what is left is the cell.
+  const salvaged = sentences
+    .map(withoutInternalParentheses)
     .filter((sentence) => !internalReference.test(sentence))
     .join(" ")
     .trim()
+  return salvaged === "" ? withoutInternalParentheses(expanded).trim() : salvaged
+}
 
 /** A page's YAML frontmatter. One key, always quoted, never multi-line. */
 export const frontmatter = (description) => `---\ndescription: ${JSON.stringify(description)}\n---\n`

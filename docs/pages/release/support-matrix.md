@@ -21,7 +21,7 @@ which is frozen for this candidate. A row here and a row there are the same row.
 | Bun | Supported for non-durable packages and for `apps/*` only. | `>=1.3.0` (`BUILD.ts:15`); CI pins `1.3.14`. |
 | Browser | Bundleable entry points only. No durable execution. | Bundles under esbuild `--platform=browser` as proven by `scripts/browser-check.mjs`. |
 | Linux x64 | Supported; the required CI lanes run here. | Ubuntu runner. |
-| macOS |  | arm64 and x64. |
+| macOS | Supported for development and the Phase 7 manual smoke; the `node-macos` CI lane is advisory. | arm64 and x64. |
 | Windows | Unsupported. | none |
 
 ## Databases
@@ -85,44 +85,45 @@ execution claim.
 
 | Package | Purpose | Browser |
 | --- | --- | --- |
-| `@smthrs/agent` | Production agent loop on the durable engine: `AgentSession`, `AgentAction`, `CellPlugin`. | no claim |
-| `@smthrs/artifacts` | Content-addressed artifact store (local, remote-over-HTTP, combined). | gated yes |
-| `@smthrs/canonical` | RFC 8785 canonical JSON as Effect Schema. | gated yes |
-| `@smthrs/capability` | Capability vocabulary, tiers, typed permission failures. | gated yes |
-| `@smthrs/cli` | The `smithers` executable and `NodeControl` composition. | Node |
-| `@smthrs/control` | Control services, RPC schema, `ControlServer`/`ControlClient`, `SqlControlRuntime`, credentials. | no claim (no `node:` imports) |
+| [`@smthrs/agent`](/api/agent) | Production agent loop on the durable engine: `AgentSession`, `AgentAction`, `CellPlugin`. | no claim |
+| [`@smthrs/artifacts`](/api/artifacts) | Content-addressed artifact store (local, remote-over-HTTP, combined). | gated yes |
+| [`@smthrs/canonical`](/api/canonical) | RFC 8785 canonical JSON as Effect Schema. | gated yes |
+| [`@smthrs/capability`](/api/capability) | Capability vocabulary, tiers, typed permission failures. | gated yes |
+| [`@smthrs/cli`](/cli) | The `smithers` executable and `NodeControl` composition. | Node |
+| [`@smthrs/control`](/api/control) | Control services, RPC schema, `ControlServer`/`ControlClient`, `SqlControlRuntime`, credentials. | no claim (no `node:` imports) |
 | `@smthrs/core` | Plan-time `Flow`/`Node` builders and `Graph`. | no claim |
-| `@smthrs/crypto` | Injected cryptographic schema transformations. | gated yes |
-| `@smthrs/database` | `SqlClient` access, write retry, `Migrations` ladder. | gated yes (root); `node/NodeDatabase` gated Node-only |
-| `@smthrs/engine` | `FlowEngine`, `FlowProxy`, vendored `effect/unstable/workflow` fork. | gated yes |
-| `@smthrs/engine-store` | Durable `FlowEngine`: journal, run, cache, artifact stores; `RunDriver` sweep; `DisasterRecovery`. | gated yes |
-| `@smthrs/flow` | Authoring model: `Flow`, `Action`, `Interpreter`, durable deferred/clock/queue, `RetryPolicy`. | gated yes |
-| `@smthrs/flows` | Curated aggregate barrel and `./NodeRuntime` production composition. | gated yes (root); `NodeRuntime` gated Node-only |
-| `@smthrs/gateway` |  | no claim |
+| [`@smthrs/crypto`](/api/crypto) | Injected cryptographic schema transformations. | gated yes |
+| [`@smthrs/database`](/api/database) | `SqlClient` access, write retry, `Migrations` ladder. | gated yes (root); `node/NodeDatabase` gated Node-only |
+| [`@smthrs/engine`](/api/engine) | `FlowEngine`, `FlowProxy`, vendored `effect/unstable/workflow` fork. | gated yes |
+| [`@smthrs/engine-store`](/api/engine-store) | Durable `FlowEngine`: journal, run, cache, artifact stores; `RunDriver` sweep; `DisasterRecovery`. | gated yes |
+| [`@smthrs/flow`](/api/flow) | Authoring model: `Flow`, `Action`, `Interpreter`, durable deferred/clock/queue, `RetryPolicy`. | gated yes |
+| [`@smthrs/flows`](/api/flows) | Curated aggregate barrel and `./NodeRuntime` production composition. | gated yes (root); `NodeRuntime` gated Node-only |
+| [`@smthrs/gateway`](/api/gateway) | Gateway wire schemas, projections, session tokens, `SuperviseRuntime` port; the Phase 4 projection server. | no claim |
 | `@smthrs/harness` | Built-in agent harness: dynamic nodes, sealed model steps, QuickJS cell runtime. | no claim |
-| `@smthrs/jj` | Jujutsu host service; ships `wasm/flows_jj.wasm`. | gated yes (root, `browser/BrowserJj`); `node/NodeJj`, `bun/BunJj` gated Node-only |
-| `@smthrs/journal` | Immutable event history, projections, redaction, owner fence. | gated yes |
-| `@smthrs/kernel` | Capability sets, grants, guarded host decorators, `GrantStore`. | gated yes (root); `test/TestHost` gated Node-only |
-| `@smthrs/keys` | Canonical flow keys. | gated yes |
-| `@smthrs/mcp` | Stdio MCP client (`McpClient`) and `McpFlows`, which projects a server's tools as `FlowBinding` sources (`mcp/<server>/<tool>`); consumed by `@smthrs/cli` `--mcp-config` (rule (a): `packages/cli/package.json:95`). | no claim |
-| `@smthrs/memory` | Durable cross-run facts, history, notes, recall. | no claim |
+| [`@smthrs/jj`](/api/jj) | Jujutsu host service; ships `wasm/flows_jj.wasm`. | gated yes (root, `browser/BrowserJj`); `node/NodeJj`, `bun/BunJj` gated Node-only |
+| [`@smthrs/journal`](/api/journal) | Immutable event history, projections, redaction, owner fence. | gated yes |
+| [`@smthrs/kernel`](/api/kernel) | Capability sets, grants, guarded host decorators, `GrantStore`. | gated yes (root); `test/TestHost` gated Node-only |
+| [`@smthrs/keys`](/api/keys) | Canonical flow keys. | gated yes |
+| `@smthrs/mcp` | Stdio MCP client (`McpClient`) and `McpFlows`, which projects a server's tools as `FlowBinding` sources (`mcp/<server>/<tool>`); consumed by `@smthrs/cli` `--mcp-config`. | no claim |
+| [`@smthrs/memory`](/api/memory) | Durable cross-run facts, history, notes, recall. | no claim |
+| [`@smthrs/migrate`](/migration/migrate-tool) | The 0.x to 1.0 migration tool: `smithers-migrate` scan/plan/apply over a 0.x project. | no claim |
 | `@smthrs/model` | Schema-first model protocols, routes, streaming, seat resolution. | no claim |
-| `@smthrs/notifications` | Durable notification queue and admission policy. | no claim |
-| `@smthrs/observability` | OTLP wiring, `JournalLogger`, metrics. | gated yes |
-| `@smthrs/patterns` | Higher-order flow patterns and decorators. | no claim |
-| `@smthrs/plan` | Persisted plan compiler, `PlanStore`, `PlanDiff`. | gated yes |
-| `@smthrs/platform-browser` | Browser `FileSystem` (ZenFS) and `ChildProcessSpawner` (just-bash), `BrowserHost`. | gated yes |
-| `@smthrs/platform-bun` | Bun host bundle. | gated Node-only |
-| `@smthrs/platform-node` | Node host bundle. | gated Node-only |
+| [`@smthrs/notifications`](/api/notifications) | Durable notification queue and admission policy. | no claim |
+| [`@smthrs/observability`](/api/observability) | OTLP wiring, `JournalLogger`, metrics. | gated yes |
+| [`@smthrs/patterns`](/api/patterns) | Higher-order flow patterns and decorators. | no claim |
+| [`@smthrs/plan`](/api/plan) | Persisted plan compiler, `PlanStore`, `PlanDiff`. | gated yes |
+| [`@smthrs/platform-browser`](/api/platform-browser) | Browser `FileSystem` (ZenFS) and `ChildProcessSpawner` (just-bash), `BrowserHost`. | gated yes |
+| [`@smthrs/platform-bun`](/api/platform-bun) | Bun host bundle. | gated Node-only |
+| [`@smthrs/platform-node`](/api/platform-node) | Node host bundle. | gated Node-only |
 | `@smthrs/plugin` | Typed plugin kernel (`engineHooks`), consumed by `@smthrs/agent`. | no claim |
-| `@smthrs/registry` | Flow descriptor discovery (`flows/**/{flow.ts,flow.mdx,SKILL.md}`) and registry. | no claim |
-| `@smthrs/run-store` | Run and attempt rows, ownership arbitration, heartbeat lease. | gated yes |
-| `@smthrs/sandbox` | `RemoteChildProcessSpawner` and `SandboxHealth`. | gated yes |
+| [`@smthrs/registry`](/api/registry) | Flow descriptor discovery (`flows/**/{flow.ts,flow.mdx,SKILL.md}`) and registry. | no claim |
+| [`@smthrs/run-store`](/api/run-store) | Run and attempt rows, ownership arbitration, heartbeat lease. | gated yes |
+| [`@smthrs/sandbox`](/api/sandbox) | `RemoteChildProcessSpawner` and `SandboxHealth`. | gated yes |
 | `@smthrs/std` | Standard tool library: filesystem, search, shell, checkpoints. | subpath (`Grep`, `Glob`, `Search`, `PortableSearch`) |
-| `@smthrs/step-cache` | Sealed step results by step-key digest. | gated yes |
-| `@smthrs/sync` | Read-only journal replication RPC, `RunCatalog`, branch collaboration. | gated yes |
+| [`@smthrs/step-cache`](/api/step-cache) | Sealed step results by step-key digest. | gated yes |
+| [`@smthrs/sync`](/api/sync) | Read-only journal replication RPC, `RunCatalog`, branch collaboration. | gated yes |
 | `@smthrs/testing` | Engine and model doubles, conformance suites, restart/parity harnesses, vitest adapters. | no claim |
-| `@smthrs/time-travel` | Replay, fork, rewind, compensation, `SqlTimeTravelStore` (library API only in rc.0; see section 5). | gated yes |
+| [`@smthrs/time-travel`](/api/time-travel) | Replay, fork, rewind, compensation, `SqlTimeTravelStore` (library API only in rc.0; see section 5). | gated yes |
 | `smthrs` | Deprecation/migration notice only (section 3.3). | not applicable |
 
 {/* generated:support-matrix end */}

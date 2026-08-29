@@ -2,7 +2,7 @@
 /**
  * The documentation gate.
  *
- * Eleven checks over the vocs page tree, each one a claim the documentation
+ * Twelve checks over the vocs page tree, each one a claim the documentation
  * makes that can be verified against something else in the repository:
  *
  *   1. house style: no em-dash anywhere in the prose
@@ -17,6 +17,8 @@
  *   9. every asset the ledger keeps has a place in the route plan
  *  10. every page is reachable from the sidebar, and every sidebar link resolves
  *  11. the compatibility promise is quoted verbatim wherever section 11 says
+ *  12. every document that states the size of the published set agrees with
+ *      the count section 3.1 spells
  *
  * The two normalizers run in `--check` mode first, so their rules stay one
  * implementation rather than a detector and a fixer that can disagree.
@@ -26,7 +28,16 @@
 import { spawnSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { availableCommands, compatibilityPromise, promiseHolders, removedCommands, repoRoot } from "./docs-contract.mjs"
+import {
+  availableCommands,
+  citedPackageCounts,
+  compatibilityPromise,
+  countCitingDocuments,
+  promiseHolders,
+  publishedPackageCount,
+  removedCommands,
+  repoRoot
+} from "./docs-contract.mjs"
 import { assets, isHistorical, pages } from "./docs-pages.mjs"
 import { sidebarRoutes } from "./docs-sidebar.mjs"
 import { routePlan } from "./docs-routes.mjs"
@@ -343,6 +354,26 @@ for (const [title, argv] of [
   } else {
     pass(`the compatibility promise is verbatim in ${promiseHolders.length} places`)
   }
+}
+
+// -----------------------------------------------------------------------------
+// 12. The size of the published set
+// -----------------------------------------------------------------------------
+
+{
+  // Two documents state how many packages the release publishes, in prose a
+  // maintainer reads before running the publish. The number is written by hand
+  // and goes stale the moment a package joins the release, which is exactly
+  // what happened when the migration tool became the fortieth name.
+  const declared = publishedPackageCount()
+  const offenders = []
+  for (const path of countCitingDocuments()) {
+    for (const cited of citedPackageCounts(readFileSync(join(repoRoot, path), "utf8"))) {
+      if (cited !== declared) offenders.push(`${path}: states ${cited}, the contract freezes ${declared}`)
+    }
+  }
+  if (offenders.length > 0) fail("a document states the wrong number of published packages", offenders)
+  else pass(`every stated package count matches the ${declared} names in contract section 3.1`)
 }
 
 process.exit(failed ? 1 : 0)

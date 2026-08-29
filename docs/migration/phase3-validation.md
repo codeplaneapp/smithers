@@ -8,7 +8,7 @@ at Node 24.18.0, Bun 1.4.0, pnpm 11.21.0. Commands are repository-root relative.
 
 | Fact | Value | Where it is enforced |
 | --- | --- | --- |
-| Published packages | 39 | `scripts/pack-release.mjs` `publishedPackages`, checked against the workspace on every read |
+| Published packages | 40 | `scripts/pack-release.mjs` `publishedPackages`, checked against the workspace on every read |
 | Version | `1.0.0-rc.0`, one synchronized version | `node scripts/set-release-version.mjs --check 1.0.0-rc.0` |
 | Release train | `smthrs.group` in `{engine, agent}`, `private !== true` | `scripts/pack-release.mjs` `releaseGroups`, `.github/workflows/release.yml` |
 | Dist-tag | `rc` for any version containing `-`, never `latest` | `publishConfig.tag` in every public manifest, `publish_tag` in `release.yml`, `scripts/pack-release.test.mjs` |

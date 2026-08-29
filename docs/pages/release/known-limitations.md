@@ -154,7 +154,7 @@ state column is what the release does today.
 
 ## Not in release 1
 
-`1.0.0-rc.0` ships the `engine` and `agent` groups together at one synchronized version. `scripts/pack-release.mjs` packs every non-private workspace whose manifest declares `smthrs.group` in `{engine, agent}`, checks that set against the 39 names frozen in [rc-contract.md section 3.1](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md), and throws on a manifest that declares no known group; `.github/workflows/release.yml` gates on the same fields. Group membership is therefore no longer a proxy for feature scope: a package can be published and still not be a release-candidate feature, and the way to keep one out of the release is `private: true`. The following subsystems exist in this tree and are **not** part of release 1.
+`1.0.0-rc.0` ships the `engine` and `agent` groups together at one synchronized version. `scripts/pack-release.mjs` packs every non-private workspace whose manifest declares `smthrs.group` in `{engine, agent}`, checks that set against the 40 names frozen in [rc-contract.md section 3.1](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md), and throws on a manifest that declares no known group; `.github/workflows/release.yml` gates on the same fields. Group membership is therefore no longer a proxy for feature scope: a package can be published and still not be a release-candidate feature, and the way to keep one out of the release is `private: true`. The following subsystems exist in this tree and are **not** part of release 1.
 
 | Subsystem | Why it is out of release 1 |
 | --- | --- |

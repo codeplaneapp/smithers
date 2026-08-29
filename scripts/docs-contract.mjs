@@ -6,7 +6,7 @@
  * command must say when someone runs it. Both the page generator and the docs
  * gate read the tables from here so neither carries a second copy of the list.
  */
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -256,10 +256,91 @@ export const supportedRunControl = (source = readFileSync(contractPath, "utf8"))
 export const runtimes = (source = readFileSync(contractPath, "utf8")) =>
   tableUnder(source, "## 1. Supported runtimes").map(([runtime, status, minimum]) => ({ runtime, status, minimum }))
 
-/** Section 3.1: the packages published at 1.0.0-rc.0. */
-export const publishedPackages = (source = readFileSync(contractPath, "utf8")) =>
-  tableUnder(source, "### 3.1 Published at 1.0.0-rc.0 (39 names)").map(([name, purpose, browser]) => ({
+/**
+ * Every place a document states the size of the published set.
+ *
+ * Three spellings appear in this tree: `N names frozen in` cites section 3.1
+ * directly, "the N packages `node scripts/pack-release.mjs --names` prints"
+ * cites the roster the contract freezes, and the Phase 3 validation record
+ * states it as a table cell. A number written by hand goes stale the moment a
+ * package joins the release, and these are the documents a maintainer reads
+ * before publishing.
+ *
+ * @example
+ * ```ts
+ * citedPackageCounts("against the 40 names frozen in section 3.1") // [40]
+ * ```
+ */
+export const citedPackageCounts = (body) =>
+  [
+    ...body.matchAll(/(\d+) names frozen in/g),
+    ...body.matchAll(/the (\d+) packages `node scripts\/pack-release\.mjs --names` prints/g),
+    ...body.matchAll(/^\| Published packages \| (\d+) \|/gm)
+  ].map((match) => Number(match[1]))
+
+/**
+ * The documents the citation check reads: every source Markdown file under
+ * `docs/` plus the README. `docs/dist` is the site vocs renders, so reading it
+ * would report the same sentence twice and would report it from a directory
+ * a fix cannot be applied to. Paths are repository-relative and sorted, so a
+ * failure names the same file on every machine.
+ */
+export const countCitingDocuments = (root = repoRoot) => {
+  const found = []
+  const walk = (relative) => {
+    for (const entry of readdirSync(join(root, relative), { withFileTypes: true }).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    )) {
+      const next = relative === "" ? entry.name : `${relative}/${entry.name}`
+      if (entry.isDirectory()) {
+        if (next !== "docs/dist") walk(next)
+      } else if (entry.name.endsWith(".md") || entry.name.endsWith(".mdx")) found.push(next)
+    }
+  }
+  walk("docs")
+  found.push("README.md")
+  return found
+}
+
+/**
+ * The section 3.1 heading, whose parenthesis carries the package count.
+ *
+ * The count moves whenever a package joins or leaves the release, so the
+ * heading is matched by its stable prefix. Reading it back is what lets a page
+ * cite the number without keeping a second copy of it.
+ */
+const publishedHeading = (source) => {
+  const match = /^### 3\.1 Published at 1\.0\.0-rc\.0 \((\d+) names\)$/m.exec(source)
+  if (match === null) throw new Error("docs-contract: the section 3.1 heading is missing or does not spell a count")
+  return { heading: match[0], count: Number(match[1]) }
+}
+
+/**
+ * Section 3.1: how many packages the contract says it publishes.
+ *
+ * @example
+ * ```ts
+ * publishedPackageCount() === publishedPackages().length
+ * ```
+ */
+export const publishedPackageCount = (source = readFileSync(contractPath, "utf8")) => publishedHeading(source).count
+
+/**
+ * Section 3.1: the packages published at 1.0.0-rc.0.
+ *
+ * Throws when the heading's count and the table disagree. A contract that
+ * contradicts itself is worse than a missing one: the pages generated from it
+ * would state a number no reader could reproduce.
+ */
+export const publishedPackages = (source = readFileSync(contractPath, "utf8")) => {
+  const { count, heading } = publishedHeading(source)
+  const rows = tableUnder(source, heading).map(([name, purpose, browser]) => ({
     name: name.replace(/`/g, ""),
     purpose,
     browser
   }))
+  if (rows.length !== count) {
+    throw new Error(`docs-contract: section 3.1 heading says ${count} names and the table has ${rows.length} rows`)
+  }
+  return rows
+}

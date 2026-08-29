@@ -22,7 +22,7 @@ These flags existed in Smithers 0.x. `smithers init` declares each one so it fai
 
 | Flag | Reason |
 | --- | --- |
-| `--global` | rc.0 has no global pack; seats resolve from environment keys (section 4.1) |
+| `--global` | rc.0 has no global pack; seats resolve from environment keys |
 
 ## Source
 

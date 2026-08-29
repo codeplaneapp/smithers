@@ -1368,7 +1368,7 @@ These flags existed in Smithers 0.x. `smithers init` declares each one so it fai
 
 | Flag | Reason |
 | --- | --- |
-| `--global` | rc.0 has no global pack; seats resolve from environment keys (section 4.1) |
+| `--global` | rc.0 has no global pack; seats resolve from environment keys |
 
 ---
 
@@ -1482,7 +1482,7 @@ These flags existed in Smithers 0.x. `smithers migrate` declares each one so it 
 
 | Flag | Reason |
 | --- | --- |
-| `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed (section 2, error code `unsupported_database`) |
+| `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed |
 
 ---
 
@@ -1753,7 +1753,7 @@ These flags existed in Smithers 0.x. `smithers up` declares each one so it fails
 | `--steal-ownership` | the run driver's heartbeat sweep owns recovery |
 | `--resume-claim-*` | the run driver's heartbeat sweep owns recovery |
 | `--resume-restore-*` | the run driver's heartbeat sweep owns recovery |
-| `--max-concurrency &lt;n&gt;` | no per-launch concurrency override exists in the imported engine; parallelism is declared by the flow and bounded by plan admission (section 5.2). Plue's `runArgs` and `agent.ts` drop the flag (section 10) |
+| `--max-concurrency &lt;n&gt;` | parallelism is declared by the flow and bounded by plan admission |
 
 ---
 
@@ -10510,7 +10510,7 @@ which is frozen for this candidate. A row here and a row there are the same row.
 | Bun | Supported for non-durable packages and for `apps/*` only. | `>=1.3.0` (`BUILD.ts:15`); CI pins `1.3.14`. |
 | Browser | Bundleable entry points only. No durable execution. | Bundles under esbuild `--platform=browser` as proven by `scripts/browser-check.mjs`. |
 | Linux x64 | Supported; the required CI lanes run here. | Ubuntu runner. |
-| macOS |  | arm64 and x64. |
+| macOS | Supported for development and the Phase 7 manual smoke; the `node-macos` CI lane is advisory. | arm64 and x64. |
 | Windows | Unsupported. | none |
 
 ### Databases
@@ -10587,14 +10587,15 @@ execution claim.
 | `@smthrs/engine-store` | Durable `FlowEngine`: journal, run, cache, artifact stores; `RunDriver` sweep; `DisasterRecovery`. | gated yes |
 | `@smthrs/flow` | Authoring model: `Flow`, `Action`, `Interpreter`, durable deferred/clock/queue, `RetryPolicy`. | gated yes |
 | `@smthrs/flows` | Curated aggregate barrel and `./NodeRuntime` production composition. | gated yes (root); `NodeRuntime` gated Node-only |
-| `@smthrs/gateway` |  | no claim |
+| `@smthrs/gateway` | Gateway wire schemas, projections, session tokens, `SuperviseRuntime` port; the Phase 4 projection server. | no claim |
 | `@smthrs/harness` | Built-in agent harness: dynamic nodes, sealed model steps, QuickJS cell runtime. | no claim |
 | `@smthrs/jj` | Jujutsu host service; ships `wasm/flows_jj.wasm`. | gated yes (root, `browser/BrowserJj`); `node/NodeJj`, `bun/BunJj` gated Node-only |
 | `@smthrs/journal` | Immutable event history, projections, redaction, owner fence. | gated yes |
 | `@smthrs/kernel` | Capability sets, grants, guarded host decorators, `GrantStore`. | gated yes (root); `test/TestHost` gated Node-only |
 | `@smthrs/keys` | Canonical flow keys. | gated yes |
-| `@smthrs/mcp` | Stdio MCP client (`McpClient`) and `McpFlows`, which projects a server's tools as `FlowBinding` sources (`mcp/<server>/<tool>`); consumed by `@smthrs/cli` `--mcp-config` (rule (a): `packages/cli/package.json:95`). | no claim |
+| `@smthrs/mcp` | Stdio MCP client (`McpClient`) and `McpFlows`, which projects a server's tools as `FlowBinding` sources (`mcp/<server>/<tool>`); consumed by `@smthrs/cli` `--mcp-config`. | no claim |
 | `@smthrs/memory` | Durable cross-run facts, history, notes, recall. | no claim |
+| `@smthrs/migrate` | The 0.x to 1.0 migration tool: `smithers-migrate` scan/plan/apply over a 0.x project. | no claim |
 | `@smthrs/model` | Schema-first model protocols, routes, streaming, seat resolution. | no claim |
 | `@smthrs/notifications` | Durable notification queue and admission policy. | no claim |
 | `@smthrs/observability` | OTLP wiring, `JournalLogger`, metrics. | gated yes |
@@ -10824,7 +10825,7 @@ state column is what the release does today.
 
 ### Not in release 1
 
-`1.0.0-rc.0` ships the `engine` and `agent` groups together at one synchronized version. `scripts/pack-release.mjs` packs every non-private workspace whose manifest declares `smthrs.group` in `{engine, agent}`, checks that set against the 39 names frozen in [rc-contract.md section 3.1](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md), and throws on a manifest that declares no known group; `.github/workflows/release.yml` gates on the same fields. Group membership is therefore no longer a proxy for feature scope: a package can be published and still not be a release-candidate feature, and the way to keep one out of the release is `private: true`. The following subsystems exist in this tree and are **not** part of release 1.
+`1.0.0-rc.0` ships the `engine` and `agent` groups together at one synchronized version. `scripts/pack-release.mjs` packs every non-private workspace whose manifest declares `smthrs.group` in `{engine, agent}`, checks that set against the 40 names frozen in [rc-contract.md section 3.1](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md), and throws on a manifest that declares no known group; `.github/workflows/release.yml` gates on the same fields. Group membership is therefore no longer a proxy for feature scope: a package can be published and still not be a release-candidate feature, and the way to keep one out of the release is `private: true`. The following subsystems exist in this tree and are **not** part of release 1.
 
 | Subsystem | Why it is out of release 1 |
 | --- | --- |
@@ -12338,72 +12339,72 @@ CLI reference lists the commands that ship.
 | Verb | Use instead |
 | --- | --- |
 | [`smithers add`](#add) | JSX pack tooling is gone; `smithers migrate` replaces `upgrade` |
-| [`smithers agents`](#agents) | moved to the plugins repository or deferred (`cron` returns on `@smthrs/triggers`; `listeners` returns with the GitHub integration) |
-| [`smithers alerts`](#alerts) | moved to the plugins repository or deferred (`cron` returns on `@smthrs/triggers`; `listeners` returns with the GitHub integration) |
+| [`smithers agents`](#agents) | moved to the plugins repository or deferred |
+| [`smithers alerts`](#alerts) | moved to the plugins repository or deferred |
 | [`smithers ask`](#ask) | removed with the JSX inline workflow |
-| [`smithers ask-human`](#ask-human) | approvals park the run; use `ps --status waiting-approval`, `approve`, `deny`; the MCP `ask_human` tool keeps its name and returns the `unsupported` envelope (section 4.1) |
+| [`smithers ask-human`](#ask-human) | approvals park the run; use `ps --status waiting-approval`, `approve`, and `deny` |
 | [`smithers chat`](#chat) | removed with the JSX inline workflow |
 | [`smithers chat-create`](#chat-create) | removed with the JSX inline workflow |
-| [`smithers claude-shell`](#claude-shell) | moved to the plugins repository or deferred (`cron` returns on `@smthrs/triggers`; `listeners` returns with the GitHub integration) |
-| [`smithers cron`](#cron) | moved to the plugins repository or deferred (`cron` returns on `@smthrs/triggers`; `listeners` returns with the GitHub integration) |
-| [`smithers diff`](#diff) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
-| [`smithers docs-full`](#docs-full) | `docs-full` becomes `docs --full`; the other eleven are the 0.x `COMMAND_ALIASES` did-you-mean hint keys (`apps/cli/src/index.js:12994-13008`), each answering with the rc.0 verb (`ps`, `ls`, `cancel`, `up`, `status`, `logs`, `--help`); the two remaining 0.x hint keys `ls` and `status` are real rc.0 commands (section 4.1) and are not registered here. Only `inspect`, `why`, `events`, `resume`, `gateway`, `workflow list` survive as aliases |
+| [`smithers claude-shell`](#claude-shell) | moved to the plugins repository or deferred |
+| [`smithers cron`](#cron) | moved to the plugins repository or deferred (cron returns on @smthrs/triggers) |
+| [`smithers diff`](#diff) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
+| [`smithers docs-full`](#docs-full) | `docs-full` becomes `docs --full` |
 | [`smithers eject`](#eject) | JSX pack tooling is gone; `smithers migrate` replaces `upgrade` |
 | [`smithers eval`](#eval) | not part of the engine release |
-| [`smithers exec`](#exec) | `docs-full` becomes `docs --full`; the other eleven are the 0.x `COMMAND_ALIASES` did-you-mean hint keys (`apps/cli/src/index.js:12994-13008`), each answering with the rc.0 verb (`ps`, `ls`, `cancel`, `up`, `status`, `logs`, `--help`); the two remaining 0.x hint keys `ls` and `status` are real rc.0 commands (section 4.1) and are not registered here. Only `inspect`, `why`, `events`, `resume`, `gateway`, `workflow list` survive as aliases |
-| [`smithers fork`](#fork) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
-| [`smithers graph`](#graph) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
-| [`smithers gui`](#gui) | replaced by `smithers serve` and the Electrobun product UI; the 0.x terminal monitor (`smithers-mon`, `packages/tui`) is deleted, and a run monitor on the new projections is new work, not a port |
-| [`smithers help`](#help) | `docs-full` becomes `docs --full`; the other eleven are the 0.x `COMMAND_ALIASES` did-you-mean hint keys (`apps/cli/src/index.js:12994-13008`), each answering with the rc.0 verb (`ps`, `ls`, `cancel`, `up`, `status`, `logs`, `--help`); the two remaining 0.x hint keys `ls` and `status` are real rc.0 commands (section 4.1) and are not registered here. Only `inspect`, `why`, `events`, `resume`, `gateway`, `workflow list` survive as aliases |
-| [`smithers herdr`](#herdr) | moved to the plugins repository or deferred (`cron` returns on `@smthrs/triggers`; `listeners` returns with the GitHub integration) |
-| [`smithers hermes`](#hermes) | moved to the plugins repository or deferred (`cron` returns on `@smthrs/triggers`; `listeners` returns with the GitHub integration) |
+| [`smithers exec`](#exec) | use `up` |
+| [`smithers fork`](#fork) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
+| [`smithers graph`](#graph) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
+| [`smithers gui`](#gui) | replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted |
+| [`smithers help`](#help) | use `--help` |
+| [`smithers herdr`](#herdr) | moved to the plugins repository or deferred |
+| [`smithers hermes`](#hermes) | moved to the plugins repository or deferred |
 | [`smithers hijack`](#hijack) | not available; use `steer`, `signal`, `approve`, `deny`, `cancel`, `run --resume` |
-| [`smithers human`](#human) | approvals park the run; use `ps --status waiting-approval`, `approve`, `deny`; the MCP `ask_human` tool keeps its name and returns the `unsupported` envelope (section 4.1) |
-| [`smithers kill`](#kill) | `docs-full` becomes `docs --full`; the other eleven are the 0.x `COMMAND_ALIASES` did-you-mean hint keys (`apps/cli/src/index.js:12994-13008`), each answering with the rc.0 verb (`ps`, `ls`, `cancel`, `up`, `status`, `logs`, `--help`); the two remaining 0.x hint keys `ls` and `status` are real rc.0 commands (section 4.1) and are not registered here. Only `inspect`, `why`, `events`, `resume`, `gateway`, `workflow list` survive as aliases |
-| [`smithers list`](#list) | `docs-full` becomes `docs --full`; the other eleven are the 0.x `COMMAND_ALIASES` did-you-mean hint keys (`apps/cli/src/index.js:12994-13008`), each answering with the rc.0 verb (`ps`, `ls`, `cancel`, `up`, `status`, `logs`, `--help`); the two remaining 0.x hint keys `ls` and `status` are real rc.0 commands (section 4.1) and are not registered here. Only `inspect`, `why`, `events`, `resume`, `gateway`, `workflow list` survive as aliases |
-| [`smithers list-runs`](#list-runs) | `docs-full` becomes `docs --full`; the other eleven are the 0.x `COMMAND_ALIASES` did-you-mean hint keys (`apps/cli/src/index.js:12994-13008`), each answering with the rc.0 verb (`ps`, `ls`, `cancel`, `up`, `status`, `logs`, `--help`); the two remaining 0.x hint keys `ls` and `status` are real rc.0 commands (section 4.1) and are not registered here. Only `inspect`, `why`, `events`, `resume`, `gateway`, `workflow list` survive as aliases |
-| [`smithers listeners`](#listeners) | moved to the plugins repository or deferred (`cron` returns on `@smthrs/triggers`; `listeners` returns with the GitHub integration) |
-| [`smithers log`](#log) | `docs-full` becomes `docs --full`; the other eleven are the 0.x `COMMAND_ALIASES` did-you-mean hint keys (`apps/cli/src/index.js:12994-13008`), each answering with the rc.0 verb (`ps`, `ls`, `cancel`, `up`, `status`, `logs`, `--help`); the two remaining 0.x hint keys `ls` and `status` are real rc.0 commands (section 4.1) and are not registered here. Only `inspect`, `why`, `events`, `resume`, `gateway`, `workflow list` survive as aliases |
+| [`smithers human`](#human) | approvals park the run; use `ps --status waiting-approval`, `approve`, and `deny` |
+| [`smithers kill`](#kill) | use `cancel` |
+| [`smithers list`](#list) | use `ls` |
+| [`smithers list-runs`](#list-runs) | use `ps` |
+| [`smithers listeners`](#listeners) | moved to the plugins repository or deferred |
+| [`smithers log`](#log) | use `logs` |
 | [`smithers make-workflow`](#make-workflow) | JSX pack tooling is gone; `smithers migrate` replaces `upgrade` |
-| [`smithers monitor`](#monitor) | replaced by `smithers serve` and the Electrobun product UI; the 0.x terminal monitor (`smithers-mon`, `packages/tui`) is deleted, and a run monitor on the new projections is new work, not a port |
-| [`smithers node`](#node) | use `output`, `logs --json`, and the `node-output` projection |
-| [`smithers observability`](#observability) | moved to the plugins repository or deferred (`cron` returns on `@smthrs/triggers`; `listeners` returns with the GitHub integration) |
-| [`smithers openapi`](#openapi) | moved to the plugins repository or deferred (`cron` returns on `@smthrs/triggers`; `listeners` returns with the GitHub integration) |
+| [`smithers monitor`](#monitor) | replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted |
+| [`smithers node`](#node) | use `output`, `logs --json`, and the node-output projection |
+| [`smithers observability`](#observability) | moved to the plugins repository or deferred |
+| [`smithers openapi`](#openapi) | moved to the plugins repository or deferred |
 | [`smithers optimize`](#optimize) | not part of the engine release |
 | [`smithers packs`](#packs) | JSX pack tooling is gone; `smithers migrate` replaces `upgrade` |
 | [`smithers pause`](#pause) | not available; use `steer`, `signal`, `approve`, `deny`, `cancel`, `run --resume` |
-| [`smithers release`](#release) |  |
+| [`smithers release`](#release) | not an rc.0 verb |
 | [`smithers remove`](#remove) | JSX pack tooling is gone; `smithers migrate` replaces `upgrade` |
-| [`smithers replay`](#replay) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
-| [`smithers restore`](#restore) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
-| [`smithers retry-task`](#retry-task) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
-| [`smithers revert`](#revert) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
-| [`smithers review`](#review) |  |
-| [`smithers rewind`](#rewind) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
-| [`smithers runs`](#runs) | `docs-full` becomes `docs --full`; the other eleven are the 0.x `COMMAND_ALIASES` did-you-mean hint keys (`apps/cli/src/index.js:12994-13008`), each answering with the rc.0 verb (`ps`, `ls`, `cancel`, `up`, `status`, `logs`, `--help`); the two remaining 0.x hint keys `ls` and `status` are real rc.0 commands (section 4.1) and are not registered here. Only `inspect`, `why`, `events`, `resume`, `gateway`, `workflow list` survive as aliases |
+| [`smithers replay`](#replay) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
+| [`smithers restore`](#restore) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
+| [`smithers retry-task`](#retry-task) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
+| [`smithers revert`](#revert) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
+| [`smithers review`](#review) | not an rc.0 verb |
+| [`smithers rewind`](#rewind) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
+| [`smithers runs`](#runs) | use `ps` |
 | [`smithers scores`](#scores) | not part of the engine release |
 | [`smithers share`](#share) | JSX pack tooling is gone; `smithers migrate` replaces `upgrade` |
-| [`smithers show`](#show) | `docs-full` becomes `docs --full`; the other eleven are the 0.x `COMMAND_ALIASES` did-you-mean hint keys (`apps/cli/src/index.js:12994-13008`), each answering with the rc.0 verb (`ps`, `ls`, `cancel`, `up`, `status`, `logs`, `--help`); the two remaining 0.x hint keys `ls` and `status` are real rc.0 commands (section 4.1) and are not registered here. Only `inspect`, `why`, `events`, `resume`, `gateway`, `workflow list` survive as aliases |
-| [`smithers snapshot-hook`](#snapshot-hook) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
-| [`smithers snapshots`](#snapshots) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
-| [`smithers start`](#start) | `docs-full` becomes `docs --full`; the other eleven are the 0.x `COMMAND_ALIASES` did-you-mean hint keys (`apps/cli/src/index.js:12994-13008`), each answering with the rc.0 verb (`ps`, `ls`, `cancel`, `up`, `status`, `logs`, `--help`); the two remaining 0.x hint keys `ls` and `status` are real rc.0 commands (section 4.1) and are not registered here. Only `inspect`, `why`, `events`, `resume`, `gateway`, `workflow list` survive as aliases |
+| [`smithers show`](#show) | use `status` |
+| [`smithers snapshot-hook`](#snapshot-hook) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
+| [`smithers snapshots`](#snapshots) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
+| [`smithers start`](#start) | use `up` |
 | [`smithers starters`](#starters) | JSX pack tooling is gone; `smithers migrate` replaces `upgrade` |
-| [`smithers stop`](#stop) | `docs-full` becomes `docs --full`; the other eleven are the 0.x `COMMAND_ALIASES` did-you-mean hint keys (`apps/cli/src/index.js:12994-13008`), each answering with the rc.0 verb (`ps`, `ls`, `cancel`, `up`, `status`, `logs`, `--help`); the two remaining 0.x hint keys `ls` and `status` are real rc.0 commands (section 4.1) and are not registered here. Only `inspect`, `why`, `events`, `resume`, `gateway`, `workflow list` survive as aliases |
+| [`smithers stop`](#stop) | use `cancel` |
 | [`smithers supervise`](#supervise) | the run driver's heartbeat sweep owns recovery |
 | [`smithers supervisor`](#supervisor) | the run driver's heartbeat sweep owns recovery |
-| [`smithers tail`](#tail) | use `output`, `logs --json`, and the `node-output` projection |
-| [`smithers test`](#test) |  |
-| [`smithers timeline`](#timeline) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
-| [`smithers timetravel`](#timetravel) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
-| [`smithers token`](#token) | moved to the plugins repository or deferred (`cron` returns on `@smthrs/triggers`; `listeners` returns with the GitHub integration) |
+| [`smithers tail`](#tail) | use `output`, `logs --json`, and the node-output projection |
+| [`smithers test`](#test) | not an rc.0 verb |
+| [`smithers timeline`](#timeline) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
+| [`smithers timetravel`](#timetravel) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
+| [`smithers token`](#token) | moved to the plugins repository or deferred |
 | [`smithers top`](#top) | the run driver's heartbeat sweep owns recovery |
-| [`smithers tree`](#tree) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
-| [`smithers ui`](#ui) | replaced by `smithers serve` and the Electrobun product UI; the 0.x terminal monitor (`smithers-mon`, `packages/tui`) is deleted, and a run monitor on the new projections is new work, not a port |
+| [`smithers tree`](#tree) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
+| [`smithers ui`](#ui) | replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted |
 | [`smithers upgrade`](#upgrade) | JSX pack tooling is gone; `smithers migrate` replaces `upgrade` |
-| [`smithers usage`](#usage) | moved to the plugins repository or deferred (`cron` returns on `@smthrs/triggers`; `listeners` returns with the GitHub integration) |
+| [`smithers usage`](#usage) | moved to the plugins repository or deferred |
 | [`smithers what`](#what) | removed with the JSX inline workflow |
-| [`smithers workflows`](#workflows) | `docs-full` becomes `docs --full`; the other eleven are the 0.x `COMMAND_ALIASES` did-you-mean hint keys (`apps/cli/src/index.js:12994-13008`), each answering with the rc.0 verb (`ps`, `ls`, `cancel`, `up`, `status`, `logs`, `--help`); the two remaining 0.x hint keys `ls` and `status` are real rc.0 commands (section 4.1) and are not registered here. Only `inspect`, `why`, `events`, `resume`, `gateway`, `workflow list` survive as aliases |
-| [`smithers worktrees`](#worktrees) | time travel is a library API (`@smthrs/time-travel`) and worktree lanes are deferred |
+| [`smithers workflows`](#workflows) | use `ls` |
+| [`smithers worktrees`](#worktrees) | time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred |
 
 `smithers gateway status|stop` is removed; `smithers gateway` keeps its other form.
 
@@ -12424,11 +12425,11 @@ CLI reference lists the commands that ship.
 | `up` | `--steal-ownership` | the run driver's heartbeat sweep owns recovery |
 | `up` | `--resume-claim-*` | the run driver's heartbeat sweep owns recovery |
 | `up` | `--resume-restore-*` | the run driver's heartbeat sweep owns recovery |
-| `up` | `--max-concurrency &lt;n&gt;` | no per-launch concurrency override exists in the imported engine; parallelism is declared by the flow and bounded by plan admission (section 5.2). Plue's `runArgs` and `agent.ts` drop the flag (section 10) |
-| `migrate` | `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed (section 2, error code `unsupported_database`) |
-| `global` | `--backend pglite\|postgres` |  |
-| `global` | `--backend sqlite` |  |
-| `init` | `--global` | rc.0 has no global pack; seats resolve from environment keys (section 4.1) |
+| `up` | `--max-concurrency &lt;n&gt;` | parallelism is declared by the flow and bounded by plan admission |
+| `migrate` | `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed |
+| `global` | `--backend pglite\|postgres` | SQLite only (`--backend sqlite` is accepted as a no-op) |
+| `global` | `--backend sqlite` | SQLite only (`--backend sqlite` is accepted as a no-op) |
+| `init` | `--global` | rc.0 has no global pack; seats resolve from environment keys |
 
 #### add
 

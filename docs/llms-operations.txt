@@ -28,7 +28,7 @@ which is frozen for this candidate. A row here and a row there are the same row.
 | Bun | Supported for non-durable packages and for `apps/*` only. | `>=1.3.0` (`BUILD.ts:15`); CI pins `1.3.14`. |
 | Browser | Bundleable entry points only. No durable execution. | Bundles under esbuild `--platform=browser` as proven by `scripts/browser-check.mjs`. |
 | Linux x64 | Supported; the required CI lanes run here. | Ubuntu runner. |
-| macOS |  | arm64 and x64. |
+| macOS | Supported for development and the Phase 7 manual smoke; the `node-macos` CI lane is advisory. | arm64 and x64. |
 | Windows | Unsupported. | none |
 
 ### Databases
@@ -105,14 +105,15 @@ execution claim.
 | `@smthrs/engine-store` | Durable `FlowEngine`: journal, run, cache, artifact stores; `RunDriver` sweep; `DisasterRecovery`. | gated yes |
 | `@smthrs/flow` | Authoring model: `Flow`, `Action`, `Interpreter`, durable deferred/clock/queue, `RetryPolicy`. | gated yes |
 | `@smthrs/flows` | Curated aggregate barrel and `./NodeRuntime` production composition. | gated yes (root); `NodeRuntime` gated Node-only |
-| `@smthrs/gateway` |  | no claim |
+| `@smthrs/gateway` | Gateway wire schemas, projections, session tokens, `SuperviseRuntime` port; the Phase 4 projection server. | no claim |
 | `@smthrs/harness` | Built-in agent harness: dynamic nodes, sealed model steps, QuickJS cell runtime. | no claim |
 | `@smthrs/jj` | Jujutsu host service; ships `wasm/flows_jj.wasm`. | gated yes (root, `browser/BrowserJj`); `node/NodeJj`, `bun/BunJj` gated Node-only |
 | `@smthrs/journal` | Immutable event history, projections, redaction, owner fence. | gated yes |
 | `@smthrs/kernel` | Capability sets, grants, guarded host decorators, `GrantStore`. | gated yes (root); `test/TestHost` gated Node-only |
 | `@smthrs/keys` | Canonical flow keys. | gated yes |
-| `@smthrs/mcp` | Stdio MCP client (`McpClient`) and `McpFlows`, which projects a server's tools as `FlowBinding` sources (`mcp/<server>/<tool>`); consumed by `@smthrs/cli` `--mcp-config` (rule (a): `packages/cli/package.json:95`). | no claim |
+| `@smthrs/mcp` | Stdio MCP client (`McpClient`) and `McpFlows`, which projects a server's tools as `FlowBinding` sources (`mcp/<server>/<tool>`); consumed by `@smthrs/cli` `--mcp-config`. | no claim |
 | `@smthrs/memory` | Durable cross-run facts, history, notes, recall. | no claim |
+| `@smthrs/migrate` | The 0.x to 1.0 migration tool: `smithers-migrate` scan/plan/apply over a 0.x project. | no claim |
 | `@smthrs/model` | Schema-first model protocols, routes, streaming, seat resolution. | no claim |
 | `@smthrs/notifications` | Durable notification queue and admission policy. | no claim |
 | `@smthrs/observability` | OTLP wiring, `JournalLogger`, metrics. | gated yes |
@@ -342,7 +343,7 @@ state column is what the release does today.
 
 ### Not in release 1
 
-`1.0.0-rc.0` ships the `engine` and `agent` groups together at one synchronized version. `scripts/pack-release.mjs` packs every non-private workspace whose manifest declares `smthrs.group` in `{engine, agent}`, checks that set against the 39 names frozen in [rc-contract.md section 3.1](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md), and throws on a manifest that declares no known group; `.github/workflows/release.yml` gates on the same fields. Group membership is therefore no longer a proxy for feature scope: a package can be published and still not be a release-candidate feature, and the way to keep one out of the release is `private: true`. The following subsystems exist in this tree and are **not** part of release 1.
+`1.0.0-rc.0` ships the `engine` and `agent` groups together at one synchronized version. `scripts/pack-release.mjs` packs every non-private workspace whose manifest declares `smthrs.group` in `{engine, agent}`, checks that set against the 40 names frozen in [rc-contract.md section 3.1](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md), and throws on a manifest that declares no known group; `.github/workflows/release.yml` gates on the same fields. Group membership is therefore no longer a proxy for feature scope: a package can be published and still not be a release-candidate feature, and the way to keep one out of the release is `private: true`. The following subsystems exist in this tree and are **not** part of release 1.
 
 | Subsystem | Why it is out of release 1 |
 | --- | --- |

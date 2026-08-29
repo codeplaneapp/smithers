@@ -22,7 +22,7 @@ These flags existed in Smithers 0.x. `smithers migrate` declares each one so it 
 
 | Flag | Reason |
 | --- | --- |
-| `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed (section 2, error code `unsupported_database`) |
+| `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed |
 
 ## Source
 

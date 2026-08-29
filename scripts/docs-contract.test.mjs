@@ -4,11 +4,15 @@ import { join } from "node:path"
 import test from "node:test"
 import {
   availableCommands,
+  citedPackageCounts,
   codeSpans,
+  countCitingDocuments,
   commandName,
   compatibilityPromise,
+  contractPath,
   promiseHolders,
   exclusions,
+  publishedPackageCount,
   publishedPackages,
   repoRoot,
   releaseNotes,
@@ -122,7 +126,58 @@ test("pairs every release note with the exclusions that cite it", () => {
 
 test("reads the runtime, package, and run-control tables", () => {
   assert.ok(runtimes().some((row) => row.runtime === "Node.js"))
-  assert.equal(publishedPackages().length, 39)
+  assert.ok(publishedPackages().some((row) => row.name === "@smthrs/cli"))
   assert.ok(supportedRunControl().some((row) => row.feature === "Cancel"))
   assert.ok(unsupportedFeatures().some((row) => row.feature === "Hijack"))
+})
+
+test("the section 3.1 heading counts the rows it heads", () => {
+  // The heading spells the number out. When a package joins the release the
+  // heading and the table move together or the contract contradicts itself,
+  // and every page that cites the count inherits the contradiction.
+  assert.equal(publishedPackageCount(), publishedPackages().length)
+})
+
+test("a section 3.1 count that disagrees with its table is rejected", () => {
+  const source = readFileSync(contractPath, "utf8").replace(
+    /### 3.1 Published at 1.0.0-rc.0 \(\d+ names\)/,
+    "### 3.1 Published at 1.0.0-rc.0 (2 names)"
+  )
+  assert.throws(() => publishedPackages(source), /heading says 2 .* rows/)
+})
+
+test("the count survives a package joining the release", () => {
+  const source = readFileSync(contractPath, "utf8")
+  const declared = publishedPackageCount(source)
+  const grown = source
+    .replace(
+      `### 3.1 Published at 1.0.0-rc.0 (${declared} names)`,
+      `### 3.1 Published at 1.0.0-rc.0 (${declared + 1} names)`
+    )
+    .replace("| `@smthrs/model` |", "| `@smthrs/new` | A new one. | no claim |\n| `@smthrs/model` |")
+  assert.equal(publishedPackageCount(grown), declared + 1)
+  assert.equal(publishedPackages(grown).length, declared + 1)
+})
+
+test("finds both spellings a document uses to cite the published set", () => {
+  const body = [
+    "checks that set against the 39 names frozen in [rc-contract.md section 3.1](x)",
+    "Scope: the 41 packages `node scripts/pack-release.mjs --names` prints, every",
+    "| Published packages | 42 | enforced somewhere |",
+    "39 packages of prose that cite nothing"
+  ].join("\n")
+  assert.deepEqual(citedPackageCounts(body), [39, 41, 42])
+})
+
+test("finds no citation in a document that states no count", () => {
+  assert.deepEqual(citedPackageCounts("The release publishes several packages."), [])
+})
+
+test("every document that cites the published set agrees with the contract", () => {
+  const declared = publishedPackageCount()
+  for (const path of countCitingDocuments()) {
+    for (const cited of citedPackageCounts(readFileSync(join(repoRoot, path), "utf8"))) {
+      assert.equal(cited, declared, `${path} cites ${cited} published packages and the contract freezes ${declared}`)
+    }
+  }
 })

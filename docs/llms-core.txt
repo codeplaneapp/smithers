@@ -1351,7 +1351,7 @@ These flags existed in Smithers 0.x. `smithers init` declares each one so it fai
 
 | Flag | Reason |
 | --- | --- |
-| `--global` | rc.0 has no global pack; seats resolve from environment keys (section 4.1) |
+| `--global` | rc.0 has no global pack; seats resolve from environment keys |
 
 ---
 
@@ -1465,7 +1465,7 @@ These flags existed in Smithers 0.x. `smithers migrate` declares each one so it 
 
 | Flag | Reason |
 | --- | --- |
-| `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed (section 2, error code `unsupported_database`) |
+| `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed |
 
 ---
 
@@ -1736,7 +1736,7 @@ These flags existed in Smithers 0.x. `smithers up` declares each one so it fails
 | `--steal-ownership` | the run driver's heartbeat sweep owns recovery |
 | `--resume-claim-*` | the run driver's heartbeat sweep owns recovery |
 | `--resume-restore-*` | the run driver's heartbeat sweep owns recovery |
-| `--max-concurrency &lt;n&gt;` | no per-launch concurrency override exists in the imported engine; parallelism is declared by the flow and bounded by plan admission (section 5.2). Plue's `runArgs` and `agent.ts` drop the flag (section 10) |
+| `--max-concurrency &lt;n&gt;` | parallelism is declared by the flow and bounded by plan admission |
 
 ---
 
