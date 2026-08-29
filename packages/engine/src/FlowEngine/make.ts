@@ -12,7 +12,6 @@ import {
   type DurableDeferred,
   Flow,
   FlowRuntime,
-  type Interpreter,
   RetryPolicy,
   StepIdentity
 } from "@smthrs/flow"
@@ -22,7 +21,6 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
-import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { actionKey, ordinalScope, uncanonicalKey } from "./ActionKey.ts"
@@ -43,17 +41,6 @@ const toJsonExit = Exit.map((value: any) => value ?? null)
 const ActionOrdinalScope = Context.Service<never, string>(
   "@smthrs/engine/FlowEngine/ActionOrdinalScope"
 )
-
-/**
- * The tag the interpreter raises its refusals under, anchored to the class so
- * a rename breaks this file rather than silently re-laundering the refusal.
- *
- * @private
- */
-const interpreterErrorTag: Interpreter.InterpreterError["_tag"] = "@smthrs/flow/InterpreterError"
-
-/** Whether a body failure is the interpreter refusing to drive the graph. */
-const isInterpreterError = Predicate.isTagged(interpreterErrorTag)
 
 /**
  * A body failure rendered for one log line, bounded so an oversized payload
@@ -119,36 +106,30 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
         (payload, executionId) =>
           Effect.matchEffect(Effect.suspend(() => execute(payload, executionId)), {
             onFailure: (error) =>
-              isInterpreterError(error)
-                // The interpreter's own refusal is not a body outcome. It names
-                // a graph this composition cannot drive at all — an action with
-                // no implementation wired up, an incomplete graph — so no flow
-                // declares it in `errorSchema`, and validating it there
-                // replaced the one message the operator needed ("Action
-                // \"x/Y\" has no implementation. Provide ONE
-                // Action.layerImplementations under both …") with
-                // `InvalidType(<Never>)`. It travels out typed instead,
-                // exactly as the interpreter raised it.
-                ? Effect.fail(error)
-                : Effect.flatMap(
-                  Effect.orDie(
-                    flow.errorSchema.makeEffect(error).pipe(
-                      // A body failure outside the flow's declared error schema
-                      // is a defect either way, but `orDie` alone reports only
-                      // the schema mismatch and never the error that actually
-                      // occurred. Naming the flow and the undeclared error
-                      // turns that into one legible log line, the same
-                      // treatment a recorded action outcome gets below.
-                      Effect.tapError(() =>
-                        Effect.annotateLogs(
-                          Effect.logError("A flow body failed with an error outside its declared error schema"),
-                          { flow: flow._tag, error: stringifyError(error) }
-                        )
-                      )
-                    )
+              Effect.matchEffect(flow.errorSchema.makeEffect(error), {
+                // A body failure outside the flow's declared error schema is a
+                // defect, and the defect is the ERROR, not the schema issue
+                // about it. `orDie` on the validation reported only the
+                // mismatch: for a flow declaring no error the whole report was
+                // `InvalidType(<Never>)`, which erased the one message the
+                // operator needed — the interpreter's refusal naming the
+                // action it could not resolve. Dying with the error itself
+                // keeps that message, and keeps it durably: the driver encodes
+                // a settled exit through `Flow.Result({ success, error:
+                // flow.errorSchema })`, whose defect channel is
+                // `Schema.Defect`, so an undeclared failure delivered as a
+                // FAILURE could not be encoded at all and left the run row
+                // `running` and owned forever.
+                onFailure: () =>
+                  Effect.andThen(
+                    Effect.annotateLogs(
+                      Effect.logError("A flow body failed with an error outside its declared error schema"),
+                      { flow: flow._tag, error: stringifyError(error) }
+                    ),
+                    Effect.die(error)
                   ),
-                  () => Effect.fail(error)
-                ),
+                onSuccess: () => Effect.fail(error)
+              }),
             onSuccess: (value) =>
               Effect.flatMap(FlowRuntime.FlowInstance, (instance) =>
                 // A handoff has no success value for this round. Its handler
