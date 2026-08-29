@@ -1,6 +1,7 @@
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { readdirSync, statSync } from "node:fs"
 import { join, relative, resolve, sep } from "node:path"
 import { describe, expect, it } from "vitest"
+import { collectSources, fileBindsSpawningModule } from "./SpawnSpecifiers.ts"
 
 /**
  * Containment is a property of the `ChildProcessSpawner` SERVICE, not of any
@@ -21,6 +22,15 @@ import { describe, expect, it } from "vitest"
  * `packages/std/test/ExecContainment.test.ts` carries the same assertion
  * scoped to `std` alone, where it fails fast during work on that package, and
  * this suite is the universe.
+ *
+ * Both read `packages/flows/test/SpawnSpecifiers.ts`, which parses each file
+ * and asks the syntax tree. One reader means this gate can never be narrower
+ * than the package-local one, and a parser means neither can be defeated by
+ * an import's LAYOUT. The three regex readers that came before were each one
+ * layout wide, and the last one missed the multi-line import `dprint` itself
+ * produces for any import over 120 characters. The reader's fixtures, one
+ * file per layout, live beside it in
+ * `packages/flows/test/SpawnSpecifiers.test.ts`.
  *
  * The exceptions are named here with the reason each one is bounded, not
  * derived from what happens to be in the tree. The list is checked in both
@@ -89,37 +99,6 @@ describe("child-process containment conformance", () => {
     ])
   ])
 
-  /**
-   * The specifier of a module that starts a process, in either spelling.
-   *
-   * The `node:` prefix is optional because omitting it binds exactly the same
-   * module, and nothing in this repository requires the prefix: no
-   * `packages/*\/eslint.config.js` configures `unicorn/prefer-node-protocol`
-   * or `no-restricted-imports`. A gate that matched only the prefixed
-   * spelling would therefore be one token wide.
-   *
-   * `cluster` is here beside `child_process` because `cluster.fork()` starts
-   * a process the same way and inherits the same nothing: no kill deadline,
-   * no ledger record. Nothing under `packages/*\/src` imports it today, so
-   * the exemption list below is unaffected. Threads are out of scope: a
-   * `node:worker_threads` worker dies with the process that made it.
-   */
-  const spawningModule = String.raw`["'](?:node:)?(?:child_process|cluster)["']`
-
-  /**
-   * An import of a process-starting module, in any of the three forms that
-   * actually bind it.
-   *
-   * Prose is deliberately not matched. Six modules name `node:child_process`
-   * in a doc comment to say what they do or do not do, and a scan that
-   * flagged those would push authors toward describing the boundary less
-   * clearly, which is the opposite of the point.
-   */
-  const importsSpawningModule = (source: string): boolean =>
-    new RegExp(String.raw`^\s*import\s[^\n]*?from\s*${spawningModule}`, "m").test(source)
-    || new RegExp(String.raw`\bimport\s*\(\s*${spawningModule}\s*\)`).test(source)
-    || new RegExp(String.raw`\brequire\s*\(\s*${spawningModule}\s*\)`).test(source)
-
   const isDirectory = (path: string) => {
     try {
       return statSync(path).isDirectory()
@@ -129,61 +108,37 @@ describe("child-process containment conformance", () => {
   }
 
   /**
-   * Every TypeScript module under `packages/<name>/src`.
+   * Every source module under `packages/<name>/src`.
    *
    * The universe is derived from the packages directory rather than from a
    * list, so a package added tomorrow is covered without anyone remembering
-   * to add it here.
+   * to add it here, and it spans every extension a module in this repository
+   * can be written in rather than `.ts` alone.
    */
   const sources: Array<{ readonly id: string; readonly path: string }> = []
   for (const name of readdirSync(packagesDir)) {
     const root = join(packagesDir, name, "src")
     if (!isDirectory(root)) continue
-    const walk = (directory: string) => {
-      for (const entry of readdirSync(directory)) {
-        const path = join(directory, entry)
-        if (isDirectory(path)) walk(path)
-        else if (path.endsWith(".ts")) {
-          sources.push({ id: `${name}/${relative(join(packagesDir, name), path).split(sep).join("/")}`, path })
-        }
-      }
+    for (const path of collectSources(root)) {
+      sources.push({ id: `${name}/${relative(join(packagesDir, name), path).split(sep).join("/")}`, path })
     }
-    walk(root)
   }
 
   const importers = sources
-    .filter(({ path }) => importsSpawningModule(readFileSync(path, "utf8")))
+    .filter(({ path }) => fileBindsSpawningModule(path))
     .map(({ id }) => id)
     .sort()
 
-  it("recognizes every specifier that binds a process-starting module", () => {
-    // The gate is only as wide as its matcher, and the matcher is the one part
-    // of this suite that scanning the tree cannot exercise: nothing under
-    // `packages/*/src` spells the bare specifier today, so a matcher that
-    // missed it would look exactly like a matcher that works, right up to the
-    // day someone writes it. `import { spawn } from "child_process"` binds the
-    // same module as the `node:`-prefixed form, and no eslint config in this
-    // repository requires the prefix, so both spellings are pinned here.
-    for (const specifier of ["node:child_process", "child_process", "node:cluster", "cluster"]) {
-      expect(importsSpawningModule(`import { spawn } from "${specifier}"\n`), specifier).toBe(true)
-      expect(importsSpawningModule(`import spawner from '${specifier}'\n`), specifier).toBe(true)
-      expect(importsSpawningModule(`const spawner = require("${specifier}")\n`), specifier).toBe(true)
-      expect(importsSpawningModule(`const spawner = await import("${specifier}")\n`), specifier).toBe(true)
-    }
-
-    // Prose that names the module to describe a boundary is not an import, and
-    // an importer of a different module that merely reads alike is not one
-    // either.
-    expect(importsSpawningModule(" * Resolves the tag instead of node:child_process.\n")).toBe(false)
-    expect(importsSpawningModule("// never child_process, always the tag\n")).toBe(false)
-    expect(importsSpawningModule("import { Worker } from \"node:worker_threads\"\n")).toBe(false)
-  })
-
   it("scans a universe that could actually contain a bypass", () => {
     // Guards the guard: a broken walk or a renamed directory would make every
-    // assertion below pass over nothing.
-    expect(sources.length).toBeGreaterThan(500)
+    // assertion below pass over nothing. The extension assertions are the
+    // widened universe stated as a requirement, so narrowing the walk back to
+    // `.ts` fails here rather than silently un-scanning the 86 `.tsx`
+    // components and two `.js` entry points it used to skip.
+    expect(sources.length).toBeGreaterThan(900)
     expect(sources.map(({ id }) => id)).toContain("std/src/internal/Exec.ts")
+    expect(sources.some(({ id }) => id.endsWith(".tsx"))).toBe(true)
+    expect(sources.some(({ id }) => id.endsWith(".js"))).toBe(true)
   })
 
   it("starts child processes only through the host's spawner", () => {
