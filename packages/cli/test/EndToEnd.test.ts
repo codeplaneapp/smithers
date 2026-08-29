@@ -72,6 +72,24 @@ describe("one project, from init to gc", () => {
     expect(json("ls")).toEqual({ _tag: "flows", items: [{ flowId: "hello", description: expect.any(String) }] })
   }, 180_000)
 
+  it("parks an unapproved plan with the parked exit status", () => {
+    const card = json("plan", "hello") as { readonly approval: unknown }
+    const approval = JSON.stringify(card.approval)
+
+    const parked = smithers("run", approval, "--json")
+
+    // Exit 3 is the parked status in the rc-contract section 4 table, and it
+    // is the one code a caller cannot learn from the payload alone: the run
+    // did not fail, it is waiting for a decision.
+    expect(parked.status).toBe(3)
+    expect(JSON.parse(parked.stdout)).toMatchObject({ _tag: "Parked", status: "waiting-approval" })
+
+    // Approving the same payload launches it, so the park was a gate and not a
+    // dead end.
+    expect(json("approve", approval, "--scope", "run")).toMatchObject({ _tag: "Accepted" })
+    json("down")
+  }, 180_000)
+
   it("launches the discovered flow detached and returns only the receipt's run id", () => {
     const launched = json("up", "hello", "-d")
 
