@@ -9,15 +9,19 @@ import { memoryKv } from "./helpers/memoryKv.ts";
 /**
  * The contract between `smithers bug` and this worker.
  *
- * The run block is built from `@smthrs/control`'s own DTOs rather than typed
+ * Run blocks here are built from `@smthrs/control`'s own DTOs rather than typed
  * out by hand, so a change to `RunSummary` or `ControlEvent` fails here instead
- * of quietly producing reports the worker stores but nobody can read. That is
- * the whole point of pinning it: the worker's schema is loose past `title`, so
- * a wrong shape would be accepted and only noticed in triage.
+ * of quietly producing reports the worker stores but nobody can read. The
+ * worker's schema is loose past the headline, so a wrong shape would otherwise
+ * be accepted and only noticed in triage.
  *
- * 0.x sent `workflowName`, `workflowPath`, a five-status vocabulary, and events
- * keyed `seq`/`timestampMs`/`type`. rc.0 sends `flowId`, the seven-status
- * vocabulary, and events keyed `sequence`/`occurredAt`/`kind`.
+ * Two client shapes reach this endpoint and both must keep working. The rc.0
+ * `bug` verb (`packages/cli/src/Command.ts`, cli-ops lane) posts `summary`, a
+ * `platform` string, `node`, `runs` and an optional `digest`. 0.x posted
+ * `title`, `body`, `smithersVersion`, a `platform` object and a singular `run`
+ * whose events were keyed `seq`/`timestampMs`/`type` over a five-status
+ * vocabulary; rc.0 run DTOs use `flowId`, seven statuses, and
+ * `sequence`/`occurredAt`/`kind`.
  */
 const decodeRunSummary = Schema.decodeUnknownSync(ControlSchema.RunSummary);
 const decodeControlEvent = Schema.decodeUnknownSync(ControlSchema.ControlEvent);
@@ -50,7 +54,13 @@ const controlEvents = [
   },
 ].map((event) => decodeControlEvent(event));
 
-/** The payload the `bug` verb posts: platform, version, and the run digest. */
+/**
+ * A hand-composed report carrying rc.0 run DTOs under the 0.x envelope.
+ *
+ * This is the shape a human or an old client sends, not what the rc.0 verb
+ * builds — that one is asserted separately below, against the verb's own
+ * fields. Both have to be accepted.
+ */
 const payload = {
   title: `Run ${runSummary.runId} failed: the review step exhausted its correction budget`,
   body: "It failed the same way twice on a clean checkout.",
@@ -81,7 +91,7 @@ function post(body: unknown): Request {
 }
 
 describe("the smithers bug payload contract", () => {
-  test("the intake schema accepts an rc.0 report", () => {
+  test("the intake schema accepts a 0.x envelope carrying rc.0 run DTOs", () => {
     const parsed = bugReportSchema.safeParse(payload);
     expect(parsed.success).toBe(true);
   });
@@ -122,6 +132,59 @@ describe("the smithers bug payload contract", () => {
       makeEnv(),
     );
     expect(response.status).toBe(201);
+  });
+
+  test("the payload the rc.0 `smithers bug` verb actually posts is accepted", async () => {
+    // The shape below is what `packages/cli/src/Command.ts` builds through
+    // `Bug.report` and POSTs to `Bug.defaultEndpoint`
+    // (https://bug.smithers.sh/api/bugs, this worker): a `summary` line, a
+    // `platform` STRING, `node`, the `runs` array from `Control.list`, and an
+    // optional `digest` when `--run` names one. There is no `title`, no `body`,
+    // no `smithersVersion`, and no singular `run`.
+    //
+    // The verb is the cli-ops lane's; this test owns the receiving half. The
+    // run entries are decoded through `@smthrs/control`'s RunSummary so the
+    // fixture cannot drift from the DTO the verb lists.
+    const env = makeEnv();
+    const rcPayload = {
+      summary: "the review step exhausted its correction budget",
+      version: "1.0.0-rc.0",
+      platform: "darwin-arm64",
+      node: "22.19.0",
+      runs: [runSummary],
+      digest: { runId: runSummary.runId, events: controlEvents },
+    };
+
+    const response = await createBugWorker().fetch(post(rcPayload), env);
+    expect(response.status).toBe(201);
+
+    const { id } = (await response.json()) as { id: string };
+    const record = JSON.parse((await env.BUGS.get(`bug:${id}`))!) as {
+      report: Record<string, unknown>;
+    };
+    // Stored whole: triage reads the summary, the runs, and the digest.
+    expect(record.report.summary).toBe("the review step exhausted its correction budget");
+    expect(record.report.platform).toBe("darwin-arm64");
+    expect((record.report.runs as unknown[])).toHaveLength(1);
+    expect(record.report.digest).toBeDefined();
+  });
+
+  test("the verb's report survives with only a summary, as `smithers bug` sends with no --run", async () => {
+    // `digest` is omitted entirely unless --run names a run, and `runs` is the
+    // empty array on a project with no runs yet. Requiring either would bounce
+    // the first report a new user ever files.
+    const response = await createBugWorker().fetch(
+      post({ summary: "init wrote no flow", version: "1.0.0-rc.0", platform: "linux-x64", node: "22.19.0", runs: [] }),
+      makeEnv(),
+    );
+    expect(response.status).toBe(201);
+  });
+
+  test("a report with neither a title nor a summary is refused", () => {
+    // The headline is the one field triage cannot work without, and accepting
+    // both spellings must not degrade into accepting none.
+    expect(bugReportSchema.safeParse({ version: "1.0.0-rc.0", runs: [] }).success).toBe(false);
+    expect(bugReportSchema.safeParse({ title: "", summary: "" }).success).toBe(false);
   });
 
   test("a 0.x-shaped report is still stored, so an old CLI never loses a report", async () => {

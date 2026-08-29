@@ -5,44 +5,65 @@ from `smithers bug` (and anyone else) and stores them in KV.
 
 ## The payload
 
-`smithers bug` posts the report plus, when `--run` names one, a digest of that
-run. The digest is built from the control plane's own DTOs: a `RunSummary` for
-the run and the tail of its `Watch` stream as `ControlEvent`s.
+Two shapes reach this endpoint and both are stored. The worker is deployed once
+and talks to every CLI version ever installed, so bouncing a shape would drop
+the report of the user most likely to be hitting a bug.
+
+### rc.0, what `smithers bug` posts today
+
+`packages/cli/src/Command.ts` builds this through `Bug.report`, which scrubs
+credentials out of every string, and POSTs it to `Bug.defaultEndpoint`. `runs`
+is whatever `Control.list` returned; `digest` appears only when `--run` names a
+run.
+
+```jsonc
+{
+  "summary": "the review step exhausted its correction budget",
+  "version": "1.0.0-rc.0",
+  "platform": "darwin-arm64",
+  "node": "22.19.0",
+  "runs": [
+    {
+      "runId": "run-01JQ…",
+      "flowId": "flows/build-and-review",
+      // One of the seven rc.0 statuses: accepted, running, parked,
+      // waiting-approval, cancelled, completed, failed.
+      "status": "failed",
+      "createdAt": 1788000000000,
+      "updatedAt": 1788000042000
+    }
+  ],
+  "digest": { "runId": "run-01JQ…", "events": [{ "sequence": 3, "kind": "control.run.failed" }] }
+}
+```
+
+### 0.x, and anything hand-written
 
 ```jsonc
 {
   "title": "Run run-01JQ… failed: the review step exhausted its correction budget",
   "body": "It failed the same way twice on a clean checkout.",
-  "smithersVersion": "1.0.0-rc.0",
+  "smithersVersion": "0.35.0",
   "platform": { "os": "darwin", "arch": "arm64", "nodeVersion": "v22.19.0" },
   "createdAtMs": 1788000050000,
-  "run": {
-    "runId": "run-01JQ…",
-    "flowId": "flows/build-and-review",
-    // One of the seven rc.0 statuses: accepted, running, parked,
-    // waiting-approval, cancelled, completed, failed.
-    "status": "failed",
-    "createdAt": 1788000000000,
-    "updatedAt": 1788000042000,
-    "error": "the review step exhausted its correction budget",
-    "events": [{ "sequence": 3, "kind": "control.run.failed", "occurredAt": 1788000042000, "payload": {} }]
-  }
+  "run": { "runId": "r-123", "workflowName": "build-and-review", "status": "failed", "events": [] }
 }
 ```
 
 0.x sent `workflowName` and `workflowPath` instead of `flowId`, a five-status
-vocabulary, and events keyed `seq`/`timestampMs`/`type`. The worker still
-stores those: it is deployed once and talks to every CLI version ever
-installed, and bouncing an old shape would drop the report of the user most
-likely to be hitting a bug. `tests/smithersBugPayload.test.ts` pins both
-shapes, and builds the rc.0 one through `@smthrs/control`'s schemas so a DTO
+vocabulary, and events keyed `seq`/`timestampMs`/`type`.
+
+The one thing the worker insists on is a headline: `summary` or `title`, at
+least one, non-empty. `tests/smithersBugPayload.test.ts` pins both shapes and
+builds the run DTOs through `@smthrs/control`'s schemas, so a control-plane DTO
 change fails there rather than in triage.
 
 ## Routes
 
-- `POST /api/bugs` — zod-validated report (`{ title, body?, smithersVersion?, platform?, run? }`,
-  loose beyond that), 256KB cap (stream-counted, so a missing/spoofed
-  content-length can't buffer past the cap), per-IP rate limit of 20/hour via a
+- `POST /api/bugs` — zod-validated report: one of `summary` or `title` is
+  required, every other key is optional, and the object stays loose. 256KB cap
+  (stream-counted, so a missing/spoofed content-length can't buffer past the
+  cap), per-IP rate limit of 20/hour via a
   KV counter. The KV counter is **best-effort/advisory** — KV has no atomic
   increment, so a concurrent burst from one IP can race past the limit; use a
   Durable Object or a Rate Limiting binding if a hard cap is ever needed.
