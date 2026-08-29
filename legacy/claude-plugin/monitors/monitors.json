@@ -1,7 +1,0 @@
-[
-  {
-    "name": "smithers-runs",
-    "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/smithers.mjs\" claude monitor",
-    "description": "Streams actionable transitions (approval pending, human request, failed, stalled, node retry churn) plus a periodic run-progress still-running digest for the Smithers runs THIS session started or subscribed to; relay every line to the user so a detached run never goes hours without a status. Runs from other sessions and pre-existing runs never notify. Subscriptions are recorded automatically by `smithers claude tick` (the /workflows mirror) and Claude-launched runs, or explicitly via `smithers claude subscribe <runId>`. Finished/cancelled runs are not broadcast (the /workflows mirror reports those). Exits silently in projects without a Smithers store."
-  }
-]

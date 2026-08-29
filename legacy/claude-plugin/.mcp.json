@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "smithers": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/smithers.mjs", "--mcp"]
-    }
-  }
-}
