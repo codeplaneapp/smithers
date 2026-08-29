@@ -163,11 +163,7 @@ type StepEffect = Effect.Effect<string>
 
 const flowWiring = <ROut>(
   runtime: FlowRuntime.FlowRuntime["Service"],
-  implementation: Layer.Layer<
-    ROut,
-    never,
-    Crypto.Crypto | Action.Implementations | FlowRuntime.FlowRuntime
-  >
+  implementation: Layer.Layer<ROut, never, Crypto.Crypto | Action.Implementations | FlowRuntime.FlowRuntime>
 ) =>
   implementation.pipe(
     Layer.provideMerge(Action.layerImplementations),

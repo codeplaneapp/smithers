@@ -233,6 +233,75 @@ describe("SqlTimeTravelStore.descendants", () => {
       expect(result.attached.map((edge) => edge.childRunId)).toEqual(["child", "parent"])
       expect(result.detached).toEqual([])
     }))
+  it.effect("derives a continuation edge from the round the parent handed off to", () =>
+    Effect.gen(function*() {
+      const result = yield* run((store, sql) =>
+        Effect.gen(function*() {
+          // Exactly what `@smthrs/engine-store` writes when a trampoline round
+          // hands off: a `handed-off` decision on the round that finished,
+          // naming the round that follows it.
+          yield* sql`
+            INSERT INTO flows_journal_events
+              (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+               event_type, payload_json, meta_json)
+            VALUES ('round-0', 4, 'round-0-4', 'engine', 0, 0,
+                    'flows.engine.run-decision',
+                    ${
+            JSON.stringify({
+              decision: "handed-off",
+              status: "completed",
+              lineageId: "round-0",
+              roundOrdinal: 1,
+              nextExecutionId: "round-1"
+            })
+          },
+                    '{}')
+          `
+          // A decision that is not a handoff must contribute no edge.
+          yield* sql`
+            INSERT INTO flows_journal_events
+              (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+               event_type, payload_json, meta_json)
+            VALUES ('round-0', 5, 'round-0-5', 'engine', 1, 0,
+                    'flows.engine.run-decision',
+                    ${JSON.stringify({ decision: "transitioned", status: "completed" })},
+                    '{}')
+          `
+          return yield* store.descendants("round-0", { lineageId: "round-0/root", seq: 3 })
+        })
+      )
+
+      // A round is its own run row with its own claim and its own journal, so
+      // rewinding past the handoff orphans it rather than having to cancel it.
+      expect(result.detached).toEqual([{
+        parentRunId: "round-0",
+        parentSeq: 4,
+        childRunId: "round-1",
+        kind: "continuation",
+        attached: false
+      }])
+      expect(result.attached).toEqual([])
+    }))
+
+  it.effect("leaves a handoff recorded before the frame out of the descendants", () =>
+    Effect.gen(function*() {
+      const result = yield* run((store, sql) =>
+        Effect.gen(function*() {
+          yield* sql`
+            INSERT INTO flows_journal_events
+              (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+               event_type, payload_json, meta_json)
+            VALUES ('round-0', 2, 'round-0-2', 'engine', 0, 0,
+                    'flows.engine.run-decision',
+                    ${JSON.stringify({ decision: "handed-off", nextExecutionId: "round-1" })},
+                    '{}')
+          `
+          return yield* store.descendants("round-0", { lineageId: "round-0/root", seq: 3 })
+        })
+      )
+
+      expect(result).toEqual({ attached: [], detached: [] })
+    }))
 })
 
 describe("SqlTimeTravelStore audits", () => {

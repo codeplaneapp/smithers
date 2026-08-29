@@ -225,6 +225,20 @@ const descendantsFrom = (
  */
 const spawnEffectKind = "flows/engine-store/child-spawn"
 
+/**
+ * The decision a trampoline round records when it hands off to the next one.
+ *
+ * The same BRIDGE reasoning as {@link spawnEffectKind}: a later round is its
+ * own run row with its own `lineage_id`/`round_ordinal`, but `flows_runs`
+ * carries no parent SEQ, and a frame needs one. The handoff decision does — it
+ * is journaled on the round that finished, at the exact position the round
+ * advanced — so continuation edges are DERIVED from it rather than from a
+ * fourth store of the same tree.
+ *
+ * @private
+ */
+const handoffEventType = "flows.engine.run-decision"
+
 /** @private */
 const DecisionPayload = Schema.Struct({ state: Schema.Unknown })
 const decisionState = Schema.decodeUnknownOption(DecisionPayload)
@@ -261,9 +275,10 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
      *
      * `docs/specs/Concepts/Subflows.md` §129-131 asks for one lineage tree with
      * an edge kind; this is that union, expressed where both sources can be
-     * read. Fork edges stay in `flows_time_travel_edges`; child edges are
-     * DERIVED from the parent's own journal, which is the only one of the three
-     * stores of this tree that carries the `parentSeq` a frame needs.
+     * read. Fork edges stay in `flows_time_travel_edges`; child edges and
+     * trampoline continuation edges are DERIVED from the parent's own journal,
+     * which is the only one of the three stores of this tree that carries the
+     * `parentSeq` a frame needs.
      */
     const allEdges = sql<EdgeRow>`
       SELECT parent_run_id, parent_seq, child_run_id, kind, attached
@@ -279,6 +294,16 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
         AND json_extract(payload_json, '$.effect.kind') = ${spawnEffectKind}
         AND json_extract(payload_json, '$.effect.status') = 'succeeded'
         AND json_extract(payload_json, '$.effect.output.childRunId') IS NOT NULL
+      UNION ALL
+      SELECT run_id AS parent_run_id,
+             seq AS parent_seq,
+             json_extract(payload_json, '$.nextExecutionId') AS child_run_id,
+             'continuation' AS kind,
+             0 AS attached
+      FROM flows_journal_events
+      WHERE event_type = ${handoffEventType}
+        AND json_extract(payload_json, '$.decision') = 'handed-off'
+        AND json_extract(payload_json, '$.nextExecutionId') IS NOT NULL
     `.pipe(Effect.flatMap(decodeEdges), Effect.mapError(mapError))
 
     /**

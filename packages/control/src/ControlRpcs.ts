@@ -91,6 +91,19 @@ const SignalInput = Schema.Struct({
 
 const RunMutationInput = Schema.Struct({ runId: RunId, idempotencyKey: IdempotencyKey })
 
+/**
+ * A cancel carries the operator's stated reason; a pause and a resume do not.
+ *
+ * The reason is on the wire because attribution is written where the
+ * cancellation is decided, and a remote operator decides it here. The
+ * principal is deliberately NOT on the wire: the server stamps the identity it
+ * authenticated, so a client cannot name someone else.
+ */
+const CancelInput = Schema.Struct({
+  ...RunMutationInput.fields,
+  reason: Schema.optional(Schema.String)
+})
+
 const mutationErrors = Schema.Union([RunNotFound, ClaimLost, PersistenceError, Unavailable])
 
 /**
@@ -153,7 +166,7 @@ export const ControlRpcs = RpcGroup.make(
     success: Receipt,
     error: Schema.Union([RunNotFound, PersistenceError, Unavailable])
   }),
-  Rpc.make("Cancel", { payload: RunMutationInput, success: Receipt, error: mutationErrors }),
+  Rpc.make("Cancel", { payload: CancelInput, success: Receipt, error: mutationErrors }),
   Rpc.make("Pause", { payload: RunMutationInput, success: Receipt, error: mutationErrors }),
   Rpc.make("Resume", { payload: RunMutationInput, success: Receipt, error: mutationErrors }),
   Rpc.make("List", {

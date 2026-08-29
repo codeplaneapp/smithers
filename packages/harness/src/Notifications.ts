@@ -8,6 +8,7 @@
 import * as ModelRequest from "@smthrs/model/ModelRequest"
 import { NotificationQueue } from "@smthrs/notifications"
 import type { Notification } from "@smthrs/notifications/Notification"
+import * as SteerPayload from "@smthrs/notifications/SteerPayload"
 import { Effect, Layer } from "effect"
 import { HarnessError } from "./HarnessError.ts"
 import * as Steering from "./Steering.ts"
@@ -44,6 +45,75 @@ const render = (notification: Notification): ModelRequest.Message => {
   )
 }
 
+/**
+ * The steering item one notification carries, or nothing when it carries none.
+ *
+ * A steer names what it wants — a message, a seat, a thinking level, a widened
+ * tool set — and only the message belongs in the transcript. Telling the model
+ * "your seat changed" would be a turn spent on bookkeeping; changing the seat
+ * is what the operator asked for. Anything the steering vocabulary does not
+ * recognize stays an insert, because a system event or a webhook body is still
+ * something the run should be told about.
+ */
+const steerItem = (notification: Notification): Steering.Item => {
+  const item = notification._tag === "system-event" ? undefined : SteerPayload.decode(notification.payload)
+  // Zero, and not a timestamp: `admittedAt` orders items inside a queue this
+  // adapter does not keep. The durable queue already decided which
+  // notifications this boundary may deliver, so every item it handed back is
+  // at or before the boundary's cutoff by construction.
+  const admittedAt = 0
+  if (item === undefined || item.kind === "Message") {
+    return notification.delivery === "steer"
+      ? { _tag: "Insert", delivery: "steer", admittedAt, message: render(notification) }
+      : { _tag: "Insert", delivery: "queue", admittedAt, message: render(notification) }
+  }
+  switch (item.kind) {
+    case "Seat":
+      return { _tag: "SeatChange", delivery: "steer", admittedAt, seat: item.seat }
+    case "Thinking":
+      return { _tag: "ThinkingChange", delivery: "steer", admittedAt, thinking: item.thinking }
+    case "Tools":
+      return { _tag: "ActivateTools", delivery: "steer", admittedAt, toolNames: item.toolNames }
+  }
+}
+
+/**
+ * Folds the notifications one boundary promoted into the drain it produces.
+ *
+ * The durable queue has already decided WHICH notifications this boundary may
+ * deliver, so nothing is held back here: the fold sorts promoted notifications
+ * into the three things a turn boundary can act on.
+ */
+const drainOf = (notifications: ReadonlyArray<Notification>): Steering.Drain => {
+  const inserts: Array<ModelRequest.Message> = []
+  const seatChanges: Array<Steering.SeatChange | Steering.ThinkingChange> = []
+  const activatedToolNames: Array<string> = []
+  for (const notification of notifications) {
+    const item = steerItem(notification)
+    switch (item._tag) {
+      case "Insert":
+        inserts.push(item.message)
+        break
+      case "SeatChange":
+      case "ThinkingChange":
+        seatChanges.push(item)
+        break
+      case "ActivateTools":
+        for (const name of item.toolNames) {
+          if (!activatedToolNames.includes(name)) activatedToolNames.push(name)
+        }
+        break
+    }
+  }
+  return {
+    inserts,
+    seatChanges,
+    activatedToolNames,
+    remaining: Steering.empty(),
+    queued: notifications.some((notification) => notification.delivery === "queue")
+  }
+}
+
 const mapFailure = (cause: unknown): HarnessError =>
   new HarnessError({
     code: "engine_failed",
@@ -73,13 +143,7 @@ export const make = (
           boundary: input.boundary,
           wouldIdle: input.wouldIdle
         }).pipe(
-          Effect.map((receipt) => ({
-            inserts: receipt.notifications.map(render),
-            seatChanges: [],
-            activatedToolNames: [],
-            remaining: Steering.empty(),
-            queued: receipt.notifications.some((notification) => notification.delivery === "queue")
-          })),
+          Effect.map((receipt) => drainOf(receipt.notifications)),
           Effect.mapError(mapFailure)
         )
     })

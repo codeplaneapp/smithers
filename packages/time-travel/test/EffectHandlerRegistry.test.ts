@@ -505,8 +505,23 @@ describe("EffectHandlerRegistry", () => {
       expect(owners).toEqual([boundaryAuthority.owner])
     }))
 
-  it.effect("rejects invalid and unfenceable boundary descriptions before resolving the journal", () =>
-    Effect.gen(function*() {
+  it.effect("rejects invalid and unfenceable boundary descriptions before resolving the journal", () => {
+    // A journal that records every touch: the assertion is that validation
+    // refuses these descriptions *before* the journal is resolved, so the
+    // count must stay zero.
+    let emits = 0
+    const journal = Journal.makeNoop({
+      emitDurable: () =>
+        Effect.sync(() => {
+          emits += 1
+          return {
+            _tag: "Accepted" as const,
+            seq: 1 as JournalEvent.Seq,
+            sourceSeq: 1 as JournalEvent.SourceSeq
+          }
+        })
+    })
+    return Effect.gen(function*() {
       const base = {
         id: "invalid-boundary",
         kind: "mail.send",
@@ -540,12 +555,9 @@ describe("EffectHandlerRegistry", () => {
         code: "invalid",
         message: "irreversible effect invalid-boundary requires an idempotency key"
       })
-    }).pipe(
-      Effect.provideService(
-        Journal.Journal,
-        Journal.makeNoop({ emitDurable: () => Effect.die("invalid boundaries must not use the journal") })
-      )
-    ))
+      expect(emits).toBe(0)
+    }).pipe(Effect.provide(Layer.succeed(Journal.Journal, journal)))
+  })
 
   it.effect("reports a succeeded-boundary persistence failure after the action has completed", () =>
     Effect.gen(function*() {

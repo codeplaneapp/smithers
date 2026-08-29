@@ -3,8 +3,10 @@
  *
  * @since 0.1.0
  */
+import * as SteerPayload from "@smthrs/notifications/SteerPayload"
 import * as PersistedPlan from "@smthrs/plan/Plan"
 import { Schema } from "effect"
+import { Origin } from "./Lineage.ts"
 
 /**
  * A durable control-plane run identifier.
@@ -293,6 +295,75 @@ export const RunStatus = Schema.Literals([
 export type RunStatus = typeof RunStatus.Type
 
 /**
+ * How a run came to exist, when it did not start on its own.
+ *
+ * Defined by `@smthrs/control/Lineage` and re-exported here so a serializable
+ * projection needs one import.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const RunOrigin = Origin
+
+/**
+ * How a run came to exist, when it did not start on its own.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type RunOrigin = typeof RunOrigin.Type
+
+/**
+ * Where a cancellation came from.
+ *
+ * `control` is an operator asking through this plane, and it is the only
+ * source that can name a principal. `cascade` is a run swept up in an
+ * ancestor's cancellation. `engine` is everything the runtime decided on its
+ * own account: a lease expiry, a budget, a supervisor.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const CancelSource = Schema.Literals(["control", "engine", "cascade"])
+
+/**
+ * Where a cancellation came from.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type CancelSource = typeof CancelSource.Type
+
+/**
+ * Who cancelled a run, why, and on whose behalf.
+ *
+ * A durable cancellation is anonymous on its own: the run row records that
+ * somebody asked and when, and nothing else. This is the attribution the
+ * journal adds back. `principal` and `reason` are present exactly when a
+ * request named them, which a cascade inherits from the request that started
+ * it and an engine-decided cancellation never has.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const Cancellation = Schema.Struct({
+  requestedAt: Schema.Number,
+  source: CancelSource,
+  principal: Schema.optional(Principal),
+  reason: Schema.optional(Schema.String),
+  /** The cancelled ancestor this run was swept up with, on a cascade. */
+  cascadedFrom: Schema.optional(RunId)
+})
+
+/**
+ * Who cancelled a run, why, and on whose behalf.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type Cancellation = typeof Cancellation.Type
+
+/**
  * A compact summary for run listings and status projections.
  *
  * @since 0.1.0
@@ -306,6 +377,28 @@ export const RunSummary = Schema.Struct({
   planId: Schema.optional(Schema.String),
   planDigest: Schema.optional(Schema.String),
   ownerId: Schema.optional(Schema.String),
+  /**
+   * The run this one branched from: the spawning run, the forked-from run, or
+   * the previous trampoline round. Absent on a run with no ancestor.
+   */
+  parentRunId: Schema.optional(RunId),
+  /**
+   * The trampoline lineage this run is a round of, and which round it is.
+   * Both absent means a lineage of one, read as round 0 of itself.
+   */
+  lineageId: Schema.optional(Schema.String),
+  roundOrdinal: Schema.optional(Schema.Number),
+  origin: Schema.optional(RunOrigin),
+  /**
+   * What a parked run is holding on: `approval`, `event`, `timer`, `quota`, or
+   * a reason a plugin declared. Absent on a run that is not parked, and on a
+   * park whose owner released the run without declaring one.
+   */
+  waitingReason: Schema.optional(Schema.String),
+  /** What has been steered to this run and not yet delivered. */
+  steering: Schema.optional(Schema.Struct({ pending: Schema.Number })),
+  /** Who cancelled this run, why, and on whose behalf. Absent until one did. */
+  cancellation: Schema.optional(Cancellation),
   createdAt: Schema.Number,
   updatedAt: Schema.Number
 })
@@ -319,29 +412,99 @@ export const RunSummary = Schema.Struct({
  */
 export type RunSummary = typeof RunSummary.Type
 
+const steerEnvelope = {
+  messageId: Schema.String,
+  runId: RunId,
+  principal: Principal,
+  createdAt: Schema.Number
+}
+
 /**
- * A durable operator message delivered at an execution turn boundary.
+ * An operator message inserted into the transcript at the next turn boundary.
+ *
+ * `kind` is optional here and required on every other variant, which is what
+ * keeps a steer written before the vocabulary widened readable: a body and no
+ * kind is a message, and always was.
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
-export const SteerMessage = Schema.Struct({
-  messageId: Schema.String,
-  runId: RunId,
-  body: Schema.String,
-  principal: Principal,
-  createdAt: Schema.Number
+export const MessageSteer = Schema.Struct({
+  ...steerEnvelope,
+  kind: Schema.optional(Schema.Literal("Message")),
+  body: Schema.String
 })
 
 /**
- * A durable operator message delivered at an execution turn boundary.
+ * A model-seat change that applies from the next turn on.
  *
  * @since 0.1.0
  * @category models
- * @slop
+ */
+export const SeatSteer = Schema.Struct({ ...steerEnvelope, ...SteerPayload.SeatPayload.fields })
+
+/**
+ * A thinking-level change that applies from the next turn on.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const ThinkingSteer = Schema.Struct({ ...steerEnvelope, ...SteerPayload.ThinkingPayload.fields })
+
+/**
+ * Tools added to the active set for future turns.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const ToolsSteer = Schema.Struct({ ...steerEnvelope, ...SteerPayload.ToolsPayload.fields })
+
+/**
+ * A durable operator steer delivered at an execution turn boundary.
+ *
+ * An operator steers a run for four different reasons, and only one of them is
+ * something to tell the model. Saying "your seat changed" would spend a turn on
+ * bookkeeping; changing the seat is what was asked for. So the four are one
+ * union rather than four free-text conventions the harness would have to
+ * parse.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const SteerMessage = Schema.Union([MessageSteer, SeatSteer, ThinkingSteer, ToolsSteer])
+
+/**
+ * A durable operator steer delivered at an execution turn boundary.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export type SteerMessage = typeof SteerMessage.Type
+
+/**
+ * The stored steering item one steer carries.
+ *
+ * The envelope — who asked, when, for which run — is control-plane
+ * bookkeeping. What crosses into the notification queue is the item alone, in
+ * the vocabulary `@smthrs/notifications` defines and the harness reads back.
+ *
+ * @param message the steer
+ * @since 0.1.0
+ * @category conversions
+ */
+export const steerItem = (message: SteerMessage): SteerPayload.SteerPayload => {
+  switch (message.kind) {
+    case undefined:
+    case "Message":
+      return { kind: "Message", body: message.body }
+    case "Seat":
+      return { kind: "Seat", seat: message.seat }
+    case "Thinking":
+      return { kind: "Thinking", thinking: message.thinking }
+    case "Tools":
+      return { kind: "Tools", toolNames: message.toolNames }
+  }
+}
 
 /**
  * A durable, named signal delivered to a waiting run.
@@ -430,7 +593,9 @@ export const ListRequest = Schema.Union([
       runId: Schema.optional(RunId),
       flowId: Schema.optional(FlowId),
       status: Schema.optional(RunStatus),
-      principalId: Schema.optional(Schema.String)
+      principalId: Schema.optional(Schema.String),
+      parentRunId: Schema.optional(RunId),
+      lineageId: Schema.optional(Schema.String)
     })),
     cursor: Schema.optional(Schema.String),
     limit: Schema.optional(Schema.Number)

@@ -89,6 +89,17 @@ export interface Service {
   readonly drain: (
     input: DrainInput
   ) => Effect.Effect<DrainReceipt, Journal.JournalError | NotificationError>
+  /**
+   * What this run has been told that no boundary has delivered yet, in
+   * admission order.
+   *
+   * The queue is the owner of that fact: pending is admitted minus promoted,
+   * and both halves are its own journal records. A supervisor that counted
+   * admissions alone would report a steer as waiting forever.
+   */
+  readonly pending: (
+    runId: string
+  ) => Effect.Effect<ReadonlyArray<NotificationModel.Notification>, Journal.JournalError | NotificationError>
 }
 
 /**
@@ -126,6 +137,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service =>
   make({
     admit: Effect.fn("NotificationQueue.admit")(() => Effect.fail(unavailable("admit"))),
     drain: Effect.fn("NotificationQueue.drain")(() => Effect.fail(unavailable("drain"))),
+    pending: Effect.fn("NotificationQueue.pending")(() => Effect.fail(unavailable("pending"))),
     ...overrides
   })
 
@@ -331,6 +343,17 @@ export const layer: Layer.Layer<NotificationQueue, never, Journal.Journal> = Lay
             duplicate: false
           }
         })))
+      ),
+      pending: Effect.fn("NotificationQueue.pending")((rawRunId) =>
+        Effect.map(
+          load(journal, JournalEvent.RunId.make(rawRunId)),
+          // The fold `load` already performs: admissions add, promotions
+          // remove. Read outside the operations semaphore, because a count
+          // taken while a boundary drains is a count taken at some instant
+          // either side of it, and blocking a supervisor behind a turn
+          // boundary would be the worse answer.
+          (loaded) => loaded.state.items.map((item) => item.notification)
+        )
       )
     })
   })

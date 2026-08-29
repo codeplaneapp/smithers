@@ -1,10 +1,10 @@
 ---
-description: "Eleven runnable programs under examples/src, each paired with a test that runs it against the real packages."
+description: "Runnable programs under examples/src, each paired with a test that runs it against the real packages."
 ---
 
 # Examples
 
-Eleven programs under `examples/src`, each one paired with a test under `examples/test` that runs it against the real packages. Nothing in this directory is mocked: the durable examples open a real SQLite file, the host example spawns a real process, and the browser example is bundled by a real bundler.
+Every program under `examples/src` is paired with a test under `examples/test` that runs it against the real packages. Nothing in this directory is mocked: the durable examples open a real SQLite file, the host example spawns a real process, and the browser example is bundled by a real bundler.
 
 ```sh
 pnpm install
@@ -34,6 +34,7 @@ The suite is a gate, so a snippet that stops compiling or stops producing the do
 | [`34-human-task.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/34-human-task.ts) | `HumanTask.action`: a `confirm` that parks, an answer it refuses, the re-ask that follows, and three processes across the question's life | the run completes with `true`; the engine's waiting row names attempt one and then attempt two, and the refusal recorded under attempt one is read back off its own step |
 | [`35-remote-cache.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/35-remote-cache.ts) | two durable engines over two database files sharing one real HTTP action cache, composed through `CombinedCacheStore` in `"deferred"` publication mode plus the `CacheSync` seam | the second engine answers without executing the body, and when the shared tier refuses every write both runs still succeed and journal `unpublished` |
 | [`37-host-containment.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/37-host-containment.ts) | `SIGKILL`ing a real `layerHost` process that has a child process group open, then standing the same `hostId` back up over the same database | the killed host leaves a live group behind, the next incarnation kills it, and the host's journal run reads `process-spawned` then `process-reaped` |
+| [`38-monitor-and-alert.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/38-monitor-and-alert.ts) | the control plane's supervision loop over two real durable runs that park on `WaitFor`: one is answered and finishes, the other is not, and `Monitor.run` classifies it from its journal and resumes it before `Alerts` pages about the beat it wrote | the answered run returns `{ approved: true }`, the unanswered one is `parked` on `event`, three quiet beats then `wedged-node`, one `resume`, no page under a production delay, one coalesced page under a zero delay, and no second page |
 
 ## Reading them in order
 
@@ -58,6 +59,7 @@ same `hostId` over the same database. Standing that host up IS the sweep.
 `11` is the agent seam. `AgentAction.make` declares a model call as an ordinary action, with the same tag, the same `.call()`, and the same plan node, and ships the implementation with it, so the author writes a seat, a system prompt, a prompt built from the payload, and an `output` schema instead of a `toLayer`. The implementation resolves the declared seat through the `SeatResolver` service and runs one loop of the `Agent` service inside the enclosing execution. The schema is rendered into the run's teaching and enforced on the way out, which is why the second step reads `research.summary` as a `string`. The example provides a `SeatResolver` that answers with a scripted model, so it runs in CI with no API key.
 
 `35` is the shared tier. Three declarations have to line up before a step result can travel, and the example names all three: the action declares an `idempotencyKey` so another machine can derive the same identity, it declares a hard file boundary so the step is hermetic enough to cache, and the composition declares a complete cache environment through `Action.layerCacheEnvironment` — beneath the engine, where the dispatch reads it. Missing any one of them scopes the key to its own run, and two engines then derive two digests and never meet. The example serves the action-cache half over plain HTTP on loopback; `RemoteArtifacts` refuses a non-HTTPS endpoint because those options carry credentials, so a shared artifact tier belongs behind TLS.
+`38` is the control plane supervising a run the engine owns. Both runs park for real: `WaitFor` annotates the park as `event`, the engine writes the waiting reason on the run row and releases the run, and `execute` returns while the run stays parked. One run's approval arrives and it finishes, which is what makes the other run's park a wait rather than a wedge. `Monitor.run` then beats over `Control`, classifies each beat from the run's journal, journals `control.monitor.beat` with the remedy it is about to attempt, and records `control.monitor.healed` only once the resume returned a receipt; `Alerts` reads those beats through a detector the policy supplies, opens a `wedged-node` condition, and pages when it outlives the policy's delay. Nothing in either half reads an in-process fiber, which is why the same loop supervises a run another process owns.
 
 ## Detached children
 

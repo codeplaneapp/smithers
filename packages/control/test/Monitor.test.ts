@@ -1,0 +1,454 @@
+/**
+ * Run health classification and the heal loop over it.
+ *
+ * `classify` is enumerated as a table, because the value of a fixed vocabulary
+ * is that every condition maps to exactly one word and a reader can check the
+ * mapping at a glance. The loop runs over the real durable control plane: a
+ * monitor that healed a run in a fixture would prove nothing about a monitor
+ * pointed at production, and the stall it has to detect is a property of the
+ * journal, which only a real journal has.
+ */
+import { Journal, JournalEvent } from "@smthrs/journal"
+import { Effect, Fiber, type Layer, Stream } from "effect"
+import { TestClock } from "effect/testing"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
+import { describe, expect, it } from "vitest"
+import { Control } from "../src/Control.ts"
+import { PersistenceError } from "../src/ControlError.ts"
+import { ControlRuntime } from "../src/ControlRuntime.ts"
+import type { ControlEvent, RunSummary } from "../src/ControlSchema.ts"
+import * as Monitor from "../src/Monitor.ts"
+import { durable, type DurableStack } from "./DurableStack.ts"
+
+/** Parks a run on a reason the way the engine parks one. */
+const parkOn = (runId: string, reason: string) =>
+  Effect.flatMap(
+    Effect.service(SqlClient.SqlClient),
+    (sql) => sql`UPDATE flows_runs SET waiting_reason = ${reason} WHERE run_id = ${runId}`.pipe(Effect.orDie)
+  )
+
+const run = <A, E>(
+  body: Effect.Effect<A, E, DurableStack>,
+  stack: Layer.Layer<DurableStack> = durable()
+): Promise<A> => Effect.runPromise(body.pipe(Effect.provide(stack), Effect.scoped, Effect.orDie))
+
+/** Every journal entry a run has, so a test can read a record's source. */
+const entriesOf = (runId: string) =>
+  Effect.flatMap(
+    Journal.Journal,
+    (journal) =>
+      journal.entries({ runId: JournalEvent.RunId.make(runId), limit: 512 }).pipe(
+        Effect.map((page) => page.entries),
+        Effect.orDie
+      )
+  )
+
+/** Plans, approves, and starts one control-owned run. */
+const start = (suffix: string) =>
+  Effect.gen(function*() {
+    const control = yield* Control
+    const card = yield* control.plan({ flowId: "system/test", input: { suite: suffix } })
+    yield* control.approve({ ...card.approval, idempotencyKey: `approve:${suffix}` })
+    const receipt = yield* control.run({
+      _tag: "Plan",
+      planId: card.planId,
+      digest: card.digest,
+      envelope: card.envelope,
+      idempotencyKey: `run:${suffix}`
+    })
+    if (receipt._tag !== "Accepted" || receipt.runId === undefined) return yield* Effect.die("expected a started run")
+    return receipt.runId
+  })
+
+const summary = (overrides: Partial<RunSummary> = {}): RunSummary => ({
+  runId: "run-1",
+  flowId: "system/test",
+  status: "running",
+  createdAt: 1,
+  updatedAt: 1,
+  ...overrides
+})
+
+const event = (kind: string, sequence: number, payload: ControlEvent["payload"] = {}): ControlEvent => ({
+  sequence,
+  kind,
+  runId: "run-1",
+  occurredAt: sequence,
+  payload
+})
+
+const started = (sequence: number) => event(Monitor.attemptStartedEventType, sequence)
+const finished = (sequence: number, state: "succeeded" | "failed") =>
+  event(Monitor.attemptFinishedEventType, sequence, { state })
+
+const classify = (observation: Partial<Monitor.Observation>): Monitor.Health =>
+  Monitor.classify({ summary: summary(), events: [], beatsWithoutProgress: 0, stallBeats: 3, ...observation })
+
+describe("Monitor.classify", () => {
+  const table: ReadonlyArray<[string, Partial<Monitor.Observation>, Monitor.Health]> = [
+    ["a run the control plane has never heard of", { summary: undefined }, "unknown"],
+    ["a run that reported its own failure", { summary: summary({ status: "failed" }) }, "failing"],
+    ["a completed run", { summary: summary({ status: "completed" }) }, "healthy"],
+    ["a cancelled run", { summary: summary({ status: "cancelled" }) }, "healthy"],
+    ["a run waiting on an approval", { summary: summary({ status: "waiting-approval" }) }, "awaiting-human"],
+    [
+      "a run parked on an approval",
+      { summary: summary({ status: "parked", waitingReason: "approval" }) },
+      "awaiting-human"
+    ],
+    [
+      "an approval park that also has a failed attempt",
+      {
+        summary: summary({ status: "parked", waitingReason: "approval" }),
+        events: [started(1), finished(2, "failed")]
+      },
+      "awaiting-human"
+    ],
+    [
+      "a run an operator paused, which declares no waiting reason",
+      { summary: summary({ status: "parked" }), beatsWithoutProgress: 9 },
+      "awaiting-human"
+    ],
+    [
+      "a run a sweep released from a dead owner",
+      { summary: summary({ status: "parked", waitingReason: "released" }), beatsWithoutProgress: 3 },
+      "stalled"
+    ],
+    [
+      "a trampoline past the round bound",
+      { summary: summary({ roundOrdinal: 40 }), roundBound: 32 },
+      "runaway-loop"
+    ],
+    [
+      "a trampoline under the round bound",
+      { summary: summary({ roundOrdinal: 4 }), roundBound: 32 },
+      "healthy"
+    ],
+    [
+      "a run whose last settled attempt failed",
+      { events: [started(1), finished(2, "failed")] },
+      "failing"
+    ],
+    [
+      "a run that failed an attempt and then succeeded one",
+      { events: [started(1), finished(2, "failed"), started(3), finished(4, "succeeded")] },
+      "healthy"
+    ],
+    [
+      "no progress for the stall threshold with nothing in flight",
+      { events: [started(1), finished(2, "succeeded")], beatsWithoutProgress: 3 },
+      "stalled"
+    ],
+    [
+      "no progress for the stall threshold with an attempt still open",
+      { events: [started(1)], beatsWithoutProgress: 3 },
+      "wedged-node"
+    ],
+    [
+      "no progress for one beat short of the threshold",
+      { events: [started(1)], beatsWithoutProgress: 2 },
+      "healthy"
+    ],
+    ["a run whose journal is still growing", { events: [started(1)], beatsWithoutProgress: 0 }, "healthy"]
+  ]
+
+  for (const [name, observation, health] of table) {
+    it(`calls ${name} ${health}`, () => {
+      expect(classify(observation)).toBe(health)
+    })
+  }
+
+  it("maps each health onto the remedy it warrants", () => {
+    const every: ReadonlyArray<Monitor.Health> = [
+      "healthy",
+      "stalled",
+      "wedged-node",
+      "runaway-loop",
+      "awaiting-human",
+      "failing",
+      "unknown"
+    ]
+    expect(every.map((health) => [health, Monitor.remedyFor(health)])).toEqual([
+      ["healthy", "none"],
+      ["stalled", "resume"],
+      ["wedged-node", "resume"],
+      ["runaway-loop", "cancel"],
+      ["awaiting-human", "none"],
+      ["failing", "cancel"],
+      ["unknown", "none"]
+    ])
+  })
+})
+
+describe("Monitor.run over the durable control plane", () => {
+  it("takes every beat it was asked for and journals each one", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runId = yield* start("beats")
+      const report = yield* Monitor.run({ runId, intervalMs: 0, maxChecks: 4, stallBeats: 99 })
+      const journaled = yield* control.list({ _tag: "runs", filters: { runId } })
+      return { report, journaled }
+    }))
+
+    expect(observed.report.beats.map((beat) => beat.beat)).toEqual([0, 1, 2, 3])
+    expect(observed.report.beats.every((beat) => beat.healed === undefined)).toBe(true)
+    expect(observed.report.health).toBe("healthy")
+  })
+
+  it("records every beat on the run's journal", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runId = yield* start("journal")
+      yield* Monitor.run({ runId, intervalMs: 0, maxChecks: 3, stallBeats: 99 })
+      const events = yield* control.watch({ runId, follow: false }).pipe(Stream.runCollect)
+      return events.filter((event) => event.kind === Monitor.beatEventType)
+    }))
+
+    expect(observed.map((event) => event.payload)).toEqual([
+      { runId: expect.any(String), monitorId: "default", beat: 0, health: "healthy", sequence: expect.any(Number) },
+      { runId: expect.any(String), monitorId: "default", beat: 1, health: "healthy", sequence: expect.any(Number) },
+      { runId: expect.any(String), monitorId: "default", beat: 2, health: "healthy", sequence: expect.any(Number) }
+    ])
+  })
+
+  it("calls an approval-parked run awaiting-human and heals nothing", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runtime = yield* ControlRuntime
+      const runId = yield* start("approval")
+      yield* control.pause({ runId, idempotencyKey: `pause:${runId}` })
+      yield* parkOn(runId, "approval")
+      const before = yield* runtime.getRun(runId)
+      const report = yield* Monitor.run({
+        runId,
+        intervalMs: 0,
+        maxChecks: 5,
+        stallBeats: 1,
+        autoHeal: ["stalled", "wedged-node", "failing", "runaway-loop"]
+      })
+      const after = yield* runtime.getRun(runId)
+      return { before, report, after }
+    }))
+
+    expect(observed.report.beats.map((beat) => beat.health)).toEqual([
+      "awaiting-human",
+      "awaiting-human",
+      "awaiting-human",
+      "awaiting-human",
+      "awaiting-human"
+    ])
+    expect(observed.report.beats.every((beat) => beat.healed === undefined)).toBe(true)
+    // The run is exactly where the human left it.
+    expect(observed.after.status).toBe("parked")
+  })
+
+  it("resumes a stalled run once and stops when the resume moves it", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runId = yield* start("stalled")
+      yield* control.pause({ runId, idempotencyKey: `pause:${runId}` })
+      // A stall is a run nobody is driving: `released` is what a sweep writes
+      // on a run whose owner died. A park with no reason is an operator's, and
+      // the case below proves the monitor leaves that one alone.
+      yield* parkOn(runId, "released")
+      const report = yield* Monitor.run({
+        runId,
+        intervalMs: 0,
+        maxChecks: 6,
+        stallBeats: 3,
+        autoHeal: ["stalled"]
+      })
+      return report
+    }))
+
+    expect(observed.beats.filter((beat) => beat.healed === "resume")).toHaveLength(1)
+    expect(observed.beats.find((beat) => beat.healed === "resume")?.health).toBe("stalled")
+    expect(observed.beats.find((beat) => beat.healed === "resume")?.receipt?._tag).toBe("Accepted")
+    // Three quiet beats before the stall, and none after: the resume wrote a
+    // journal entry, which is progress.
+    expect(observed.beats.map((beat) => beat.health)).toEqual([
+      "healthy",
+      "healthy",
+      "healthy",
+      "stalled",
+      "healthy",
+      "healthy"
+    ])
+  })
+
+  it("journals the heal only after the remedy returned a receipt", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runId = yield* start("healed-after")
+      yield* control.pause({ runId, idempotencyKey: `pause:${runId}` })
+      yield* parkOn(runId, "released")
+      const report = yield* Monitor.run({
+        runId,
+        intervalMs: 0,
+        maxChecks: 4,
+        stallBeats: 3,
+        autoHeal: ["stalled"]
+      })
+      const entries = yield* entriesOf(runId)
+      return {
+        report,
+        beats: entries.filter((entry) => entry.eventType === Monitor.beatEventType),
+        healed: entries.filter((entry) => entry.eventType === Monitor.healedEventType)
+      }
+    }))
+
+    const deciding = observed.beats.at(-1)!
+    // The beat that decided says what it is ABOUT to do. Saying it healed
+    // before the remedy ran would leave durable evidence of a heal that a
+    // crash one instruction later never performed.
+    expect(deciding.payload).toMatchObject({ health: "stalled", remedy: "resume" })
+    expect((deciding.payload as Record<string, unknown>)["healed"]).toBeUndefined()
+
+    expect(observed.healed).toHaveLength(1)
+    expect(observed.healed[0]?.payload).toMatchObject({
+      monitorId: "default",
+      health: "stalled",
+      healed: "resume",
+      receipt: "Accepted"
+    })
+    // And it is written after the beat, not with it.
+    expect(observed.healed[0]!.seq).toBeGreaterThan(deciding.seq)
+    expect(observed.report.beats.at(-1)?.healed).toBe("resume")
+  })
+
+  it("journals nothing healed when the remedy fails", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runId = yield* start("failed-heal")
+      yield* control.pause({ runId, idempotencyKey: `pause:${runId}` })
+      yield* parkOn(runId, "released")
+      const exit = yield* Effect.exit(Monitor.run({
+        runId,
+        intervalMs: 0,
+        maxChecks: 6,
+        stallBeats: 3,
+        autoHeal: ["stalled"],
+        heal: () =>
+          Effect.fail(
+            new PersistenceError({ operation: "resume", message: "the control plane refused the resume" })
+          )
+      }))
+      const entries = yield* entriesOf(runId)
+      return {
+        exit,
+        beats: entries.filter((entry) => entry.eventType === Monitor.beatEventType),
+        healed: entries.filter((entry) => entry.eventType === Monitor.healedEventType)
+      }
+    }))
+
+    expect(observed.exit._tag).toBe("Failure")
+    // The run was never healed, and the journal never says it was.
+    expect(observed.healed).toEqual([])
+    expect(observed.beats.at(-1)?.payload).toMatchObject({ health: "stalled", remedy: "resume" })
+    for (const beat of observed.beats) {
+      expect((beat.payload as Record<string, unknown>)["healed"]).toBeUndefined()
+    }
+  })
+
+  it("names the monitor on every record it writes, so two of them are tellable apart", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runId = yield* start("two-monitors")
+      yield* control.pause({ runId, idempotencyKey: `pause:${runId}` })
+      yield* parkOn(runId, "released")
+      // Two supervisors pointed at one run. Nothing stops that, so the
+      // evidence has to say which of them wrote each record, and their
+      // remedies have to carry different idempotency keys.
+      yield* Monitor.run({
+        runId,
+        monitorId: "supervisor-a",
+        intervalMs: 0,
+        maxChecks: 4,
+        stallBeats: 3,
+        autoHeal: ["stalled"]
+      })
+      yield* Monitor.run({
+        runId,
+        monitorId: "supervisor-b",
+        intervalMs: 0,
+        maxChecks: 4,
+        stallBeats: 3,
+        autoHeal: ["stalled"]
+      })
+      const entries = yield* entriesOf(runId)
+      return entries.filter((entry) =>
+        entry.eventType === Monitor.beatEventType || entry.eventType === Monitor.healedEventType
+      )
+    }))
+
+    const sources = new Set(observed.map((entry) => entry.sourceId as string))
+    expect(sources).toEqual(new Set(["/control/monitor/supervisor-a", "/control/monitor/supervisor-b"]))
+    const monitors = new Set(observed.map((entry) => (entry.payload as Record<string, unknown>)["monitorId"]))
+    expect(monitors).toEqual(new Set(["supervisor-a", "supervisor-b"]))
+  })
+
+  it("leaves a run an operator paused where the operator left it", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runtime = yield* ControlRuntime
+      const runId = yield* start("operator-pause")
+      // `Control.pause` writes no waiting reason. Every engine park names one,
+      // so an absent reason is an operator's hand on the run.
+      yield* control.pause({ runId, idempotencyKey: `pause:${runId}` })
+      const report = yield* Monitor.run({
+        runId,
+        intervalMs: 0,
+        maxChecks: 5,
+        stallBeats: 1,
+        autoHeal: ["stalled", "wedged-node", "failing", "runaway-loop"]
+      })
+      return { report, after: yield* runtime.getRun(runId) }
+    }))
+
+    expect(observed.report.beats.map((beat) => beat.health)).toEqual([
+      "awaiting-human",
+      "awaiting-human",
+      "awaiting-human",
+      "awaiting-human",
+      "awaiting-human"
+    ])
+    expect(observed.report.beats.every((beat) => beat.healed === undefined)).toBe(true)
+    expect(observed.after.status).toBe("parked")
+  })
+
+  it("stops early on a run that finished", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const runtime = yield* ControlRuntime
+      const runId = yield* start("completed")
+      const fence = yield* runtime.claimFence(runId)
+      yield* runtime.writeStatus(runId, fence, "completed")
+      return yield* Monitor.run({ runId, intervalMs: 0, maxChecks: 6, stallBeats: 1 })
+    }))
+
+    expect(observed.beats).toHaveLength(1)
+    expect(observed.health).toBe("healthy")
+  })
+
+  it("waits the interval between beats", async () => {
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const runId = yield* start("interval")
+        const fiber = yield* Monitor.run({ runId, intervalMs: 1_000, maxChecks: 3, stallBeats: 99 }).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+        // The first beat has run and the second is asleep.
+        const early = fiber.pollUnsafe()
+        yield* TestClock.adjust("1 minute")
+        return { early, report: yield* Fiber.join(fiber) }
+      }).pipe(
+        Effect.provide(durable()),
+        Effect.provide(TestClock.layer()),
+        Effect.scoped,
+        Effect.orDie
+      )
+    )
+
+    expect(observed.early).toBeUndefined()
+    expect(observed.report.beats).toHaveLength(3)
+  })
+})

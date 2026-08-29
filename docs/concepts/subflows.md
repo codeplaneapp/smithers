@@ -73,7 +73,7 @@ The engine contract exposes `interrupt` and `interruptUnsafe`. The memory engine
 
 ## Lineage
 
-The parent edge is durable, so lineage survives a restart and is visible to every owner process. The time-travel store represents `child`, `fork`, and `continuation` edges and has rewind policy for detached descendants. Reading engine-created lineage back through the control plane's run summaries and filters is **Planned**.
+The parent edge is durable, so lineage survives a restart and is visible to every owner process. The time-travel store represents `child`, `fork`, and `continuation` edges as one tree: fork edges come from its own edge table, child edges from the parent journal's spawn record, and continuation edges from the `handed-off` run decision of the round that advanced. Rewind has policy for detached descendants. The control plane projects engine-created lineage back onto its run summaries and filters: `Control.list` answers `parentRunId` and `lineageId` filters, and `Control.watch` carries a derived `control.run.lineage` event.
 
 `examples/src/36-detached-children.ts` is this page in runnable form: a parent that spawns a detached child and completes, and a second engine over the same database file that collects the child.
 

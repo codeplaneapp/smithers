@@ -80,7 +80,12 @@ child naming `(parentRunId, forkJournalOffset)`. Lineage is recorded twice: in
 `flows_runs.parent_run_id` so ancestry is walkable with a recursive CTE and
 survives edge archival. Child-spawn edges are not stored a third time; they are
 derived from the parent journal's own spawn record, the only source that carries
-a parent sequence.
+a parent sequence. Trampoline continuation edges come from the same place: the
+`handed-off` run decision the finishing round journals names `nextExecutionId`
+at the sequence the round advanced, so `descendants` reports each later round as
+a `continuation` edge, detached — a round owns its own claim and its own
+journal, so rewinding past the handoff orphans it rather than requiring it to be
+cancelled.
 
 A fork never touches the parent: the boundary assessment still runs, but every
 verdict is normalized into `Fork.warnings` — "this effect may execute again on

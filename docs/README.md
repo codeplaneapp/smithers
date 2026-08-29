@@ -71,6 +71,8 @@ Private-alpha operators should also read the [alpha notes](alpha-notes.md) for c
 - [`@smthrs/time-travel`](reference/time-travel.md)
 - [`@smthrs/memory`](reference/memory.md)
 - [Trellis and DelegationChain](reference/patterns-delegation.md), the delegation patterns in `@smthrs/patterns`
+- [`@smthrs/control`](reference/control.md)
+- [`@smthrs/notifications`](reference/notifications.md)
 
 Vendor host adapters (`@smthrs/host-cloudflare`, `@smthrs/host-vercel`) are
 documented in the [plugins repository](https://github.com/smithersai/plugins).

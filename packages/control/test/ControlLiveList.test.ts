@@ -300,8 +300,8 @@ describe("ControlLive mutations", () => {
 
     expect(observed.receipts.map((receipt) => receipt._tag)).toEqual(["Accepted", "Accepted"])
     expect(observed.drained.notifications.map((notification) => notification.payload)).toEqual([
-      { body: "" },
-      { body: "second" }
+      { kind: "Message", body: "" },
+      { kind: "Message", body: "second" }
     ])
   })
 })

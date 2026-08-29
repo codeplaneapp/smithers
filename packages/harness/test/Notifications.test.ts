@@ -300,4 +300,77 @@ describe("harness notification adapter", () => {
 
     expect(drained.inserts).toEqual([rendered("layered", "body:layered")])
   })
+
+  it("delivers a typed steer as the seat, thinking, and tool changes it names", async () => {
+    const drained = await Effect.runPromise(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        yield* queue.admit("run", notification("say", "steer", "run/root/child", { kind: "Message", body: "ship it" }))
+        yield* queue.admit("run", notification("seat", "steer", "run/root/child", { kind: "Seat", seat: "reviewer" }))
+        yield* queue.admit(
+          "run",
+          notification("think", "steer", "run/root/child", { kind: "Thinking", thinking: "high" })
+        )
+        yield* queue.admit(
+          "run",
+          notification("tools", "steer", "run/root/child", { kind: "Tools", toolNames: ["grep", "edit"] })
+        )
+        // A second steer that re-names a tool the first already activated.
+        // Activation is a set, not a list: naming `grep` twice widens the
+        // active set once.
+        yield* queue.admit(
+          "run",
+          notification("tools-again", "steer", "run/root/child", { kind: "Tools", toolNames: ["grep", "read"] })
+        )
+        const source = yield* Notifications.make({ runId: "run", lineageId: "run/root/child" })
+        return yield* source.drain({ boundary: "child/turn-1", wouldIdle: false })
+      }).pipe(Effect.provide(notificationLayer()), Effect.scoped)
+    )
+
+    // Only the message reaches the transcript. A seat change is not something
+    // to tell the model about; it is something to do to the next turn.
+    expect(drained.inserts).toEqual([rendered("say", "ship it")])
+    expect(drained.seatChanges).toEqual([
+      { _tag: "SeatChange", delivery: "steer", admittedAt: 0, seat: "reviewer" },
+      { _tag: "ThinkingChange", delivery: "steer", admittedAt: 0, thinking: "high" }
+    ])
+    expect(drained.activatedToolNames).toEqual(["grep", "edit", "read"])
+  })
+
+  it("keeps a payload that is not a steering item out of the seat and tool changes", async () => {
+    const drained = await Effect.runPromise(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        // A system event carrying a status, not a steer. It is rendered for
+        // the model, and it changes nothing about the turn.
+        yield* queue.admit("run", systemEvent("deploy", "run/root/child", { kind: "Seat", seat: 12 }))
+        const source = yield* Notifications.make({ runId: "run", lineageId: "run/root/child" })
+        return yield* source.drain({ boundary: "child/turn-1", wouldIdle: true })
+      }).pipe(Effect.provide(notificationLayer()), Effect.scoped)
+    )
+
+    expect(drained.seatChanges).toEqual([])
+    expect(drained.activatedToolNames).toEqual([])
+    expect(drained.inserts).toEqual([
+      rendered("deploy", "{\"kind\":\"Seat\",\"seat\":12}", "machine:ci", "ci/root", 0)
+    ])
+  })
+
+  it("journals a typed drain through the record boundary", async () => {
+    const drained = await Effect.runPromise(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        yield* queue.admit("run", notification("seat", "steer", "run/root/child", { kind: "Seat", seat: "reviewer" }))
+        const source = yield* Notifications.make({ runId: "run", lineageId: "run/root/child" })
+        return yield* source.drain({ boundary: "child/turn-1", wouldIdle: false })
+      }).pipe(Effect.provide(notificationLayer()), Effect.scoped)
+    )
+
+    // A seat change that could not survive the record boundary would be
+    // delivered once and lost on the re-execution that replays the frame.
+    const journaled = Schema.encodeUnknownSync(Steering.DrainRecord)(Steering.drainRecord(drained))
+    expect(journaled.seatChanges).toEqual([
+      { _tag: "SeatChange", delivery: "steer", admittedAt: 0, seat: "reviewer" }
+    ])
+  })
 })

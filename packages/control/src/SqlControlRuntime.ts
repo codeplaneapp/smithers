@@ -50,6 +50,7 @@ import type { Ownership } from "@smthrs/run-store"
 import { RunStore } from "@smthrs/run-store"
 import { Clock, Crypto, Effect, Fiber, Layer, Option } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as Attribution from "./Cancellation.ts"
 import type { ApprovalTarget, PlanInput } from "./Control.ts"
 import {
   AlreadyResolved,
@@ -64,6 +65,7 @@ import {
 import type { ApprovalToken, BulkGrant, LaunchResult, MemoryFlow, Service, StoredPlan } from "./ControlRuntime.ts"
 import { ControlRuntime, make } from "./ControlRuntime.ts"
 import type {
+  Cancellation,
   Envelope,
   FlowId,
   IdempotencyKey,
@@ -77,6 +79,7 @@ import type {
   SteerMessage
 } from "./ControlSchema.ts"
 import { accepted, alreadyApplied, canonical, emptyEnvelope, planCard, sameEnvelope } from "./internal/planning.ts"
+import * as Lineage from "./Lineage.ts"
 import { catalog } from "./SystemFlows.ts"
 
 /**
@@ -117,6 +120,39 @@ const persistence = (operation: string) => (cause: unknown): PersistenceError =>
 
 /** A random identifier that does not depend on any Node API. */
 const randomId = (): string => globalThis.crypto.randomUUID()
+
+/**
+ * Every message a failure and the failures it wraps carry.
+ *
+ * A SQL failure arrives wrapped: the client reports "Failed to prepare
+ * statement" and keeps the driver's own sentence one or two levels down, under
+ * `reason` and then `cause`. The depth bound keeps a self-referential chain
+ * from looping.
+ */
+const causeMessages = (value: unknown, depth = 4): string => {
+  if (depth === 0 || typeof value !== "object" || value === null) return typeof value === "string" ? value : ""
+  const fields = value as { readonly message?: unknown; readonly cause?: unknown; readonly reason?: unknown }
+  const own = typeof fields.message === "string" ? fields.message : ""
+  return `${own} ${causeMessages(fields.reason, depth - 1)} ${causeMessages(fields.cause, depth - 1)}`
+}
+
+/**
+ * Whether a query failure means one named table is not in this database.
+ *
+ * The SQL contract here is driver-neutral and carries no portable error code
+ * for a missing relation, so this reads the sentence the driver produced. The
+ * three phrasings are the ones SQLite, PostgreSQL, and MySQL use, and each is
+ * matched together with the table name, so a DIFFERENT missing table — one
+ * this deployment does need — is still reported as a failure.
+ */
+const missingTable = (table: string) => (cause: unknown): boolean => {
+  const message = causeMessages(cause)
+  return message.includes(table) && (
+    message.includes("no such table") ||
+    message.includes("does not exist") ||
+    message.includes("doesn't exist")
+  )
+}
 
 const terminal = (status: RunStatus): boolean => status === "cancelled" || status === "completed" || status === "failed"
 
@@ -306,6 +342,403 @@ export const make_ = (
         )
       )
 
+    /**
+     * The control status a store status projects back onto.
+     *
+     * The forward map is lossy — `accepted` and `running` both store as
+     * `running` — so a run this plane did not launch is reported under the
+     * status the store can actually prove.
+     */
+    const controlStatus = (status: RunStore.RunStatus): RunStatus => {
+      switch (status) {
+        case "pending":
+          return "accepted"
+        case "running":
+          return "running"
+        case "suspended":
+          return "parked"
+        default:
+          return status
+      }
+    }
+
+    /**
+     * The control summary a run row carries, when it carries one.
+     *
+     * A run this plane launched has its `RunSummary` written into `state_json`
+     * by the same fenced `UPDATE` that moves its status. A run the engine
+     * created has the engine's state there instead, and this returns
+     * `undefined` for it rather than pretending the shape matched.
+     */
+    const storedSummary = (stateJson: string): RunSummary | undefined => {
+      const parsed = JSON.parse(stateJson) as unknown
+      if (typeof parsed !== "object" || parsed === null) return undefined
+      const candidate = parsed as Partial<RunSummary>
+      return typeof candidate.runId === "string" && typeof candidate.flowId === "string" &&
+          typeof candidate.status === "string"
+        ? candidate as RunSummary
+        : undefined
+    }
+
+    /** The flow name the engine records in its own run state. */
+    const engineFlowName = (stateJson: string): string => {
+      const parsed = JSON.parse(stateJson) as unknown
+      const name = typeof parsed === "object" && parsed !== null
+        ? (parsed as { readonly flowName?: unknown }).flowName
+        : undefined
+      return typeof name === "string" && name.length > 0 ? name : "unknown"
+    }
+
+    const optional = <A>(value: A | null | undefined): { readonly value?: A } =>
+      value === null || value === undefined ? {} : { value }
+
+    /**
+     * How much of the database one projection needs to read.
+     *
+     * `undefined` is every row, which is what a LISTING needs: it projects
+     * every row at once, and a per-row query would make one listing N round
+     * trips. A single run needs the run and its ancestor chain and nothing
+     * else — cascade attribution walks ancestors and stops — so a mutation on
+     * one run does not pay for the size of the whole database.
+     */
+    type IndexScope = ReadonlyArray<string> | undefined
+
+    /** `WHERE` material narrowing a column to a scope, or nothing at all. */
+    const within = (column: string, scope: IndexScope) =>
+      scope === undefined ? sql.literal("1 = 1") : sql.in(column, scope as Array<string>)
+
+    /**
+     * The two facts a run row cannot tell about itself.
+     */
+    interface AncestryIndex {
+      /** Run ids a `fork-created` marker names. */
+      readonly forked: ReadonlySet<string>
+      /** The run that spawned each child, by child id. */
+      readonly spawnedBy: ReadonlyMap<string, string>
+      /** What each parked run is waiting for, by run id. */
+      readonly waitingFor: ReadonlyMap<string, string>
+      /** Who cancelled each cancelled run, by run id. */
+      readonly cancellations: ReadonlyMap<string, Cancellation>
+    }
+
+    /**
+     * Projects a run row onto a control summary, ancestry included.
+     *
+     * Ancestry reaches the row from two different places, because the engine
+     * records two different relationships. `parent_run_id` is the trampoline
+     * chain — the round before this one — and it is the only ancestry a run
+     * row carries. A run another run SPAWNED records nothing in its own row:
+     * the edge lives in `flows_run_parents`, which is the subflow DAG cycle
+     * detection walks (`packages/run-store/src/migrations/0002_lineage.ts`).
+     * A projection that read the column alone would report every child of
+     * every run as an orphan.
+     *
+     * The column wins when both exist, which is the case for round 1 of a run
+     * that was itself spawned: the round's nearest ancestor is the round
+     * before it, not the run that spawned round 0.
+     *
+     * @param row the run row
+     * @param ancestry the fork markers and spawn edges of the whole database
+     */
+    const summaryFrom = (row: RunStore.RunRow, ancestry: AncestryIndex): RunSummary => {
+      const stored = storedSummary(row.stateJson)
+      const base: RunSummary = stored ?? {
+        runId: row.runId,
+        flowId: engineFlowName(row.stateJson),
+        status: controlStatus(row.status),
+        createdAt: row.createdAtMs,
+        updatedAt: row.finishedAtMs ?? row.startedAtMs ?? row.createdAtMs
+      }
+      const parentRunId = optional(row.parentRunId).value ?? ancestry.spawnedBy.get(row.runId)
+      const lineageId = optional(row.lineageId).value
+      const roundOrdinal = optional(row.roundOrdinal).value
+      const origin = Lineage.originOf({
+        ...(parentRunId === undefined ? {} : { parentRunId }),
+        ...(roundOrdinal === undefined ? {} : { roundOrdinal }),
+        forked: ancestry.forked.has(row.runId)
+      })
+      const waitingReason = ancestry.waitingFor.get(row.runId)
+      const cancellation = ancestry.cancellations.get(row.runId)
+      return {
+        ...base,
+        ...(parentRunId === undefined ? {} : { parentRunId }),
+        ...(lineageId === undefined ? {} : { lineageId }),
+        ...(roundOrdinal === undefined ? {} : { roundOrdinal }),
+        ...(origin === undefined ? {} : { origin }),
+        ...(waitingReason === undefined ? {} : { waitingReason }),
+        ...(cancellation === undefined ? {} : { cancellation })
+      }
+    }
+
+    /**
+     * The runs a `fork-created` marker names.
+     *
+     * Time travel writes the marker on the forked child's own journal, which
+     * is the only evidence separating a fork from an ordinary child: both
+     * record `parent_run_id`. A composition whose journal is not this database
+     * has no journal table here at all, and the honest answer there is "no
+     * fork evidence" — not a failed projection — so exactly that one failure
+     * is folded into the empty set.
+     *
+     * Every other failure is reported. A locked database, a corrupt page, or
+     * a table that exists but no longer answers this question would otherwise
+     * report every fork in the deployment as an ordinary child, silently and
+     * for as long as the condition lasted.
+     */
+    const forkedRunIds = (scope: IndexScope): Effect.Effect<ReadonlySet<string>, PersistenceError> =>
+      sql<{ readonly runId: string }>`
+      SELECT DISTINCT run_id AS "runId" FROM flows_journal_events
+      WHERE event_type = ${Lineage.forkCreatedEventType} AND ${within("run_id", scope)}
+    `.pipe(
+        Effect.map((rows) => new Set(rows.map((row) => row.runId)) as ReadonlySet<string>),
+        Effect.catchIf(
+          missingTable("flows_journal_events"),
+          () => Effect.succeed(new Set<string>() as ReadonlySet<string>)
+        ),
+        Effect.mapError(persistence("read fork markers"))
+      )
+
+    /**
+     * The run that spawned each child, by child id.
+     *
+     * `seq` is the engine's store-global insertion order, so the FIRST edge is
+     * the creating parent. A diamond's later parents are edges too, and a
+     * summary names one ancestor, so the creating one is the one it names.
+     *
+     * Missing table, missing evidence, exactly as with the fork markers: a
+     * control plane over a database with no engine state in it observes runs
+     * that spawned nothing.
+     */
+    const spawnedBy = (scope: IndexScope): Effect.Effect<ReadonlyMap<string, string>, PersistenceError> =>
+      sql<{
+        readonly childId: string
+        readonly parentId: string
+      }>`
+      SELECT child_id AS "childId", parent_id AS "parentId"
+      FROM flows_run_parents WHERE ${within("child_id", scope)} ORDER BY seq DESC
+    `.pipe(
+        // Descending, so the lowest `seq` is written last and wins the key.
+        Effect.map((rows) => new Map(rows.map((row) => [row.childId, row.parentId])) as ReadonlyMap<string, string>),
+        Effect.catchIf(
+          missingTable("flows_run_parents"),
+          () => Effect.succeed(new Map<string, string>() as ReadonlyMap<string, string>)
+        ),
+        Effect.mapError(persistence("read spawn edges"))
+      )
+
+    /**
+     * What each parked run is waiting for, by run id.
+     *
+     * The engine writes `waiting_reason` on the run row when it parks a run
+     * (`packages/engine-store/src/DurableEngineState.ts` `park`), and clears
+     * it on the wake. The control plane reads it and never writes it: a park
+     * belongs to whoever is holding the run, and the projection reports the
+     * hold rather than deciding it.
+     *
+     * The reason separates the parks a steer can end from the parks it
+     * cannot, so `Control.steer` needs it on the summary and not only in the
+     * engine's own store.
+     */
+    const waitingFor = (scope: IndexScope): Effect.Effect<ReadonlyMap<string, string>, PersistenceError> =>
+      sql<{
+        readonly runId: string
+        readonly waitingReason: string
+      }>`
+      SELECT run_id AS "runId", waiting_reason AS "waitingReason"
+      FROM flows_runs WHERE waiting_reason IS NOT NULL AND ${within("run_id", scope)}
+    `.pipe(
+        Effect.map((rows) => new Map(rows.map((row) => [row.runId, row.waitingReason])) as ReadonlyMap<string, string>),
+        Effect.mapError(persistence("read waiting reasons"))
+      )
+
+    /**
+     * The attributed cancel requests this plane journaled, by run id.
+     *
+     * The FIRST entry for a run wins. A cancel is idempotent, so a repeat asks
+     * for something that already happened; the request that caused the
+     * cancellation is the one that gets to name the principal and the reason.
+     */
+    const cancelRequests = (
+      scope: IndexScope
+    ): Effect.Effect<ReadonlyMap<string, Attribution.Request>, PersistenceError> =>
+      sql<{
+        readonly runId: string
+        readonly emittedAtMs: number
+        readonly payloadJson: string
+      }>`
+      SELECT run_id AS "runId", emitted_at_ms AS "emittedAtMs", payload_json AS "payloadJson"
+      FROM flows_journal_events
+      WHERE event_type = ${Attribution.requestedEventType} AND ${within("run_id", scope)}
+      ORDER BY run_id, seq
+    `.pipe(
+        Effect.map((rows) => {
+          const requests = new Map<string, Attribution.Request>()
+          for (const row of rows) {
+            if (requests.has(row.runId)) continue
+            const payload = JSON.parse(row.payloadJson) as {
+              readonly principal?: Principal
+              readonly reason?: string
+            }
+            requests.set(row.runId, {
+              requestedAt: Number(row.emittedAtMs),
+              ...(payload.principal === undefined ? {} : { principal: payload.principal }),
+              ...(payload.reason === undefined ? {} : { reason: payload.reason })
+            })
+          }
+          return requests
+        }),
+        Effect.catchIf(
+          missingTable("flows_journal_events"),
+          () => Effect.succeed(new Map<string, Attribution.Request>() as ReadonlyMap<string, Attribution.Request>)
+        ),
+        Effect.mapError(persistence("read cancel requests"))
+      )
+
+    /**
+     * When the engine journaled each run's interruption.
+     *
+     * The engine writes this record in the same transaction as the `cancelled`
+     * transition (`packages/engine-store/src/internal/RunDriver.ts`), so it is
+     * the moment a cancellation actually took, as opposed to the moment
+     * somebody asked. A run cancelled by a peer process that never wrote a
+     * request column still has this.
+     */
+    const engineInterruptions = (scope: IndexScope): Effect.Effect<ReadonlyMap<string, number>, PersistenceError> =>
+      sql<{
+        readonly runId: string
+        readonly payloadJson: string
+      }>`
+      SELECT run_id AS "runId", payload_json AS "payloadJson"
+      FROM flows_journal_events
+      WHERE event_type = ${Attribution.interruptedEventType} AND ${within("run_id", scope)}
+    `.pipe(
+        Effect.map((rows) => {
+          const cancelled = new Map<string, number>()
+          for (const row of rows) {
+            const payload = JSON.parse(row.payloadJson) as {
+              readonly outcome?: string
+              readonly interruptedAtMs?: number
+            }
+            if (payload.outcome !== "cancelled") continue
+            cancelled.set(row.runId, Number(payload.interruptedAtMs ?? 0))
+          }
+          return cancelled
+        }),
+        Effect.catchIf(
+          missingTable("flows_journal_events"),
+          () => Effect.succeed(new Map<string, number>() as ReadonlyMap<string, number>)
+        ),
+        Effect.mapError(persistence("read engine interruptions"))
+      )
+
+    /**
+     * The ancestry and cancel columns of every run row.
+     *
+     * Cascade is a fact about a run's ancestors, so the attribution cannot be
+     * decided a row at a time: the request that cancelled a child may be three
+     * rounds up the chain.
+     */
+    const cancelEvidence = (scope: IndexScope): Effect.Effect<
+      ReadonlyArray<{
+        readonly runId: string
+        readonly parentRunId: string | null
+        readonly cancelRequestedAtMs: number | null
+      }>,
+      PersistenceError
+    > =>
+      sql<{
+        readonly runId: string
+        readonly parentRunId: string | null
+        readonly cancelRequestedAtMs: number | null
+      }>`
+      SELECT run_id AS "runId", parent_run_id AS "parentRunId",
+             cancel_requested_at_ms AS "cancelRequestedAtMs"
+      FROM flows_runs WHERE ${within("run_id", scope)}
+    `.pipe(Effect.mapError(persistence("read cancel evidence")))
+
+    /** Every cancelled run's attribution in the scope, folded in one pass. */
+    const cancellations = (scope: IndexScope): Effect.Effect<ReadonlyMap<string, Cancellation>, PersistenceError> =>
+      Effect.map(
+        Effect.all({
+          rows: cancelEvidence(scope),
+          requests: cancelRequests(scope),
+          interrupted: engineInterruptions(scope),
+          spawnedBy: spawnedBy(scope)
+        }),
+        ({ interrupted, requests, rows, spawnedBy }) =>
+          Attribution.attribute({
+            runs: rows.map((row) => {
+              const parentRunId = row.parentRunId ?? spawnedBy.get(row.runId)
+              const cancelledAt = interrupted.get(row.runId)
+              return {
+                runId: row.runId,
+                ...(parentRunId === undefined || parentRunId === null ? {} : { parentRunId }),
+                ...(row.cancelRequestedAtMs === null ? {} : { cancelRequestedAt: Number(row.cancelRequestedAtMs) }),
+                ...(cancelledAt === undefined ? {} : { cancelledAt })
+              }
+            }),
+            requests
+          })
+      )
+
+    /** Every index a projection needs over one scope, read together. */
+    const ancestryIndex = (scope: IndexScope): Effect.Effect<AncestryIndex, PersistenceError> =>
+      Effect.map(
+        Effect.all({
+          forked: forkedRunIds(scope),
+          spawnedBy: spawnedBy(scope),
+          waitingFor: waitingFor(scope),
+          cancellations: cancellations(scope)
+        }),
+        (index): AncestryIndex => index
+      )
+
+    /**
+     * One run and every ancestor above it, nearest first.
+     *
+     * The trampoline chain is one recursive read over `parent_run_id`. A
+     * SPAWNED run records nothing in its own row, so when a chain runs out the
+     * spawn edge is looked up and the walk continues from there — one extra
+     * read per nesting level, and subflow nesting is shallow where a
+     * trampoline is long. The visited set makes corrupt ancestry terminate
+     * instead of taking the control plane down with it.
+     */
+    const ancestorChain = (runId: RunId): Effect.Effect<ReadonlyArray<string>, PersistenceError> =>
+      Effect.gen(function*() {
+        const chain: Array<string> = []
+        const visited = new Set<string>()
+        let start: string | undefined = runId
+        while (start !== undefined && !visited.has(start)) {
+          const rows = yield* sql<{ readonly runId: string; readonly parentRunId: string | null }>`
+            WITH RECURSIVE ancestry(run_id, parent_run_id) AS (
+              SELECT run_id, parent_run_id FROM flows_runs WHERE run_id = ${start}
+              UNION
+              SELECT runs.run_id, runs.parent_run_id
+              FROM flows_runs runs JOIN ancestry ON runs.run_id = ancestry.parent_run_id
+            )
+            SELECT run_id AS "runId", parent_run_id AS "parentRunId" FROM ancestry
+          `.pipe(Effect.mapError(persistence("walk a run's ancestry")))
+          if (rows.length === 0) {
+            // No row at all: the caller's own `requireRow` reports that.
+            if (!visited.has(start)) chain.push(start)
+            break
+          }
+          let last: string | undefined
+          for (const row of rows) {
+            if (visited.has(row.runId)) continue
+            visited.add(row.runId)
+            chain.push(row.runId)
+            if (row.parentRunId === null) last = row.runId
+          }
+          // The chain ended at a row naming no parent. A run somebody SPAWNED
+          // records its parent in the edge table instead, so the walk
+          // continues from there.
+          const spawn = last === undefined ? undefined : (yield* spawnedBy([last])).get(last)
+          start = spawn
+        }
+        return chain
+      })
+
     const summaryOf = (row: RunStore.RunRow): RunSummary => JSON.parse(row.stateJson) as RunSummary
 
     const snapshotOf = (row: RunStore.RunRow): RunStore.RunSnapshot => ({
@@ -370,8 +803,22 @@ export const make_ = (
         }, "accepted")
       })
 
+    /**
+     * Every durable run, this plane's own first.
+     *
+     * `control_runs` indexes only the runs this plane launched. A control
+     * plane that listed nothing else could not answer "what did that run
+     * spawn?", because a child, a fork, and a later trampoline round are all
+     * created by the engine straight into `flows_runs`. The left join keeps
+     * launch order for the runs that have one and falls back to creation order
+     * for the rest.
+     */
     const listRunIds: Effect.Effect<ReadonlyArray<string>, PersistenceError> = sql<{ readonly runId: string }>`
-      SELECT run_id AS "runId" FROM control_runs ORDER BY created_seq
+      SELECT runs.run_id AS "runId"
+      FROM flows_runs AS runs
+      LEFT JOIN control_runs AS indexed ON indexed.run_id = runs.run_id
+      ORDER BY CASE WHEN indexed.created_seq IS NULL THEN 1 ELSE 0 END,
+               indexed.created_seq, runs.created_at_ms, runs.run_id
     `.pipe(query("list runs"), Effect.map((rows) => rows.map((row) => row.runId)))
 
     const listPlanIds: Effect.Effect<ReadonlyArray<string>, PersistenceError> = sql<{ readonly planId: string }>`
@@ -631,12 +1078,21 @@ export const make_ = (
         }
         return started
       }),
-      getRun: Effect.fn("SqlControlRuntime.getRun")((runId: RunId) => Effect.map(requireRow(runId), summaryOf)),
+      getRun: Effect.fn("SqlControlRuntime.getRun")((runId: RunId) =>
+        Effect.gen(function*() {
+          const row = yield* requireRow(runId)
+          return summaryFrom(row, yield* ancestryIndex(yield* ancestorChain(runId)))
+        })
+      ),
       listRuns: Effect.fn("SqlControlRuntime.listRuns")(() =>
-        Effect.flatMap(
-          listRunIds,
-          Effect.forEach((runId) => Effect.map(requireRow(runId), summaryOf))
-        ).pipe(Effect.catchTag("/control/RunNotFound", () => Effect.succeed([] as ReadonlyArray<RunSummary>)))
+        Effect.gen(function*() {
+          const ancestry = yield* ancestryIndex(undefined)
+          const runIds = yield* listRunIds
+          return yield* Effect.forEach(
+            runIds,
+            (runId) => Effect.map(requireRow(runId), (row) => summaryFrom(row, ancestry))
+          )
+        }).pipe(Effect.catchTag("/control/RunNotFound", () => Effect.succeed([] as ReadonlyArray<RunSummary>)))
       )(),
       listFlows: Effect.fn("SqlControlRuntime.listFlows")(() =>
         Effect.succeed(

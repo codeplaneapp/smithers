@@ -26,6 +26,30 @@ export * as ControlError from "./ControlError.ts"
 export * as ControlSchema from "./ControlSchema.ts"
 
 /**
+ * @category projections
+ * @since 0.1.0
+ */
+export * as Cancellation from "./Cancellation.ts"
+
+/**
+ * @category projections
+ * @since 0.1.0
+ */
+export * as Lineage from "./Lineage.ts"
+
+/**
+ * @category projections
+ * @since 0.1.0
+ */
+export * as Monitor from "./Monitor.ts"
+
+/**
+ * @category projections
+ * @since 0.1.0
+ */
+export * as Steering from "./Steering.ts"
+
+/**
  * @category services
  * @since 0.1.0
  * @slop

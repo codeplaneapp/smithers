@@ -146,10 +146,12 @@ describe("NotificationQueue", () => {
           boundary: "turn",
           wouldIdle: false
         }).pipe(Effect.flip)
-        return [admit, drain]
+        const pending = yield* queue.pending("run").pipe(Effect.flip)
+        return [admit, drain, pending]
       }).pipe(Effect.provide(NotificationQueue.layerNoop()))
     )
     expect(errors.map((error) => error.code)).toEqual([
+      "notification_unavailable",
       "notification_unavailable",
       "notification_unavailable"
     ])
@@ -218,5 +220,44 @@ describe("NotificationQueue", () => {
     expect(result.admission.decision).toBe("admitted")
     expect(result.duplicate.duplicate).toBe(true)
     expect(result.empty.notifications).toEqual([])
+  })
+
+  it("reports what is still pending, and drops what a boundary took", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        yield* queue.admit("run", item("steer-1", "steer"))
+        yield* queue.admit("run", item("steer-2", "steer"))
+        yield* queue.admit("run", item("followup-1", "queue"))
+        const before = yield* queue.pending("run")
+        yield* queue.drain({
+          runId: "run",
+          targetLineageId: "run/root",
+          boundary: "turn-1",
+          wouldIdle: false
+        })
+        return { before, after: yield* queue.pending("run") }
+      })
+    )
+
+    // A steer notification is pending until a boundary promotes it, and a
+    // queued follow-up stays pending until the run would otherwise idle.
+    expect(observed.before.map((notification) => notification.id)).toEqual([
+      "steer-1",
+      "steer-2",
+      "followup-1"
+    ])
+    expect(observed.after.map((notification) => notification.id)).toEqual(["followup-1"])
+  })
+
+  it("reports nothing pending for a run that was never notified", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        return yield* queue.pending("never-notified")
+      })
+    )
+
+    expect(observed).toEqual([])
   })
 })

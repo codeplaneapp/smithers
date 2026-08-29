@@ -126,6 +126,36 @@ describe("ControlRpcs", () => {
     expect(events[0]?.kind).toBe("control.run.accepted")
   })
 
+  it("carries a cancel reason across the wire and refuses a caller-named principal", async () => {
+    const result = await Effect.runPromise(client((rpc) =>
+      Effect.gen(function*() {
+        const card = yield* plan(rpc)
+        yield* rpc.Approve({ ...card.approval, idempotencyKey: "cancel-approve" })
+        const receipt = yield* rpc.Run({
+          _tag: "Plan",
+          planId: card.planId,
+          digest: card.digest,
+          envelope: card.envelope,
+          idempotencyKey: "cancel-start"
+        })
+        if (receipt._tag !== "Accepted" || receipt.runId === undefined) return yield* Effect.die("no run")
+        yield* rpc.Cancel({
+          runId: receipt.runId,
+          reason: "budget",
+          idempotencyKey: "cancel",
+          // A client naming its own principal is decoded away before the
+          // handler, so the server's stamped identity is the one recorded.
+          principal: { id: "attacker", kind: "attacker", stampedAt: 0 }
+        } as never)
+        const events = yield* rpc.Watch({ runId: receipt.runId, follow: false }).pipe(Stream.runCollect)
+        return events.find((event) => event.kind === "control.run.cancel-requested")
+      })
+    ))
+
+    expect(result?.payload).toMatchObject({ source: "control", reason: "budget" })
+    expect((result?.payload as { readonly principal: { readonly id: string } }).principal.id).toBe("server")
+  })
+
   it("rejects malformed payloads before handlers and ignores caller principal fields", async () => {
     const result = await Effect.runPromise(client((rpc) =>
       Effect.gen(function*() {

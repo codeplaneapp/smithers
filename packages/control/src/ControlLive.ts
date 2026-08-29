@@ -6,8 +6,10 @@
  */
 import { Journal, JournalEvent } from "@smthrs/journal"
 import { NotificationQueue } from "@smthrs/notifications"
+import * as SteerPayload from "@smthrs/notifications/SteerPayload"
 import { Registry } from "@smthrs/registry"
 import { Effect, Layer, Option, Semaphore, Stream } from "effect"
+import * as Cancellation from "./Cancellation.ts"
 import {
   type ApprovalInput,
   Control,
@@ -38,6 +40,9 @@ import type {
   RunSummary,
   WatchFilter
 } from "./ControlSchema.ts"
+import { steerItem } from "./ControlSchema.ts"
+import * as Lineage from "./Lineage.ts"
+import * as Steering from "./Steering.ts"
 
 const sourceId = JournalEvent.SourceId.make("/control")
 
@@ -53,11 +58,14 @@ const accepted = (key: IdempotencyKey, runId?: RunId): Receipt =>
     ? { _tag: "Accepted", receiptId: key }
     : { _tag: "Accepted", receiptId: key, runId }
 
+const terminal = (status: RunSummary["status"]): boolean =>
+  status === "cancelled" || status === "completed" || status === "failed"
+
 const terminalOrAccepted = (
   key: IdempotencyKey,
   run: RunSummary
 ): Receipt =>
-  run.status === "cancelled" || run.status === "completed" || run.status === "failed"
+  terminal(run.status)
     ? { _tag: "Terminal", runId: run.runId, status: run.status }
     : accepted(key, run.runId)
 
@@ -219,6 +227,75 @@ export const layer: Layer.Layer<
       )
     }
 
+    /**
+     * Resumes a parked run whose park a steer has just answered.
+     *
+     * Only two parks are the steer's to end. A run parked on `event` is
+     * waiting for something to arrive, and a steer is something arriving. A
+     * run parked on `released` lost its owner to a sweep
+     * (`@smthrs/engine-store` `DisasterRecovery.fence`) and nothing is coming
+     * to claim it, so the steer claims it.
+     *
+     * Every other park keeps waiting. An `approval`, `timer`, or `quota` park
+     * is waiting for a decision, a clock, or a budget that a message does not
+     * supply. A park with NO reason at all is an operator's `Control.pause`,
+     * which is the one park a steer must not end: an operator who paused a run
+     * and then sent it a message is queuing the message for when they resume
+     * it, not asking for the pause to be undone. A park a control plane cannot
+     * explain is left alone for the same reason.
+     *
+     * A lost claim is not a failure here: it means another process already
+     * owns the run, which is the outcome the wake was trying to produce.
+     */
+    const wake = (
+      run: RunSummary,
+      messageId: string
+    ): Effect.Effect<void, PersistenceError> => {
+      if (run.status !== "parked") return Effect.void
+      if (run.waitingReason !== "event" && run.waitingReason !== "released") return Effect.void
+      return runtime.resume(run.runId).pipe(
+        Effect.flatMap((resumed) =>
+          emit(run.runId, "control.steer.woke", {
+            runId: run.runId,
+            messageId,
+            status: resumed.status
+          })
+        ),
+        Effect.catchTag("/control/ClaimLost", () => Effect.void),
+        Effect.catchTag("/control/RunNotFound", () => Effect.void)
+      )
+    }
+
+    /**
+     * A page of run summaries with their pending steer counts filled in.
+     *
+     * The count comes from the notification queue rather than from a column,
+     * because pending is admitted minus promoted and the queue owns both
+     * halves. A queue that is unavailable leaves the field absent — "not
+     * known" is representable, and it is the truth — while a journal that
+     * fails is a failed listing.
+     */
+    const withSteering = (
+      runs: ReadonlyArray<RunSummary>
+    ): Effect.Effect<ReadonlyArray<RunSummary>, ControlError> =>
+      Effect.forEach(runs, (run) =>
+        notifications.pending(run.runId).pipe(
+          Effect.map((pending): RunSummary => ({
+            ...run,
+            steering: {
+              pending: pending.filter((notification) => notification.delivery === "steer").length
+            }
+          })),
+          Effect.catchTag("/notifications/NotificationError", () => Effect.succeed(run)),
+          Effect.mapError((cause) =>
+            new PersistenceError({
+              operation: "control.list.steering",
+              message: `Failed to read pending steering for ${run.runId}`,
+              cause
+            })
+          )
+        ))
+
     const list = (request: ListRequest): Effect.Effect<ListResponse, ControlError> =>
       Effect.gen(function*() {
         if (request._tag === "flows") {
@@ -245,10 +322,17 @@ export const layer: Layer.Layer<
         if (request.filters?.status !== undefined) {
           runs = runs.filter((run) => run.status === request.filters?.status)
         }
+        if (request.filters?.parentRunId !== undefined) {
+          runs = runs.filter((run) => run.parentRunId === request.filters?.parentRunId)
+        }
+        if (request.filters?.lineageId !== undefined) {
+          runs = runs.filter((run) => run.lineageId === request.filters?.lineageId)
+        }
         const result = page(runs, request.cursor, request.limit)
+        const items = yield* withSteering(result.items)
         return result.nextCursor === undefined
-          ? { _tag: "runs", items: result.items }
-          : { _tag: "runs", items: result.items, nextCursor: result.nextCursor }
+          ? { _tag: "runs", items }
+          : { _tag: "runs", items, nextCursor: result.nextCursor }
       })
 
     const streamForRun = (
@@ -370,7 +454,7 @@ export const layer: Layer.Layer<
             ))
         )
 
-    const watch = (filter: WatchFilter): Stream.Stream<ControlEvent, ControlError> =>
+    const entries = (filter: WatchFilter): Stream.Stream<ControlEvent, ControlError> =>
       filter.follow === false
         ? snapshot(filter)
         : filter.runId !== undefined
@@ -404,6 +488,26 @@ export const layer: Layer.Layer<
             )
           })
         )
+
+    /**
+     * Journal entries plus the ancestry deltas they disclose.
+     *
+     * The expansion runs after the follow branch's deduplication, so a derived
+     * event never competes for the `(runId, sequence)` key its own entry was
+     * deduplicated on.
+     */
+    const watch = (filter: WatchFilter): Stream.Stream<ControlEvent, ControlError> =>
+      entries(filter).pipe(
+        Stream.map((event): ReadonlyArray<ControlEvent> => {
+          const lineage = Lineage.derive(event)
+          return [
+            event,
+            ...(lineage === undefined ? [] : [lineage]),
+            ...Steering.derive(event)
+          ]
+        }),
+        Stream.flattenIterable
+      )
 
     const service: Service = {
       plan: Effect.fn("Control.plan")((input) =>
@@ -478,7 +582,12 @@ export const layer: Layer.Layer<
           input.idempotencyKey,
           fingerprint("steer", input),
           Effect.gen(function*() {
-            yield* runtime.getRun(input.runId)
+            const run = yield* runtime.getRun(input.runId)
+            // A run that will never take another turn cannot be steered, and
+            // storing the steer anyway would leave an operator watching a
+            // message that has no boundary left to deliver it.
+            if (terminal(run.status)) return { _tag: "Terminal", runId: run.runId, status: run.status }
+            const item = steerItem(input.message)
             yield* notifications.admit(input.runId, {
               _tag: "human-steer",
               id: input.message.messageId,
@@ -490,7 +599,7 @@ export const layer: Layer.Layer<
                 sourceTurn: 0,
                 sourceActor: `${input.message.principal.kind}:${input.message.principal.id}`
               },
-              payload: { body: input.message.body }
+              payload: SteerPayload.encode(item) as ControlEvent["payload"]
             }).pipe(
               Effect.mapError((cause) =>
                 new PersistenceError({
@@ -500,10 +609,12 @@ export const layer: Layer.Layer<
                 })
               )
             )
-            yield* emit(input.runId, "control.steer.enqueued", {
+            yield* emit(input.runId, Steering.enqueuedEventType, {
               runId: input.runId,
-              messageId: input.message.messageId
+              messageId: input.message.messageId,
+              kind: item.kind
             })
+            yield* wake(run, input.message.messageId)
             return accepted(input.idempotencyKey, input.runId)
           })
         )
@@ -531,9 +642,20 @@ export const layer: Layer.Layer<
           fingerprint("cancel", input),
           Effect.gen(function*() {
             yield* runtime.getRun(input.runId)
-            yield* emit(input.runId, "control.run.cancel-requested", {
-              runId: input.runId
-            })
+            const principal = yield* runtime.stampPrincipal(input.principal)
+            // Attribution first, and in the mutation's own transaction. A
+            // cancellation that committed without it would be durable and
+            // anonymous, and nothing afterwards could say who asked.
+            yield* emit(
+              input.runId,
+              Cancellation.requestedEventType,
+              json({
+                runId: input.runId,
+                source: "control",
+                principal,
+                ...(input.reason === undefined ? {} : { reason: input.reason })
+              })
+            )
             const run = yield* runtime.interrupt(input.runId)
             return terminalOrAccepted(input.idempotencyKey, run)
           })

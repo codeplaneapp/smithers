@@ -123,6 +123,20 @@ export interface SignalInput {
 export interface RunMutationInput {
   readonly runId: RunId
   readonly idempotencyKey: IdempotencyKey
+  /**
+   * Why the run is being cancelled, paused, or resumed.
+   *
+   * Free text, recorded on the journal entry the mutation writes and projected
+   * back onto `RunSummary.cancellation`. An operator reading a cancelled run a
+   * week later asks "why", and a control plane that never carried the answer
+   * cannot produce one afterwards.
+   */
+  readonly reason?: string | undefined
+  /**
+   * Who is asking. Stamped by the runtime, which supplies its own principal
+   * when the caller names none.
+   */
+  readonly principal?: Principal | undefined
 }
 
 /**
