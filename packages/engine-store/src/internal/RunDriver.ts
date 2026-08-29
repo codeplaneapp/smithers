@@ -1504,7 +1504,7 @@ export const make = (
           // interruptible step ahead of the `ensuring` that removes it, so an
           // interrupt landing there left this round's instance in the map for
           // the driver's lifetime — a slow leak, and a stale instance for
-          // `interruptUnsafe` to mark interrupted.
+          // `interrupt` to mark interrupted.
           liveInstances.set(executionId, instance)
           const result = yield* Effect.scoped(
             Effect.raceFirst(
