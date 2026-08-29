@@ -158,6 +158,52 @@ export const leaseLiveness = (
     )
 }
 
+/**
+ * The Node hosts' liveness check: does the owner's process still exist?
+ *
+ * {@link leaseLiveness} is the honest floor — every host can read a persisted
+ * heartbeat — but it is only a timeout, so two engine processes over one
+ * database steal each other's running rows `heartbeatStaleAfter` after any
+ * heartbeat stall: a stop-the-world pause, a swapped-out process, a disk that
+ * blocked longer than the window. This answers the question the lease is
+ * standing in for, by asking the operating system whether the recorded pid is
+ * still there.
+ *
+ * `process.kill(pid, 0)` sends no signal; it performs only the delivery
+ * checks. Three answers matter:
+ *
+ * - It returns: the process exists and is signalable. The owner is alive.
+ * - It throws `EPERM`: the process EXISTS and this user may not signal it.
+ *   That is a positive liveness answer, not a failure — reading it as death
+ *   would let one user's engine steal from another's on a shared host.
+ * - It throws anything else (`ESRCH`): no such process. The owner is gone.
+ *
+ * A pid is only meaningful inside one process namespace, so a recorded owner
+ * on another host is never probed: the answer is `false` and the arbitration
+ * falls back to the evidence that does cross hosts — the expired lease, which
+ * `RunStore.steal` verifies for itself. The engine consults this check only
+ * for a run whose lease has ALREADY expired, so answering `false` here does
+ * not weaken anything; it declines to add evidence.
+ *
+ * Node hosts only. It is not part of the browser promise: this entry point
+ * bundles for the browser because it never imports a `node:` built-in, and a
+ * browser composition has no process table to ask, so it keeps
+ * {@link leaseLiveness}.
+ *
+ * @since 0.1.0
+ * @category ownership
+ */
+export const sameHostPidProbe: LivenessCheck = (expectedOwner, context) =>
+  Effect.sync(() => {
+    if (!sameHostIncarnation(expectedOwner, context.claimant)) return false
+    try {
+      process.kill(expectedOwner.pid, 0)
+      return true
+    } catch (error) {
+      return (error as { readonly code?: string | undefined } | null)?.code === "EPERM"
+    }
+  })
+
 export {
   /**
    * Heartbeat cadence adopted from `RUN_HEARTBEAT_MS` in the Run Ownership
