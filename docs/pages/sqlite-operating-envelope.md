@@ -103,7 +103,7 @@ retries instead of killing the run, and
 `packages/database/test/contract/DatabaseWriteContract.ts` pins that
 classification. Moving the pin is the real fix and is not part of this release.
 The pin and its known upstream issues are tracked in
-[implementation status](https://github.com/smithersai/smithers/blob/main/docs/architecture/implementation-status.md#substrate-pin-and-known-upstream-issues).
+[implementation status](/release/support-matrix#substrate-pin-and-known-upstream-issues).
 
 ## Multi-process rules
 
