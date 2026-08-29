@@ -120,9 +120,7 @@ export const subscribe = (
   sessionId: string,
   now: number = Date.now()
 ): ReadonlyArray<Subscription> => {
-  const kept = readSubscriptions(root, now).filter((entry) =>
-    !(entry.runId === runId && entry.sessionId === sessionId)
-  )
+  const kept = readSubscriptions(root, now).filter((entry) => !(entry.runId === runId && entry.sessionId === sessionId))
   const entries = [...kept, { runId, sessionId, updatedAtMs: now }]
   writeSubscriptions(root, entries)
   return entries

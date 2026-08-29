@@ -168,7 +168,12 @@ export interface RemovedFlag {
  * @since 1.0.0
  */
 export const removedFlags: ReadonlyArray<RemovedFlag> = [
-  { parent: "steer", flag: "takeover", reason: "hijack is not available; `steer --message` is the only mode", anchor: "hijack" },
+  {
+    parent: "steer",
+    flag: "takeover",
+    reason: "hijack is not available; `steer --message` is the only mode",
+    anchor: "hijack"
+  },
   { parent: "up", flag: "serve", reason: uiHosting, anchor: "ui" },
   { parent: "up", flag: "interactive", reason: uiHosting, anchor: "ui" },
   { parent: "up", flag: "supervise", reason: uiHosting, anchor: "ui" },

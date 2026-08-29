@@ -17,11 +17,15 @@ export default defineConfig({
       // each other's coverage scratch state (issues #115/#121).
       reportsDirectory: join(tmpdir(), `flows-cli-coverage-${process.pid}`),
       include: ["src/**"],
+      // Ratcheted to the measured surface after the Phase 4 port, with a few
+      // points of headroom for the checks whose branches depend on the host
+      // (`jj` on PATH, provider keys exported). Lower these only with a
+      // reason; the point of the ratchet is that deleted coverage fails.
       thresholds: {
-        branches: 40,
-        functions: 50,
-        lines: 57,
-        statements: 56
+        branches: 76,
+        functions: 72,
+        lines: 79,
+        statements: 78
       }
     }
   }

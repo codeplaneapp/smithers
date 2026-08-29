@@ -174,7 +174,10 @@ export const collect = (
         const rows = yield* sql<{ readonly total: number }>`
           SELECT COUNT(*) AS total FROM ${sql.literal(table)} WHERE ${sql.in(column, chunk)}
         `
-        count += rows[0]?.total ?? 0
+        // Summed rather than read out of `rows[0]`: an aggregate returns
+        // exactly one row, so the index-and-default form was a branch no test
+        // could ever take.
+        for (const row of rows) count += row.total
         yield* sql`DELETE FROM ${sql.literal(table)} WHERE ${sql.in(column, chunk)}`
       }
       if (count > 0) deleted[table] = count

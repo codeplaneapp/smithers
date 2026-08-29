@@ -116,8 +116,7 @@ const summaryOf = (runId: string) =>
 
 const missingRun = (runId: string): Envelope => failed("RUN_NOT_FOUND", `Run not found: ${runId}`)
 
-const missingArgument = (name: string): Envelope =>
-  failed("INVALID_INPUT", `${name} is required and must be a string`)
+const missingArgument = (name: string): Envelope => failed("INVALID_INPUT", `${name} is required and must be a string`)
 
 /** Wraps a control-plane failure in the envelope instead of dying. */
 const envelope = <A>(
@@ -520,7 +519,7 @@ const parse = (line: string): Request | undefined => {
     const value: unknown = JSON.parse(trimmed)
     if (typeof value !== "object" || value === null) return undefined
     if ((value as { readonly jsonrpc?: unknown }).jsonrpc !== "2.0") return undefined
-    return value as Request
+    return value
   } catch {
     return undefined
   }

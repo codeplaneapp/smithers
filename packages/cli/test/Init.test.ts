@@ -10,6 +10,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import * as Init from "../src/Init.ts"
+import * as Project from "../src/Project.ts"
 
 const staged: Array<string> = []
 
@@ -96,6 +97,17 @@ describe("the scaffold", () => {
 
     expect(second.created).toBe(false)
     expect(readFileSync(second.flowFile, "utf8")).toBe("mine\n")
+  })
+
+  it("leaves behind the .flows/ anchor, so every subdirectory resolves one root", () => {
+    const root = directory()
+    const result = Init.scaffold(root, "review")
+    const nested = join(root, "src", "deep")
+    mkdirSync(nested, { recursive: true })
+
+    expect(result.stateDirectory).toBe(join(root, ".flows"))
+    expect(existsSync(result.stateDirectory)).toBe(true)
+    expect(Project.root(undefined, nested)).toBe(root)
   })
 
   it("names a flow after the project directory when none is given", () => {

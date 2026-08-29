@@ -6,11 +6,11 @@
  * pinned here is that a project's two databases are both swept, and that a
  * project which has never run anything is a no-op rather than an error.
  */
+import { Cause, Effect, Exit } from "effect"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
-import { Cause, Effect, Exit } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 import * as CliError from "../src/CliError.ts"
 import * as Gc from "../src/Gc.ts"

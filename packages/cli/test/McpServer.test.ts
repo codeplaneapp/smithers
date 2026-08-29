@@ -5,11 +5,11 @@
  * `smithers --mcp`, so the framing, the handshake, and the envelope are proven
  * by the code that consumes them rather than by a reimplementation.
  */
+import { NodeServices } from "@effect/platform-node"
 import { Control as ControlService } from "@smthrs/control"
 import * as TestControl from "@smthrs/control/test/TestControl"
 import * as McpClient from "@smthrs/mcp/McpClient"
 import { Effect, Layer } from "effect"
-import { NodeServices } from "@effect/platform-node"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -30,8 +30,9 @@ const control = TestControl.layer({ now: () => 0 })
 const call = (tool: McpServer.Tool, args: Record<string, unknown> = {}) =>
   Effect.runPromise(tool.call(args).pipe(Effect.provide(control)) as Effect.Effect<McpServer.Envelope>)
 
-const find = (name: string) => McpServer.tools({ surface: "both", verbs: Verb.shipped })
-  .find((tool) => tool.name === name)!
+const find = (name: string) =>
+  McpServer.tools({ surface: "both", verbs: Verb.shipped })
+    .find((tool) => tool.name === name)!
 
 describe("the tool surface", () => {
   it("exposes the eleven Control-backed tools by their 0.x names", () => {
@@ -125,7 +126,10 @@ describe("the envelope", () => {
 
   it("refuses a decision it does not recognise", async () => {
     const result = await call(find("resolve_approval"), {
-      approval: { target: { _tag: "Plan", planId: "p", digest: "d", envelope: { capabilities: [], flows: [], budget: {} } }, idempotencyKey: "k" },
+      approval: {
+        target: { _tag: "Plan", planId: "p", digest: "d", envelope: { capabilities: [], flows: [], budget: {} } },
+        idempotencyKey: "k"
+      },
       decision: "maybe"
     })
 
@@ -222,11 +226,7 @@ describe("a real stdio round trip", () => {
           const unsupported = yield* client.callTool("time_travel", {})
           return { tools: client.tools.map((tool) => tool.name), supported, unsupported }
         })
-      ).pipe(Effect.provide(NodeServices.layer)) as Effect.Effect<{
-        readonly tools: ReadonlyArray<string>
-        readonly supported: McpClient.ToolResult
-        readonly unsupported: McpClient.ToolResult
-      }>
+      ).pipe(Effect.provide(NodeServices.layer), Effect.orDie)
     )
 
     expect(result.tools).toHaveLength(21)

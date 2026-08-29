@@ -129,7 +129,7 @@ describe("McpFlows.mcp", () => {
     const bindings = await execute(source.bindings())
     expect(bindings).toHaveLength(1)
     expect(bindings[0]!.descriptor.name).toBe("mcp/echo/add")
-    expect(bindings[0]!.descriptor.capabilities).toEqual(["*"])
+    expect(bindings[0]!.descriptor.capabilities).toEqual(McpFlows.capabilities)
   })
 
   it("runs a tool call through the produced binding", async () => {
@@ -140,7 +140,7 @@ describe("McpFlows.mcp", () => {
         const call = new Cell.Call({
           flowName: "mcp/echo/add",
           input: { a: 2, b: 3 },
-          capabilities: ["*"],
+          capabilities: McpFlows.capabilities,
           effects: binding!.descriptor.effects,
           placement: Option.none(),
           identity: new Cell.CallIdentity({

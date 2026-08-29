@@ -8,8 +8,8 @@
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { DatabaseSync } from "node:sqlite"
 import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import { afterEach, describe, expect, it } from "vitest"
 import * as Doctor from "../src/Doctor.ts"
 

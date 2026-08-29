@@ -14,27 +14,27 @@
  * @since 1.0.0
  */
 import { Control as ControlService, ControlSchema } from "@smthrs/control"
+import * as ResolveJj from "@smthrs/jj/node/resolveJjBinary"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
-import * as Namespace from "@smthrs/memory/Namespace"
+import type * as Namespace from "@smthrs/memory/Namespace"
 import { Console, Effect, Option, Schema, Stream } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import * as Agents from "./Agents.ts"
-import * as CliError from "./CliError.ts"
 import * as Bug from "./Bug.ts"
 import * as ClaudeMirror from "./ClaudeMirror.ts"
+import * as CliError from "./CliError.ts"
 import * as Detached from "./Detached.ts"
 import * as Docs from "./Docs.ts"
 import * as Doctor from "./Doctor.ts"
-import * as Gc from "./Gc.ts"
 import * as Environment from "./Environment.ts"
 import * as ExecutorOwnership from "./ExecutorOwnership.ts"
 import * as Forensics from "./Forensics.ts"
+import * as Gc from "./Gc.ts"
 import * as Init from "./Init.ts"
 import * as Legacy from "./Legacy.ts"
 import * as NodeOutput from "./NodeOutput.ts"
 import { Output } from "./Output.ts"
 import * as Project from "./Project.ts"
-import * as ResolveJj from "@smthrs/jj/node/resolveJjBinary"
 import * as Serve from "./Serve.ts"
 import * as Unsupported from "./Unsupported.ts"
 import * as Update from "./Update.ts"
@@ -416,6 +416,9 @@ const cancel = Command.make("cancel", { runId: Argument.string("run-id") }, (con
  * run are two mutations. At the import reference the key was `cli:signal:<id>`
  * alone, so the second signal replayed the first one's recorded receipt and
  * was never delivered (rc-contract section 5.1).
+ *
+ * @category constructors
+ * @since 1.0.0
  */
 export const signalKey = (runId: string, payload: ControlSchema.SignalPayload): string => {
   const serialized = JSON.stringify(payload)
@@ -484,31 +487,38 @@ const workflowList = Command.make("list", {}, () => listFlows).pipe(
   Command.unlisted
 )
 
-const workflow = Command.make("workflow", { rest: Argument.string("subcommand").pipe(Argument.variadic()) }, (config) =>
-  Effect.fail(
-    Unsupported.verbError(
-      Unsupported.removedVerbs.find((verb) => verb.name === "workflows")!,
-      config.rest[0]
+const workflow = Command.make(
+  "workflow",
+  { rest: Argument.string("subcommand").pipe(Argument.variadic()) },
+  (config) =>
+    Effect.fail(
+      Unsupported.verbError(
+        Unsupported.removedVerbs.find((verb) => verb.name === "workflows")!,
+        config.rest[0]
+      )
     )
-  )).pipe(
-    Command.withDescription("Removed; only `workflow list` survives, as an alias of `ls`"),
-    Command.unlisted,
-    Command.withSubcommands([workflowList])
-  )
+).pipe(
+  Command.withDescription("Removed; only `workflow list` survives, as an alias of `ls`"),
+  Command.unlisted,
+  Command.withSubcommands([workflowList])
+)
 
 const ps = Command.make("ps", {
   flow: Flag.string("flow").pipe(Flag.optional),
   // Validated, not cast: at the import reference any string reached the store
   // as a `RunStatus`, so `--status done` listed nothing and said nothing.
-  status: Flag.choice("status", [
-    "accepted",
-    "running",
-    "parked",
-    "waiting-approval",
-    "cancelled",
-    "completed",
-    "failed"
-  ] as const).pipe(Flag.optional)
+  status: Flag.choice(
+    "status",
+    [
+      "accepted",
+      "running",
+      "parked",
+      "waiting-approval",
+      "cancelled",
+      "completed",
+      "failed"
+    ] as const
+  ).pipe(Flag.optional)
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -644,8 +654,11 @@ const docs = Command.make("docs", { full: Flag.boolean("full") }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
     const bundle = Docs.read(config.full)
+    // A missing bundle is reported once, on stderr, with exit 1. Printing it
+    // to stdout as well put the same paragraph in both streams and put an
+    // error message inside the document a caller was piping somewhere.
+    if (!bundle.found) return yield* Effect.fail(new CliError.UnsupportedError({ message: bundle.text }))
     yield* Console.log(bundle.text)
-    if (!bundle.found) yield* Effect.fail(new CliError.UnsupportedError({ message: bundle.text }))
   })).pipe(Command.withDescription(Verb.find("docs")!.help))
 
 const migrate = Command.make("migrate", {
@@ -704,16 +717,20 @@ const memoryList = Command.make("list", { ...memoryFlags, prefix: Flag.string("p
     yield* render(facts.map((fact) => ({ key: fact.key, value: fact.value, updatedAtMs: fact.updatedAtMs })))
   })).pipe(Command.withDescription("List facts in a memory namespace"))
 
-const memoryGet = Command.make("get", { ...memoryFlags, key: Argument.string("key") }, (config) =>
-  Effect.gen(function*() {
-    yield* guardGlobals
-    const store = yield* MemoryStore.MemoryStore
-    const fact = yield* store.getFact({ namespace: memoryNamespace(config.namespace), key: config.key })
-    if (fact === undefined) {
-      return yield* Effect.fail(new CliError.UsageError({ message: `No fact ${config.key} in this namespace` }))
-    }
-    yield* render(fact.value)
-  })).pipe(Command.withDescription("Read one fact"))
+const memoryGet = Command.make(
+  "get",
+  { ...memoryFlags, key: Argument.string("key") },
+  (config) =>
+    Effect.gen(function*() {
+      yield* guardGlobals
+      const store = yield* MemoryStore.MemoryStore
+      const fact = yield* store.getFact({ namespace: memoryNamespace(config.namespace), key: config.key })
+      if (fact === undefined) {
+        return yield* Effect.fail(new CliError.UsageError({ message: `No fact ${config.key} in this namespace` }))
+      }
+      yield* render(fact.value)
+    })
+).pipe(Command.withDescription("Read one fact"))
 
 const memorySet = Command.make("set", {
   ...memoryFlags,
@@ -740,13 +757,17 @@ const memorySet = Command.make("set", {
     yield* render({ key: config.key, written: true })
   })).pipe(Command.withDescription("Write one fact"))
 
-const memoryRm = Command.make("rm", { ...memoryFlags, key: Argument.string("key") }, (config) =>
-  Effect.gen(function*() {
-    yield* guardGlobals
-    const store = yield* MemoryStore.MemoryStore
-    const removed = yield* store.deleteFact({ namespace: memoryNamespace(config.namespace), key: config.key })
-    yield* render({ key: config.key, removed })
-  })).pipe(Command.withDescription("Delete one fact"))
+const memoryRm = Command.make(
+  "rm",
+  { ...memoryFlags, key: Argument.string("key") },
+  (config) =>
+    Effect.gen(function*() {
+      yield* guardGlobals
+      const store = yield* MemoryStore.MemoryStore
+      const removed = yield* store.deleteFact({ namespace: memoryNamespace(config.namespace), key: config.key })
+      yield* render({ key: config.key, removed })
+    })
+).pipe(Command.withDescription("Delete one fact"))
 
 const memory = Command.make("memory").pipe(
   Command.withDescription(Verb.find("memory")!.help),
@@ -895,21 +916,25 @@ const mcp = Command.make("mcp").pipe(
   Command.withSubcommands([mcpAdd])
 )
 
-const skillsAdd = Command.make("add", { agent: Flag.string("agent").pipe(Flag.optional) }, (config) =>
-  Effect.gen(function*() {
-    yield* guardGlobals
-    const requested = Option.getOrUndefined(config.agent)
-    const targets = requested === undefined ? Agents.agents : Agents.agents.filter((agent) => agent.id === requested)
-    if (targets.length === 0) {
-      return yield* Effect.fail(
-        new CliError.UsageError({
-          message: `Unknown agent ${requested}. Known agents: ${Agents.agents.map((agent) => agent.id).join(", ")}`
-        })
-      )
-    }
-    const contents = Agents.skill(Verb.shipped)
-    yield* render(yield* Effect.sync(() => targets.map((agent) => Agents.addSkill(agent, contents))))
-  })).pipe(Command.withDescription("Install the smithers skill into an agent"))
+const skillsAdd = Command.make(
+  "add",
+  { agent: Flag.string("agent").pipe(Flag.optional) },
+  (config) =>
+    Effect.gen(function*() {
+      yield* guardGlobals
+      const requested = Option.getOrUndefined(config.agent)
+      const targets = requested === undefined ? Agents.agents : Agents.agents.filter((agent) => agent.id === requested)
+      if (targets.length === 0) {
+        return yield* Effect.fail(
+          new CliError.UsageError({
+            message: `Unknown agent ${requested}. Known agents: ${Agents.agents.map((agent) => agent.id).join(", ")}`
+          })
+        )
+      }
+      const contents = Agents.skill(Verb.shipped)
+      yield* render(yield* Effect.sync(() => targets.map((agent) => Agents.addSkill(agent, contents))))
+    })
+).pipe(Command.withDescription("Install the smithers skill into an agent"))
 
 const skillsList = Command.make("list", {}, () =>
   Effect.gen(function*() {
@@ -1036,8 +1061,11 @@ const serveCommand = Command.make("serve", {
 const removedCommands = Unsupported.removedVerbs
   .filter((verb) => verb.name !== "workflows")
   .map((verb) =>
-    Command.make(verb.name, { rest: Argument.string("argument").pipe(Argument.variadic()) }, (config) =>
-      Effect.fail(Unsupported.verbError(verb, verb.subcommands === undefined ? undefined : config.rest[0]))).pipe(
+    Command.make(
+      verb.name,
+      { rest: Argument.string("argument").pipe(Argument.variadic()) },
+      (config) => Effect.fail(Unsupported.verbError(verb, verb.subcommands === undefined ? undefined : config.rest[0]))
+    ).pipe(
       Command.withDescription(`Removed in 1.0.0-rc.0: ${verb.reason}`),
       Command.unlisted
     )

@@ -8,18 +8,34 @@
  * handler returns a typed error" — so they are asserted there.
  */
 import { spawn, spawnSync } from "node:child_process"
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
+import { Version } from "../src/index.ts"
 import * as Unsupported from "../src/Unsupported.ts"
 import * as Verb from "../src/Verb.ts"
-import { Version } from "../src/index.ts"
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url))
 const executable = fileURLToPath(new URL("../src/bin.ts", import.meta.url))
-const shim = fileURLToPath(new URL("../bin/smithers.mjs", import.meta.url))
-const temporaryDirectoryPrefix = fileURLToPath(new URL("../.tmp-cli-test-", import.meta.url))
+const binDirectory = fileURLToPath(new URL("../bin", import.meta.url))
+const shim = join(binDirectory, "smithers.mjs")
+// Outside the repository on purpose. `Project.root` walks up for `.flows/`,
+// and this checkout grows one the moment any command runs in it, so a working
+// directory under `packages/` would resolve the repository as the project root
+// and every case would read the repository's own run state instead of the
+// empty one it staged.
+const temporaryDirectoryPrefix = join(tmpdir(), "smithers-cli-bin-")
+
+/**
+ * Every case here starts at least one real `smithers`, and starting one means
+ * parsing the whole module graph through Node's type stripping. That is
+ * seconds on an idle machine and much longer under a loaded one, so these
+ * describes carry their own budget rather than the package's 30 s default.
+ * The budget stays finite: a genuine hang still fails the run.
+ */
+const processBudget = { timeout: 240_000 }
 
 const run = (args: ReadonlyArray<string>, environment: Readonly<Record<string, string>> = {}) => {
   const cwd = mkdtempSync(temporaryDirectoryPrefix)
@@ -27,7 +43,7 @@ const run = (args: ReadonlyArray<string>, environment: Readonly<Record<string, s
     return spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
       cwd,
       encoding: "utf8",
-      timeout: 60_000,
+      timeout: 180_000,
       env: { ...process.env, ...environment }
     })
   } finally {
@@ -35,7 +51,7 @@ const run = (args: ReadonlyArray<string>, environment: Readonly<Record<string, s
   }
 }
 
-describe("smithers executable", () => {
+describe("smithers executable", processBudget, () => {
   it("reports the package version", () => {
     const result = run(["--version"])
 
@@ -58,7 +74,7 @@ describe("smithers executable", () => {
   })
 })
 
-describe("the help surface", () => {
+describe("the help surface", processBudget, () => {
   const help = run(["--help"])
 
   it("lists exactly the section 4.1 verbs", () => {
@@ -81,7 +97,7 @@ describe("the help surface", () => {
   })
 })
 
-describe("removed verbs and flags at the process boundary", () => {
+describe("removed verbs and flags at the process boundary", processBudget, () => {
   // The complete sets are driven through the parser in `Unsupported.test.ts`;
   // one process per entry would be several minutes of spawns for the same
   // fact. These cases pin what only a real process can show: the status code
@@ -121,7 +137,7 @@ describe("removed verbs and flags at the process boundary", () => {
   })
 })
 
-describe("the SQLite-only database contract", () => {
+describe("the SQLite-only database contract", processBudget, () => {
   it("accepts `--backend sqlite` as a no-op and exits 0", () => {
     const result = run(["--backend", "sqlite", "--json", "ls"])
 
@@ -143,10 +159,9 @@ describe("the SQLite-only database contract", () => {
     expect(result.status).toBe(1)
     expect(result.stderr).toContain("unsupported_database")
   })
-
 })
 
-describe("the --json stdout contract", () => {
+describe("the --json stdout contract", processBudget, () => {
   it("prints exactly one JSON document on stdout and nothing else", () => {
     const result = run(["--json", "ls"])
 
@@ -163,7 +178,7 @@ describe("the --json stdout contract", () => {
   })
 })
 
-describe("the signal exit codes", () => {
+describe("the signal exit codes", processBudget, () => {
   const interrupted = async (signal: "SIGINT" | "SIGTERM") => {
     const cwd = mkdtempSync(temporaryDirectoryPrefix)
     try {
@@ -171,32 +186,35 @@ describe("the signal exit codes", () => {
         cwd,
         stdio: ["ignore", "pipe", "pipe"]
       })
-      // The engine opens a database and starts a watch before it blocks; the
-      // signal has to land after that, or the process dies during startup and
-      // the exit code says nothing about the teardown contract.
-      const code = await new Promise<number | null>((resolve) => {
-        const timer = setTimeout(() => child.kill(signal), 3000)
-        child.on("exit", (status, killedBy) => {
-          clearTimeout(timer)
-          resolve(status ?? (killedBy === signal ? null : null))
-        })
+      const exited = new Promise<{ readonly status: number | null; readonly signal: string | null }>((resolve) => {
+        child.on("exit", (status, killedBy) => resolve({ status, signal: killedBy }))
       })
-      return code
+      // The signal has to land after the handler is installed and the engine
+      // has opened its database. A fixed sleep is a race: on a loaded machine
+      // the module graph alone can take seconds to parse, and the process then
+      // dies from the default action instead of running its teardown. The
+      // control database appearing is the readiness proof.
+      const database = join(cwd, ".flows", "control.db")
+      const deadline = Date.now() + 120_000
+      while (!existsSync(database) && Date.now() < deadline) await new Promise((wake) => setTimeout(wake, 25))
+      expect(existsSync(database)).toBe(true)
+      child.kill(signal)
+      return await exited
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
   }
 
   it("exits 130 on SIGINT", async () => {
-    expect(await interrupted("SIGINT")).toBe(130)
-  }, 60_000)
+    expect(await interrupted("SIGINT")).toEqual({ status: 130, signal: null })
+  }, 240_000)
 
   it("exits 143 on SIGTERM", async () => {
-    expect(await interrupted("SIGTERM")).toBe(143)
-  }, 60_000)
+    expect(await interrupted("SIGTERM")).toEqual({ status: 143, signal: null })
+  }, 240_000)
 })
 
-describe("the smithers bin shim", () => {
+describe("the smithers bin shim", processBudget, () => {
   it("is the only binary the package declares, and ships in the tarball", () => {
     const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
       readonly bin?: Record<string, string>
@@ -217,7 +235,7 @@ describe("the smithers bin shim", () => {
   it.skipIf(!built)("runs the built entry when dist is present", () => {
     const cwd = mkdtempSync(temporaryDirectoryPrefix)
     try {
-      const result = spawnSync(process.execPath, [shim, "--version"], { cwd, encoding: "utf8", timeout: 30_000 })
+      const result = spawnSync(process.execPath, [shim, "--version"], { cwd, encoding: "utf8", timeout: 180_000 })
 
       expect(result.error).toBeUndefined()
       expect(result.status).toBe(0)
@@ -234,15 +252,17 @@ describe("the smithers bin shim", () => {
     // package root that has `src` and no `dist`, which is exactly that shape.
     const root = mkdtempSync(temporaryDirectoryPrefix)
     try {
-      mkdirSync(join(root, "bin"))
-      copyFileSync(shim, join(root, "bin", "smithers.mjs"))
+      // The whole directory, not just the entry: the shim imports its
+      // sibling helpers, and copying one file made this case fail the moment a
+      // second one appeared.
+      cpSync(binDirectory, join(root, "bin"), { recursive: true })
       symlinkSync(join(packageRoot, "src"), join(root, "src"), "dir")
       expect(existsSync(join(root, "dist"))).toBe(false)
 
       const result = spawnSync(process.execPath, [join(root, "bin", "smithers.mjs"), "--version"], {
         cwd: root,
         encoding: "utf8",
-        timeout: 30_000
+        timeout: 180_000
       })
 
       expect(result.error).toBeUndefined()

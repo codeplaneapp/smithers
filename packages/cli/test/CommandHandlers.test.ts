@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest"
 import * as CliError from "../src/CliError.ts"
 import { cli } from "../src/Command.ts"
 import * as ExecutorOwnership from "../src/ExecutorOwnership.ts"
+import * as NodeControl from "../src/NodeControl.ts"
 import * as Output from "../src/Output.ts"
 import { packageVersion } from "../src/Version.ts"
 
@@ -40,7 +41,11 @@ const json = Effect.fnUntraced(function*(args: ReadonlyArray<string>) {
 })
 
 const testControl = TestControl.layer({ now: () => 0 })
-const services = Layer.merge(TestConsole.layer, Output.layer)
+// `memory` is part of the command tree, so every invocation carries its
+// requirement. These cases have no local database, which is exactly the
+// `--remote` situation, so they get the same refusing store a remote
+// invocation gets rather than opening a `.flows/` beside the test run.
+const services = Layer.mergeAll(TestConsole.layer, Output.layer, NodeControl.layerMemoryRemote)
 
 const run = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
