@@ -31,7 +31,7 @@
  *
  * A fence is a serialized `OwnerId`. `hostId` and `pid` identify the process;
  * the `nonce` is regenerated on **every** claim, so a fence taken before a
- * pause is not the fence held after the resume that follows it, and the stale
+ * park is not the fence held after the resume that follows it, and the stale
  * one is refused by the CAS. This is the `rangeID`-style monotonic fence from
  * `reference/temporal`'s history service, narrowed to a per-run token.
  *
@@ -1142,11 +1142,6 @@ export const make_ = (
         if (fiber !== undefined) yield* Fiber.interrupt(fiber)
         fibers.delete(runId)
         return yield* transition(runId, row.owner, summaryOf(row), "cancelled")
-      }),
-      pause: Effect.fn("SqlControlRuntime.pause")(function*(runId: RunId) {
-        const row = yield* requireRow(runId)
-        if (!ownedByUs(row)) return yield* new ClaimLost({ runId })
-        return yield* transition(runId, row.owner, summaryOf(row), "parked")
       }),
       resume: Effect.fn("SqlControlRuntime.resume")(function*(
         runId: RunId,

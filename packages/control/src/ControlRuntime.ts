@@ -244,7 +244,6 @@ export interface Service {
     fiber: Fiber.Fiber<unknown, unknown>
   ) => Effect.Effect<void, RunNotFound | PersistenceError>
   readonly interrupt: (runId: RunId) => Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
-  readonly pause: (runId: RunId) => Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
   /**
    * Joins or claims a suspended run.
    *
@@ -593,14 +592,6 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           run.fence = undefined
           run.localFence = undefined
           return updateSummary(run, { status: "cancelled", ownerId: undefined })
-        }),
-        pause: Effect.fn("ControlRuntime.pause")(function*(runId) {
-          const run = yield* requireRun(runId)
-          if (run.localFence === undefined) return yield* new ClaimLost({ runId })
-          yield* checkFence(runId, run, run.localFence)
-          run.fence = undefined
-          run.localFence = undefined
-          return updateSummary(run, { status: "parked", ownerId: undefined })
         }),
         resume: Effect.fn("ControlRuntime.resume")(function*(runId) {
           const run = yield* requireRun(runId)

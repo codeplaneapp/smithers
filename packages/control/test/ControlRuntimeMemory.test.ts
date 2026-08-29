@@ -198,23 +198,24 @@ describe("ControlRuntime.layerMemory", () => {
     expect(observed.denied).toBeInstanceOf(ClaimLost)
   })
 
-  it("refuses every owner-sensitive operation once a pause has released the fence", async () => {
+  it("refuses every owner-sensitive operation once a park has released the fence", async () => {
     const observed = await withRuntime((runtime) =>
       Effect.gen(function*() {
         const { run } = yield* start(runtime)
-        const paused = yield* runtime.pause(run.runId)
-        const again = yield* Effect.flip(runtime.pause(run.runId))
+        const fence = yield* runtime.claimFence(run.runId)
+        const parked = yield* runtime.writeStatus(run.runId, fence, "parked")
+        const again = yield* Effect.flip(runtime.writeStatus(run.runId, fence, "parked"))
         const interrupted = yield* Effect.flip(runtime.interrupt(run.runId))
-        const fence = yield* Effect.flip(runtime.claimFence(run.runId))
-        return { paused, again, interrupted, fence }
+        const evicted = yield* Effect.flip(runtime.claimFence(run.runId))
+        return { parked, again, interrupted, evicted }
       })
     )
 
-    expect(observed.paused.status).toBe("parked")
-    expect(observed.paused.ownerId).toBeUndefined()
+    expect(observed.parked.status).toBe("parked")
+    expect(observed.parked.ownerId).toBeUndefined()
     expect(observed.again).toBeInstanceOf(ClaimLost)
     expect(observed.interrupted).toBeInstanceOf(ClaimLost)
-    expect(observed.fence).toBeInstanceOf(ClaimLost)
+    expect(observed.evicted).toBeInstanceOf(ClaimLost)
   })
 
   it("rejoins a run it is already driving instead of taking a second fence", async () => {

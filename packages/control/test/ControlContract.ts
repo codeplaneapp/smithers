@@ -17,6 +17,7 @@ import { AlreadyResolved, ClaimLost, EnvelopeMismatch, PlanDigestMismatch, RunNo
 import * as ControlExecutor from "../src/ControlExecutor.ts"
 import { ControlRuntime } from "../src/ControlRuntime.ts"
 import type { Envelope, PlanCard, Principal } from "../src/ControlSchema.ts"
+import { park } from "./Park.ts"
 
 /** Every service a contract test may reach for. */
 export type Stack =
@@ -376,7 +377,7 @@ export const contract = (name: string, harness: Harness): void => {
         const control = yield* Control
         const runtime = yield* ControlRuntime
         const { runId } = yield* start
-        yield* control.pause({ runId, idempotencyKey: "pause:signal" })
+        yield* park(runtime, runId)
         yield* control.signal({
           runId,
           signal: { name: "reviewed", payload: { ok: true } },
@@ -405,18 +406,18 @@ export const contract = (name: string, harness: Harness): void => {
         expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
       }))
 
-    test("releases ownership on pause, claims on resume, and rejects stale fences", () =>
+    test("releases ownership on a park, claims on resume, and rejects stale fences", () =>
       Effect.gen(function*() {
         const control = yield* Control
         const runtime = yield* ControlRuntime
         const { runId } = yield* start
         const staleFence = yield* runtime.claimFence(runId)
-        yield* control.pause({ runId, idempotencyKey: "pause:fence" })
-        const pausedWrite = yield* runtime.writeStatus(runId, staleFence, "running").pipe(Effect.flip)
+        yield* park(runtime, runId)
+        const parkedWrite = yield* runtime.writeStatus(runId, staleFence, "running").pipe(Effect.flip)
         const resumed = yield* control.resume({ runId, idempotencyKey: "resume:fence" })
         const resumedWrite = yield* runtime.writeStatus(runId, staleFence, "completed").pipe(Effect.flip)
 
-        expect(pausedWrite).toBeInstanceOf(ClaimLost)
+        expect(parkedWrite).toBeInstanceOf(ClaimLost)
         expect(resumed._tag).toBe("Accepted")
         expect(resumedWrite).toBeInstanceOf(ClaimLost)
       }))

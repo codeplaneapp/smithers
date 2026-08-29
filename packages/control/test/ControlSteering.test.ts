@@ -13,9 +13,11 @@ import { Effect, type Layer, Stream } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { describe, expect, it } from "vitest"
 import { Control } from "../src/Control.ts"
+import { ControlRuntime } from "../src/ControlRuntime.ts"
 import type { ListResponse, Principal, RunSummary, SteerMessage } from "../src/ControlSchema.ts"
 import * as Steering from "../src/Steering.ts"
 import { durable, type DurableStack } from "./DurableStack.ts"
+import { park as releaseOwnership } from "./Park.ts"
 
 const principal: Principal = { id: "operator", kind: "test", stampedAt: 1 }
 
@@ -71,8 +73,7 @@ const summary = (runId: string) =>
 /** Parks a run the way the engine parks one: suspended, with a waiting reason. */
 const park = (runId: string, reason?: string) =>
   Effect.gen(function*() {
-    const control = yield* Control
-    yield* control.pause({ runId, idempotencyKey: `pause:${runId}` })
+    yield* releaseOwnership(yield* ControlRuntime, runId)
     if (reason === undefined) return
     const sql = yield* Effect.service(SqlClient.SqlClient)
     yield* sql`UPDATE flows_runs SET waiting_reason = ${reason} WHERE run_id = ${runId}`.pipe(Effect.orDie)
@@ -155,12 +156,12 @@ describe("live steering", () => {
     expect(observed.woken?.status).toBe("accepted")
   })
 
-  it("leaves a run the operator paused exactly where the operator left it", async () => {
+  it("leaves a run the operator parked exactly where the operator left it", async () => {
     const observed = await run(Effect.gen(function*() {
       const queue = yield* NotificationQueue.NotificationQueue
-      const runId = yield* start("operator-pause")
-      // `Control.pause` writes no waiting reason, which is the one park a
-      // steer must not end: the message waits for the operator's own resume.
+      const runId = yield* start("operator-park")
+      // An operator's own park writes no waiting reason, which is the one park
+      // a steer must not end: the message waits for the operator's own resume.
       yield* park(runId)
       yield* steer(runId, { messageId: "steer-1", body: "read this when you are back" })
       return { summary: yield* summary(runId), pending: yield* queue.pending(runId) }
@@ -168,7 +169,7 @@ describe("live steering", () => {
 
     expect(observed.summary?.status).toBe("parked")
     expect(observed.summary?.waitingReason).toBeUndefined()
-    // Stored, not delivered: the steer is queued behind the pause.
+    // Stored, not delivered: the steer is queued behind the park.
     expect(observed.pending).toHaveLength(1)
   })
 

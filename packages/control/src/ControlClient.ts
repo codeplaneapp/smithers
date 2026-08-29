@@ -104,7 +104,6 @@ export const layer = (config: ClientConfig) => {
         steer: Effect.fn("Control.steer")((input) => normalize(unary.Steer(input))),
         signal: Effect.fn("Control.signal")((input) => normalize(unary.Signal(input))),
         cancel: Effect.fn("Control.cancel")((input) => normalize(unary.Cancel(input))),
-        pause: Effect.fn("Control.pause")((input) => normalize(unary.Pause(input))),
         resume: Effect.fn("Control.resume")((input) => normalize(unary.Resume(input))),
         list: Effect.fn("Control.list")((input) => normalize(unary.List(input))),
         watch: (input) =>

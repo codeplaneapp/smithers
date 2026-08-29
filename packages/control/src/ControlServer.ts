@@ -36,7 +36,6 @@ export const layer = ControlRpcs.toLayer(
       Steer: Effect.fn("Control.steer")((input) => control.steer(input)),
       Signal: Effect.fn("Control.signal")((input) => control.signal(input)),
       Cancel: Effect.fn("Control.cancel")((input) => control.cancel(input)),
-      Pause: Effect.fn("Control.pause")((input) => control.pause(input)),
       Resume: Effect.fn("Control.resume")((input) => control.resume(input)),
       List: Effect.fn("Control.list")((input) => control.list(input)),
       Watch: (input) => control.watch(input)

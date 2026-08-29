@@ -206,26 +206,21 @@ export const layer: Layer.Layer<
       )
 
     const runMutation = (
-      operation: "pause" | "resume",
       input: RunMutationInput
-    ): Effect.Effect<Receipt, RunNotFound | ClaimLost | PersistenceError> => {
-      const transition = operation === "pause"
-        ? runtime.pause(input.runId)
-        : runtime.resume(input.runId)
-      return mutate(
-        operation,
+    ): Effect.Effect<Receipt, RunNotFound | ClaimLost | PersistenceError> =>
+      mutate(
+        "resume",
         input.idempotencyKey,
-        fingerprint(operation, input),
+        fingerprint("resume", input),
         Effect.gen(function*() {
-          const run = yield* transition
-          yield* emit(input.runId, `control.run.${operation}`, {
+          const run = yield* runtime.resume(input.runId)
+          yield* emit(input.runId, "control.run.resume", {
             runId: input.runId,
             status: run.status
           })
           return terminalOrAccepted(input.idempotencyKey, run)
         })
       )
-    }
 
     /**
      * Resumes a parked run whose park a steer has just answered.
@@ -238,11 +233,12 @@ export const layer: Layer.Layer<
      *
      * Every other park keeps waiting. An `approval`, `timer`, or `quota` park
      * is waiting for a decision, a clock, or a budget that a message does not
-     * supply. A park with NO reason at all is an operator's `Control.pause`,
-     * which is the one park a steer must not end: an operator who paused a run
-     * and then sent it a message is queuing the message for when they resume
-     * it, not asking for the pause to be undone. A park a control plane cannot
-     * explain is left alone for the same reason.
+     * supply. A park with NO reason at all is an operator's own park, written
+     * through `ControlRuntime.writeStatus`, and it is the one park a steer must
+     * not end: an operator who stopped a run and then sent it a message is
+     * queuing the message for when they restart it, not asking for the stop to
+     * be undone. A park a control plane cannot explain is left alone for the
+     * same reason.
      *
      * A lost claim is not a failure here. It means another process already
      * owns the run, or the run belongs to a driver this plane did not launch
@@ -665,8 +661,7 @@ export const layer: Layer.Layer<
           })
         )
       ),
-      pause: Effect.fn("Control.pause")((input) => runMutation("pause", input)),
-      resume: Effect.fn("Control.resume")((input) => runMutation("resume", input)),
+      resume: Effect.fn("Control.resume")((input) => runMutation(input)),
       list,
       watch
     }
