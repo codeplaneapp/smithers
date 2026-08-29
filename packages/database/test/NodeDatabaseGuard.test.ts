@@ -1,0 +1,159 @@
+import { afterEach, describe, expect, it } from "@effect/vitest"
+import { Cause, Effect, type Exit, Layer, Result } from "effect"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
+import * as NodeDatabase from "../src/node/NodeDatabase.ts"
+
+/**
+ * Negative gates for the two rc.0 exclusions the Node driver enforces:
+ * X-13 (a 0.x `smithers.db` is never loaded) and X-18 (the durable engine
+ * does not run under Bun). Both refusals are defects rather than typed
+ * failures because `layer` keeps the error channel `never` that every
+ * durable package composes against; the defect still carries the typed
+ * `NodeDatabase.UnsupportedDatabase` value with its stable code.
+ */
+
+const tempDirectories = new Set<string>()
+
+const tempDirectory = (): string => {
+  const directory = mkdtempSync(join(tmpdir(), "flows-db-guard-"))
+  tempDirectories.add(directory)
+  return directory
+}
+
+const tempFile = (name = "guard.sqlite"): string => join(tempDirectory(), name)
+
+afterEach(() => {
+  for (const directory of tempDirectories) {
+    rmSync(directory, { recursive: true, force: true })
+  }
+  tempDirectories.clear()
+})
+
+/** Writes a file that carries tables but no `flows_migrations`: a 0.x `smithers.db`. */
+const seedZeroX = (filename: string): void => {
+  const db = new DatabaseSync(filename)
+  try {
+    db.exec("CREATE TABLE _smithers_runs (id TEXT PRIMARY KEY, status TEXT NOT NULL)")
+    db.exec("INSERT INTO _smithers_runs (id, status) VALUES ('run-1', 'running')")
+  } finally {
+    db.close()
+  }
+}
+
+/** Writes a file that carries the flows migration ledger: a Smithers 1.0 database. */
+const seedFlows = (filename: string): void => {
+  const db = new DatabaseSync(filename)
+  try {
+    db.exec("CREATE TABLE flows_migrations (migration_id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT)")
+    db.exec("CREATE TABLE flows_runs (id TEXT PRIMARY KEY)")
+  } finally {
+    db.close()
+  }
+}
+
+const build = (options: NodeDatabase.NodeDatabaseOptions) =>
+  Effect.exit(Effect.scoped(Layer.build(NodeDatabase.layer(options) as unknown as Layer.Layer<never>)))
+
+/** Reads the defect a failed layer build carries, so its type and message can be asserted. */
+const defectOf = (exit: Exit.Exit<unknown, unknown>): unknown => {
+  expect(exit._tag).toBe("Failure")
+  if (exit._tag !== "Failure") return undefined
+  const found = Cause.findDefect(exit.cause)
+  expect(Result.isSuccess(found)).toBe(true)
+  return Result.isSuccess(found) ? found.success : undefined
+}
+
+describe("NodeDatabase guard: 0.x database files (X-13)", () => {
+  it.effect("refuses a file that has tables and no flows_migrations table", () =>
+    Effect.gen(function*() {
+      const filename = tempFile("smithers.db")
+      seedZeroX(filename)
+
+      const defect = defectOf(yield* build({ filename }))
+
+      expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(true)
+      if (!NodeDatabase.isUnsupportedDatabase(defect)) return
+      expect(defect.code).toBe("unsupported_database_file")
+      expect(defect.message).toBe(
+        `${filename} is not a Smithers 1.0 database (1.0.0-rc.0 does not load a 0.x smithers.db)`
+      )
+    }))
+
+  it.effect("opens a database that carries the flows_migrations table", () =>
+    Effect.gen(function*() {
+      const filename = tempFile()
+      seedFlows(filename)
+
+      expect((yield* build({ filename }))._tag).toBe("Success")
+    }))
+
+  it.effect("opens an empty file, which the ladder is about to populate", () =>
+    Effect.gen(function*() {
+      const filename = tempFile()
+      writeFileSync(filename, "")
+
+      expect((yield* build({ filename }))._tag).toBe("Success")
+    }))
+
+  it.effect("opens a path that does not exist yet", () =>
+    Effect.gen(function*() {
+      expect((yield* build({ filename: tempFile() }))._tag).toBe("Success")
+    }))
+
+  it.effect("opens an in-memory database, which has no path to probe", () =>
+    Effect.gen(function*() {
+      expect((yield* build({ filename: ":memory:" }))._tag).toBe("Success")
+    }))
+
+  it.effect("leaves a path that is not a regular file to the driver", () =>
+    Effect.gen(function*() {
+      // A directory cannot be probed and is not a 0.x database: the driver's
+      // own open failure must surface, not the guard's refusal.
+      const defect = defectOf(yield* build({ filename: tempDirectory() }))
+
+      expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(false)
+    }))
+
+  it.effect("leaves a file that is not SQLite at all to the driver", () =>
+    Effect.gen(function*() {
+      const filename = tempFile("garbage.db")
+      writeFileSync(filename, "this is not a SQLite database")
+
+      const defect = defectOf(yield* build({ filename }))
+
+      expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(false)
+    }))
+})
+
+describe("NodeDatabase guard: Bun (X-18)", () => {
+  afterEach(() => {
+    delete (process.versions as { bun?: string }).bun
+  })
+
+  it.effect("refuses to open the durable database under Bun", () =>
+    Effect.gen(function*() {
+      const filename = tempFile()
+      ;(process.versions as { bun?: string }).bun = "1.3.14"
+
+      const defect = defectOf(yield* build({ filename }))
+
+      expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(true)
+      if (!NodeDatabase.isUnsupportedDatabase(defect)) return
+      expect(defect.code).toBe("unsupported_runtime")
+      expect(defect.message).toBe("1.0.0-rc.0 runs the durable engine on Node.js >=22.19.0 only")
+    }))
+
+  it.effect("refuses before it inspects the file, so an in-memory database is refused too", () =>
+    Effect.gen(function*() {
+      ;(process.versions as { bun?: string }).bun = "1.3.14"
+
+      const defect = defectOf(yield* build({ filename: ":memory:" }))
+
+      expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(true)
+      if (!NodeDatabase.isUnsupportedDatabase(defect)) return
+      expect(defect.code).toBe("unsupported_runtime")
+    }))
+})

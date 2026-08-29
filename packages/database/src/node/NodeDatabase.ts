@@ -13,8 +13,10 @@
  */
 import * as SqliteClient from "@effect/sql-sqlite-node/SqliteClient"
 
-import { Duration, Effect, Layer, Schedule } from "effect"
+import { Duration, Effect, Layer, Schedule, Schema } from "effect"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
+import { statSync } from "node:fs"
+import { DatabaseSync } from "node:sqlite"
 
 /**
  * Configuration for a Node SQLite connection.
@@ -29,6 +31,133 @@ export interface NodeDatabaseOptions {
   /** Additional driver configuration. WAL remains enabled unless explicitly disabled. */
   readonly sqlite?: Omit<SqliteClient.SqliteClientConfig, "filename"> | undefined
 }
+
+/**
+ * Stable codes for the two rc.0 exclusions this driver enforces.
+ *
+ * `unsupported_runtime` refuses the durable engine under Bun (rc-contract
+ * §1 and §7 "Runtimes", exclusion X-18). `unsupported_database_file` refuses a
+ * 0.x `smithers.db` (rc-contract §2 and §6, exclusion X-13).
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export const UnsupportedDatabaseCode = Schema.Literals([
+  "unsupported_runtime",
+  "unsupported_database_file"
+])
+
+/**
+ * Stable code for an rc.0 refusal to open a durable database.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type UnsupportedDatabaseCode = typeof UnsupportedDatabaseCode.Type
+
+/**
+ * Refusal to open a durable database in 1.0.0-rc.0.
+ *
+ * Raised as a *defect* by `layer`, not as a typed failure, for the same
+ * reason a non-lock open failure is a defect: `layer` is a leaf client layer
+ * whose error channel every durable package composes against as `never`, and
+ * neither refusal is recoverable at run time. Both are operator mistakes
+ * fixed by pointing the runtime somewhere else or by running Node.js. The
+ * value carried by the defect is still typed and matchable with
+ * `isUnsupportedDatabase`.
+ *
+ * @category errors
+ * @since 1.0.0
+ */
+export class UnsupportedDatabase extends Schema.TaggedError<UnsupportedDatabase>()(
+  "@smthrs/database/UnsupportedDatabase",
+  {
+    code: UnsupportedDatabaseCode,
+    message: Schema.String
+  }
+) {}
+
+/**
+ * Narrows an unknown defect to this driver's refusal.
+ *
+ * @category refinements
+ * @since 1.0.0
+ */
+export const isUnsupportedDatabase = (input: unknown): input is UnsupportedDatabase =>
+  input instanceof UnsupportedDatabase
+
+/** The one Node.js floor rc.0 states, repeated in the refusal message. */
+const nodeFloor = ">=22.19.0"
+
+/**
+ * The ledger table every flows migration set records its progress in
+ * (`Migrations.table`). Its absence from a database that already has tables
+ * is what separates a 0.x `smithers.db` from a Smithers 1.0 file. Repeated
+ * here rather than imported so the guard stays free of the migration module.
+ */
+const migrationLedgerTable = "flows_migrations"
+
+/**
+ * Reads the tables of a file without joining the WAL or converting it.
+ *
+ * Returns `undefined` when the file cannot be inspected at all: a path that
+ * does not exist, a directory, an in-memory name, or a file SQLite refuses to
+ * read. None of those is a 0.x database, so the driver's own open behavior
+ * decides what happens next and the guard says nothing.
+ */
+const readTableNames = (filename: string): ReadonlyArray<string> | undefined => {
+  try {
+    if (!statSync(filename).isFile()) return undefined
+    const db = new DatabaseSync(filename, { readOnly: true })
+    try {
+      return db
+        .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+        .all()
+        .map((row) => String((row as { readonly name: unknown }).name))
+    } finally {
+      db.close()
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Refuses the open when rc.0 does not support it, and says nothing otherwise.
+ *
+ * Order matters: the runtime check runs before the file is touched, so a Bun
+ * process is told it is the wrong runtime rather than told something about
+ * the file it pointed at.
+ */
+const unsupportedOpen = (filename: string): UnsupportedDatabase | undefined => {
+  if (process.versions.bun !== undefined) {
+    return new UnsupportedDatabase({
+      code: "unsupported_runtime",
+      message: `1.0.0-rc.0 runs the durable engine on Node.js ${nodeFloor} only`
+    })
+  }
+  const tables = readTableNames(filename)
+  if (tables === undefined || tables.length === 0) return undefined
+  if (tables.includes(migrationLedgerTable)) return undefined
+  return new UnsupportedDatabase({
+    code: "unsupported_database_file",
+    message: `${filename} is not a Smithers 1.0 database (1.0.0-rc.0 does not load a 0.x smithers.db)`
+  })
+}
+
+/**
+ * The rc.0 open guard, evaluated once per layer build.
+ *
+ * A `smithers.db` opened through this ladder would gain `flows_*` tables
+ * beside its `_smithers_*` ones and silently mix two schemas; a durable
+ * database opened under Bun would fail later, deeper, and less legibly. Both
+ * are refused here, before the connection exists.
+ */
+const guardOpen = (filename: string): Effect.Effect<void> =>
+  Effect.suspend(() => {
+    const refusal = unsupportedOpen(filename)
+    return refusal === undefined ? Effect.void : Effect.die(refusal)
+  })
 
 /** Bounds how long a connection keeps retrying a peer that holds the database. */
 const openAttempts = 40
@@ -107,7 +236,10 @@ const retryLockedOpen = <A>(self: Layer.Layer<A>): Layer.Layer<A> =>
  * @slop
  */
 export const layer = (options: NodeDatabaseOptions): Layer.Layer<SqlClient.SqlClient> =>
-  retryLockedOpen(SqliteClient.layer({
-    ...options.sqlite,
-    filename: options.filename
-  }))
+  Layer.unwrap(Effect.as(
+    guardOpen(options.filename),
+    retryLockedOpen(SqliteClient.layer({
+      ...options.sqlite,
+      filename: options.filename
+    }))
+  ))
