@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "smithers": {
+      "command": "npx",
+      "args": ["--package", "@smthrs/cli", "smithers", "--mcp"]
+    }
+  }
+}

@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "smithers": {
-      "command": "bunx",
-      "args": ["smthrs", "--mcp"]
-    }
-  }
-}

@@ -1,0 +1,29 @@
+{
+  "name": "smithers",
+  "version": "1.0.0-rc.0",
+  "description": "Drive Smithers, the durable control plane for long-running coding agents: plan, approve, run, watch, and resume durable flows.",
+  "author": {
+    "name": "Smithers",
+    "url": "https://smithers.sh"
+  },
+  "homepage": "https://smithers.sh",
+  "repository": "https://github.com/smithersai/smithers",
+  "license": "MIT",
+  "keywords": ["flows", "orchestration", "durable", "agents", "smithers"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Smithers",
+    "shortDescription": "Durable, resumable AI flows you drive from the terminal",
+    "longDescription": "Smithers is a durable control plane for long-running coding agents. This plugin lets Codex plan a flow, clear its approval gate, run it, watch it to completion, and resume it after a crash, so multi-step work survives a lost session instead of restarting from the beginning.",
+    "developerName": "Smithers",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://smithers.sh",
+    "defaultPrompt": [
+      "List the Smithers flows available in this repo.",
+      "Plan a Smithers flow that implements this and reviews it, then run it so I can watch."
+    ],
+    "brandColor": "#10A37F"
+  }
+}

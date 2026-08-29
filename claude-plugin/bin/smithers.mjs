@@ -2,10 +2,10 @@
 // Plugin launcher for the Smithers CLI.
 //
 // Config files (`.mcp.json`, `monitors/monitors.json`) can only name a static
-// command, so they name this script instead of `bunx smthrs`.
-// It forwards every argument, inherits stdio byte-for-byte (the MCP server
-// speaks JSON-RPC over stdin/stdout, so nothing may be written here), and
-// propagates the child's exit code or signal.
+// command, so they name this script instead of a package-runner invocation of
+// the published CLI. It forwards every argument, inherits stdio byte-for-byte
+// (the MCP server speaks JSON-RPC over stdin/stdout, so nothing may be written
+// here), and propagates the child's exit code or signal.
 //
 // Dependency-free: Node built-ins plus the sibling resolver only.
 

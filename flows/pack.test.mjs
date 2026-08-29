@@ -1,0 +1,245 @@
+/**
+ * The migration pack inputs, checked against the real registry and the real
+ * migration detector.
+ *
+ * These files are data for two consumers that do not exist yet: the Phase 6
+ * `migrate-smithers-v1` flow body, and the init pack. Data that nothing runs
+ * rots silently, so this suite runs the registry over the prompt bodies and the
+ * detector over the fixture, both through their production entry points.
+ *
+ * Run: node --test flows/pack.test.mjs
+ */
+
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
+import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
+
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+import * as NodePath from "@effect/platform-node/NodePath";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+
+import * as Discovery from "../packages/registry/src/Discovery.ts";
+import * as MarkdownFlow from "../packages/registry/src/MarkdownFlow.ts";
+import * as Detect from "../packages/migrate/src/Detect.ts";
+
+const flowsRoot = dirname(fileURLToPath(import.meta.url));
+const repoRoot = dirname(flowsRoot);
+const platform = Layer.merge(NodeFileSystem.layer, NodePath.layer);
+const run = (effect) => Effect.runPromise(effect.pipe(Effect.provide(platform)));
+
+/** The ten prompt bodies this lane stages, by their path-derived flow name. */
+const EXPECTED_FLOWS = [
+  "create-flow/clarify",
+  "create-flow/design",
+  "create-flow/document",
+  "create-flow/fix",
+  "create-flow/provision",
+  "create-flow/scaffold",
+  "create-skill/clarify",
+  "create-skill/design",
+  "create-skill/document",
+  "create-skill/scaffold",
+];
+
+const FIXTURE = "migrate-smithers-v1/test/fixtures/smithers-0x-hello";
+
+/** Every `flow.mdx` under `flows/`, as repository-relative POSIX paths. */
+function markdownFlows(directory = flowsRoot) {
+  const found = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const full = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      found.push(...markdownFlows(full));
+    } else if (entry.name === "flow.mdx") {
+      found.push(full);
+    }
+  }
+  return found;
+}
+
+describe("the staged prompt bodies", () => {
+  const files = markdownFlows();
+
+  it("are the ten create-flow and create-skill bodies", () => {
+    assert.deepEqual(
+      files.map((file) => relative(flowsRoot, dirname(file)).split("\\").join("/")).sort(),
+      EXPECTED_FLOWS,
+    );
+  });
+
+  for (const file of files) {
+    const name = relative(flowsRoot, dirname(file)).split("\\").join("/");
+
+    it(`${name} loads through MarkdownFlow with no warnings`, () => {
+      const text = readFileSync(file, "utf8");
+      const result = MarkdownFlow.fromMarkdown({
+        text,
+        path: relative(repoRoot, file).split("\\").join("/"),
+        baseDirectory: dirname(file),
+        naming: "path",
+        name: Option.some(name),
+        dirBasename: name.split("/").pop(),
+        provenance: { source: "project", root: flowsRoot },
+      });
+
+      assert.deepEqual(
+        result.warnings.map((warning) => `${warning.code}: ${warning.message}`),
+        [],
+      );
+      assert.ok(Option.isSome(result.descriptor), `${name} produced no descriptor`);
+
+      const descriptor = result.descriptor.value;
+      assert.equal(descriptor.name, name);
+      assert.ok(descriptor.description.length > 0);
+      assert.ok(
+        [...descriptor.description].length <= 1024,
+        "a description over 1024 characters is refused by the Agent Skills limit",
+      );
+      assert.equal(descriptor.input._tag, "MarkdownArgs");
+      assert.equal(descriptor.output._tag, "MarkdownOutput");
+    });
+
+    it(`${name} renders a prompt that carries its body and the caller's arguments`, () => {
+      const body = MarkdownFlow.loadBody(readFileSync(file, "utf8"), dirname(file));
+      const rendered = MarkdownFlow.renderPrompt(body, { args: "THE-ARGUMENTS" });
+
+      assert.ok(rendered.startsWith(body.text.slice(0, 40)), "the body must lead the prompt");
+      assert.ok(rendered.includes("THE-ARGUMENTS"), "the caller's arguments must be appended");
+      assert.ok(!rendered.includes("---\ndescription:"), "frontmatter must not reach the model");
+    });
+
+    it(`${name} states the 1.0 authoring model, never the 0.x one`, () => {
+      const text = readFileSync(file, "utf8");
+      for (const removed of [
+        "createSmithers",
+        "<Task",
+        "jsxImportSource",
+        "gateway-react",
+        "gateway-ui",
+        "bunx smthrs",
+        "docs-full",
+        "ask-human",
+        "smithers ui ",
+        "smithers inspect",
+        "props.schema",
+      ]) {
+        assert.ok(!text.includes(removed), `${name} still mentions "${removed}"`);
+      }
+    });
+  }
+});
+
+describe("discovery over the project flows directory", () => {
+  it("finds exactly the staged bodies, with no warnings", async () => {
+    const scan = await run(
+      Effect.gen(function* () {
+        const discovery = Discovery.make(yield* FileSystem.FileSystem, yield* Path.Path);
+        return yield* discovery.scan({ source: "project", root: flowsRoot, naming: "path" });
+      }),
+    );
+
+    assert.deepEqual(
+      scan.warnings.map((warning) => `${warning.code} at ${warning.path}: ${warning.message}`),
+      [],
+    );
+    assert.deepEqual([...scan.entries].map((entry) => entry.name).sort(), EXPECTED_FLOWS);
+  });
+
+  it("finds no flow inside the 0.x fixture, which is data and not a flow", async () => {
+    const scan = await run(
+      Effect.gen(function* () {
+        const discovery = Discovery.make(yield* FileSystem.FileSystem, yield* Path.Path);
+        return yield* discovery.scan({
+          source: "project",
+          root: join(flowsRoot, "migrate-smithers-v1"),
+          naming: "path",
+        });
+      }),
+    );
+
+    assert.deepEqual([...scan.entries].map((entry) => entry.name), []);
+  });
+});
+
+describe("the smithers-0x-hello fixture", () => {
+  const root = join(flowsRoot, FIXTURE);
+
+  it("is a complete 0.x project on disk", () => {
+    for (const file of [
+      "package.json",
+      "tsconfig.json",
+      "FIXTURE.md",
+      "simple-workflow.jsx",
+      "_example-kit.js",
+      ".smithers/workflows/hello.tsx",
+      ".smithers/agents/index.ts",
+      ".smithers/prompts/hello.mdx",
+      ".smithers/ui/hello.tsx",
+      "prompts/simple-workflow/research.mdx",
+      "prompts/simple-workflow/write.mdx",
+    ]) {
+      assert.ok(statSync(join(root, file)).isFile(), `${file} is missing from the fixture`);
+    }
+  });
+
+  it("is outside every pnpm workspace glob, so its 0.x dependencies never install", () => {
+    const workspace = readFileSync(join(repoRoot, "pnpm-workspace.yaml"), "utf8");
+    const globs = [...workspace.matchAll(/^ {2}- "([^"]+)"$/gm)].map((match) => match[1]);
+    assert.ok(globs.length > 0, "the workspace file must declare package globs");
+    for (const glob of globs) {
+      assert.ok(!glob.startsWith("flows"), `workspace glob "${glob}" would pick up the fixture`);
+    }
+  });
+
+  it("is detected as a Smithers 0.x project by the migrate detector", async () => {
+    const detection = await run(Detect.scan(root));
+
+    assert.deepEqual(
+      detection.manifests.flatMap((manifest) => manifest.oldPackages),
+      [{ name: "smthrs", version: "0.35.0", field: "dependencies", reason: "old-name" }],
+    );
+
+    const tsconfig = detection.tsconfigs.find((entry) => entry.path === "tsconfig.json");
+    assert.equal(tsconfig?.jsx, "react-jsx");
+    assert.equal(tsconfig?.jsxImportSource, "smthrs");
+
+    assert.deepEqual(
+      detection.workflowFiles.map((entry) => `${entry.path}:${entry.api}:${entry.kind}`).sort(),
+      [".smithers/workflows/hello.tsx:smthrs:tsx", "simple-workflow.jsx:smthrs:jsx"],
+    );
+
+    assert.deepEqual(detection.prompts.map((entry) => entry.path).sort(), [
+      ".smithers/prompts/hello.mdx",
+      "prompts/simple-workflow/research.mdx",
+      "prompts/simple-workflow/write.mdx",
+    ]);
+
+    assert.deepEqual(detection.uis.map((entry) => entry.path), [".smithers/ui/hello.tsx"]);
+    assert.equal(detection.effectPin, "4.0.0-beta.105");
+    assert.ok(
+      detection.warnings.some((warning) => warning.code === "effect-pin-conflict"),
+      "the beta.105 pin must be reported against the rc.108 the 1.0 tree requires",
+    );
+  });
+
+  it("carries the 0.x CLI verbs its package scripts invoke", async () => {
+    const detection = await run(Detect.scan(join(flowsRoot, FIXTURE)));
+    assert.deepEqual(
+      detection.scripts.map((hit) => hit.text).sort(),
+      ["smithers up", "smithers workflow"],
+    );
+  });
+
+  it("holds no 0.x run state, so the migration gate has nothing to refuse", () => {
+    for (const path of [".smithers/smithers.db", "smithers.db", ".smithers/executions"]) {
+      assert.throws(() => statSync(join(root, path)), /ENOENT/, `${path} must not exist in the fixture`);
+    }
+  });
+});
