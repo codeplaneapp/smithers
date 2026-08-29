@@ -14,25 +14,32 @@ against a remote `smithers serve` with `--remote`.
 
 | Command | Summary |
 | --- | --- |
-| [`smithers approve`](/cli/approve) | Approve the complete serialized plan approval payload |
+| [`smithers approve`](/cli/approve) | Approve the complete serialized approval payload |
+| [`smithers bug`](/cli/bug) | Report a bug with a run digest attached |
 | [`smithers cancel`](/cli/cancel) | Cancel a durable run |
-| [`smithers deny`](/cli/deny) | Deny the complete serialized plan approval payload |
-| [`smithers docs`](/cli/docs) | Run the docs system flow |
-| [`smithers doctor`](/cli/doctor) | Run the doctor system flow |
-| [`smithers init`](/cli/init) | Run the init system flow |
+| [`smithers claude`](/cli/claude) | Claude Code plugin mirror protocol |
+| [`smithers deny`](/cli/deny) | Deny the complete serialized approval payload |
+| [`smithers docs`](/cli/docs) | Print the bundled documentation; --full prints llms-full.txt |
+| [`smithers doctor`](/cli/doctor) | Report registry, database, runtime, and provider readiness |
+| [`smithers down`](/cli/down) | Cancel every non-terminal run |
+| [`smithers gc`](/cli/gc) | Delete terminal runs older than a threshold and compact the journal |
+| [`smithers init`](/cli/init) | Scaffold flows/&lt;name&gt;/flow.mdx and ignore .flows/ |
 | [`smithers logs`](/cli/logs) | Read run events; --follow streams future events |
-| [`smithers ls`](/cli/ls) | List available flows |
-| [`smithers migrate`](/cli/migrate) | Run the migrate system flow |
+| [`smithers ls`](/cli/ls) | List the flows discovered under this project |
+| [`smithers mcp`](/cli/mcp) | Wire the Smithers MCP server into an agent |
+| [`smithers memory`](/cli/memory) | Read and write namespaced facts in the control database |
+| [`smithers migrate`](/cli/migrate) | Convert a Smithers 0.x project to the 1.0 authoring model |
+| [`smithers output`](/cli/output) | Print one registered node output |
 | [`smithers plan`](/cli/plan) | Render a flow plan and its complete approval payload |
 | [`smithers ps`](/cli/ps) | List durable runs |
 | [`smithers run`](/cli/run) | Run an approved plan payload, or resume a parked run |
-| [`smithers serve`](/cli/serve) | Run the serve system flow |
+| [`smithers serve`](/cli/serve) | Host the control server for this project |
 | [`smithers signal`](/cli/signal) | Deliver a durable JSON signal to a run |
-| [`smithers status`](/cli/status) | Show control status |
-| [`smithers up`](/cli/up) | Boot the local stack; --watch enables development mode |
-
-The binary also registers the reserved system verbs `release`, `replay`, `add`, `remove`, `eject`, `test`. Section 4.2 of the release contract removes them; see the
-[migration guide](/migration/1.0#removed-commands).
+| [`smithers skills`](/cli/skills) | Install and list the smithers agent skill |
+| [`smithers status`](/cli/status) | Show the diagnosis card for one run, or the run listing |
+| [`smithers steer`](/cli/steer) | Send a durable, attributed steering message to a run |
+| [`smithers up`](/cli/up) | Plan, approve, and run one flow; -d launches it detached |
+| [`smithers update`](/cli/update) | Check npm for a newer @smthrs/cli |
 
 ## Aliases
 
@@ -54,11 +61,12 @@ The binary also registers the reserved system verbs `release`, `replay`, `add`, 
 | `--remote string` | See the command pages. |
 | `--quiet` | See the command pages. |
 | `--mcp-config string` | See the command pages. |
+| `--root string` | See the command pages. |
 | `--help, -h` | Show help information |
 | `--version, -v` | Show version information |
 | `--wizard` | Start wizard mode for a command |
-| `--completions <bash\|zsh\|fish\|sh>` | Print shell completion script (choices: bash, zsh, fish, sh) |
-| `--log-level <all\|trace\|debug\|info\|warn\|warning\|error\|fatal\|none>` | Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none) |
+| `--completions &lt;bash\|zsh\|fish\|sh&gt;` | Print shell completion script (choices: bash, zsh, fish, sh) |
+| `--log-level &lt;all\|trace\|debug\|info\|warn\|warning\|error\|fatal\|none&gt;` | Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none) |
 
 ## Exit codes
 

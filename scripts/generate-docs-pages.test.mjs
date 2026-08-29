@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { helpBlock, helpEntry, parseHelp } from "./docs-help.mjs"
+import { pages } from "./docs-pages.mjs"
 
 const help = [
   "DESCRIPTION",
@@ -51,4 +52,26 @@ test("parses a help page into its blocks", () => {
 
 test("a help page with no subcommands reports none", () => {
   assert.deepEqual(parseHelp("DESCRIPTION\n  Something\n").subcommands, [])
+})
+
+test("no generated CLI page interpolates help text MDX would read as a tag", () => {
+  // `smithers init` describes itself as "Scaffold flows/<name>/flow.mdx". Copied
+  // into a page unescaped, that is an unclosed JSX element and `vocs build`
+  // dies on it, so the escape belongs in the generator rather than in a
+  // hand-edit of one page.
+  const offenders = []
+  for (const page of pages()) {
+    if (!page.route.startsWith("/cli")) continue
+    let fenced = false
+    for (const line of page.body.split("\n")) {
+      if (/^\s*`{3,}/.test(line)) {
+        fenced = !fenced
+        continue
+      }
+      if (fenced) continue
+      const prose = line.replace(/`[^`]*`/g, "")
+      if (/<[A-Za-z/]/.test(prose)) offenders.push(`${page.path}: ${line.trim()}`)
+    }
+  }
+  assert.deepEqual(offenders, [])
 })

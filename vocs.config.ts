@@ -59,15 +59,25 @@ export default defineConfig({
         { text: "approve", link: "/cli/approve" },
         { text: "deny", link: "/cli/deny" },
         { text: "cancel", link: "/cli/cancel" },
+        { text: "down", link: "/cli/down" },
         { text: "signal", link: "/cli/signal" },
+        { text: "steer", link: "/cli/steer" },
         { text: "ls", link: "/cli/ls" },
         { text: "ps", link: "/cli/ps" },
         { text: "status", link: "/cli/status" },
         { text: "logs", link: "/cli/logs" },
+        { text: "output", link: "/cli/output" },
+        { text: "memory", link: "/cli/memory" },
         { text: "serve", link: "/cli/serve" },
+        { text: "gc", link: "/cli/gc" },
         { text: "init", link: "/cli/init" },
         { text: "doctor", link: "/cli/doctor" },
         { text: "docs", link: "/cli/docs" },
+        { text: "skills", link: "/cli/skills" },
+        { text: "mcp", link: "/cli/mcp" },
+        { text: "claude", link: "/cli/claude" },
+        { text: "update", link: "/cli/update" },
+        { text: "bug", link: "/cli/bug" },
         { text: "migrate", link: "/cli/migrate" }
       ]
     },
@@ -128,7 +138,15 @@ export default defineConfig({
         { text: "@smthrs/control", link: "/api/control" },
         { text: "@smthrs/gateway", link: "/api/gateway" },
         { text: "@smthrs/agent", link: "/api/agent" },
-        { text: "@smthrs/patterns", link: "/api/patterns" },
+        {
+          text: "@smthrs/patterns",
+          link: "/api/patterns",
+          items: [
+            { text: "Loops", link: "/api/patterns-loops" },
+            { text: "Delegation", link: "/api/patterns-delegation" },
+            { text: "Teams", link: "/api/patterns-teams" }
+          ]
+        },
         { text: "@smthrs/registry", link: "/api/registry" },
         { text: "@smthrs/memory", link: "/api/memory" },
         { text: "@smthrs/notifications", link: "/api/notifications" },

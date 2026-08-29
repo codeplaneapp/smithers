@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   cell,
+  mdxText,
   contractProse,
   errorTags,
   exitCodes,
@@ -14,6 +15,20 @@ import {
   variantRows,
   variantTag
 } from "./docs-render.mjs"
+
+test("escapes an angle-bracket placeholder MDX would read as a tag", () => {
+  assert.equal(mdxText("Scaffold flows/<name>/flow.mdx"), "Scaffold flows/&lt;name&gt;/flow.mdx")
+  assert.equal(mdxText("Close a </div>"), "Close a &lt;/div&gt;")
+})
+
+test("leaves a code span and a comparison alone", () => {
+  assert.equal(mdxText("run `smithers init <name>` first"), "run `smithers init <name>` first")
+  assert.equal(mdxText("when a < b"), "when a < b")
+})
+
+test("a cell is both pipe-safe and MDX-safe", () => {
+  assert.equal(cell("flows/<name>|x"), "flows/&lt;name&gt;\\|x")
+})
 
 test("escapes a pipe so a cell cannot end its column", () => {
   assert.equal(cell("a|b"), "a\\|b")

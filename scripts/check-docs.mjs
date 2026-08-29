@@ -2,8 +2,8 @@
 /**
  * The documentation gate.
  *
- * Nine checks over the vocs page tree, each one a claim the documentation makes
- * that can be verified against something else in the repository:
+ * Eleven checks over the vocs page tree, each one a claim the documentation
+ * makes that can be verified against something else in the repository:
  *
  *   1. house style: no em-dash anywhere in the prose
  *   2. every page carries a frontmatter description and one H1
@@ -15,6 +15,8 @@
  *      a Smithers 0.x package
  *   8. the generated pages are current
  *   9. every asset the ledger keeps has a place in the route plan
+ *  10. every page is reachable from the sidebar, and every sidebar link resolves
+ *  11. the compatibility promise is quoted verbatim wherever section 11 says
  *
  * The two normalizers run in `--check` mode first, so their rules stay one
  * implementation rather than a detector and a fixer that can disagree.
@@ -24,8 +26,9 @@
 import { spawnSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { availableCommands, removedCommands, repoRoot } from "./docs-contract.mjs"
+import { availableCommands, compatibilityPromise, promiseHolders, removedCommands, repoRoot } from "./docs-contract.mjs"
 import { assets, isHistorical, pages } from "./docs-pages.mjs"
+import { sidebarRoutes } from "./docs-sidebar.mjs"
 import { routePlan } from "./docs-routes.mjs"
 import { cliCatalog } from "./docs-help.mjs"
 
@@ -292,6 +295,46 @@ for (const [title, argv] of [
   const plan = routePlan()
   if (plan.problems.length > 0) fail("the route plan must cover every kept asset", plan.problems)
   else pass(`the route plan covers ${plan.entries.length} kept assets and ${plan.deletions.length} deletion rules`)
+}
+
+// -----------------------------------------------------------------------------
+// 10. Sidebar reachability
+// -----------------------------------------------------------------------------
+
+{
+  // A generated page can exist, build, and ship while reachable only by guessing
+  // its URL, because sidebar order is the one editorial thing no generator
+  // writes. Both directions matter: an unlisted page is invisible, and a link to
+  // a page that no longer exists is a 404 in the site's own navigation.
+  const links = await sidebarRoutes()
+  const offenders = []
+  for (const page of allPages) {
+    if (isHistorical(page.route) || links.has(page.route)) continue
+    offenders.push(`${page.path} is published and the sidebar does not list it`)
+  }
+  for (const link of links) {
+    if (link.startsWith("http") || routes.has(link)) continue
+    offenders.push(`the sidebar links ${link} and no page answers it`)
+  }
+  if (offenders.length > 0) fail("the sidebar must reach every page", offenders)
+  else pass(`the sidebar reaches all ${links.size} routes the site publishes`)
+}
+
+// -----------------------------------------------------------------------------
+// 11. The compatibility promise
+// -----------------------------------------------------------------------------
+
+{
+  // Section 11 froze one paragraph and named the three places it belongs. A
+  // rewrapped or reworded copy is a different promise, and this repository has
+  // already had one silently rewritten by a rename pass.
+  const promise = compatibilityPromise()
+  const offenders = promiseHolders.filter((path) => !readFileSync(join(repoRoot, path), "utf8").includes(promise))
+  if (offenders.length > 0) {
+    fail("the compatibility promise must be quoted verbatim", offenders.map((path) => `${path}: not verbatim`))
+  } else {
+    pass(`the compatibility promise is verbatim in ${promiseHolders.length} places`)
+  }
 }
 
 process.exit(failed ? 1 : 0)

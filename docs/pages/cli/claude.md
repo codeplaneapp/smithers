@@ -1,20 +1,20 @@
 ---
-description: "Deny the complete serialized approval payload"
+description: "Claude Code plugin mirror protocol"
 ---
 
-# smithers deny
+# smithers claude
 
-Deny the complete serialized approval payload.
+Claude Code plugin mirror protocol.
 
 ## Usage
 
 ```sh
-smithers deny [flags] <approval>
+smithers claude <subcommand> [flags]
 ```
 
 ## Behavior
 
-Denies; a denied plan can never launch.
+Claude Code plugin mirror protocol, `claudeMirrorContract` 2; run status vocabulary is the rc.0 `RunStatus`.
 
 ## Source
 

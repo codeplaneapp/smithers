@@ -23,8 +23,27 @@ export const replaceRegion = (source, name, body) => {
   return `${source.slice(0, start)}${regionStart(name)}\n\n${body.trim()}\n\n${source.slice(end)}`
 }
 
+/**
+ * Escapes the angle brackets a Markdown page renders as MDX would parse as JSX.
+ *
+ * `--help` text is data from the binary, and `smithers init` describes itself as
+ * "Scaffold flows/<name>/flow.mdx". Interpolated into a page, `<name>` is an
+ * unclosed JSX element and the site build dies on it. A code span is left alone,
+ * because inside one the brackets are already literal and are the conventional
+ * way to write a placeholder; a lone `<` between spaces is left alone too,
+ * because it is arithmetic rather than a tag.
+ *
+ * This escapes `>` as well, so apply it to interpolated data and never to
+ * authored Markdown: a blockquote passed through it would come out as text.
+ */
+export const mdxText = (text) =>
+  text
+    .split(/(`[^`]*`)/)
+    .map((part, index) => (index % 2 === 1 ? part : part.replace(/<(?=[A-Za-z/])/g, "&lt;").replace(/>/g, "&gt;")))
+    .join("")
+
 /** Escapes a cell so a pipe inside it cannot end the Markdown column. */
-export const cell = (text) => text.replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ").trim()
+export const cell = (text) => mdxText(text).replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ").trim()
 
 /** Clauses that address the migration's own record rather than a reader. */
 const internalReference = /import reference|ledger |Phase [1-9]|triage|flows-cli|`Command\.ts|at HEAD/

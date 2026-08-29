@@ -1,26 +1,26 @@
 ---
-description: "Approve the complete serialized approval payload"
+description: "Report a bug with a run digest attached"
 ---
 
-# smithers approve
+# smithers bug
 
-Approve the complete serialized approval payload.
+Report a bug with a run digest attached.
 
 ## Usage
 
 ```sh
-smithers approve [flags] <approval>
+smithers bug [flags] [<summary...>]
 ```
 
 ## Behavior
 
-Plan-level and node-level (`ask`) approvals; principal stamped server-side.
+Posts a report with `Control.list` and a `Control.watch` digest to `bug.smithers.sh` (`SMITHERS_BUG_ENDPOINT`).
 
 ## Flags
 
 | Flag | Meaning |
 | --- | --- |
-| `--scope choice` | (choices: once, run, remembered) |
+| `--run string` | See the behavior above. |
 
 ## Source
 

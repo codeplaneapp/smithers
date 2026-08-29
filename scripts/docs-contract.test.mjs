@@ -1,12 +1,16 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import test from "node:test"
 import {
   availableCommands,
   codeSpans,
   commandName,
   compatibilityPromise,
+  promiseHolders,
   exclusions,
   publishedPackages,
+  repoRoot,
   releaseNotes,
   removedCommands,
   removedFlags,
@@ -92,6 +96,16 @@ test("quotes the compatibility promise verbatim from section 11", () => {
   const promise = compatibilityPromise()
   assert.match(promise, /^Smithers 1\.0\.0-rc\.0 is a source migration/)
   assert.match(promise, /no `smthrs\/jsx-runtime`/)
+})
+
+test("carries the promise verbatim everywhere section 11 names", () => {
+  const promise = compatibilityPromise()
+  for (const path of promiseHolders) {
+    assert.ok(
+      readFileSync(join(repoRoot, path), "utf8").includes(promise),
+      `${path} does not quote section 11 verbatim`
+    )
+  }
 })
 
 test("pairs every release note with the exclusions that cite it", () => {

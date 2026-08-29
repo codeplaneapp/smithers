@@ -1,15 +1,15 @@
 ---
-description: "Run the docs system flow"
+description: "Print the bundled documentation; --full prints llms-full.txt"
 ---
 
 # smithers docs
 
-Run the docs system flow.
+Print the bundled documentation; --full prints llms-full.txt.
 
 ## Usage
 
 ```sh
-smithers docs [flags] [<key=value...>]
+smithers docs [flags]
 ```
 
 ## Behavior
@@ -20,7 +20,7 @@ Prints the bundled `llms.txt` or `llms-full.txt` generated from the vocs `docs/p
 
 | Flag | Meaning |
 | --- | --- |
-| `--data string` | See the behavior above. |
+| `--full` | See the behavior above. |
 
 ## Source
 

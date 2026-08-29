@@ -1,15 +1,15 @@
 ---
-description: "Run the serve system flow"
+description: "Host the control server for this project"
 ---
 
 # smithers serve
 
-Run the serve system flow.
+Host the control server for this project.
 
 ## Usage
 
 ```sh
-smithers serve [flags] [<key=value...>]
+smithers serve [flags]
 ```
 
 ## Behavior
@@ -20,7 +20,9 @@ Hosts the control server (section 10): `/rpc`, `/rpc/ws`, `/sync`, `/sync/ws`, `
 
 | Flag | Meaning |
 | --- | --- |
-| `--data string` | See the behavior above. |
+| `--host string` | See the behavior above. |
+| `--port integer` | See the behavior above. |
+| `--listen` | See the behavior above. |
 
 ## Source
 

@@ -1,20 +1,20 @@
 ---
-description: "Deny the complete serialized approval payload"
+description: "Print one registered node output"
 ---
 
-# smithers deny
+# smithers output
 
-Deny the complete serialized approval payload.
+Print one registered node output.
 
 ## Usage
 
 ```sh
-smithers deny [flags] <approval>
+smithers output [flags] RUN_ID [NODE_ID]
 ```
 
 ## Behavior
 
-Denies; a denied plan can never launch.
+Registered node output from the `node-output` projection.
 
 ## Source
 

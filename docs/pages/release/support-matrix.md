@@ -34,33 +34,33 @@ SQLite only. PostgreSQL and PGlite exit with `unsupported_database`; see
 | Command | Behavior |
 | --- | --- |
 | [`smithers approve`](/cli/approve) | Plan-level and node-level (`ask`) approvals; principal stamped server-side. |
-| `smithers bug` | Posts a report with `Control.list` and a `Control.watch` digest to `bug.smithers.sh` (`SMITHERS_BUG_ENDPOINT`). |
+| [`smithers bug`](/cli/bug) | Posts a report with `Control.list` and a `Control.watch` digest to `bug.smithers.sh` (`SMITHERS_BUG_ENDPOINT`). |
 | [`smithers cancel`](/cli/cancel) | Durable, cross-process (section 5). |
-| `smithers claude` | Claude Code plugin mirror protocol, `claudeMirrorContract` 2; run status vocabulary is the rc.0 `RunStatus`. |
+| [`smithers claude`](/cli/claude) | Claude Code plugin mirror protocol, `claudeMirrorContract` 2; run status vocabulary is the rc.0 `RunStatus`. |
 | `smithers completions` | Standard. |
 | [`smithers deny`](/cli/deny) | Denies; a denied plan can never launch. |
 | [`smithers docs`](/cli/docs) | Prints the bundled `llms.txt` or `llms-full.txt` generated from the vocs `docs/pages` tree (section 9 exception 2, R-25). |
 | [`smithers doctor`](/cli/doctor) | Reports registry discovery warnings, database paths and ladder state, Node version, `jj` on `PATH`, provider keys present, and 0.x state detected (section 6). |
-| `smithers down` | Cancels every non-terminal run (`Control.list` then `cancel`). |
-| `smithers gc` | Deletes terminal runs older than the threshold with their attempts, clock, deferred, and waiting rows and time-travel archive entries, then `Journal.compact`. Automatic retention stays off by default. |
+| [`smithers down`](/cli/down) | Cancels every non-terminal run (`Control.list` then `cancel`). |
+| [`smithers gc`](/cli/gc) | Deletes terminal runs older than the threshold with their attempts, clock, deferred, and waiting rows and time-travel archive entries, then `Journal.compact`. Automatic retention stays off by default. |
 | [`smithers init`](/cli/init) | Scaffolds `flows/<name>/flow.mdx` and adds `.flows/` to `.gitignore`. `--global` is not supported (seats resolve from environment keys); it exits 1. |
 | [`smithers logs`](/cli/logs) | Transcript or raw `ControlEvent` stream. `events` is an alias of `logs --json`. |
 | [`smithers ls`](/cli/ls) | Registry descriptors from `<project>/flows/**`. `workflow list` is an alias. |
-| `smithers mcp` | MCP server over stdio; `{ ok, data?, error? }` envelope kept. Supported tools (11): `list_workflows`, `run_workflow`, `list_runs`, `get_run`, `watch_run`, `get_run_events`, `explain_run`, `list_pending_approvals`, `resolve_approval`, `get_node_detail`, `get_chat_transcript`. Unsupported tools (10) return `{ ok: false, error: { code: "unsupported", ... } }`: `revert_attempt`, `fork_run`, `replay_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, `time_travel`, `list_artifacts`, `ask_human`. |
-| `smithers memory` | Namespaced facts in the control database. |
+| [`smithers mcp`](/cli/mcp) | MCP server over stdio; `{ ok, data?, error? }` envelope kept. Supported tools (11): `list_workflows`, `run_workflow`, `list_runs`, `get_run`, `watch_run`, `get_run_events`, `explain_run`, `list_pending_approvals`, `resolve_approval`, `get_node_detail`, `get_chat_transcript`. Unsupported tools (10) return `{ ok: false, error: { code: "unsupported", ... } }`: `revert_attempt`, `fork_run`, `replay_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, `time_travel`, `list_artifacts`, `ask_human`. |
+| [`smithers memory`](/cli/memory) | Namespaced facts in the control database. |
 | [`smithers migrate`](/cli/migrate) | The reserved `system/migrate` flow id is retired so the verb does not collide with the project flow. |
-| `smithers output` | Registered node output from the `node-output` projection. |
+| [`smithers output`](/cli/output) | Registered node output from the `node-output` projection. |
 | [`smithers plan`](/cli/plan) | `Control.plan`; prints the `PlanCard` and the approval payload. |
 | [`smithers ps`](/cli/ps) | Run listing; `--status` validated against `accepted\|running\|parked\|waiting-approval\|cancelled\|completed\|failed`. |
 | `smithers resume` | Alias of `run --resume`. |
 | [`smithers run`](/cli/run) | Launches an approved plan; blocks until settlement when the local process owns the executor. |
 | [`smithers serve`](/cli/serve) | Hosts the control server (section 10): `/rpc`, `/rpc/ws`, `/sync`, `/sync/ws`, `/projections/ws`, `GET /health`. Loopback default; non-loopback requires `--listen` and a bearer token. `gateway` is an alias for rc.0 only. |
 | [`smithers signal`](/cli/signal) | Delivers a named signal to a flow parked on `WaitFor` (section 5). |
-| `smithers skills` | Writes the `smithers` skill into detected agents; no automatic refresh side effect on other commands. |
+| [`smithers skills`](/cli/skills) | Writes the `smithers` skill into detected agents; no automatic refresh side effect on other commands. |
 | [`smithers status`](/cli/status) | Forensics diagnosis card for one run, or the run listing. `inspect` and `why` are aliases. |
-| `smithers steer` | Durable, attributed steer through the notification queue; drained at the agent's turn close. |
+| [`smithers steer`](/cli/steer) | Durable, attributed steer through the notification queue; drained at the agent's turn close. |
 | [`smithers up`](/cli/up) | One-shot launch: plan, approve with scope `run`, run; prints `{ runId }` under `--json`; exit code follows the terminal status. `-d` spawns `smithers run` detached, logs to `.flows/logs/<runId>.log`, and returns after the admission line (30 s default). Operator-supplied run ids are not supported; callers read `runId` from the receipt. |
-| `smithers update` | npm `latest`/`next` check for `@smthrs/cli`. |
+| [`smithers update`](/cli/update) | npm `latest`/`next` check for `@smthrs/cli`. |
 
 ## Run control
 

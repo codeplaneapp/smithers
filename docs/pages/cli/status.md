@@ -1,10 +1,10 @@
 ---
-description: "Show control status"
+description: "Show the diagnosis card for one run, or the run listing"
 ---
 
 # smithers status
 
-Show control status.
+Show the diagnosis card for one run, or the run listing.
 
 ## Usage
 

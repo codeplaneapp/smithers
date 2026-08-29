@@ -1,26 +1,20 @@
 ---
-description: "Run the doctor system flow"
+description: "Report registry, database, runtime, and provider readiness"
 ---
 
 # smithers doctor
 
-Run the doctor system flow.
+Report registry, database, runtime, and provider readiness.
 
 ## Usage
 
 ```sh
-smithers doctor [flags] [<key=value...>]
+smithers doctor [flags]
 ```
 
 ## Behavior
 
 Reports registry discovery warnings, database paths and ladder state, Node version, `jj` on `PATH`, provider keys present, and 0.x state detected (section 6).
-
-## Flags
-
-| Flag | Meaning |
-| --- | --- |
-| `--data string` | See the behavior above. |
 
 ## Source
 

@@ -1,20 +1,20 @@
 ---
-description: "Deny the complete serialized approval payload"
+description: "Cancel every non-terminal run"
 ---
 
-# smithers deny
+# smithers down
 
-Deny the complete serialized approval payload.
+Cancel every non-terminal run.
 
 ## Usage
 
 ```sh
-smithers deny [flags] <approval>
+smithers down [flags]
 ```
 
 ## Behavior
 
-Denies; a denied plan can never launch.
+Cancels every non-terminal run (`Control.list` then `cancel`).
 
 ## Source
 

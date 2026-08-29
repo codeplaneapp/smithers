@@ -21,7 +21,7 @@ Run listing; `--status` validated against `accepted|running|parked|waiting-appro
 | Flag | Meaning |
 | --- | --- |
 | `--flow string` | See the behavior above. |
-| `--status string` | See the behavior above. |
+| `--status choice` | (choices: accepted, running, parked, waiting-approval, cancelled, completed, failed) |
 
 ## Source
 

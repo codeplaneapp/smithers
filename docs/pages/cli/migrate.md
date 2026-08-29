@@ -1,26 +1,20 @@
 ---
-description: "Run the migrate system flow"
+description: "Convert a Smithers 0.x project to the 1.0 authoring model"
 ---
 
 # smithers migrate
 
-Run the migrate system flow.
+Convert a Smithers 0.x project to the 1.0 authoring model.
 
 ## Usage
 
 ```sh
-smithers migrate [flags] [<key=value...>]
+smithers migrate [flags] [<path>]
 ```
 
 ## Behavior
 
 The reserved `system/migrate` flow id is retired so the verb does not collide with the project flow.
-
-## Flags
-
-| Flag | Meaning |
-| --- | --- |
-| `--data string` | See the behavior above. |
 
 ## Removed flags
 
@@ -28,7 +22,7 @@ These flags existed in Smithers 0.x. `smithers migrate` declares each one so it 
 
 | Flag | Reason |
 | --- | --- |
-| `--to <backend>` | SQLite only; the 0.x database move is removed (section 2, error code `unsupported_database`) |
+| `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed (section 2, error code `unsupported_database`) |
 
 ## Source
 

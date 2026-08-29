@@ -1,26 +1,20 @@
 ---
-description: "Run the init system flow"
+description: "Scaffold flows/<name>/flow.mdx and ignore .flows/"
 ---
 
 # smithers init
 
-Run the init system flow.
+Scaffold flows/&lt;name&gt;/flow.mdx and ignore .flows/.
 
 ## Usage
 
 ```sh
-smithers init [flags] [<key=value...>]
+smithers init [flags] [<name>]
 ```
 
 ## Behavior
 
 Scaffolds `flows/<name>/flow.mdx` and adds `.flows/` to `.gitignore`. `--global` is not supported (seats resolve from environment keys); it exits 1.
-
-## Flags
-
-| Flag | Meaning |
-| --- | --- |
-| `--data string` | See the behavior above. |
 
 ## Removed flags
 

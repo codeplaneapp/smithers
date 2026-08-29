@@ -181,6 +181,21 @@ export const compatibilityPromise = (source = readFileSync(contractPath, "utf8")
   return quoted.map((line) => line.slice(2)).join("\n")
 }
 
+/**
+ * The files section 11 requires the promise in, word for word.
+ *
+ * The section names "the release notes, README, and migration guide". The
+ * release notes are the compatibility-policy page, which is what a reader of
+ * the changelog index lands on. Quoting rather than paraphrasing is the point:
+ * an approximate promise is a different promise, and a reader deciding whether
+ * to upgrade is entitled to the one the contract froze.
+ */
+export const promiseHolders = [
+  "README.md",
+  "docs/pages/migration/1.0.md",
+  "docs/pages/changelogs/compatibility-policy.md"
+]
+
 /** Section 7, the deferred-feature release notes, as one paragraph per entry. */
 export const releaseNoteParagraphs = (source = readFileSync(contractPath, "utf8")) => {
   const start = source.indexOf("## 7. Deferred features with release-note wording")

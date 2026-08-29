@@ -1048,25 +1048,32 @@ against a remote `smithers serve` with `--remote`.
 
 | Command | Summary |
 | --- | --- |
-| `smithers approve` | Approve the complete serialized plan approval payload |
+| `smithers approve` | Approve the complete serialized approval payload |
+| `smithers bug` | Report a bug with a run digest attached |
 | `smithers cancel` | Cancel a durable run |
-| `smithers deny` | Deny the complete serialized plan approval payload |
-| `smithers docs` | Run the docs system flow |
-| `smithers doctor` | Run the doctor system flow |
-| `smithers init` | Run the init system flow |
+| `smithers claude` | Claude Code plugin mirror protocol |
+| `smithers deny` | Deny the complete serialized approval payload |
+| `smithers docs` | Print the bundled documentation; --full prints llms-full.txt |
+| `smithers doctor` | Report registry, database, runtime, and provider readiness |
+| `smithers down` | Cancel every non-terminal run |
+| `smithers gc` | Delete terminal runs older than a threshold and compact the journal |
+| `smithers init` | Scaffold flows/&lt;name&gt;/flow.mdx and ignore .flows/ |
 | `smithers logs` | Read run events; --follow streams future events |
-| `smithers ls` | List available flows |
-| `smithers migrate` | Run the migrate system flow |
+| `smithers ls` | List the flows discovered under this project |
+| `smithers mcp` | Wire the Smithers MCP server into an agent |
+| `smithers memory` | Read and write namespaced facts in the control database |
+| `smithers migrate` | Convert a Smithers 0.x project to the 1.0 authoring model |
+| `smithers output` | Print one registered node output |
 | `smithers plan` | Render a flow plan and its complete approval payload |
 | `smithers ps` | List durable runs |
 | `smithers run` | Run an approved plan payload, or resume a parked run |
-| `smithers serve` | Run the serve system flow |
+| `smithers serve` | Host the control server for this project |
 | `smithers signal` | Deliver a durable JSON signal to a run |
-| `smithers status` | Show control status |
-| `smithers up` | Boot the local stack; --watch enables development mode |
-
-The binary also registers the reserved system verbs `release`, `replay`, `add`, `remove`, `eject`, `test`. Section 4.2 of the release contract removes them; see the
-migration guide.
+| `smithers skills` | Install and list the smithers agent skill |
+| `smithers status` | Show the diagnosis card for one run, or the run listing |
+| `smithers steer` | Send a durable, attributed steering message to a run |
+| `smithers up` | Plan, approve, and run one flow; -d launches it detached |
+| `smithers update` | Check npm for a newer @smthrs/cli |
 
 ### Aliases
 
@@ -1088,11 +1095,12 @@ migration guide.
 | `--remote string` | See the command pages. |
 | `--quiet` | See the command pages. |
 | `--mcp-config string` | See the command pages. |
+| `--root string` | See the command pages. |
 | `--help, -h` | Show help information |
 | `--version, -v` | Show version information |
 | `--wizard` | Start wizard mode for a command |
-| `--completions <bash\|zsh\|fish\|sh>` | Print shell completion script (choices: bash, zsh, fish, sh) |
-| `--log-level <all\|trace\|debug\|info\|warn\|warning\|error\|fatal\|none>` | Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none) |
+| `--completions &lt;bash\|zsh\|fish\|sh&gt;` | Print shell completion script (choices: bash, zsh, fish, sh) |
+| `--log-level &lt;all\|trace\|debug\|info\|warn\|warning\|error\|fatal\|none&gt;` | Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none) |
 
 ### Exit codes
 
@@ -1118,9 +1126,9 @@ verb and its replacement.
 
 Route: /cli/approve
 
-> Approve the complete serialized plan approval payload
+> Approve the complete serialized approval payload
 
-Approve the complete serialized plan approval payload.
+Approve the complete serialized approval payload.
 
 ### Usage
 
@@ -1137,6 +1145,32 @@ Plan-level and node-level (`ask`) approvals; principal stamped server-side.
 | Flag | Meaning |
 | --- | --- |
 | `--scope choice` | (choices: once, run, remembered) |
+
+---
+
+## smithers bug
+
+Route: /cli/bug
+
+> Report a bug with a run digest attached
+
+Report a bug with a run digest attached.
+
+### Usage
+
+```sh
+smithers bug [flags] [<summary...>]
+```
+
+### Behavior
+
+Posts a report with `Control.list` and a `Control.watch` digest to `bug.smithers.sh` (`SMITHERS_BUG_ENDPOINT`).
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--run string` | See the behavior above. |
 
 ---
 
@@ -1160,13 +1194,33 @@ Durable, cross-process (section 5).
 
 ---
 
+## smithers claude
+
+Route: /cli/claude
+
+> Claude Code plugin mirror protocol
+
+Claude Code plugin mirror protocol.
+
+### Usage
+
+```sh
+smithers claude <subcommand> [flags]
+```
+
+### Behavior
+
+Claude Code plugin mirror protocol, `claudeMirrorContract` 2; run status vocabulary is the rc.0 `RunStatus`.
+
+---
+
 ## smithers deny
 
 Route: /cli/deny
 
-> Deny the complete serialized plan approval payload
+> Deny the complete serialized approval payload
 
-Deny the complete serialized plan approval payload.
+Deny the complete serialized approval payload.
 
 ### Usage
 
@@ -1184,14 +1238,14 @@ Denies; a denied plan can never launch.
 
 Route: /cli/docs
 
-> Run the docs system flow
+> Print the bundled documentation; --full prints llms-full.txt
 
-Run the docs system flow.
+Print the bundled documentation; --full prints llms-full.txt.
 
 ### Usage
 
 ```sh
-smithers docs [flags] [<key=value...>]
+smithers docs [flags]
 ```
 
 ### Behavior
@@ -1202,7 +1256,7 @@ Prints the bundled `llms.txt` or `llms-full.txt` generated from the vocs `docs/p
 
 | Flag | Meaning |
 | --- | --- |
-| `--data string` | See the behavior above. |
+| `--full` | See the behavior above. |
 
 ---
 
@@ -1210,25 +1264,66 @@ Prints the bundled `llms.txt` or `llms-full.txt` generated from the vocs `docs/p
 
 Route: /cli/doctor
 
-> Run the doctor system flow
+> Report registry, database, runtime, and provider readiness
 
-Run the doctor system flow.
+Report registry, database, runtime, and provider readiness.
 
 ### Usage
 
 ```sh
-smithers doctor [flags] [<key=value...>]
+smithers doctor [flags]
 ```
 
 ### Behavior
 
 Reports registry discovery warnings, database paths and ladder state, Node version, `jj` on `PATH`, provider keys present, and 0.x state detected (section 6).
 
+---
+
+## smithers down
+
+Route: /cli/down
+
+> Cancel every non-terminal run
+
+Cancel every non-terminal run.
+
+### Usage
+
+```sh
+smithers down [flags]
+```
+
+### Behavior
+
+Cancels every non-terminal run (`Control.list` then `cancel`).
+
+---
+
+## smithers gc
+
+Route: /cli/gc
+
+> Delete terminal runs older than a threshold and compact the journal
+
+Delete terminal runs older than a threshold and compact the journal.
+
+### Usage
+
+```sh
+smithers gc [flags]
+```
+
+### Behavior
+
+Deletes terminal runs older than the threshold with their attempts, clock, deferred, and waiting rows and time-travel archive entries, then `Journal.compact`. Automatic retention stays off by default.
+
 ### Flags
 
 | Flag | Meaning |
 | --- | --- |
-| `--data string` | See the behavior above. |
+| `--older-than string` | See the behavior above. |
+| `--dry-run` | See the behavior above. |
 
 ---
 
@@ -1236,25 +1331,19 @@ Reports registry discovery warnings, database paths and ladder state, Node versi
 
 Route: /cli/init
 
-> Run the init system flow
+> Scaffold flows/<name>/flow.mdx and ignore .flows/
 
-Run the init system flow.
+Scaffold flows/&lt;name&gt;/flow.mdx and ignore .flows/.
 
 ### Usage
 
 ```sh
-smithers init [flags] [<key=value...>]
+smithers init [flags] [<name>]
 ```
 
 ### Behavior
 
 Scaffolds `flows/<name>/flow.mdx` and adds `.flows/` to `.gitignore`. `--global` is not supported (seats resolve from environment keys); it exits 1.
-
-### Flags
-
-| Flag | Meaning |
-| --- | --- |
-| `--data string` | See the behavior above. |
 
 ### Removed flags
 
@@ -1296,9 +1385,9 @@ Transcript or raw `ControlEvent` stream. `events` is an alias of `logs --json`.
 
 Route: /cli/ls
 
-> List available flows
+> List the flows discovered under this project
 
-List available flows.
+List the flows discovered under this project.
 
 ### Usage
 
@@ -1312,29 +1401,63 @@ Registry descriptors from `<project>/flows/**`. `workflow list` is an alias.
 
 ---
 
-## smithers migrate
+## smithers mcp
 
-Route: /cli/migrate
+Route: /cli/mcp
 
-> Run the migrate system flow
+> Wire the Smithers MCP server into an agent
 
-Run the migrate system flow.
+Wire the Smithers MCP server into an agent.
 
 ### Usage
 
 ```sh
-smithers migrate [flags] [<key=value...>]
+smithers mcp <subcommand> [flags]
+```
+
+### Behavior
+
+MCP server over stdio; `{ ok, data?, error? }` envelope kept. Supported tools (11): `list_workflows`, `run_workflow`, `list_runs`, `get_run`, `watch_run`, `get_run_events`, `explain_run`, `list_pending_approvals`, `resolve_approval`, `get_node_detail`, `get_chat_transcript`. Unsupported tools (10) return `{ ok: false, error: { code: "unsupported", ... } }`: `revert_attempt`, `fork_run`, `replay_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, `time_travel`, `list_artifacts`, `ask_human`.
+
+---
+
+## smithers memory
+
+Route: /cli/memory
+
+> Read and write namespaced facts in the control database
+
+Read and write namespaced facts in the control database.
+
+### Usage
+
+```sh
+smithers memory <subcommand> [flags]
+```
+
+### Behavior
+
+Namespaced facts in the control database.
+
+---
+
+## smithers migrate
+
+Route: /cli/migrate
+
+> Convert a Smithers 0.x project to the 1.0 authoring model
+
+Convert a Smithers 0.x project to the 1.0 authoring model.
+
+### Usage
+
+```sh
+smithers migrate [flags] [<path>]
 ```
 
 ### Behavior
 
 The reserved `system/migrate` flow id is retired so the verb does not collide with the project flow.
-
-### Flags
-
-| Flag | Meaning |
-| --- | --- |
-| `--data string` | See the behavior above. |
 
 ### Removed flags
 
@@ -1342,7 +1465,27 @@ These flags existed in Smithers 0.x. `smithers migrate` declares each one so it 
 
 | Flag | Reason |
 | --- | --- |
-| `--to <backend>` | SQLite only; the 0.x database move is removed (section 2, error code `unsupported_database`) |
+| `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed (section 2, error code `unsupported_database`) |
+
+---
+
+## smithers output
+
+Route: /cli/output
+
+> Print one registered node output
+
+Print one registered node output.
+
+### Usage
+
+```sh
+smithers output [flags] RUN_ID [NODE_ID]
+```
+
+### Behavior
+
+Registered node output from the `node-output` projection.
 
 ---
 
@@ -1395,7 +1538,7 @@ Run listing; `--status` validated against `accepted|running|parked|waiting-appro
 | Flag | Meaning |
 | --- | --- |
 | `--flow string` | See the behavior above. |
-| `--status string` | See the behavior above. |
+| `--status choice` | (choices: accepted, running, parked, waiting-approval, cancelled, completed, failed) |
 
 ---
 
@@ -1434,14 +1577,14 @@ Launches an approved plan; blocks until settlement when the local process owns t
 
 Route: /cli/serve
 
-> Run the serve system flow
+> Host the control server for this project
 
-Run the serve system flow.
+Host the control server for this project.
 
 ### Usage
 
 ```sh
-smithers serve [flags] [<key=value...>]
+smithers serve [flags]
 ```
 
 ### Behavior
@@ -1452,7 +1595,9 @@ Hosts the control server (section 10): `/rpc`, `/rpc/ws`, `/sync`, `/sync/ws`, `
 
 | Flag | Meaning |
 | --- | --- |
-| `--data string` | See the behavior above. |
+| `--host string` | See the behavior above. |
+| `--port integer` | See the behavior above. |
+| `--listen` | See the behavior above. |
 
 ---
 
@@ -1476,13 +1621,33 @@ Delivers a named signal to a flow parked on `WaitFor` (section 5).
 
 ---
 
+## smithers skills
+
+Route: /cli/skills
+
+> Install and list the smithers agent skill
+
+Install and list the smithers agent skill.
+
+### Usage
+
+```sh
+smithers skills <subcommand> [flags]
+```
+
+### Behavior
+
+Writes the `smithers` skill into detected agents; no automatic refresh side effect on other commands.
+
+---
+
 ## smithers status
 
 Route: /cli/status
 
-> Show control status
+> Show the diagnosis card for one run, or the run listing
 
-Show control status.
+Show the diagnosis card for one run, or the run listing.
 
 ### Usage
 
@@ -1496,18 +1661,52 @@ Forensics diagnosis card for one run, or the run listing. `inspect` and `why` ar
 
 ---
 
-## smithers up
+## smithers steer
 
-Route: /cli/up
+Route: /cli/steer
 
-> Boot the local stack; --watch enables development mode
+> Send a durable, attributed steering message to a run
 
-Boot the local stack; --watch enables development mode.
+Send a durable, attributed steering message to a run.
 
 ### Usage
 
 ```sh
-smithers up [flags] [<flow>]
+smithers steer [flags] RUN_ID
+```
+
+### Behavior
+
+Durable, attributed steer through the notification queue; drained at the agent's turn close.
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--message string` | See the behavior above. |
+
+### Removed flags
+
+These flags existed in Smithers 0.x. `smithers steer` declares each one so it fails with a migration message instead of a usage error, and exits 1.
+
+| Flag | Reason |
+| --- | --- |
+| `--takeover` | hijack is not available; `steer --message` is the only mode |
+
+---
+
+## smithers up
+
+Route: /cli/up
+
+> Plan, approve, and run one flow; -d launches it detached
+
+Plan, approve, and run one flow; -d launches it detached.
+
+### Usage
+
+```sh
+smithers up [flags] <flow>
 ```
 
 ### Behavior
@@ -1518,7 +1717,8 @@ One-shot launch: plan, approve with scope `run`, run; prints `{ runId }` under `
 
 | Flag | Meaning |
 | --- | --- |
-| `--watch` | See the behavior above. |
+| `--data string` | See the behavior above. |
+| `--detached, -d` | See the behavior above. |
 
 ### Removed flags
 
@@ -1536,7 +1736,27 @@ These flags existed in Smithers 0.x. `smithers up` declares each one so it fails
 | `--steal-ownership` | the run driver's heartbeat sweep owns recovery |
 | `--resume-claim-*` | the run driver's heartbeat sweep owns recovery |
 | `--resume-restore-*` | the run driver's heartbeat sweep owns recovery |
-| `--max-concurrency <n>` | no per-launch concurrency override exists in the imported engine; parallelism is declared by the flow and bounded by plan admission (section 5.2). Plue's `runArgs` and `agent.ts` drop the flag (section 10) |
+| `--max-concurrency &lt;n&gt;` | no per-launch concurrency override exists in the imported engine; parallelism is declared by the flow and bounded by plan admission (section 5.2). Plue's `runArgs` and `agent.ts` drop the flag (section 10) |
+
+---
+
+## smithers update
+
+Route: /cli/update
+
+> Check npm for a newer @smthrs/cli
+
+Check npm for a newer @smthrs/cli.
+
+### Usage
+
+```sh
+smithers update [flags]
+```
+
+### Behavior
+
+npm `latest`/`next` check for `@smthrs/cli`.
 
 ---
 

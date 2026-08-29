@@ -1,15 +1,15 @@
 ---
-description: "Boot the local stack; --watch enables development mode"
+description: "Plan, approve, and run one flow; -d launches it detached"
 ---
 
 # smithers up
 
-Boot the local stack; --watch enables development mode.
+Plan, approve, and run one flow; -d launches it detached.
 
 ## Usage
 
 ```sh
-smithers up [flags] [<flow>]
+smithers up [flags] <flow>
 ```
 
 ## Behavior
@@ -20,7 +20,8 @@ One-shot launch: plan, approve with scope `run`, run; prints `{ runId }` under `
 
 | Flag | Meaning |
 | --- | --- |
-| `--watch` | See the behavior above. |
+| `--data string` | See the behavior above. |
+| `--detached, -d` | See the behavior above. |
 
 ## Removed flags
 
@@ -38,7 +39,7 @@ These flags existed in Smithers 0.x. `smithers up` declares each one so it fails
 | `--steal-ownership` | the run driver's heartbeat sweep owns recovery |
 | `--resume-claim-*` | the run driver's heartbeat sweep owns recovery |
 | `--resume-restore-*` | the run driver's heartbeat sweep owns recovery |
-| `--max-concurrency <n>` | no per-launch concurrency override exists in the imported engine; parallelism is declared by the flow and bounded by plan admission (section 5.2). Plue's `runArgs` and `agent.ts` drop the flag (section 10) |
+| `--max-concurrency &lt;n&gt;` | no per-launch concurrency override exists in the imported engine; parallelism is declared by the flow and bounded by plan admission (section 5.2). Plue's `runArgs` and `agent.ts` drop the flag (section 10) |
 
 ## Source
 

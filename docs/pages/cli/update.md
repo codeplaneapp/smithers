@@ -1,20 +1,20 @@
 ---
-description: "Deny the complete serialized approval payload"
+description: "Check npm for a newer @smthrs/cli"
 ---
 
-# smithers deny
+# smithers update
 
-Deny the complete serialized approval payload.
+Check npm for a newer @smthrs/cli.
 
 ## Usage
 
 ```sh
-smithers deny [flags] <approval>
+smithers update [flags]
 ```
 
 ## Behavior
 
-Denies; a denied plan can never launch.
+npm `latest`/`next` check for `@smthrs/cli`.
 
 ## Source
 

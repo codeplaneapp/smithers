@@ -1,20 +1,20 @@
 ---
-description: "Deny the complete serialized approval payload"
+description: "Install and list the smithers agent skill"
 ---
 
-# smithers deny
+# smithers skills
 
-Deny the complete serialized approval payload.
+Install and list the smithers agent skill.
 
 ## Usage
 
 ```sh
-smithers deny [flags] <approval>
+smithers skills <subcommand> [flags]
 ```
 
 ## Behavior
 
-Denies; a denied plan can never launch.
+Writes the `smithers` skill into detected agents; no automatic refresh side effect on other commands.
 
 ## Source
 

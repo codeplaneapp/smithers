@@ -1,20 +1,20 @@
 ---
-description: "Deny the complete serialized approval payload"
+description: "Read and write namespaced facts in the control database"
 ---
 
-# smithers deny
+# smithers memory
 
-Deny the complete serialized approval payload.
+Read and write namespaced facts in the control database.
 
 ## Usage
 
 ```sh
-smithers deny [flags] <approval>
+smithers memory <subcommand> [flags]
 ```
 
 ## Behavior
 
-Denies; a denied plan can never launch.
+Namespaced facts in the control database.
 
 ## Source
 

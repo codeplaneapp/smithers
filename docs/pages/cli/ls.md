@@ -1,10 +1,10 @@
 ---
-description: "List available flows"
+description: "List the flows discovered under this project"
 ---
 
 # smithers ls
 
-List available flows.
+List the flows discovered under this project.
 
 ## Usage
 
