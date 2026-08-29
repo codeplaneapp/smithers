@@ -329,6 +329,11 @@ export const make = (
      * killed the drive fiber, dropped the probe refusal, and took down any
      * `execute` joined to that run. One address per (run, owner, lease,
      * evidence) keeps every reason sayable and still admits each of them once.
+     *
+     * That makes this driver's own payload a pure function of its address, so
+     * it can no longer conflict with itself. It is not the only writer at
+     * these addresses, and a conflict raised by another one is no longer fatal
+     * either: refusals are emitted through {@link emitEvidence}.
      */
     const stealRefusedSourceId = (
       owner: Ownership.OwnerId,
@@ -437,11 +442,7 @@ export const make = (
      * `roundOrdinal` in the decision payload, which is what walks a whole
      * trampoline chain.
      */
-    const emitDecision = (
-      runId: string,
-      payload: unknown,
-      sourceId = dependencies.journalSource
-    ): Effect.Effect<void> =>
+    const decisionRecord = (runId: string, payload: unknown, sourceId: string) =>
       // Unfenced by design: a decision record commits in the SAME transaction
       // as the store-level owner CAS that is its fence (`transitionOwned`,
       // `activate`, `claim`/`steal` outcomes), and by then the run is often no
@@ -450,14 +451,85 @@ export const make = (
       // steal-refused-owner-alive, activation-lost) also record decisions for
       // runs this driver never owned at all — first-writer-wins evidence,
       // which is what the unfenced channel exists for.
-      journal.emitDurableUnfenced(
-        JournalRecords.runDecision({
-          runId,
-          lineageId: FlowEngine.Lineage.root(runId),
-          sourceId,
-          ...(sourceId === dependencies.journalSource ? {} : { sourceSeq: 0 })
-        }, payload)
-      ).pipe(Effect.asVoid, Effect.orDie)
+      JournalRecords.runDecision({
+        runId,
+        lineageId: FlowEngine.Lineage.root(runId),
+        sourceId,
+        ...(sourceId === dependencies.journalSource ? {} : { sourceSeq: 0 })
+      }, payload)
+
+    /**
+     * Records a decision this driver's own write transaction is responsible
+     * for: the `transitioned` record that commits with its run-row CAS, and
+     * the `claimed-and-activated` / `stolen-and-activated` record that commits
+     * with the activation CAS.
+     *
+     * These stay fatal. They take the driver's default source id, so the
+     * journal allocates them a fresh `sourceSeq` and no address can collide;
+     * a failure here is the storage layer failing under a transaction whose
+     * other half is a run-row write, and the transaction has to take the
+     * driver down with it rather than commit a terminal row whose decision
+     * never reached the journal.
+     */
+    const emitDecision = (
+      runId: string,
+      payload: unknown,
+      sourceId = dependencies.journalSource
+    ): Effect.Effect<void> =>
+      journal.emitDurableUnfenced(decisionRecord(runId, payload, sourceId)).pipe(Effect.asVoid, Effect.orDie)
+
+    /**
+     * Records evidence ABOUT a run this driver does not own, and never raises
+     * on the drive fiber.
+     *
+     * `claim-lost`, `activation-lost` and `steal-refused-owner-alive` are the
+     * three decisions taken about a run another process holds. They are
+     * observations, not commitments: the arbitration they describe already
+     * happened in the store, the caller has already lost, and the very next
+     * thing every one of these call sites does is answer `false`. Routing them
+     * through {@link emitDecision} put an audit write on the failure path of
+     * the loop that drives every run in the process — an `idempotency_conflict`
+     * on a shared refusal address killed the drive fiber, dropped the record
+     * anyway, and took down any `execute` joined to that run.
+     *
+     * So the receipt is folded into a log, the shape `ActionPersistence`'s
+     * `emitConverging` uses for the same reason on the replay branches:
+     *
+     * - `Accepted`: the observation is durable. Nothing to say.
+     * - `Duplicate`: an identical observation is already durable — the
+     *   per-heartbeat deduplication the refusal address exists for. Debug.
+     * - `idempotency_conflict`: this address already holds a DIFFERENT
+     *   observation, so someone (another process, an earlier evidence shape,
+     *   a copied journal after a time-travel fork) said something else about
+     *   the same (run, owner, lease, evidence). The durable record wins and
+     *   the divergence is worth a warning, but it is still only evidence.
+     *
+     * Any other journal failure is folded the same way and for the same
+     * reason: an audit record must never be the thing that stops a driver
+     * from driving. A journal that is genuinely broken still fails the very
+     * next decision write that IS a fence, which is where it belongs.
+     */
+    const emitEvidence = (
+      runId: string,
+      payload: unknown,
+      sourceId = dependencies.journalSource
+    ): Effect.Effect<void> =>
+      journal.emitDurableUnfenced(decisionRecord(runId, payload, sourceId)).pipe(
+        Effect.flatMap((receipt) =>
+          receipt._tag === "Duplicate"
+            ? Effect.logDebug(
+              `engine-store: run ${runId} already recorded this evidence`,
+              { runId, sourceId, seq: receipt.seq }
+            )
+            : Effect.void
+        ),
+        Effect.catch((error) =>
+          Effect.logWarning(
+            `engine-store: evidence about run ${runId} was not admitted to the journal (${error.code}); the run is unaffected`,
+            { runId, sourceId, code: error.code, payload }
+          )
+        )
+      )
 
     /**
      * Commits a run-row transition and the decision describing it in ONE write
@@ -548,7 +620,7 @@ export const make = (
             // was in the way (issue #53 follow-up).
             if (row.owner !== null && !sameOwner(row.owner, dependencies.owner)) {
               deferSteal(row.runId, row.heartbeatAtMs, nowMs)
-              yield* emitDecision(row.runId, {
+              yield* emitEvidence(row.runId, {
                 decision: "steal-refused-owner-alive",
                 evidence: "lease-fresh",
                 expectedOwner: row.owner,
@@ -561,7 +633,7 @@ export const make = (
           }
           if (yield* isAlive(row.owner, { claimant: dependencies.owner, heartbeatAtMs: row.heartbeatAtMs, nowMs })) {
             deferSteal(row.runId, row.heartbeatAtMs, nowMs)
-            yield* emitDecision(row.runId, {
+            yield* emitEvidence(row.runId, {
               decision: "steal-refused-owner-alive",
               // Always a supplied probe. The default check is the lease, and
               // the lease already refused above for every row that could still
@@ -601,7 +673,7 @@ export const make = (
         }
 
         if (claim._tag !== "Claimed") {
-          yield* emitDecision(row.runId, {
+          yield* emitEvidence(row.runId, {
             decision: "claim-lost",
             outcome: claim._tag,
             expected
@@ -638,7 +710,7 @@ export const make = (
         ).pipe(Effect.orDie)
         if (activation._tag !== "Activated") {
           yield* abandon(row.runId, claim.claimedAtMs)
-          yield* emitDecision(row.runId, {
+          yield* emitEvidence(row.runId, {
             decision: "activation-lost",
             outcome: activation._tag,
             expected

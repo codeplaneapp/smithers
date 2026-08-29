@@ -20,6 +20,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
+import { FlowEngine } from "@smthrs/engine"
 import { Flow, FlowRuntime } from "@smthrs/flow"
 import { Journal, SqlJournal } from "@smthrs/journal"
 import { Node } from "@smthrs/plan"
@@ -36,6 +37,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { spawn } from "node:child_process"
 import { once } from "node:events"
 import * as DurableEngineState from "../src/DurableEngineState.ts"
+import * as JournalRecords from "../src/internal/JournalRecords.ts"
 import * as RunDriver from "../src/internal/RunDriver.ts"
 import * as Migrations from "../src/Migrations.ts"
 import { opaqueHandlerBody } from "./fixtures/OpaqueHandlerBody.ts"
@@ -336,6 +338,114 @@ describe("the stale-running sweep backs off refused rows (B-04)", () => {
       expect(result.row.status).toBe("running")
       expect(result.settled).toBeInstanceOf(Flow.Suspended)
       expect(logs.filter((message) => message.includes("coordinated drain failed"))).toEqual([])
+    }))
+
+  /**
+   * A refusal is EVIDENCE about a run this driver does not own, and evidence
+   * must never raise on the fiber that drives every run in the process.
+   *
+   * Addressing a refusal by `(run, owner, lease, evidence)` makes the journal
+   * deduplicate it, and the payload under that address is a pure function of
+   * the address, so this driver cannot conflict with itself. It is not the
+   * only writer. Another process arbitrating the same row, an older release
+   * whose payload carried different fields, or a journal copied by a
+   * time-travel fork all leave a record at an address this driver will write
+   * to next, and the journal answers `idempotency_conflict` for same address /
+   * different content. Emitted through the plain decision path that error was
+   * an `Effect.orDie` on the drive loop: the audit write killed the driver,
+   * lost the record it was trying to make, and took down every `execute`
+   * joined to that run — for a disagreement about an audit row.
+   *
+   * The record is therefore emitted converging, the shape `ActionPersistence`
+   * uses on its replay branches: `Accepted` stands, `Duplicate` is the
+   * deduplication doing its job, and a conflict is logged and left alone,
+   * because the durable record is the one that was there first.
+   *
+   * The conflicting record is pre-written here through the journal itself, at
+   * the exact address `stealRefusedSourceId` mints, which is the only way to
+   * reach the conflict without pretending the journal is something else.
+   */
+  it.effect("logs a refusal the journal will not admit, and keeps driving the run", () =>
+    Effect.gen(function*() {
+      const logs: Array<string> = []
+      const capture = Logger.make((options) => {
+        logs.push(String(options.message))
+      })
+      const result = yield* run(
+        Effect.gen(function*() {
+          const store = yield* RunStore.RunStore
+          const journal = yield* Journal.Journal
+          const stalled: Ownership.OwnerId = { hostId: "live-host", pid: 424242, nonce: "stalled" }
+          yield* insertRunOwnedBy("contested", stalled, 0)
+
+          // Exactly the address `RunDriver.stealRefusedSourceId` mints for
+          // this (owner, lease, evidence). Spelled out rather than imported so
+          // that changing the address shape has to be a deliberate edit here.
+          const refusalSource = `stale-sweep-backoff:steal-refused:lease-fresh:${
+            JSON.stringify([stalled.hostId, stalled.pid, stalled.nonce])
+          }:0`
+          const foreignRefusal = JournalRecords.runDecision({
+            runId: "contested",
+            lineageId: FlowEngine.Lineage.root("contested"),
+            sourceId: refusalSource,
+            sourceSeq: 0
+          }, {
+            decision: "steal-refused-owner-alive",
+            evidence: "lease-fresh",
+            expectedOwner: stalled,
+            heartbeatAtMs: 0,
+            // The difference. Nothing this driver writes carries this field,
+            // so its own refusal is same-address / different-content.
+            recordedBy: "another process"
+          })
+          const preWritten = yield* journal.emitDurableUnfenced(foreignRefusal)
+
+          const driver = yield* RunDriver.make({
+            owner: { hostId: "sweep-host", pid: 1, nonce: "sweeper" },
+            journalSource: "stale-sweep-backoff",
+            isAlive: () => Effect.succeed(true),
+            engine: Effect.succeed(fakeEngine)
+          })
+          yield* driver.register(TestFlow, () => Effect.succeed("never reached"))
+
+          // The operator's `resume`: the driver refuses the steal, and its
+          // refusal record collides with the one already at that address.
+          yield* driver.resume(TestFlow, "contested")
+
+          // A caller joining the run is answered rather than killed.
+          const settled = yield* driver.execute(TestFlow, {
+            executionId: "contested",
+            payload: {},
+            discard: false
+          })
+
+          // A third record, identical to the one holding the address: the
+          // journal answers `Duplicate`, which is what makes the middle write
+          // a genuine content conflict rather than a broken address.
+          const third = yield* journal.emitDurableUnfenced(foreignRefusal)
+          return {
+            preWritten: preWritten._tag,
+            third: third._tag,
+            refusals: yield* refusalsOf("contested"),
+            settled,
+            row: yield* store.get("contested")
+          }
+        }).pipe(Effect.provide(Logger.layer([capture])))
+      )
+
+      expect(result.preWritten).toBe("Accepted")
+      // The first writer still holds the address, with its content intact.
+      expect(result.refusals).toHaveLength(1)
+      expect((result.refusals[0]!.payload as { readonly recordedBy?: string }).recordedBy).toBe("another process")
+      // The conflict is an outcome the driver logged, not a defect it raised.
+      expect(logs.some((message) => message.includes("was not admitted to the journal (idempotency_conflict)"))).toBe(
+        true
+      )
+      expect(logs.filter((message) => message.includes("coordinated drain failed"))).toEqual([])
+      // The run is untouched and the join was answered.
+      expect(result.row.status).toBe("running")
+      expect(result.settled).toBeInstanceOf(Flow.Suspended)
+      expect(result.third).toBe("Duplicate")
     }))
 })
 
