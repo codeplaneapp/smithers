@@ -42,6 +42,20 @@ export const sessionStart = Smithers.NodeTest({
 })
 
 /**
+ * The advisory PreToolUse nudge: the documents it emits, the mirror it stays
+ * silent for, and the verb and MCP tool it advertises.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const preferSmithers = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.testRunner([Smithers.file("//claude-plugin/hooks/prefer-smithers.test.mjs")]),
+  srcs: [sources],
+  deps: []
+})
+
+/**
  * The `/workflows` mirror's contract with the CLI: the version it speaks, the
  * commands it builds, and the vocabulary it treats as terminal.
  *
