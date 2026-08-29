@@ -313,6 +313,9 @@ importers:
       '@smthrs/artifacts':
         specifier: 1.0.0-rc.0
         version: link:../packages/artifacts
+      '@smthrs/capability':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/capability
       '@smthrs/control':
         specifier: 1.0.0-rc.0
         version: link:../packages/control
@@ -352,6 +355,12 @@ importers:
       '@smthrs/keys':
         specifier: 1.0.0-rc.0
         version: link:../packages/keys
+      '@smthrs/mcp':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/mcp
+      '@smthrs/memory':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/memory
       '@smthrs/model':
         specifier: 1.0.0-rc.0
         version: link:../packages/model
