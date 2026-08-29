@@ -15,6 +15,9 @@
  * subject is precisely what is left when no code of ours got to run.
  */
 import { afterAll, describe, expect, it } from "@effect/vitest"
+import { ProcessLedger } from "@smthrs/kernel"
+import * as NodeHost from "@smthrs/platform-node/NodeHost"
+import * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { spawn } from "node:child_process"
@@ -78,6 +81,20 @@ const killHost = (filename: string, hostId: string): Promise<number> =>
     })
   })
 
+/**
+ * A journal-backed ledger over one runtime file, with NO reaper attached.
+ *
+ * `layerHost` reaps while it is being built, so a test that only stands a host
+ * up can never see what the sweep was handed. This composes the same ledger
+ * over the same storage the host uses and stops there, which is the only way
+ * to observe `orphans` before anything acts on it.
+ */
+const ledgerOver = (filename: string, hostId: string) =>
+  ProcessLedger.layer({ hostId, ownerPid: process.pid }).pipe(
+    Layer.provide(NodeRuntime.storage(filename)),
+    Layer.provide(Layer.merge(NodeHost.layer, NodeHost.NodeCrypto.layer))
+  )
+
 const readBack = <A>(filename: string, query: (database: DatabaseSync) => A): A => {
   const database = new DatabaseSync(filename, { readOnly: true })
   try {
@@ -136,5 +153,43 @@ describe("a host that was killed", () => {
       { event_type: "flows.host.process-spawned.v1" },
       { event_type: "flows.host.process-reaped.v1" }
     ])
+  }, 120_000)
+
+  it("names the abandoned group in `orphans` before anything signals it", async () => {
+    const filename = join(directory, "orphans", "runtime.sqlite")
+
+    const pgid = await killHost(filename, "orphan-host")
+    expect(groupIsAlive(pgid)).toBe(true)
+
+    // The next incarnation is handed nothing but the host id, and what it
+    // inherits through the journal is the process GROUP the dead one led. A
+    // record naming a pid with no group would be one the reaper must refuse,
+    // so this is the half of the contract the kill assertion cannot show.
+    const orphans = await Effect.runPromise(
+      Effect.flatMap(ProcessLedger.ProcessLedger, (ledger) => ledger.orphans).pipe(
+        Effect.provide(ledgerOver(filename, "orphan-host")),
+        Effect.scoped
+      )
+    )
+
+    expect(orphans).toEqual([
+      expect.objectContaining({
+        pid: pgid,
+        pgid,
+        hostId: "orphan-host",
+        commandDigest: "sh -c 'sleep 300 & sleep 300'"
+      })
+    ])
+    expect(orphans[0]?.ownerPid).not.toBe(process.pid)
+
+    // And the reaper, given exactly that, ends the group.
+    const reaped = await Effect.runPromise(
+      ProcessReaper.reap().pipe(Effect.provide(ledgerOver(filename, "orphan-host")), Effect.scoped)
+    )
+
+    expect(reaped).toEqual([{ record: expect.objectContaining({ pid: pgid, pgid }), killed: true }])
+    const deadline = Date.now() + 10_000
+    while (groupIsAlive(pgid) && Date.now() < deadline) await sleep(50)
+    expect(groupIsAlive(pgid)).toBe(false)
   }, 120_000)
 })
