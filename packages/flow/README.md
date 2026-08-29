@@ -335,10 +335,10 @@ const recorded = HumanTask.answer({ token, value: { decision: "ship" } })
 // `request_invalid` before anyone is asked. Provide HumanTask.layer beside the
 // other implementations.
 //
-// `timeoutMs` needs a host that resumes a durable race. It settles under
-// `@smthrs/engine`'s in-process engine; the SQLite engine store does not yet
-// re-drive a run parked on `DurableDeferred.raceAll`, so ask without a
-// deadline there (docs/reference/flow.md has the detail).
+// `timeoutMs` races the answer against one durable clock per question. Both
+// hosts resume a run parked on that race, so a deadline settles under
+// `@smthrs/engine`'s in-process engine and under the SQLite engine store
+// alike (docs/reference/flow.md has the detail).
 ```
 
 ### DurableClock — durable sleep

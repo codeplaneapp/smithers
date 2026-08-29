@@ -154,13 +154,11 @@ export const deferred = (
  * keeps the deadline it was first armed with, which is what makes the bound
  * survive a restart.
  *
- * KNOWN GAP (2026-08-28): the deadline needs a host that re-drives a run parked
- * on {@link module:DurableDeferred.raceAll}. `@smthrs/engine`'s in-process
- * engine does; the SQLite engine store parks the race correctly and then fails
- * the woken run with an interrupt-only cause instead of re-driving it, so a
- * `timeoutMs` question never settles on its deadline there. The gap is in the
- * durable driver rather than here — a race of a bare `DurableDeferred.await`
- * and a `DurableClock.sleep`, with no human task involved, reproduces it.
+ * The deadline settles on both hosts. `@smthrs/engine`'s in-process engine and
+ * the SQLite engine store each re-drive a run parked on
+ * {@link module:DurableDeferred.raceAll}, so the durable timer wakes the
+ * question wherever it was asked
+ * (`packages/engine-store/test/RacedParkResume.test.ts`).
  *
  * @private
  */

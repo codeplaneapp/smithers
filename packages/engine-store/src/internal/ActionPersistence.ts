@@ -1661,6 +1661,33 @@ export const make = (deps: Dependencies) => {
             ? yield* dispatch.pipe(Effect.exit)
             : Exit.map(isolated, (settled) => settled.result)
           if (Exit.isFailure(outcome)) {
+            /**
+             * A DURABLE PARK IS NOT A SETTLEMENT (N-08). A body that reaches a
+             * wait point ends its fiber by self-interruption — `Flow.suspend`
+             * marks the instance and interrupts — so an interrupt-only exit
+             * from a dispatch whose instance is suspended describes a run that
+             * parked, not an attempt that failed. Settling it below wrote a
+             * `failed` row carrying the interrupt cause, and the replay branch
+             * above then rethrew that cause on every later drive: the run died
+             * with "All fibers interrupted without error" instead of resuming.
+             * The memory engine kept no attempt row and so never saw it, which
+             * is why `HumanTask.timeoutMs`, `Action.raceAll`, and every durable
+             * wait raced against a timer worked in memory and not on SQLite.
+             *
+             * The row therefore stays `running`, which is exactly the shape the
+             * adoption path above re-enters: the next drive re-executes the
+             * body under the SAME attempt number, so the park costs nothing
+             * against the retry budget and the raced deferreds re-register
+             * against their persisted completions. `running` is also the only
+             * in-progress state the attempt store admits, so a later settlement
+             * of this attempt is an ordinary fenced `finish`.
+             */
+            const parkedInstance = Option.getOrUndefined(
+              yield* Effect.serviceOption(FlowRuntime.FlowInstance)
+            )
+            if (parkedInstance?.suspended === true && Cause.hasInterruptsOnly(outcome.cause)) {
+              return yield* Effect.failCause(outcome.cause)
+            }
             const finishedAtMs = yield* Clock.currentTimeMillis
             // A boundary violation raised while the body ran is classified
             // like one raised at settle time (issue #109): the row records it
