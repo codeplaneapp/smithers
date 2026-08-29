@@ -18,13 +18,17 @@
  *   `completed`, `failed`, or `cancelled` AND it finished before the cutoff.
  *   A running, pending, or suspended run is never a candidate at any age.
  * - **Nothing a live run still needs.** A candidate is retained when a live
- *   run stands on either side of it in the lineage. Downward: an aged terminal
- *   run whose descendant is still live stays, because deleting it would leave
- *   that descendant's `parent_run_id` pointing at nothing. Upward: an aged
+ *   run stands on either side of it in the lineage, over BOTH relations that
+ *   make one run the parent of another: the `flows_run_parents` edge a spawned
+ *   child is recorded under, and the reserved `parent_run_id` column the
+ *   rounds of one trampoline lineage are chained through. Upward: an aged
  *   terminal run with a live ancestor stays, because a parent reads a settled
  *   child's result out of its run row (`agent/await`) and a parent parked on
  *   an approval, a deferred, or a timer can be parked for longer than the
- *   threshold before it ever asks.
+ *   threshold before it ever asks. Downward: an aged terminal run whose
+ *   descendant is still live stays, because deleting it would leave that
+ *   descendant's `parent_run_id` pointing at nothing and would drop the live
+ *   descendant's lineage edges with the `flows_run_parents_gc` trigger.
  * - **Explicit.** Nothing schedules this. Automatic retention stays opt-in,
  *   for the reason `ArtifactGc` states: deletion is the irreversible
  *   direction, and a human approving a plan must be approving the deletions.
@@ -125,15 +129,18 @@ export interface RetainReport {
   readonly runIds: ReadonlyArray<string>
   /**
    * Aged terminal runs left in place because a descendant of theirs is not
-   * being deleted. They become collectable once that descendant is.
+   * terminal, or is terminal and is not being deleted by this pass. They
+   * become collectable once that descendant is. At most `limit` of them are
+   * reported, the oldest first, so the report costs no more than the pass.
    */
   readonly retainedForLiveDescendants: ReadonlyArray<string>
   /**
    * Aged terminal runs left in place because an ancestor of theirs is not
    * terminal. That ancestor can still read the run's settled result through
    * `agent/await`, which answers out of the run row. They become collectable
-   * once the ancestor finishes and ages past the threshold. A run retained for
-   * both reasons is reported under {@link retainedForLiveDescendants}.
+   * once every ancestor is terminal — a terminal ancestor holds nothing back,
+   * whatever its own age. A run retained for both reasons is reported under
+   * {@link retainedForLiveDescendants}, and at most `limit` runs are reported.
    */
   readonly retainedForLiveAncestors: ReadonlyArray<string>
   readonly runs: number
@@ -192,14 +199,56 @@ const chunkSize = 500
 /** The statuses a run can never leave. */
 const terminalStatuses = ["completed", "failed", "cancelled"]
 
+/** `terminalStatuses` as a SQL list, for the lineage prelude below. */
+const terminalList = terminalStatuses.map((status) => `'${status}'`).join(", ")
+
 /**
- * Generations the ancestor walk climbs before it stops. `parent_run_id` is
- * acyclic in practice — a child row is inserted after the parent it names —
- * but a recursive walk over a corrupt edge would not terminate, and this one
- * runs inside the pass's write transaction. The bound is far above any real
- * spawn depth, so it never changes which runs a healthy workspace collects.
+ * The prelude every scan opens with: which runs a live run stands above, and
+ * which it stands below.
+ *
+ * Two relations make one run the parent of another, and a walk over either one
+ * alone misses half the lineage. A SPAWNED child records its parent as a
+ * `flows_run_parents` edge, one row per parent so a diamond records both, and
+ * leaves `parent_run_id` NULL: the engine reserves that column for the rounds
+ * of one trampoline lineage (`RunDriver.continueLineage`). The edge is the
+ * relation every `agent/await` depends on. `link` is both relations as one
+ * edge list.
+ *
+ * `under_live` is every run reachable downward from a run that is not
+ * terminal. Those runs have a live ancestor, which can still read a settled
+ * result out of their run row. `over_live` is every run reachable upward from
+ * one. Those runs have a live descendant, whose own lineage the
+ * `flows_run_parents_gc` trigger would drop with them. An edge whose parent
+ * row is gone is not reachable from `live` at all, so it holds nothing back,
+ * and since only terminal runs are ever deleted it never can.
+ *
+ * The walks carry run ids and nothing else, so `UNION` makes them terminate on
+ * their own: a corrupt edge that closed a cycle adds a row the set already
+ * holds, and the walk stops. That matters because these reads run inside the
+ * pass's write transaction. They are SQLite-specific, like the `sqlite_master`
+ * probe below, and rc.0 is SQLite-only.
  */
-const maxAncestorDepth = 10_000
+const lineagePrelude = `
+      WITH RECURSIVE
+        link(child_id, parent_id) AS (
+          SELECT child_id, parent_id FROM flows_run_parents
+          UNION
+          SELECT run_id, parent_run_id FROM flows_runs WHERE parent_run_id IS NOT NULL
+        ),
+        live(run_id) AS (
+          SELECT run_id FROM flows_runs WHERE status NOT IN (${terminalList})
+        ),
+        under_live(run_id) AS (
+          SELECT link.child_id FROM link JOIN live ON live.run_id = link.parent_id
+          UNION
+          SELECT link.child_id FROM link JOIN under_live ON under_live.run_id = link.parent_id
+        ),
+        over_live(run_id) AS (
+          SELECT link.parent_id FROM link JOIN live ON live.run_id = link.child_id
+          UNION
+          SELECT link.parent_id FROM link JOIN over_live ON over_live.run_id = link.child_id
+        )
+    `
 
 /** Classifies a read of the scan phase, where nothing has been deleted yet. */
 const scanning = (what: string) => (cause: unknown): RetentionError =>
@@ -257,12 +306,24 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
       Effect.mapError(scanning("the schema catalog"))
     )
 
-    /** Aged terminal runs, oldest first, bounded by the pass's limit. */
+    /**
+     * Aged terminal runs no live run stands above or below, oldest first,
+     * bounded by the pass's limit.
+     *
+     * The lineage filters run BEFORE the bound, and that is what makes a
+     * bounded pass converge. A workspace whose oldest thousand aged runs all
+     * hang under one parked parent would otherwise fill the window with runs
+     * the pass then has to retain, and report nothing collected while younger
+     * collectable runs sat behind them, pass after pass.
+     */
     const candidatesOf = (cutoffMs: number, limit: number) =>
       sql<{ readonly run_id: string; readonly parent_run_id: string | null }>`
+        ${sql.unsafe(lineagePrelude)}
         SELECT run_id, parent_run_id FROM flows_runs
         WHERE ${sql.in("status", terminalStatuses)}
           AND COALESCE(finished_at_ms, created_at_ms) <= ${cutoffMs}
+          AND run_id NOT IN (SELECT run_id FROM under_live)
+          AND run_id NOT IN (SELECT run_id FROM over_live)
         ORDER BY COALESCE(finished_at_ms, created_at_ms), run_id
         LIMIT ${limit}
       `.pipe(
@@ -294,39 +355,31 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
       )
 
     /**
-     * Every candidate with an ancestor that is not terminal.
+     * The aged terminal runs a live run holds back, and which side it stands
+     * on: `liveDescendant` when the run is an ancestor of something not
+     * terminal, otherwise it is a descendant of something not terminal.
      *
-     * `agent/await` answers out of the child's run row, so a live ancestor is
-     * a run that can still ask for a candidate's settled result — however long
-     * ago the candidate finished, and whether or not it has asked yet. The
-     * walk climbs `parent_run_id` from each candidate; the recursive read is
-     * SQLite-specific, like the `sqlite_master` probe above, and rc.0 is
-     * SQLite-only.
+     * These runs are never candidates — `candidatesOf` excludes them — so this
+     * read exists to say WHY a workspace with aged runs collected fewer than
+     * it holds. It carries the pass's own bound so the report costs no more
+     * than the pass does.
      */
-    const liveAncestorsOf = (candidateIds: ReadonlyArray<string>) =>
-      Effect.reduce(
-        chunksOf(candidateIds),
-        (): Array<string> => [],
-        (accumulated, chunk) =>
-          sql<{ readonly run_id: string }>`
-            WITH RECURSIVE ancestry(run_id, ancestor_id, parent_run_id, status, depth) AS (
-              SELECT run_id, run_id, parent_run_id, status, 0
-                FROM flows_runs WHERE ${sql.in("run_id", chunk)}
-              UNION ALL
-              SELECT ancestry.run_id, parent.run_id, parent.parent_run_id, parent.status, ancestry.depth + 1
-                FROM ancestry JOIN flows_runs AS parent ON parent.run_id = ancestry.parent_run_id
-               WHERE ancestry.depth < ${maxAncestorDepth}
-            )
-            SELECT DISTINCT run_id FROM ancestry
-             WHERE ancestor_id <> run_id AND NOT (${sql.in("status", terminalStatuses)})
-          `.pipe(
-            Effect.map((rows) => {
-              for (const row of rows) accumulated.push(row.run_id)
-              return accumulated
-            }),
-            Effect.mapError(scanning("the run lineage"))
+    const retainedByLineage = (cutoffMs: number, limit: number) =>
+      sql<{ readonly run_id: string; readonly live_descendant: number }>`
+        ${sql.unsafe(lineagePrelude)}
+        SELECT
+          run_id,
+          (run_id IN (SELECT run_id FROM over_live)) AS live_descendant
+        FROM flows_runs
+        WHERE ${sql.in("status", terminalStatuses)}
+          AND COALESCE(finished_at_ms, created_at_ms) <= ${cutoffMs}
+          AND (
+            run_id IN (SELECT run_id FROM under_live)
+            OR run_id IN (SELECT run_id FROM over_live)
           )
-      )
+        ORDER BY COALESCE(finished_at_ms, created_at_ms), run_id
+        LIMIT ${limit}
+      `.pipe(Effect.mapError(scanning("the run lineage")))
 
     const countIn = (table: string, column: string, ids: ReadonlyArray<string>) =>
       Effect.reduce(chunksOf(ids), () => 0, (total, chunk) =>
@@ -406,22 +459,26 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
       Effect.gen(function*() {
         // Clamped, not interpolated: SQLite reads a negative `LIMIT` as no
         // limit at all, which would make a mistyped bound a full sweep.
-        const candidates = yield* candidatesOf(cutoffMs, Math.max(0, options.limit ?? defaultLimit))
+        const limit = Math.max(0, options.limit ?? defaultLimit)
+        const candidates = yield* candidatesOf(cutoffMs, limit)
         const candidateIds = candidates.map((candidate) => candidate.runId)
         const parentOf = new Map(candidates.map((candidate) => [candidate.runId, candidate.parentRunId]))
         const doomed = new Set(candidateIds)
         const retained = new Set<string>()
         const retainedAbove = new Set<string>()
         const candidateSet = new Set(candidateIds)
+        // The foreign key, which the lineage filters do not cover: a child row
+        // that is terminal and simply outside this pass — younger than the
+        // cutoff, or past the bound — still points at its parent.
         for (const child of yield* childrenOf(candidateIds)) {
           if (candidateSet.has(child.runId)) continue
           pinAncestors(doomed, retained, parentOf, child.parentRunId)
         }
-        // The upward direction. `pinAncestors` also covers the candidates
-        // between this one and its live ancestor, so the retained set stays
-        // closed under the foreign key whatever the walk's depth bound saw.
-        for (const runId of yield* liveAncestorsOf(candidateIds)) {
-          pinAncestors(doomed, retainedAbove, parentOf, runId)
+        // Why the workspace kept aged runs this pass. These never entered the
+        // candidate set, so this only classifies them.
+        for (const held of yield* retainedByLineage(cutoffMs, limit)) {
+          if (Number(held.live_descendant) > 0) retained.add(held.run_id)
+          else retainedAbove.add(held.run_id)
         }
         // `candidateIds` is already oldest first, so the report reads in the
         // order the pass collected.

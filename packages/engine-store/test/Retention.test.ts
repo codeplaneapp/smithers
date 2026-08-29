@@ -12,12 +12,13 @@
  * @since 0.1.0
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Action, DurableDeferred, Flow } from "@smthrs/flow"
+import { Action, DurableDeferred, Flow, FlowRuntime } from "@smthrs/flow"
 import { Journal, JournalEvent } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
 import { AttemptStore, type Ownership, RunStore } from "@smthrs/run-store"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
@@ -172,6 +173,19 @@ const finish = (runId: string, status: "completed" | "failed" | "cancelled") =>
     expect(outcome).toEqual({ _tag: "Transitioned" })
   })
 
+/** The reserved continuation column, read directly off the run row. */
+const parentRunIdOf = (runId: string) =>
+  Effect.gen(function*() {
+    const sql = yield* Effect.service(SqlClient.SqlClient)
+    const rows = yield* sql<{ readonly parent_run_id: string | null }>`
+      SELECT parent_run_id FROM flows_runs WHERE run_id = ${runId}
+    `.pipe(Effect.orDie)
+    return rows[0]?.parent_run_id ?? null
+  })
+
+/** The parent an engine hands `execute`, which becomes the DAG edge. */
+const parentInstance = (executionId: string) => ({ executionId } as FlowRuntime.FlowInstance["Service"])
+
 const statusOf = (runId: string) =>
   Effect.map(Effect.flatMap(RunStore.RunStore, (runs) => runs.get(runId)), (row) => row.status)
 
@@ -308,7 +322,10 @@ describe("retention", () => {
         // pass that collects the child leaves that await with `notFound` and
         // drops the parent's DAG edge with it.
         yield* activate("live-parent")
-        yield* activate("finished-child", "live-parent")
+        // Linked the way a spawned child is linked in production: by the DAG
+        // edge alone. `parent_run_id` is the trampoline continuation column
+        // and stays NULL on a spawned child (`RunDriver.continueLineage`).
+        yield* activate("finished-child")
         yield* state.recordRunParent("finished-child", "live-parent")
         yield* seedDependents("finished-child")
         yield* finish("finished-child", "completed")
@@ -336,6 +353,215 @@ describe("retention", () => {
         expect(second.retainedForLiveAncestors).toEqual([])
         expect((yield* footprint("finished-child")).runs).toBe(0)
         expect((yield* footprint("live-parent")).runs).toBe(0)
+      }).pipe(
+        Effect.provideService(Jj.Jj, jj),
+        Effect.provide(StepBoundary.layerTest()),
+        Effect.provide(stores)
+      )
+    ))
+
+  it.effect("keeps the settled child of a parked parent, spawned the way the engine spawns one", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        const retain = yield* retention
+        const ChildFlow = Flow.make("Retention/Child", {
+          payload: {},
+          success: Schema.String,
+          body: opaqueHandlerBody
+        })
+
+        // A parent parked on an approval, a deferred, or a timer: live, and it
+        // has not asked for its child's result yet.
+        yield* activate("parked-parent")
+
+        const engine = yield* EngineStore.make({
+          owner: { hostId: "retention-host" },
+          journalSource: "retention-test",
+          isAlive: () => Effect.succeed(false)
+        })
+        yield* engine.register(ChildFlow, () => Effect.succeed("child-result"))
+        // The spawn the engine itself writes. Nothing about the shape is
+        // arranged by the test: `RunDriver` records the lineage as a
+        // `flows_run_parents` edge and leaves the child row's
+        // `parent_run_id` NULL, because that column carries the rounds of one
+        // trampoline lineage instead.
+        yield* engine.execute(ChildFlow, {
+          executionId: "spawned-child",
+          payload: {},
+          discard: true
+        }).pipe(Effect.provideService(FlowRuntime.FlowInstance, parentInstance("parked-parent")))
+
+        expect(yield* parentRunIdOf("spawned-child")).toBe(null)
+        expect((yield* footprint("spawned-child")).childEdges).toBe(1)
+        expect(yield* statusOf("spawned-child")).toBe("completed")
+
+        yield* TestClock.adjust(agingMs)
+        const report = yield* retain.retain({ olderThanMs: thresholdMs })
+
+        expect(report.runIds).toEqual([])
+        expect(report.retainedForLiveAncestors).toEqual(["spawned-child"])
+        expect((yield* footprint("spawned-child")).runs).toBe(1)
+        expect((yield* footprint("spawned-child")).childEdges).toBe(1)
+
+        // The property the guard exists for: `agent/await` answers out of the
+        // child's run row and its journal, both of which the pass left alone,
+        // so the parent still gets the result it spawned the child for.
+        const settled = yield* engine.poll(ChildFlow, "spawned-child")
+        expect(Option.isSome(settled)).toBe(true)
+        if (Option.isNone(settled)) return
+        expect(settled.value._tag).toBe("Complete")
+        if (settled.value._tag !== "Complete") return
+        expect(settled.value.exit).toEqual(Exit.succeed("child-result"))
+
+        // Nothing is pinned forever: the child goes with the parent that could
+        // have asked for it, once that parent is terminal and aged too.
+        yield* finish("parked-parent", "completed")
+        yield* TestClock.adjust(agingMs)
+        const second = yield* retain.retain({ olderThanMs: thresholdMs })
+
+        expect([...second.runIds].sort()).toEqual(["parked-parent", "spawned-child"])
+        expect((yield* footprint("spawned-child")).runs).toBe(0)
+      }).pipe(
+        Effect.scoped,
+        Effect.provideService(Jj.Jj, jj),
+        Effect.provide(StepBoundary.layerTest()),
+        Effect.provide(stores)
+      )
+    ))
+
+  it.effect("keeps a run whose second parent in a diamond is still live", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        const retain = yield* retention
+        const state = yield* DurableEngineState.DurableEngineState
+
+        // A diamond: the child names two parents, and only the edge table
+        // records the second one. One of them is aged and terminal, the other
+        // is still live and can still await the child.
+        yield* activate("settled-parent")
+        yield* activate("second-parent")
+        yield* activate("shared-child")
+        yield* state.recordRunParent("shared-child", "settled-parent")
+        yield* state.recordRunParent("shared-child", "second-parent")
+        yield* finish("shared-child", "completed")
+        yield* finish("settled-parent", "completed")
+
+        yield* TestClock.adjust(agingMs)
+        const first = yield* retain.retain({ olderThanMs: thresholdMs })
+
+        // The child stays, held by the live parent alone. The terminal parent
+        // goes, and `flows_run_parents_gc` takes the edge that named it with
+        // it: an edge to a run that no longer exists is not lineage worth
+        // keeping, and the walk reads the surviving edge either way.
+        expect(first.runIds).toEqual(["settled-parent"])
+        expect(first.retainedForLiveAncestors).toEqual(["shared-child"])
+        expect(first.retainedForLiveDescendants).toEqual([])
+        expect((yield* footprint("shared-child")).runs).toBe(1)
+        expect((yield* footprint("shared-child")).childEdges).toBe(1)
+        expect((yield* footprint("second-parent")).parentEdges).toBe(1)
+
+        yield* finish("second-parent", "completed")
+        yield* TestClock.adjust(agingMs)
+        const second = yield* retain.retain({ olderThanMs: thresholdMs })
+
+        expect([...second.runIds].sort()).toEqual(["second-parent", "shared-child"])
+      }).pipe(
+        Effect.provideService(Jj.Jj, jj),
+        Effect.provide(StepBoundary.layerTest()),
+        Effect.provide(stores)
+      )
+    ))
+
+  it.effect("keeps an aged terminal run whose spawned child is still live", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        const retain = yield* retention
+        const state = yield* DurableEngineState.DurableEngineState
+
+        // The downward direction over the same edge-only lineage. Collecting
+        // the parent would fire `flows_run_parents_gc` and drop the running
+        // child's ancestry, which the control plane reads out of that table.
+        yield* activate("settled-spawner")
+        yield* activate("running-child")
+        yield* state.recordRunParent("running-child", "settled-spawner")
+        yield* finish("settled-spawner", "completed")
+
+        yield* TestClock.adjust(agingMs)
+        const report = yield* retain.retain({ olderThanMs: thresholdMs })
+
+        expect(report.runIds).toEqual([])
+        expect(report.retainedForLiveDescendants).toEqual(["settled-spawner"])
+        expect((yield* footprint("settled-spawner")).runs).toBe(1)
+        expect((yield* footprint("running-child")).childEdges).toBe(1)
+        expect(yield* statusOf("running-child")).toBe("running")
+      }).pipe(
+        Effect.provideService(Jj.Jj, jj),
+        Effect.provide(StepBoundary.layerTest()),
+        Effect.provide(stores)
+      )
+    ))
+
+  it.effect("keeps an aged run its child still points at, and collects it once the child goes", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        const retain = yield* retention
+
+        // Nothing here is live: the child is terminal and simply younger than
+        // the cutoff. `flows_runs.parent_run_id` is a self-referential foreign
+        // key, so collecting the parent while that row exists would fail the
+        // transaction.
+        yield* activate("round-one")
+        yield* finish("round-one", "completed")
+        yield* TestClock.adjust(agingMs)
+        yield* activate("round-two", "round-one")
+        yield* finish("round-two", "completed")
+
+        const first = yield* retain.retain({ olderThanMs: thresholdMs })
+
+        expect(first.runIds).toEqual([])
+        expect(first.retainedForLiveDescendants).toEqual(["round-one"])
+        expect((yield* footprint("round-one")).runs).toBe(1)
+
+        yield* TestClock.adjust(agingMs)
+        const second = yield* retain.retain({ olderThanMs: thresholdMs })
+
+        expect([...second.runIds].sort()).toEqual(["round-one", "round-two"])
+      }).pipe(
+        Effect.provideService(Jj.Jj, jj),
+        Effect.provide(StepBoundary.layerTest()),
+        Effect.provide(stores)
+      )
+    ))
+
+  it.effect("collects past a retained lineage instead of spending the bound on it", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        const retain = yield* retention
+        const state = yield* DurableEngineState.DurableEngineState
+
+        // Two aged children of one parked parent, both older than a third run
+        // that nothing holds back. A bound applied before the lineage filter
+        // fills its whole window with the two retained children and reports
+        // nothing collected, pass after pass, while the workspace grows.
+        yield* activate("long-parked-parent")
+        for (const runId of ["held-one", "held-two"]) {
+          yield* activate(runId)
+          yield* state.recordRunParent(runId, "long-parked-parent")
+          yield* finish(runId, "completed")
+        }
+        yield* TestClock.adjust(agingMs)
+        yield* activate("collectable")
+        yield* finish("collectable", "completed")
+        yield* TestClock.adjust(agingMs)
+
+        const report = yield* retain.retain({ olderThanMs: thresholdMs, limit: 1 })
+
+        expect(report.runIds).toEqual(["collectable"])
+        // The report carries the pass's own bound, so it names the oldest
+        // retained run rather than every one of them.
+        expect(report.retainedForLiveAncestors).toEqual(["held-one"])
+        expect((yield* footprint("held-one")).runs).toBe(1)
+        expect((yield* footprint("held-two")).runs).toBe(1)
       }).pipe(
         Effect.provideService(Jj.Jj, jj),
         Effect.provide(StepBoundary.layerTest()),
