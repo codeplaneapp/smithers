@@ -179,6 +179,12 @@ export interface Options {
   readonly nodeVersion?: string | undefined
   readonly jj?: { readonly path: string; readonly executable: boolean; readonly hint?: string | undefined } | undefined
   readonly cwd?: string | undefined
+  /**
+   * The 0.x state found when the invocation started. The caller samples it,
+   * because by the time a command runs its own control database has created
+   * `<root>/.flows` and `Project.legacyState` would report nothing.
+   */
+  readonly legacyPaths?: ReadonlyArray<string> | undefined
 }
 
 /**
@@ -223,8 +229,17 @@ export const inspect = (options: Options): Report => {
   const backend = Environment.unsupportedBackend(Environment.read(environment, "SMITHERS_BACKEND"))
   if (backend !== undefined) checks.push({ name: "backend", level: "fail", detail: backend })
 
-  const legacyPaths = Project.legacyState(options.cwd ?? options.root)
-  for (const path of legacyPaths) {
+  // Two sources, because section 6 gates them differently. The markers are
+  // the notice's paths and stop at a directory that already holds `.flows/`.
+  // The databases are the refusal's input and do not, so doctor keeps
+  // answering "what does the old database still hold?" for a project that
+  // has already started running rc.0 commands.
+  const markers = options.legacyPaths ?? Project.legacyState(options.cwd ?? options.root)
+  const databases = Project.legacyDatabases(options.cwd ?? options.root)
+  const reported = new Set<string>()
+  for (const path of [...markers, ...databases]) {
+    if (reported.has(path)) continue
+    reported.add(path)
     const detail = path.endsWith("smithers.db")
       ? describeLegacyDatabase(path)
       : Project.legacyNotice(path)

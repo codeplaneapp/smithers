@@ -160,13 +160,20 @@ describe("the removed surface", () => {
   it("registers every removed verb, hidden, and never as a shipped one", () => {
     const shipped = new Set(Verb.shipped.map((verb) => verb.name))
     for (const verb of Unsupported.removedVerbs) {
-      // `workflows` is answered by the `workflow` command, which keeps
-      // `workflow list` alive as the `ls` alias.
-      const registered = verb.name === "workflows" ? "workflow" : verb.name
-      expect(subcommandNames).toContain(registered)
-      expect(listed).not.toContain(registered)
+      // Under its own spelling, with no substitution. Section 4.2 names the
+      // 0.x did-you-mean key `workflows`, so that is the word an operator
+      // migrating a script types, and it is the word that has to answer.
+      expect(subcommandNames).toContain(verb.name)
+      expect(listed).not.toContain(verb.name)
       expect(shipped.has(verb.name)).toBe(false)
     }
+  })
+
+  it("also answers the singular `workflow`, which carries `workflow list`", () => {
+    // The group exists to keep the surviving `ls` alias reachable. It is
+    // hidden and refuses on its own, so both spellings exit 1.
+    expect(subcommandNames).toContain("workflow")
+    expect(listed).not.toContain("workflow")
   })
 
   it("gives every removal a reason and a migration link", () => {
