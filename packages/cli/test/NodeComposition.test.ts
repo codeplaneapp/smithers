@@ -12,6 +12,7 @@ import * as KernelChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
 import * as GrantStore from "@smthrs/kernel/GrantStore"
 import * as Path from "@smthrs/kernel/Path"
 import * as Workspace from "@smthrs/kernel/Workspace"
+import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import { Registry } from "@smthrs/registry"
 import * as Container from "@smthrs/std/Container"
 import { Cause, Effect, Exit, FileSystem, Layer } from "effect"
@@ -246,7 +247,10 @@ describe("NodeControl.testRunner", () => {
         const offered = NodeControl.testFlows(
           services,
           container,
-          NodeControl.testRunner({ SMITHERS_TEST_COMMAND: "pytest -q", SMITHERS_TEST_CONTAINER: "swebench-1" }, "/work/repo")
+          NodeControl.testRunner(
+            { SMITHERS_TEST_COMMAND: "pytest -q", SMITHERS_TEST_CONTAINER: "swebench-1" },
+            "/work/repo"
+          )
         )
         const bound = yield* Effect.forEach(offered, (source) => source.bindings())
         return bound.flat().map((binding) => binding.descriptor.name)
@@ -449,6 +453,44 @@ describe("NodeControl.layerOutput", () => {
       expect(codes.acceptedCode).toBe(0)
     } finally {
       process.exitCode = previous
+    }
+  })
+})
+
+describe("NodeControl memory", () => {
+  it("refuses a remote memory verb instead of writing where nothing reads", async () => {
+    const failure = await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* MemoryStore.MemoryStore
+        return yield* Effect.flip(
+          store.putFact({ namespace: { kind: "user", id: "cli" }, key: "k", value: 1, provenance: {} })
+        )
+      }).pipe(Effect.provide(NodeControl.layerMemoryRemote))
+    )
+
+    // The control plane owns memory. Building the local store for a `--remote`
+    // invocation would open a `.flows/control.db` beside the operator's shell
+    // and record a fact the server never reads, which looks like it worked.
+    expect(failure.code).toBe("store")
+    expect(failure.message).toContain("--remote")
+    expect(failure.message).toContain(".flows/control.db")
+  })
+
+  it("reads and writes the control database for a local invocation", async () => {
+    const project = await mkdtemp(join(tmpdir(), "flows-cli-memory-"))
+    try {
+      const written = await Effect.runPromise(
+        Effect.gen(function*() {
+          const store = yield* MemoryStore.MemoryStore
+          yield* store.putFact({ namespace: { kind: "user", id: "cli" }, key: "seat", value: "sol", provenance: {} })
+          return yield* store.getFact({ namespace: { kind: "user", id: "cli" }, key: "seat" })
+        }).pipe(Effect.provide(NodeControl.layerMemory(project)), Effect.scoped, Effect.orDie)
+      )
+
+      expect(written?.value).toBe("sol")
+      expect(existsSync(join(project, ".flows", "control.db"))).toBe(true)
+    } finally {
+      await rm(project, { recursive: true, force: true })
     }
   })
 })

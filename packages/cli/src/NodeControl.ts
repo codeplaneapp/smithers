@@ -36,6 +36,7 @@ import * as GrantStore from "@smthrs/kernel/GrantStore"
 import * as Workspace from "@smthrs/kernel/Workspace"
 import type * as McpClient from "@smthrs/mcp/McpClient"
 import * as McpFlows from "@smthrs/mcp/McpFlows"
+import * as MemoryError from "@smthrs/memory/MemoryError"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import * as Recall from "@smthrs/memory/Recall"
 import type * as ModelError from "@smthrs/model/ModelError"
@@ -937,10 +938,39 @@ export const layer = (applicationConfig: Application.Config) => {
     Project.layer(root),
     // `smithers memory` reads and writes the same durable store a run's
     // `memory` flow does, over the same control database. A separate
-    // connection would be a second writer to one SQLite file.
-    layerMemory(root)
+    // connection would be a second writer to one SQLite file. A remote
+    // invocation has no local database to be that store, so it gets the
+    // refusal instead of silently writing where nothing reads.
+    applicationConfig.remote === undefined ? layerMemory(root) : layerMemoryRemote
   )
 }
+
+/**
+ * Provides the memory store a `--remote` invocation gets: none, said out loud.
+ *
+ * The control plane owns memory. Building the local store here would open (and
+ * create) a `.flows/control.db` beside the operator's shell and write facts the
+ * server never reads, which is worse than a refusal because it looks like it
+ * worked.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerMemoryRemote: Layer.Layer<MemoryStore.MemoryStore> = MemoryStore.layerNoop({
+  putFact: () => remoteMemory("memory set"),
+  getFact: () => remoteMemory("memory get"),
+  deleteFact: () => remoteMemory("memory rm"),
+  listFacts: () => remoteMemory("memory list")
+})
+
+const remoteMemory = (verb: string): Effect.Effect<never, MemoryError.MemoryError> =>
+  Effect.fail(
+    new MemoryError.MemoryError({
+      code: "store",
+      message:
+        `${verb} is not available against --remote: the control plane owns memory. Run it on the host that holds .flows/control.db.`
+    })
+  )
 
 /**
  * Provides the durable memory store the `memory` verbs read and write, over

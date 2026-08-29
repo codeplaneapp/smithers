@@ -55,12 +55,24 @@ describe("the environment contract", () => {
   })
 
   it("reads a positive integer and ignores anything else", () => {
-    expect(Environment.readInteger({ SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS: "5000" }, "SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS"))
+    expect(
+      Environment.readInteger(
+        { SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS: "5000" },
+        "SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS"
+      )
+    )
       .toBe(5000)
-    expect(Environment.readInteger({ FLOWS_DETACHED_ADMISSION_TIMEOUT_MS: "42" }, "SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS"))
+    expect(
+      Environment.readInteger({ FLOWS_DETACHED_ADMISSION_TIMEOUT_MS: "42" }, "SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS")
+    )
       .toBe(42)
     for (const value of ["0", "-1", "soon", ""]) {
-      expect(Environment.readInteger({ SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS: value }, "SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS"))
+      expect(
+        Environment.readInteger(
+          { SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS: value },
+          "SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS"
+        )
+      )
         .toBeUndefined()
     }
     expect(Environment.readInteger({}, "SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS")).toBeUndefined()

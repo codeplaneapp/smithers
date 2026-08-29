@@ -8,18 +8,19 @@
  * handler returns a typed error" — so they are asserted there.
  */
 import { spawn, spawnSync } from "node:child_process"
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
+import { Version } from "../src/index.ts"
 import * as Unsupported from "../src/Unsupported.ts"
 import * as Verb from "../src/Verb.ts"
-import { Version } from "../src/index.ts"
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url))
 const executable = fileURLToPath(new URL("../src/bin.ts", import.meta.url))
-const shim = fileURLToPath(new URL("../bin/smithers.mjs", import.meta.url))
+const binDirectory = fileURLToPath(new URL("../bin", import.meta.url))
+const shim = join(binDirectory, "smithers.mjs")
 // Outside the repository on purpose. `Project.root` walks up for `.flows/`,
 // and this checkout grows one the moment any command runs in it, so a working
 // directory under `packages/` would resolve the repository as the project root
@@ -149,7 +150,6 @@ describe("the SQLite-only database contract", () => {
     expect(result.status).toBe(1)
     expect(result.stderr).toContain("unsupported_database")
   })
-
 })
 
 describe("the --json stdout contract", () => {
@@ -243,8 +243,10 @@ describe("the smithers bin shim", () => {
     // package root that has `src` and no `dist`, which is exactly that shape.
     const root = mkdtempSync(temporaryDirectoryPrefix)
     try {
-      mkdirSync(join(root, "bin"))
-      copyFileSync(shim, join(root, "bin", "smithers.mjs"))
+      // The whole directory, not just the entry: the shim imports its
+      // sibling helpers, and copying one file made this case fail the moment a
+      // second one appeared.
+      cpSync(binDirectory, join(root, "bin"), { recursive: true })
       symlinkSync(join(packageRoot, "src"), join(root, "src"), "dir")
       expect(existsSync(join(root, "dist"))).toBe(false)
 

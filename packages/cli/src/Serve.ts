@@ -70,8 +70,7 @@ export const refuse = (bind: Bind): CliError.UnsupportedError | undefined => {
   }
   if (bind.credential === undefined || bind.credential === "") {
     return new CliError.UnsupportedError({
-      message:
-        `Refusing to bind ${bind.host} without a bearer token: pass --credential or set SMITHERS_API_KEY.`
+      message: `Refusing to bind ${bind.host} without a bearer token: pass --credential or set SMITHERS_API_KEY.`
     })
   }
   return undefined

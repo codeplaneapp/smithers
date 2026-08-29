@@ -244,8 +244,9 @@ export const launch = async (options: Options): Promise<Launched | Rejected> => 
       if (elapsedMs >= maxWaitMs) {
         terminate(child)
         return {
-          reason:
-            `Detached engine did not reach admission within ${maxWaitMs}ms. The engine process (pid ${child.pid ?? "unknown"}) was still alive and was terminated. Set SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS to raise the window.`,
+          reason: `Detached engine did not reach admission within ${maxWaitMs}ms. The engine process (pid ${
+            child.pid ?? "unknown"
+          }) was still alive and was terminated. Set SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS to raise the window.`,
           tail,
           logFile: pending
         }

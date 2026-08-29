@@ -78,7 +78,10 @@ describe("one project, from init to gc", () => {
     // The receipt's own field. rc.0 has no `--run-id`, so this is the only
     // place a caller learns which run it started.
     expect(launched.runId).toMatch(/^run-/)
-    expect(launched).toMatchObject({ detached: true, logFile: join(project, ".flows", "logs", `${launched.runId}.log`) })
+    expect(launched).toMatchObject({
+      detached: true,
+      logFile: join(project, ".flows", "logs", `${launched.runId}.log`)
+    })
     runId = launched.runId
 
     // The launch returned because the child proved it persisted the run, not

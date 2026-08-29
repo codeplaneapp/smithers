@@ -159,7 +159,7 @@ export const manualInstructions = (targets: ReadonlyArray<string> = agents.map((
     "Or add it to the agent's MCP configuration by hand:",
     "",
     "  {",
-    '    "mcpServers": {',
+    "    \"mcpServers\": {",
     `      "${serverName}": { "command": ${JSON.stringify(entry.command)}, "args": ${JSON.stringify(entry.args)} }`,
     "    }",
     "  }",

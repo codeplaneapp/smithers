@@ -185,7 +185,7 @@ describe("the monitor stream", () => {
       .toMatchObject({ runId: "run-1", kind: "control.run.completed", status: "completed" })
     expect(ClaudeMirror.transition(event("control.approval.requested", {})))
       .toMatchObject({ kind: "control.approval.requested" })
-    expect(ClaudeMirror.transition(event("control.approval.requested", {})).status).toBeUndefined()
+    expect(ClaudeMirror.transition(event("control.approval.requested", {}))?.status).toBeUndefined()
     // A line per model token would be unreadable and would wake the plugin
     // continuously.
     expect(ClaudeMirror.transition(event("control.agent.model-settled", {}))).toBeUndefined()
