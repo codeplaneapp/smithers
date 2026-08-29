@@ -43,7 +43,11 @@ bundles never drift.
 
 ## The companion skills
 
-Four narrower skills sit beside this one and are installed the same way:
+Four narrower skills sit beside this one in the repository. `skills add` does
+not install them: it writes exactly one file, `smithers/SKILL.md`, into each
+detected agent directory. Copy the directory you want into the same place, or
+point the agent at its path in a checkout, which is how `smithers/SKILL.md`
+itself refers to them.
 
 | Skill | When to load it |
 | --- | --- |
@@ -51,3 +55,7 @@ Four narrower skills sit beside this one and are installed the same way:
 | `prompt-author` | The graph is right but one step's prompt underperforms. |
 | `risk-reviewer` | A flow performs outward-facing or irreversible actions. |
 | `migrate-smithers-v1` | The project is still on Smithers 0.x and its JSX authoring API. |
+
+```sh
+cp -R skills/schema-author ~/.claude/skills/
+```

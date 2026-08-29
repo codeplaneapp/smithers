@@ -13,10 +13,21 @@ import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import * as Frontmatter from "../../../packages/registry/src/internal/Frontmatter.ts";
+import * as McpServer from "../../../packages/cli/src/McpServer.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(dirname(dirname(here)));
 const read = (path) => readFileSync(join(repoRoot, path), "utf8");
+
+/**
+ * The rc.0 MCP tool split, read from the server rather than copied.
+ *
+ * A copy of this list drifted once already: it named nine unsupported tools
+ * when the server answers ten, so a skill could have presented `ask_human` as
+ * available and the check would have passed.
+ */
+const SUPPORTED_TOOLS = new Set(McpServer.supportedTools.map((tool) => tool.name));
+const UNSUPPORTED_TOOLS = McpServer.unsupportedTools.map((tool) => tool.name);
 
 const PLUGIN_SKILLS = {
   claude: "claude-plugin/skills/smithers/SKILL.md",
@@ -107,40 +118,18 @@ for (const [agent, path] of Object.entries(PLUGIN_SKILLS)) {
     });
 
     it("lists only MCP tools the rc.0 server supports", () => {
-      const supported = new Set([
-        "list_workflows",
-        "run_workflow",
-        "list_runs",
-        "get_run",
-        "watch_run",
-        "get_run_events",
-        "explain_run",
-        "list_pending_approvals",
-        "resolve_approval",
-        "get_node_detail",
-        "get_chat_transcript",
-      ]);
-      const unsupported = [
-        "revert_attempt",
-        "fork_run",
-        "replay_run",
-        "rewind_run",
-        "restore_checkpoint",
-        "list_snapshots",
-        "get_timeline",
-        "time_travel",
-        "list_artifacts",
-      ];
-      for (const tool of unsupported) {
+      assert.equal(SUPPORTED_TOOLS.size + UNSUPPORTED_TOOLS.length, 21, "the rc.0 server serves 21 tool names");
+      for (const tool of UNSUPPORTED_TOOLS) {
         // The Codex skill documents the unsupported set by name on purpose;
         // the Claude skill must not present one as available.
         if (agent === "claude") assert.ok(!text.includes(tool), `${path} names the unsupported tool ${tool}`);
       }
       // Only the part before the unsupported roster is a claim of support.
       const claimed = text.split(/Ten more keep|Ten keep their names/)[0];
-      for (const named of claimed.match(/`(list_[a-z_]+|get_[a-z_]+|run_workflow|watch_run|resolve_approval)`/g) ?? []) {
+      for (const named of claimed.match(/`([a-z]+_[a-z_]+)`/g) ?? []) {
         const tool = named.slice(1, -1);
-        assert.ok(supported.has(tool), `${path} presents ${tool} as a working tool`);
+        if (!SUPPORTED_TOOLS.has(tool) && !UNSUPPORTED_TOOLS.includes(tool)) continue;
+        assert.ok(SUPPORTED_TOOLS.has(tool), `${path} presents ${tool} as a working tool`);
       }
     });
 
@@ -219,9 +208,18 @@ describe("the Codex plugin manifests", () => {
     const routing = read("codex-plugin/scripts/configure-codex-routing.mjs");
     const hint = /export const HINT_TEXT = "([^"]+)"/.exec(routing);
     assert.ok(hint, "the routing script must export HINT_TEXT");
-    const supported = new Set(["list_workflows", "run_workflow", "watch_run"]);
-    for (const named of hint[1].match(/\b[a-z]+_[a-z_]+\b/g) ?? []) {
-      assert.ok(supported.has(named), `HINT_TEXT names ${named}, which the rc.0 MCP server does not support`);
+    // The hint is the one sentence Codex reads before it decides whether to
+    // route work to Smithers, so a tool name it advertises has to be one of
+    // the 21 the server serves, and a supported one.
+    const named = hint[1].match(/\b[a-z]+_[a-z_]+\b/g) ?? [];
+    assert.ok(named.length > 0, "the hint must name the tools it routes to");
+    for (const tool of named) {
+      assert.ok(
+        SUPPORTED_TOOLS.has(tool),
+        `HINT_TEXT names ${tool}, which the rc.0 MCP server ${
+          UNSUPPORTED_TOOLS.includes(tool) ? "answers with an unsupported envelope" : "does not serve"
+        }`,
+      );
     }
   });
 });

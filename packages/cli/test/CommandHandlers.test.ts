@@ -8,14 +8,14 @@
  * `--json`/`--quiet` presentation flags that change what the other flags mean.
  */
 import { NodeServices } from "@effect/platform-node"
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { Control as ControlService, type ControlSchema } from "@smthrs/control"
 import * as TestControl from "@smthrs/control/test/TestControl"
 import { Cause, Effect, Exit, Layer, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { Command } from "effect/unstable/cli"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import * as CliError from "../src/CliError.ts"
 import { cli } from "../src/Command.ts"
@@ -590,7 +590,17 @@ describe("the claude mirror verbs", () => {
         const launched = yield* launch()
         // The run has events past sequence 0, so a blocking tick wakes on the
         // first pass rather than waiting out its deadline.
-        return yield* json(["--json", "claude", "tick", launched.runId, "--after-seq", "0", "--wait", "--timeout-ms", "5000"])
+        return yield* json([
+          "--json",
+          "claude",
+          "tick",
+          launched.runId,
+          "--after-seq",
+          "0",
+          "--wait",
+          "--timeout-ms",
+          "5000"
+        ])
       }).pipe(Effect.provide(Project.layer(root))),
       testControl
     )

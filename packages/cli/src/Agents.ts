@@ -189,6 +189,10 @@ export const manualInstructions = (targets: ReadonlyArray<string> = agents.map((
  */
 export const skillSources = (docsDirectory: string = Docs.directory()): ReadonlyArray<string> => [
   join(docsDirectory, "SKILL.md"),
+  // `<package>/docs/..` is the package root in both layouts, so the checkout
+  // source is two levels above it. Counting from the docs directory itself
+  // landed on `packages/skills` once the package was built, because `dist`
+  // adds a level the count did not know about.
   join(docsDirectory, "..", "..", "..", "skills", "smithers", "SKILL.md")
 ]
 

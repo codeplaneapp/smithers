@@ -242,6 +242,20 @@ describe("the smithers on-ramp", () => {
     assert.match(readme, /smithers docs --full/);
     assert.ok(!readme.includes("bunx smthrs"), "the README must not name the 0.x published bin lookup");
   });
+
+  it("does not promise that the companion skills install themselves", () => {
+    // rc-contract.md ruling F2: `skills add` writes the single curated
+    // `smithers` skill. The README said the other four were "installed the
+    // same way", which sends a reader to a command that never writes them.
+    const readme = readFileSync(join(skillsRoot, "smithers/README.md"), "utf8");
+    const companions = readme.split("## The companion skills")[1];
+    assert.ok(companions !== undefined, "the README must say where the companion skills come from");
+    assert.ok(
+      !/installed the same way/.test(companions),
+      "the README claims `skills add` installs the companion skills, and it does not",
+    );
+    assert.match(companions, /does\s+not install them/);
+  });
 });
 
 describe("installing the curated skill", () => {
@@ -303,6 +317,14 @@ describe("installing the curated skill", () => {
       readFileSync(installed, "utf8"),
       readFileSync(join(skillsRoot, "smithers", "SKILL.md"), "utf8"),
       "the installed skill must be this repository's curated source, byte for byte",
+    );
+    // Ruling F2: one curated skill, and no per-verb set. 0.x wrote 64
+    // `smithers-<verb>` directories here, and 43 of them scripted verbs 1.0
+    // removed, so an agent that read them would run commands that exit 1.
+    assert.deepEqual(
+      readdirSync(join(home, ".claude", "skills")).sort(),
+      ["smithers"],
+      "`skills add` wrote something other than the single curated skill",
     );
   });
 
