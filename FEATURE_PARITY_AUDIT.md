@@ -1,5 +1,17 @@
 # Feature parity audit
 
+## Status (2026-08-28)
+
+Post-integration audit against the parity integration tree (flows HEAD 9230168 plus the ten parity lanes: 16 commits, 326 files, +43693/-624, exported as patches/parity-integration.diff). Counts over 95 audited features (99 tracked items; four sections carry a second item):
+
+- Yes before this round: 33
+- Yes (1.0.0-rc.0), closed by the parity lanes and verified in the integration tree: 34
+- Partial after integration: 8 (Human tasks, Child cancellation and process containment, Check suite, Kanban, Runbook, Merge queue, Sidecar, Live client sync)
+- Deferred for rc.0 under Phase 5 enforcement or scope ruling: 11 items (A16, A28b, A58b, A60b, A62, A67, A72, A73, A89a, A89b, A93)
+- Pending Phase 4: 10 (External integrations, CLI, MCP server, Gateway and RPC, Product UI, Electric sync proxy, Workflow-specific UIs, Init pack and starters, Open code review, Docs pipeline)
+- Plue-owned: 2 (Usage metering and quotas, Hosted tenancy and billing)
+- Not a runtime feature: 1 (Docs-driven development)
+
 ## Typed workflow execution
 
 - Parity: Yes
@@ -234,7 +246,10 @@ console.log(result)
 
 ## Retries
 
-- Parity: Yes; fixed attempt count
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/patterns` `WithRetry` gains `backoff` (initialMs, factor, maxMs) and `nonRetryable` error tags, folded into declaration identity
+- Evidence: packages/patterns/test/WithRetry.test.ts::spaces attempts by a capped exponential backoff
+- Evidence: packages/patterns/test/WithRetry.test.ts::attempts a non-retryable failure exactly once
 - Verified output: `3`
 - Old
 
@@ -279,7 +294,10 @@ console.log(attempts)
 
 ## Panel
 
-- Parity: Yes; plan-time pattern
+- Parity: Yes (1.0.0-rc.0)
+- New: `Panel.run` (bounded concurrency, per-panelist roles, opinions keyed by name) beside `Panel.make`
+- Evidence: packages/patterns/test/Panel.test.ts::holds three panelists in flight together at width three
+- Evidence: packages/patterns/test/Panel.test.ts::keys opinions by panelist name whatever the completion order
 - Verified plan: `3` calls
 - Old
 
@@ -447,35 +465,46 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Loop and bounded recursion
 
-- Parity: Partial
-- Gap: old runtime rerender loop and new static recursion tree are not equivalent
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/patterns` `Loop.make` and `Loop.run` (bounded until-loop with onMaxReached fail or return-last); the durable recipe is one `Flow.to` round per iteration with maxRounds
+- Evidence: packages/patterns/test/Loop.test.ts::stops at the first satisfied predicate
+- Evidence: packages/patterns/test/Loop.test.ts::declares exactly maxIterations bounded body and predicate calls
 
 ## Child workflows
 
-- Parity: Partial
-- Gap: new `.child()` exists; cancellation and cleanup remain incomplete
+- Parity: Yes (1.0.0-rc.0)
+- New: per-child parent-exit policy (`RunState.onParentExit` cancel or detach, applied inside the parent's terminal transaction) and the durable `EngineChildren` port (spawn, await, send over Control, Crypto, FlowRuntime, RunStore)
+- Evidence: packages/engine-store/test/ChildExitPolicy.test.ts::commits the parent's exit and its children's cancellation together or not at all
+- Evidence: packages/agent/test/EngineChildren.test.ts::returns the child's output to a second engine over the same database file
+- Note: `Children.await` polls rather than parking the calling run; the park needs a `ChildFlows.Children` contract change owned by agent-runtime
 
 ## Caching
 
-- Parity: Partial
-- Old: TTL, scope, key callbacks, version invalidation
-- New: sealed step-key cache; no TTL API
+- Parity: Yes (1.0.0-rc.0)
+- New: `CacheEnvironment.withCache` and `CachePolicy` (ttlMs; scope run, flow, or shared) read by `ActionPersistence` with journaled admission verdicts; `CacheStore` `maxAgeMs` and `sweepExpired`; `WithCache` folds ttl, scope, and version into declaration identity
+- Evidence: packages/engine-store/test/CacheTtl.test.ts::serves the recorded result inside the bound without dispatching again
+- Evidence: packages/engine-store/test/CacheTtl.test.ts::shares a shared-scoped result across runs
+- Note: the engine honors the `@smthrs/flow` action form today; core `WithCache.make` declarations reach the engine through the Phase 4 core-runtime bridge
 
 ## Failure handling
 
-- Parity: Partial
-- New: `Node.catch`
-- Gap: old `TryCatchFinally` semantics not yet audited end-to-end
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/patterns` `TryCatchFinally` (filtered catch, finalizer on both arms, finalizer_failed error code) beside `Node.catch`
+- Evidence: packages/patterns/test/TryCatchFinally.test.ts::recovers a matching failure and still runs the finalizer
+- Evidence: packages/patterns/test/TryCatchFinally.test.ts::fails finalizer_failed when the finalizer fails after a successful body
 
 ## Saga compensation
 
-- Parity: Partial
-- Gap: no equivalent named pattern
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/patterns` `Saga` (LIFO compensation; policies compensate, compensate-and-fail, fail; default compensate)
+- Evidence: packages/patterns/test/Saga.test.ts::compensates completed steps in reverse and settles under compensate
+- Evidence: packages/patterns/test/Saga.test.ts::compensates completed steps when the forward chain is interrupted
+- Note: `Saga.run` compensations are in-memory finalizers and must be idempotent; the declared `make` form is the durable one
 
 ## Continue as new
 
-- Parity: Partial
-- Gap: continued terminal status
+- Parity: Deferred for rc.0
+- Enforcement: `RunStatus` gains no `continued` value; the trampoline (`Flow.to` with maxRounds, lineage_id, round_ordinal) is the supported mechanism, a handed-off round settles completed, and the exclusion is documented per PLAN.md Phase 5
 
 ## Durable timers
 
@@ -500,17 +529,23 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 ## Human tasks
 
 - Parity: Partial
-- Gap: arbitrary typed human-response helper
+- New: `HumanTask.action` (typed ask, confirm, select, and json responses; bounded JSON Schema validation; re-ask to maxAttempts with journaled refusals; `HumanTask.answer` and `HumanTask.decode`)
+- Evidence: packages/flow/test/HumanTask.test.ts::parks on one process and is answered on the next, through the same token
+- Gap: `timeoutMs` does not work on the durable engine-store: a run parked on `DurableDeferred.raceAll` never resumes there because `ActionPersistence` raises an unhandled `AttemptSuspended` on the re-drive (engine-store defect, flow-primitives finding 14, Phase 5 blocker); the deadline behavior is proven on the memory engine only
 
 ## Priority and concurrency
 
-- Parity: Partial
-- Gap: priority and bounded dynamic concurrency
+- Parity: Yes (1.0.0-rc.0)
+- New: `Node.priority` and the core Priority annotation reach `NodeDraft.priority` and the plan scheduler; `Bounded.all` and `Bounded.run` bound fan-out with priority-first starts
+- Evidence: packages/engine-store/test/PlanSchedulerPriority.test.ts::starts the higher-priority ready node first under a capacity of one
+- Evidence: packages/patterns/test/Bounded.test.ts::keeps run within the concurrency bound and starts the highest priority first
 
 ## Quarantine and continue-on-failure
 
-- Parity: Partial
-- Gap: named quarantine policy
+- Parity: Yes (1.0.0-rc.0)
+- New: `Quarantine.all`, `Quarantine.run`, and `Quarantine.settle` (continue-on-failure join; halt or quarantine policy)
+- Evidence: packages/patterns/test/Quarantine.test.ts::isolates a failing member and lets its siblings finish
+- Evidence: packages/patterns/test/Quarantine.test.ts::interrupts siblings on the first failure under the halt policy
 
 ## Idempotency and stable step identity
 
@@ -526,13 +561,18 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Structured-output correction
 
-- Parity: Partial
-- Gap: correction-attempt policy parity
+- Parity: Yes (1.0.0-rc.0)
+- New: `AgentAction` `Host.defaultCorrections` with per-action override, each correction attempt a sealed durable step with journaled rejections, and a bounded `repair` slot decoded by the same schema
+- Evidence: packages/agent/test/StructuredOutputPolicy.test.ts::replays the settled ask on a second engine and re-issues only the correction
+- Evidence: packages/agent/test/StructuredOutputPolicy.test.ts::journals one record per rejection, naming the attempt and the schema
 
 ## Quota-aware waits
 
-- Parity: Partial
-- Gap: provider quota classifier
+- Parity: Yes (1.0.0-rc.0)
+- New: `QuotaPolicy` classifier (provider reset instant, retry-after fallback, prose parsing, wait ceiling) and the quota park in `AgentAction` (waiting reason quota with wakeAt, retry budget untouched)
+- Evidence: packages/agent/test/QuotaPolicy.test.ts::parks the run under the quota reason, wakes on the deadline, and answers
+- Evidence: packages/agent/test/QuotaPolicy.test.ts::resumes a parked run on a second engine without re-issuing the refusal
+- Deferred for rc.0: the cross-process quota wake sweep (A28b); the driver's sweep wakes released and cancel-requested rows only, documented per PLAN.md Phase 5
 
 ## Provenance and capability authority
 
@@ -540,21 +580,32 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Artifacts and remote step cache
 
-- Parity: Partial
-- Gap: remote cache integration audit
+- Parity: Yes (1.0.0-rc.0)
+- New: `RemoteArtifacts` download policy (all or minimal) honored at the dispatch seam, chunked PUT with HEAD-probe resume and whole-blob fallback, and the end-to-end shared-tier example 35
+- Evidence: packages/engine-store/test/RemoteCacheProtocol.test.ts::admits a replay under minimal with no download, and materializes on the first read
+- Evidence: packages/artifacts/test/RemoteArtifactsServer.test.ts::resumes an interrupted chunked upload from the prefix the server kept
 
 ## Child cancellation and process containment
 
 - Parity: Partial
-- Release blocker
+- New: `ProcessLedger` (journaled spawn, exit, and reap facts), `ContainedSpawner` (per-command process group, SIGTERM then SIGKILL after graceMs), `ProcessReaper` (ESRCH-only liveness, start-identity check before kill), `NodeHost.layerContained` and `BunHost.layerContained`, optional remote `Provider.kill`
+- Evidence: packages/flows/test/NodeRuntime.test.ts::releases the run it owns when a shutdown signal arrives, and kills what it spawned
+- Evidence: packages/flows/test/NodeRuntime.test.ts::kills what a run spawned when a SECOND driver over the same file interrupts it
+- Gap: after a cross-driver durable cancel the run reaches cancelled and the process group dies, but the `Flow.execute` fiber never settles (a `RunDriver` defect in engine-children's paths; the test asserts the durable outcome and interrupts the fiber). Containment stays on the Phase 5 blocker list until that fiber settles
 
 ## Run lineage
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
+- New: control `Lineage` (origin child, fork, or continuation), `RunSummary` parentRunId, lineageId, roundOrdinal, and origin, `ListRequest` filters by parent and lineage, derived `control.run.lineage` watch events, and the time-travel continuation edge
+- Evidence: packages/control/test/EngineLineage.test.ts::lists the trampoline's three rounds under one lineage with ascending ordinals
+- Evidence: packages/time-travel/test/TrampolineLineage.test.ts
 
 ## Live steering
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
+- New: typed `SteerMessage` union (legacy bodies still decode), delivery receipts on the journal, pending counts on `RunSummary`, and wake on steer scoped to event parks
+- Evidence: packages/control/test/ControlSteering.test.ts::shows a watcher the enqueue and then the delivery of the same message id
+- Evidence: packages/control/test/ControlSteering.test.ts::wakes a run parked on an event and leaves an approval, timer, or quota park alone
 
 ## Usage metering and quotas
 
@@ -562,8 +613,10 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Escalation chain
 
-- Parity: Partial
-- Gap: old escalation checks/human fallback differ from new `Escalation`
+- Parity: Yes (1.0.0-rc.0)
+- New: `Escalation` per-rung escalateIf with the default predicate, fallback rung, and the Reached or Exhausted result carrying the level
+- Evidence: packages/patterns/test/Escalation.test.ts::stops at a rung whose escalateIf refuses even when accept would escalate
+- Evidence: packages/patterns/test/Escalation.test.ts::runs the fallback only after every rung escalates
 
 ## Fork fan-out
 
@@ -579,39 +632,66 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Supervisor
 
-- Parity: No
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/patterns` `Supervisor` (plan, routed workers, review, re-delegation of retriable ids, finalize)
+- Evidence: packages/patterns/test/Supervisor.test.ts::re-delegates only the retriable tasks and finalizes every output
+- Evidence: packages/patterns/test/Supervisor.test.ts::never runs more workers at once than the concurrency bound
 
 ## SuperSmithers
 
-- Parity: No; application macro
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/patterns` `Intervene` (read, propose, gated apply, report; dryRun; `WithApproval` gate), the reusable shape behind the old macro
+- Evidence: packages/patterns/test/Intervene.test.ts::never applies on a dry run and reports the proposal
+- Evidence: packages/patterns/test/Intervene.test.ts::stops before apply when the approval is denied
 
 ## Optimizer pattern
 
-- Parity: No; eval primitives exist
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/patterns` `Optimizer` (generate, evaluate, improve to a target score, best-so-far kept)
+- Evidence: packages/patterns/test/Optimizer.test.ts::stops at the first candidate that reaches the target
+- Evidence: packages/patterns/test/Optimizer.test.ts::keeps the best candidate when no target is set
 
 ## Ralph
 
-- Parity: Partial; see Loop and bounded recursion
+- Parity: Yes (1.0.0-rc.0)
+- New: `Loop.ralph` (body-only bounded loop that stops on a done signal)
+- Evidence: packages/patterns/test/Loop.test.ts::stops ralph when the body reports done
 
 ## Check suite
 
-- Parity: Partial; expressible with `MapReduce`
+- Parity: Partial
+- New: `CheckSuite.make` and `CheckSuite.run` (record-keyed checks; verdict strategies all-pass, majority, any-pass; continueOnFail at run time)
+- Evidence: packages/patterns/test/CheckSuite.test.ts::runs every check and lists the failed one when continueOnFail is true
+- Gap: the declared join is `Node.all`, so a tolerant suite's make topology halts on the first failure; wiring `Quarantine.all` into `make` is an integration follow-up the integration round did not apply
 
 ## Kanban
 
-- Parity: No; application pattern
+- Parity: Partial
+- New: `Kanban.make` and `Kanban.run` (per-column bounded concurrency, until loop, unique item ids, failed items isolated at run time)
+- Evidence: packages/patterns/test/Kanban.test.ts::drops a failed item and lets the rest finish the board
+- Gap: the declared board halts on the first failing item; the make surface waits on the same `Quarantine.all` wiring as Check suite
 
 ## Runbook
 
-- Parity: Partial; expressible with sequence and approval
+- Parity: Partial
+- New: `Runbook.make` and `Runbook.run` (risk-gated steps, elevated critical approvals, onDeny fail or skip at run time)
+- Evidence: packages/patterns/test/Runbook.test.ts::skips a denied step and runs the next one under onDeny skip
+- Gap: onDeny skip is execution-only; the declared form needs `Node.catch` wired around a gated step, which the integration round did not apply
 
 ## Scan-fix-verify
 
-- Parity: Partial; expressible with `ReviewLoop`; semantics differ
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/patterns` `ScanFixVerify` (per-issue fix fan-out under a concurrency bound; only an empty rescan is terminal)
+- Evidence: packages/patterns/test/ScanFixVerify.test.ts::rescans after a resolved verification and ends only on a clean scan
+- Evidence: packages/patterns/test/ScanFixVerify.test.ts::overlaps fixes up to the concurrency bound
 
 ## Drift detector
 
-- Parity: Partial; expressible with schedules and actions
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/patterns` `DriftDetector` (capture, compare, alert; polling recipe over Loop or triggers)
+- Evidence: packages/patterns/test/DriftDetector.test.ts::alerts once with the comparison when the snapshot drifted
+- Evidence: packages/patterns/test/DriftDetector.test.ts::skips the alert when nothing drifted
+- Note: `make` declares the alert arm unconditionally because core has no branch constructor; `run` performs the real skip
 
 ## Content pipeline
 
@@ -619,35 +699,59 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Merge queue
 
-- Parity: No
+- Parity: Partial
+- New: `MergeQueue.make` and `MergeQueue.run` (priority-then-declaration landing order; halt or quarantine failure policy at run time)
+- Evidence: packages/patterns/test/MergeQueue.test.ts::lands members one at a time in priority then declaration order
+- Gap: in the declared form failurePolicy is captured rather than branched and priority is key material rather than a `Node.priority` scheduler annotation; the make-surface wiring was not applied at integration
 
 ## Poller
 
-- Parity: Partial; no durable named poller
+- Parity: Yes (1.0.0-rc.0)
+- New: `Poll.make` (durable named poller: one check per trampoline round, `Sleep.action` between attempts, fixed, linear, or exponential backoff, onTimeout fail or return-last, bounded checks)
+- Evidence: packages/flow/test/Poll.test.ts::waits the declared schedule between attempts, then answers with what satisfied the check
+- Evidence: packages/flow/test/Poll.test.ts::re-drives the round it was dropped in without re-running that round's attempt
 
 ## Monitor
 
-- Parity: No
+- Parity: Yes (1.0.0-rc.0)
+- New: control `Monitor` (pure classify plus `Monitor.run` over Control with journaled beats and default heals), composed durably with Poll in example 38
+- Evidence: packages/control/test/Monitor.test.ts::resumes a stalled run once and stops when the resume moves it
+- Evidence: examples/test/38-monitor-and-alert.test.ts
 
 ## Sidecar
 
-- Parity: No
+- Parity: Partial
+- New: `Sidecar.make` and `Sidecar.run` (concurrent primary and quarantined shadow, optional score and delta)
+- Evidence: packages/patterns/test/Sidecar.test.ts::returns the primary value when the shadow fails
+- Gap: `make` cannot put the shadow behind a catch (the plan declares one fail-fast All) and declares a result shape `run` never produces; rewiring `Sidecar.make` onto core's `Node.catch` was not applied at integration
 
 ## Aspects and budgets
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
+- New: agent `Budget` service (token and latency budgets; fail, warn, or skip-remaining; usage projected from sealed steps and folded back on restart; `Budget.layerFromEnvelope`; skip-remaining is a typed never-retried skip)
+- Evidence: packages/agent/test/Budget.test.ts::counts what the run spent before the restart, folded back from the replay
+- Evidence: packages/agent/test/Budget.test.ts::skips every later step's model calls under skip-remaining
 
 ## Dynamic delegation and Trellis
 
-- Parity: No
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/patterns` `Trellis` (model-authored plan schema, validate against the Recursion envelope with path-naming refusals, compile, make, run with re-authoring rounds and shared fuel)
+- Evidence: packages/patterns/test/Trellis.test.ts::runs the authored plan with real concurrency and charges one fuel unit per leaf
+- Evidence: packages/patterns/test/Trellis.test.ts::fails fuel_exhausted before running the third leaf
 
 ## Delegation chain
 
-- Parity: No
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/patterns` `DelegationChain` (refine, plan, derisk rounds, tiered execution over per-rung Escalation with WithRetry, review, settle), ported onto Escalation's Reached or Exhausted result at integration
+- Evidence: packages/patterns/test/DelegationChain.test.ts::escalates a leaf that fails on the weakest tier and succeeds on the next
+- Evidence: packages/patterns/test/DelegationChain.test.ts::fails with the leaf path once every tier has spent maxAttempts
 
 ## Memory Trellis
 
-- Parity: No
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/memory` `WithMemory` policy annotation applied to a flow tree and `MemoryTrellis.make`; memory flows resolve the namespace, budget, and refusals from the annotation, bound through `StandardFlows.memory`
+- Evidence: packages/memory/test/WithMemory.test.ts::annotates the flow and every flow it declares
+- Evidence: packages/memory/test/WithMemory.test.ts::resolves a delegated leaf's recall to the trellis namespace over the real store
 
 ## Agent memory
 
@@ -655,15 +759,25 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Durable engine
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
+- New: `NodeRuntime.layerHost` (one composition: contained host, kernel HostServices with grants, default StepBoundary and WorkspaceSandbox, default lease liveness, SIGINT and SIGTERM handling with a shutdown deadline)
+- Evidence: packages/flows/test/NodeRuntime.test.ts::runs a sealed host-reading action with nothing but its own options
+- Evidence: packages/flows/test/NodeRuntimeSignals.integration.test.ts::releases the run it was driving and exits on its own
+- Deferred for rc.0: cross-process event-driven wake (A58b); `WakeBus` is in-process and a deferred completed elsewhere lands through the heartbeat poll and sweeps, documented as the polling bound per PLAN.md Phase 5
 
 ## Crash recovery and resume
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
+- New: `Ownership.leaseLiveness` as the default `isAlive` (lease-expired steal evidence; a fresh process reclaims a hard-killed owner with no host code) and `RestartableEngine.kill`
+- Evidence: packages/engine-store/test/HardKillReclaim.test.ts::reclaims a run left running by a process that was actually SIGKILLed
+- Evidence: packages/engine-store/test/HardKillReclaim.test.ts::does not steal a running run whose heartbeat is still fresh
 
 ## Cancellation and pause
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
+- New: attributed cancel (`RunSummary.cancellation` with requestedAt, principal, reason, and source control, engine, or cascade) with cascade attribution on children
+- Evidence: packages/control/test/EngineCancellation.test.ts::reports the interrupted parent as engine-decided and its child as a cascade
+- Deferred for rc.0: attributed pause (A60b); the engine has no pause verb and records no actor, so rc.0 documents `Control.pause` as explicitly unsupported per PLAN.md Phase 5
 
 ## Time travel
 
@@ -673,7 +787,8 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Workspace checkpoints
 
-- Parity: Partial
+- Parity: Deferred for rc.0
+- Enforcement: the checkpoint, restore, revert, and worktree-lane verbs are removed rather than approximated; time-travel fork and rewind over stored state plus `StepBoundary` are the supported scope, per PLAN.md Phase 5
 
 ## Local sandbox
 
@@ -681,11 +796,18 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Worktrees and VCS
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
+- New: `Jj.root` and `Jj.revert` as optional service members (NodeJj implementations, `jj:root` and `jj:revert` capability actions, kernel decorator forwards a backend's absence; jj children spawn through the contained spawner)
+- Evidence: packages/jj/test/NodeJj.test.ts::answers the repository root from a directory inside it
+- Evidence: packages/jj/test/NodeJj.test.ts::undoes one change and reports the paths it touched
+- Deferred for rc.0: scoped `withWorkspace` and worktree lanes, dropped by ruling; see Workspace checkpoints
 
 ## Remote sandbox providers
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
+- New: optional `Provider.kill` and `Provider.ping`, `SandboxSupervision` (probe on an interval, retire an unhealthy session, open a fresh one), and the `ProviderConformance` suite run against TestRemote and the real local-process provider
+- Evidence: packages/sandbox/test/SandboxSupervision.test.ts::lets a retry policy land the failed action on a fresh session
+- Evidence: packages/sandbox/test/ProviderConformance.test.ts::names a provider whose declared ping does not answer
 
 ## SQLite storage
 
@@ -693,7 +815,8 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Postgres and PGlite storage
 
-- Parity: No
+- Parity: Deferred for rc.0
+- Enforcement: rc.0 is SQLite-only; a non-SQLite client fails clearly at migration time instead of failing late, per PLAN.md Phase 5
 
 ## Agent adapters and pools
 
@@ -714,15 +837,18 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Prompt optimization
 
-- Parity: No
+- Parity: Deferred for rc.0
+- Enforcement: dropped by scope ruling; `@smthrs/evals` stays private and no candidate-search API ships in rc.0
 
 ## OpenAPI tools
 
-- Parity: No
+- Parity: Deferred for rc.0
+- Enforcement: dropped by scope ruling; the `smithers openapi` verb is removed and no spec-driven flow surface ships (std keeps Fetch, HttpPost, WebFetch over the kernel HttpClient)
 
 ## External integrations
 
-- Parity: No; migrate onto actions, triggers, and Plue
+- Parity: Pending Phase 4 (integrations)
+- Gap: old packages/integrations and packages/telegram depend on JSX and the old database; they port onto Action, `@smthrs/triggers` Webhook and Channel, Control, and the Credential stores, with vendor adapters bound for the plugins repository or Plue
 
 ## Schedules
 
@@ -730,23 +856,30 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Durable alerts
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/notifications` `Alerts` (Policy rules keyed by condition with afterMs and severity, pure `decide` on journal time, `AlertRuntime` with coalesced admission, an injected Sink, and journaled at-least-once delivery deduplicated by alertId)
+- Evidence: packages/notifications/test/Alerts.test.ts::stays quiet until the delay elapses and then admits one coalesced event
+- Evidence: packages/notifications/test/Alerts.test.ts::never delivers the same alert twice, however often it ticks
 
 ## CLI
 
-- Parity: Partial; compatibility intentionally out of scope
+- Parity: Pending Phase 4 (cli-ops)
+- Gap: the imported CLI covers plan, run, approve, deny, cancel, signal, ls, ps, status, logs, and up; the remaining old verb set ports in the Phase 4 CLI and operations lane after the core-runtime bridge, and unsupported commands must fail with an explicit migration message
 
 ## MCP server
 
-- Parity: Partial
+- Parity: Pending Phase 4 (cli-ops)
+- Gap: the imported tree ships no MCP tools; Control RPCs are the backend for run_workflow, get_run, list_runs, watch_run, resolve_approval, ask_human, fork_run, and rewind_run
 
 ## Gateway and RPC
 
-- Parity: Partial; Plue migration required
+- Parity: Pending Phase 4 (ui-gateway)
+- Gap: the old gateway, server, protocol, and gateway-client packages retarget onto `@smthrs/control` RPCs, `@smthrs/sync`, and GatewaySchema for the Plue cutover
 
 ## Product UI
 
-- Parity: Yes after Flows UI and Plue migration
+- Parity: Pending Phase 4 (ui-gateway)
+- Gap: conditional on the gateway retarget (A79) and the Flows UI import (apps/ui)
 
 ## Operator TUI
 
@@ -755,14 +888,17 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 ## Live client sync
 
 - Parity: Partial
+- Gap: `SyncServer`'s `RunCatalog` implementations are still static and in-memory, so a workspace follower never learns of new runs; the preserved handoff (patches/storage-cache-A82-handoff.diff) put RunCatalog in packages/sync and edited packages/run-store, both forbidden by the ownership ruling (RunCatalog belongs in control or engine-store), so the re-expression against the merged RunStore API is open work
 
 ## Electric sync proxy
 
-- Parity: No; likely unnecessary
+- Parity: Pending Phase 4 (ui-gateway)
+- Gap: delete disposition; `@smthrs/sync` is the read-only replication protocol
 
 ## Workflow-specific UIs
 
-- Parity: No; remove unless a product requirement survives migration
+- Parity: Pending Phase 4 (ui-gateway)
+- Gap: per-app disposition of the .smithers workflow UIs and the apps/smithers* POCs; remove each unless a product requirement survives migration
 
 ## Observability
 
@@ -774,15 +910,20 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Workflow packs
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/registry` `Pack` (Manifest schema, `Pack.read`, content-addressed `Pack.digest`, `Pack.compatible` with npm caret semantics, `Registry.layerFromPacks` merging sources with local-over-installed shadowing warnings)
+- Evidence: packages/registry/test/Pack.test.ts::shadows an installed flow with the local one and warns naming both packs
+- Evidence: packages/registry/test/Pack.test.ts::reads a caret on a zero-major line as npm does: the minor is the pin
 
 ## Init pack and starters
 
-- Parity: No
+- Parity: Pending Phase 4 (cli-ops)
+- Gap: `smithers init` seeding over the pack manifest; the A87 pack manifest it depends on shipped in rc.0
 
 ## Runtime portability
 
-- Parity: Partial
+- Parity: Deferred for rc.0
+- Enforcement: the Bun durable engine stays unsupported and durable execution under Bun returns the existing unsupported_runtime error (A89a, dropped by ruling); edge and serverless claims are limited to browser-bundleable APIs, with the Cloudflare and Vercel adapters experimental in the plugins repository (A89b), per PLAN.md Phase 5
 
 ## Workflow testing
 
@@ -794,15 +935,18 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Open code review
 
-- Parity: No; migrate as application workflow
+- Parity: Pending Phase 4 (integrations)
+- Gap: apps/review and the review workflows migrate as an application flow on the new engine
 
 ## Herdr supervision and hijack
 
-- Parity: No
+- Parity: Deferred for rc.0
+- Enforcement: the hijack verbs and symbols (packages/herdr, `smithers hijack`, HijackState) are removed rather than ported; flows ships no RunControl hook, per PLAN.md Phase 5
 
 ## Docs pipeline
 
-- Parity: Yes after migration
+- Parity: Pending Phase 4 (docs-examples)
+- Gap: reconcile the old Mintlify docs and `pnpm docs:llms` with the imported waku site (docs/pages.gen.ts)
 
 ## Docs-driven development
 
