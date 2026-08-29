@@ -504,7 +504,7 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 ## Continue as new
 
 - Parity: Deferred for rc.0
-- Enforcement: `RunStatus` gains no `continued` value; the trampoline (`Flow.to` with maxRounds, lineage_id, round_ordinal) is the supported mechanism, a handed-off round settles completed, and the exclusion is documented per PLAN.md Phase 5
+- Enforcement (X-04, known limitations "Continue-as-new"): `RunStatus` gains no `continued` value; the trampoline (`Flow.to` with maxRounds, lineage_id, round_ordinal) is the supported mechanism, a handed-off round settles completed, and the exclusion is documented per PLAN.md Phase 5
 
 ## Durable timers
 
@@ -572,7 +572,7 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 - New: `QuotaPolicy` classifier (provider reset instant, retry-after fallback, prose parsing, wait ceiling) and the quota park in `AgentAction` (waiting reason quota with wakeAt, retry budget untouched)
 - Evidence: packages/agent/test/QuotaPolicy.test.ts::parks the run under the quota reason, wakes on the deadline, and answers
 - Evidence: packages/agent/test/QuotaPolicy.test.ts::resumes a parked run on a second engine without re-issuing the refusal
-- Deferred for rc.0: the cross-process quota wake sweep (A28b); the driver's sweep wakes released and cancel-requested rows only, documented per PLAN.md Phase 5
+- Deferred for rc.0 (B-R1, the residual of X-05, known limitations "Provider quota"): the cross-process quota wake sweep (A28b); the driver's sweep wakes released and cancel-requested rows only, documented per PLAN.md Phase 5
 
 ## Provenance and capability authority
 
@@ -763,7 +763,7 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 - New: `NodeRuntime.layerHost` (one composition: contained host, kernel HostServices with grants, default StepBoundary and WorkspaceSandbox, default lease liveness, SIGINT and SIGTERM handling with a shutdown deadline)
 - Evidence: packages/flows/test/NodeRuntime.test.ts::runs a sealed host-reading action with nothing but its own options
 - Evidence: packages/flows/test/NodeRuntimeSignals.integration.test.ts::releases the run it was driving and exits on its own
-- Deferred for rc.0: cross-process event-driven wake (A58b); `WakeBus` is in-process and a deferred completed elsewhere lands through the heartbeat poll and sweeps, documented as the polling bound per PLAN.md Phase 5
+- Deferred for rc.0 (X-07, known limitations "Wake and supervision"): cross-process event-driven wake (A58b); `WakeBus` is in-process and a deferred completed elsewhere lands through the heartbeat poll and sweeps, documented as the polling bound per PLAN.md Phase 5
 
 ## Crash recovery and resume
 
@@ -777,7 +777,7 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 - Parity: Yes (1.0.0-rc.0)
 - New: attributed cancel (`RunSummary.cancellation` with requestedAt, principal, reason, and source control, engine, or cascade) with cascade attribution on children
 - Evidence: packages/control/test/EngineCancellation.test.ts::reports the interrupted parent as engine-decided and its child as a cascade
-- Deferred for rc.0: attributed pause (A60b); the engine has no pause verb and records no actor, so rc.0 documents `Control.pause` as explicitly unsupported per PLAN.md Phase 5
+- Deferred for rc.0 (X-03 and X-14, known limitations "Pause"): attributed pause (A60b); the engine has no pause verb and records no actor, so rc.0 documents `Control.pause` as explicitly unsupported per PLAN.md Phase 5
 
 ## Time travel
 
@@ -788,7 +788,7 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 ## Workspace checkpoints
 
 - Parity: Deferred for rc.0
-- Enforcement: the checkpoint, restore, revert, and worktree-lane verbs are removed rather than approximated; time-travel fork and rewind over stored state plus `StepBoundary` are the supported scope, per PLAN.md Phase 5
+- Enforcement (X-06 and X-19, known limitations "Checkpoints and worktree lanes"): the checkpoint, restore, revert, `replay`, and worktree-lane verbs are removed rather than approximated; time-travel fork and rewind over stored state plus `StepBoundary` are the supported scope, per PLAN.md Phase 5
 
 ## Local sandbox
 
@@ -800,7 +800,7 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 - New: `Jj.root` and `Jj.revert` as optional service members (NodeJj implementations, `jj:root` and `jj:revert` capability actions, kernel decorator forwards a backend's absence; jj children spawn through the contained spawner)
 - Evidence: packages/jj/test/NodeJj.test.ts::answers the repository root from a directory inside it
 - Evidence: packages/jj/test/NodeJj.test.ts::undoes one change and reports the paths it touched
-- Deferred for rc.0: scoped `withWorkspace` and worktree lanes, dropped by ruling; see Workspace checkpoints
+- Deferred for rc.0 (X-06): scoped `withWorkspace` and worktree lanes, dropped by ruling; see Workspace checkpoints
 
 ## Remote sandbox providers
 
@@ -819,7 +819,7 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 ## Postgres and PGlite storage
 
 - Parity: Deferred for rc.0
-- Enforcement: rc.0 is SQLite-only; a non-SQLite client fails clearly at migration time instead of failing late, per PLAN.md Phase 5
+- Enforcement (X-01, known limitations "Databases"): rc.0 is SQLite-only; a non-SQLite client fails clearly at migration time instead of failing late, per PLAN.md Phase 5. The CLI half, `--backend` and `SMITHERS_BACKEND` exiting 1 with `unsupported_database`, is triage item W-16, held as an apply-ready diff until the Phase 4 CLI lane lands
 
 ## Agent adapters and pools
 
@@ -841,12 +841,12 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 ## Prompt optimization
 
 - Parity: Deferred for rc.0
-- Enforcement: dropped by scope ruling; `@smthrs/evals` stays private and no candidate-search API ships in rc.0
+- Enforcement (X-09, known limitations "Triggers, evaluation, integrations, and UI"): dropped by scope ruling; `@smthrs/evals` stays private and no candidate-search API ships in rc.0
 
 ## OpenAPI tools
 
 - Parity: Deferred for rc.0
-- Enforcement: dropped by scope ruling; the `smithers openapi` verb is removed and no spec-driven flow surface ships (std keeps Fetch, HttpPost, WebFetch over the kernel HttpClient)
+- Enforcement (X-09, known limitations "Triggers, evaluation, integrations, and UI"): dropped by scope ruling; the `smithers openapi` verb is removed and no spec-driven flow surface ships (std keeps Fetch, HttpPost, WebFetch over the kernel HttpClient)
 
 ## External integrations
 
@@ -946,7 +946,7 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 ## Herdr supervision and hijack
 
 - Parity: Deferred for rc.0
-- Enforcement: the hijack verbs and symbols (packages/herdr, `smithers hijack`, HijackState) are removed rather than ported; flows ships no RunControl hook, per PLAN.md Phase 5
+- Enforcement (X-02 for hijack and X-10 for supervision, known limitations "Hijack" and "Wake and supervision"): the hijack verbs and symbols (packages/herdr, `smithers hijack`, HijackState) are removed rather than ported; flows ships no RunControl hook, per PLAN.md Phase 5
 
 ## Docs pipeline
 
