@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest"
 import * as CliError from "../src/CliError.ts"
 import { cli } from "../src/Command.ts"
 import * as ExecutorOwnership from "../src/ExecutorOwnership.ts"
+import * as NodeControl from "../src/NodeControl.ts"
 import * as Output from "../src/Output.ts"
 import { packageVersion } from "../src/Version.ts"
 
@@ -40,7 +41,11 @@ const json = Effect.fnUntraced(function*(args: ReadonlyArray<string>) {
 })
 
 const testControl = TestControl.layer({ now: () => 0 })
-const services = Layer.merge(TestConsole.layer, Output.layer)
+// `memory` is part of the command tree, so every invocation carries its
+// requirement. These cases have no local database, which is exactly the
+// `--remote` situation, so they get the same refusing store a remote
+// invocation gets rather than opening a `.flows/` beside the test run.
+const services = Layer.mergeAll(TestConsole.layer, Output.layer, NodeControl.layerMemoryRemote)
 
 const run = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -299,34 +304,22 @@ describe("lifecycle verbs", () => {
   })
 })
 
-describe("system verbs", () => {
-  it("plans a reserved system flow with its own decoded input", async () => {
-    const card = await run(json(["--json", "docs", "topic=flows"]), testControl)
+describe("up", () => {
+  it("plans, approves for the run, and launches in one command", async () => {
+    const receipt = await run(json(["--json", "up", "system/test"]), testControl)
 
-    // A system verb takes every positional argument as input; there is no
-    // leading flow-id argument to skip.
-    expect(card).toMatchObject({ flowId: "system/docs" })
+    // One command, one receipt: the plan and its approval are internal to the
+    // verb, and the caller reads the run id off the receipt because rc.0 has
+    // no operator-supplied run id (rc-contract section 4.1).
+    expect(receipt).toMatchObject({ _tag: "Accepted" })
+    expect(typeof (receipt as { readonly runId: string }).runId).toBe("string")
+  })
+
+  it("carries --data into the planned input", async () => {
+    const card = await run(json(["--json", "plan", "system/test", "--data", "{\"topic\":\"flows\"}"]), testControl)
+
+    expect(card).toMatchObject({ flowId: "system/test" })
     expect((card as { readonly inputSummary: string }).inputSummary).toBe(JSON.stringify({ topic: "flows" }))
-  })
-
-  it("plans the boot flow, and --watch is the only input it carries", async () => {
-    const result = await run(
-      Effect.gen(function*() {
-        const plain = yield* json(["--json", "up"])
-        const watched = yield* json(["--json", "up", "--watch"])
-        return { plain, watched }
-      }),
-      testControl
-    )
-
-    expect((result.plain as { readonly inputSummary: string }).inputSummary).toBe(JSON.stringify({ watch: false }))
-    expect((result.watched as { readonly inputSummary: string }).inputSummary).toBe(JSON.stringify({ watch: true }))
-  })
-
-  it("redirects `up <flow>` to the run verb instead of planning boot", async () => {
-    const rendered = await run(text(["up", "review"]), testControl)
-
-    expect(rendered).toBe("did you mean `smithers run review`?")
   })
 })
 

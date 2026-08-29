@@ -1,22 +1,41 @@
-import { spawnSync } from "node:child_process"
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs"
+/**
+ * The `smithers` executable, driven as an operator drives it.
+ *
+ * Everything here is a real process: the help surface, the exit-code contract,
+ * the `--json` stdout contract, and every removed verb and flag from
+ * rc-contract section 4.2. Those refusals only mean anything at the process
+ * boundary — the promise is "exit 1 with a migration message", not "the
+ * handler returns a typed error" — so they are asserted there.
+ */
+import { spawn, spawnSync } from "node:child_process"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { Version } from "../src/index.ts"
+import * as Unsupported from "../src/Unsupported.ts"
+import * as Verb from "../src/Verb.ts"
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url))
 const executable = fileURLToPath(new URL("../src/bin.ts", import.meta.url))
-const shim = fileURLToPath(new URL("../bin/smithers.mjs", import.meta.url))
-const temporaryDirectoryPrefix = fileURLToPath(new URL("../.tmp-cli-test-", import.meta.url))
+const binDirectory = fileURLToPath(new URL("../bin", import.meta.url))
+const shim = join(binDirectory, "smithers.mjs")
+// Outside the repository on purpose. `Project.root` walks up for `.flows/`,
+// and this checkout grows one the moment any command runs in it, so a working
+// directory under `packages/` would resolve the repository as the project root
+// and every case would read the repository's own run state instead of the
+// empty one it staged.
+const temporaryDirectoryPrefix = join(tmpdir(), "smithers-cli-bin-")
 
-const run = (args: ReadonlyArray<string>) => {
+const run = (args: ReadonlyArray<string>, environment: Readonly<Record<string, string>> = {}) => {
   const cwd = mkdtempSync(temporaryDirectoryPrefix)
   try {
     return spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
       cwd,
       encoding: "utf8",
-      timeout: 30_000
+      timeout: 60_000,
+      env: { ...process.env, ...environment }
     })
   } finally {
     rmSync(cwd, { recursive: true, force: true })
@@ -35,17 +54,155 @@ describe("smithers executable", () => {
   it("exits with usage status for malformed JSON input", () => {
     const result = run(["plan", "system/test", "--data", "{"])
 
-    expect(result.error).toBeUndefined()
     expect(result.status).toBe(2)
   })
 
-  it("rejects the unsupported flow-list filter", () => {
+  it("exits with usage status for a flag no command declares", () => {
     const result = run(["ls", "--filter", "review"])
 
-    expect(result.error).toBeUndefined()
     expect(result.status).toBe(2)
     expect(result.stderr).toContain("--filter")
   })
+})
+
+describe("the help surface", () => {
+  const help = run(["--help"])
+
+  it("lists exactly the section 4.1 verbs", () => {
+    expect(help.status).toBe(0)
+    for (const verb of Verb.subcommands) expect(help.stdout).toContain(verb.name)
+  })
+
+  it("advertises no removed verb", () => {
+    // Matched on the help layout's own leading indentation so a word that
+    // merely appears inside a description is not read as a listed command.
+    for (const verb of Unsupported.removedVerbs) {
+      expect(help.stdout).not.toMatch(new RegExp(`^\\s+${verb.name}\\s{2,}`, "m"))
+    }
+  })
+
+  it("advertises no alias, which is what keeps the list the contract's list", () => {
+    for (const alias of ["resume", "inspect", "why", "events", "gateway"]) {
+      expect(help.stdout).not.toMatch(new RegExp(`^\\s+${alias}\\s{2,}`, "m"))
+    }
+  })
+})
+
+describe("removed verbs and flags at the process boundary", () => {
+  // The complete sets are driven through the parser in `Unsupported.test.ts`;
+  // one process per entry would be several minutes of spawns for the same
+  // fact. These cases pin what only a real process can show: the status code
+  // and the message on stderr.
+  it("refuses a removed verb with exit 1 and a migration message", () => {
+    const result = run(["rewind", "run-1"])
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("smithers rewind was removed in 1.0.0-rc.0")
+    expect(result.stderr).toContain(`${Unsupported.migrationUrl}#rewind`)
+  })
+
+  it("names the sub-verb when a removed group is called with one", () => {
+    const result = run(["worktrees", "prune"])
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("smithers worktrees prune was removed in 1.0.0-rc.0")
+  })
+
+  it("refuses a removed flag with exit 1 rather than the parser's exit 2", () => {
+    // Exit 2 would mean the parser rejected an unknown flag, which carries no
+    // migration message: declaring these hidden is what buys the sentence.
+    const result = run(["steer", "run-1", "--message", "hello", "--takeover"])
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("smithers steer --takeover was removed in 1.0.0-rc.0")
+  })
+
+  it("keeps `workflow list` alive as the `ls` alias while removing the rest", () => {
+    const listed = run(["--json", "workflow", "list"])
+    const removed = run(["workflow", "run"])
+
+    expect(listed.status).toBe(0)
+    expect(JSON.parse(listed.stdout)).toMatchObject({ _tag: "flows" })
+    expect(removed.status).toBe(1)
+    expect(removed.stderr).toContain("was removed in 1.0.0-rc.0")
+  })
+})
+
+describe("the SQLite-only database contract", () => {
+  it("accepts `--backend sqlite` as a no-op and exits 0", () => {
+    const result = run(["--backend", "sqlite", "--json", "ls"])
+
+    expect(result.status).toBe(0)
+    expect(JSON.parse(result.stdout)).toMatchObject({ _tag: "flows" })
+  })
+
+  it("refuses `--backend pglite` with unsupported_database", () => {
+    const result = run(["--backend", "pglite", "ls"])
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("unsupported_database")
+    expect(result.stderr).toContain("SQLite only")
+  })
+
+  it("refuses SMITHERS_BACKEND=postgres, which a script exports rather than passes", () => {
+    const result = run(["ls"], { SMITHERS_BACKEND: "postgres" })
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("unsupported_database")
+  })
+})
+
+describe("the --json stdout contract", () => {
+  it("prints exactly one JSON document on stdout and nothing else", () => {
+    const result = run(["--json", "ls"])
+
+    expect(result.status).toBe(0)
+    expect(result.stdout.trimEnd().split("\n")).toHaveLength(1)
+    expect(() => JSON.parse(result.stdout)).not.toThrow()
+  })
+
+  it("prints nothing at all under --quiet", () => {
+    const result = run(["--json", "--quiet", "ls"])
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).toBe("")
+  })
+})
+
+describe("the signal exit codes", () => {
+  const interrupted = async (signal: "SIGINT" | "SIGTERM") => {
+    const cwd = mkdtempSync(temporaryDirectoryPrefix)
+    try {
+      const child = spawn(process.execPath, ["--no-warnings", executable, "logs", "--follow"], {
+        cwd,
+        stdio: ["ignore", "pipe", "pipe"]
+      })
+      const exited = new Promise<{ readonly status: number | null; readonly signal: string | null }>((resolve) => {
+        child.on("exit", (status, killedBy) => resolve({ status, signal: killedBy }))
+      })
+      // The signal has to land after the handler is installed and the engine
+      // has opened its database. A fixed sleep is a race: on a loaded machine
+      // the module graph alone can take seconds to parse, and the process then
+      // dies from the default action instead of running its teardown. The
+      // control database appearing is the readiness proof.
+      const database = join(cwd, ".flows", "control.db")
+      const deadline = Date.now() + 30_000
+      while (!existsSync(database) && Date.now() < deadline) await new Promise((wake) => setTimeout(wake, 25))
+      expect(existsSync(database)).toBe(true)
+      child.kill(signal)
+      return await exited
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  }
+
+  it("exits 130 on SIGINT", async () => {
+    expect(await interrupted("SIGINT")).toEqual({ status: 130, signal: null })
+  }, 60_000)
+
+  it("exits 143 on SIGTERM", async () => {
+    expect(await interrupted("SIGTERM")).toEqual({ status: 143, signal: null })
+  }, 60_000)
 })
 
 describe("the smithers bin shim", () => {
@@ -86,8 +243,10 @@ describe("the smithers bin shim", () => {
     // package root that has `src` and no `dist`, which is exactly that shape.
     const root = mkdtempSync(temporaryDirectoryPrefix)
     try {
-      mkdirSync(join(root, "bin"))
-      copyFileSync(shim, join(root, "bin", "smithers.mjs"))
+      // The whole directory, not just the entry: the shim imports its
+      // sibling helpers, and copying one file made this case fail the moment a
+      // second one appeared.
+      cpSync(binDirectory, join(root, "bin"), { recursive: true })
       symlinkSync(join(packageRoot, "src"), join(root, "src"), "dir")
       expect(existsSync(join(root, "dist"))).toBe(false)
 

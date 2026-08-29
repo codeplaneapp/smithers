@@ -3188,9 +3188,15 @@ importers:
       '@smthrs/core':
         specifier: 1.0.0-rc.0
         version: link:../core
+      '@smthrs/flow':
+        specifier: 1.0.0-rc.0
+        version: link:../flow
       '@smthrs/kernel':
         specifier: 1.0.0-rc.0
         version: link:../kernel
+      '@smthrs/plan':
+        specifier: 1.0.0-rc.0
+        version: link:../plan
       effect:
         specifier: 4.0.0-rc.108
         version: 4.0.0-rc.108
@@ -3210,6 +3216,18 @@ importers:
       '@eslint/js':
         specifier: 9.39.1
         version: 9.39.1
+      '@smthrs/engine-store':
+        specifier: 1.0.0-rc.0
+        version: link:../engine-store
+      '@smthrs/flows':
+        specifier: 1.0.0-rc.0
+        version: link:../flows
+      '@smthrs/journal':
+        specifier: 1.0.0-rc.0
+        version: link:../journal
+      '@smthrs/run-store':
+        specifier: 1.0.0-rc.0
+        version: link:../run-store
       '@types/node':
         specifier: 25.9.5
         version: 25.9.5

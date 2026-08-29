@@ -14,12 +14,33 @@
  * with no build step, which `scripts/check-local-smithers.mjs` requires.
  */
 import { existsSync } from "node:fs"
+import { dirname } from "node:path"
 import { fileURLToPath } from "node:url"
+import { danglingWorkspaceLinkHint } from "./dangling-workspace-links.mjs"
 
 const built = new URL("../dist/esm/bin.js", import.meta.url)
 
+/**
+ * Imports the entry, and explains the one failure whose message names the
+ * wrong problem: a checkout whose workspace links point into a git worktree
+ * that has since been removed fails with `ERR_MODULE_NOT_FOUND` for a package
+ * that is right there in the tree. The 0.x bin diagnosed this; without the
+ * diagnosis the reader looks for a build problem that does not exist.
+ */
+const start = async (entry) => {
+  try {
+    await import(entry)
+  } catch (cause) {
+    if (cause?.code !== "ERR_MODULE_NOT_FOUND") throw cause
+    const hint = danglingWorkspaceLinkHint(dirname(fileURLToPath(import.meta.url)))
+    if (hint === null) throw cause
+    process.stderr.write(`${hint}\n`)
+    throw cause
+  }
+}
+
 if (existsSync(fileURLToPath(built))) {
-  await import(built.href)
+  await start(built.href)
 } else {
   // Type stripping is experimental on Node 22, and its warning would prepend a
   // paragraph of noise to every development invocation. Only that one warning
@@ -30,5 +51,5 @@ if (existsSync(fileURLToPath(built))) {
     if (type === "ExperimentalWarning" && String(warning).includes("Type Stripping")) return
     emitWarning(warning, ...rest)
   }
-  await import(new URL("../src/bin.ts", import.meta.url).href)
+  await start(new URL("../src/bin.ts", import.meta.url).href)
 }

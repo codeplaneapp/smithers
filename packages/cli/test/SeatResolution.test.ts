@@ -199,7 +199,7 @@ describe("NodeControl.seatResolver ChatGPT mode", () => {
   }
 
   it("routes the unchanged openai seat over the ChatGPT backend, demanding no API key", async () => {
-    const environment = { FLOWS_OPENAI_AUTH: "chatgpt", CODEX_HOME: codexHome({ provisioned: true }) }
+    const environment = { SMITHERS_OPENAI_AUTH: "chatgpt", CODEX_HOME: codexHome({ provisioned: true }) }
 
     const resolved = await Effect.runPromise(resolve(environment, "openai:gpt-5.6-sol"))
 
@@ -219,7 +219,7 @@ describe("NodeControl.seatResolver ChatGPT mode", () => {
 
   it("refuses the mode without a provisioned session, naming the store and the login command", async () => {
     const home = codexHome({ provisioned: false })
-    const environment = { FLOWS_OPENAI_AUTH: "chatgpt", CODEX_HOME: home, OPENAI_API_KEY: "unused" }
+    const environment = { SMITHERS_OPENAI_AUTH: "chatgpt", CODEX_HOME: home, OPENAI_API_KEY: "unused" }
 
     const error = await Effect.runPromise(Effect.flip(resolve(environment, "openai:gpt-5.6-sol")))
 
@@ -232,17 +232,17 @@ describe("NodeControl.seatResolver ChatGPT mode", () => {
   })
 
   it("refuses a mode value it does not know rather than guessing a credential source", async () => {
-    const error = await Effect.runPromise(Effect.flip(resolve({ FLOWS_OPENAI_AUTH: "oauth" }, "openai:gpt-5.6-sol")))
+    const error = await Effect.runPromise(Effect.flip(resolve({ SMITHERS_OPENAI_AUTH: "oauth" }, "openai:gpt-5.6-sol")))
 
     expect(error).toBeInstanceOf(Seat.SeatUnresolved)
     expect(error.message).toBe(
-      "FLOWS_OPENAI_AUTH must be \"api-key\" or \"chatgpt\" to run the openai:gpt-5.6-sol seat"
+      "SMITHERS_OPENAI_AUTH must be \"api-key\" or \"chatgpt\" to run the openai:gpt-5.6-sol seat"
     )
   })
 
   it("treats an empty mode exactly like an unset one: the API key path stays the default", async () => {
     const resolved = await Effect.runPromise(
-      resolve({ FLOWS_OPENAI_AUTH: "", OPENAI_API_KEY: "k" }, "openai:gpt-5.6-sol")
+      resolve({ SMITHERS_OPENAI_AUTH: "", OPENAI_API_KEY: "k" }, "openai:gpt-5.6-sol")
     )
 
     expect((await prepared(resolved, "gpt-5.6-sol")).url).toBe("https://api.openai.com/v1/responses")
@@ -250,7 +250,7 @@ describe("NodeControl.seatResolver ChatGPT mode", () => {
 
   it("scopes the mode to the openai provider: every other seat keeps its own key", async () => {
     const environment = {
-      FLOWS_OPENAI_AUTH: "chatgpt",
+      SMITHERS_OPENAI_AUTH: "chatgpt",
       CODEX_HOME: codexHome({ provisioned: false }),
       ANTHROPIC_API_KEY: "anthropic-key"
     }

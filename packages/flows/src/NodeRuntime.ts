@@ -74,6 +74,14 @@ const validate = (options: Options): Options => {
   return options
 }
 
+/**
+ * The registry a host that discovers nothing composes: no services, no
+ * requirements, no failures. Written as a function so each call site gets the
+ * empty layer at its own type rather than sharing one assertion.
+ */
+const emptyRegistry = <Out, Error, Requirements>(): Layer.Layer<Out, Error, Requirements> =>
+  Layer.empty as unknown as Layer.Layer<Out, Error, Requirements>
+
 const databaseLayer = (filename: string) =>
   Layer.unwrap(
     Effect.gen(function*() {
@@ -121,12 +129,16 @@ const composition = <
   SandboxRequirements,
   Registered,
   RegistrationError,
-  RegistrationRequirements
+  RegistrationRequirements,
+  RegistryOut,
+  RegistryError,
+  RegistryRequirements
 >(
   options: Options,
   stepBoundary: Layer.Layer<StepBoundary.Service, BoundaryError, BoundaryRequirements>,
   workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, SandboxError, SandboxRequirements>,
-  registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>
+  registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
+  registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements>
 ) => {
   const validated = validate(options)
   const execution = Layer.merge(stepBoundary, workspaceSandbox).pipe(
@@ -137,7 +149,13 @@ const composition = <
     journalSource: `${validated.owner.hostId}-engine`,
     isAlive: validated.isAlive
   }).pipe(Layer.provideMerge(execution))
-  return registerFlows.pipe(Layer.provideMerge(engine))
+  // The registry is built BETWEEN the engine and the registration phase, so a
+  // registration that reads a catalog off it — `@smthrs/registry`'s
+  // `Executable.layer`, which turns every discovered descriptor into a
+  // registered durable flow — has both the registry and the engine's own
+  // context in hand, and the engine is still live before the first flow is
+  // registered.
+  return registerFlows.pipe(Layer.provideMerge(registry), Layer.provideMerge(engine))
 }
 
 /**
@@ -161,13 +179,17 @@ export const make = <
   SandboxRequirements,
   Registered,
   RegistrationError,
-  RegistrationRequirements
+  RegistrationRequirements,
+  RegistryOut = never,
+  RegistryError = never,
+  RegistryRequirements = never
 >(
   options: Options,
   stepBoundary: Layer.Layer<StepBoundary.Service, BoundaryError, BoundaryRequirements>,
   workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, SandboxError, SandboxRequirements>,
-  registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>
-) => Layer.build(composition(options, stepBoundary, workspaceSandbox, registerFlows))
+  registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
+  registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements> = emptyRegistry()
+) => Layer.build(composition(options, stepBoundary, workspaceSandbox, registerFlows, registry))
 
 /**
  * Provides the supported scoped Node SQLite runtime.
@@ -177,6 +199,14 @@ export const make = <
  * runtime is usable only after every supplied flow registration has completed.
  * Shutdown is scope closure; this module installs no process or signal
  * handlers.
+ *
+ * `registry` is the optional catalog the registration phase reads from. A host
+ * that discovers its flows rather than listing them passes
+ * `@smthrs/registry`'s `Executable.layerProject({ root })` — `Discovery` over
+ * `<root>/flows/**` plus any installed packs — and a `registerFlows` built from
+ * `Executable.layer(...)`; the registry is provided beneath registration, so
+ * every discovered flow is registered before the runtime accepts a launch.
+ * Omitting it is exactly the previous behavior.
  *
  * @since 0.1.0
  * @category layers
@@ -189,13 +219,17 @@ export const layer = <
   SandboxRequirements,
   Registered,
   RegistrationError,
-  RegistrationRequirements
+  RegistrationRequirements,
+  RegistryOut = never,
+  RegistryError = never,
+  RegistryRequirements = never
 >(
   options: Options,
   stepBoundary: Layer.Layer<StepBoundary.Service, BoundaryError, BoundaryRequirements>,
   workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, SandboxError, SandboxRequirements>,
-  registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>
-) => Layer.effectContext(make(options, stepBoundary, workspaceSandbox, registerFlows))
+  registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
+  registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements> = emptyRegistry()
+) => Layer.effectContext(make(options, stepBoundary, workspaceSandbox, registerFlows, registry))
 
 /**
  * Configuration for the batteries-included Node host composition.
@@ -405,12 +439,25 @@ const onSignal = (
  * all still composes {@link layer} itself; nothing here is reachable only
  * through this function.
  *
+ * The optional `registry` argument is the same seam {@link layer} takes: pass
+ * `@smthrs/registry`'s `Executable.layerProject({ root })` to feed the
+ * registration phase from `<root>/flows/**` and the installed packs instead of
+ * a hand-written list of flows.
+ *
  * @since 0.1.0
  * @category layers
  */
-export const layerHost = <Registered, RegistrationError, RegistrationRequirements>(
+export const layerHost = <
+  Registered,
+  RegistrationError,
+  RegistrationRequirements,
+  RegistryOut = never,
+  RegistryError = never,
+  RegistryRequirements = never
+>(
   options: HostOptions,
-  registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>
+  registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
+  registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements> = emptyRegistry()
 ) => {
   const validated = validate({
     filename: options.filename,
@@ -444,8 +491,10 @@ export const layerHost = <Registered, RegistrationError, RegistrationRequirement
   }).pipe(Layer.provideMerge(guarded))
   // Registration stays the final startup phase, exactly as in `layer`: no
   // persisted run can resume through this composition before its flow is
-  // registered.
-  const composed = registerFlows.pipe(Layer.provideMerge(engine))
+  // registered. The registry sits directly beneath it, so a registration built
+  // from a discovered catalog reads the catalog on the guarded host this
+  // composition already built.
+  const composed = registerFlows.pipe(Layer.provideMerge(registry), Layer.provideMerge(engine))
   return Layer.effectContext(Effect.gen(function*() {
     const parent = yield* Scope.Scope
     // The composition is built into a scope this module can close, because a

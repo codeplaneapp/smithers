@@ -73,7 +73,11 @@ const scenario = (shared: ReadonlyArray<string> = []) =>
     return { plan, parked, approve, run, runId, status, missingStatus, logs }
   })
 
-const scenarioServices = Layer.merge(TestConsole.layer, Output.layer)
+// `memory` is part of the command tree, so every invocation carries its
+// requirement. These cases have no local database, which is exactly the
+// `--remote` situation, so they get the same refusing store a remote
+// invocation gets rather than opening a `.flows/` beside the test run.
+const scenarioServices = Layer.mergeAll(TestConsole.layer, Output.layer, NodeControl.layerMemoryRemote)
 
 const normalize = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(normalize)
@@ -132,14 +136,14 @@ const nonTerminalControl = Layer.effect(
 
 describe("Control surface", () => {
   it("parses the remote bearer credential from either CLI spelling", () => {
-    expect(NodeControl.makeConfig([
+    const resolved = NodeControl.makeConfig([
       "--remote",
       "https://control.example.test",
       "--credential=alpha-secret"
-    ], {})).toEqual({
-      remote: "https://control.example.test",
-      credential: "alpha-secret"
-    })
+    ], {})
+
+    expect(resolved.remote).toBe("https://control.example.test")
+    expect(resolved.credential).toBe("alpha-secret")
   })
 
   it("prints the package version", async () => {

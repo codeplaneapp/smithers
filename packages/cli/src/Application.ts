@@ -34,6 +34,13 @@ export interface Config {
    * this process's to configure.
    */
   readonly mcpServers?: ReadonlyArray<McpClient.ConnectOptions> | undefined
+  /**
+   * The project root every durable layer is built over: the `.flows/`
+   * directory, the `flows/` registry sources, and the detached run logs all
+   * hang off it. Resolved from `--root` or the nearest ancestor holding
+   * `.flows/` or `flows/`, before any command handler runs.
+   */
+  readonly root?: string | undefined
 }
 
 /**
