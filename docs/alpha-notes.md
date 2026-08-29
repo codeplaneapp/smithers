@@ -97,6 +97,27 @@ only.
 | `database` | `dies with the original lock defect after the fixed open-retry budget is exhausted` | `it.live.runIf(FLOWS_SLOW_TESTS === "1")` |
 | `harness` | `workerd smoke` | `describe.skipIf(FLOWS_WORKERD_SMOKE !== "1")` |
 | `create-app` | `layerTevm against a mainnet fork` | `it.skip` in `template/aomi` |
+| `migrate` | `migrates a single-file JSX project through the bin (${reason})` | `it.skip` without a seat |
+| `migrate` | `records what a single-file project could not settle (${reason})` | `it.skip` without a seat |
+| `migrate` | `refuses what it cannot translate in a multi-workflow pack (${reason})` | `it.skip` without a seat |
+
+**`migrate` — apply against a real model.** The three cases in
+`packages/migrate/test/flow/MigrateFlow.live.e2e.test.ts` drive the migration
+tool against a real model: they rewrite a 0.x JSX workflow, record what the
+run could not settle, and refuse a multi-workflow pack the tool cannot
+translate. Everything else under `test/flow` scripts the seat, so these are
+the only cases that prove the contract, the prompt, and the captured sources
+are enough for a model to produce a flow the registry discovers. They cost
+real money and real minutes, and the package hard-codes no model id on
+purpose, so the operator names the seat: set `SMITHERS_MIGRATE_SEAT` to a
+`provider:model` seat and set that provider's key
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`), then run
+`pnpm --filter @smthrs/migrate test`. Without both, each case skips and says
+which variable is missing rather than passing without doing the work. What
+breaks if it regresses: the migration path an operator runs at cutover could
+stop producing a compiling flow and only the release rehearsal would find out.
+Closing it for the default gate means paying for a model seat in CI, which
+the RC does not do.
 
 **`harness` — workerd smoke.** The suite boots a real `workerd` process to
 prove the QuickJS cell runtime runs unchanged on the Cloudflare runtime.
