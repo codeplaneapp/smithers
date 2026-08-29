@@ -1,0 +1,130 @@
+/**
+ * The reserved `integration:` signal namespace, and the mapping onto the
+ * control plane and the notification queue.
+ *
+ * Every event an integration delivers is named
+ * `integration:<service>:<event>`. Reserving the prefix keeps a workflow's own
+ * signal names from colliding with delivered ones, and makes the origin of a
+ * signal readable in the journal without a lookup.
+ *
+ * @since 1.0.0
+ */
+import type { SignalPayload } from "@smthrs/control/ControlSchema"
+import { SmithersError } from "@smthrs/errors/SmithersError"
+import type { Notification } from "@smthrs/notifications/Notification"
+import type { ExternalEvent } from "./ExternalEvent.ts"
+
+/**
+ * The reserved prefix. A workflow's own signals must not use it.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const INTEGRATION_SIGNAL_PREFIX = "integration:"
+
+const requireSegment = (value: string, label: string): string => {
+  const normalized = typeof value === "string" ? value.trim() : ""
+  if (normalized.length === 0) {
+    throw new SmithersError("INVALID_INPUT", `Integration signal ${label} must be a non-empty string.`, {
+      [label]: value
+    })
+  }
+  if (normalized.includes(":")) {
+    throw new SmithersError("INVALID_INPUT", `Integration signal ${label} must not contain ":".`, { [label]: value })
+  }
+  return normalized
+}
+
+/**
+ * The signal name for one integration event.
+ *
+ * The `event` segment may contain dots, which is how per-action variants are
+ * spelled (`pull_request.opened`). Neither segment may contain `:`, because
+ * that is the separator {@link parse} splits on.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const eventName = (service: string, event: string): string =>
+  `${INTEGRATION_SIGNAL_PREFIX}${requireSegment(service, "service")}:${requireSegment(event, "event")}`
+
+/**
+ * Whether `name` is in the reserved namespace.
+ *
+ * @category refinements
+ * @since 1.0.0
+ */
+export const isIntegrationSignalName = (name: unknown): name is string =>
+  typeof name === "string" && name.startsWith(INTEGRATION_SIGNAL_PREFIX)
+
+/**
+ * Splits an `integration:<service>:<event>` name back into its parts, or
+ * `null` when `name` is not one.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const parse = (name: string): { readonly service: string; readonly event: string } | null => {
+  if (!isIntegrationSignalName(name)) return null
+  const rest = name.slice(INTEGRATION_SIGNAL_PREFIX.length)
+  const separator = rest.indexOf(":")
+  if (separator <= 0 || separator === rest.length - 1) return null
+  return { service: rest.slice(0, separator), event: rest.slice(separator + 1) }
+}
+
+/**
+ * The attribution stamped on a signal an integration delivered:
+ * `integration:<service>`.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const receivedBy = (service: string): string =>
+  `${INTEGRATION_SIGNAL_PREFIX}${requireSegment(service, "service")}`
+
+/**
+ * The control-plane signal for an event.
+ *
+ * @category conversions
+ * @since 1.0.0
+ */
+export const toSignalPayload = (event: ExternalEvent): SignalPayload => ({
+  name: event.eventName,
+  payload: event.payload
+})
+
+/**
+ * What {@link toNotification} needs beyond the event itself.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface NotificationOptions {
+  /** The notification's own durable id. Usually the event's dedupe key. */
+  readonly id?: string | undefined
+  /** The lineage the notification is queued against. */
+  readonly targetLineageId: string
+  readonly provenance: Notification["provenance"]
+}
+
+/**
+ * The durable notification for an event.
+ *
+ * Integration events are machine-originated, so they queue rather than steer:
+ * they reach the model when the run would otherwise idle, not by interrupting
+ * the turn in flight. Consecutive events about the same thing coalesce on
+ * `<eventName>:<correlationId>`, so a burst of edits to one issue leaves one
+ * pending notification carrying the newest payload.
+ *
+ * @category conversions
+ * @since 1.0.0
+ */
+export const toNotification = (event: ExternalEvent, options: NotificationOptions): Notification => ({
+  _tag: "system-event",
+  id: options.id ?? event.dedupeKey,
+  targetLineageId: options.targetLineageId,
+  provenance: options.provenance,
+  payload: event.payload,
+  delivery: "queue",
+  coalescingKey: `${event.eventName}:${event.correlationId ?? ""}`
+})

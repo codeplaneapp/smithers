@@ -1,0 +1,150 @@
+# @smthrs/integrations
+
+GitHub, Linear, and Telegram adapters over the Smithers control plane.
+
+This is a private workspace package. It is not published at `1.0.0-rc.0`
+because no consumer on the registry imports it; it re-enters the public set
+when one does.
+
+## What it is
+
+A narrow host layer, and nothing above it. Each provider gets a client, a
+verified webhook channel, and payload schemas. What an application does with
+them — which flow a pull request starts, which run an issue comment signals —
+is an Action or a Flow the application writes, because that part is not a
+provider concern.
+
+There is no `smithers listeners` verb and no gateway-level webhook
+configuration at 1.0. Webhook ingress is library code: a provider builds a
+`@smthrs/control` `Channel`, the application registers it with `Channels`, and
+`Channels.ingest` runs verify, decode, map, dispatch in that fixed order.
+
+```ts
+import * as Channels from "@smthrs/control/Channels"
+import { Core, GitHub } from "@smthrs/integrations"
+import { Effect, Redacted } from "effect"
+
+const channel = GitHub.Webhook.channel({
+  credential: Redacted.make({ id: "github-webhook", name: "github-webhook" }),
+  secret: Core.Channel.constantSecret(Redacted.make(process.env.GITHUB_WEBHOOK_SECRET!)),
+  route: Core.Channel.startFlow("triage")
+})
+
+const register = Effect.flatMap(Channels.Channels, (channels) => channels.register(channel))
+```
+
+Import one provider at a time when that is all you need:
+`@smthrs/integrations/github`, `/linear`, `/telegram`, `/core`.
+
+## What each part is for
+
+### `core`
+
+The service-agnostic pieces every provider shares.
+
+- **`Signature`** — constant-time HMAC-SHA256 verification. A webhook signature
+  is attacker-supplied, so `constantTimeEqual` always scans the longer input
+  and folds the length difference into the result: an early return would turn
+  the endpoint into an oracle that leaks the expected digest a byte at a time.
+  GitHub's `sha256=<hex>`, Linear's bare hex, and base64 digests are accepted.
+- **`Channel`** — the `WebhookChannel` binding: a secret resolver, the fixed
+  verify-then-decode order, and the `startFlow` and `signalRun` routes.
+- **`CursorStore`** — cursor persistence for polling sources, in memory or over
+  the control database. The contract is that a cursor is committed _after_ the
+  batch it acknowledges was handled.
+- **`ExternalEvent`** and **`SignalName`** — the one normalized event shape, the
+  reserved `integration:<service>:<event>` namespace, and the mapping onto
+  `@smthrs/control` signals and `@smthrs/notifications` system events.
+- **`IntegrationError`** — provider error classification, with a
+  machine-readable `reason` and provider-safe details.
+- **`Pkce`** and **`AuthorizationUrl`** — the RFC 7636 and RFC 6749 pieces of
+  the GitHub and Linear OAuth flows.
+
+### `github`
+
+`GitHubClient` is a REST client that exists for three behaviors a bare `fetch`
+does not have: rate-limit handling that recognizes a 429 _and_ the 403 forms
+GitHub uses for a secondary limit, `Link: rel="next"` pagination, and token
+hygiene — the token reaches the `Authorization` header and nothing else, and
+every request URL is pinned to the configured API origin so a redirected page
+link cannot carry it elsewhere.
+
+`Webhook` verifies `X-Hub-Signature-256` over the exact delivered bytes, then
+decodes one delivery into one event named and correlated at the most specific
+form the payload supports. `names` and `correlations` expose the whole ordered
+ladder for a caller that routes on a broader form.
+
+`ListenerRegistry` reconciles declared webhooks against a repository. Its
+safety property is ownership: a hook is owned only when its numeric GitHub id
+is in this workspace's own state file, so an unowned hook on a declared URL is
+reported as a `conflict` and never touched. Deletes need an explicit
+`allowDelete` on top of `apply`.
+
+### `linear`
+
+`LinearClient` is plain `fetch` over raw GraphQL. It resolves the names people
+write — `ENG`, `In Progress`, `bug`, `ENG-123` — into the ids Linear's
+mutations take, and caches every lookup per client. A 429 or 5xx is retried up
+to five attempts honoring `Retry-After` or `X-RateLimit-Requests-Reset`.
+
+`Webhook` checks the `Linear-Signature` HMAC _and_ the `webhookTimestamp`
+freshness window, because a valid signature never expires and a captured
+delivery would otherwise be replayable forever.
+
+### `telegram`
+
+`TelegramClient` chunks at Telegram's 4096-character limit on paragraph,
+sentence, and word boundaries; converts markdown to MarkdownV2; and resends a
+chunk as plain text when Telegram rejects the entities, so a formatting failure
+costs formatting rather than the message. The bot token is redacted from every
+error, including one a transport raised with the URL in it.
+
+`Source` is the `getUpdates` long poll. `Approval` is the inline-keyboard
+approval codec, where a press carries a per-approval token and a foreign press
+fails safe. `InitData` verifies Mini App `initData` on both the HMAC and
+Ed25519 paths, over Web Crypto only, so the same code runs under Node, Bun, and
+a Cloudflare Worker.
+
+## Credentials
+
+| Variable                                     | Used by                                      |
+| -------------------------------------------- | -------------------------------------------- |
+| `SMITHERS_GITHUB_TOKEN`, then `GITHUB_TOKEN` | `GitHub.GitHubClient`, `ListenerRegistry`    |
+| `SMITHERS_GITHUB_API_BASE_URL`               | GitHub Enterprise or a fixture server        |
+| `SMITHERS_GITHUB_WEBHOOK_SECRET`             | `GitHub.Webhook`                             |
+| `SMITHERS_LINEAR_API_KEY`                    | `Linear.LinearClient`                        |
+| `SMITHERS_LINEAR_WEBHOOK_SECRET`             | `Linear.Webhook`                             |
+| `SMITHERS_LINEAR_API_BASE_URL`               | A fixture server                             |
+| `SMITHERS_TELEGRAM_BOT_TOKEN`                | `Telegram.TelegramClient`, `Telegram.Source` |
+
+Explicit configuration always wins. Every client also takes an `env` argument
+that _replaces_ the ambient environment rather than layering over it, so a
+caller supplying its own credentials cannot have an ambient `GITHUB_TOKEN`
+decide which account a call runs as.
+
+## Tests
+
+`pnpm --filter @smthrs/integrations test` runs the whole suite. The client and
+webhook suites drive a real `node:http` fixture server over a real socket:
+nothing here mocks a transport.
+
+Three suites talk to the live APIs and skip, naming the credential, when it is
+absent:
+
+```sh
+GITHUB_TOKEN=…  pnpm --filter @smthrs/integrations exec vitest run test/GitHubLive.test.ts
+LINEAR_API_KEY=…  pnpm --filter @smthrs/integrations exec vitest run test/LinearLive.test.ts
+TELEGRAM_BOT_TOKEN=…  pnpm --filter @smthrs/integrations exec vitest run test/TelegramLive.test.ts
+```
+
+All three are read-only. The Telegram poll passes no offset, so it confirms
+nothing and a running bot keeps its backlog.
+
+## Commands
+
+```sh
+pnpm --filter @smthrs/integrations test
+pnpm --filter @smthrs/integrations check
+pnpm --filter @smthrs/integrations lint
+pnpm --filter @smthrs/integrations circular
+```
