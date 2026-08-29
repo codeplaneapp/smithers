@@ -95,6 +95,61 @@ describe("DurableClock", () => {
     }).pipe(Effect.provide(layer))
   })
 
+  effect("a zero threshold is durable while an omitted threshold uses the default", () => {
+    const Step = Action.make("DurableClock/zero-threshold/step", {
+      payload: { id: Schema.String, useZeroThreshold: Schema.Boolean },
+      success: Schema.String
+    })
+    const flow = Flow.make("DurableClock/zero-threshold", {
+      payload: { id: Schema.String, useZeroThreshold: Schema.Boolean },
+      success: Schema.String,
+      idempotencyKey: ({ id }) => id,
+      body: (payload) => Step.call(payload)
+    })
+    const layer = layerWired(Layer.mergeAll(
+      Step.toLayer(({ useZeroThreshold }) =>
+        useZeroThreshold
+          ? Effect.as(
+            DurableClock.sleep({
+              name: "zero-threshold",
+              duration: "5 millis",
+              inMemoryThreshold: 0
+            }),
+            "slept"
+          )
+          : Effect.as(
+            DurableClock.sleep({
+              name: "default-threshold",
+              duration: "5 millis"
+            }),
+            "slept"
+          )
+      ),
+      Interpreter.layer(flow)
+    ))
+    return Effect.gen(function*() {
+      const zeroExecutionId = yield* flow.execute(
+        { id: "zero", useZeroThreshold: true },
+        { discard: true }
+      )
+      yield* Effect.yieldNow
+      const zeroPending = yield* flow.poll(zeroExecutionId)
+      expect(Option.isSome(zeroPending) && zeroPending.value._tag).toBe("Suspended")
+
+      const defaultExecutionId = yield* flow.execute(
+        { id: "default", useZeroThreshold: false },
+        { discard: true }
+      )
+      expect(Option.isNone(yield* flow.poll(defaultExecutionId))).toBe(true)
+
+      yield* TestClock.adjust("5 millis")
+      const zeroResult = yield* pollComplete(flow.poll(zeroExecutionId))
+      const defaultResult = yield* pollComplete(flow.poll(defaultExecutionId))
+      expect(Option.isSome(zeroResult) && zeroResult.value._tag === "Complete").toBe(true)
+      expect(Option.isSome(defaultResult) && defaultResult.value._tag === "Complete").toBe(true)
+    }).pipe(Effect.provide(layer))
+  })
+
   effect("the in-memory threshold boundary is inclusive and configurable", () => {
     const Step = Action.make("DurableClock/threshold/step", {
       payload: { id: Schema.String },

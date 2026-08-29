@@ -90,9 +90,9 @@ export const sleep: (
       return
     }
 
-    const inMemoryThreshold = options.inMemoryThreshold
-      ? Duration.fromInputUnsafe(options.inMemoryThreshold)
-      : defaultInMemoryThreshold
+    const inMemoryThreshold = Duration.fromInputUnsafe(
+      options.inMemoryThreshold ?? defaultInMemoryThreshold
+    )
 
     if (Duration.isLessThanOrEqualTo(duration, inMemoryThreshold)) {
       return yield* Action.make({
