@@ -62,10 +62,11 @@ export const isNewer = (candidate: string, current: string): boolean => {
   for (let index = 0; index < length; index++) {
     const a = left[index]
     const b = right[index]
-    // A version that ran out of segments is the release; the one that still
-    // has a prerelease tag is older (1.0.0 beats 1.0.0-rc.0).
-    if (a === undefined) return false
-    if (b === undefined) return true
+    // Both versions come from npm dist-tags, so both carry major, minor, and
+    // patch. Running out of segments therefore means one of them has no
+    // prerelease suffix, and the release is newer: 1.0.0 beats 1.0.0-rc.0.
+    if (a === undefined) return true
+    if (b === undefined) return false
     if (a === b) continue
     const numeric = Number(a)
     const other = Number(b)

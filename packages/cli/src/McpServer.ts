@@ -467,6 +467,45 @@ export const tools = (options: Options = {}): ReadonlyArray<Tool> => {
   )
 }
 
+/**
+ * Whether this invocation is the MCP server rather than a command.
+ *
+ * @category predicates
+ * @since 1.0.0
+ */
+export const requested = (args: ReadonlyArray<string>): boolean => args.includes("--mcp")
+
+const value = (args: ReadonlyArray<string>, flag: string): string | undefined => {
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index]
+    if (argument === `--${flag}`) return args[index + 1]
+    if (argument?.startsWith(`--${flag}=`)) return argument.slice(flag.length + 3)
+  }
+  return undefined
+}
+
+/**
+ * Reads the session's scope out of raw argv.
+ *
+ * The MCP server is selected by a flag rather than a subcommand, because that
+ * is how every MCP client's configuration spells a launch command, so its own
+ * flags are read from argv rather than parsed by the command tree.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const optionsFromArguments = (args: ReadonlyArray<string>): Options => {
+  const surface = value(args, "surface")
+  const allowed = value(args, "allowed-tools")
+  return {
+    surface: surface === "raw" || surface === "both" ? surface : "semantic",
+    ...(allowed === undefined
+      ? {}
+      : { allowedTools: allowed.split(",").map((name) => name.trim()).filter((name) => name !== "") }),
+    readOnly: args.includes("--read-only")
+  }
+}
+
 /** A JSON-RPC message as it arrives on stdin. */
 interface Request {
   readonly id?: number | string | undefined

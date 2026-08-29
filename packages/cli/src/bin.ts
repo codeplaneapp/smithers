@@ -10,7 +10,9 @@ import { Cause, Effect, Exit, Runtime } from "effect"
 import { CliError as EffectCliError, Command } from "effect/unstable/cli"
 import * as CliError from "./CliError.ts"
 import { cli } from "./Command.ts"
+import * as McpServer from "./McpServer.ts"
 import * as NodeControl from "./NodeControl.ts"
+import * as Verb from "./Verb.ts"
 import { packageVersion } from "./Version.ts"
 
 let signalExitCode: 130 | 143 | undefined
@@ -79,6 +81,17 @@ const teardown: Runtime.Teardown = (exit, onExit) => {
 
 const main = Effect.gen(function*() {
   const applicationConfig = yield* NodeControl.config
+  const argv = process.argv.slice(2)
+  // `--mcp` is a mode, not a verb: every MCP client configures a launch
+  // command, so the flag has to be readable before the command tree parses
+  // anything. The server then talks to the same Control layer the verbs do.
+  if (McpServer.requested(argv)) {
+    return yield* McpServer.serve({
+      ...McpServer.optionsFromArguments(argv),
+      verbs: Verb.shipped,
+      version: packageVersion
+    }).pipe(Effect.provide(NodeControl.layer(applicationConfig)))
+  }
   yield* Command.run(cli, { version: packageVersion }).pipe(
     Effect.provide(NodeControl.layer(applicationConfig))
   )
