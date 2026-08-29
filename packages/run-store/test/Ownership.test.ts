@@ -179,6 +179,23 @@ describe("sameHostPidProbe", () => {
       expect(yield* sameHostPidProbe(self, { claimant, heartbeatAtMs: 0, nowMs: 1 })).toBe(true)
     }))
 
+  /**
+   * The documented limit of asking a pid: an owner recorded by a PREVIOUS
+   * incarnation of this same process — or by a second engine composed inside
+   * it — differs from the claimant only by `nonce`, and the process it names
+   * is this one. It is therefore always alive, and its row is never stolen
+   * while the process lives. Reading it as dead is not the alternative: two
+   * engines in one process are the shape this check exists to arbitrate, and
+   * that reading would let each steal the other's live runs. An embedded host
+   * that re-creates its engine in place keeps `leaseLiveness`, whose timeout
+   * does expire.
+   */
+  it.effect("cannot tell a previous incarnation in this process from the claimant", () =>
+    Effect.gen(function*() {
+      const previous: OwnerId = { hostId: "probe-host", pid: process.pid, nonce: "previous-incarnation" }
+      expect(yield* sameHostPidProbe(previous, { claimant, heartbeatAtMs: 0, nowMs: 1 })).toBe(true)
+    }))
+
   it.effect("reports a pid that has exited as gone", () =>
     Effect.gen(function*() {
       // A real process, really reaped: `exit` has fired, so the pid names

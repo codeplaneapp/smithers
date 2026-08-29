@@ -198,6 +198,23 @@ export const leaseLiveness = (
  * never reclaimed by anyone, because no other machine can ever produce
  * evidence about its pids.
  *
+ * Two limits are inherent to asking a pid, and they bound what reclaim can
+ * promise. Both are shared with `HostLiveness.isAlive`.
+ *
+ * - An owner recorded with the CLAIMANT'S OWN pid is always alive. A previous
+ *   incarnation of this process, or a second engine composed inside it, differs
+ *   from the claimant only by `nonce`, and the process it names is this one.
+ *   Such a row is never stolen while the process lives, so an embedded host
+ *   that re-creates its engine in place should keep {@link leaseLiveness},
+ *   whose timeout does expire. Reading same-pid-different-nonce as death is
+ *   not the alternative: it would let two engines in one process — the exact
+ *   shape this check exists to arbitrate — steal each other's live runs.
+ * - A pid the operating system has REUSED reports the unrelated process that
+ *   now holds it. The dead owner's row stays refused for as long as that
+ *   process lives, which delays reclaim rather than breaking it: the row is
+ *   still `running` under an expired lease, and the next probe after the pid
+ *   is free reclaims it.
+ *
  * @since 0.1.0
  * @category ownership
  */
