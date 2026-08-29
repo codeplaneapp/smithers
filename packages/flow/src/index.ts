@@ -54,11 +54,25 @@ export * as FlowRuntime from "./FlowRuntime/index.ts"
 export * as Graph from "./Graph.ts"
 
 /**
+ * Asking a person something: typed answers, re-asking, and a deadline.
+ *
+ * @since 0.1.0
+ */
+export * as HumanTask from "./HumanTask.ts"
+
+/**
  * Execution of a flow body, and the layer that registers it.
  *
  * @since 0.1.0
  */
 export * as Interpreter from "./Interpreter.ts"
+
+/**
+ * The durable poller: attempts as rounds, waits as durable timers.
+ *
+ * @since 0.1.0
+ */
+export * as Poll from "./Poll.ts"
 
 /**
  * Retry policy models and constructors.

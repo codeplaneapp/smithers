@@ -126,6 +126,8 @@ The root exports these namespaces, also available from matching
 | `DurableDeferred` | `DurableDeferred`, `Any`, and `AnyWithProps`; `make`, `await`, `into`, and `raceAll`; token API `TokenTypeId`, `Token`, `TokenParsed` (`FromString`, `fromString`, `encode`, `asToken`), `token`, `tokenFromExecutionId`, and `tokenFromPayload`; external completion `done`, `succeed`, `fail`, and `failCause`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `DurableClock`    | `DurableClock`, `make({ name, duration })`, and threshold-aware `sleep(options)`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `DurableQueue`    | `TypeId`, `DurableQueue`, `make`, flow-side `process`, worker effect `makeWorker`, and worker `layer` constructor `worker`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `Poll`            | The durable poller: `make(tag, options)` returning a flow whose body is one attempt; `Backoff`, `Check`, `CheckResult`, `delayMillis`, `Failure`, `PayloadSchema`, `PollExhausted`, `exhausted`, `exhaustedTag`, and `layer`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `HumanTask`       | Asking a person something: `action` and `tag`; `Kind`, `Request`, `HumanTaskFailed`, and `defaultMaxAttempts`; `deferred(name, attempt)` and the `answer` resolver; `validate`, `validateSchema`, and the typed view `decode`; `layer`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `RetryPolicy`     | `RetryPolicy` schema/type, `make`, and `defaultRetryPolicy`; decisions `RetryAfter`, `GiveUp`, `RetryDecision`, `retryAfter`, and `giveUp`; `nextDelay`, `nextDelayEffect`, `errorTag`, `isNonRetryable`, `decide`, and `decideEffect`; `RetryAttemptsExhausted`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `FlowRuntime`     | The execution contract this package declares: the `FlowRuntime` service, the per-execution `FlowInstance` service, `annotateWaiting` and `WaitingAnnotation`, and the `FlowCycleDetected` failure `execute` can return.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `StepIdentity`    | `allocationScope` and `invocationKey`, the one canonical derivation of ordinal step identity.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -262,6 +264,81 @@ const charge = Action.make({
 // Action.InfraInterrupt and honor `interruptRetryPolicy`.
 const resilient = Action.retry(charge, { times: 3 })
 const fastest = Action.raceAll("fastest-charge", [charge, resilient])
+```
+
+### Poll — keep asking until it is ready
+
+```ts
+import { Action, Poll } from "@smthrs/flow"
+import { Schema } from "effect"
+
+const Status = Action.make("deploy/status", {
+  payload: { id: Schema.String, attempt: Schema.Number },
+  success: Poll.CheckResult(Schema.String)
+})
+
+// One attempt is one durable round: the check runs, and either settles the
+// lineage or sleeps for this attempt's delay and hands off to the next round.
+const Deployment = Poll.make("deploy/wait", {
+  input: { id: Schema.String },
+  result: Schema.String,
+  intervalMs: 5_000,
+  backoff: "exponential", // "fixed" | "linear" | "exponential"
+  maxAttempts: 8,
+  onTimeout: "fail", // or "return-last" to answer with the last check output
+  check: ({ attempt, id }) => Status.call({ attempt, id })
+})
+
+// A spent budget fails Poll.PollExhausted, which a body catches like any
+// other declared failure. Provide Poll.layer beside Sleep.layer. A check that
+// can hang bounds itself: race the work against a durable clock inside the
+// check's own implementation (docs/reference/flow.md shows the recipe), so the
+// bound is replayable and a check that ran out of time costs one attempt.
+//
+// A schedule no clock can keep is refused at declaration with a RangeError:
+// an interval that is not a finite, non-negative length, a budget below one
+// attempt, or a backoff that reaches an infinite wait before the budget is
+// spent.
+```
+
+### HumanTask — ask a person, and re-ask
+
+```ts
+import { HumanTask } from "@smthrs/flow"
+import { Schema } from "effect"
+
+const Decision = Schema.Struct({ decision: Schema.Literals(["ship", "hold"]) })
+
+const asked = HumanTask.action.call({
+  name: "release",
+  kind: "json", // "ask" | "confirm" | "select" | "json"
+  prompt: "Ship the release?",
+  schema: {
+    type: "object",
+    required: ["decision"],
+    properties: { decision: { enum: ["ship", "hold"] } }
+  },
+  maxAttempts: 3,
+  timeoutMs: 6 * 60 * 60 * 1000
+}).pipe(HumanTask.decode(Decision))
+
+// The run parks under `approval` carrying the current attempt's token.
+// Whoever collects the answer records it against that token:
+const recorded = HumanTask.answer({ token, value: { decision: "ship" } })
+
+// An answer the schema refuses parks again on the next attempt's token, and
+// the reason it was refused is recorded as a step of its own,
+// `HumanTask/<name>#<attempt>/rejected`. A spent budget fails HumanTaskFailed
+// `rejected`; a passed deadline fails it `timeout`. A question nobody could
+// answer — no options to choose from, a budget below one attempt, a timeoutMs
+// that is not a finite, non-negative length of time — fails it
+// `request_invalid` before anyone is asked. Provide HumanTask.layer beside the
+// other implementations.
+//
+// `timeoutMs` needs a host that resumes a durable race. It settles under
+// `@smthrs/engine`'s in-process engine; the SQLite engine store does not yet
+// re-drive a run parked on `DurableDeferred.raceAll`, so ask without a
+// deadline there (docs/reference/flow.md has the detail).
 ```
 
 ### DurableClock — durable sleep

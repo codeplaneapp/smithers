@@ -46,6 +46,77 @@ Sealed idempotency identity has two forms. A string is namespaced by the action 
 
 Deferred tokens encode flow name, execution ID, and deferred name so another process can complete the correct durable address.
 
+## `Poll`
+
+`Poll.make(tag, options)` declares a durable poller and returns an ordinary flow. Its body is ONE attempt: run `check`, and either settle the lineage with the check's own output or sleep for this attempt's delay and hand off to the next round with the attempt counter raised. Each attempt is therefore a durable round with its own keyed plan nodes, a check that already ran replays from its recorded outcome, and the wait between attempts is a durable timer that survives a process restart.
+
+| Option | Meaning |
+| --- | --- |
+| `input` | The author's payload fields. `attempt` is added to them and defaults to one |
+| `result` | The schema the poll settles with |
+| `check` | A body fragment returning `{ satisfied, output }`. It may not fail; state what a failure means with `Node.catch` inside the fragment |
+| `intervalMs`, `backoff` | The wait before the next attempt: `fixed`, `linear` (interval × attempt), or `exponential` (interval × 2^(attempt−1)) |
+| `maxAttempts` | The attempt bound. It is also the flow's `maxRounds`, so a lineage that opened another round is refused by the engine |
+| `onTimeout` | `fail` fails `PollExhausted` at the bound; `return-last` answers with the last check output |
+
+`delayMillis` is the exported schedule function, `CheckResult(result)` is the success schema a check action declares, `Failure` is the union a poll's rounds can fail with, and `Poll.layer` implements the `system/poll-exhausted` step.
+
+`Poll.make` refuses a schedule no clock can keep, with a `RangeError` naming the option that is wrong: an `intervalMs` that is not finite or is negative becomes a `system/sleep` node whose timer never fires, and a `maxAttempts` below one whole attempt reaches `Flow.make` as a complaint about `maxRounds`, an option the author never wrote. The check is on the schedule rather than on the interval alone: `delayMillis` multiplies the interval by the backoff, so `{ intervalMs: 1000, maxAttempts: 2000, backoff: "exponential" }` states three finite options and still asks for a wait of `Infinity`. The last wait a poll can arm — the one before the final attempt, since the attempt at the budget gives up rather than sleeps — has to be a length too.
+
+### Bounding a check that can hang
+
+A per-attempt time limit on the check is deliberately not a `Poll.make` option. A plan node's duration is not something the body around it can bound, so the bound goes in the check's own implementation, where `DurableDeferred.raceAll` races the work against a durable clock:
+
+```ts
+const Status = Action.make("deploy/status", {
+  payload: { id: Schema.String, attempt: Schema.Number },
+  success: Poll.CheckResult(Schema.String)
+})
+
+const statusLayer = Status.toLayer(({ attempt, id }) =>
+  DurableDeferred.raceAll({
+    name: `deploy/status#${attempt}`,
+    success: Poll.CheckResult(Schema.String),
+    error: Schema.Never,
+    effects: [
+      readDeployment(id),
+      Effect.as(
+        DurableClock.sleep({
+          name: `deploy/status#${attempt}`,
+          duration: Duration.seconds(30),
+          inMemoryThreshold: Duration.zero
+        }),
+        { satisfied: false, output: "unknown" }
+      )
+    ]
+  })
+)
+```
+
+Three things make this the durable bound rather than a wall-clock one. The race records its winner under a name that carries the attempt, so a re-driven round reads the recorded outcome instead of racing again. The clock parks the execution rather than holding a fiber, so the bound outlives the process waiting on it. And the clock's branch answers `satisfied: false`, so a check that ran out of time costs the poll one attempt and nothing else: the round takes its declared interval and hands off to the next attempt exactly as an unsatisfied check does.
+
+## `HumanTask`
+
+`HumanTask.action` is the declared `system/human-task` step: a typed question with re-asking and a deadline, built on `WaitFor`'s wait points and `DurableClock`.
+
+| Payload field | Meaning |
+| --- | --- |
+| `name` | Addresses the question. Two calls naming one question in one execution await one answer |
+| `kind` | `ask` (prose), `confirm` (a boolean), `select` (one of `options`), `json` (a value `schema` accepts) |
+| `prompt` | What the person is asked |
+| `options` | The choices a `select` offers |
+| `schema` | A JSON Schema in the bounded subset: `type` (`object`, `array`, `string`, `number`, `integer`, `boolean`, `null`), `enum`, `properties`, `required`, `items`, `nullable`, `description`, `title` |
+| `maxAttempts` | How many answers may be refused before the task fails. Defaults to `defaultMaxAttempts` (10) |
+| `timeoutMs` | How long the QUESTION stays open, across every attempt. A finite number of milliseconds that is not negative |
+
+Each attempt is its own durable wait point, `WaitFor/<name>#<attempt>`, so an answer is recorded through the ordinary durable deferred path and a refused answer stays recorded under the attempt that refused it. The refusal itself is recorded as a sealed step named `HumanTask/<name>#<attempt>/rejected`, carrying the task, the attempt, and the reason, so a reader of the journal sees why an answer was sent back. The run parks under the `approval` waiting reason carrying the current attempt's token; `HumanTask.answer({ token, value })` records an answer against it. A re-driven round replays every answer it already has and parks on the first attempt that has none, so a restart between the park and the answer resumes on the same token.
+
+`HumanTaskFailed` carries `code`, `task`, `attempts`, the `rejections` it collected, and a message. `request_invalid` refuses an unanswerable question before anyone is asked: a `select` with no options, an attempt budget below one, a `timeoutMs` that is not a length of time (`NaN` and a negative length are deadlines that have already passed, so the question would time out on its first park with nobody asked; `Infinity` is a deadline that never arrives), or a schema outside the subset. `rejected` means the budget was spent on answers the task refused. `timeout` means the deadline passed with the question open.
+
+`timeoutMs` races the answer against one `DurableClock` per task through `DurableDeferred.raceAll`. The race parks and settles on whichever arrives first under `@smthrs/engine`'s in-process engine. It does not resume under the SQLite engine store: a run parked on a durable race is woken and then fails with an interrupt-only cause instead of re-driving the race, so on a durable host a question asked with `timeoutMs` never settles on its deadline. Ask without `timeoutMs` there until the store resumes a raced park. A durable race of a `DurableDeferred.await` and a `DurableClock.sleep`, with no human task involved, reproduces it.
+
+`validate(value, request)` returns the reason an answer was refused, or `undefined`; run it in the interface so a typo is refused while the person is still looking at it. `validateSchema(schema)` checks that a schema stays inside the subset at every depth. `decode(schema)` gives the `Schema.Json` answer the caller's own type; the two schema descriptions must agree, and a disagreement surfaces as a defect rather than as a failure a body could catch.
+
 ## `FlowRuntime`
 
 `FlowRuntime` is the service tag the authoring APIs are written against: registration, execution, polling, safe/unsafe interruption, resume, action execution, deferred lookup/completion, and clock scheduling. `FlowInstance` holds one execution's mutable frontier state, and `annotateWaiting` declares how the flow is about to wait so a durable driver can park it under that reason and token. `FlowCycleDetected` is the typed failure `execute` can return. `CancelRequestFailed` is the typed, recoverable failure returned by public interrupt surfaces when a durable runtime cannot transactionally record the run and its linked descendants; no ephemeral interruption occurs and durable cancellation state remains unchanged.

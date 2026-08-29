@@ -90,16 +90,29 @@ type ExecutionState = {
 }
 
 /**
- * A `FlowRuntime` layer that keeps every execution, action outcome, and
- * durable deferred result in process memory.
+ * The half of this runtime's state a process crash does NOT take with it:
+ * recorded action outcomes, and durable deferred results.
+ *
+ * Registrations, live executions, and armed timers are process state and are
+ * rebuilt by whoever starts next; these two maps are the journal, so a case
+ * that drops a runtime and builds another over the same `MemoryState` is
+ * running the second process against the first one's durable record.
  */
-export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(FlowRuntime.FlowRuntime)(
+export interface MemoryState {
+  readonly actions: Map<string, Exit.Exit<Flow.Result<unknown, unknown>>>
+  readonly deferredResults: Map<string, Exit.Exit<unknown, unknown>>
+}
+
+/** An empty durable record, as a fresh database would be. */
+export const makeMemoryState = (): MemoryState => ({ actions: new Map(), deferredResults: new Map() })
+
+const makeRuntime = (durable: MemoryState) =>
   Effect.gen(function*() {
     const rootScope = yield* Effect.scope
     const flows = new Map<string, { readonly handler: Handler; readonly scope: Scope.Scope }>()
     const executions = new Map<string, ExecutionState>()
-    const actions = new Map<string, Exit.Exit<Flow.Result<unknown, unknown>>>()
-    const deferredResults = new Map<string, Exit.Exit<any, any>>()
+    const actions = durable.actions
+    const deferredResults = durable.deferredResults
     const clocks = yield* FiberMap.make<string>()
 
     const drive = Effect.fnUntraced(function*(executionId: string): Effect.fn.Return<void> {
@@ -323,6 +336,21 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
 
     return runtime
   })
+
+/**
+ * A `FlowRuntime` layer whose durable record is `state`, so a second build
+ * over the same state is what a restarted process sees.
+ */
+export const layerMemoryOver = (state: MemoryState): Layer.Layer<FlowRuntime.FlowRuntime> =>
+  Layer.effect(FlowRuntime.FlowRuntime)(makeRuntime(state))
+
+/**
+ * A `FlowRuntime` layer that keeps every execution, action outcome, and
+ * durable deferred result in process memory. Each build gets a record of its
+ * own.
+ */
+export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(FlowRuntime.FlowRuntime)(
+  Effect.suspend(() => makeRuntime(makeMemoryState()))
 )
 
 /**
