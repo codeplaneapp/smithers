@@ -41,10 +41,11 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { execFileSync } from "node:child_process"
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { collectSources, fileBindsSpawningModule } from "../../flows/test/SpawnSpecifiers.ts"
 import * as Exec from "../src/internal/Exec.ts"
 
 const directory = mkdtempSync(join(tmpdir(), "flows-exec-containment-"))
@@ -203,41 +204,20 @@ describe.skipIf(process.platform === "win32")("a cancelled Exec", () => {
     // decorates `ChildProcessSpawner` once and every path that resolves the
     // tag inherits the kill deadline and the ledger record. A module that
     // reached for `child_process` would be outside both, silently, and no
-    // behavioral test in this package could see it — the process would simply
+    // behavioral test in this package could see it: the process would simply
     // outlive a cancel on someone's machine. So the bypass is checked for
-    // directly.
+    // directly, here over `std` alone, where it fails fast during work on this
+    // package, and in `packages/flows/test/spawnContainment.test.ts` over
+    // every package.
     //
-    // Both spellings of the specifier bind the same module and no eslint
-    // config in this repository requires the `node:` prefix, so both are
-    // matched; `cluster.fork()` is matched for the same reason. The matcher is
-    // pinned against fixtures rather than trusted, because nothing in this
-    // package spells the bare form today, which is exactly what a matcher that
-    // missed it would look like. `packages/flows/test/spawnContainment.test.ts`
-    // is the same gate over every package.
-    const source = join(dirname(fileURLToPath(import.meta.url)), "..", "src")
-    const files: Array<string> = []
-    const walk = (directory: string) => {
-      for (const entry of readdirSync(directory)) {
-        const path = join(directory, entry)
-        if (statSync(path).isDirectory()) walk(path)
-        else if (path.endsWith(".ts")) files.push(path)
-      }
-    }
-    walk(source)
-
-    const spawningModule = String.raw`["'](?:node:)?(?:child_process|cluster)["']`
-    const importsSpawningModule = (source: string): boolean =>
-      new RegExp(String.raw`^\s*import\s[^\n]*?from\s*${spawningModule}`, "m").test(source)
-      || new RegExp(String.raw`\bimport\s*\(\s*${spawningModule}\s*\)`).test(source)
-      || new RegExp(String.raw`\brequire\s*\(\s*${spawningModule}\s*\)`).test(source)
-
-    for (const specifier of ["node:child_process", "child_process", "node:cluster", "cluster"]) {
-      expect(importsSpawningModule(`import { spawn } from "${specifier}"\n`), specifier).toBe(true)
-      expect(importsSpawningModule(`const spawner = require("${specifier}")\n`), specifier).toBe(true)
-    }
-    expect(importsSpawningModule(" * never reaches for node:child_process\n")).toBe(false)
+    // Both gates read the same parser, so this one can never be narrower than
+    // that one, and the reader's own fixtures live with it in
+    // `packages/flows/test/SpawnSpecifiers.test.ts`: one file per layout,
+    // including the multi-line import the repository's formatter produces,
+    // which is what walked through the regex this replaced.
+    const files = collectSources(join(dirname(fileURLToPath(import.meta.url)), "..", "src"))
 
     expect(files.length).toBeGreaterThan(0)
-    expect(files.filter((path) => importsSpawningModule(readFileSync(path, "utf8")))).toEqual([])
+    expect(files.filter((path) => fileBindsSpawningModule(path))).toEqual([])
   })
 })
