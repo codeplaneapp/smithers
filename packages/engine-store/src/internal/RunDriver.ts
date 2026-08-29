@@ -1399,7 +1399,21 @@ export const make = (
           // this flow can still close it. Claiming first is what makes the
           // close fenced: `cancelOwned` is owner-fenced, so exactly one of the
           // sweeping processes wins and the rest see a lost CAS.
-          if (initial.status === "suspended" && initial.cancelRequestedAtMs !== null) {
+          //
+          // `running` is here for the same reason `suspended` is. The row a
+          // hard-killed owner leaves behind is `running` with a frozen
+          // heartbeat and no waiting row, so the stale-running sweep is the
+          // only thing that reaches it, and it arrives through this same
+          // function: without this arm a control-only process could close a
+          // PARKED run of an unregistered flow and not a hard-killed one,
+          // though the two closes are the identical durable write. Nothing is
+          // weakened by admitting it, because the arbitration is
+          // `claimAndActivate`'s and not this guard's: a fresh lease or a live
+          // owner refuses the takeover and the run is left exactly as it was.
+          if (
+            (initial.status === "suspended" || initial.status === "running") &&
+            initial.cancelRequestedAtMs !== null
+          ) {
             if (!(yield* claimAndActivate(initial))) return
             return yield* cancelOwned(executionId, withoutResult(state))
           }

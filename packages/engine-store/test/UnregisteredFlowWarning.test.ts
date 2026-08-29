@@ -56,6 +56,28 @@ const provideJournal = <A, E, R>(
     Exclude<R, Journal.Journal | RunStore.RunStore | DurableEngineState.DurableEngineState | Scope.Scope>
   >
 
+/**
+ * The same services over one real SQLite database, `DurableEngineState`
+ * included.
+ *
+ * {@link provideJournal} composes the memory state, whose `staleRunningRuns`
+ * has nothing to enumerate: it scans a run table it does not have. A case
+ * about a hard-killed RUNNING row has to go through the SQL implementation,
+ * which reads `flows_runs` itself.
+ */
+const provideSql = <A, E, R>(
+  effect: Effect.Effect<A, E, R | Journal.Journal | RunStore.RunStore | DurableEngineState.DurableEngineState>
+) =>
+  effect.pipe(
+    Effect.provide(TestStores.layerAt(":memory:")),
+    Effect.provide(TestClock.layer()),
+    Effect.scoped
+  ) as Effect.Effect<
+    A,
+    E,
+    Exclude<R, Journal.Journal | RunStore.RunStore | DurableEngineState.DurableEngineState | Scope.Scope>
+  >
+
 /** Interrupts a run mid-action via driver-scope close (process shutdown). */
 const releaseMidAction = (executionId: string) =>
   Effect.gen(function*() {
@@ -279,5 +301,72 @@ describe("a parked run of an unregistered flow still cancels (B-01)", () => {
       expect(result.row.cancelRequestedAtMs).toBe(1_000)
       expect(result.decisions).toContain("claim-lost")
       expect(result.interrupted).toBe(0)
+    }))
+
+  /**
+   * The other half of B-01: the run whose owner was hard-killed.
+   *
+   * A cancel can be requested against a `running` row too, and the row a
+   * SIGKILL leaves behind — `running`, a frozen heartbeat, no waiting row — is
+   * reached only by the stale-running sweep. That sweep drives the run through
+   * the same `drive()`, so an unregistered flow sent it down the warn-and-leave
+   * branch: the row was woken every heartbeat, warned about once, and left
+   * `running` with a cancellation nothing would ever deliver. A control-only
+   * process could close a PARKED run of that flow and not this one, even
+   * though the two closes are the same durable write.
+   *
+   * The claim is what makes it safe. `claimAndActivate` arbitrates a running
+   * row exactly as it does for a registered flow — a fresh lease or a live
+   * probe refuses the takeover — so only a row this process may legitimately
+   * take over is closed here.
+   */
+  it.effect("closes a hard-killed run of an unregistered flow that was told to cancel", () =>
+    Effect.gen(function*() {
+      const logs: Array<string> = []
+      const capture = Logger.make((options) => {
+        logs.push(String(options.message))
+      })
+
+      const result = yield* withCrypto(provideSql(
+        Effect.gen(function*() {
+          const store = yield* RunStore.RunStore
+          const journal = yield* Journal.Journal
+          const dead: Ownership.OwnerId = { hostId: "unregistered-host", pid: 99, nonce: "hard-killed" }
+
+          // The row a SIGKILL leaves: activated, then never heard from again.
+          // No release, no waiting row, so only the stale-running sweep sees it.
+          yield* store.create(
+            "b01-hardkilled",
+            JSON.stringify({ version: 1, flowName: TestFlow._tag, payload: {} })
+          )
+          const pending = yield* store.get("b01-hardkilled")
+          const expected = { status: pending.status, owner: pending.owner, heartbeatAtMs: pending.heartbeatAtMs }
+          yield* store.claim("b01-hardkilled", expected, dead, 0)
+          yield* store.activate("b01-hardkilled", dead, 0, expected)
+          yield* store.requestCancel("b01-hardkilled", 1_000)
+
+          // The control-only process again: store and sweeper, no registration.
+          yield* makeDriver("owner-cancel-running")
+          yield* TestClock.adjust(
+            Duration.toMillis(Ownership.heartbeatStaleAfter) + Duration.toMillis(Ownership.heartbeatInterval)
+          )
+
+          yield* journal.flush
+          const entries = yield* journal.entries({ runId: "b01-hardkilled" as never, limit: 200 })
+          return {
+            row: yield* store.get("b01-hardkilled"),
+            interrupted: entries.entries.filter((entry) => entry.eventType === "flows.engine.interrupted").length,
+            warnings: logs.filter((message) =>
+              message.includes("not registered") && message.includes("b01-hardkilled")
+            ).length
+          }
+        }).pipe(Effect.provide(Logger.layer([capture])))
+      ))
+
+      expect(result.row.status).toBe("cancelled")
+      expect(result.row.owner).toBeNull()
+      expect(result.interrupted).toBe(1)
+      // Closing the run is not the case the warning exists for.
+      expect(result.warnings).toBe(0)
     }))
 })
