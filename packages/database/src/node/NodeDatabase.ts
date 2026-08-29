@@ -97,6 +97,11 @@ const nodeFloor = ">=22.19.0"
  */
 const migrationLedgerTable = "flows_migrations"
 
+const isLockedError = (error: unknown): boolean => {
+  const text = String(error)
+  return text.includes("database is locked") || text.includes("database is busy")
+}
+
 /**
  * Reads the tables of a file without joining the WAL or converting it.
  *
@@ -104,21 +109,28 @@ const migrationLedgerTable = "flows_migrations"
  * does not exist, a directory, an in-memory name, or a file SQLite refuses to
  * read. None of those is a 0.x database, so the driver's own open behavior
  * decides what happens next and the guard says nothing.
+ *
+ * A file a peer holds locked is not one of those cases and is rethrown, so
+ * `guardOpen` outwaits the lock on the same ladder the open uses. Answering
+ * `undefined` there would wave the file through: the open ladder outwaits the
+ * same peer, so a 0.x `smithers.db` whose 0.x writer held it for a moment
+ * would be opened and migrated, which is the refusal rc-contract section 2
+ * states without condition.
  */
 const readTableNames = (filename: string): ReadonlyArray<string> | undefined => {
+  let db: DatabaseSync | undefined
   try {
     if (!statSync(filename).isFile()) return undefined
-    const db = new DatabaseSync(filename, { readOnly: true })
-    try {
-      return db
-        .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
-        .all()
-        .map((row) => String((row as { readonly name: unknown }).name))
-    } finally {
-      db.close()
-    }
-  } catch {
+    db = new DatabaseSync(filename, { readOnly: true })
+    return db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+      .all()
+      .map((row) => String((row as { readonly name: unknown }).name))
+  } catch (error) {
+    if (isLockedError(error)) throw error
     return undefined
+  } finally {
+    db?.close()
   }
 }
 
@@ -154,20 +166,15 @@ const unsupportedOpen = (filename: string): UnsupportedDatabase | undefined => {
  * are refused here, before the connection exists.
  */
 const guardOpen = (filename: string): Effect.Effect<void> =>
-  Effect.suspend(() => {
+  retryWhileLocked(Effect.suspend(() => {
     const refusal = unsupportedOpen(filename)
     return refusal === undefined ? Effect.void : Effect.die(refusal)
-  })
+  }))
 
 /** Bounds how long a connection keeps retrying a peer that holds the database. */
 const openAttempts = 40
 const openBaseDelayMs = 5
 const openMaxDelayMs = 250
-
-const isLockedError = (error: unknown): boolean => {
-  const text = String(error)
-  return text.includes("database is locked") || text.includes("database is busy")
-}
 
 /** Carries an open-time defect through a retry as a typed failure. */
 interface OpenFailure {
@@ -190,6 +197,20 @@ const openSchedule = Schedule.exponential(Duration.millis(openBaseDelayMs)).pipe
   ),
   Schedule.upTo({ times: openAttempts - 1 })
 )
+
+/**
+ * Retries `self` on the fixed ladder while SQLite reports the file as locked,
+ * then re-raises the original defect unchanged.
+ *
+ * One ladder serves the guard's probe and the open itself, so the guard is
+ * never the first to give up on a peer the open would have waited out.
+ */
+const retryWhileLocked = <A>(self: Effect.Effect<A>): Effect.Effect<A> =>
+  self.pipe(
+    Effect.catchDefect((defect) => Effect.fail<OpenFailure>({ defect })),
+    Effect.retry({ schedule: openSchedule, while: (error) => isLockedError(error.defect) }),
+    Effect.catch((error) => Effect.die(error.defect))
+  )
 
 /**
  * Retries opening a connection while SQLite reports the database as locked.
@@ -220,10 +241,8 @@ const retryLockedOpen = <A>(self: Layer.Layer<A>): Layer.Layer<A> =>
     // A fresh memo map per attempt: reusing the caller's would hand every
     // retry the first attempt's memoized (failed) build instead of opening
     // again. `self` is a leaf client layer, so there is nothing to share.
-    Effect.flatMap(Layer.makeMemoMap, (memoMap) => Layer.buildWithMemoMap(self, memoMap, scope)).pipe(
-      Effect.catchDefect((defect) => Effect.fail<OpenFailure>({ defect })),
-      Effect.retry({ schedule: openSchedule, while: (error) => isLockedError(error.defect) }),
-      Effect.catch((error) => Effect.die(error.defect))
+    retryWhileLocked(
+      Effect.flatMap(Layer.makeMemoMap, (memoMap) => Layer.buildWithMemoMap(self, memoMap, scope))
     )
   )
 

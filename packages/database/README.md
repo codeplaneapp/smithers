@@ -64,9 +64,13 @@ The runtime check runs first, so a Bun process learns it is the wrong runtime
 rather than something about the file it named. The file check reads
 `sqlite_master` through a read-only connection and says nothing when the file
 cannot be inspected at all: a path that does not exist, a directory, an
-in-memory name, a file another process holds locked, or a file SQLite refuses
-to read. None of those is a 0.x database, so the driver's own open decides
-what happens next.
+in-memory name, or a file SQLite refuses to read. None of those is a 0.x
+database, so the driver's own open decides what happens next.
+
+A file a peer holds locked is not one of those cases. The probe retries on the
+same ladder the open uses, so a 0.x `smithers.db` is refused whether or not a
+0.x writer held it at that moment; a lock nobody releases exhausts the ladder
+and raises SQLite's own lock error, exactly as an unguarded open would.
 
 The file check exists because 1.0.0-rc.0 does not load 0.x run state. Without
 it, pointing the runtime at a 0.x `smithers.db` would add `flows_*` tables

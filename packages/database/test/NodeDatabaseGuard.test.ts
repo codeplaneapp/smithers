@@ -36,10 +36,29 @@ afterEach(() => {
 const seedZeroX = (filename: string): void => {
   const db = new DatabaseSync(filename)
   try {
+    // Rollback journal, as 0.x leaves it: a writer's exclusive lock then
+    // blocks the guard's read-only probe, which is the case below.
+    db.exec("PRAGMA journal_mode = DELETE")
     db.exec("CREATE TABLE _smithers_runs (id TEXT PRIMARY KEY, status TEXT NOT NULL)")
     db.exec("INSERT INTO _smithers_runs (id, status) VALUES ('run-1', 'running')")
   } finally {
     db.close()
+  }
+}
+
+/** Takes the file's write lock, as a 0.x process mid-transaction holds it. */
+const holdWriteLock = (filename: string): { readonly release: () => void } => {
+  const db = new DatabaseSync(filename)
+  let released = false
+  db.exec("PRAGMA busy_timeout = 0")
+  db.exec("BEGIN EXCLUSIVE")
+  return {
+    release: () => {
+      if (released) return
+      released = true
+      db.exec("COMMIT")
+      db.close()
+    }
   }
 }
 
@@ -80,6 +99,30 @@ describe("NodeDatabase guard: 0.x database files (X-13)", () => {
       expect(defect.message).toBe(
         `${filename} is not a Smithers 1.0 database (1.0.0-rc.0 does not load a 0.x smithers.db)`
       )
+    }))
+
+  // Real elapsed time: `it.effect`'s TestClock would stall the probe's ladder.
+  it.live("refuses a 0.x file whose 0.x writer holds the lock", () =>
+    Effect.gen(function*() {
+      const filename = tempFile("smithers.db")
+      seedZeroX(filename)
+      const lock = holdWriteLock(filename)
+      // Released only after the probe has already been refused its read, so
+      // the guard has to outwait the lock rather than never meeting it. The
+      // open ladder outwaits a lock this short, so a guard that gave up here
+      // would open the very file section 2 refuses.
+      const timer = setTimeout(() => lock.release(), 300)
+
+      try {
+        const defect = defectOf(yield* build({ filename }))
+
+        expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(true)
+        if (!NodeDatabase.isUnsupportedDatabase(defect)) return
+        expect(defect.code).toBe("unsupported_database_file")
+      } finally {
+        clearTimeout(timer)
+        lock.release()
+      }
     }))
 
   it.effect("opens a database that carries the flows_migrations table", () =>
