@@ -9,7 +9,7 @@ import { parse } from "yaml";
  * They live in this suite because `.github/workflows/{apps-deploy,canary}.yml`
  * ship with `apps/review` under one owner and this is that owner's only test
  * runner. `apps/server/scripts/canary/workflow-wiring.test.ts` grades a
- * different property — that every probe has a caller — and neither file
+ * different property, that every probe has a caller, and neither file
  * asserts the other's.
  */
 const workflowsDir = fileURLToPath(new URL("../../../../.github/workflows/", import.meta.url));

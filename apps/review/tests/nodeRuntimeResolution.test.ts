@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
  * TypeScript sources, so Node strips the types and then applies its own ESM
  * resolution: a relative specifier without a file extension throws
  * `ERR_MODULE_NOT_FOUND`. Bun resolves the same specifier, so the rest of this
- * suite — which runs under Bun — cannot see the difference. That is the whole
+ * suite, which runs under Bun, cannot see the difference. That is the whole
  * reason this file spawns Node.
  *
  * The modules below are the ones that leave `apps/review` for a workspace
