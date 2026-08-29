@@ -38,8 +38,9 @@ function manifestsUnder(directory: string): Map<string, Manifest> {
   const found = new Map<string, Manifest>();
   for (const entry of readdirSync(`${workspaceRoot}${directory}`, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
+    const manifestPath = `${workspaceRoot}${directory}/${entry.name}/package.json`;
     try {
-      found.set(entry.name, JSON.parse(readFileSync(`${workspaceRoot}${directory}/${entry.name}/package.json`, "utf8")));
+      found.set(entry.name, JSON.parse(readFileSync(manifestPath, "utf8")));
     } catch {
       continue; // Not a package directory.
     }
