@@ -20,7 +20,7 @@ Read [implementation status](../pages/release/support-matrix.md) before choosing
 - [Abandoned runs and supervision](../pages/release/support-matrix.md#abandoned-runs-and-supervision) — abandoned runs are **not** auto-resumed in this release, and the manual resume path.
 - [Substrate pin and known upstream issues](../pages/release/support-matrix.md#substrate-pin-and-known-upstream-issues) — the exact `effect@4.0.0-rc.108` pin and the upstream defects tracked against it.
 
-Private-alpha operators should also read the [alpha notes](alpha-notes.md) for current operational limits.
+Private-alpha operators should also read the [alpha notes](../alpha-notes.md) for current operational limits.
 
 ## Concepts
 
@@ -88,7 +88,7 @@ documented in the [plugins repository](https://github.com/smithersai/plugins).
 - [Execution and data flow](../pages/architecture/execution-data-flow.md)
 - [Design decisions](../pages/design-decisions.md)
 - [Implementation status](../pages/release/support-matrix.md)
-- [Alpha notes](alpha-notes.md) — known limitations for the private alpha, including the register of test pins.
+- [Alpha notes](../alpha-notes.md) — known limitations for the private alpha, including the register of test pins.
 
 ## Releasing
 

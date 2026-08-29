@@ -70,9 +70,9 @@ export const docsReferenceSync = Smithers.LlmLint({
   changes,
   include: [Smithers.glob("//packages/*/src/**")],
   context: [
-    Smithers.glob("//docs/reference/*.md"),
-    Smithers.glob("//docs/concepts/**/*.md"),
-    Smithers.glob("//docs/guides/**/*.md")
+    Smithers.glob("//docs/pages/api/*.md"),
+    Smithers.glob("//docs/pages/concepts/**/*.md"),
+    Smithers.glob("//docs/pages/guides/**/*.md")
   ],
   deps: [],
   prompt,

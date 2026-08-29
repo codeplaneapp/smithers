@@ -1,53 +1,133 @@
-# Implementation status
+---
+description: "What Smithers 1.0.0-rc.0 supports: runtimes, databases, published packages, commands, and run control, straight from the release contract."
+---
 
-This page distinguishes usable source-backed behavior from contracts and planned integration. It is the authoritative documentation-level status table for this repository.
+# rc.0 support matrix
 
-## Release status
+This page states what Smithers 1.0.0-rc.0 supports. Everything it does not
+support is in [known limitations](/release/known-limitations).
 
-This library releases as a production pilot/beta. Its APIs are pre-1.0 contracts and may change without backward compatibility. The `@smthrs/*` engine package manifests currently use version `0.1.0` and pin `effect` to exactly `4.0.0-rc.108`, which is a release candidate.
+The tables below are generated from
+[the release contract](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md),
+which is frozen for this candidate. A row here and a row there are the same row.
 
-## Substrate pin and known upstream issues
+{/* generated:support-matrix start */}
 
-`effect` is pinned to exactly `4.0.0-rc.108` in every release-1 engine manifest, as are the `@effect/*` packages that follow Effect's own version line (`@effect/platform-node`, `@effect/platform-node-shared`, `@effect/platform-bun`, `@effect/sql-sqlite-node`, `@effect/opentelemetry`, `@effect/vitest`). The agent-group packages, `examples`, and `apps/ui` hold the same pin.
+## Runtimes
 
-Every workspace is on it, including `@smthrs/build-infra` (`packages/build/infra/package.json`), the `private: true` `smthrs.group: "tooling"` deployment workspace that held `4.0.0-rc.109` until the 1.0 root reconciliation aligned it. `scripts/check-single-effect-version.mjs` fails the build on a second version in any manifest, in either lockfile, or in the install.
-
-Pinning a release candidate means an upstream defect is not fixed by a patch range: adopting a fix requires moving the pin across the whole workspace. This section is where known upstream defects against the pin are tracked. There is no separate tracker.
-
-| Upstream issue | Upstream status | Status against the pin |
+| Runtime | Status | Minimum |
 | --- | --- | --- |
-| [Effect-TS/effect#7235](https://github.com/Effect-TS/effect/issues/7235) — when `SqlClient.makeWithTransaction` cannot start `BEGIN IMMEDIATE` under contention, the failure branch still tries to roll back, so the typed `SqlError` is lost and the fiber dies with an unrecoverable defect containing `cannot rollback - no transaction is active` | Fixed by [PR #7236](https://github.com/Effect-TS/effect/pull/7236), merged 2026-08-13, first published in `effect@4.0.0-rc.109` (2026-08-14) | **Present in the pinned `4.0.0-rc.108`**, which was published 2026-08-12. Mitigated here rather than avoided: `WriteRetry.isRetryableWriteError` and `DurableWriter.fromSqlError` both match the defect's message text and classify it into the transient busy vocabulary, so a lost `BEGIN IMMEDIATE` race retries instead of killing the run (`packages/database/src/internal/WriteRetry.ts:74`, `packages/database/src/DurableWriter.ts:124`), and `packages/database/test/contract/DatabaseWriteContract.ts` pins that classification. See the [SQLite operating envelope](/sqlite-operating-envelope#write-contention). |
+| Node.js | Supported. The only durable execution target. | `>=22.19.0` (every `packages/*/package.json` `engines.node`; root `BUILD.ts:12` `Smithers.Runtime.Node({ version: ">=22.19.0" })`; CI pins `22.19.0`). |
+| Bun | Supported for non-durable packages and for `apps/*` only. | `>=1.3.0` (`BUILD.ts:15`); CI pins `1.3.14`. |
+| Browser | Bundleable entry points only. No durable execution. | Bundles under esbuild `--platform=browser` as proven by `scripts/browser-check.mjs`. |
+| Linux x64 | Supported; the required CI lanes run here. | Ubuntu runner. |
+| macOS |  | arm64 and x64. |
+| Windows | Unsupported. | none |
 
-## Not in release 1
+## Databases
 
-`1.0.0-rc.0` ships the `engine` and `agent` groups together at one synchronized version. `scripts/pack-release.mjs` packs every non-private workspace whose manifest declares `smthrs.group` in `{engine, agent}`, checks that set against the 39 names frozen in [rc-contract.md section 3.1](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md), and throws on a manifest that declares no known group; `.github/workflows/release.yml` gates on the same fields. Group membership is therefore no longer a proxy for feature scope: a package can be published and still not be a release-candidate feature, and the way to keep one out of the release is `private: true`. The following subsystems exist in this tree and are **not** part of release 1.
+SQLite only. PostgreSQL and PGlite exit with `unsupported_database`; see
+[databases](/databases) for the files, the ladder, and the operating limits.
 
-| Subsystem | Why it is out of release 1 |
+## Commands
+
+| Command | Behavior |
 | --- | --- |
-| `@smthrs/triggers` | `private: true` at rc.0, so the release train never packs it. |
-| `@smthrs/evals` | `private: true` at rc.0, so the release train never packs it. |
-| `@smthrs/gateway` | Published, because the Plue cutover consumes its wire schemas and projections, but its supervision runtime is a noop. See [abandoned runs and supervision](#abandoned-runs-and-supervision). |
-| Memory semantic recall (`@smthrs/memory` `RecallSemantic`) | `@smthrs/memory` is published, but semantic recall needs an embedding provider the RC does not ship. A provider-free `Embedding.layerInProcess` ships, and `MemoryStore` automatically projects records that supply `inProcessVector` (`packages/memory/src/Embedding.ts:185-193`, `packages/memory/src/MemoryStore.ts:647-667`). |
-| Observability OTLP export (`@smthrs/observability` `Otlp`) | The module is published, but no composition in this repository installs it. `Otlp` is referenced only by its own package tests, so it is an opt-in layer an application wires itself, not a shipped default. See [telemetry](/telemetry). |
+| [`smithers approve`](/cli/approve) | Plan-level and node-level (`ask`) approvals; principal stamped server-side. |
+| `smithers bug` | Posts a report with `Control.list` and a `Control.watch` digest to `bug.smithers.sh` (`SMITHERS_BUG_ENDPOINT`). |
+| [`smithers cancel`](/cli/cancel) | Durable, cross-process (section 5). |
+| `smithers claude` | Claude Code plugin mirror protocol, `claudeMirrorContract` 2; run status vocabulary is the rc.0 `RunStatus`. |
+| `smithers completions` | Standard. |
+| [`smithers deny`](/cli/deny) | Denies; a denied plan can never launch. |
+| [`smithers docs`](/cli/docs) | Prints the bundled `llms.txt` or `llms-full.txt` generated from the vocs `docs/pages` tree (section 9 exception 2, R-25). |
+| [`smithers doctor`](/cli/doctor) | Reports registry discovery warnings, database paths and ladder state, Node version, `jj` on `PATH`, provider keys present, and 0.x state detected (section 6). |
+| `smithers down` | Cancels every non-terminal run (`Control.list` then `cancel`). |
+| `smithers gc` | Deletes terminal runs older than the threshold with their attempts, clock, deferred, and waiting rows and time-travel archive entries, then `Journal.compact`. Automatic retention stays off by default. |
+| [`smithers init`](/cli/init) | Scaffolds `flows/<name>/flow.mdx` and adds `.flows/` to `.gitignore`. `--global` is not supported (seats resolve from environment keys); it exits 1. |
+| [`smithers logs`](/cli/logs) | Transcript or raw `ControlEvent` stream. `events` is an alias of `logs --json`. |
+| [`smithers ls`](/cli/ls) | Registry descriptors from `<project>/flows/**`. `workflow list` is an alias. |
+| `smithers mcp` | MCP server over stdio; `{ ok, data?, error? }` envelope kept. Supported tools (11): `list_workflows`, `run_workflow`, `list_runs`, `get_run`, `watch_run`, `get_run_events`, `explain_run`, `list_pending_approvals`, `resolve_approval`, `get_node_detail`, `get_chat_transcript`. Unsupported tools (10) return `{ ok: false, error: { code: "unsupported", ... } }`: `revert_attempt`, `fork_run`, `replay_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, `time_travel`, `list_artifacts`, `ask_human`. |
+| `smithers memory` | Namespaced facts in the control database. |
+| [`smithers migrate`](/cli/migrate) | The reserved `system/migrate` flow id is retired so the verb does not collide with the project flow. |
+| `smithers output` | Registered node output from the `node-output` projection. |
+| [`smithers plan`](/cli/plan) | `Control.plan`; prints the `PlanCard` and the approval payload. |
+| [`smithers ps`](/cli/ps) | Run listing; `--status` validated against `accepted\|running\|parked\|waiting-approval\|cancelled\|completed\|failed`. |
+| `smithers resume` | Alias of `run --resume`. |
+| [`smithers run`](/cli/run) | Launches an approved plan; blocks until settlement when the local process owns the executor. |
+| [`smithers serve`](/cli/serve) | Hosts the control server (section 10): `/rpc`, `/rpc/ws`, `/sync`, `/sync/ws`, `/projections/ws`, `GET /health`. Loopback default; non-loopback requires `--listen` and a bearer token. `gateway` is an alias for rc.0 only. |
+| [`smithers signal`](/cli/signal) | Delivers a named signal to a flow parked on `WaitFor` (section 5). |
+| `smithers skills` | Writes the `smithers` skill into detected agents; no automatic refresh side effect on other commands. |
+| [`smithers status`](/cli/status) | Forensics diagnosis card for one run, or the run listing. `inspect` and `why` are aliases. |
+| `smithers steer` | Durable, attributed steer through the notification queue; drained at the agent's turn close. |
+| [`smithers up`](/cli/up) | One-shot launch: plan, approve with scope `run`, run; prints `{ runId }` under `--json`; exit code follows the terminal status. `-d` spawns `smithers run` detached, logs to `.flows/logs/<runId>.log`, and returns after the admission line (30 s default). Operator-supplied run ids are not supported; callers read `runId` from the receipt. |
+| `smithers update` | npm `latest`/`next` check for `@smthrs/cli`. |
 
-## Abandoned runs and supervision
+## Run control
 
-**Abandoned runs are not auto-resumed in this release.** Nothing in the tree watches for runs whose owner died and starts a process to pick them up. `@smthrs/gateway`'s `SuperviseRuntime` declares the `scan`/`resume` contract and ships only `make`, `makeNoop` (empty scan, successful resume), and `layerNoop` (`packages/gateway/src/SuperviseRuntime.ts:121,129,142`), plus a test double at `packages/gateway/src/test/TestSuperviseRuntime.ts`. There is no production implementation, and no production consumer invokes the supervision contract.
+| Feature | Contract |
+| --- | --- |
+| Cancel | `smithers cancel`, `Control.cancel`, and the `Cancel` RPC record `RunStore.requestCancel` on the engine row durably regardless of which process owns the run, then interrupt a local fiber if present. The engine cascade (`descendantsOf`, `requestCancelDescendants`, `inheritParentCancellation`, `retainedScopes`) delivers it within one heartbeat tick in the owning process. A cancel against a terminal run returns the `Terminal` receipt and writes no event. |
+| Signals | `smithers signal <run-id> {name, payload}` persists the `control_run_messages` row, journals `control.signal.delivered`, and completes the matching `WaitFor` deferred (`DurableEngineState.completeDeferred`) keyed by signal name; a run parked on `WaitFor` wakes within one heartbeat tick. |
+| Approvals | Plan-level approval for `deployClass` flows and node-level approval (`ask`) park the run as `waiting-approval`; `approve`/`deny` take the serialized `ApprovalPayload`, scope `once\|run\|remembered`, principal stamped by the server; `control.approval.requested` carries the exact approve argument. `Approve` on a `Node` target resumes the run server-side so a gateway client does not need a second call. |
+| Steer | `Control.steer` and the `steer` verb; provenance `sourceActor = <principal.kind>:<principal.id>`. |
+| Retry bounds | An action's `RetryPolicy` `maxAttempts` and `expirationMs` survive park, resume, and process death: the durable driver persists the attempt sequence and the first attempt's start time, and the engine resumes the counter and the wall-clock origin from them (`packages/engine/src/FlowEngine/make.ts:354-392`, `actionRetryOrigin` and `actionLatestAttempt`). The suspended-flow polling budget (`suspendedRetryPolicy`) is per caller by design (`make.ts:194-201`). A pruned attempt row restarts the `expirationMs` budget from the current clock with a logged warning (`make.ts:366-378`); that is a documented limit. |
+| Resume and ownership | `run --resume` is join-or-claim; a live peer's run returns `ClaimLost`. Heartbeat 1 s, stale after 30 s with 10 s skew; steal requires `LivenessEvidence`; `RunDriver` sweeps stale-running rows (64 per tick) and released rows every tick. The default `isAlive` is the same-host pid probe from `@smthrs/run-store` `Ownership.LivenessProbe`; the CLI no longer hard-codes `() => Effect.succeed(false)`. One engine process per project directory remains the documented posture. |
+| Time travel | Library API only: `TimeTravel.inspect`, `replay`, `fork` (refuses when an ancestor is live; provisions the jj workspace before committing), `rewind` (compensation, jj restore, archive, suspend). |
+| Retention | `smithers gc` (section 4.1). Journal compaction stays opt-in. |
+| Sync bounds | Workspace subscriptions use a configurable concurrency bound and bounded `PubSub`s; `SyncClient` uses a real credit window. Server stays loopback-only by default. |
+| Process containment | Cooperative cancellation of a run kills the process group of every child the kernel spawner started, including a child that ignores `SIGTERM`; no `PPID 1` orphan survives a cancel. A hard-killed engine process is not covered (section 5.2, X-17). |
 
-What does recover automatically is scoped to a process that is already running the engine **and** has the flow registered. On the one-second heartbeat cadence (`packages/run-store/src/Heartbeat.ts:24`), each engine driver sweeps parked runs for pending cancels and enumerates `running` rows whose heartbeat is older than the 30-second stale cutoff (`Heartbeat.ts:33`), re-driving up to 64 per tick through the ordinary claim/steal path (`packages/engine-store/src/internal/RunDriver.ts:160,1375,1412`). A wake for a flow the sweeping process has not registered logs a once-per-run warning and leaves the row parked (`RunDriver.ts:1074`).
+## Published packages
 
-The manual resume path for an abandoned run is therefore:
+All of them carry version `1.0.0-rc.0`. The browser column is the bundling
+claim [browser support](/architecture/browser-support) executes, not a durable
+execution claim.
 
-1. Start (or restart) a host process composed through `@smthrs/flows/NodeRuntime` — `NodeRuntime.layer(options, stepBoundary, workspaceSandbox, registerFlows)` — against the same SQLite `filename` the dead owner used.
-2. Make `registerFlows` register every flow that has stored runs. Registration is the final startup phase of that composition, and the engine's registration hook re-arms durable clocks and deferred wakes, so nothing resumes before its flow exists in the process.
-3. Supply an `Options.isAlive` that answers truthfully for the dead owner. Steal is refused while `isAlive` reports the recorded owner alive, and the driver journals a `steal-refused-owner-alive` decision (`packages/engine-store/src/internal/RunDriver.ts:392`); only once it answers `false` does the exact-snapshot claim take the row.
-4. Wait out the stale window. There is nothing to invoke by hand; the timing is below.
+| Package | Purpose | Browser |
+| --- | --- | --- |
+| `@smthrs/agent` | Production agent loop on the durable engine: `AgentSession`, `AgentAction`, `CellPlugin`. | no claim |
+| `@smthrs/artifacts` | Content-addressed artifact store (local, remote-over-HTTP, combined). | gated yes |
+| `@smthrs/canonical` | RFC 8785 canonical JSON as Effect Schema. | gated yes |
+| `@smthrs/capability` | Capability vocabulary, tiers, typed permission failures. | gated yes |
+| `@smthrs/cli` | The `smithers` executable and `NodeControl` composition. | Node |
+| `@smthrs/control` | Control services, RPC schema, `ControlServer`/`ControlClient`, `SqlControlRuntime`, credentials. | no claim (no `node:` imports) |
+| `@smthrs/core` | Plan-time `Flow`/`Node` builders and `Graph`. | no claim |
+| `@smthrs/crypto` | Injected cryptographic schema transformations. | gated yes |
+| `@smthrs/database` | `SqlClient` access, write retry, `Migrations` ladder. | gated yes (root); `node/NodeDatabase` gated Node-only |
+| `@smthrs/engine` | `FlowEngine`, `FlowProxy`, vendored `effect/unstable/workflow` fork. | gated yes |
+| `@smthrs/engine-store` | Durable `FlowEngine`: journal, run, cache, artifact stores; `RunDriver` sweep; `DisasterRecovery`. | gated yes |
+| `@smthrs/flow` | Authoring model: `Flow`, `Action`, `Interpreter`, durable deferred/clock/queue, `RetryPolicy`. | gated yes |
+| `@smthrs/flows` | Curated aggregate barrel and `./NodeRuntime` production composition. | gated yes (root); `NodeRuntime` gated Node-only |
+| `@smthrs/gateway` |  | no claim |
+| `@smthrs/harness` | Built-in agent harness: dynamic nodes, sealed model steps, QuickJS cell runtime. | no claim |
+| `@smthrs/jj` | Jujutsu host service; ships `wasm/flows_jj.wasm`. | gated yes (root, `browser/BrowserJj`); `node/NodeJj`, `bun/BunJj` gated Node-only |
+| `@smthrs/journal` | Immutable event history, projections, redaction, owner fence. | gated yes |
+| `@smthrs/kernel` | Capability sets, grants, guarded host decorators, `GrantStore`. | gated yes (root); `test/TestHost` gated Node-only |
+| `@smthrs/keys` | Canonical flow keys. | gated yes |
+| `@smthrs/mcp` | Stdio MCP client (`McpClient`) and `McpFlows`, which projects a server's tools as `FlowBinding` sources (`mcp/<server>/<tool>`); consumed by `@smthrs/cli` `--mcp-config` (rule (a): `packages/cli/package.json:95`). | no claim |
+| `@smthrs/memory` | Durable cross-run facts, history, notes, recall. | no claim |
+| `@smthrs/model` | Schema-first model protocols, routes, streaming, seat resolution. | no claim |
+| `@smthrs/notifications` | Durable notification queue and admission policy. | no claim |
+| `@smthrs/observability` | OTLP wiring, `JournalLogger`, metrics. | gated yes |
+| `@smthrs/patterns` | Higher-order flow patterns and decorators. | no claim |
+| `@smthrs/plan` | Persisted plan compiler, `PlanStore`, `PlanDiff`. | gated yes |
+| `@smthrs/platform-browser` | Browser `FileSystem` (ZenFS) and `ChildProcessSpawner` (just-bash), `BrowserHost`. | gated yes |
+| `@smthrs/platform-bun` | Bun host bundle. | gated Node-only |
+| `@smthrs/platform-node` | Node host bundle. | gated Node-only |
+| `@smthrs/plugin` | Typed plugin kernel (`engineHooks`), consumed by `@smthrs/agent`. | no claim |
+| `@smthrs/registry` | Flow descriptor discovery (`flows/**/{flow.ts,flow.mdx,SKILL.md}`) and registry. | no claim |
+| `@smthrs/run-store` | Run and attempt rows, ownership arbitration, heartbeat lease. | gated yes |
+| `@smthrs/sandbox` | `RemoteChildProcessSpawner` and `SandboxHealth`. | gated yes |
+| `@smthrs/std` | Standard tool library: filesystem, search, shell, checkpoints. | subpath (`Grep`, `Glob`, `Search`, `PortableSearch`) |
+| `@smthrs/step-cache` | Sealed step results by step-key digest. | gated yes |
+| `@smthrs/sync` | Read-only journal replication RPC, `RunCatalog`, branch collaboration. | gated yes |
+| `@smthrs/testing` | Engine and model doubles, conformance suites, restart/parity harnesses, vitest adapters. | no claim |
+| `@smthrs/time-travel` | Replay, fork, rewind, compensation, `SqlTimeTravelStore` (library API only in rc.0; see section 5). | gated yes |
+| `smthrs` | Deprecation/migration notice only (section 3.3). | not applicable |
 
-**Reclaim is not bounded above by 30 seconds.** The 30-second cutoff is an eligibility floor, not a deadline. The steal predicate is strict — `heartbeat_at_ms < now - 30s` (`packages/run-store/src/RunStore.ts:1184`) — so a row becomes eligible only *after* its heartbeat is more than 30 seconds old. The sweep that notices it runs once per second, so the earliest re-drive is the first tick after the cutoff passes. Each tick wakes at most 64 stale rows, oldest heartbeat first (`packages/engine-store/src/internal/RunDriver.ts:160,1412`), so a mass owner death drains batch by batch across successive ticks and a run behind a backlog is reclaimed correspondingly later. Steal is also refused for as long as `isAlive` reports the recorded owner alive, which is application-supplied latency the engine does not bound. Plan for "eligible after 30 seconds, reclaimed on a later tick", not for a 30-second recovery-time objective.
+{/* generated:support-matrix end */}
 
-If no such process is running, the run stays where it is. Persisted state is not lost, but it does not advance.
-
-## Support matrix
+## What runs where
 
 Support means durable engine execution. A package that bundles for a platform is not necessarily runnable there. The supported production target is Node.js `>=22.19.0` with local SQLite.
 
@@ -96,42 +176,3 @@ Support means durable engine execution. A package that bundles for a platform is
 | Time travel utilities | Replay projections, memory/SQL time-travel stores, fork, rewind, compensation, recovery, and tier-aware retry |
 | Isolated (sandboxed) action execution | `EngineStore.WorkspaceSandbox` runs a sealed action's body inside a **workspace transaction**: the base is a copy-in of exactly the declared read set (Bazel's strategy, and `docs/specs/Concepts/Effect Taxonomy.md`'s strong tier — an undeclared file is not there to read), the body's writes accumulate in a path-keyed map served through both the `Workspace` tag and a re-rooted Effect `FileSystem`, and settlement is a whole-map diff. The host is untouched until `materialize`, a compare-and-set on every `beforeDigest` that applies whole or not at all; `ActionPersistence` rebases a bounded number of times on a `MaterializationConflict`. One transaction implementation serves an in-memory host (conformance, browser) and a filesystem host that retains oversized products in `@smthrs/artifacts` by digest. Queued effects are never dispatched inside the transaction — a dispatch stage runs after copy-back settles, deduplicated by idempotency key — and the journal gains `diff-bundle-captured` and `copy-back-settled`. **It is a deterministic transaction model, not a security boundary**: a body reaching the host through a service the transaction does not seed (a spawned native process) is outside it, and denying that ambient access is the VM/`SandboxProvider` story in `docs/specs/Concepts/Agent Adapters.md` |
 | Whole-tree write verification | An isolated execution makes it structural: the transaction *is* the tree, so a write outside the declared set is a map comparison rather than an inference. `ActionPersistence` therefore sets `wholeTreeWritesVerified` on the boundary evidence — and, when the diff shows a deviation, records the deviation instead, with the whole-tree paths `StepBoundary.settle`'s declared-read scan could never have seen. **A sealed action with a hard boundary, run under the production filesystem composition, is now admitted to the shared step cache**; `packages/engine-store/test/SandboxedAction.test.ts` is the proof, and `examples/src/durable-layer.ts` is the composition |
-
-## Implemented contracts with no production implementation
-
-| Contract | What is missing |
-| --- | --- |
-| Cross-host liveness | `EngineStore.Options.isAlive` is application-supplied |
-| `RunCatalog` | A durable workspace run list/watch; static and memory implementations ship |
-| Browser Jujutsu | A typed unavailable implementation ships |
-| Edge process spawning | Typed unavailable by default; optional remote sandbox adapters ship |
-
-## Planned or incomplete integration
-
-- Chunked/resumable artifact transfer (`.smithers/tickets/cas-chunked-transfer.md`) and a Bazel-style remote download policy — a `RemoteOutputChecker` analogue with `all`/`toplevel`/`minimal` (`.smithers/tickets/remote-cache-download-policy.md`). Materialization is read-through today, so a metadata-only replay state is representable, but there is no dial to choose it. Artifact garbage collection shipped as `@smthrs/engine-store` `ArtifactGc` over `@smthrs/artifacts` `ArtifactSweep` (`docs/pages/artifact-gc.mdx`).
-- The human diff-review gate: `docs/specs/Concepts/Diff Review.md` renders a pending copy-back as a `PermissionRequired` bundle a person accepts, whole or by hunk, before it reaches the host. The engine applies a settled bundle without that gate today (`.smithers/tickets/diff-review-gate.md`).
-- The transaction's `FileSystem` surface is deliberately partial — temp files, streams, sinks, and watches have no meaning over a functional map and refuse rather than lie (`.smithers/tickets/sandbox-filesystem-surface.md`).
-- A packaged production layer that composes database, migrations, journal stores, durable deferred/clock state, kernel, Host, and engine. **Partly shipped.** The storage-and-engine half is the `@smthrs/flows/NodeRuntime` subpath (`packages/flows/src/NodeRuntime.ts`): `storage` opens the SQLite database, runs migrations, and provides the journal, run, attempt, cache, and durable-engine-state stores plus `OwnerIdentity`, `Workspace`, and a filesystem artifact store; `layer` and `make` add `EngineStore` over that and run `registerFlows` as the final startup phase; shutdown is scope closure. The host and kernel half is still the caller's. `NodeRuntime` does not install `NodeHost.layer` and does not install the guarded `HostServices` kernel, so `Jj`, Effect `FileSystem`, and Effect `Crypto` remain requirements of the returned layer, and the caller passes `StepBoundary` and `WorkspaceSandbox` in as arguments (`NodeRuntime.ts:105-121,128-131`). It also installs no process or signal handlers by design. Its application-source consumers in this repository are the worked composition in `examples/src/durable-layer.ts:13,36,76` and the production control executor in `packages/cli/src/NodeControl.ts`. The composition itself has a direct real-SQLite package gate at `packages/flows/test/NodeRuntime.test.ts`; the examples manifest dependency is owned separately, so the examples suite is not the evidence for this module's gate.
-- Cross-process event-driven wake. The in-process `WakeBus` completes `resumeSignal` today; a wake published in another process still lands through polling and sweeps.
-- Injectable retry classification, shareability, and wait/wake seams. Cache-conflict verdicts (`Inconsistency`) and owner identity (`OwnerIdentity`) are services today; the rest is still fixed engine behavior with no service or option in front of it.
-- Graph-level failure policies such as quarantine or continue-on-failure.
-- Detached child flow construction and lifecycle policy.
-- Automatic creation of time-travel snapshots, lineage edges, and boundary records from ordinary engine execution.
-- **Postgres/PGlite dialect parity — an accepted gap, not scheduled (issue #78).** The shipped SQL backend is Node SQLite (`@effect/sql-sqlite-node`). Browser package roots expose driver-neutral contracts, but no browser SQL client layer ships here. The journal migration ladder is SQLite-flavoured DDL, so a smithers workspace already on PGlite or Postgres cannot take stage 1 of the documented cutover. What did land is the dialect-blind write-retry seam: `DurableWriter.make` takes any `SqlClient`, and classification now covers the Postgres transient SQLSTATEs (`40001`/`40P01`/`55P03` and PGlite's text forms) as well as the SQLite codes, normalized onto the same `busy` category, so a hand-supplied `PgClient` is degraded rather than silently unprotected. Also SQLite-only, and *outside* the ladder, is the schema `DurableEngineState.make` creates at construction — the run-parent table, its index, the `flows_run_parents_gc` trigger, and the stale-running partial index — now inventoried with per-dialect notes in `packages/engine-store/src/internal/EngineStateSchema.ts` and pinned by a catalog-diff test so it cannot drift (issue #92). The remaining plan (pg/pglite layers, a dialect-parameterized ladder including that inventory, the suites run against PGlite in CI) is written out as new gap 4 in [`smithers-replacement-gaps.md`](/release/known-limitations).
-- A fully runnable engine-store deployment for Cloudflare Workers.
-- Fully durable serverless deferreds and clocks on Vercel.
-
-## Important integration cautions
-
-- `EngineStore` no longer reaches for `process.pid` or `node:crypto` (`randomUUID`) directly: both enter through the injectable `OwnerIdentity` service, which closed issue #114 and made `@smthrs/engine-store` — and the `@smthrs/flows` barrel that re-exports it — browser entry points. The twenty-four browser-bundleable entry points, the seven that stay Node-only, and the `pnpm run browser` gate that executes both halves of the claim are listed in [browser support](/architecture/browser-support). What remains missing for a browser *deployment* is a SQL client behind the `DurableWriter` contract; none ships here. `StepBoundary` briefly added a module-scope `node:buffer` import for its base64 codec; it now uses the platform-neutral `effect/Encoding`, and a regression test pins the module `node:`-free since its contract schemas and `layerTest` must be importable from a browser bundle.
-- `SqlTimeTravelStore.createFork` materializes executable state from the
-  parent's current persisted snapshot and attempts, and records the lineage
-  edge on `flows_runs.parent_run_id`. Those records are not historical per
-  journal frame.
-- The time-travel package reads cache keys from effect-boundary metadata. Callers recording those boundaries must use the same cache address convention as the cache producer.
-- Flow registrations and active fibers are scoped in memory. A restarted process must re-register handlers before driving stored runs.
-- The `DurableWriter.write` retry classifier is dialect-blind (issue #78): a hand-supplied PostgreSQL `SqlClient` — as the Vercel store adapter can wrap — gets the same bounded retry as SQLite. What is still missing for those backends is a shipped SQL client layer and a dialect-parameterized migration ladder, tracked above under "Postgres/PGlite dialect parity". A backend that does land must pass `packages/database/test/contract/DatabaseWriteContract.ts`, the conformance suite for the write-serialization contract (issue #97).
-
-The packages are pre-1.0. Treat these boundaries as evolving compatibility contracts.
-
-For the smithers-engine cutover view of this status — what is closed, partial, and missing versus the smithers internal engine — see [smithers-replacement-gaps](/release/known-limitations).
