@@ -91,6 +91,20 @@ export interface Flow<
    */
   readonly body: (payload: Payload["Type"]) => Node.Node<BodySuccess<Success["Type"]>, Error["Type"], Requires>
   readonly idempotencyKey?: ((payload: Payload["Type"]) => string) | undefined
+  /**
+   * How long ONE CALLER keeps polling a suspended execution of this flow.
+   *
+   * It is a per-caller wall-clock budget, not a bound on the run. `execute`
+   * re-drives a parked execution on this schedule and gives up when the
+   * schedule is spent; the execution stays parked, and the next caller — a
+   * second process, a sweep, a resume — starts a budget of its own. Nothing
+   * about it is durable, and a spent budget cancels nothing.
+   *
+   * What bounds work durably is an action's own `RetryPolicy`: the engine
+   * restores `maxAttempts` from the persisted attempt sequence and the
+   * `expirationMs` origin from the first attempt's start time, so those
+   * survive park, resume, and process death.
+   */
   readonly suspendedRetryPolicy?: RetryPolicy.RetryPolicy | undefined
   /**
    * How many rounds one trampoline lineage started from this flow may open.
