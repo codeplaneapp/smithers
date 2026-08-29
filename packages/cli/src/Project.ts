@@ -1,0 +1,193 @@
+/**
+ * Where a `smithers` invocation decides it is running.
+ *
+ * Every command that touches durable state resolves the same project root the
+ * same way, because 0.x's most reported operational surprise was two commands
+ * in one repository disagreeing about which database they meant (`smithers up`
+ * from a subdirectory writing a second store). The rule:
+ *
+ * 1. an explicit `--root`, resolved against the invocation directory;
+ * 2. otherwise the nearest ancestor that anchors a project (see
+ *    {@link anchors});
+ * 3. otherwise the invocation directory itself.
+ *
+ * The same module answers the rc-contract section 6 question: is there
+ * Smithers 0.x state beside this project? rc.0 never loads it, and the
+ * detector exists so the CLI can say so once instead of failing obscurely.
+ *
+ * @since 1.0.0
+ */
+import { Context, Layer } from "effect"
+import { existsSync } from "node:fs"
+import { dirname, isAbsolute, join, resolve } from "node:path"
+
+/**
+ * Directory and file names that mark a Smithers 0.x project.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const legacyMarkers: ReadonlyArray<string> = [
+  ".smithers",
+  "smithers.db",
+  "smithers.db-wal",
+  "smithers.db-shm"
+]
+
+/**
+ * Names that end the upward walk.
+ *
+ * Both walks stop at the repository root, inclusive. Without that bound a
+ * command run in a checkout under `$HOME` would keep climbing into the home
+ * directory, where 0.x's global `~/.smithers` lives — and rc.0 does not read
+ * global state at all (rc-contract section 6), so reporting it would be a
+ * false alarm on every invocation.
+ */
+const boundaryMarkers: ReadonlyArray<string> = [".git", ".jj"]
+
+/** Names that make a directory a project in its own right. */
+const projectMarkers: ReadonlyArray<string> = ["package.json", ".git", ".jj"]
+
+/**
+ * Whether a directory anchors the project root.
+ *
+ * `.flows/` anchors on its own: rc.0 writes that directory and nothing else
+ * does, so finding one is proof of the project it belongs to.
+ *
+ * `flows/` anchors only beside a project marker. A directory called `flows` is
+ * a source root in a Smithers project and an ordinary package directory
+ * everywhere else, and this repository holds both: `packages/flows` is the
+ * `@smthrs/flows` package, so the bare-name rule made every command run under
+ * `packages/` resolve its root to `packages/` and write a second
+ * `packages/.flows` database. Requiring `package.json`, `.git`, or `.jj` in
+ * the same directory keeps the anchor on the directory a project actually
+ * starts at.
+ */
+const anchors = (directory: string, exists: (path: string) => boolean): boolean => {
+  if (exists(join(directory, ".flows"))) return true
+  return exists(join(directory, "flows")) &&
+    projectMarkers.some((marker) => exists(join(directory, marker)))
+}
+
+/**
+ * Resolves the project root for one invocation.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const root = (
+  explicit: string | undefined,
+  cwd: string = process.cwd(),
+  exists: (path: string) => boolean = existsSync
+): string => {
+  if (explicit !== undefined && explicit !== "") {
+    return isAbsolute(explicit) ? explicit : resolve(cwd, explicit)
+  }
+  let directory = resolve(cwd)
+  for (;;) {
+    if (anchors(directory, exists)) return directory
+    const parent = dirname(directory)
+    if (parent === directory || boundaryMarkers.some((marker) => exists(join(directory, marker)))) {
+      return resolve(cwd)
+    }
+    directory = parent
+  }
+}
+
+/**
+ * Where this project keeps rc.0 state.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const stateDirectory = (projectRoot: string): string => join(projectRoot, ".flows")
+
+/**
+ * Where a detached run writes its log.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const logDirectory = (projectRoot: string): string => join(stateDirectory(projectRoot), "logs")
+
+/**
+ * Where a detached run with this id writes its log.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const logFile = (projectRoot: string, runId: string): string => join(logDirectory(projectRoot), `${runId}.log`)
+
+/**
+ * Where a project's flow sources live.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const flowsDirectory = (projectRoot: string): string => join(projectRoot, "flows")
+
+/**
+ * Smithers 0.x state found beside a project, newest ancestor first.
+ *
+ * A directory that already holds `.flows/` is an rc.0 project and reports
+ * nothing: a repository mid-migration would otherwise print the notice on
+ * every command forever.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const legacyState = (
+  cwd: string = process.cwd(),
+  exists: (path: string) => boolean = existsSync
+): ReadonlyArray<string> => {
+  const found: Array<string> = []
+  let directory = resolve(cwd)
+  for (;;) {
+    if (!exists(join(directory, ".flows"))) {
+      for (const marker of legacyMarkers) {
+        const candidate = join(directory, marker)
+        if (exists(candidate)) found.push(candidate)
+      }
+    }
+    const parent = dirname(directory)
+    if (parent === directory || boundaryMarkers.some((marker) => exists(join(directory, marker)))) return found
+    directory = parent
+  }
+}
+
+/**
+ * The one-line notice rc-contract section 6 requires on stderr when 0.x state
+ * is found and rc.0 state is not.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const legacyNotice = (path: string): string =>
+  `Found Smithers 0.x state at ${path}. 1.0.0-rc.0 does not load, resume, or migrate 0.x run databases. ` +
+  `Finish, archive, or discard those runs with the 0.x CLI (bunx smthrs@0.35.0 ps), ` +
+  `then run "smithers migrate" to convert the project source. ` +
+  `See https://smithers.sh/migration/1.0#run-data`
+
+/**
+ * The project root this invocation resolved, as a service.
+ *
+ * Commands read it from here rather than calling {@link root} again, so the
+ * root a handler acts on is provably the same one the durable layers were
+ * built over. `--root` is parsed before the layers are constructed, which is
+ * why it cannot simply be a flag every handler reads.
+ *
+ * @category references
+ * @since 1.0.0
+ */
+export const ProjectRoot: Context.Reference<string> = Context.Reference<string>(
+  "/cli/ProjectRoot",
+  { defaultValue: () => process.cwd() }
+)
+
+/**
+ * Provides the resolved project root for one invocation.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layer = (projectRoot: string): Layer.Layer<never> => Layer.succeed(ProjectRoot, projectRoot)

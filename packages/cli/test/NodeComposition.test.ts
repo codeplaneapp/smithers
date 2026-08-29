@@ -36,81 +36,121 @@ afterAll(async () => {
   if (root !== "") await rm(root, { recursive: true, force: true })
 })
 
+/**
+ * `makeConfig` also resolves the project root, which every durable layer is
+ * built over. These cases are about the flag and environment ladder, so each
+ * one pins the root separately and compares the rest.
+ */
+const configuration = (
+  args: ReadonlyArray<string>,
+  environment: Readonly<Record<string, string | undefined>>
+) => {
+  const { root: _root, ...rest } = NodeControl.makeConfig(args, environment, "/work")
+  return rest
+}
+
 describe("NodeControl.makeConfig", () => {
   it("resolves nothing from an empty invocation and an empty environment", () => {
-    expect(NodeControl.makeConfig([], {})).toEqual({ remote: undefined, credential: undefined })
+    expect(configuration([], {})).toEqual({ remote: undefined, credential: undefined, mcpServers: undefined })
+  })
+
+  it("resolves the project root from --root, against the invocation directory", () => {
+    expect(NodeControl.makeConfig(["--root", "project"], {}, "/work").root).toBe(join("/work", "project"))
+    expect(NodeControl.makeConfig(["--root", "/elsewhere"], {}, "/work").root).toBe("/elsewhere")
   })
 
   it("falls back to the environment only when the flag is absent", () => {
-    expect(NodeControl.makeConfig([], { FLOWS_REMOTE: "https://env.example.test" })).toEqual({
+    expect(configuration([], { SMITHERS_REMOTE: "https://env.example.test" })).toEqual({
       remote: "https://env.example.test",
-      credential: undefined
+      credential: undefined,
+      mcpServers: undefined
     })
     expect(
-      NodeControl.makeConfig(["--remote", "https://flag.example.test"], { FLOWS_REMOTE: "https://env.example.test" })
-    ).toEqual({ remote: "https://flag.example.test", credential: undefined })
+      configuration(["--remote", "https://flag.example.test"], { SMITHERS_REMOTE: "https://env.example.test" })
+    ).toEqual({ remote: "https://flag.example.test", credential: undefined, mcpServers: undefined })
   })
 
   it("treats `--remote` as the last argument as no value at all", () => {
     // There is no argument after it, so the flag contributes nothing and the
     // environment fallback still applies.
-    expect(NodeControl.makeConfig(["--remote"], { FLOWS_REMOTE: "https://env.example.test" })).toEqual({
+    expect(configuration(["--remote"], { SMITHERS_REMOTE: "https://env.example.test" })).toEqual({
       remote: "https://env.example.test",
-      credential: undefined
+      credential: undefined,
+      mcpServers: undefined
     })
   })
 
   it("keeps an explicitly empty `--remote=` instead of falling back", () => {
     // `??` only falls back on absence, and an empty inline value is a present
     // empty string.
-    expect(NodeControl.makeConfig(["--remote="], { FLOWS_REMOTE: "https://env.example.test" })).toEqual({
+    expect(configuration(["--remote="], { SMITHERS_REMOTE: "https://env.example.test" })).toEqual({
       remote: "",
-      credential: undefined
+      credential: undefined,
+      mcpServers: undefined
     })
   })
 
   it("takes the first occurrence when a flag is repeated", () => {
-    expect(NodeControl.makeConfig(["--remote", "https://first.test", "--remote", "https://second.test"], {}))
-      .toEqual({ remote: "https://first.test", credential: undefined })
+    expect(configuration(["--remote", "https://first.test", "--remote", "https://second.test"], {}))
+      .toEqual({ remote: "https://first.test", credential: undefined, mcpServers: undefined })
   })
 
   it("does not guess that a following flag is a missing value", () => {
     // Positional reading is deliberate and each flag is scanned on its own:
     // the token after `--remote` is its value whatever it looks like, and
     // `--credential` is still found where it stands.
-    expect(NodeControl.makeConfig(["--remote", "--credential", "secret"], {})).toEqual({
+    expect(configuration(["--remote", "--credential", "secret"], {})).toEqual({
       remote: "--credential",
-      credential: "secret"
+      credential: "secret",
+      mcpServers: undefined
     })
   })
 
   it("resolves a credential with no remote at all", () => {
-    expect(NodeControl.makeConfig(["--credential=secret"], {})).toEqual({
+    expect(configuration(["--credential=secret"], {})).toEqual({
       remote: undefined,
-      credential: "secret"
+      credential: "secret",
+      mcpServers: undefined
     })
   })
 
   it("does not treat a longer flag with the same prefix as a match", () => {
-    expect(NodeControl.makeConfig(["--remotely", "x"], {})).toEqual({ remote: undefined, credential: undefined })
+    expect(configuration(["--remotely", "x"], {})).toEqual({
+      remote: undefined,
+      credential: undefined,
+      mcpServers: undefined
+    })
+  })
+
+  it("reads SMITHERS_API_KEY as the --credential fallback, new in Phase 4", () => {
+    expect(configuration([], { SMITHERS_API_KEY: "from-environment" }).credential).toBe("from-environment")
+    expect(configuration(["--credential=from-argv"], { SMITHERS_API_KEY: "from-environment" }).credential)
+      .toBe("from-argv")
+  })
+
+  it("accepts the rc.0 FLOWS_* aliases, with the SMITHERS name winning", () => {
+    expect(configuration([], { FLOWS_REMOTE: "https://alias.test" }).remote).toBe("https://alias.test")
+    expect(
+      configuration([], { SMITHERS_REMOTE: "https://canonical.test", FLOWS_REMOTE: "https://alias.test" }).remote
+    ).toBe("https://canonical.test")
   })
 })
 
 describe("NodeControl.config", () => {
   it("reads the current process arguments and environment", () => {
     const argv = process.argv
-    const previous = process.env.FLOWS_REMOTE
+    const previous = process.env.SMITHERS_REMOTE
     try {
       process.argv = [process.execPath, "smithers", "--credential=from-argv"]
-      process.env.FLOWS_REMOTE = "https://from-environment.test"
-      expect(Effect.runSync(NodeControl.config)).toEqual({
-        remote: "https://from-environment.test",
-        credential: "from-argv"
-      })
+      process.env.SMITHERS_REMOTE = "https://from-environment.test"
+      const resolved = Effect.runSync(NodeControl.config)
+      expect(resolved.remote).toBe("https://from-environment.test")
+      expect(resolved.credential).toBe("from-argv")
+      expect(typeof resolved.root).toBe("string")
     } finally {
       process.argv = argv
-      if (previous === undefined) delete process.env.FLOWS_REMOTE
-      else process.env.FLOWS_REMOTE = previous
+      if (previous === undefined) delete process.env.SMITHERS_REMOTE
+      else process.env.SMITHERS_REMOTE = previous
     }
   })
 })
@@ -129,7 +169,7 @@ describe("NodeControl.checkpointStore", () => {
     // workspace and the container reaches the same directory through the mount
     // it already has — which is why the scratch lives inside the workspace at
     // all, and why the store needs both paths.
-    expect(NodeControl.checkpointStore({ FLOWS_TEST_CWD: "/testbed" }, "/work/repo")).toEqual({
+    expect(NodeControl.checkpointStore({ SMITHERS_TEST_CWD: "/testbed" }, "/work/repo")).toEqual({
       root: "/work/repo",
       cwd: "/testbed"
     })
@@ -139,7 +179,7 @@ describe("NodeControl.checkpointStore", () => {
     // No container, so the two names of the one directory are the same name.
     // A host that declares nothing still gets checkpoints; it is the workspace
     // root that decides, not the container.
-    for (const environment of [{}, { FLOWS_TEST_CWD: "" }, { FLOWS_TEST_CWD: "  " }]) {
+    for (const environment of [{}, { SMITHERS_TEST_CWD: "" }, { SMITHERS_TEST_CWD: "  " }]) {
       expect(NodeControl.checkpointStore(environment, "/work/repo")).toEqual({ root: "/work/repo" })
     }
   })
@@ -151,7 +191,7 @@ describe("NodeControl.testRunner", () => {
     // no flow at all: the catalog then advertises a call whose every answer is
     // "not configured", and a run spends a frame finding that out.
     expect(NodeControl.testRunner({}, "/work")).toBeUndefined()
-    expect(NodeControl.testRunner({ FLOWS_TEST_COMMAND: "   " }, "/work")).toBeUndefined()
+    expect(NodeControl.testRunner({ SMITHERS_TEST_COMMAND: "   " }, "/work")).toBeUndefined()
   })
 
   it("reads the runner, its container and its two directories off the environment", () => {
@@ -161,10 +201,10 @@ describe("NodeControl.testRunner", () => {
     expect(
       NodeControl.testRunner(
         {
-          FLOWS_TEST_COMMAND: "./tests/runtests.py --settings=test_sqlite",
-          FLOWS_TEST_CONTAINER: "swebench-1",
-          FLOWS_TEST_CWD: "/testbed",
-          FLOWS_TEST_TIMEOUT_MS: "600000"
+          SMITHERS_TEST_COMMAND: "./tests/runtests.py --settings=test_sqlite",
+          SMITHERS_TEST_CONTAINER: "swebench-1",
+          SMITHERS_TEST_CWD: "/testbed",
+          SMITHERS_TEST_TIMEOUT_MS: "600000"
         },
         "/work/repo"
       )
@@ -178,14 +218,14 @@ describe("NodeControl.testRunner", () => {
   })
 
   it("defaults the runner's directory to the repository and drops an unusable timeout", () => {
-    expect(NodeControl.testRunner({ FLOWS_TEST_COMMAND: "pytest -q" }, "/work/repo")).toEqual({
+    expect(NodeControl.testRunner({ SMITHERS_TEST_COMMAND: "pytest -q" }, "/work/repo")).toEqual({
       command: "pytest -q",
       cwd: "/work/repo",
       root: "/work/repo"
     })
     for (const timeout of ["", "soon", "0", "-1"]) {
       expect(
-        NodeControl.testRunner({ FLOWS_TEST_COMMAND: "pytest -q", FLOWS_TEST_TIMEOUT_MS: timeout }, "/work/repo")
+        NodeControl.testRunner({ SMITHERS_TEST_COMMAND: "pytest -q", SMITHERS_TEST_TIMEOUT_MS: timeout }, "/work/repo")
       ).not.toHaveProperty("timeoutMs")
     }
   })
@@ -206,7 +246,7 @@ describe("NodeControl.testRunner", () => {
         const offered = NodeControl.testFlows(
           services,
           container,
-          NodeControl.testRunner({ FLOWS_TEST_COMMAND: "pytest -q", FLOWS_TEST_CONTAINER: "swebench-1" }, "/work/repo")
+          NodeControl.testRunner({ SMITHERS_TEST_COMMAND: "pytest -q", SMITHERS_TEST_CONTAINER: "swebench-1" }, "/work/repo")
         )
         const bound = yield* Effect.forEach(offered, (source) => source.bindings())
         return bound.flat().map((binding) => binding.descriptor.name)

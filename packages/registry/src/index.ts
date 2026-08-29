@@ -39,6 +39,12 @@ export * as MarkdownFlow from "./MarkdownFlow.ts"
 export * as Disclosure from "./Disclosure.ts"
 
 /**
+ * @category constructors
+ * @since 0.1.0
+ */
+export * as Executable from "./Executable.ts"
+
+/**
  * @category models
  * @since 0.1.0
  */
