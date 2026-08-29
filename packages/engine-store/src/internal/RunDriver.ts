@@ -2037,8 +2037,24 @@ export const make = (
         // `ensureRun` created the row above, so a not-found here is a broken
         // store invariant, not a caller-recoverable state.
         const result = yield* Effect.orDie(poll(flow, options.executionId))
-        return Option.getOrElse(result, () => new Flow.Suspended({})) as Discard extends true ? void
-          : Flow.Result<unknown, unknown>
+        if (Option.isSome(result)) {
+          return result.value as Discard extends true ? void : Flow.Result<unknown, unknown>
+        }
+        // A cancelled run has no `Flow.Result` on its row — cancellation is
+        // recorded as `cancellation`, not as a settlement — so answering the
+        // absence with `Suspended` told the caller to wait for a run that was
+        // over. The engine's suspended-retry loop then did what that answer
+        // means: slept, resumed, re-drove, and asked again, for as long as the
+        // caller lived. A run cancelled underneath its caller interrupts the
+        // caller instead, which is what the memory engine already does
+        // (`layerMemory.ts` `interrupt` settles the round `Complete` with an
+        // interrupt cause) and what a cancellation means: the work the caller
+        // asked for is not going to happen.
+        const settled = yield* rowOf(options.executionId)
+        return (settled?.status === "cancelled"
+          ? new Flow.Complete({ exit: Exit.failCause(Cause.interrupt()) })
+          : new Flow.Suspended({})) as Discard extends true ? void
+            : Flow.Result<unknown, unknown>
       }
     )
 
