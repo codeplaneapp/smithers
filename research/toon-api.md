@@ -1,5 +1,10 @@
 # Smithers TOON API — Complete Self-Contained Reference
 
+> **Written for Smithers 0.x.** This note is research from before the 1.0
+> rewrite. It describes the JSX workflow runtime, its CLI, or its gateway, none
+> of which exist in 1.0.0-rc.0. It is kept as history, not as guidance; see
+> `docs/pages/migration/1.0.md` for what replaced each surface it names.
+
 This document is a fully self-contained reconstruction of the `.toon` workflow definition format that Smithers shipped between **March 14 and March 28, 2026**, before the public surface was retired in favor of JSX. It is written as briefing material for an agent designing a homoiconic Lisp (Lion-lang) front-end for Smithers — **the agent reading this has no access to the codebase**, so all relevant source, docs, examples, and tests are inlined verbatim.
 
 > **TL;DR for the Lion designer:** TOON was a YAML-like declarative format that compiled to the same `BuilderNode` graph the JSX surface produces. Anything Lion creates only needs to produce the same graph. Sections [3](#3-formal-spec) and [10](#10-implementation-the-toon-compiler-source) are the load-bearing ones — the rest are context, examples, and design hints.

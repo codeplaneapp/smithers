@@ -89,7 +89,7 @@ A write transaction must never span a host call. A caller holding one wants `"de
 
 This page is the public API reference for the **step result cache**: sealed
 action results addressed by step-key digest. It was split out of
-`@smthrs/journal` — see
+`@smthrs/journal`: see
 `docs/specs/Concepts/Journal Split.md`.
 
 It is deliberately a *cache*. Entries may be evicted, a stale entry is a miss
@@ -99,7 +99,7 @@ replay, and speculation validation alike. The package depends on
 
 ### CacheStore
 
-`CacheStore` exposes `get`, `put`, and `evict`. `put` returns `Inserted`, `ExistingSame`, or `Conflict`; cache entries retain the recording run and journal sequence as provenance. `evict(keyDigest, { ifRecordedBy })` deletes only while the row still carries that `(runId, eventSeq)` pair — both halves, since sequence numbers are per-run and collide across runs routinely. Whether the insert conflicted and whether the fenced delete hit are read through [`DurableWriter.affectedRows`](/api/database#durablewriter) rather than a driver-specific `changes` cast, so the outcomes hold on every backend (issue #134).
+`CacheStore` exposes `get`, `put`, and `evict`. `put` returns `Inserted`, `ExistingSame`, or `Conflict`; cache entries retain the recording run and journal sequence as provenance. `evict(keyDigest, { ifRecordedBy })` deletes only while the row still carries that `(runId, eventSeq)` pair: both halves, since sequence numbers are per-run and collide across runs routinely. Whether the insert conflicted and whether the fenced delete hit are read through [`DurableWriter.affectedRows`](/api/database#durablewriter) rather than a driver-specific `changes` cast, so the outcomes hold on every backend (issue #134).
 
 `get` takes an optional age bound. `get(keyDigest, { maxAgeMs })` refuses a row
 whose `createdAtMs` is more than `maxAgeMs` before the current clock reading and
@@ -118,7 +118,7 @@ row for at all.
 
 `sweepExpired(olderThanMs)` is the collection half, deleting head rows recorded
 before the floor and answering how many it deleted. It never touches the
-append-only `flows_step_cache_recorded` ledger — an old frame's replay projects
+append-only `flows_step_cache_recorded` ledger: an old frame's replay projects
 what that event recorded, so deleting the evidence would change a replayed
 answer. `CombinedCacheStore` sweeps the local tier only, for the same reason it
 evicts locally only, and `RemoteCacheStore.sweepExpired` validates its argument
@@ -162,8 +162,8 @@ replay the same emit answers `Duplicate` when the verdict agrees and fails
 `idempotency_conflict` when it does not, and the conflict names the recorded
 verdict exactly, because `verdict` is the only field of that payload the
 identity does not already fix. A dispatch that served a row at 900 ms and lost
-its process therefore serves the same row at 1100 ms — from the same engine or
-from the one that resumed the run — instead of expiring a result the run
+its process therefore serves the same row at 1100 ms: from the same engine or
+from the one that resumed the run: instead of expiring a result the run
 already consumed. An
 expired verdict is followed by a second record with `action: "expired"` carrying
 the row's age, and by an eviction fenced on the row's own provenance, which
@@ -200,20 +200,20 @@ expected its own value (issue #72). `CacheStore.layer` round-trips `result` and
 
 ### RemoteCacheStore and CombinedCacheStore
 
-`RemoteCacheStore` is the same contract spoken over HTTP — `GET`/`PUT`/`DELETE
-/ac/{keyDigest}` carrying the `CacheEntry` JSON — mirroring the action-cache
+`RemoteCacheStore` is the same contract spoken over HTTP: `GET`/`PUT`/`DELETE
+/ac/{keyDigest}` carrying the `CacheEntry` JSON: mirroring the action-cache
 half of Bazel's dumb-HTTP remote cache. `201 Created` is `Inserted`, any other
 2xx is `ExistingSame`, `409` is `Conflict`, which is the smallest vocabulary
 that preserves first-writer-wins over plain HTTP. A lookup that comes back
 recorded under a *different* key is refused: a tier answering with someone
 else's entry would hand the caller a result under the wrong key. The endpoint
-and its headers are layer construction options — a capability, never an input,
+and its headers are layer construction options: a capability, never an input,
 and never part of a step key.
 
 `CombinedCacheStore` composes a local and a remote tier: local first, remote
 second, writing the shared entry back into the local SQL store so the next
 lookup is local. A local `Conflict` is never published upward. Eviction is
-deliberately local-only — every engine eviction is a "this host observed this
+deliberately local-only: every engine eviction is a "this host observed this
 row to be poison" judgement, and none of those observations generalize to a
 tier where another machine may still hold the artifacts this one lost.
 
@@ -237,8 +237,8 @@ SQLite database and is therefore imported from
 
 ### Migrations
 
-`Migrations.set` is this package's namespaced migration set —
-`flows_step_cache` — and reserves migration id block `2000`. `Migrations.run` /
+`Migrations.set` is this package's namespaced migration set , 
+`flows_step_cache`, and reserves migration id block `2000`. `Migrations.run` /
 `Migrations.layer` install it alone; `@smthrs/engine-store/Migrations` composes
 it with the journal's, the run store's, and the engine's. See
 [`@smthrs/database`](/api/database) for the composition rules.

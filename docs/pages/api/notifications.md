@@ -10,7 +10,7 @@ the alert policy over it.
 A notification queue answers "tell this run something". An alert answers the
 question nobody is around to ask: a run has been waiting for an approval for an
 hour, and the person who could grant it does not know. Both are the same
-machinery — an alert is admitted as a coalesced system event — and differ only
+machinery, an alert is admitted as a coalesced system event, and differ only
 in who decides to write one.
 
 ## Queue
@@ -108,8 +108,8 @@ const layerPager = Layer.succeed(Alerts.Sink)({
 ```
 
 `Alerts.alertId(alert)` is stable for the life of one condition and every field
-of the alert is derived from the journal — `firedAt` is `since` plus the rule's
-`afterMs`, not the wall clock of whichever tick noticed — so the same alert is
+of the alert is derived from the journal: `firedAt` is `since` plus the rule's
+`afterMs`, not the wall clock of whichever tick noticed, so the same alert is
 byte-identical on every attempt and the id is a sound deduplication key. A sink
 without one will occasionally page twice about one condition.
 

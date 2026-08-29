@@ -56,7 +56,7 @@ it became the place you operate runs.
 
 The CLI opens the Monitor when a run starts, and
 `bunx smthrs monitor` opens it for any existing run or
-workspace. See the [Monitor guide](/guides/monitor).
+workspace. See the Monitor guide.
 
 ## Install workflow packs from GitHub or npm
 
@@ -83,8 +83,8 @@ bunx smthrs remove review-pack           # uninstall
 This is the first release of packs, and we are shipping it as an MVP: the
 lifecycle commands are real, the registry is young, and you will find rough
 edges. `bunx smthrs bug` tells us what broke. See
-[Workflow packs](/reference/packs), [`add`](/workflows/add), and
-[`share-pack`](/workflows/share-pack).
+Workflow packs, `add`, and
+`share-pack`.
 
 ## The approval follows the artifact
 
@@ -105,7 +105,7 @@ re-checks it at schedule time. If the row changed, the task parks as
 state through `ctx.boundStale()`, operators see it through
 `bunx smthrs why`, and a correction loop can approve a new
 artifact without failing the run. See
-[Provenance binding](/concepts/provenance).
+Provenance binding.
 
 ## Node.js, the browser, and everywhere else
 
@@ -135,11 +135,11 @@ import { runBrowserWorkflow } from "smthrs/browser";
 
 Two ways to hand a goal to a fleet:
 
-- **[`<DelegationChain>`](/components/delegation-chain)** is the fixed,
+- **`<DelegationChain>`** is the fixed,
   inspectable pipeline: refine the goal, plan, preview cost, execute, review,
   score, and re-plan within a bounded budget. It ships in the pack with its
   own live UI.
-- **[`<Trellis>`](/components/trellis)** (experimental) lets a strong model
+- **`<Trellis>`** (experimental) lets a strong model
   author the plan itself. It writes a bounded `agent | sequence | parallel`
   program from settled evidence, and Smithers validates and compiles it into
   ordinary durable tasks in the same run, with immutable recursive fuel and
@@ -174,7 +174,7 @@ await store.saveNote({
 The `incident-runbook-memory` example in the repository runs the whole loop:
 bank lessons during an incident, propose a consolidated rule, gate it on human
 approval, and serve the accepted rule to the next incident. Notes require
-SQLite in this release. See the [memory reference](/reference/memory).
+SQLite in this release. See the memory reference.
 
 ## Your workflows own their UI, and init gets out of your way
 
@@ -197,7 +197,7 @@ view opens wherever the workflow runs:
   gets you started. The install is focused on authoring workflows; the old
   starter pile lives on under `examples/`.
 
-See the [workflow-owned UI migration guide](/guides/workflow-owned-ui-migration).
+See the workflow-owned UI migration guide.
 
 ## Ask the CLI what happened
 

@@ -31,7 +31,7 @@ The Gateway is now a singleton: CLI commands autostart one shared daemon per wor
 
 ## TanStack DB sync engine
 
-The UI data layer moved to TanStack DB collections with per-mode providers behind one API. The [sync guide](/guides/sync) covers the architecture.
+The UI data layer moved to TanStack DB collections with per-mode providers behind one API. The sync guide covers the architecture.
 
 - **Local mode:** a QueryCollection provider over new `/v1/api` REST routes with SSE invalidation.
 - **Multiplayer mode:** an ElectricSQL provider over Postgres, through a hardened Electric sync proxy.
@@ -41,7 +41,7 @@ The UI data layer moved to TanStack DB collections with per-mode providers behin
 
 Workflow UIs are now a first-class authoring surface:
 
-- **A reusable [`gateway-ui` component package](/reference/gateway-ui)** and a [workflow UI styleguide](/guides/workflow-ui-design) provide the primitives custom workflow UIs are built from.
+- **A reusable `gateway-ui` component package** and a workflow UI styleguide provide the primitives custom workflow UIs are built from.
 - **A create-workflow builder UI** with a code editor and live graph preview backs `bunx smthrs make-workflow`: describe a workflow in plain English and watch it get designed, scaffolded, and graph-verified.
 - **Experimental:** `bunx smthrs ui --app` serves a local UI app preview with a concierge chat that can create and launch workflows ([ui.smithers.sh](https://ui.smithers.sh)). It requires an LLM API key and is not yet part of the supported product surface.
 
@@ -57,14 +57,14 @@ Workflow UIs are now a first-class authoring surface:
 
 Both plugins are covered in depth at [plugins.smithers.sh](https://plugins.smithers.sh).
 
-- **Claude Code** ([integration guide](/integrations/claude-code-plugin)): the plugin now mirrors every Smithers run into a live /workflows view by default, with a background monitor that surfaces approvals, human requests, failures, and stalls. It is driven by new versioned protocol commands (`bunx smthrs claude tick|node-wait|monitor`), and the graph layer derives Claude-native phase plans, including from persisted frames, so a restarted session picks the view back up.
+- **Claude Code** (integration guide): the plugin now mirrors every Smithers run into a live /workflows view by default, with a background monitor that surfaces approvals, human requests, failures, and stalls. It is driven by new versioned protocol commands (`bunx smthrs claude tick|node-wait|monitor`), and the graph layer derives Claude-native phase plans, including from persisted frames, so a restarted session picks the view back up.
 - **Codex** gets its own plugin whose skill drives the agent to run its work through Smithers and open a live `bunx smthrs ui` view per workflow.
 
 ## Self-healing runs
 
 When a run fails, Smithers now [investigates itself](https://self-healing.smithers.sh):
 
-- **Post-failure autopsy:** the CLI auto-launches an autopsy workflow on run failure that diagnoses what went wrong from the event history and reports findings ([guide](/guide/post-failure)).
+- **Post-failure autopsy:** the CLI auto-launches an autopsy workflow on run failure that diagnoses what went wrong from the event history and reports findings (guide).
 - **Fleet medic:** the `monitor-smithers` sweep gains an auto-remediation medic stage that proposes and applies fixes for stuck or degraded runs.
 - **`bunx smthrs supervise`** continues to watch for stale running runs and auto-resume them.
 
@@ -74,13 +74,13 @@ When a run fails, Smithers now [investigates itself](https://self-healing.smithe
 
 ## Serverless and sandboxes
 
-- **Cloudflare:** serverless resume and cron ticks with run-lease claims let a Worker own a durable run without a long-lived process, alongside a Cloudflare sandbox provider ([integration guide](/integrations/cloudflare)).
-- **Run on plue:** a plue sandbox provider and a `run-on-plue` workflow run any Smithers workflow on a real remote Freestyle VM, verified end to end ([example](/examples/run-on-plue)).
+- **Cloudflare:** serverless resume and cron ticks with run-lease claims let a Worker own a durable run without a long-lived process, alongside a Cloudflare sandbox provider (integration guide).
+- **Run on plue:** a plue sandbox provider and a `run-on-plue` workflow run any Smithers workflow on a real remote Freestyle VM, verified end to end (example).
 
 ## Integrations: Telegram, GitHub, and Linear
 
 - A new integrations package delivers external webhook events (GitHub, Linear, Telegram) into workflows, with durable persisted integration event state.
-- Telegram becomes an approval surface: a Bot API helper package, inline approval buttons, a mini-app approval page with `initData` verification, and a daily-digest summary bot; see [telegram.smithers.sh](https://telegram.smithers.sh) and the [Telegram guide](/integrations/telegram).
+- Telegram becomes an approval surface: a Bot API helper package, inline approval buttons, a mini-app approval page with `initData` verification, and a daily-digest summary bot; see [telegram.smithers.sh](https://telegram.smithers.sh) and the Telegram guide.
 
 ## Docs-driven development
 
@@ -88,11 +88,11 @@ A new [docs-driven development](https://ddd.smithers.sh) family of workflows tre
 
 ## CLI
 
-- **Interactive `init` wizard** ([init.smithers.sh](https://init.smithers.sh)) with à-la-carte workflow/skill/agent-doc selection and persisted skill deselections; `--yes` / `--non-interactive` for CI. Non-interactive re-init now runs as a durable, replayable [system workflow](/workflows/init), falling back to the imperative path if the workflow cannot load.
-- **`bunx smthrs make-workflow "<task>"`** dispatches the create-workflow builder from a plain-English description, and `init [prompt]` chains straight into it: install the pack and describe your first workflow in one command. A seeded [make-workflow tutorial](/workflows/make-workflow-tutorial) teaches the authoring loop.
+- **Interactive `init` wizard** ([init.smithers.sh](https://init.smithers.sh)) with à-la-carte workflow/skill/agent-doc selection and persisted skill deselections; `--yes` / `--non-interactive` for CI. Non-interactive re-init now runs as a durable, replayable system workflow, falling back to the imperative path if the workflow cannot load.
+- **`bunx smthrs make-workflow "<task>"`** dispatches the create-workflow builder from a plain-English description, and `init [prompt]` chains straight into it: install the pack and describe your first workflow in one command. A seeded make-workflow tutorial teaches the authoring loop.
 - **`bunx smthrs update`** detects how Smithers was installed (bunx/npx, global bun/npm/pnpm/yarn, project-local) and upgrades it or prints the exact command, plus a passive once-a-day update notice (`SMITHERS_NO_UPDATE_CHECK` opts out).
 - **HTML run reports:** `bunx smthrs workflow run --report` emits an HTML report with open-in-browser.
-- **`bunx smthrs bug`** files bug reports with scrubbed run context ([how we handle them](/contributing/bug-reports)).
+- **`bunx smthrs bug`** files bug reports with scrubbed run context (how we handle them).
 - **Agent availability probing:** the CLI now probes whether agent CLIs can actually run instead of trusting auth files on disk.
 - **Version-pinned LLM docs:** `bunx smthrs docs` / `docs-full` serve `llms.txt` / `llms-full.txt` pinned to the installed version, with a git-tag fallback for older `--docs-version` requests.
 - **Project-local CLI resolution:** a globally-installed `smithers` resolves and delegates to the nearest project-local install, the way tsx and bunx do.

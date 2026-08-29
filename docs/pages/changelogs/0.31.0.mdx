@@ -106,8 +106,8 @@ fixture workflows plus handwritten cases and a harness) and a
 marks and reverts its side effects.
 
 See the external side effects section of the
-[Task docs](/components/task) and the
-[time-travel quickstart](/guides/time-travel-quickstart).
+Task docs and the
+time-travel quickstart.
 
 ## Claude Opus 5 becomes the default implementer
 
@@ -124,10 +124,10 @@ bunx smthrs oneshot "make the flaky auth test deterministic"
 
 - Cost scoring prices `claude-opus-5` at $5 per million input tokens and
   $25 per million output tokens, the same as Opus 4.8.
-- [`smithers oneshot`](/guides/oneshot) falls back in a new order: Claude
+- `smithers oneshot` falls back in a new order: Claude
   Opus 5, then Codex Sol, then Kimi K3, then Claude Fable 5.
 
-See the [model selection guide](/guides/model-selection) for overriding
+See the model selection guide for overriding
 any seat.
 
 ## Point Opus 5 at your open issues
@@ -215,10 +215,10 @@ repo's own issue tracker. The most noticeable, with a security pin first:
 ## Docs for humans, docs for agents
 
 The docs site now separates its two audiences. The Product API tab is for
-you: a [Platform Capabilities](/guide/capabilities) catalog of what you
+you: a Platform Capabilities catalog of what you
 can ask for in plain English, setup pages for each harness (Claude Code,
 Codex, Cursor, Copilot, Pi, Hermes, OpenClaw), and a
-[Set Up Semantic Memory](/guide/setup/semantic-memory) page covering
+Set Up Semantic Memory page covering
 Hindsight and `HINDSIGHT_URL`. The Technical API tab is the agent-facing
 reference, and its entry pages now say so.
 

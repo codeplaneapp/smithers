@@ -77,7 +77,7 @@ Take the barrel when you want the whole engine in one dependency. Take the indiv
 
 The barrel package. It re-exports every engine package as a namespace so one
 dependency yields the whole engine surface. Its only API of its own is
-`namespaces`, the runtime list of the re-exported namespace names — also the
+`namespaces`, the runtime list of the re-exported namespace names: also the
 barrel's one executable statement, so the package's 100% coverage gate has a
 real denominator instead of an empty one (issue #169).
 
@@ -155,10 +155,10 @@ package. The barrel pulls in every one of them.
 
 **A browser is not one of those targets.** Every package root the barrel
 re-exports bundles for a browser, and `pnpm run browser` gates `@smthrs/flows`
-itself alongside them — see [browser support](/architecture/browser-support).
+itself alongside them: see [browser support](/architecture/browser-support).
 Bundling is still weaker than running: the durable composition needs a SQL
 client behind the `DurableWriter` contract, and the only ones shipped here are
-`node:sqlite`-backed. The namespaces here also carry contracts only —
+`node:sqlite`-backed. The namespaces here also carry contracts only , 
 `Journal.TestJournal` does not exist; it lives at
 `@smthrs/journal/test/TestJournal`, and the host bundles live at
 `@smthrs/platform-node`, `@smthrs/platform-bun`, and

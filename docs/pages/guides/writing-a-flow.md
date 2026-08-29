@@ -100,7 +100,7 @@ Use `tier: "irreversible"` for effects that cannot be rolled back, and give them
 
 ## Declare a model call
 
-A model call is an ordinary action, so it is declared like one — except that its implementation ships with it and an author never writes `toLayer` for it. `AgentAction.make` takes the seat, the system teaching, a prompt built from the step payload, and an `output` schema:
+A model call is an ordinary action, so it is declared like one, except that its implementation ships with it and an author never writes `toLayer` for it. `AgentAction.make` takes the seat, the system teaching, a prompt built from the step payload, and an `output` schema:
 
 ```ts
 import * as AgentAction from "@smthrs/agent/AgentAction"
@@ -119,9 +119,9 @@ const Review = AgentAction.make("example/Review", {
 
 `Review.call({ diff })` records the same plan node any other action records, and `Review.layer` is the implementation: it resolves the declared seat through the `SeatResolver` service and runs one agent loop through the `Agent` service inside the current execution.
 
-The `output` schema is enforced. It is rendered into the run's system teaching as JSON Schema, and the run's final answer is decoded by it — whole answer first, then the last balanced JSON container inside it. A decode miss spends one correction re-prompt carrying bounded diagnostics before the step fails `StructuredOutputFailure`. Set `corrections: 0` to make a first miss terminal.
+The `output` schema is enforced. It is rendered into the run's system teaching as JSON Schema, and the run's final answer is decoded by it: whole answer first, then the last balanced JSON container inside it. A decode miss spends one correction re-prompt carrying bounded diagnostics before the step fails `StructuredOutputFailure`. Set `corrections: 0` to make a first miss terminal.
 
-The host wiring is two services. `AgentAction.Host` is the composition every model-backed action shares — the registry a cell may call into, the sandbox budget, the capability envelope, the executable catalog:
+The host wiring is two services. `AgentAction.Host` is the composition every model-backed action shares, the registry a cell may call into, the sandbox budget, the capability envelope, the executable catalog:
 
 ```ts
 const HostLayer = AgentAction.layerHost({

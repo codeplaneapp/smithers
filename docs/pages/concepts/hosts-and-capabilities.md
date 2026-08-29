@@ -8,7 +8,7 @@ This page describes the portable host surface and the permission kernel that med
 
 ## The closed host surface
 
-`@smthrs/kernel` owns the closed list — `HostServiceTags` and `HostServiceIds` — of these protected services:
+`@smthrs/kernel` owns the closed list, `HostServiceTags` and `HostServiceIds`, of these protected services:
 
 - Effect `FileSystem`
 - Effect `Path`
@@ -16,7 +16,7 @@ This page describes the portable host surface and the permission kernel that med
 - `Jj` (contract in [`@smthrs/jj`](/api/jj))
 - Effect `HttpClient`
 
-Four of the five slots hold Effect's own tags. Smithers used to define a `Shell` service in the third slot; it was `effect/unstable/process` with fewer features, so it was deleted and the slot now holds `effect/process/ChildProcessSpawner` (see [design decisions](/design-decisions)). The fifth slot went the same way: a Smithers-defined one-hop `HttpTransport` was deleted in favour of `effect/HttpClient`. Smithers supplies implementations of both — Node, Bun, an in-browser one, and a remote one — and adds only the capability check.
+Four of the five slots hold Effect's own tags. Smithers used to define a `Shell` service in the third slot; it was `effect/unstable/process` with fewer features, so it was deleted and the slot now holds `effect/process/ChildProcessSpawner` (see [design decisions](/design-decisions)). The fifth slot went the same way: a Smithers-defined one-hop `HttpTransport` was deleted in favour of `effect/HttpClient`. Smithers supplies implementations of both, Node, Bun, an in-browser one, and a remote one, and adds only the capability check.
 
 The list is closed, not the package: `Jj` ships as its own package so a consumer that only needs that capability does not take the whole host surface. The contract stays in `@smthrs/jj`; the kernel decorates that same tag (and re-exports it for convenience) rather than declaring a second one, and the composite bundles (`NodeHost`, `BunHost`, `BrowserHost`, `TestHost`) provide all five tags. There is no pseudo-terminal service: interactive-terminal support is out of core by design (see [design decisions](/design-decisions)).
 
@@ -27,11 +27,11 @@ Cloudflare and Vercel adapters live in the separate
 operations fail through their service contract; they should not disappear
 from the environment type.
 
-Host bundles provide an `HttpClient` that never follows a redirect on its own — the fetch layers are configured with `RequestInit { redirect: "manual" }`, and Undici installs no redirect interceptor. Redirect following belongs *above* the kernel's guard: the decorator composes Effect's own `HttpClient.followRedirects` over the checked client, so every network hop is authorized independently.
+Host bundles provide an `HttpClient` that never follows a redirect on its own: the fetch layers are configured with `RequestInit { redirect: "manual" }`, and Undici installs no redirect interceptor. Redirect following belongs *above* the kernel's guard: the decorator composes Effect's own `HttpClient.followRedirects` over the checked client, so every network hop is authorized independently.
 
 ## Kernel decoration
 
-The kernel decorates each service tag in place — a middleware `Layer` over the very tag the platform adapter provides, so there is no second "protected" tag to reach around. Each decorator:
+The kernel decorates each service tag in place, a middleware `Layer` over the very tag the platform adapter provides, so there is no second "protected" tag to reach around. Each decorator:
 
 1. derives an exact `Capability`,
 2. asks `GrantStore` to authorize it,
@@ -41,7 +41,7 @@ Where Effect owns the tag (`FileSystem`, `ChildProcessSpawner`) the error channe
 
 The `Jj` slot carries two optional operations, `root` and `revert`, checked as `jj:root` (sealed) and `jj:revert` (compensable). The decorator forwards their absence: a backend that cannot revert keeps reading as one, because a caller deciding what it can offer needs "this host has no revert" and not "your revert was refused".
 
-For a spawn, the exact capability is `proc:spawn` with `CommandLine.render(command)` as its resource — the same string a browser interpreter or a remote sandbox is handed for supported commands, so a grant and the thing it authorizes cannot drift apart. A custom shell path is included explicitly in the resource; adapters that cannot select it reject the command.
+For a spawn, the exact capability is `proc:spawn` with `CommandLine.render(command)` as its resource: the same string a browser interpreter or a remote sandbox is handed for supported commands, so a grant and the thing it authorizes cannot drift apart. A custom shell path is included explicitly in the resource; adapters that cannot select it reject the command.
 
 ```ts
 import { Capability, Permission } from "@smthrs/kernel"
@@ -87,7 +87,7 @@ Containment is not confinement. It ends processes this host started and recorded
 
 ## Boundary capture: hermetic execution as a transaction
 
-Hermetic execution needs more than a capability check — it needs to know what a
+Hermetic execution needs more than a capability check: it needs to know what a
 body *actually* read and wrote. Two contracts split that job:
 
 - [`StepBoundary`](/api/engine-store#stepboundary) measures the
@@ -96,9 +96,9 @@ body *actually* read and wrote. Two contracts split that job:
   can only look at paths it was told about.
 - [`WorkspaceSandbox`](/api/engine-store#workspacesandbox) runs the
   body in an isolated **workspace transaction** instead. The transaction is
-  seeded with exactly the declared read set — an undeclared file is not there
+  seeded with exactly the declared read set: an undeclared file is not there
   to read, which is `docs/specs/Concepts/Effect Taxonomy.md`'s strong
-  enforcement tier — and the body's writes accumulate in the transaction rather
+  enforcement tier, and the body's writes accumulate in the transaction rather
   than on the host. Settlement is a whole-map diff, so "did this body write
   outside its declared write set" is a comparison rather than an inference.
 
@@ -111,7 +111,7 @@ of `docs/specs/Concepts/Diff Review.md` will attach.
 
 The transaction is a **deterministic transaction model, not a security
 boundary**. A body that reaches the host through a service the transaction does
-not seed — a spawned native process, an undecorated socket — is outside it.
+not seed, a spawned native process, an undecorated socket, is outside it.
 Actually denying that ambient access is the VM/`SandboxProvider` provisioning
 story in `docs/specs/Concepts/Agent Adapters.md`, and it is future work.
 
@@ -119,7 +119,7 @@ story in `docs/specs/Concepts/Agent Adapters.md`, and it is future work.
 
 - The browser layer wraps an injected ZenFS-like promises API and an injected just-bash interpreter, which must be mounted on the *same* filesystem.
 - The browser spawner is buffered, cannot take stdin or be killed, and rejects custom shells, detached processes, and configured extra file descriptors rather than silently dropping them.
-- Browser `Jj` has a real implementation: `@smthrs/jj/browser/BrowserJj`'s `layer({ fs, wasm })` drives jj-lib compiled to `wasm32-wasip1` over an injected virtual filesystem. `layerUnsupported` remains exported for a host that ships no wasm module — it fails in the error channel rather than omitting the tag — but the `BrowserHost` bundle wires the real layer: `layer({ bash, fs, jj })` takes the compiled module and the sync slice of the same mount, and a jj-less host is an explicit page choice, never the bundle's silent default.
+- Browser `Jj` has a real implementation: `@smthrs/jj/browser/BrowserJj`'s `layer({ fs, wasm })` drives jj-lib compiled to `wasm32-wasip1` over an injected virtual filesystem. `layerUnsupported` remains exported for a host that ships no wasm module; it fails in the error channel rather than omitting the tag, but the `BrowserHost` bundle wires the real layer: `layer({ bash, fs, jj })` takes the compiled module and the sync slice of the same mount, and a jj-less host is an explicit page choice, never the bundle's silent default.
 - Hosted-adapter behavior and limitations are documented with those adapters
   in the external plugins repository.
 

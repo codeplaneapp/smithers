@@ -1,5 +1,10 @@
 # Authoring benchmark baseline: claude-haiku-4-5
 
+> **Written for Smithers 0.x.** This note is research from before the 1.0
+> rewrite. It describes the JSX workflow runtime, its CLI, or its gateway, none
+> of which exist in 1.0.0-rc.0. It is kept as history, not as guidance; see
+> `docs/pages/migration/1.0.md` for what replaced each surface it names.
+
 Date: 2026-07-14. Suite: `.smithers/evals/authoring-benchmark.jsonl`, workflow:
 `.smithers/workflows/authoring-benchmark.tsx`. This is the "haiku can build
 this" acceptance bar from Phase 1 of

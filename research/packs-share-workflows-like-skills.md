@@ -1,5 +1,10 @@
 # Plan: "Share workflows like skills" — packs + messaging launch
 
+> **Written for Smithers 0.x.** This note is research from before the 1.0
+> rewrite. It describes the JSX workflow runtime, its CLI, or its gateway, none
+> of which exist in 1.0.0-rc.0. It is kept as history, not as guidance; see
+> `docs/pages/migration/1.0.md` for what replaced each surface it names.
+
 Status: **design approved in principle, pending final review** (will, 2026-07-13).
 Scope: one combined launch — ship `smithers add` + packs first, then flip the README/homepage
 messaging with the install one-liner as the hero moment.

@@ -19,6 +19,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { pathToFileURL } from "node:url"
 import { repoRoot } from "./docs-contract.mjs"
 import { pages } from "./docs-pages.mjs"
 import { assertRegenerable, checkVersionRelease, packageVersion, versionStamp } from "./llms-version-guard.ts"
@@ -167,134 +168,162 @@ export const orderRoutes = (topic: Topic, routes: ReadonlyArray<string>): Readon
   return [...leading, ...rest]
 }
 
-const version = packageVersion()
+/**
+ * Builds every artifact from the current tree.
+ *
+ * Returns the artifact map rather than writing it, so a caller can compare
+ * before deciding, and so importing this module for its helpers runs nothing.
+ */
+export const build = (): { readonly artifacts: Map<string, string>; readonly report: ReadonlyArray<string> } => {
+  const version = packageVersion()
 
-const all = pages()
-const byRoute = new Map(all.map((page) => [page.route, page]))
-const assigned = new Map<string, string>()
-const orphans: Array<string> = []
+  const all = pages()
+  const byRoute = new Map(all.map((page) => [page.route, page]))
+  const assigned = new Map<string, string>()
+  const orphans: Array<string> = []
 
-for (const page of all) {
-  if (excluded(page.route)) continue
-  const topic = topics.find((candidate) => candidate.matches(page.route))
-  if (topic === undefined) {
-    orphans.push(page.route)
-    continue
+  for (const page of all) {
+    if (excluded(page.route)) continue
+    const topic = topics.find((candidate) => candidate.matches(page.route))
+    if (topic === undefined) {
+      orphans.push(page.route)
+      continue
+    }
+    assigned.set(page.route, topic.name)
   }
-  assigned.set(page.route, topic.name)
-}
 
-if (orphans.length > 0) {
-  throw new Error(
-    `generate-llms: ${orphans.length} route(s) belong to no topic: ${orphans.join(", ")}.\n` +
-      "Add the route to a topic in scripts/generate-llms.ts, or record it in `excluded`."
-  )
-}
+  if (orphans.length > 0) {
+    throw new Error(
+      `generate-llms: ${orphans.length} route(s) belong to no topic: ${orphans.join(", ")}.\n` +
+        "Add the route to a topic in scripts/generate-llms.ts, or record it in `excluded`."
+    )
+  }
 
-const missingDescription = all.filter((page) => !excluded(page.route) && page.description === undefined)
-if (missingDescription.length > 0) {
-  throw new Error(
-    `generate-llms: ${missingDescription.length} page(s) have no frontmatter description: ` +
-      `${missingDescription.map((page) => page.path).join(", ")}`
-  )
-}
+  const missingDescription = all.filter((page) => !excluded(page.route) && page.description === undefined)
+  if (missingDescription.length > 0) {
+    throw new Error(
+      `generate-llms: ${missingDescription.length} page(s) have no frontmatter description: ` +
+        `${missingDescription.map((page) => page.path).join(", ")}`
+    )
+  }
 
-const bundles = topics.map((topic) => {
-  const routes = orderRoutes(topic, [...assigned].filter(([, name]) => name === topic.name).map(([route]) => route))
-  const sections = routes.map((route) => renderPage(byRoute.get(route)!))
-  const head = `# ${topic.title}\n\n> ${topic.header}\n${versionStamp(version)}\n`
-  return { topic, routes, content: optimize(`${head}${separator}${sections.join(separator)}`) }
-})
+  const bundles = topics.map((topic) => {
+    const routes = orderRoutes(topic, [...assigned].filter(([, name]) => name === topic.name).map(([route]) => route))
+    const sections = routes.map((route) => renderPage(byRoute.get(route)!))
+    const head = `# ${topic.title}\n\n> ${topic.header}\n${versionStamp(version)}\n`
+    return { topic, routes, content: optimize(`${head}${separator}${sections.join(separator)}`) }
+  })
 
-const fullHeader = [
-  "# Smithers, complete documentation",
-  "",
-  `> Smithers is an Effect-based durable-execution engine. This file is every documentation page in one document, for an agent operating Smithers on someone's behalf.`,
-  versionStamp(version),
-  "",
-  "Sections, in order:",
-  ...bundles.map((bundle, index) => `  ${index + 1}. ${bundle.topic.title}: ${bundle.topic.header}`),
-  "",
-  "The Smithers 0.x changelogs are not included. Smithers 1.0 removed the runtime they describe; read the migration section instead.",
-  ""
-].join("\n")
+  const fullHeader = [
+    "# Smithers, complete documentation",
+    "",
+    `> Smithers is an Effect-based durable-execution engine. This file is every documentation page in one document, for an agent operating Smithers on someone's behalf.`,
+    versionStamp(version),
+    "",
+    "Sections, in order:",
+    ...bundles.map((bundle, index) => `  ${index + 1}. ${bundle.topic.title}: ${bundle.topic.header}`),
+    "",
+    "The Smithers 0.x changelogs are not included. Smithers 1.0 removed the runtime they describe; read the migration section instead.",
+    ""
+  ].join("\n")
 
-const full = optimize(`${fullHeader}${separator}${bundles.map((bundle) => bundle.content).join(separator)}`)
+  const full = optimize(`${fullHeader}${separator}${bundles.map((bundle) => bundle.content).join(separator)}`)
 
-const index = [
-  "# Smithers",
-  "",
-  "> An Effect-based durable-execution engine: typed flows that replay from a journal, content-addressed action results, capability-checked host access, and a control plane that runs them.",
-  versionStamp(version),
-  "",
-  "## The whole thing in one file",
-  "",
-  "Read [/llms-full.txt](/llms-full.txt). It contains every section below.",
-  "",
-  "## Sections",
-  "",
-  ...bundles.map((bundle) => `- ${bundle.topic.title}: ${bundle.topic.header}`),
-  "",
-  "## Where to start",
-  "",
-  "- Install and the release-candidate warning: /installation",
-  "- Write a flow: /guides/writing-a-flow",
-  "- Run one: /guides/running-flows",
-  "- What the release does not do: /release/known-limitations",
-  "- Move a 0.x project: /migration/1.0",
-  "",
-  "## Pointers",
-  "",
-  "- npm: @smthrs/cli, @smthrs/flow, @smthrs/engine, @smthrs/flows",
-  "- github: github.com/smithersai/smithers",
-  "- The Smithers 0.x changelogs are on the site under /changelogs and are not part of these bundles.",
-  ""
-].join("\n")
+  const index = [
+    "# Smithers",
+    "",
+    "> An Effect-based durable-execution engine: typed flows that replay from a journal, content-addressed action results, capability-checked host access, and a control plane that runs them.",
+    versionStamp(version),
+    "",
+    "## The whole thing in one file",
+    "",
+    "Read [/llms-full.txt](/llms-full.txt). It contains every section below.",
+    "",
+    "## Sections",
+    "",
+    ...bundles.map((bundle) => `- ${bundle.topic.title}: ${bundle.topic.header}`),
+    "",
+    "## Where to start",
+    "",
+    "- Install and the release-candidate warning: /installation",
+    "- Write a flow: /guides/writing-a-flow",
+    "- Run one: /guides/running-flows",
+    "- What the release does not do: /release/known-limitations",
+    "- Move a 0.x project: /migration/1.0",
+    "",
+    "## Pointers",
+    "",
+    "- npm: @smthrs/cli, @smthrs/flow, @smthrs/engine, @smthrs/flows",
+    "- github: github.com/smithersai/smithers",
+    "- The Smithers 0.x changelogs are on the site under /changelogs and are not part of these bundles.",
+    ""
+  ].join("\n")
 
-const indexContent = optimize(index)
+  const indexContent = optimize(index)
 
-const skillSource = join(repoRoot, "skills", "smithers", "SKILL.md")
-const artifacts = new Map<string, string>()
-for (const bundle of bundles) artifacts.set(`docs/llms-${bundle.topic.name}.txt`, bundle.content)
-artifacts.set("docs/llms-full.txt", full)
-artifacts.set("docs/llms.txt", indexContent)
-artifacts.set("packages/cli/docs/llms.txt", indexContent)
-artifacts.set("packages/cli/docs/llms-full.txt", full)
-artifacts.set("skills/smithers/llms-full.txt", full)
+  const skillSource = join(repoRoot, "skills", "smithers", "SKILL.md")
+  const artifacts = new Map<string, string>()
+  for (const bundle of bundles) artifacts.set(`docs/llms-${bundle.topic.name}.txt`, bundle.content)
+  artifacts.set("docs/llms-full.txt", full)
+  artifacts.set("docs/llms.txt", indexContent)
+  artifacts.set("packages/cli/docs/llms.txt", indexContent)
+  artifacts.set("packages/cli/docs/llms-full.txt", full)
+  artifacts.set("skills/smithers/llms-full.txt", full)
 
-let skill: string | undefined
-try {
-  skill = readFileSync(skillSource, "utf8")
-} catch {
-  skill = undefined
-}
-if (skill !== undefined) artifacts.set("packages/cli/docs/SKILL.md", skill)
-
-const changed: Array<string> = []
-for (const [path, content] of artifacts) {
-  const absolute = join(repoRoot, path)
-  let current: string | undefined
+  let skill: string | undefined
   try {
-    current = readFileSync(absolute, "utf8")
+    skill = readFileSync(skillSource, "utf8")
   } catch {
-    current = undefined
+    skill = undefined
   }
-  if (current !== content) changed.push(path)
+  if (skill !== undefined) artifacts.set("packages/cli/docs/SKILL.md", skill)
+
+  const report = [
+    ...bundles.map((bundle) =>
+      `  ${bundle.topic.name.padEnd(10)} ${String(bundle.routes.length).padStart(3)} pages  ${
+        bundle.content.length.toLocaleString()
+      } bytes`
+    ),
+    `  ${"full".padEnd(10)} ${String(assigned.size).padStart(3)} pages  ${full.length.toLocaleString()} bytes`,
+    ...(skill === undefined
+      ? ["  skills/smithers/SKILL.md is absent, so packages/cli/docs/SKILL.md was not written"]
+      : [])
+  ]
+
+  return { artifacts, report }
 }
 
-assertRegenerable(version, changed, changed.length === 0 ? "unreleased" : checkVersionRelease(version))
+/** Writes what {@link build} produced, refusing to rewrite a released bundle. */
+export const main = (): void => {
+  const { artifacts, report } = build()
+  const changed: Array<string> = []
+  for (const [path, content] of artifacts) {
+    const absolute = join(repoRoot, path)
+    let current: string | undefined
+    try {
+      current = readFileSync(absolute, "utf8")
+    } catch {
+      current = undefined
+    }
+    if (current !== content) changed.push(path)
+  }
 
-for (const [path, content] of artifacts) {
-  const absolute = join(repoRoot, path)
-  mkdirSync(dirname(absolute), { recursive: true })
-  writeFileSync(absolute, content)
+  assertRegenerable(
+    packageVersion(),
+    changed,
+    changed.length === 0 ? "unreleased" : checkVersionRelease(packageVersion())
+  )
+
+  for (const [path, content] of artifacts) {
+    const absolute = join(repoRoot, path)
+    mkdirSync(dirname(absolute), { recursive: true })
+    writeFileSync(absolute, content)
+  }
+
+  for (const line of report) console.log(line)
+  console.log(`\n${artifacts.size} artifact(s) written, ${changed.length} changed.`)
 }
 
-for (const bundle of bundles) {
-  console.log(`  ${bundle.topic.name.padEnd(10)} ${String(bundle.routes.length).padStart(3)} pages  ${bundle.content.length.toLocaleString()} bytes`)
+if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main()
 }
-console.log(`  ${"full".padEnd(10)} ${String(assigned.size).padStart(3)} pages  ${full.length.toLocaleString()} bytes`)
-if (skill === undefined) {
-  console.log("  skills/smithers/SKILL.md is absent, so packages/cli/docs/SKILL.md was not written")
-}
-console.log(`\n${artifacts.size} artifact(s) written, ${changed.length} changed.`)

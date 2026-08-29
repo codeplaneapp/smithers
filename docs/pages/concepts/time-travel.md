@@ -22,7 +22,7 @@ const frame: Frame.Frame = {
 }
 ```
 
-A `Position` pairs that frame with the run it addresses — `{ runId, frame }` —
+A `Position` pairs that frame with the run it addresses: `{ runId, frame }` , 
 and is the only argument every operation takes. A frame is an address into
 history, never a snapshot object.
 
@@ -78,7 +78,7 @@ identity run-local.
 
 `EffectBoundary.guard` records intent and outcome around an external effect. Records classify the effect as `sealed`, `compensable`, or `irreversible`, and track `intended`, `succeeded`, or `unknown` status.
 
-Behind the service, an effect-handler registry maps effect kinds to assessment and rollback handlers, classifies suffix records, invokes eligible handlers, and returns receipts. Unknown or irreversible effects can block a rewind. None of it is a caller parameter — `EffectBoundary` is the only half of that contract you touch, from the producer side.
+Behind the service, an effect-handler registry maps effect kinds to assessment and rollback handlers, classifies suffix records, invokes eligible handlers, and returns receipts. Unknown or irreversible effects can block a rewind. None of it is a caller parameter: `EffectBoundary` is the only half of that contract you touch, from the producer side.
 
 ## Rewind protocol
 

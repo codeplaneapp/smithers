@@ -228,3 +228,58 @@ export const localSmithersUnit = Smithers.NodeTest({
   srcs: [sources],
   deps: []
 })
+
+/**
+ * The documentation gate: house style, page shape, links, the CLI catalog
+ * against the binary, the removed surfaces, the generated pages, and the route
+ * plan.
+ *
+ * It spawns the working-tree CLI to read `--help`, so it is not cacheable and
+ * re-runs regardless.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const docs = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.entrypoint(Smithers.file("//scripts/check-docs.mjs")),
+  srcs: [sources],
+  deps: []
+})
+
+/**
+ * The bundles `smithers docs`, the installed skill, and smithers.sh serve are
+ * regenerated from `docs/pages` and compared byte for byte.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const llms = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.entrypoint(Smithers.file("//scripts/check-llms.mjs")),
+  srcs: [sources],
+  deps: []
+})
+
+/**
+ * The unit suites behind those two gates: the contract parser, the render
+ * helpers, the help parser, the route plan, the bundle builder, the version
+ * guard, and the invocation normalizer.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const docsUnit = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.testRunner([
+    Smithers.file("//scripts/docs-contract.test.mjs"),
+    Smithers.file("//scripts/docs-render.test.mjs"),
+    Smithers.file("//scripts/docs-routes.test.mjs"),
+    Smithers.file("//scripts/generate-docs-pages.test.mjs"),
+    Smithers.file("//scripts/generate-llms.test.mjs"),
+    Smithers.file("//scripts/llms-version-guard.test.ts"),
+    Smithers.file("//scripts/normalize-bunx.test.ts")
+  ]),
+  srcs: [sources],
+  deps: []
+})

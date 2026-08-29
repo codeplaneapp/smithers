@@ -263,8 +263,8 @@ browser-safe.
 `KeyMaterial` is what a planner declares about one node: a `version`, a tier
 `kind`, an opaque `body`, an ordered list of `InputRef`s, `layers`,
 `capabilities`, and opaque `effects` / `placement`. An `InputRef` is one of
-three *tagged* variants — `Literal`, `Ref` (with a projection path), and
-`Pending` — and the tag is hashed, so `Pending{from}` and `Ref{from, path: []}`
+three *tagged* variants: `Literal`, `Ref` (with a projection path), and
+`Pending`, and the tag is hashed, so `Pending{from}` and `Ref{from, path: []}`
 cannot collide even though both resolve to the same dependency digest.
 
 `KeyMaterial.dependencies` lists the graph-local nodes a material names, in
@@ -277,7 +277,7 @@ node's edges, so a hashed reference and an edge can never disagree.
 its dependencies, it substitutes each reference for the dependency's digest and
 returns a key.
 
-`content` and `ordinal` are the two constructors underneath — a cross-run
+`content` and `ordinal` are the two constructors underneath: a cross-run
 reusable content key, and a deliberately run-local invocation key.
 `digestInput` nominally brands a precomputed digest so it hashes as a digest
 reference; a plain object that merely has a `digest` field hashes as a literal,
@@ -296,7 +296,7 @@ string format could never be the thing the cache is consulted against.
 
 `Plan.compile({ planId, flow, nodes })` topologically orders drafts by their
 material dependencies, computes every key in that order, annotates detected
-write-set overlaps, and derives the plan digest. It performs no I/O — declared
+write-set overlaps, and derives the plan digest. It performs no I/O: declared
 `effects` carry read and write *paths*, never digests, because measuring a path
 is run-time work.
 
@@ -333,14 +333,14 @@ pair, both members are annotated with the resolved verdict:
 
 An ordering edge is **not** key material: a node serialized behind another
 computes the same result, so re-keying it would throw away a legitimate cache
-hit. Each annotation also carries a runtime strategy — `delay-rebase` or
-`stop-merge` — which is what the scheduler does when the predicted overlap
+hit. Each annotation also carries a runtime strategy: `delay-rebase` or
+`stop-merge`, which is what the scheduler does when the predicted overlap
 actually bites.
 
 ### PlanDiff
 
 `PlanDiff.diff(previous, next)` is `smithers plan --diff` as a value: `added`,
-`removed`, `rekeyed`, `unchanged`. The **verdict** is the key — two nodes with
+`removed`, `rekeyed`, `unchanged`. The **verdict** is the key, two nodes with
 the same id and key are the same step. The **attribution** on a re-keyed node
 (`changed: ["body", "input[1]"]`) is a report for a human, derived field by
 field, and is deliberately part of no digest.
@@ -348,8 +348,8 @@ field, and is deliberately part of no digest.
 ### PlanStore
 
 `PlanStore` exposes `record`, `append`, and `get`. `record` is first-writer-wins
-in the shape `CacheStore.put` established — `Recorded`, `ExistingSame`, or
-`Conflict` carrying the existing digest — so an identical re-record is not an
+in the shape `CacheStore.put` established: `Recorded`, `ExistingSame`, or
+`Conflict` carrying the existing digest, so an identical re-record is not an
 error and a different plan under the same id is never a silent overwrite.
 
 Append-only is enforced **in SQL, not by convention**: triggers on
@@ -367,7 +367,7 @@ it.
 ### Migrations
 
 The package owns `flows_plans`, `flows_plan_nodes`, and `flows_plan_edges`, and
-reserves migration id block `4000` — the next free block after the journal
+reserves migration id block `4000`: the next free block after the journal
 (`0`), run store (`1000`), step cache (`2000`), and engine store (`3000`). It
 is the last set in
 [`@smthrs/engine-store`](/api/engine-store)'s `Migrations.sets`, because

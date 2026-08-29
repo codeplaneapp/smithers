@@ -113,11 +113,11 @@ the bytes and returns their address; `get` verifies that the stored bytes still
 hash to the address it was asked for; `findMissing` is one batched probe whose
 result is guaranteed to be a deduplicated subset of its input.
 
-Three error tags, deliberately distinct. `ArtifactMissing` is the typed miss —
+Three error tags, deliberately distinct. `ArtifactMissing` is the typed miss , 
 an ordinary, expected outcome that a second tier may satisfy. `ArtifactCorruption`
 is an integrity violation: the bytes at an address no longer hash to it.
-`ArtifactStoreError` is neither — a failing host, an unreachable tier, or an
-address that is not usable as one — and stays retryable. Collapsing the three
+`ArtifactStoreError` is neither: a failing host, an unreachable tier, or an
+address that is not usable as one, and stays retryable. Collapsing the three
 into one code is exactly what makes a shared cache unsafe: a miss is fetchable,
 corruption is not, and a host refusal says nothing at all.
 
@@ -125,14 +125,14 @@ Implementations: `makeFileSystem` / `layerFileSystem` over Effect's `FileSystem`
 tag, `makeMemory` / `layerMemory` for tests and browser hosts, and
 `makeNoop` / `layerNoop` per house style.
 
-`layerFileSystem` publishes at `${directory}/${digest[0:2]}/${digest}` —
-Bazel's `DiskCacheClient` fanout — with a default directory of `.flows/objects`.
+`layerFileSystem` publishes at `${directory}/${digest[0:2]}/${digest}` , 
+Bazel's `DiskCacheClient` fanout, with a default directory of `.flows/objects`.
 Bytes land at a temp path in that directory, are fsynced where the host has
 writable file handles, and are renamed into place. Temp names fold a random
 per-instance token so two processes publishing one digest into a shared
 workspace never collide. An existing blob is digest-verified on every
-`put` — the objects directory is workspace-shared, so a remembered proof could
-outlive the bytes it proved — and a mismatch or failing read falls through to
+`put`: the objects directory is workspace-shared, so a remembered proof could
+outlive the bytes it proved, and a mismatch or failing read falls through to
 the atomic rewrite, healing the address.
 
 ### RemoteArtifacts
@@ -143,8 +143,8 @@ capability kernel already decorates with `net:get`/`net:post` checks, so a
 remote artifact fetch is permission-checked like any other egress.
 
 Every download is digest-verified before it is returned. The shared tier is the
-least trusted store there is — it is written by machines this one has never
-met — so a mis-serving or compromised cache can waste a round trip but can never
+least trusted store there is: it is written by machines this one has never
+met, so a mis-serving or compromised cache can waste a round trip but can never
 substitute content.
 
 The endpoint and its headers are **layer construction options**: a capability,
@@ -193,7 +193,7 @@ half over plain HTTP for that reason and says so.
 
 ### CombinedArtifacts
 
-Local first, remote second, with local write-back — Bazel's `CombinedCache`
+Local first, remote second, with local write-back. Bazel's `CombinedCache`
 shape. A local miss *or* a local corruption falls through to the shared tier,
 and the write-back hands the correct bytes to `local.put`, whose own
 verification rewrites the mismatched blob: a read-through heals a corrupt local
@@ -202,8 +202,8 @@ deduplicate in flight.
 
 A `put` records locally first and its local digest is the answer: the upload to
 the shared tier is opportunistic, and a refusal is dropped rather than
-propagated. Failing there would fail whatever produced the bytes — a step's
-`settle`, say — because a *cache* was unreachable. Nothing depends on that
+propagated. Failing there would fail whatever produced the bytes: a step's
+`settle`, say: because a *cache* was unreachable. Nothing depends on that
 upload; what gates a shared cache entry is the publication protocol's
 `findMissing` → upload → confirm, run before the entry is published, so a
 dropped upload costs one re-upload and never correctness.

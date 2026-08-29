@@ -100,17 +100,17 @@ order. `pnpm run test:examples` runs every one against the real packages: the
 durable examples open a real SQLite file, the host example spawns a real process,
 and the browser example is bundled by a real bundler.
 
-- `01-define-and-run.ts` — define a typed flow and run it on the in-memory engine
-- `02-run-durably.ts` — run a flow on the durable engine and read the journal it wrote
-- `03-crash-and-resume.ts` — suspend a run, drop the engine, and resume from durable state
-- `04-retry-policy.ts` — retry a flaky action, and read the policy that decides when to stop
-- `05-time-travel-fork.ts` — fork a finished run at a journal frame and drive the copy
-- `06-time-travel-rewind.ts` — rewind a run to an earlier frame and re-derive a view
-- `07-sync-follower.ts` — follow a run's journal from a second process
-- `08-host-adapters.ts` — run the same host program against two adapters
-- `09-browser-use.ts` — use the library from a browser bundle
-- `10-telemetry-export.ts` — export OTLP spans and read the same run three ways
-- `11-agent-step.ts` — chain two model-backed agent steps with declared output schemas
+- `01-define-and-run.ts`: define a typed flow and run it on the in-memory engine
+- `02-run-durably.ts`: run a flow on the durable engine and read the journal it wrote
+- `03-crash-and-resume.ts`: suspend a run, drop the engine, and resume from durable state
+- `04-retry-policy.ts`: retry a flaky action, and read the policy that decides when to stop
+- `05-time-travel-fork.ts`: fork a finished run at a journal frame and drive the copy
+- `06-time-travel-rewind.ts`: rewind a run to an earlier frame and re-derive a view
+- `07-sync-follower.ts`: follow a run's journal from a second process
+- `08-host-adapters.ts`: run the same host program against two adapters
+- `09-browser-use.ts`: use the library from a browser bundle
+- `10-telemetry-export.ts`: export OTLP spans and read the same run three ways
+- `11-agent-step.ts`: chain two model-backed agent steps with declared output schemas
 
 ## Features
 

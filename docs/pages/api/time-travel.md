@@ -144,8 +144,8 @@ This page is the public API reference for the `TimeTravel` service and the store
 
 `TimeTravelStore.Service` stores and retrieves:
 
-- snapshots at frames — `snapshotAt` reads the nearest anchor at or before a frame, `recordSnapshot` writes one (the snapshot projector is its only caller),
-- run state and admitted attempts at a frame — `stateAt` and `attemptsAt` fold the journal's own decision and attempt records rather than reading the run row's current values,
+- snapshots at frames: `snapshotAt` reads the nearest anchor at or before a frame, `recordSnapshot` writes one (the snapshot projector is its only caller),
+- run state and admitted attempts at a frame: `stateAt` and `attemptsAt` fold the journal's own decision and attempt records rather than reading the run row's current values,
 - descendants and lineage edges,
 - rewind audits and compensation receipts,
 - fork records,
@@ -156,7 +156,7 @@ This page is the public API reference for the `TimeTravel` service and the store
 ### Operations
 
 `TimeTravel` is one injectable service with three operations, each addressed by
-a `Position` — a run ID plus a `Frame`:
+a `Position`, a run ID plus a `Frame`:
 
 | Operation | Main API |
 | --- | --- |
@@ -187,7 +187,7 @@ The engine writes these records itself: an irreversible action dispatch is
 wrapped in an `intended` record before the body runs and a `succeeded` or
 `unknown` record after it settles, and a child spawn is journaled as one too.
 
-Compensation planning stays internal — `rewind` resolves handlers, classifies
+Compensation planning stays internal: `rewind` resolves handlers, classifies
 each record as `revertible`, `warning`, or `blocking`, and records the rollback
 receipts on its audit itself. What is public is the *door*:
 `CompensationHandlers.layer([...])` contributes handlers from the composition
@@ -208,8 +208,8 @@ fails with `irreversible`.
 ### Fork
 
 `SqlTimeTravelStore.createFork` creates a restartable engine row whose state is
-the state **at** the frame — folded from the run-decision records, not copied
-from the parent's current row — copies the selected journal prefix, copies only
+the state **at** the frame: folded from the run-decision records, not copied
+from the parent's current row: copies the selected journal prefix, copies only
 the attempts that prefix can explain, and writes a `fork-created` marker on the
 child naming `(parentRunId, forkJournalOffset)`. Lineage is recorded twice: in
 `flows_time_travel_edges` for the attach/detach protocol, and in the child's
@@ -219,13 +219,13 @@ derived from the parent journal's own spawn record, the only source that carries
 a parent sequence. Trampoline continuation edges come from the same place: the
 `handed-off` run decision the finishing round journals names `nextExecutionId`
 at the sequence the round advanced, so `descendants` reports each later round as
-a `continuation` edge, detached — a round owns its own claim and its own
+a `continuation` edge, detached: a round owns its own claim and its own
 journal, so rewinding past the handoff orphans it rather than requiring it to be
 cancelled.
 
 A fork never touches the parent: the boundary assessment still runs, but every
-verdict is normalized into `Fork.warnings` — "this effect may execute again on
-the child" — and nothing is reverted, truncated, or restored. The child's lane is
+verdict is normalized into `Fork.warnings`. "this effect may execute again on
+the child", and nothing is reverted, truncated, or restored. The child's lane is
 added but **not** pinned to the frame's jj pointer: `Jj` acts on the one working
 copy it is rooted at and cannot provision a workspace at a revision, so pinning
 it would restore the parent's tree. The fork discloses the pointer as a warning

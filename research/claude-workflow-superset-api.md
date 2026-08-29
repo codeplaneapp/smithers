@@ -1,5 +1,10 @@
 # The Claude Workflow API: a cosmetic skin over the Effect kernel
 
+> **Written for Smithers 0.x.** This note is research from before the 1.0
+> rewrite. It describes the JSX workflow runtime, its CLI, or its gateway, none
+> of which exist in 1.0.0-rc.0. It is kept as history, not as guidance; see
+> `docs/pages/migration/1.0.md` for what replaced each surface it names.
+
 **Status:** design proposal v2, 2026-07-27. Supersedes v1 (which proposed a new replay driver beside the JSX reconciler; unnecessary — the replay kernel already exists under the Effect API).
 **One sentence:** ship a Claude-only authoring skin that is *source-compatible* with the Claude Code native Workflow tool's script API, implemented as a thin cosmetic wrapper over the Smithers Effect API — whose `@effect/workflow` foundation already is a deterministic-replay durable-execution engine — making Smithers the first orchestrator to ship *per-platform authoring skills*: Claude sessions author in the shape Claude is system-prompt-trained on, and the durable engine underneath never changes.
 

@@ -105,7 +105,7 @@ real unified diff. Codex, OpenCode, Cursor, and Amp report paths and kinds
 only. Each engine declares what it can do in
 `AgentCapabilityRegistry.fileChanges` (`supportsFileChanges` and
 `supportsUnifiedDiff`); the per-engine table is in the
-[agents reference](/reference/agents#file-change-parsing).
+agents reference.
 
 In the node chat stream that means:
 
@@ -236,7 +236,7 @@ Entries accept per-task `agent`/`output`/`label` overrides over the
 component-level defaults, an allowlisted set of `Task` props passes through,
 and duplicate ids or a missing `agent`/`output`/`fork` fail at render time
 instead of mid-run. Details are in the
-[ForkFanOut reference](/components/fork-fan-out).
+ForkFanOut reference.
 
 ## Resume and retry work again
 
@@ -390,7 +390,7 @@ inside a Bubblewrap sandbox. The v0.0.1 integration is deliberately fixed
 (one fresh `serve` worker and one stock Nanocodex turn per `generate()` call,
 no daemon or worker pool) and fails closed when the sandbox requirements are
 not met. Linux x64 only; see the
-[Nanocodex integration page](/integrations/nanocodex) for the requirements.
+Nanocodex integration page for the requirements.
 
 ## A theme registry for the UI kit
 

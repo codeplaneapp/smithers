@@ -182,7 +182,7 @@ spend. `Budget.defaultMaxRuns` bounds how many tallies it holds in memory, and
 than read by an operator. It goes on the journal's durable channel for that
 reason, and its write failure is reported rather than ignored. A composition
 with no journal at all, such as the reference memory engine, accounts within one
-process and recovers nothing across a restart — that absence is the one this
+process and recovers nothing across a restart: that absence is the one this
 module reads as "nothing recorded" rather than as "spend unknown", because such
 a composition never recorded anything to lose.
 `Budget.budgetWarningEvent` is the opposite record and stays on the lossy

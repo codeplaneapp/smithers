@@ -108,7 +108,7 @@ const layer = Layer.mergeAll(RunStore.layer, AttemptStore.layer).pipe(
 
 This page is the public API reference for **executable run state**: run rows,
 action attempt rows, and the ownership arbitration that fences them. It was
-split out of `@smthrs/journal` — see
+split out of `@smthrs/journal`: see
 `docs/specs/Concepts/Journal Split.md`.
 
 Recovery reads these stores. The journal is history, audit, replay evidence,
@@ -135,7 +135,7 @@ the same `DurableWriter` and so commit as one transaction.
 | `cancel_requested_at_ms` | It participates in a compare-and-swap. `transitionOwned(..., { cancelRequested: "absent" })` compiles the predicate into the same `UPDATE` as the ownership fence, so a cancellation request cannot slip between a read and a terminal write. |
 | `parent_run_id` | Lineage is walked in SQL. A recursive CTE over `parent_run_id` answers ancestry questions that a JSON side-channel would force into decode-then-filter. |
 
-Everything else a harness records about a run — flow name and hash, cancel attribution, pause and hijack requests, VCS coordinates, config — stays in `state_json`. That is the intended extension point, not a workaround: those fields are read with the row, never guarded on, and adding a column per harness concept would make the schema a union of its consumers. `state_json` is checked to be valid JSON, and `transitionOwned` replaces it atomically with the status change.
+Everything else a harness records about a run, flow name and hash, cancel attribution, pause and hijack requests, VCS coordinates, config, stays in `state_json`. That is the intended extension point, not a workaround: those fields are read with the row, never guarded on, and adding a column per harness concept would make the schema a union of its consumers. `state_json` is checked to be valid JSON, and `transitionOwned` replaces it atomically with the status change.
 
 When a `state_json` field does need to be scanned, index the expression rather than promoting the column:
 
@@ -149,9 +149,9 @@ WHERE json_extract(state_json, '$.flowName') = 'deploy';
 
 Promote a field to a column only when it must appear in a CAS guard. `TransitionGuard` is the seam for that: new guarded metadata extends the interface and the single `UPDATE`, rather than adding a transition variant per rule.
 
-`requestCancel(runId, nowMs)` records the request without an owner fence — any observer may ask, and the owner decides at its next guarded transition. It returns `CancelRequested`, `AlreadyRequested` (with the original request time, which is never overwritten), or `NotFound`. A guarded transition that loses only to its guard returns `GuardFailed`, distinct from `FenceLost`.
+`requestCancel(runId, nowMs)` records the request without an owner fence: any observer may ask, and the owner decides at its next guarded transition. It returns `CancelRequested`, `AlreadyRequested` (with the original request time, which is never overwritten), or `NotFound`. A guarded transition that loses only to its guard returns `GuardFailed`, distinct from `FenceLost`.
 
-`Ownership.OwnerId` contains `hostId`, `pid`, and `nonce`. `LivenessEvidence` records observer and observation time. `heartbeatLoop`, `heartbeatInterval`, `heartbeatStaleAfter`, `heartbeatSkewAllowance`, and `heartbeatWriteTolerance` support scoped ownership maintenance. The loop interrupts its owner immediately on durable evidence that the fence is gone (any outcome other than `Updated`), but tolerates failed heartbeat *writes* for `heartbeatWriteTolerance`. That budget is `heartbeatStaleAfter` minus `heartbeatSkewAllowance` minus one heartbeat tick. The allowance is explicit because the owner stamps the heartbeat from its own clock while the stealer judges it against *its* clock, so the hosts' offset is subtracted straight from the owner's margin; the tick covers the budget only being re-evaluated once per pulse. Within the allowance the owner always stops executing side effects before a steal can be admitted. Beyond it the lease is bounded, not guaranteed: durable writes stay safe because the ownership compare-and-set fences them, but non-durable external side effects can overlap — inherent to any wall-clock lease, and a caller that cannot tolerate overlap needs a fencing token at the side effect itself. A successful pulse re-arms that window.
+`Ownership.OwnerId` contains `hostId`, `pid`, and `nonce`. `LivenessEvidence` records observer and observation time. `heartbeatLoop`, `heartbeatInterval`, `heartbeatStaleAfter`, `heartbeatSkewAllowance`, and `heartbeatWriteTolerance` support scoped ownership maintenance. The loop interrupts its owner immediately on durable evidence that the fence is gone (any outcome other than `Updated`), but tolerates failed heartbeat *writes* for `heartbeatWriteTolerance`. That budget is `heartbeatStaleAfter` minus `heartbeatSkewAllowance` minus one heartbeat tick. The allowance is explicit because the owner stamps the heartbeat from its own clock while the stealer judges it against *its* clock, so the hosts' offset is subtracted straight from the owner's margin; the tick covers the budget only being re-evaluated once per pulse. Within the allowance the owner always stops executing side effects before a steal can be admitted. Beyond it the lease is bounded, not guaranteed: durable writes stay safe because the ownership compare-and-set fences them, but non-durable external side effects can overlap: inherent to any wall-clock lease, and a caller that cannot tolerate overlap needs a fencing token at the side effect itself. A successful pulse re-arms that window.
 
 `LivenessEvidence.kind` is one of three. `same-host-pid-dead` is a local process probe and is accepted only from an observer on the owner's host, because a pid means nothing outside its own process namespace. `cross-host-unreachable-stale` is a reachability judgement and is accepted only from another host. `lease-expired` asserts only that the persisted heartbeat is older than `heartbeatStaleAfter`, so it is accepted from any observer: `steal` verifies that claim itself in the same write and refuses a row whose lease is still inside the window.
 
@@ -171,7 +171,7 @@ Promote a field to a column only when it must appear in a CAS guard. `Transition
 
 `finish` COALESCEs `error_json`, `outcome_json`, and `meta_json`: a value recorded mid-flight by `put` or `patch` survives a terminal claim that omits it, and supplying one replaces it. Only `put`'s upsert rewrites those columns unconditionally, because an upsert restates the whole row.
 
-`patch(id, fields)` is the unfenced surface for opaque fields — checkpoint, error, outcome, and metadata — and never moves `state`, `started_at_ms`, or `finished_at_ms`. Omitted fields are left as recorded. It returns `Patched` or `NotFound`. Fields such as response text, worktree pointers, or cache flags belong in `meta`; the fenced lifecycle stays with `put`/`heartbeat`/`finish`.
+`patch(id, fields)` is the unfenced surface for opaque fields, checkpoint, error, outcome, and metadata, and never moves `state`, `started_at_ms`, or `finished_at_ms`. Omitted fields are left as recorded. It returns `Patched` or `NotFound`. Fields such as response text, worktree pointers, or cache flags belong in `meta`; the fenced lifecycle stays with `put`/`heartbeat`/`finish`.
 
 `AttemptStore` exports SQL `make`/`layer` plus no-op test seams.
 
@@ -185,7 +185,7 @@ redactor there is silent corruption, not defence: a legitimate `pageToken`
 resumes as `"[REDACTED]"` and the flow reads the wrong page, and a non-string
 field like `clientSecret: { … }` becomes a string, so schema decode of the
 persisted state dies and the run is undrivable (issue #72). These stores
-therefore take no `redact` option at all — `RunStore.layer` and
+therefore take no `redact` option at all: `RunStore.layer` and
 `AttemptStore.layer` round-trip their columns byte-for-byte. See the
 [`@smthrs/journal` reference](/api/journal) for the write-side rules.
 
@@ -201,8 +201,8 @@ needs the journal, the run store, and the step cache over ONE database takes
 
 ### Migrations
 
-`Migrations.set` is this package's namespaced migration set — `flows_runs`,
-its three indexes, and `flows_attempts` — and reserves migration id block
+`Migrations.set` is this package's namespaced migration set: `flows_runs`,
+its three indexes, and `flows_attempts`, and reserves migration id block
 `1000`. `Migrations.run` / `Migrations.layer` install it alone;
 `@smthrs/engine-store/Migrations` composes it with the journal's, the step
 cache's, and the engine's. See

@@ -16,7 +16,7 @@ This guide describes the services required by `@smthrs/engine-store` and gives a
 - `StepBoundary`
 - an Effect `Scope`
 
-`TestStores.layer()` supplies the four SQL services — journal, run, attempt, and cache — over ONE in-memory SQLite database. It is useful for integration tests, not restart durability:
+`TestStores.layer()` supplies the four SQL services, journal, run, attempt, and cache, over ONE in-memory SQLite database. It is useful for integration tests, not restart durability:
 
 ```ts
 import { DurableEngineState, EngineStore, StepBoundary } from "@smthrs/engine-store"
@@ -158,7 +158,7 @@ elsewhere in the tree, so its results are not admitted to the shared cache.
 Supply a stronger boundary that enforces declared writes and returns
 `wholeTreeWritesVerified: true` before admitting cross-run cache entries.
 
-`EngineStore` mints its owner identity through the `OwnerIdentity` service rather than reading `node:crypto.randomUUID` and `process.pid` directly, so the composition itself is edge-safe: the default draws an incarnation number from `Random` where the platform has no process, and `OwnerIdentity.layerConstant` pins the whole token where a host already holds a lease. What is still **Planned** is a browser SQL client behind the `DurableWriter` contract — without one there is nothing for the composition to run against off Node.
+`EngineStore` mints its owner identity through the `OwnerIdentity` service rather than reading `node:crypto.randomUUID` and `process.pid` directly, so the composition itself is edge-safe: the default draws an incarnation number from `Random` where the platform has no process, and `OwnerIdentity.layerConstant` pins the whole token where a host already holds a lease. What is still **Planned** is a browser SQL client behind the `DurableWriter` contract. Without one there is nothing for the composition to run against off Node.
 
 ## Ownership and liveness
 

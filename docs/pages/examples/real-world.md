@@ -236,10 +236,10 @@ Task:
 ${prompt}
 
 Previous implementation:
-${previousDraft || "None — this is the first pass."}
+${previousDraft || "None. This is the first pass."}
 
 Reviewer feedback:
-${feedback || "None — this is the first pass."}
+${feedback || "None. This is the first pass."}
 `.trim()
 })
 

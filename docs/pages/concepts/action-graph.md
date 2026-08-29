@@ -4,7 +4,7 @@ description: "Content-addressed actions, explicit Effect dependencies, hermetic 
 
 # Flows and the action graph
 
-This page explains the repository’s Bazel-like properties—content-addressed actions, explicit Effect dependencies, hermetic-boundary contracts, and cached results—while distinguishing them from the static action planner that is not yet implemented.
+This page explains the repository’s Bazel-like properties: content-addressed actions, explicit Effect dependencies, hermetic-boundary contracts, and cached results, while distinguishing them from the static action planner that is not yet implemented.
 
 ## The graph that exists today
 
@@ -61,7 +61,7 @@ Resolving graph-local dependency references into digests is [`@smthrs/plan`](/ap
 Two properties fall out and are the reason the package exists:
 
 - **Planning performs no I/O.** Declared `effects` carry read and write *paths*, never digests. Measuring a path is run-time work.
-- **Invalidation is re-keying.** An edited declaration re-keys that node and its dependent cone, and nothing else. There is deliberately no reverse-dependency index and no invalidating node visitor — content addressing subsumes both.
+- **Invalidation is re-keying.** An edited declaration re-keys that node and its dependent cone, and nothing else. There is deliberately no reverse-dependency index and no invalidating node visitor: content addressing subsumes both.
 
 A plan grows rather than being replaced: `Plan.append` adds a pre-keyed subgraph at the next generation, and `PlanStore` enforces append-only with SQL triggers.
 
@@ -77,7 +77,7 @@ Inside one flow body the runtime schedules **fibers**, not a persisted DAG:
 - queue worker concurrency is explicit;
 - run ownership prevents cross-process duplicate drivers.
 
-Above that, `EngineStore.PlanScheduler` drives a **persisted plan**. It walks the graph, admits ready nodes under `steps`/`agents` caps ordered by priority plus one point per round waited, and dispatches each through the same `ActionPersistence` seam an ordinary action uses — so the shared cache, the workspace sandbox, attempt rows, and the fenced journal all apply unchanged. Each node settles as `built`, `clean`, `failed`, or `skipped`, and the outcome is journaled.
+Above that, `EngineStore.PlanScheduler` drives a **persisted plan**. It walks the graph, admits ready nodes under `steps`/`agents` caps ordered by priority plus one point per round waited, and dispatches each through the same `ActionPersistence` seam an ordinary action uses, so the shared cache, the workspace sandbox, attempt rows, and the fenced journal all apply unchanged. Each node settles as `built`, `clean`, `failed`, or `skipped`, and the outcome is journaled.
 
 There is still no resource pool, critical-path analysis, or package-defined concurrency ceiling; `aspects.ts`-derived caps are supplied to the scheduler by its caller rather than read by it.
 

@@ -37,8 +37,8 @@ it under one vocabulary:
 
 The engine records the two relationships in two places, so the projection reads
 both. `parent_run_id` is the trampoline chain: the round before this one. A run
-that another run SPAWNED writes nothing in its own row — the edge lives in the
-`flows_run_parents` DAG that cycle detection walks — so a projection that read
+that another run SPAWNED writes nothing in its own row: the edge lives in the
+`flows_run_parents` DAG that cycle detection walks, so a projection that read
 the column alone would report every child of every run as an orphan. The column
 wins when a row has both, which is the case for round 1 of a run that was
 itself spawned: its nearest ancestor is the round before it.
@@ -69,13 +69,13 @@ control plane launched itself. A child, a fork, and a later trampoline round
 are all created by the engine straight into the run store, and a control plane
 that listed only its own launches could not answer what a run spawned. Runs the
 plane launched keep launch order; the rest follow in creation order. A run
-whose `state_json` is not a control summary — an engine-created run — is
+whose `state_json` is not a control summary, an engine-created run, is
 projected from the run row's own columns instead, with the engine's `flowName`
 as its `flowId`.
 
 A listing reads the fork markers, the spawn edges, the waiting reasons, and the
 cancellation evidence of every row, because it projects every row. Reading ONE
-run — which is what every mutation does before it writes — reads the run and
+run, which is what every mutation does before it writes, reads the run and
 its ancestor chain and nothing else, so the cost of steering or cancelling a
 run does not grow with the size of the database. Cascade attribution needs the
 ancestors and stops there; the chain is one recursive read over `parent_run_id`
@@ -126,8 +126,8 @@ for four different reasons and only one of them is something to tell the model:
 | `Thinking` | `thinking` | Runs the turn at that thinking level. |
 | `Tools` | `toolNames` | Adds those tools to the active set. |
 
-`ControlSchema.steerItem` strips the control envelope — who asked, when, for
-which run — and returns the `@smthrs/notifications` `SteerPayload` the harness
+`ControlSchema.steerItem` strips the control envelope: who asked, when, for
+which run, and returns the `@smthrs/notifications` `SteerPayload` the harness
 reads back. `Notifications.make` in `@smthrs/harness` maps each payload onto
 the matching `Steering.Item`, so a seat steer changes the seat instead of
 spending a turn announcing it.
@@ -203,7 +203,7 @@ anonymously.
 The `Cancel` RPC carries the reason and refuses a caller-named principal: the
 server stamps the identity it authenticated, so a remote operator states why
 and never states who. The principal's `stampedAt` is a record of when that
-authentication happened — evidence about an external event, never a value any
+authentication happened: evidence about an external event, never a value any
 decision is replayed from.
 
 `Cancellation.attribute` is the fold, and it is pure and scope-independent: it
@@ -270,7 +270,7 @@ const report = yield* Monitor.run({
 ```
 
 Each beat lists the run, replays its journal, classifies, and records
-`control.monitor.beat` — carrying the `remedy` it is about to attempt — before
+`control.monitor.beat`, carrying the `remedy` it is about to attempt, before
 applying any remedy, so a monitor that crashes mid-heal leaves the evidence of
 what it decided. The remedy is a second record, `control.monitor.healed`,
 written only once the heal returned a receipt: a heal that failed must not
@@ -283,12 +283,12 @@ every record the monitor writes (`/control/monitor/<monitorId>`) and the
 `monitorId` field in each payload. Nothing on the control plane leases a run to
 one watcher, so two monitors on one run both beat and both remedy. The
 identity is what makes their evidence tellable apart and their default remedies
-distinct — the built-in `resume` and `cancel` keys are
+distinct: the built-in `resume` and `cancel` keys are
 `monitor:<monitorId>:<remedy>:<runId>:<beat>`. A remedy must be idempotent on
 the control plane; a custom `heal` owes the same property.
 
-`remedyFor` maps a health onto an action — `stalled` and `wedged-node` resume,
-`failing` and `runaway-loop` cancel, everything else does nothing — and
+`remedyFor` maps a health onto an action: `stalled` and `wedged-node` resume,
+`failing` and `runaway-loop` cancel, everything else does nothing, and
 `autoHeal` decides which of them the monitor may actually apply. It is empty by
 default, because a monitor that healed by default would cancel a run the first
 time it looked at one. A remedy resets the stall count, so one stall produces

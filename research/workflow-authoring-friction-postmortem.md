@@ -1,5 +1,10 @@
 # Postmortem: 11-hour workflow-authoring repair loop (riskless-github-issue-sweep)
 
+> **Written for Smithers 0.x.** This note is research from before the 1.0
+> rewrite. It describes the JSX workflow runtime, its CLI, or its gateway, none
+> of which exist in 1.0.0-rc.0. It is kept as history, not as guidance; see
+> `docs/pages/migration/1.0.md` for what replaced each surface it names.
+
 Date: 2026-07-14. Source: Codex orchestrator session `019f5edc` in `~/smithers4`
 (04:25Z–18:58Z, killed by a machine restart). The orchestrator spent ~11 hours
 and **7 smithers authoring/repair runs** trying to produce a landing-grade

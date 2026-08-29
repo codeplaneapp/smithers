@@ -70,8 +70,8 @@ flowchart TD
 | [`@smthrs/crypto`](/api/crypto) | Injected cryptographic schema transformations | Platform implementation is supplied through Effect Crypto |
 | [`@smthrs/keys`](/api/keys) | Canonical flow keys | Composes `canonical` and `crypto` |
 | [`@smthrs/database`](/api/database) | `SqlClient` access plus transactional SQLite write retry | Owns no domain tables |
-| `@smthrs/platform-node`, `@smthrs/platform-bun` | The Node and Bun Host bundles: Effect's own platform services — filesystem, path, spawner, `HttpClient` — composed with the `Jj` adapter | Raw effects; no permission decisions. Bun composes `@effect/platform-bun` directly and does not depend on `@smthrs/platform-browser` |
-| [`@smthrs/capability`](/api/capability) | The capability vocabulary — actions, patterns, tiers — and typed permission failures with their `PlatformError` projection | A leaf both the kernel and `@smthrs/jj` depend on; its schema ids stay `@smthrs/kernel/…` because they are journaled |
+| `@smthrs/platform-node`, `@smthrs/platform-bun` | The Node and Bun Host bundles: Effect's own platform services, filesystem, path, spawner, `HttpClient`, composed with the `Jj` adapter | Raw effects; no permission decisions. Bun composes `@effect/platform-bun` directly and does not depend on `@smthrs/platform-browser` |
+| [`@smthrs/capability`](/api/capability) | The capability vocabulary, actions, patterns, tiers, and typed permission failures with their `PlatformError` projection | A leaf both the kernel and `@smthrs/jj` depend on; its schema ids stay `@smthrs/kernel/…` because they are journaled |
 | [`@smthrs/jj`](/api/jj) | Jujutsu snapshot, restore, diff, and workspace operations | Depends on `effect` and `@smthrs/capability`; the closed Host list still names it |
 | [`@smthrs/sandbox`](/api/sandbox) | A remote `ChildProcessSpawner` implementation and sandbox liveness | Adapts a caller's provider onto Effect's `ChildProcessSpawner`; owns no host access |
 | [`@smthrs/platform-browser`](/api/platform-browser) | Browser implementations of effect's `FileSystem` and `ChildProcessSpawner`, and the `BrowserHost` bundle, which provides effect's own fetch-backed `HttpClient` | Depends on `effect`, `@smthrs/kernel`, and `@smthrs/jj` for the slots it fills; the ZenFS and just-bash backends are arguments, not dependencies |
@@ -80,7 +80,7 @@ flowchart TD
 | [`@smthrs/step-cache`](/api/step-cache) | Sealed step results addressed by step-key digest, plus the HTTP action-cache client and the local-first/remote-second composition | Owns `flows_step_cache`; depends on `database` alone |
 | [`@smthrs/plan`](/api/plan) | The persisted plan: the `KeyMaterial`→`StepKey` compiler, `Plan.compile`/`append`, `PlanDiff`, and the append-only `PlanStore` | Owns `flows_plans`, `flows_plan_nodes`, `flows_plan_edges`, and migration block `4000`; performs no I/O beyond the database and executes nothing |
 | [`@smthrs/artifacts`](/api/artifacts) | The content-addressed artifact store the step cache references by digest: local, remote-over-HTTP, and the combination | Owns no tables and no migration; depends on `crypto` alone. Host access is Effect's `FileSystem` and `HttpClient` tags |
-| [`@smthrs/flow`](/api/flow) | The flow authoring model — flows, actions, durable primitives, retry policy, step identity — and the `FlowRuntime` port they execute against | Declares the runtime port; depends on nothing that implements it |
+| [`@smthrs/flow`](/api/flow) | The flow authoring model, flows, actions, durable primitives, retry policy, step identity, and the `FlowRuntime` port they execute against | Declares the runtime port; depends on nothing that implements it |
 | [`@smthrs/engine`](/api/engine) | The runtime that executes flows: the encoded engine seam, its typed adapter, the in-memory implementation, and the RPC/HTTP façades | Computes action keys above the encoded engine seam |
 | [`@smthrs/kernel`](/api/kernel) | Capability sets, grants, and guarded Host decorators | Permission checks occur immediately before Host delegation |
 | [`@smthrs/engine-store`](/api/engine-store) | Durable `FlowEngine` implementation composing the journal, run, and cache stores | Claims runs before driving and fences action persistence; owns the deferred/clock tables and composes every migration set |
@@ -108,7 +108,7 @@ tests.
 
 The core contracts are isomorphic, but not every aggregate is runtime-neutral:
 
-- `@smthrs/engine-store` mints owner identity through the injectable `OwnerIdentity` service rather than reading `process.pid` and `node:crypto` directly, so the package root — and the `@smthrs/flows` barrel above it — bundles for the browser. Running it still needs a browser SQL client for the `DurableWriter` contract, and none ships here.
+- `@smthrs/engine-store` mints owner identity through the injectable `OwnerIdentity` service rather than reading `process.pid` and `node:crypto` directly, so the package root, and the `@smthrs/flows` barrel above it, bundles for the browser. Running it still needs a browser SQL client for the `DurableWriter` contract, and none ships here.
 - Vendor host adapters (`@smthrs/host-cloudflare`, `@smthrs/host-vercel`) live in the [plugins repository](https://github.com/smithersai/plugins).
 
 See [implementation status](/release/support-matrix) and the Cloudflare and Vercel guides in the [plugins repository](https://github.com/smithersai/plugins/blob/main/docs/guides/).

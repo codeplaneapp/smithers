@@ -77,7 +77,7 @@ rather than when the remote process ends. Both are stated in the module header.
 
 This page is the public API reference for remote process execution and sandbox liveness. Provider packages adapt their SDK sessions to `RemoteChildProcessSpawner.Provider`; this package owns the conversion onto Effect's `ChildProcessSpawner` contract and its `PlatformError` surface, plus the health taxonomy above it.
 
-It depends on `@smthrs/kernel` — for `CommandLine.render` alone — and nothing else in the workspace. That direction is deliberate: a sandbox is one way to satisfy `ChildProcessSpawner`, so it sits above the closed host list rather than inside it.
+It depends on `@smthrs/kernel`, for `CommandLine.render` alone, and nothing else in the workspace. That direction is deliberate: a sandbox is one way to satisfy `ChildProcessSpawner`, so it sits above the closed host list rather than inside it.
 
 ### RemoteChildProcessSpawner
 
@@ -95,13 +95,13 @@ It depends on `@smthrs/kernel` — for `CommandLine.render` alone — and nothin
 
 Provider acquisition is tied to the layer scope: interrupting an execution or a stream consumer closes that scope and therefore runs the finalizer installed by `Provider.open`. No `AbortSignal` crosses this seam.
 
-A provider may add SDK details to `ProviderError.cause`, but it cannot create new host-visible failure kinds — the code set is closed, and `layer` normalizes each code onto the `PlatformError` reason that already means it (`timeout` → `TimedOut`, `unavailable` → `NotFound`, the rest → `Unknown`), naming the `ChildProcess` module the sibling spawners name.
+A provider may add SDK details to `ProviderError.cause`, but it cannot create new host-visible failure kinds: the code set is closed, and `layer` normalizes each code onto the `PlatformError` reason that already means it (`timeout` → `TimedOut`, `unavailable` → `NotFound`, the rest → `Unknown`), naming the `ChildProcess` module the sibling spawners name.
 
 `Provider.kill` and `Provider.ping` are optional, because a transport that can only post a command line has neither. A provider that implements them buys two things it cannot otherwise have: one command can be stopped without tearing down the session that runs it, and the session's liveness can be supervised. When `kill` is present the adapter maps `ChildProcessHandle.kill` onto it and signals a still-running command when its scope closes, ahead of the provider's own release finalizer; a process this side has already seen exit is left alone. When `kill` is absent the adapter keeps the old refusal, a `BadArgument` `PlatformError`, rather than pretending to have delivered a signal.
 
 The codes are this seam's own. They used to borrow the deleted `Shell` service's set; a remote session goes wrong in its own ways, so the seam now declares them.
 
-The command reaches the provider as the string `CommandLine.render` produces — the same string `@smthrs/kernel`'s `proc:spawn` check is written against, so a grant and the thing it authorizes cannot drift apart. Unsupported semantics are declared rather than dropped: command-supplied stdin streams, additional file descriptors, custom shell paths, detached processes, non-default pipeline routing, and delivering a signal to `kill` fail with a `BadArgument` `PlatformError`. The adapter honors output `pipe` / `ignore` / `inherit` dispositions and output sinks. A remote process ends by closing its scope. Two divergences cannot be reported as a failure and are stated in the module header instead: `extendEnv` is ignored, because the remote session's ambient environment never crosses the seam, and `isRunning` turns `false` when a caller observes `exitCode` rather than when the remote process ends.
+The command reaches the provider as the string `CommandLine.render` produces: the same string `@smthrs/kernel`'s `proc:spawn` check is written against, so a grant and the thing it authorizes cannot drift apart. Unsupported semantics are declared rather than dropped: command-supplied stdin streams, additional file descriptors, custom shell paths, detached processes, non-default pipeline routing, and delivering a signal to `kill` fail with a `BadArgument` `PlatformError`. The adapter honors output `pipe` / `ignore` / `inherit` dispositions and output sinks. A remote process ends by closing its scope. Two divergences cannot be reported as a failure and are stated in the module header instead: `extendEnv` is ignored, because the remote session's ambient environment never crosses the seam, and `isRunning` turns `false` when a caller observes `exitCode` rather than when the remote process ends.
 
 ### SandboxHealth
 
@@ -116,9 +116,9 @@ The command reaches the provider as the string `CommandLine.render` produces —
 | `make`, `makeNoop`, `layer`, `layerNoop` | constructors and layers | `makeNoop` always reports `Healthy`, for hosts without a remote sandbox |
 | `fromProvider`, `layerFromProvider` | constructor and layer | probes a `RemoteChildProcessSpawner.Provider` through its optional `ping`, and falls back to `makeNoop` when it has none |
 
-The journal's run-ownership heartbeat detects a dead engine owner; nothing detected a dead sandbox under a live engine. This module closes that gap with a taxonomy plus a probe, not a supervisor — no polling loop lives here.
+The journal's run-ownership heartbeat detects a dead engine owner; nothing detected a dead sandbox under a live engine. This module closes that gap with a taxonomy plus a probe, not a supervisor, no polling loop lives here.
 
-`probe` never fails: a failed ping becomes `Unhealthy(reason: "ping_failed")`, and a ping that outlives the deadline (5 seconds by default) becomes `Unhealthy(reason: "unresponsive")`. That is what distinguishes "sandbox dead" from "slow command" — the probe answers within the deadline either way. `Unhealthy.component` is `"sandbox"`, so an "engine alive, sandbox dead" diagnosis is explicit rather than inferred from a generic provider error.
+`probe` never fails: a failed ping becomes `Unhealthy(reason: "ping_failed")`, and a ping that outlives the deadline (5 seconds by default) becomes `Unhealthy(reason: "unresponsive")`. That is what distinguishes "sandbox dead" from "slow command": the probe answers within the deadline either way. `Unhealthy.component` is `"sandbox"`, so an "engine alive, sandbox dead" diagnosis is explicit rather than inferred from a generic provider error.
 
 Reasons, like the host error codes, are a stable public contract: never repurpose one, add one.
 

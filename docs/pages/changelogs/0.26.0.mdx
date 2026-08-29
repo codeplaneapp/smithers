@@ -15,7 +15,7 @@ Smithers now drops into the Hermes agent runtime, in both directions: the agent 
 
 - **Hermes** ([Nous Research](https://github.com/NousResearch/hermes-agent)) gets a **native Smithers plugin**, which is richer than a bare MCP entry. It adds slash commands (`/smithers run|ps|inspect|approve|deny|watch`) usable in the Hermes CLI and every gateway it speaks to, a `pre_llm_call` hook that injects live run status and pending approval gates into Hermes on every turn, the `smithers_run` / `smithers_ps` / `smithers_inspect` / `smithers_approve` / `smithers_deny` / `smithers_output` / `smithers_human_answer` tools, and a bundled `smithers:orchestrate` skill. A new `HermesCliAgent` also lets a workflow `<Task>` delegate to the Hermes agent itself.
 
-See [Hermes](/integrations/hermes) for setup.
+See Hermes for setup.
 
 ## Every workflow run prints a useful result
 

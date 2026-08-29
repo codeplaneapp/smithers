@@ -316,7 +316,7 @@ Use `tier: "irreversible"` for effects that cannot be rolled back, and give them
 
 ### Declare a model call
 
-A model call is an ordinary action, so it is declared like one — except that its implementation ships with it and an author never writes `toLayer` for it. `AgentAction.make` takes the seat, the system teaching, a prompt built from the step payload, and an `output` schema:
+A model call is an ordinary action, so it is declared like one, except that its implementation ships with it and an author never writes `toLayer` for it. `AgentAction.make` takes the seat, the system teaching, a prompt built from the step payload, and an `output` schema:
 
 ```ts
 import * as AgentAction from "@smthrs/agent/AgentAction"
@@ -335,9 +335,9 @@ const Review = AgentAction.make("example/Review", {
 
 `Review.call({ diff })` records the same plan node any other action records, and `Review.layer` is the implementation: it resolves the declared seat through the `SeatResolver` service and runs one agent loop through the `Agent` service inside the current execution.
 
-The `output` schema is enforced. It is rendered into the run's system teaching as JSON Schema, and the run's final answer is decoded by it — whole answer first, then the last balanced JSON container inside it. A decode miss spends one correction re-prompt carrying bounded diagnostics before the step fails `StructuredOutputFailure`. Set `corrections: 0` to make a first miss terminal.
+The `output` schema is enforced. It is rendered into the run's system teaching as JSON Schema, and the run's final answer is decoded by it: whole answer first, then the last balanced JSON container inside it. A decode miss spends one correction re-prompt carrying bounded diagnostics before the step fails `StructuredOutputFailure`. Set `corrections: 0` to make a first miss terminal.
 
-The host wiring is two services. `AgentAction.Host` is the composition every model-backed action shares — the registry a cell may call into, the sandbox budget, the capability envelope, the executable catalog:
+The host wiring is two services. `AgentAction.Host` is the composition every model-backed action shares, the registry a cell may call into, the sandbox budget, the capability envelope, the executable catalog:
 
 ```ts
 const HostLayer = AgentAction.layerHost({
@@ -766,7 +766,7 @@ Route: /architecture/browser-support
 
 Browser support is a hard requirement of this repository, and it is met the only way an Effect codebase can meet it: **host access goes through a layer**, so a module that only depends on contracts never resolves a `node:` built-in. This page states exactly which entry points honour that today, which do not, and what proves it.
 
-Nothing here is a claim about what *should* bundle. Every row is executed by `scripts/browser-check.mjs` — `pnpm run browser` locally, one step in [CI](../../.github/workflows/ci.yml) — which bundles each entry point with esbuild's `platform: "browser"`.
+Nothing here is a claim about what *should* bundle. Every row is executed by `scripts/browser-check.mjs`, `pnpm run browser` locally, one step in [CI](../../.github/workflows/ci.yml), which bundles each entry point with esbuild's `platform: "browser"`.
 
 ### Browser entry points
 
@@ -776,7 +776,7 @@ These bundle for the browser. A resolution error in any of them fails the build.
 | --- | --- |
 | `@smthrs/artifacts` | The content-addressed artifact store: the `ArtifactStore` contract, its filesystem/memory/no-op implementations, the HTTP CAS client over Effect's `HttpClient` tag, and the local-first/remote-second composition |
 | `@smthrs/canonical` | RFC 8785 canonical JSON as an Effect Schema |
-| `@smthrs/platform-browser/BrowserHost` | `layer({ bash, fs, jj })` over an injected browser filesystem, bash interpreter, and the compiled `flows_jj.wasm` with its sync mount slice — all five tags real |
+| `@smthrs/platform-browser/BrowserHost` | `layer({ bash, fs, jj })` over an injected browser filesystem, bash interpreter, and the compiled `flows_jj.wasm` with its sync mount slice: all five tags real |
 | `@smthrs/jj` | The `Jj` contract, `JjError`, and the no-op layer |
 | `@smthrs/jj/browser/BrowserJj` | `layer({ fs, wasm })` runs jj-lib compiled to `wasm32-wasip1` over an injected virtual filesystem through this package's WASI preview1 shim; `layerUnsupported` stays the fallback for a host that ships no module, reporting `not_installed` |
 | `@smthrs/sandbox` | `RemoteChildProcessSpawner` provider adaptation and the `SandboxHealth` probe; it owns no host access of its own |
@@ -791,7 +791,7 @@ These bundle for the browser. A resolution error in any of them fails the build.
 | `@smthrs/step-cache` | The step cache and its migration, over the same contracts, plus the HTTP action-cache client and the two-tier composition |
 | `@smthrs/flow` | Flow, action, durable clock/deferred/queue, retry policy, step identity, and the `FlowRuntime` port |
 | `@smthrs/engine` | The engine that executes flows: the encoded seam, the in-memory runtime, and the RPC/HTTP façades |
-| `@smthrs/engine-store` | The durable engine over the journal. Owner identity — the last `process.pid` and `node:crypto` read — enters through the `OwnerIdentity` service, whose default draws an incarnation number where a host has no process (issue #114) |
+| `@smthrs/engine-store` | The durable engine over the journal. Owner identity, the last `process.pid` and `node:crypto` read, enters through the `OwnerIdentity` service, whose default draws an incarnation number where a host has no process (issue #114) |
 | `@smthrs/flows` | The barrel. It re-exports every engine package, so it bundles exactly when they all do |
 | `@smthrs/sync` | Read-only journal sync and branch protocols |
 | `@smthrs/capability` | Capability grants and the linear glob matcher that authorizes them |
@@ -799,11 +799,11 @@ These bundle for the browser. A resolution error in any of them fails the build.
 | `@smthrs/observability` | Structured logging and metrics over Effect's own tags, with no exporter wired |
 | `@smthrs/time-travel` | Frames, replay, fork, rewind, compensation, and recovery |
 
-Bundling is not running: `@smthrs/journal` bundles because it depends on the `DurableWriter` *contract* and Effect's `SqlClient`, and a browser application still has to supply a browser SQL client (for example Effect's sqlite-wasm OPFS worker) to that contract. Bundling is the property that makes such a composition possible; the sqlite-wasm layer itself is not shipped here — see implementation status.
+Bundling is not running: `@smthrs/journal` bundles because it depends on the `DurableWriter` *contract* and Effect's `SqlClient`, and a browser application still has to supply a browser SQL client (for example Effect's sqlite-wasm OPFS worker) to that contract. Bundling is the property that makes such a composition possible; the sqlite-wasm layer itself is not shipped here: see implementation status.
 
 ### Node entry points
 
-These are Node-only, deliberately. The gate asserts each one *still* fails to bundle for the browser, and fails the build if it stops failing — a Node-only entry point cannot quietly become browser-safe without this page being corrected.
+These are Node-only, deliberately. The gate asserts each one *still* fails to bundle for the browser, and fails the build if it stops failing: a Node-only entry point cannot quietly become browser-safe without this page being corrected.
 
 | Entry point | Why |
 | --- | --- |
@@ -815,7 +815,7 @@ These are Node-only, deliberately. The gate asserts each one *still* fails to bu
 
 ### The rule this encodes
 
-A platform-neutral package root exports **contracts**; an implementation lives in its platform package — `@smthrs/platform-node`, `@smthrs/platform-bun`, or `@smthrs/platform-browser` — the way `effect` keeps `@effect/platform-node` out of `effect`. A neutral root that re-exports an implementation resolves that implementation's imports for every consumer, including browser ones, before any bundler can tree-shake it. Package barrel tests pin the namespaces each root exports, and the browser gate pins every browser-safe entry point in this table.
+A platform-neutral package root exports **contracts**; an implementation lives in its platform package, `@smthrs/platform-node`, `@smthrs/platform-bun`, or `@smthrs/platform-browser`, the way `effect` keeps `@effect/platform-node` out of `effect`. A neutral root that re-exports an implementation resolves that implementation's imports for every consumer, including browser ones, before any bundler can tree-shake it. Package barrel tests pin the namespaces each root exports, and the browser gate pins every browser-safe entry point in this table.
 
 ### The honest claim
 
@@ -894,7 +894,7 @@ The engine store hashes that key again for its database address, confirms the ru
 `DurableDeferred.await` and long `DurableClock.sleep` calls return `Flow.Suspended` when no result exists. The driver transitions the run to `suspended`, clearing owner and heartbeat. Deferred completion is ordered:
 
 1. store the completion;
-2. emit its journal record on the durable channel (which commits it), then flush the lossy queue best-effort — a latched lossy-sink failure is logged, never fatal to delivery;
+2. emit its journal record on the durable channel (which commits it), then flush the lossy queue best-effort: a latched lossy-sink failure is logged, never fatal to delivery;
 3. schedule a claim-gated wake.
 
 `EngineStore` implements `resumeSignal` over the in-process `WakeBus`, so a wake published in this process resumes the waiting engine without a poll tick; the poll loop remains the bounded fallback for wakes published elsewhere.
@@ -987,8 +987,8 @@ flowchart TD
 | `@smthrs/crypto` | Injected cryptographic schema transformations | Platform implementation is supplied through Effect Crypto |
 | `@smthrs/keys` | Canonical flow keys | Composes `canonical` and `crypto` |
 | `@smthrs/database` | `SqlClient` access plus transactional SQLite write retry | Owns no domain tables |
-| `@smthrs/platform-node`, `@smthrs/platform-bun` | The Node and Bun Host bundles: Effect's own platform services — filesystem, path, spawner, `HttpClient` — composed with the `Jj` adapter | Raw effects; no permission decisions. Bun composes `@effect/platform-bun` directly and does not depend on `@smthrs/platform-browser` |
-| `@smthrs/capability` | The capability vocabulary — actions, patterns, tiers — and typed permission failures with their `PlatformError` projection | A leaf both the kernel and `@smthrs/jj` depend on; its schema ids stay `@smthrs/kernel/…` because they are journaled |
+| `@smthrs/platform-node`, `@smthrs/platform-bun` | The Node and Bun Host bundles: Effect's own platform services, filesystem, path, spawner, `HttpClient`, composed with the `Jj` adapter | Raw effects; no permission decisions. Bun composes `@effect/platform-bun` directly and does not depend on `@smthrs/platform-browser` |
+| `@smthrs/capability` | The capability vocabulary, actions, patterns, tiers, and typed permission failures with their `PlatformError` projection | A leaf both the kernel and `@smthrs/jj` depend on; its schema ids stay `@smthrs/kernel/…` because they are journaled |
 | `@smthrs/jj` | Jujutsu snapshot, restore, diff, and workspace operations | Depends on `effect` and `@smthrs/capability`; the closed Host list still names it |
 | `@smthrs/sandbox` | A remote `ChildProcessSpawner` implementation and sandbox liveness | Adapts a caller's provider onto Effect's `ChildProcessSpawner`; owns no host access |
 | `@smthrs/platform-browser` | Browser implementations of effect's `FileSystem` and `ChildProcessSpawner`, and the `BrowserHost` bundle, which provides effect's own fetch-backed `HttpClient` | Depends on `effect`, `@smthrs/kernel`, and `@smthrs/jj` for the slots it fills; the ZenFS and just-bash backends are arguments, not dependencies |
@@ -997,7 +997,7 @@ flowchart TD
 | `@smthrs/step-cache` | Sealed step results addressed by step-key digest, plus the HTTP action-cache client and the local-first/remote-second composition | Owns `flows_step_cache`; depends on `database` alone |
 | `@smthrs/plan` | The persisted plan: the `KeyMaterial`→`StepKey` compiler, `Plan.compile`/`append`, `PlanDiff`, and the append-only `PlanStore` | Owns `flows_plans`, `flows_plan_nodes`, `flows_plan_edges`, and migration block `4000`; performs no I/O beyond the database and executes nothing |
 | `@smthrs/artifacts` | The content-addressed artifact store the step cache references by digest: local, remote-over-HTTP, and the combination | Owns no tables and no migration; depends on `crypto` alone. Host access is Effect's `FileSystem` and `HttpClient` tags |
-| `@smthrs/flow` | The flow authoring model — flows, actions, durable primitives, retry policy, step identity — and the `FlowRuntime` port they execute against | Declares the runtime port; depends on nothing that implements it |
+| `@smthrs/flow` | The flow authoring model, flows, actions, durable primitives, retry policy, step identity, and the `FlowRuntime` port they execute against | Declares the runtime port; depends on nothing that implements it |
 | `@smthrs/engine` | The runtime that executes flows: the encoded engine seam, its typed adapter, the in-memory implementation, and the RPC/HTTP façades | Computes action keys above the encoded engine seam |
 | `@smthrs/kernel` | Capability sets, grants, and guarded Host decorators | Permission checks occur immediately before Host delegation |
 | `@smthrs/engine-store` | Durable `FlowEngine` implementation composing the journal, run, and cache stores | Claims runs before driving and fences action persistence; owns the deferred/clock tables and composes every migration set |
@@ -1025,7 +1025,7 @@ tests.
 
 The core contracts are isomorphic, but not every aggregate is runtime-neutral:
 
-- `@smthrs/engine-store` mints owner identity through the injectable `OwnerIdentity` service rather than reading `process.pid` and `node:crypto` directly, so the package root — and the `@smthrs/flows` barrel above it — bundles for the browser. Running it still needs a browser SQL client for the `DurableWriter` contract, and none ships here.
+- `@smthrs/engine-store` mints owner identity through the injectable `OwnerIdentity` service rather than reading `process.pid` and `node:crypto` directly, so the package root, and the `@smthrs/flows` barrel above it, bundles for the browser. Running it still needs a browser SQL client for the `DurableWriter` contract, and none ships here.
 - Vendor host adapters (`@smthrs/host-cloudflare`, `@smthrs/host-vercel`) live in the [plugins repository](https://github.com/smithersai/plugins).
 
 See implementation status and the Cloudflare and Vercel guides in the [plugins repository](https://github.com/smithersai/plugins/blob/main/docs/guides/).
@@ -1546,7 +1546,7 @@ Route: /concepts/action-graph
 
 > Content-addressed actions, explicit Effect dependencies, hermetic boundaries, and cached results: the Bazel-like properties and their current limits.
 
-This page explains the repository’s Bazel-like properties—content-addressed actions, explicit Effect dependencies, hermetic-boundary contracts, and cached results—while distinguishing them from the static action planner that is not yet implemented.
+This page explains the repository’s Bazel-like properties: content-addressed actions, explicit Effect dependencies, hermetic-boundary contracts, and cached results, while distinguishing them from the static action planner that is not yet implemented.
 
 ### The graph that exists today
 
@@ -1603,7 +1603,7 @@ Resolving graph-local dependency references into digests is `@smthrs/plan`. `Pla
 Two properties fall out and are the reason the package exists:
 
 - **Planning performs no I/O.** Declared `effects` carry read and write *paths*, never digests. Measuring a path is run-time work.
-- **Invalidation is re-keying.** An edited declaration re-keys that node and its dependent cone, and nothing else. There is deliberately no reverse-dependency index and no invalidating node visitor — content addressing subsumes both.
+- **Invalidation is re-keying.** An edited declaration re-keys that node and its dependent cone, and nothing else. There is deliberately no reverse-dependency index and no invalidating node visitor: content addressing subsumes both.
 
 A plan grows rather than being replaced: `Plan.append` adds a pre-keyed subgraph at the next generation, and `PlanStore` enforces append-only with SQL triggers.
 
@@ -1619,7 +1619,7 @@ Inside one flow body the runtime schedules **fibers**, not a persisted DAG:
 - queue worker concurrency is explicit;
 - run ownership prevents cross-process duplicate drivers.
 
-Above that, `EngineStore.PlanScheduler` drives a **persisted plan**. It walks the graph, admits ready nodes under `steps`/`agents` caps ordered by priority plus one point per round waited, and dispatches each through the same `ActionPersistence` seam an ordinary action uses — so the shared cache, the workspace sandbox, attempt rows, and the fenced journal all apply unchanged. Each node settles as `built`, `clean`, `failed`, or `skipped`, and the outcome is journaled.
+Above that, `EngineStore.PlanScheduler` drives a **persisted plan**. It walks the graph, admits ready nodes under `steps`/`agents` caps ordered by priority plus one point per round waited, and dispatches each through the same `ActionPersistence` seam an ordinary action uses, so the shared cache, the workspace sandbox, attempt rows, and the fenced journal all apply unchanged. Each node settles as `built`, `clean`, `failed`, or `skipped`, and the outcome is journaled.
 
 There is still no resource pool, critical-path analysis, or package-defined concurrency ceiling; `aspects.ts`-derived caps are supplied to the scheduler by its caller rather than read by it.
 
@@ -1748,7 +1748,7 @@ const [checked, tested] = yield* Effect.all(
 
 The enclosing flow handler does not complete until both effects complete. Error and interruption behavior follows `Effect.all`; Smithers does not add an implicit “continue unrelated nodes” policy.
 
-Actions receive ordinals from a counter scoped to the action's **name**, not from one per-run counter bumped in fiber-arrival order (issue #73), and the name is folded into the ordinal step key. Two distinct actions running concurrently — `Effect.all([chargeCard, sendEmail], { concurrency: "unbounded" })` — therefore keep their identities no matter how a replay interleaves them. What remains order-sensitive: repeated invocations of the *same* action in one run are numbered in allocation order, and changing branch structure before an action can still change which invocation occupies which number. For cross-run cache reuse, or to pin identity across concurrent invocations of one action, declare a cache key input instead of relying on an ordinal.
+Actions receive ordinals from a counter scoped to the action's **name**, not from one per-run counter bumped in fiber-arrival order (issue #73), and the name is folded into the ordinal step key. Two distinct actions running concurrently, `Effect.all([chargeCard, sendEmail], { concurrency: "unbounded" })`, therefore keep their identities no matter how a replay interleaves them. What remains order-sensitive: repeated invocations of the *same* action in one run are numbered in allocation order, and changing branch structure before an action can still change which invocation occupies which number. For cross-run cache reuse, or to pin identity across concurrent invocations of one action, declare a cache key input instead of relying on an ordinal.
 
 ### Bounded fan-out and quarantine
 
@@ -2389,7 +2389,7 @@ This page describes the portable host surface and the permission kernel that med
 
 ### The closed host surface
 
-`@smthrs/kernel` owns the closed list — `HostServiceTags` and `HostServiceIds` — of these protected services:
+`@smthrs/kernel` owns the closed list, `HostServiceTags` and `HostServiceIds`, of these protected services:
 
 - Effect `FileSystem`
 - Effect `Path`
@@ -2397,7 +2397,7 @@ This page describes the portable host surface and the permission kernel that med
 - `Jj` (contract in `@smthrs/jj`)
 - Effect `HttpClient`
 
-Four of the five slots hold Effect's own tags. Smithers used to define a `Shell` service in the third slot; it was `effect/unstable/process` with fewer features, so it was deleted and the slot now holds `effect/process/ChildProcessSpawner` (see design decisions). The fifth slot went the same way: a Smithers-defined one-hop `HttpTransport` was deleted in favour of `effect/HttpClient`. Smithers supplies implementations of both — Node, Bun, an in-browser one, and a remote one — and adds only the capability check.
+Four of the five slots hold Effect's own tags. Smithers used to define a `Shell` service in the third slot; it was `effect/unstable/process` with fewer features, so it was deleted and the slot now holds `effect/process/ChildProcessSpawner` (see design decisions). The fifth slot went the same way: a Smithers-defined one-hop `HttpTransport` was deleted in favour of `effect/HttpClient`. Smithers supplies implementations of both, Node, Bun, an in-browser one, and a remote one, and adds only the capability check.
 
 The list is closed, not the package: `Jj` ships as its own package so a consumer that only needs that capability does not take the whole host surface. The contract stays in `@smthrs/jj`; the kernel decorates that same tag (and re-exports it for convenience) rather than declaring a second one, and the composite bundles (`NodeHost`, `BunHost`, `BrowserHost`, `TestHost`) provide all five tags. There is no pseudo-terminal service: interactive-terminal support is out of core by design (see design decisions).
 
@@ -2408,11 +2408,11 @@ Cloudflare and Vercel adapters live in the separate
 operations fail through their service contract; they should not disappear
 from the environment type.
 
-Host bundles provide an `HttpClient` that never follows a redirect on its own — the fetch layers are configured with `RequestInit { redirect: "manual" }`, and Undici installs no redirect interceptor. Redirect following belongs *above* the kernel's guard: the decorator composes Effect's own `HttpClient.followRedirects` over the checked client, so every network hop is authorized independently.
+Host bundles provide an `HttpClient` that never follows a redirect on its own: the fetch layers are configured with `RequestInit { redirect: "manual" }`, and Undici installs no redirect interceptor. Redirect following belongs *above* the kernel's guard: the decorator composes Effect's own `HttpClient.followRedirects` over the checked client, so every network hop is authorized independently.
 
 ### Kernel decoration
 
-The kernel decorates each service tag in place — a middleware `Layer` over the very tag the platform adapter provides, so there is no second "protected" tag to reach around. Each decorator:
+The kernel decorates each service tag in place, a middleware `Layer` over the very tag the platform adapter provides, so there is no second "protected" tag to reach around. Each decorator:
 
 1. derives an exact `Capability`,
 2. asks `GrantStore` to authorize it,
@@ -2422,7 +2422,7 @@ Where Effect owns the tag (`FileSystem`, `ChildProcessSpawner`) the error channe
 
 The `Jj` slot carries two optional operations, `root` and `revert`, checked as `jj:root` (sealed) and `jj:revert` (compensable). The decorator forwards their absence: a backend that cannot revert keeps reading as one, because a caller deciding what it can offer needs "this host has no revert" and not "your revert was refused".
 
-For a spawn, the exact capability is `proc:spawn` with `CommandLine.render(command)` as its resource — the same string a browser interpreter or a remote sandbox is handed for supported commands, so a grant and the thing it authorizes cannot drift apart. A custom shell path is included explicitly in the resource; adapters that cannot select it reject the command.
+For a spawn, the exact capability is `proc:spawn` with `CommandLine.render(command)` as its resource: the same string a browser interpreter or a remote sandbox is handed for supported commands, so a grant and the thing it authorizes cannot drift apart. A custom shell path is included explicitly in the resource; adapters that cannot select it reject the command.
 
 ```ts
 import { Capability, Permission } from "@smthrs/kernel"
@@ -2468,7 +2468,7 @@ Containment is not confinement. It ends processes this host started and recorded
 
 ### Boundary capture: hermetic execution as a transaction
 
-Hermetic execution needs more than a capability check — it needs to know what a
+Hermetic execution needs more than a capability check: it needs to know what a
 body *actually* read and wrote. Two contracts split that job:
 
 - `StepBoundary` measures the
@@ -2477,9 +2477,9 @@ body *actually* read and wrote. Two contracts split that job:
   can only look at paths it was told about.
 - `WorkspaceSandbox` runs the
   body in an isolated **workspace transaction** instead. The transaction is
-  seeded with exactly the declared read set — an undeclared file is not there
+  seeded with exactly the declared read set: an undeclared file is not there
   to read, which is `docs/specs/Concepts/Effect Taxonomy.md`'s strong
-  enforcement tier — and the body's writes accumulate in the transaction rather
+  enforcement tier, and the body's writes accumulate in the transaction rather
   than on the host. Settlement is a whole-map diff, so "did this body write
   outside its declared write set" is a comparison rather than an inference.
 
@@ -2492,7 +2492,7 @@ of `docs/specs/Concepts/Diff Review.md` will attach.
 
 The transaction is a **deterministic transaction model, not a security
 boundary**. A body that reaches the host through a service the transaction does
-not seed — a spawned native process, an undecorated socket — is outside it.
+not seed, a spawned native process, an undecorated socket, is outside it.
 Actually denying that ambient access is the VM/`SandboxProvider` provisioning
 story in `docs/specs/Concepts/Agent Adapters.md`, and it is future work.
 
@@ -2500,7 +2500,7 @@ story in `docs/specs/Concepts/Agent Adapters.md`, and it is future work.
 
 - The browser layer wraps an injected ZenFS-like promises API and an injected just-bash interpreter, which must be mounted on the *same* filesystem.
 - The browser spawner is buffered, cannot take stdin or be killed, and rejects custom shells, detached processes, and configured extra file descriptors rather than silently dropping them.
-- Browser `Jj` has a real implementation: `@smthrs/jj/browser/BrowserJj`'s `layer({ fs, wasm })` drives jj-lib compiled to `wasm32-wasip1` over an injected virtual filesystem. `layerUnsupported` remains exported for a host that ships no wasm module — it fails in the error channel rather than omitting the tag — but the `BrowserHost` bundle wires the real layer: `layer({ bash, fs, jj })` takes the compiled module and the sync slice of the same mount, and a jj-less host is an explicit page choice, never the bundle's silent default.
+- Browser `Jj` has a real implementation: `@smthrs/jj/browser/BrowserJj`'s `layer({ fs, wasm })` drives jj-lib compiled to `wasm32-wasip1` over an injected virtual filesystem. `layerUnsupported` remains exported for a host that ships no wasm module; it fails in the error channel rather than omitting the tag, but the `BrowserHost` bundle wires the real layer: `layer({ bash, fs, jj })` takes the compiled module and the sync slice of the same mount, and a jj-less host is an explicit page choice, never the bundle's silent default.
 - Hosted-adapter behavior and limitations are documented with those adapters
   in the external plugins repository.
 
@@ -2539,8 +2539,8 @@ The journal does not define an application-wide event union. `eventType`, `paylo
 
 Each committed entry has:
 
-- `seq` — canonical order within one run;
-- `sourceSeq` — producer-local idempotency order within `(runId, sourceId)`.
+- `seq`: canonical order within one run;
+- `sourceSeq`: producer-local idempotency order within `(runId, sourceId)`.
 
 `makeEventId(runId, sourceId, sourceSeq)` deterministically encodes the producer identity. An exact retry returns `Duplicate` with the original `seq`. Reusing that identity with different event content fails with `idempotency_conflict`.
 
@@ -2625,11 +2625,11 @@ Time-travel tables use a separate migration in `@smthrs/time-travel`.
 
 `RunStore`, `AttemptStore`, `CacheStore`, and `DurableEngineState` hold the **executable authoritative state**. No engine state is derived from journal entries; the entries explain what happened, the rows decide what happens next.
 
-The two are nevertheless committed together. Engine-store writes every lifecycle event with `emitDurable` **inside `Journal.transact`**, the write transaction that also carries the state transition it describes — the run-row compare-and-swap with its decision, the attempt write with its attempt event. Those stores use the same `DurableWriter`, so their writes join that transaction as savepoints: either both halves are durable, or neither is. A crash can no longer leave durable state the journal does not explain, which is what lets audit, sync, and time travel treat the log as the account of record.
+The two are nevertheless committed together. Engine-store writes every lifecycle event with `emitDurable` **inside `Journal.transact`**, the write transaction that also carries the state transition it describes: the run-row compare-and-swap with its decision, the attempt write with its attempt event. Those stores use the same `DurableWriter`, so their writes join that transaction as savepoints: either both halves are durable, or neither is. A crash can no longer leave durable state the journal does not explain, which is what lets audit, sync, and time travel treat the log as the account of record.
 
-Of the two shapes this could have taken — deriving the store rows from the log, or committing the state projection and its entry in one transaction — Smithers took the second. It is the smaller change: the executable rows keep their fenced CAS semantics, and no read path has to be rebuilt on projection.
+Of the two shapes this could have taken, deriving the store rows from the log, or committing the state projection and its entry in one transaction, Smithers took the second. It is the smaller change: the executable rows keep their fenced CAS semantics, and no read path has to be rebuilt on projection.
 
-Two consequences to plan for. Publication follows the commit, so an entry becomes visible on `changes`/`stream` only after the outermost transaction commits. And the unit is all-or-nothing: a crash before COMMIT loses the whole unit, so work that had already run — an action body, for instance — re-executes on the next drive. Local commit is still not remote atomicity: external effects need idempotency keys, fencing tokens, or compensation.
+Two consequences to plan for. Publication follows the commit, so an entry becomes visible on `changes`/`stream` only after the outermost transaction commits. And the unit is all-or-nothing: a crash before COMMIT loses the whole unit, so work that had already run, an action body, for instance, re-executes on the next drive. Local commit is still not remote atomicity: external effects need idempotency keys, fencing tokens, or compensation.
 
 ### Operational rule
 
@@ -2660,7 +2660,7 @@ An object identity is caller-owned. A string identity is first combined with the
 
 When no complete cache environment is provided, `kind` becomes `"run"` and the current run ID is included. This permits replay within that run without claiming the result is safe to reuse elsewhere.
 
-A declaration may narrow how far its recorded result travels with the `CachePolicy` annotation from `@smthrs/flow/CacheEnvironment`, which `@smthrs/patterns`'s `WithCache` attaches for a plan-time declaration. Scope is key material: `shared` folds nothing and keeps the content address the engine already derived, `run` folds the run ID, and `flow` folds the executing flow's tag. A narrowed step therefore addresses a digest no sibling derives, rather than relying on a read-time filter a second reader could disagree with. The same annotation's `ttlMs` bounds the age of a row the engine serves. The verdict is journalled before it is acted on, under a producer identity naming the run, the step key, the decision, and the row's recorded provenance — never the process that took it — so a replay, including one driven by the engine that resumed the run under a different journal source, reads the recorded decision instead of re-judging the age against a fresh clock. Past the bound the engine also journals the row's age, evicts it, and dispatches again.
+A declaration may narrow how far its recorded result travels with the `CachePolicy` annotation from `@smthrs/flow/CacheEnvironment`, which `@smthrs/patterns`'s `WithCache` attaches for a plan-time declaration. Scope is key material: `shared` folds nothing and keeps the content address the engine already derived, `run` folds the run ID, and `flow` folds the executing flow's tag. A narrowed step therefore addresses a digest no sibling derives, rather than relying on a read-time filter a second reader could disagree with. The same annotation's `ttlMs` bounds the age of a row the engine serves. The verdict is journalled before it is acted on, under a producer identity naming the run, the step key, the decision, and the row's recorded provenance, never the process that took it, so a replay, including one driven by the engine that resumed the run under a different journal source, reads the recorded decision instead of re-judging the age against a fresh clock. Past the bound the engine also journals the row's age, evicts it, and dispatches again.
 
 Compensable, irreversible, and keyless actions receive engine-private invocation keys containing the run ID, allocation scope, ordinal, and durability tier.
 
@@ -2803,7 +2803,7 @@ The request includes a credit count. Credit is a hard limit on frames emitted by
 
 ### Authentication
 
-`SyncAuth` is an Effect RPC middleware service, and the package ships its production implementation: `SyncAuth.layer` verifies a `WorkspaceShare` capability — the branch share scheme extended with a signed `kid` for key rotation — presented in the `flows-sync-workspace` request header, and installs the resulting `SyncPrincipal` for the request. The principal defaults to anonymous, and the server refuses anonymous access to every non-branch run and to workspace listings, so an unauthenticated connection can read only branch runs it holds a branch share capability for. Signing secrets are provisioned as `Redacted` values through `WorkspaceShare.layerHmac` (explicit keyring) or `WorkspaceShare.layerConfig` (`FLOWS_SYNC_SECRET`, `FLOWS_SYNC_KEY_ID`); there is no default secret. A deployment may substitute its own `SyncAuth` implementation at the transport boundary.
+`SyncAuth` is an Effect RPC middleware service, and the package ships its production implementation: `SyncAuth.layer` verifies a `WorkspaceShare` capability, the branch share scheme extended with a signed `kid` for key rotation, presented in the `flows-sync-workspace` request header, and installs the resulting `SyncPrincipal` for the request. The principal defaults to anonymous, and the server refuses anonymous access to every non-branch run and to workspace listings, so an unauthenticated connection can read only branch runs it holds a branch share capability for. Signing secrets are provisioned as `Redacted` values through `WorkspaceShare.layerHmac` (explicit keyring) or `WorkspaceShare.layerConfig` (`FLOWS_SYNC_SECRET`, `FLOWS_SYNC_KEY_ID`); there is no default secret. A deployment may substitute its own `SyncAuth` implementation at the transport boundary.
 
 ### Directionality
 
@@ -2837,7 +2837,7 @@ const frame: Frame.Frame = {
 }
 ```
 
-A `Position` pairs that frame with the run it addresses — `{ runId, frame }` —
+A `Position` pairs that frame with the run it addresses: `{ runId, frame }` ,
 and is the only argument every operation takes. A frame is an address into
 history, never a snapshot object.
 
@@ -2893,7 +2893,7 @@ identity run-local.
 
 `EffectBoundary.guard` records intent and outcome around an external effect. Records classify the effect as `sealed`, `compensable`, or `irreversible`, and track `intended`, `succeeded`, or `unknown` status.
 
-Behind the service, an effect-handler registry maps effect kinds to assessment and rollback handlers, classifies suffix records, invokes eligible handlers, and returns receipts. Unknown or irreversible effects can block a rewind. None of it is a caller parameter — `EffectBoundary` is the only half of that contract you touch, from the producer side.
+Behind the service, an effect-handler registry maps effect kinds to assessment and rollback handlers, classifies suffix records, invokes eligible handlers, and returns receipts. Unknown or irreversible effects can block a rewind. None of it is a caller parameter: `EffectBoundary` is the only half of that contract you touch, from the producer side.
 
 ### Rewind protocol
 
@@ -3028,7 +3028,7 @@ This guide describes the services required by `@smthrs/engine-store` and gives a
 - `StepBoundary`
 - an Effect `Scope`
 
-`TestStores.layer()` supplies the four SQL services — journal, run, attempt, and cache — over ONE in-memory SQLite database. It is useful for integration tests, not restart durability:
+`TestStores.layer()` supplies the four SQL services, journal, run, attempt, and cache, over ONE in-memory SQLite database. It is useful for integration tests, not restart durability:
 
 ```ts
 import { DurableEngineState, EngineStore, StepBoundary } from "@smthrs/engine-store"
@@ -3170,7 +3170,7 @@ elsewhere in the tree, so its results are not admitted to the shared cache.
 Supply a stronger boundary that enforces declared writes and returns
 `wholeTreeWritesVerified: true` before admitting cross-run cache entries.
 
-`EngineStore` mints its owner identity through the `OwnerIdentity` service rather than reading `node:crypto.randomUUID` and `process.pid` directly, so the composition itself is edge-safe: the default draws an incarnation number from `Random` where the platform has no process, and `OwnerIdentity.layerConstant` pins the whole token where a host already holds a lease. What is still **Planned** is a browser SQL client behind the `DurableWriter` contract — without one there is nothing for the composition to run against off Node.
+`EngineStore` mints its owner identity through the `OwnerIdentity` service rather than reading `node:crypto.randomUUID` and `process.pid` directly, so the composition itself is edge-safe: the default draws an incarnation number from `Random` where the platform has no process, and `OwnerIdentity.layerConstant` pins the whole token where a host already holds a lease. What is still **Planned** is a browser SQL client behind the `DurableWriter` contract. Without one there is nothing for the composition to run against off Node.
 
 ### Ownership and liveness
 
@@ -3339,7 +3339,7 @@ Select explicit execution IDs so failures are reproducible.
 
 ### Test host operations
 
-`TestHost.layer` supplies an in-memory filesystem, a scripted command interpreter, seeded Random, a Jujutsu service, and Effect's `HttpClient` tag filled by `HttpClient.layerNoop()` — a stub that fails every request with a `TransportError`, so a test that needs real responses provides its own client over the bundle. Configure only the seams a test exercises:
+`TestHost.layer` supplies an in-memory filesystem, a scripted command interpreter, seeded Random, a Jujutsu service, and Effect's `HttpClient` tag filled by `HttpClient.layerNoop()`, a stub that fails every request with a `TransportError`, so a test that needs real responses provides its own client over the bundle. Configure only the seams a test exercises:
 
 ```ts
 import * as TestHost from "@smthrs/kernel/test/TestHost"
