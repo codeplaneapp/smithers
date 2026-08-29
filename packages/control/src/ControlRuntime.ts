@@ -245,7 +245,20 @@ export interface Service {
   ) => Effect.Effect<void, RunNotFound | PersistenceError>
   readonly interrupt: (runId: RunId) => Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
   readonly pause: (runId: RunId) => Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
-  readonly resume: (runId: RunId) => Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
+  /**
+   * Joins or claims a suspended run.
+   *
+   * `scope: "launched"` restricts the claim to runs this plane launched.
+   * The steer wake passes it, because claiming a run another driver created
+   * would strand the row under this plane's fence where that driver's own
+   * resume path gives up. An explicit `Control.resume` — an operator or a
+   * monitor remedy acting on a run nobody is driving — omits it and may
+   * claim any suspended run.
+   */
+  readonly resume: (
+    runId: RunId,
+    options?: { readonly scope?: "launched" | "any" | undefined } | undefined
+  ) => Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
   readonly claimFence: (runId: RunId) => Effect.Effect<string, RunNotFound | ClaimLost | PersistenceError>
   readonly writeStatus: (
     runId: RunId,

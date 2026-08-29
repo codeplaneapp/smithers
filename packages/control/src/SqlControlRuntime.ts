@@ -1148,7 +1148,10 @@ export const make_ = (
         if (!ownedByUs(row)) return yield* new ClaimLost({ runId })
         return yield* transition(runId, row.owner, summaryOf(row), "parked")
       }),
-      resume: Effect.fn("SqlControlRuntime.resume")(function*(runId: RunId) {
+      resume: Effect.fn("SqlControlRuntime.resume")(function*(
+        runId: RunId,
+        options?: { readonly scope?: "launched" | "any" | undefined } | undefined
+      ) {
         const row = yield* requireRow(runId)
         const summary = summaryOf(row)
         if (terminal(summary.status)) return summary
@@ -1157,19 +1160,21 @@ export const make_ = (
         if (row.status === "running") {
           return ownedByUs(row) ? summary : yield* new ClaimLost({ runId })
         }
-        // Wake-by-request across owners: only a run this plane launched is
-        // this plane's to claim. An engine-created run — a child, a fork, a
-        // trampoline round — has its own driver, and claiming it here would
-        // move the row into a state no engine re-drives: the engine's
-        // `scheduleResume` finds the row held under this plane's fence and
-        // gives up, which orphans the run. The wake intent is already durable
-        // (the notification queue admitted the message), so the owning
-        // driver's next poll or sweep delivers it. Same rule as cancel:
-        // a control plane never claims a run another driver owns.
-        const indexed = yield* sql`SELECT run_id FROM control_runs WHERE run_id = ${runId}`.pipe(
-          Effect.mapError(persistence("read the launch index"))
-        )
-        if (indexed.length === 0) return yield* new ClaimLost({ runId })
+        // `scope: "launched"` is the steer wake's request: only a run this
+        // plane launched is this plane's to claim there. An engine-created
+        // run — a child, a fork, a trampoline round — has its own driver, and
+        // a wake that claimed it would move the row under this plane's fence
+        // where that driver's `scheduleResume` gives up, orphaning the run.
+        // The wake intent is already durable (the notification queue admitted
+        // the message), so the owning driver's next poll or sweep delivers
+        // it. An explicit operator or monitor resume omits the scope and may
+        // claim any suspended run — a wedged run is one nobody is driving.
+        if (options?.scope === "launched") {
+          const indexed = yield* sql`SELECT run_id FROM control_runs WHERE run_id = ${runId}`.pipe(
+            Effect.mapError(persistence("read the launch index"))
+          )
+          if (indexed.length === 0) return yield* new ClaimLost({ runId })
+        }
         return yield* claim(runId, row)
       }),
       claimFence: Effect.fn("SqlControlRuntime.claimFence")(function*(runId: RunId) {

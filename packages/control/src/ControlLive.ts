@@ -257,7 +257,7 @@ export const layer: Layer.Layer<
     ): Effect.Effect<void, PersistenceError> => {
       if (run.status !== "parked") return Effect.void
       if (run.waitingReason !== "event" && run.waitingReason !== "released") return Effect.void
-      return runtime.resume(run.runId).pipe(
+      return runtime.resume(run.runId, { scope: "launched" }).pipe(
         Effect.flatMap((resumed) =>
           emit(run.runId, "control.steer.woke", {
             runId: run.runId,
