@@ -67,7 +67,10 @@ export interface Delta extends Scores {
  * The shadow's outcome, quarantined when it failed.
  *
  * A quarantined shadow carries its `Cause`, so an operator can read what the
- * experiment did without the run having failed.
+ * experiment did without the run having failed. The declared form
+ * ({@link make}) carries `error` instead: a recovery arm is planned against the
+ * typed error the shadow may fail with, and only a running fiber has the whole
+ * cause.
  *
  * @category models
  * @since 0.1.0
@@ -115,6 +118,12 @@ export interface RuntimeOptions<I, P, S, E, R, E2, R2, E3 = never, R3 = never> {
 const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
   (flow as unknown as (input: unknown) => Node.Node<unknown, unknown>)(input)
 
+// Reads one field of a joined value. During planning the value is symbolic and
+// the read answers a reference the plan records; during execution it answers
+// the field. Both directions matter: the plan must show which half of the join
+// the scorer reads, and the run must actually read it.
+const field = (value: unknown, key: string): unknown => (value as Record<string, unknown>)[key]
+
 /**
  * Compares two scores.
  *
@@ -135,13 +144,20 @@ export const delta = (primary: number, shadow: number): Delta => ({
 })
 
 /**
- * Declares the sidecar topology: primary and shadow under one `All`.
+ * Declares the sidecar topology: primary and shadow under one `All`, with the
+ * shadow behind a `Catch`.
  *
  * The declared `All` is what makes the shadow concurrent rather than an extra
- * sequential step. The quarantine is not declared: core's node vocabulary has
- * no failure or catch constructor, so a plan states the shadow as work that
- * happens and {@link run} decides what a failure means. That is the honest
- * direction, because capability and cost analysis must count the shadow.
+ * sequential step. The `Catch` is what makes it an experiment: the arm settles
+ * the shadow as `{ quarantined: true, error }`, so the join cannot fail on the
+ * shadow's behalf and a plan reader sees that a failed shadow does not fail the
+ * run. A settled shadow is `{ quarantined: false, value }`, the shape
+ * {@link run} reports.
+ *
+ * The score arm is declared unconditionally, because a plan has no branch to
+ * hang the "only when the shadow produced a value" condition on. `run` has the
+ * value in hand and skips the scorer for a quarantined shadow. The declared
+ * result is `{ primary, shadow, delta }`, which is {@link Result}.
  *
  * @category constructors
  * @since 0.1.0
@@ -155,18 +171,35 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
     flows: score === undefined
       ? [options.primary, options.shadow]
       : [options.primary, options.shadow, score],
-    body: Node.capture({ scores: score !== undefined }, (input) =>
-      Node.andThen(
-        Node.all({
-          primary: call(options.primary, input),
-          shadow: call(options.shadow, input)
-        }),
-        Node.capture({ scores: score !== undefined }, (both) =>
-          score === undefined ? Node.succeed(both) : Node.map(
-            call(score, both),
-            Node.capture({ scores: true }, (scores) => ({ ...both, scores }))
-          ))
-      ))
+    body: Node.capture({ scores: score !== undefined }, (input) => {
+      const shadow: Node.Node<unknown, unknown> = Node.catch(
+        Node.map(
+          call(options.shadow, input),
+          Node.capture({ shadow: "settled" }, (value: unknown) => ({ quarantined: false, value }))
+        ),
+        {
+          onFailure: Node.capture(
+            { shadow: "quarantined" },
+            (error: unknown) => Node.succeed({ quarantined: true, error })
+          )
+        }
+      )
+      const scored = (both: unknown): Node.Node<unknown, unknown> =>
+        score === undefined ? Node.succeed(both) : Node.map(
+          // The scorer sees the same pair `run` hands it: the primary's value
+          // and the shadow's, not the shadow's quarantine wrapper.
+          call(score, { primary: field(both, "primary"), shadow: field(field(both, "shadow"), "value") }),
+          Node.capture({ scores: true }, (scores: unknown) => ({
+            primary: field(both, "primary"),
+            shadow: field(both, "shadow"),
+            delta: delta(field(scores, "primary") as number, field(scores, "shadow") as number)
+          }))
+        )
+      return Node.andThen(
+        Node.all({ primary: call(options.primary, input), shadow }),
+        Node.capture({ scores: score !== undefined }, scored)
+      )
+    })
   })
 }
 
