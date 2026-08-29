@@ -204,6 +204,20 @@ const untilCompleted = (
     return yield* untilCompleted(store, runId, attempts - 1)
   })
 
+/** Waits for a run row to reach `suspended`, or gives up loudly. */
+const untilSuspended = (
+  store: RunStore.Service,
+  runId: string,
+  attempts = 400
+): Effect.Effect<void> =>
+  Effect.gen(function*() {
+    const row = yield* Effect.orDie(store.get(runId))
+    if (row.status === "suspended") return
+    if (attempts <= 0) return yield* Effect.die(new Error(`run ${runId} never suspended (${row.status})`))
+    yield* Effect.sleep("10 millis")
+    return yield* untilSuspended(store, runId, attempts - 1)
+  })
+
 /**
  * Registers the child flows on an engine, with the handler each one needs.
  *
@@ -641,8 +655,8 @@ describe("EngineChildren.send", () => {
       })
 
       expect(drained.notifications.map((notification) => notification.payload)).toEqual([
-        { body: "same words" },
-        { body: "same words" }
+        { kind: "Message", body: "same words" },
+        { kind: "Message", body: "same words" }
       ])
       expect(new Set(drained.notifications.map((notification) => notification.id)).size).toBe(2)
     })))
@@ -680,8 +694,8 @@ describe("EngineChildren.send", () => {
       })
 
       expect(drained.notifications.map((notification) => notification.payload)).toEqual([
-        { body: "same words" },
-        { body: "same words" }
+        { kind: "Message", body: "same words" },
+        { kind: "Message", body: "same words" }
       ])
       expect(new Set(drained.notifications.map((notification) => notification.id)).size).toBe(2)
     })))
@@ -737,8 +751,8 @@ describe("EngineChildren.send", () => {
       // that collapsed the two sends onto one key.
       expect(announcements).toBe(1)
       expect(drained.notifications.map((notification) => notification.payload)).toEqual([
-        { body: "first" },
-        { body: "second" }
+        { kind: "Message", body: "first" },
+        { kind: "Message", body: "second" }
       ])
       expect(new Set(drained.notifications.map((notification) => notification.id)).size).toBe(2)
     })))
@@ -818,7 +832,7 @@ describe("EngineChildren.send", () => {
       // One message on the child's queue, not two: the replay path is what
       // `delivered: true` reported the second time.
       expect(drained.notifications.map((notification) => notification.payload)).toEqual([
-        { body: "hold position" }
+        { kind: "Message", body: "hold position" }
       ])
     }))
 
@@ -889,8 +903,96 @@ describe("EngineChildren.send", () => {
       // that tells the two collisions apart when someone reads the log.
       expect(settled).toContain("key1_")
       expect(drained.notifications.map((notification) => notification.payload)).toEqual([
-        { body: "hold position" }
+        { kind: "Message", body: "hold position" }
       ])
+    }))
+
+  it("leaves a foreign engine's parked child to its own driver", () =>
+    // The wake half of the cross-owner rule: a control plane never CLAIMS a
+    // run another driver owns. Steering a parked child from a control plane
+    // that launched nothing must queue the message and leave the park alone —
+    // claiming it would strand the row under a fence no engine re-drives, and
+    // the child would never hear its own deferred complete.
+    withTempFile(async (filename) => {
+      // Composition A: the engine that owns the child. The child parks on the
+      // gate; once it resumes it drains its own queue and reports what it
+      // heard.
+      const child = await runOn(
+        filename,
+        Effect.gen(function*() {
+          const runtime = yield* engine("children-foreign-wake-a")
+          const store = yield* RunStore.RunStore
+          const port = yield* children().pipe(Effect.provideService(FlowRuntime.FlowRuntime, runtime))
+          yield* runtime.register(Steerable, (_payload, executionId) =>
+            Effect.gen(function*() {
+              yield* DurableDeferred.await(gate)
+              const steering = yield* Notifications.make({ runId: executionId, lineageId: executionId })
+              const drained = yield* steering.drain({ boundary: "turn-1", wouldIdle: false })
+              return drained.inserts.map(textOf).join(" | ")
+            }).pipe(Effect.orDie))
+          yield* runtime.register(Parent, () =>
+            port.spawn({ flow: Steerable._tag, label: "foreign" }).pipe(
+              Effect.map((spawned) => spawned.child),
+              Effect.orDie
+            ))
+          const spawned = yield* runtime.execute(Parent, { executionId: "foreign-wake-parent", payload: {} })
+          // The park must be durable before this composition closes.
+          yield* untilSuspended(store, spawned)
+          return spawned
+        })
+      )
+
+      // Composition B: a control plane over the same file that launched
+      // nothing. The steer is accepted — it is a durable wake request — and
+      // the park holds: still suspended, still unowned.
+      await runOn(
+        filename,
+        Effect.gen(function*() {
+          const control = yield* ControlService.Control
+          const store = yield* RunStore.RunStore
+          const receipt = yield* control.steer({
+            runId: child,
+            message: {
+              messageId: "foreign-wake-steer",
+              runId: child,
+              body: "carry on",
+              principal: { id: "operator", kind: "test", stampedAt: 1 },
+              createdAt: 1
+            },
+            idempotencyKey: "steer:foreign-wake"
+          }).pipe(Effect.orDie)
+          expect(receipt._tag).toBe("Accepted")
+          const row = yield* Effect.orDie(store.get(child))
+          expect(row.status).toBe("suspended")
+          expect(row.owner).toBeNull()
+        })
+      )
+
+      // Composition C: the owning driver's own wake. The deferred completes,
+      // the child resumes exactly once, and the steer is in its output.
+      const collected = await runOn(
+        filename,
+        Effect.gen(function*() {
+          const runtime = yield* engine("children-foreign-wake-c")
+          const port = yield* children().pipe(Effect.provideService(FlowRuntime.FlowRuntime, runtime))
+          yield* runtime.register(Steerable, (_payload, executionId) =>
+            Effect.gen(function*() {
+              yield* DurableDeferred.await(gate)
+              const steering = yield* Notifications.make({ runId: executionId, lineageId: executionId })
+              const drained = yield* steering.drain({ boundary: "turn-1", wouldIdle: false })
+              return drained.inserts.map(textOf).join(" | ")
+            }).pipe(Effect.orDie))
+          yield* runtime.deferredDone(gate, {
+            flowName: Steerable._tag,
+            executionId: child,
+            deferredName: gate.name,
+            exit: Exit.succeed("resumed")
+          })
+          return yield* port.await({ child })
+        })
+      )
+
+      expect(collected.output).toContain("carry on")
     }))
 
   it("refuses a receipt that is not a delivery", () =>

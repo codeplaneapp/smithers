@@ -244,8 +244,12 @@ export const layer: Layer.Layer<
      * it, not asking for the pause to be undone. A park a control plane cannot
      * explain is left alone for the same reason.
      *
-     * A lost claim is not a failure here: it means another process already
-     * owns the run, which is the outcome the wake was trying to produce.
+     * A lost claim is not a failure here. It means another process already
+     * owns the run, or the run belongs to a driver this plane did not launch
+     * — an engine-created child keeps its park, because claiming it would
+     * strand it under this plane's fence where no engine re-drives it. The
+     * steer itself is already durable in the notification queue, so the
+     * owning driver delivers it at the run's next boundary.
      */
     const wake = (
       run: RunSummary,

@@ -531,6 +531,11 @@ describe("vitest coverage isolation conformance", () => {
     // directives that the earlier literal-`v8 ignore` grep never saw.
     const directive = /(?:istanbul|[cv]8|node:coverage)\s+ignore\s+(if|else|next|file|start|stop)(?=\W|$)/g
     const allowlist: Record<string, number> = {
+      // `AgentAction`'s failure boundary stringifies a decoded provider or
+      // harness cause whose fields are primitives by construction, so the
+      // `JSON.stringify` throw arm is unreachable; it exists so a future
+      // cause shape reports the failure it carries instead of a TypeError.
+      "agent/src/AgentAction.ts": 1,
       // The agent package's former hints (FlowEngineLike's canonicalization
       // mappers and AgentSession's process-loss fallbacks) were removed with
       // the code that needed them in 81b218ce7; the entries leave with them.
