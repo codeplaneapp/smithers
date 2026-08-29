@@ -173,6 +173,37 @@ const cancelRequested = { _tag: "CancelRequested" } as const
 const staleRunningSweepBatch = 64
 
 /**
+ * How long a run waits before its live owner is probed again, and how far
+ * that wait doubles.
+ *
+ * A refusal is evidence: the recorded owner answered, so the one thing the
+ * sweep knows is that re-asking immediately is waste. Without a wait the
+ * oldest batch is re-probed every heartbeat forever and nothing behind it is
+ * ever reached (issue #79 follow-up). The first wait is two ticks, which is
+ * already enough for the batch to move on, and it doubles up to the lease
+ * window: an owner that stops heartbeating is therefore re-probed within one
+ * `heartbeatStaleAfter` of the last refusal, which is the same window every
+ * other reclaim decision is made against.
+ */
+const stealRefusalBackoffFirst = Duration.times(Ownership.heartbeatInterval, 2)
+const stealRefusalBackoffMax = Ownership.heartbeatStaleAfter
+
+/**
+ * A refusal this driver remembers: which lease it was refused against, when
+ * the owner may be probed again, and how many consecutive refusals that
+ * lease has produced (the backoff exponent).
+ *
+ * Keyed by run id and holding the heartbeat it was collected against, so an
+ * owner that resumes heartbeating — a new lease — restarts the ladder rather
+ * than inheriting a long wait from the stall that preceded it.
+ */
+interface StealRefusal {
+  readonly heartbeatAtMs: number | null
+  readonly nextProbeAtMs: number
+  readonly attempt: number
+}
+
+/**
  * The type of {@link cancelRequested}: the settlement a round takes when the
  * cancel-request poll wins the race against the flow.
  */
@@ -247,6 +278,51 @@ export const make = (
      * newly registered flow makes previously dropped runs drivable again.
      */
     const warnedUnregistered = new Set<string>()
+    /**
+     * Runs whose owner answered a probe (or held a fresh lease) and are
+     * therefore not worth re-arbitrating yet. See {@link StealRefusal}.
+     *
+     * Bounded by the stale set the sweep can see: every tick drops the entries
+     * whose rows are no longer in the window it read, so a run that is stolen,
+     * released, or settled takes its entry with it.
+     */
+    const stealRefusals = new Map<string, StealRefusal>()
+
+    /**
+     * Records that a run's recorded owner was found alive, and when it may be
+     * asked about again.
+     */
+    const deferSteal = (
+      runId: string,
+      heartbeatAtMs: number | null,
+      nowMs: number
+    ): void => {
+      const previous = stealRefusals.get(runId)
+      // A moved lease is new evidence about a different state of the world, so
+      // it starts the ladder over instead of inheriting the old wait.
+      const attempt = previous !== undefined && previous.heartbeatAtMs === heartbeatAtMs ? previous.attempt + 1 : 1
+      const waitMs = Math.min(
+        Duration.toMillis(stealRefusalBackoffFirst) * Math.pow(2, attempt - 1),
+        Duration.toMillis(stealRefusalBackoffMax)
+      )
+      stealRefusals.set(runId, { heartbeatAtMs, nextProbeAtMs: nowMs + waitMs, attempt })
+    }
+
+    /**
+     * The journal address of one refusal.
+     *
+     * Refusals were emitted through the driver's default source id with no
+     * `sourceSeq`, so nothing deduplicated them: a live owner cost one durable
+     * journal row per refused run per heartbeat, indefinitely. Addressing the
+     * record by the run, the owner, and the lease it was refused against makes
+     * the journal's own first-writer admission the deduplication — the same
+     * mechanism the registration-time wake records use — so a repeated refusal
+     * about an unchanged lease says nothing twice.
+     */
+    const stealRefusedSourceId = (owner: Ownership.OwnerId, heartbeatAtMs: number | null): string =>
+      `${dependencies.journalSource}:steal-refused:${
+        JSON.stringify([owner.hostId, owner.pid, owner.nonce])
+      }:${heartbeatAtMs}`
     const liveInstances = new Map<string, FlowRuntime.FlowInstance["Service"]>()
     /**
      * Flow scopes retained past a round's settlement.
@@ -456,18 +532,20 @@ export const make = (
             // operator whose `resume` did nothing can see that a live owner
             // was in the way (issue #53 follow-up).
             if (row.owner !== null && !sameOwner(row.owner, dependencies.owner)) {
+              deferSteal(row.runId, row.heartbeatAtMs, nowMs)
               yield* emitDecision(row.runId, {
                 decision: "steal-refused-owner-alive",
                 evidence: "lease-fresh",
                 expectedOwner: row.owner,
                 heartbeatAtMs: row.heartbeatAtMs
-              })
+              }, stealRefusedSourceId(row.owner, row.heartbeatAtMs))
             }
             yield* Effect.annotateCurrentSpan({ outcome: "heartbeat_fresh" })
             yield* Metric.update(EngineStoreMetrics.claim.HeartbeatFresh, 1)
             return false
           }
           if (yield* isAlive(row.owner, { claimant: dependencies.owner, heartbeatAtMs: row.heartbeatAtMs, nowMs })) {
+            deferSteal(row.runId, row.heartbeatAtMs, nowMs)
             yield* emitDecision(row.runId, {
               decision: "steal-refused-owner-alive",
               // Always a supplied probe. The default check is the lease, and
@@ -477,7 +555,7 @@ export const make = (
               evidence: "probe",
               expectedOwner: row.owner,
               heartbeatAtMs: row.heartbeatAtMs
-            })
+            }, stealRefusedSourceId(row.owner, row.heartbeatAtMs))
             yield* Effect.annotateCurrentSpan({ outcome: "steal_refused_owner_alive" })
             yield* Metric.update(EngineStoreMetrics.claim.StealRefusedOwnerAlive, 1)
             yield* Effect.logDebug("run steal refused, recorded owner is alive", {
@@ -557,6 +635,9 @@ export const make = (
         }
         yield* Effect.annotateCurrentSpan({ outcome: "activated" })
         yield* Metric.update(EngineStoreMetrics.claim.Activated, 1)
+        // The run is this driver's now, so whatever it was told about the
+        // previous owner is spent.
+        stealRefusals.delete(row.runId)
         return true
       })
     })
@@ -1665,6 +1746,11 @@ export const make = (
      */
     const sweepStaleRunning: Effect.Effect<void> = Effect.gen(function*() {
       const nowMs = yield* Clock.currentTimeMillis
+      // Rows this driver has already arbitrated and been refused. They are the
+      // oldest heartbeats in the window, so they sort first and would fill the
+      // batch every tick; the read asks for enough extra rows to see past
+      // exactly the ones it is going to skip.
+      const deferred = Array.from(stealRefusals.values()).filter((entry) => entry.nextProbeAtMs > nowMs).length
       // Capped per tick (issue #79): oldest heartbeats come back first, so a
       // mass owner death drains across successive ticks — batch after batch
       // as each stolen run's heartbeat leaves the stale window — instead of
@@ -1672,9 +1758,22 @@ export const make = (
       // contending N-drivers × M-runs on the claim/steal CAS.
       const stale = yield* engineState.staleRunningRuns(
         nowMs - Duration.toMillis(Ownership.heartbeatStaleAfter),
-        staleRunningSweepBatch
+        staleRunningSweepBatch + deferred
       )
+      // A refusal is remembered only while its row is still in the window this
+      // read covers. A run that was stolen, released, or settled leaves the
+      // stale set, and its entry leaves with it, so the map cannot outgrow the
+      // backlog it describes.
+      const visible = new Set(stale)
+      for (const runId of stealRefusals.keys()) {
+        if (!visible.has(runId)) stealRefusals.delete(runId)
+      }
+      let woken = 0
       for (const runId of stale) {
+        if (woken >= staleRunningSweepBatch) break
+        const refusal = stealRefusals.get(runId)
+        if (refusal !== undefined && refusal.nextProbeAtMs > nowMs) continue
+        woken = woken + 1
         yield* coordinator.wake(runId)
       }
     })
