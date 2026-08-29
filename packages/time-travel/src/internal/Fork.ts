@@ -81,18 +81,27 @@ const digest = (value: string): string => {
  * The workspace name a forked run's lane carries.
  *
  * THE CHILD RUN ID IS THE ONLY INPUT, on purpose. Naming the lane after the
- * parent frame — `flows-fork-<parentRunId>-<seq>` — gave the second fork of
- * one frame the first child's name, and gave two parents that differ only in a
- * character the sanitizer folds (`demo/a` and `demo:a`) one shared name. The
- * child run id distinguishes exactly what the store distinguishes; the digest
- * of the RAW id restores what sanitizing and the length cap fold away, so two
- * different children can never meet in one directory.
+ * parent frame, meaning the parent run id and the frame's seq, gave the second
+ * fork of one frame the first child's name, and gave two parents that differ
+ * only in a character the sanitizer folds (`demo/a` and `demo:a`) one shared
+ * name.
+ * The child run id distinguishes exactly what the store distinguishes, and the
+ * digest of the RAW id restores what sanitizing and the 64-character cap fold
+ * away. Two children share a name only when their sanitized, capped ids match
+ * AND their raw ids share a 32-bit FNV-1a digest, about one pair in 4.3
+ * billion for ids that already differ by an ordinal the store hands out. That
+ * residual case is loud rather than silent: `jj workspace add` refuses a name
+ * the repository already holds, so the fork fails instead of two runs sharing
+ * one directory.
+ *
+ * `jj workspace list` shows this name to an operator, so it carries the
+ * product's name rather than the imported repository's.
  *
  * @since 0.1.0
  * @category constructors
  */
 export const workspaceNameFor = (childRunId: string): string =>
-  `flows-fork-${sanitize(childRunId).slice(0, 64)}-${digest(childRunId)}`
+  `smithers-fork-${sanitize(childRunId).slice(0, 64)}-${digest(childRunId)}`
 
 /**
  * Reads the journal suffix a fork carries past — the entries the child will

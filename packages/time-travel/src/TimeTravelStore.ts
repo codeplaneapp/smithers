@@ -274,8 +274,14 @@ export interface Service {
    * workspace named after the parent frame alone collides the moment one frame
    * is forked twice. Minting the id first is what lets the caller name the
    * lane after the child that will live in it, so the two identities are the
-   * same identity. Two mints that are not separated by a commit return the
-   * same id; the store's own uniqueness constraints are what settle a race.
+   * same identity.
+   *
+   * The contract is only that the id differs from every fork already committed
+   * off that frame. What two mints that are NOT separated by a commit return
+   * is the implementation's own business: `SqlTimeTravelStore.layer` derives
+   * the ordinal from the committed edges, so it repeats the id and lets the
+   * run table's primary key settle the race, while `MemoryTimeTravelStore.make`
+   * advances a private counter and hands out two different ids.
    */
   readonly nextForkId: (parentRunId: string, frame: Frame) => Effect.Effect<string, TimeTravelError>
   /**

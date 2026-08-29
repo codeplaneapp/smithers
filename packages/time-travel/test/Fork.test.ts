@@ -31,6 +31,22 @@ describe("fork", () => {
       expect(store.state().records.filter((record) => record.runId === "r")).toEqual(before)
     }))
 
+  // The in-memory store advances a private counter instead of counting
+  // committed edges, so it hands out a fresh id per mint. The store interface
+  // documents that difference; this is what holds it to it.
+  it.effect("mints a fresh child id on every call, committed or not", () =>
+    Effect.gen(function*() {
+      const store = Memory.make({
+        records: [{ runId: "r", seq: 0, eventId: "a", lineageId: "r", payload: null }]
+      })
+
+      const first = yield* store.nextForkId("r", { lineageId: "r", seq: 0 })
+      const second = yield* store.nextForkId("r", { lineageId: "r", seq: 0 })
+
+      expect(first).not.toBe(second)
+      expect(store.state().records.filter((record) => record.runId !== "r")).toEqual([])
+    }))
+
   it.effect("copies the frame's anchors to the child, and only those", () =>
     Effect.gen(function*() {
       const store = Memory.make({
@@ -137,6 +153,21 @@ describe("fork workspace identity", () => {
       expect(lanes).toHaveLength(2)
       expect(lanes[0]!.name).not.toBe(lanes[1]!.name)
       expect(lanes[0]!.path).not.toBe(lanes[1]!.path)
+    }))
+
+  it.effect("names the lane after the child run, under the operator-visible smithers prefix", () =>
+    Effect.gen(function*() {
+      const { lanes } = yield* runForks((timeTravel, sql) =>
+        Effect.gen(function*() {
+          yield* insertParent(sql, "parent")
+          return yield* timeTravel.fork({ runId: "parent", frame })
+        })
+      )
+
+      // `jj workspace list` shows this name to an operator, so the product
+      // name owns the prefix. The rest is the child run id, sanitized, and
+      // the digest that restores what sanitizing folded away.
+      expect(lanes[0]!.name).toMatch(/^smithers-fork-parent-fork-0-1-[0-9a-f]{8}$/)
     }))
 
   it.effect("gives run ids that differ only in a sanitized character distinct workspaces", () =>

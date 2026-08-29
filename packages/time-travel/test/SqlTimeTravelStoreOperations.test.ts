@@ -671,6 +671,60 @@ describe("SqlTimeTravelStore derived reads", () => {
     }))
 })
 
+describe("SqlTimeTravelStore.nextForkId", () => {
+  const frame = { lineageId: "mint/root", seq: 0 } as const
+
+  const seedParent = (sql: SqlClient.SqlClient) =>
+    Effect.gen(function*() {
+      yield* insertRun(sql, "mint")
+      yield* sql`
+        INSERT INTO flows_journal_events
+          (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+           event_type, payload_json, meta_json)
+        VALUES ('mint', 0, 'mint-0', 'source', 0, 0,
+                'flows.engine.run-decision',
+                ${JSON.stringify({ state: { version: 1, flowName: "Demo", payload: {} } })},
+                ${JSON.stringify({ lineageId: "mint/root" })})
+      `
+    })
+
+  // The store operation the fork verb calls before it provisions a workspace.
+  // `TimeTravelStore.Service.nextForkId` documents the repeat below as this
+  // implementation's own semantics, so it is pinned here rather than assumed.
+  it.effect("repeats the id until a fork commits, then advances past it", () =>
+    run((store, sql) =>
+      Effect.gen(function*() {
+        yield* seedParent(sql)
+
+        const first = yield* store.nextForkId("mint", frame)
+        const again = yield* store.nextForkId("mint", frame)
+        const child = yield* store.createFork("mint", frame, first)
+        const afterCommit = yield* store.nextForkId("mint", frame)
+
+        expect(first).toBe("mint:fork:0:1")
+        expect(again).toBe(first)
+        expect(child.runId).toBe(first)
+        expect(afterCommit).toBe("mint:fork:0:2")
+      })
+    ))
+
+  it.effect("writes nothing, so an abandoned mint leaves no run and no edge", () =>
+    run((store, sql) =>
+      Effect.gen(function*() {
+        yield* seedParent(sql)
+
+        yield* store.nextForkId("mint", frame)
+
+        const runs = yield* sql<{ readonly run_id: string }>`SELECT run_id FROM flows_runs`
+        const edges = yield* sql<
+          { readonly child_run_id: string }
+        >`SELECT child_run_id FROM flows_time_travel_edges`
+        expect(runs.map((row) => row.run_id)).toEqual(["mint"])
+        expect(edges).toEqual([])
+      })
+    ))
+})
+
 describe("SqlTimeTravelStore.createFork", () => {
   it.effect("creates distinct coherent forks when two store handles race at one parent frame", () =>
     Effect.gen(function*() {
