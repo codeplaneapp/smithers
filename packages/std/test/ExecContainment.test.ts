@@ -202,10 +202,18 @@ describe.skipIf(process.platform === "win32")("a cancelled Exec", () => {
     // Containment is a property of the SERVICE, not of any call site: the host
     // decorates `ChildProcessSpawner` once and every path that resolves the
     // tag inherits the kill deadline and the ledger record. A module that
-    // reached for `node:child_process` would be outside both, silently, and no
+    // reached for `child_process` would be outside both, silently, and no
     // behavioral test in this package could see it — the process would simply
     // outlive a cancel on someone's machine. So the bypass is checked for
     // directly.
+    //
+    // Both spellings of the specifier bind the same module and no eslint
+    // config in this repository requires the `node:` prefix, so both are
+    // matched; `cluster.fork()` is matched for the same reason. The matcher is
+    // pinned against fixtures rather than trusted, because nothing in this
+    // package spells the bare form today, which is exactly what a matcher that
+    // missed it would look like. `packages/flows/test/spawnContainment.test.ts`
+    // is the same gate over every package.
     const source = join(dirname(fileURLToPath(import.meta.url)), "..", "src")
     const files: Array<string> = []
     const walk = (directory: string) => {
@@ -217,7 +225,19 @@ describe.skipIf(process.platform === "win32")("a cancelled Exec", () => {
     }
     walk(source)
 
+    const spawningModule = String.raw`["'](?:node:)?(?:child_process|cluster)["']`
+    const importsSpawningModule = (source: string): boolean =>
+      new RegExp(String.raw`^\s*import\s[^\n]*?from\s*${spawningModule}`, "m").test(source)
+      || new RegExp(String.raw`\bimport\s*\(\s*${spawningModule}\s*\)`).test(source)
+      || new RegExp(String.raw`\brequire\s*\(\s*${spawningModule}\s*\)`).test(source)
+
+    for (const specifier of ["node:child_process", "child_process", "node:cluster", "cluster"]) {
+      expect(importsSpawningModule(`import { spawn } from "${specifier}"\n`), specifier).toBe(true)
+      expect(importsSpawningModule(`const spawner = require("${specifier}")\n`), specifier).toBe(true)
+    }
+    expect(importsSpawningModule(" * never reaches for node:child_process\n")).toBe(false)
+
     expect(files.length).toBeGreaterThan(0)
-    expect(files.filter((path) => readFileSync(path, "utf8").includes("node:child_process"))).toEqual([])
+    expect(files.filter((path) => importsSpawningModule(readFileSync(path, "utf8")))).toEqual([])
   })
 })
