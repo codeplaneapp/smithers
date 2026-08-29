@@ -2172,6 +2172,9 @@ importers:
       '@smthrs/errors':
         specifier: 1.0.0-rc.0
         version: link:../errors
+      '@smthrs/flow':
+        specifier: 1.0.0-rc.0
+        version: link:../flow
       '@smthrs/notifications':
         specifier: 1.0.0-rc.0
         version: link:../notifications
@@ -2182,12 +2185,18 @@ importers:
       '@effect/language-service':
         specifier: 0.87.1
         version: 0.87.1
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1(supports-color@10.2.2))
       '@effect/vitest':
         specifier: 4.0.0-rc.108
         version: 4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.9)
       '@eslint/js':
         specifier: 9.39.1
         version: 9.39.1
+      '@smthrs/engine':
+        specifier: 1.0.0-rc.0
+        version: link:../engine
       '@types/node':
         specifier: 25.9.5
         version: 25.9.5

@@ -8,11 +8,11 @@ when one does.
 
 ## What it is
 
-A narrow host layer, and nothing above it. Each provider gets a client, a
-verified webhook channel, and payload schemas. What an application does with
-them — which flow a pull request starts, which run an issue comment signals —
-is an Action or a Flow the application writes, because that part is not a
-provider concern.
+A narrow host layer plus the durable actions over it. Each provider gets a
+client, a verified webhook channel, payload schemas, and the actions a flow
+calls. What an application does with an event, which flow a pull request starts
+and which run an issue comment signals, stays a Flow the application writes,
+because that part is not a provider concern.
 
 There is no `smithers listeners` verb and no gateway-level webhook
 configuration at 1.0. Webhook ingress is library code: a provider builds a
@@ -42,22 +42,23 @@ Import one provider at a time when that is all you need:
 
 The service-agnostic pieces every provider shares.
 
-- **`Signature`** — constant-time HMAC-SHA256 verification. A webhook signature
+- **`Signature`**: constant-time HMAC-SHA256 verification. A webhook signature
   is attacker-supplied, so `constantTimeEqual` always scans the longer input
   and folds the length difference into the result: an early return would turn
   the endpoint into an oracle that leaks the expected digest a byte at a time.
   GitHub's `sha256=<hex>`, Linear's bare hex, and base64 digests are accepted.
-- **`Channel`** — the `WebhookChannel` binding: a secret resolver, the fixed
+- **`Channel`**: the `WebhookChannel` binding, a secret resolver, the fixed
   verify-then-decode order, and the `startFlow` and `signalRun` routes.
-- **`CursorStore`** — cursor persistence for polling sources, in memory or over
+- **`CursorStore`**: cursor persistence for polling sources, in memory or over
   the control database. The contract is that a cursor is committed _after_ the
   batch it acknowledges was handled.
-- **`ExternalEvent`** and **`SignalName`** — the one normalized event shape, the
+- **`ExternalEvent`** and **`SignalName`**: the one normalized event shape, the
   reserved `integration:<service>:<event>` namespace, and the mapping onto
   `@smthrs/control` signals and `@smthrs/notifications` system events.
-- **`IntegrationError`** — provider error classification, with a
-  machine-readable `reason` and provider-safe details.
-- **`Pkce`** and **`AuthorizationUrl`** — the RFC 7636 and RFC 6749 pieces of
+- **`IntegrationError`**: provider error classification, with a
+  machine-readable `reason` and provider-safe details. `ActionFailure` is the
+  schema form of it, which is what a durable action journals.
+- **`Pkce`** and **`AuthorizationUrl`**: the RFC 7636 and RFC 6749 pieces of
   the GitHub and Linear OAuth flows.
 
 ### `github`
@@ -65,7 +66,7 @@ The service-agnostic pieces every provider shares.
 `GitHubClient` is a REST client that exists for three behaviors a bare `fetch`
 does not have: rate-limit handling that recognizes a 429 _and_ the 403 forms
 GitHub uses for a secondary limit, `Link: rel="next"` pagination, and token
-hygiene — the token reaches the `Authorization` header and nothing else, and
+hygiene. The token reaches the `Authorization` header and nothing else, and
 every request URL is pinned to the configured API origin so a redirected page
 link cannot carry it elsewhere.
 
@@ -83,8 +84,8 @@ reported as a `conflict` and never touched. Deletes need an explicit
 ### `linear`
 
 `LinearClient` is plain `fetch` over raw GraphQL. It resolves the names people
-write — `ENG`, `In Progress`, `bug`, `ENG-123` — into the ids Linear's
-mutations take, and caches every lookup per client. A 429 or 5xx is retried up
+write, such as `ENG`, `In Progress`, `bug`, and `ENG-123`, into the ids
+Linear's mutations take, and caches every lookup per client. A 429 or 5xx is retried up
 to five attempts honoring `Retry-After` or `X-RateLimit-Requests-Reset`.
 
 `Webhook` checks the `Linear-Signature` HMAC _and_ the `webhookTimestamp`
@@ -104,6 +105,25 @@ approval codec, where a press carries a per-approval token and a foreign press
 fails safe. `InitData` verifies Mini App `initData` on both the HMAC and
 Ed25519 paths, over Web Crypto only, so the same code runs under Node, Bun, and
 a Cloudflare Worker.
+
+## Actions
+
+One durable action per provider, over the client of the same name:
+
+| Action                          | Tag                                    |
+| ------------------------------- | -------------------------------------- |
+| `GitHub.Actions.CommentOnIssue` | `integrations/github/comment-on-issue` |
+| `Linear.Actions.CreateIssue`    | `integrations/linear/create-issue`     |
+| `Telegram.Actions.SendMessage`  | `integrations/telegram/send-message`   |
+
+All three are `tier: "irreversible"`, because the remote side has acted by the
+time the call returns. `.call(payload)` records a plan node; `Actions.layer`
+provides the implementation, and needs the provider's client in context. The
+error type is `Core.ActionFailure.IntegrationFailure`, the schema form of
+`IntegrationError`, because a class cannot cross the journal.
+
+Writing another `Action.make` over the same client is the intended way to reach
+an endpoint these three do not cover.
 
 ## Credentials
 

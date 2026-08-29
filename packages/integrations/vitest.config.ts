@@ -24,11 +24,12 @@ export default defineConfig({
       // its migration ran, and the unreachable tail of the Linear retry loop.
       // The live suites in `test/*Live.test.ts` cover the provider side of
       // that when a credential is present. Raise these when a case closes;
-      // never lower them.
+      // never lower them. Last raised when the durable actions and their
+      // conversion tests landed (round 1).
       thresholds: {
-        branches: 93,
-        functions: 96,
-        lines: 98,
+        branches: 94,
+        functions: 98,
+        lines: 99,
         statements: 98
       }
     }

@@ -68,13 +68,16 @@
     "@smthrs/control": "1.0.0-rc.0",
     "@smthrs/database": "1.0.0-rc.0",
     "@smthrs/errors": "1.0.0-rc.0",
+    "@smthrs/flow": "1.0.0-rc.0",
     "@smthrs/notifications": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {
     "@effect/language-service": "0.87.1",
+    "@effect/platform-node": "4.0.0-rc.108",
     "@effect/vitest": "4.0.0-rc.108",
     "@eslint/js": "9.39.1",
+    "@smthrs/engine": "1.0.0-rc.0",
     "@types/node": "25.9.5",
     "@vitest/coverage-v8": "4.1.9",
     "dprint": "0.55.2",

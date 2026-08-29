@@ -74,6 +74,32 @@ const ingest = (
     ) as Effect.Effect<{ readonly _tag: "Success" | "Failure" }>
   )
 
+/**
+ * Ingests the same delivery twice through ONE `Channels` instance.
+ *
+ * Building the layer per call would give each ingest its own replay set, which
+ * is exactly the thing this helper exists to not do.
+ */
+const ingestTwice = (
+  channel: Channels.Channel,
+  raw: Channels.RawInbound,
+  calls: Array<string> = []
+): Promise<ReadonlyArray<{ readonly _tag: string }>> =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      const channels = yield* Channels.Channels
+      yield* channels.register(channel)
+      const first = yield* channels.ingest({ channel: channel.name, raw })
+      const second = yield* channels.ingest({ channel: channel.name, raw })
+      return [first, second]
+    }).pipe(
+      Effect.provide(Channels.layer.pipe(Layer.provide(controlLayer(calls)))),
+      // Both deliveries verify, so a control failure here is a defect in the
+      // test rather than an outcome worth asserting on.
+      Effect.orDie
+    )
+  ) as Promise<ReadonlyArray<{ readonly _tag: string }>>
+
 const bytes = (value: string) => new TextEncoder().encode(value)
 
 const githubChannel = (secret = SECRET) =>
@@ -147,6 +173,49 @@ describe("case 17: a WebhookChannel bound with the GitHub verifier rejects a bad
     const exit = await ingest(githubChannel(), githubDelivery(ISSUE_BODY, signature), calls)
     expect(exit._tag).toBe("Success")
     expect(calls).toEqual(["plan", "run"])
+  })
+})
+
+// The 0.x `deliverEvents` pinned "dedupes redeliveries by (source,
+// dedupeKey)". `deliverEvents` is gone; a webhook provider still retries a
+// delivery it did not see acknowledged, so the requirement moved to the
+// channel and is pinned here rather than assumed.
+describe("redelivery", () => {
+  it("applies a correctly signed delivery once and reports the retry as AlreadyApplied", async () => {
+    const calls: Array<string> = []
+    const signature = `sha256=${computeHmacSha256Hex(ISSUE_BODY, SECRET)}`
+    const receipts = await ingestTwice(githubChannel(), githubDelivery(ISSUE_BODY, signature), calls)
+    // The second delivery carries the same `x-github-delivery`, so it is the
+    // same idempotency key and must not start a second run.
+    expect(calls).toEqual(["plan", "run"])
+    expect(receipts[0]?._tag).toBe("Accepted")
+    expect(receipts[1]?._tag).toBe("AlreadyApplied")
+  })
+
+  it("treats a different delivery id as a new delivery", async () => {
+    const calls: Array<string> = []
+    const signature = `sha256=${computeHmacSha256Hex(ISSUE_BODY, SECRET)}`
+    const channel = githubChannel()
+    const receipts = await Effect.runPromise(
+      Effect.gen(function*() {
+        const channels = yield* Channels.Channels
+        yield* channels.register(channel)
+        const first = yield* channels.ingest({
+          channel: channel.name,
+          raw: githubDelivery(ISSUE_BODY, signature)
+        })
+        const second = yield* channels.ingest({
+          channel: channel.name,
+          raw: { ...githubDelivery(ISSUE_BODY, signature), idempotencyKey: "delivery-2" }
+        })
+        return [first, second]
+      }).pipe(
+        Effect.provide(Channels.layer.pipe(Layer.provide(controlLayer(calls)))),
+        Effect.orDie
+      )
+    )
+    expect(calls).toEqual(["plan", "run", "plan", "run"])
+    expect(receipts.map((receipt) => receipt._tag)).toEqual(["Accepted", "Accepted"])
   })
 })
 

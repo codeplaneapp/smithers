@@ -4,7 +4,7 @@ This page is the API reference for the GitHub, Linear, and Telegram adapters.
 
 The package is private at `1.0.0-rc.0`: no consumer on the registry imports it.
 It is documented here because it is the worked example of what a Smithers
-integration is — a narrow host layer with a verified door into the control
+integration is: a narrow host layer with a verified door into the control
 plane, and no opinion above that line.
 
 GitHub and Linear are the two integrations the `1.0.0-rc.0` release smoke
@@ -12,7 +12,7 @@ exercises against live APIs.
 
 ## The shape of an integration
 
-Three things, per provider, and nothing else:
+Four things, per provider:
 
 1. **A client.** Authentication, rate limits, pagination, and credential
    hygiene. Everything a caller would otherwise get wrong against that API.
@@ -20,10 +20,14 @@ Three things, per provider, and nothing else:
    webhook and turns it into one normalized event.
 3. **Schemas.** The payload fields worth typing, with everything else passing
    through untouched.
+4. **Actions.** The durable steps a flow calls: `GitHub.Actions.CommentOnIssue`,
+   `Linear.Actions.CreateIssue`, `Telegram.Actions.SendMessage`. Each declares
+   its payload, its success, and `IntegrationFailure` as its error, so the
+   engine can journal the result and replay it instead of posting twice.
 
-What an event *means* — which flow a pull request starts, which run an issue
-comment signals — is an Action or a Flow the application writes. A provider
-adapter that decided that for you would be a framework.
+What an event *means*, which flow a pull request starts and which run an issue
+comment signals, stays a Flow the application writes. A provider adapter that
+decided that for you would be a framework.
 
 ## Webhook ingress
 
@@ -68,8 +72,8 @@ to every run parked on a matching name.
 
 `Core.Signature.verifySignature` is the constant-time HMAC-SHA256 check every
 webhook source uses. It accepts GitHub's `sha256=<hex>`, Linear's bare hex, and
-a base64 digest, and it returns `false` — never throws — for a missing
-signature, an empty secret, a wrong prefix, or an undecodable digest.
+a base64 digest. It returns `false` and never throws for a missing signature,
+an empty secret, a wrong prefix, or an undecodable digest.
 
 The comparison is `Core.Signature.constantTimeEqual`, which always scans the
 longer of its two inputs and folds the length difference into the accumulator.
@@ -156,13 +160,63 @@ message, not in `details`, and not in a log line, and the Telegram client
 additionally strips its token from errors it did not construct, because the
 token is in the request path and a transport error quotes the URL.
 
-Every GitHub request URL — including a `Link: rel="next"` target — is pinned to
-the configured API origin. A redirected page link that left the origin would
+Every GitHub request URL is pinned to the configured API origin, including a
+`Link: rel="next"` target. A redirected page link that left the origin would
 hand the token to whoever received it.
 
 Every client takes an `env` argument that replaces the ambient environment
 rather than layering over it, so a caller that supplies its own credentials
 cannot have an ambient `GITHUB_TOKEN` decide which account a call runs as.
+
+## Actions
+
+Each provider ships one durable action over its client. The client is an
+ordinary Effect service; the action is what makes a call a step of a flow, so
+the engine journals the result and a restart replays it instead of posting a
+second comment.
+
+| Action | Tag | Does |
+| --- | --- | --- |
+| `GitHub.Actions.CommentOnIssue` | `integrations/github/comment-on-issue` | Comments on an issue or pull request. |
+| `Linear.Actions.CreateIssue` | `integrations/linear/create-issue` | Files an issue, resolving team, state, and label names to ids. |
+| `Telegram.Actions.SendMessage` | `integrations/telegram/send-message` | Sends a message, chunked, with the markdown fallback. |
+
+All three are `tier: "irreversible"`. The remote side has acted by the time the
+call returns, so the engine never retries one on its own.
+
+A flow calls the declaration and provides the implementation layer plus the
+client the layer needs:
+
+```ts
+import { Flow } from "@smthrs/flow"
+import { Core, GitHub } from "@smthrs/integrations"
+import { Layer, Schema } from "effect"
+
+const Triage = Flow.make("triage", {
+  payload: { owner: Schema.String, repo: Schema.String, issueNumber: Schema.Number },
+  success: GitHub.Actions.Comment,
+  error: Core.ActionFailure.IntegrationFailure,
+  body: (input) =>
+    GitHub.Actions.CommentOnIssue.call({ ...input, body: "Triaged." })
+})
+
+const layer = Layer.provideMerge(
+  GitHub.Actions.layer,
+  GitHub.GitHubClient.layer({ token: process.env["GITHUB_TOKEN"] })
+)
+```
+
+`.call(payload)` records a plan node and runs nothing. The node demands the
+requirement that `GitHub.Actions.layer` provides, so a composition that forgot
+the layer fails to compile rather than at run time.
+
+An action fails with `Core.ActionFailure.IntegrationFailure`, the schema form
+of `IntegrationError`: a `reason`, a message already safe to persist, and
+`retryable`. A class cannot cross the journal; this can.
+
+An application that needs an endpoint these three do not cover writes its own
+`Action.make` over the same client. That is the intended extension point, not a
+gap.
 
 ## Errors
 

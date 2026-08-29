@@ -9,7 +9,7 @@
  *   `x-ratelimit-reset`, capped so a skewed clock cannot park a call for hours.
  * - **Pagination.** `paginate` follows RFC 5988 `Link: rel="next"`.
  * - **Token hygiene.** The token reaches the `Authorization` header and
- *   nothing else — not a message, not `details`, not a log line — and every
+ *   nothing else, not a message, not `details`, not a log line, and every
  *   request URL, including a `rel="next"` target, is pinned to the configured
  *   API origin so a redirected link cannot carry the token elsewhere.
  *

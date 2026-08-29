@@ -9,6 +9,12 @@
  */
 
 /**
+ * @category actions
+ * @since 1.0.0
+ */
+export * as Actions from "./telegram/Actions.ts"
+
+/**
  * @category constructors
  * @since 1.0.0
  */

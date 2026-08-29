@@ -87,7 +87,7 @@ const decodeBase64 = (value: string): Uint8Array | undefined => {
 /**
  * Whether `options.signature` is a valid HMAC-SHA256 of `options.payload`.
  *
- * Returns `false` — never throws — for a missing signature, an empty secret, a
+ * Returns `false`, and never throws, for a missing signature, an empty secret, a
  * wrong prefix, an undecodable digest, and a digest that does not match.
  *
  * @category verification

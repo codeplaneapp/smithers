@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import {
   ERROR_REFERENCE_URL,
@@ -77,5 +79,28 @@ describe("error codes", () => {
 
   it("points every code at the reference page", () => {
     expect(getSmithersErrorDocsUrl("INTEGRATION_ERROR")).toBe(ERROR_REFERENCE_URL)
+  })
+})
+
+// Every SmithersError message ends with `See <ERROR_REFERENCE_URL>`, so the
+// page has to exist and has to document every code. It shipped once without a
+// page; this is what stops that from happening again.
+describe("the reference page the messages point at", () => {
+  const page = readFileSync(
+    fileURLToPath(new URL("../../../docs/reference/errors.md", import.meta.url)),
+    "utf8"
+  )
+
+  it("lives at the path ERROR_REFERENCE_URL names", () => {
+    expect(ERROR_REFERENCE_URL).toBe("https://smithers.sh/reference/errors")
+    expect(page.startsWith("# Error codes")).toBe(true)
+  })
+
+  it("documents every code, and no code the table dropped", () => {
+    for (const code of knownSmithersErrorCodes) expect(page).toContain(`\`${code}\``)
+    // The page must not still describe a code that was removed from the table.
+    for (const heading of page.matchAll(/^\| `([A-Z_]+)` \|/gm)) {
+      expect(knownSmithersErrorCodes).toContain(heading[1])
+    }
   })
 })

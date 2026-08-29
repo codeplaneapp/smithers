@@ -10,7 +10,7 @@
  *
  * - **HMAC**, when you hold the bot token. The secret is
  *   `HMAC_SHA256(key="WebAppData", msg=botToken)`, and the data-check string is
- *   every field except `hash` — the `signature` field stays in — as
+ *   every field except `hash`, with the `signature` field staying in, as
  *   `key=value`, sorted, newline-joined.
  * - **Ed25519**, for a third party holding only the numeric bot id. The
  *   message is `<botId>:WebAppData\n` plus the data-check string with both

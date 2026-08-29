@@ -8,6 +8,12 @@
  */
 
 /**
+ * @category actions
+ * @since 1.0.0
+ */
+export * as Actions from "./linear/Actions.ts"
+
+/**
  * @category constructors
  * @since 1.0.0
  */

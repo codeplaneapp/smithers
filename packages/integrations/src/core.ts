@@ -5,6 +5,12 @@
  */
 
 /**
+ * @category schemas
+ * @since 1.0.0
+ */
+export * as ActionFailure from "./core/ActionFailure.ts"
+
+/**
  * @category constructors
  * @since 1.0.0
  */

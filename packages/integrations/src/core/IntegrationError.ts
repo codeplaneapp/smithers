@@ -3,7 +3,7 @@
  *
  * Every integration failure is one `IntegrationError` carrying a
  * machine-readable {@link Reason}. A caller maps the reason to whatever its
- * transport needs — `invalid-signature` to 401, `permission-denied` to 403 —
+ * transport needs, `invalid-signature` to 401 and `permission-denied` to 403,
  * without reading message text, and the control plane maps it to a typed
  * `ControlError` at the channel boundary.
  *
@@ -16,20 +16,33 @@ import { InvalidInput, Unauthorized } from "@smthrs/control/ControlError"
 import { SmithersError } from "@smthrs/errors/SmithersError"
 
 /**
+ * Every classification an integration failure can carry, in one runtime list.
+ *
+ * {@link Reason} is derived from it and `core/ActionFailure.ts` builds the
+ * action-boundary schema from it, so adding a reason is a single edit and the
+ * durable error schema cannot drift from the class.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export const reasons = [
+  "invalid-config",
+  "invalid-signature",
+  "decode-failed",
+  "poll-failed",
+  "delivery-failed",
+  "credentials-missing",
+  "permission-denied",
+  "listener-conflict"
+] as const
+
+/**
  * What went wrong, coarsely enough for a caller to act on.
  *
  * @category models
  * @since 1.0.0
  */
-export type Reason =
-  | "invalid-config"
-  | "invalid-signature"
-  | "decode-failed"
-  | "poll-failed"
-  | "delivery-failed"
-  | "credentials-missing"
-  | "permission-denied"
-  | "listener-conflict"
+export type Reason = typeof reasons[number]
 
 /**
  * A failure raised by an integration client, webhook source, or listener

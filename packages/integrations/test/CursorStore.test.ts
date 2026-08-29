@@ -1,6 +1,11 @@
+import * as DurableWriter from "@smthrs/database/DurableWriter"
+import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import { Effect, Layer } from "effect"
-import { describe, expect, it } from "vitest"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterAll, describe, expect, it } from "vitest"
 import { CursorStore, layerMemory, layerSql } from "../src/core/CursorStore.ts"
 import * as Migrations from "../src/core/migrations/index.ts"
 
@@ -55,19 +60,46 @@ contract("CursorStore (memory)", layerMemory)
 // exists.
 contract("CursorStore (SQLite)", sqlLayer as Layer.Layer<CursorStore, never, never>)
 
+// "Survives a restart" is the only reason the SQLite store exists, so the
+// durability case uses a database on disk and builds the whole layer stack
+// twice. Two `yield* CursorStore` inside one `Effect.provide` would resolve
+// the same memoized service over the same open connection and would pass even
+// if nothing were ever written to the file.
 describe("CursorStore (SQLite) durability", () => {
-  it("keeps the cursor across a second store built on the same database", async () => {
-    const program = Effect.gen(function*() {
-      const first = yield* CursorStore
-      yield* first.set("telegram", "99")
-      // A second acquisition of the service over the same database is what a
-      // restarted process sees.
-      const second = yield* CursorStore
-      return yield* second.get("telegram")
-    })
-    const cursor = await Effect.runPromise(
-      program.pipe(Effect.provide(sqlLayer), Effect.scoped) as Effect.Effect<string | null>
+  const directory = mkdtempSync(join(tmpdir(), "integrations-cursor-"))
+  const filename = join(directory, "cursors.db")
+
+  afterAll(() => {
+    rmSync(directory, { recursive: true, force: true })
+  })
+
+  /** One process's whole stack: its own connection, its own CursorStore. */
+  const process = <A>(effect: Effect.Effect<A, unknown, CursorStore>): Promise<A> =>
+    Effect.runPromise(
+      effect.pipe(
+        Effect.provide(
+          Layer.provideMerge(
+            layerSql,
+            Layer.provideMerge(
+              Migrations.layer,
+              Layer.provideMerge(DurableWriter.layer(), NodeDatabase.layer({ filename }))
+            )
+          )
+        ),
+        Effect.scoped,
+        Effect.orDie
+      ) as Effect.Effect<A>
     )
+
+  it("keeps the cursor across a second store opened on the same file", async () => {
+    await process(Effect.flatMap(CursorStore, (store) => store.set("telegram", "99")))
+    // A second stack over the same file is what a restarted process sees.
+    const cursor = await process(Effect.flatMap(CursorStore, (store) => store.get("telegram")))
+    expect(cursor).toBe("99")
+  })
+
+  it("re-runs the migration against the existing file without losing the row", async () => {
+    const cursor = await process(Effect.flatMap(CursorStore, (store) => store.get("telegram")))
     expect(cursor).toBe("99")
   })
 })

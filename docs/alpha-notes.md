@@ -101,10 +101,10 @@ only.
 | `integrations` | `Linear live contract (LINEAR_API_KEY)` | `describe.skipIf(LINEAR_API_KEY === undefined)` |
 | `integrations` | `Telegram live contract (TELEGRAM_BOT_TOKEN)` | `describe.skipIf(TELEGRAM_BOT_TOKEN === undefined)` |
 
-**`integrations` — the three live contract suites.** Each one talks to a real
-vendor API — `api.github.com`, `api.linear.app`, `api.telegram.org` — and skips
-when its credential is absent, naming the variable in the suite title and in a
-comment above it. They exist because the fixture suites prove the clients'
+**`integrations`: the three live contract suites.** Each one talks to a real
+vendor API, `api.github.com`, `api.linear.app`, or `api.telegram.org`. Each
+skips when its credential is absent, naming the variable in the suite title and
+in a comment above it. They exist because the fixture suites prove the clients'
 behavior against a server this repository controls, and only a live call proves
 the wire contract those fixtures encode is still the one the vendor serves.
 What breaks if they regress: a provider changes a response shape, a header, or

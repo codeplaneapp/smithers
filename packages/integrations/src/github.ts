@@ -1,12 +1,19 @@
 /**
  * The GitHub integration surface.
  *
- * A narrow host layer: a REST client, a verified webhook channel, declared
- * webhook reconciliation, and payload schemas. Everything an application
- * builds on top of it is an Action or a Flow it writes itself.
+ * A narrow host layer plus the durable actions over it: a REST client, a
+ * verified webhook channel, declared webhook reconciliation, payload schemas,
+ * and the actions a flow calls. An application composes them into flows of its
+ * own and adds actions for the endpoints it needs.
  *
  * @since 1.0.0
  */
+
+/**
+ * @category actions
+ * @since 1.0.0
+ */
+export * as Actions from "./github/Actions.ts"
 
 /**
  * @category constructors
