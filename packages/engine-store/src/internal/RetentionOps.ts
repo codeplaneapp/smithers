@@ -16,9 +16,15 @@
  *   never a run row whose history is gone, or history whose run row is gone.
  * - **Terminal and aged only.** A run is a candidate only when its status is
  *   `completed`, `failed`, or `cancelled` AND it finished before the cutoff.
- *   A running, pending, or suspended run is never a candidate at any age, and
- *   an aged terminal run whose descendant is still live is retained: deleting
- *   it would leave that descendant's `parent_run_id` pointing at nothing.
+ *   A running, pending, or suspended run is never a candidate at any age.
+ * - **Nothing a live run still needs.** A candidate is retained when a live
+ *   run stands on either side of it in the lineage. Downward: an aged terminal
+ *   run whose descendant is still live stays, because deleting it would leave
+ *   that descendant's `parent_run_id` pointing at nothing. Upward: an aged
+ *   terminal run with a live ancestor stays, because a parent reads a settled
+ *   child's result out of its run row (`agent/await`) and a parent parked on
+ *   an approval, a deferred, or a timer can be parked for longer than the
+ *   threshold before it ever asks.
  * - **Explicit.** Nothing schedules this. Automatic retention stays opt-in,
  *   for the reason `ArtifactGc` states: deletion is the irreversible
  *   direction, and a human approving a plan must be approving the deletions.
@@ -98,7 +104,8 @@ export interface RetainOptions {
    * Largest number of runs one pass deletes. Defaults to
    * {@link defaultLimit}. Retention is idempotent, so a workspace with more
    * aged runs than the bound converges over repeated passes instead of
-   * holding one long write transaction open.
+   * holding one long write transaction open. A negative value is read as
+   * zero, so a pass under a mistyped bound deletes nothing.
    */
   readonly limit?: number | undefined
   /** Compute and report the pass without deleting anything. */
@@ -121,6 +128,14 @@ export interface RetainReport {
    * being deleted. They become collectable once that descendant is.
    */
   readonly retainedForLiveDescendants: ReadonlyArray<string>
+  /**
+   * Aged terminal runs left in place because an ancestor of theirs is not
+   * terminal. That ancestor can still read the run's settled result through
+   * `agent/await`, which answers out of the run row. They become collectable
+   * once the ancestor finishes and ages past the threshold. A run retained for
+   * both reasons is reported under {@link retainedForLiveDescendants}.
+   */
+  readonly retainedForLiveAncestors: ReadonlyArray<string>
   readonly runs: number
   readonly attempts: number
   readonly clockDeadlines: number
@@ -176,6 +191,15 @@ const chunkSize = 500
 
 /** The statuses a run can never leave. */
 const terminalStatuses = ["completed", "failed", "cancelled"]
+
+/**
+ * Generations the ancestor walk climbs before it stops. `parent_run_id` is
+ * acyclic in practice — a child row is inserted after the parent it names —
+ * but a recursive walk over a corrupt edge would not terminate, and this one
+ * runs inside the pass's write transaction. The bound is far above any real
+ * spawn depth, so it never changes which runs a healthy workspace collects.
+ */
+const maxAncestorDepth = 10_000
 
 /** Classifies a read of the scan phase, where nothing has been deleted yet. */
 const scanning = (what: string) => (cause: unknown): RetentionError =>
@@ -269,6 +293,41 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
           )
       )
 
+    /**
+     * Every candidate with an ancestor that is not terminal.
+     *
+     * `agent/await` answers out of the child's run row, so a live ancestor is
+     * a run that can still ask for a candidate's settled result — however long
+     * ago the candidate finished, and whether or not it has asked yet. The
+     * walk climbs `parent_run_id` from each candidate; the recursive read is
+     * SQLite-specific, like the `sqlite_master` probe above, and rc.0 is
+     * SQLite-only.
+     */
+    const liveAncestorsOf = (candidateIds: ReadonlyArray<string>) =>
+      Effect.reduce(
+        chunksOf(candidateIds),
+        (): Array<string> => [],
+        (accumulated, chunk) =>
+          sql<{ readonly run_id: string }>`
+            WITH RECURSIVE ancestry(run_id, ancestor_id, parent_run_id, status, depth) AS (
+              SELECT run_id, run_id, parent_run_id, status, 0
+                FROM flows_runs WHERE ${sql.in("run_id", chunk)}
+              UNION ALL
+              SELECT ancestry.run_id, parent.run_id, parent.parent_run_id, parent.status, ancestry.depth + 1
+                FROM ancestry JOIN flows_runs AS parent ON parent.run_id = ancestry.parent_run_id
+               WHERE ancestry.depth < ${maxAncestorDepth}
+            )
+            SELECT DISTINCT run_id FROM ancestry
+             WHERE ancestor_id <> run_id AND NOT (${sql.in("status", terminalStatuses)})
+          `.pipe(
+            Effect.map((rows) => {
+              for (const row of rows) accumulated.push(row.run_id)
+              return accumulated
+            }),
+            Effect.mapError(scanning("the run lineage"))
+          )
+      )
+
     const countIn = (table: string, column: string, ids: ReadonlyArray<string>) =>
       Effect.reduce(chunksOf(ids), () => 0, (total, chunk) =>
         sql<{ readonly total: number }>`
@@ -345,15 +404,24 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
 
     const pass = (options: RetainOptions, cutoffMs: number, hasArchive: boolean) =>
       Effect.gen(function*() {
-        const candidates = yield* candidatesOf(cutoffMs, options.limit ?? defaultLimit)
+        // Clamped, not interpolated: SQLite reads a negative `LIMIT` as no
+        // limit at all, which would make a mistyped bound a full sweep.
+        const candidates = yield* candidatesOf(cutoffMs, Math.max(0, options.limit ?? defaultLimit))
         const candidateIds = candidates.map((candidate) => candidate.runId)
         const parentOf = new Map(candidates.map((candidate) => [candidate.runId, candidate.parentRunId]))
         const doomed = new Set(candidateIds)
         const retained = new Set<string>()
+        const retainedAbove = new Set<string>()
         const candidateSet = new Set(candidateIds)
         for (const child of yield* childrenOf(candidateIds)) {
           if (candidateSet.has(child.runId)) continue
           pinAncestors(doomed, retained, parentOf, child.parentRunId)
+        }
+        // The upward direction. `pinAncestors` also covers the candidates
+        // between this one and its live ancestor, so the retained set stays
+        // closed under the foreign key whatever the walk's depth bound saw.
+        for (const runId of yield* liveAncestorsOf(candidateIds)) {
+          pinAncestors(doomed, retainedAbove, parentOf, runId)
         }
         // `candidateIds` is already oldest first, so the report reads in the
         // order the pass collected.
@@ -386,6 +454,7 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
           cutoffMs,
           runIds,
           retainedForLiveDescendants: Array.from(retained).sort(),
+          retainedForLiveAncestors: Array.from(retainedAbove).sort(),
           runs: runIds.length,
           ...counts,
           dryRun: options.dryRun === true

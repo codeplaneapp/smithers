@@ -295,6 +295,54 @@ describe("retention", () => {
       )
     ))
 
+  it.effect("keeps an aged terminal run whose ancestor is still live", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        const retain = yield* retention
+        const state = yield* DurableEngineState.DurableEngineState
+
+        // A live parent that spawned a child, and the child settled first.
+        // `agent/await` reads a child's result out of its run row, and a
+        // parent parked on an approval, a deferred, or a timer can be parked
+        // for longer than the retention threshold before it ever awaits. A
+        // pass that collects the child leaves that await with `notFound` and
+        // drops the parent's DAG edge with it.
+        yield* activate("live-parent")
+        yield* activate("finished-child", "live-parent")
+        yield* state.recordRunParent("finished-child", "live-parent")
+        yield* seedDependents("finished-child")
+        yield* finish("finished-child", "completed")
+
+        yield* TestClock.adjust(agingMs)
+        const first = yield* retain.retain({ olderThanMs: thresholdMs })
+
+        expect(first.runIds).toEqual([])
+        expect(first.retainedForLiveAncestors).toEqual(["finished-child"])
+        expect(first.runs).toBe(0)
+        const child = yield* footprint("finished-child")
+        expect(child.runs).toBe(1)
+        expect(child.journal).toBe(1)
+        expect(child.childEdges).toBe(1)
+        expect((yield* footprint("live-parent")).parentEdges).toBe(1)
+        expect(yield* statusOf("finished-child")).toBe("completed")
+
+        // The child becomes collectable when the parent that could still ask
+        // for it is finished and aged too.
+        yield* finish("live-parent", "completed")
+        yield* TestClock.adjust(agingMs)
+        const second = yield* retain.retain({ olderThanMs: thresholdMs })
+
+        expect([...second.runIds].sort()).toEqual(["finished-child", "live-parent"])
+        expect(second.retainedForLiveAncestors).toEqual([])
+        expect((yield* footprint("finished-child")).runs).toBe(0)
+        expect((yield* footprint("live-parent")).runs).toBe(0)
+      }).pipe(
+        Effect.provideService(Jj.Jj, jj),
+        Effect.provide(StepBoundary.layerTest()),
+        Effect.provide(stores)
+      )
+    ))
+
   it.effect("reports what it would delete under dryRun without deleting it", () =>
     withCrypto(
       Effect.gen(function*() {
@@ -352,6 +400,13 @@ describe("retention", () => {
           yield* finish(runId, "completed")
         }
         yield* TestClock.adjust(agingMs)
+
+        // A negative bound is read as zero, the way a negative age is. An
+        // interpolated `LIMIT -1` is unbounded in SQLite, so without the clamp
+        // a mistyped bound is a full sweep rather than a refused one.
+        const refused = yield* retain.retain({ olderThanMs: thresholdMs, limit: -1 })
+        expect(refused.runs).toBe(0)
+        expect(refused.runIds).toEqual([])
 
         const first = yield* retain.retain({ olderThanMs: thresholdMs, limit: 2 })
         const second = yield* retain.retain({ olderThanMs: thresholdMs, limit: 2 })
