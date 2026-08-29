@@ -50,6 +50,15 @@ try {
   assert.equal(reported.status, 0, reported.stderr)
   const fingerprint = JSON.parse(reported.stdout)
 
+  // The fingerprint refuses rather than guessing when the preflight has not
+  // run, and the refusal names what to do. Reading past it produces a
+  // `TypeError` on an absent field, which is the wrong sentence for an
+  // operator who simply has no build yet.
+  assert.deepEqual(
+    fingerprint.refusals ?? [],
+    [],
+    `the subject refused: ${(fingerprint.refusals ?? []).map((refusal) => refusal.message).join("; ")}`
+  )
   assert.ok(fingerprint.stamp.startsWith("sha256:"), "the fingerprint carries a content stamp")
 
   // Every path in the record is repository-relative. A fingerprint states which
