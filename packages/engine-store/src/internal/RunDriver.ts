@@ -318,9 +318,24 @@ export const make = (
      * the journal's own first-writer admission the deduplication — the same
      * mechanism the registration-time wake records use — so a repeated refusal
      * about an unchanged lease says nothing twice.
+     *
+     * The evidence is part of the address because one lease can be refused for
+     * two different reasons, and they are different records. A wake that
+     * arrives while the owner is still pulsing is refused by the lease alone
+     * (`lease-fresh`); the same owner, still alive but stalled past the
+     * window, is refused by the probe (`probe`). Addressing both to one key
+     * made the second write a different payload under the first one's address,
+     * which the journal rejects as `idempotency_conflict` — a defect that
+     * killed the drive fiber, dropped the probe refusal, and took down any
+     * `execute` joined to that run. One address per (run, owner, lease,
+     * evidence) keeps every reason sayable and still admits each of them once.
      */
-    const stealRefusedSourceId = (owner: Ownership.OwnerId, heartbeatAtMs: number | null): string =>
-      `${dependencies.journalSource}:steal-refused:${
+    const stealRefusedSourceId = (
+      owner: Ownership.OwnerId,
+      heartbeatAtMs: number | null,
+      evidence: "lease-fresh" | "probe"
+    ): string =>
+      `${dependencies.journalSource}:steal-refused:${evidence}:${
         JSON.stringify([owner.hostId, owner.pid, owner.nonce])
       }:${heartbeatAtMs}`
     const liveInstances = new Map<string, FlowRuntime.FlowInstance["Service"]>()
@@ -538,7 +553,7 @@ export const make = (
                 evidence: "lease-fresh",
                 expectedOwner: row.owner,
                 heartbeatAtMs: row.heartbeatAtMs
-              }, stealRefusedSourceId(row.owner, row.heartbeatAtMs))
+              }, stealRefusedSourceId(row.owner, row.heartbeatAtMs, "lease-fresh"))
             }
             yield* Effect.annotateCurrentSpan({ outcome: "heartbeat_fresh" })
             yield* Metric.update(EngineStoreMetrics.claim.HeartbeatFresh, 1)
@@ -555,7 +570,7 @@ export const make = (
               evidence: "probe",
               expectedOwner: row.owner,
               heartbeatAtMs: row.heartbeatAtMs
-            }, stealRefusedSourceId(row.owner, row.heartbeatAtMs))
+            }, stealRefusedSourceId(row.owner, row.heartbeatAtMs, "probe"))
             yield* Effect.annotateCurrentSpan({ outcome: "steal_refused_owner_alive" })
             yield* Metric.update(EngineStoreMetrics.claim.StealRefusedOwnerAlive, 1)
             yield* Effect.logDebug("run steal refused, recorded owner is alive", {

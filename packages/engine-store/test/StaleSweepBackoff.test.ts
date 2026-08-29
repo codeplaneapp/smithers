@@ -28,6 +28,7 @@ import * as Clock from "effect/Clock"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
@@ -139,6 +140,13 @@ const decisionsFor = (runId: string) =>
       .filter((entry) => entry.eventType === "flows.engine.run-decision")
       .map((entry) => (entry.payload as { readonly decision: string }).decision)
   })
+
+/** The `evidence` field of every refusal journaled for one run, in order. */
+const refusalEvidenceOf = (runId: string) =>
+  Effect.map(
+    refusalsOf(runId),
+    (entries) => entries.map((entry) => (entry.payload as { readonly evidence: string }).evidence)
+  )
 
 describe("the stale-running sweep backs off refused rows (B-04)", () => {
   it.effect("probes past the batch within two ticks and journals one refusal per lease", () =>
@@ -257,6 +265,77 @@ describe("the stale-running sweep backs off refused rows (B-04)", () => {
       expect(result.whileFresh).toBe(3)
       // The new stall is probed on the first tick that sees it.
       expect(result.afterNewLease).toBe(4)
+    }))
+
+  /**
+   * One lease can be refused for two different reasons, and both have to be
+   * sayable.
+   *
+   * A refusal is addressed by the run, the owner, and the lease it was refused
+   * against, so the journal's first-writer admission collapses repeats. That
+   * address left out WHY the steal was refused, and the two reasons carry
+   * different payloads: an owner whose heartbeat is still inside the window is
+   * refused by the lease alone (`lease-fresh`, no probe consulted), and the
+   * same owner, still alive but no longer pulsing, is refused by the probe
+   * (`probe`). A run woken while its owner was fresh and then swept once that
+   * owner stalled therefore wrote two different records to one address, which
+   * the journal rejects as `idempotency_conflict` — a defect, killing the
+   * drive fiber, losing the probe refusal, and taking down any `execute`
+   * joined to that run.
+   *
+   * The wake is the operator `resume` path, which is also the shape a signal
+   * completion and an `execute` join take.
+   */
+  it.effect("says why a lease was refused, so one lease can record both reasons", () =>
+    Effect.gen(function*() {
+      const logs: Array<string> = []
+      const capture = Logger.make((options) => {
+        logs.push(String(options.message))
+      })
+      const result = yield* run(
+        Effect.gen(function*() {
+          const store = yield* RunStore.RunStore
+          const driver = yield* RunDriver.make({
+            owner: { hostId: "sweep-host", pid: 1, nonce: "sweeper" },
+            journalSource: "stale-sweep-backoff",
+            // The owner never dies; it only stops pulsing. That is the whole
+            // point: the lease expires while the process is still there.
+            isAlive: () => Effect.succeed(true),
+            engine: Effect.succeed(fakeEngine)
+          })
+          yield* driver.register(TestFlow, () => Effect.succeed("never reached"))
+          const stalled: Ownership.OwnerId = { hostId: "live-host", pid: 424242, nonce: "stalled" }
+          yield* insertRunOwnedBy("contested", stalled, 0)
+
+          // Woken while the lease is still fresh: refused by the lease.
+          yield* driver.resume(TestFlow, "contested")
+          const afterWake = yield* refusalEvidenceOf("contested")
+
+          // The owner stalls on that same heartbeat until the lease expires,
+          // so the stale sweep arbitrates the SAME (run, owner, lease) with a
+          // probe instead.
+          yield* TestClock.adjust(staleAfterMs + heartbeatMs)
+          const afterSweep = yield* refusalEvidenceOf("contested")
+
+          // A caller joining the run must be told to wait, not be killed by
+          // the journal write the sweep just attempted.
+          const settled = yield* driver.execute(TestFlow, {
+            executionId: "contested",
+            payload: {},
+            discard: false
+          })
+          return { afterWake, afterSweep, settled, row: yield* store.get("contested") }
+        }).pipe(Effect.provide(Logger.layer([capture])))
+      )
+
+      expect(result.afterWake).toEqual(["lease-fresh"])
+      // Both reasons survive: the lease refusal the operator's resume hit, and
+      // the probe refusal that answered for the stalled owner.
+      expect(result.afterSweep).toEqual(["lease-fresh", "probe"])
+      // Nothing was stolen, and the join was answered rather than killed.
+      expect(result.row.status).toBe("running")
+      expect(result.settled).toBeInstanceOf(Flow.Suspended)
+      expect(logs.filter((message) => message.includes("coordinated drain failed"))).toEqual([])
     }))
 })
 
