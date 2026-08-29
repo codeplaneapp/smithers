@@ -46,7 +46,7 @@ When the report names a verification command the project does not really run, co
 
 One unit at a time, in this order: dependencies, then one unit per workflow file in dependency order, then one per integration, then the project itself. Each unit takes a checkpoint, rewrites, and verifies with the project's own install, format, typecheck, test, and flow-discovery commands. A unit that fails is handed back to the agent with the failing output up to `--max-repair-rounds` times, and then restored from its checkpoint and recorded as failed. The run continues.
 
-Migrated flows land in `flows/<name>/flow.ts`. The sources the migration replaced move to `.smithers-migrate/archive/<original path>`. The files a 1.0 project keeps — `package.json`, `tsconfig*.json`, `.gitignore` — are rewritten where they are and never moved.
+Migrated flows land in `flows/<name>/flow.ts`. The sources the migration replaced move to `.smithers-migrate/archive/<original path>`. The files a 1.0 project keeps (`package.json`, `tsconfig*.json`, `.gitignore`) are rewritten where they are and never moved.
 
 A unit may write only the files it declared. The tool digests the whole tree before the unit starts and compares afterwards, so a write outside that set fails the unit and is named in the report whether or not the agent mentioned it.
 

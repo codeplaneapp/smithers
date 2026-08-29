@@ -185,7 +185,7 @@ export function lockStatus(home, now = Date.now(), pidAlive = processIsAlive) {
 }
 function journalSignature(path) {
   // Revision guard for the journal: writeState replaces via rename, so any
-  // rewrite — even byte-identical (ABA) — yields a new inode/mtime.
+  // rewrite yields a new inode and mtime, even a byte-identical (ABA) one.
   try { const s = statSync(path); return `${s.ino}:${s.mtimeMs}:${s.size}`; } catch (error) { if (error.code !== "ENOENT") throw error; return null; }
 }
 export function statusSnapshot(home) {
