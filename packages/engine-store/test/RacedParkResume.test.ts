@@ -14,9 +14,11 @@
  * stores (`TestStores.layerAt`).
  */
 import { describe, expect, it } from "@effect/vitest"
+import { FlowEngine } from "@smthrs/engine"
 import { Action, DurableClock, DurableDeferred, Flow, FlowRuntime, HumanTask, Interpreter } from "@smthrs/flow"
+import { Journal } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
-import { AttemptStore, RunStore } from "@smthrs/run-store"
+import { AttemptStore, type Ownership, RunStore } from "@smthrs/run-store"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -24,6 +26,8 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as EngineStore from "../src/EngineStore.ts"
+import * as ActionPersistence from "../src/internal/ActionPersistence.ts"
+import * as EffectRecords from "../src/internal/EffectRecords.ts"
 import * as StepBoundary from "../src/StepBoundary.ts"
 import * as TestStores from "../src/test/TestStores.ts"
 import { opaqueHandlerBody } from "./fixtures/OpaqueHandlerBody.ts"
@@ -224,4 +228,85 @@ describe("HumanTask.timeoutMs on the durable engine", () => {
         })
       })
     ))
+})
+
+/**
+ * A park is not a settlement at the EFFECT BOUNDARY either.
+ *
+ * The terminal boundary record says an irreversible or compensable effect
+ * finished and names what nobody can testify to (`unknown`). A parked dispatch
+ * has not finished: the attempt row deliberately stays `running` so the next
+ * drive re-enters the same attempt. Writing `unknown` for the park closed a
+ * boundary that is still open, and made a routine park-and-resume read
+ * `intended, unknown, succeeded` in the journal a rewind classifies the doomed
+ * suffix from.
+ */
+const boundaryStatuses = (runId: string) =>
+  Effect.gen(function*() {
+    const journal = yield* Journal.Journal
+    yield* journal.flush
+    const page = yield* journal.entries({ runId: runId as never, limit: 50 })
+    return page.entries
+      .filter((entry) => entry.eventType === EffectRecords.eventType)
+      .map((entry) => (entry.payload as { readonly effect: { readonly status: string } }).effect.status)
+  })
+
+const ParkedIrreversible = Flow.make("RacedParkResume/Irreversible", {
+  payload: {},
+  success: Schema.String,
+  body: opaqueHandlerBody
+})
+
+const boundaryOwner: Ownership.OwnerId = { hostId: "raced-park-boundary", pid: 1, nonce: "owner" }
+
+/** Dispatches one irreversible action under an owned, active run row. */
+const dispatchIrreversible = (runId: string, execute: () => Effect.Effect<unknown, unknown>) =>
+  Effect.gen(function*() {
+    const runs = yield* RunStore.RunStore
+    const existing = yield* Effect.option(runs.get(runId))
+    if (Option.isNone(existing)) {
+      yield* runs.create(runId, "{}")
+      const pending = yield* runs.get(runId)
+      const snapshot = { status: pending.status, owner: pending.owner, heartbeatAtMs: pending.heartbeatAtMs }
+      const claim = yield* runs.claim(runId, snapshot, boundaryOwner, 1)
+      if (claim._tag !== "Claimed") return yield* Effect.die(new Error("claim lost"))
+      yield* runs.activate(runId, boundaryOwner, claim.claimedAtMs, snapshot)
+    }
+    return yield* Effect.exit(
+      ActionPersistence.make({
+        runId,
+        owner: boundaryOwner,
+        sourceId: "raced-park-boundary",
+        execute
+      })({ action: { name: "billing/Charge" }, attempt: 1, key: `${runId}-key`, tier: "irreversible" })
+    )
+  })
+
+describe("an irreversible dispatch that parks", () => {
+  it.effect("leaves its effect boundary open, and closes it when the resumed attempt settles", () =>
+    provide(Effect.scoped(Effect.gen(function*() {
+      const instance = FlowEngine.makeInstance(ParkedIrreversible as never, "boundary-park")
+      const parked = yield* dispatchIrreversible("boundary-park", () =>
+        Effect.gen(function*() {
+          // What `Flow.suspend` does: mark the instance, then end the fiber by
+          // self-interruption.
+          instance.suspended = true
+          return yield* Effect.interrupt
+        })).pipe(Effect.provideService(FlowRuntime.FlowInstance, instance))
+      const afterPark = yield* boundaryStatuses("boundary-park")
+
+      instance.suspended = false
+      const settled = yield* dispatchIrreversible("boundary-park", () => Effect.succeed("receipt")).pipe(
+        Effect.provideService(FlowRuntime.FlowInstance, instance)
+      )
+      const afterResume = yield* boundaryStatuses("boundary-park")
+
+      expect(Exit.isFailure(parked)).toBe(true)
+      expect(afterPark).toEqual(["intended"])
+      expect(Exit.isSuccess(settled)).toBe(true)
+      // One crossing, one intent, one settlement: the re-drive re-emits the
+      // same `intended` record under the same attempt id, which the lifecycle
+      // emit keeps at one row.
+      expect(afterResume).toEqual(["intended", "succeeded"])
+    }))))
 })

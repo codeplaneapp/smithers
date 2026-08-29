@@ -1645,6 +1645,18 @@ export const make = (deps: Dependencies) => {
               ...(snapshotId === undefined ? {} : { changeId: snapshotId })
             } satisfies EffectRecords.Descriptor
             : undefined
+          /**
+           * Whether a failing exit ends this dispatch in a durable PARK rather
+           * than a settlement (N-08). A body that reaches a wait point marks
+           * its instance suspended and interrupts, so an interrupt-only exit
+           * under a suspended instance is a run that parked. Both the effect
+           * boundary and the attempt row read it: a park closes neither.
+           */
+          const parked = (cause: Cause.Cause<unknown>) =>
+            Effect.map(
+              Effect.serviceOption(FlowRuntime.FlowInstance),
+              (instance) => Option.getOrUndefined(instance)?.suspended === true && Cause.hasInterruptsOnly(cause)
+            )
           const dispatch = effect === undefined
             ? deps.execute(input)
             : Effect.uninterruptibleMask((restore) =>
@@ -1653,7 +1665,17 @@ export const make = (deps: Dependencies) => {
                 const exit = yield* Effect.exit(restore(deps.execute(input)))
                 yield* Exit.isSuccess(exit)
                   ? emitLifecycle(EffectRecords.boundary(effect, "succeeded", exit.value))
-                  : Effect.ignore(emitLifecycle(EffectRecords.boundary(effect, "unknown")))
+                  // A park leaves the boundary OPEN. The terminal record says
+                  // the effect finished and nobody can testify to how; a parked
+                  // dispatch has not finished, and the next drive re-enters the
+                  // SAME attempt. Writing it here made a routine park and
+                  // resume read `intended, unknown, intended, succeeded` in the
+                  // journal a rewind classifies a doomed suffix from.
+                  : Effect.flatMap(
+                    parked(exit.cause),
+                    (isPark) =>
+                      isPark ? Effect.void : Effect.ignore(emitLifecycle(EffectRecords.boundary(effect, "unknown")))
+                  )
                 return yield* exit
               })
             )
@@ -1682,10 +1704,7 @@ export const make = (deps: Dependencies) => {
              * in-progress state the attempt store admits, so a later settlement
              * of this attempt is an ordinary fenced `finish`.
              */
-            const parkedInstance = Option.getOrUndefined(
-              yield* Effect.serviceOption(FlowRuntime.FlowInstance)
-            )
-            if (parkedInstance?.suspended === true && Cause.hasInterruptsOnly(outcome.cause)) {
+            if (yield* parked(outcome.cause)) {
               return yield* Effect.failCause(outcome.cause)
             }
             const finishedAtMs = yield* Clock.currentTimeMillis
