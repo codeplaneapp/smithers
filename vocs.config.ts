@@ -15,6 +15,11 @@ export default defineConfig({
     "Smithers is an Effect-based durable-execution engine: typed flows that replay from a journal, content-addressed action results, capability-checked host access, read-only sync, and time travel over run history.",
   srcDir: "docs",
   outDir: "docs/dist",
+  // The deploy target is a static host, so the build must emit HTML per route
+  // rather than the SSR server bundle vocs produces by default. Under the
+  // default `dynamic` strategy `docs/dist` holds `serve-node.js` and no
+  // `index.html`, and uploading it to Pages publishes a directory listing.
+  renderStrategy: "full-static",
   sidebar: [
     { text: "Introduction", link: "/" },
     { text: "Installation", link: "/installation" },

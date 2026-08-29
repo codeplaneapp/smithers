@@ -237,7 +237,10 @@ export const build = (): { readonly artifacts: Map<string, string>; readonly rep
     "",
     "## The whole thing in one file",
     "",
-    "Read [/llms-full.txt](/llms-full.txt). It contains every section below.",
+    // A file reference, not a site path. This index ships beside its siblings in
+    // three places (`docs/`, `packages/cli/docs/`, `skills/smithers/`), and the
+    // site's own `/llms-full.txt` is a different document that vocs generates.
+    "Read `llms-full.txt` beside this file. It contains every section below.",
     "",
     "## Sections",
     "",
@@ -255,7 +258,7 @@ export const build = (): { readonly artifacts: Map<string, string>; readonly rep
     "",
     "- npm: @smthrs/cli, @smthrs/flow, @smthrs/engine, @smthrs/flows",
     "- github: github.com/smithersai/smithers",
-    "- The Smithers 0.x changelogs are on the site under /changelogs and are not part of these bundles.",
+    "- The Smithers 0.x changelogs are on the site at smithers.sh/changelogs and are not part of these bundles.",
     ""
   ].join("\n")
 

@@ -5,7 +5,7 @@ Version: 1.0.0-rc.0
 
 ## The whole thing in one file
 
-Read /llms-full.txt. It contains every section below.
+Read `llms-full.txt` beside this file. It contains every section below.
 
 ## Sections
 
@@ -28,4 +28,4 @@ Read /llms-full.txt. It contains every section below.
 
 - npm: @smthrs/cli, @smthrs/flow, @smthrs/engine, @smthrs/flows
 - github: github.com/smithersai/smithers
-- The Smithers 0.x changelogs are on the site under /changelogs and are not part of these bundles.
+- The Smithers 0.x changelogs are on the site at smithers.sh/changelogs and are not part of these bundles.
