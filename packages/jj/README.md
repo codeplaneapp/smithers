@@ -59,6 +59,15 @@ const program = Effect.gen(function*() {
 Effect.runPromise(program)
 ```
 
+`snapshot(message)` describes the current change with that message and then
+opens a fresh one. With no message it takes the snapshot and leaves the
+description alone: it runs no `jj describe` at all, because `jj describe`
+without `-m` starts `$JJ_EDITOR` and waits for it, and because `-m ""` would
+erase a description the caller never asked to change. The change id still
+comes back, since every jj command snapshots the working copy first.
+`packages/jj/test/NodeJj.test.ts` pins that with a marker editor on
+`JJ_EDITOR`.
+
 The tag key and the error `_tag` are durable identity: step keys digest the
 resolved service set and `JjError` round-trips through the journal, so
 renaming either invalidates recorded runs.

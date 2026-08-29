@@ -8,12 +8,13 @@
  * for a program that has no spawner to offer, so what has to be true of it is
  * narrower and provable — a cancelled invocation leaves no `jj` behind.
  *
- * `jj` is short-lived and starts no long-lived children of its own (every
- * command this layer runs writes to a pipe, so jj starts no pager), which is
- * why signalling the process the layer holds is enough here. A host that wants
- * a process GROUP killed composes `layerSpawner` under a contained spawner
- * instead; `@smthrs/platform-node`'s `NodeHostContainment` suite pins that
- * side.
+ * `jj` is short-lived and starts no long-lived children of its own, which is
+ * why signalling the process the layer holds is enough here: every command
+ * this layer runs writes to a pipe, so jj starts no pager, and none of them
+ * opens an editor, which `packages/jj/test/NodeJj.test.ts` pins with a marker
+ * on `JJ_EDITOR`. A host that wants a process GROUP killed composes
+ * `layerSpawner` under a contained spawner instead; `@smthrs/platform-node`'s
+ * `NodeHostContainment` suite pins that side.
  *
  * The `jj` under test is a shim on `PATH`: a real `jj` command finishes far
  * too quickly to be cancelled, and the subject is the cancellation, not jj.

@@ -44,9 +44,12 @@ describe("child-process containment conformance", () => {
       "jj/src/node/NodeJj.ts",
       "The self-spawning `layer`, for a program that has no spawner to offer. "
       + "Bounded: every command is short-lived, writes to a pipe so jj starts no pager, "
+      + "opens no editor (`snapshot` passes `-m` or runs no `describe`, because "
+      + "`jj describe` without `-m` starts `$JJ_EDITOR` and waits for it), "
       + "and is held by the handle the invocation started, so a cancel signals it "
-      + "(`packages/jj/test/NodeJjLifetime.test.ts`). A host that wants the process GROUP "
-      + "contained composes `layerSpawner` instead, which is what `NodeHost.layerContained` does."
+      + "(`packages/jj/test/NodeJjLifetime.test.ts`, `packages/jj/test/NodeJj.test.ts`). "
+      + "A host that wants the process GROUP contained composes `layerSpawner` instead, "
+      + "which is what `NodeHost.layerContained` does."
     ],
     [
       "platform-node/src/AtomicFileSystem.ts",
