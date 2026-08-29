@@ -6,9 +6,9 @@
  * @since 0.1.0
  */
 import { Context, Effect, Layer } from "effect"
-import type { LaunchFailed } from "./ControlError.ts"
+import type { LaunchFailed, PersistenceError } from "./ControlError.ts"
 import type { StoredPlan } from "./ControlRuntime.ts"
-import type { RunSummary } from "./ControlSchema.ts"
+import type { RunId, RunSummary, SignalPayload } from "./ControlSchema.ts"
 
 /**
  * One stored plan and the run summary it is being started as.
@@ -32,8 +32,71 @@ export interface Launch {
 export type Acceptance = "accepted" | "pending"
 
 /**
- * The acceptance port: the control plane hands a launch over and learns
- * only whether it was accepted.
+ * One run whose cancellation has to become durable on the engine row.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface CancelRequest {
+  readonly runId: RunId
+}
+
+/**
+ * What the executor did with a cancel request.
+ *
+ * `recorded` means `cancel_requested_at_ms` is set on the engine row — by this
+ * call or by an earlier one — so the owning process stops the run at its next
+ * cancel poll whichever process asked. `unknown` means this executor's engine
+ * has no row for the run at all, which is the honest answer for a run another
+ * composition launched into a database this one does not share.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export type CancelRecord = "recorded" | "unknown"
+
+/**
+ * One signal to deliver to a run's open wait point.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface Signal {
+  readonly runId: RunId
+  readonly signal: SignalPayload
+}
+
+/**
+ * What the executor did with a signal.
+ *
+ * `delivered` means the `WaitFor` deferred the run is parked on was completed
+ * with the signal's payload and the run was woken. `no-match` means the run IS
+ * parked and is waiting for something else, which `Control.signal` refuses
+ * rather than recording a delivery nothing consumes. `unknown` means this
+ * executor is driving no execution for the run at all — another process may
+ * be, or none is yet — so the recorded message is the whole delivery and the
+ * executor that eventually drives the run replays it at its next start.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export type SignalDelivery = "delivered" | "no-match" | "unknown"
+
+/**
+ * The executor port: the control plane hands work over to a real run executor
+ * and learns only what the executor did with it.
+ *
+ * `launch` is acceptance. `requestCancel` and `deliverSignal` are the two
+ * requests that have to reach the engine to mean anything: a cancel is durable
+ * on the engine row so that whichever process owns the run stops it, and a
+ * signal completes the wait point a parked run is actually waiting on. Without
+ * them the control plane records facts nobody reads — a cancel that answers
+ * `ClaimLost` to every process but the owner, and a signal a parked run never
+ * sees (rc-contract §5.1; triage B-10, B-13).
  *
  * @category services
  * @since 0.1.0
@@ -41,6 +104,15 @@ export type Acceptance = "accepted" | "pending"
  */
 export interface Service {
   readonly launch: (input: Launch) => Effect.Effect<Acceptance, LaunchFailed>
+  /**
+   * Records a cancellation on the engine row, durably, regardless of which
+   * process owns the run.
+   */
+  readonly requestCancel: (input: CancelRequest) => Effect.Effect<CancelRecord, PersistenceError>
+  /**
+   * Completes the run's open `WaitFor` wait point with the signal's payload.
+   */
+  readonly deliverSignal: (input: Signal) => Effect.Effect<SignalDelivery, PersistenceError>
 }
 
 /**
@@ -55,7 +127,7 @@ export class ControlExecutor extends Context.Service<ControlExecutor, Service>()
 ) {}
 
 /**
- * Builds a {@link Service} from an implementation of its one method.
+ * Builds a {@link Service} from an implementation of its methods.
  *
  * @category constructors
  * @since 0.1.0
@@ -74,6 +146,12 @@ export const make = (implementation: Service): Service => ControlExecutor.of(imp
 export const makeNoop = (overrides: Partial<Service> = {}): Service =>
   make({
     launch: Effect.fn("ControlExecutor.launch")(() => Effect.succeed("pending" as const)),
+    // An executor that starts nothing owns no engine row and no wait point, so
+    // it records no cancel and matches no signal. `Control.cancel` still writes
+    // its journal entry and interrupts a local fiber, and `Control.signal`
+    // still records the message: both are what the port's absence already did.
+    requestCancel: Effect.fn("ControlExecutor.requestCancel")(() => Effect.succeed("unknown" as const)),
+    deliverSignal: Effect.fn("ControlExecutor.deliverSignal")(() => Effect.succeed("unknown" as const)),
     ...overrides
   })
 

@@ -318,7 +318,7 @@ describe("ControlLive executor acceptance", () => {
       }),
       live({
         runtime: memoryRuntime({ flows }),
-        executor: ControlExecutor.make({
+        executor: ControlExecutor.makeNoop({
           launch: Effect.fn("RefusingExecutor.launch")(({ run }) =>
             Effect.fail(new LaunchFailed({ runId: run.runId, message: "no capacity" }))
           )
@@ -346,7 +346,7 @@ describe("ControlLive executor acceptance", () => {
       }),
       live({
         runtime: memoryRuntime({ flows }),
-        executor: ControlExecutor.make({
+        executor: ControlExecutor.makeNoop({
           launch: Effect.fn("AcceptingExecutor.launch")(({ plan, run }) =>
             Effect.sync(() => {
               accepted.push(`${plan.card.planId}:${run.runId}`)

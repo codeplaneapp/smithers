@@ -1136,12 +1136,19 @@ export const make_ = (
       }),
       interrupt: Effect.fn("SqlControlRuntime.interrupt")(function*(runId: RunId) {
         const row = yield* requireRow(runId)
+        const summary = summaryOf(row)
+        // Terminality is asked FIRST, as `resume` asks it. A settled run has
+        // released its owner, so `ownedByUs` is false for every process
+        // including the one that ran it, and asking ownership first answered
+        // `ClaimLost` — "somebody else has it" — for a run that had simply
+        // finished. Its caller has a `Terminal` receipt for exactly this.
+        if (terminal(summary.status)) return summary
         if (!ownedByUs(row)) return yield* new ClaimLost({ runId })
         const fiber = fibers.get(runId)
         // Cancellation is fiber interruption, not a flag anyone polls.
         if (fiber !== undefined) yield* Fiber.interrupt(fiber)
         fibers.delete(runId)
-        return yield* transition(runId, row.owner, summaryOf(row), "cancelled")
+        return yield* transition(runId, row.owner, summary, "cancelled")
       }),
       resume: Effect.fn("SqlControlRuntime.resume")(function*(
         runId: RunId,

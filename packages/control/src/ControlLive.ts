@@ -19,10 +19,11 @@ import {
   type SteerInput
 } from "./Control.ts"
 import {
-  type ClaimLost,
+  ClaimLost,
   type ControlError,
   type EnvelopeMismatch,
   type LaunchFailed,
+  NoMatchingWait,
   PersistenceError,
   type PlanDigestMismatch,
   type RunNotFound,
@@ -201,10 +202,46 @@ export const layer: Layer.Layer<
             })
           )
           yield* runtime.resolveApproval(token, decision, principal)
-          return accepted(input.idempotencyKey, input.target._tag === "Node" ? input.target.runId : undefined)
+          if (input.target._tag === "Plan") return accepted(input.idempotencyKey)
+          // A decision on a node target has to restart the run the ask parked,
+          // in this call. The executor re-drives a parked execution only when
+          // it sees a resume event, so answering without one left the run in
+          // `waiting-approval` until a second call arrived — and a denial the
+          // run never learns about is a denial that decided nothing.
+          //
+          // The claim is scoped to runs this plane launched, for the same
+          // reason `Control.resume` scopes it: a run another driver owns keeps
+          // its owner, and the journal entry is what reaches it.
+          const runId = input.target.runId
+          const resumed = yield* runtime.resume(runId, { scope: "launched" }).pipe(
+            Effect.catchTag("/control/ClaimLost", () => Effect.succeed(undefined)),
+            Effect.catchTag("/control/RunNotFound", () => Effect.succeed(undefined))
+          )
+          yield* emit(runId, "control.run.resumed", {
+            runId,
+            ...(resumed === undefined ? {} : { status: resumed.status })
+          })
+          return accepted(input.idempotencyKey, runId)
         })
       )
 
+    /**
+     * Restarts a parked run, by claiming it or by asking whoever owns it.
+     *
+     * A run this plane launched is this plane's to claim, and `scope:
+     * "launched"` is how the runtime is told to check. A run the ENGINE created
+     * — a child, a fork, a trampoline round — has its own driver, and claiming
+     * it here overwrote the engine's `state_json` and owner columns with a
+     * control-plane summary, after which that driver's `scheduleResume` no
+     * longer recognized the row: the run stayed suspended with its waiting
+     * reason set and its execution never returned (control-plane example 38).
+     *
+     * The journal entry is the delegation. It is written either way, and the
+     * owning driver's resume bridge follows it, so the intent reaches the run
+     * without this plane taking the row away from the process that can act on
+     * it. A run that is RUNNING under a live peer is still `ClaimLost`: there
+     * is nothing to restart, and pretending otherwise would hide the peer.
+     */
     const runMutation = (
       input: RunMutationInput
     ): Effect.Effect<Receipt, RunNotFound | ClaimLost | PersistenceError> =>
@@ -213,12 +250,23 @@ export const layer: Layer.Layer<
         input.idempotencyKey,
         fingerprint("resume", input),
         Effect.gen(function*() {
-          const run = yield* runtime.resume(input.runId)
+          const current = yield* runtime.getRun(input.runId)
+          if (terminal(current.status)) {
+            return { _tag: "Terminal", runId: current.runId, status: current.status }
+          }
+          const claimed = yield* runtime.resume(input.runId, { scope: "launched" }).pipe(
+            Effect.catchTag("/control/ClaimLost", () =>
+              current.status === "running"
+                ? Effect.fail(new ClaimLost({ runId: input.runId }))
+                : Effect.succeed(undefined))
+          )
           yield* emit(input.runId, "control.run.resume", {
             runId: input.runId,
-            status: run.status
+            status: (claimed ?? current).status
           })
-          return terminalOrAccepted(input.idempotencyKey, run)
+          return claimed === undefined
+            ? accepted(input.idempotencyKey, input.runId)
+            : terminalOrAccepted(input.idempotencyKey, claimed)
         })
       )
 
@@ -247,6 +295,19 @@ export const layer: Layer.Layer<
      * steer itself is already durable in the notification queue, so the
      * owning driver delivers it at the run's next boundary.
      */
+    /**
+     * Makes a cancellation durable on the engine row through the executor.
+     *
+     * Absent executor, absent engine: the composition runs nothing, so there is
+     * no row to write and the local interrupt is the whole cancel. An executor
+     * that answers `unknown` has an engine that never heard of the run, which
+     * is the same situation with a different messenger.
+     */
+    const executorRequestCancel = (runId: RunId): Effect.Effect<void, PersistenceError> =>
+      Option.isNone(executor)
+        ? Effect.void
+        : Effect.asVoid(executor.value.requestCancel({ runId }))
+
     const wake = (
       run: RunSummary,
       messageId: string
@@ -620,20 +681,50 @@ export const layer: Layer.Layer<
         )
       ),
       signal: Effect.fn("Control.signal")((input: SignalInput) =>
-        mutate(
-          "signal",
-          input.idempotencyKey,
-          fingerprint("signal", input),
-          Effect.gen(function*() {
-            yield* runtime.deliverSignal(input.runId, input.signal)
-            yield* emit(input.runId, "control.signal.delivered", {
-              runId: input.runId,
-              name: input.signal.name,
-              payload: input.signal.payload
+        Effect.gen(function*() {
+          const key = fingerprint("signal", input)
+          // The idempotency lookup runs first and outside the mutation, because
+          // delivery has to happen before the record and a re-sent signal must
+          // answer with its original receipt rather than be matched against a
+          // wait point its own first delivery already closed.
+          const prior = yield* runtime.lookupMutation(`signal:${input.idempotencyKey}`, key)
+          if (prior !== undefined) {
+            return prior._tag === "AlreadyApplied" ? { ...prior, receiptId: input.idempotencyKey } : prior
+          }
+          const current = yield* runtime.getRun(input.runId)
+          if (terminal(current.status)) {
+            return { _tag: "Terminal", runId: current.runId, status: current.status }
+          }
+          // Delivery decides the receipt, and it runs OUTSIDE the mutation's
+          // write transaction: completing a wait point re-drives the run, and
+          // the engine's own deferred completion flushes the journal on its way
+          // out — a flush that waits on the writer this transaction would be
+          // holding. A crash between delivery and record leaves the run awake
+          // with no control record, which is the survivable half of the pair.
+          const delivery = Option.isNone(executor)
+            ? "unknown" as const
+            : yield* executor.value.deliverSignal({ runId: input.runId, signal: input.signal })
+          // The run is parked, and parked on something else. Recording a
+          // delivery here would leave an operator watching a signal that never
+          // lands, which is exactly the partial behavior rc.0 forbids.
+          if (delivery === "no-match") {
+            return yield* new NoMatchingWait({ runId: input.runId, name: input.signal.name })
+          }
+          return yield* mutate(
+            "signal",
+            input.idempotencyKey,
+            key,
+            Effect.gen(function*() {
+              yield* runtime.deliverSignal(input.runId, input.signal)
+              yield* emit(input.runId, "control.signal.delivered", {
+                runId: input.runId,
+                name: input.signal.name,
+                payload: input.signal.payload
+              })
+              return accepted(input.idempotencyKey, input.runId)
             })
-            return accepted(input.idempotencyKey, input.runId)
-          })
-        )
+          )
+        })
       ),
       cancel: Effect.fn("Control.cancel")((input) =>
         mutate(
@@ -641,7 +732,13 @@ export const layer: Layer.Layer<
           input.idempotencyKey,
           fingerprint("cancel", input),
           Effect.gen(function*() {
-            yield* runtime.getRun(input.runId)
+            const current = yield* runtime.getRun(input.runId)
+            // A run that has already settled cannot be cancelled, and a cancel
+            // request journaled against it would be a request nothing can ever
+            // act on. Answer with what actually happened to the run.
+            if (terminal(current.status)) {
+              return { _tag: "Terminal", runId: current.runId, status: current.status }
+            }
             const principal = yield* runtime.stampPrincipal(input.principal)
             // Attribution first, and in the mutation's own transaction. A
             // cancellation that committed without it would be durable and
@@ -656,8 +753,28 @@ export const layer: Layer.Layer<
                 ...(input.reason === undefined ? {} : { reason: input.reason })
               })
             )
-            const run = yield* runtime.interrupt(input.runId)
-            return terminalOrAccepted(input.idempotencyKey, run)
+            // The durable half, and the only half that reaches a run another
+            // process owns: fibers are process-local, so an interrupt can only
+            // stop a run this process is driving. The executor writes
+            // `cancel_requested_at_ms` on the engine row instead, and the
+            // owner's cancel poll acts on it within a heartbeat.
+            //
+            // It runs INSIDE the mutation's transaction on purpose. An engine
+            // that refuses the request rolls the whole cancel back — no
+            // attribution event, no terminal control status — because a
+            // control row that says `cancelled` while the engine row is still
+            // running is the one state an operator can never recover from.
+            yield* executorRequestCancel(input.runId)
+            const run = yield* runtime.interrupt(input.runId).pipe(
+              // Another live process owns the run. The request is durable and
+              // that process will act on it, so the honest receipt is
+              // `Accepted` — the cancel was taken — rather than `ClaimLost`,
+              // which reads as a refusal.
+              Effect.catchTag("/control/ClaimLost", () => Effect.succeed(undefined))
+            )
+            return run === undefined
+              ? accepted(input.idempotencyKey, input.runId)
+              : terminalOrAccepted(input.idempotencyKey, run)
           })
         )
       ),

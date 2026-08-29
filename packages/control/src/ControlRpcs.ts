@@ -12,6 +12,7 @@ import {
   FlowNotFound,
   InvalidInput,
   LaunchFailed,
+  NoMatchingWait,
   PersistenceError,
   PlanDigestMismatch,
   RunNotFound,
@@ -164,7 +165,7 @@ export const ControlRpcs = RpcGroup.make(
   Rpc.make("Signal", {
     payload: SignalInput,
     success: Receipt,
-    error: Schema.Union([RunNotFound, PersistenceError, Unavailable])
+    error: Schema.Union([RunNotFound, NoMatchingWait, PersistenceError, Unavailable])
   }),
   Rpc.make("Cancel", { payload: CancelInput, success: Receipt, error: mutationErrors }),
   Rpc.make("Resume", { payload: RunMutationInput, success: Receipt, error: mutationErrors }),
@@ -183,7 +184,8 @@ export const ControlRpcs = RpcGroup.make(
       Unavailable,
       TransportError,
       PersistenceError,
-      LaunchFailed
+      LaunchFailed,
+      NoMatchingWait
     ])
   }),
   Rpc.make("Watch", {
@@ -201,7 +203,8 @@ export const ControlRpcs = RpcGroup.make(
       Unavailable,
       TransportError,
       PersistenceError,
-      LaunchFailed
+      LaunchFailed,
+      NoMatchingWait
     ]),
     stream: true
   })

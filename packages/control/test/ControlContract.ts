@@ -334,7 +334,7 @@ export const contract = (name: string, harness: Harness): void => {
 
     it("reports running only after a real executor accepts the launch", async () => {
       const invoked: Array<string> = []
-      const executor = ControlExecutor.make({
+      const executor = ControlExecutor.makeNoop({
         launch: Effect.fn("ContractExecutor.launch")(({ run }) =>
           Effect.sync(() => {
             invoked.push(run.runId)

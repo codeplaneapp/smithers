@@ -12,6 +12,7 @@ import type {
   FlowNotFound,
   InvalidInput,
   LaunchFailed,
+  NoMatchingWait,
   PersistenceError,
   PlanDigestMismatch,
   RunNotFound,
@@ -169,7 +170,9 @@ export interface Service {
     PlanDigestMismatch | EnvelopeMismatch | AlreadyResolved | RunNotFound | PersistenceError | Unavailable
   >
   readonly steer: (input: SteerInput) => Effect.Effect<Receipt, RunNotFound | PersistenceError | Unavailable>
-  readonly signal: (input: SignalInput) => Effect.Effect<Receipt, RunNotFound | PersistenceError | Unavailable>
+  readonly signal: (
+    input: SignalInput
+  ) => Effect.Effect<Receipt, RunNotFound | NoMatchingWait | PersistenceError | Unavailable>
   readonly cancel: (
     input: RunMutationInput
   ) => Effect.Effect<Receipt, RunNotFound | ClaimLost | PersistenceError | Unavailable>

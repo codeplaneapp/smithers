@@ -15,6 +15,7 @@ import {
   FlowNotFound,
   InvalidInput,
   LaunchFailed,
+  NoMatchingWait,
   PersistenceError,
   PlanDigestMismatch,
   RunNotFound,
@@ -44,7 +45,8 @@ export const isControlError = Schema.is(Schema.Union([
   Unavailable,
   TransportError,
   PersistenceError,
-  LaunchFailed
+  LaunchFailed,
+  NoMatchingWait
 ]))
 
 const transportError = (error: unknown): TransportError =>

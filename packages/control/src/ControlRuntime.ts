@@ -586,6 +586,13 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
         ),
         interrupt: Effect.fn("ControlRuntime.interrupt")(function*(runId) {
           const run = yield* requireRun(runId)
+          // Terminal first, as `resume` does: a settled run released its fence,
+          // and answering `ClaimLost` there would name the wrong problem.
+          if (
+            run.summary.status === "cancelled" ||
+            run.summary.status === "completed" ||
+            run.summary.status === "failed"
+          ) return run.summary
           if (run.localFence === undefined) return yield* new ClaimLost({ runId })
           yield* checkFence(runId, run, run.localFence)
           if (run.fiber !== undefined) yield* Fiber.interrupt(run.fiber)
