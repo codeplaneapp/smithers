@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Smithers Claude Code plugin — SessionStart hook.
+// Smithers Claude Code plugin: the SessionStart hook.
 // Detects a Smithers 1.0 project and injects a short note so Claude reaches
 // for Smithers, and mirrors every run into /workflows through the plugin's
 // generic smithers-run.mjs script, instead of hand-rolling agents with the
 // native Workflow / Task / Agent tools.
-// Dependency-free: uses only Node built-ins. Never throws — a hook that errors
+// Dependency-free: uses only Node built-ins. Never throws, because a hook that errors
 // must not break the session, so all failures degrade to "no context injected".
 
 import { spawn } from "node:child_process";
@@ -179,7 +179,7 @@ export function buildContext(context) {
     `LIVE VIEW RULE: every Smithers run you start or attach to gets a live /workflows mirror. Launch runs ` +
       `with the native Workflow tool pointed at the plugin's generic mirror script: ` +
       `Workflow({ scriptPath: ${JSON.stringify(mirrorScript)}, args: { ${mirrorCliArg}flow: "<flow-id>", ` +
-      `data: { ... } } }) — it starts the detached run itself and mirrors it node-by-node. Attach to an ` +
+      `data: { ... } } }). It starts the detached run itself and mirrors it node by node. Attach to an ` +
       `existing run with args: { ${mirrorCliArg}runId: "<run-id>" }. This is the ONLY sanctioned use of the ` +
       `native Workflow tool; the durable work always lives in the Smithers engine (stopping the mirror never ` +
       `stops the run).`,
@@ -188,7 +188,7 @@ export function buildContext(context) {
     lines.push(
       `SOURCE-CHECKOUT RULE: this project IS the Smithers source tree (${cli.root}). Every smithers command ` +
         `you run must execute the working tree, so invoke it as \`${cliCommand}\` (or plain \`smithers\`, ` +
-        `which delegates to the same entry) — never a package-runner invocation of the published CLI, which ` +
+        `which delegates to the same entry), never a package-runner invocation of the published CLI, which ` +
         `runs the released build instead of the code under edit. Running from source needs \`pnpm install\` ` +
         `and nothing else.`,
     );

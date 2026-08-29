@@ -7,14 +7,14 @@
 // `packages/cli/bin/smithers.mjs` from the working tree. A package-runner
 // invocation does not do that: it downloads and runs the published npm
 // tarball, and only lands back on the working tree by accident, via the
-// published bin's `node_modules` delegation — which silently does not fire in
+// published bin's `node_modules` delegation, which silently does not fire in
 // a fresh worktree, a slimmed checkout, or any tree that has not been
 // installed. Editing engine code and then watching a run execute last week's
 // published build is the failure that mode causes.
 //
 // Outside a checkout, a bare `smthrs` bin-name lookup is not ours to assume.
 // The CLI is published as `@smthrs/cli` and the bin it declares is `smithers`,
-// so a runner asked for `smthrs` has to guess — and in any project that ships
+// so a runner asked for `smthrs` has to guess, and in any project that ships
 // its own `smthrs` bin the runner picks that program instead. That is not
 // hypothetical: `@smthrs/build-cli` in this repository declares
 // `bin: { smthrs }`, so inside it `bunx smthrs --version` prints that
@@ -25,13 +25,13 @@
 // So resolution walks four tiers, most specific first, and only the last one
 // resolves through a package runner:
 //
-//   1. `workspace` — a Smithers source checkout; run its working tree.
-//   2. `installed` — a `node_modules/@smthrs/cli` whose manifest identifies it
+//   1. `workspace`: a Smithers source checkout; run its working tree.
+//   2. `installed`: a `node_modules/@smthrs/cli` whose manifest identifies it
 //      as the CLI; run the bin path it declares, so no name lookup is
 //      involved.
-//   3. `path`      — an executable named `smithers` on PATH. That name IS the
+//   3. `path`:      an executable named `smithers` on PATH. That name IS the
 //      CLI's own bin, so it is unambiguous in a way `smthrs` is not.
-//   4. `published` — `npx --package @smthrs/cli smithers`, the behavior a user
+//   4. `published`: `npx --package @smthrs/cli smithers`, the behavior a user
 //      with no install gets.
 //
 // Tiers 1 and 2 spawn `node`, never `bun`: the durable engine is unsupported
@@ -107,7 +107,7 @@ export function findSmithersSourceRoot(from) {
  *
  * The manifest `name` must be the published package name: a directory called
  * `node_modules/@smthrs/cli` is not proof, since a workspace may link anything
- * there. `bin` is read as npm defines it — a bare string names the package's
+ * there. `bin` is read as npm defines it: a bare string names the package's
  * single bin, an object is keyed by bin name.
  *
  * @param {string} packageDirectory
@@ -185,8 +185,8 @@ function isExecutableFile(path, platform) {
 
 /**
  * Absolute path of a Smithers executable on PATH, or null. Unlike a bare
- * bin-name lookup this searches for `smithers` — the name the published
- * package actually declares — so a project-local `smthrs` bin cannot answer
+ * bin-name lookup this searches for `smithers`, the name the published
+ * package actually declares, so a project-local `smthrs` bin cannot answer
  * for it.
  *
  * @param {NodeJS.ProcessEnv} [env]

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Smithers Codex plugin — SessionStart hook.
+// Smithers Codex plugin: the SessionStart hook.
 // Detects a Smithers 1.0 project and injects a short note so Codex reaches for
 // Smithers instead of hand-rolling agents.
-// Dependency-free: uses only Node built-ins. Never throws — a hook that errors
+// Dependency-free: uses only Node built-ins. Never throws, because a hook that errors
 // must not break the session, so all failures degrade to "no context injected".
 
 import { spawn } from "node:child_process";
@@ -215,7 +215,7 @@ export function buildContext(context) {
     lines.push(
       `SOURCE-CHECKOUT RULE: this project IS the Smithers source tree (${cli.root}). Every smithers command ` +
         `you run must execute the working tree, so invoke it as \`${cliCommand}\` (or plain \`smithers\`, ` +
-        `which delegates to the same entry) — never a package-runner invocation of the published CLI, which ` +
+        `which delegates to the same entry), never a package-runner invocation of the published CLI, which ` +
         `runs the released build instead of the code under edit. Running from source needs \`pnpm install\` ` +
         `and nothing else.`,
     );

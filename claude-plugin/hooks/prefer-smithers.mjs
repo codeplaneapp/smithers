@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Smithers Claude Code plugin — PreToolUse hook.
+// Smithers Claude Code plugin: the PreToolUse hook.
 // Fires on the native orchestration tools (Workflow, Task, Agent). It is
 // ADVISORY ONLY: it injects a reminder to prefer a durable Smithers workflow,
 // and never denies the tool. Claude stays in control; this just nudges.
-// The one sanctioned native-Workflow use — the plugin's smithers-run.mjs
-// /workflows mirror — passes through with no nudge at all.
+// The one sanctioned native-Workflow use, the plugin's smithers-run.mjs
+// /workflows mirror, passes through with no nudge at all.
 // Dependency-free, never throws. On any error it emits empty allow-by-default
 // output so the tool call proceeds untouched.
 

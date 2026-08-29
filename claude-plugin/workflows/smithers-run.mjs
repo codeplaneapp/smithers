@@ -341,7 +341,7 @@ while (ticks < MAX_TICKS) {
     const key = `approval:${runId}:${approval.nodeId}`
     if (!loggedGates.has(key)) {
       loggedGates.add(key)
-      log(`⏸ Approval needed on ${approval.nodeId}${approval.title ? `: ${approval.title}` : ''} — resolve with the resolve_approval MCP tool, or \`smithers approve <payload>\` using the payload in \`smithers status ${runId}\``)
+      log(`⏸ Approval needed on ${approval.nodeId}${approval.title ? `: ${approval.title}` : ''}. Resolve it with the resolve_approval MCP tool, or \`smithers approve <payload>\` using the payload in \`smithers status ${runId}\``)
     }
   }
 
