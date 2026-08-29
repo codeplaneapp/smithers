@@ -2190,6 +2190,11 @@ export const make = (
       // from appearing to half-work; `interrupt` is the supported request and
       // is still available to the same caller. The memory engine, which does
       // have two behaviors, is unchanged.
+      //
+      // The reason is rc-contract §7 "Durable interruptUnsafe" verbatim, not a
+      // paraphrase of it: the release note and the failure a caller catches
+      // are the same statement, so an operator who reads one and a developer
+      // who logs the other are reading the same sentence.
       interruptUnsafe: Effect.fn("FlowEngine.interruptUnsafe")((
         _flow: Flow.Any,
         executionId: string
@@ -2199,7 +2204,7 @@ export const make = (
             code: "unsafe_interrupt_unsupported",
             executionId,
             reason:
-              "the durable engine has one cancellation path, interrupt, which is durable and cascades to linked children; interruptUnsafe would force cancellation without cleanup and is not supported"
+              "The durable engine has one cancellation path, interrupt, which is durable and cascades to linked children. FlowRuntime.interruptUnsafe on the durable engine fails with unsafe_interrupt_unsupported instead of forcing cancellation without cleanup."
           })
         )
       ),

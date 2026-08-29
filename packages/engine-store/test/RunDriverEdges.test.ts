@@ -782,6 +782,12 @@ describe("RunDriver cancellation paths", () => {
    * the unsafe path to tear a wedged run down got the safe one and no
    * indication that its request had been reinterpreted. rc.0 refuses it
    * instead, so the feature cannot appear to half-work.
+   *
+   * The code AND the reason are contract text: rc-contract §7 "Durable
+   * interruptUnsafe" is the release note an operator reads, and the failure a
+   * caller catches has to say the same thing in the same words. Asserted
+   * exactly, not by substring, so a reworded refusal is a test failure rather
+   * than a silent divergence from the published wording.
    */
   it.effect("refuses interruptUnsafe with a typed unsupported failure", () =>
     Effect.gen(function*() {
@@ -796,7 +802,11 @@ describe("RunDriver cancellation paths", () => {
       expect(result.failure).toBeInstanceOf(FlowRuntime.CancelRequestFailed)
       expect(result.failure.code).toBe("unsafe_interrupt_unsupported")
       expect(result.failure.executionId).toBe("unsafe-interrupt")
-      expect(result.failure.reason).toContain("interrupt")
+      expect(result.failure.reason).toBe(
+        "The durable engine has one cancellation path, interrupt, which is durable and cascades to " +
+          "linked children. FlowRuntime.interruptUnsafe on the durable engine fails with " +
+          "unsafe_interrupt_unsupported instead of forcing cancellation without cleanup."
+      )
       // The refusal changes nothing: no cancellation was requested, so the
       // caller can still ask for the supported one.
       expect(result.row.cancelRequestedAtMs).toBeNull()
