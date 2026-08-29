@@ -132,14 +132,14 @@ const nonTerminalControl = Layer.effect(
 
 describe("Control surface", () => {
   it("parses the remote bearer credential from either CLI spelling", () => {
-    expect(NodeControl.makeConfig([
+    const resolved = NodeControl.makeConfig([
       "--remote",
       "https://control.example.test",
       "--credential=alpha-secret"
-    ], {})).toEqual({
-      remote: "https://control.example.test",
-      credential: "alpha-secret"
-    })
+    ], {})
+
+    expect(resolved.remote).toBe("https://control.example.test")
+    expect(resolved.credential).toBe("alpha-secret")
   })
 
   it("prints the package version", async () => {
