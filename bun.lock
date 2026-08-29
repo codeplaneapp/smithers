@@ -1102,7 +1102,7 @@
     },
     "packages/migrate": {
       "name": "@smthrs/migrate",
-      "version": "0.1.0",
+      "version": "1.0.0-rc.0",
       "bin": {
         "smithers-migrate": "./dist/esm/flow/bin.js",
       },

@@ -2551,6 +2551,46 @@ importers:
       vitest:
         specifier: 4.1.9
         version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@25.9.5)(@vitest/coverage-v8@4.1.9)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))
+    optionalDependencies:
+      '@smthrs/agent':
+        specifier: 1.0.0-rc.0
+        version: link:../agent
+      '@smthrs/core':
+        specifier: 1.0.0-rc.0
+        version: link:../core
+      '@smthrs/engine':
+        specifier: 1.0.0-rc.0
+        version: link:../engine
+      '@smthrs/flow':
+        specifier: 1.0.0-rc.0
+        version: link:../flow
+      '@smthrs/flows':
+        specifier: 1.0.0-rc.0
+        version: link:../flows
+      '@smthrs/harness':
+        specifier: 1.0.0-rc.0
+        version: link:../harness
+      '@smthrs/kernel':
+        specifier: 1.0.0-rc.0
+        version: link:../kernel
+      '@smthrs/model':
+        specifier: 1.0.0-rc.0
+        version: link:../model
+      '@smthrs/patterns':
+        specifier: 1.0.0-rc.0
+        version: link:../patterns
+      '@smthrs/plan':
+        specifier: 1.0.0-rc.0
+        version: link:../plan
+      '@smthrs/platform-node':
+        specifier: 1.0.0-rc.0
+        version: link:../platform-node
+      '@smthrs/registry':
+        specifier: 1.0.0-rc.0
+        version: link:../registry
+      '@smthrs/std':
+        specifier: 1.0.0-rc.0
+        version: link:../std
 
   packages/model:
     dependencies:

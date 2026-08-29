@@ -112,14 +112,14 @@ test("workspaces covers every non-private engine and agent package under package
   assert.deepEqual(tooling.filter(([, manifest]) => manifest.private !== true).map(([name]) => name), [])
 })
 
-test("the packed set is exactly the 39 names the RC contract publishes", () => {
+test("the packed set is exactly the 40 names the RC contract publishes", () => {
   // rc-contract.md section 3.1 is the release decision; group membership is
   // only how it is enforced. Restating the roster here means a package that
   // joins or leaves the release has to change both files in one diff.
   const manifests = readWorkspaceManifests()
   const packed = workspaces.map((directory) => manifests.get(directory).name)
 
-  assert.equal(publishedPackages.length, 39)
+  assert.equal(publishedPackages.length, 40)
   assert.deepEqual([...packed].sort(), [...publishedPackages].sort())
   assert.ok(publishedPackages.includes("smthrs"), "the unscoped deprecation notice publishes with the RC")
 })
