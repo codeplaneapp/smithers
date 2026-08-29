@@ -16,6 +16,10 @@ These are enforced by `tests/worker.test.ts`, so breaking one fails the build:
   test compares them field by field. **Edit both in the same commit.**
 - Only components that actually exist and were verified get listed.
 
+`tests/rcSurfaces.test.ts` adds the half `worker.test.ts` cannot see: it reads
+this repository's own manifests, so a component that still names a renamed
+package fails even though the page and the feed agree with each other.
+
 ## Change a component's state
 
 1. Edit the component's `status` in `site/status.json` (`operational`,

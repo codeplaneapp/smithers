@@ -48,8 +48,8 @@
     {
       "id": "npm",
       "name": "CLI distribution",
-      "url": "https://www.npmjs.com/package/smithers-orchestrator",
-      "description": "smithers-orchestrator on npm. Operated by npm, not by us.",
+      "url": "https://www.npmjs.com/package/@smthrs/cli",
+      "description": "@smthrs/cli on npm. Operated by npm, not by us.",
       "status": "operational"
     }
   ],

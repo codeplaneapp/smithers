@@ -1,6 +1,9 @@
 {
   "compilerOptions": {
-    "lib": ["ESNext"],
+    // DOM as well as ESNext: the contract test reaches @smthrs/control, whose
+    // WebCrypto sources are typed against DOM, as the module that owns them
+    // declares.
+    "lib": ["ESNext", "DOM"],
     "target": "ESNext",
     "module": "ESNext",
     "moduleDetection": "force",
