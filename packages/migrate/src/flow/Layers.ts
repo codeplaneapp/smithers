@@ -1,0 +1,527 @@
+/**
+ * The two compositions a migration runs under: a real Node host, and a
+ * scripted one for tests.
+ *
+ * Two filesystems, on purpose. The deterministic half — the scan, the
+ * checkpoint, the verification, the archive, the report — reads and writes
+ * through Node's own services, because it walks whole trees and the kernel's
+ * guarded filesystem costs a helper process per authorized operation. The
+ * agent's half runs through the kernel: descriptor-relative access pinned to
+ * the project root, a capability envelope that names the project, and a grant
+ * store that denies every write under a 0.x run-state path and permits only
+ * this project's own verification command lines. Both halves of the promise
+ * the tool makes operators are therefore enforced rather than asserted: the
+ * kernel refuses a run-state write and refuses a shell command the project
+ * does not already run, and the run-state digests fail the unit if the bytes
+ * moved anyway.
+ *
+ * The seat is a role. `AgentAction` declares `migrate`, and the resolver here
+ * maps that one name onto whatever the operator asked for with `--seat`. No
+ * model id appears anywhere in this package, the prompt's worked pairs
+ * included: a host that was given no seat and no key refuses by name, which is
+ * the honest failure.
+ *
+ * @since 0.1.0
+ */
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as Agent from "@smthrs/agent/Agent"
+import type * as AgentAction from "@smthrs/agent/AgentAction"
+import * as FlowEngineLike from "@smthrs/agent/FlowEngineLike"
+import * as Seat from "@smthrs/agent/Seat"
+import * as SeatResolver from "@smthrs/agent/SeatResolver"
+import { FlowEngine } from "@smthrs/engine"
+import { Action } from "@smthrs/flow"
+import type * as FlowRuntime from "@smthrs/flow/FlowRuntime"
+import { Capability, GrantStore, Permission, Workspace } from "@smthrs/kernel"
+import * as KernelChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
+import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
+import * as KernelHttpClient from "@smthrs/kernel/HttpClient"
+import type * as Model from "@smthrs/model/Model"
+import type * as ModelError from "@smthrs/model/ModelError"
+import * as ModelEvent from "@smthrs/model/ModelEvent"
+import * as OpenAICompatible from "@smthrs/model/OpenAICompatible"
+import * as RequestExecutor from "@smthrs/model/RequestExecutor"
+import * as Route from "@smthrs/model/Route"
+import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Redacted from "effect/Redacted"
+import type * as Result from "effect/Result"
+import * as Stream from "effect/Stream"
+import * as Scan from "../Scan.ts"
+import * as Units from "../Units.ts"
+import type * as Contract from "./Contract.ts"
+import * as MigrateFlow from "./MigrateFlow.ts"
+import * as Transform from "./Transform.ts"
+
+/**
+ * Which environment variable carries each provider's key. The same three the
+ * flows CLI reads, spelled the same way, so a machine set up for one is set up
+ * for the other.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const apiKeyVariable: Readonly<Record<string, string>> = {
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+  openrouter: "OPENROUTER_API_KEY"
+}
+
+/**
+ * The seat the operator's environment can actually pay for, when they named
+ * none.
+ *
+ * A default is a choice about someone's money, so this makes the smallest one
+ * there is: the provider whose key is present, and nothing about which model.
+ * With no key at all it returns `undefined` and the resolver refuses by name.
+ *
+ * @category combinators
+ * @since 0.1.0
+ */
+export const configuredProvider = (
+  environment: Readonly<Record<string, string | undefined>>
+): string | undefined => {
+  for (const provider of ["anthropic", "openai", "openrouter"]) {
+    const variable = apiKeyVariable[provider]
+    const value = variable === undefined ? undefined : environment[variable]
+    if (value !== undefined && value.length > 0) return provider
+  }
+  return undefined
+}
+
+const refusal = (seat: string, message: string): Seat.SeatUnresolved => new Seat.SeatUnresolved({ seat, message })
+
+// The provider routes have distinct body types, so the seat is built once,
+// generically, and each branch supplies its own route. The shape mirrors
+// `@smthrs/cli`'s `NodeControl.seatOf`, which is where the resolver this one
+// stands in for lives.
+const seatOf = <Body, Frame, Event, State>(
+  configured: Result.Result<Route.Route<Body, Frame, Event, State>, ModelError.ModelError>,
+  executor: RequestExecutor.RequestExecutor,
+  declared: string,
+  modelId: string
+): Effect.Effect<Seat.Seat, Seat.SeatUnresolved> =>
+  Effect.gen(function*() {
+    const route = yield* Effect.fromResult(configured).pipe(
+      Effect.mapError((error) => refusal(declared, error.message))
+    )
+    const model = yield* Route.toModel(route).pipe(
+      Effect.provideService(RequestExecutor.RequestExecutor, executor)
+    )
+    return Seat.make({
+      id: declared,
+      model,
+      route: FlowEngineLike.routeResolver(route),
+      contextWindowTokens: SeatResolver.contextWindowTokensFor(modelId)
+    })
+  })
+
+/**
+ * The Node seat resolver: it maps the migration's one declared seat onto the
+ * `provider:modelId` the operator chose, and reads that provider's key from the
+ * environment it was given rather than from the process.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const seatResolver = (options: {
+  readonly environment: Readonly<Record<string, string | undefined>>
+  readonly seat: string | undefined
+  readonly executor: RequestExecutor.RequestExecutor
+}): SeatResolver.Service =>
+  SeatResolver.make({
+    resolve: (declared) =>
+      Effect.gen(function*() {
+        const chosen = options.seat
+        if (chosen === undefined || chosen.length === 0) {
+          const provider = configuredProvider(options.environment)
+          return yield* Effect.fail(refusal(
+            declared,
+            provider === undefined
+              ? `Set ${Object.values(apiKeyVariable).join(", ")} or pass --seat <provider:model> to run the migration`
+              : `Pass --seat ${provider}:<model> to name the model this migration runs on`
+          ))
+        }
+        const separator = chosen.indexOf(":")
+        const provider = separator < 0 ? "anthropic" : chosen.slice(0, separator)
+        const modelId = Seat.modelIdOf(chosen)
+        const variable = apiKeyVariable[provider]
+        if (variable === undefined) {
+          return yield* Effect.fail(refusal(declared, `No route is configured for the ${provider} provider`))
+        }
+        const key = options.environment[variable]
+        if (key === undefined || key.length === 0) {
+          return yield* Effect.fail(refusal(declared, `Set ${variable} to run the ${chosen} seat`))
+        }
+        const redacted = Redacted.make(key)
+        return yield* provider === "anthropic"
+          ? seatOf(Route.anthropic({ apiKey: redacted }), options.executor, chosen, modelId)
+          : provider === "openrouter"
+          ? seatOf(
+            OpenAICompatible.make({
+              id: "openrouter",
+              baseUrl: "https://openrouter.ai/api",
+              apiKey: redacted
+            }),
+            options.executor,
+            chosen,
+            modelId
+          )
+          : seatOf(Route.openai({ apiKey: redacted }), options.executor, chosen, modelId)
+      })
+  })
+
+/**
+ * Every command line a unit is allowed to spawn: this project's own install,
+ * format, typecheck, and test commands, in the order a verification runs them.
+ *
+ * The list is exactly what {@link module:Verify.run} executes, so the agent's
+ * shell and the tool's own verification are permitted the same commands and
+ * nothing else.
+ *
+ * @category combinators
+ * @since 0.1.0
+ */
+export const verificationCommands = (commands: Contract.Commands): ReadonlyArray<string> => [
+  ...new Set([
+    ...(commands.install === undefined ? [] : [commands.install]),
+    ...(commands.format === undefined ? [] : [commands.format]),
+    ...commands.typecheck,
+    ...(commands.test === undefined ? [] : [commands.test])
+  ])
+]
+
+/**
+ * The permission rules one migration runs under: the project tree, the
+ * commands that verify it, the model calls that rewrite it, and a denial for
+ * every 0.x run-state path.
+ *
+ * `proc:spawn` is granted per command line rather than as a wildcard. The
+ * kernel checks the capability against the line
+ * `@smthrs/kernel/CommandLine.render` produces, and this package spawns every
+ * command through the platform shell, so a grant is the verification command
+ * spelled exactly as the project spells it. The store is unattended, so a line
+ * that matches no grant is refused rather than queued: an agent cannot reach
+ * `sqlite3`, `rm`, or a package manager the project does not already run. A
+ * verification command that itself contains a `*` grants the glob it spells,
+ * which is the widest this can be, and it is still one project command rather
+ * than every command.
+ *
+ * That matters more than a filesystem rule does. A spawned process writes at
+ * the OS level, where the kernel's `fs:write` denials cannot see it, so
+ * confining the spawn is the only place run-state protection can be *enforced*
+ * against a shell. What the project's own verification commands then do is
+ * outside any rule, and the run-state digests in {@link module:Checkpoint.Ref}
+ * are what catch it: the unit fails its checks and is restored.
+ *
+ * The denials come last and are configured rules, so they veto: no envelope,
+ * no remembered grant, and no later allow can reach a run-state path.
+ *
+ * @category combinators
+ * @since 0.1.0
+ */
+export const rules = (options: {
+  readonly root: string
+  readonly runStatePaths: ReadonlyArray<string>
+  readonly commands: Contract.Commands
+}): ReadonlyArray<Permission.Rule> => {
+  const root = options.root.replace(/\/+$/, "")
+  const allow = (action: Capability.PatternAction, resource: string): Permission.Rule =>
+    new Permission.Rule({ effect: "allow", pattern: new Capability.CapabilityPattern({ action, resource }) })
+  const deny = (action: Capability.PatternAction, resource: string): Permission.Rule =>
+    new Permission.Rule({ effect: "deny", pattern: new Capability.CapabilityPattern({ action, resource }) })
+  return [
+    // The root itself, not only what is under it. `write` creates the parent
+    // directory of its target first, and the parent of a root-level file is
+    // the root: without this rule the agent can write `flows/x/flow.ts` and
+    // cannot write `package.json`, which is the one file the dependencies and
+    // project units exist to rewrite.
+    allow("fs:*", root),
+    allow("fs:*", `${root}/**`),
+    ...verificationCommands(options.commands).map((command) => allow("proc:spawn", command)),
+    allow("net:*", "**"),
+    allow("model:*", "**"),
+    ...options.runStatePaths.flatMap((relative) => [
+      deny("fs:write", `${root}/${relative}`),
+      deny("fs:write", `${root}/${relative}/**`)
+    ])
+  ]
+}
+
+/**
+ * The snapshot boundary compensable actions run against.
+ *
+ * A cell's `write` is compensable, so the engine asks a host for a per-action
+ * snapshot before it runs and offers to restore it on a retry. This tool
+ * answers that its rollback is coarser and already taken: every unit opens with
+ * a checkpoint — a jj change, a git ref, or a file copy — and a unit that fails
+ * verification is restored from it wholesale. A finer snapshot per cell call
+ * would record the same bytes a second time and roll back to a state the unit
+ * report could not describe.
+ *
+ * It is a real answer, not a stub: `snapshot` records the checkpoint the unit
+ * already holds, and `restore` says the restore is the unit's, so a reader of
+ * this composition can see which rollback is in force.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerSnapshotBoundary: Layer.Layer<FlowEngine.SnapshotBoundary> = Layer.succeed(
+  FlowEngine.SnapshotBoundary
+)({
+  snapshot: (options) => Effect.succeed({ boundary: "unit-checkpoint", key: options.key }),
+  restore: () => Effect.void,
+  diff: () => Effect.succeed(undefined)
+})
+
+/**
+ * What a Node host needs told.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface NodeConfig {
+  readonly root: string
+  readonly commands: Contract.Commands
+  readonly runStatePaths: ReadonlyArray<string>
+  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
+  readonly seat?: string | undefined
+}
+
+const grantsFor = (config: NodeConfig): Layer.Layer<GrantStore.GrantStore, never, never> =>
+  GrantStore.layer({
+    attended: false,
+    rules: rules({ root: config.root, runStatePaths: config.runStatePaths, commands: config.commands })
+  }).pipe(Layer.provide(Workspace.layer(config.root)), Layer.orDie)
+
+const hostFor = (
+  config: NodeConfig
+): Layer.Layer<AgentAction.Host, never, never> => {
+  const grants = grantsFor(config)
+  // The kernel-guarded platform, as `@smthrs/cli`'s `layerGuardedPlatform`
+  // builds it: descriptor-relative atomic access under a pinned root, with the
+  // same grant store answering for the filesystem and the shell. Two stores
+  // would be a fail-open the types could not catch.
+  const platform = Layer.orDie(KernelFileSystem.layer).pipe(
+    Layer.provide([Workspace.layer(config.root), grants]),
+    Layer.provideMerge(Layer.provideMerge(AtomicFileSystem.layer, NodeServices.layer))
+  )
+  const guarded = KernelChildProcessSpawner.layer.pipe(
+    Layer.provide(grants),
+    Layer.provideMerge(platform)
+  )
+  return Transform.hostLayer({ root: config.root, commands: config.commands }).pipe(Layer.provide(guarded))
+}
+
+const executor = RequestExecutor.layer.pipe(
+  Layer.provide(KernelHttpClient.layer),
+  Layer.provide([NodeHttpClient.layerUndici, GrantStore.layerNoop])
+)
+
+/**
+ * Everything a migration needs on Node, including the credentialed half.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerNode = (config: NodeConfig) => {
+  const seats = Layer.effect(
+    SeatResolver.SeatResolver,
+    Effect.map(RequestExecutor.RequestExecutor, (request) =>
+      seatResolver({
+        environment: config.environment ?? {},
+        seat: config.seat,
+        executor: request
+      }))
+  ).pipe(Layer.provide(executor))
+  return MigrateFlow.layer.pipe(
+    Layer.provideMerge(Layer.mergeAll(hostFor(config), seats, Agent.layer)),
+    Layer.provideMerge(Agent.layerDefaults),
+    Layer.provideMerge(Action.layerImplementations),
+    Layer.provideMerge(FlowEngine.layerMemory),
+    Layer.provideMerge(layerSnapshotBoundary),
+    Layer.provideMerge(NodeCrypto.layer),
+    Layer.provideMerge(NodeServices.layer)
+  )
+}
+
+/**
+ * What a Node host needs told when it derives the rest from the project.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface ScannedConfig {
+  readonly root: string
+  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
+  readonly seat?: string | undefined
+  readonly flowsDir?: string | undefined
+  /**
+   * The operator's own command overrides, if they named any.
+   *
+   * They have to reach the host, not only the units. The host binds
+   * `migrate/verify` and grants `proc:spawn` per command line, so a host that
+   * derived its commands from the manifests while the units ran the operator's
+   * would offer the agent a self-check that measures something else and refuse
+   * the very commands its brief lists.
+   */
+  readonly commands?: Units.CommandOverrides | undefined
+}
+
+/**
+ * The verification commands one project verifies a unit with: what its
+ * manifests and lockfiles imply, with the operator's overrides on top.
+ *
+ * One derivation, two callers. The host binds `migrate/verify` and grants
+ * `proc:spawn` from this list, and each unit's outline carries it into the
+ * prompt and into `Verify`. If those two ever came from different code the
+ * agent would be shown one set of commands, permitted another, and measured by
+ * a third.
+ *
+ * @category combinators
+ * @since 0.1.0
+ */
+export const commandsFor = (
+  detection: Scan.ScanResult["detection"],
+  overrides: Units.CommandOverrides = {},
+  flowsDir = "flows"
+): Contract.Commands => {
+  const derived = Units.verifyCommands(detection, overrides, flowsDir)
+  return {
+    ...(derived.install === undefined ? {} : { install: derived.install }),
+    ...(derived.format === undefined ? {} : { format: derived.format }),
+    typecheck: derived.typecheck,
+    ...(derived.test === undefined ? {} : { test: derived.test }),
+    flowsDir: derived.discovery.flowsDir
+  }
+}
+
+/**
+ * Everything a migration needs on Node, with the run-state paths and the
+ * verification commands read from the project.
+ *
+ * The scan is read only and happens while the layer is built, which is what
+ * lets the grant store deny writes to run state before any step can attempt
+ * one. It is the reason this layer fails with the scanner's own error.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerNodeScanned = (config: ScannedConfig) =>
+  Layer.unwrap(
+    Effect.gen(function*() {
+      const result = yield* Scan.scan(config.root, {
+        ...(config.flowsDir === undefined ? {} : { flowsDir: config.flowsDir })
+      })
+      return layerNode({
+        root: config.root,
+        ...(config.environment === undefined ? {} : { environment: config.environment }),
+        ...(config.seat === undefined ? {} : { seat: config.seat }),
+        runStatePaths: Transform.runStatePaths(result),
+        commands: commandsFor(result.detection, config.commands ?? {}, config.flowsDir ?? "flows")
+      })
+    })
+  ).pipe(Layer.provide(NodeServices.layer))
+
+/**
+ * The cell a scripted model answers one frame with.
+ *
+ * It is the cell source, not an answer, because a migration that only answers
+ * has migrated nothing: the rewrite is `ctx.call("write", ...)` and the answer
+ * is `ctx.done(...)`. A test that scripted only the answer would prove the
+ * decoding and none of the work.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Script = (asked: string) => string
+
+/**
+ * Ends a scripted cell with the value the declared output schema expects.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const done = (output: unknown): string => `ctx.done(${JSON.stringify(JSON.stringify(output))})`
+
+/**
+ * A model that answers every frame with one scripted cell. The seam a test
+ * replaces instead of a network.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const scriptedModel = (script: Script): Model.Model => ({
+  stream: (request) =>
+    Stream.suspend(() => {
+      const asked = [
+        ...request.system.map((part) => part.text),
+        ...request.messages.flatMap((message) =>
+          message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+        )
+      ].join("\n")
+      const cell = script(asked)
+      return Stream.fromIterable([
+        ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "cell" }),
+        ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "cell", text: "```cell\n" + cell + "\n```" }),
+        ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: "cell" }),
+        ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+      ])
+    })
+})
+
+const preparedRequest = {
+  routeId: "migrate",
+  protocolId: "migrate",
+  method: "POST" as const,
+  url: "https://example.invalid/v1/messages",
+  publicHeaders: { "content-type": "application/json" },
+  body: new TextEncoder().encode("{}"),
+  bodyText: "{}"
+}
+
+/**
+ * Everything a migration needs, with every seat resolved to a scripted model.
+ *
+ * The composition is the production one; only the credentialed half is
+ * replaced, exactly as `examples/src/11-agent-step.ts` does it. The guarded
+ * filesystem, the grant store, the capability envelope, and the sandbox budget
+ * are all real, so a scripted test still proves the confinement.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerScripted = (config: NodeConfig & { readonly script: Script }) => {
+  const model = scriptedModel(config.script)
+  const seats = SeatResolver.layer({
+    resolve: (id) =>
+      Effect.succeed(
+        Seat.make({
+          id,
+          model,
+          route: { prepare: () => Effect.succeed(preparedRequest) },
+          contextWindowTokens: 200_000
+        })
+      )
+  })
+  return MigrateFlow.layer.pipe(
+    Layer.provideMerge(Layer.mergeAll(hostFor(config), seats, Agent.layer)),
+    Layer.provideMerge(Agent.layerDefaults),
+    Layer.provideMerge(Action.layerImplementations),
+    Layer.provideMerge(FlowEngine.layerMemory),
+    Layer.provideMerge(layerSnapshotBoundary),
+    Layer.provideMerge(NodeCrypto.layer),
+    Layer.provideMerge(NodeServices.layer)
+  )
+}
+
+/**
+ * The runtime a migration executes under.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Runtime = FlowRuntime.FlowRuntime

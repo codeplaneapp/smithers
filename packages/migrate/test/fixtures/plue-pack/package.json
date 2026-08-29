@@ -1,0 +1,13 @@
+{
+  "name": "plue",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "workspaces": [
+    ".smithers"
+  ],
+  "scripts": {
+    "wf": "smithers workflow run",
+    "ci": "bunx smthrs up .smithers/workflows/pipelines/ci-fast.tsx -d"
+  }
+}

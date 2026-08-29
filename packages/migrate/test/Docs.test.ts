@@ -1,0 +1,85 @@
+/**
+ * The reference page is part of the package's contract: an operator reads it
+ * before deciding whether to run `apply`. These tests fail when the page
+ * falls behind the code, so a new module or a new mapping row cannot land
+ * undocumented.
+ *
+ * @since 0.1.0
+ */
+import { describe, expect, it } from "@effect/vitest"
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import * as Constructs from "../src/Constructs.ts"
+import * as Mapping from "../src/Mapping.ts"
+
+const read = (relative: string): string => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8")
+
+const reference = read("../../../docs/reference/migrate.md")
+const index = read("../src/index.ts")
+
+/** Every namespace `src/index.ts` re-exports, in source order. */
+const exportedModules = [...index.matchAll(/export \* as (\w+) from/g)].map((match) => match[1] as string)
+
+describe("reference page", () => {
+  it("documents every module the package exports", () => {
+    expect(exportedModules.length).toBeGreaterThan(0)
+
+    const undocumented = exportedModules.filter((name) => !reference.includes(`\n## ${name}\n`))
+
+    expect(undocumented).toEqual([])
+  })
+
+  it("heads its module sections in the order src/index.ts exports them", () => {
+    const headings = [...reference.matchAll(/^## (\w+)$/gm)]
+      .map((match) => match[1] as string)
+      .filter((heading) => exportedModules.includes(heading))
+
+    expect(headings).toEqual(exportedModules)
+  })
+
+  it("embeds the mapping table verbatim from Mapping.rows", () => {
+    expect(reference).toContain(Mapping.markdownTable())
+  })
+
+  it("names every catalog construct in the mapping table", () => {
+    const table = Mapping.markdownTable()
+    const missing = Constructs.constructs.filter((construct) => !table.includes(`\`${construct.name}\``))
+
+    expect(missing.map((construct) => construct.name)).toEqual([])
+  })
+
+  it("states the product rule the tool is built around", () => {
+    expect(reference).toContain("not a compatibility library")
+    expect(reference).toContain("never rewrites or resumes 0.x run state")
+  })
+
+  it("documents the three modes and the three exit codes", () => {
+    for (const mode of ["`scan`", "`plan`", "`apply`"]) expect(reference).toContain(mode)
+    for (const line of ["| 0 |", "| 1 |", "| 3 |"]) expect(reference).toContain(line)
+  })
+})
+
+describe("mapping table rendering", () => {
+  it("renders one row per mapping row plus a header and a separator", () => {
+    const lines = Mapping.markdownTable().split("\n")
+
+    expect(lines).toHaveLength(Mapping.rows.length + 2)
+    expect(lines[0]).toBe("| Old construct | New target | Module | Class |")
+    expect(lines[1]).toBe("| --- | --- | --- | --- |")
+  })
+
+  it("is deterministic across renders", () => {
+    expect(Mapping.markdownTable()).toBe(Mapping.markdownTable())
+  })
+
+  it("writes `none` for a construct with no target, never an empty cell", () => {
+    const table = Mapping.markdownTable()
+    const withoutTarget = Mapping.rows.filter((row) => row.target === null)
+
+    expect(withoutTarget.length).toBeGreaterThan(0)
+    for (const row of withoutTarget) {
+      expect(table).toContain(`| \`${row.construct}\` | none | none | ${row.class} |`)
+    }
+    expect(table).not.toContain("|  |")
+  })
+})

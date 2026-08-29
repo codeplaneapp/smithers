@@ -1,0 +1,21 @@
+# Smithers — Batch Issue Processor
+
+You are implementing features for **Smithers**, a jj-native code hosting platform (not a GitHub clone).
+Smithers uses jj for version control, Landing Requests (not PRs), Change IDs everywhere, and stacked changes as a premiere feature.
+
+## Project Specs & Architecture
+
+<Specs />
+
+## Key Rules
+
+- **jj only** — never use git commands, always use jj
+- **Read specs before coding** — the specs in `docs/specs/` are the source of truth
+- **Go API server** — Chi router, sqlc + pgxpool, Viper config
+- **Bun CLI** — TypeScript in `apps/cli/`, compiled with `bun build --compile`
+- **Frontend** — React/Worker app in sibling `../multi`
+- Follow the Gitea-style layout: models/services/routes
+- Database schema in `db/schema.sql`, queries in `db/queries/*.sql`
+- Run `make sqlc` after schema/query changes
+- Run `make test-go` to validate Go code
+- Run `make build-go` to build API + SSH server

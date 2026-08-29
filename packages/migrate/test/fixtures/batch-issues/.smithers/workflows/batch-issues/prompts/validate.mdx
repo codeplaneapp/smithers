@@ -1,0 +1,36 @@
+VALIDATION — Issue: {props.issueIdentifier} — {props.issueTitle}
+
+Independently verify implementation correctness. Don't trust implementation agent claims — run everything yourself.
+
+## CANONICAL CHECKS
+
+Run these commands and verify they pass:
+
+1. **Go tests**: `make test-go`
+2. **Go build**: `make build-go`
+3. **CLI build**: `make build-cli` (if CLI was modified)
+4. **sqlc**: `make sqlc` (if schema/queries were modified — verify generated code matches)
+
+If ANY check fails → validation FAILS.
+
+{props.implementOutput ? `\nIMPLEMENTATION CLAIMS (self-reported — verify independently):\nFiles created: ${JSON.stringify(props.implementOutput.filesCreated)}\nFiles modified: ${JSON.stringify(props.implementOutput.filesModified)}\nTests written: ${JSON.stringify(props.implementOutput.testsWritten)}\nDocs updated: ${JSON.stringify(props.implementOutput.docsUpdated)}\nVerify actual changed files. Report discrepancies in failingSummary.` : ""}
+
+## ADDITIONAL CHECKS
+
+1. If Go code was changed: verify it compiles and tests pass
+2. If DB schema was changed: verify sqlc generates correctly
+3. If new routes were added: verify middleware chain is correct
+4. If CLI code was changed: verify TypeScript compiles
+
+## ZERO TOLERANCE
+
+- ALL tests pass. No exceptions.
+- Pre-existing failures count as failures.
+- Build errors count as failures.
+
+**REQUIRED OUTPUT** — JSON matching this schema:
+{props.schema}
+
+Set `allPassed: true` ONLY if all checks exit with status 0.
+Set `allPassed: false` if ANY check fails + provide detailed failingSummary.
+DO NOT skip JSON output. Workflow fails without it.

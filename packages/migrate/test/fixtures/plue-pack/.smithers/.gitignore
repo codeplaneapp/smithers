@@ -1,0 +1,16 @@
+node_modules/
+executions/
+*.db
+*.sqlite
+dist/
+.DS_Store
+
+# Runtime logs, pids, and dev daemon state (ssh host keyscans, cloudflared/ui daemons)
+*.log
+*.pid
+dev/
+
+# Per-run reports and execution output
+runs/
+health-monitor/
+issue-closure-controller/

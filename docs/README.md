@@ -44,6 +44,7 @@ Private-alpha operators should also read the [alpha notes](alpha-notes.md) for c
 - [Using the durable engine](guides/durable-engine.md)
 - [Testing](guides/testing.md)
 - [Control-plane trust posture](guides/control-plane-trust.md) — bearer authentication, loopback binding, and alpha authorization limits.
+- [Migrating from Smithers 0.x](guides/migrating-from-0x.md) — what changes, the three commands, and what the migration refuses to do.
 
 ## Package reference
 
@@ -75,6 +76,7 @@ Private-alpha operators should also read the [alpha notes](alpha-notes.md) for c
 - [Trellis and DelegationChain](reference/patterns-delegation.md), the delegation patterns in `@smthrs/patterns`
 - [`@smthrs/control`](reference/control.md)
 - [`@smthrs/notifications`](reference/notifications.md)
+- [`@smthrs/migrate`](reference/migrate.md), which upgrades a Smithers 0.x project to this authoring model
 
 Vendor host adapters (`@smthrs/host-cloudflare`, `@smthrs/host-vercel`) are
 documented in the [plugins repository](https://github.com/smithersai/plugins).

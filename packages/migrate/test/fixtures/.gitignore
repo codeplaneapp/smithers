@@ -1,0 +1,8 @@
+# The fixtures are real Smithers 0.x projects, so a `.smithers/` directory is
+# the point of them. The repository root ignores `.smithers/` because that is
+# where a 0.x checkout keeps its own run state; here it is committed test data.
+!.smithers/
+
+# `persisted-db` commits one 0.x execution log so `RunState.scan` has real
+# history to classify.
+!**/*.log

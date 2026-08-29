@@ -1,0 +1,243 @@
+import { describe, expect, it } from "@effect/vitest"
+import * as Effect from "effect/Effect"
+import { chmodSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+import { pathToFileURL } from "node:url"
+import * as Detect from "../src/Detect.ts"
+import * as RunState from "../src/RunState.ts"
+import { copyFixture, fixture, hashTree, nodeLayer } from "./fixtures/helpers.ts"
+
+const buildDb = async (root: string, now: number): Promise<void> => {
+  const module = await import(pathToFileURL(join(fixture("persisted-db"), "make-db.mjs")).href) as {
+    build: (target: string, now: number) => string
+  }
+  module.build(root, now)
+}
+
+const now = 1_780_000_000_000
+
+const report = (root: string, options: RunState.Options = {}) =>
+  Effect.gen(function*() {
+    const detection = yield* Detect.scan(root)
+    return yield* RunState.scan(root, detection, { now, ...options })
+  }).pipe(Effect.provide(nodeLayer))
+
+describe("RunState.scan", () => {
+  it.effect("reports clean when a project has no database and no state", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      const result = yield* report(root)
+
+      expect(result.verdict).toBe("clean")
+      expect(result.databases).toEqual([])
+      expect(result.instructions).toEqual([])
+    }))
+
+  it.effect("reports history-only for execution logs with no database", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      const result = yield* report(root)
+
+      expect(result.verdict).toBe("history-only")
+      // The mirror file is run state too: it names the sessions a run mirrored
+      // to, and a 1.0 runtime never reads it.
+      expect(result.stateDirs.map((entry) => entry.path)).toEqual([
+        ".smithers/executions",
+        ".smithers/workflows/run-1783757199651.log",
+        ".smithers/claude-mirror-subscriptions.json"
+      ])
+      expect(result.stateDirs[0]?.files).toBe(1)
+      // A loose `run-*.log` beside the workflows is run state too, and it is
+      // the one 0.x leaves outside every state directory.
+      expect(result.stateDirs[1]?.bytes).toBeGreaterThan(0)
+      expect(result.stateDirs[2]?.bytes).toBeGreaterThan(0)
+      expect(result.instructions).toEqual([RunState.instructionText.archive])
+    }))
+
+  it.effect("blocks on a live run and a parked run, with instructions in order", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      yield* Effect.promise(() => buildDb(root, now))
+      const result = yield* report(root)
+
+      expect(result.verdict).toBe("blocked")
+      const database = result.databases[0]
+      expect(database?.path).toBe(".smithers/smithers.db")
+      expect(database?.readable).toBe(true)
+      expect(database?.tables).toEqual([
+        "_smithers_attempts",
+        "_smithers_events",
+        "_smithers_nodes",
+        "_smithers_runs",
+        "_smithers_schema_migrations"
+      ])
+      expect(database?.migrations).toEqual({ count: 3, maxId: "0025_snapshot_contents" })
+      expect(database?.runsByStatus).toEqual([
+        { status: "failed", count: 1 },
+        { status: "finished", count: 1 },
+        { status: "running", count: 1 },
+        { status: "waiting-quota", count: 1 }
+      ])
+      expect(database?.live.map((row) => row.runId)).toEqual(["run-live"])
+      expect(database?.parked.map((row) => row.runId)).toEqual(["run-parked"])
+      expect(database?.parked[0]?.status).toBe("waiting-quota")
+      expect(result.instructions).toEqual([
+        RunState.instructionText.live,
+        RunState.instructionText.parked,
+        RunState.instructionText.archive
+      ])
+    }))
+
+  it.effect("moves the live run to parked once its heartbeat falls outside the window", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      yield* Effect.promise(() => buildDb(root, now))
+      const result = yield* report(root, { now: now + 11 * 60 * 1000 })
+
+      expect(result.databases[0]?.live).toEqual([])
+      expect(result.databases[0]?.parked.map((row) => row.runId)).toEqual(["run-live", "run-parked"])
+      expect(result.instructions).toEqual([
+        RunState.instructionText.parked,
+        RunState.instructionText.archive
+      ])
+    }))
+
+  it.effect("leaves every byte of the project unchanged", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      yield* Effect.promise(() => buildDb(root, now))
+      const before = hashTree(root)
+
+      yield* report(root)
+
+      expect(Object.fromEntries(hashTree(root))).toEqual(Object.fromEntries(before))
+    }))
+
+  it.effect("blocks on a Postgres backend without connecting to it", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      writeFileSync(
+        join(root, ".smithers", "smithers.config.ts"),
+        "export const backend = \"postgres\";\n\nexport default { backend };\n"
+      )
+      const result = yield* report(root)
+
+      expect(result.verdict).toBe("blocked")
+      expect(result.postgres?.sources.map((entry) => entry.file)).toEqual([".smithers/smithers.config.ts"])
+      expect(result.instructions).toContain(RunState.instructionText.backend)
+    }))
+
+  it.effect("blocks on SMITHERS_BACKEND=pglite in a dotenv file", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      writeFileSync(join(root, ".env"), "SMITHERS_BACKEND=pglite\n")
+      const result = yield* report(root)
+
+      expect(result.pglite?.sources[0]?.file).toBe(".env")
+      expect(result.verdict).toBe("blocked")
+    }))
+
+  it.effect("blocks on a PGlite data directory", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      mkdirSync(join(root, ".smithers", "pg"), { recursive: true })
+      writeFileSync(join(root, ".smithers", "pg", "PG_VERSION"), "16\n")
+      const result = yield* report(root)
+
+      expect(result.pglite?.sources[0]?.file).toBe(".smithers/pg/PG_VERSION")
+      expect(result.verdict).toBe("blocked")
+    }))
+
+  it.effect("blocks on a database it cannot open", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      writeFileSync(join(root, "smithers.db"), "this is not a database")
+      const result = yield* report(root)
+
+      const broken = result.databases.find((database) => database.path === "smithers.db")
+      expect(broken?.readable).toBe(false)
+      expect(broken?.unreadableReason).toBeDefined()
+      expect(result.verdict).toBe("blocked")
+      expect(result.instructions.some((line) => line.includes("could not be opened read only"))).toBe(true)
+    }))
+
+  it.effect("blocks on a gateway state file that names this workspace", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      const temporary = copyFixture("jsx-single")
+      mkdirSync(join(temporary, "smithers-gateway"), { recursive: true })
+      writeFileSync(
+        join(temporary, "smithers-gateway", "gateway.json"),
+        JSON.stringify({ workspace: root, port: 7331 })
+      )
+      const result = yield* report(root, { tmpdir: temporary })
+
+      expect(result.gatewayState).toHaveLength(1)
+      expect(result.verdict).toBe("blocked")
+      expect(result.instructions.some((line) => line.includes("smithers down"))).toBe(true)
+    }))
+
+  it.effect("finds a database named by a dbPath literal in project source", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      yield* Effect.promise(() => buildDb(root, now))
+      writeFileSync(join(root, "smithers.db"), "")
+      const result = yield* report(root)
+
+      expect(result.databases.map((database) => database.path)).toEqual([".smithers/smithers.db", "smithers.db"])
+    }))
+})
+
+describe("RunState.roots", () => {
+  it.effect("walks the directory a loose state file lives in, never the file itself", () =>
+    Effect.gen(function*() {
+      // A file used as a walk root walks nothing, so the sibling `run-*.log`
+      // 0.x writes next to an existing one would be invisible to the
+      // membership half of the run-state check.
+      const root = copyFixture("persisted-db")
+      const result = yield* report(root)
+
+      expect(result.stateDirs.map((entry) => [entry.path, entry.kind])).toEqual([
+        [".smithers/executions", "directory"],
+        [".smithers/workflows/run-1783757199651.log", "file"],
+        [".smithers/claude-mirror-subscriptions.json", "file"]
+      ])
+      // `.smithers` is the parent of the mirror file, and it already covers
+      // `.smithers/executions` and `.smithers/workflows`.
+      expect(RunState.roots(result)).toEqual([".smithers"])
+      for (const entry of RunState.roots(result)) {
+        expect(statSync(join(root, ...entry.split("/"))).isDirectory(), entry).toBe(true)
+      }
+    }))
+
+  it.effect("keeps the parent of a loose log when no state file sits beside it", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      rmSync(join(root, ".smithers", "claude-mirror-subscriptions.json"))
+      const result = yield* report(root)
+
+      expect(RunState.roots(result)).toEqual([".smithers/executions", ".smithers/workflows"])
+    }))
+})
+
+describe("RunState unreadable database", () => {
+  it.effect("records an unopenable file rather than failing the scan", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      yield* Effect.promise(() => buildDb(root, now))
+      const database = join(root, ".smithers", "smithers.db")
+      chmodSync(database, 0o000)
+      const result = yield* report(root)
+      chmodSync(database, 0o644)
+
+      // Running as root defeats the permission bit; the scan must still be
+      // honest either way, so both outcomes are asserted on their own terms.
+      const finding = result.databases[0]
+      if (finding?.readable === false) {
+        expect(result.verdict).toBe("blocked")
+        expect(result.instructions.some((line) => line.includes("could not be opened read only"))).toBe(true)
+      } else {
+        expect(finding?.live.map((row) => row.runId)).toEqual(["run-live"])
+      }
+    }))
+})

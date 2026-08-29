@@ -1,0 +1,28 @@
+CONTEXT EXTRACTION — Analyze Smithers Specs + Commit History
+
+You are analyzing the Smithers project to extract useful context for an automated issue processor.
+
+## ALL SPEC FILES
+
+{props.specsContent}
+
+## RECENT COMMIT HISTORY
+
+{props.commitHistory}
+
+## YOUR TASK
+
+Extract and synthesize the most useful context from the specs and commit history. Focus on:
+
+1. **Architectural Patterns**: What patterns does this codebase follow? (Chi router, sqlc, services layer, etc.)
+2. **Recent Changes**: What has changed recently? What areas of the codebase are actively being worked on?
+3. **Spec Highlights**: What are the key decisions from each spec? What constraints must implementations follow?
+4. **Current State**: Based on the commit history, what's the current state of the project? What's built vs. not yet built?
+5. **Blockers**: Are there any blockers, risks, or dependencies visible in the specs or history?
+6. **Context for Planning**: Synthesize everything into a concise context block that would help an agent prioritize and implement backlog issues effectively.
+
+Be thorough but concise. Extract the signal, not the noise.
+
+**REQUIRED OUTPUT** — JSON matching this schema:
+{props.schema}
+DO NOT skip JSON output. Workflow fails without it.
