@@ -12,6 +12,7 @@ import {
   type DurableDeferred,
   Flow,
   FlowRuntime,
+  type Interpreter,
   RetryPolicy,
   StepIdentity
 } from "@smthrs/flow"
@@ -21,6 +22,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { actionKey, ordinalScope, uncanonicalKey } from "./ActionKey.ts"
@@ -41,6 +43,36 @@ const toJsonExit = Exit.map((value: any) => value ?? null)
 const ActionOrdinalScope = Context.Service<never, string>(
   "@smthrs/engine/FlowEngine/ActionOrdinalScope"
 )
+
+/**
+ * The tag the interpreter raises its refusals under, anchored to the class so
+ * a rename breaks this file rather than silently re-laundering the refusal.
+ *
+ * @private
+ */
+const interpreterErrorTag: Interpreter.InterpreterError["_tag"] = "@smthrs/flow/InterpreterError"
+
+/** Whether a body failure is the interpreter refusing to drive the graph. */
+const isInterpreterError = Predicate.isTagged(interpreterErrorTag)
+
+/**
+ * A body failure rendered for one log line, bounded so an oversized payload
+ * cannot flood the log the operator is reading it from.
+ *
+ * @private
+ */
+const stringifyError = (error: unknown): string => {
+  try {
+    // `String` rather than the JSON alone: `JSON.stringify` answers
+    // `undefined` for a value it does not encode, and a log line reading
+    // "undefined" is still a line.
+    return String(JSON.stringify(error)).slice(0, 4096)
+  } catch {
+    // A circular value: rendering it must not replace the defect under
+    // diagnosis with a defect about the diagnosis.
+    return String(error).slice(0, 4096)
+  }
+}
 
 /**
  * Builds a typed `FlowRuntime` service from a low-level encoded
@@ -87,10 +119,36 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
         (payload, executionId) =>
           Effect.matchEffect(Effect.suspend(() => execute(payload, executionId)), {
             onFailure: (error) =>
-              Effect.flatMap(
-                Effect.orDie(flow.errorSchema.makeEffect(error)),
-                () => Effect.fail(error)
-              ),
+              isInterpreterError(error)
+                // The interpreter's own refusal is not a body outcome. It names
+                // a graph this composition cannot drive at all — an action with
+                // no implementation wired up, an incomplete graph — so no flow
+                // declares it in `errorSchema`, and validating it there
+                // replaced the one message the operator needed ("Action
+                // \"x/Y\" has no implementation. Provide ONE
+                // Action.layerImplementations under both …") with
+                // `InvalidType(<Never>)`. It travels out typed instead,
+                // exactly as the interpreter raised it.
+                ? Effect.fail(error)
+                : Effect.flatMap(
+                  Effect.orDie(
+                    flow.errorSchema.makeEffect(error).pipe(
+                      // A body failure outside the flow's declared error schema
+                      // is a defect either way, but `orDie` alone reports only
+                      // the schema mismatch and never the error that actually
+                      // occurred. Naming the flow and the undeclared error
+                      // turns that into one legible log line, the same
+                      // treatment a recorded action outcome gets below.
+                      Effect.tapError(() =>
+                        Effect.annotateLogs(
+                          Effect.logError("A flow body failed with an error outside its declared error schema"),
+                          { flow: flow._tag, error: stringifyError(error) }
+                        )
+                      )
+                    )
+                  ),
+                  () => Effect.fail(error)
+                ),
             onSuccess: (value) =>
               Effect.flatMap(FlowRuntime.FlowInstance, (instance) =>
                 // A handoff has no success value for this round. Its handler
