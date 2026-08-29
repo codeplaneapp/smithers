@@ -1,9 +1,11 @@
+import * as Context from "effect/Context"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 import * as Annotations from "../src/Annotations.ts"
 import * as Effects from "../src/Effects.ts"
 import * as Flow from "../src/Flow.ts"
+import * as Graph from "../src/Graph.ts"
 import * as Node from "../src/Node.ts"
 import * as Placement from "../src/Placement.ts"
 
@@ -135,6 +137,85 @@ describe("Flow", () => {
     expect(effected.effects).toBe(replacement)
     expect(sealedDirect.effects).toEqual(Effects.sealed(declaration))
     expect(sealedPiped.effects).toEqual(Effects.sealed(declaration))
+  })
+
+  it("attaches a typed annotation without touching the original or the graph it plans", () => {
+    const Bank = Context.Service<{ readonly bank: string }>("test/Flow/Bank")
+    const original = Flow.make({
+      name: "annotated",
+      input: Schema.String,
+      output: Schema.String,
+      body: (input) => Node.succeed(input)
+    })
+
+    const direct = Flow.annotate(original, Bank, { bank: "one" })
+    const piped = original.pipe(Flow.annotate(Bank, { bank: "two" }))
+
+    expect(direct).not.toBe(original)
+    expect(Option.isNone(Annotations.getOption(original.annotations, Bank))).toBe(true)
+    expect(Option.getOrUndefined(Annotations.getOption(direct.annotations, Bank))).toEqual({ bank: "one" })
+    expect(Option.getOrUndefined(Annotations.getOption(piped.annotations, Bank))).toEqual({ bank: "two" })
+    // An annotation is metadata, so it takes no part in identity or planning.
+    expect(direct.implementation).toEqual(original.implementation)
+    expect(Graph.nodes(Graph.build(direct, "x")).map((node) => node.id)).toEqual(
+      Graph.nodes(Graph.build(original, "x")).map((node) => node.id)
+    )
+  })
+
+  it("replaces a dynamic flow's collaborators and keeps everything else it carries", () => {
+    const first = Flow.make({ name: "first", input: Schema.String, output: Schema.String, model: "smart" })
+    const second = Flow.make({
+      name: "second",
+      input: Schema.String,
+      output: Schema.String,
+      capabilities: ["shell"],
+      model: "smart"
+    })
+    const placement = Placement.local()
+    const original = Flow.make({
+      name: "parent",
+      description: "declares collaborators",
+      input: Schema.String,
+      output: Schema.String,
+      capabilities: ["net"],
+      model: "smart",
+      prompt: "delegate",
+      flows: [first, "by-name"]
+    }).pipe(
+      Flow.within(placement),
+      Flow.annotate(Annotations.Lane, { id: "lane-1" })
+    )
+
+    const rebound = Flow.withFlows(original, [second, "by-name"])
+
+    expect(rebound).not.toBe(original)
+    expect(rebound.implementation).toEqual({
+      _tag: "Dynamic",
+      model: "smart",
+      flows: [second, "by-name"],
+      prompt: "delegate"
+    })
+    // The original keeps the collaborators it declared.
+    expect(original.implementation).toEqual({
+      _tag: "Dynamic",
+      model: "smart",
+      flows: [first, "by-name"],
+      prompt: "delegate"
+    })
+    // Every other field the flow carries survives the rebuild.
+    expect(rebound.name).toBe("parent")
+    expect(rebound.description).toBe("declares collaborators")
+    expect(rebound.capabilities).toEqual(["net"])
+    expect(Option.getOrUndefined(Annotations.getOption(rebound.annotations, Annotations.Placement))).toEqual(placement)
+    expect(Option.getOrUndefined(Annotations.getOption(rebound.annotations, Annotations.Lane))).toEqual({
+      id: "lane-1"
+    })
+    // The body the rebuild produces declares the new collaborators, not the old ones.
+    const dynamicNode = Graph.nodes(Graph.build(rebound, "x")).find((node) => node.kind === "Dynamic")
+    expect(JSON.stringify(dynamicNode?.keyMaterial)).toContain("shell")
+    // A flow with a body reaches its collaborators by calling them, so it is untouched.
+    const bodied = Flow.make({ input: Schema.String, output: Schema.String, body: (input) => Node.succeed(input) })
+    expect(Flow.withFlows(bodied, [second])).toBe(bodied)
   })
 
   it("seals an empty effect envelope when no declaration exists", () => {

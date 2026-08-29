@@ -211,6 +211,15 @@ export const layerNoop: Layer.Layer<Recall> = Layer.succeed(Recall)(makeNoop())
 export type NamespaceValue = Namespace.Namespace
 
 /**
+ * Maps a structured namespace back to the public bank name recall accepts.
+ * `namespaceForBank` is its inverse for every prefixed bank.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const bankForNamespace = (namespace: Namespace.Namespace): string => `${namespace.kind}-${namespace.id}`
+
+/**
  * Maps a public bank name to the structured namespace used by MemoryStore.
  * Prefixes preserve explicit lifetimes; an unprefixed bank is flow-local.
  *

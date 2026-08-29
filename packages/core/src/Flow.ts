@@ -419,6 +419,80 @@ export const within: {
   }))
 
 /**
+ * Attaches one typed annotation to a flow, returning a fresh flow.
+ *
+ * Annotations are metadata a host or a decorator reads; they take no part in
+ * flow identity, so an annotated flow plans the same graph as the flow it was
+ * built from. {@link within} is the placement-shaped special case of this
+ * combinator.
+ *
+ * @category combinators
+ * @since 0.1.0
+ */
+export const annotate: {
+  <I, S>(
+    key: Context.Key<I, S>,
+    value: S
+  ): <Input extends Schema.Top, Output extends Schema.Top, E>(
+    self: Flow<Input, Output, E>
+  ) => Flow<Input, Output, E>
+  <Input extends Schema.Top, Output extends Schema.Top, E, I, S>(
+    self: Flow<Input, Output, E>,
+    key: Context.Key<I, S>,
+    value: S
+  ): Flow<Input, Output, E>
+} = dual(3, <Input extends Schema.Top, Output extends Schema.Top, E, I, S>(
+  self: Flow<Input, Output, E>,
+  key: Context.Key<I, S>,
+  value: S
+): Flow<Input, Output, E> =>
+  makeFlow({
+    ...optionsFromFlow(self),
+    annotations: Annotations.add(self.annotations, key, value)
+  }))
+
+/**
+ * Replaces the collaborators a dynamic flow declares, returning a fresh flow.
+ *
+ * Everything else the flow carries comes across unchanged: its name, schemas,
+ * capabilities, effects, and annotations. That is what lets a decorator rewrite
+ * a flow tree without dropping the metadata a host reads back, such as a
+ * placement or a lane. A flow with a body reaches its collaborators by calling
+ * them rather than declaring them, so one is returned untouched.
+ *
+ * @category combinators
+ * @since 0.1.0
+ */
+export const withFlows: {
+  (
+    flows: ReadonlyArray<Reference>
+  ): <Input extends Schema.Top, Output extends Schema.Top, E>(
+    self: Flow<Input, Output, E>
+  ) => Flow<Input, Output, E>
+  <Input extends Schema.Top, Output extends Schema.Top, E>(
+    self: Flow<Input, Output, E>,
+    flows: ReadonlyArray<Reference>
+  ): Flow<Input, Output, E>
+} = dual(2, <Input extends Schema.Top, Output extends Schema.Top, E>(
+  self: Flow<Input, Output, E>,
+  flows: ReadonlyArray<Reference>
+): Flow<Input, Output, E> => {
+  const implementation = self.implementation
+  if (implementation === undefined || implementation._tag !== "Dynamic") return self
+  return makeFlow({
+    ...optionsFromFlow(self),
+    body: () =>
+      Node.dynamic({
+        ...(implementation.model === undefined ? {} : { model: implementation.model }),
+        flows,
+        output: self.output,
+        ...(implementation.prompt === undefined ? {} : { prompt: implementation.prompt })
+      }) as Node.Node<Output["Type"], E>,
+    implementation: { _tag: "Dynamic", model: implementation.model, flows, prompt: implementation.prompt }
+  })
+})
+
+/**
  * Replaces a flow's effect declaration, returning a fresh flow.
  *
  * @category combinators

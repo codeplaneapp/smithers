@@ -16,6 +16,7 @@ import * as Schema from "effect/Schema"
 import type { MemoryError } from "./MemoryError.ts"
 import * as MemoryStore from "./MemoryStore.ts"
 import * as Recall from "./Recall.ts"
+import * as WithMemory from "./WithMemory.ts"
 
 /**
  * The registry name of the `remember` flow.
@@ -206,16 +207,101 @@ export const runRecall = (
   Effect.flatMap(Recall.Recall, (service) => service.recall(input))
 
 /**
- * Runtime handlers keyed by their public flow declarations.
+ * Applies the memory policy a flow carries to a recall request.
+ *
+ * The policy supplies defaults, never overrides: a caller that names its own
+ * banks or its own budget keeps them. A policy of `recall: "none"` is the one
+ * exception, and it is a refusal rather than a default, so the request never
+ * reaches the recall service at all.
  *
  * @category handlers
  * @since 0.1.0
- * @slop
  */
-export const handlers = {
-  remember: runRemember,
-  recall: runRecall
-} as const
+export const runRecallFor = (
+  flow: Flow.Any,
+  input: RecallInputType
+): Effect.Effect<RecallOutputType, MemoryError, Recall.Recall> => {
+  const policy = WithMemory.policyOf(flow)
+  if (policy === undefined) return runRecall(input)
+  if (policy.recall === "none") return Effect.succeed([])
+  return runRecall({
+    ...input,
+    banks: input.banks.length > 0 ? input.banks : [Recall.bankForNamespace(policy.namespace)],
+    maxTokens: input.maxTokens ?? policy.maxTokens
+  })
+}
+
+/**
+ * Applies the memory policy a flow carries to a memory write.
+ *
+ * An unnamed bank resolves to the policy namespace. `retain: "never"` drops
+ * the write: the caller still receives the key it asked for, and nothing
+ * reaches the store.
+ *
+ * @category handlers
+ * @since 0.1.0
+ */
+export const runRememberFor = (
+  flow: Flow.Any,
+  input: RememberInputType
+): Effect.Effect<typeof RememberOutput.Type, MemoryError, MemoryStore.MemoryStore> => {
+  const policy = WithMemory.policyOf(flow)
+  if (policy === undefined) return runRemember(input)
+  if (policy.retain === "never") return Effect.succeed({ key: input.key })
+  return runRemember(
+    input.bank.length > 0 ? input : { ...input, bank: Recall.bankForNamespace(policy.namespace) }
+  )
+}
+
+/**
+ * The runtime handlers one bound memory declaration answers with.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Handlers {
+  readonly remember: (
+    input: RememberInputType
+  ) => Effect.Effect<typeof RememberOutput.Type, MemoryError, MemoryStore.MemoryStore>
+  readonly recall: (input: RecallInputType) => Effect.Effect<RecallOutputType, MemoryError, Recall.Recall>
+}
+
+/**
+ * Builds the handlers for one memory declaration, reading the memory policy
+ * that declaration carries.
+ *
+ * A host binds the declaration a cell was given, which for delegated work is
+ * the policy-carrying copy `withMemory` produced, not the bare declaration
+ * exported here. Passing that copy is what makes the namespace, the recall
+ * budget, and `recall: "none"` reach the runtime:
+ *
+ * ```ts
+ * const bound = WithMemory.withMemory(Flows.recall, policy)
+ * FlowBinding.make({ flow: bound, handler: Flows.handlersFor(bound).recall })
+ * ```
+ *
+ * @category handlers
+ * @since 0.1.0
+ */
+export const handlersFor = (flow: Flow.Any): Handlers => ({
+  remember: (input) => runRememberFor(flow, input),
+  recall: (input) => runRecallFor(flow, input)
+})
+
+/**
+ * Runtime handlers for the bare declarations this module exports.
+ *
+ * They read a memory policy the same way {@link handlersFor} does. The bare
+ * declarations carry none, so these behave as unscoped memory. Bind a
+ * policy-carrying copy through {@link handlersFor} to get the scoped answer.
+ *
+ * @category handlers
+ * @since 0.1.0
+ */
+export const handlers: Handlers = {
+  remember: handlersFor(remember).remember,
+  recall: handlersFor(recall).recall
+}
 
 /**
  * What the `remember` flow accepts.

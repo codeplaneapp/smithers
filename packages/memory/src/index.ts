@@ -35,6 +35,12 @@ export * as MemoryError from "./MemoryError.ts"
 export * as MemoryStore from "./MemoryStore.ts"
 
 /**
+ * @category patterns
+ * @since 0.1.0
+ */
+export * as MemoryTrellis from "./MemoryTrellis.ts"
+
+/**
  * @category models @since 0.1.0
  * @slop
  */
@@ -69,3 +75,9 @@ export * as RecallSemantic from "./RecallSemantic.ts"
  * @slop
  */
 export * as Source from "./Source.ts"
+
+/**
+ * @category patterns
+ * @since 0.1.0
+ */
+export * as WithMemory from "./WithMemory.ts"

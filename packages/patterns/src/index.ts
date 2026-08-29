@@ -108,3 +108,15 @@ export * as Quarantine from "./Quarantine.ts"
  * @slop
  */
 export * as Saga from "./Saga.ts"
+
+/**
+ * @category patterns
+ * @since 0.1.0
+ */
+export * as Trellis from "./Trellis.ts"
+
+/**
+ * @category patterns
+ * @since 0.1.0
+ */
+export * as DelegationChain from "./DelegationChain.ts"
