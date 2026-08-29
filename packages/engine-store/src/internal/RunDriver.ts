@@ -860,6 +860,13 @@ export const make = (
             // `instance.interrupted` flag, which a durable observation never
             // sets and a second driver instance never has.
             cascaded = yield* requestCancelDescendants(runId, interruptedAtMs)
+            // The run has no future, so neither do its timers. Completing the
+            // clock rows in this transaction is what stops a durable timer
+            // from outliving the run it belongs to: the sweep queries already
+            // skip a settled run's rows, and this stops them being pending at
+            // all — including under an in-memory state with no run view to
+            // join against.
+            yield* engineState.completeRunClocks(runId, interruptedAtMs)
             // A cancel can race the final poll after the run already parked
             // (park precedes the guarded terminal CAS). Clear the waiting row so
             // the terminally cancelled run never surfaces to a sweeper again
@@ -1532,9 +1539,13 @@ export const make = (
               { decision: "transitioned", status, owner: dependencies.owner },
               { cancelRequested: "absent" },
               // A suspension is not an exit: the run is parked and will settle
-              // later, so its children keep going. A `completed` or `failed`
-              // run is done, and its attached children end with it.
-              status === "suspended" ? undefined : applyChildExitPolicy(executionId)
+              // later, so its children keep going and its timers stay armed. A
+              // `completed` or `failed` run is done, so its attached children
+              // end with it and its clock rows are closed with it.
+              status === "suspended" ? undefined : Effect.gen(function*() {
+                yield* applyChildExitPolicy(executionId)
+                yield* engineState.completeRunClocks(executionId, yield* Clock.currentTimeMillis)
+              })
             ).pipe(
               // The park becomes durable the instant this transition commits, so
               // the flag that records it is set in the transition's own exit
@@ -1998,6 +2009,13 @@ export const make = (
           )
         )
         if (row === undefined) return
+        // A settled run is not woken and then refused: it is not woken. The
+        // terminal reject used to live one layer down, in `claimAndActivate`,
+        // so a timer armed before its run was cancelled and an external
+        // trigger arriving after the run finished both wrote a
+        // `wake-scheduled` decision into the journal of a run that can never
+        // wake again — one per event, forever, on a durable channel.
+        if (row.status === "completed" || row.status === "failed" || row.status === "cancelled") return
         const state = yield* decodeState(row.stateJson)
         if (state.flowName !== flowName) return
         yield* emitDecision(executionId, {
