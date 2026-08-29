@@ -1,0 +1,107 @@
+/**
+ * Authority-free channel declarations.
+ *
+ * A channel authenticates opaque transport input, maps verified payloads to
+ * control-plane starts or signals, and may project run state outbound. It
+ * carries no execution authority: the target flow's envelope and permission
+ * checks apply unchanged.
+ *
+ * @see docs/specs/Concepts/Channels.md
+ * @since 0.1.0
+ */
+import type { IdempotencyKey } from "@smthrs/control/ControlSchema"
+import type * as Effect from "effect/Effect"
+import type * as Schema from "effect/Schema"
+import type { TriggerError } from "./TriggerError.ts"
+
+/**
+ * Opaque inbound transport data. Verification must inspect this value before
+ * any payload decoding occurs.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface RawInbound {
+  readonly body: Uint8Array
+  readonly headers: Readonly<Record<string, string | undefined>>
+  readonly idempotencyKey: IdempotencyKey
+}
+
+/**
+ * A verified request that starts a flow.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Start {
+  readonly start: {
+    readonly flowId: string
+    readonly input: unknown
+  }
+}
+
+/**
+ * A verified request that resolves a waiting flow step.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Signal {
+  readonly signal: {
+    readonly runId: string
+    readonly stepId: string
+    readonly value: unknown
+  }
+}
+
+/**
+ * The only operations an inbound channel may request.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Inbound = Start | Signal
+
+/**
+ * Authenticates raw request bytes and headers.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Verify = (raw: RawInbound) => Effect.Effect<void, TriggerError>
+
+/**
+ * An authority-free bidirectional channel declaration.
+ *
+ * `inbound` only describes a control-plane start or signal. It cannot supply
+ * capabilities, grants, or an alternate execution envelope.
+ *
+ * @category declarations
+ * @since 0.1.0
+ */
+export interface Channel<Payload, Run = never, Outbound = never> {
+  readonly name: string
+  readonly verify: Verify
+  readonly inbound: (payload: Payload) => Inbound
+  readonly outbound?: ((run: Run) => Outbound) | undefined
+}
+
+/**
+ * Configuration for a schema-declared channel.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Config<Payload, Run = never, Outbound = never> extends Channel<Payload, Run, Outbound> {
+  readonly schema: Schema.Schema<Payload>
+}
+
+/**
+ * Declares a channel without adding authority or execution behavior.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const make = <Payload, Run = never, Outbound = never>(
+  config: Channel<Payload, Run, Outbound>
+): Channel<Payload, Run, Outbound> => config

@@ -1,0 +1,26 @@
+{
+  "name": "@smthrs/build-infra",
+  "private": true,
+  "smthrs": {
+    "group": "tooling"
+  },
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "deploy": "node scripts/deploy.ts --stage prod",
+    "deploy:dev": "node scripts/deploy.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "4.0.0-rc.109",
+    "@effect/platform-node": "4.0.0-rc.109",
+    "alchemy": "2.0.0-beta.72",
+    "effect": "4.0.0-rc.109"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260814.1",
+    "@types/node": "25.9.5",
+    "typescript": "6.0.3",
+    "vitest": "4.1.9"
+  }
+}

@@ -1,0 +1,509 @@
+/**
+ * Discovery and prompt rendering for markdown-backed flows.
+ *
+ * Implements the markdown compatibility and one-schema/five-doors rules in
+ * [Flow Registry](../../../docs/specs/Concepts/Flow%20Registry.md) and
+ * [Input](../../../docs/specs/Specs/Input.md).
+ *
+ * @since 0.1.0
+ */
+import type * as CoreMarkdown from "@smthrs/core/Markdown"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
+import {
+  BodyRefMarkdown,
+  type DiscoveryWarning,
+  type EffectDeclaration,
+  type FlowBody,
+  FlowBodyPrompt,
+  FlowDescriptor,
+  type FlowDescriptor as FlowDescriptorType,
+  type Provenance,
+  SchemaRefMarkdownArgs,
+  SchemaRefMarkdownOutput
+} from "./Descriptor.ts"
+import { inferEffectTier, maxTier } from "./internal/Authority.ts"
+import * as Frontmatter from "./internal/Frontmatter.ts"
+import * as Names from "./internal/Names.ts"
+
+/**
+ * The fixed decoded input schema for markdown flows.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Input = Schema.Struct({ args: Schema.String })
+
+/**
+ * The decoded input accepted by every markdown flow.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Input = typeof Input.Type
+
+/**
+ * The fixed output schema for markdown flows.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Output = Schema.String
+
+/**
+ * The prompt text returned by a markdown flow.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Output = typeof Output.Type
+
+/**
+ * Parameters used to derive a descriptor from already-read markdown text.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface FromMarkdownOptions {
+  readonly text: string
+  readonly path: string
+  readonly baseDirectory: string
+  readonly naming: "path" | "frontmatter"
+  readonly name: Option.Option<string>
+  readonly dirBasename: string
+  readonly provenance: Provenance
+}
+
+/**
+ * The metadata result of markdown flow discovery.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface FromMarkdownResult {
+  readonly descriptor: Option.Option<FlowDescriptorType>
+  readonly warnings: ReadonlyArray<DiscoveryWarning>
+}
+
+/**
+ * Derives a markdown flow descriptor without retaining the prompt body.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const fromMarkdown = (options: FromMarkdownOptions): FromMarkdownResult => {
+  const parsed = Frontmatter.parse({ text: options.text, path: options.path })
+  const warnings = [...parsed.warnings]
+  const fields = parsed.fields
+  const description = fields.description
+  const name = deriveName(options, fields, warnings)
+
+  if (typeof description !== "string" || description.trim() === "") {
+    warnings.push({
+      code: "missing_description",
+      path: options.path,
+      name,
+      message: "Markdown flows require a non-empty frontmatter description"
+    })
+    return { descriptor: Option.none(), warnings }
+  }
+  if ([...description].length > 1024) {
+    warnings.push({
+      code: "invalid_description",
+      path: options.path,
+      name,
+      message: "Frontmatter description exceeds the 1024-character Agent Skills limit"
+    })
+  }
+
+  validateStandardFields(fields, options.path, warnings)
+  const capabilities = deriveCapabilities(fields, options.path, warnings)
+  const flows = deriveFlows(fields, options.path, warnings)
+  const modelInvocable = deriveModelInvocable(fields, options.path, warnings)
+  const effects = deriveEffects(fields, capabilities, options.path, warnings)
+  const placement = derivePlacement(fields, options.path, warnings)
+  const model = typeof fields.model === "string" && fields.model.trim() !== ""
+    ? Option.some(fields.model)
+    : Option.none<string>()
+  warnUnsupportedSchema(fields, options.path, warnings)
+  warnUnknownFields(fields, options.path, warnings)
+
+  return {
+    descriptor: Option.some(
+      new FlowDescriptor({
+        name,
+        description,
+        body: new BodyRefMarkdown({
+          path: options.path,
+          baseDirectory: options.baseDirectory
+        }),
+        input: new SchemaRefMarkdownArgs({}),
+        output: new SchemaRefMarkdownOutput({}),
+        model,
+        flows,
+        capabilities,
+        effects,
+        placement,
+        modelInvocable,
+        path: options.path,
+        frontmatter: fields,
+        provenance: options.provenance
+      })
+    ),
+    warnings
+  }
+}
+
+/**
+ * Loads a markdown prompt body after discovery, removing only leading frontmatter.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const loadBody = (text: string, baseDirectory: string): FlowBody =>
+  new FlowBodyPrompt({
+    text: Frontmatter.split(text).body,
+    baseDirectory
+  })
+
+/**
+ * Renders decoded markdown-flow arguments using the compatible skill convention.
+ *
+ * @category rendering
+ * @since 0.1.0
+ */
+export const renderPrompt = (body: FlowBody & FlowBodyPrompt, input: { readonly args: string }): string =>
+  [
+    body.text,
+    "",
+    "Supporting skill resources are available relative to this skill directory but are not loaded into context unless needed:",
+    "<skill_resources>",
+    `- Base directory: ${body.baseDirectory}`,
+    "- Resolve relative resource paths from this directory and read only the files you need.",
+    "</skill_resources>",
+    ...(input.args === "" ? [] : ["", input.args])
+  ].join("\n")
+
+/**
+ * Projects a registry descriptor into the one authoring value accepted by
+ * `/core/Markdown`. This is the deliberate registry-to-core adapter
+ * boundary; metadata is not independently reinterpreted downstream.
+ *
+ * @category conversions
+ * @since 0.1.0
+ */
+export const toCoreFrontmatter = (descriptor: FlowDescriptorType): CoreMarkdown.MarkdownFrontmatter => ({
+  name: descriptor.name,
+  description: descriptor.description,
+  flows: descriptor.flows,
+  capabilities: descriptor.capabilities,
+  effects: descriptor.effects,
+  ...(Option.getOrUndefined(descriptor.model) === undefined
+    ? {}
+    : { model: Option.getOrThrow(descriptor.model) }),
+  ...(Option.getOrUndefined(descriptor.placement) === undefined
+    ? {}
+    : { placement: Option.getOrThrow(descriptor.placement) })
+})
+
+const deriveName = (
+  options: FromMarkdownOptions,
+  fields: Record<string, unknown>,
+  warnings: Array<DiscoveryWarning>
+): string => {
+  if (options.naming === "frontmatter") {
+    const derived = Names.deriveFromFrontmatter({ fields, dirBasename: options.dirBasename, path: options.path })
+    warnings.push(...derived.warnings)
+    return derived.name
+  }
+
+  if ("name" in fields) {
+    warnings.push({
+      code: "name_field_ignored",
+      path: options.path,
+      message: "Ignoring frontmatter name because this source uses path-derived names"
+    })
+  }
+  return Option.getOrElse(options.name, () => options.dirBasename)
+}
+
+const deriveCapabilities = (
+  fields: Record<string, unknown>,
+  path: string,
+  warnings: Array<DiscoveryWarning>
+): ReadonlyArray<string> => {
+  if (!("capabilities" in fields)) {
+    warnings.push({
+      code: "unprojectable_authority",
+      path,
+      message: "Markdown authority is not declared; using the conservative wildcard"
+    })
+    return ["*"]
+  }
+
+  const value = fields.capabilities
+  if (typeof value === "string") {
+    warnings.push({
+      code: "invalid_capabilities",
+      path,
+      message: "Frontmatter capabilities should be a string array; accepting the space-separated string"
+    })
+    return value.split(/\s+/).filter((capability) => capability.length > 0)
+  }
+  if (Array.isArray(value) && value.every((capability): capability is string => typeof capability === "string")) {
+    return value
+  }
+
+  warnings.push({
+    code: "invalid_capabilities",
+    path,
+    message: "Malformed capabilities cannot bound markdown authority; using the conservative wildcard"
+  })
+  return ["*"]
+}
+
+const deriveFlows = (
+  fields: Record<string, unknown>,
+  path: string,
+  warnings: Array<DiscoveryWarning>
+): ReadonlyArray<string> => {
+  const value = fields.flows ?? fields["allowed-tools"]
+  if (value === undefined) return []
+  if (typeof value === "string") {
+    return value.split(/\s+/).filter((flow) => flow.length > 0)
+  }
+  if (Array.isArray(value) && value.every((flow): flow is string => typeof flow === "string")) {
+    return value
+  }
+  warnings.push({
+    code: "invalid_allowed_tools",
+    path,
+    message: "Ignoring malformed flows; expected a string array or Agent Skills allowed-tools string"
+  })
+  return []
+}
+
+const deriveModelInvocable = (
+  fields: Record<string, unknown>,
+  path: string,
+  warnings: Array<DiscoveryWarning>
+): boolean => {
+  if (!("disable-model-invocation" in fields)) {
+    return true
+  }
+  if (
+    fields["disable-model-invocation"] === true ||
+    fields["disable-model-invocation"] === "true"
+  ) {
+    return false
+  }
+  if (
+    fields["disable-model-invocation"] === false ||
+    fields["disable-model-invocation"] === "false"
+  ) {
+    return true
+  }
+
+  warnings.push({
+    code: "invalid_model_invocation",
+    path,
+    message: "Ignoring disable-model-invocation; expected a boolean"
+  })
+  return true
+}
+
+const deriveEffects = (
+  fields: Record<string, unknown>,
+  capabilities: ReadonlyArray<string>,
+  path: string,
+  warnings: Array<DiscoveryWarning>
+): EffectDeclaration => {
+  const inferred = inferEffectTier(capabilities)
+  const value = fields.effects
+  const object = typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+  let conservative = capabilities.includes("*")
+  if (value !== undefined && object === undefined) {
+    conservative = true
+    warnings.push({
+      code: "invalid_effect_declaration",
+      path,
+      message: "Frontmatter effects must be an object; using conservative effects"
+    })
+  }
+  const strings = (key: "reads" | "writes"): ReadonlyArray<string> => {
+    const candidate = object?.[key]
+    if (candidate === undefined) {
+      return conservative ? ["**"] : []
+    }
+    if (Array.isArray(candidate) && candidate.every((item): item is string => typeof item === "string")) {
+      return candidate
+    }
+    conservative = true
+    warnings.push({
+      code: "invalid_effect_declaration",
+      path,
+      message: `Frontmatter effects.${key} must be a string array; using the conservative wildcard`
+    })
+    return ["**"]
+  }
+  const reads = strings("reads")
+  const writes = strings("writes")
+  const explicitTier = object?.tier
+  let tier = inferred
+  if (explicitTier === "sealed" || explicitTier === "compensable" || explicitTier === "irreversible") {
+    tier = maxTier(explicitTier, inferred)
+    if (tier !== explicitTier) {
+      warnings.push({
+        code: "invalid_effect_tier",
+        path,
+        message: `Effect tier ${explicitTier} under-classifies declared authority; using ${tier}`
+      })
+    }
+  } else if (explicitTier !== undefined) {
+    tier = "irreversible"
+    warnings.push({
+      code: "invalid_effect_tier",
+      path,
+      message: "Ignoring invalid effects.tier; using irreversible"
+    })
+  }
+  const mode = object?.mode
+  if (mode !== undefined && mode !== "hermetic" && mode !== "expected") {
+    conservative = true
+    warnings.push({
+      code: "invalid_effect_declaration",
+      path,
+      message: "Frontmatter effects.mode must be hermetic or expected; using expected"
+    })
+  }
+  const onConflict = object?.onConflict
+  if (
+    onConflict !== undefined &&
+    onConflict !== "serialize" &&
+    onConflict !== "lane" &&
+    onConflict !== "fail"
+  ) {
+    conservative = true
+    warnings.push({
+      code: "invalid_effect_declaration",
+      path,
+      message: "Frontmatter effects.onConflict must be serialize, lane, or fail; using serialize"
+    })
+  }
+  return {
+    reads: conservative ? ["**"] : reads,
+    writes: conservative ? ["**"] : writes,
+    mode: conservative || mode === "expected" ? "expected" : "hermetic",
+    onConflict: onConflict === "lane" || onConflict === "fail"
+      ? onConflict
+      : "serialize",
+    tier: conservative ? "irreversible" : tier
+  }
+}
+
+const derivePlacement = (
+  fields: Record<string, unknown>,
+  path: string,
+  warnings: Array<DiscoveryWarning>
+): Option.Option<"client" | "local" | "sandbox" | "remote"> => {
+  const value = fields.placement
+  if (value === undefined) return Option.none()
+  if (value === "client" || value === "local" || value === "sandbox" || value === "remote") {
+    return Option.some(value)
+  }
+  warnings.push({
+    code: "unsupported_module_metadata",
+    path,
+    message: "Ignoring invalid placement; expected client, local, sandbox, or remote"
+  })
+  return Option.none()
+}
+
+const validateStandardFields = (
+  fields: Record<string, unknown>,
+  path: string,
+  warnings: Array<DiscoveryWarning>
+): void => {
+  if ("license" in fields && typeof fields.license !== "string") {
+    warnings.push({
+      code: "invalid_license",
+      path,
+      message: "Frontmatter license must be a string when provided"
+    })
+  }
+
+  if ("compatibility" in fields) {
+    const compatibility = fields.compatibility
+    if (typeof compatibility !== "string" || [...compatibility].length > 500) {
+      warnings.push({
+        code: "invalid_compatibility",
+        path,
+        message: "Frontmatter compatibility must be a string of at most 500 characters"
+      })
+    }
+  }
+
+  if ("metadata" in fields) {
+    const metadata = fields.metadata
+    if (
+      typeof metadata !== "object" ||
+      metadata === null ||
+      Array.isArray(metadata) ||
+      !Object.values(metadata).every((value) => typeof value === "string")
+    ) {
+      warnings.push({
+        code: "invalid_metadata",
+        path,
+        message: "Frontmatter metadata must be a string-to-string mapping"
+      })
+    }
+  }
+}
+
+const warnUnsupportedSchema = (
+  fields: Record<string, unknown>,
+  path: string,
+  warnings: Array<DiscoveryWarning>
+): void => {
+  for (const key of ["input", "schema"]) {
+    if (key in fields) {
+      warnings.push({
+        code: "unsupported_input_schema",
+        path,
+        message: `Ignoring unsupported markdown flow ${key} frontmatter`
+      })
+    }
+  }
+}
+
+const knownFields = new Set([
+  "name",
+  "description",
+  "license",
+  "compatibility",
+  "allowed-tools",
+  "flows",
+  "model",
+  "effort",
+  "capabilities",
+  "effects",
+  "placement",
+  "metadata",
+  "disable-model-invocation",
+  "input",
+  "schema"
+])
+
+const warnUnknownFields = (fields: Record<string, unknown>, path: string, warnings: Array<DiscoveryWarning>): void => {
+  for (const key of Object.keys(fields)) {
+    if (!knownFields.has(key)) {
+      warnings.push({
+        code: "unknown_frontmatter_key",
+        path,
+        message: `Unknown frontmatter key: ${key}`
+      })
+    }
+  }
+}

@@ -1,0 +1,254 @@
+/**
+ * Reads one run's journal back into the facts its controller decided on.
+ *
+ *   import { read } from "./lib/journal-facts.mjs"
+ *   const facts = read("journals/django__django-16612-r3/engine.db")
+ *
+ * The harness writes every fact a completion is judged on: the input and result
+ * of every call, the workspace digest each frame closed on, whether that frame
+ * moved the tree, and the transition it applied. This rebuilds the controller's
+ * own view out of those events and hands it back — frames, the narrowing ledger,
+ * the failure ledger, the demands that were issued, tokens and span.
+ *
+ * It re-runs no detector of its own. `NarrowedCheck`, `Sufficiency`,
+ * `UnresolvedFailure` and `UnmovedTree` are imported from `@smthrs/harness`
+ * source and asked the same questions `CellTurn` asks them, in the same order
+ * and with the same inputs, so a reading taken here and the demand the run
+ * actually got cannot drift apart. Everything this module adds is the fold from
+ * an event stream back into per-frame state.
+ *
+ * Three places where the journal is thinner than the controller's memory, all
+ * of them documented here rather than guessed at silently:
+ *
+ * - **Whether a call declared a write** is per frame in the journal, not per
+ *   call. A call is treated as mutating when its flow is one of the editing
+ *   flows, which is the same list `lib/narrowing-journals.mjs` and
+ *   `fixtures/make-fixture.mjs` use. A misclassification can only drop a check
+ *   from the ledger, never add one.
+ * - **The call signature** is the canonical form of `[flow, input]` rather than
+ *   the controller's digest of it. Both are injective over the same value, so
+ *   the equivalence classes — which is all any caller asks about — are identical.
+ * - **A call's `invalidProbe`** is read off the reserved result key, as
+ *   `CellTurn` reads it: a result carrying an object there is a flow saying the
+ *   failure was about the command and not about the tree, and is neither failing
+ *   nor passing.
+ *
+ * @since 0.1.0
+ */
+import { DatabaseSync } from "node:sqlite"
+import * as NarrowedCheck from "../../../packages/harness/src/NarrowedCheck.ts"
+import * as Sufficiency from "../../../packages/harness/src/Sufficiency.ts"
+import * as UnresolvedFailure from "../../../packages/harness/src/UnresolvedFailure.ts"
+
+/** Flows whose calls change the workspace, so they are never checks. */
+const editing = new Set(["write", "edit", "apply_patch"])
+
+/** The reserved result key a flow reports "I could not run this" under. */
+const invalidProbeKey = "invalidProbe"
+
+/**
+ * A stable, injective rendering of one value, used only as an identity.
+ *
+ * Keys are emitted in sorted order so two spellings of one input collapse to one
+ * signature, which is the whole requirement: nothing reads this text, and
+ * nothing outside this module ever sees it.
+ */
+const canonical = (value) => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null"
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`
+  const keys = Object.keys(value).sort()
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`
+}
+
+const probed = (value) => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  const probe = value[invalidProbeKey]
+  return probe !== null && typeof probe === "object" && !Array.isArray(probe)
+}
+
+/**
+ * Reads a run's journal into the facts its controller decided on.
+ *
+ * @category conversions
+ * @since 0.1.0
+ */
+export const read = (databasePath) => {
+  const database = new DatabaseSync(databasePath, { readOnly: true })
+  let rows
+  try {
+    rows = database.prepare(
+      "select seq, emitted_at_ms, event_type, payload_json from flows_journal_events"
+        + " where event_type like 'control.%' or event_type = 'flows.time-travel.effect-boundary'"
+        + " order by seq"
+    ).all()
+  } finally {
+    database.close()
+  }
+
+  const frames = []
+  const started = []
+  const demands = { unmoved: [], unresolved: [], narrowed: [], narrowOnly: [], readOnly: [], repeat: [] }
+  const sufficiencyEvents = []
+  const usage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0 }
+  let seat
+  let openedDigest
+  let modelCalls = 0
+  let firstAt
+  let lastAt
+  let frame
+
+  for (const row of rows) {
+    const payload = JSON.parse(row.payload_json)
+    if (firstAt === undefined) firstAt = row.emitted_at_ms
+    lastAt = row.emitted_at_ms
+    switch (row.event_type) {
+      case "flows.time-travel.effect-boundary": {
+        // The run's opening measurement, recorded as the first frame's
+        // `workspace-open` boundary. An incomplete walk says nothing about the
+        // tree, so it is read as no measurement at all — the same reading
+        // `CellTurn` takes when it fixes `openingDigest`.
+        const effect = payload.effect
+        if (
+          openedDigest === undefined && effect?.kind === "harness/boundary/workspace-open"
+          && effect.status === "succeeded" && effect.output?._tag === "Some"
+        ) {
+          openedDigest = effect.output.value.complete ? effect.output.value.digest : ""
+        }
+        break
+      }
+      case "control.agent.turn-opened":
+        if (seat === undefined) seat = payload.seat
+        frame = {
+          index: frames.length,
+          seq: row.seq,
+          calls: [],
+          basis: "declared",
+          digest: "",
+          mutated: false,
+          declaredWrites: 0,
+          transition: "none",
+          transitionSeq: undefined
+        }
+        frames.push(frame)
+        break
+      case "control.agent.model-settled":
+        modelCalls += 1
+        usage.inputTokens += payload.usage?.inputTokens ?? 0
+        usage.cachedInputTokens += payload.usage?.cachedInputTokens ?? 0
+        usage.outputTokens += payload.usage?.outputTokens ?? 0
+        usage.reasoningTokens += payload.usage?.reasoningTokens ?? 0
+        break
+      case "control.agent.cell-call-started":
+        started.push(payload)
+        break
+      case "control.agent.cell-call-settled": {
+        const opened = started.shift()
+        if (frame === undefined) break
+        const ok = payload.outcome === "success"
+        const probe = ok && probed(payload.value)
+        frame.calls.push({
+          seq: row.seq,
+          flow: payload.flowName,
+          input: opened?.input ?? null,
+          signature: canonical([payload.flowName, opened?.input ?? null]),
+          ok,
+          mutates: editing.has(payload.flowName),
+          failing: ok && !probe && UnresolvedFailure.failed(payload.value),
+          passing: ok && !probe && UnresolvedFailure.passed(payload.value)
+        })
+        break
+      }
+      case "control.agent.mutation-observed":
+        if (frame === undefined) break
+        frame.basis = payload.basis
+        frame.digest = payload.digest
+        frame.mutated = payload.mutated
+        frame.declaredWrites = payload.declaredWrites ?? 0
+        break
+      case "control.agent.transition-applied":
+        if (frame === undefined) break
+        frame.transition = payload.transition?._tag ?? "none"
+        frame.transitionSeq = row.seq
+        break
+      case "control.agent.unmoved-demanded":
+        demands.unmoved.push({ seq: row.seq, ...payload })
+        break
+      case "control.agent.unresolved-demanded":
+        demands.unresolved.push({ seq: row.seq, ...payload })
+        break
+      case "control.agent.narrowed-demanded":
+        demands.narrowed.push({ seq: row.seq, ...payload })
+        break
+      case "control.agent.narrow-only-demanded":
+        demands.narrowOnly.push({ seq: row.seq, ...payload })
+        break
+      case "control.agent.read-only-demanded":
+        demands.readOnly.push({ seq: row.seq, ...payload })
+        break
+      case "control.agent.repeat-demanded":
+        demands.repeat.push({ seq: row.seq, ...payload })
+        break
+      case "control.agent.sufficiency-observed":
+        sufficiencyEvents.push({ seq: row.seq, ...payload })
+        break
+      default:
+        break
+    }
+  }
+
+  // The per-frame fold `CellTurn` runs, in its order: this frame's checks are
+  // stamped with the tree it closed on, remembered against the epoch the frame
+  // *opened* at, and judged against the epoch it closes at.
+  let checkLedger = []
+  let failureLedger = []
+  let mutations = 0
+  for (const entry of frames) {
+    const workspaceDigest = entry.basis === "observed" ? entry.digest : ""
+    entry.epoch = mutations
+    entry.checks = entry.calls.flatMap((call) => {
+      if (!call.ok || call.mutates) return []
+      const recorded = NarrowedCheck.check({
+        flow: call.flow,
+        signature: call.signature,
+        input: call.input,
+        digest: workspaceDigest,
+        failing: call.failing,
+        passing: call.passing,
+        stable: !entry.mutated
+      })
+      return recorded === undefined ? [] : [{ check: recorded, seq: call.seq }]
+    })
+    const frameChecks = entry.checks.map((held) => held.check)
+    entry.ledgerBefore = checkLedger
+    entry.failuresBefore = failureLedger
+    failureLedger = Sufficiency.remember(failureLedger, { frame: frameChecks, epoch: mutations })
+    checkLedger = NarrowedCheck.remember(checkLedger, frameChecks)
+    mutations += entry.mutated ? 1 : 0
+    entry.closingEpoch = mutations
+    entry.workspaceDigest = workspaceDigest
+    entry.ledger = checkLedger
+    entry.failures = failureLedger
+    entry.frameChecks = frameChecks
+  }
+
+  const measured = frames.filter((entry) => entry.workspaceDigest !== "")
+  const completing = frames.filter((entry) => entry.transition === "complete")
+
+  return {
+    frames,
+    demands,
+    sufficiencyEvents,
+    seat,
+    modelCalls,
+    usage,
+    spanMillis: firstAt === undefined ? 0 : lastAt - firstAt,
+    /** The digest the run opened on; empty when the run never measured one. */
+    openedDigest: openedDigest ?? "",
+    /** The digest the last measured frame closed on; empty when none did. */
+    finalDigest: measured.length === 0 ? "" : measured[measured.length - 1].workspaceDigest,
+    /** Frames whose transition was `complete`; the last one is what the run submitted on. */
+    completing,
+    /** Frames that changed the workspace. */
+    mutating: frames.filter((entry) => entry.mutated)
+  }
+}

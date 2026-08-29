@@ -1,0 +1,1 @@
+{ "name": "viem-fixture", "version": "1.0.0", "engines": { "node": ">=24.5" }, "packageManager": "pnpm@11.13.1" }

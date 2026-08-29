@@ -1,0 +1,237 @@
+/**
+ * The ChatGPT-subscription Responses route: the deltas the subscription
+ * backend imposes on the API-key surface, each of which was confirmed against
+ * the live backend (2026-08-25). The route must send `store:false`, never send
+ * `max_output_tokens`, request encrypted reasoning, replay it verbatim instead
+ * of `item_reference` ids, and keep every credential out of the sealed view.
+ */
+import { Effect, Redacted, Result, Schema } from "effect"
+import { describe, expect, it } from "vitest"
+import * as Auth from "../src/Auth.ts"
+import * as CanonicalJson from "../src/CanonicalJson.ts"
+import { ModelError } from "../src/ModelError.ts"
+import * as ModelEvent from "../src/ModelEvent.ts"
+import * as ModelRequest from "../src/ModelRequest.ts"
+import * as OpenAIChatGPT from "../src/OpenAIChatGPT.ts"
+import * as OpenAIResponses from "../src/OpenAIResponses.ts"
+import * as Route from "../src/Route.ts"
+
+const request = (overrides: Partial<Parameters<typeof ModelRequest.ModelRequest.make>[0]> = {}) =>
+  ModelRequest.ModelRequest.make({
+    modelId: "gpt-5.6-sol",
+    system: [],
+    messages: [],
+    tools: [],
+    params: ModelRequest.GenerationParams.make(),
+    ...overrides
+  })
+
+const route = () => Result.getOrThrow(OpenAIChatGPT.make({ auth: Auth.bearer(Redacted.make("chatgpt-access")) }))
+
+const prepared = (modelRequest: ModelRequest.ModelRequest) => Effect.runPromise(Route.prepare(route(), modelRequest))
+
+const step = (
+  state: ReturnType<typeof OpenAIResponses.chatgptProtocol.stream.initial>,
+  data: string
+) => {
+  const event = Schema.decodeUnknownSync(OpenAIResponses.chatgptProtocol.stream.event)(data)
+  return Effect.runSync(OpenAIResponses.chatgptProtocol.stream.step(state, event))
+}
+
+const replayData = (data: ReadonlyArray<string>): ReadonlyArray<ModelEvent.ModelEvent> => {
+  let state = OpenAIResponses.chatgptProtocol.stream.initial(request())
+  const events: Array<ModelEvent.ModelEvent> = []
+  for (const datum of data) {
+    const [next, emitted] = step(state, datum)
+    state = next
+    events.push(...emitted)
+  }
+  return events
+}
+
+describe("OpenAIChatGPT.make", () => {
+  it("composes the codex backend endpoint, protocol, and client identity headers", async () => {
+    const config = route()
+
+    expect(config.id).toBe("openai-chatgpt")
+    expect(config.protocol.id).toBe("openai-responses-chatgpt")
+    expect(config.protocol.supportsDeferred("gpt-5.6-sol")).toBe(false)
+    expect(config.framing.id).toBe("sse")
+    // No `/v1` prefix: the subscription backend serves `/codex/responses`.
+    expect(config.endpoint.url).toBe("https://chatgpt.com/backend-api/codex/responses")
+
+    const view = await prepared(request())
+    expect(view.publicHeaders).toEqual({
+      accept: "text/event-stream",
+      "content-type": "application/json",
+      "openai-beta": "responses=experimental",
+      originator: "codex_cli_rs",
+      "user-agent": "codex_cli_rs/0.149.1"
+    })
+    expect(JSON.stringify(view)).not.toContain("chatgpt-access")
+  })
+
+  it("pins the subscription body deltas: store false, stream true, encrypted reasoning, no output cap", async () => {
+    const view = await prepared(request({
+      params: ModelRequest.GenerationParams.make({ maxTokens: 4096, reasoningEffort: "high" })
+    }))
+    const body = JSON.parse(view.bodyText)
+
+    expect(body.store).toBe(false)
+    expect(body.stream).toBe(true)
+    expect(body.include).toEqual(["reasoning.encrypted_content"])
+    expect(body.reasoning).toEqual({ effort: "high" })
+    // The backend rejects the field outright, so the route never sends it.
+    expect(body).not.toHaveProperty("max_output_tokens")
+  })
+
+  it("rejects the account id as a route header: identity is applied through Auth", () => {
+    const withAccountHeader = Result.getOrThrow(OpenAIChatGPT.make({
+      auth: Auth.bearer(Redacted.make("chatgpt-access")),
+      headers: { "chatgpt-account-id": "acct_1234" }
+    }))
+
+    const error = Effect.runSync(Route.prepare(withAccountHeader, request()).pipe(Effect.flip))
+    expect(error).toMatchObject({ code: "invalid_request" })
+    expect(JSON.stringify(error)).not.toContain("acct_1234")
+  })
+
+  it("replays encrypted reasoning verbatim and drops stored item references", async () => {
+    const signature = CanonicalJson.stringify({
+      type: "reasoning",
+      id: "rs_1",
+      encrypted_content: "opaque-reasoning-state"
+    })
+    const view = await prepared(request({
+      messages: [
+        ModelRequest.Message.user("fix it"),
+        ModelRequest.Message.assistant(
+          [
+            { type: "thinking", text: "", signature },
+            ModelRequest.ToolCallPart.make({ id: "call_1", name: "bash", arguments: "{}" })
+          ],
+          // Stored-mode history carries item ids; this backend stores nothing,
+          // so a reference would name an item the server does not have.
+          { stopReason: "tool-calls", itemIds: ["rs_0"] }
+        ),
+        ModelRequest.Message.tool(ModelRequest.ToolResultPart.make({ toolCallId: "call_1", content: "ok" }))
+      ]
+    }))
+    const body = JSON.parse(view.bodyText)
+
+    expect(body.input).toEqual([
+      { role: "user", content: [{ type: "input_text", text: "fix it" }] },
+      { type: "reasoning", id: "rs_1", encrypted_content: "opaque-reasoning-state" },
+      { type: "function_call", call_id: "call_1", name: "bash", arguments: "{}" },
+      { type: "function_call_output", call_id: "call_1", output: "ok" }
+    ])
+  })
+})
+
+describe("OpenAIResponses.chatgptProtocol stream", () => {
+  it("captures the completed reasoning item as a replayable signature and records no item ids", () => {
+    const events = replayData([
+      JSON.stringify({
+        type: "response.reasoning_summary_text.delta",
+        item_id: "rs_1",
+        delta: "thinking aloud"
+      }),
+      JSON.stringify({ type: "response.reasoning_summary_text.done", item_id: "rs_1" }),
+      JSON.stringify({
+        type: "response.output_item.done",
+        item: {
+          id: "rs_1",
+          type: "reasoning",
+          summary: [{ type: "summary_text", text: "thinking aloud" }],
+          encrypted_content: "opaque-reasoning-state"
+        }
+      }),
+      JSON.stringify({
+        type: "response.completed",
+        response: { id: "resp_1", usage: { input_tokens: 23, output_tokens: 5 } }
+      })
+    ])
+
+    const signature = CanonicalJson.stringify({
+      type: "reasoning",
+      id: "rs_1",
+      summary: [{ type: "summary_text", text: "thinking aloud" }],
+      encrypted_content: "opaque-reasoning-state"
+    })
+    expect(events).toEqual([
+      // The summary part carries no signature: an item id is not replayable
+      // under store:false, and the real signature only exists at item done.
+      { type: "thinking-start", id: "rs_1" },
+      { type: "thinking-delta", id: "rs_1", text: "thinking aloud" },
+      { type: "thinking-end", id: "rs_1" },
+      { type: "thinking-start", id: "rs_1:encrypted", signature },
+      { type: "thinking-end", id: "rs_1:encrypted" },
+      {
+        type: "usage",
+        inputTokens: 23,
+        outputTokens: 5,
+        cachedInputTokens: undefined,
+        reasoningTokens: undefined,
+        totalTokens: undefined
+      },
+      { type: "settle", stopReason: "stop", responseId: "resp_1" }
+    ])
+
+    // The settled message closes the loop: its signature part lowers straight
+    // back into the next request's input.
+    const settled = ModelEvent.settledMessage(events)
+    expect(settled.message.itemIds).toBeUndefined()
+    expect(settled.usage).toMatchObject({ inputTokens: 23, outputTokens: 5 })
+  })
+
+  it("leaves a reasoning item without encrypted content unreferenced rather than fabricating one", () => {
+    const events = replayData([
+      JSON.stringify({ type: "response.output_item.done", item: { id: "rs_1", type: "reasoning" } }),
+      JSON.stringify({ type: "response.completed", response: { id: "resp_1" } })
+    ])
+
+    expect(events).toEqual([{ type: "settle", stopReason: "stop", responseId: "resp_1" }])
+  })
+
+  it("omits the summary field from a signature whose item carried none", () => {
+    const events = replayData([
+      JSON.stringify({
+        type: "response.output_item.added",
+        item: { id: "rs_2", type: "reasoning" }
+      }),
+      JSON.stringify({
+        type: "response.output_item.done",
+        item: { id: "rs_2", type: "reasoning", encrypted_content: "opaque-reasoning-state" }
+      })
+    ])
+
+    expect(events).toEqual([
+      {
+        type: "thinking-start",
+        id: "rs_2:encrypted",
+        signature: CanonicalJson.stringify({
+          type: "reasoning",
+          id: "rs_2",
+          encrypted_content: "opaque-reasoning-state"
+        })
+      },
+      { type: "thinking-end", id: "rs_2:encrypted" }
+    ])
+  })
+
+  it("classifies the backend's flat detail envelope", () => {
+    const badRequest = OpenAIResponses.chatgptProtocol.classifyError(400, "{\"detail\":\"Stream must be set to true\"}")
+    expect(badRequest).toBeInstanceOf(ModelError)
+    expect(badRequest).toMatchObject({
+      code: "invalid_request",
+      message: "Stream must be set to true",
+      httpStatus: 400
+    })
+
+    const unauthenticated = OpenAIResponses.chatgptProtocol.classifyError(
+      401,
+      "{\"detail\":\"Could not parse your authentication token. Please try signing in again.\"}"
+    )
+    expect(unauthenticated).toMatchObject({ code: "authentication", httpStatus: 401 })
+  })
+})

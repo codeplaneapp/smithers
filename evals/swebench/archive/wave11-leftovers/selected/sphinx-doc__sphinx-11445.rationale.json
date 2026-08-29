@@ -1,0 +1,79 @@
+{
+  "instance": "sphinx-doc__sphinx-11445",
+  "selected": "r1",
+  "selectedRunId": "sphinx-doc__sphinx-11445-r1",
+  "selectedPatch": "selected/sphinx-doc__sphinx-11445.patch",
+  "read": {
+    "journals": "journals",
+    "patches": "patches"
+  },
+  "neverRead": "the official evaluator's reports, the dataset's tests, and every other record of the answer",
+  "predicateOrder": [
+    "preEditFailure",
+    "mutationAfter",
+    "greenOverFinalTree",
+    "cleanCompletion"
+  ],
+  "tieBreaks": [
+    "broader final check",
+    "non-empty patch",
+    "lower cost",
+    "lower run index"
+  ],
+  "candidates": [
+    {
+      "rank": 1,
+      "index": "r1",
+      "runId": "sphinx-doc__sphinx-11445-r1",
+      "score": 4,
+      "patchBytes": 414,
+      "finalCheckTerms": 122,
+      "usd": 0.9552,
+      "tokens": {
+        "inputTokens": 91350,
+        "cachedInputTokens": 45296,
+        "outputTokens": 23408,
+        "reasoningTokens": 15025
+      },
+      "seat": "openai:gpt-5.6-sol",
+      "frames": 9,
+      "modelCalls": 9,
+      "demands": {
+        "unmoved": 0,
+        "unresolved": 0,
+        "narrowed": 0,
+        "narrowOnly": 0,
+        "readOnly": 0,
+        "repeat": 0
+      },
+      "sufficiencyObservations": 0,
+      "predicates": {
+        "preEditFailure": {
+          "held": true,
+          "seq": 96,
+          "epoch": 0,
+          "check": "bash {\"command\":\"docker exec flowsbench-sphinx-doc--sphinx-11445 bash -lc 'cd /testbed\\nd=/tmp/sphinx-rst-prolog-domain-title\\nrm -rf \\\"$d\\\" && mkdir -p \\\"$d\\\"\\ncat…"
+        },
+        "mutationAfter": {
+          "held": true,
+          "seq": 203,
+          "digest": "31030a3bb8f5593defd79d5b310b4b3c79987355470ae2dcb6f215c94c40fec0"
+        },
+        "greenOverFinalTree": {
+          "held": true,
+          "seq": 287,
+          "failedEpoch": 0,
+          "digest": "31030a3bb8f5593defd79d5b310b4b3c79987355470ae2dcb6f215c94c40fec0",
+          "failed": "bash {\"command\":\"docker exec flowsbench-sphinx-doc--sphinx-11445 bash -lc 'cd /testbed\\nd=/tmp/sphinx-rst-prolog-domain-title\\nrm -rf \\\"$d\\\" && mkdir -p \\\"$d\\\"\\ncat…",
+          "passed": "bash {\"command\":\"docker exec flowsbench-sphinx-doc--sphinx-11445 bash -lc 'cd /testbed\\nd=/tmp/sphinx-rst-prolog-domain-title\\nrm -rf \\\"$d\\\" && mkdir -p \\\"$d\\\"\\ncat…",
+          "terms": 122
+        },
+        "cleanCompletion": {
+          "held": true,
+          "seq": 299,
+          "digest": "31030a3bb8f5593defd79d5b310b4b3c79987355470ae2dcb6f215c94c40fec0"
+        }
+      }
+    }
+  ]
+}

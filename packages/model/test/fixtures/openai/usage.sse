@@ -1,0 +1,8 @@
+event: response.reasoning_summary.delta
+data: {"type":"response.reasoning_summary.delta","item_id":"rs_1","delta":"I should count."}
+
+event: response.reasoning_summary.done
+data: {"type":"response.reasoning_summary.done","item_id":"rs_1"}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_usage","usage":{"input_tokens":12,"input_tokens_details":{"cached_tokens":4},"output_tokens":8,"output_tokens_details":{"reasoning_tokens":3},"total_tokens":20}}}

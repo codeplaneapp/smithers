@@ -1,0 +1,918 @@
+/**
+ * Generated GitHub Actions CI workflow.
+ *
+ * The pipeline is a target graph and one verb over it. A job declares what it
+ * REQUIRES ({@link CiToolchain.Toolchain}) and which targets it runs
+ * ({@link TargetStep}); nothing in the declaration is a command. Every argv the
+ * rendered workflow carries is produced here or by the declaration it came from:
+ * the install by {@link PackageManager.install}, the interpreter version by the
+ * declared {@link Runtime}, the Rust install by {@link RustToolchain.install},
+ * the target invocation by {@link PackageManager.exec} over the CLI verb.
+ *
+ * That is the whole point of the rewrite this module went through. A BUILD.ts
+ * file that spells `run: "node --test scripts/pack-release.test.mjs"` has put a
+ * gate outside the build graph: it is not planned, not keyed, not cached, not
+ * addressable, and not runnable locally by the same name CI uses. Bazel's answer
+ * is that every check is a test target and CI is `bazel test //...`; this module
+ * is that answer for GitHub Actions.
+ *
+ * @since 0.1.0
+ */
+import type { Action } from "@smthrs/flow"
+import type * as Node from "@smthrs/plan/Node"
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import * as CiToolchain from "./CiToolchain.ts"
+import { DriftError, generateFile, resolveOutputPath, WriteFileError } from "./GeneratedFile.ts"
+import * as Input from "./Input.ts"
+import * as PackageManager from "./PackageManager.ts"
+import * as RemoteCache from "./RemoteCache.ts"
+import * as RustToolchain from "./RustToolchain.ts"
+import * as Secret from "./Secret.ts"
+import * as Target from "./Target.ts"
+import * as Verb from "./Verb.ts"
+
+/**
+ * How a CI workflow target treats its output file.
+ *
+ * - `check` — byte-compare the checked-in workflow against the rendered form,
+ *   and fail on drift. The DEFAULT, matching every other generated root file.
+ * - `write` — render the declared jobs and write the file.
+ *
+ * Only `write` touches the working tree, and only a target that declares it
+ * gets it. `lint` maps `write` to `check` so no lint or CI run mutates a
+ * workflow file.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const OutputMode = Schema.Literals(["write", "check"]).pipe(
+  Schema.withConstructorDefault(Effect.succeed("check" as const))
+)
+
+/**
+ * How a CI workflow target treats its output file.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type OutputMode = typeof OutputMode.Type
+
+/**
+ * The largest `--jobs` bound a generated pipeline step may declare. Higher is
+ * a number no GitHub-hosted runner has the cores to honour, so it would be a
+ * declaration that reads as a promise the pipeline cannot keep.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumParallelism = 256
+
+/**
+ * One invocation of the build system over part of the target graph.
+ *
+ * This is the ONLY thing a job can be declared to do. There is no free-form
+ * command field anywhere in this schema: a step names a verb and a target
+ * pattern, and the argv that runs them is rendered here from the declared
+ * package manager. A gate that is not a target is a gate this declaration
+ * cannot express, which is the constraint that keeps gates in the graph.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const TargetStep = Schema.Struct({
+  /** Operator-facing step name. Defaults to the verb and pattern it runs. */
+  name: Schema.optional(Schema.NonEmptyString),
+  /**
+   * The CLI verb, as a typed {@link Verb.PipelineVerb} value. `Verb.Ci` is the
+   * aggregate: one invocation that plans every kind over the pattern, rather
+   * than four that re-plan the same graph.
+   */
+  verb: Verb.PipelineVerb,
+  /**
+   * The targets the verb runs over, in the CLI's label grammar: `//...`,
+   * `//pkg/...`, `//pkg`, `//pkg:target`, or `//:target`. A pattern is a label,
+   * not a command — the same kind of value {@link Input.file} takes — and it is
+   * validated against that grammar before it is rendered.
+   */
+  pattern: Schema.NonEmptyString,
+  /**
+   * How many targets this invocation executes at once, rendered as `--jobs`.
+   * Omitted leaves the CLI's own default, which sizes itself to the host. A
+   * runner whose heavy suites carry finite per-test budgets needs a smaller
+   * bound than the host suggests, because host parallelism starves them.
+   */
+  parallelism: Schema.optional(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(maximumParallelism))
+  )
+})
+
+/**
+ * One invocation of the build system over part of the target graph.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type TargetStep = typeof TargetStep.Type
+
+/**
+ * One target invocation the pipeline must still perform.
+ *
+ * A gate is a claim about coverage that outlives the job list: "the docs verb
+ * still runs over the packages". It is checked structurally against the declared
+ * steps, not by matching text in the rendered YAML, so a gate cannot be
+ * satisfied by a comment that happens to contain the right words.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Gate = Schema.Struct({
+  /** Operator-facing name, used in the failure message. */
+  name: Schema.NonEmptyString,
+  verb: Verb.Verb,
+  pattern: Schema.NonEmptyString,
+  /** When present, the job id the invocation must appear in. */
+  job: Schema.optional(Schema.NonEmptyString)
+})
+
+/**
+ * One target invocation the pipeline must still perform.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Gate = typeof Gate.Type
+
+/**
+ * The smallest `timeout-minutes` GitHub Actions runs. Zero and negative values
+ * are a workflow the runner rejects.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const minimumTimeoutMinutes = 1
+
+/**
+ * The largest `timeout-minutes` GitHub Actions honours. A larger value is
+ * silently capped, so the rendered job would not enforce the timeout it
+ * declares.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumTimeoutMinutes = 360
+
+/**
+ * One declared job.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Job = Schema.Struct({
+  id: Schema.NonEmptyString,
+  name: Schema.optional(Schema.NonEmptyString),
+  runsOn: Schema.NonEmptyString,
+  /**
+   * `timeout-minutes`, in the range GitHub Actions supports. Zero and negative
+   * values are rejected by the runner, and anything above 360 is silently
+   * clamped, so both render a job that does not do what it declares.
+   */
+  timeoutMinutes: Schema.optional(
+    Schema.Int.check(
+      Schema.isGreaterThanOrEqualTo(minimumTimeoutMinutes),
+      Schema.isLessThanOrEqualTo(maximumTimeoutMinutes)
+    )
+  ),
+  continueOnError: Schema.optional(Schema.Boolean),
+  /** What the runner must provide before the first target runs. */
+  toolchain: CiToolchain.Toolchain,
+  steps: Schema.Array(TargetStep)
+})
+
+/**
+ * One declared job.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Job = typeof Job.Type
+
+/**
+ * Attributes for {@link GithubCiGen}.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Attrs = Schema.Struct({
+  /** @default "CI" */
+  workflowName: Schema.NonEmptyString.pipe(
+    Schema.withConstructorDefault(Effect.succeed("CI"))
+  ),
+  /** @default ["main"] */
+  pushBranches: Schema.Array(Schema.NonEmptyString).pipe(
+    Schema.withConstructorDefault(Effect.succeed<ReadonlyArray<string>>(["main"]))
+  ),
+  /** @default true */
+  pullRequest: Schema.Boolean.pipe(
+    Schema.withConstructorDefault(Effect.succeed(true))
+  ),
+  /** @default true */
+  workflowDispatch: Schema.Boolean.pipe(
+    Schema.withConstructorDefault(Effect.succeed(true))
+  ),
+  /** @default true */
+  cancelInProgress: Schema.Boolean.pipe(
+    Schema.withConstructorDefault(Effect.succeed(true))
+  ),
+  /**
+   * The declared package manager. Every job that installs the workspace installs
+   * with it and runs the smthrs binary through it, so a workspace that switches
+   * managers gets a regenerated workflow rather than a pipeline still calling
+   * pnpm.
+   */
+  packageManager: PackageManager.PackageManager,
+  /**
+   * The declared secret overriding the root RemoteCache endpoint.
+   *
+   * A {@link Secret} declaration rather than two strings. The old pair named a
+   * GitHub secret and, separately, the environment variable it landed in, which
+   * let a workflow set a variable nothing read. One declaration names the
+   * variable, and the generated step reads the repository secret of the same
+   * name, so the two cannot disagree.
+   */
+  cacheUrlSecret: Schema.optional(Secret.Declaration),
+  /** The declared secret supplying the remote-cache bearer token. */
+  cacheTokenSecret: Schema.optional(Secret.Declaration),
+  /** The jobs the workflow declares. A generated workflow needs at least one. @default [] */
+  jobs: Schema.Array(Job).pipe(
+    Schema.withConstructorDefault(Effect.succeed<ReadonlyArray<Job>>([]))
+  ),
+  /** The target invocations the pipeline must perform, in every mode. @default [] */
+  gates: Schema.Array(Gate).pipe(
+    Schema.withConstructorDefault(Effect.succeed<ReadonlyArray<Gate>>([]))
+  ),
+  /**
+   * Job ids the workflow must define. Checked against the render, so removing a
+   * job without removing it here is a throw at plan time rather than a pipeline
+   * that quietly stopped running a lane.
+   */
+  requiredJobs: Schema.Array(Schema.NonEmptyString).pipe(
+    Schema.withConstructorDefault(Effect.succeed<ReadonlyArray<string>>([]))
+  ),
+  /**
+   * Declared workflow output path. This stays a string because outputs are
+   * declared paths, not input references. `check` derives a read declaration
+   * from the same output path for its non-writing view.
+   *
+   * @default ".github/workflows/ci.yml"
+   */
+  output: Schema.NonEmptyString.pipe(
+    Schema.withConstructorDefault(Effect.succeed(".github/workflows/ci.yml"))
+  ),
+  mode: OutputMode
+})
+
+/**
+ * Attributes for {@link GithubCiGen}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Attrs = typeof Attrs.Type
+
+/**
+ * The pinned action references the generator emits.
+ *
+ * They are constants of the implementation, not attrs. An action reference is
+ * an argv by another name: a BUILD.ts file that could name one could name any
+ * program the runner will fetch and execute, which is the surface this module
+ * exists to close.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const actions = {
+  checkout: "actions/checkout@v4",
+  setupNode: "actions/setup-node@v4",
+  setupBun: "oven-sh/setup-bun@v2",
+  setupPnpm: "pnpm/action-setup@v6",
+  installTool: "taiki-e/install-action@v2",
+  rustCache: "Swatinem/rust-cache@v2",
+  uploadArtifact: "actions/upload-artifact@v4"
+} as const
+
+/**
+ * Control characters a rendered value may not carry. Tab and newline are
+ * legitimate inside a script and are handled by the block-scalar form; the
+ * rest are not. A carriage return is the one that bites: it survives into the
+ * generated script and the shell then runs a command with a stray `\r`.
+ */
+const controlCharacter = /[\u0000-\u0008\u000B-\u001F\u007F]/
+
+/**
+ * Characters a plain (unquoted) YAML scalar may carry here. `'` is included
+ * because a single quote is only an indicator as the FIRST character, which the
+ * leading `[A-Za-z0-9]` already excludes; flow indicators (`[`, `]`, `{`, `}`,
+ * `,`), `#`, and everything else force quoting.
+ */
+const plainScalar = /^[A-Za-z0-9][A-Za-z0-9 ._/@:+'-]*$/
+
+/**
+ * Plain scalars a YAML parser resolves to something that is not a string.
+ *
+ * Every attribute rendered through `scalar` is declared a `string`, so a value
+ * that resolves to a boolean, null, a number, or a timestamp is a value the
+ * workflow no longer carries: a workflow named `true` becomes the boolean
+ * `true`, a branch `null` becomes an empty entry, a runner `false` becomes a
+ * boolean `runs-on` GitHub rejects, and a numeric-looking job name becomes a
+ * number. The YAML 1.2 core schema resolves the booleans, `null`, and the
+ * numbers; GitHub's parser also accepts YAML 1.1 spellings (`yes`, `off`, `~`,
+ * octal, sexagesimal, timestamps), so those are quoted too. The list is
+ * deliberately wider than any one parser: quoting a string that did not need it
+ * is invisible, resolving one that did is a silently different workflow.
+ */
+const yamlBoolean = /^(?:y|Y|yes|Yes|YES|n|N|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF)$/
+const yamlNull = /^(?:~|null|Null|NULL)$/
+const yamlNumber =
+  /^[-+]?(?:0b[01_]+|0o[0-7_]+|0x[0-9a-fA-F_]+|0[0-7_]+|[0-9][0-9_]*(?::[0-5]?[0-9])+(?:\.[0-9_]*)?|(?:[0-9][0-9_]*)?\.[0-9_]*(?:[eE][-+]?[0-9]+)?|[0-9][0-9_]*(?:\.[0-9_]*)?(?:[eE][-+]?[0-9]+)?)$/
+const yamlInfinity = /^[-+]?\.(?:inf|Inf|INF|nan|NaN|NAN)$/
+const yamlTimestamp = /^[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt ].*)?$/
+
+/** Whether a plain scalar would resolve to something other than a string. */
+const resolvesToNonString = (value: string): boolean =>
+  yamlBoolean.test(value) || yamlNull.test(value) || yamlNumber.test(value) ||
+  yamlInfinity.test(value) || yamlTimestamp.test(value)
+
+/**
+ * Quotes a scalar unless YAML reads it back as exactly the declared string.
+ *
+ * `JSON.stringify` emits a YAML double-quoted scalar, whose escape set agrees
+ * with JSON's for every character that can appear here, so the quoted form
+ * always reads back byte-identical.
+ */
+const scalar = (value: string): string => {
+  if (controlCharacter.test(value)) {
+    throw new Error(`GithubCiGen: ${JSON.stringify(value)} contains a control character`)
+  }
+  return plainScalar.test(value) &&
+      !value.includes(": ") && !value.endsWith(":") && !/\s$/.test(value) &&
+      !resolvesToNonString(value)
+    ? value
+    : JSON.stringify(value)
+}
+
+/**
+ * A `runs-on` flow sequence of plain runner labels, `[self-hosted, linux]`.
+ * Quoting the whole sequence would turn a label set into a single nonexistent
+ * label, so the sequence is re-rendered label by label and everything else is
+ * quoted as one scalar.
+ */
+const runnerSequence = /^\[\s*([A-Za-z0-9_.-]+(?:\s*,\s*[A-Za-z0-9_.-]+)*)\s*\]$/
+
+/**
+ * Renders a runner, keeping a label set a sequence.
+ *
+ * Each label is judged on its own terms: a reserved label inside the sequence
+ * (`[self-hosted, null]`) resolves to null and silently drops out of the label
+ * set, so it is quoted while its neighbours stay plain.
+ *
+ * A value that OPENS a YAML flow collection without being a label set is
+ * refused rather than quoted. Quoting `[self-hosted, my label]` or
+ * `{group: g, labels: [x]}` would turn a collection into one label string that
+ * no runner carries, which is a job that never picks up — a silent downgrade
+ * exactly where the renderer must fail closed.
+ */
+const runner = (value: string): string => {
+  const match = value.match(runnerSequence)
+  if (match !== null) return `[${match[1]!.split(",").map((label) => scalar(label.trim())).join(", ")}]`
+  if (value.startsWith("[") || value.startsWith("{")) {
+    throw new Error(
+      `GithubCiGen: ${
+        JSON.stringify(value)
+      } is not a runner label set; use one label, or [label, label] with labels of [A-Za-z0-9_.-]`
+    )
+  }
+  return scalar(value)
+}
+
+/**
+ * Renders a `with:` or `env:` map.
+ *
+ * The KEY goes through `scalar` too. A key is declared a string just as a value
+ * is, and YAML resolves a plain `NO:`, `ON:`, or `Y:` to a boolean, so an
+ * environment variable named `NO` would reach the runner as the key `false`.
+ */
+const mapping = (
+  entries: Readonly<Record<string, string>>,
+  indent: string
+): ReadonlyArray<string> => Object.entries(entries).map(([key, value]) => `${indent}${scalar(key)}: ${scalar(value)}`)
+
+/**
+ * One rendered YAML step.
+ *
+ * Deliberately not exported and deliberately not part of {@link Attrs}: this is
+ * the generator's own output shape, and the only code that constructs one is
+ * this module.
+ */
+interface RenderedStep {
+  readonly name?: string
+  readonly uses?: string
+  readonly run?: string
+  readonly with?: Readonly<Record<string, string>>
+  readonly env?: Readonly<Record<string, string>>
+}
+
+const renderStep = (step: RenderedStep, indent: string): ReadonlyArray<string> => {
+  const lines: Array<string> = []
+  const fields: Array<string> = []
+  if (step.name !== undefined) fields.push(`name: ${scalar(step.name)}`)
+  if (step.uses !== undefined) fields.push(`uses: ${scalar(step.uses)}`)
+  if (step.run !== undefined) {
+    fields.push(step.run.includes("\n") ? "run: |" : `run: ${scalar(step.run)}`)
+  }
+  if (fields.length === 0) {
+    throw new Error("a CI step must declare uses or run")
+  }
+  lines.push(`${indent}- ${fields[0]}`)
+  const inner = `${indent}  `
+  // A blank script line is emitted blank, not as indentation alone, so a
+  // generated file carries no trailing whitespace.
+  const body = (): void => {
+    for (const line of step.run!.split("\n")) lines.push(line === "" ? "" : `${inner}  ${line}`)
+  }
+  for (const field of fields.slice(1)) {
+    lines.push(`${inner}${field}`)
+    if (field === "run: |") body()
+  }
+  if (fields[0] === "run: |") body()
+  if (step.with !== undefined && Object.keys(step.with).length > 0) {
+    lines.push(`${inner}with:`, ...mapping(step.with, `${inner}  `))
+  }
+  if (step.env !== undefined && Object.keys(step.env).length > 0) {
+    lines.push(`${inner}env:`, ...mapping(step.env, `${inner}  `))
+  }
+  return lines
+}
+
+/**
+ * One package-path or target-name component of a target pattern.
+ *
+ * A component starts with a letter, a digit, or `_`, which rejects the
+ * option-like forms (`--help`, `-x`) whose only effect in a generated command
+ * is a green no-op, and rejects `.` and `..` traversal along with them. It
+ * carries no shell metacharacter, no `*`, no whitespace, and no quote.
+ */
+const patternComponent = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/
+
+/** Whether every component of a package path is a supported one. */
+const packagePath = (path: string): boolean => path.split("/").every((part) => patternComponent.test(part))
+
+/**
+ * Whether a string is a target pattern the CLI's label grammar accepts.
+ *
+ * The supported forms are exactly `//...`, `//pkg/...`, `//pkg`, `//pkg:target`,
+ * and `//:target`. Everything else is refused, which is what makes the
+ * generated command safe to render: `*` never reaches the shell to be expanded
+ * against the checkout, `--help` never turns a step into a usage message that
+ * exits 0, and `//a/../b`, `//a//b`, and `//a:b:c` never become a pattern the
+ * CLI would reject at run time instead of at plan time.
+ *
+ * @category validation
+ * @since 0.1.0
+ */
+export const targetPattern = (pattern: string): boolean => {
+  if (!pattern.startsWith("//")) return false
+  const body = pattern.slice(2)
+  if (body === "...") return true
+  if (body.endsWith("/...")) {
+    const prefix = body.slice(0, -4)
+    return prefix !== "" && packagePath(prefix)
+  }
+  const colon = body.indexOf(":")
+  if (colon === -1) return body !== "" && packagePath(body)
+  if (body.indexOf(":", colon + 1) !== -1) return false
+  const target = body.slice(colon + 1)
+  const path = body.slice(0, colon)
+  return patternComponent.test(target) && (path === "" || packagePath(path))
+}
+
+/**
+ * Renders a validated pattern as ONE shell word.
+ *
+ * `targetPattern` already excludes the single quote, so the single-quoted form
+ * is always well formed, and it is a literal word in every default GitHub
+ * Actions shell — `bash` on Linux and macOS, `pwsh` on Windows. Nothing inside
+ * is expanded, so a pattern is passed to the CLI exactly as declared.
+ */
+const shellArgument = (pattern: string): string => `'${pattern}'`
+
+/** The install argv every job that installs the workspace runs. */
+const installArgv = (attrs: Attrs): ReadonlyArray<string> =>
+  PackageManager.install(attrs.packageManager, { frozen: true, ignoreScripts: true })
+
+/**
+ * Renders one target invocation as a shell command.
+ *
+ * The workspace binary is resolved through the declared package manager, so the
+ * CLI that runs is the one the lockfile pinned, never a fetched one.
+ *
+ * @category rendering
+ * @since 0.1.0
+ */
+export const stepCommand = (attrs: Attrs, step: TargetStep): string =>
+  [
+    ...PackageManager.exec(attrs.packageManager, ["smthrs", Verb.command(step.verb)]),
+    shellArgument(step.pattern),
+    ...(step.parallelism === undefined ? [] : ["--jobs", String(step.parallelism)])
+  ].join(" ")
+
+/** The setup action for the declared package manager, when it needs one. */
+const managerSetupAction = (manager: PackageManager.PackageManager): string | undefined => {
+  switch (manager.name) {
+    case "pnpm":
+      return actions.setupPnpm
+    // Bun is installed by its own runtime setup; a second action would install
+    // the same program twice.
+    case "bun":
+      return undefined
+  }
+}
+
+/** Text a generated shell script may echo, single-quoted. */
+const echoableText = /^[A-Za-z0-9 ,.:;()/@_=+-]+$/
+
+/** Renders one diagnostic line of a generated shell script. */
+const diagnostic = (text: string): string => {
+  if (!echoableText.test(text)) {
+    throw new Error(`GithubCiGen: ${JSON.stringify(text)} is not usable as a generated diagnostic`)
+  }
+  return `echo '${text}' >&2`
+}
+
+/** The steps one declared interpreter installation renders to. */
+const runtimeSteps = (setup: CiToolchain.RuntimeSetup): ReadonlyArray<RenderedStep> => {
+  switch (setup.name) {
+    case "node":
+      return [{
+        uses: actions.setupNode,
+        with: {
+          "node-version": setup.release,
+          ...(setup.cachePackageStore ? { cache: "pnpm" } : {})
+        }
+      }]
+    case "bun":
+      return [{ uses: actions.setupBun, with: { "bun-version": setup.release } }]
+  }
+}
+
+/**
+ * The steps a job's declared requirements render to, in the order a runner
+ * needs them.
+ *
+ * Checkout first, because nothing else can read the tree. Workflow linting next,
+ * because it is the cheapest failure and needs nothing installed. Then the
+ * package manager, the interpreters, and the install, because the install needs
+ * both. Then the toolchains a suite spawns, and last the assertions about the
+ * runner image itself.
+ *
+ * @category rendering
+ * @since 0.1.0
+ */
+export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedStep> => {
+  const needs = job.toolchain
+  const steps: Array<RenderedStep> = [{
+    uses: actions.checkout,
+    ...(needs.submodules ? { with: { submodules: "recursive" } } : {})
+  }]
+  if (needs.workflowLint !== undefined) {
+    steps.push({
+      name: "Validate GitHub Actions workflows",
+      uses: `docker://rhysd/actionlint:${needs.workflowLint.release}`,
+      with: { args: needs.workflowLint.workflows.join(" ") }
+    })
+  }
+  const managerSetup = managerSetupAction(attrs.packageManager)
+  if (needs.install && managerSetup !== undefined) steps.push({ uses: managerSetup })
+  for (const setup of needs.runtimes) steps.push(...runtimeSteps(setup))
+  if (needs.install) steps.push({ run: installArgv(attrs).join(" ") })
+  if (needs.rust !== undefined) {
+    steps.push({
+      name: "Install pinned Rust toolchain",
+      run: RustToolchain.install(needs.rust.toolchain).join(" ")
+    })
+    // Registry state and compiled dependencies, keyed on Cargo.lock. A native
+    // dependency build dominates a Rust job's time without it.
+    if (needs.rust.cache) steps.push({ uses: actions.rustCache })
+  }
+  if (needs.jj !== undefined) {
+    steps.push({
+      name: "Install jj",
+      uses: actions.installTool,
+      with: { tool: `jj-cli@${needs.jj.release}` }
+    })
+    if (needs.jj.colocate) {
+      steps.push({ name: "Initialize colocated jj repository", run: "jj git init --colocate" })
+    }
+  }
+  if (needs.browser !== undefined) {
+    const executable = needs.browser.executable
+    steps.push({
+      name: "Assert the runner ships the declared browser",
+      run: [
+        `if [ ! -x ${executable} ]; then`,
+        `  ${diagnostic(`${executable} is missing from this runner image.`)}`,
+        `  ${diagnostic(needs.browser.reason)}`,
+        "  exit 1",
+        "fi",
+        `${executable} --version`
+      ].join("\n")
+    })
+  }
+  return steps
+}
+
+/**
+ * The steps a job's declared artifact upload renders to.
+ *
+ * Collection is unconditional and best-effort, and the upload ignores an empty
+ * collection, so a green run produces the same result an `if: failure()` would
+ * without putting a step condition in the file. The generated workflow carries
+ * no `if:` key at all, so nobody has to adjudicate in review which conditions
+ * are load-bearing.
+ *
+ * @category rendering
+ * @since 0.1.0
+ */
+export const artifactSteps = (upload: CiToolchain.ArtifactUpload): ReadonlyArray<RenderedStep> => {
+  const artifact = CiToolchain.validatePath(upload.artifact, "artifact name")
+  const root = `"$RUNNER_TEMP/${artifact}"`
+  const copies = upload.sources.map((source) => {
+    const from = CiToolchain.validatePath(source.from, "artifact source")
+      .split("*")
+      .map((part) => `'${part}'`)
+      .join("*")
+    const destination = source.as === undefined
+      ? root
+      : `"$RUNNER_TEMP/${artifact}/${CiToolchain.validatePath(source.as, "artifact destination")}"`
+    return `cp -R -- ${from} ${destination}`
+  })
+  return [
+    { name: `Collect ${upload.artifact}`, run: [`mkdir -p ${root}`, ...copies].join("\n") },
+    {
+      name: `Upload ${upload.artifact}`,
+      uses: actions.uploadArtifact,
+      with: {
+        name: artifact,
+        path: `\${{ runner.temp }}/${artifact}`,
+        "if-no-files-found": "ignore"
+      }
+    }
+  ]
+}
+
+/** GitHub's own job-id shape: a letter or `_`, then letters, digits, `-`, `_`. */
+const jobIdShape = /^[A-Za-z_][A-Za-z0-9_-]*$/
+
+/**
+ * Rejects declared jobs GitHub Actions would refuse, shadow, or run empty, and
+ * declarations this generator cannot render.
+ *
+ * Every target here is a shape the Actions contract already forbids or a
+ * declaration that would render a pipeline doing less than it claims: duplicate
+ * job ids render duplicate YAML mapping keys (GitHub keeps the last, and a gate
+ * could match the one that never runs), a job needs at least one target step,
+ * and a job that runs a target step without installing the workspace has no
+ * binary to run it with.
+ */
+const validateJobs = (attrs: Attrs): void => {
+  const ids = new Set<string>()
+  for (const job of attrs.jobs) {
+    if (!jobIdShape.test(job.id)) {
+      throw new Error(
+        `GithubCiGen: ${JSON.stringify(job.id)} is not a valid job id; use letters, digits, "-", and "_"`
+      )
+    }
+    if (ids.has(job.id)) {
+      throw new Error(`GithubCiGen: duplicate job id ${JSON.stringify(job.id)}`)
+    }
+    ids.add(job.id)
+    if (job.steps.length === 0) {
+      throw new Error(`GithubCiGen: job ${JSON.stringify(job.id)} runs no targets`)
+    }
+    if (!job.toolchain.install) {
+      throw new Error(
+        `GithubCiGen: job ${
+          JSON.stringify(job.id)
+        } runs targets through the workspace binary but declares install: false`
+      )
+    }
+    // The attrs schema already bounds this. It is checked again here because
+    // `render` is exported and callable with an attrs value the schema never
+    // constructed, and a job whose timeout the runner rejects or silently caps
+    // is exactly the plan-time-visible red pipeline this target refuses to emit.
+    if (
+      job.timeoutMinutes !== undefined &&
+      (!Number.isInteger(job.timeoutMinutes) ||
+        job.timeoutMinutes < minimumTimeoutMinutes ||
+        job.timeoutMinutes > maximumTimeoutMinutes)
+    ) {
+      throw new Error(
+        `GithubCiGen: job ${
+          JSON.stringify(job.id)
+        } declares timeout-minutes ${job.timeoutMinutes}; GitHub Actions supports a whole number from ${minimumTimeoutMinutes} to ${maximumTimeoutMinutes}`
+      )
+    }
+    for (const step of job.steps) {
+      if (!targetPattern(step.pattern)) {
+        throw new Error(
+          `GithubCiGen: ${
+            JSON.stringify(step.pattern)
+          } is not a target pattern; use //..., //pkg/..., //pkg, //pkg:target, or //:target`
+        )
+      }
+      if (!Verb.isPipelineVerb(step.verb)) {
+        throw new Error(`GithubCiGen: job ${JSON.stringify(job.id)} declares a step with no CLI verb`)
+      }
+      if (
+        step.parallelism !== undefined &&
+        (!Number.isInteger(step.parallelism) || step.parallelism < 1 || step.parallelism > maximumParallelism)
+      ) {
+        throw new Error(
+          `GithubCiGen: parallelism ${step.parallelism} is not a whole number from 1 to ${maximumParallelism}`
+        )
+      }
+    }
+  }
+  const missingJobs = attrs.requiredJobs.filter((id) => !ids.has(id))
+  if (missingJobs.length > 0) {
+    throw new Error(
+      `GithubCiGen: the rendered workflow is missing required jobs: ${missingJobs.join(", ")}`
+    )
+  }
+}
+
+/**
+ * Whether one declared step performs a gate's invocation.
+ *
+ * `Verb.Ci` covers every verb, because the aggregate command plans them all
+ * over the same pattern. Nothing else is inferred: a gate on `//packages/...`
+ * is not satisfied by a step on `//...`, because a wider pattern is a different
+ * claim and the point of a gate is that the claim was checked, not guessed.
+ *
+ * @category validation
+ * @since 0.1.0
+ */
+export const satisfiesGate = (step: TargetStep, gate: Gate): boolean =>
+  step.pattern === gate.pattern &&
+  (step.verb.name === "ci" || step.verb.name === gate.verb.name)
+
+/**
+ * The declared gates no declared job performs.
+ *
+ * @category validation
+ * @since 0.1.0
+ */
+export const missingGates = (attrs: Attrs): ReadonlyArray<Gate> =>
+  attrs.gates.filter((gate) =>
+    !attrs.jobs.some((job) =>
+      (gate.job === undefined || job.id === gate.job) &&
+      job.steps.some((step) => satisfiesGate(step, gate))
+    )
+  )
+
+/**
+ * Renders cache host state for every generated target step.
+ *
+ * A declared secret becomes one environment entry whose value is the repository
+ * secret of the same name. The value is a GitHub expression, so the credential
+ * exists only inside the runner; nothing about it is written into the workflow
+ * file or into this target's key.
+ */
+const cacheEnvironment = (attrs: Attrs): Readonly<Record<string, string>> => {
+  const env: Record<string, string> = {}
+  if (attrs.cacheUrlSecret !== undefined) {
+    env[attrs.cacheUrlSecret.env] = `\${{ secrets.${attrs.cacheUrlSecret.env} }}`
+  }
+  if (attrs.cacheTokenSecret !== undefined) {
+    env[RemoteCache.normalizeTokenEnv(attrs.cacheTokenSecret.env)] = `\${{ secrets.${attrs.cacheTokenSecret.env} }}`
+  }
+  return env
+}
+
+/**
+ * Renders the workflow YAML from attrs, deterministically.
+ *
+ * It FAILS CLOSED. A render throws at plan time, rather than emitting a
+ * pipeline that silently checks less than the repository requires, when it
+ * would drop a declared gate, drop a declared required job, declare a job that
+ * runs no targets or cannot run them, emit a pattern outside the CLI's label
+ * grammar, or emit a job shape GitHub Actions rejects. That refusal is the whole
+ * reason this target can own a workflow file at all.
+ *
+ * @category rendering
+ * @since 0.1.0
+ */
+export const render = (attrs: Attrs): string => {
+  if (attrs.jobs.length === 0) {
+    throw new Error("GithubCiGen: write mode needs at least one declared job")
+  }
+  if (attrs.pushBranches.length === 0 && !attrs.pullRequest && !attrs.workflowDispatch) {
+    throw new Error("GithubCiGen: write mode needs at least one workflow trigger")
+  }
+  validateJobs(attrs)
+  const missing = missingGates(attrs)
+  if (missing.length > 0) {
+    throw new Error(
+      `GithubCiGen: the rendered workflow does not run ${
+        missing.map((gate) => `${gate.name} (${gate.verb.name} ${gate.pattern})`).join(", ")
+      }; declare the step or drop the gate`
+    )
+  }
+  const triggers: Array<string> = []
+  if (attrs.pushBranches.length > 0) {
+    triggers.push("  push:", `    branches: [${attrs.pushBranches.map(scalar).join(", ")}]`)
+  }
+  if (attrs.pullRequest) triggers.push("  pull_request:")
+  if (attrs.workflowDispatch) triggers.push("  workflow_dispatch:")
+  const lines: Array<string> = [
+    `name: ${scalar(attrs.workflowName)}`,
+    "on:",
+    ...triggers,
+    "concurrency:",
+    "  group: ci-${{ github.ref }}",
+    `  cancel-in-progress: ${attrs.cancelInProgress}`,
+    "jobs:"
+  ]
+  const cacheEnv = cacheEnvironment(attrs)
+  const hasCacheEnv = Object.keys(cacheEnv).length > 0
+  for (const job of attrs.jobs) {
+    // A job id is a mapping KEY, and YAML resolves a plain `no:` or `on:` to a
+    // boolean just as it does a value, so an id that reads as one is quoted.
+    lines.push(`  ${scalar(job.id)}:`)
+    if (job.name !== undefined) lines.push(`    name: ${scalar(job.name)}`)
+    lines.push(`    runs-on: ${runner(job.runsOn)}`)
+    if (job.timeoutMinutes !== undefined) lines.push(`    timeout-minutes: ${job.timeoutMinutes}`)
+    if (job.continueOnError !== undefined) lines.push(`    continue-on-error: ${job.continueOnError}`)
+    lines.push("    steps:")
+    const rendered: Array<RenderedStep> = [...toolchainSteps(attrs, job)]
+    for (const step of job.steps) {
+      rendered.push({
+        ...(step.name === undefined ? {} : { name: step.name }),
+        run: stepCommand(attrs, step),
+        ...(hasCacheEnv ? { env: cacheEnv } : {})
+      })
+    }
+    if (job.toolchain.artifacts !== undefined) rendered.push(...artifactSteps(job.toolchain.artifacts))
+    for (const step of rendered) lines.push(...renderStep(step, "      "))
+  }
+  return `${lines.join("\n")}\n`
+}
+
+/**
+ * Generates the GitHub Actions CI workflow from BUILD.ts attrs.
+ *
+ * The workflow is a generated root file, on the same terms as `tsconfig.json`:
+ * BUILD.ts is the only description of the pipeline, `write` renders it, and
+ * `check` — the default — fails on drift. A pipeline that lives in two places,
+ * a BUILD.ts declaration and a hand-maintained YAML file, is two descriptions
+ * of one thing, free to disagree.
+ *
+ * Every step the workflow carries is derived, never authored. A job declares
+ * what it requires and which targets it runs; {@link toolchainSteps} turns the
+ * requirements into checkout, setup, and install steps, and
+ * {@link stepCommand} turns each target step into one
+ * `<manager> exec smthrs <verb> '<pattern>'` invocation. There is no attribute
+ * anywhere in {@link Attrs} that accepts a command, an action reference, or a
+ * shell script, so a gate that is not a target cannot be added to the pipeline
+ * without first becoming one.
+ *
+ * The `lint` verb maps `write` to `check` through `attrsForKind`, so no lint
+ * or `ci` run mutates a workflow file. Only `check` is cacheable; the output
+ * file is a declared input there, so editing the workflow re-keys the target.
+ *
+ * Generated command example:
+ *
+ * ```yaml
+ * - run: pnpm exec smthrs ci '//packages/...' --jobs 2
+ * ```
+ *
+ * @category targets
+ * @since 0.1.0
+ */
+export const GithubCiGen = Target.make("GithubCiGen", {
+  attrs: Attrs,
+  kinds: ["build", "lint"],
+  error: Schema.Union([WriteFileError, DriftError]),
+  cache: (attrs) => attrs.mode !== "write",
+  inputs: (attrs) => attrs.mode === "write" ? [] : [Input.file(`//${resolveOutputPath(attrs.output)}`)],
+  attrsForKind: (kind, attrs) =>
+    kind === "lint" && attrs.mode === "write" ? { ...attrs, mode: "check" as const } : attrs,
+  implementation: (
+    attrs
+  ): Node.Node<
+    void,
+    WriteFileError | DriftError,
+    | Action.Requirement<"smithers-build/write-file">
+    | Action.Requirement<"smithers-build/check-file">
+  > => generateFile(attrs.mode, { path: resolveOutputPath(attrs.output), contents: render(attrs) })
+})

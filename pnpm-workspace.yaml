@@ -1,0 +1,35 @@
+packages:
+  - "packages/*"
+  - "packages/build/infra"
+  - "examples"
+  - "apps/*"
+
+allowBuilds:
+  "@journeyapps/wa-sqlite": false
+  dprint: false
+  es5-ext: false
+  esbuild: false
+  msgpackr-extract: false
+  playwright: false
+  sharp: false
+  unrs-resolver: false
+  vue-demi: false
+  workerd: false
+
+linkWorkspacePackages: true
+minimumReleaseAgeExclude:
+  - '@tanstack/react-router@1.170.31'
+  - '@tanstack/react-start-client@1.168.29'
+  - '@tanstack/react-start-rsc@0.1.47'
+  - '@tanstack/react-start-server@1.167.36'
+  - '@tanstack/react-start@1.168.48'
+  - '@tanstack/router-core@1.171.26'
+  - '@tanstack/router-generator@1.167.32'
+  - '@tanstack/router-plugin@1.168.34'
+  - '@tanstack/start-client-core@1.170.26'
+  - '@tanstack/start-plugin-core@1.171.38'
+  - '@tanstack/start-server-core@1.169.30'
+  - '@tanstack/start-storage-context@1.167.28'
+patchedDependencies:
+  vocs@2.8.5: patches/vocs@2.8.5.patch
+verifyDepsBeforeRun: false

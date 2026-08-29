@@ -1,0 +1,44 @@
+{
+  "name": "@smthrs/examples",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Runnable end-to-end examples for the Smithers Flows documentation",
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@smthrs/agent": "0.1.0",
+    "@smthrs/artifacts": "0.1.0",
+    "@smthrs/database": "0.1.0",
+    "@smthrs/engine": "0.1.0",
+    "@smthrs/engine-store": "0.1.0",
+    "@smthrs/flow": "0.1.0",
+    "@smthrs/flows": "0.1.0",
+    "@smthrs/harness": "0.1.0",
+    "@smthrs/jj": "0.1.0",
+    "@smthrs/journal": "0.1.0",
+    "@smthrs/kernel": "0.1.0",
+    "@smthrs/keys": "0.1.0",
+    "@smthrs/model": "0.1.0",
+    "@smthrs/observability": "0.1.0",
+    "@smthrs/plan": "0.1.0",
+    "@smthrs/platform-browser": "0.1.0",
+    "@smthrs/platform-node": "0.1.0",
+    "@smthrs/registry": "0.1.0",
+    "@smthrs/run-store": "0.1.0",
+    "@smthrs/step-cache": "0.1.0",
+    "@smthrs/sync": "0.1.0",
+    "@smthrs/time-travel": "0.1.0",
+    "effect": "4.0.0-rc.108"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "4.0.0-rc.108",
+    "@effect/vitest": "4.0.0-rc.108",
+    "@types/node": "25.9.5",
+    "esbuild": "0.28.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.9"
+  }
+}

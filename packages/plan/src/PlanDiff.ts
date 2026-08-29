@@ -1,0 +1,133 @@
+/**
+ * `flows plan --diff`, as a value.
+ *
+ * `docs/specs/Specs/Plan.md`: "which steps changed key (and _which input_
+ * changed them), what entered the envelope, what joined the release set —
+ * 'what is different about this run' is a set comparison, not archaeology."
+ * This module is the set comparison.
+ *
+ * The **verdict** is the key: two nodes with the same id and the same key are
+ * the same step and nothing else needs saying. The **attribution** —
+ * `changed: ["input[1]"]` — is a report for a human, derived by comparing the
+ * declarations field by field. It is deliberately not part of any digest.
+ *
+ * @since 0.1.0
+ */
+import type * as Plan from "./Plan.ts"
+
+/**
+ * A node whose key moved, with the fields that moved it.
+ *
+ * @since 0.1.0
+ * @category models
+ * @slop
+ */
+export interface Rekeyed {
+  readonly id: string
+  readonly from: string
+  readonly to: string
+  /**
+   * Field labels — `"body"`, `"layers"`, `"capabilities"`, `"effects"`,
+   * `"input[0]"` — whose declaration differs, plus `"input[n]"` entries whose
+   * referenced node itself re-keyed. Empty when nothing local changed, which
+   * is the honest answer for a node re-keyed purely by an upstream edit whose
+   * reference is a `Pending` with no projection.
+   */
+  readonly changed: ReadonlyArray<string>
+}
+
+/**
+ * What changed between two plans of the same flow.
+ *
+ * @since 0.1.0
+ * @category models
+ * @slop
+ */
+export interface PlanDiff {
+  readonly added: ReadonlyArray<string>
+  readonly removed: ReadonlyArray<string>
+  readonly rekeyed: ReadonlyArray<Rekeyed>
+  readonly unchanged: ReadonlyArray<string>
+}
+
+/**
+ * Order-insensitive structural comparison for the attribution report only.
+ * Digests go through RFC 8785 canonical JSON; this does not have to, and
+ * saying so keeps the two from being confused.
+ *
+ * @private
+ */
+const stable = (value: unknown): string => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined"
+  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`
+  const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left < right ? -1 : 1)
+  return `{${entries.map(([name, entry]) => `${JSON.stringify(name)}:${stable(entry)}`).join(",")}}`
+}
+
+/** @private */
+const changedFields = (
+  previous: Plan.PlanNode,
+  next: Plan.PlanNode,
+  rekeyedDependencies: ReadonlySet<string>
+): ReadonlyArray<string> => {
+  const changed: Array<string> = []
+  if (stable(previous.material.body) !== stable(next.material.body)) changed.push("body")
+  if (stable(previous.material.layers) !== stable(next.material.layers)) changed.push("layers")
+  if (stable(previous.material.capabilities) !== stable(next.material.capabilities)) changed.push("capabilities")
+  if (stable(previous.material.effects) !== stable(next.material.effects)) changed.push("effects")
+  if (previous.material.version !== next.material.version) changed.push("version")
+  const width = Math.max(previous.material.inputs.length, next.material.inputs.length)
+  for (let index = 0; index < width; index++) {
+    const before = previous.material.inputs[index]
+    const after = next.material.inputs[index]
+    if (before === undefined || after === undefined || stable(before) !== stable(after)) {
+      changed.push(`input[${index}]`)
+      continue
+    }
+    if (after._tag !== "Literal" && rekeyedDependencies.has(after.from)) changed.push(`input[${index}]`)
+  }
+  return changed
+}
+
+/**
+ * Compares a plan against the last plan for the same flow.
+ *
+ * @since 0.1.0
+ * @category constructors
+ * @slop
+ */
+export const diff = (previous: Plan.Plan, next: Plan.Plan): PlanDiff => {
+  const before = new Map(previous.nodes.map((node) => [node.id, node]))
+  const after = new Map(next.nodes.map((node) => [node.id, node]))
+  const rekeyedIds = new Set<string>()
+  for (const node of next.nodes) {
+    const original = before.get(node.id)
+    if (original !== undefined && original.key !== node.key) rekeyedIds.add(node.id)
+  }
+  const added: Array<string> = []
+  const rekeyed: Array<Rekeyed> = []
+  const unchanged: Array<string> = []
+  for (const node of next.nodes) {
+    const original = before.get(node.id)
+    if (original === undefined) {
+      added.push(node.id)
+      continue
+    }
+    if (original.key === node.key) {
+      unchanged.push(node.id)
+      continue
+    }
+    rekeyed.push({
+      id: node.id,
+      from: original.key,
+      to: node.key,
+      changed: changedFields(original, node, rekeyedIds)
+    })
+  }
+  return {
+    added,
+    removed: previous.nodes.filter((node) => !after.has(node.id)).map((node) => node.id),
+    rekeyed,
+    unchanged
+  }
+}

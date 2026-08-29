@@ -1,0 +1,204 @@
+import { describe, expect, it } from "@effect/vitest"
+import { Deferred, Effect, Fiber, Layer, Option, Queue, type Scope, Stream } from "effect"
+import { TestClock } from "effect/testing"
+import * as RpcClient from "effect/unstable/rpc/RpcClient"
+import type * as RpcClientError from "effect/unstable/rpc/RpcClientError"
+import type * as RpcGroup from "effect/unstable/rpc/RpcGroup"
+import type { FromServerEncoded } from "effect/unstable/rpc/RpcMessage"
+import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization"
+import * as RpcServer from "effect/unstable/rpc/RpcServer"
+import * as Socket from "effect/unstable/socket/Socket"
+import * as BranchCommands from "../src/BranchCommands.ts"
+import * as BranchIds from "../src/BranchIds.ts"
+import * as BranchPresence from "../src/BranchPresence.ts"
+import type { BranchId, ParticipantId } from "../src/BranchProtocol.ts"
+import * as BranchRpcs from "../src/BranchRpcs.ts"
+import * as BranchServer from "../src/BranchServer.ts"
+import * as BranchShare from "../src/BranchShare.ts"
+import * as SyncPrincipal from "../src/SyncPrincipal.ts"
+import { SyncAuth } from "../src/SyncRpcs.ts"
+import * as TestSocket from "../src/test/TestSocket.ts"
+
+type Client = RpcClient.RpcClient<RpcGroup.Rpcs<typeof BranchRpcs.BranchRpcs>, RpcClientError.RpcClientError>
+type Requirements =
+  | BranchShare.BranchShare
+  | BranchCommands.BranchCommands
+  | BranchIds.BranchIds
+  | SyncAuth
+  | Scope.Scope
+
+const base = Layer.mergeAll(
+  BranchShare.layerHmac({ secret: "roster-watch-secret" }),
+  BranchCommands.layerNoop,
+  BranchIds.layerSequential("roster"),
+  Layer.succeed(SyncAuth)((effect) =>
+    Effect.provideService(effect, SyncPrincipal.SyncPrincipal, SyncPrincipal.workspace("roster-test"))
+  )
+)
+
+const program = <A, E>(effect: Effect.Effect<A, E, Requirements>) =>
+  effect.pipe(Effect.provide(base), Effect.provide(TestClock.layer()), Effect.scoped)
+
+const connect = (
+  pair: TestSocket.Pair,
+  presence: BranchPresence.Service
+): Effect.Effect<Client, never, Requirements> =>
+  Effect.gen(function*() {
+    const handlers = yield* Layer.build(BranchServer.layerHandlers).pipe(
+      Effect.provideService(BranchPresence.BranchPresence, presence)
+    )
+    const serialization = RpcSerialization.json.makeUnsafe()
+    const writer = yield* pair.server.writer
+    const protocol = yield* RpcServer.Protocol.make((writeRequest) =>
+      Effect.gen(function*() {
+        yield* pair.server.runRaw((bytes) =>
+          Effect.forEach(serialization.decode(bytes), (message) => writeRequest(0, message as never), {
+            discard: true
+          })
+        ).pipe(Effect.forkScoped)
+        return {
+          disconnects: yield* Queue.make<number>(),
+          send: (_clientId: number, response: FromServerEncoded) => {
+            const encoded = serialization.encode(response)
+            return encoded === undefined ? Effect.void : Effect.orDie(writer(encoded))
+          },
+          end: () => Effect.void,
+          clientIds: Effect.succeed<ReadonlySet<number>>(new Set([0])),
+          initialMessage: Effect.succeed(Option.none()),
+          supportsAck: true,
+          supportsTransferables: false,
+          supportsSpanPropagation: false
+        }
+      })
+    )
+    yield* RpcServer.make(BranchRpcs.BranchRpcs, { disableFatalDefects: true }).pipe(
+      Effect.provideService(RpcServer.Protocol, protocol),
+      Effect.provide(handlers),
+      Effect.forkScoped
+    )
+    const clientProtocol = yield* RpcClient.makeProtocolSocket().pipe(
+      Effect.provideService(Socket.Socket, pair.client),
+      Effect.provide(RpcSerialization.layerJson)
+    )
+    return yield* RpcClient.make(BranchRpcs.BranchRpcs).pipe(
+      Effect.provideService(RpcClient.Protocol, clientProtocol)
+    )
+  })
+
+const leaseMs = 1_000
+const alice = "alice" as ParticipantId
+const bob = "bob" as ParticipantId
+
+describe("Branch.WatchRoster lease propagation", () => {
+  it.effect("emits one removal when a lease expires while a survivor heartbeats", () =>
+    Effect.gen(function*() {
+      const rosters = yield* program(
+        Effect.gen(function*() {
+          const presence = yield* BranchPresence.makeMemory({ leaseMs })
+          const pair = yield* TestSocket.makePair()
+          const client = yield* connect(pair, presence)
+          const share = yield* BranchShare.BranchShare
+          const branchId = "lease-watch" as BranchId
+          const capability = yield* share.mint({
+            branchId,
+            capabilityId: "lease-watch-capability",
+            access: "write",
+            ttlMs: 60_000
+          })
+          const announce = (participantId: ParticipantId, displayName: string) =>
+            client["Branch.Announce"]({ capability, branchId, participantId, displayName, cursor: null })
+          yield* announce(alice, "Alice")
+          yield* announce(bob, "Bob")
+
+          const initial = yield* Deferred.make<void>()
+          const removed = yield* Deferred.make<void>()
+          let emissions = 0
+          const watched = yield* Stream.runCollect(
+            Stream.take(
+              client["Branch.WatchRoster"]({ capability, branchId }).pipe(
+                Stream.tap(() => {
+                  emissions += 1
+                  return emissions === 1
+                    ? Deferred.succeed(initial, undefined)
+                    : emissions === 2
+                    ? Deferred.succeed(removed, undefined)
+                    : Effect.void
+                })
+              ),
+              3
+            )
+          ).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(initial)
+          yield* TestClock.adjust(leaseMs)
+          yield* announce(bob, "Bob")
+          yield* Deferred.await(removed)
+          yield* announce(bob, "Bob")
+          return Array.from(
+            yield* Fiber.join(watched),
+            (frame) => frame.participants.map((participant) => participant.participantId)
+          )
+        })
+      )
+
+      expect(rosters).toEqual([[alice, bob], [bob], [bob]])
+      const removals = rosters.slice(1).filter((roster, index) =>
+        rosters[index]?.includes(alice) === true && !roster.includes(alice)
+      )
+      expect(removals).toHaveLength(1)
+    }))
+
+  it.effect("does not lose a roster change between the initial list and change subscription", () =>
+    Effect.gen(function*() {
+      const rosters = yield* program(
+        Effect.gen(function*() {
+          const memory = yield* BranchPresence.makeMemory({ leaseMs })
+          const initialListed = yield* Deferred.make<void>()
+          const releaseInitial = yield* Deferred.make<void>()
+          let lists = 0
+          const controlled = BranchPresence.make({
+            ...memory,
+            list: (request) =>
+              Effect.gen(function*() {
+                const roster = yield* memory.list(request)
+                lists += 1
+                if (lists === 1) {
+                  yield* Deferred.succeed(initialListed, undefined)
+                  yield* Deferred.await(releaseInitial)
+                }
+                return roster
+              })
+          })
+          const pair = yield* TestSocket.makePair()
+          const client = yield* connect(pair, controlled)
+          const share = yield* BranchShare.BranchShare
+          const branchId = "watch-toctou" as BranchId
+          const capability = yield* share.mint({
+            branchId,
+            capabilityId: "watch-toctou-capability",
+            access: "write",
+            ttlMs: 60_000
+          })
+
+          const watched = yield* Stream.runCollect(
+            Stream.take(client["Branch.WatchRoster"]({ capability, branchId }), 2)
+          ).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(initialListed)
+          yield* client["Branch.Announce"]({
+            capability,
+            branchId,
+            participantId: alice,
+            displayName: "Alice",
+            cursor: null
+          })
+          yield* Deferred.succeed(releaseInitial, undefined)
+          return Array.from(
+            yield* Fiber.join(watched),
+            (frame) => frame.participants.map((participant) => participant.participantId)
+          )
+        })
+      )
+
+      expect(rosters).toContainEqual([])
+      expect(rosters).toContainEqual([alice])
+    }))
+})

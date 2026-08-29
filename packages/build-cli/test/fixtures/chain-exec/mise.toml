@@ -1,0 +1,3 @@
+[tools]
+forge = "1.5.1"
+mockery = "2.53.6"

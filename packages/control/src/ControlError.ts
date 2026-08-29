@@ -1,0 +1,205 @@
+/**
+ * Stable, schema-backed control-plane failures.
+ *
+ * @since 0.1.0
+ */
+import { Effect, Schema } from "effect"
+import { FlowId, RunId } from "./ControlSchema.ts"
+
+const constantCode = <const Code extends string>(code: Code) =>
+  Schema.Literal(code).pipe(Schema.withConstructorDefault(Effect.succeed(code)))
+
+/**
+ * No run with this id exists.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class RunNotFound extends Schema.TaggedError<RunNotFound>()("/control/RunNotFound", {
+  code: constantCode("run_not_found"),
+  runId: RunId
+}) {}
+
+/**
+ * No flow with this id is registered.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class FlowNotFound extends Schema.TaggedError<FlowNotFound>()("/control/FlowNotFound", {
+  code: constantCode("flow_not_found"),
+  flowId: FlowId
+}) {}
+
+/**
+ * The submitted plan does not hash to the digest the caller declared, so
+ * the control plane refuses to store it.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class PlanDigestMismatch extends Schema.TaggedError<PlanDigestMismatch>()("/control/PlanDigestMismatch", {
+  code: constantCode("plan_digest_mismatch"),
+  planId: Schema.String,
+  expected: Schema.String,
+  actual: Schema.String
+}) {}
+
+/**
+ * The plan's effect envelope differs from the one the caller declared.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class EnvelopeMismatch extends Schema.TaggedError<EnvelopeMismatch>()("/control/EnvelopeMismatch", {
+  code: constantCode("envelope_mismatch"),
+  planId: Schema.String,
+  expected: Schema.String,
+  actual: Schema.String
+}) {}
+
+/**
+ * The caller's claim on this run lapsed or was fenced by a newer owner.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class ClaimLost extends Schema.TaggedError<ClaimLost>()("/control/ClaimLost", {
+  code: constantCode("claim_lost"),
+  runId: RunId
+}) {}
+
+/**
+ * This request was already answered; a second answer is refused rather
+ * than overwriting the first.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class AlreadyResolved extends Schema.TaggedError<AlreadyResolved>()("/control/AlreadyResolved", {
+  code: constantCode("already_resolved"),
+  requestId: Schema.String
+}) {}
+
+/**
+ * The request did not satisfy its schema or a stated precondition.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class InvalidInput extends Schema.TaggedError<InvalidInput>()("/control/InvalidInput", {
+  code: constantCode("invalid_input"),
+  issue: Schema.String
+}) {}
+
+/**
+ * The caller presented no usable credential for this operation.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class Unauthorized extends Schema.TaggedError<Unauthorized>()("/control/Unauthorized", {
+  code: constantCode("unauthorized"),
+  message: Schema.String
+}) {}
+
+/**
+ * The operation is not implemented in this deployment. `ticket` names the
+ * issue that tracks it, per `Concepts/Tickets Not Exceptions.md`.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class Unavailable extends Schema.TaggedError<Unavailable>()("/control/Unavailable", {
+  code: constantCode("unavailable"),
+  feature: Schema.String,
+  ticket: Schema.String
+}) {}
+
+/**
+ * The request did not reach the control plane, or its reply did not come
+ * back. `retryable` states whether resending is safe.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class TransportError extends Schema.TaggedError<TransportError>()("/control/TransportError", {
+  code: constantCode("transport_error"),
+  message: Schema.String,
+  retryable: Schema.Boolean
+}) {}
+
+/**
+ * A control-plane store operation failed.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class PersistenceError extends Schema.TaggedError<PersistenceError>()("/control/PersistenceError", {
+  code: constantCode("persistence_failed"),
+  operation: Schema.String,
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown)
+}) {}
+
+/**
+ * The executor refused or could not start the run.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class LaunchFailed extends Schema.TaggedError<LaunchFailed>()("/control/LaunchFailed", {
+  code: constantCode("launch_failed"),
+  runId: RunId,
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown)
+}) {}
+
+/**
+ * A credential write lost a race: the record moved on before this writer
+ * committed, so the update is refused rather than silently overwriting the
+ * winner.
+ *
+ * @since 0.1.0
+ * @category errors
+ * @slop
+ */
+export class CredentialConflict extends Schema.TaggedError<CredentialConflict>()("/control/CredentialConflict", {
+  code: constantCode("credential_conflict"),
+  id: Schema.String,
+  expectedVersion: Schema.Number,
+  actualVersion: Schema.Number
+}) {}
+
+/**
+ * Every stable failure emitted by the control plane.
+ *
+ * @since 0.1.0
+ * @category errors
+ * @slop
+ */
+export type ControlError =
+  | RunNotFound
+  | FlowNotFound
+  | PlanDigestMismatch
+  | EnvelopeMismatch
+  | ClaimLost
+  | AlreadyResolved
+  | InvalidInput
+  | Unauthorized
+  | Unavailable
+  | TransportError
+  | PersistenceError
+  | LaunchFailed

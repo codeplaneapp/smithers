@@ -1,0 +1,54 @@
+/**
+ * Persisted plan schema migrations.
+ *
+ * This package owns `flows_plans`, `flows_plan_nodes`, and `flows_plan_edges`
+ * and nothing else. It reserves migration id block `4000` — the next free
+ * block after the journal (`0`), the run store (`1000`), the step cache
+ * (`2000`), and the engine store (`3000`) — so its first migration is id
+ * `4001`. See `@smthrs/database`'s `Migrations` for how the blocks compose and
+ * why a set landing at or below the applied high-water mark is rejected rather
+ * than silently assumed done.
+ *
+ * Derived contracts: `docs/specs/Specs/Plan.md` and
+ * `docs/specs/Concepts/Journal Split.md`.
+ *
+ * @since 0.1.0
+ */
+import * as DatabaseMigrations from "@smthrs/database/Migrations"
+import * as Layer from "effect/Layer"
+import initial from "./migrations/0001_initial.ts"
+
+/**
+ * The plan store's namespaced migration set, for composition with the other
+ * storage packages.
+ *
+ * @category migrations
+ * @since 0.1.0
+ * @slop
+ */
+export const set: DatabaseMigrations.MigrationSet = {
+  namespace: "plan",
+  idOffset: DatabaseMigrations.idBlock * 4,
+  migrations: {
+    "0001_initial": initial
+  }
+}
+
+/**
+ * Creates the plan schema.
+ *
+ * @category migrations
+ * @since 0.1.0
+ * @slop
+ */
+export const run = DatabaseMigrations.run([set])
+
+/**
+ * Layer that runs plan migrations before exposing the database to the plan
+ * store.
+ *
+ * @category layers
+ * @since 0.1.0
+ * @slop
+ */
+export const layer = Layer.effectDiscard(run)

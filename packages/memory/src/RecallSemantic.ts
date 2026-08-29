@@ -1,0 +1,505 @@
+/**
+ * In-process semantic recall and best-effort vector projection.
+ *
+ * V1 intentionally brute-forces cosine similarity over the selected banks;
+ * sqlite-vec is deferred to an optimization ticket. Projection is advisory:
+ * authoritative MemoryStore writes complete first, projection failures retry
+ * once and are logged without changing the write result.
+ *
+ * @see docs/specs/Concepts/Memory.md
+ * @since 0.1.0
+ */
+import * as Clock from "effect/Clock"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Semaphore from "effect/Semaphore"
+import * as Embedding from "./Embedding.ts"
+import type { DatabaseService } from "./internal/Sql.ts"
+import * as MemoryError from "./MemoryError.ts"
+import * as MemoryStore from "./MemoryStore.ts"
+import * as Namespace from "./Namespace.ts"
+import * as Recall from "./Recall.ts"
+
+const compareText = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
+
+/**
+ * Durable vector projection row.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface Vector {
+  readonly bank: string
+  readonly key: string
+  readonly model: string
+  readonly contentDigest: string
+  readonly dimensions: number
+  readonly vector: ReadonlyArray<number>
+  readonly updatedAtMs: number
+  readonly recordKind?: "fact" | "note" | undefined
+  readonly recordId?: string | undefined
+}
+
+/**
+ * Injectable vector-table adapter for semantic recall.
+ *
+ * @category services
+ * @since 0.1.0
+ * @slop
+ */
+export interface VectorStore {
+  readonly upsert: (vector: Vector) => Effect.Effect<void, MemoryError.MemoryError>
+  readonly list: (banks: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<Vector>, MemoryError.MemoryError>
+}
+
+/**
+ * Semantic recall configuration.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface Options {
+  readonly vectorStore: VectorStore
+  readonly model?: string
+  readonly halfLifeMs?: number
+}
+
+interface SqlVectorRow {
+  readonly record_kind: "fact" | "note"
+  readonly record_id: string
+  readonly namespace_kind: Namespace.Kind
+  readonly namespace_id: string
+  readonly embedding_model: string
+  readonly content_digest: string
+  readonly dimensions: number
+  readonly vector_bytes: Uint8Array
+  readonly updated_at_ms: number
+}
+
+/**
+ * Deterministic result limits for the three semantic budgets.
+ *
+ * @category constants
+ * @since 0.1.0
+ * @slop
+ */
+export const budgetLimits = {
+  low: 3,
+  mid: 8,
+  high: 20
+} as const
+
+/**
+ * The embedding model semantic recall uses when a declaration names none.
+ *
+ * @category constants
+ * @since 0.1.0
+ * @slop
+ */
+export const defaultModel = Embedding.inProcessModel
+const defaultHalfLifeMs = 7 * 24 * 60 * 60 * 1000
+
+const vectorBytes = (vector: ReadonlyArray<number>): Uint8Array => {
+  const values = new Float32Array(vector)
+  return new Uint8Array(values.buffer)
+}
+
+const maximumDimensions = 65_536
+
+const readVector = (
+  bytes: Uint8Array,
+  dimensions: number
+): Effect.Effect<ReadonlyArray<number>, MemoryError.MemoryError> =>
+  !Number.isSafeInteger(dimensions) || dimensions < 1 || dimensions > maximumDimensions ||
+    bytes.byteLength !== dimensions * 4
+    ? Effect.fail(
+      new MemoryError.MemoryError({
+        code: "store",
+        message: "stored memory vector has invalid dimensions or byte length"
+      })
+    )
+    : Effect.try({
+      try: () => {
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+        const vector = new Array<number>(dimensions)
+        for (let index = 0; index < dimensions; index++) vector[index] = view.getFloat32(index * 4, true)
+        return vector
+      },
+      catch: (cause) =>
+        new MemoryError.MemoryError({ code: "store", message: "stored memory vector could not be decoded", cause })
+    })
+
+const sqlError = (cause: unknown): MemoryError.MemoryError =>
+  new MemoryError.MemoryError({ code: "store", message: "memory vector projection failed", cause })
+
+/**
+ * Builds the SQLite adapter for the migration-owned `memory_vectors` table.
+ *
+ * @category constructors
+ * @since 0.1.0
+ * @slop
+ */
+export const makeSqlVectorStore = (database: DatabaseService): VectorStore => ({
+  upsert: (vector) =>
+    database.write(
+      database.sql`
+      INSERT INTO memory_vectors (
+        record_kind, record_id, namespace_kind, namespace_id,
+        embedding_model, content_digest, dimensions, vector_bytes, updated_at_ms
+      ) VALUES (
+        ${vector.recordKind ?? "note"},
+        ${vector.recordId ?? vector.key},
+        ${Recall.namespaceForBank(vector.bank).kind},
+        ${Recall.namespaceForBank(vector.bank).id},
+        ${vector.model},
+        ${vector.contentDigest},
+        ${vector.dimensions},
+        ${vectorBytes(vector.vector)},
+        ${vector.updatedAtMs}
+      )
+      ON CONFLICT (
+        namespace_kind, namespace_id, record_kind, record_id, embedding_model
+      ) DO UPDATE SET
+        content_digest = excluded.content_digest,
+        dimensions = excluded.dimensions,
+        vector_bytes = excluded.vector_bytes,
+        updated_at_ms = excluded.updated_at_ms
+    `
+    ).pipe(Effect.mapError(sqlError), Effect.asVoid),
+  list: (banks) =>
+    Effect.all(
+      banks.map((bank) => {
+        const namespace = Recall.namespaceForBank(bank)
+        return database.sql<SqlVectorRow>`
+          SELECT record_kind, record_id, namespace_kind, namespace_id,
+            embedding_model, content_digest, dimensions, vector_bytes, updated_at_ms
+          FROM memory_vectors
+          WHERE namespace_kind = ${namespace.kind} AND namespace_id = ${namespace.id}
+        `.pipe(Effect.map((rows) => ({ bank, rows })))
+      }),
+      { concurrency: "unbounded" }
+    ).pipe(
+      Effect.flatMap((groups) =>
+        Effect.forEach(groups.flatMap(({ bank, rows }) => rows.map((row) => ({ bank, row }))), ({ bank, row }) =>
+          readVector(row.vector_bytes, row.dimensions).pipe(Effect.map((vector) => ({
+            bank,
+            key: row.record_id,
+            model: row.embedding_model,
+            contentDigest: row.content_digest,
+            dimensions: row.dimensions,
+            vector,
+            updatedAtMs: row.updated_at_ms,
+            recordKind: row.record_kind,
+            recordId: row.record_id
+          }))))
+      ),
+      Effect.mapError((cause) =>
+        cause instanceof MemoryError.MemoryError ? cause : sqlError(cause)
+      )
+    )
+})
+
+const digest = (text: string): string => {
+  let hash = 2166136261
+  for (const byte of new TextEncoder().encode(text)) {
+    hash ^= byte
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0")
+}
+
+const factText = (value: unknown): string => {
+  if (typeof value === "string") return value
+  try {
+    return JSON.stringify(value) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
+
+const mismatch = (message: string): MemoryError.MemoryError =>
+  new MemoryError.MemoryError({ code: "embedding_unavailable", message })
+
+const cosine = (left: ReadonlyArray<number>, right: ReadonlyArray<number>): number => {
+  if (left.length !== right.length || left.length === 0) return 0
+  let dot = 0
+  let leftMagnitude = 0
+  let rightMagnitude = 0
+  for (let index = 0; index < left.length; index++) {
+    const leftValue = left[index] ?? 0
+    const rightValue = right[index] ?? 0
+    dot += leftValue * rightValue
+    leftMagnitude += leftValue * leftValue
+    rightMagnitude += rightValue * rightValue
+  }
+  return leftMagnitude === 0 || rightMagnitude === 0 ? 0 : dot / Math.sqrt(leftMagnitude * rightMagnitude)
+}
+
+const recency = (updatedAtMs: number, nowMs: number, halfLifeMs: number): number =>
+  Math.exp(-Math.max(0, nowMs - updatedAtMs) / halfLifeMs)
+
+/**
+ * Computes a semantic recall result from a vector projection and authoritative
+ * rows. A model or dimension mismatch is a typed embedding failure.
+ *
+ * @category constructors
+ * @since 0.1.0
+ * @slop
+ */
+export const recall = (
+  input: Recall.Input,
+  options: Options
+): Effect.Effect<Recall.Output, MemoryError.MemoryError, MemoryStore.MemoryStore | Embedding.Embedding> =>
+  Effect.gen(function*() {
+    const embedding = yield* Embedding.Embedding
+    const store = yield* MemoryStore.MemoryStore
+    const model = options.model ?? defaultModel
+    const limit = budgetLimits[input.budget ?? "mid"]
+    const query = yield* embedding.embed(input.query)
+    const vectors = yield* options.vectorStore.list(input.banks)
+    if (vectors.some((vector) => vector.model !== model)) {
+      return yield* Effect.fail(mismatch(`embedding model mismatch: expected ${model}`))
+    }
+    if (
+      vectors.some((vector) =>
+        vector.dimensions !== query.vector.length || vector.vector.length !== query.vector.length
+      )
+    ) {
+      return yield* Effect.fail(mismatch("embedding dimensions do not match the query vector"))
+    }
+    const rows = yield* Effect.all(
+      input.banks.map((namespace) =>
+        store.searchRows({
+          namespace: Recall.namespaceForBank(namespace),
+          status: "accepted"
+        })
+      ),
+      { concurrency: "unbounded" }
+    )
+    const byIdentity = new Map(
+      rows.flatMap((bankRows, index) =>
+        bankRows.map((row) =>
+          [
+            `${input.banks[index] ?? ""}\u0000${row.kind}\u0000${row.id}`,
+            { ...row, bank: input.banks[index] ?? "" }
+          ] as const
+        )
+      )
+    )
+    const now = yield* Clock.currentTimeMillis
+    const halfLife = options.halfLifeMs ?? defaultHalfLifeMs
+    if (!Number.isFinite(now) || !Number.isFinite(halfLife) || halfLife <= 0) {
+      return yield* Effect.fail(mismatch("semantic recency configuration must be finite with a positive half-life"))
+    }
+    const ranked: Array<Recall.Result> = []
+    for (const vector of vectors) {
+      const row = byIdentity.get(
+        `${vector.bank}\u0000${vector.recordKind ?? "note"}\u0000${vector.recordId ?? vector.key}`
+      )
+      if (row === undefined) continue
+      if (row.status !== undefined && row.status !== "accepted") continue
+      if (input.tagGroups !== undefined && !input.tagGroups.every((group) => Namespace.matches(group, row.tags))) {
+        continue
+      }
+      const score = cosine(query.vector, vector.vector) * recency(vector.updatedAtMs, now, halfLife)
+      if (score > 0) {
+        ranked.push({
+          bank: vector.bank,
+          key: row.key,
+          text: row.text,
+          score,
+          updatedAtMs: row.updatedAtMs
+        })
+      }
+    }
+    ranked.sort((left, right) =>
+      right.score - left.score || (right.updatedAtMs ?? 0) - (left.updatedAtMs ?? 0) ||
+      compareText(left.key, right.key)
+    )
+    return Recall.capRecallResults(ranked.slice(0, limit), input.maxTokens ?? 2048)
+  })
+
+/**
+ * Creates a per-key serialized projection decorator. Call it after the
+ * authoritative store transaction has committed.
+ *
+ * @category constructors
+ * @since 0.1.0
+ * @slop
+ */
+export interface Projector {
+  (row: {
+    readonly bank: string
+    readonly key: string
+    readonly text: string
+    readonly updatedAtMs: number
+    readonly recordKind?: "fact" | "note" | undefined
+    readonly recordId?: string | undefined
+  }): Effect.Effect<void, never, Embedding.Embedding>
+  /** Number of keys currently projecting or waiting; exposed for diagnostics. */
+  readonly activeKeys: () => number
+}
+
+/**
+ * Constructs the bounded-lifetime semantic projection coordinator.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const makeProjector = (options: Options): Projector => {
+  const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>()
+  const project = (row: {
+    readonly bank: string
+    readonly key: string
+    readonly text: string
+    readonly updatedAtMs: number
+    readonly recordKind?: "fact" | "note" | undefined
+    readonly recordId?: string | undefined
+  }) =>
+    Effect.suspend(() => {
+      const model = options.model ?? defaultModel
+      const task = Effect.gen(function*() {
+        const embedding = yield* Embedding.Embedding
+        const response = yield* embedding.embed(row.text)
+        yield* options.vectorStore.upsert({
+          ...row,
+          model,
+          contentDigest: digest(row.text),
+          dimensions: response.vector.length,
+          vector: response.vector,
+          recordKind: row.recordKind,
+          recordId: row.recordId
+        })
+      }).pipe(
+        Effect.retry({ times: 1 }),
+        Effect.catch((cause) => Effect.logWarning(`memory semantic projection failed: ${String(cause)}`)),
+        Effect.asVoid
+      )
+      const identity = `${model}\u0000${row.bank}\u0000${row.key}`
+      let entry = locks.get(identity)
+      if (entry === undefined) {
+        entry = { lock: Semaphore.makeUnsafe(1), users: 0 }
+        locks.set(identity, entry)
+      }
+      entry.users += 1
+      const current = entry
+      return current.lock.withPermit(task).pipe(
+        Effect.ensuring(Effect.sync(() => {
+          current.users -= 1
+          if (current.users === 0 && locks.get(identity) === current) locks.delete(identity)
+        }))
+      )
+    })
+  return Object.assign(project, { activeKeys: () => locks.size })
+}
+
+/**
+ * Projects one committed row, retrying once and degrading to a log-only
+ * failure. The returned effect remains interruptible.
+ *
+ * @category constructors
+ * @since 0.1.0
+ * @slop
+ */
+export const projectAfterCommit = (
+  projector: Projector,
+  row: Parameters<Projector>[0]
+): Effect.Effect<void, never, Embedding.Embedding> => projector(row)
+
+/**
+ * Decorates authoritative fact and note writes with an after-commit semantic
+ * projection. The supplied embedding service is captured so the returned
+ * MemoryStore retains its ordinary no-environment write signatures.
+ *
+ * @category constructors
+ * @since 0.1.0
+ * @slop
+ */
+export const decorateStore = (
+  store: MemoryStore.Service,
+  projector: Projector,
+  embedding: Embedding.Service
+): MemoryStore.Service => {
+  const project = (row: Parameters<Projector>[0]): Effect.Effect<void> =>
+    projector(row).pipe(Effect.provideService(Embedding.Embedding, embedding))
+  return {
+    ...store,
+    putFact: (input) =>
+      store.putFact(input).pipe(
+        Effect.andThen(store.getFact({ namespace: input.namespace, key: input.key })),
+        Effect.flatMap((fact) =>
+          fact === undefined
+            ? Effect.void
+            : project({
+              bank: `${fact.namespace.kind}-${fact.namespace.id}`,
+              key: fact.key,
+              text: factText(fact.value),
+              updatedAtMs: fact.updatedAtMs,
+              recordKind: "fact" as const,
+              recordId: fact.key
+            })
+        )
+      ),
+    putNote: (input) =>
+      store.putNote(input).pipe(
+        Effect.tap((note) =>
+          project({
+            bank: `${note.namespace.kind}-${note.namespace.id}`,
+            key: note.id,
+            text: note.text,
+            updatedAtMs: note.createdAtMs,
+            recordKind: "note",
+            recordId: note.id
+          })
+        )
+      )
+  }
+}
+
+/**
+ * Provides semantic recall from the MemoryStore, Embedding, and vector table.
+ *
+ * @category layers
+ * @since 0.1.0
+ * @slop
+ */
+export const layer = (
+  options: Options
+): Layer.Layer<Recall.Recall, never, MemoryStore.MemoryStore | Embedding.Embedding> =>
+  Layer.effect(
+    Recall.Recall,
+    Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const embedding = yield* Embedding.Embedding
+      return Recall.make({
+        recall: (input) =>
+          recall(input, options).pipe(
+            Effect.provideService(MemoryStore.MemoryStore, store),
+            Effect.provideService(Embedding.Embedding, embedding)
+          )
+      })
+    })
+  )
+
+/**
+ * Cosine similarity between two embedding vectors. Exported so the
+ * ranking can be tested without a store.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export const cosineSimilarity = cosine
+
+/**
+ * The recency weight applied to a row's similarity, decaying with the
+ * configured half-life. Exported so the ranking can be tested without a
+ * store.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export const recencyDecay = recency

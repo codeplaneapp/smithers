@@ -1,0 +1,303 @@
+/**
+ * Local-first, remote-second, with write-back into the local SQL store — the
+ * shape of `CombinedCache.downloadActionResult`
+ * (`reference/bazel/.../remote/CombinedCache.java`, lines 230-303).
+ */
+import { describe, expect, it } from "@effect/vitest"
+import * as Deferred from "effect/Deferred"
+import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
+import * as Option from "effect/Option"
+import * as CacheStore from "../src/CacheStore.ts"
+import * as CombinedCacheStore from "../src/CombinedCacheStore.ts"
+
+const entry: CacheStore.CacheEntry = {
+  keyDigest: "key-digest",
+  result: { ok: true },
+  meta: {},
+  createdAtMs: 7,
+  recordedRunId: "run-1",
+  recordedEventSeq: 3
+}
+
+/** A first-writer-wins in-memory tier with a call log. */
+const tier = (options: { readonly putOutcome?: CacheStore.PutResult } = {}) => {
+  const rows = new Map<string, CacheStore.CacheEntry>()
+  const calls: Array<string> = []
+  const store: CacheStore.Service = {
+    get: (keyDigest) =>
+      Effect.sync(() => {
+        calls.push("get")
+        const row = rows.get(keyDigest)
+        return row === undefined ? Option.none() : Option.some(row)
+      }),
+    put: (candidate) =>
+      Effect.sync(() => {
+        calls.push("put")
+        if (options.putOutcome !== undefined) return options.putOutcome
+        if (rows.has(candidate.keyDigest)) return { _tag: "ExistingSame" } as const
+        rows.set(candidate.keyDigest, candidate)
+        return { _tag: "Inserted" } as const
+      }),
+    evict: (keyDigest) =>
+      Effect.sync(() => {
+        calls.push("evict")
+        return rows.delete(keyDigest)
+      })
+  }
+  return { rows, calls, store }
+}
+
+/**
+ * A first-writer-wins tier that decides `ExistingSame` versus `Conflict` on the
+ * stored result the way the SQL store does, with optional deferred gating so an
+ * interleaving can be pinned without a sleep.
+ */
+const durableTier = (
+  options: {
+    readonly gateGet?: Deferred.Deferred<void>
+    readonly reachedGet?: Deferred.Deferred<void>
+    readonly failPut?: CacheStore.CacheStoreError
+  } = {}
+) => {
+  const rows = new Map<string, CacheStore.CacheEntry>()
+  const calls: Array<string> = []
+  const outcomes: Array<CacheStore.PutResult> = []
+  const store: CacheStore.Service = {
+    get: (keyDigest: string): Effect.Effect<Option.Option<CacheStore.CacheEntry>, CacheStore.CacheStoreError> =>
+      Effect.suspend(() => {
+        calls.push("get")
+        const announce = options.reachedGet === undefined
+          ? Effect.void
+          : Deferred.succeed(options.reachedGet, undefined)
+        const wait = options.gateGet === undefined ? Effect.void : Deferred.await(options.gateGet)
+        return announce.pipe(
+          Effect.andThen(wait),
+          Effect.map(() => {
+            const row = rows.get(keyDigest)
+            return row === undefined ? Option.none() : Option.some(row)
+          })
+        )
+      }),
+    put: (candidate: CacheStore.CacheEntry): Effect.Effect<CacheStore.PutResult, CacheStore.CacheStoreError> =>
+      Effect.suspend((): Effect.Effect<CacheStore.PutResult, CacheStore.CacheStoreError> => {
+        calls.push("put")
+        if (options.failPut !== undefined) return Effect.fail(options.failPut)
+        const existing = rows.get(candidate.keyDigest)
+        if (existing === undefined) {
+          rows.set(candidate.keyDigest, candidate)
+          outcomes.push({ _tag: "Inserted" })
+          return Effect.succeed({ _tag: "Inserted" })
+        }
+        const outcome: CacheStore.PutResult = JSON.stringify(existing.result) === JSON.stringify(candidate.result)
+          ? { _tag: "ExistingSame" }
+          : { _tag: "Conflict" }
+        outcomes.push(outcome)
+        return Effect.succeed(outcome)
+      }),
+    evict: (keyDigest: string) =>
+      Effect.sync(() => {
+        calls.push("evict")
+        return rows.delete(keyDigest)
+      })
+  }
+  return { rows, calls, outcomes, store }
+}
+
+describe("lookups", () => {
+  it.effect("answers from the local tier without touching the remote one", () =>
+    Effect.gen(function*() {
+      const local = tier()
+      const remote = tier()
+      yield* (local.store.put(entry))
+      const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+      expect(Option.getOrUndefined(yield* (combined.get(entry.keyDigest)))).toEqual(entry)
+      expect(remote.calls).toEqual([])
+    }))
+
+  it.effect("falls through to the remote tier and writes the row back locally", () =>
+    Effect.gen(function*() {
+      const local = tier()
+      const remote = tier()
+      yield* (remote.store.put(entry))
+      const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+      expect(Option.getOrUndefined(yield* (combined.get(entry.keyDigest)))).toEqual(entry)
+      // The write-back means the next lookup — on this run or a sibling one — is
+      // a local hit.
+      expect(local.rows.get(entry.keyDigest)).toEqual(entry)
+      const before = remote.calls.length
+      yield* (combined.get(entry.keyDigest))
+      expect(remote.calls).toHaveLength(before)
+    }))
+
+  it.effect("reports a miss neither tier can satisfy", () =>
+    Effect.gen(function*() {
+      const combined = CombinedCacheStore.make({ local: tier().store, remote: tier().store })
+      expect(Option.isNone(yield* (combined.get(entry.keyDigest)))).toBe(true)
+    }))
+})
+
+describe("publications", () => {
+  it.effect("records locally and publishes to the shared tier", () =>
+    Effect.gen(function*() {
+      const local = tier()
+      const remote = tier()
+      const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+      expect(yield* (combined.put(entry))).toEqual({ _tag: "Inserted" })
+      expect(remote.rows.get(entry.keyDigest)).toEqual(entry)
+    }))
+
+  it.effect("leaves the shared write to the caller in deferred mode", () =>
+    Effect.gen(function*() {
+      // The engine commits the local row inside a `DurableWriter` transaction and
+      // a host call must never be held across one, so its composition defers the
+      // shared write to its own `CacheSync` seam. Lookups stay read-through.
+      const local = tier()
+      const remote = tier()
+      const combined = CombinedCacheStore.make({
+        local: local.store,
+        remote: remote.store,
+        publication: "deferred"
+      })
+      expect(yield* (combined.put(entry))).toEqual({ _tag: "Inserted" })
+      expect(local.rows.get(entry.keyDigest)).toEqual(entry)
+      expect(remote.calls).toEqual([])
+    }))
+
+  it.effect("does not publish a result the local tier says conflicts", () =>
+    Effect.gen(function*() {
+      // A local `Conflict` is what drives the strict `Inconsistency` verdict;
+      // pushing the losing result to the shared tier would spread it.
+      const local = tier({ putOutcome: { _tag: "Conflict" } })
+      const remote = tier()
+      const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+      expect(yield* (combined.put(entry))).toEqual({ _tag: "Conflict" })
+      expect(remote.calls).toEqual([])
+    }))
+})
+
+describe("write-back races", () => {
+  const localEntry: CacheStore.CacheEntry = { ...entry, result: { ok: "local" } }
+  const remoteEntry: CacheStore.CacheEntry = { ...entry, result: { ok: "remote" } }
+
+  it.effect("serves the durable local winner when a concurrent put wins the write-back", () =>
+    Effect.gen(function*() {
+      const gate = Deferred.makeUnsafe<void>()
+      const reached = Deferred.makeUnsafe<void>()
+      const local = durableTier()
+      const remote = durableTier({ gateGet: gate, reachedGet: reached })
+      yield* (remote.store.put(remoteEntry))
+      const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+
+      const observed = yield* (
+        Effect.gen(function*() {
+          // The lookup misses locally, then parks inside the remote read.
+          const lookup = yield* Effect.forkChild(combined.get(entry.keyDigest), { startImmediately: true })
+          yield* Deferred.await(reached)
+          // A sibling run on this machine records a *different* result under the
+          // same key and wins the durable row.
+          const winner = yield* local.store.put(localEntry)
+          expect(winner).toEqual({ _tag: "Inserted" })
+          yield* Deferred.succeed(gate, undefined)
+          return yield* Fiber.join(lookup)
+        })
+      )
+
+      // The write-back lost: the local tier reports the row it kept is a
+      // different result under the same key.
+      expect(local.outcomes).toEqual([{ _tag: "Inserted" }, { _tag: "Conflict" }])
+      expect(local.rows.get(entry.keyDigest)).toEqual(localEntry)
+      // The caller must never be handed a result the durable tier disagrees with:
+      // this machine replays `localEntry`, so serving `remoteEntry` is a cache
+      // collision the caller cannot detect.
+      expect(Option.getOrThrow(observed)).toEqual(localEntry)
+    }))
+
+  it.effect("serves the remote row when the losing write-back finds no local row to defer to", () =>
+    Effect.gen(function*() {
+      // The write-back reported a losing outcome, but by the time the durable
+      // row is re-read the winner is gone again — recorded and evicted by a
+      // sibling within the window. The remote entry is then the only row
+      // anyone holds, and it is what the caller gets.
+      const local = tier({ putOutcome: { _tag: "Conflict" } })
+      const remote = tier()
+      yield* (remote.store.put(remoteEntry))
+      const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+      const observed = yield* (combined.get(entry.keyDigest))
+      expect(local.calls).toEqual(["get", "put", "get"])
+      expect(Option.getOrThrow(observed)).toEqual(remoteEntry)
+    }))
+
+  it.effect("keeps the local row and fails the caller when the shared publication fails", () =>
+    Effect.gen(function*() {
+      // Partial success: the local insert committed and the shared write did not.
+      // The local row is what this machine replays from, so it survives; the
+      // caller sees the transport failure and the shared tier holds nothing.
+      const local = durableTier()
+      const refused = new CacheStore.CacheStoreError({
+        code: "persistence_failed",
+        message: "the remote cache tier refused a publication"
+      })
+      const failed = durableTier({ failPut: refused })
+      const combined = CombinedCacheStore.make({
+        local: local.store,
+        remote: failed.store
+      })
+
+      const failure = yield* (Effect.flip(combined.put(entry)))
+      expect(failure.code).toBe("persistence_failed")
+      expect(failed.calls).toEqual(["put"])
+      expect(failed.outcomes).toEqual([])
+      expect(failed.rows.size).toBe(0)
+      expect(Option.isNone(yield* (failed.store.get(entry.keyDigest)))).toBe(true)
+      expect(local.rows.get(entry.keyDigest)).toEqual(entry)
+      expect(local.outcomes).toEqual([{ _tag: "Inserted" }])
+
+      // Retry semantics, pinned: the same `put` against a healthy shared tier
+      // republishes and reports `ExistingSame` off the surviving local row. It is
+      // never a `Conflict`, so a retry after an outage cannot fail the run
+      // through the `Inconsistency` receiver.
+      const healthy = durableTier()
+      const retried = yield* (
+        CombinedCacheStore.make({ local: local.store, remote: healthy.store }).put(entry)
+      )
+      expect(retried).toEqual({ _tag: "ExistingSame" })
+      expect(healthy.rows.get(entry.keyDigest)).toEqual(entry)
+    }))
+})
+
+describe("evictions", () => {
+  it.effect("stays local", () =>
+    Effect.gen(function*() {
+      // Every engine eviction is a "this host observed this row to be poison"
+      // judgement, and none of those observations generalize to a tier where
+      // another machine may still hold the artifacts this one lost.
+      const local = tier()
+      const remote = tier()
+      yield* (local.store.put(entry))
+      yield* (remote.store.put(entry))
+      const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+      expect(yield* (combined.evict(entry.keyDigest))).toBe(true)
+      expect(remote.rows.has(entry.keyDigest)).toBe(true)
+    }))
+})
+
+describe("layer", () => {
+  it.effect("builds both tiers from effects and provides one tag", () =>
+    Effect.gen(function*() {
+      const remote = tier()
+      const found = yield* (
+        Effect.flatMap(CacheStore.CacheStore, (store) => Effect.andThen(store.put(entry), store.get(entry.keyDigest)))
+          .pipe(
+            Effect.provide(
+              CombinedCacheStore.layer({
+                local: Effect.sync(() => tier().store),
+                remote: Effect.succeed(remote.store)
+              })
+            )
+          )
+      )
+      expect(Option.getOrUndefined(found)).toEqual(entry)
+      expect(remote.rows.get(entry.keyDigest)).toEqual(entry)
+    }))
+})

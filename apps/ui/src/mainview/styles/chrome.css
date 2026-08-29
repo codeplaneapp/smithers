@@ -1,0 +1,197 @@
+/*
+ * The local-app chrome bar and tab bodies (docs/LOCAL-APP.md "Tabs"): the
+ * strip in the upper-left, the `+` menu, the repository chip, and the bodies
+ * that stay mounted while hidden.
+ */
+.chrome-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	min-height: 36px;
+	padding: 0 8px;
+	border-bottom: 1px solid var(--border);
+	background: var(--card);
+}
+
+.tab-strip {
+	display: flex;
+	min-width: 0;
+	align-items: flex-end;
+	gap: 2px;
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+
+.tab {
+	display: flex;
+	height: 28px;
+	align-items: center;
+	gap: 2px;
+	padding: 0 4px 0 10px;
+	border: 1px solid transparent;
+	border-bottom: 0;
+	border-radius: 6px 6px 0 0;
+	color: var(--bubble-meta, var(--text));
+}
+
+.tab[data-active="true"] {
+	border-color: var(--border);
+	background: var(--bg);
+	color: var(--text);
+}
+
+.tab-select {
+	white-space: nowrap;
+	font-size: var(--fs-small);
+}
+
+.tab-close {
+	display: inline-flex;
+	width: 18px;
+	height: 18px;
+	align-items: center;
+	justify-content: center;
+	border-radius: 4px;
+	color: inherit;
+}
+
+.tab-close:hover,
+.tab-close:focus-visible {
+	background: var(--hover);
+}
+
+.tab-add {
+	position: relative;
+	display: flex;
+	align-items: center;
+	align-self: center;
+}
+
+.tab-add-trigger {
+	display: inline-flex;
+	width: 24px;
+	height: 24px;
+	align-items: center;
+	justify-content: center;
+	border-radius: 6px;
+}
+
+.tab-add-trigger:hover,
+.tab-add-trigger:focus-visible,
+.tab-add-trigger[aria-expanded="true"] {
+	background: var(--hover);
+}
+
+.tab-add-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 60;
+}
+
+.tab-add-menu {
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
+	z-index: 61;
+	display: flex;
+	min-width: 240px;
+	flex-direction: column;
+	padding: 4px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--card);
+	box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+.tab-add-item {
+	display: flex;
+	width: 100%;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 6px 8px;
+	border-radius: 6px;
+	text-align: left;
+	font-size: var(--fs-small);
+	white-space: nowrap;
+}
+
+.tab-add-item:hover,
+.tab-add-item:focus-visible {
+	background: var(--hover);
+}
+
+.tab-add-item:disabled {
+	cursor: default;
+	opacity: 0.5;
+}
+
+.tab-add-item:disabled:hover {
+	background: none;
+}
+
+.tab-add-account {
+	color: var(--bubble-meta, var(--text));
+}
+
+.chrome-actions {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 8px;
+}
+
+.repo-chip {
+	max-width: 240px;
+	overflow: hidden;
+	padding: 2px 10px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	font-size: var(--fs-small);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chrome-action {
+	padding: 4px 8px;
+	border-radius: 6px;
+	font-size: var(--fs-small);
+}
+
+.chrome-action:hover,
+.chrome-action:focus-visible {
+	background: var(--hover);
+}
+
+/* Every tab body stays mounted; an inactive one is hidden, never unmounted. */
+.tab-body {
+	display: flex;
+	min-width: 0;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+}
+
+.tab-body[hidden] {
+	display: none;
+}
+
+.tab-terminal {
+	flex: 1;
+	min-height: 0;
+	border: 0;
+	border-radius: 0;
+}
+
+.card-tab {
+	flex: 1;
+	min-height: 0;
+	padding: 16px;
+	overflow: auto;
+}
+
+.card-tab-gone {
+	margin: 16px;
+	color: var(--bubble-meta, var(--text));
+}

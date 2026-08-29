@@ -1,0 +1,104 @@
+{
+  "name": "@smthrs/artifacts",
+  "type": "module",
+  "version": "0.1.0",
+  "license": "MIT",
+  "smthrs": {
+    "group": "engine"
+  },
+  "description": "Effect service for the flows content-addressed artifact store, local and remote",
+  "homepage": "https://github.com/smithersai/flows",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/smithersai/flows.git",
+    "directory": "packages/artifacts"
+  },
+  "bugs": {
+    "url": "https://github.com/smithersai/flows/issues"
+  },
+  "tags": [
+    "typescript",
+    "effect",
+    "cache",
+    "content-addressed"
+  ],
+  "keywords": [
+    "typescript",
+    "effect",
+    "cache",
+    "content-addressed"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "sideEffects": [],
+  "exports": {
+    "./package.json": "./package.json",
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts",
+    "./internal/*": null,
+    "./*/index": null
+  },
+  "files": [
+    "src/**/*.ts",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "dist/**/package.json",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      },
+      "./*": {
+        "types": "./dist/esm/*.d.ts",
+        "import": "./dist/esm/*.js",
+        "require": "./dist/cjs/*.js"
+      },
+      "./internal/*": null,
+      "./*/index": null
+    }
+  },
+  "scripts": {
+    "lint": "eslint src --max-warnings=0 && dprint check",
+    "format": "dprint fmt",
+    "build": "node scripts/build.mjs",
+    "check": "tsc -b tsconfig.json && tsc -p tsconfig.test.json --noEmit",
+    "circular": "node scripts/circular.mjs",
+    "test": "vitest",
+    "coverage": "vitest --coverage"
+  },
+  "dependencies": {
+    "@smthrs/crypto": "0.1.0",
+    "effect": "4.0.0-rc.108"
+  },
+  "devDependencies": {
+    "@effect/language-service": "0.87.1",
+    "@effect/platform-node": "4.0.0-rc.108",
+    "@effect/vitest": "4.0.0-rc.108",
+    "@eslint/js": "9.39.1",
+    "@types/node": "25.9.5",
+    "@vitest/coverage-v8": "4.1.9",
+    "dprint": "0.55.2",
+    "esbuild": "0.28.1",
+    "eslint": "9.39.1",
+    "eslint-import-resolver-typescript": "4.4.5",
+    "eslint-plugin-import": "2.32.0",
+    "eslint-plugin-jsdoc": "64.1.0",
+    "eslint-plugin-unicorn": "61.0.2",
+    "madge": "8.0.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0",
+    "vitest": "4.1.9"
+  }
+}

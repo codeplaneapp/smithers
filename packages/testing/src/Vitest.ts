@@ -1,0 +1,123 @@
+/**
+ * Vitest adapter for scoped Effect test bodies.
+ *
+ * This is the sole module in `/testing` that imports a test runner, and
+ * the runner boundary is the **only** sanctioned `AbortSignal` touch in the
+ * package: Vitest cancellation is converted to fiber interruption at the edge
+ * (`Fiber.interrupt`), never threaded through Effect code. Adapted from
+ * `reference/opencode/packages/core/test/lib/effect.ts` per
+ * `docs/specs/Research/Smithers Testing Library Conversion 2026-07-27.md` §3.
+ *
+ * @since 0.0.0
+ */
+import * as EffectVitest from "@effect/vitest"
+import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
+import * as Layer from "effect/Layer"
+import * as ManagedRuntime from "effect/ManagedRuntime"
+import type * as Scope from "effect/Scope"
+import * as TestClock from "effect/testing/TestClock"
+import * as TestConsole from "effect/testing/TestConsole"
+import { assert, describe, expect, it as vitestIt, type TestOptions } from "vitest"
+
+/** @since 0.0.0 @category testing */
+export { assert, describe, expect }
+
+/**
+ * The Effect-aware `it`, with `scoped` aliased onto `it.effect`.
+ *
+ * @category testing
+ * @since 0.0.0
+ */
+export const it = Object.assign(EffectVitest.it, { scoped: EffectVitest.it.effect })
+
+type Body<A, E, R> = Effect.Effect<A, E, R> | (() => Effect.Effect<A, E, R>)
+
+interface TestRegistration<R> {
+  <A, E>(
+    name: string,
+    body: Body<A, E, R | Scope.Scope>,
+    options?: number | TestOptions
+  ): void
+}
+
+interface EffectTest<R> extends TestRegistration<R> {
+  readonly skip: TestRegistration<R>
+  readonly only: TestRegistration<R>
+}
+
+/**
+ * The Effect-aware test registrars, each carrying the requirements `R` a
+ * body may use: `effect` under the test clock, `live` under the real one,
+ * and `scoped` with a scope provided.
+ *
+ * @category testing
+ * @since 0.0.0
+ */
+export interface TestEffect<R> {
+  readonly effect: EffectTest<R>
+  readonly live: EffectTest<R>
+  readonly scoped: EffectTest<R>
+  readonly skip: TestRegistration<R>
+  readonly only: TestRegistration<R>
+}
+
+const evaluate = <A, E, R>(body: Body<A, E, R>): Effect.Effect<A, E, R> =>
+  Effect.suspend(() => typeof body === "function" ? body() : body)
+
+/**
+ * Builds a **fresh** environment from the supplied layer for every test case
+ * and runs each body in its own Scope, so no state — including the
+ * deterministic variant's `TestClock` — is shared between tests and no test
+ * can depend on registration order. The deterministic variant includes
+ * TestClock; `live` intentionally uses the supplied layer with only
+ * TestConsole added.
+ *
+ * Runner cancellation is converted to fiber interruption at this boundary:
+ * the body runs as a forked fiber and the Vitest `AbortSignal` triggers
+ * `Fiber.interrupt`. The signal itself never crosses into Effect code.
+ *
+ * @since 0.0.0
+ * @category testing
+ */
+export const testEffect = <R, E>(layer: Layer.Layer<R, E>): TestEffect<R> => {
+  const make = (base: Layer.Layer<never>): EffectTest<R> => {
+    const add = (mode: "run" | "skip" | "only"): TestRegistration<R> =>
+    <A, E2>(
+      name: string,
+      body: Body<A, E2, R | Scope.Scope>,
+      options?: number | TestOptions
+    ): void => {
+      const testOptions = typeof options === "number" ? { timeout: options } : options ?? {}
+      const test = mode === "skip" ? vitestIt.skip : mode === "only" ? vitestIt.only : vitestIt
+      test(
+        name,
+        testOptions,
+        async (context) => {
+          const runtime = ManagedRuntime.make(Layer.mergeAll(layer, base))
+          const fiber = runtime.runFork(Effect.scoped(evaluate(body)))
+          // The sanctioned runner-boundary AbortSignal conversion: abort
+          // becomes fiber interruption, nothing else.
+          const onAbort = () => {
+            runtime.runFork(Fiber.interrupt(fiber))
+          }
+          context.signal.addEventListener("abort", onAbort, { once: true })
+          try {
+            await runtime.runPromise(Fiber.join(fiber))
+          } finally {
+            context.signal.removeEventListener("abort", onAbort)
+            await runtime.dispose()
+          }
+        }
+      )
+    }
+    const registerBody = add("run")
+    const skip = add("skip")
+    const only = add("only")
+    return Object.assign(registerBody, { skip, only })
+  }
+
+  const effect = make(Layer.mergeAll(TestClock.layer(), TestConsole.layer))
+  const live = make(TestConsole.layer)
+  return { effect, live, scoped: effect, skip: effect.skip, only: effect.only }
+}

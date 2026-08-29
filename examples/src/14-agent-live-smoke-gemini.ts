@@ -1,0 +1,153 @@
+/**
+ * A live smoke test against Gemini's OpenAI-compatible endpoint: the same
+ * assembled production agent stack as {@link liveLocalSmoke} (see
+ * `13-agent-live-smoke-local.ts`), run against a real hosted provider over
+ * `Route.openaiCompatible` instead of a fully local one.
+ *
+ * Exists to get a witnessed, real, successful completion once a local model
+ * proves too small to finish the harness's own convention — Gemini's free
+ * tier has a real per-minute rate limit but working quota, unlike the two
+ * paid keys available in the authoring environment (`OPENAI_API_KEY`,
+ * `ANTHROPIC_API_KEY`), both out of credit.
+ *
+ * @since 0.1.0
+ */
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
+import * as Agent from "@smthrs/agent/Agent"
+import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as FlowEngineLike from "@smthrs/agent/FlowEngineLike"
+import * as Seat from "@smthrs/agent/Seat"
+import * as SeatResolver from "@smthrs/agent/SeatResolver"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as GrantStore from "@smthrs/kernel/GrantStore"
+import * as KernelHttpClient from "@smthrs/kernel/HttpClient"
+import * as RequestExecutor from "@smthrs/model/RequestExecutor"
+import * as Route from "@smthrs/model/Route"
+import * as Registry from "@smthrs/registry/Registry"
+import { Effect, Layer, Option, Redacted, Schema } from "effect"
+
+/**
+ * The real HTTP transport: the kernel's guarded client (always-allow, since
+ * this is a standalone smoke test with no grant policy to enforce) over
+ * Node's real undici-backed client.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const executorLayer = RequestExecutor.layer.pipe(
+  Layer.provide(KernelHttpClient.layer),
+  Layer.provide(GrantStore.layerNoop),
+  Layer.provide(NodeHttpClient.layerUndici)
+)
+
+/**
+ * A real `SeatResolver`: any `gemini:<modelId>` seat resolves to a live
+ * Gemini route over its OpenAI-compatible Chat Completions endpoint, using
+ * the real `GEMINI_API_KEY` from the environment as the bearer token.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const liveGeminiSeats = (baseUrl: string, apiKey: string) =>
+  Layer.effect(SeatResolver.SeatResolver)(
+    Effect.gen(function*() {
+      const executor = yield* RequestExecutor.RequestExecutor
+      return SeatResolver.make({
+        resolve: (id) =>
+          Effect.gen(function*() {
+            const modelId = Seat.modelIdOf(id)
+            const routeConfig = yield* Effect.fromResult(
+              Route.openaiCompatible({ id: "gemini", baseUrl, apiKey: Redacted.make(apiKey) })
+            ).pipe(
+              Effect.mapError((error) => new Seat.SeatUnresolved({ seat: id, message: error.message }))
+            )
+            const model = yield* Route.toModel(routeConfig).pipe(
+              Effect.provideService(RequestExecutor.RequestExecutor, executor)
+            )
+            return Seat.make({
+              id,
+              model,
+              route: FlowEngineLike.routeResolver(routeConfig),
+              contextWindowTokens: SeatResolver.contextWindowTokensFor(modelId)
+            })
+          })
+      })
+    })
+  ).pipe(Layer.provide(executorLayer))
+
+/** One model-backed step: answer a question in one short sentence. */
+export const LiveSmokeGemini = AgentAction.make("examples/LiveSmokeGemini", {
+  payload: { question: Schema.String },
+  output: Schema.Struct({ answer: Schema.String }),
+  seat: "gemini:gemini-2.5-flash",
+  system: ["You are a terse assistant. Answer in one short sentence and nothing else."],
+  prompt: ({ question }) => question
+})
+
+/** The workflow: one step, so the live round trip to Gemini is the only thing under test. */
+export const LiveSmokeGeminiWorkflow = Flow.make("examples/LiveSmokeGeminiWorkflow", {
+  payload: { question: Schema.String },
+  success: Schema.Struct({ answer: Schema.String }),
+  error: AgentAction.AgentFailure,
+  body: ({ question }) => LiveSmokeGemini.call({ question })
+})
+
+const host = AgentAction.layerHost({
+  registry: Registry.makeNoop({
+    list: () => Effect.succeed([]),
+    visible: () => Effect.succeed([]),
+    getOption: () => Effect.succeed(Option.none())
+  }),
+  limits: { calls: 1 },
+  capabilityEnvelope: [],
+  maxFrames: 1
+})
+
+/**
+ * Builds the full live composition against a Gemini endpoint. Takes
+ * `baseUrl`/`apiKey` explicitly rather than hardcoding them.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const liveLayer = (baseUrl: string, apiKey: string) =>
+  Layer.mergeAll(LiveSmokeGemini.layer, Interpreter.layer(LiveSmokeGeminiWorkflow)).pipe(
+    Layer.provideMerge(Layer.mergeAll(host, liveGeminiSeats(baseUrl, apiKey), Agent.layer)),
+    Layer.provideMerge(Agent.layerDefaults),
+    Layer.provideMerge(Action.layerImplementations),
+    Layer.provideMerge(FlowEngine.layerMemory),
+    Layer.provideMerge(NodeCrypto.layer)
+  )
+
+/**
+ * Runs the workflow against a live Gemini seat.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const main = (
+  question: string,
+  baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
+  apiKey = process.env.GEMINI_API_KEY ?? ""
+) =>
+  LiveSmokeGeminiWorkflow.execute(
+    { question },
+    { executionId: `live-smoke-gemini-${Date.now()}` }
+  ).pipe(
+    Effect.orDie,
+    Effect.provide(liveLayer(baseUrl, apiKey))
+  )
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  Effect.runPromise(main("What is the capital of France? Answer in one word.")).then(
+    (result) => {
+      console.log("RESULT:", JSON.stringify(result))
+    },
+    (error) => {
+      console.error("FAILED:", error)
+      process.exitCode = 1
+    }
+  )
+}

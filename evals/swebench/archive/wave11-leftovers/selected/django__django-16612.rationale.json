@@ -1,0 +1,74 @@
+{
+  "instance": "django__django-16612",
+  "selected": "r1",
+  "selectedRunId": "django__django-16612-r1",
+  "selectedPatch": "selected/django__django-16612.patch",
+  "read": {
+    "journals": "journals",
+    "patches": "patches"
+  },
+  "neverRead": "the official evaluator's reports, the dataset's tests, and every other record of the answer",
+  "predicateOrder": [
+    "preEditFailure",
+    "mutationAfter",
+    "greenOverFinalTree",
+    "cleanCompletion"
+  ],
+  "tieBreaks": [
+    "broader final check",
+    "non-empty patch",
+    "lower cost",
+    "lower run index"
+  ],
+  "candidates": [
+    {
+      "rank": 1,
+      "index": "r1",
+      "runId": "django__django-16612-r1",
+      "score": 3,
+      "patchBytes": 595,
+      "finalCheckTerms": null,
+      "usd": 0.2839,
+      "tokens": {
+        "inputTokens": 21692,
+        "cachedInputTokens": 10676,
+        "outputTokens": 7450,
+        "reasoningTokens": 4393
+      },
+      "seat": "openai:gpt-5.6-sol",
+      "frames": 3,
+      "modelCalls": 3,
+      "demands": {
+        "unmoved": 0,
+        "unresolved": 0,
+        "narrowed": 0,
+        "narrowOnly": 0,
+        "readOnly": 0,
+        "repeat": 0
+      },
+      "sufficiencyObservations": 0,
+      "predicates": {
+        "preEditFailure": {
+          "held": true,
+          "seq": 49,
+          "epoch": 0,
+          "check": "bash {\"command\":\"docker exec flowsbench-django--django-16612 bash -lc 'cd /testbed && ./tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1 admin_vi…"
+        },
+        "mutationAfter": {
+          "held": true,
+          "seq": 107,
+          "digest": "e91a8837ecb3ec9f5a8e7c916ad9c38139e4fc43a2682b239af5fad4f9564076"
+        },
+        "greenOverFinalTree": {
+          "held": false,
+          "why": "no check the run had watched fail went green over the tree it finished on"
+        },
+        "cleanCompletion": {
+          "held": true,
+          "seq": 161,
+          "digest": "e91a8837ecb3ec9f5a8e7c916ad9c38139e4fc43a2682b239af5fad4f9564076"
+        }
+      }
+    }
+  ]
+}

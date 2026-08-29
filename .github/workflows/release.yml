@@ -1,0 +1,176 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Rehearsal path. A dispatched run executes every gate, packs the release set,
+  # smoke-tests the tarballs, and skips publication while dryRun is true. npm
+  # versions are immutable, so this is the only way to exercise the workflow
+  # end to end without spending the version under test.
+  workflow_dispatch:
+    inputs:
+      releaseTag:
+        description: "Tag to validate, for example v0.1.0-next.0. Defaults to the dispatched ref."
+        type: string
+        required: false
+        default: ""
+      dryRun:
+        description: "Run every gate and skip the npm publish step."
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: validate, build, and publish
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # A tag push releases the tag it pushed. A dispatched run releases the tag
+      # it was given, because github.ref_name is a branch name on that path.
+      RELEASE_TAG: ${{ inputs.releaseTag != '' && inputs.releaseTag || github.ref_name }}
+      # Publication is skipped only on a dispatched dry run. A tag push always
+      # publishes: `inputs.dryRun` is absent there, so this resolves to false.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dryRun }}
+    steps:
+      - uses: actions/checkout@v4
+      # actionlint models GitHub's per-key expression-context rules, including
+      # the fact that `runner` is available to steps but not a job-level env.
+      - name: Validate GitHub Actions workflows
+        uses: docker://rhysd/actionlint:1.7.11
+        with:
+          args: .github/workflows/ci.yml .github/workflows/release.yml
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install jj
+        uses: taiki-e/install-action@v2
+        with:
+          tool: jj-cli@0.39.0
+      - name: Initialize colocated jj repository
+        run: jj git init --colocate
+      - name: Validate release tag
+        run: |
+          case "$RELEASE_TAG" in
+            v[0-9]*) ;;
+            *) echo "Release tags must use the v<version> format." >&2; exit 1 ;;
+          esac
+          RELEASE_VERSION="${RELEASE_TAG#v}"
+          # This is the flows engine train. The agent layer is a separate
+          # release surface and will get its own train when it is release-ready.
+          for manifest in packages/*/package.json; do
+            package_group="$(node -p "require('./' + process.argv[1]).smthrs?.group ?? ''" "$manifest")"
+            case "$package_group" in
+              engine) ;;
+              agent|tooling) continue ;;
+              *) echo "$manifest has missing or unknown smthrs.group '$package_group'." >&2; exit 1 ;;
+            esac
+            package_version="$(node -p "require('./' + process.argv[1]).version" "$manifest")"
+            if [ "$package_version" != "$RELEASE_VERSION" ]; then
+              echo "$manifest has version $package_version; expected $RELEASE_VERSION." >&2
+              exit 1
+            fi
+          done
+      - name: Typecheck all workspaces
+        run: pnpm run check
+      - name: Test all workspaces
+        run: pnpm test
+      - name: Lint all workspaces
+        run: pnpm run lint
+      - name: Circular-dependency guard
+        run: pnpm run circular
+      # The gate roster here must stay a superset of ci.yml's. The browser
+      # guard and the release manifest unit test are the two that used to run
+      # only on the pull-request path, so a re-tag or a hotfix tag could
+      # publish without them. scripts/pack-release.test.mjs asserts that.
+      - name: Browser bundle guard
+        run: pnpm run browser
+      - name: Release manifest unit test
+        run: node --test scripts/pack-release.test.mjs
+      - name: Release rehearsal unit test
+        run: node --test scripts/release-rehearsal.test.mjs
+      - name: Release version coherence
+        run: node --test scripts/set-release-version.test.mjs
+      - name: Disaster-recovery script test
+        run: node --test scripts/flows-backup.test.mjs
+      - name: Test-pin register guard
+        run: node --test scripts/check-test-pins.test.mjs
+      - name: Build all workspaces from clean artifacts
+        run: |
+          find packages -type d -name dist -prune -exec rm -rf {} +
+          pnpm --recursive --if-present run build
+      # Pack from staging manifests whose exports point at built artifacts.
+      # Repository manifests retain Effect's source-first export shape.
+      - name: Pack and smoke-test release artifacts
+        env:
+          PACK_DIR: ${{ runner.temp }}/release-packs
+        run: |
+          node scripts/pack-release.mjs "$PACK_DIR"
+          node scripts/smoke-release.mjs "$PACK_DIR"
+      # The package set and its order come from scripts/pack-release.mjs, which
+      # derives membership from the `engine` smthrs.group and order from the
+      # workspace dependency edges. Reading manifest.json publishes exactly
+      # what the pack step produced, in the packed order, so the lists cannot
+      # drift or accidentally include the separate agent release surface.
+      #
+      # The plan is computed on both paths, so a dry run reports the exact set,
+      # order, version, and dist-tag a real run would publish.
+      - name: Compute the publish plan
+        env:
+          PACK_DIR: ${{ runner.temp }}/release-packs
+          PUBLISH_ORDER: ${{ runner.temp }}/publish-order.txt
+        run: |
+          release_version="${RELEASE_TAG#v}"
+          publish_tag="latest"
+          case "$release_version" in *-*) publish_tag="next" ;; esac
+          node -e '
+            const { readFileSync } = require("node:fs")
+            const packed = JSON.parse(readFileSync(process.env.PACK_DIR + "/manifest.json", "utf8"))
+            for (const entry of packed) console.log(entry.name + " " + entry.filename)
+          ' > "$PUBLISH_ORDER"
+          echo "PUBLISH_VERSION=$release_version" >> "$GITHUB_ENV"
+          echo "PUBLISH_DIST_TAG=$publish_tag" >> "$GITHUB_ENV"
+          echo "Publish plan for $release_version on the $publish_tag dist-tag:"
+          cat "$PUBLISH_ORDER"
+      - name: Publish packages in dependency order
+        if: env.DRY_RUN != 'true'
+        env:
+          PACK_DIR: ${{ runner.temp }}/release-packs
+          PUBLISH_ORDER: ${{ runner.temp }}/publish-order.txt
+          # Trusted publishing (id-token: write) is the primary credential and
+          # needs nothing here. This maps the documented token fallback, since a
+          # GitHub environment secret is not exported into the step by itself:
+          # unset, it is empty and pnpm falls back to trusted publishing.
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+        run: |
+          while read -r workspace tarball; do
+            spec="$workspace@$PUBLISH_VERSION"
+            if pnpm view "$spec" version --json >/dev/null 2>&1; then
+              echo "$spec is already published; leaving the immutable version in place."
+              continue
+            fi
+            pnpm publish "$PACK_DIR/$tarball" --provenance --access public --tag "$PUBLISH_DIST_TAG"
+          done < "$PUBLISH_ORDER"
+      - name: Report the skipped publication
+        if: env.DRY_RUN == 'true'
+        env:
+          PUBLISH_ORDER: ${{ runner.temp }}/publish-order.txt
+        run: |
+          echo "Dry run: every gate, the pack, and the smoke test ran. Nothing was published."
+          echo "A real run would publish these at $PUBLISH_VERSION on the $PUBLISH_DIST_TAG dist-tag:"
+          cat "$PUBLISH_ORDER"

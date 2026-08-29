@@ -1,0 +1,56 @@
+/**
+ * The barrel and the aggregate layer. `BrowserServices.layer` has no behaviour
+ * of its own, so the assertion is that every tag it promises is present and
+ * that the spawner it wires up is the one talking to the filesystem it wires
+ * up — the failure mode the function signature exists to prevent.
+ */
+import { describe, expect, it } from "@effect/vitest"
+import { Effect, FileSystem, Path } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import * as NodeFsPromises from "node:fs/promises"
+import * as BrowserChildProcessSpawner from "../src/BrowserChildProcessSpawner/index.ts"
+import * as BrowserFileSystem from "../src/BrowserFileSystem/index.ts"
+import * as BrowserHost from "../src/BrowserHost.ts"
+import * as BrowserServices from "../src/BrowserServices.ts"
+import * as Index from "../src/index.ts"
+
+const bash: BrowserChildProcessSpawner.JustBashLike = {
+  run: async (command) => ({ stdout: command, stderr: "", exitCode: 0 })
+}
+
+describe("@smthrs/platform-browser barrel", () => {
+  it("re-exports every module as a namespace", () => {
+    expect(Object.keys(Index).sort()).toEqual(
+      [
+        "BrowserChildProcessSpawner",
+        "BrowserFileSystem",
+        "BrowserHost",
+        "BrowserServices"
+      ].sort()
+    )
+    expect(Index.BrowserChildProcessSpawner.layer).toBe(BrowserChildProcessSpawner.layer)
+    expect(Index.BrowserFileSystem.layer).toBe(BrowserFileSystem.layer)
+    expect(Index.BrowserHost.layer).toBe(BrowserHost.layer)
+    expect(Index.BrowserServices.layer).toBe(BrowserServices.layer)
+  })
+})
+
+describe("BrowserServices", () => {
+  it.effect("provides the spawner, the filesystem, and the path service from one layer", () =>
+    Effect.gen(function*() {
+      const services = yield* (
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const fs = yield* FileSystem.FileSystem
+          const path = yield* Path.Path
+          return {
+            spawned: typeof spawner.spawn,
+            exists: yield* fs.exists("/definitely-not-a-real-path"),
+            normalized: path.normalize("/a/./b/../c")
+          }
+        }).pipe(Effect.provide(BrowserServices.layer({ bash, fs: NodeFsPromises })))
+      )
+
+      expect(services).toEqual({ spawned: "function", exists: false, normalized: "/a/c" })
+    }))
+})

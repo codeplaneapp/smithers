@@ -1,0 +1,64 @@
+# Everything transient the rig provisions or produces. Patterns are anchored:
+# only the rig's own top-level artifacts are ignored, so the committed baseline
+# under baseline/ stays committed.
+#
+# `./bootstrap.sh` rebuilds the provisioned set; a wave rebuilds the rest.
+/swb-verified.json
+/sample.json
+/.venv-swb/
+/.codex-home/
+# The two locks every lane shares: one extraction at a time, one evaluator at a
+# time. `lib/lock.sh` clears either one when the pid inside it is gone.
+/.extract-lock/
+/.grade-lock/
+
+# Wave artifacts: workspaces, patches, timings, logs, predictions, scorecards,
+# and the evaluator's own output (<model>.<run-id>.json, next to the
+# predictions file it graded).
+/work/
+/work-codex/
+/patches/
+/patches-codex/
+/timings/
+/timings-codex/
+/logs-agent/
+/logs-codex/
+/logs/
+# `./preflight-network.sh` writes one suite log per probe per condition. Two
+# whole test-suite transcripts per repository family; none of it is a result.
+/logs-preflight/
+/preds-*.json
+/scorecard.json
+/scorecard.md
+/flows-cell-harness.*.json
+/codex-cli.*.json
+
+# Best-of-n artifacts: the archived journals a matrix run leaves behind, the
+# patches its selector chose, the matrix manifests, and the matrix report.
+/journals/
+/selected/
+/matrix-*.json
+/matrix-report.md
+
+# The full benchmark's whole working set: the manifest, the checkpoint log, the
+# scoreboard, the driver's logs, and the per-instance archive of patches,
+# journals, timings and evaluator reports. Days of running and gigabytes of
+# journals; none of it is committed.
+/fullbench/
+
+# Generated fixture: `./verify.sh` rebuilds it from the committed numbers.
+/fixtures/work/
+/fixtures/patches/
+/fixtures/timings/
+/fixtures/scorecard.json
+/fixtures/scorecard.md
+/fixtures/flows-cell-harness.mirror.json
+
+# The pinned subject fingerprint (`./preflight.sh`) and the read-only
+# liveness probe workspace (`./readonly-liveness.sh`).
+/.subject.json
+/work-liveness/
+
+# CPython's byte-cache. `fixtures/check-eval-exports.py` imports `lib/grade.py`
+# as a module, which is what makes `lib/__pycache__/` appear.
+__pycache__/

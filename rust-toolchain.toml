@@ -1,0 +1,18 @@
+# Pins the toolchain that builds the crates/ workspace and the committed
+# `packages/jj/wasm/flows_jj.wasm` artifact. CI rebuilds the wasm with this
+# exact toolchain and fails on byte drift (see ci.yml's wasm-repro job), so
+# bumping the channel means rebuilding and recommitting the artifact with
+# `node crates/flows-jj/build-wasm.mjs` in the same change, on the host the
+# artifact is built for — `x86_64-unknown-linux-gnu`. The script refuses to
+# build it on any other host and prints the container command; its header
+# explains why the bytes are host-specific.
+#
+# 1.89.0 is the release recorded in the committed artifact's `producers`
+# section. The minimal profile is deliberate: `rust-src` stays uninstalled so
+# rustc keeps std spans on their `/rustc/<commit-hash>` form (build-wasm.mjs
+# remaps the translated form back for toolchains that do have it).
+[toolchain]
+channel = "1.89.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-wasip1"]

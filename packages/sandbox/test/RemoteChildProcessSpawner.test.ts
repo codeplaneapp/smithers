@@ -1,0 +1,697 @@
+import { describe, expect, it } from "@effect/vitest"
+import { Deferred, Effect, Exit, Fiber, PlatformError, Sink, Stream } from "effect"
+import * as Scope from "effect/Scope"
+import { ChildProcess } from "effect/unstable/process"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import * as RemoteChildProcessSpawner from "../src/RemoteChildProcessSpawner/index.ts"
+
+const reason = (error: unknown): string =>
+  error instanceof PlatformError.PlatformError ? error.reason._tag : `not a PlatformError: ${String(error)}`
+
+describe("RemoteChildProcessSpawner", () => {
+  it.effect("adapts a scripted command through the spawner's buffered helper", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        session: "exec-session",
+        scripts: { greet: { stdout: "hello" } }
+      })
+
+      const result = yield* (
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const command = ChildProcess.make("greet")
+          return {
+            stdout: yield* spawner.string(command),
+            exitCode: yield* spawner.exitCode(command)
+          }
+        }).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(result).toEqual({ stdout: "hello", exitCode: 0 })
+      expect(provider.state.openedSessions).toEqual(["exec-session"])
+      expect(provider.state.commands).toEqual(["greet", "greet"])
+    }))
+
+  it.effect("renders arguments and a pipeline into the command the provider receives", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        scripts: { "printf 'a b' | grep a": { stdout: "a b" } }
+      })
+
+      const output = yield* (
+        Effect.flatMap(
+          ChildProcessSpawner,
+          (spawner) =>
+            spawner.string(
+              ChildProcess.make("printf", ["a b"]).pipe(ChildProcess.pipeTo(ChildProcess.make("grep", ["a"])))
+            )
+        ).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(output).toBe("a b")
+      expect(provider.state.commands).toEqual(["printf 'a b' | grep a"])
+    }))
+
+  it.effect("renders shell commands under the exact unquoted line the provider executes", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        scripts: { "echo safe; run privileged": { stdout: "done" } }
+      })
+
+      const output = yield* (
+        Effect.flatMap(
+          ChildProcessSpawner,
+          (spawner) => spawner.string(ChildProcess.make("echo", ["safe;", "run", "privileged"], { shell: true }))
+        ).pipe(
+          Effect.provide(RemoteChildProcessSpawner.layer(provider))
+        )
+      )
+
+      expect(output).toBe("done")
+      expect(provider.state.commands).toEqual(["echo safe; run privileged"])
+    }))
+
+  it.effect("interleaves stdout and stderr through the handle's `all` stream", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        scripts: { noisy: { stdout: "out", stderr: "err" } }
+      })
+
+      const output = yield* (
+        Effect.flatMap(
+          ChildProcessSpawner,
+          (spawner) => Stream.runCollect(spawner.streamString(ChildProcess.make("noisy"), { includeStderr: true }))
+        ).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(Array.from(output).sort()).toEqual(["err", "out"])
+    }))
+
+  it.effect("runs the provider cancellation finalizer on interruption", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts: { pending: { pending: true } } })
+
+      yield* (
+        Effect.gen(function*() {
+          const fiber = yield* Effect.flatMap(
+            ChildProcessSpawner,
+            (spawner) => spawner.exitCode(ChildProcess.make("pending"))
+          ).pipe(
+            Effect.provide(RemoteChildProcessSpawner.layer(provider)),
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Effect.yieldNow
+          yield* Fiber.interrupt(fiber)
+        })
+      )
+
+      expect(provider.state.commands).toEqual(["pending"])
+      expect(provider.state.cancellations).toBe(1)
+    }))
+
+  it.effect("releases the provider session when a stdout consumer is interrupted", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts: { pending: { pending: true } } })
+
+      yield* (
+        Effect.gen(function*() {
+          const fiber = yield* Effect.flatMap(
+            ChildProcessSpawner,
+            (spawner) => Stream.runDrain(spawner.streamString(ChildProcess.make("pending")))
+          ).pipe(
+            Effect.provide(RemoteChildProcessSpawner.layer(provider)),
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Effect.yieldNow
+          yield* Fiber.interrupt(fiber)
+        })
+      )
+
+      expect(provider.state.commands).toEqual(["pending"])
+      expect(provider.state.cancellations).toBe(1)
+    }))
+
+  it.effect.each(["failure", "defect"] as const)(
+    "surfaces a provider open-scope release %s without hanging",
+    (kind) =>
+      Effect.gen(function*() {
+        const releaseFailure = new RemoteChildProcessSpawner.ProviderError({
+          code: "unknown",
+          message: "provider scope release failed"
+        })
+        const release = kind === "failure"
+          // Scope finalizers are typed as infallible in Effect, so a provider's
+          // typed release failure reaches the close boundary as a defect.
+          ? Effect.fail(releaseFailure).pipe(Effect.orDie)
+          : Effect.die("provider scope release defect")
+        const provider = RemoteChildProcessSpawner.Provider.of({
+          session: "release-failure",
+          open: () =>
+            Effect.gen(function*() {
+              const scope = yield* Effect.scope
+              yield* Scope.addFinalizer(scope, release)
+            }),
+          spawn: () =>
+            Effect.succeed({
+              stdout: Stream.empty,
+              stderr: Stream.empty,
+              exitCode: Effect.succeed(0)
+            })
+        })
+
+        const exit = yield* (
+          Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.exitCode(ChildProcess.make("quiet"))).pipe(
+            Effect.provide(RemoteChildProcessSpawner.layer(provider)),
+            Effect.scoped,
+            Effect.exit
+          )
+        )
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (!Exit.isFailure(exit)) return
+        expect(exit.cause.reasons).toEqual(expect.arrayContaining([
+          expect.objectContaining(
+            kind === "failure"
+              ? { _tag: "Die", defect: releaseFailure }
+              : { _tag: "Die", defect: "provider scope release defect" }
+          )
+        ]))
+      }),
+    1_000
+  )
+
+  it.effect("maps typed provider failures onto normalized PlatformError reasons", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        scripts: {
+          fail: {
+            failure: new RemoteChildProcessSpawner.ProviderError({
+              code: "spawn_error",
+              message: "provider rejected command"
+            })
+          },
+          slow: {
+            failure: new RemoteChildProcessSpawner.ProviderError({ code: "timeout", message: "provider gave up" })
+          }
+        }
+      })
+
+      const errors = yield* (
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          return [
+            yield* Effect.flip(spawner.string(ChildProcess.make("fail"))),
+            yield* Effect.flip(spawner.string(ChildProcess.make("slow")))
+          ]
+        }).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(errors.map(reason)).toEqual(["Unknown", "TimedOut"])
+      expect(errors[0]?.message).toContain("`fail`: provider rejected command")
+    }))
+
+  it.effect.each(["aborted", "unknown"] as const)(
+    "maps provider code %s to the documented Unknown reason",
+    (code) =>
+      Effect.gen(function*() {
+        const provider = RemoteChildProcessSpawner.TestRemote.make({
+          scripts: {
+            fail: {
+              failure: new RemoteChildProcessSpawner.ProviderError({
+                code,
+                message: `${code} provider failure`
+              })
+            }
+          }
+        })
+
+        const error = yield* (
+          Effect.flip(
+            Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.string(ChildProcess.make("fail")))
+          ).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+        )
+
+        expect(reason(error)).toBe("Unknown")
+        expect(error.reason).toMatchObject({ module: "ChildProcess", method: "spawn" })
+      })
+  )
+
+  it.effect.each(["stdout", "stderr"] as const)(
+    "maps a provider %s stream failure after preserving earlier output",
+    (output) =>
+      Effect.gen(function*() {
+        const providerFailure = new RemoteChildProcessSpawner.ProviderError({
+          code: "unknown",
+          message: `${output} stream disconnected`
+        })
+        const failedStream = Stream.concat(
+          Stream.succeed(new TextEncoder().encode("before")),
+          Stream.fail(providerFailure)
+        )
+        const provider = RemoteChildProcessSpawner.Provider.of({
+          session: `failed-${output}`,
+          open: () => Effect.void,
+          spawn: () =>
+            Effect.succeed({
+              stdout: output === "stdout" ? failedStream : Stream.empty,
+              stderr: output === "stderr" ? failedStream : Stream.empty,
+              exitCode: Effect.succeed(0)
+            })
+        })
+
+        const observed = yield* (
+          Effect.gen(function*() {
+            const spawner = yield* ChildProcessSpawner
+            const handle = yield* spawner.spawn(ChildProcess.make("stream-failure"))
+            const chunks: Array<string> = []
+            const error = yield* Effect.flip(
+              Stream.runForEach(handle[output], (chunk) =>
+                Effect.sync(() => {
+                  chunks.push(new TextDecoder().decode(chunk))
+                }))
+            )
+            return { chunks, error }
+          }).pipe(Effect.scoped, Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+        )
+
+        expect(observed.chunks).toEqual(["before"])
+        expect(reason(observed.error)).toBe("Unknown")
+        expect(observed.error.reason).toMatchObject({ module: "ChildProcess", method: output })
+      })
+  )
+
+  it.effect("maps an exitCode failure and then reports the handle as no longer running", () =>
+    Effect.gen(function*() {
+      const providerFailure = new RemoteChildProcessSpawner.ProviderError({
+        code: "unknown",
+        message: "remote process vanished"
+      })
+      const provider = RemoteChildProcessSpawner.Provider.of({
+        session: "exit-failure",
+        open: () => Effect.void,
+        spawn: () =>
+          Effect.succeed({
+            stdout: Stream.empty,
+            stderr: Stream.empty,
+            exitCode: Effect.fail(providerFailure)
+          })
+      })
+
+      const observed = yield* (
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const handle = yield* spawner.spawn(ChildProcess.make("exit-failure"))
+          const before = yield* handle.isRunning
+          const error = yield* Effect.flip(handle.exitCode)
+          yield* Effect.yieldNow
+          const after = yield* handle.isRunning
+          return { before, error, after }
+        }).pipe(Effect.scoped, Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(reason(observed.error)).toBe("Unknown")
+      expect(observed.error.reason).toMatchObject({ module: "ChildProcess", method: "exitCode" })
+      expect(observed.before).toBe(true)
+      expect(observed.after).toBe(false)
+    }))
+
+  it.effect("provides a spawner that fails every command when opening the session fails", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        openFailure: new RemoteChildProcessSpawner.ProviderError({
+          code: "unavailable",
+          message: "provider session is unavailable"
+        })
+      })
+
+      const errors = yield* (
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          return [
+            yield* Effect.flip(spawner.string(ChildProcess.make("never-opened"))),
+            // A stream must fail too, not hang on a queue nothing will ever end.
+            yield* Effect.flip(Stream.runDrain(spawner.streamString(ChildProcess.make("never-opened"))))
+          ]
+        }).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(errors.map(reason)).toEqual(["NotFound", "NotFound"])
+      expect(errors[0]?.message).toContain("`never-opened`: provider session is unavailable")
+    }))
+
+  it.effect("answers an unconfigured extra file descriptor the way a local spawner does", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts: { quiet: { stdout: "out" } } })
+
+      const observed = yield* (
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const handle = yield* spawner.spawn(ChildProcess.make("quiet"))
+          return {
+            // A descriptor nobody configured drains on the way in and is empty on
+            // the way out — the same answer `NodeChildProcessSpawner` gives.
+            written: yield* Stream.run(Stream.fromArray([new Uint8Array([1])]), handle.getInputFd(3)),
+            read: yield* Stream.runCollect(handle.getOutputFd(3))
+          }
+        }).pipe(Effect.scoped, Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(observed.written).toBeUndefined()
+      expect(Array.from(observed.read)).toEqual([])
+    }))
+
+  it.effect("rejects stdin and kill instead of dropping them silently", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts: { quiet: {} } })
+
+      const errors = yield* (
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const handle = yield* spawner.spawn(ChildProcess.make("quiet"))
+          return [
+            yield* Effect.flip(Stream.run(Stream.fromArray([new Uint8Array([1])]), handle.stdin)),
+            yield* Effect.flip(handle.kill())
+          ]
+        }).pipe(Effect.scoped, Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(errors.map(reason)).toEqual(["BadArgument", "BadArgument"])
+    }))
+
+  it.effect("rejects command-supplied stdin before the provider starts", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts: { quiet: {} } })
+
+      const error = yield* (
+        Effect.flip(
+          Effect.flatMap(ChildProcessSpawner, (spawner) =>
+            spawner.exitCode(ChildProcess.make("quiet", [], {
+              stdin: Stream.fromArray([new Uint8Array([1])])
+            })))
+        ).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(reason(error)).toBe("BadArgument")
+      expect(error.message).toContain("cannot supply stdin")
+      expect(provider.state.commands).toEqual([])
+    }))
+
+  it.effect("rejects command-supplied stdin inside a config", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts: { quiet: {} } })
+
+      const error = yield* (
+        Effect.flip(
+          Effect.flatMap(ChildProcessSpawner, (spawner) =>
+            spawner.exitCode(ChildProcess.make("quiet", [], {
+              stdin: { stream: Stream.fromArray([new Uint8Array([1])]) }
+            })))
+        ).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(reason(error)).toBe("BadArgument")
+      expect(provider.state.commands).toEqual([])
+    }))
+
+  it.effect.each<[string, ChildProcess.Command, string]>([
+    [
+      "a non-default pipe source",
+      ChildProcess.pipeTo(ChildProcess.make("left"), ChildProcess.make("right"), { from: "stderr" }),
+      "pipe from stderr"
+    ],
+    [
+      "a non-default pipe destination",
+      ChildProcess.pipeTo(ChildProcess.make("left"), ChildProcess.make("right"), { to: "fd3" }),
+      "pipe to fd3"
+    ],
+    [
+      "additional file descriptors",
+      ChildProcess.make("quiet", [], { additionalFds: { fd3: { type: "output" } } }),
+      "additional file descriptors"
+    ],
+    ["a custom shell", ChildProcess.make("quiet", [], { shell: "/bin/zsh" }), "requested shell"],
+    ["a detached process", ChildProcess.make("quiet", [], { detached: true }), "detach"]
+  ])("rejects %s instead of changing its meaning", ([_name, command, message]) =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({})
+
+      const error = yield* (
+        Effect.flip(Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.exitCode(command))).pipe(
+          Effect.provide(RemoteChildProcessSpawner.layer(provider))
+        )
+      )
+
+      expect(reason(error)).toBe("BadArgument")
+      expect(error.message).toContain(message)
+      expect(provider.state.commands).toEqual([])
+    }))
+
+  it.effect.each<[string, ChildProcess.Command]>([
+    [
+      "the left side of an outer pipe",
+      ChildProcess.pipeTo(
+        ChildProcess.pipeTo(ChildProcess.make("left"), ChildProcess.make("middle"), { from: "stderr" }),
+        ChildProcess.make("right")
+      )
+    ],
+    [
+      "the right side of an outer pipe",
+      ChildProcess.pipeTo(
+        ChildProcess.make("left"),
+        ChildProcess.pipeTo(ChildProcess.make("middle"), ChildProcess.make("right"), { from: "stderr" })
+      )
+    ]
+  ])("rejects an inner stderr pipe nested on %s", ([_position, command]) =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({})
+
+      const error = yield* (
+        Effect.flip(Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.exitCode(command))).pipe(
+          Effect.provide(RemoteChildProcessSpawner.layer(provider))
+        )
+      )
+
+      expect(reason(error)).toBe("BadArgument")
+      expect(error.message).toContain("pipe from stderr")
+      expect(provider.state.commands).toEqual([])
+    }))
+
+  it.effect("honors output dispositions and sinks", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        scripts: { noisy: { stdout: "out", stderr: "err" } }
+      })
+      const upper = Sink.map(
+        Sink.collect<Uint8Array>(),
+        (chunks) =>
+          new TextEncoder().encode(
+            chunks.map((chunk) => new TextDecoder().decode(chunk)).join("").toUpperCase()
+          )
+      )
+
+      const observed = yield* (
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const handle = yield* spawner.spawn(ChildProcess.make("noisy", [], {
+            stdout: upper,
+            stderr: { stream: "ignore" }
+          }))
+          return {
+            stdout: yield* Stream.mkString(Stream.decodeText(handle.stdout)),
+            stderr: yield* Stream.mkString(Stream.decodeText(handle.stderr))
+          }
+        }).pipe(Effect.scoped, Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(observed).toEqual({ stdout: "OUT", stderr: "" })
+    }))
+
+  it.effect.each<[undefined | "pipe" | "overlapped" | "ignore" | "inherit", string]>([
+    [undefined, "out"],
+    ["pipe", "out"],
+    ["overlapped", "out"],
+    ["ignore", ""],
+    ["inherit", ""]
+  ])("honors the %s stdout disposition", ([stdout, expected]) =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts: { noisy: { stdout: "out" } } })
+
+      const observed = yield* (
+        Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.string(ChildProcess.make("noisy", [], { stdout })))
+          .pipe(
+            Effect.provide(RemoteChildProcessSpawner.layer(provider))
+          )
+      )
+
+      expect(observed).toBe(expected)
+    }))
+
+  it.effect("accepts explicit default pipeline routing and empty option objects", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        scripts: { "left | right": { stdout: "ok" } }
+      })
+      const command = ChildProcess.pipeTo(
+        ChildProcess.make("left", [], { additionalFds: {}, stdin: "pipe" }),
+        ChildProcess.make("right", [], { stdout: {}, stderr: {} }),
+        { from: "stdout", to: "stdin" }
+      )
+
+      const output = yield* (
+        Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.string(command)).pipe(
+          Effect.provide(RemoteChildProcessSpawner.layer(provider))
+        )
+      )
+
+      expect(output).toBe("ok")
+    }))
+})
+
+describe("RemoteChildProcessSpawner test double scripting", () => {
+  it.effect("answers an unscripted command the way a shell reports a missing binary", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts: { other: {} } })
+
+      const result = yield* (
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const command = ChildProcess.make("nope")
+          return {
+            stderr: yield* Stream.mkString(spawner.streamString(command, { includeStderr: true })),
+            exitCode: yield* spawner.exitCode(command)
+          }
+        }).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(result).toEqual({ stderr: "command not found: nope\n", exitCode: 127 })
+    }))
+
+  it.effect("answers a scripted command with no declared output as an empty success", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts: { quiet: {} } })
+
+      const result = yield* (
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const command = ChildProcess.make("quiet")
+          return {
+            stdout: yield* spawner.string(command),
+            exitCode: yield* spawner.exitCode(command)
+          }
+        }).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(result).toEqual({ stdout: "", exitCode: 0 })
+    }))
+
+  it.effect("reports the process as running until its exit code arrives", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts: { quiet: { exitCode: 3 } } })
+
+      const observed = yield* (
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const handle = yield* spawner.spawn(ChildProcess.make("quiet"))
+          const before = yield* handle.isRunning
+          const exitCode = yield* handle.exitCode
+          return { before, exitCode, after: yield* handle.isRunning }
+        }).pipe(Effect.scoped, Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(observed).toEqual({ before: true, exitCode: 3, after: false })
+    }))
+})
+
+describe("RemoteChildProcessSpawner handle state", () => {
+  it.effect("allocates concurrent handles independently while recording commands in call order", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        session: "concurrent-session",
+        scripts: { first: {}, second: {} }
+      })
+
+      const pids = yield* (
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const handles = yield* Effect.all([
+            spawner.spawn(ChildProcess.make("first")),
+            spawner.spawn(ChildProcess.make("second"))
+          ], { concurrency: 2 })
+          return handles.map((handle) => handle.pid)
+        }).pipe(Effect.scoped, Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+
+      expect(pids[0]).not.toBe(pids[1])
+      expect(pids).toEqual([1, 2])
+      expect(provider.state.openedSessions).toEqual(["concurrent-session"])
+      expect(provider.state.commands).toEqual(["first", "second"])
+    }))
+
+  it.effect("does not share observable pid state between two spawner layers (D8)", () =>
+    Effect.gen(function*() {
+      // `layer.ts:117` was a module-level `let nextPid = 1`: process-global
+      // mutable state in a repository whose rule is that host access goes
+      // through a Layer. Two spawners in one process shared the counter, so a
+      // handle's id depended on how many processes an unrelated spawner had
+      // started — and on test ordering.
+      const spawn = () =>
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const first = yield* spawner.spawn(ChildProcess.make("greet"))
+          const second = yield* spawner.spawn(ChildProcess.make("greet"))
+          return [first.pid, second.pid]
+        }).pipe(
+          Effect.provide(
+            RemoteChildProcessSpawner.layer(
+              RemoteChildProcessSpawner.TestRemote.make({ scripts: { greet: { stdout: "hello" } } })
+            )
+          ),
+          Effect.scoped
+        )
+
+      const left = yield* (spawn())
+      const right = yield* (spawn())
+
+      // Distinct handles within one spawner still get distinct ids.
+      expect(left[0]).not.toBe(left[1])
+      // And the second spawner starts over rather than continuing the first's
+      // count, which is what "does not share state" means here.
+      expect(right).toEqual(left)
+    }))
+
+  it.effect("reports isRunning false after the process exits without awaiting exitCode first", () =>
+    Effect.gen(function*() {
+      // The old `running` flag flipped only inside the handle's `exitCode`
+      // effect, so a caller that never awaited it was told the process was still
+      // running forever. A controlled provider lets the remote process exit
+      // without consuming the handle's exit effect.
+      const exited = Effect.runSync(Deferred.make<number>())
+      const provider = RemoteChildProcessSpawner.Provider.of({
+        session: "liveness",
+        open: () => Effect.void,
+        spawn: () =>
+          Effect.succeed({
+            stdout: Stream.empty,
+            stderr: Stream.empty,
+            exitCode: Deferred.await(exited)
+          })
+      })
+
+      const observed = yield* (
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const handle = yield* spawner.spawn(ChildProcess.make("greet"))
+          const beforeExit = yield* handle.isRunning
+          yield* Deferred.succeed(exited, 0)
+          yield* Effect.yieldNow
+          const afterExit = yield* handle.isRunning
+          return { beforeExit, afterExit }
+        }).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)), Effect.scoped)
+      )
+
+      expect(observed.beforeExit).toBe(true)
+      // No `handle.exitCode` await occurred. The adapter observes the provider's
+      // completion in its own scoped fiber and updates liveness independently.
+      expect(observed.afterExit).toBe(false)
+    }))
+})

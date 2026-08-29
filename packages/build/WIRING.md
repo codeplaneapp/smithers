@@ -1,0 +1,133 @@
+# Wiring
+
+`@smthrs/build` is a pnpm workspace package of the flows repository at
+`packages/build`, alongside the private `@smthrs/targets` and `@smthrs/build-cli`
+packages. The workspace install links everything; there is no separate
+install step.
+
+## Compile-time dependencies
+
+| Dependency       | Version        | Use                                            |
+| ---------------- | -------------- | ---------------------------------------------- |
+| `effect`         | `4.0.0-rc.108` | Effects, schemas, layers, files, and processes |
+| `@smthrs/flow`   | `0.1.0`        | Actions, flows, annotations, and file inputs   |
+| `@smthrs/plan`   | `0.1.0`        | Planned nodes                                  |
+| `@smthrs/crypto` | `0.1.0`        | SHA-256 digests                                |
+
+The CLI additionally uses the flows engine, action implementations, and Node
+platform services declared in `../build-cli/package.json`.
+
+## Workspace membership
+
+The flows checkout uses pnpm. Its `pnpm-workspace.yaml` includes
+`packages/*` and `packages/build/infra`.
+
+1. The three packages live at `packages/build`, `packages/targets`,
+   and `packages/build-cli`.
+2. Cross-package dependencies use the exact `0.1.0` workspace versions.
+   `linkWorkspacePackages` resolves them to the local packages; no `file:` or
+   `link:` specifiers remain.
+3. The root `pnpm install` creates the package links and owns the single
+   `pnpm-lock.yaml`. The old per-package npm lockfiles are deleted.
+4. `pnpm --filter @smthrs/build check` typechecks the library. The
+   root `pnpm check` recurses into every package, including `rules`, `cli`,
+   and `infra`.
+
+No TypeScript path mapping is required. `tsconfig.json`, the build scripts,
+the dual ESM/CJS export map, and the pinned tooling dependencies copy the
+current `@smthrs/flow` package shape.
+
+## BUILD.ts imports
+
+The flows workspace root declares `"@smthrs/targets": "0.1.0"` and
+`"@smthrs/build-cli": "0.1.0"` as devDependencies, resolved to the workspace
+packages. `BUILD.ts` files import the rule catalog by bare specifier:
+`import { ... } from "@smthrs/targets"`, and `pnpm exec smthrs` resolves the
+CLI's workspace bin.
+
+Embedding the install flow requires:
+
+- an `Install.layer` containing its action implementations;
+- an interpreter registration for `Install.Install` so the second trampoline
+  round can resolve the flow by tag;
+- a `FlowRuntime`;
+- Node `FileSystem`, `ChildProcessSpawner`, and `Crypto` services;
+- one `PackageManager` layer.
+
+Only `PackageManager.layerPnpm` performs work today. `layerBun` resolves the
+service but fails every operation with a typed `unsupported` error.
+
+The pnpm layer is constructed with an absolute project root and explicit host
+facts:
+
+```ts
+PackageManager.layerPnpm({
+  projectRoot: "/absolute/workspace",
+  platform: { os: "linux", arch: "x64", libc: "glibc" }
+})
+```
+
+Optional construction values are a bounded command timeout, an executable
+override, and an environment snapshot. Child processes do not inherit the
+complete host environment. The layer selects bootstrap/network variables and
+variables referenced by the project `.npmrc`, clears user/global npm config,
+refuses embedded credentials and process-control variable references, and
+passes `extendEnv: false`.
+
+`../build-cli/src/engine.ts` is the production composition. It uses an
+in-memory flows runtime per invocation, anchors the package-manager service to
+the canonical workspace root, and never changes process-wide `cwd`. The
+`install` command requires the default `.flows` configuration because the
+declared store boundary is fixed at `.flows/store/pnpm`.
+
+## Target executor composition
+
+Each selected target gets a fresh in-memory runtime so two targets built from
+the same rule tag cannot alias each other's flow registration. The executor
+provides implementations for:
+
+- shared process execution and output capture;
+- generated-file write/check and package-manifest synchronization;
+- declared-output verification and filegroup expansion;
+- install actions under pnpm;
+- GitHub workflow checks, documentation parity, LLM review, and package
+  scaffolding.
+
+Irreversible release actions are intentionally absent. A `Changesets` version,
+`NpmPublish`, or `JsrPublish` target therefore refuses with
+`unresolved_action` instead of mutating external state through the ordinary
+executor.
+
+## Cache-directory host state
+
+For normal target verbs the CLI resolves `--cache-dir`, then the root
+`Workspace` declaration, then `.flows`. Target results live below
+`<cacheDirectory>/cache`; rule scratch files use the same root.
+
+The real directory is not action payload or key material. Rules that need it
+emit a constant token and `ExecLive` substitutes the validated host value just
+before spawn. Discovery and glob expansion receive the same resolved value and
+exclude it explicitly. The fixed `.flows/store` install tree is excluded
+separately.
+
+## Remote caches
+
+The CLI target-result cache speaks `/ac` directly. `RemoteCacheStore` and
+`RemoteArtifacts` in the flows engine are a different composition: they store
+engine step rows and artifact blobs through `/ac` and `/cas`. The smthrs CLI
+does not provide those engine layers today.
+
+An embedding host that needs engine-level remote artifacts must compose those
+layers with its local step cache and artifact store itself. Endpoint and
+authorization values are host capabilities and must not enter step-key
+material.
+
+## Current boundary limit
+
+Install fetch actions declare `.flows/store/<manager>` as a `TreeArtifact`, but
+their boundary mode is `expected`. The current absolute-root manager process
+cannot freeze the lockfile and `.npmrc` across the child's own opens, and the
+unsandboxed filesystem observer cannot attest that nothing else was read or
+written. Consequently install results and store trees are not published to a
+cross-run engine cache. Wiring a sandbox that produces hermetic-read and
+whole-tree evidence is required before changing that admission policy.

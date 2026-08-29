@@ -1,0 +1,50 @@
+{
+  "probes": 3,
+  "flagged": 0,
+  "systemic": false,
+  "instancesAtRisk": 0,
+  "rows": [
+    {
+      "id": "django__django-16612",
+      "family": "django",
+      "verdict": "ok",
+      "why": "both conditions produced the same outcome (exit 1 and 1)",
+      "familySize": 21,
+      "noneExit": 1,
+      "noneObserved": "none",
+      "noneEgress": 0,
+      "bridgeExit": 1,
+      "bridgeObserved": "bridge",
+      "bridgeEgress": 0,
+      "timeoutSeconds": 900
+    },
+    {
+      "id": "sympy__sympy-20154",
+      "family": "sympy",
+      "verdict": "ok",
+      "why": "the suite exceeded 900s under both conditions",
+      "familySize": 6,
+      "noneExit": 124,
+      "noneObserved": "none",
+      "noneEgress": 0,
+      "bridgeExit": 124,
+      "bridgeObserved": "bridge",
+      "bridgeEgress": 0,
+      "timeoutSeconds": 900
+    },
+    {
+      "id": "astropy__astropy-14365",
+      "family": "astropy",
+      "verdict": "ok",
+      "why": "both conditions produced the same outcome (exit 2 and 2)",
+      "familySize": 4,
+      "noneExit": 2,
+      "noneObserved": "none",
+      "noneEgress": 0,
+      "bridgeExit": 2,
+      "bridgeObserved": "bridge",
+      "bridgeEgress": 0,
+      "timeoutSeconds": 900
+    }
+  ]
+}

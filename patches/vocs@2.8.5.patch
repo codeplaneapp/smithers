@@ -1,0 +1,52 @@
+diff --git a/dist/react/Root.js b/dist/react/Root.js
+index 641cee118919e649fc5d977bcfc3f4e62b003007..6dea35886ee18a795e5dba1844233ab3c8283d3d 100644
+--- a/dist/react/Root.js
++++ b/dist/react/Root.js
+@@ -5,11 +5,10 @@ import userStylesUrl from 'virtual:vocs/user-styles';
+ import stylesUrl from '../styles/index.css?url';
+ import { Head } from './Head.js';
+ import { Root_client } from './Root.client.js';
+-import { ScrollRestoration } from './ScrollRestoration.js';
+ export async function Root({ children }) {
+     const { colorScheme, accentColor } = config;
+     return (_jsxs("html", { "data-vocs": true, ...(colorScheme === 'light' || colorScheme === 'dark'
+             ? { 'data-vocs-theme': colorScheme }
+-            : {}), lang: "en", style: { colorScheme, '--vocs-color-accent': accentColor }, suppressHydrationWarning: true, children: [_jsxs("head", { children: [_jsx("link", { rel: "stylesheet", href: stylesUrl }), userStylesUrl && _jsx("link", { rel: "stylesheet", href: userStylesUrl }), groupIconsStylesUrl && _jsx("link", { rel: "stylesheet", href: groupIconsStylesUrl }), _jsx(Head, { includeJsonLd: false })] }), _jsxs("body", { "data-version": "1.0", children: [_jsx(Root_client, { children: children }), _jsx(ScrollRestoration, {})] })] }));
++            : {}), lang: "en", style: { colorScheme, '--vocs-color-accent': accentColor }, suppressHydrationWarning: true, children: [_jsxs("head", { children: [_jsx("link", { rel: "stylesheet", href: stylesUrl }), userStylesUrl && _jsx("link", { rel: "stylesheet", href: userStylesUrl }), groupIconsStylesUrl && _jsx("link", { rel: "stylesheet", href: groupIconsStylesUrl }), _jsx(Head, { includeJsonLd: false })] }), _jsx("body", { "data-version": "1.0", children: _jsx(Root_client, { children: children }) })] }));
+ }
+ //# sourceMappingURL=Root.js.map
+diff --git a/src/react/Root.tsx b/src/react/Root.tsx
+index e65e8dfcd6c18b996166a57fdb896791532a769d..9357d1a83721b5a8fe94807a27a21aeecfd2d11b 100644
+--- a/src/react/Root.tsx
++++ b/src/react/Root.tsx
+@@ -4,7 +4,6 @@ import userStylesUrl from 'virtual:vocs/user-styles'
+ import stylesUrl from '../styles/index.css?url'
+ import { Head } from './Head.js'
+ import { Root_client } from './Root.client.js'
+-import { ScrollRestoration } from './ScrollRestoration.js'
+ 
+ export async function Root({ children }: { children: React.ReactNode }) {
+   const { colorScheme, accentColor } = config
+@@ -26,7 +25,6 @@ export async function Root({ children }: { children: React.ReactNode }) {
+       </head>
+       <body data-version="1.0">
+         <Root_client>{children}</Root_client>
+-        <ScrollRestoration />
+       </body>
+     </html>
+   )
+diff --git a/src/react/ScrollRestoration.tsx b/src/react/ScrollRestoration.tsx
+index 9a6f4a4fb06b5c178d8bff24d2dc3713d4d67de8..e61d5953f0c7a85153d56f01844930505fdeded7 100644
+--- a/src/react/ScrollRestoration.tsx
++++ b/src/react/ScrollRestoration.tsx
+@@ -42,10 +42,8 @@ export function ScrollRestoration() {
+     }
+ 
+     window.addEventListener('popstate', handlePopstate)
+-    events.on('start', handleNavigateStart)
+     return () => {
+       window.removeEventListener('popstate', handlePopstate)
+-      events.off('start', handleNavigateStart)
+       window.history.scrollRestoration = 'auto'
+     }
+   }, [events])

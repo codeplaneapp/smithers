@@ -1,0 +1,230 @@
+/**
+ * Permission-aware outgoing HTTP requests.
+ *
+ * There is no kernel `HttpClient` interface and no kernel `HttpClient` tag.
+ * Effect owns both, and its tag fixes the error channel to `HttpClientError`,
+ * so this module is only the middleware: a `Layer` over Effect's own tag that
+ * reads the raw client out of context and returns a guarded one in its place.
+ * Permission failures are projected into `HttpClientError` by
+ * {@link toHttpClientError}, which keeps the structured kernel failure on the
+ * transport reason's `cause` so {@link fromHttpClientError} can hand it back.
+ *
+ * **Redirects.** A redirect is a second network destination, so it needs a
+ * second grant check. Two halves guarantee that:
+ *
+ *  1. Host bundles provide a client that does **not** follow redirects on its
+ *     own — Effect's fetch layer with `RequestInit { redirect: "manual" }`,
+ *     Undici without a redirect interceptor. Nothing below this layer can
+ *     silently walk to another origin.
+ *  2. This layer composes Effect's own `HttpClient.followRedirects` *above*
+ *     the guard. That combinator re-enters `postprocess` for every hop, and
+ *     `postprocess` is the guarded one, so hop *n* is checked exactly like hop
+ *     zero and an authorized origin cannot lend its grant to another.
+ *
+ * Governing design:
+ * `docs/specs/Concepts/Permission Kernel.md`,
+ * `docs/specs/Concepts/Effect Taxonomy.md`, and
+ * `docs/specs/Concepts/Host Adapters.md`.
+ *
+ * @since 0.1.0
+ */
+
+import { type Capability, make as makeCapability } from "@smthrs/capability/Capability"
+import { formatError, isPermissionError, PermissionDenied, type PermissionError } from "@smthrs/capability/Permission"
+import { Context, Effect, Layer, Option } from "effect"
+import * as EffectHttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientError from "effect/unstable/http/HttpClientError"
+import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import { GrantStore } from "./GrantStore.ts"
+
+/**
+ * The outgoing HTTP client service — Effect's tag, unchanged. Re-exported so
+ * the kernel namespace stays one-stop; it is the *same* tag, never a second
+ * one.
+ *
+ * @category services
+ * @since 0.1.0
+ */
+export { HttpClient } from "effect/unstable/http/HttpClient"
+
+/**
+ * Constructs a client from a low-level request runner, keeping Effect's own
+ * URL construction, tracing, header redaction, and interruption behavior.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export { make } from "effect/unstable/http/HttpClient"
+
+/**
+ * The model identity an outgoing request is made on behalf of, if any.
+ *
+ * A model call is not a general `net:*` effect: the same host answers many
+ * models, and a grant for one must not be a grant for the rest. Effect's tag
+ * has no room for an extra method, so the intent rides on a `Context`
+ * reference instead — set it with {@link withModelCall} and the decorator asks
+ * for `model:call` rather than `net:get`/`net:post`.
+ *
+ * @category references
+ * @since 0.1.0
+ * @slop
+ */
+export const ModelCall: Context.Reference<string | undefined> = Context.Reference<string | undefined>(
+  "@smthrs/kernel/HttpClient/ModelCall",
+  { defaultValue: (): string | undefined => undefined }
+)
+
+/**
+ * Runs `effect` with every outgoing request in it checked as a `model:call` on
+ * `modelId` instead of as plain network access.
+ *
+ * @category references
+ * @since 0.1.0
+ * @slop
+ */
+export const withModelCall = (modelId: string) => <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  Effect.provideService(effect, ModelCall, modelId)
+
+/**
+ * Projects a permission failure into the error channel Effect's `HttpClient`
+ * tag fixes.
+ *
+ * Nothing is lost: the reason is always a `TransportError` — the request did
+ * not leave the host because the capability kernel refused, suspended, or
+ * could not decide it — `description` carries the human rendering from
+ * `Permission.formatError`, and `cause` carries the structured failure itself,
+ * so {@link fromHttpClientError} hands the attended surface back the original
+ * `capability`, `tier`, `requestId`, and `reason`.
+ *
+ * @category constructors
+ * @since 0.1.0
+ * @slop
+ */
+export const toHttpClientError = (options: {
+  readonly request: HttpClientRequest.HttpClientRequest
+  readonly error: PermissionError
+}): HttpClientError.HttpClientError =>
+  new HttpClientError.HttpClientError({
+    reason: new HttpClientError.TransportError({
+      request: options.request,
+      description: formatError(options.error),
+      cause: options.error
+    })
+  })
+
+/**
+ * Recovers the structured permission failure a {@link toHttpClientError}
+ * projection carries, so an attended surface can still reply to the request
+ * and an unattended report can still name the capability.
+ *
+ * @category refinements
+ * @since 0.1.0
+ * @slop
+ */
+export const fromHttpClientError = (
+  error: HttpClientError.HttpClientError
+): Option.Option<PermissionError> =>
+  error.reason._tag === "TransportError" && isPermissionError(error.reason.cause)
+    ? Option.some(error.reason.cause)
+    : Option.none()
+
+/**
+ * Constructs an unavailable HTTP client stub.
+ *
+ * Every request reports the missing host as a `TransportError` naming the
+ * request, so an unconfigured capability answers rather than vanishing.
+ *
+ * @category constructors
+ * @since 0.1.0
+ * @slop
+ */
+export const makeNoop = (): EffectHttpClient.HttpClient =>
+  EffectHttpClient.make((request) =>
+    Effect.fail(
+      new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({
+          request,
+          cause: new Error("HTTP is unavailable on this host")
+        })
+      })
+    )
+  )
+
+/**
+ * Provides an unavailable HTTP client stub.
+ *
+ * @category layers
+ * @since 0.1.0
+ * @slop
+ */
+export const layerNoop = (): Layer.Layer<EffectHttpClient.HttpClient> =>
+  Layer.succeed(EffectHttpClient.HttpClient)(makeNoop())
+
+const capabilityFor = (
+  request: HttpClientRequest.HttpClientRequest,
+  modelId: string | undefined
+): Effect.Effect<Capability, PermissionDenied> => {
+  let url: URL
+  try {
+    url = new URL(request.url)
+  } catch {
+    return Effect.fail(
+      new PermissionDenied({
+        code: "permission_denied",
+        capability: makeCapability(
+          modelId === undefined
+            ? request.method === "GET" || request.method === "HEAD" ? "net:get" : "net:post"
+            : "model:call",
+          request.url
+        ),
+        reason: "HTTP capability checks require an absolute, parseable URL"
+      })
+    )
+  }
+  return Effect.succeed(
+    modelId === undefined
+      ? makeCapability(
+        request.method === "GET" || request.method === "HEAD" ? "net:get" : "net:post",
+        url.host.toLowerCase()
+      )
+      : makeCapability("model:call", `${url.host.toLowerCase()}/${modelId}`)
+  )
+}
+
+/**
+ * Decorates the HTTP client in place with a `net:get`/`net:post`/`model:call`
+ * capability check, then follows redirects *through* that check.
+ *
+ * The layer provides the tag it also requires: compose it over a host client
+ * layer with `Layer.provide` and a consumer that never heard of the kernel is
+ * guarded too. Because every hop re-enters the guarded `postprocess`, an
+ * authorized first URL that redirects to an unauthorized one is denied at the
+ * second hop instead of being fetched.
+ *
+ * @category layers
+ * @since 0.1.0
+ * @slop
+ */
+export const layer: Layer.Layer<
+  EffectHttpClient.HttpClient,
+  never,
+  EffectHttpClient.HttpClient | GrantStore
+> = Layer.effect(
+  EffectHttpClient.HttpClient,
+  Effect.gen(function*() {
+    const client = yield* EffectHttpClient.HttpClient
+    const grants = yield* GrantStore
+    const guarded = EffectHttpClient.transform(
+      client,
+      (execute, request) =>
+        Effect.withFiber((fiber) =>
+          capabilityFor(request, fiber.getRef(ModelCall)).pipe(
+            Effect.flatMap((capability) => grants.check(capability)),
+            Effect.mapError((error: PermissionError) => toHttpClientError({ request, error })),
+            Effect.andThen(execute)
+          )
+        )
+    )
+    return EffectHttpClient.followRedirects(guarded)
+  })
+)

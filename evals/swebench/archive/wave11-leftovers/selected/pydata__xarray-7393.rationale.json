@@ -1,0 +1,72 @@
+{
+  "instance": "pydata__xarray-7393",
+  "selected": "r1",
+  "selectedRunId": "pydata__xarray-7393-r1",
+  "selectedPatch": "selected/pydata__xarray-7393.patch",
+  "read": {
+    "journals": "journals",
+    "patches": "patches"
+  },
+  "neverRead": "the official evaluator's reports, the dataset's tests, and every other record of the answer",
+  "predicateOrder": [
+    "preEditFailure",
+    "mutationAfter",
+    "greenOverFinalTree",
+    "cleanCompletion"
+  ],
+  "tieBreaks": [
+    "broader final check",
+    "non-empty patch",
+    "lower cost",
+    "lower run index"
+  ],
+  "candidates": [
+    {
+      "rank": 1,
+      "index": "r1",
+      "runId": "pydata__xarray-7393-r1",
+      "score": 1,
+      "patchBytes": 0,
+      "finalCheckTerms": null,
+      "usd": 1.7659,
+      "tokens": {
+        "inputTokens": 209605,
+        "cachedInputTokens": 135677,
+        "outputTokens": 44280,
+        "reasoningTokens": 28048
+      },
+      "seat": "openai:gpt-5.6-sol",
+      "frames": 24,
+      "modelCalls": 24,
+      "demands": {
+        "unmoved": 0,
+        "unresolved": 0,
+        "narrowed": 0,
+        "narrowOnly": 0,
+        "readOnly": 0,
+        "repeat": 0
+      },
+      "sufficiencyObservations": 0,
+      "predicates": {
+        "preEditFailure": {
+          "held": true,
+          "seq": 24,
+          "epoch": 0,
+          "check": "bash {\"command\":\"docker exec flowsbench-pydata--xarray-7393 bash -lc 'cd /testbed && python - <<\\\"PY\\\"\\nimport numpy as np\\nimport xarray as xr\\n\\nds = xr.Dataset(c…"
+        },
+        "mutationAfter": {
+          "held": false,
+          "why": "the workspace never changed after that check"
+        },
+        "greenOverFinalTree": {
+          "held": false,
+          "why": "no check the run had watched fail went green over the tree it finished on"
+        },
+        "cleanCompletion": {
+          "held": false,
+          "why": "the run never applied a complete transition"
+        }
+      }
+    }
+  ]
+}

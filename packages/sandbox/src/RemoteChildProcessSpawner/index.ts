@@ -1,0 +1,57 @@
+/**
+ * Remote implementation of Effect's `ChildProcessSpawner` service.
+ *
+ * A remote session — a micro-VM, a container, a cloud runner — cannot be forked
+ * into from this process. What it can do is run a command line for us and hand
+ * back the three pieces a child process has: `stdout`, `stderr`, `exitCode`.
+ * Provider packages adapt their SDK session to the `Provider` contract; this
+ * module adapts that contract into a `ChildProcessSpawner` layer so
+ * `ChildProcess` commands work against a remote session the way they do under
+ * `NodeChildProcessSpawner`. Opening a provider is scoped, so interruption
+ * closes the layer scope and runs the provider's cancellation finalizer — no
+ * `AbortSignal` crosses this seam.
+ *
+ * **The divergences are real and are not hidden.** A remote session is reached
+ * by sending it one rendered command line, so there is no local process to hold
+ * onto:
+ *
+ * - **No stdin.** `stdin` is a `Sink` that fails, and a command that supplies a
+ *   `Stream` for stdin is rejected at spawn time rather than losing its input
+ *   silently.
+ * - **No signals.** A remote process ends by closing its scope, which runs the
+ *   provider's cancellation finalizer; there is no signal to deliver, so `kill`
+ *   fails rather than pretending to have delivered one.
+ * - **No process identity.** `pid` is a module counter, not a pid on either
+ *   side of the seam, and `unref` is a no-op: this process holds no reference to
+ *   a remote one. `isRunning` answers from what this side has observed, not from
+ *   the remote process table — nothing pushes an exit across the seam, so it
+ *   turns `false` when a caller observes `exitCode` rather than when the remote
+ *   process actually ends.
+ * - **No pipeline routing between processes.** A `PipedCommand` is rendered
+ *   into the single command line the remote side parses, so the `|` reaches the
+ *   remote shell rather than this adapter. A non-default `from` or `to` cannot
+ *   survive that rendering and is rejected.
+ * - **No extra file descriptors.** `getInputFd` returns `Sink.drain` and
+ *   `getOutputFd` returns `Stream.empty` — the same answer
+ *   `NodeChildProcessSpawner` gives for a descriptor that was never configured.
+ *   A command that explicitly configures one is rejected at spawn time.
+ * - **No custom shell or detached process.** `shell: true` means whatever shell
+ *   the remote session runs the rendered line with, but a shell path and
+ *   `detached: true` are the local host's vocabulary and are rejected.
+ * - **`extendEnv` is ignored.** The ambient environment belongs to the remote
+ *   session and this side cannot read it, so only the `env` overrides cross the
+ *   seam; `extendEnv: false` cannot clear an environment we never held.
+ *
+ * The `stdout`/`stderr` dispositions mean what they mean under
+ * `NodeChildProcessSpawner` — `"inherit"` and `"ignore"` yield an empty stream,
+ * and a `Sink` is transduced through.
+ *
+ * @since 0.1.0
+ */
+export * from "./layer.ts"
+export * from "./Provider.ts"
+export * from "./ProviderError.ts"
+export * from "./TestRemote.ts"
+export * from "./TestRemoteProvider.ts"
+export * from "./TestRemoteState.ts"
+export * from "./TestScript.ts"
