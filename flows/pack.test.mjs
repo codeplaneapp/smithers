@@ -11,6 +11,7 @@
  */
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { describe, it } from "node:test";
@@ -187,6 +188,32 @@ describe("the smithers-0x-hello fixture", () => {
     ]) {
       assert.ok(statSync(join(root, file)).isFile(), `${file} is missing from the fixture`);
     }
+  });
+
+  it("is committed, `.smithers/` pack included", () => {
+    // The repository root ignores `.smithers/`, because that is where a 0.x
+    // checkout keeps its run state. Here it is the point of the fixture, so the
+    // fixtures directory un-ignores it the way packages/migrate's does. Without
+    // that negation the pack exists on the author's disk and nowhere else, and
+    // every test here passes while a fresh clone has no fixture at all.
+    const tracked = spawnSync("git", ["ls-files", "--", `flows/${FIXTURE}`], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+    assert.equal(tracked.status, 0, tracked.stderr);
+    const files = tracked.stdout.split("\n").filter((line) => line !== "");
+    for (const file of [
+      ".smithers/workflows/hello.tsx",
+      ".smithers/agents/index.ts",
+      ".smithers/prompts/hello.mdx",
+      ".smithers/ui/hello.tsx",
+    ]) {
+      assert.ok(
+        files.includes(`flows/${FIXTURE}/${file}`),
+        `${file} is on disk but not tracked; check the fixtures .gitignore`,
+      );
+    }
+    assert.equal(files.length, 15, "every fixture file is tracked");
   });
 
   it("is outside every pnpm workspace glob, so its 0.x dependencies never install", () => {
