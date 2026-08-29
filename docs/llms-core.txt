@@ -766,7 +766,7 @@ Route: /architecture/browser-support
 
 Browser support is a hard requirement of this repository, and it is met the only way an Effect codebase can meet it: **host access goes through a layer**, so a module that only depends on contracts never resolves a `node:` built-in. This page states exactly which entry points honour that today, which do not, and what proves it.
 
-Nothing here is a claim about what *should* bundle. Every row is executed by `scripts/browser-check.mjs`, `pnpm run browser` locally, one step in [CI](../../.github/workflows/ci.yml), which bundles each entry point with esbuild's `platform: "browser"`.
+Nothing here is a claim about what *should* bundle. Every row is executed by `scripts/browser-check.mjs`, `pnpm run browser` locally, one step in [CI](https://github.com/smithersai/smithers/blob/main/.github/workflows/ci.yml), which bundles each entry point with esbuild's `platform: "browser"`.
 
 ### Browser entry points
 
@@ -2923,7 +2923,7 @@ Time travel is a library API in this release, and only a library API.
 | Surface | 1.0.0-rc.0 |
 | --- | --- |
 | `TimeTravel.inspect`, `replay`, `fork`, `rewind` | available from `@smthrs/time-travel` |
-| CLI verbs | none. `smithers replay`, `rewind`, `fork`, `timetravel`, `snapshots`, `restore`, and `revert` exit 1 with a migration message |
+| CLI verbs | none. The Smithers 0.x time-travel verbs exit 1 with a migration message; migrating from 0.x lists them |
 | MCP tools | none. `replay_run`, `fork_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, and `time_travel` answer with the `unsupported` envelope |
 | Composition | not composed into `NodeControl`, and the CLI does not install migration block 5000 |
 

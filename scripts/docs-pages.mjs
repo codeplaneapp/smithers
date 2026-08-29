@@ -14,8 +14,13 @@ import { repoRoot } from "./docs-contract.mjs"
 /** The directory vocs serves as the site. */
 export const pagesRoot = join(repoRoot, "docs", "pages")
 
-/** The directory vocs serves as static assets, at the site root. */
-export const publicRoot = join(repoRoot, "docs", "public")
+/**
+ * The directory vocs serves as static assets, at the site root.
+ *
+ * vocs resolves it as `<rootDir>/public`, and `rootDir` is the repository root,
+ * so the release images live at `public/images` rather than under `docs/`.
+ */
+export const publicRoot = join(repoRoot, "public")
 
 const walk = (dir, out = []) => {
   for (const name of readdirSync(dir).sort()) {

@@ -1096,56 +1096,6 @@ It covers 90 kept assets and 36 deletion rules. The table is generated from
 fails when an asset the ledger keeps has no place here or a file the ledger
 deletes is still present.
 
-### Release images
-
-43 files. vocs serves docs/public at the site root, so the changelog image links resolve unchanged.
-
-| Was | Is | Route |
-| --- | --- | --- |
-| `docs/images/0.23.0/smithers-pwa.png` | `docs/public/images/0.23.0/smithers-pwa.png` | `/images/0.23.0/smithers-pwa.png` |
-| `docs/images/0.25.0/review-diff.png` | `docs/public/images/0.25.0/review-diff.png` | `/images/0.25.0/review-diff.png` |
-| `docs/images/0.25.0/time-travel.png` | `docs/public/images/0.25.0/time-travel.png` | `/images/0.25.0/time-travel.png` |
-| `docs/images/0.25.0/ui-preview.png` | `docs/public/images/0.25.0/ui-preview.png` | `/images/0.25.0/ui-preview.png` |
-| `docs/images/0.25.0/watch-runs.png` | `docs/public/images/0.25.0/watch-runs.png` | `/images/0.25.0/watch-runs.png` |
-| `docs/images/0.27.0/hero.svg` | `docs/public/images/0.27.0/hero.svg` | `/images/0.27.0/hero.svg` |
-| `docs/images/0.28.0/hero.svg` | `docs/public/images/0.28.0/hero.svg` | `/images/0.28.0/hero.svg` |
-| `docs/images/0.28.0/monitor-live.gif` | `docs/public/images/0.28.0/monitor-live.gif` | `/images/0.28.0/monitor-live.gif` |
-| `docs/images/0.28.0/monitor-tour.gif` | `docs/public/images/0.28.0/monitor-tour.gif` | `/images/0.28.0/monitor-tour.gif` |
-| `docs/images/0.29.0/hero.svg` | `docs/public/images/0.29.0/hero.svg` | `/images/0.29.0/hero.svg` |
-| `docs/images/0.29.0/microsandbox.svg` | `docs/public/images/0.29.0/microsandbox.svg` | `/images/0.29.0/microsandbox.svg` |
-| `docs/images/0.29.0/release-shape.svg` | `docs/public/images/0.29.0/release-shape.svg` | `/images/0.29.0/release-shape.svg` |
-| `docs/images/0.30.0/hero.svg` | `docs/public/images/0.30.0/hero.svg` | `/images/0.30.0/hero.svg` |
-| `docs/images/0.30.0/monitor-overview.png` | `docs/public/images/0.30.0/monitor-overview.png` | `/images/0.30.0/monitor-overview.png` |
-| `docs/images/0.30.0/monitor-run-detail.png` | `docs/public/images/0.30.0/monitor-run-detail.png` | `/images/0.30.0/monitor-run-detail.png` |
-| `docs/images/0.30.0/ui-agentic.png` | `docs/public/images/0.30.0/ui-agentic.png` | `/images/0.30.0/ui-agentic.png` |
-| `docs/images/0.30.0/ui-approvals.png` | `docs/public/images/0.30.0/ui-approvals.png` | `/images/0.30.0/ui-approvals.png` |
-| `docs/images/0.30.0/ui-canvas.png` | `docs/public/images/0.30.0/ui-canvas.png` | `/images/0.30.0/ui-canvas.png` |
-| `docs/images/0.30.0/ui-chart.png` | `docs/public/images/0.30.0/ui-chart.png` | `/images/0.30.0/ui-chart.png` |
-| `docs/images/0.30.0/ui-chat.png` | `docs/public/images/0.30.0/ui-chat.png` | `/images/0.30.0/ui-chat.png` |
-| `docs/images/0.30.0/ui-prompt.png` | `docs/public/images/0.30.0/ui-prompt.png` | `/images/0.30.0/ui-prompt.png` |
-| `docs/images/0.31.0/monitor-live.gif` | `docs/public/images/0.31.0/monitor-live.gif` | `/images/0.31.0/monitor-live.gif` |
-| `docs/images/0.31.0/monitor-tour.gif` | `docs/public/images/0.31.0/monitor-tour.gif` | `/images/0.31.0/monitor-tour.gif` |
-| `docs/images/0.32.0/monitor-live.gif` | `docs/public/images/0.32.0/monitor-live.gif` | `/images/0.32.0/monitor-live.gif` |
-| `docs/images/0.32.0/monitor-tour.gif` | `docs/public/images/0.32.0/monitor-tour.gif` | `/images/0.32.0/monitor-tour.gif` |
-| `docs/images/0.33.1/monitor-live.gif` | `docs/public/images/0.33.1/monitor-live.gif` | `/images/0.33.1/monitor-live.gif` |
-| `docs/images/0.33.1/monitor-tour.gif` | `docs/public/images/0.33.1/monitor-tour.gif` | `/images/0.33.1/monitor-tour.gif` |
-| `docs/images/studio-2/command-palette.gif` | `docs/public/images/studio-2/command-palette.gif` | `/images/studio-2/command-palette.gif` |
-| `docs/images/studio-2/devtools.png` | `docs/public/images/studio-2/devtools.png` | `/images/studio-2/devtools.png` |
-| `docs/images/studio-2/home.png` | `docs/public/images/studio-2/home.png` | `/images/studio-2/home.png` |
-| `docs/images/studio-2/runs-live.gif` | `docs/public/images/studio-2/runs-live.gif` | `/images/studio-2/runs-live.gif` |
-| `docs/images/studio-2/workspace-terminal.png` | `docs/public/images/studio-2/workspace-terminal.png` | `/images/studio-2/workspace-terminal.png` |
-| `docs/images/unidirectional-dataflow.jpg` | `docs/public/images/unidirectional-dataflow.jpg` | `/images/unidirectional-dataflow.jpg` |
-| `docs/images/why/_record/crash-resume.tape` | `docs/public/images/why/_record/crash-resume.tape` | `/images/why/_record/crash-resume.tape` |
-| `docs/images/why/_record/model-swap.tape` | `docs/public/images/why/_record/model-swap.tape` | `/images/why/_record/model-swap.tape` |
-| `docs/images/why/any-agent.png` | `docs/public/images/why/any-agent.png` | `/images/why/any-agent.png` |
-| `docs/images/why/crash-resume.gif` | `docs/public/images/why/crash-resume.gif` | `/images/why/crash-resume.gif` |
-| `docs/images/why/render-loop.svg` | `docs/public/images/why/render-loop.svg` | `/images/why/render-loop.svg` |
-| `docs/images/why/runs-live.gif` | `docs/public/images/why/runs-live.gif` | `/images/why/runs-live.gif` |
-| `docs/images/why/task-fork.gif` | `docs/public/images/why/task-fork.gif` | `/images/why/task-fork.gif` |
-| `docs/images/why/three-layer-stack.svg` | `docs/public/images/why/three-layer-stack.svg` | `/images/why/three-layer-stack.svg` |
-| `docs/images/workflow-ui/implement.png` | `docs/public/images/workflow-ui/implement.png` | `/images/workflow-ui/implement.png` |
-| `docs/images/workflow-ui/review.png` | `docs/public/images/workflow-ui/review.png` | `/images/workflow-ui/review.png` |
-
 ### Changelogs
 
 45 files. a vocs page in the changelogs section.

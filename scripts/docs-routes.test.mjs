@@ -14,15 +14,15 @@ test("escapes a dot so a glob cannot match a neighbour", () => {
 })
 
 test("maps a moved asset back to the path the ledger names", () => {
-  assert.equal(originalPath("docs/public/images/0.23.0/a.png"), "docs/images/0.23.0/a.png")
+  assert.equal(originalPath("public/images/0.23.0/a.png"), "docs/images/0.23.0/a.png")
   assert.equal(originalPath("docs/pages/changelogs/0.35.0.mdx"), "docs/changelogs/0.35.0.mdx")
   assert.equal(originalPath("docs/data/sota-models.json"), "docs/data/sota-models.json")
 })
 
 test("every placement declares where it moved to and why", () => {
   for (const placement of placements) {
-    assert.ok(placement.from.startsWith("docs/"))
-    assert.ok(placement.to.startsWith("docs/"))
+    assert.ok(placement.from.startsWith("docs/"), `${placement.from} is not a documentation path`)
+    assert.ok(placement.to.length > 0)
     assert.ok(placement.note.length > 20, `${placement.from} needs a reason a reader can use`)
   }
 })

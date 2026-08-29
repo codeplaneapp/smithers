@@ -9,9 +9,9 @@ you, live chat and fleet widgets to put in them, a Monitor redesigned around
 triage, a hardened browser viewer, and a new `smithers oneshot` command for
 single-task asks. 233 commits, no breaking changes.
 
-<Frame caption="Smithers 0.30.0: an agentic UI kit, a triage-first Monitor, and oneshot.">
- <img src="/images/0.30.0/hero.svg" alt="Smithers 0.30.0 release card listing the headline features" />
-</Frame>
+<img src="/images/0.30.0/hero.svg" alt="Smithers 0.30.0 release card listing the headline features" />
+
+*Smithers 0.30.0: an agentic UI kit, a triage-first Monitor, and oneshot.*
 
 ## Upgrading
 
@@ -32,9 +32,9 @@ builds that UI for you. What it can build just took a big step up:
 chat, reasoning, tool calls, plans, approvals, checkpoints, attachments,
 sources, a workflow canvas, and more.
 
-<Frame caption="Message, Reasoning, ToolCall (with an approval slot), MessageResponse, and Sources, composed rather than hand-rolled.">
- <img src="/images/0.30.0/ui-chat.png" alt="A dark-themed agent chat built from Smithers components: a user bubble, an expandable reasoning trace, two tool-call panels, a markdown answer, and a sources list" />
-</Frame>
+<img src="/images/0.30.0/ui-chat.png" alt="A dark-themed agent chat built from Smithers components: a user bubble, an expandable reasoning trace, two tool-call panels, a markdown answer, and a sources list" />
+
+*Message, Reasoning, ToolCall (with an approval slot), MessageResponse, and Sources, composed rather than hand-rolled.*
 
 ```tsx
 import { Message, Reasoning, ReasoningSummary, ToolCall, MessageResponse, Sources } from "smthrs/ui";
@@ -49,17 +49,17 @@ import { Message, Reasoning, ReasoningSummary, ToolCall, MessageResponse, Source
 </Message>
 ```
 
-<Frame caption="Plan with live TaskItem rows, and ChainOfThought. The agent's work reads as progress, not a log.">
- <img src="/images/0.30.0/ui-agentic.png" alt="A collapsible release plan with done, active, and pending steps and task rows showing file badges and elapsed time, above a chain-of-thought step list" />
-</Frame>
+<img src="/images/0.30.0/ui-agentic.png" alt="A collapsible release plan with done, active, and pending steps and task rows showing file badges and elapsed time, above a chain-of-thought step list" />
 
-<Frame caption="ApprovalCard and durable Checkpoints. Decide, or rewind, without leaving the UI.">
- <img src="/images/0.30.0/ui-approvals.png" alt="An approval card for a production deploy with risk badge, affected resources, and approve and deny buttons, above two checkpoint rows with restore, fork, replay, and rewind actions" />
-</Frame>
+*Plan with live TaskItem rows, and ChainOfThought. The agent's work reads as progress, not a log.*
 
-<Frame caption="PromptInput with attachments, upload states and progress included.">
- <img src="/images/0.30.0/ui-prompt.png" alt="A dark-themed prompt composer with two attachment chips, one mid-upload with a progress bar, a drafted message, and a send button" />
-</Frame>
+<img src="/images/0.30.0/ui-approvals.png" alt="An approval card for a production deploy with risk badge, affected resources, and approve and deny buttons, above two checkpoint rows with restore, fork, replay, and rewind actions" />
+
+*ApprovalCard and durable Checkpoints. Decide, or rewind, without leaving the UI.*
+
+<img src="/images/0.30.0/ui-prompt.png" alt="A dark-themed prompt composer with two attachment chips, one mid-upload with a progress bar, a drafted message, and a send button" />
+
+*PromptInput with attachments, upload states and progress included.*
 
 Everything shares one design language: light and dark out of the box,
 consistent status colors, accessible by construction. That matters because it
@@ -105,9 +105,9 @@ See the gateway-ui reference.
 The Monitor used to answer one question, is it done yet? It now answers the
 question you actually have: **what needs me right now?**
 
-<Frame caption="The overview: pending approvals and recent failures in 'Needs you', live runs in 'Active now', everything else below the fold.">
- <img src="/images/0.30.0/monitor-overview.png" alt="The Smithers Monitor overview in dark theme, showing a Needs you band with three pending approvals and a failed run, an Active now band with one live run, and an all-runs table" />
-</Frame>
+<img src="/images/0.30.0/monitor-overview.png" alt="The Smithers Monitor overview in dark theme, showing a Needs you band with three pending approvals and a failed run, an Active now band with one live run, and an all-runs table" />
+
+*The overview: pending approvals and recent failures in 'Needs you', live runs in 'Active now', everything else below the fold.*
 
 - **Needs you**: pending approvals, human-parked runs, and failures from the
   last 24h, with approve/deny inline.
@@ -117,9 +117,9 @@ question you actually have: **what needs me right now?**
 - A **keyboard kit** for mouse-free triage: `/` to search, `j`/`k` to move,
   `Enter` to open, `Esc` to back out.
 
-<Frame caption="Run detail: the execution tree, a structured event log, and collapsible inspector blocks that stop polling when closed.">
- <img src="/images/0.30.0/monitor-run-detail.png" alt="A Monitor run detail page in dark theme with an approvals rail, execution tree, and structured event log" />
-</Frame>
+<img src="/images/0.30.0/monitor-run-detail.png" alt="A Monitor run detail page in dark theme with an approvals rail, execution tree, and structured event log" />
+
+*Run detail: the execution tree, a structured event log, and collapsible inspector blocks that stop polling when closed.*
 
 Every inspector block (Details, Prompt, Tool calls, Transcript, Output, Diff)
 is now collapsible and unmounts when closed, so a collapsed Transcript stops
@@ -130,9 +130,9 @@ task's initial prompt. See the Monitor guide.
 
 Two more pieces for custom UIs, both shown above in spirit:
 
-<Frame caption="The chart adapter: validated categorical colors, correct in light and dark.">
- <img src="/images/0.30.0/ui-chart.png" alt="An area chart of tasks landed and in flight over five days, with a legend and tooltips, built with the Smithers chart adapter" />
-</Frame>
+<img src="/images/0.30.0/ui-chart.png" alt="An area chart of tasks landed and in flight over five days, with a legend and tooltips, built with the Smithers chart adapter" />
+
+*The chart adapter: validated categorical colors, correct in light and dark.*
 
 ```tsx
 import { ChartContainer, chartConfig } from "smthrs/ui/adapters/chart";
@@ -142,9 +142,9 @@ import { ChartContainer, chartConfig } from "smthrs/ui/adapters/chart";
 </ChartContainer>
 ```
 
-<Frame caption="The workflow canvas anatomy: node cards, edge legends, and canvas chrome for a run's graph.">
- <img src="/images/0.30.0/ui-canvas.png" alt="A workflow canvas with four status-tinted node cards, an edge legend, and zoom controls" />
-</Frame>
+<img src="/images/0.30.0/ui-canvas.png" alt="A workflow canvas with four status-tinted node cards, an edge legend, and zoom controls" />
+
+*The workflow canvas anatomy: node cards, edge legends, and canvas chrome for a run's graph.*
 
 Charts ship from their own subpath so the base library stays light; the
 canvas anatomy (`WorkflowCanvas`, `WorkflowNode`, edge legends, controls) is

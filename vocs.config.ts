@@ -3,7 +3,8 @@ import { defineConfig } from "vocs/config"
 /**
  * The Smithers documentation site.
  *
- * `docs/pages` is the whole site and `docs/public` is served at its root. The
+ * `docs/pages` is the whole site and the repository's `public/` is served at its
+ * root, which is where vocs resolves static assets from. The
  * CLI, control, release, changelog-index, and route-plan sections are generated
  * by `scripts/generate-docs-pages.mjs`; the sidebar below names them once so a
  * new command or RPC needs no edit here.

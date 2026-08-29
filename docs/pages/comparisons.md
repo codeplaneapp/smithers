@@ -60,6 +60,34 @@ Build systems persist nothing about a run in progress.
 
 **Time travel.** `@smthrs/time-travel` forks, rewinds, and compensates over recorded history. A build cache has no history to rewind.
 
+## Compared with workflow engines
+
+A build system is one comparison; a durable workflow engine is the other. The
+table is about shape, not quality: each row is a design choice with a cost.
+
+| | Temporal | LangGraph | Smithers |
+| --- | --- | --- | --- |
+| Recovery model | replay workflow code against event history | re-enter a graph node from checkpointed state | replay the flow body against the journal, skipping recorded actions |
+| What you deploy | a server cluster and worker fleets | your own process plus a checkpoint store | one Node process and a SQLite file |
+| Determinism rules | yes, side effects live in activities | not enforced by the runtime | yes, side effects live in actions |
+| Step identity | the activity's name and sequence | the node's name | a content-addressed step key over inputs, capabilities, and the measured boundary |
+| Typing | SDK types per language | Python types, loosely checked at the edges | Effect Schema on every payload, success, and error, encoded into the journal |
+| Human gates | signals and queries you design | an interrupt you handle | plan-level and node-level approvals that park the run |
+| Host access | unrestricted inside an activity | unrestricted | a closed host list decorated by a capability kernel |
+
+Smithers is closest to Temporal, deliberately: replay against a durable history
+is the same mechanism, and the vendored Effect workflow surface diverges from
+upstream by tightening it rather than loosening it. The differences that matter
+are that a step is addressed by its content rather than by its name, so renaming
+an activity cannot corrupt replay and two runs computing the same work share one
+result; and that the deployment is one process with a file, which is what makes
+the engine embeddable in a CLI or an application rather than a platform a team
+operates.
+
+What Temporal has that this release does not: a cluster, worker fleets,
+multi-language SDKs, visibility search, and schedules. What LangGraph has that
+this release does not: a graph-authoring UI and a Python ecosystem.
+
 ## What Smithers is not
 
 Smithers is not a build tool: no target discovery, no file watcher, no toolchain model, no terminal UI, no executor fleet. For building a monorepo, use TurboRepo, Nx, or Bazel. Smithers is an embeddable engine for programs that need build-system caching discipline over durable, typed, long-running effects.

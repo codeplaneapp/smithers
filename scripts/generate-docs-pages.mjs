@@ -534,7 +534,9 @@ for (const [name, rpc] of rpcEntries) {
     if (rows.length === 0) continue
     body.push(`## ${family.title}`, "", `${rows.length} files. ${rows[0].note}.`, "", "| Was | Is | Route |", "| --- | --- | --- |")
     for (const row of rows) {
-      body.push(`| \`${row.before}\` | \`${row.path}\` | ${row.route === undefined ? "not routed" : `[\`${row.route}\`](${row.route})`} |`)
+      // The route is printed rather than linked: a Markdown link to a static
+      // asset is a dead link to vocs's checker, which only resolves pages.
+      body.push(`| \`${row.before}\` | \`${row.path}\` | ${row.route === undefined ? "not routed" : `\`${row.route}\``} |`)
     }
     body.push("")
   }

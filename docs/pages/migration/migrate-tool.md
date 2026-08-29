@@ -98,7 +98,7 @@ from the rule instead.
 `Mapping.byConstruct(name)` resolves a row for every catalog name. A test keeps
 the table below in sync with `Mapping.rows`.
 
-<!-- mapping table: generated from Mapping.rows, checked by test/Docs.test.ts -->
+{/* mapping table: generated from Mapping.rows, checked by test/Docs.test.ts */}
 
 | Old construct | New target | Module | Class |
 | --- | --- | --- | --- |
