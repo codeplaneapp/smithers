@@ -83,7 +83,11 @@ describe("the run-card phases", () => {
   });
 
   test("every phase has a human label rather than a title-cased slug", () => {
-    expect(formatStatus("quiet")).toBe("Gone quiet");
+    // `quiet` keeps the mechanical fallback on purpose. apps/ui's run card has
+    // always worn a "Quiet" pill and its CardFrames suite pins that string, so
+    // a label entry here would have changed a rendered label rather than added
+    // a missing one.
+    expect(formatStatus("quiet")).toBe("Quiet");
     expect(formatStatus("no-capacity")).toBe("No capacity");
     expect(formatStatus("launching")).toBe("Launching");
     expect(formatStatus("reconnecting")).toBe("Reconnecting");

@@ -136,7 +136,11 @@ export function formatStatus(status: string | undefined): string {
     parked: "Parked",
     launching: "Launching",
     reconnecting: "Reconnecting",
-    quiet: "Gone quiet",
+    // `quiet` is deliberately absent: the mechanical fallback already renders
+    // "Quiet", which is the pill apps/ui's run card has always worn
+    // (apps/ui CardFrames.test.tsx, "a quiet or stopped run card never wears a
+    // Running pill"). A label entry here would change a rendered string, and
+    // this table's Phase 4 additions are additive only.
     stopped: "Stopped",
     "no-capacity": "No capacity",
     ready: "Ready",
