@@ -107,7 +107,3 @@ reference/*
 # origin, so they are never evidence and never belong in the tracked report
 # trail under apps/reports/launch-checklist/.
 apps/reports/launch-checklist/*-dry-run/
-
-# Live seeded-bug eval reports: they spend real inference budget and are not
-# a build input.
-evals/review-seeded-bugs/.report/
