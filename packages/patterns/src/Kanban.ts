@@ -147,8 +147,12 @@ const bound = (value: number): boolean => Number.isSafeInteger(value) && value >
  * The declaration does not drop a quarantined card from the later columns: a
  * plan has no branch, so the card travels on with its marker as `previous` and
  * the column flow decides what a quarantined predecessor means. `run` has the
- * value in hand and does drop it, so a board's declared call count is an upper
- * bound on the calls a pass makes.
+ * value in hand and does drop it. The two paths therefore differ in WHICH
+ * calls happen and not only in how many: an executed declaration calls the
+ * later columns for a quarantined card where a `run` pass makes no call at
+ * all, so a board's declared call count is an upper bound on a pass, and a
+ * column flow reached through the declaration must read its `previous` for a
+ * {@link Quarantine.Quarantined} marker.
  *
  * @category constructors
  * @since 0.1.0
