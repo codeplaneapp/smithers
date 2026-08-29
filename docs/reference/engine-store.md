@@ -11,12 +11,19 @@ This page is the public API reference for the journal-backed `FlowEngine` compos
 ```ts
 const layer = EngineStore.layer({
   owner: { hostId: "worker-a" },
-  journalSource: "engine-a",
-  isAlive: (owner) => checkOwner(owner)
+  journalSource: "engine-a"
 })
 ```
 
-`Options` contains `owner.hostId`, `journalSource`, required `isAlive`, and the optional `clockFireRetryPolicy` — the redispatch `Schedule` for a durable clock whose fire failed, defaulting to exponential from 100ms capped at 30s, forever. It is the same option shape as the engine's `suspendedRetryPolicy`: the built-in behavior is the default, and a deployment supplies its own rather than patching the store. `make(options)` returns a `FlowRuntime` service — the port `@smthrs/flow` declares; `layer(options)` provides both `FlowRuntime` and `FlowEngine.SnapshotBoundary`. The liveness probe is mandatory because silently treating an unknown owner as alive can strand recovery forever.
+`Options` contains `owner.hostId`, `journalSource`, and the optional `isAlive` and `clockFireRetryPolicy`. `clockFireRetryPolicy` is the redispatch `Schedule` for a durable clock whose fire failed, defaulting to exponential from 100ms capped at 30s, forever. It is the same option shape as the engine's `suspendedRetryPolicy`: the built-in behavior is the default, and a deployment supplies its own rather than patching the store. `make(options)` returns a `FlowRuntime` service, the port `@smthrs/flow` declares. `layer(options)` provides both `FlowRuntime` and `FlowEngine.SnapshotBoundary`.
+
+### Liveness and reclaim
+
+`isAlive` decides whether a run whose lease has expired may be stolen. Answering `true` refuses the takeover. The default is `Ownership.leaseLiveness(Ownership.heartbeatStaleAfter)`: the owner counts as alive while its persisted `heartbeat_at_ms` is younger than the staleness cutoff, and gone once it is not. That is the only evidence every host has, and it is what lets a fresh process reclaim the runs of an owner killed with SIGKILL without any application code. The steal it admits carries `lease-expired` evidence, which `RunStore.steal` re-checks against the row inside the same write, so a claimant that lies about the lease loses the compare-and-swap.
+
+A deployment that knows more supplies its own check and refuses the takeover for longer. Such a check is a `process.kill(pid, 0)` probe on the owner's host, or an orchestrator that reports pod liveness. Guard a pid read with `Ownership.sameHostIncarnation(owner, claimant)`: a pid names a process only in its own host's namespace. A supplied check receives the recorded owner and a `LivenessContext` of `{ claimant, heartbeatAtMs, nowMs }`.
+
+The journal says which answer was used. A refusal records `steal-refused-owner-alive` with `evidence: "lease-fresh"` (the lease was still inside the window) or `evidence: "probe"` (the supplied check answered for the owner); a takeover records `stolen-and-activated` with the evidence kind it wrote: `lease-expired`, `same-host-pid-dead`, or `cross-host-unreachable-stale`.
 
 Required services are `Journal`, `RunStore`, `AttemptStore`, `CacheStore`, `DurableEngineState`, kernel `Jj`, `StepBoundary`, `OwnerIdentity`, and `Scope`. `EngineCompositionError` represents an engine that was invoked without a complete composition.
 
@@ -233,3 +240,19 @@ around scoped fibers. `RunDriver` is its only consumer. It is not distributed
 ownership; that is [`@smthrs/run-store`](run-store.md)'s `RunStore`. The shape
 is adapted from opencode's `packages/core/src/session/run-coordinator.ts`,
 which also lives in the session layer.
+
+## Test compositions
+
+`test/TestStores` builds every durable engine service over one database, with
+this package's composed migration set already installed. `layer` uses a private
+in-memory database and keeps `SqlClient` to itself, which is what a case that
+only needs an engine wants. `layerAt(filename)` takes the database by name and
+re-exports the connection alongside `DurableEngineState`, which two other
+shapes need:
+
+- adding another SQL-backed service (a control runtime, say) over the same
+  database as the engine, and
+- pointing two independently constructed bundles at one FILE. That gives two
+  connections, two engines, and no shared object graph, which is what a second
+  process actually has. `:memory:` gives each connection its own private
+  database, so it cannot prove anything durable across compositions.

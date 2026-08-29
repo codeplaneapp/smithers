@@ -13,7 +13,8 @@ import { type Action, Flow, FlowRuntime } from "@smthrs/flow"
 import { FileBoundary } from "@smthrs/flow/FileBoundary"
 import { Journal } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
-import { AttemptStore, type Ownership, RunStore } from "@smthrs/run-store"
+import { AttemptStore, RunStore } from "@smthrs/run-store"
+import type { Ownership } from "@smthrs/run-store"
 import { CacheStore } from "@smthrs/step-cache"
 import type * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
@@ -47,9 +48,23 @@ export interface Options {
     readonly hostId: string
   }
   readonly journalSource: string
-  readonly isAlive: (
-    owner: Ownership.OwnerId
-  ) => Effect.Effect<boolean>
+  /**
+   * Liveness arbitration consulted before this store steals a run whose lease
+   * has expired. Answering `true` refuses the takeover.
+   *
+   * Optional. The default is `Ownership.leaseLiveness(heartbeatStaleAfter)`:
+   * the owner is alive while its persisted heartbeat is younger than the
+   * staleness cutoff, and gone once it is not. That is the weakest honest
+   * answer and the one every host can give, so a composition that supplies
+   * nothing still reclaims the runs of an owner killed with SIGKILL — the
+   * steal it admits carries `lease-expired` evidence, which the run store
+   * verifies against the row in the same write.
+   *
+   * A deployment that can say more supplies its own check and refuses the
+   * takeover for longer: `Ownership.sameHostIncarnation` is the guard a local
+   * `process.kill(pid, 0)` probe applies before reading `owner.pid`.
+   */
+  readonly isAlive?: Ownership.LivenessCheck | undefined
   /**
    * Redispatch policy for a durable clock whose fire failed. Defaults to
    * {@link DeferredPersistence.defaultFireRetryPolicy} — exponential from

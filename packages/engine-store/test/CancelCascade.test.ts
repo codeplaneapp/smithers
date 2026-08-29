@@ -207,13 +207,29 @@ describe("cancellation cascades to linked children", () => {
       expect(result.second).toEqual(result.first)
     }))
 
-  it.effect("does not cascade when the parent completes normally", () =>
+  it.effect("a parent that completes normally ends its attached children and spares a detached one", () =>
     Effect.gen(function*() {
+      // The difference between the two paths is who may opt out. A CANCELLED
+      // parent cascades to every linked descendant: the operator asked for the
+      // subtree to stop, and no child overrides that. A parent that ends on its
+      // own terms applies each child's own `onParentExit`, so a fire-and-forget
+      // spawn outlives it and an attached child does not.
       const result = yield* withCrypto(provide(Effect.gen(function*() {
         const store = yield* RunStore.RunStore
         const engineState = yield* DurableEngineState.DurableEngineState
         const driver = yield* makeDriver("complete")
         const family = yield* seedFamily(store, engineState, "cascade-complete")
+        yield* store.create(
+          "cascade-complete-detached",
+          JSON.stringify({
+            version: 1,
+            flowName: CascadeFlow._tag,
+            payload: {},
+            parentExecutionId: "cascade-complete",
+            onParentExit: "detach"
+          })
+        )
+        yield* engineState.recordRunParent("cascade-complete-detached", "cascade-complete")
 
         yield* driver.register(CascadeFlow, () => Effect.succeed("done"))
         yield* driver.execute(CascadeFlow, {
@@ -223,15 +239,28 @@ describe("cancellation cascades to linked children", () => {
         })
 
         const rows = yield* Effect.forEach(
-          ["cascade-complete", family.childA, family.childB, family.grandchild],
+          [
+            "cascade-complete",
+            family.childA,
+            family.childB,
+            family.grandchild,
+            "cascade-complete-detached",
+            family.unrelated
+          ],
           (runId) => store.get(runId)
         )
         return rows
       })))
 
-      const [parent, ...children] = result
+      const [parent, childA, childB, grandchild, detached, unrelated] = result
       expect(parent!.status).toBe("completed")
-      expect(children.map((row) => row!.cancelRequestedAtMs)).toEqual([null, null, null])
+      // Attached, so they end with the run that was waiting for them —
+      // transitively, over the same durable edge table the cascade walks.
+      expect(childA!.cancelRequestedAtMs).not.toBeNull()
+      expect(childB!.cancelRequestedAtMs).not.toBeNull()
+      expect(grandchild!.cancelRequestedAtMs).not.toBeNull()
+      expect(detached!.cancelRequestedAtMs).toBeNull()
+      expect(unrelated!.cancelRequestedAtMs).toBeNull()
     }))
 })
 

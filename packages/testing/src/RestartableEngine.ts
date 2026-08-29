@@ -30,6 +30,21 @@ interface EngineInstance {
 export interface Restartable {
   readonly engine: EngineSubjectService
   readonly restart: Effect.Effect<void, EngineUnavailableError>
+  /**
+   * Replaces the live instance WITHOUT closing the one it replaces.
+   *
+   * The difference from {@link restart} is the release. A restart closes the
+   * outgoing instance's scope, so its fibers are interrupted and its
+   * finalizers run — the orderly shutdown a process performs when it is asked
+   * to stop. A kill runs neither: the abandoned instance keeps whatever it
+   * held, exactly as SIGKILL leaves a durable owner holding a run it will
+   * never release, which is the state lease-based reclaim has to recover from
+   * (`Ownership.leaseLiveness`).
+   *
+   * The abandoned scope is still closed when the harness's own scope closes,
+   * so a killed instance leaks nothing past the test that killed it.
+   */
+  readonly kill: Effect.Effect<void, EngineUnavailableError>
   readonly killAndResume: (
     executionId: string
   ) => Effect.Effect<ExecutionResult, EngineSubjectError>
@@ -49,8 +64,10 @@ const buildInstance = (
  *
  * `restart` closes the current instance scope, interrupting all of its live
  * execution fibers, and then constructs a fresh engine over the same store.
- * The exposed engine is a stable facade that always delegates to the current
- * instance.
+ * `kill` builds the same fresh engine but leaves the outgoing one running and
+ * unreleased, which is the hard-kill state a lease-based reclaim recovers
+ * from. The exposed engine is a stable facade that always delegates to the
+ * current instance.
  *
  * @category constructors
  * @since 0.0.0
@@ -64,16 +81,35 @@ export const make = (): Effect.Effect<
     const store = yield* makeStore()
     const initial = yield* buildInstance(store)
     const current = yield* Ref.make(initial)
+    /**
+     * Instances dropped by {@link Restartable.kill}. A killed instance is
+     * deliberately left running for the rest of the test, so the harness — not
+     * the kill — owns closing it, and nothing survives the harness scope.
+     */
+    const abandoned = yield* Ref.make<ReadonlyArray<Scope.Closeable>>([])
 
     yield* Effect.addFinalizer((exit) =>
-      Ref.get(current).pipe(
-        Effect.flatMap((instance) => Scope.close(instance.scope, exit))
-      )
+      Effect.gen(function*() {
+        const instance = yield* Ref.get(current)
+        yield* Scope.close(instance.scope, exit)
+        yield* Effect.forEach(
+          yield* Ref.get(abandoned),
+          (scope) => Scope.close(scope, exit),
+          { discard: true }
+        )
+      })
     )
 
     const restart: Effect.Effect<void, EngineUnavailableError> = Effect.gen(function*() {
       const previous = yield* Ref.get(current)
       yield* Scope.close(previous.scope, Exit.void)
+      const next = yield* buildInstance(store)
+      yield* Ref.set(current, next)
+    })
+
+    const kill: Effect.Effect<void, EngineUnavailableError> = Effect.gen(function*() {
+      const previous = yield* Ref.get(current)
+      yield* Ref.update(abandoned, (scopes) => [...scopes, previous.scope])
       const next = yield* buildInstance(store)
       yield* Ref.set(current, next)
     })
@@ -97,6 +133,7 @@ export const make = (): Effect.Effect<
     return {
       engine,
       restart,
+      kill,
       killAndResume: (executionId) =>
         restart.pipe(
           Effect.andThen(withEngine((subject) => subject.resume(executionId)))

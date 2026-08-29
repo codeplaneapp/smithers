@@ -18,12 +18,42 @@ import * as Schema from "effect/Schema"
 const PositiveSafeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
 /**
+ * What a linked child does when the run that spawned it ends.
+ *
+ * `cancel` is the default and the shape a `.child()` boundary takes: the
+ * parent is waiting on this child, so a parent that stops waiting — because it
+ * completed, failed, or was cancelled — leaves nothing behind. `detach` is the
+ * shape a fire-and-forget spawn takes: the parent deliberately did not wait,
+ * so the child outlives it and keeps its own claim and its own journal.
+ *
+ * The policy is recorded on the CHILD rather than on the edge because it is a
+ * property of how the child was started, and because a child with two parents
+ * (the diamond `flows_run_parents` permits) must answer the question once.
+ *
+ * @since 0.1.0
+ * @category schemas
+ * @slop
+ */
+export const OnParentExit = Schema.Literals(["cancel", "detach"])
+
+/**
+ * The value form of {@link OnParentExit}.
+ *
+ * @since 0.1.0
+ * @category models
+ * @slop
+ */
+export type OnParentExit = typeof OnParentExit.Type
+
+/**
  * The versioned state stored for a durable flow run: which flow it is, the
  * encoded `payload` it was started with, and — as they arrive — its
  * `result` and its cancellation timestamp.
  *
  * `parentExecutionId` is present only on a child run, and is what makes a
- * spawned subflow reachable from the run that spawned it.
+ * spawned subflow reachable from the run that spawned it. `onParentExit`
+ * travels with it: it is what the parent's terminal transition reads to decide
+ * whether this child ends with it.
  *
  * @since 0.1.0
  * @category schemas
@@ -34,6 +64,7 @@ export const RunState = Schema.Struct({
   flowName: Schema.NonEmptyString,
   payload: Schema.Unknown,
   parentExecutionId: Schema.optionalKey(Schema.NonEmptyString),
+  onParentExit: Schema.optionalKey(OnParentExit),
   maxRounds: Schema.optionalKey(PositiveSafeInt),
   result: Schema.optionalKey(Schema.Unknown),
   cancellation: Schema.optionalKey(Schema.Struct({

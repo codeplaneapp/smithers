@@ -14,7 +14,7 @@
  */
 import { OwnerId } from "@smthrs/journal/OwnerId"
 import { Clock, Duration, Effect, Schema } from "effect"
-import { heartbeatInterval, heartbeatWriteTolerance } from "./Heartbeat.ts"
+import { heartbeatInterval, heartbeatStaleAfter, heartbeatWriteTolerance } from "./Heartbeat.ts"
 import { RunStore } from "./RunStore.ts"
 
 export {
@@ -31,13 +31,22 @@ export {
 /**
  * Evidence that the owner in an exact run snapshot is no longer live.
  *
+ * Two of the three kinds are collected outside the store: `same-host-pid-dead`
+ * is a local process probe, and `cross-host-unreachable-stale` is a
+ * reachability judgement the deployment makes. `lease-expired` is different —
+ * it asserts only that the persisted heartbeat is older than the staleness
+ * cutoff, which is the one claim the store can check for itself, and `steal`
+ * checks it: the write refuses any row whose `heartbeat_at_ms` is still inside
+ * the window. It is therefore accepted from a claimant on any host, while the
+ * other two stay bound to the host relation that makes them meaningful.
+ *
  * @since 0.1.0
  * @category models
  */
 export const LivenessEvidence = Schema.Struct({
   expectedOwner: OwnerId,
   checkedAtMs: Schema.Number,
-  kind: Schema.Literals(["same-host-pid-dead", "cross-host-unreachable-stale"])
+  kind: Schema.Literals(["same-host-pid-dead", "cross-host-unreachable-stale", "lease-expired"])
 })
 
 /**
@@ -65,6 +74,89 @@ export type LivenessProbe<E = never, R = never> = (
   claimant: OwnerId,
   checkedAtMs: number
 ) => Effect.Effect<LivenessEvidence | undefined, E, R>
+
+/**
+ * What a liveness check knows about the run it is asked about, beyond the
+ * owner recorded on it.
+ *
+ * The lease is here because it is the only liveness signal every deployment
+ * has: `heartbeatAtMs` is the last heartbeat the owner persisted, `nowMs` is
+ * the reading the arbitration is made against, and `claimant` is the identity
+ * that would take the run over. A check that wants to probe a pid compares
+ * hosts with {@link sameHostIncarnation} first; a check that has nothing but
+ * the lease uses {@link leaseLiveness}.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface LivenessContext {
+  readonly claimant: OwnerId
+  readonly heartbeatAtMs: number | null
+  readonly nowMs: number
+}
+
+/**
+ * The question ownership arbitration asks before it steals a run: is the
+ * recorded owner still working?
+ *
+ * Answering `true` refuses the takeover. The engine consults this only for a
+ * run whose lease has already expired, so a check that has no better evidence
+ * than the lease answers `false` there — which is exactly what
+ * {@link leaseLiveness} does.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type LivenessCheck = (
+  expectedOwner: OwnerId,
+  context: LivenessContext
+) => Effect.Effect<boolean>
+
+/**
+ * Whether two owner identities are incarnations on the same host.
+ *
+ * The predicate a probe applies before it inspects a pid: `owner.pid` names a
+ * process in the claimant's own process namespace only when the hosts match,
+ * so a cross-host probe that read it would be answering about an unrelated
+ * process. Exposed because the check that needs it — a
+ * `process.kill(pid, 0)` probe — belongs to a platform package rather than
+ * here.
+ *
+ * @since 0.1.0
+ * @category ownership
+ */
+export const sameHostIncarnation = (
+  expectedOwner: OwnerId,
+  claimant: OwnerId
+): boolean => expectedOwner.hostId === claimant.hostId
+
+/**
+ * The default liveness check: the lease, and nothing else.
+ *
+ * An owner is treated as alive for as long as its persisted heartbeat is
+ * younger than `staleAfter`, and as gone once it is not. That is the weakest
+ * honest answer, and it is the one every host can give: a fresh process with
+ * no application code at all can reclaim a hard-killed owner's runs once the
+ * lease it stopped renewing has expired. A deployment that can say more — a
+ * pid probe on the owner's host, an orchestrator that reports pod liveness —
+ * supplies its own {@link LivenessCheck} and refuses the takeover for longer.
+ *
+ * An owner with no recorded heartbeat holds no lease and is reported gone; the
+ * steal it enables is still gated by the store's own snapshot compare-and-swap.
+ *
+ * @since 0.1.0
+ * @category ownership
+ */
+export const leaseLiveness = (
+  staleAfter: Duration.Input = heartbeatStaleAfter
+): LivenessCheck => {
+  const staleAfterMs = Duration.toMillis(staleAfter)
+  return (_expectedOwner, context) =>
+    Effect.succeed(
+      context.heartbeatAtMs !== null &&
+        context.heartbeatAtMs >= context.nowMs - staleAfterMs
+    )
+}
 
 export {
   /**

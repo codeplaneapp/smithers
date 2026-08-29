@@ -22,7 +22,7 @@ or constructor options — see [design decisions](design-decisions.md).
 | # | Audit area | Pre-hardening status | Status now |
 | --- | --- | --- | --- |
 | 1 | Waiting-reason taxonomy | partial | **closed** |
-| 2 | Fenced claim + owner liveness | fencing only; liveness missing | **closed** (lease/heartbeat), one browser caveat |
+| 2 | Fenced claim + owner liveness | fencing only; liveness missing | **closed** (lease/heartbeat, lease-expiry default) |
 | 3 | Journal append fencing | missing | **closed** |
 | 4 | Pause / cancel / hijack with attribution | missing | **partial** — cancel closed, pause = park, hijack + attribution missing |
 | 5 | Continue-as-new lineage | missing | **partial** — lineage edge closed, `Continued` terminal missing |
@@ -67,10 +67,15 @@ and `attempts.finish` leaves exactly one durable completion.
 **Caveat:** the pid half is closed — `EngineStore` mints owner identity through
 the `OwnerIdentity` port, whose default draws from `Random` where the platform
 has no process, so the store now meets the browser-host requirement (see
-[implementation-status](implementation-status.md) cautions). What remains is
-cross-host liveness: `EngineStore.Options.isAlive` is still
-application-supplied. Done = a default `isAlive` derived from lease expiry
-alone.
+[implementation-status](implementation-status.md) cautions). Cross-host liveness
+is closed too: `EngineStore.Options.isAlive` is optional and defaults to
+`Ownership.leaseLiveness(Ownership.heartbeatStaleAfter)`, which answers from the
+lease alone, so a fresh process reclaims a hard-killed owner's runs with no
+application code. The steal it admits carries `lease-expired` evidence that
+`RunStore.steal` re-verifies against the row in the same write. A deployment
+that can say more supplies its own check and refuses the takeover for longer.
+Such a check is a pid probe guarded by `Ownership.sameHostIncarnation`, or an
+orchestrator's report of pod liveness.
 
 ### 3. Journal append fencing — closed
 

@@ -72,6 +72,12 @@ export * as PromoteFlows from "./PromoteFlows.ts"
 export * as FlowStore from "./FlowStore.ts"
 
 /**
+ * @category constructors
+ * @since 0.1.0
+ */
+export * as EngineChildren from "./EngineChildren.ts"
+
+/**
  * @category services
  * @since 0.1.0
  */

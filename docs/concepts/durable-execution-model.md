@@ -22,7 +22,9 @@ pending → running → completed
 
 Only `running` runs have an owner. A driver reads the exact persisted snapshot, claims it, activates the claim, and maintains a heartbeat. Moving to `suspended` or a terminal status clears owner and heartbeat atomically.
 
-All start and wake paths enter the same keyed `RunCoordinator`, so concurrent callers either join one local drain or race through the same database claim. A stale owner may be replaced only after the heartbeat is at least 30 seconds old and the application’s liveness probe reports it dead or unreachable.
+A run that reaches a terminal status also ends the children linked to it. The same transaction that writes `completed` or `failed` cancel-requests every attached descendant and leaves every detached one running, so a crash cannot commit a finished parent over a live child. See [Subflows](subflows.md).
+
+All start and wake paths enter the same keyed `RunCoordinator`, so concurrent callers either join one local drain or race through the same database claim. A stale owner may be replaced only after its heartbeat is at least 30 seconds old. By default the expired lease is the whole answer, so a fresh process reclaims the runs of an owner that died without releasing them. A deployment that can probe the owner supplies `EngineStore.Options.isAlive` and the takeover waits for that probe to report the owner gone.
 
 ## Replay from the top
 
@@ -88,7 +90,7 @@ Ordinary TypeScript and Effect combinators are not individually journaled. Durab
 - `DurableDeferred`;
 - durable clocks;
 - durable queues built from deferreds and Effect’s persisted queue;
-- child flow execution;
+- child flow execution, attached or detached;
 - explicit journal or time-travel effect boundaries.
 
 Calling an API, reading the filesystem, generating randomness, or consulting wall-clock time outside one of those boundaries can make replay diverge. Host services make these dependencies injectable, but injection alone does not record their results.

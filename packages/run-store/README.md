@@ -13,7 +13,10 @@ describing it in ONE write transaction, because both write through the same
 
 `Ownership` supplies the liveness evidence, probes, and heartbeat supervision
 that arbitrate a run's owner. `RunStore` only _validates_ supplied evidence; it
-never probes a process or a network itself.
+never probes a process or a network itself. The one claim it can check for
+itself is the lease, which is why `lease-expired` evidence is accepted from any
+observer and re-verified by `steal`; `leaseLiveness` is the default answer an
+engine uses when the deployment supplies no probe of its own.
 
 ```sh
 pnpm add @smthrs/run-store
@@ -27,7 +30,7 @@ The root exports these namespaces, also available from matching
 | Namespace      | Public exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `RunStore`     | `RunStatus`, `RunStoreErrorCode`, `RunStoreError`, `RunSnapshot`, `RunRow`, `CreateOptions`, and `TransitionGuard`; outcome types `RequestCancelOutcome`, `ClaimOutcome`, `ClaimAndOwnOutcome`, `ActivateOutcome`, `AbandonClaimOutcome`, `RecoverClaimOutcome`, `HeartbeatOutcome`, and `TransitionOutcome`; `Service` / `RunStore` for create/get/cancel, claim/activate/recover/steal, heartbeat, and owned transitions; `make`, `makeNoop`, `layerNoop`, and SQL `layer`. |
-| `Ownership`    | `OwnerId` (re-exported from `@smthrs/journal`, which defines it as the fence on durable appends), `LivenessEvidence`, `LivenessProbe`, `heartbeatInterval`, `heartbeatStaleAfter`, `heartbeatSkewAllowance`, `heartbeatWriteTolerance`, and `heartbeatLoop`.                                                                                                                                                                                                                  |
+| `Ownership`    | `OwnerId` (re-exported from `@smthrs/journal`, which defines it as the fence on durable appends), `LivenessEvidence`, `LivenessProbe`, `LivenessCheck`, `LivenessContext`, `leaseLiveness`, `sameHostIncarnation`, `heartbeatInterval`, `heartbeatStaleAfter`, `heartbeatSkewAllowance`, `heartbeatWriteTolerance`, and `heartbeatLoop`.                                                                                                                                      |
 | `AttemptStore` | `AttemptStoreErrorCode`, `AttemptStoreError`, `AttemptId`, `Attempt`, `FinishAttempt`, `AttemptPatch`, `Options`, and result types `PutResult`, `PatchResult`, `HeartbeatResult`, `FinishResult`; `Service` / `AttemptStore` operations `put`, `get`, `heartbeat`, `finish`, and `patch`; `makeWith`, `make`, `makeNoop`, `layerNoop`, `layer`, and `layerWith`.                                                                                                              |
 | `Migrations`   | `set` (the namespaced migration set for `flows_runs` and `flows_attempts`), `run`, and prerequisite `layer`.                                                                                                                                                                                                                                                                                                                                                                  |
 

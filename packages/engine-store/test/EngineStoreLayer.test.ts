@@ -230,7 +230,7 @@ describe("EngineStore.make liveness", () => {
     }))
 
   // Real elapsed time: `it.effect`'s TestClock would stall this.
-  it.live("uses the required liveness probe, so a live foreign owner is never stolen from", () =>
+  it.live("uses a supplied liveness probe, so a live foreign owner is never stolen from", () =>
     Effect.gen(function*() {
       let executions = 0
       const result = yield* withCrypto(
@@ -281,6 +281,62 @@ describe("EngineStore.make liveness", () => {
         .filter((entry) => entry.eventType === "flows.engine.run-decision")
         .map((entry) => (entry.payload as { decision: string }).decision)
       expect(decisions).toContain("steal-refused-owner-alive")
+    }))
+
+  // Real elapsed time, for the same reason as the probe case above.
+  it.live("reclaims an abandoned run with no liveness probe supplied at all", () =>
+    Effect.gen(function*() {
+      // `Options.isAlive` used to be required, so a composition that had
+      // nothing but the persisted lease could not be written: the honest
+      // answer for a host with no probe is "I do not know", and the only way
+      // to say it was `() => Effect.succeed(true)`, which strands a
+      // hard-killed owner's runs forever. Omitting the option now means the
+      // lease decides.
+      let executions = 0
+      const result = yield* withCrypto(
+        Effect.scoped(Effect.gen(function*() {
+          const store = yield* RunStore.RunStore
+          yield* store.create(
+            "abandoned-run",
+            JSON.stringify({ version: 1, flowName: LayerFlow._tag, payload: {} })
+          )
+          const created = yield* store.get("abandoned-run")
+          const expected = { status: created.status, owner: created.owner, heartbeatAtMs: created.heartbeatAtMs }
+          // The same seeding as the probe case: a foreign owner holding a
+          // `running` row whose lease expired at time 0 and is never renewed,
+          // which is what SIGKILL leaves behind.
+          const owned = yield* store.claimAndOwn("abandoned-run", expected, otherOwner, 0)
+          expect(owned._tag).toBe("Activated")
+
+          const engine = yield* EngineStore.make({
+            owner: { hostId: "layer-host" },
+            journalSource: "layer-test"
+          })
+          yield* engine.register(
+            LayerFlow,
+            () =>
+              Effect.sync(() => {
+                executions++
+                return "reclaimed"
+              })
+          )
+          yield* engine.resume(LayerFlow, "abandoned-run")
+          const journal = yield* Journal.Journal
+          yield* journal.flush
+          const entries = yield* journal.entries({ runId: "abandoned-run" as never, limit: 100 })
+          return { row: yield* store.get("abandoned-run"), entries: entries.entries }
+        })).pipe(
+          Effect.provide(baseLayers(recordingJj([]), DurableEngineState.makeMemory()))
+        )
+      )
+
+      expect(executions).toBe(1)
+      expect(result.row.status).toBe("completed")
+      const steals = result.entries
+        .filter((entry) => entry.eventType === "flows.engine.run-decision")
+        .map((entry) => entry.payload as { readonly decision: string; readonly evidence?: string })
+        .filter((decision) => decision.decision === "stolen-and-activated")
+      expect(steals).toEqual([expect.objectContaining({ evidence: "lease-expired" })])
     }))
 
   it.effect("replays an action that declares no idempotency key from its own run journal", () =>

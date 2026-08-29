@@ -588,9 +588,22 @@ const evidenceMatchesOwner = (
   evidence: LivenessEvidence
 ): boolean => {
   if (!sameOwner(expectedOwner, evidence.expectedOwner) || evidence.checkedAtMs !== nowMs) return false
-  return evidence.kind === "same-host-pid-dead"
-    ? expectedOwner.hostId === observer.hostId
-    : expectedOwner.hostId !== observer.hostId
+  switch (evidence.kind) {
+    // A pid means nothing outside the host that owns the process namespace.
+    case "same-host-pid-dead":
+      return expectedOwner.hostId === observer.hostId
+    // Unreachability is what a peer host observes; on the owner's own host it
+    // would be an unprobed guess dressed as evidence.
+    case "cross-host-unreachable-stale":
+      return expectedOwner.hostId !== observer.hostId
+    // The lease is host-neutral, and the claim it makes is the one the write
+    // below verifies for itself (`heartbeat_at_ms < nowMs - heartbeatStaleAfterMs`,
+    // and `claimed_at_ms` for `recoverClaim`). Accepting it from any observer
+    // is therefore not a widening of trust: an observer that lies about the
+    // lease loses the compare-and-swap.
+    case "lease-expired":
+      return true
+  }
 }
 
 /**

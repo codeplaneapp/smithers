@@ -50,6 +50,12 @@ The first three build on each other. `01` shows what the two nouns are with noth
 
 `35` is the shared tier. Three declarations have to line up before a step result can travel, and the example names all three: the action declares an `idempotencyKey` so another machine can derive the same identity, it declares a hard file boundary so the step is hermetic enough to cache, and the composition declares a complete cache environment through `Action.layerCacheEnvironment` — beneath the engine, where the dispatch reads it. Missing any one of them scopes the key to its own run, and two engines then derive two digests and never meet. The example serves the action-cache half over plain HTTP on loopback; `RemoteArtifacts` refuses a non-HTTPS endpoint because those options carry credentials, so a shared artifact tier belongs behind TLS.
 
+## Detached children
+
+`36` spawns a child that outlives the run that started it. The parent's one step calls `Children.spawn`, which starts the named flow as a run of its own (its own row, its own claim, its own journal) and answers once that row exists durably. The parent then COMPLETES while the child is still going, and the assertions read the two run rows: the parent is `completed` and the child carries no cancellation request, because a spawn that discarded its result records `onParentExit: "detach"` on the child and a terminal parent leaves such a child alone. Phase two builds a second engine over the same file, with a different owner and nothing carried over in memory, and collects the child's output through `Children.await`.
+
+The child port is `EngineChildren`, and it depends on three services: the flow runtime that starts and polls executions, the run store that says whether a child exists, and the control plane that steers one. The example wires a real control plane over the engine's own database rather than stubbing it, because that is the composition a host copies.
+
 ## The shared durable layer
 
 `examples/src/durable-layer.ts` composes what `EngineStore.layer` needs: the journal and its three stores, the durable deferred and clock state, a kernel `Jj`, and a `StepBoundary`, all over one SQLite file. Every persistence example reuses it, which is also why a restart in one example reads the rows a previous phase wrote.

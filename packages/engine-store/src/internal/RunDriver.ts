@@ -23,7 +23,7 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as DurableEngineState from "../DurableEngineState.ts"
 import * as EngineStoreMetrics from "../EngineStoreMetrics.ts"
-import { RunState } from "../RunState.ts"
+import { type OnParentExit, RunState } from "../RunState.ts"
 import * as WakeBus from "../WakeBus.ts"
 import * as ActionPersistence from "./ActionPersistence.ts"
 import * as EffectRecords from "./EffectRecords.ts"
@@ -70,7 +70,14 @@ export type FlowCycleDetected = FlowRuntime.FlowCycleDetected
 export interface Dependencies {
   readonly owner: Ownership.OwnerId
   readonly journalSource: string
-  readonly isAlive: (owner: Ownership.OwnerId) => Effect.Effect<boolean>
+  /**
+   * Liveness arbitration before a steal, consulted only for a run whose lease
+   * has already expired. Optional: the default is
+   * `Ownership.leaseLiveness(Ownership.heartbeatStaleAfter)`, which has no
+   * evidence beyond the lease and therefore reports the owner gone, so a
+   * composition that supplies nothing still reclaims hard-killed runs.
+   */
+  readonly isAlive?: Ownership.LivenessCheck | undefined
   readonly engine: Effect.Effect<FlowRuntime.FlowRuntime["Service"]>
   /**
    * In-process wake bus announced to whenever a durable write makes a run
@@ -202,6 +209,36 @@ export const make = (
     const store = yield* RunStore.RunStore
     const engineState = yield* DurableEngineState.DurableEngineState
     const wakeBus = dependencies.wakeBus ?? WakeBus.makeNoop()
+    /**
+     * The deployment's own liveness answer, if it gave one.
+     *
+     * Kept separate from {@link isAlive} because the two differ in what they
+     * PROVE, and the journal says which was used: a supplied probe reports on
+     * the process (or the host it lives on), while the default reports only
+     * that the lease it stopped renewing has expired.
+     */
+    const suppliedIsAlive = dependencies.isAlive
+    const isAlive: Ownership.LivenessCheck = suppliedIsAlive ??
+      Ownership.leaseLiveness(Ownership.heartbeatStaleAfter)
+    /**
+     * The evidence kind a steal admitted by {@link isAlive} carries.
+     *
+     * `steal` is only reached for a run whose lease has already expired, so
+     * `lease-expired` is always true here; what the supplied-probe kinds add
+     * is WHY the deployment believes the owner is gone, which is the
+     * distinction `RunStore` binds to the host relation.
+     */
+    const livenessEvidenceKind = (
+      expectedOwner: Ownership.OwnerId
+    ): Ownership.LivenessEvidence["kind"] =>
+      suppliedIsAlive === undefined
+        ? "lease-expired"
+        : Ownership.sameHostIncarnation(expectedOwner, dependencies.owner)
+        ? "same-host-pid-dead"
+        : "cross-host-unreachable-stale"
+    /** Owner identity equality, the fence's own notion of "the same process". */
+    const sameOwner = (left: Ownership.OwnerId, right: Ownership.OwnerId): boolean =>
+      left.hostId === right.hostId && left.pid === right.pid && left.nonce === right.nonce
     const registrations = new Map<string, Registration>()
     /**
      * Runs already warned about waking without a registered flow (issue
@@ -346,13 +383,20 @@ export const make = (
      * The decision is emitted only for a `Transitioned` outcome — a lost CAS
      * changed nothing, and its `claim-lost`/`activation-lost` records are
      * emitted by the caller, outside the transaction, so they survive.
+     *
+     * `afterTransitioned` is the seam for work that must commit WITH the
+     * transition or not at all — today, ending the run's linked children on a
+     * terminal exit. It runs only after a successful CAS, so a lost fence
+     * touches nothing, and inside the transaction, so a crash between the two
+     * writes rolls both back.
      */
     const transitionAndRecord = (
       runId: string,
       toStatus: RunStore.RunStatus,
       stateJson: string,
       decision: unknown,
-      guard?: RunStore.TransitionGuard | undefined
+      guard?: RunStore.TransitionGuard | undefined,
+      afterTransitioned?: Effect.Effect<void> | undefined
     ): Effect.Effect<RunStore.TransitionOutcome> =>
       journal.transact(
         Effect.gen(function*() {
@@ -371,6 +415,7 @@ export const make = (
           // `ndc/state_rebuilder.go` is the model). Without it a fork at an
           // early frame silently inherited the parent's *latest* state.
           yield* emitDecision(runId, { ...(decision as object), state: JSON.parse(stateJson) })
+          if (afterTransitioned !== undefined) yield* afterTransitioned
           return transitioned
         })
       ).pipe(Effect.orDie)
@@ -395,6 +440,7 @@ export const make = (
         const expected = snapshot(row)
         const nowMs = yield* Clock.currentTimeMillis
         let claim: RunStore.ClaimOutcome
+        let stealEvidenceKind: Ownership.LivenessEvidence["kind"] | undefined
 
         if (row.status === "running") {
           if (
@@ -402,13 +448,33 @@ export const make = (
             row.heartbeatAtMs === null ||
             row.heartbeatAtMs >= nowMs - Duration.toMillis(Ownership.heartbeatStaleAfter)
           ) {
+            // The lease is the refusal, and no probe is consulted for it: a
+            // probe may be a remote call, and a fresh heartbeat already
+            // answers the question. It is journaled anyway — but only when
+            // another owner holds the run, because refusing to steal from
+            // ourselves is routine re-entry rather than arbitration — so an
+            // operator whose `resume` did nothing can see that a live owner
+            // was in the way (issue #53 follow-up).
+            if (row.owner !== null && !sameOwner(row.owner, dependencies.owner)) {
+              yield* emitDecision(row.runId, {
+                decision: "steal-refused-owner-alive",
+                evidence: "lease-fresh",
+                expectedOwner: row.owner,
+                heartbeatAtMs: row.heartbeatAtMs
+              })
+            }
             yield* Effect.annotateCurrentSpan({ outcome: "heartbeat_fresh" })
             yield* Metric.update(EngineStoreMetrics.claim.HeartbeatFresh, 1)
             return false
           }
-          if (yield* dependencies.isAlive(row.owner)) {
+          if (yield* isAlive(row.owner, { claimant: dependencies.owner, heartbeatAtMs: row.heartbeatAtMs, nowMs })) {
             yield* emitDecision(row.runId, {
               decision: "steal-refused-owner-alive",
+              // Always a supplied probe. The default check is the lease, and
+              // the lease already refused above for every row that could still
+              // be fresh, so reaching this arm means the deployment answered
+              // for the owner with something the store cannot see.
+              evidence: "probe",
               expectedOwner: row.owner,
               heartbeatAtMs: row.heartbeatAtMs
             })
@@ -420,6 +486,7 @@ export const make = (
             })
             return false
           }
+          stealEvidenceKind = livenessEvidenceKind(row.owner)
           claim = yield* store.steal(
             row.runId,
             expected,
@@ -428,9 +495,7 @@ export const make = (
             {
               expectedOwner: row.owner,
               checkedAtMs: nowMs,
-              kind: row.owner.hostId === dependencies.owner.hostId
-                ? "same-host-pid-dead"
-                : "cross-host-unreachable-stale"
+              kind: stealEvidenceKind
             }
           ).pipe(Effect.orDie)
         } else {
@@ -469,7 +534,11 @@ export const make = (
             yield* emitDecision(row.runId, {
               decision: row.status === "running" ? "stolen-and-activated" : "claimed-and-activated",
               previousStatus: row.status,
-              owner: dependencies.owner
+              owner: dependencies.owner,
+              // What admitted the takeover, so an operator reading the journal
+              // can tell a lease that simply expired from a probe that
+              // positively reported the owner gone.
+              ...(stealEvidenceKind === undefined ? {} : { evidence: stealEvidenceKind })
             })
             return activation
           })
@@ -568,6 +637,124 @@ export const make = (
       })
 
     /**
+     * Reads a run row, answering `undefined` for a row that is not there.
+     *
+     * An edge whose child row is gone is not a defect: the schema's
+     * `flows_run_parents_gc` trigger drops edges with the run they belong to,
+     * but a lane that clears rows in a different order (retention, archival)
+     * can leave the edge behind for a moment, and the walks below must not die
+     * on one.
+     */
+    const rowOf = (runId: string): Effect.Effect<RunStore.RunRow | undefined> =>
+      store.get(runId).pipe(
+        Effect.catch((error) =>
+          error.code === "not_found_row"
+            ? Effect.succeed(undefined)
+            : Effect.die(error)
+        )
+      )
+
+    /** The exit policy a child recorded for itself when it was spawned. */
+    const exitPolicyOf = (row: RunStore.RunRow): Effect.Effect<OnParentExit> =>
+      decodeState(row.stateJson).pipe(
+        // A row written before the policy existed, or created outside
+        // `ensureRun` (a seeded edge, an external admission), names none. It
+        // is a LINKED child either way, and the contract for a linked child is
+        // that it ends with the run it belongs to; `detach` is the deliberate
+        // exception and has to be recorded to hold.
+        Effect.map((state) => state.onParentExit ?? "cancel")
+      )
+
+    /**
+     * Applies the per-child exit policy when a run ends on its own terms.
+     *
+     * Cancellation is not this path. A cancelled run cascades to every linked
+     * descendant unconditionally (`requestCancelDescendants`): an operator who
+     * cancels a run is asking for the subtree to stop, and a child cannot opt
+     * out of that. What this closes is the other half — a parent that
+     * COMPLETED or FAILED used to leave every linked child running, so a
+     * `.child()` boundary whose parent died on an unrelated branch left a
+     * durable orphan nothing would ever wait for or cancel.
+     *
+     * Three shapes are left alone, and each for its own reason:
+     *
+     * - A child that recorded `detach` was spawned fire-and-forget. Outliving
+     *   the parent is the whole point, so it is reported, not touched, and its
+     *   own subtree is not walked — those runs hang off a run that is still
+     *   going.
+     * - A child that already settled has nothing to cancel, and it applied
+     *   this same policy to its own children when it settled.
+     * - A child whose row is gone leaves only an edge.
+     *
+     * The requests are written by the caller's transaction — the parent's
+     * terminal compare-and-swap — so a crash cannot commit a completed parent
+     * whose children were never asked to stop.
+     */
+    const endLinkedChildren = (
+      runId: string,
+      nowMs: number
+    ): Effect.Effect<
+      {
+        readonly cancelled: ReadonlyArray<string>
+        readonly detached: ReadonlyArray<string>
+      },
+      RunStore.RunStoreError
+    > =>
+      Effect.gen(function*() {
+        const seen = new Set<string>([runId])
+        const cancelled: Array<string> = []
+        const detached: Array<string> = []
+        let frontier: ReadonlyArray<string> = [runId]
+        while (frontier.length > 0) {
+          const next: Array<string> = []
+          for (const parentId of frontier) {
+            for (const edge of yield* engineState.runChildren(parentId)) {
+              if (seen.has(edge.childId)) continue
+              seen.add(edge.childId)
+              const row = yield* rowOf(edge.childId)
+              if (row === undefined) continue
+              if (row.status === "completed" || row.status === "failed" || row.status === "cancelled") {
+                continue
+              }
+              if ((yield* exitPolicyOf(row)) === "detach") {
+                detached.push(edge.childId)
+                continue
+              }
+              cancelled.push(edge.childId)
+              next.push(edge.childId)
+            }
+          }
+          frontier = next
+        }
+        yield* Effect.forEach(
+          cancelled,
+          (childId) => store.requestCancel(childId, nowMs),
+          { discard: true }
+        )
+        return { cancelled, detached }
+      })
+
+    /**
+     * The effect a terminal transition runs inside its own transaction to end
+     * the children it is responsible for, journaling what it decided.
+     *
+     * The record is emitted only when there was a linked child to decide
+     * about, so an ordinary childless run adds nothing to its journal.
+     */
+    const applyChildExitPolicy = (runId: string): Effect.Effect<void> =>
+      Effect.gen(function*() {
+        const nowMs = yield* Clock.currentTimeMillis
+        const outcome = yield* endLinkedChildren(runId, nowMs).pipe(Effect.orDie)
+        if (outcome.cancelled.length === 0 && outcome.detached.length === 0) return
+        yield* emitDecision(runId, {
+          decision: "child-policy-applied",
+          appliedAtMs: nowMs,
+          cancelled: outcome.cancelled,
+          detached: outcome.detached
+        })
+      })
+
+    /**
      * Carries a parent's durable cancellation onto a child that was linked
      * AFTER the parent's cascade had already run.
      *
@@ -616,22 +803,32 @@ export const make = (
      */
     const inheritParentCancellation = (
       parentId: string,
-      childId: string
+      childId: string,
+      onParentExit: OnParentExit
     ): Effect.Effect<void> =>
       Effect.gen(function*() {
-        const parent = yield* store.get(parentId).pipe(
-          Effect.catch((error) =>
-            error.code === "not_found_row"
-              ? Effect.succeed(undefined)
-              : Effect.die(error)
-          )
-        )
+        const parent = yield* rowOf(parentId)
         if (parent === undefined) return
-        if (parent.cancelRequestedAtMs === null && parent.status !== "cancelled") return
-        // The parent's own request timestamp, so the inherited request reads
-        // as the same operator intent rather than as a later, independent one.
-        const nowMs = parent.cancelRequestedAtMs ?? (yield* Clock.currentTimeMillis)
-        yield* store.requestCancel(childId, nowMs).pipe(Effect.orDie)
+        if (parent.cancelRequestedAtMs !== null || parent.status === "cancelled") {
+          // The parent's own request timestamp, so the inherited request reads
+          // as the same operator intent rather than as a later, independent one.
+          const nowMs = parent.cancelRequestedAtMs ?? (yield* Clock.currentTimeMillis)
+          yield* store.requestCancel(childId, nowMs).pipe(Effect.orDie)
+          return
+        }
+        // The same interleaving, for the other way a parent stops: a parent
+        // that had already COMPLETED or FAILED ran `applyChildExitPolicy`
+        // before this edge existed, so its walk could not have seen this
+        // child and nothing will walk again on its behalf. The child applies
+        // its own recorded policy here instead, in the transaction that made
+        // it a child, so an attached child admitted a moment too late cannot
+        // run on under a parent that is already gone.
+        if (parent.status !== "completed" && parent.status !== "failed") return
+        // The policy comes from the caller rather than from a re-read: this
+        // runs inside the transaction that just wrote the child's row, so the
+        // state on disk is the state the caller is holding.
+        if (onParentExit === "detach") return
+        yield* store.requestCancel(childId, yield* Clock.currentTimeMillis).pipe(Effect.orDie)
       })
 
     const cancelOwned = (
@@ -1042,7 +1239,13 @@ export const make = (
             maxRounds: error.maxRounds,
             owner: dependencies.owner
           },
-          { cancelRequested: "absent" }
+          { cancelRequested: "absent" },
+          // The lineage is over, not continuing: this round is the last one,
+          // so it ends its children like any other terminal exit. A round that
+          // HANDS OFF settles through `continueLineage` instead and deliberately
+          // does not, because the lineage — and therefore the parent the
+          // children are linked to — carries on.
+          applyChildExitPolicy(seam.executionId)
         )
         if (transitioned._tag === "GuardFailed") {
           yield* cancelOwned(seam.executionId, seam.state)
@@ -1311,7 +1514,11 @@ export const make = (
               status,
               yield* encodeState(nextState),
               { decision: "transitioned", status, owner: dependencies.owner },
-              { cancelRequested: "absent" }
+              { cancelRequested: "absent" },
+              // A suspension is not an exit: the run is parked and will settle
+              // later, so its children keep going. A `completed` or `failed`
+              // run is done, and its attached children end with it.
+              status === "suspended" ? undefined : applyChildExitPolicy(executionId)
             ).pipe(
               // The park becomes durable the instant this transition commits, so
               // the flag that records it is set in the transition's own exit
@@ -1474,6 +1681,13 @@ export const make = (
       options: {
         readonly executionId: string
         readonly payload: object
+        /**
+         * Whether the caller discarded this execution's result. It is what
+         * separates the two child shapes: a caller that waits for the child's
+         * value holds it attached, and a caller that threw the value away
+         * spawned it detached. See {@link RunState.OnParentExit}.
+         */
+        readonly discard?: boolean | undefined
         readonly parent?: FlowRuntime.FlowInstance["Service"] | undefined
         readonly round?:
           | (FlowEngine.Round.Round & {
@@ -1519,13 +1733,18 @@ export const make = (
           }
           const round = options.round ?? FlowEngine.Round.initial(options.executionId)
           const previousExecutionId = options.round?.previousExecutionId
+          // Decided once, at spawn, from what the caller did with the result:
+          // a caller waiting for the value keeps the child attached, and a
+          // caller that discarded it detached the child on purpose. Nothing
+          // later rewrites this.
+          const onParentExit: OnParentExit = options.discard === true ? "detach" : "cancel"
           const state: RunState = {
             version: 1,
             flowName: flow._tag,
             payload,
             ...(options.parent === undefined
               ? {}
-              : { parentExecutionId: options.parent.executionId }),
+              : { parentExecutionId: options.parent.executionId, onParentExit }),
             ...(flow.maxRounds === undefined ? {} : { maxRounds: flow.maxRounds })
           }
           const createdStateJson = yield* encodeState(state)
@@ -1610,7 +1829,8 @@ export const make = (
           if (options.parent !== undefined) {
             yield* inheritParentCancellation(
               options.parent.executionId,
-              options.executionId
+              options.executionId,
+              onParentExit
             )
           }
         }))

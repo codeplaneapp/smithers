@@ -94,6 +94,21 @@ implementation.
   boundary. Detached lifecycle — `agent/spawn`, `agent/send`, `agent/await` — is
   bound over an injected `Children` port, because nothing browser-safe can
   honestly claim to persist a detached run.
+- `EngineChildren` — that port, over a durable engine. `spawn` starts the named
+  flow as a run of its own and answers once its row exists, `await` reads the
+  child's result back out of the run store (so another process, another engine,
+  and a later incarnation all work), and `send` steers the child through
+  `Control.steer`, naming the message with the calling step's key, an ordinal
+  counted inside the enclosing dispatch, so a re-driven round delivers it once
+  and a send after a park never inherits a replayed step's number. The message
+  carries a timestamp read inside a sealed step, so a re-drive submits the same
+  bytes and the control plane recognises its own earlier admission. `send`
+  answers from the receipt: `Accepted` and `AlreadyApplied` report
+  `delivered: true`, and every other receipt fails the call, because nothing
+  was admitted. It reaches no engine internals: `FlowRuntime`, `RunStore`, and
+  `Control` are the whole dependency set.
+  `EngineChildren.layer({ flows })` names the flows a child may run; anything
+  else is `ChildError { code: "not_found" }`.
 - `CellPlugin.fromBindings` — the one-liner for authoring a harness plugin that
   contributes capabilities.
 
@@ -341,6 +356,7 @@ The root entry point exports these namespaces; each is also importable from `@sm
 | `StandardFlows`            | `filesystem`, `shell`, `memory`, `WaitInput`, `WaitOutput`, `waitFlow`, `clock`, `AskInput`, `AskOutput`, `askFlow`, `ApprovalUnavailable`, `Asker`, `approval`, `askerNoop`                                     | Expresses the built-in host capabilities as ordinary executable flows.                  |
 | `AgentSession`             | `Options`, `trace`, `patterns`, `waitForRunning`, `waitForParked`, `preserveDriverInterrupt`, `registerDriver`, `settleDriverFailure`, `make`, `layer`                                                           | Runs one control-plane launch as one durable agent session.                             |
 | `ChildFlows`               | `SpawnInput`, `SpawnOutput`, `SendInput`, `SendOutput`, `AwaitInput`, `AwaitOutput`, `spawnFlow`, `sendFlow`, `awaitFlow`, `ChildError`, `Children`, `makeNoop`, `source`                                        | Expresses detached subagent lifecycle as ordinary executable flows.                     |
+| `EngineChildren`           | `Options`, `ChildState`, `childExecutionId`, `make`, `layer`                                                                                                                                                     | Implements the `Children` port as real durable runs on this host's engine.              |
 | `PromoteFlows`             | `bestPractices`, `flowTemplate`, `ShowScriptInput`, `ShowScriptOutput`, `WriteFlowInput`, `WriteFlowOutput`, `showScriptFlow`, `writeFlowFlow`, `Options`, `source`                                              | Turns the script the model just ran into a saved flow, as two ordinary flows.           |
 | `FlowStore`                | `FlowStoreErrorCode`, `FlowStoreError`, `idPattern`, `validateId`, `SavedFlow`, `WriteResult`, `Service`, `FlowStore`, `makeMemory`, `makeFileSystem`, `makeNoop`, `layerMemory`, `layerFileSystem`, `layerNoop` | Writes a saved flow's files and lists the flows a host already holds.                   |
 | `WorkspaceSandbox`         | Every export of [`@smthrs/engine-store/WorkspaceSandbox`](../engine-store/README.md), including `Service`, `WorkspaceSandbox`, `make`, `layer`, `Host`, `makeHosted`, `makeMemory`, and `layerFileSystem`        | Re-exports the canonical workspace transaction contract, unchanged.                     |

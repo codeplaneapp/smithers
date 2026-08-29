@@ -44,6 +44,7 @@ The root exports these namespaces; each is also available from its matching
 | `OwnerIdentity`      | `OwnerIdentity` / `Service` mint the `OwnerId` an incarnation fences its writes with. `make` builds one from an implementation, `makeDefault` / `layer` supply the platform default, and `layerConstant(owner)` pins a fixed identity for a test or a host that already holds a lease.                                                                                                                                                                                                                                                                                                                                                                                        |
 | `RunState`           | The versioned run-state envelope schema the engine stores in each run row.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `Migrations`         | `set` is this package's own `MigrationSet`; `sets` is the composed, dependency-ordered list an engine installs; `run` and `layer` execute it through `@smthrs/database`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `test/TestStores`    | Every durable engine service over one database, migrated. `layer` is the private in-memory bundle; `layerAt(filename)` names the database and re-exports the connection and `DurableEngineState`, so two independently built bundles can share one file. `database` / `databaseAt` are the migrated database alone.                                                                                                                                                                                                                                                                                                                                                           |
 | `Errors`             | Stable `FlowCycleDetected`, `AttemptAdmissionRejected`, and `CacheConflictDetected` errors.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ```ts
@@ -53,8 +54,7 @@ import { Effect } from "effect"
 
 const engineLayer = EngineStore.layer({
   owner: { hostId: "worker-a" },
-  journalSource: "engine-store",
-  isAlive: (owner) => checkOwner(owner)
+  journalSource: "engine-store"
 })
 
 const program = Effect.gen(function*() {
@@ -66,6 +66,13 @@ const program = Effect.gen(function*() {
 `DurableEngineState`, `StepBoundary`, `Jj`, `OwnerIdentity`, and `Scope`. Run
 migrations before using the SQL-backed durable state; provide
 `OwnerIdentity.layer` unless the host mints its own owner tokens.
+
+`Options.isAlive` is optional. Its default,
+`Ownership.leaseLiveness(Ownership.heartbeatStaleAfter)`, treats an owner as
+alive while its persisted heartbeat is fresh and gone once the lease expires,
+so this composition reclaims the runs of a hard-killed owner with no host code.
+Supply a check to refuse a takeover for longer: a pid probe guarded by
+`Ownership.sameHostIncarnation`, or an orchestrator's liveness answer.
 
 `WorkspaceSandbox` and `EffectDispatcher` are **optional** and change what a
 sealed action is worth. Without a sandbox the body runs against the host

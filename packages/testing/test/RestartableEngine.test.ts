@@ -105,3 +105,58 @@ it.scoped("restarts over the same store and executes only the frontier", () =>
       }
     ])
   }))
+
+/**
+ * `kill` is the hard-kill half of the harness: the instance it replaces is
+ * dropped, not closed.
+ *
+ * `restart` already proves the orderly half above — the outgoing instance's
+ * scope closes, so its in-flight execution is interrupted and reports
+ * `suspended`. A process killed with SIGKILL does neither: its fibers are not
+ * interrupted, its finalizers never run, and it never releases what it held.
+ * That is the state `Ownership.leaseLiveness` reclaims from, so a durable test
+ * cannot produce it with `restart`.
+ */
+it.scoped("kill leaves the abandoned instance running and unreleased", () =>
+  Effect.gen(function*() {
+    const harness = yield* RestartableEngine.make()
+    const started = yield* Latch.make()
+    const release = yield* Latch.make()
+    const executionId = "restartable/kill/execution"
+    const flow: FlowSpec = {
+      name: "testing/restartable/kill",
+      steps: [
+        {
+          key: "restartable/kill/step",
+          sealed: false,
+          kind: "step",
+          run: (input) =>
+            Effect.gen(function*() {
+              yield* started.open
+              yield* release.await
+              return { input, step: "complete" }
+            })
+        }
+      ]
+    }
+
+    const running = yield* harness.engine.run({
+      flow,
+      payload: { command: "kill" },
+      executionId
+    }).pipe(Effect.forkChild({ startImmediately: true }))
+    yield* started.await
+
+    yield* harness.kill
+
+    // The killed instance kept its fiber: releasing the latch lets the
+    // execution the dead engine was driving finish on its own. A `restart`
+    // would have interrupted it and answered `suspended` instead.
+    yield* release.open
+    const abandonedResult = yield* Fiber.join(running)
+    expect(abandonedResult.status).toBe("completed")
+
+    // The facade now serves the fresh instance over the same store.
+    const survivor = yield* harness.engine.result(executionId)
+    expect(survivor.status).toBe("completed")
+  }))
