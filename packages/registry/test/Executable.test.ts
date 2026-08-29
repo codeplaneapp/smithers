@@ -16,18 +16,19 @@ import * as CacheEnvironment from "@smthrs/flow/CacheEnvironment"
 import { Node } from "@smthrs/plan"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
+import * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
+import { execFile } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import * as Descriptor from "../src/Descriptor.ts"
 import * as Discovery from "../src/Discovery.ts"
 import * as Executable from "../src/Executable.ts"
 import * as Registry from "../src/Registry.ts"
 import greetModule from "./fixtures/executable/flows/greet/flow.ts"
-import orphanModule from "./fixtures/executable/flows/orphan/flow.ts"
-import tunedModule from "./fixtures/executable/flows/tuned/flow.ts"
-import undecidedModule from "./fixtures/executable/flows/undecided/flow.ts"
 
 const flowsRoot = fileURLToPath(new URL("./fixtures/executable/flows", import.meta.url))
 const projectRoot = fileURLToPath(new URL("./fixtures/executable", import.meta.url))
@@ -35,28 +36,6 @@ const modulesRoot = fileURLToPath(new URL("./fixtures/executable/modules", impor
 const fixturesRoot = fileURLToPath(new URL("./fixtures", import.meta.url))
 
 const platform = Layer.merge(NodeFileSystem.layer, NodePath.layer)
-
-/**
- * The fixture modules, keyed by the directory a descriptor's body sits in.
- *
- * Discovery reads a module's metadata without evaluating it, so the bridge's
- * loader is the seam that evaluates one. Under vitest a static import is the
- * honest stand-in for a host's own `import`: the module is the same value the
- * default loader would produce, without asking the test runner to hand a
- * TypeScript file to Node's own resolver.
- */
-const fixtureModules: Readonly<Record<string, unknown>> = {
-  greet: { default: greetModule },
-  orphan: { default: orphanModule },
-  tuned: { default: tunedModule },
-  undecided: { default: undecidedModule }
-}
-
-const load = (path: string): Effect.Effect<unknown, unknown> => {
-  const directory = path.split("/").at(-2) ?? ""
-  const module = fixtureModules[directory]
-  return module === undefined ? Effect.fail(new Error(`no fixture module for ${path}`)) : Effect.succeed(module)
-}
 
 /** The delegate every fixture that resolves one names. */
 const Echo = Flow.make("test/echo", {
@@ -79,9 +58,18 @@ const Agent = Flow.make("agent", {
   body: (payload) => Node.succeed(payload.prompt)
 })
 
+/**
+ * The options every case starts from.
+ *
+ * `load` is deliberately absent, so the default loader — a dynamic `import` of
+ * the `file:` specifier {@link module:Executable} builds — is the path under
+ * test everywhere a fixture module is read. A stand-in is passed only by the
+ * cases that need a module no file can contain, such as one with no default
+ * export.
+ */
 const options = (
   overrides: Partial<Executable.Options> = {}
-): Executable.Options => ({ delegates: [Echo, Other, Agent], load, ...overrides })
+): Executable.Options => ({ delegates: [Echo, Other, Agent], ...overrides })
 
 const scan = Effect.gen(function*() {
   const discovery = yield* Discovery.Discovery
@@ -203,7 +191,7 @@ describe("refusals", () => {
         ...(yield* descriptorNamed("greet")),
         body: new Descriptor.BodyRefModule({ path: `${modulesRoot}/absent.mjs` })
       })
-      const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options({ load: undefined })))
+      const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
       expect(failure.code).toBe("body_unavailable")
       expect(failure.message).toContain("absent.mjs")
     }).pipe(Effect.provide(platform)))
@@ -216,7 +204,7 @@ describe("refusals", () => {
       })
       // The loader reached the module — it refused what the module exports,
       // not the specifier it was given.
-      const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options({ load: undefined })))
+      const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
       expect(failure.code).toBe("invalid_module")
     }).pipe(Effect.provide(platform)))
 
@@ -226,7 +214,7 @@ describe("refusals", () => {
         ...(yield* descriptorNamed("greet")),
         body: new Descriptor.BodyRefModule({ path: "fixtures/executable/modules/plain.mjs" })
       })
-      const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options({ load: undefined })))
+      const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
       expect(failure.code).toBe("body_unavailable")
     }).pipe(Effect.provide(platform)))
 
@@ -236,7 +224,7 @@ describe("refusals", () => {
         ...(yield* descriptorNamed("greet")),
         body: new Descriptor.BodyRefModule({ path: `${modulesRoot}/plain.mjs` })
       })
-      const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options({ load: undefined })))
+      const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
       expect(failure.code).toBe("invalid_module")
       expect(failure.message).toContain("plain.mjs")
     }).pipe(Effect.provide(platform)))
@@ -249,6 +237,43 @@ describe("refusals", () => {
       )
       expect(failure.code).toBe("invalid_module")
     }).pipe(Effect.provide(platform)))
+})
+
+describe("the module specifier", () => {
+  it("escapes the characters a path and a URL both claim", () => {
+    // `#`, `?`, and a literal `%` are legal in a filename and structural in a
+    // URL. Concatenating one truncates the specifier at it, so the loader
+    // addresses a shorter path and reports a module that is right there as
+    // missing.
+    expect(Executable.fileSpecifier("/flows/rev#2/flow.ts")).toBe("file:///flows/rev%232/flow.ts")
+    expect(Executable.fileSpecifier("/flows/a?b/flow.ts")).toBe("file:///flows/a%3Fb/flow.ts")
+    // `%` is escaped FIRST, so a path that already contains `%23` survives as
+    // a literal instead of decoding back into a `#`.
+    expect(Executable.fileSpecifier("/flows/a%23b/flow.ts")).toBe("file:///flows/a%2523b/flow.ts")
+    // Anything already written as a specifier is the caller's own, untouched.
+    expect(Executable.fileSpecifier("file:///flows/greet/flow.ts")).toBe("file:///flows/greet/flow.ts")
+  })
+
+  it("builds a specifier Node's own loader resolves", async () => {
+    // The default loader's `import` runs under whatever loader the host has,
+    // and this suite's is vite-node, which resolves neither form. So the proof
+    // is Node itself: a real subprocess, the real ESM resolver, the production
+    // specifier, and a fixture that really does live under a directory named
+    // `rev#2`.
+    const specifier = Executable.fileSpecifier(`${modulesRoot}/rev#2/plain.mjs`)
+    const loaded = await new Promise<string>((resolve, reject) => {
+      execFile(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `const m = await import(${JSON.stringify(specifier)}); process.stdout.write(m.default.notAFlow)`
+        ],
+        (error, stdout, stderr) => error === null ? resolve(stdout) : reject(new Error(stderr))
+      )
+    })
+    expect(loaded).toBe("rev#2")
+  })
 })
 
 describe("annotation lowering", () => {
@@ -377,6 +402,7 @@ describe("the host's catalog", () => {
       expect(built.executables.map((executable) => executable.descriptor.name).sort()).toEqual([
         "changelog",
         "greet",
+        "scoped",
         "tuned"
       ])
       expect(built.refused.map((failure) => `${failure.flow}:${failure.code}`).sort()).toEqual([
@@ -385,10 +411,21 @@ describe("the host's catalog", () => {
       ])
     }).pipe(Effect.provide(registryLayer), Effect.provide(platform)))
 
-  it.effect("fails the whole catalog on a defect in one entry", () =>
+  it.effect("reports a defective entry instead of failing the whole catalog", () =>
     Effect.gen(function*() {
-      const failure = yield* Effect.flip(Executable.catalog(options({ load: () => Effect.succeed({}) })))
-      expect(failure._tag).toBe("flows/registry/ExecutableError")
+      // Every module body is now unreadable; only the markdown flow survives.
+      // `flows/` is a directory a person edits, so one entry being broken is an
+      // ordinary state, and taking the host's other flows down with it would
+      // make `ls` and every unrelated `up` fail for an unrelated typo.
+      const built = yield* Executable.catalog(options({ load: () => Effect.succeed({}) }))
+      expect(built.executables.map((executable) => executable.descriptor.name)).toEqual(["changelog"])
+      expect(built.refused.map((failure) => `${failure.flow}:${failure.code}`).sort()).toEqual([
+        "greet:invalid_module",
+        "orphan:missing_delegate",
+        "scoped:invalid_module",
+        "tuned:invalid_module",
+        "undecided:ambiguous_delegate"
+      ])
     }).pipe(Effect.provide(registryLayer), Effect.provide(platform)))
 
   it.effect("looks one flow up by registry name", () =>
@@ -409,7 +446,7 @@ describe("the project registry", () => {
     Effect.gen(function*() {
       const registry = yield* Registry.Registry
       const names = (yield* registry.list()).map((entry) => entry.name).sort()
-      expect(names).toEqual(["changelog", "greet", "orphan", "tuned", "undecided"])
+      expect(names).toEqual(["changelog", "greet", "orphan", "scoped", "tuned", "undecided"])
     }).pipe(
       Effect.provide(Executable.layerProject({ root: projectRoot })),
       Effect.provide(platform)
@@ -427,27 +464,140 @@ describe("the project registry", () => {
   it.effect("scans installed packs beside the project's own flows, local packs first", () =>
     Effect.gen(function*() {
       const registry = yield* Registry.Registry
-      const names = (yield* registry.list()).map((entry) => entry.name)
+      const entries = yield* registry.list()
+      const names = entries.map((entry) => entry.name)
       expect(names).toContain("greet")
       expect(names).toContain("pdf")
       expect(names).toContain("template-skill")
+      // Pack entries carry the pack they came from. A host that cannot say
+      // which pack a flow arrived in cannot answer "why is this here" or
+      // "which pack do I uninstall".
+      const pdf = entries.find((entry) => entry.name === "pdf")
+      expect(pdf?.provenance.pack?.name).toBe("fixtures")
+      expect(pdf?.provenance.pack?.origin).toBe("local")
+      // The project's own flows are not pack flows.
+      expect(entries.find((entry) => entry.name === "greet")?.provenance.pack).toBeUndefined()
     }).pipe(
       Effect.provide(
         Executable.layerProject({
           root: projectRoot,
-          runtimeVersion: "1.0.0-rc.0",
-          packs: [
-            {
-              dir: fixturesRoot,
+          packs: {
+            runtimeVersion: "1.0.0-rc.0",
+            installed: [
+              {
+                dir: fixturesRoot,
+                origin: "installed",
+                manifest: { name: "installed", version: "1.0.0", flows: ["foreign"] } as never
+              },
+              {
+                dir: fixturesRoot,
+                origin: "local",
+                manifest: { name: "fixtures", version: "1.0.0", flows: ["foreign"] } as never
+              }
+            ]
+          }
+        })
+      ),
+      Effect.provide(platform)
+    ))
+
+  it.effect("reports a name two packs both define as shadowed, naming both", () =>
+    Effect.gen(function*() {
+      const registry = yield* Registry.Registry
+      const warnings = yield* registry.warnings()
+      const shadowed = warnings.filter((warning) => warning.code === "shadowed")
+      // Two packs over one directory define the same names. The `local` pack
+      // wins whatever order the host listed them in, and the loser is named:
+      // `duplicate_name` would say only "kept the first", which is the caller's
+      // order and not the rule that actually decided.
+      expect(shadowed.length).toBeGreaterThan(0)
+      expect(shadowed[0]!.message).toContain("fixtures@1.0.0 (local)")
+      expect(shadowed[0]!.message).toContain("installed@1.0.0 (installed)")
+    }).pipe(
+      Effect.provide(
+        Executable.layerProject({
+          root: projectRoot,
+          packs: {
+            runtimeVersion: "1.0.0-rc.0",
+            installed: [
+              {
+                dir: fixturesRoot,
+                origin: "installed",
+                manifest: { name: "installed", version: "1.0.0", flows: ["foreign"] } as never
+              },
+              {
+                dir: fixturesRoot,
+                origin: "local",
+                manifest: { name: "fixtures", version: "1.0.0", flows: ["foreign"] } as never
+              }
+            ]
+          }
+        })
+      ),
+      Effect.provide(platform)
+    ))
+
+  it.effect("names the pack when it declares a flows directory it does not ship", () =>
+    Effect.gen(function*() {
+      const exit = yield* Effect.exit(Effect.provide(
+        Effect.void,
+        Executable.layerProject({
+          root: projectRoot,
+          packs: {
+            runtimeVersion: "1.0.0-rc.0",
+            installed: [{
+              dir: projectRoot,
               origin: "installed",
-              manifest: { name: "installed", version: "1.0.0", flows: ["foreign/review"] } as never
-            },
-            {
+              manifest: { name: "broken", version: "1.0.0", flows: ["does-not-exist"] } as never
+            }]
+          }
+        })
+      ))
+      // The regression this pins: the missing root used to be caught as "this
+      // project has no flows", replacing the WHOLE registry with an empty one,
+      // so the project's own five flows silently disappeared behind one
+      // defective pack.
+      expect(exit._tag).toBe("Failure")
+      expect(JSON.stringify(exit)).toContain("invalid_pack")
+      expect(JSON.stringify(exit)).toContain("broken@1.0.0")
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("fails loudly when the project root cannot be read at all", () =>
+    Effect.gen(function*() {
+      const unreadable = Layer.succeed(FileSystem.FileSystem)(FileSystem.makeNoop({
+        exists: () =>
+          Effect.fail(
+            PlatformError.systemError({ _tag: "PermissionDenied", module: "FileSystem", method: "exists" })
+          )
+      }))
+      const exit = yield* Effect.exit(Effect.provide(
+        Effect.void,
+        Executable.layerProject({ root: projectRoot }).pipe(Layer.provide(Layer.merge(unreadable, NodePath.layer)))
+      ))
+      // "I could not look" is not "there is nothing there". Reporting an
+      // unreadable root as an empty project would hide every flow behind a
+      // permissions mistake.
+      expect(exit._tag).toBe("Failure")
+      expect(JSON.stringify(exit)).toContain("read_failed")
+    }))
+
+  it.effect("keeps a pack's flows when the project has no flows directory of its own", () =>
+    Effect.gen(function*() {
+      const registry = yield* Registry.Registry
+      const names = (yield* registry.list()).map((entry) => entry.name)
+      expect(names).toContain("pdf")
+    }).pipe(
+      Effect.provide(
+        Executable.layerProject({
+          root: `${projectRoot}/absent`,
+          packs: {
+            runtimeVersion: "1.0.0-rc.0",
+            installed: [{
               dir: fixturesRoot,
               origin: "local",
               manifest: { name: "fixtures", version: "1.0.0", flows: ["foreign"] } as never
-            }
-          ]
+            }]
+          }
         })
       ),
       Effect.provide(platform)
@@ -459,11 +609,14 @@ describe("the project registry", () => {
         Effect.void,
         Executable.layerProject({
           root: projectRoot,
-          packs: [{
-            dir: modulesRoot,
-            origin: "local",
-            manifest: { name: "broken", version: "1.0.0", flows: ["plain.mjs"] } as never
-          }]
+          packs: {
+            runtimeVersion: "1.0.0-rc.0",
+            installed: [{
+              dir: modulesRoot,
+              origin: "local",
+              manifest: { name: "broken", version: "1.0.0", flows: ["plain.mjs"] } as never
+            }]
+          }
         })
       ))
       expect(built._tag).toBe("Failure")
@@ -475,17 +628,19 @@ describe("the project registry", () => {
         Effect.void,
         Executable.layerProject({
           root: projectRoot,
-          runtimeVersion: "1.0.0-rc.0",
-          packs: [{
-            dir: projectRoot,
-            origin: "installed",
-            manifest: {
-              name: "future",
-              version: "2.0.0",
-              flows: ["flows"],
-              requires: { smithers: ">=9.0.0" }
-            } as never
-          }]
+          packs: {
+            runtimeVersion: "1.0.0-rc.0",
+            installed: [{
+              dir: projectRoot,
+              origin: "installed",
+              manifest: {
+                name: "future",
+                version: "2.0.0",
+                flows: ["flows"],
+                requires: { smithers: ">=9.0.0" }
+              } as never
+            }]
+          }
         })
       ))
       expect(registry._tag).toBe("Failure")
@@ -518,6 +673,29 @@ describe("the delegating body", () => {
 })
 
 describe("registration", () => {
+  it.effect("hands the host the refusals it registered around", () =>
+    Effect.gen(function*() {
+      const logs: Array<string> = []
+      const capture = Logger.make((entry) => void logs.push(String(entry.message)))
+      const runtime = Layer.succeed(
+        FlowRuntime.FlowRuntime,
+        { register: () => Effect.void } as never
+      )
+      const built = yield* Effect.provide(
+        Executable.Catalog,
+        Executable.layer(options()).pipe(
+          Layer.provideMerge(Layer.merge(runtime, Action.layerImplementations))
+        )
+      ).pipe(Effect.provide(Logger.layer([capture])))
+
+      // Registration is where a host learns what it CANNOT run. Without this
+      // the refusals were computed and thrown away, so `up orphan` reached the
+      // runtime's generic unregistered-flow failure instead of the typed
+      // refusal that names the missing delegate.
+      expect(built.refused.map((failure) => failure.flow).sort()).toEqual(["orphan", "undecided"])
+      expect(logs.filter((message) => message.includes("not runnable")).length).toBe(2)
+    }).pipe(Effect.scoped, Effect.provide(registryLayer), Effect.provide(platform)))
+
   it.effect("registers every runnable flow with the runtime", () =>
     Effect.gen(function*() {
       const registered: Array<string> = []
@@ -532,6 +710,6 @@ describe("registration", () => {
           Layer.provideMerge(Layer.merge(runtime, Action.layerImplementations))
         )
       )
-      expect(registered.sort()).toEqual(["changelog", "greet", "tuned"])
+      expect(registered.sort()).toEqual(["changelog", "greet", "scoped", "tuned"])
     }).pipe(Effect.scoped, Effect.provide(registryLayer), Effect.provide(platform)))
 })

@@ -15,10 +15,10 @@ The root entry point exports these namespaces; each is also importable from `@sm
 | `Descriptor`    | `EffectTier`, `Placement`, `EffectDeclaration`, `SchemaRefMarkdownArgs`, `SchemaRefMarkdownOutput`, `SchemaRefModule`, `SchemaRefNone`, `SchemaRef`, `BodyRefMarkdown`, `BodyRefModule`, `BodyRef`, `FlowBodyPrompt`, `FlowBodyModule`, `FlowBody`, `PackRef`, `Provenance`, `Source`, `DiscoveryWarningCode`, `DiscoveryWarning`, `FlowDescriptor`, `SourceScan` | Defines the serializable descriptor, body, schema, source, provenance, and warning models. |
 | `Disclosure`    | `toEntries`, `toXml`                                                                                                                                                                                                                                                                                                                                              | Projects descriptors to compact entries or Agent Skills XML.                               |
 | `Discovery`     | `Discovery`, `make`, `layer`, `makeNoop`, `layerNoop`                                                                                                                                                                                                                                                                                                             | Defines and implements metadata-only source scanning over FileSystem and Path.             |
-| `Executable`    | `defaultAgent`, `Payload`, `Invocation`, `Delegate`, `ExecutableErrorCode`, `ExecutableError`, `Lowered`, `Registration`, `Executable`, `Options`, `delegateOf`, `lower`, `fromDescriptor`, `fromRegistry`, `Catalog`, `catalog`, `layer`, `ProjectOptions`, `layerProject`                                                                                       | Turns a discovered descriptor into a registered, engine-runnable `@smthrs/flow` flow.      |
+| `Executable`    | `defaultAgent`, `Payload`, `Invocation`, `Delegate`, `ExecutableErrorCode`, `ExecutableError`, `Lowered`, `Registration`, `Executable`, `Options`, `fileSpecifier`, `delegateOf`, `lower`, `fromDescriptor`, `fromRegistry`, `Catalog`, `catalog`, `layer`, `ProjectOptions`, `layerProject`                                                                      | Turns a discovered descriptor into a registered, engine-runnable `@smthrs/flow` flow.      |
 | `MarkdownFlow`  | `Input`, `Output`, `FromMarkdownOptions`, `FromMarkdownResult`, `fromMarkdown`, `loadBody`, `renderPrompt`, `toCoreFrontmatter`                                                                                                                                                                                                                                   | Parses Markdown metadata, loads prompt bodies lazily, and renders invocation prompts.      |
 | `Pack`          | `Origin`, `Requires`, `Manifest`, `Installed`, `File`, `Scan`, `read`, `digest`, `compatible`, `sources`, `attribute`, `merge`, `checkCompatible`                                                                                                                                                                                                                 | Reads pack manifests, addresses their contents, and merges packs by origin.                |
-| `Registry`      | `Config`, `Registry`, `make`, `layer`, `layerFromDescriptors`, `layerFromPacks`, `makeNoop`, `layerNoop`                                                                                                                                                                                                                                                          | Provides ordered discovery, lookup, visibility, lazy body loading, refresh, and warnings.  |
+| `Registry`      | `Config`, `PackConfig`, `Registry`, `make`, `layer`, `layerFromDescriptors`, `layerFromPacks`, `makeNoop`, `layerNoop`                                                                                                                                                                                                                                            | Provides ordered discovery, lookup, visibility, lazy body loading, refresh, and warnings.  |
 | `RegistryError` | `DiscoveryErrorCode`, `DiscoveryError`, `RegistryErrorCode`, `RegistryError`, `RegistryFailure`, `discoveryError`, `registryError`                                                                                                                                                                                                                                | Defines typed discovery and registry failures and constructors.                            |
 
 ```ts
@@ -77,16 +77,44 @@ one registered driver runs many descriptors.
 
 Three declarations are lowered onto the runtime:
 
-| Declared on the body                                                                              | Lowered onto                                                                                                                                                          |
-| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CacheEnvironment.CachePolicyAnnotation` (what `@smthrs/patterns`' `withCache` writes)            | the flow's annotation bag, which `@smthrs/engine-store` reads at dispatch, and the delegating node's captured key material, so a changed policy is a changed step key |
-| `Annotations.Priority`                                                                            | the delegating node's `Node.priority`, which becomes `NodeDraft.priority` for the plan scheduler                                                                      |
-| `Flow.within(...)`, or the descriptor's own `"use sandbox"` directive or `placement:` frontmatter | the flow's `@smthrs/flow` placement annotation and the `Invocation.placement` a host selects a spawn target with                                                      |
+| Declared on the body                                                                              | Lowered onto                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CacheEnvironment.CachePolicyAnnotation` (what `@smthrs/patterns`' `withCache` writes)            | the delegating node's captured key material, so a changed policy is a changed step key, and the flow's annotation bag under the identifier the engine reads a policy off a dispatched action |
+| `Annotations.Priority`                                                                            | the delegating node's `Node.priority`, which becomes `NodeDraft.priority` for `@smthrs/engine-store`'s `PlanScheduler`                                                                       |
+| `Flow.within(...)`, or the descriptor's own `"use sandbox"` directive or `placement:` frontmatter | the flow's `@smthrs/flow` placement annotation and the `Invocation.placement` a host selects a spawn target with                                                                             |
+
+Two of those three reach the runtime in `1.0.0-rc.0`; read the table with these
+limits, which the suites pin as behavior rather than as intent:
+
+- **The cache policy is declaration identity, not a dispatch instruction.**
+  `@smthrs/engine-store` reads a policy off a dispatched **action**, and nothing
+  in rc.0 carries a flow's annotation bag onto the actions a delegate's body
+  dispatches. A declared `ttlMs` bounds no row's age and a declared `scope`
+  narrows no row's address. What the declaration does change is the delegating
+  node's step key, so re-declaring a policy re-runs the step.
+- **The priority orders scheduled plans.** `PlanScheduler` admits ready nodes
+  highest-priority-first under a concurrency limit. The `up` path settles a flow
+  through `@smthrs/flow` `Interpreter`, which admits every ready node at once,
+  so on that path the priority orders nothing.
 
 `Executable.catalog(options)` builds every discovered flow this host can run and
-reports the rest: an entry whose delegate only another host registers is listed
-in `refused` rather than failing the whole catalog, while a defect in an entry —
-an unreadable body, a module exporting the wrong thing — still fails.
+reports the rest in `refused`, each carrying its `ExecutableError` code: a
+delegate only another host registers (`missing_delegate`, `ambiguous_delegate`)
+and a defect in the entry itself (`body_unavailable`, `invalid_module`) are both
+reported rather than raised. `flows/` is a directory a person edits, so one file
+in it is routinely mid-edit or wrong, and failing the catalog would take `ls`,
+`ps`, and every unrelated `up` down with it.
+
+`Executable.layer(options)` registers everything runnable, logs a warning naming
+each refusal, and provides the whole `Catalog` as a service, so a host can print
+what it declined instead of letting an operator find out from `up <flow>`.
+
+`Executable.layerProject({ root, packs })` is the registry a Node host discovers
+a project in: `<root>/flows/**` first, then every installed pack, under one
+refreshable first-found registry. A project with no `flows/` directory has no
+flows yet, which is the state `smithers init` leaves behind. A pack that
+declares a flows directory it does not ship is a broken installation and fails
+the layer as `RegistryError { code: "invalid_pack" }` naming the pack.
 
 ## Workflow packs
 

@@ -37,23 +37,10 @@ import { fileURLToPath } from "node:url"
 import type * as Descriptor from "../src/Descriptor.ts"
 import * as Discovery from "../src/Discovery.ts"
 import * as Executable from "../src/Executable.ts"
-import greetModule from "./fixtures/executable/flows/greet/flow.ts"
-import tunedModule from "./fixtures/executable/flows/tuned/flow.ts"
 
 const flowsRoot = fileURLToPath(new URL("./fixtures/executable/flows", import.meta.url))
 const projectRoot = fileURLToPath(new URL("./fixtures/executable", import.meta.url))
 const platform = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)
-
-const fixtureModules: Readonly<Record<string, unknown>> = {
-  greet: { default: greetModule },
-  tuned: { default: tunedModule }
-}
-
-const load = (path: string): Effect.Effect<unknown, unknown> => {
-  const directory = path.split("/").at(-2) ?? ""
-  const module = fixtureModules[directory]
-  return module === undefined ? Effect.fail(new Error(`no fixture module for ${path}`)) : Effect.succeed(module)
-}
 
 /** What the delegate was handed, in call order. */
 const spawned: Array<Executable.Invocation> = []
@@ -134,7 +121,7 @@ const descriptorNamed = (name: string) =>
 const executableNamed = (name: string) =>
   Effect.flatMap(
     descriptorNamed(name),
-    (descriptor) => Executable.fromDescriptor(descriptor, { delegates: [Echo], load })
+    (descriptor) => Executable.fromDescriptor(descriptor, { delegates: [Echo] })
   ).pipe(Effect.provide(platform))
 
 /** A private directory for one case's engine database and workspace. */
@@ -230,7 +217,7 @@ describe("a discovered flow runs on the durable engine", () => {
     Effect.gen(function*() {
       const descriptor = yield* descriptorNamed("orphan").pipe(Effect.provide(platform))
       const failure = yield* Effect.flip(
-        Executable.fromDescriptor(descriptor, { delegates: [Echo], load }).pipe(Effect.provide(platform))
+        Executable.fromDescriptor(descriptor, { delegates: [Echo] }).pipe(Effect.provide(platform))
       )
       // The refusal happens before the engine is asked to drive anything, so
       // an operator reads the missing flow's name instead of an empty `AnyOf`
@@ -256,9 +243,40 @@ describe("the annotation golden", () => {
       expect(second.result).toBe("tuned:compiled")
       // Two runs, two executions, one dispatch of the sealed step: the second
       // run read the row the first one recorded out of the step cache in the
-      // same SQLite file.
+      // same SQLite file. What earns the reuse is the delegate's own sealed
+      // step — its `tier`, its `idempotencyKey`, and its hard boundary — NOT
+      // the descriptor's declared policy; the next case is why the difference
+      // matters and how it is pinned.
       expect(spawned.length).toBe(2)
       expect(executions).toBe(1)
+    }))
+
+  it.effect("does not narrow the cache address from a descriptor's declared scope", () =>
+    Effect.gen(function*() {
+      executions = 0
+      spawned.length = 0
+      const directory = workspace("scoped")
+      const filename = join(directory, "engine.db")
+      const executable = yield* executableNamed("scoped")
+
+      // The declaration says `scope: "run"`, which `@smthrs/engine-store`
+      // `ActionPersistence` reads off a DISPATCHED ACTION and folds into the
+      // cache row's address, so a second run would derive a different address
+      // and re-execute. It is declared on the FLOW here, and rc.0 carries a
+      // flow's annotation bag onto nothing: `@smthrs/flow` `Interpreter`
+      // dispatches the actions the delegate's own body names and never reads
+      // the enclosing flow's annotations.
+      yield* execute(executable, filename, "registry-scoped-a", "scoped-1", { name: "one" })
+      yield* execute(executable, filename, "registry-scoped-b", "scoped-2", { name: "two" })
+
+      expect(executable.lowered.cache).toEqual({ scope: "run" })
+      // 2 is what a policy that reached dispatch would produce. This assertion
+      // is the pin on rc.0's real behavior, and the red-on-fix test for the
+      // Phase 5 flow-primitives row "Interpreter ignores the enclosing flow's
+      // CachePolicyAnnotation": when that lands, this number becomes 2 and the
+      // claim in `Lowered.cache` changes with it.
+      expect(executions).toBe(1)
+      expect(spawned.length).toBe(2)
     }))
 
   it.effect("hands the delegate the placement the descriptor declared", () =>
@@ -349,7 +367,7 @@ describe("the host seam", () => {
     Effect.gen(function*() {
       spawned.length = 0
       const directory = workspace("host")
-      const options: Executable.Options = { delegates: [Echo], load }
+      const options: Executable.Options = { delegates: [Echo] }
       // The whole seam, composed the way a host composes it: discovery over
       // `<root>/flows/**` is the runtime's registry, and the registration phase
       // is the catalog built from it. Nothing lists a flow by hand.

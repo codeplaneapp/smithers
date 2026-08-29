@@ -16,11 +16,17 @@
  * One delegating node is therefore the whole lowering, and every runtime
  * decision the descriptor carries rides it:
  *
- * - the declared cache policy travels twice, as the flow's
- *   `@smthrs/flow` `CacheEnvironment.CachePolicyAnnotation` and as key material
- *   captured on the delegating node, so a changed policy is a changed step key;
+ * - the declared cache policy becomes key material captured on the delegating
+ *   node, so a changed policy is a changed step key, and the flow's
+ *   `@smthrs/flow` `CacheEnvironment.CachePolicyAnnotation`, which is where
+ *   `@smthrs/patterns`' `withCache` puts one too. Read {@link Lowered.cache}
+ *   for what rc.0 does and does not do with it: the annotation is declaration
+ *   identity here, not a dispatch instruction;
  * - `Node.priority` becomes the delegating node's priority, which is what
- *   reaches `NodeDraft.priority` and the plan scheduler;
+ *   reaches `NodeDraft.priority` and `@smthrs/engine-store`'s `PlanScheduler`.
+ *   The rc.0 `up` path settles a flow through `@smthrs/flow` `Interpreter`,
+ *   which admits every ready node at once, so the priority orders scheduled
+ *   plans and nothing else;
  * - the placement directive becomes both the flow's opaque
  *   `@smthrs/flow` placement annotation and a field of the
  *   {@link Invocation} the delegate reads, which is what a host selects a
@@ -54,9 +60,8 @@ import * as Schema from "effect/Schema"
 import type * as Descriptor from "./Descriptor.ts"
 import * as Discovery from "./Discovery.ts"
 import * as MarkdownFlow from "./MarkdownFlow.ts"
-import * as Pack from "./Pack.ts"
 import * as Registry from "./Registry.ts"
-import type { DiscoveryError, RegistryError } from "./RegistryError.ts"
+import { type DiscoveryError, discoveryError, type RegistryError } from "./RegistryError.ts"
 
 /**
  * The delegate a descriptor runs on when it names no single flow of its own.
@@ -198,9 +203,25 @@ export class ExecutableError extends Schema.TaggedError<ExecutableError>()(
  * @since 0.1.0
  */
 export interface Lowered {
-  /** The declared cache policy, or `undefined` when none was declared. */
+  /**
+   * The declared cache policy, or `undefined` when none was declared.
+   *
+   * In rc.0 this is declaration identity, not a dispatch instruction. It enters
+   * the delegating node's captured key material, so a changed policy is a
+   * changed step key, and it is annotated on the bridged flow under the
+   * identifier `@smthrs/engine-store` reads a policy off a dispatched action.
+   * Nothing carries a flow's annotation bag onto the actions its delegate
+   * dispatches, so neither `ttlMs` nor `scope` narrows a cache row here.
+   */
   readonly cache: CacheEnvironment.CachePolicy | undefined
-  /** The declared scheduling priority, or `undefined`. */
+  /**
+   * The declared scheduling priority, or `undefined`.
+   *
+   * Honored by `@smthrs/engine-store`'s `PlanScheduler`, which admits ready
+   * nodes highest-priority-first under a concurrency limit. The rc.0 `up` path
+   * runs a flow through `@smthrs/flow` `Interpreter`, which settles every ready
+   * node at once, so on that path the priority orders nothing.
+   */
   readonly priority: number | undefined
   /** The declared placement directive, or `undefined`. */
   readonly placement: CorePlacement.Placement | undefined
@@ -273,16 +294,43 @@ const refuse = (options: {
   })
 
 /**
+ * The three characters a path may legally contain that a URL reads as
+ * structure rather than as a name, in the order they must be escaped: `%`
+ * first, or escaping the other two would corrupt a literal `%` beside them.
+ */
+const urlStructural: ReadonlyArray<readonly [string, string]> = [
+  ["%", "%25"],
+  ["#", "%23"],
+  ["?", "%3F"]
+]
+
+/**
  * A `file:` specifier for an absolute filesystem path.
  *
  * Written by hand rather than with `node:url` because this package is
  * browser-safe: a host that bundles a registry must not pull a Node builtin in
- * behind it.
+ * behind it. Doing it by hand means doing what `pathToFileURL` does. A `#` or
+ * a `?` in a directory name is both a legal filename character and URL syntax,
+ * and concatenating one unescaped truncates the specifier at it, so
+ * `file:///a#b.ts` addresses `/a`. The loader then imports the wrong module,
+ * or none, with nothing in the failure to say why.
+ *
+ * Exported because {@link Options.load} receives a filesystem path, not a
+ * specifier: a host that supplies its own loader has to make the same
+ * conversion, and in a browser bundle it has no `pathToFileURL` to make it
+ * with.
+ *
+ * @category conversions
+ * @since 0.1.0
  */
-const fileSpecifier = (path: string): string => {
+export const fileSpecifier = (path: string): string => {
   if (path.startsWith("file:")) return path
   const posix = path.replaceAll("\\", "/")
-  return posix.startsWith("/") ? `file://${posix}` : `file:///${posix}`
+  const escaped = urlStructural.reduce(
+    (value, [character, escape]) => value.replaceAll(character, escape),
+    posix
+  )
+  return posix.startsWith("/") ? `file://${escaped}` : `file:///${escaped}`
 }
 
 const importModule = (path: string): Effect.Effect<unknown, unknown> =>
@@ -371,10 +419,20 @@ const captured = (lowered: Lowered): Readonly<Record<string, unknown>> => ({
  * The annotation bag the bridged flow carries.
  *
  * Placement is stored under `@smthrs/flow`'s own placement key, which
- * `@smthrs/flow` `Graph` reads while building the plan, and the cache policy
- * under the identifier `@smthrs/engine-store` reads at dispatch. Both keys are
- * declared by other packages on purpose: a bag this module writes is one those
- * modules read.
+ * `@smthrs/flow` `Graph` reads while building the plan. The cache policy is
+ * stored under `CacheEnvironment.CachePolicyAnnotation`. That is the identifier
+ * `@smthrs/engine-store` `ActionPersistence` reads a policy under, and the one
+ * `@smthrs/patterns`' `withCache` writes on a flow. What `ActionPersistence`
+ * reads it off, though, is a DISPATCHED ACTION.
+ *
+ * A flow's bag is not an action's bag, and rc.0 carries nothing between them:
+ * `@smthrs/flow` `Interpreter` dispatches the actions a delegate's own body
+ * names and never consults the enclosing flow's annotations. So the policy
+ * lowered here bounds nothing at dispatch today. It is kept because it is
+ * where a policy belongs and because the delegating node's captured key
+ * material, which is the half that does change behavior, has to agree with it.
+ * `packages/registry/test/ExecutableEngine.test.ts` pins the current behavior
+ * with a `scope: "run"` descriptor that does NOT re-execute.
  */
 const annotationsOf = (lowered: Lowered): Context.Context<never> => {
   let bag = Context.empty()
@@ -504,9 +562,10 @@ export const fromDescriptor = (
       flows: descriptor.flows
     })
     // The policy travels twice, exactly as `@smthrs/patterns`' `withCache`
-    // sends it: as an annotation the engine executes at dispatch, and as
-    // captured identity on the node, so two descriptors declaring different
-    // policies are two declarations with two step keys.
+    // sends it: as an annotation on the flow, and as captured identity on the
+    // node, so two descriptors declaring different policies are two
+    // declarations with two step keys. Only the second half reaches the rc.0
+    // runtime; see `annotationsOf`.
     const identity = PlanNode.capture(captured(lowered), (value: unknown) => value)
     // The BODY's identity is captured too, and it has to be. A plan-time
     // function JavaScript cannot inspect gets process-local identity, so a
@@ -581,16 +640,32 @@ export interface Catalog {
 }
 
 /**
- * Makes every discovered flow runnable, skipping the ones this host cannot
- * run.
+ * Service tag for the catalog a host was built from.
+ *
+ * {@link layer} provides it, so a command that lists or diagnoses flows reads
+ * the same refusals the registration phase acted on instead of rebuilding the
+ * catalog and hoping the two agree.
+ *
+ * @category services
+ * @since 0.1.0
+ */
+export const Catalog: Context.Service<Catalog, Catalog> = Context.Service("flows/registry/Catalog")
+
+/**
+ * Makes every discovered flow runnable, reporting the ones it could not.
  *
  * A project's `flows/` directory is a mixed set: some entries delegate to a
- * flow this host registered, others name a delegate only another host has.
- * Refusing the whole catalog for one of those would make a host's own flows
- * unreachable, so an entry whose delegate is missing is reported in
- * {@link Catalog.refused} and left out. Anything else — an unreadable body, a
- * module that exports the wrong thing — still fails, because it is a defect in
- * the entry rather than a statement about this host.
+ * flow this host registered, others name a delegate only another host has, and
+ * one may simply be broken. None of those is a reason to withhold the rest.
+ * `flows/` is a directory a person edits, so at any moment one file in it is
+ * mid-edit or wrong, and a catalog that failed on it would take down `ls`,
+ * `ps`, and every unrelated `up` with it.
+ *
+ * So every refusal is reported in {@link Catalog.refused} carrying its
+ * {@link ExecutableError} code, and the entries that resolve stay runnable. The
+ * codes are what distinguish the two kinds: `missing_delegate` and
+ * `ambiguous_delegate` are statements about this host, while
+ * `body_unavailable` and `invalid_module` are defects in the entry.
  *
  * @category constructors
  * @since 0.1.0
@@ -599,7 +674,7 @@ export const catalog = (
   options: Options
 ): Effect.Effect<
   Catalog,
-  ExecutableError | RegistryError | DiscoveryError,
+  RegistryError | DiscoveryError,
   Registry.Registry | FileSystem.FileSystem | Path.Path
 > =>
   Effect.gen(function*() {
@@ -613,9 +688,6 @@ export const catalog = (
         executables.push(result.success)
         continue
       }
-      if (result.failure.code !== "missing_delegate" && result.failure.code !== "ambiguous_delegate") {
-        return yield* Effect.fail(result.failure)
-      }
       refused.push(result.failure)
     }
     return { executables, refused }
@@ -628,23 +700,39 @@ export const catalog = (
  * once it has been built, `Control.run` on a discovered flow reaches a
  * registered durable flow instead of an empty catalog.
  *
+ * A refusal is never silent. Each one is logged as a warning naming the flow,
+ * the code, the delegate it wanted, and what is registered instead, and the
+ * whole {@link Catalog} is provided as a service, so a host can print the
+ * refusals rather than let an operator discover them from `up <flow>` failing
+ * inside the runtime.
+ *
  * @category layers
  * @since 0.1.0
  */
 export const layer = (
   options: Options
 ): Layer.Layer<
-  never,
-  ExecutableError | RegistryError | DiscoveryError,
+  Catalog,
+  RegistryError | DiscoveryError,
   Registry.Registry | FileSystem.FileSystem | Path.Path | Registration
 > =>
   Layer.unwrap(
     Effect.map(
-      catalog(options),
+      Effect.tap(catalog(options), (built) =>
+        Effect.forEach(built.refused, (failure) =>
+          Effect.logWarning("discovered flow is not runnable on this host", {
+            flow: failure.flow,
+            code: failure.code,
+            delegate: failure.delegate,
+            available: failure.available,
+            reason: failure.message
+          }), { discard: true })),
       (built) =>
         Layer.mergeAll(
-          Layer.empty,
-          ...built.executables.map((executable) => executable.layer)
+          Layer.succeed(Catalog)(built),
+          ...built.executables.map((executable) =>
+            executable.layer
+          )
         )
     )
   )
@@ -658,10 +746,14 @@ export const layer = (
 export interface ProjectOptions {
   /** The project root. `<root>/flows` is scanned for `flow.ts` and `flow.mdx`. */
   readonly root: string
-  /** Installed packs whose flows join the project's, project entries first. */
-  readonly packs?: ReadonlyArray<Pack.Installed> | undefined
-  /** The runtime version a pack's `requires.smithers` range is checked against. */
-  readonly runtimeVersion?: string | undefined
+  /**
+   * Installed packs whose flows join the project's, project entries first.
+   *
+   * The runtime version rides inside {@link module:Registry.PackConfig} rather
+   * than beside it, so a caller cannot ask for packs without saying what their
+   * `requires.smithers` range is checked against.
+   */
+  readonly packs?: Registry.PackConfig | undefined
 }
 
 /**
@@ -669,9 +761,18 @@ export interface ProjectOptions {
  *
  * `<root>/flows/**` first, then every installed pack's own sources, all under
  * one first-found registry, so a project flow shadows a pack flow of the same
- * name and `refresh` rescans both. A project with no `flows/` directory is not
- * a failure: it simply has no flows yet, which is the state `smithers init`
- * leaves behind.
+ * name and `refresh` rescans both. Packs are scanned through the registry's own
+ * pack path, so each pack descriptor carries its `provenance.pack`, a name two
+ * packs both define is reported as `shadowed` naming both of them with the
+ * `local` pack winning, and every pack's `requires.smithers` is checked against
+ * {@link module:Registry.PackConfig.runtimeVersion}.
+ *
+ * A project with no `flows/` directory is not a failure: it simply has no flows
+ * yet, which is the state `smithers init` leaves behind. That is decided by
+ * looking for the directory, so it stays a statement about the PROJECT: a pack
+ * that declares a flows directory it does not ship fails the layer as an
+ * `invalid_pack` naming the pack, instead of quietly emptying the registry the
+ * project's own flows were in.
  *
  * This is the value a host passes as the durable runtime's registry: the seam
  * `@smthrs/flows` `NodeRuntime` opened so discovery, and not a hand-written
@@ -686,25 +787,31 @@ export const layerProject = (
   Layer.unwrap(
     Effect.gen(function*() {
       const path = yield* Path.Path
-      const packs = options.packs ?? []
-      const runtimeVersion = options.runtimeVersion
-      if (runtimeVersion !== undefined) {
-        for (const pack of packs) yield* Pack.checkCompatible(pack, runtimeVersion)
-      }
-      const ordered = [...packs].sort((left, right) =>
-        Number(right.origin === "local") - Number(left.origin === "local")
-      )
-      const sources: Array<Descriptor.Source> = [
-        { source: "project", root: path.join(options.root, "flows"), naming: "path" },
-        ...ordered.flatMap((pack) => [...Pack.sources(pack, path)])
-      ]
-      return Registry.layer({ sources }).pipe(
-        Layer.provide(Discovery.layer),
-        Layer.catch((error) =>
-          error.code === "root_missing"
-            ? Registry.layerFromDescriptors([])
-            : Layer.effect(Registry.Registry)(Effect.fail(error))
+      const fs = yield* FileSystem.FileSystem
+      const root = path.join(options.root, "flows")
+      // ASKED UP FRONT, not caught afterwards. A project with no `flows/`
+      // directory has no flows yet, which is the state `smithers init` leaves
+      // behind; catching the scan's `root_missing` instead would make every
+      // OTHER missing root — a pack that declares a directory it does not
+      // ship — read as "this project has no flows" and empty the registry the
+      // project's own flows were in.
+      const present = yield* fs.exists(root).pipe(
+        Effect.mapError((cause) =>
+          discoveryError({
+            code: "read_failed",
+            module: "Executable",
+            method: "layerProject",
+            description: `could not access the project flows directory "${root}"`,
+            cause
+          })
         )
       )
+      const sources: ReadonlyArray<Descriptor.Source> = present
+        ? [{ source: "project", root, naming: "path" }]
+        : []
+      return Registry.layer({
+        sources,
+        ...(options.packs === undefined ? {} : { packs: options.packs })
+      }).pipe(Layer.provide(Discovery.layer))
     })
   )
