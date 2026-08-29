@@ -1,5 +1,5 @@
 /**
- * Control-plane contracts and projections for the flows harness.
+ * Control-plane contracts and projections for the Smithers harness.
  *
  * @since 0.1.0
  */

@@ -1,20 +1,20 @@
 {
   "name": "@smthrs/gateway",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.0",
   "license": "MIT",
   "smthrs": {
     "group": "agent"
   },
   "description": "Effect workspace gateway contracts, projections, and supervision ports for flows",
-  "homepage": "https://github.com/smithersai/flows",
+  "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
-    "url": "https://github.com/smithersai/flows.git",
+    "url": "https://github.com/smithersai/smithers.git",
     "directory": "packages/gateway"
   },
   "bugs": {
-    "url": "https://github.com/smithersai/flows/issues"
+    "url": "https://github.com/smithersai/smithers/issues"
   },
   "tags": [
     "typescript",
@@ -53,6 +53,7 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
+    "tag": "rc",
     "exports": {
       "./package.json": "./package.json",
       ".": {
@@ -79,11 +80,11 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@smthrs/control": "0.1.0",
-    "@smthrs/journal": "0.1.0",
-    "@smthrs/notifications": "0.1.0",
-    "@smthrs/run-store": "0.1.0",
-    "@smthrs/sync": "0.1.0",
+    "@smthrs/control": "1.0.0-rc.0",
+    "@smthrs/journal": "1.0.0-rc.0",
+    "@smthrs/notifications": "1.0.0-rc.0",
+    "@smthrs/run-store": "1.0.0-rc.0",
+    "@smthrs/sync": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {

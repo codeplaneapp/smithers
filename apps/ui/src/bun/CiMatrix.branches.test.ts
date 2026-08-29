@@ -39,12 +39,12 @@ jobs:
           - ubuntu-latest
           - macos-latest
     steps:
-      - run: pnpm exec smthrs test '//packages/...'
-      - run: pnpm exec smthrs ci '//apps/ui:check'
+      - run: pnpm exec smithers-build test '//packages/...'
+      - run: pnpm exec smithers-build ci '//apps/ui:check'
   lint:
     runs-on: ubuntu-latest
     steps:
-      - run: pnpm exec smthrs lint '//src:lint'
+      - run: pnpm exec smithers-build lint '//src:lint'
 `
 
 test("with no Node sidecar the preview reads the workflows already on disk", async () => {
@@ -78,7 +78,7 @@ test("a repository that declares no CiGen target falls back to disk too", async 
     node: { path: process.execPath, version: "v22.19.0" }
   })
   expect(result.workflows.map((entry) => entry.source)).toEqual(["on-disk"])
-  /* A `.yaml` extension counts, and a job with no smthrs step has no targets. */
+  /* A `.yaml` extension counts, and a job with no smithers-build step has no targets. */
   expect(result.workflows[0]?.name).toBe("release")
   expect(result.workflows[0]?.jobs).toEqual([{ name: "publish", targets: [] }])
 })
@@ -89,7 +89,7 @@ test("a repository with no workflows directory answers an empty preview", async 
 })
 
 test("a CiGen label whose scratch render fails warns and shows what is on disk", async () => {
-  await workflow("ci.yml", "name: ci\njobs:\n  test:\n    steps:\n      - run: pnpm exec smthrs test '//src:lint'\n")
+  await workflow("ci.yml", "name: ci\njobs:\n  test:\n    steps:\n      - run: pnpm exec smithers-build test '//src:lint'\n")
   await writeFile(join(repo, "PACKAGE.ts"), "export const x = 1\n")
   const cli = join(repo, "broken-cli.mjs")
   await writeFile(cli, "process.stderr.write('the loader could not resolve //\\u002F.github:github\\n')\nprocess.exit(1)\n")
@@ -124,7 +124,7 @@ test("the scratch clone follows a declaration's relative imports, including .js 
     `import { mkdirSync, writeFileSync, existsSync } from "node:fs"
 mkdirSync(".github/workflows", { recursive: true })
 const seen = ["PACKAGE.ts", "ci/shards.ts", "ci/nested.ts", "WORKSPACE.ts"].filter((file) => existsSync(file))
-writeFileSync(".github/workflows/generated.yml", \`name: generated\\njobs:\\n  build:\\n    steps:\\n      - run: pnpm exec smthrs build '//src:build'\\n      - run: echo \${seen.join(",")}\\n\`)
+writeFileSync(".github/workflows/generated.yml", \`name: generated\\njobs:\\n  build:\\n    steps:\\n      - run: pnpm exec smithers-build build '//src:build'\\n      - run: echo \${seen.join(",")}\\n\`)
 `
   )
   const result = await renderCiMatrix({

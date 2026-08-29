@@ -145,7 +145,7 @@ returns no targets fails with `default target synthesized no targets for //<dir>
 
 The root `BUILD.ts` is always loaded before any synthesis decision, so
 workspace-level declarations are in scope. See
-[Default targets](../extending/default-targets.md).
+[Default targets](../extending/default-rules.md).
 
 ## Host state
 

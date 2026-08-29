@@ -43,7 +43,7 @@ export const notFound = (path: string): StdError.StdError =>
   new StdError.StdError({ code: "not_found", message: `Path not found: ${path}`, path })
 
 /**
- * Validates Flows Ripgrep ASCII v1. It is deliberately the intersection of
+ * Validates Smithers Ripgrep ASCII v1. It is deliberately the intersection of
  * Rust regex and JavaScript RegExp: ASCII patterns, captures, alternation,
  * ASCII character classes and ordinary quantifiers. Lookaround,
  * backreferences, named/inline groups, Unicode/shorthand classes and control
@@ -111,7 +111,7 @@ export const validatePattern = (pattern: string, fixedStrings: boolean): StdErro
     new RegExp(pattern, "u")
     return undefined
   } catch {
-    return invalidPattern(pattern, "invalid Flows Ripgrep ASCII v1 expression")
+    return invalidPattern(pattern, "invalid Smithers Ripgrep ASCII v1 expression")
   }
 }
 

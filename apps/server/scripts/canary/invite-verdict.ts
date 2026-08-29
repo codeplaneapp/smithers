@@ -6,7 +6,7 @@
  * here, where a bun test can drive it without a deployment.
  *
  * The identity Worker is not in this repository (apps/UPSTREAMS.md); it lives
- * in ~/flows/ui/workers/identity. Its write door is documented in
+ * in smithersai/ui at workers/identity. Its write door is documented in
  * apps/server/INVITES.md and is exercised by src/seed-allowlist.test.ts.
  *
  * Its read-back door is not documented anywhere in this tree. What the live

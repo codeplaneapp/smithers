@@ -1,11 +1,12 @@
 /**
  * A model-backed step with a typed output schema, chained into another one.
  *
- * This is the flows form of a two-step research-then-write workflow: the first
- * step asks a model to research a topic and hands back `{ summary, keyPoints }`,
- * the second turns that into an article. Both are model calls, and neither is
- * special topology — `docs/specs/Concepts/Unified Flow Authoring.md` says a
- * model call is an ordinary action, so `AgentAction.make` declares one exactly
+ * This is the Smithers form of a two-step research-then-write workflow: the
+ * first step asks a model to research a topic and hands back
+ * `{ summary, keyPoints }`, the second turns that into an article. Both are
+ * model calls, and neither is special topology — the unified flow-authoring
+ * model says a model call is an ordinary action, so `AgentAction.make`
+ * declares one exactly
  * the way `Action.make` declares any other. The difference is that the author
  * does not write `toLayer`: a model call has one implementation, it runs the
  * cell loop, and it ships with the declaration as `.layer`.

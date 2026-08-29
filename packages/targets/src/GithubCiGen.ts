@@ -226,7 +226,7 @@ export const Attrs = Schema.Struct({
   ),
   /**
    * The declared package manager. Every job that installs the workspace installs
-   * with it and runs the smthrs binary through it, so a workspace that switches
+   * with it and runs the smithers-build binary through it, so a workspace that switches
    * managers gets a regenerated workflow rather than a pipeline still calling
    * pnpm.
    */
@@ -521,7 +521,7 @@ const installArgv = (attrs: Attrs): ReadonlyArray<string> =>
  */
 export const stepCommand = (attrs: Attrs, step: TargetStep): string =>
   [
-    ...PackageManager.exec(attrs.packageManager, ["smthrs", Verb.command(step.verb)]),
+    ...PackageManager.exec(attrs.packageManager, ["smithers-build", Verb.command(step.verb)]),
     shellArgument(step.pattern),
     ...(step.parallelism === undefined ? [] : ["--jobs", String(step.parallelism)])
   ].join(" ")
@@ -881,7 +881,7 @@ export const render = (attrs: Attrs): string => {
  * what it requires and which targets it runs; {@link toolchainSteps} turns the
  * requirements into checkout, setup, and install steps, and
  * {@link stepCommand} turns each target step into one
- * `<manager> exec smthrs <verb> '<pattern>'` invocation. There is no attribute
+ * `<manager> exec smithers-build <verb> '<pattern>'` invocation. There is no attribute
  * anywhere in {@link Attrs} that accepts a command, an action reference, or a
  * shell script, so a gate that is not a target cannot be added to the pipeline
  * without first becoming one.
@@ -893,7 +893,7 @@ export const render = (attrs: Attrs): string => {
  * Generated command example:
  *
  * ```yaml
- * - run: pnpm exec smthrs ci '//packages/...' --jobs 2
+ * - run: pnpm exec smithers-build ci '//packages/...' --jobs 2
  * ```
  *
  * @category targets

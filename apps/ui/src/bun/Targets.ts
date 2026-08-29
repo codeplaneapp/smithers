@@ -163,11 +163,11 @@ export const queryTargets = async (options: TargetsQueryOptions): Promise<Target
   const warnings: Array<string> = []
   const node = options.node
   if (node === null) {
-    warnings.push("No Node.js >= 22.19 was found for the smthrs loader (SMITHERS_NODE, PATH, nvm, homebrew).")
+    warnings.push("No Node.js >= 22.19 was found for the smithers-build loader (SMITHERS_NODE, PATH, nvm, homebrew).")
     return { targets: [], warnings, durationMs: Date.now() - started }
   }
   if (!existsSync(cli)) {
-    warnings.push(`The smthrs loader is missing at ${cli} (set SMITHERS_BUILD_CLI).`)
+    warnings.push(`The smithers-build loader is missing at ${cli} (set SMITHERS_BUILD_CLI).`)
     return { targets: [], warnings, durationMs: Date.now() - started }
   }
   const workspaces = options.workspaces === undefined || options.workspaces.length === 0
@@ -427,7 +427,7 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
     emit(live.run, { type: "started", runId: live.run.runId, label: live.run.label, labels: [...live.run.labels], at: live.run.startedAt })
     if (!existsSync(cli)) {
       live.run.status = "failed"
-      emit(live.run, { type: "error", message: `The smthrs loader is missing at ${cli} (set SMITHERS_BUILD_CLI).` })
+      emit(live.run, { type: "error", message: `The smithers-build loader is missing at ${cli} (set SMITHERS_BUILD_CLI).` })
       emit(live.run, { type: "exit", code: null })
       return
     }

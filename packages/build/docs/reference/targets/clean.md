@@ -74,7 +74,7 @@ None. The target declares no input attributes.
 | Cacheable | Never; deletion changes local state and has no reusable result |
 | Executes  | Yes, through `ExecLive`, as a `run` root or dependency         |
 
-Invoke it explicitly with `smthrs run <label>`. Making a build depend on clean
+Invoke it explicitly with `smithers-build run <label>`. Making a build depend on clean
 is rarely useful: deleting outputs before a build defeats cache reuse.
 
 ## See also

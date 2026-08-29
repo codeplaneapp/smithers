@@ -6,8 +6,8 @@ priority: p1
 
 # Fold deferred completions and clock deadlines into the journal
 
-Implement the deferred/clock row in the fold table from
-`docs/specs/Concepts/Journal Consensus.md`: `flows_deferred_completions` and
+Implement the deferred/clock row in the fold table from the "Journal
+Consensus" spec: `flows_deferred_completions` and
 `flows_clock_deadlines` become rebuildable materializations of journal events.
 
 - Keep `@smthrs/engine-store`'s durable deferred and clock behavior while

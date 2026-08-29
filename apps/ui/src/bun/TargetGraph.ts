@@ -161,9 +161,9 @@ export interface TargetGraphOptions {
 }
 
 const runJson = async (options: TargetGraphOptions, args: ReadonlyArray<string>): Promise<unknown> => {
-  if (options.node === null) throw new Error("No Node.js >= 22.19 was found for the smthrs loader.")
+  if (options.node === null) throw new Error("No Node.js >= 22.19 was found for the smithers-build loader.")
   const cli = options.cli ?? resolveBuildCli()
-  if (!existsSync(cli)) throw new Error(`The smthrs loader is missing at ${cli}.`)
+  if (!existsSync(cli)) throw new Error(`The smithers-build loader is missing at ${cli}.`)
   const wrapped = wrapSandbox(
     [options.node.path, cli, ...args],
     loaderPolicy(sandboxPathsFor(options.repo)),

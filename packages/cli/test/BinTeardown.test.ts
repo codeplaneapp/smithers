@@ -1,5 +1,5 @@
 /**
- * The `flows` entrypoint's exit-status contract, exercised in process.
+ * The `smithers` entrypoint's exit-status contract, exercised in process.
  *
  * `Bin.test.ts` proves three statuses end to end through a real spawn. These
  * cases pin the whole mapping — signals, interruption, every CLI failure
@@ -84,7 +84,7 @@ afterAll(() => {
   process.exitCode = previousExitCode
 })
 
-describe("flows entrypoint", () => {
+describe("smithers entrypoint", () => {
   it("starts the command tree on the Node runtime with a teardown", () => {
     expect(runMain).toHaveBeenCalledTimes(1)
     expect(typeof entrypoint.teardown).toBe("function")
@@ -107,13 +107,13 @@ describe("flows entrypoint", () => {
   it("reports success for a help request and a usage status for one with errors", () => {
     // `ShowHelp` with no errors is `--help`, which is a successful
     // invocation; with errors it is a rejected one.
-    expect(status(entrypoint, failure(new EffectCliError.ShowHelp({ commandPath: ["flows"], errors: [] })))).toBe(0)
+    expect(status(entrypoint, failure(new EffectCliError.ShowHelp({ commandPath: ["smithers"], errors: [] })))).toBe(0)
     expect(
       status(
         entrypoint,
         failure(
           new EffectCliError.ShowHelp({
-            commandPath: ["flows"],
+            commandPath: ["smithers"],
             errors: [new EffectCliError.UnrecognizedOption({ option: "--filter", suggestions: [] })]
           })
         )
@@ -162,7 +162,7 @@ describe("flows entrypoint", () => {
     })
     try {
       process.chdir(project)
-      process.argv = [process.execPath, "flows", "--version"]
+      process.argv = [process.execPath, "smithers", "--version"]
       await Effect.runPromise(fresh.main)
     } finally {
       write.mockRestore()

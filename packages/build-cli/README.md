@@ -1,18 +1,18 @@
-# smthrs CLI
+# smithers-build CLI
 
-`smthrs` uses incur and the Bazel verb model. A verb selects a target set.
+`smithers-build` uses incur and the Bazel verb model. A verb selects a target set.
 Targets do not contain per-command scripts.
 
 ```sh
-smthrs install --workspace /Users/williamcory/flows/flows
-smthrs build //packages/...
-smthrs test //packages/flow:test
-smthrs lint //packages/flow:lint
-smthrs query 'deps(//packages/flow:lib)'
-smthrs graph //packages/... --mermaid
+smithers-build install --workspace /path/to/smithers
+smithers-build build //packages/...
+smithers-build test //packages/flow:test
+smithers-build lint //packages/flow:lint
+smithers-build query 'deps(//packages/flow:lib)'
+smithers-build graph //packages/... --mermaid
 ```
 
-`install` executes the `smthrs` package's Install Flow with the pnpm layer.
+`install` executes the `smithers-build` package's Install Flow with the pnpm layer.
 `build`, `test`, `lint`, `query`, and `graph` evaluate and print plans only.
 
 ## Cache directory

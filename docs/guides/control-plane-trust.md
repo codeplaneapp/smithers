@@ -41,8 +41,8 @@ Remote CLI commands attach the credential to HTTP RPC requests and WebSocket
 upgrades as `Authorization: Bearer <credential>`:
 
 ```sh
-flows --remote https://control.example.test --credential "$FLOWS_CONTROL_TOKEN" plan system/test
-flows --remote https://control.example.test --credential "$FLOWS_CONTROL_TOKEN" ps
+smithers --remote https://control.example.test --credential "$FLOWS_CONTROL_TOKEN" plan system/test
+smithers --remote https://control.example.test --credential "$FLOWS_CONTROL_TOKEN" ps
 ```
 
 Missing, malformed, empty, and incorrect credentials all return the same typed

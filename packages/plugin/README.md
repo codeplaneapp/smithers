@@ -32,7 +32,7 @@ import { type FlowsPlugin, Kernel } from "@smthrs/plugin"
 import { Effect } from "effect"
 
 const tuning: FlowsPlugin = {
-  name: "flows-plugin-tuning",
+  name: "smithers-plugin-tuning",
   hooks: {
     config: () => Effect.succeed({ engine: { maxConcurrency: 8 } }),
     configResolved: (config) => Effect.log(`cell concurrency: ${config.engine.maxConcurrency}`)

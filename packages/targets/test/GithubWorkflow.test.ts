@@ -21,7 +21,7 @@ import {
 } from "../src/GithubWorkflow.ts"
 
 /**
- * The flows repository's own pipeline, read from disk. It is the workload
+ * The Smithers repository's own pipeline, read from disk. It is the workload
  * this reader exists for: seven jobs, block scalars, `continue-on-error`
  * advisory lanes, `with:` maps, `env:` maps, and heavy comment traffic.
  */
@@ -425,7 +425,7 @@ describe("parseWorkflow", () => {
       .toThrow(WorkflowParseError)
   })
 
-  it("parses the flows repository's own pipeline", async () => {
+  it("parses the Smithers repository's own pipeline", async () => {
     const source = await readReal()
     if (source === undefined) return
     const workflow = parseWorkflow(source)
@@ -471,7 +471,7 @@ describe("parseWorkflow", () => {
    * repository: every `pnpm run <script>` a step invokes must be a script in
    * the root manifest, and every `node <file>` must be a file on disk.
    */
-  it("runs only scripts and files the flows repository actually has", async () => {
+  it("runs only scripts and files the Smithers repository actually has", async () => {
     const source = await readReal()
     if (source === undefined) return
     const manifest = JSON.parse(
@@ -844,7 +844,7 @@ describe("supported lockfile installs", () => {
 
   /**
    * Every command below is syntactically a lockfile install, and every one of
-   * them leaves the workspace without the dev dependency the pinned smthrs CLI
+   * them leaves the workspace without the dev dependency the pinned smithers-build CLI
    * lives in. They used to pass, so the install gate was satisfied by a job
    * whose next step could only fail.
    */

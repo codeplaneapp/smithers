@@ -116,7 +116,7 @@ describe("HostServices", () => {
           reason: "denied by integration test"
         })
 
-        // `flows` owns `Jj`, so its interface names the kernel failure directly
+        // Smithers owns `Jj`, so its interface names the kernel failure directly
         // instead of projecting it into a `PlatformError`.
         const jj = yield* HostJj.Jj
         expect(yield* Effect.flip(jj.status())).toMatchObject({

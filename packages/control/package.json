@@ -1,20 +1,20 @@
 {
   "name": "@smthrs/control",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.0",
   "license": "MIT",
   "smthrs": {
     "group": "agent"
   },
   "description": "Browser-safe control services and RPC projections for flows",
-  "homepage": "https://github.com/smithersai/flows",
+  "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
-    "url": "https://github.com/smithersai/flows.git",
+    "url": "https://github.com/smithersai/smithers.git",
     "directory": "packages/control"
   },
   "bugs": {
-    "url": "https://github.com/smithersai/flows/issues"
+    "url": "https://github.com/smithersai/smithers/issues"
   },
   "tags": [
     "typescript",
@@ -53,6 +53,7 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
+    "tag": "rc",
     "exports": {
       "./package.json": "./package.json",
       ".": {
@@ -79,15 +80,15 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@smthrs/canonical": "0.1.0",
-    "@smthrs/core": "0.1.0",
-    "@smthrs/crypto": "0.1.0",
-    "@smthrs/database": "0.1.0",
-    "@smthrs/journal": "0.1.0",
-    "@smthrs/notifications": "0.1.0",
-    "@smthrs/plan": "0.1.0",
-    "@smthrs/registry": "0.1.0",
-    "@smthrs/run-store": "0.1.0",
+    "@smthrs/canonical": "1.0.0-rc.0",
+    "@smthrs/core": "1.0.0-rc.0",
+    "@smthrs/crypto": "1.0.0-rc.0",
+    "@smthrs/database": "1.0.0-rc.0",
+    "@smthrs/journal": "1.0.0-rc.0",
+    "@smthrs/notifications": "1.0.0-rc.0",
+    "@smthrs/plan": "1.0.0-rc.0",
+    "@smthrs/registry": "1.0.0-rc.0",
+    "@smthrs/run-store": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {

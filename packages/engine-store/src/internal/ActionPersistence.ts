@@ -1320,7 +1320,7 @@ export const make = (deps: Dependencies) => {
                   yield* jj.restore(decodeMeta(previous.value.meta)!.snapshotId!)
                 }
               }
-              const snapshot = yield* jj.snapshot(`flows action ${keyDigest} attempt ${input.attempt}`)
+              const snapshot = yield* jj.snapshot(`smithers action ${keyDigest} attempt ${input.attempt}`)
               snapshotId = snapshot.changeId
               // Persist the pre-image into the running row before announcing it
               // (issue #87): a SIGKILL mid-attempt must not lose the only

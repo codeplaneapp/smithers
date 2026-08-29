@@ -55,4 +55,4 @@ A platform-neutral package root exports **contracts**; an implementation lives i
 
 ## The honest claim
 
-“`flows` has browser-safe canonical JSON, crypto, and host contracts with a working `BrowserHost`, and its journal, keys, kernel, engine, engine-store, sync, time-travel, and barrel surfaces all bundle for the browser. Its durable engine composition is still SQLite-on-Node in practice, because no browser SQL client layer ships here.” Do not shorten that to “the library is browser compatible”: bundling is not running, and every entry in this page's second table is still Node-only.
+“Smithers has browser-safe canonical JSON, crypto, and host contracts with a working `BrowserHost`, and its journal, keys, kernel, engine, engine-store, sync, time-travel, and barrel surfaces all bundle for the browser. Its durable engine composition is still SQLite-on-Node in practice, because no browser SQL client layer ships here.” Do not shorten that to “the library is browser compatible”: bundling is not running, and every entry in this page's second table is still Node-only.

@@ -34,7 +34,7 @@ The durable composition still needs a SQL client behind the `DurableWriter` cont
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/flows` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/flows/src/index.ts) | Node and browser |
+| `@smthrs/flows` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/flows/src/index.ts) | Node and browser |
 
 ## Namespaces
 

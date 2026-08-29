@@ -27,11 +27,11 @@ The only `DurableWriter` backing shipped here is `node:sqlite`.
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/engine-store` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/index.ts) | Node and browser |
+| `@smthrs/engine-store` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/index.ts) | Node and browser |
 
 ## EngineStore
 
-[src/EngineStore.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/EngineStore.ts)
+[src/EngineStore.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/EngineStore.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -47,7 +47,7 @@ Required services: `Journal`, `RunStore`, `AttemptStore`, `CacheStore`, `Durable
 
 ## DurableEngineState
 
-[src/DurableEngineState.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/DurableEngineState.ts)
+[src/DurableEngineState.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/DurableEngineState.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -65,7 +65,7 @@ Required services: `Journal`, `RunStore`, `AttemptStore`, `CacheStore`, `Durable
 
 ## StepBoundary
 
-[src/StepBoundary.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/StepBoundary.ts)
+[src/StepBoundary.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/StepBoundary.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -86,7 +86,7 @@ Required services: `Journal`, `RunStore`, `AttemptStore`, `CacheStore`, `Durable
 
 ## WorkspaceSandbox
 
-[src/WorkspaceSandbox.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/WorkspaceSandbox.ts)
+[src/WorkspaceSandbox.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/WorkspaceSandbox.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -113,7 +113,7 @@ This is a deterministic transaction model, not a security boundary.
 
 ## ArtifactSync
 
-[src/ArtifactSync.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/ArtifactSync.ts)
+[src/ArtifactSync.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/ArtifactSync.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -127,7 +127,7 @@ This is a deterministic transaction model, not a security boundary.
 
 ## ArtifactGc
 
-[src/ArtifactGc.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/ArtifactGc.ts)
+[src/ArtifactGc.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/ArtifactGc.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -143,7 +143,7 @@ Collection never runs automatically. `gc()` is an explicit verb, and the mark is
 
 ## CacheSync
 
-[src/CacheSync.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/CacheSync.ts)
+[src/CacheSync.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/CacheSync.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -158,7 +158,7 @@ Neither publication step can fail a run. By the time they run the result is alre
 
 ## Inconsistency
 
-[src/Inconsistency.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/Inconsistency.ts)
+[src/Inconsistency.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/Inconsistency.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -174,7 +174,7 @@ The unwired core default is strict.
 
 ## OwnerIdentity
 
-[src/OwnerIdentity.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/OwnerIdentity.ts)
+[src/OwnerIdentity.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/OwnerIdentity.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -188,7 +188,7 @@ Minting an owner id is nondeterminism against the host, so it sits behind a port
 
 ## RunState
 
-[src/RunState.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/RunState.ts)
+[src/RunState.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/RunState.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -196,7 +196,7 @@ Minting an owner id is nondeterminism against the host, so it sits behind a port
 
 ## Errors
 
-[src/Errors.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/Errors.ts)
+[src/Errors.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/Errors.ts)
 
 | Export | `code` |
 | --- | --- |
@@ -210,7 +210,7 @@ Every `code` literal is part of the public API. Consumers may switch on `code` o
 
 ## Migrations
 
-[src/Migrations.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/Migrations.ts)
+[src/Migrations.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/Migrations.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -227,4 +227,4 @@ Every `code` literal is part of the public API. Consumers may switch on `code` o
 
 | Export | Source | Notes |
 | --- | --- | --- |
-| `TestStores.layer(options?)`, `TestStores.database` | [src/test/TestStores.ts](https://github.com/smithersai/flows/blob/main/packages/engine-store/src/test/TestStores.ts) | migrated journal, run, attempt, and cache services over ONE in-memory SQLite database |
+| `TestStores.layer(options?)`, `TestStores.database` | [src/test/TestStores.ts](https://github.com/smithersai/smithers/blob/main/packages/engine-store/src/test/TestStores.ts) | migrated journal, run, attempt, and cache services over ONE in-memory SQLite database |

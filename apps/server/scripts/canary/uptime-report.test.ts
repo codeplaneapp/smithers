@@ -181,7 +181,7 @@ describe("uptime-probe.ts against a live HTTP origin", () => {
 })
 
 describe("uptime-report.ts", () => {
-  const runUrl = "https://github.com/smithersai/flows/actions/runs/7"
+  const runUrl = "https://github.com/smithersai/smithers/actions/runs/7"
 
   test("a failing report with nothing open asks for the issue to be created", async () => {
     mode = "spa-down"

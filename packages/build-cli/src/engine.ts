@@ -26,7 +26,7 @@ import * as NodePath from "node:path"
 import * as NodeUtil from "node:util/types"
 
 /**
- * Node host services needed by non-interactive smthrs execution.
+ * Node host services needed by non-interactive smithers-build execution.
  *
  * `NodeServices.layer` also acquires `NodeTerminal`, which attaches listeners
  * to process stdin. The executor gives every target an isolated flow runtime;

@@ -3,7 +3,7 @@
 /**
  * The canonical flow key: `key1_` followed by a SHA-256 digest.
  *
- * A key is how `flows` names work — the step cache, the attempt rows, and the
+ * A key is how Smithers names work — the step cache, the attempt rows, and the
  * plan all address by it — so it must be derivable from the value alone and
  * identical on every host. That is why it is a digest of the value's
  * {@link Canonical} RFC 8785 form rather than of whatever `JSON.stringify`

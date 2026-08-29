@@ -1,5 +1,5 @@
 /**
- * The subject under evaluation: the flows agent, composed the way a host
+ * The subject under evaluation: the Smithers agent, composed the way a host
  * composes it.
  *
  * The behaviour under evaluation is production code: the cell controller and

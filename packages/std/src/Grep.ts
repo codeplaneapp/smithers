@@ -1,8 +1,8 @@
 /**
- * The `grep` flow and its Flows Ripgrep Subset v1 contract.
+ * The `grep` flow and its Smithers Ripgrep Subset v1 contract.
  *
  * Supported ripgrep semantics: Rust-style regular expressions restricted to
- * Flows Ripgrep ASCII v1; `-F` (`fixedStrings`); `-i` (`ignoreCase`) and `-S`
+ * Smithers Ripgrep ASCII v1; `-F` (`fixedStrings`); `-i` (`ignoreCase`) and `-S`
  * (`smartCase`); ordered `-g` include/exclude globs; `-A`, `-B`, and `-C`
  * context; per-file `--max-count`; `--files-with-matches`; `--hidden`; and
  * deterministic path/line ordering. Ignore files and file-type registries are
@@ -65,7 +65,7 @@ export const name = "grep"
  * @since 0.1.0
  */
 export const description =
-  "Search file contents through the Flows Ripgrep Subset v1 contract. limit counts matches, each carrying its own context and enclosing definition; fixedStrings searches a literal, and one is retried."
+  "Search file contents through the Smithers Ripgrep Subset v1 contract. limit counts matches, each carrying its own context and enclosing definition; fixedStrings searches a literal, and one is retried."
 
 /**
  * Input accepted by {@link flow} and {@link run}.
@@ -74,7 +74,7 @@ export const description =
  * @since 0.1.0
  */
 export const Input = Schema.Struct({
-  pattern: Schema.String.annotate({ description: "Flows Ripgrep ASCII v1 expression." }),
+  pattern: Schema.String.annotate({ description: "Smithers Ripgrep ASCII v1 expression." }),
   root: Schema.optional(Schema.String).annotate({
     description: "Search root the globs are relative to; defaults to /. Pass the project directory."
   }),

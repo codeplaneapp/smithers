@@ -131,9 +131,9 @@ describe("the dependency closure", () => {
 })
 
 /*
- * AGENTS.md "New Smithers only": legacy runtime packages from ~/smithers use
+ * AGENTS.md "New Smithers only": the legacy runtime packages under legacy/ use
  * the retired @smithers scope; product code may only import the new @smthrs
- * packages owned by ../flows. Scans all product source, not just shared.
+ * packages owned by this repository. Scans all product source, not just shared.
  */
 describe("legacy scope boundary", () => {
   test("no src module imports the retired @smithers/* scope", () => {

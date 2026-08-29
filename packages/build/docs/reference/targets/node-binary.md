@@ -6,7 +6,7 @@ files rather than a verdict. Modelled on Bazel's `nodejs_binary`.
 The build-verb counterpart of [NodeTest](node-test.md). They are separate types
 because a target's participating verbs are fixed by its type — the planner
 selects by kind, so one type covering both would put a release-packing program
-in the graph of `smthrs test`.
+in the graph of `smithers-build test`.
 
 ```ts
 import { Smithers } from "@smthrs/targets"

@@ -39,7 +39,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError"
 import * as WriteRetry from "./internal/WriteRetry.ts"
 
 /**
- * The single table every flows package records its applied migrations in.
+ * The single table every Smithers package records its applied migrations in.
  *
  * @category constants
  * @since 0.1.0

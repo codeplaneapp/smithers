@@ -8,7 +8,7 @@
  */
 
 /**
- * One behavior from an external test suite and its flows coverage status.
+ * One behavior from an external test suite and its Smithers coverage status.
  *
  * @category models
  * @since 0.0.0
@@ -459,7 +459,7 @@ const pinned = new Map<string, Pick<ParityRow, "flowsEquivalent" | "status" | "r
     {
       flowsEquivalent: "flows/packages/engine-store/test/RunCoordinator.test.ts",
       status: "partial",
-      reason: "The coordinator coalesces wakes; flows has no OpenCode Session aggregate adapter."
+      reason: "The coordinator coalesces wakes; Smithers has no OpenCode Session aggregate adapter."
     }
   ],
   [
@@ -613,7 +613,7 @@ const pinned = new Map<string, Pick<ParityRow, "flowsEquivalent" | "status" | "r
       flowsEquivalent: "agent/packages/model/test/DeferredTools.test.ts",
       status: "partial",
       reason:
-        "Flows pins retained deferred definitions at the model boundary, but does not expose mutable scoped registrations."
+        "Smithers pins retained deferred definitions at the model boundary, but does not expose mutable scoped registrations."
     }
   ],
   [
@@ -633,7 +633,7 @@ const pinned = new Map<string, Pick<ParityRow, "flowsEquivalent" | "status" | "r
     {
       flowsEquivalent: "—",
       status: "skipped",
-      reason: "The flows registry is immutable and has no fallible retention operation."
+      reason: "The Smithers registry is immutable and has no fallible retention operation."
     }
   ],
   [
@@ -644,7 +644,7 @@ const pinned = new Map<string, Pick<ParityRow, "flowsEquivalent" | "status" | "r
     {
       flowsEquivalent: "agent/packages/model/test/ModelRequest.test.ts",
       status: "partial",
-      reason: "Provider request codecs are pinned; flows has no mutable OpenCode tool-registration codec."
+      reason: "Provider request codecs are pinned; Smithers has no mutable OpenCode tool-registration codec."
     }
   ]
 ])
@@ -654,7 +654,8 @@ const defaultCoverage = (source: string): Pick<ParityRow, "flowsEquivalent" | "s
     return {
       flowsEquivalent: "agent/packages/model/test/Route.test.ts",
       status: "partial",
-      reason: "Flows pins provider-neutral route/auth lowering, not OpenCode catalog and Session variant compatibility."
+      reason:
+        "Smithers pins provider-neutral route/auth lowering, not OpenCode catalog and Session variant compatibility."
     }
   }
   if (source === "packages/core/test/session-runner.test.ts") {
@@ -662,7 +663,7 @@ const defaultCoverage = (source: string): Pick<ParityRow, "flowsEquivalent" | "s
       flowsEquivalent: "—",
       status: "skipped",
       reason:
-        "This OpenCode durable Session-runner behavior has no equivalent public flows harness contract; only exact translated descendants are pinned above."
+        "This OpenCode durable Session-runner behavior has no equivalent public Smithers harness contract; only exact translated descendants are pinned above."
     }
   }
   if (source.startsWith("packages/core/test/session-runner")) {
@@ -670,14 +671,14 @@ const defaultCoverage = (source: string): Pick<ParityRow, "flowsEquivalent" | "s
       flowsEquivalent: "—",
       status: "skipped",
       reason:
-        "This OpenCode registration, compatibility, or durable Session behavior has no equivalent public flows harness contract."
+        "This OpenCode registration, compatibility, or durable Session behavior has no equivalent public Smithers harness contract."
     }
   }
   return {
     flowsEquivalent: "—",
     status: "skipped",
     reason:
-      "Flows has no OpenCode-compatible mutable Session aggregate; this source behavior is inventoried without claiming harness parity."
+      "Smithers has no OpenCode-compatible mutable Session aggregate; this source behavior is inventoried without claiming harness parity."
   }
 }
 

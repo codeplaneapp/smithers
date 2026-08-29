@@ -6,15 +6,16 @@
   "smthrs": {
     "group": "agent"
   },
+  "private": true,
   "description": "Fixed-suite evaluation, baselines, regression reports, and score gates for flows",
-  "homepage": "https://github.com/smithersai/flows",
+  "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
-    "url": "https://github.com/smithersai/flows.git",
+    "url": "https://github.com/smithersai/smithers.git",
     "directory": "packages/evals"
   },
   "bugs": {
-    "url": "https://github.com/smithersai/flows/issues"
+    "url": "https://github.com/smithersai/smithers/issues"
   },
   "tags": [
     "typescript",
@@ -79,9 +80,9 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@smthrs/core": "0.1.0",
-    "@smthrs/scorers": "0.1.0",
-    "@smthrs/testing": "0.1.0",
+    "@smthrs/core": "1.0.0-rc.0",
+    "@smthrs/scorers": "workspace:*",
+    "@smthrs/testing": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
 /*
  * The Node sidecar probe (LOCAL-APP.md, "Targets: load and run"). The
- * `smthrs` loader runs under Node >= 22.19, and a Finder launch gets the
+ * `smithers-build` loader runs under Node >= 22.19, and a Finder launch gets the
  * launchd PATH, so the probe walks explicit candidates rather than trusting
  * PATH alone. Every host read is injectable so the order and the version gate
  * can be asserted without a machine's node installs.

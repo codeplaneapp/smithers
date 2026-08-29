@@ -98,7 +98,7 @@ package to be built.
 ## Synthesized packages declare no edges
 
 Default-target synthesis passes one static `attrs` value to every matching
-directory. In the flows workspace that value is `{ deps: [] }`, so a synthesized
+directory. In the Smithers workspace that value is `{ deps: [] }`, so a synthesized
 package has no dependency edges even when its `package.json` names workspace
 siblings.
 
@@ -124,4 +124,4 @@ generated knip config before running knip. See
 
 - [Labels](labels.md)
 - [Caching](../workspace/caching.md)
-- [Default targets](../extending/default-targets.md)
+- [Default targets](../extending/default-rules.md)

@@ -2,7 +2,7 @@
  * The deterministic Host bundle.
  *
  * It lives beside the contract suite because the two are one pair: the bundle
- * every `flows` test runs against, and the suite that proves it satisfies the
+ * every Smithers test runs against, and the suite that proves it satisfies the
  * same closed Host list a real platform bundle does.
  *
  * **Node-only.** `effect/testing`'s `TestClock` reaches for `node:assert`, so

@@ -15,7 +15,7 @@ export const docs = Smithers.DocsParity({
 Run it with:
 
 ```sh
-smthrs docs //packages/widget:docs
+smithers-build docs //packages/widget:docs
 ```
 
 ## Attributes

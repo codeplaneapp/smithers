@@ -46,7 +46,10 @@ export const tsconfig = Smithers.Tsconfig({
     "packages/storage/*/test/**/*",
     "packages/coding-agent/examples/**/*"
   ],
-  exclude: ["**/dist/**", "packages/coding-agent/examples/extensions/gondolin/**"]
+  // `legacy/**` is the Smithers 0.x source tree Phase 4 lanes port from. It is
+  // outside the workspace and no live module imports it, so it must not enter
+  // the root TypeScript program.
+  exclude: ["**/dist/**", "legacy/**", "packages/coding-agent/examples/extensions/gondolin/**"]
 })
 
 export const lockfile = Smithers.Lockfile({

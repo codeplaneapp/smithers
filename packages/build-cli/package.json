@@ -13,7 +13,7 @@
   },
   "sideEffects": [],
   "bin": {
-    "smthrs": "./src/main.js"
+    "smithers-build": "./src/main.js"
   },
   "exports": {
     "./package.json": "./package.json",
@@ -54,19 +54,19 @@
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.108",
     "@effect/platform-node-shared": "4.0.0-rc.108",
-    "@smthrs/canonical": "0.1.0",
-    "@smthrs/create-app": "0.1.0",
-    "@smthrs/crypto": "0.1.0",
-    "@smthrs/engine": "0.1.0",
-    "@smthrs/flow": "0.1.0",
-    "@smthrs/keys": "0.1.0",
-    "@smthrs/plan": "0.1.0",
-    "@smthrs/build": "0.1.0",
+    "@smthrs/canonical": "1.0.0-rc.0",
+    "@smthrs/create-app": "workspace:*",
+    "@smthrs/crypto": "1.0.0-rc.0",
+    "@smthrs/engine": "1.0.0-rc.0",
+    "@smthrs/flow": "1.0.0-rc.0",
+    "@smthrs/keys": "1.0.0-rc.0",
+    "@smthrs/plan": "1.0.0-rc.0",
+    "@smthrs/build": "workspace:*",
     "effect": "4.0.0-rc.108",
     "ignore": "7.0.6",
     "incur": "0.5.1",
     "minimatch": "10.2.6",
-    "@smthrs/targets": "0.1.0",
+    "@smthrs/targets": "workspace:*",
     "tsx": "4.23.12"
   },
   "devDependencies": {

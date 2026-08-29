@@ -1,6 +1,6 @@
 # Install
 
-`smthrs` expresses dependency installation as one flow with one round and
+`smithers-build` expresses dependency installation as one flow with one round and
 three actions: measure, fetch, and link. Only pnpm performs work today; npm,
 Bun, and Yarn are explicit typed refusals.
 
@@ -18,7 +18,7 @@ export const nodeModules = Smithers.Install({ packageManager })
 The CLI also runs the flow directly:
 
 ```sh
-smthrs install --workspace /absolute/or/relative/workspace
+smithers-build install --workspace /absolute/or/relative/workspace
 ```
 
 The library layer requires an absolute project root and the declared version.

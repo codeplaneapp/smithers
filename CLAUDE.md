@@ -1,77 +1,115 @@
 # Smithers
 
-Durable agent-workflow runtime/control plane. Product UI: `../multi`. Hosted forge: `../plue`.
+Durable-execution engine and control plane for long-running coding agents. A
+flow is a typed Effect program whose side effects are journaled as they happen;
+the next process reads the journal and continues where the record stops.
 
-`AGENTS.md` links here; edit this file.
+`AGENTS.md` is a symlink to this file; edit this file.
+
+## Migration in progress
+
+This tree is mid-migration to `1.0.0-rc.0`. Read these before changing
+anything structural:
+
+- `PLAN.md` — the seven phases and their exit criteria.
+- `docs/migration/rc-contract.md` — the frozen release contract. Section 9 is
+  the tooling baseline; the imported Flows tooling wins unless section 9 names
+  an exception.
+- `docs/migration/disposition-ledger.md` (and `.json`) — one recorded
+  disposition per old path.
+- `docs/migration/phase2-baseline.md` — the post-import gate baseline.
+
+`legacy/` holds 0.x sources that later phases port from. It is excluded from
+the workspace, `tsconfig.json`, eslint, vitest, and every BUILD.ts inventory,
+and live code must never import it. `pnpm run check:legacy-absent` is the
+Phase 7 gate that fails while the directory exists.
 
 ## Find things
 
-- `packages/{graph,scheduler,engine,driver}` — workflow graph, decisions, execution, task driving.
-- `packages/{db,server,gateway,protocol,control-plane}` — persistence and control-plane contracts/services.
-- `packages/{agents,sandbox,vcs,time-travel,memory,scorers,openapi}` — adapters and runtime capabilities.
-- `packages/{gateway-client,gateway-react,gateway-ui,components,tui}` — gateway clients and run UIs.
-- `packages/smithers` — published `smthrs` facade; implement in the owning package, then export here.
-- `apps/cli` — CLI, MCP server, gateway command, local workflow tools.
-- `.smithers` — built-in/init workflow pack and workflow UIs; `scripts/generate-workflow-pack.ts` generates shipped pack assets.
-- `apps/observability`, `apps/review` — observability and review integrations.
-- `docs` — Mintlify source; `skills` — agent skills; `examples` — runnable patterns; `e2e` — real-backend suites.
-- `package.json`, `pnpm-workspace.yaml` — command and workspace index.
-- `apps/smithers*` and demo apps are POCs, not the product UI.
+Engine and durability:
+
+- `packages/{flow,engine,engine-store}` — authoring model, runtime, durable engine.
+- `packages/{journal,run-store,step-cache,plan,artifacts,database}` — the storage ladder.
+- `packages/{canonical,crypto,keys}` — canonical JSON, injected crypto, flow keys.
+- `packages/{capability,kernel}` — capability vocabulary and the guarded host surface.
+- `packages/{sync,time-travel}` — follower replication; replay, fork, rewind, compensate.
+- `packages/flows` — the curated aggregate barrel and `NodeRuntime` composition.
+
+Control plane, agents, and clients:
+
+- `packages/{cli,control,gateway}` — the `smithers` executable, control services, gateway projections.
+- `packages/{agent,harness,model,mcp,memory,notifications,registry}` — agent loop, cell runtime, model routes, MCP, durable memory, notifications, flow discovery.
+- `packages/{core,patterns,plugin,std,testing}` — plan-time builders, higher-order patterns, plugin kernel, standard tools, test doubles and conformance suites.
+- `packages/{chain,evals,scorers,triggers,fs}` — private agent-group packages.
+- `packages/{ui,ui-styleguide}` — 0.x UI kits retained for `apps/ui` and `apps/review`; private at rc.0.
+
+Hosts and adapters:
+
+- `packages/{platform-node,platform-bun,platform-browser}` — host bundles.
+- `packages/{jj,sandbox,observability}` — Jujutsu host service, remote spawner, OTLP wiring.
+- `crates/flows-jj` + `vendor/jj` — the Rust crate and the pinned jj submodule behind `packages/jj/wasm/flows_jj.wasm`.
+
+Build system and repository surfaces:
+
+- `packages/{build,build-cli,targets}` and `packages/build/infra` — the target graph, its CLI, and the hosted cache Worker.
+- `BUILD.ts`, `ci/BUILD.ts`, `lint/BUILD.ts`, `scripts/BUILD.ts`, `apps/*/BUILD.ts`, `packages/*/BUILD.ts` — target declarations.
+- `scripts/` — release, gate, and operator scripts, each declared in `scripts/BUILD.ts`.
+- `apps/{ui,server,shared,tui}` — the product UI, its Worker, shared code, and the terminal UI.
+- `apps/{bug-worker,status-site}` — deployed operational endpoints.
+- `examples/`, `evals/`, `factory/` — runnable documentation programs, eval suites, factory queue.
+- `docs/pages` — the vocs documentation site; `vocs.config.ts` configures it.
 
 ## Commands
 
 ```sh
-pnpm install --frozen-lockfile
-bun install --frozen-lockfile --offline --lockfile-only
-pnpm typecheck
-pnpm lint
-pnpm -C packages/<package> test
-pnpm test
-pnpm -C e2e test
-pnpm docs:llms                  # after docs changes
+pnpm install --frozen-lockfile --offline
+pnpm run check                    # tsc across every package
+pnpm test                         # vitest/bun across every package
+pnpm run lint                     # eslint + dprint
+pnpm run circular                 # madge
+pnpm run browser                  # browser bundle contract
+pnpm run test:examples
+pnpm run test:jsdoc
+pnpm exec vocs dev                # docs site
 
-bun apps/cli/src/index.js <cmd>   # run smithers from this working tree
+pnpm exec smithers-build ci '//packages/...'      # the whole package graph
+pnpm exec smithers-build test '//scripts/...'     # the script gates
+pnpm exec smithers-build build '//:ci'            # regenerate .github/workflows/ci.yml
+pnpm exec smithers-build lint '//:ci'             # drift-check that workflow
 ```
 
-## Running smithers here
+`pnpm test` stops at the first failing package. Use
+`pnpm --recursive --if-present --no-bail run test` to see every package.
 
-Internal scripts run the **working tree**, never an installed copy. `bunx
-smthrs` downloads the published npm build; inside a checkout it
-usually re-execs back into source via the published bin's `node_modules`
-delegation, but a fresh worktree or slimmed checkout has no such install and
-silently runs last release's build instead of the code under edit.
+The build CLI's binary is `smithers-build` (private `packages/build-cli`). The
+user-facing binary is `smithers`, owned by `packages/cli`, and it runs the
+working tree: `packages/cli/bin/smithers.mjs` executes `dist/esm/bin.js` when a
+published install has one and `src/bin.ts` otherwise, so `pnpm exec smithers`
+needs no build step.
 
-- Shell/npm scripts: `bun apps/cli/src/index.js <cmd>` (paths are repo-root relative).
-- Plugin code: `resolveSmithersCli()` from `<plugin>/lib/resolve-smithers-cli.mjs`
-  (copied verbatim into each plugin because Codex sparse-checkouts a plugin
-  directory alone; `check:local-smithers` enforces the copies stay identical).
-- Bare `smithers` is fine: `resolveSourceCheckoutCli` makes the bin delegate to
-  this tree's `apps/cli/src/index.js` from anywhere inside the checkout.
-- `pnpm check:local-smithers` (part of `pnpm test`) fails the build on a
-  published-CLI invocation in an execution position. Prose mentions of `bunx
-  smthrs` — agent prompts, docs assertions, marketing copy — are
-  correct and are not flagged.
+## Invariants
 
-Running from source needs `pnpm install` and nothing else — every package
-resolves through `src/`. Build steps only matter for these:
-
-| Surface | Build first |
-| --- | --- |
-| `smithers ui --app` (bundled local UI) | none; the CLI vite-builds `apps/smithers` on demand and rebuilds when stale. `apps/cli/ui-dist` is a pack-time artifact and is only used when the source app cannot be built. |
-| Types / `pnpm typecheck` / editor | `pnpm -r build` (`tsup --dts-only`) or `pnpm check:dts` |
-| Vendored `jj` binaries | `pnpm fetch:jj` |
-| Shipped init pack assets | `pnpm generate:init-pack` |
+- `BUILD.ts` declares targets, never commands. A gate becomes a target in the
+  package that owns it before CI can run it. `CONTRIBUTING.md` has the full rule.
+- Root files generated from `BUILD.ts` (`tsconfig.json`, `.github/workflows/ci.yml`,
+  `known-files.d.ts`) are regenerated, never hand-edited, and their pins in
+  `packages/flows/test/vitestCoverageIsolation.test.ts` change in the same commit.
+  `pnpm-workspace.yaml` is the exception: pnpm owns it and it is hand-written.
+- Exactly one `effect` version resolves across every manifest and both
+  lockfiles: `4.0.0-rc.108`. `scripts/check-single-effect-version.mjs` enforces it.
+- Dependency and package-manifest changes refresh both `pnpm-lock.yaml` and
+  `bun.lock` in the same commit. Bun runs `apps/*`, the `ci/BUILD.ts` matrix,
+  and `evals/agent`.
+- The durable engine runs on Node.js >= 22.19.0 with local SQLite. Bun covers
+  only the matrix in `ci/BUILD.ts`. PostgreSQL and PGlite are unsupported.
+- Product code and end-to-end tests use real backends and real data, never
+  mocked behavior.
+- Use `jj st` / `jj diff` for working-copy truth where a jj workspace exists.
+  Preserve unrelated concurrent changes; never blanket-stage.
+- `legacy/` is never imported by live code and never enters a tooling inventory.
 
 ## Replies
 
 - Be extremely concise. Minimum words to convey the point. Long replies go unread.
 - Lead with the answer or result. No preamble, no recap of what you just did.
 - Do the work instead of asking permission or listing options.
-
-## Invariants
-
-- Use `jj st`/`jj diff` for working-copy truth. Preserve unrelated concurrent changes; never blanket-stage.
-- Dependency and package-manifest changes must refresh both `pnpm-lock.yaml` and `bun.lock` in the same commit.
-- Product code and E2E tests use real backends/data, not mocked behavior.
-- Keep public exports/types and generated docs bundles synchronized; root checks enforce both.
-- Internal scripts execute this working tree's smithers, never an installed one (see above).

@@ -13,15 +13,15 @@
   in the tapped fetch, and /api/client-errors ingest. Deferred to issues:
   `keys.add` (masked secret-entry card, smithersai/mvp#19) and push
   notifications (service-worker + native design pass, smithersai/mvp#21).
-  Crons remain unimplemented (gateway RPC — waits for new flows).
+  Crons remain unimplemented (gateway RPC — waits for the new Smithers runtime).
 
-**Flows-dependency rule.** Everything riding multi's old gateway RPC plane
+**Runtime-dependency rule.** Everything riding multi's old gateway RPC plane
 (`/v1/rpc/*`): evals, scores, optimize, guardian, tickets, crons, run
-cancel/resume/rewind, prompts, docs — waits for the new flows runtime
-(`../flows/flows`) rather than porting the legacy RPC surface. The shipped
-Tier 1/2 actions are plain platform REST and carry no flows dependency.
+cancel/resume/rewind, prompts, docs — waits for the new Smithers runtime in
+this repository rather than porting the legacy RPC surface. The shipped
+Tier 1/2 actions are plain platform REST and carry no runtime dependency.
 
-Multi (`/Users/williamcory/multi`) ships 359 flow commands against the same
+Multi (`../multi`) ships 359 flow commands against the same
 backend this app uses. This document lists the user actions multi implements
 that mvp does not, mapped onto mvp's command registry, with the registration
 contract every new action must follow.
@@ -69,7 +69,7 @@ dependencies.
 
 Grouped by domain. "Route" is the backend surface multi already uses (the
 Worker proxies `/api/**` to the platform with an injected bearer). Multi
-reference files are under `/Users/williamcory/multi`.
+reference files are under `../multi`.
 
 ### Tier 1 — core product actions (implement first)
 

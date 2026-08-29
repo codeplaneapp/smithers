@@ -5,7 +5,7 @@
  *
  * Hashing is host access — it is `crypto.subtle` in a page and `node:crypto`
  * on a server — so it goes through `effect/Crypto` like every other host
- * service, which is what keeps `flows` browser-bundleable. Digests are
+ * service, which is what keeps Smithers browser-bundleable. Digests are
  * validated lowercase hex, because a digest is an identity that crosses the
  * journal and the cache and must compare byte-for-byte wherever it is read.
  *

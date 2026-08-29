@@ -50,7 +50,7 @@ export const parseWorkflowYaml = (path: string, yaml: string, source: CiWorkflow
       const item = /^\s+-\s*(.+)$/.exec(line)
       if (item !== null && blockAxis !== undefined) current.matrix[blockAxis]!.push(scalar(item[1]!))
     }
-    for (const match of line.matchAll(/\b(?:smthrs|smithers)\s+(?:(?:run|test|lint|build|ci|docs)\s+)?['"]?(\/\/[^\s'";]+)/g)) {
+    for (const match of line.matchAll(/\b(?:smithers-build|smthrs|smithers)\s+(?:(?:run|test|lint|build|ci|docs)\s+)?['"]?(\/\/[^\s'";]+)/g)) {
       if (!current.targets.includes(match[1]!)) current.targets.push(match[1]!)
     }
   }

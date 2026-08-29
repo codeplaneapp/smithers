@@ -17,7 +17,7 @@ own.
 Network access is not one of them: `BrowserHost.layer` provides Effect's own
 `FetchHttpClient.layer` directly, configured with
 `RequestInit { redirect: "manual" }` so the runtime never follows a redirect
-behind `@smthrs/kernel`'s grant check. There is no `flows` wrapper around
+behind `@smthrs/kernel`'s grant check. There is no Smithers wrapper around
 `fetch`.
 
 ## Public API

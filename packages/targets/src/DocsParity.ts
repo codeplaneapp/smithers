@@ -305,7 +305,7 @@ export type Attrs = typeof Attrs.Type
  * what separates a real package contract from a scaffolded stub.
  *
  * The target participates in the `docs` verb alone, and the aggregate `ci`
- * command plans that verb alongside build, test, and lint. `smthrs docs
+ * command plans that verb alongside build, test, and lint. `smithers-build docs
  * //...` remains the focused way to run just this gate. Key material contains
  * the README digest, dependency keys, and the prose floor, so prose drift is
  * a cache miss like any other input change.

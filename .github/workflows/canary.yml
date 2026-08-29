@@ -55,7 +55,7 @@ concurrency:
 jobs:
   probe:
     name: probe the live deployment
-    if: github.repository == 'smithersai/flows'
+    if: github.repository == 'smithersai/smithers'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

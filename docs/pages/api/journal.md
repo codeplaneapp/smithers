@@ -19,13 +19,13 @@ const layer = SqlJournal.layer({ capacity: 1024, overflow: "reject" }).pipe(
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/journal` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/journal/src/index.ts) | any |
-| `@smthrs/journal/test/TestJournal` | [src/test/TestJournal.ts](https://github.com/smithersai/flows/blob/main/packages/journal/src/test/TestJournal.ts) | Node |
-| `@smthrs/journal/test/Notifying` | [src/test/Notifying.ts](https://github.com/smithersai/flows/blob/main/packages/journal/src/test/Notifying.ts) | any |
+| `@smthrs/journal` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/journal/src/index.ts) | any |
+| `@smthrs/journal/test/TestJournal` | [src/test/TestJournal.ts](https://github.com/smithersai/smithers/blob/main/packages/journal/src/test/TestJournal.ts) | Node |
+| `@smthrs/journal/test/Notifying` | [src/test/Notifying.ts](https://github.com/smithersai/smithers/blob/main/packages/journal/src/test/Notifying.ts) | any |
 
 ## JournalEvent
 
-[src/JournalEvent.ts](https://github.com/smithersai/flows/blob/main/packages/journal/src/JournalEvent.ts)
+[src/JournalEvent.ts](https://github.com/smithersai/smithers/blob/main/packages/journal/src/JournalEvent.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -36,7 +36,7 @@ const layer = SqlJournal.layer({ capacity: 1024, overflow: "reject" }).pipe(
 
 ## Journal
 
-[src/Journal.ts](https://github.com/smithersai/flows/blob/main/packages/journal/src/Journal.ts)
+[src/Journal.ts](https://github.com/smithersai/smithers/blob/main/packages/journal/src/Journal.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -73,7 +73,7 @@ Reads below a run's compaction floor fail with `compacted`. See [Checkpoints and
 
 ## SqlJournal
 
-[src/SqlJournal.ts](https://github.com/smithersai/flows/blob/main/packages/journal/src/SqlJournal.ts)
+[src/SqlJournal.ts](https://github.com/smithersai/smithers/blob/main/packages/journal/src/SqlJournal.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -83,7 +83,7 @@ Reads below a run's compaction floor fail with `compacted`. See [Checkpoints and
 
 ## JournalMetrics
 
-[src/JournalMetrics.ts](https://github.com/smithersai/flows/blob/main/packages/journal/src/JournalMetrics.ts)
+[src/JournalMetrics.ts](https://github.com/smithersai/smithers/blob/main/packages/journal/src/JournalMetrics.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -92,7 +92,7 @@ Reads below a run's compaction floor fail with `compacted`. See [Checkpoints and
 
 ## OwnerId
 
-[src/OwnerId.ts](https://github.com/smithersai/flows/blob/main/packages/journal/src/OwnerId.ts)
+[src/OwnerId.ts](https://github.com/smithersai/smithers/blob/main/packages/journal/src/OwnerId.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -100,7 +100,7 @@ Reads below a run's compaction floor fail with `compacted`. See [Checkpoints and
 
 ## Migrations
 
-[src/Migrations.ts](https://github.com/smithersai/flows/blob/main/packages/journal/src/Migrations.ts)
+[src/Migrations.ts](https://github.com/smithersai/smithers/blob/main/packages/journal/src/Migrations.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -114,12 +114,12 @@ Every other durable table belongs to the package that reads it. `@smthrs/databas
 
 | Export | Source | Notes |
 | --- | --- | --- |
-| `Projection.Projection`, `Projection.make` | [src/Projection.ts](https://github.com/smithersai/flows/blob/main/packages/journal/src/Projection.ts) | `initial` plus an effectful `reduce` |
-| `Redaction.Rule`, `defaultRules`, `placeholder`, `isSensitiveKey`, `Options`, `redact`, `Redactor`, `make`, `redactJsonString`, `makeNoop` | [src/Redaction.ts](https://github.com/smithersai/flows/blob/main/packages/journal/src/Redaction.ts) | applied at the single `payload`/`meta` encode chokepoint |
+| `Projection.Projection`, `Projection.make` | [src/Projection.ts](https://github.com/smithersai/smithers/blob/main/packages/journal/src/Projection.ts) | `initial` plus an effectful `reduce` |
+| `Redaction.Rule`, `defaultRules`, `placeholder`, `isSensitiveKey`, `Options`, `redact`, `Redactor`, `make`, `redactJsonString`, `makeNoop` | [src/Redaction.ts](https://github.com/smithersai/smithers/blob/main/packages/journal/src/Redaction.ts) | applied at the single `payload`/`meta` encode chokepoint |
 
 ## Test layers
 
 | Export | Source | Notes |
 | --- | --- | --- |
-| `TestJournal.layer(options?)`, `TestJournal.TestJournalOptions` | [src/test/TestJournal.ts](https://github.com/smithersai/flows/blob/main/packages/journal/src/test/TestJournal.ts) | the SQL journal over in-memory SQLite; `@smthrs/engine-store/test/TestStores` bundles all four stores over one database |
-| `Notifying.wrap`, `Notifying.layer`, `Notifying.Order`, `Notifying.Hook` | [src/test/Notifying.ts](https://github.com/smithersai/flows/blob/main/packages/journal/src/test/Notifying.ts) | interstitial crash and fence-loss injection around any Effect service |
+| `TestJournal.layer(options?)`, `TestJournal.TestJournalOptions` | [src/test/TestJournal.ts](https://github.com/smithersai/smithers/blob/main/packages/journal/src/test/TestJournal.ts) | the SQL journal over in-memory SQLite; `@smthrs/engine-store/test/TestStores` bundles all four stores over one database |
+| `Notifying.wrap`, `Notifying.layer`, `Notifying.Order`, `Notifying.Hook` | [src/test/Notifying.ts](https://github.com/smithersai/smithers/blob/main/packages/journal/src/test/Notifying.ts) | interstitial crash and fence-loss injection around any Effect service |

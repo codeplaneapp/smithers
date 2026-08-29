@@ -1,6 +1,6 @@
 # @smthrs/agent
 
-The flows agent, and the two ways to run it.
+The Smithers agent, and the two ways to run it.
 
 `Agent` **is** the agent: one service whose single method runs one whole cell
 loop on the durable engine. A **cell** is the JavaScript program the model emits

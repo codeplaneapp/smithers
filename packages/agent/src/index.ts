@@ -1,5 +1,5 @@
 /**
- * The flows agent.
+ * The Smithers agent.
  *
  * `Agent` is the agent: the production agent loop composed on the durable
  * engine. `AgentSession` runs it as one durable control-plane run. `AgentAction`

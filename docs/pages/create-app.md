@@ -4,7 +4,7 @@
 the app; everything else is named by where it sits.
 
 ```sh
-smthrs create-app ledger
+smithers-build create-app ledger
 cd ledger
 pnpm install
 pnpm routes
@@ -193,11 +193,11 @@ optional.
 
 ## The generated files
 
-`smthrs-routes` writes two files at the app root and never anything else.
+`smithers-routes` writes two files at the app root and never anything else.
 
 ```sh
-smthrs-routes           # write
-smthrs-routes --check   # exit 1 on drift; this is what `smthrs '//:routes'` runs
+smithers-routes           # write
+smithers-routes --check   # exit 1 on drift; this is what `smithers-build '//:routes'` runs
 ```
 
 `routes.gen.ts` holds every flow with its three resolved layers, plus the pane
@@ -288,10 +288,10 @@ The default loader re-runs the router and imports only the named flow and its
 three layer files. `routes.gen.ts` is deliberately not used: it imports every
 page, and a model test has no business loading the UI graph.
 
-## smthrs create-app
+## smithers-build create-app
 
 ```sh
-smthrs create-app <dir> [--template default|aomi] [--no-link]
+smithers-build create-app <dir> [--template default|aomi] [--no-link]
 ```
 
 The directory's name becomes the app name, so it must be lowercase letters,

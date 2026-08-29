@@ -1,16 +1,16 @@
 # factory/
 
 The software factory: everything that turns queued prompts into landed,
-documented commits. The process design lives in the spec vault:
-`docs/specs/Concepts/Software Factory.md` (process),
-`docs/specs/Concepts/Clean History.md` (the `vibe`/`main` branch model), and
-`docs/specs/Concepts/Colocated Docs.md` (documentation planes).
+documented commits. The process design lives in the spec vault, a separate
+repository: the "Software Factory" spec (process), the "Clean History" spec
+(the `vibe`/`main` branch model), and the "Colocated Docs" spec (documentation
+planes).
 
 ## Contents
 
 - `queue/` — the intake. One markdown file per requested change; presence is
   registration. See `queue/README.md`.
-- `flows/` — factory production lines: flows that run on the flows library
+- `flows/` — factory production lines: flows that run on the Smithers library
   itself (`harness.ts` holds the `AgentTask`/`ShellTask` atoms). Launch with
   `bun factory/flows/<name>.ts`.
 - `reports/` — each flow's output: a summary markdown per flow plus tailable

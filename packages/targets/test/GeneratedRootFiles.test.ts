@@ -192,7 +192,7 @@ describe("Install", () => {
 })
 
 describe("the checked-in root files match what BUILD.ts declares", () => {
-  // These are the drift checks `smthrs lint` runs. Keeping them here means a
+  // These are the drift checks `smithers-build lint` runs. Keeping them here means a
   // change to a generator, or a hand edit to a generated file, fails in this
   // package's own suite rather than only in a workspace-wide run.
   it("renders the checked-in tsconfig.json", async () => {
@@ -220,7 +220,12 @@ describe("the checked-in root files match what BUILD.ts declares", () => {
         "packages/storage/*/test/**/*",
         "packages/coding-agent/examples/**/*"
       ],
-      exclude: ["**/dist/**", "packages/coding-agent/examples/extensions/gondolin/**"]
+      // `legacy/**` is the Smithers 0.x source tree the 1.0 Phase 4 lanes port
+      // from. It is outside the pnpm workspace and no live module imports it,
+      // so it must not enter the root TypeScript program. Root `BUILD.ts`
+      // declares it; this literal is the drift check on that declaration and
+      // moves with it.
+      exclude: ["**/dist/**", "legacy/**", "packages/coding-agent/examples/extensions/gondolin/**"]
     }))
     const actual = await Fs.readFile(NodePath.join(workspaceRoot, "tsconfig.json"), "utf8")
     expect(declared).toBe(actual)

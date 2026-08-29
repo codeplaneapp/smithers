@@ -161,27 +161,27 @@ every command.
 | `check` | Default. Renders declared jobs and byte-compares the result with the checked-in workflow. It never writes. |
 | `write` | Explicit generation. Validates and writes the rendered workflow.                                           |
 
-The `lint` form maps `write` to `check`. `smthrs ci` plans lint first, so CI is
+The `lint` form maps `write` to `check`. `smithers-build ci` plans lint first, so CI is
 also non-mutating even if a target explicitly declares write mode. Only an
-explicit `smthrs build` of a `mode: "write"` target generates a file.
+explicit `smithers-build build` of a `mode: "write"` target generates a file.
 
 ## Attributes
 
-| Name               | Type                            | Default                      | Description                                                                                                                                           |
-| ------------------ | ------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workflowName`     | `string`                        | `"CI"`                       | Generated workflow name.                                                                                                                              |
-| `pushBranches`     | `Array<string>`                 | `["main"]`                   | Generated push branches.                                                                                                                              |
-| `pullRequest`      | `boolean`                       | `true`                       | Generated pull-request trigger.                                                                                                                       |
-| `workflowDispatch` | `boolean`                       | `true`                       | Generated manual trigger.                                                                                                                             |
-| `cancelInProgress` | `boolean`                       | `true`                       | Generated concurrency policy.                                                                                                                         |
-| `packageManager`   | `PackageManager.PackageManager` | required                     | The declared package manager. Every job installs with it and runs the smthrs binary through it, so a workspace that switches managers is regenerated. |
-| `cacheUrlSecret`   | `Secret.Secret`                 | optional                     | The declared secret supplying the remote-cache endpoint override. Every generated target step reads the repository secret of the same name.           |
-| `cacheTokenSecret` | `Secret.Secret`                 | optional                     | The declared secret supplying the remote-cache bearer token.                                                                                          |
-| `jobs`             | `Array<Job>`                    | `[]`                         | Jobs rendered by `write` and `check`; the render refuses an empty list.                                                                               |
-| `gates`            | `Array<Gate>`                   | `[]`                         | Target invocations the pipeline must still perform, optionally in one named job. Checked structurally against the declared steps, never against text. |
-| `requiredJobs`     | `Array<string>`                 | `[]`                         | Job ids the workflow must define, in every mode.                                                                                                      |
-| `output`           | `string`                        | `".github/workflows/ci.yml"` | Workspace-relative workflow path.                                                                                                                     |
-| `mode`             | `"check" \| "write"`            | `"check"`                    | Output handling described above.                                                                                                                      |
+| Name               | Type                            | Default                      | Description                                                                                                                                                   |
+| ------------------ | ------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflowName`     | `string`                        | `"CI"`                       | Generated workflow name.                                                                                                                                      |
+| `pushBranches`     | `Array<string>`                 | `["main"]`                   | Generated push branches.                                                                                                                                      |
+| `pullRequest`      | `boolean`                       | `true`                       | Generated pull-request trigger.                                                                                                                               |
+| `workflowDispatch` | `boolean`                       | `true`                       | Generated manual trigger.                                                                                                                                     |
+| `cancelInProgress` | `boolean`                       | `true`                       | Generated concurrency policy.                                                                                                                                 |
+| `packageManager`   | `PackageManager.PackageManager` | required                     | The declared package manager. Every job installs with it and runs the smithers-build binary through it, so a workspace that switches managers is regenerated. |
+| `cacheUrlSecret`   | `Secret.Secret`                 | optional                     | The declared secret supplying the remote-cache endpoint override. Every generated target step reads the repository secret of the same name.                   |
+| `cacheTokenSecret` | `Secret.Secret`                 | optional                     | The declared secret supplying the remote-cache bearer token.                                                                                                  |
+| `jobs`             | `Array<Job>`                    | `[]`                         | Jobs rendered by `write` and `check`; the render refuses an empty list.                                                                                       |
+| `gates`            | `Array<Gate>`                   | `[]`                         | Target invocations the pipeline must still perform, optionally in one named job. Checked structurally against the declared steps, never against text.         |
+| `requiredJobs`     | `Array<string>`                 | `[]`                         | Job ids the workflow must define, in every mode.                                                                                                              |
+| `output`           | `string`                        | `".github/workflows/ci.yml"` | Workspace-relative workflow path.                                                                                                                             |
+| `mode`             | `"check" \| "write"`            | `"check"`                    | Output handling described above.                                                                                                                              |
 
 ### Job
 
@@ -309,7 +309,7 @@ instead: the copies tolerate an empty source and the upload declares
 ### The workspace binary
 
 Every target step runs the workspace binary the declared install put in the
-tree — `pnpm exec smthrs …`, `bun x smthrs …` — so the CLI that runs is the one
+tree — `pnpm exec smithers-build …`, `bun x smithers-build …` — so the CLI that runs is the one
 the lockfile pinned, never a fetched one. The pattern is rendered as one
 single-quoted shell word, a literal in every default GitHub Actions shell
 (`bash` on Linux and macOS, `pwsh` on Windows), so the runner cannot

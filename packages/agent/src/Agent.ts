@@ -1,5 +1,5 @@
 /**
- * The flows agent.
+ * The Smithers agent.
  *
  * This module is the production composition of the durable cell loop, and it is
  * the one the whole package is named for. Everything the loop needs already
@@ -204,7 +204,7 @@ export interface Options {
    *
    * The default is false, because the default run is unattended. Only a caller
    * that has somewhere for an answer to come from — an operator on the other
-   * end of `flows approve`, an interactive session — may claim true, and a
+   * end of `smithers approve`, an interactive session — may claim true, and a
    * caller that claims it wrongly buys a run that waits forever.
    */
   readonly approvalChannel?: boolean | undefined

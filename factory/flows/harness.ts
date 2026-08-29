@@ -1,5 +1,5 @@
 /**
- * Dogfood harness: runs factory background tasks as flows on the flows
+ * Dogfood harness: runs factory background tasks as flows on the Smithers
  * library itself.
  *
  * Two atoms: `AgentTask` spawns a headless `claude -p` agent, `ShellTask`
@@ -24,9 +24,8 @@ import * as path from "node:path"
 import { FlowEngine } from "../../packages/engine/src/index.ts"
 import { Action, Flow, Interpreter } from "../../packages/flow/src/index.ts"
 
-export const FLOWS_ROOT = path.resolve(import.meta.dirname, "../..")
-export const REPO_ROOT = path.resolve(FLOWS_ROOT, "..")
-export const REPORTS_DIR = path.join(FLOWS_ROOT, "factory/reports")
+export const REPO_ROOT = path.resolve(import.meta.dirname, "../..")
+export const REPORTS_DIR = path.join(REPO_ROOT, "factory/reports")
 
 export const TaskResult = Schema.Struct({
   id: Schema.String,
@@ -359,13 +358,13 @@ export interface WorkspacePackage {
 /** Reads and validates every workspace package identity before it reaches a command argument. */
 export const listWorkspacePackages = (): Array<WorkspacePackage> =>
   fs
-    .readdirSync(path.join(FLOWS_ROOT, "packages"), { withFileTypes: true })
+    .readdirSync(path.join(REPO_ROOT, "packages"), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
       if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(entry.name)) {
         throw new Error(`Unsafe workspace package directory: ${JSON.stringify(entry.name)}`)
       }
-      const manifestPath = path.join(FLOWS_ROOT, "packages", entry.name, "package.json")
+      const manifestPath = path.join(REPO_ROOT, "packages", entry.name, "package.json")
       const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
         name?: unknown
       }

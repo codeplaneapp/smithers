@@ -12,7 +12,7 @@ This page describes the portable host surface and the permission kernel that med
 - `Jj` (contract in [`@smthrs/jj`](../reference/jj.md))
 - Effect `HttpClient`
 
-Four of the five slots hold Effect's own tags. `flows` used to define a `Shell` service in the third slot; it was `effect/unstable/process` with fewer features, so it was deleted and the slot now holds `effect/process/ChildProcessSpawner` (see [design decisions](../pages/design-decisions.md)). The fifth slot went the same way: a `flows`-defined one-hop `HttpTransport` was deleted in favour of `effect/HttpClient`. `flows` supplies implementations of both — Node, Bun, an in-browser one, and a remote one — and adds only the capability check.
+Four of the five slots hold Effect's own tags. Smithers used to define a `Shell` service in the third slot; it was `effect/unstable/process` with fewer features, so it was deleted and the slot now holds `effect/process/ChildProcessSpawner` (see [design decisions](../pages/design-decisions.md)). The fifth slot went the same way: a Smithers-defined one-hop `HttpTransport` was deleted in favour of `effect/HttpClient`. Smithers supplies implementations of both — Node, Bun, an in-browser one, and a remote one — and adds only the capability check.
 
 The list is closed, not the package: `Jj` ships as its own package so a consumer that only needs that capability does not take the whole host surface. The contract stays in `@smthrs/jj`; the kernel decorates that same tag (and re-exports it for convenience) rather than declaring a second one, and the composite bundles (`NodeHost`, `BunHost`, `BrowserHost`, `TestHost`) provide all five tags. There is no pseudo-terminal service: interactive-terminal support is out of core by design (see [design decisions](../pages/design-decisions.md)).
 
@@ -33,7 +33,7 @@ The kernel decorates each service tag in place — a middleware `Layer` over the
 2. asks `GrantStore` to authorize it,
 3. calls the raw platform port only when allowed.
 
-Where Effect owns the tag (`FileSystem`, `ChildProcessSpawner`) the error channel stays `PlatformError`: a refused operation surfaces with reason `PermissionDenied`, and the structured kernel failure rides on its `cause`, recoverable with `Permission.fromPlatformError`. `HttpClient` does the same in Effect's network channel: a refusal is an `HttpClientError` whose reason is a `TransportError` carrying the kernel failure on `cause`, recoverable with `HttpClient.fromHttpClientError`. Where `flows` owns the service (`Jj`) the interface names `Permission.PermissionError` directly.
+Where Effect owns the tag (`FileSystem`, `ChildProcessSpawner`) the error channel stays `PlatformError`: a refused operation surfaces with reason `PermissionDenied`, and the structured kernel failure rides on its `cause`, recoverable with `Permission.fromPlatformError`. `HttpClient` does the same in Effect's network channel: a refusal is an `HttpClientError` whose reason is a `TransportError` carrying the kernel failure on `cause`, recoverable with `HttpClient.fromHttpClientError`. Where Smithers owns the service (`Jj`) the interface names `Permission.PermissionError` directly.
 
 For a spawn, the exact capability is `proc:spawn` with `CommandLine.render(command)` as its resource — the same string a browser interpreter or a remote sandbox is handed for supported commands, so a grant and the thing it authorizes cannot drift apart. A custom shell path is included explicitly in the resource; adapters that cannot select it reject the command.
 

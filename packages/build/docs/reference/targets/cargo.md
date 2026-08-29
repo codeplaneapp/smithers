@@ -44,7 +44,7 @@ export const cargoTest = Smithers.CargoTest({
 
 There are two target types rather than one because a target's participating
 verbs are fixed by its type: the planner selects by kind, so one type covering
-both verbs would put `cargo fmt` in the graph of `smthrs test`. `CargoLint`
+both verbs would put `cargo fmt` in the graph of `smithers-build test`. `CargoLint`
 takes only the lint checks and `CargoTest` only the test check, so the mismatch
 is a type error at the call site.
 

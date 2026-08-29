@@ -55,7 +55,7 @@ export interface Rule {
 export const placeholder = "[REDACTED]"
 
 /**
- * Textual rules covering the credential shapes flows actually carries:
+ * Textual rules covering the credential shapes Smithers actually carries:
  * provider API keys, bearer tokens, and `key=value` secret assignments.
  *
  * @since 0.1.0

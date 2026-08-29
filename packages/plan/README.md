@@ -54,7 +54,7 @@ yield* store.record(plan, Date.now())
 | `KeyMaterial` | What a planner declares about a node: body, tagged input references, layers, capabilities, effects   |
 | `StepKey`     | The compiler that turns material plus resolved dependency digests into an `@smthrs/keys` `Key`       |
 | `Plan`        | `compile`, `append`, the node/edge/conflict schemas, and the digest an approval binds to             |
-| `PlanDiff`    | `flows plan --diff` as a value: added, removed, re-keyed (with attribution), unchanged               |
+| `PlanDiff`    | `smithers plan --diff` as a value: added, removed, re-keyed (with attribution), unchanged            |
 | `PlanStore`   | Append-only SQL persistence — migration block `4000`, enforced by triggers rather than by convention |
 | `Migrations`  | The namespaced migration set, composed by `@smthrs/engine-store`'s `Migrations.sets`                 |
 

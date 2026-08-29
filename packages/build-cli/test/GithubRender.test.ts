@@ -869,7 +869,7 @@ describe("toolchain variants", () => {
       packageDir: ".github"
     })
     const ci = rendered.files.find((file) => file.path === "workflows/ci.yml")
-    expect(ci!.content).toContain("pnpm exec smthrs '//:test'")
+    expect(ci!.content).toContain("pnpm exec smithers-build '//:test'")
     expect(ci!.content).not.toContain("--affected-base")
     expect(ci!.content).not.toContain("fetch-depth")
   })

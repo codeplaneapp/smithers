@@ -64,7 +64,7 @@ Collected from the attrs: every declaration in `inputs`.
 | Cacheable | Never; the process stays live                          |
 | Executes  | Yes, through `ExecLive`, as a `run` root or dependency |
 
-Invoke it explicitly with `smthrs run <label>`. It holds its concurrency slot
+Invoke it explicitly with `smithers-build run <label>`. It holds its concurrency slot
 until the process exits. Do not put a `Dev` target in a dependency chain that
 `build`, `test`, `lint`, or `ci` reaches.
 

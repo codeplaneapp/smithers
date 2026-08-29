@@ -10,7 +10,7 @@
  *
  * The two types are separate because a target's participating verbs are fixed by
  * its type: the planner selects by kind, so one type covering both would put a
- * release-packing program in the graph of `smthrs test`.
+ * release-packing program in the graph of `smithers-build test`.
  *
  * @since 0.1.0
  */

@@ -70,7 +70,7 @@ export interface StandardTargets {
  * Expands one conventional package into `lib`, `check`, `test`, `lint`,
  * `fmt`, and `docs` targets.
  *
- * Defaults follow the flows repository layout: sources in `src`, tests in
+ * Defaults follow the Smithers repository layout: sources in `src`, tests in
  * `test`, `tsc -p` over the package `tsconfig.json`, the test half of the
  * package `check` script as `tsc -p tsconfig.test.json --noEmit`, Vitest with
  * the package `vitest.config.ts`, ESLint with the package flat

@@ -1,6 +1,6 @@
 # `@smthrs/observability`
 
-The flows store packages open spans through Effect's tracer and update `Metric` counters on their hot paths, and deliberately ship no exporter. This package is the exporter: one layer that installs Effect's own OTLP logger, metrics exporter, and tracer (`effect/unstable/observability`) against a collector endpoint, with the flows service identity as the default resource. It depends on `effect` alone — no OpenTelemetry SDK.
+The Smithers store packages open spans through Effect's tracer and update `Metric` counters on their hot paths, and deliberately ship no exporter. This package is the exporter: one layer that installs Effect's own OTLP logger, metrics exporter, and tracer (`effect/unstable/observability`) against a collector endpoint, with the flows service identity as the default resource. It depends on `effect` alone — no OpenTelemetry SDK.
 
 ```typescript
 import * as Otlp from "@smthrs/observability/Otlp"

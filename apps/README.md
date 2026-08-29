@@ -20,8 +20,8 @@ state and the canary.smithers.sh custom-domain binding.
 had no living source elsewhere and was promoted to `packages/chain`
 (`@smthrs/chain`).
 
-Product-level docs (`DESIGN.md`, `MIGRATION.md`, `WAVE*-RECEIPT.md`,
-`reports/`) live at this level because they cover UI and Worker waves
+Product-level docs (`DESIGN.md`, `UPSTREAMS.md`, `E2E-CANARY-CHECKLIST.md`,
+`REMEDIATION.md`) live at this level because they cover UI and Worker waves
 alike. `UPSTREAMS.md` names the sibling Cloudflare Workers this product
 proxies — identity, billing, chat — which live in a
 different repository and are what a broken sign-in usually means.

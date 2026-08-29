@@ -6,10 +6,9 @@ store**: bytes addressed by their own SHA-256 digest.
 It is the other half of the cache. [`@smthrs/step-cache`](step-cache.md) maps a
 step key to a recorded result; a recorded result references its large outputs by
 digest rather than inlining them, and those bytes live here. See
-[Object model](../../../docs/specs/Specs/Object%20Model.md) (the `Cache` service
-owns "a content-addressed store for artifacts"),
-[Input](../../../docs/specs/Specs/Input.md) ("large values enter by digest"), and
-[Remote cache](../../../docs/specs/Concepts/Remote%20Cache.md).
+`docs/specs/Specs/Object Model.md` (the `Cache` service owns "a
+content-addressed store for artifacts"), `docs/specs/Specs/Input.md` ("large
+values enter by digest"), and `docs/specs/Concepts/Remote Cache.md`.
 
 The package depends on `effect` and `@smthrs/crypto` and nothing else, owns no
 tables, and needs no migration.
@@ -91,6 +90,6 @@ in this package. It is never a side effect of a store operation. The
 blobs only after its mark and grace-period checks. Chunked/resumable transfer
 and a Bazel-style download policy are still ticketed in `.smithers/tickets/`.
 
-See [Remote cache](../../../docs/specs/Concepts/Remote%20Cache.md) and the
+See `docs/specs/Concepts/Remote Cache.md` and the
 [`@smthrs/engine-store` reference](engine-store.md) for the publication ordering
 that binds this store to the step cache.

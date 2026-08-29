@@ -1,6 +1,6 @@
 # Private alpha notes
 
-Flows release 1 is an engine-group private-alpha pilot: a pre-1.0 durable
+Smithers release 1 is an engine-group private-alpha pilot: a pre-1.0 durable
 execution library for invited operators, not a general-purpose control-plane
 release. These notes are the one-page ledger of its shipped posture and limits,
 including things a reader would otherwise have to discover from the test tree.
@@ -38,27 +38,31 @@ the bearer-token and TLS/ingress protections described in the
 
 ### Advisory CI lanes
 
-The required release-1 gate is `check + test (coverage gates enforced)`. The
-macOS and Windows Node suites and the `smthrs ci` shadow suite are explicitly
-advisory (`continue-on-error: true`) while they establish a stable green
-streak; their failures do not establish support for those hosts or block the
-Node/Linux private-alpha target.
+The required release-1 gate is the `test` job, `workspace graph (coverage gates
+enforced)`, which runs `smithers-build ci '//packages/...'` and
+`smithers-build test '//scripts/...'`. The macOS and Windows package suites,
+`package suites (macOS, advisory)` and `package suites (Windows, advisory)`,
+are the only explicitly advisory lanes (`continue-on-error: true`) while they
+establish a stable green streak; their failures do not establish support for
+those hosts or block the Node/Linux private-alpha target.
 
 One advisory lane remains red. On Windows, the server seed-allowlist test
 constructs a module path with a doubled drive prefix, and the `jj` package's
-symlink/dirent assertions do not yet match Windows behavior. The `smthrs ci
-(shadow, advisory)` job succeeded at `81d310d7` and on the two preceding
-main-branch commits; it remains advisory while its green streak is established
-before it can replace the recursive pnpm gates. This is a tracked
+symlink/dirent assertions do not yet match Windows behavior. This is a tracked
 CI-portability gap, not a waived required check; promote the Windows lane only
 after its failures are fixed and repeated main-branch runs are green.
 
-## Not in release 1
+## Not in 1.0.0-rc.0
 
-Release 1 packs the engine group only. The following subsystems exist in this
-repository but are not release-1 features: `@smthrs/triggers`,
-`@smthrs/evals`, `@smthrs/gateway`, memory semantic recall, and observability
-OTLP export. The [implementation-status scope table](architecture/implementation-status.md#not-in-release-1)
+The release train packs the `engine` and `agent` groups together at one
+synchronized version, and every `tooling` package is private. Membership is no
+longer a proxy for feature scope, so a package can ship and still not be a
+release-candidate feature. The following exist in this repository but are not
+rc.0 features: `@smthrs/triggers` and `@smthrs/evals` (both private at rc.0),
+memory semantic recall, and observability OTLP export. `@smthrs/gateway`
+publishes because the Plue cutover needs its wire schemas, but its supervision
+runtime is still a noop. The
+[implementation-status scope table](architecture/implementation-status.md#not-in-release-1)
 explains the status of each; in particular, the published OTLP layer is
 application-wired rather than a shipped default.
 
@@ -79,16 +83,42 @@ configuration. `describe.skipIf(process.platform === "win32")`,
 are all capability gates, and CI installs `jj`, so the jj-gated suites execute
 there. `process.env.CI` is a capability gate for the same reason.
 
-Every pin in the `engine` and `tooling` package groups (`smthrs.group` in each
-manifest) must appear in the table below. `scripts/check-test-pins.mjs`
-enforces that and CI runs it, so a new pin fails the build until it is either
-fixed or written down here.
+Every pin in every package group (`smthrs.group` in each manifest) must appear
+in the table below. `scripts/check-test-pins.mjs` enforces that and CI runs it,
+so a new pin fails the build until it is either fixed or written down here. The
+1.0 release train packs the `engine` and `agent` groups together, so the
+register covers `agent` as well; before 1.0 it covered `engine` and `tooling`
+only.
 
 ### Surviving pins
 
-| Package    | Test                                                                                | Form                                      |
-| ---------- | ----------------------------------------------------------------------------------- | ----------------------------------------- |
+| Package | Test | Form |
+| --- | --- | --- |
 | `database` | `dies with the original lock defect after the fixed open-retry budget is exhausted` | `it.live.runIf(FLOWS_SLOW_TESTS === "1")` |
+| `harness` | `workerd smoke` | `describe.skipIf(FLOWS_WORKERD_SMOKE !== "1")` |
+| `create-app` | `layerTevm against a mainnet fork` | `it.skip` in `template/aomi` |
+
+**`harness` — workerd smoke.** The suite boots a real `workerd` process to
+prove the QuickJS cell runtime runs unchanged on the Cloudflare runtime.
+`workerd` is not a repository dependency and CI installs no binary for it, so
+the suite is gated off the default run rather than failing on every machine
+without one. What breaks if it regresses: the cell runtime could acquire a
+Node-only dependency and nothing would notice until an edge deployment. Run it
+with `FLOWS_WORKERD_SMOKE=1 pnpm --filter @smthrs/harness test` after
+installing `workerd`. Closing it for the default gate means adding `workerd` to
+the toolchain the CI lane installs, which the RC does not claim (see the
+browser and edge entry in `rc-contract.md` section 7).
+
+**`create-app` — `layerTevm` against a mainnet fork.** The pin is inside
+`packages/create-app/template/aomi`, a scaffolding template copied into a new
+project rather than a suite this repository runs: `create-app`'s own
+`vitest.config.ts` includes `test/**/*.test.ts` only, because the template's
+tests resolve against the scaffolded copy's `node_modules`. The test needs a
+funded mainnet fork RPC endpoint, which no gate here provides. What breaks if
+it regresses: nothing in this repository; a scaffolded project inherits a
+skipped test it can enable with its own endpoint. It is listed because the pin
+register scans package directories, not vitest include globs, and a pin the
+scanner can see is a pin the register documents.
 
 **`database` — open-retry exhaustion.** The contract this test encodes is
 correct and the test passes: run under `FLOWS_SLOW_TESTS=1` on 2026-08-16 it

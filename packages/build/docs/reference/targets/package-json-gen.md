@@ -9,7 +9,7 @@ import { packageManager } from "../../BUILD.ts"
 
 export const template = Smithers.PackageJsonTemplate.make({
   license: "MIT",
-  author: "flows",
+  author: "Smithers",
   engines: { node: ">=22.19.0" },
   scripts: Smithers.PackageJsonTemplate.standardScripts
 })
@@ -41,7 +41,7 @@ The declaration above becomes `packageJsonCheck`, `packageJsonWrite`, and
 - `scripts` maps script names to imported target objects. During workspace
   analysis, each target must resolve to a graph label and support `build`,
   `test`, `lint`, or `run`. The resulting command is
-  `smthrs <verb> <label>`.
+  `smithers-build <verb> <label>`.
 - `publish.entry` names a build target. Its declared `entries`, `outDir`, and
   `format` derive `exports`, `main`, `module`, `types`, `files`, and
   `publishConfig`. Missing or unsupported output declarations fail analysis
@@ -82,7 +82,7 @@ time never refreshes it. Run the explicit refresh target to ask the configured
 model again:
 
 ```sh
-smthrs run //packages/widget:packageJsonRefresh
+smithers-build run //packages/widget:packageJsonRefresh
 ```
 
 Check and write never call a model. If no cached answer exists, they retain the
@@ -93,7 +93,7 @@ checked-in field. A cold CI checkout therefore remains offline and optimistic.
 The root workspace exports `//:newPackage`:
 
 ```sh
-smthrs run //:newPackage --name @smthrs/widget
+smithers-build run //:newPackage --name @smthrs/widget
 ```
 
 It creates `packages/widget/package.json`, `tsconfig.json`, `README.md`,
@@ -114,4 +114,4 @@ the same build dependencies.
 - [SortPackageJson](sort-package-json.md)
 - [PackageLint](package-lint.md)
 - [NpmPublish](npm-publish.md)
-- [Default targets](../../extending/default-targets.md)
+- [Default targets](../../extending/default-rules.md)

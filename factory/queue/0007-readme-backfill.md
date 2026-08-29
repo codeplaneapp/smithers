@@ -7,8 +7,7 @@ priority: p1
 # README backfill: crypto and keys
 
 Bring the two packages failing the DocsParity gate up to the colocated-docs
-contract (`docs/specs/Concepts/Colocated Docs.md`), then enable the `docs`
-kind in CI.
+contract (the "Colocated Docs" spec), then enable the `docs` kind in CI.
 
 - At landing time of item 0002, `smthrs docs //...` fails exactly two
   packages: `packages/crypto` (53 prose characters) and `packages/keys`

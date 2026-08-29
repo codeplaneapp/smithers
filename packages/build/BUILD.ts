@@ -8,7 +8,7 @@
  * - `template` is the inert shared manifest every package merges under.
  * - `packageDefaults` synthesizes a standard package's targets, and its
  *   manifest targets, for any `packages/*` directory without a BUILD.ts.
- *   Its glob anchors at this package, so in the flows monorepo it matches
+ *   Its glob anchors at this package, so in the Smithers monorepo it matches
  *   nothing; the workspace-wide declaration lives in the root BUILD.ts.
  * - `newPackage` is the `run` target that creates such a directory.
  */
@@ -35,7 +35,7 @@ export const circular = standard.circular
 export const template = Smithers.PackageJsonTemplate.make({
   type: "module",
   license: "MIT",
-  author: "flows",
+  author: "Smithers",
   sideEffects: [],
   engines: { node: ">=22.19.0" },
   scripts: Smithers.PackageJsonTemplate.standardScripts
@@ -71,7 +71,7 @@ export const packageDefaults = Smithers.PackageDefaults({
  * Scaffolds a new workspace package.
  *
  * ```sh
- * smthrs run //:newPackage --name @smthrs/widget
+ * smithers-build run //:newPackage --name @smthrs/widget
  * ```
  */
 export const newPackage = Smithers.NewPackage({

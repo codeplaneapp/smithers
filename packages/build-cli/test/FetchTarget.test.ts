@@ -66,7 +66,7 @@ const temporaryWorkspace = async (): Promise<string> =>
 /**
  * Serves one command against a workspace, capturing exit code and output.
  * Argv passes through `normalizeArgv` exactly as `main.ts` does, so the
- * bare-label form (`smthrs '//data:schemaPinned'`) is exercised as typed.
+ * bare-label form (`smithers-build '//data:schemaPinned'`) is exercised as typed.
  */
 const serve = async (
   root: string,

@@ -1,5 +1,5 @@
 /**
- * The smthrs process entry, as a function.
+ * The smithers-build process entry, as a function.
  *
  * `main.js` boots the TypeScript loader and `main.ts` calls {@link main}
  * with the real process. Everything the process does beyond that, capturing

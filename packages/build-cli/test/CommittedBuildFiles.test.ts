@@ -8,7 +8,7 @@ import { Workspace } from "../src/Workspace.ts"
  * The repository root this package sits in. The guard runs against the real
  * checkout on purpose: the committed BUILD.ts files are executable
  * declarations, and a targets-API change that invalidates one of them must fail
- * here rather than at the next `smthrs` invocation. This is the rot that
+ * here rather than at the next `smithers-build` invocation. This is the rot that
  * actually happened once — `entries` became `file()` objects and three
  * checked-in BUILD.ts files kept the string form for weeks because nothing
  * loaded them.

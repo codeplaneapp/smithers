@@ -396,7 +396,7 @@ export type Compacted = typeof Compacted.Type
  * Exact retries return `Duplicate` with the original canonical `seq` and do
  * not consume either allocation.
  *
- * This table is flows' logical (domain) write-ahead log and is intended to
+ * This table is Smithers' logical (domain) write-ahead log and is intended to
  * become the authoritative state history. The storage engine's own WAL
  * underneath it is a durability substrate only and is never consumed as the
  * application event API. A durable boundary must not advance a run or expose

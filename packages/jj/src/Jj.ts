@@ -3,7 +3,7 @@
  *
  * The `Jj` service: version control as a Host capability.
  *
- * `flows` snapshots the working copy around every step, so jj is not a tool the
+ * Smithers snapshots the working copy around every step, so jj is not a tool the
  * agent happens to call — it is host access, and it goes through a layer like
  * every other. Contract only; module shape follows `effect/FileSystem`.
  *
@@ -121,7 +121,7 @@ export type ChangeId = string
 /**
  * Everything a `Jj` operation can fail with.
  *
- * `flows` runs jj behind the capability kernel, so the honest error channel of
+ * Smithers runs jj behind the capability kernel, so the honest error channel of
  * this contract is jj's own failure *plus* the three the kernel adds. The
  * interface declares them here, in the package that owns the service, rather
  * than being redeclared and re-tagged by `@smthrs/kernel`: one interface, one
@@ -141,7 +141,7 @@ export type JjFailure = JjError | Permission.PermissionError
  * Version control as a host capability: snapshot the working copy, restore it,
  * diff two revisions, and manage the workspaces parallel agents run in.
  *
- * It is deliberately small — only the operations `flows` needs to make a step
+ * It is deliberately small — only the operations Smithers needs to make a step
  * reversible — and every method's error channel is {@link JjFailure}, so a
  * caller cannot forget that a snapshot may be denied by the permission kernel
  * rather than by jj.

@@ -1,5 +1,5 @@
 ---
-description: "Practical Smithers Flows patterns for typed jobs, durable approvals, retries, and model-backed pipelines."
+description: "Practical Smithers patterns for typed jobs, durable approvals, retries, and model-backed pipelines."
 ---
 
 # Real-world workflows
@@ -46,7 +46,7 @@ const result = ChargeCustomer.execute(
 ).pipe(Effect.provide(AppLayer))
 ```
 
-`AppLayer` is the complete runtime dependency graph. Compose it once, then provide it once at the program boundary. The payload and result are schema-checked, and the explicit execution ID gives the run a stable identity. See the complete tested [`01-define-and-run.ts`](https://github.com/smithersai/flows/blob/main/examples/src/01-define-and-run.ts).
+`AppLayer` is the complete runtime dependency graph. Compose it once, then provide it once at the program boundary. The payload and result are schema-checked, and the explicit execution ID gives the run a stable identity. See the complete tested [`01-define-and-run.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/01-define-and-run.ts).
 
 ## Pause for approval and survive a restart
 
@@ -114,7 +114,7 @@ const resume = Effect.gen(function* () {
 const result = yield* resume
 ```
 
-The full example creates two engine layers over one real SQLite file and asserts that work before the suspension dispatches only once. See [`03-crash-and-resume.ts`](https://github.com/smithersai/flows/blob/main/examples/src/03-crash-and-resume.ts).
+The full example creates two engine layers over one real SQLite file and asserts that work before the suspension dispatches only once. See [`03-crash-and-resume.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/03-crash-and-resume.ts).
 
 ## Retry a flaky integration
 
@@ -148,7 +148,7 @@ const Upload = Action.make({
 const result = yield* Action.retry(Upload, { times: 3 })
 ```
 
-The tested program also inspects the backoff ladder and proves that a non-retryable error short-circuits it. See [`04-retry-policy.ts`](https://github.com/smithersai/flows/blob/main/examples/src/04-retry-policy.ts).
+The tested program also inspects the backoff ladder and proves that a non-retryable error short-circuits it. See [`04-retry-policy.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/04-retry-policy.ts).
 
 ## Chain typed model-backed steps
 
@@ -191,7 +191,7 @@ const PublishArticle = Flow.make("content/PublishArticle", {
 })
 ```
 
-The runnable version supplies a scripted `SeatResolver`, so CI tests the real agent loop without credentials. A production host changes only that resolver. See [`11-agent-step.ts`](https://github.com/smithersai/flows/blob/main/examples/src/11-agent-step.ts).
+The runnable version supplies a scripted `SeatResolver`, so CI tests the real agent loop without credentials. A production host changes only that resolver. See [`11-agent-step.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/11-agent-step.ts).
 
 ## Implement, review, and revise until LGTM
 

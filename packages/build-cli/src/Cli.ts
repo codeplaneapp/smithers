@@ -508,7 +508,7 @@ const runVerb = async (
  * target contributes to `ci` is the one from the first verb that selected it.
  * A generator target participates in both `build` and `lint`, and its `lint`
  * form is the non-mutating one (`attrsForKind` maps write to check). Planning
- * `build` first therefore made `smthrs ci` rewrite checked-in package
+ * `build` first therefore made `smithers-build ci` rewrite checked-in package
  * manifests and workflow files as a side effect of asking whether the
  * repository was green. Lint first makes the merged graph the checking form,
  * which is the only correct posture for a CI verb.
@@ -621,14 +621,14 @@ const executeCommand = async <A extends Outcome>(
 }
 
 /**
- * Creates the configured smthrs CLI.
+ * Creates the configured smithers-build CLI.
  *
  * @category constructors
  * @since 0.1.0
  * @slop
  */
 export const makeCli = (config: RuntimeConfig = {}) =>
-  Cli.create("smthrs", {
+  Cli.create("smithers-build", {
     description: "Execute BUILD.ts targets and install pnpm workspaces with flows",
     version: "0.1.0",
     globals: globalOptions
@@ -871,7 +871,7 @@ export const makeCli = (config: RuntimeConfig = {}) =>
 /**
  * Rewrites a bare-label argv into the `target` command.
  *
- * `smthrs '//src:lint'` — a first argument that is a label rather than a
+ * `smithers-build '//src:lint'` — a first argument that is a label rather than a
  * command — executes the label under its flavor-implied verb. Every other
  * argv passes through unchanged.
  *

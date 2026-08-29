@@ -1,6 +1,6 @@
 # Wiring
 
-`@smthrs/build` is a pnpm workspace package of the flows repository at
+`@smthrs/build` is a pnpm workspace package of the Smithers repository at
 `packages/build`, alongside the private `@smthrs/targets` and `@smthrs/build-cli`
 packages. The workspace install links everything; there is no separate
 install step.
@@ -14,12 +14,12 @@ install step.
 | `@smthrs/plan`   | `0.1.0`        | Planned nodes                                  |
 | `@smthrs/crypto` | `0.1.0`        | SHA-256 digests                                |
 
-The CLI additionally uses the flows engine, action implementations, and Node
+The CLI additionally uses the Smithers engine, action implementations, and Node
 platform services declared in `../build-cli/package.json`.
 
 ## Workspace membership
 
-The flows checkout uses pnpm. Its `pnpm-workspace.yaml` includes
+The Smithers checkout uses pnpm. Its `pnpm-workspace.yaml` includes
 `packages/*` and `packages/build/infra`.
 
 1. The three packages live at `packages/build`, `packages/targets`,
@@ -39,7 +39,7 @@ current `@smthrs/flow` package shape.
 
 ## BUILD.ts imports
 
-The flows workspace root declares `"@smthrs/targets": "0.1.0"` and
+The Smithers workspace root declares `"@smthrs/targets": "0.1.0"` and
 `"@smthrs/build-cli": "0.1.0"` as devDependencies, resolved to the workspace
 packages. `BUILD.ts` files import the rule catalog by bare specifier:
 `import { ... } from "@smthrs/targets"`, and `pnpm exec smthrs` resolves the
@@ -113,7 +113,7 @@ separately.
 ## Remote caches
 
 The CLI target-result cache speaks `/ac` directly. `RemoteCacheStore` and
-`RemoteArtifacts` in the flows engine are a different composition: they store
+`RemoteArtifacts` in the Smithers engine are a different composition: they store
 engine step rows and artifact blobs through `/ac` and `/cas`. The smthrs CLI
 does not provide those engine layers today.
 

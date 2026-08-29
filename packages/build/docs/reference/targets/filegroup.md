@@ -72,10 +72,10 @@ every glob in every target, not only to groups.
 | Cacheable | Always                                                       |
 | Executes  | Yes, through `ExpandFilegroupLive`, but only as a dependency |
 
-`kinds` is empty, so `smthrs build`, `test`, `lint`, and `docs` never select a
+`kinds` is empty, so `smithers-build build`, `test`, `lint`, and `docs` never select a
 group as a root and a group never performs work under those verbs. Dependency
 traversal, `query`, and `graph` ignore kinds, so a group is still addressable by
-label, still listed by `smthrs query`, and still traversed by `deps(...)`.
+label, still listed by `smithers-build query`, and still traversed by `deps(...)`.
 Executing a group reached as a dependency is a successful no-op: it reads the
 files the group names and succeeds with them digested.
 

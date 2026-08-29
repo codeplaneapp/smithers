@@ -26,7 +26,7 @@
 ### Changed
 
 - Renamed the package from `@smthrs/engine-harness` to `@smthrs/agent`. The
-  package is named for what it ships: the flows agent, plus the two adapters
+  package is named for what it ships: the Smithers agent, plus the two adapters
   that run it.
 - Renamed `CellHarness` to `Agent` and made it a `Context.Service`. The loop is
   reached through the `Agent` tag rather than a bare `run` export, so a future

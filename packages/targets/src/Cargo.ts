@@ -10,7 +10,7 @@
  * There are two target types rather than one because a target's participating
  * verbs are fixed by its type, not by its attrs: the planner selects by kind, so
  * one type covering both verbs would put `cargo fmt` in the graph of
- * `smthrs test`. {@link CargoLint} is the lint gate and {@link CargoTest} is the
+ * `smithers-build test`. {@link CargoLint} is the lint gate and {@link CargoTest} is the
  * test gate, and each takes only the checks that belong to its verb.
  *
  * Bazel's `rules_rust` models the same gates as `rustfmt_test`, `rust_clippy`,

@@ -397,7 +397,7 @@ describe("alertAction", () => {
     meteredTurns: 0,
     failed
   })
-  const runUrl = "https://github.com/smithersai/flows/actions/runs/1"
+  const runUrl = "https://github.com/smithersai/smithers/actions/runs/1"
 
   test("a first failure opens the one issue, under the fixed title", () => {
     const action = alertAction({ report: report(true), openIssue: undefined, runUrl })

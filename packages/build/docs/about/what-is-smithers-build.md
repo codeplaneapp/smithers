@@ -25,7 +25,7 @@ and `//packages/flow:lint`.
 
 ## Everything is a flow
 
-A target call returns a [flow](https://github.com/smithersai/flows): a declaration
+A target call returns a [flow](https://github.com/smithersai/smithers): a declaration
 with a schema-typed payload, a schema-typed success value, a schema-typed error
 channel, and a pure plan-time body. smithers build attaches planner metadata to that
 flow under a symbol, which makes it a target.
@@ -60,7 +60,7 @@ See [Targets and targets](../concepts/targets.md) and
 | Language          | TypeScript                                                                                   | Starlark                                            | JSON                                           | JSON plus TypeScript plugins               |
 
 smithers build takes Bazel's target model and label grammar, Turborepo's presentation
-and workspace assumptions, and the flows engine's keying and durability model.
+and workspace assumptions, and the Smithers engine's keying and durability model.
 It does not sandbox actions today, so its hermeticity guarantee is weaker than
 Bazel's. See [Actions and boundaries](../concepts/actions-and-boundaries.md).
 
@@ -70,7 +70,7 @@ Bazel's. See [Actions and boundaries](../concepts/actions-and-boundaries.md).
 | ------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@smthrs/build`     | `packages/build/src/`     | Dependency installation as flows. Exports `Install` and `PackageManager`.                                                                    |
 | `@smthrs/targets`   | `packages/targets/src/`   | The `BUILD.ts` authoring surface: `Target.make`, `Input`, `Workspace`, `PackageDefaults`, `Exec`, `StandardPackage`, and the target catalog. |
-| `@smthrs/build-cli` | `packages/build-cli/src/` | The `smthrs` CLI: workspace discovery, the planner, the executor, the cache, and query and graph output.                                     |
+| `@smthrs/build-cli` | `packages/build-cli/src/` | The `smithers-build` CLI: workspace discovery, the planner, the executor, the cache, and query and graph output.                             |
 
 ## Next
 

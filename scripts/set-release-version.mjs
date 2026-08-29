@@ -9,6 +9,10 @@
  * installs to a version nobody published. This rewrites both halves in one
  * pass, across every group, so the workspace stays resolvable afterwards.
  *
+ * A few published sources also carry the release version as a literal, because
+ * a package cannot read its own manifest on every runtime it supports. Those
+ * declarations are listed in `versionedSources` and rewritten in the same pass.
+ *
  * usage:
  *   node scripts/set-release-version.mjs <version>     rewrite manifests
  *   node scripts/set-release-version.mjs --check <version>
@@ -21,6 +25,48 @@ const repoRoot = resolve(import.meta.dirname, "..")
 const workspaceFile = join(repoRoot, "pnpm-workspace.yaml")
 
 const dependencyFields = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]
+
+/**
+ * Source declarations that repeat the release version as a literal.
+ *
+ * Each entry names a file, the declaration to rewrite, and a `RegExp` with
+ * three capture groups: everything before the version, the version itself, and
+ * everything after it. Add a row whenever a published source hard-codes the
+ * version; the bump and the `--check` mode then cover it for free.
+ */
+export const versionedSources = [
+  {
+    path: "packages/observability/src/Otlp.ts",
+    declaration: "defaultServiceVersion",
+    pattern: /(export const defaultServiceVersion = ")([^"]*)(")/
+  }
+]
+
+/**
+ * Rewrites one versioned source declaration, or throws when the declaration is
+ * gone. A silent miss would let the literal drift, which is the whole failure
+ * this table exists to stop.
+ */
+export const retargetSource = (text, version, { path, declaration, pattern }) => {
+  if (!pattern.test(text)) throw new Error(`${path} no longer declares ${declaration}`)
+  return text.replace(pattern, `$1${version}$3`)
+}
+
+/**
+ * Every versioned source declaration that disagrees with `version`.
+ */
+export const sourceMismatches = (version, root = repoRoot, sources = versionedSources) => {
+  const found = []
+  for (const { declaration, path, pattern } of sources) {
+    const match = pattern.exec(readFileSync(join(root, path), "utf8"))
+    if (match === null) {
+      found.push(`${path}: ${declaration} is missing, expected ${version}`)
+    } else if (match[2] !== version) {
+      found.push(`${path}: ${declaration} is ${match[2]}, expected ${version}`)
+    }
+  }
+  return found
+}
 
 /**
  * Reads the package globs from pnpm's workspace manifest.
@@ -79,6 +125,8 @@ export const retarget = (manifest, version, workspaceNames) => {
   return updated
 }
 
+const count = (total, noun) => `${total} ${noun}${total === 1 ? "" : "s"}`
+
 /**
  * Every place a manifest still disagrees with `version`.
  */
@@ -110,14 +158,16 @@ export const main = (argv) => {
   }
   const entries = readManifests()
   if (check) {
-    const drift = mismatches(entries, version)
+    const drift = [...mismatches(entries, version), ...sourceMismatches(version)]
     for (const line of drift) console.error(line)
     if (drift.length > 0) {
-      console.error(`\n${drift.length} manifest entries disagree with ${version}.`)
+      console.error(`\n${drift.length} entries disagree with ${version}.`)
       process.exitCode = 1
       return
     }
-    console.log(`${entries.length} workspace manifests have release ranges at ${version}.`)
+    console.log(
+      `${entries.length} workspace manifests and ${count(versionedSources.length, "versioned source")} are at ${version}.`
+    )
     return
   }
   const workspaceNames = new Set(entries.map(({ manifest }) => manifest.name))
@@ -129,7 +179,17 @@ export const main = (argv) => {
     writeFileSync(path, text)
     written += 1
   }
+  let rewritten = 0
+  for (const source of versionedSources) {
+    const path = join(repoRoot, source.path)
+    const text = readFileSync(path, "utf8")
+    const updated = retargetSource(text, version, source)
+    if (updated === text) continue
+    writeFileSync(path, updated)
+    rewritten += 1
+  }
   console.log(`set ${written} of ${entries.length} workspace manifests to ${version}.`)
+  console.log(`set ${rewritten} of ${count(versionedSources.length, "versioned source")} to ${version}.`)
   console.log("run `pnpm install --lockfile-only` next: the lockfile records these specifiers.")
 }
 

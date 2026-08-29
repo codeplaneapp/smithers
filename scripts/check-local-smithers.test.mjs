@@ -1,12 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
   ALLOWLIST,
   MIRRORED_RESOLVERS,
+  REPO_ROOT,
+  SOURCE_ENTRY,
   checkMirroredResolvers,
   findViolationsInFile,
   isCommentLine,
@@ -125,11 +127,20 @@ describe("checkMirroredResolvers", () => {
     assert.match(problems[0], /cp /);
   });
 
-  it("reports a missing copy", () => {
+  it("reports a copy that is missing beside a copy that exists", () => {
     const root = makeTmp();
+    const present = join(root, MIRRORED_RESOLVERS[0]);
+    mkdirSync(join(present, ".."), { recursive: true });
+    writeFileSync(present, "export const a = 1;\n");
     const problems = checkMirroredResolvers(root);
-    assert.equal(problems.length, MIRRORED_RESOLVERS.length);
+    assert.equal(problems.length, MIRRORED_RESOLVERS.length - 1);
     assert.match(problems[0], /is missing/);
+  });
+
+  it("passes when no copy exists, because the plugin lane has not landed", () => {
+    // The Phase 4 plugin lane restores both copies. A tree with neither is the
+    // recorded mid-migration state, not drift.
+    assert.deepEqual(checkMirroredResolvers(makeTmp()), []);
   });
 
   process.on("exit", () => {
@@ -141,9 +152,14 @@ describe("the repo itself", () => {
   it("scans the internal execution surfaces", () => {
     const scanned = listScannedFiles();
     assert.ok(scanned.includes("package.json"));
-    assert.ok(scanned.includes("claude-plugin/lib/resolve-smithers-cli.mjs"));
-    assert.ok(scanned.some((path) => path.startsWith(".smithers/workflows/")));
+    assert.ok(scanned.includes("scripts/check-local-smithers.mjs"));
+    assert.ok(scanned.some((path) => path.startsWith("ci/")));
     assert.ok(!scanned.some((path) => path.includes("node_modules")));
+    assert.ok(!scanned.some((path) => path.startsWith("legacy/")));
+  });
+
+  it("names a working-tree entry that exists", () => {
+    assert.ok(existsSync(join(REPO_ROOT, SOURCE_ENTRY)), `${SOURCE_ENTRY} must exist`);
   });
 
   it("has no internal script running the published CLI", () => {

@@ -1,6 +1,6 @@
 # @smthrs/cli
 
-Node command-line projection of the flows control plane. It turns `@smthrs/control` operations into the `flows` executable and supplies the Node HTTP, WebSocket, and output layers used by the CLI host.
+Node command-line projection of the Smithers control plane. It turns `@smthrs/control` operations into the `smithers` executable and supplies the Node HTTP, WebSocket, and output layers used by the CLI host.
 
 ```sh
 npm install @smthrs/cli
@@ -10,17 +10,17 @@ npm install @smthrs/cli
 
 The root entry point exports the following namespaces; each is also available from `@smthrs/cli/<Module>`.
 
-| Module          | Public exports                                                                                                                                                                                                                                                                                                                    | Description                                                                                                         |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `Application`   | `Config`, `layer`                                                                                                                                                                                                                                                                                                                 | Selects the local or authenticated RPC-backed Control layer from transport-neutral configuration.                   |
-| `CliError`      | `UsageError`, `UnsupportedError`, `CliError`, `exitCode`                                                                                                                                                                                                                                                                          | Defines typed CLI failures and their stable process exit codes.                                                     |
-| `Command`       | `cli`                                                                                                                                                                                                                                                                                                                             | Exposes the Effect CLI command tree.                                                                                |
-| `Forensics`     | `Refusal`, `Digest`, `digest`, `renderDiagnosis`, `renderTranscript`, `eventLine`                                                                                                                                                                                                                                                 | Projects a run's watch events into the transcript and diagnosis renderings.                                         |
-| `NodeControl`   | `Environment`, `ServerOptions`, `EngineDurable`, `makeConfig`, `config`, `projectSources`, `layerRegistry`, `databasePath`, `executionDatabasePath`, `engineDurable`, `seatResolver`, `layerSeatResolver`, `layerExecutor`, `layerControl`, `layerOutput`, `layer`, `layerServer`, `layerServerBearerAuth`, `layerServerNoopAuth` | Assembles Node configuration, Control, the production run executor, output, and loopback-default RPC server layers. |
-| `Output`        | `Format`, `Rendered`, `Service`, `Output`, `make`, `layer`, `exitCode`                                                                                                                                                                                                                                                            | Renders deterministic human or JSON output through an injectable service.                                           |
-| `Verb`          | `Verb`, `verbs`, `find`                                                                                                                                                                                                                                                                                                           | Provides reserved system-flow verb metadata and lookup.                                                             |
-| `Version`       | `packageVersion`                                                                                                                                                                                                                                                                                                                  | Exposes the version declared by the installed `@smthrs/cli` package metadata.                                       |
-| `bin` / `flows` | side-effect entry point                                                                                                                                                                                                                                                                                                           | Runs `Command.cli`; the package also installs it as the `flows` executable.                                         |
+| Module             | Public exports                                                                                                                                                                                                                                                                                                                    | Description                                                                                                         |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `Application`      | `Config`, `layer`                                                                                                                                                                                                                                                                                                                 | Selects the local or authenticated RPC-backed Control layer from transport-neutral configuration.                   |
+| `CliError`         | `UsageError`, `UnsupportedError`, `CliError`, `exitCode`                                                                                                                                                                                                                                                                          | Defines typed CLI failures and their stable process exit codes.                                                     |
+| `Command`          | `cli`                                                                                                                                                                                                                                                                                                                             | Exposes the Effect CLI command tree.                                                                                |
+| `Forensics`        | `Refusal`, `Digest`, `digest`, `renderDiagnosis`, `renderTranscript`, `eventLine`                                                                                                                                                                                                                                                 | Projects a run's watch events into the transcript and diagnosis renderings.                                         |
+| `NodeControl`      | `Environment`, `ServerOptions`, `EngineDurable`, `makeConfig`, `config`, `projectSources`, `layerRegistry`, `databasePath`, `executionDatabasePath`, `engineDurable`, `seatResolver`, `layerSeatResolver`, `layerExecutor`, `layerControl`, `layerOutput`, `layer`, `layerServer`, `layerServerBearerAuth`, `layerServerNoopAuth` | Assembles Node configuration, Control, the production run executor, output, and loopback-default RPC server layers. |
+| `Output`           | `Format`, `Rendered`, `Service`, `Output`, `make`, `layer`, `exitCode`                                                                                                                                                                                                                                                            | Renders deterministic human or JSON output through an injectable service.                                           |
+| `Verb`             | `Verb`, `verbs`, `find`                                                                                                                                                                                                                                                                                                           | Provides reserved system-flow verb metadata and lookup.                                                             |
+| `Version`          | `packageVersion`                                                                                                                                                                                                                                                                                                                  | Exposes the version declared by the installed `@smthrs/cli` package metadata.                                       |
+| `bin` / `smithers` | side-effect entry point                                                                                                                                                                                                                                                                                                           | Runs `Command.cli`; the package also installs it as the `smithers` executable.                                      |
 
 ```ts
 import { Command, NodeControl, Version } from "@smthrs/cli"
@@ -71,15 +71,15 @@ against a real provider:
 
    ```sh
    export ANTHROPIC_API_KEY=sk-ant-...
-   approval="$(flows --json plan hello | jq -c '.approval')"
-   flows --json approve "$approval" --scope run
-   flows --json run "$approval"
-   flows ps
-   flows logs <run-id> --follow
+   approval="$(smithers --json plan hello | jq -c '.approval')"
+   smithers --json approve "$approval" --scope run
+   smithers --json run "$approval"
+   smithers ps
+   smithers logs <run-id> --follow
    ```
 
-   `flows run` prints the accepted receipt with the run id; `flows ps` shows
+   `smithers run` prints the accepted receipt with the run id; `smithers ps` shows
    the durable run state. A run that asks for approval parks as
    `waiting-approval` and journals a `control.approval.requested` event whose
-   `payload` field is the exact argument for `flows approve '<payload>'`;
-   `flows run --resume <run-id>` then re-drives the parked execution.
+   `payload` field is the exact argument for `smithers approve '<payload>'`;
+   `smithers run --resume <run-id>` then re-drives the parked execution.

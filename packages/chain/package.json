@@ -6,15 +6,16 @@
   "smthrs": {
     "group": "agent"
   },
+  "private": true,
   "description": "The Agent Chain spine: an append-only journal, keyed replayable calls, and the trampoline that runs model-authored flow scripts",
-  "homepage": "https://github.com/smithersai/flows",
+  "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
-    "url": "https://github.com/smithersai/flows.git",
+    "url": "https://github.com/smithersai/smithers.git",
     "directory": "packages/chain"
   },
   "bugs": {
-    "url": "https://github.com/smithersai/flows/issues"
+    "url": "https://github.com/smithersai/smithers/issues"
   },
   "tags": [
     "typescript",
@@ -83,11 +84,11 @@
   },
   "dependencies": {
     "@jitl/quickjs-singlefile-browser-release-sync": "0.32.0",
-    "@smthrs/capability": "0.1.0",
-    "@smthrs/core": "0.1.0",
-    "@smthrs/memory": "0.1.0",
-    "@smthrs/model": "0.1.0",
-    "@smthrs/registry": "0.1.0",
+    "@smthrs/capability": "1.0.0-rc.0",
+    "@smthrs/core": "1.0.0-rc.0",
+    "@smthrs/memory": "1.0.0-rc.0",
+    "@smthrs/model": "1.0.0-rc.0",
+    "@smthrs/registry": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108",
     "quickjs-emscripten-core": "0.32.0"
   },
@@ -95,7 +96,7 @@
     "@effect/language-service": "0.87.1",
     "@effect/vitest": "4.0.0-rc.108",
     "@eslint/js": "9.39.1",
-    "@smthrs/testing": "0.1.0",
+    "@smthrs/testing": "1.0.0-rc.0",
     "@types/node": "25.9.5",
     "@vitest/coverage-v8": "4.1.9",
     "dprint": "0.55.2",

@@ -1,84 +1,11 @@
 {
-  "name": "smithers-monorepo",
-  "version": "0.35.0",
+  "name": "smithers",
   "description": "Durable control plane for long-running coding agents",
   "author": "William Cory",
   "license": "MIT",
   "private": true,
-  "packageManager": "pnpm@10.6.1",
-  "module": "packages/smithers/src/index.js",
   "type": "module",
-  "workspaces": [
-    "packages/*",
-    "apps/*",
-    ".smithers"
-  ],
-  "bin": {
-    "smithers": "apps/cli/src/index.js"
-  },
-  "exports": {
-    ".": "./packages/smithers/src/index.js",
-    "./gateway": "./packages/server/src/gateway.js",
-    "./gateway-client": "./packages/smithers/src/gateway-client.js",
-    "./gateway-react": "./packages/smithers/src/gateway-react.js",
-    "./tools": "./packages/smithers/src/tools.js",
-    "./testing": "./packages/testing/src/index.ts",
-    "./jsx-runtime": "./packages/smithers/src/jsx-runtime.js",
-    "./jsx-dev-runtime": "./packages/smithers/src/jsx-runtime.js",
-    "./server": "./packages/server/src/index.js",
-    "./observability": "./apps/observability/src/index.js",
-    "./mdx-plugin": "./packages/smithers/src/mdx-plugin.js",
-    "./dom/renderer": "./packages/react-reconciler/src/dom/renderer.js",
-    "./serve": "./packages/server/src/serve.js",
-    "./scorers": "./packages/scorers/src/index.js",
-    "./memory": "./packages/memory/src/index.js",
-    "./openapi": "./packages/openapi/src/index.js",
-    "./sandbox": {
-      "types": "./packages/sandbox/src/index.d.ts",
-      "import": "./packages/sandbox/src/index.js",
-      "default": "./packages/sandbox/src/index.js"
-    },
-    "./telegram": {
-      "types": "./packages/telegram/src/index.d.ts",
-      "import": "./packages/telegram/src/index.js",
-      "default": "./packages/telegram/src/index.js"
-    },
-    "./aws": {
-      "types": "./packages/smithers/src/aws.d.ts",
-      "import": "./packages/smithers/src/aws.js",
-      "default": "./packages/smithers/src/aws.js"
-    },
-    "./cloudflare": {
-      "types": "./packages/smithers/src/cloudflare.d.ts",
-      "import": "./packages/smithers/src/cloudflare.js",
-      "default": "./packages/smithers/src/cloudflare.js"
-    },
-    "./daytona": {
-      "types": "./packages/smithers/src/daytona.d.ts",
-      "import": "./packages/smithers/src/daytona.js",
-      "default": "./packages/smithers/src/daytona.js"
-    },
-    "./microsandbox": {
-      "types": "./packages/smithers/src/microsandbox.d.ts",
-      "import": "./packages/smithers/src/microsandbox.js",
-      "default": "./packages/smithers/src/microsandbox.js"
-    },
-    "./gcp": {
-      "types": "./packages/smithers/src/gcp.d.ts",
-      "import": "./packages/smithers/src/gcp.js",
-      "default": "./packages/smithers/src/gcp.js"
-    },
-    "./vercel": {
-      "types": "./packages/smithers/src/vercel.d.ts",
-      "import": "./packages/smithers/src/vercel.js",
-      "default": "./packages/smithers/src/vercel.js"
-    },
-    "./control-plane": "./packages/smithers/src/control-plane.js"
-  },
-  "engines": {
-    "node": ">=22",
-    "bun": ">=1.3.0"
-  },
+  "version": "0.0.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/smithersai/smithers.git"
@@ -87,165 +14,46 @@
   "bugs": {
     "url": "https://github.com/smithersai/smithers/issues"
   },
-  "keywords": [
-    "ai",
-    "agent",
-    "react",
-    "jsx",
-    "llm",
-    "claude",
-    "orchestration",
-    "workflow",
-    "bun"
+  "packageManager": "pnpm@11.21.0",
+  "workspaces": [
+    "packages/*",
+    "packages/build/infra",
+    "examples",
+    "apps/*"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "typecheck:examples": "tsc -p examples/tsconfig.json --noEmit",
-    "typecheck:evals": "tsc -p evals/tsconfig.json --noEmit",
-    "lint": "node scripts/lint.mjs && node scripts/format.mjs --check",
-    "lint:fix": "node scripts/lint.mjs --fix --fix-suggestions && node scripts/format.mjs --write",
-    "format": "node scripts/format.mjs --write",
-    "format:check": "node scripts/format.mjs --check",
-    "cli": "bun run apps/cli/src/index.js",
-    "generate:init-pack": "bun scripts/generate-workflow-pack.ts",
-    "sota:gen": "bun scripts/generate-sota.ts",
-    "sota:research": "bun scripts/sota-research.ts",
-    "test": "node scripts/check-single-effect-version.mjs && node scripts/check-npm-dedupe.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-installed-footprint.mjs && node scripts/check-ui-architecture.mjs && node --test scripts/check-ui-architecture.test.mjs && node scripts/check-no-direct-db-access.mjs && node scripts/check-local-smithers.mjs && node --test scripts/check-local-smithers.test.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-sota.mjs && node scripts/check-dts.mjs && node scripts/check-smithers-test-script.mjs && node --test scripts/qualify-nanocodex-release.test.mjs && bun test scripts/publish-next.test.mjs scripts/release-next-gate.test.mjs scripts/bump.test.mjs scripts/run-workspace-tests-timeout.test.mjs && pnpm -r --no-bail test",
-    "coverage": "node scripts/coverage.mjs",
-    "check:effect": "node scripts/check-single-effect-version.mjs",
+    "browser": "node scripts/browser-check.mjs",
+    "check": "pnpm --recursive --if-present run check",
+    "check:legacy-absent": "node scripts/check-legacy-absent.mjs",
     "check:npm-dedupe": "node scripts/check-npm-dedupe.mjs",
-    "check:deps": "node scripts/check-dependency-boundaries.mjs && node scripts/check-installed-footprint.mjs",
-    "check:footprint": "node scripts/check-installed-footprint.mjs",
-    "check:ui-architecture": "node scripts/check-ui-architecture.mjs",
-    "test:ui-architecture": "node --test scripts/check-ui-architecture.test.mjs",
-    "check:db-access": "node scripts/check-no-direct-db-access.mjs",
-    "check:local-smithers": "node scripts/check-local-smithers.mjs",
-    "test:local-smithers": "node --test scripts/check-local-smithers.test.mjs",
-    "check:docs": "node scripts/check-docs.mjs",
-    "check:llms": "node scripts/check-llms.mjs",
-    "check:sota": "node scripts/check-sota.mjs",
-    "check:dts": "node scripts/check-dts.mjs",
-    "fetch:jj": "node scripts/fetch-jj-binaries.mjs",
-    "docs:components": "node scripts/generate-component-source.mjs",
-    "docs:llms": "bun scripts/generate-llms.ts && bun scripts/optimize-llms-full.ts",
-    "docs": "cd docs && bunx mintlify dev",
-    "release:content": "bun apps/cli/src/index.js up .smithers/workflows/release-content.tsx",
-    "release:content:approve": "bun apps/cli/src/index.js up .smithers/workflows/release-content.tsx --input '{\"dryRun\":false,\"publish\":false}'",
-    "release:content:publish": "bun apps/cli/src/index.js up .smithers/workflows/release-content.tsx --input '{\"dryRun\":false,\"publish\":true}'",
-    "release:workflow": "bun apps/cli/src/index.js up .smithers/workflows/release.tsx",
-    "release:workflow:gated": "bun apps/cli/src/index.js up .smithers/workflows/release.tsx --input '{\"requireMarketingContent\":true}'",
-    "marketing:thread": "bun apps/cli/src/index.js up .smithers/workflows/release-content.tsx --input '{\"channels\":{\"changelog\":false,\"tweetThread\":true,\"blogPost\":false},\"skip\":{\"changelog\":true,\"blogPost\":true,\"publishX\":true,\"publishBlog\":true,\"publishChangelog\":true}}'",
-    "marketing:thread:write": "bun apps/cli/src/index.js up .smithers/workflows/release-content.tsx --input '{\"dryRun\":false,\"publish\":true,\"allowUnreviewedPublish\":true,\"channels\":{\"changelog\":false,\"tweetThread\":true,\"blogPost\":false},\"skip\":{\"changelog\":true,\"blogPost\":true,\"approval\":true,\"publishX\":true,\"publishBlog\":true,\"publishChangelog\":true}}'",
-    "version": "node scripts/bump.mjs",
-    "release": "node scripts/publish.mjs",
-    "sandbox:up": "bun scripts/sandbox.ts up",
-    "sandbox:down": "bun scripts/sandbox.ts down"
+    "circular": "pnpm --recursive --if-present run circular",
+    "dev": "pnpm --filter smithers-ui run start",
+    "deploy:dry": "pnpm --filter smithers-server run deploy:dry",
+    "lint": "pnpm --recursive --if-present run lint",
+    "test": "pnpm --recursive --if-present run test",
+    "test:jsdoc": "node --test scripts/eslint-jsdoc.test.mjs",
+    "test:examples": "pnpm --filter @smthrs/examples run test"
   },
-  "pnpm": {
-    "overrides": {
-      "@opentelemetry/propagator-jaeger": "2.9.0",
-      "effect": "4.0.0-beta.105",
-      "@smthrs/cli": "link:apps/cli"
-    },
-    "onlyBuiltDependencies": [
-      "@smthrs/jj-darwin-arm64",
-      "@smthrs/jj-darwin-x64",
-      "@smthrs/jj-linux-arm64",
-      "@smthrs/jj-linux-x64",
-      "@smthrs/jj-win32-x64"
-    ]
-  },
-  "trustedDependencies": [
-    "@smthrs/jj-darwin-arm64",
-    "@smthrs/jj-darwin-x64",
-    "@smthrs/jj-linux-arm64",
-    "@smthrs/jj-linux-x64",
-    "@smthrs/jj-win32-x64"
-  ],
-  "overrides": {
-    "@opentelemetry/propagator-jaeger": "2.9.0",
-    "effect": "4.0.0-beta.105"
+  "engines": {
+    "node": ">=22.19.0",
+    "bun": ">=1.3.0"
   },
   "devDependencies": {
-    "@happy-dom/global-registrator": "^20.10.6",
-    "@mdx-js/esbuild": "^3.1.1",
-    "@smthrs/accounts": "workspace:*",
-    "@smthrs/agent-eliza": "workspace:*",
-    "@smthrs/agents": "workspace:*",
-    "@smthrs/aws": "workspace:*",
+    "@effect/platform-node": "4.0.0-rc.108",
+    "@smthrs/build-cli": "workspace:*",
     "@smthrs/cli": "workspace:*",
-    "@smthrs/cloudflare": "workspace:*",
-    "@smthrs/components": "workspace:*",
-    "@smthrs/control-plane": "workspace:*",
-    "@smthrs/daytona": "workspace:*",
-    "@smthrs/db": "workspace:*",
-    "@smthrs/devtools": "workspace:*",
-    "@smthrs/driver": "workspace:*",
-    "@smthrs/electric-proxy": "workspace:*",
-    "@smthrs/engine": "workspace:*",
-    "@smthrs/errors": "workspace:*",
-    "@smthrs/gateway": "workspace:*",
-    "@smthrs/gateway-client": "workspace:*",
-    "@smthrs/gateway-react": "workspace:*",
-    "@smthrs/gateway-ui": "workspace:*",
-    "@smthrs/gcp": "workspace:*",
-    "@smthrs/graph": "workspace:*",
-    "@smthrs/herdr": "workspace:*",
-    "@smthrs/integrations": "workspace:*",
-    "@smthrs/memory": "workspace:*",
-    "@smthrs/microsandbox": "workspace:*",
-    "@smthrs/observability": "workspace:*",
-    "@smthrs/openapi": "workspace:*",
-    "@smthrs/pi-plugin": "workspace:*",
-    "@smthrs/protocol": "workspace:*",
-    "@smthrs/react-reconciler": "workspace:*",
-    "@smthrs/review": "workspace:*",
-    "@smthrs/sandbox": "workspace:*",
-    "@smthrs/scheduler": "workspace:*",
-    "@smthrs/scorers": "workspace:*",
-    "@smthrs/server": "workspace:*",
-    "@smthrs/telegram": "workspace:*",
-    "@smthrs/testing": "workspace:*",
-    "@smthrs/time-travel": "workspace:*",
-    "@smthrs/tool-context": "workspace:*",
-    "@smthrs/tui": "workspace:*",
-    "@smthrs/tui-ui": "workspace:*",
-    "@smthrs/ui": "workspace:*",
-    "@smthrs/ui-core": "workspace:*",
-    "@smthrs/ui-styleguide": "workspace:*",
-    "@smthrs/usage": "workspace:*",
-    "@smthrs/vcs": "workspace:*",
-    "@smthrs/vercel": "workspace:*",
-    "@smthrs/xstate": "workspace:*",
-    "@tanstack/react-query": "^5.101.2",
-    "@types/bun": "latest",
-    "@types/dagre": "^0.7.54",
-    "@types/mdx": "^2.0.14",
-    "@types/node": "^26.1.0",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@types/react-reconciler": "^0.33.0",
-    "@types/ws": "^8.18.1",
-    "bun-types": "^1.3.14",
-    "diff": "^9.0.0",
-    "drizzle-orm": "^0.45.2",
-    "effect": "4.0.0-beta.105",
-    "esbuild": "^0.28.1",
-    "oxfmt": "^0.60.0",
-    "oxlint": "^1.72.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "smthrs": "workspace:*",
-    "tsup": "^8.5.1",
-    "twitter-api-v2": "^1.29.0",
-    "typescript": "~6.0.3",
-    "yaml": "^2.9.0",
-    "zod": "^4.4.3"
-  },
-  "dependencies": {
-    "@milkdown/crepe": "7.21.2",
-    "@xyflow/react": "^12.10.2",
-    "dagre": "^0.8.5",
-    "electrobun": "^1.18.1"
+    "@smthrs/database": "workspace:*",
+    "@smthrs/engine-store": "workspace:*",
+    "@smthrs/targets": "workspace:*",
+    "effect": "4.0.0-rc.108",
+    "esbuild": "0.28.1",
+    "eslint-plugin-jsdoc": "64.1.0",
+    "mermaid": "^11.16.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "typescript": "6.0.3",
+    "vite": "^8.2.1",
+    "vocs": "^2.8.5",
+    "waku": "^1.0.0-beta.9"
   }
 }

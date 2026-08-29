@@ -1,11 +1,11 @@
 /**
  * Operator entry point for durable-store disaster recovery: hot-backs-up a
- * live flows SQLite store together with its artifact objects, verifies a
- * backup's recorded digests, and restores a backup into a fresh store
- * directory with every pre-backup ownership fence invalidated. The mechanics
- * live in `@smthrs/engine-store/DisasterRecovery`; this script only
+ * live Smithers engine SQLite store together with its artifact objects,
+ * verifies a backup's recorded digests, and restores a backup into a fresh
+ * store directory with every pre-backup ownership fence invalidated. The
+ * mechanics live in `@smthrs/engine-store/DisasterRecovery`; this script only
  * parses arguments and composes the Node host layers. Cadence and procedure:
- * `docs/pages/disaster-recovery.md`.
+ * `docs/pages/disaster-recovery.mdx`.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"

@@ -1,7 +1,7 @@
 /*
  * The target-graph backend against REAL workspaces, over real HTTP, with no
  * mocks anywhere: `startLocalServer` boots the product's server, the routes
- * spawn the real `smthrs` loader through the real Node sidecar, and the
+ * spawn the real `smithers-build` loader through the real Node sidecar, and the
  * assertions are facts about repositories on this machine.
  *
  *   ~/artsy/force      — read only, the graph/plan/affected/ci proof (82/94).

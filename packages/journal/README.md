@@ -1,6 +1,6 @@
 # @smthrs/journal
 
-The flows event journal: the immutable history of what happened, and nothing
+The Smithers event journal: the immutable history of what happened, and nothing
 else. It owns `flows_journal_events` above `@smthrs/database`, bounded journal
 admission, the `OwnerId` fence its durable channel accepts, and the records
 consumed by engine-store and sync.
@@ -8,9 +8,9 @@ consumed by engine-store and sync.
 Run and attempt state live in [`@smthrs/run-store`](../run-store), sealed step
 results in [`@smthrs/step-cache`](../step-cache), and the durable
 deferred/clock tables in [`@smthrs/engine-store`](../engine-store) — see
-[`docs/specs/Concepts/Journal Split.md`](../../../docs/specs/Concepts/Journal%20Split.md).
+`docs/specs/Concepts/Journal Split.md`.
 
-The journal is flows' own **logical (domain) write-ahead log**, intended to
+The journal is Smithers' own **logical (domain) write-ahead log**, intended to
 become the authoritative state history.
 The SQLite or PostgreSQL WAL beneath it is only the storage durability
 substrate and is never consumed as the application event API. Lifecycle

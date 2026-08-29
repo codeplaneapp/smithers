@@ -181,7 +181,7 @@ export const ApprovalPayload = Schema.Struct({
 export type ApprovalPayload = typeof ApprovalPayload.Type
 
 /**
- * What `flows plan` reports for one node before anything runs.
+ * What `smithers plan` reports for one node before anything runs.
  *
  * The two dispositions fall out of step keys for free — a key either hits the
  * step cache or it does not — which is why they are reported here rather than
@@ -196,7 +196,7 @@ export type ApprovalPayload = typeof ApprovalPayload.Type
 export const PlanNodeStatus = Schema.Literals(["cached", "run"])
 
 /**
- * What `flows plan` reports for one node before anything runs.
+ * What `smithers plan` reports for one node before anything runs.
  *
  * @since 0.1.0
  * @category models

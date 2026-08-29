@@ -1,7 +1,7 @@
 /**
  * Targets for the repository's operator and release scripts.
  *
- * Every gate under `scripts/` is declared here, so `smthrs test '//scripts/...'`
+ * Every gate under `scripts/` is declared here, so `smithers-build test '//scripts/...'`
  * is the whole of what CI used to spell as seven `node --test …` and
  * `node scripts/….mjs` strings. The scripts keep living beside the thing they
  * guard; what changed is that the build system now knows about them, which means
@@ -156,4 +156,75 @@ export const releaseSmoke = Smithers.NodeTest({
   runner: Smithers.entrypoint(Smithers.file("//scripts/smoke-release.mjs"), [packDirectory]),
   srcs: [sources],
   deps: [releasePack]
+})
+
+/**
+ * One `effect` version across every manifest, both lockfiles, and the install.
+ *
+ * Two Effect instances do not share schema internals, so a duplicate is a
+ * runtime defect rather than a size problem. `rc-contract.md` section 9 pins
+ * the supported range to one version and this target proves the tree agrees.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const effectVersion = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.entrypoint(Smithers.file("//scripts/check-single-effect-version.mjs")),
+  srcs: [sources, Smithers.file("//pnpm-lock.yaml"), Smithers.file("//bun.lock")],
+  deps: []
+})
+
+/**
+ * Every import a workspace source makes is declared by that workspace.
+ *
+ * pnpm links the whole workspace under one `node_modules`, so an undeclared
+ * import of a sibling still resolves locally and then fails for a consumer who
+ * installs the tarball. This is PLAN.md Phase 3's "no package imports files
+ * through unpublished workspace-relative paths", executed.
+ *
+ * The sources it reads live in other packages, and a declared glob may not
+ * cross a package boundary, so `srcs` names only this directory. The gate is
+ * therefore not cacheable and re-runs regardless.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const dependencyBoundaries = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.entrypoint(Smithers.file("//scripts/check-dependency-boundaries.mjs")),
+  srcs: [sources],
+  deps: []
+})
+
+/**
+ * Internal scripts execute the Smithers working tree, never an installed copy.
+ *
+ * A published-CLI invocation inside this repository silently runs a release
+ * build instead of the code under edit. The guard scans only positions that
+ * actually spawn a process, so the documentation's own `bunx smithers-build` prose
+ * stays legal.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const localSmithers = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.entrypoint(Smithers.file("//scripts/check-local-smithers.mjs")),
+  srcs: [sources],
+  deps: []
+})
+
+/**
+ * The guard's own unit suite: the violation patterns, the allowlist, and the
+ * mirrored plugin resolvers.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const localSmithersUnit = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.testRunner([Smithers.file("//scripts/check-local-smithers.test.mjs")]),
+  srcs: [sources],
+  deps: []
 })

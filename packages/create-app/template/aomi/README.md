@@ -33,7 +33,7 @@ pnpm dev        # vite, with workerd in the loop
 
 `routes.gen.ts` and `routes.ui.gen.ts` are generated. Run `pnpm routes` after
 adding a page, a pane, a flow, or a layer file; `vite` regenerates them while it
-runs, and `smthrs '//:routes'` fails on drift.
+runs, and `smithers-build '//:routes'` fails on drift.
 
 `flows/build/AGENT.ts` is the layer rule in one file: it moves the build
 pipeline to its own seat and teaching, and leaves its sandbox and tools

@@ -97,13 +97,16 @@ test("a resolved title does not authorize re-pinning a test", () => {
   }
 })
 
-test("the guarded set is the engine and tooling groups, read from the manifests", () => {
-  assert.deepEqual([...guardedGroups].sort(), ["engine", "tooling"])
+test("every package group is guarded, read from the manifests", () => {
+  // The 1.0 release train packs engine and agent together, so an undocumented
+  // pin in an agent package would ship inside a published tarball. Tooling
+  // stays guarded because its packages gate the build.
+  assert.deepEqual([...guardedGroups].sort(), ["agent", "engine", "tooling"])
 
   const guarded = new Set(guardedPackages().map((directory) => directory.split("/").pop()))
   assert.ok(guarded.has("database"), "database is an engine package")
   assert.ok(guarded.has("build-cli"), "build-cli is a tooling package")
-  assert.ok(!guarded.has("harness"), "harness is an agent package and out of scope")
+  assert.ok(guarded.has("harness"), "harness is an agent package and now in scope")
 })
 
 test("the register exists and every pin in the tree appears in it", () => {

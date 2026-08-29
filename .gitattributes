@@ -1,17 +1,17 @@
 # Normalize line endings across platforms.
 #
-# Smithers' CI runs the full test suite on Windows as well as Linux. Several
-# gates and tests are line-ending sensitive: the docs/llms bundle checks
-# regenerate artifacts and diff them against the committed copy, the
-# check:effect gate matches line-anchored regexes against the lockfile, and a
-# number of tests compare exact captured output. Without this file Windows'
-# autocrlf would check those files out as CRLF and fail them spuriously.
+# CI runs required Linux jobs and an advisory Windows package lane. Several
+# gates and tests are line-ending sensitive: generated root files are
+# regenerated and diffed against the committed copy, the single-effect-version
+# gate matches line-anchored regexes against both lockfiles, and a number of
+# tests compare exact captured output. Without this file Windows' autocrlf
+# would check those files out as CRLF and fail them spuriously.
 #
-# Force LF for every text file (git auto-detects text vs binary); explicit
+# Force LF for every text file (git auto-detects text vs binary); the explicit
 # binary entries below keep git from ever touching truly binary assets.
 * text=auto eol=lf
 
-# Binary assets — never normalize or diff as text.
+# Binary assets. Never normalize or diff these as text.
 *.png binary
 *.jpg binary
 *.jpeg binary
@@ -27,6 +27,3 @@
 *.zip binary
 *.exe binary
 *.node binary
-
-# This source fixture exercises NUL-delimited run-node keys; always diff it as text.
-packages/gateway-ui/tests/components.test.tsx text eol=lf diff

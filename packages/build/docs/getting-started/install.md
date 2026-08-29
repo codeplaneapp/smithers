@@ -1,9 +1,9 @@
 # Install
 
-smithers build lives in the flows repository as three pnpm workspace packages:
+smithers build lives in the Smithers repository as three pnpm workspace packages:
 
 ```
-flows/
+smithers/
   BUILD.ts
   packages/
     build/        # @smthrs/build — Install and PackageManager
@@ -25,11 +25,11 @@ flows/
 
 ## Link the authoring package
 
-The flows root manifest declares both the authoring package and CLI as
+The Smithers root manifest declares both the authoring package and CLI as
 devDependencies at the workspace version:
 
 ```json
-// flows/package.json
+// smithers/package.json
 {
   "devDependencies": {
     "@smthrs/build-cli": "0.1.0",
@@ -40,18 +40,18 @@ devDependencies at the workspace version:
 
 `linkWorkspacePackages` resolves the exact version to the workspace package, so
 `pnpm install` links both packages with no `file:` or `link:` specifier. The CLI
-dependency exposes the `smthrs` bin to `pnpm exec` at the workspace root.
+dependency exposes the `smithers-build` bin to `pnpm exec` at the workspace root.
 
 `BUILD.ts` files then import by bare specifier:
 
 ```ts
-// flows/BUILD.ts
+// smithers/BUILD.ts
 import { Smithers } from "@smthrs/targets"
 ```
 
 ## Install the CLI dependencies
 
-The CLI package depends on the flows engine packages, on
+The CLI package depends on the Smithers engine packages, on
 `@smthrs/build`, and on `@smthrs/targets` at the workspace version:
 
 ```json
@@ -74,19 +74,19 @@ package.
 
 ## Run the CLI
 
-The bin entry is `smthrs`, backed by `packages/build-cli/src/main.js`. That
+The bin entry is `smithers-build`, backed by `packages/build-cli/src/main.js`. That
 file is a JavaScript bootstrap: it loads `main.ts` through the programmatic
 `tsx` loader, which is also what evaluates `BUILD.ts` modules.
 
 ```sh
 # From the workspace root.
-pnpm exec smthrs query //...
+pnpm exec smithers-build query //...
 ```
 
 Or point the CLI at the workspace explicitly from anywhere:
 
 ```sh
-smthrs query //... --workspace /path/to/flows
+smithers-build query //... --workspace /path/to/smithers
 ```
 
 `--workspace` defaults to the process working directory. The current directory
@@ -101,7 +101,7 @@ workspace-relative directory, `.flows` by default. Add it to the workspace
 maintain the entry:
 
 ```ts
-// flows/BUILD.ts
+// smithers/BUILD.ts
 import { Smithers } from "@smthrs/targets"
 
 export const config = Smithers.Workspace({ cacheDirectory: ".flows", gitignored: true })
@@ -110,7 +110,7 @@ export const config = Smithers.Workspace({ cacheDirectory: ".flows", gitignored:
 See [Configuration](../workspace/configuration.md).
 
 The ordinary target verbs may use another configured directory. The dedicated
-`smthrs install` verb currently requires `.flows`, because its declared pnpm
+`smithers-build install` verb currently requires `.flows`, because its declared pnpm
 store boundary is fixed at `.flows/store/pnpm`.
 
 ## Next

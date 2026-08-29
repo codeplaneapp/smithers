@@ -14,8 +14,8 @@ import { Flow } from "../../packages/flow/src/index.ts"
 import { Node } from "../../packages/plan/src/index.ts"
 import {
   chunk,
-  FLOWS_ROOT,
   listWorkspacePackages,
+  REPO_ROOT,
   REPORTS_DIR,
   runFlow,
   ShellTask,
@@ -52,7 +52,7 @@ const writeReport = (done: number) => {
     "| Package | Exit | All files (Stmts/Branch/Funcs/Lines) | Log |",
     "| --- | --- | --- | --- |",
     ...results.map(
-      (r) => `| ${r.id} | ${r.exitCode} | ${coverageLine(r.logPath)} | ${path.relative(FLOWS_ROOT, r.logPath)} |`
+      (r) => `| ${r.id} | ${r.exitCode} | ${coverageLine(r.logPath)} | ${path.relative(REPO_ROOT, r.logPath)} |`
     ),
     ""
   ]
@@ -78,7 +78,7 @@ for (let index = 0; index < waves.length; index++) {
                 id: pkg,
                 command: "pnpm",
                 args: ["--filter", descriptor.npmName, "exec", "vitest", "run", "--coverage"],
-                cwd: FLOWS_ROOT,
+                cwd: REPO_ROOT,
                 timeoutMs: TIMEOUT_MS,
                 logDir
               })

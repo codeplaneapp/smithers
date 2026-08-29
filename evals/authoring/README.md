@@ -18,7 +18,7 @@ first-class build-system targets, so none of them is a copy-paste shell command.
 Deterministic, cache-eligible, and part of `ci`:
 
 - `//evals/authoring:datasetValidate` — proves every dataset row is a
-  well-formed chat example. Run it with `pnpm exec smthrs test
+  well-formed chat example. Run it with `pnpm exec smithers-build test
   '//evals/authoring:datasetValidate'`.
 - `//evals/authoring:types` — typechecks the validator.
 
@@ -36,7 +36,7 @@ by the `FIREWORKS_API_KEY` secret rather than a literal credential.
 Run one explicitly, for example:
 
 ```
-pnpm exec smthrs run '//evals/authoring:sftLaunch'
+pnpm exec smithers-build run '//evals/authoring:sftLaunch'
 ```
 
 ## Prerequisites for the operations

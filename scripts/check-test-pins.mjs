@@ -1,6 +1,6 @@
 /**
- * Fails when a test pin in the engine or tooling package groups is not written
- * down in docs/alpha-notes.md.
+ * Fails when a test pin in any package group is not written down in
+ * docs/alpha-notes.md.
  *
  * A pin is a test the default gate never runs to a pass. Three forms count:
  * `it.fails`/`test.fails` (an assertion that current behavior is wrong),
@@ -15,8 +15,10 @@
  * configuration.
  *
  * Group membership comes from `smthrs.group`, the same authority the release
- * train uses, so a new package is covered without being listed here. Agent-group
- * packages are out of scope.
+ * train uses, so a new package is covered without being listed here. The 1.0
+ * release train packs the engine and agent groups together, so the register
+ * covers every group: an unexplained pin in a package a user installs is the
+ * case this guard exists for.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
@@ -25,7 +27,7 @@ import { fileURLToPath } from "node:url"
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
 /** The package groups whose pins this register covers. */
-export const guardedGroups = new Set(["engine", "tooling"])
+export const guardedGroups = new Set(["engine", "agent", "tooling"])
 
 export const notesPath = join(repoRoot, "docs", "alpha-notes.md")
 
@@ -195,7 +197,7 @@ const main = () => {
   }
   const unexplained = undocumentedPins()
   if (unexplained.length === 0) {
-    console.log("No undocumented test pins in the engine or tooling package groups.")
+    console.log("No undocumented test pins in any package group.")
     return
   }
   console.error(`${unexplained.length} test pin(s) are not documented in docs/alpha-notes.md:`)

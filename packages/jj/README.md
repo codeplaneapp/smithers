@@ -1,6 +1,6 @@
 # @smthrs/jj
 
-Jujutsu version control as a portable Effect host service. `flows` snapshots the
+Jujutsu version control as a portable Effect host service. Smithers snapshots the
 working copy around every step, so jj is host access — it goes through a layer
 like the filesystem does, not through an ad-hoc `spawn`.
 
@@ -117,7 +117,7 @@ does not own the mount and never syncs for you.
 - **Synchronous and on the calling thread.** Each operation runs the wasm to
   completion — no incremental progress, and interruption waits for the op to
   finish, the same posture as `BrowserChildProcessSpawner`. Hosts that care
-  should put the flows runtime in a Worker; this layer does not do it for
+  should put the Smithers runtime in a Worker; this layer does not do it for
   them.
 - **Single-threaded.** jj's rayon-parallel working-copy paths degrade to
   serial execution on threadless wasm. Correct, just not parallel.

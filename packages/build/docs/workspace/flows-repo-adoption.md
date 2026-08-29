@@ -1,6 +1,6 @@
-# Adoption in the flows repository
+# Adoption in the Smithers repository
 
-The flows monorepo dogfoods smithers build on itself. This page records what is
+The Smithers monorepo dogfoods smithers build on itself. This page records what is
 adopted today, what still runs through plain pnpm scripts, and the criteria
 for moving the boundary. Dates are absolute because this page is a status
 record, not a design.
@@ -18,29 +18,29 @@ record, not a design.
   `build-cli/test/CommittedBuildFiles.test.ts` loads every committed
   `BUILD.ts` on each test run so a targets-API change cannot silently
   invalidate one again.
-- **Gate parity at the package level.** `smthrs ci "//packages/..."` plans
+- **Gate parity at the package level.** `smithers-build ci "//packages/..."` plans
   130 targets over 26 packages. `lib` + `check` cover what the package
   `check` scripts cover; `lint` + `fmt` cover the package `lint` scripts;
   `test` runs the same vitest configs, including their coverage gates.
 - **The graph IS the CI lane (2026-08-19).** The advisory `smthrs-shadow`
   job is gone: it existed to shadow the recursive pnpm scripts, and those
   are no longer in the pipeline. The required `test` job runs
-  `smthrs ci "//packages/..."` directly, alongside `smthrs test
+  `smithers-build ci "//packages/..."` directly, alongside `smithers-build test
   "//scripts/..."` and the labelled gates of the other jobs. The shadow
   lane's first flights found two real defects (the pnpm
   `verify-deps-before-run` mid-gate reinstall, now off via the repo
   `.npmrc`, and the withheld `CI` variable, now inherited by `ExecLive`),
   which was the lane's purpose.
-- **Verb-aware package labels.** `smthrs lint //packages/plan` selects the
+- **Verb-aware package labels.** `smithers-build lint //packages/plan` selects the
   package's lint-participating targets instead of refusing on the
   build-only default target.
 - **Workflow generation (2026-08-19).** `.github/workflows/ci.yml` is a
   generated root file. The root `BUILD.ts` declares it through `GithubCiGen`
-  with `mode: "check"`, `smthrs build //:ci` regenerates it, and every other
+  with `mode: "check"`, `smithers-build build //:ci` regenerates it, and every other
   verb drift-checks it, on the same terms as `tsconfig.json`. Nothing in the
   declaration is a command: a job states what the runner must provide and
   which targets it runs, and the generator derives every step. The `test` job
-  also runs `smthrs lint "//:ci"`, so the workflow describing the pipeline is
+  also runs `smithers-build lint "//:ci"`, so the workflow describing the pipeline is
   drift-checked by the pipeline.
 - **Workspace-file authority (2026-08-19).** `pnpm-workspace.yaml` is
   hand-written and authoritative rather than generated from root BUILD attrs.
@@ -85,4 +85,4 @@ record, not a design.
    the lane's wall-clock earns the migration.
 2. The recursive pnpm scripts stay for local use (`pnpm run check`,
    `pnpm test`), but nothing in CI calls them; they retire when the local
-   entry points move to `smthrs` too.
+   entry points move to `smithers-build` too.

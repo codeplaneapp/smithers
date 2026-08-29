@@ -21,11 +21,11 @@ const program = Effect.gen(function*() {
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/time-travel` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/time-travel/src/index.ts) | any |
+| `@smthrs/time-travel` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src/index.ts) | any |
 
 ## Frame
 
-[src/Frame.ts](https://github.com/smithersai/flows/blob/main/packages/time-travel/src/Frame.ts)
+[src/Frame.ts](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src/Frame.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -35,7 +35,7 @@ const program = Effect.gen(function*() {
 
 ## TimeTravelStore
 
-[src/TimeTravelStore.ts](https://github.com/smithersai/flows/blob/main/packages/time-travel/src/TimeTravelStore.ts)
+[src/TimeTravelStore.ts](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src/TimeTravelStore.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -48,15 +48,15 @@ const program = Effect.gen(function*() {
 
 | Implementation | Source | Notes |
 | --- | --- | --- |
-| `MemoryTimeTravelStore.make`, `layer`, `MemoryState`, `JournalRecord`, `Options` | [src/MemoryTimeTravelStore.ts](https://github.com/smithersai/flows/blob/main/packages/time-travel/src/MemoryTimeTravelStore.ts) | deterministic tests |
-| `SqlTimeTravelStore.migrate`, `make`, `layer` | [src/SqlTimeTravelStore.ts](https://github.com/smithersai/flows/blob/main/packages/time-travel/src/SqlTimeTravelStore.ts) | creates its tables on build |
-| `Migrations.set`, `sets`, `run`, `layer` | [src/Migrations.ts](https://github.com/smithersai/flows/blob/main/packages/time-travel/src/Migrations.ts) | the same DDL as a rung on the shared ladder, at id block `5000` |
+| `MemoryTimeTravelStore.make`, `layer`, `MemoryState`, `JournalRecord`, `Options` | [src/MemoryTimeTravelStore.ts](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src/MemoryTimeTravelStore.ts) | deterministic tests |
+| `SqlTimeTravelStore.migrate`, `make`, `layer` | [src/SqlTimeTravelStore.ts](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src/SqlTimeTravelStore.ts) | creates its tables on build |
+| `Migrations.set`, `sets`, `run`, `layer` | [src/Migrations.ts](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src/Migrations.ts) | the same DDL as a rung on the shared ladder, at id block `5000` |
 
 `SqlTimeTravelStore.migrate` creates `flows_time_travel_snapshots`, `flows_time_travel_edges`, `flows_time_travel_audits`, `flows_time_travel_receipts`, and `flows_time_travel_archive`, and indexes `meta_json.lineageId` on the journal's own `flows_journal_events` so a lineage-filtered read is not a full run scan.
 
 ## TimeTravel
 
-[src/TimeTravel.ts](https://github.com/smithersai/flows/blob/main/packages/time-travel/src/TimeTravel.ts)
+[src/TimeTravel.ts](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src/TimeTravel.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -78,12 +78,12 @@ crashed rewind never needs a call the caller has to remember.
 
 `Replay`, `Fork`, `Rewind`, `Retry`, `Recovery`, `Compensation`, and
 `EffectHandlerRegistry` are internal machinery under
-[src/internal/](https://github.com/smithersai/flows/blob/main/packages/time-travel/src/internal);
+[src/internal/](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src/internal);
 the package blocks `@smthrs/time-travel/internal/*` at its `exports` map.
 
 ## EffectBoundary
 
-[src/EffectBoundary.ts](https://github.com/smithersai/flows/blob/main/packages/time-travel/src/EffectBoundary.ts)
+[src/EffectBoundary.ts](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src/EffectBoundary.ts)
 
 The producer side of the contract: engine code calls `EffectBoundary.guard` so
 a later rewind has something to assess. It stays public for that reason.
@@ -100,7 +100,7 @@ application calling `guard` by hand.
 
 ## CompensationHandlers
 
-[src/CompensationHandlers.ts](https://github.com/smithersai/flows/blob/main/packages/time-travel/src/CompensationHandlers.ts)
+[src/CompensationHandlers.ts](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src/CompensationHandlers.ts)
 
 Compensation planning and tier-aware retry stay internal: `rewind` resolves them
 itself. What a composition contributes is the handler, not the registry.
@@ -118,7 +118,7 @@ With no handlers provided, a crossed record that is not sealed classifies as
 
 ## TimeTravelError
 
-[src/TimeTravelError.ts](https://github.com/smithersai/flows/blob/main/packages/time-travel/src/TimeTravelError.ts)
+[src/TimeTravelError.ts](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src/TimeTravelError.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |

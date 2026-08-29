@@ -4,8 +4,8 @@
 
 ### Breaking Changes
 
-- Renamed the package from `@smthrs/chain` to `@smthrs/chain`, the name
-  every unreleased flows package carries until the smithers parity release.
+- Renamed the package to `@smthrs/chain`, the scope every unreleased
+  Smithers package carries.
 
 ### Changed
 

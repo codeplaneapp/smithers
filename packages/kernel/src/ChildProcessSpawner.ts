@@ -1,7 +1,7 @@
 /**
  * Permission-aware process spawning.
  *
- * `flows` has no shell service of its own — process execution is Effect's
+ * Smithers has no shell service of its own — process execution is Effect's
  * `effect/unstable/process`. The only thing the kernel adds is the
  * `proc:spawn` capability check, applied to the one primitive every other
  * helper is derived from.

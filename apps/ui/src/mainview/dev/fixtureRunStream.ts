@@ -224,7 +224,7 @@ export const createTargetGraphDevFixtures = (): TargetGraphDevFixtures | undefin
       workflows: [{
         name: "ci",
         path: ".github/workflows/ci.yml",
-        yaml: "name: ci\non: [push]\njobs:\n  main:\n    runs-on: ubuntu-latest\n    steps:\n      - run: smthrs '//.github:ci'\n",
+        yaml: "name: ci\non: [push]\njobs:\n  main:\n    runs-on: ubuntu-latest\n    steps:\n      - run: smithers-build '//.github:ci'\n",
         jobs: [{ name: "main", targets: ["//.github:ci"], matrix: { shard: ["1", "2", "3"] } }]
       }],
       durationMs: 0

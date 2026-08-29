@@ -1,5 +1,5 @@
 /**
- * The Effect CLI command tree for flows.
+ * The Effect CLI command tree for Smithers.
  *
  * @since 0.1.0
  */
@@ -23,7 +23,7 @@ const global = {
   mcpConfig: Flag.string("mcp-config").pipe(Flag.optional)
 }
 
-const rootCommand = Command.make("flows").pipe(Command.withSharedFlags(global))
+const rootCommand = Command.make("smithers").pipe(Command.withSharedFlags(global))
 const input = Argument.string("key=value").pipe(Argument.variadic())
 const data = Flag.string("data").pipe(Flag.optional)
 const common = { input, data }
@@ -302,7 +302,7 @@ const up = Command.make("up", {
   watch: Flag.boolean("watch")
 }, (config) =>
   Effect.gen(function*() {
-    if (Option.isSome(config.flow)) return yield* Console.log(`did you mean \`flows run ${config.flow.value}\`?`)
+    if (Option.isSome(config.flow)) return yield* Console.log(`did you mean \`smithers run ${config.flow.value}\`?`)
     const control = yield* ControlService.Control
     const metadata = find("up")!
     const card = yield* control.plan({ flowId: metadata.flowId, input: { watch: config.watch } })
@@ -317,7 +317,7 @@ const systemCommand = (verb: string) => {
       const control = yield* ControlService.Control
       const card = yield* control.plan({ flowId: metadata.flowId, input: decodedInput })
       // Plan-bearing and deploy-class system flows stop at the complete reviewable
-      // card. Only the envelope carried by that card may be passed to `flows run`.
+      // card. Only the envelope carried by that card may be passed to `smithers run`.
       yield* render(card)
     })).pipe(Command.withDescription(metadata.help))
 }

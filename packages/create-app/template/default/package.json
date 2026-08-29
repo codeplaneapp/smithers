@@ -12,7 +12,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "wrangler deploy",
-    "routes": "smthrs-routes",
+    "routes": "smithers-routes",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:record": "SMTHRS_RECORD=1 vitest run"

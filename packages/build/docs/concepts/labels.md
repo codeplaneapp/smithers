@@ -46,7 +46,7 @@ directory, computed relative to the workspace root.
 
 ```sh
 cd packages/flow
-smthrs test :test    # //packages/flow:test
+smithers-build test :test    # //packages/flow:test
 ```
 
 If the current directory is outside the workspace, or `--workspace` points
@@ -73,7 +73,7 @@ the default. Otherwise the label fails with
 `package //<path> has no unambiguous default target`.
 
 The root install target is conventionally named `nodeModules`, which is why `//`
-resolves to it in a workspace laid out like the flows repository.
+resolves to it in a workspace laid out like the Smithers repository.
 
 ## Recursive patterns
 

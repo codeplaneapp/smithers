@@ -11,7 +11,7 @@ import type { AppStore } from "../state/AppStore"
  * after the transaction persists — a journal append is durable evidence, not
  * an optimistic hope. Events are schema-validated in both directions, so a
  * corrupted row fails loudly as JournalError instead of feeding the chain
- * garbage. This layer is the app-side stand-in the flows engine journal
+ * garbage. This layer is the app-side stand-in the Smithers engine journal
  * replaces in Phase 4; nothing outside this module knows the residency.
  *
  * Single-writer assumption: seq derives from this instance's view of the
@@ -19,7 +19,7 @@ import type { AppStore } from "../state/AppStore"
  * uniqueness. One lineage must have one live writer. The append guard below
  * turns a same-instance collision into a typed JournalError; a second store
  * instance over the same storage (two tabs on the localStorage fallback) is
- * outside this layer's protection and waits on the flows engine journal.
+ * outside this layer's protection and waits on the Smithers engine journal.
  */
 
 export interface CollectionJournalOptions {

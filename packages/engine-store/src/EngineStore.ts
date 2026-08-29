@@ -328,7 +328,7 @@ export const layer = (
       FlowEngine.SnapshotBoundary.of({
         snapshot: Effect.fn("SnapshotBoundary.snapshot")(({ key, attempt }) =>
           Effect.annotateCurrentSpan({ key, attempt }).pipe(
-            Effect.andThen(jj.snapshot(`flows action ${key} attempt ${attempt}`)),
+            Effect.andThen(jj.snapshot(`smithers action ${key} attempt ${attempt}`)),
             Effect.orDie,
             Effect.map((snapshot) => snapshot.changeId)
           )
@@ -341,7 +341,7 @@ export const layer = (
         ),
         diff: Effect.fn("SnapshotBoundary.diff")((snapshot, { key, attempt }) =>
           Effect.annotateCurrentSpan({ key, attempt }).pipe(
-            Effect.andThen(jj.snapshot(`flows action ${key} attempt ${attempt} settled`)),
+            Effect.andThen(jj.snapshot(`smithers action ${key} attempt ${attempt} settled`)),
             Effect.orDie,
             Effect.flatMap((current) => jj.diff(snapshot as never, current.changeId).pipe(Effect.orDie))
           )

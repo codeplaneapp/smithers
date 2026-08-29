@@ -9,7 +9,7 @@
  * credential from the `FIREWORKS_API_KEY` secret, never from a literal, so no
  * key enters the plan. Run one explicitly, for example:
  *
- *   pnpm exec smthrs run '//evals/authoring:sftLaunch'
+ *   pnpm exec smithers-build run '//evals/authoring:sftLaunch'
  */
 import { Smithers } from "@smthrs/targets"
 import { bunRuntime, packageManager } from "../../BUILD.ts"

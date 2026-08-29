@@ -26,7 +26,7 @@ export interface Edge {
 }
 
 /**
- * The four cache-key material fields defined by the flows step-key law.
+ * The four cache-key material fields defined by the Smithers step-key law.
  *
  * @category models
  * @since 0.1.0

@@ -30,7 +30,7 @@ path, a `..` segment, or an empty value fails the command regardless of where it
 came from.
 
 ```sh
-smthrs build //... --cache-dir .smithers-build-cache
+smithers-build build //... --cache-dir .smithers-build-cache
 ```
 
 `gitignored` comes only from the declaration. It is a workspace policy, not a

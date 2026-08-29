@@ -1,6 +1,6 @@
 /**
  * Pure wikilink/frontmatter helpers for the vault lane, ported faithfully
- * from the ddd VaultTab implementation (flows `.smithers/ui/ddd-vaultLinks.ts`).
+ * from the ddd VaultTab implementation in the Smithers 0.x workflow UI pack.
  *
  * Deliberately free of React so tests (and any other consumer) can import the
  * link logic without pulling a browser-shaped dependency tree.

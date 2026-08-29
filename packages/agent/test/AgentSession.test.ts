@@ -371,7 +371,7 @@ const drive = (
     yield* Deferred.succeed(gate, void 0)
 
     // Frame one's ask parks the run and journals the exact approval payload
-    // an operator replays through `flows approve`.
+    // an operator replays through `smithers approve`.
     const requested = yield* control.watch({ runId }).pipe(
       Stream.filter((event) => event.kind === "control.approval.requested"),
       Stream.take(1),

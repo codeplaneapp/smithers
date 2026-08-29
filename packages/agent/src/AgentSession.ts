@@ -456,7 +456,7 @@ const askIdentity = (
  * The bare `*` is the one token that is whole authority rather than an
  * action-and-resource pair. `@smthrs/registry`'s `MarkdownFlow` emits exactly
  * that string for a flow whose frontmatter declares no `capabilities:`, and
- * `flows plan` prints it back as the plan's envelope, so refusing it left
+ * `smithers plan` prints it back as the plan's envelope, so refusing it left
  * every markdown-declared agent run with an empty envelope: `bash`, `read`,
  * and `write` all failed with "outside this run's capability envelope" and
  * the built-in harness could not touch a file or run a command. It expands to
@@ -711,7 +711,7 @@ export const make = (
     /**
      * Decides one ask before its durable boundary opens. An unresolved ask
      * registers its token, publishes the exact approval payload an operator
-     * replays through `flows approve`, and parks the run with an encoded
+     * replays through `smithers approve`, and parks the run with an encoded
      * `PermissionRequired`; a resolved one lets the activity run and read the
      * decision.
      */
@@ -811,7 +811,7 @@ export const make = (
      * undiagnosable from its own journal: three of the five first SWE-bench
      * benchmark runs ended `control.run.failed {runId, status}` and nothing
      * else, and the log line was long gone. The journal is the record a
-     * `flows status` diagnosis reads, so the reason a run died belongs in it.
+     * `smithers status` diagnosis reads, so the reason a run died belongs in it.
      */
     const writeStatus = (runId: string, status: RunStatus, detail?: string) =>
       Effect.gen(function*() {

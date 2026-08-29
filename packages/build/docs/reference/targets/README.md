@@ -78,7 +78,7 @@ exists for future additions and is unused. See
 
 | Target                             | Kinds | Cacheable | Status                        | Summary                                                               |
 | ---------------------------------- | ----- | --------- | ----------------------------- | --------------------------------------------------------------------- |
-| [PnpmWorkspace](pnpm-workspace.md) | `run` | Never     | Executes                      | Runs the smthrs install flow for a pnpm workspace.                    |
+| [PnpmWorkspace](pnpm-workspace.md) | `run` | Never     | Executes                      | Runs the smithers-build install flow for a pnpm workspace.            |
 | [NewPackage](new-package.md)       | `run` | Never     | Executes                      | Scaffolds one package named with the invocation's `--name` option.    |
 | [Changesets](changesets.md)        | `run` | Never     | Executes                      | Reports Changesets status or applies versioning.                      |
 | [NpmPublish](npm-publish.md)       | `run` | Never     | Executes (dry-run by default) | Publishes a package to an npm registry.                               |
@@ -114,7 +114,7 @@ These modules are not targets. They are documented elsewhere.
 | `Input`           | [Inputs](../../concepts/inputs.md)                                                                      |
 | `Exec`            | [Actions and boundaries](../../concepts/actions-and-boundaries.md)                                      |
 | `Workspace`       | [Workspace reference](../config.md)                                                                     |
-| `PackageDefaults` | [Default targets](../../extending/default-targets.md)                                                   |
+| `PackageDefaults` | [Default targets](../../extending/default-rules.md)                                                     |
 
 ## Conventions shared by every tool-running target
 

@@ -21,11 +21,11 @@ const layer = CombinedArtifacts.layer({
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/artifacts` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/artifacts/src/index.ts) | any |
+| `@smthrs/artifacts` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/artifacts/src/index.ts) | any |
 
 ## ArtifactStore
 
-[src/ArtifactStore.ts](https://github.com/smithersai/flows/blob/main/packages/artifacts/src/ArtifactStore.ts)
+[src/ArtifactStore.ts](https://github.com/smithersai/smithers/blob/main/packages/artifacts/src/ArtifactStore.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -43,7 +43,7 @@ A digest reaches a read straight out of a durable row, so every implementation v
 
 ## ArtifactSweep
 
-[src/ArtifactSweep.ts](https://github.com/smithersai/flows/blob/main/packages/artifacts/src/ArtifactSweep.ts)
+[src/ArtifactSweep.ts](https://github.com/smithersai/smithers/blob/main/packages/artifacts/src/ArtifactSweep.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -58,7 +58,7 @@ The sweep half of [Artifact GC](/artifact-gc), deliberately not part of `Artifac
 
 ## ArtifactStoreMetrics
 
-[src/ArtifactStoreMetrics.ts](https://github.com/smithersai/flows/blob/main/packages/artifacts/src/ArtifactStoreMetrics.ts)
+[src/ArtifactStoreMetrics.ts](https://github.com/smithersai/smithers/blob/main/packages/artifacts/src/ArtifactStoreMetrics.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -69,7 +69,7 @@ The local implementations update them, so a `CombinedArtifacts` stack counts onc
 
 ## RemoteArtifacts
 
-[src/RemoteArtifacts.ts](https://github.com/smithersai/flows/blob/main/packages/artifacts/src/RemoteArtifacts.ts)
+[src/RemoteArtifacts.ts](https://github.com/smithersai/smithers/blob/main/packages/artifacts/src/RemoteArtifacts.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -78,7 +78,7 @@ The local implementations update them, so a `CombinedArtifacts` stack counts onc
 
 ## CombinedArtifacts
 
-[src/CombinedArtifacts.ts](https://github.com/smithersai/flows/blob/main/packages/artifacts/src/CombinedArtifacts.ts)
+[src/CombinedArtifacts.ts](https://github.com/smithersai/smithers/blob/main/packages/artifacts/src/CombinedArtifacts.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |

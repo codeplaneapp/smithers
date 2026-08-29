@@ -2,20 +2,20 @@
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@smthrs/mcp",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.0",
   "license": "MIT",
   "smthrs": {
     "group": "agent"
   },
   "description": "Model Context Protocol client and flow adapter: projects a remote MCP server's tools as ordinary FlowBinding.Source entries",
-  "homepage": "https://github.com/smithersai/flows",
+  "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
-    "url": "https://github.com/smithersai/flows.git",
+    "url": "https://github.com/smithersai/smithers.git",
     "directory": "packages/mcp"
   },
   "bugs": {
-    "url": "https://github.com/smithersai/flows/issues"
+    "url": "https://github.com/smithersai/smithers/issues"
   },
   "tags": [
     "typescript",
@@ -54,6 +54,7 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
+    "tag": "rc",
     "exports": {
       "./package.json": "./package.json",
       ".": {
@@ -80,11 +81,11 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@smthrs/capability": "0.1.0",
-    "@smthrs/core": "0.1.0",
-    "@smthrs/harness": "0.1.0",
-    "@smthrs/kernel": "0.1.0",
-    "@smthrs/registry": "0.1.0",
+    "@smthrs/capability": "1.0.0-rc.0",
+    "@smthrs/core": "1.0.0-rc.0",
+    "@smthrs/harness": "1.0.0-rc.0",
+    "@smthrs/kernel": "1.0.0-rc.0",
+    "@smthrs/registry": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {

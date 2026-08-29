@@ -1,20 +1,20 @@
 ---
-description: "How the Flows caching model compares with TurboRepo, Nx, and Bazel, and what a build system does not keep."
+description: "How the Smithers caching model compares with TurboRepo, Nx, and Bazel, and what a build system does not keep."
 ---
 
 # Comparisons
 
-Flows takes its caching model from build systems and its execution model from durable workflow engines. This page compares the implementation with [TurboRepo](https://turborepo.com), [Nx](https://nx.dev), and [Bazel](https://bazel.build), three build systems that also key work and cache the results. For the workflow-engine side (Temporal, Restate, Inngest), see the prior-art table in [External](/external).
+Smithers takes its caching model from build systems and its execution model from durable workflow engines. This page compares the implementation with [TurboRepo](https://turborepo.com), [Nx](https://nx.dev), and [Bazel](https://bazel.build), three build systems that also key work and cache the results. For the workflow-engine side (Temporal, Restate, Inngest), see the prior-art table in [External](/external).
 
 ## The Effect workflow fork
 
-Flows began as a fork of Effect's experimental [`effect/unstable/workflow`](https://github.com/Effect-TS/effect/tree/main/packages/effect/src/unstable/workflow) module, vendored into `@smthrs/flow` and `@smthrs/engine` at `effect@4.0.0-beta.102`. Workflow, Activity, WorkflowEngine, and WorkflowProxy became Flow, Action, FlowEngine, and FlowProxy; DurableDeferred, DurableClock, and DurableQueue keep their upstream names. The fork exists because Flows changes identity and retry semantics ([design decision D11](/design-decisions)); everywhere else it follows the upstream patterns: services as layers, Schema-typed contracts, the effect repo's module and naming conventions. [`VENDOR.md`](https://github.com/smithersai/flows/blob/main/packages/engine/VENDOR.md) records the fork point and every behavioral difference. The rest of this page covers what the fork adds that upstream does not have: build-system caching discipline over the same durable primitives.
+The Smithers engine began as a fork of Effect's experimental [`effect/unstable/workflow`](https://github.com/Effect-TS/effect/tree/main/packages/effect/src/unstable/workflow) module, vendored into `@smthrs/flow` and `@smthrs/engine` at `effect@4.0.0-beta.102`. Workflow, Activity, WorkflowEngine, and WorkflowProxy became Flow, Action, FlowEngine, and FlowProxy; DurableDeferred, DurableClock, and DurableQueue keep their upstream names. The fork exists because Smithers changes identity and retry semantics ([design decision D11](/design-decisions)); everywhere else it follows the upstream patterns: services as layers, Schema-typed contracts, the effect repo's module and naming conventions. [`VENDOR.md`](https://github.com/smithersai/smithers/blob/main/packages/engine/VENDOR.md) records the fork point and every behavioral difference. The rest of this page covers what the fork adds that upstream does not have: build-system caching discipline over the same durable primitives.
 
 ## At a glance
 
 All four systems run the same loop: key a unit of work by everything it consumes, look the key up in a cache, run only on a miss, store the result under the key. They differ in the unit of work, when the key is computed, what a result contains, and what happens when the process dies mid-run.
 
-| | TurboRepo | Nx | Bazel | Flows |
+| | TurboRepo | Nx | Bazel | Smithers |
 | --- | --- | --- | --- | --- |
 | What it is | monorepo task runner | monorepo task runner and project graph | build system | durable-execution engine |
 | Unit of cached work | a package script run | a target run | an action: a command with declared inputs and outputs | an action: a Schema-typed effect |
@@ -28,29 +28,29 @@ All four systems run the same loop: key a unit of work by everything it consumes
 
 ## The unit of work
 
-TurboRepo and Nx cache a task: one package script or executor target, a whole process. Bazel caches an action: one command with declared input and output files. A Flows action is a typed effect, not a process: `Action.make` declares payload, success, and error schemas, and the cache stores the encoded exit, decodable through them. A build system's result is output files plus a replayed log; a Flows result is a typed value, with file outputs in the content-addressed artifact store (`@smthrs/artifacts`).
+TurboRepo and Nx cache a task: one package script or executor target, a whole process. Bazel caches an action: one command with declared input and output files. A Smithers action is a typed effect, not a process: `Action.make` declares payload, success, and error schemas, and the cache stores the encoded exit, decodable through them. A build system's result is output files plus a replayed log; a Smithers result is a typed value, with file outputs in the content-addressed artifact store (`@smthrs/artifacts`).
 
 ## How the key is computed
 
 TurboRepo and Nx scan at run start: they hash the files a task can read, an environment-variable allowlist, the task configuration, and every upstream task's key. Bazel derives an action key from the exact command line and the digest of every declared input file, kept current through Skyframe.
 
-Flows computes keys with no I/O. `@smthrs/plan` compiles a flow body into a keyed graph whose declared effects carry read and write paths, never digests. The engine combines caller identity, the complete declared cache environment, and the filesystem boundary into one input, serialized as RFC 8785 canonical JSON and hashed with SHA-256 (`@smthrs/canonical`, `@smthrs/keys`, `@smthrs/crypto`). [Data structures](/data-structures) specifies the shapes.
+Smithers computes keys with no I/O. `@smthrs/plan` compiles a flow body into a keyed graph whose declared effects carry read and write paths, never digests. The engine combines caller identity, the complete declared cache environment, and the filesystem boundary into one input, serialized as RFC 8785 canonical JSON and hashed with SHA-256 (`@smthrs/canonical`, `@smthrs/keys`, `@smthrs/crypto`). [Data structures](/data-structures) specifies the shapes.
 
-The fail-closed default is the practical difference. In TurboRepo and Nx an undeclared input is a silent stale-cache bug. In Flows, an action without a complete cache environment gets a key that includes the current execution ID: memoized within the run, never reused across runs. Under-declaring narrows reuse instead of corrupting it.
+The fail-closed default is the practical difference. In TurboRepo and Nx an undeclared input is a silent stale-cache bug. In Smithers, an action without a complete cache environment gets a key that includes the current execution ID: memoized within the run, never reused across runs. Under-declaring narrows reuse instead of corrupting it.
 
 ## Invalidation
 
-Skyframe keeps a reverse-dependency graph: a changed file dirties its consumers, and dirtiness propagates until clean nodes stop it. TurboRepo and Nx keep no graph state and re-hash everything each run. Flows re-keys: a node's key is a function of what it consumes, so an edited declaration changes that key and its dependent cone's, nothing else. No reverse-dependency index, no dirtying pass.
+Skyframe keeps a reverse-dependency graph: a changed file dirties its consumers, and dirtiness propagates until clean nodes stop it. TurboRepo and Nx keep no graph state and re-hash everything each run. Smithers re-keys: a node's key is a function of what it consumes, so an edited declaration changes that key and its dependent cone's, nothing else. No reverse-dependency index, no dirtying pass.
 
 ## Hermeticity
 
-A cache is only as correct as its guarantee that the work read nothing outside its key. Bazel enforces it with OS-level sandboxing, local or remote. TurboRepo and Nx trust the declarations. Flows takes Skyframe's admission gate: a result is reusable across runs only with evidence that execution stayed inside its declared boundary. The shipped `StepBoundary` measures read sets and materializes declared outputs but cannot detect writes outside them, so its evidence is refused and cross-run admission stays closed; production hermetic execution is on the [contributor plan](/contributing), with Bazel's sandbox as the bar.
+A cache is only as correct as its guarantee that the work read nothing outside its key. Bazel enforces it with OS-level sandboxing, local or remote. TurboRepo and Nx trust the declarations. Smithers takes Skyframe's admission gate: a result is reusable across runs only with evidence that execution stayed inside its declared boundary. The shipped `StepBoundary` measures read sets and materializes declared outputs but cannot detect writes outside them, so its evidence is refused and cross-run admission stays closed; production hermetic execution is on the [contributor plan](/contributing), with Bazel's sandbox as the bar.
 
 ## What a build system does not keep
 
 Build systems persist nothing about a run in progress.
 
-**Recovery.** Kill a build and finished units stay cached, but the interrupted unit restarts from zero and the run has no identity to resume. Flows journals every attempt in the same transaction as its state transition, so a restarted process claims the run, replays recorded steps, and continues at the first unrecorded boundary.
+**Recovery.** Kill a build and finished units stay cached, but the interrupted unit restarts from zero and the run has no identity to resume. Smithers journals every attempt in the same transaction as its state transition, so a restarted process claims the run, replays recorded steps, and continues at the first unrecorded boundary.
 
 **Suspension.** `DurableDeferred.await` and `DurableClock.sleep` park a run for hours or days, holding no process, while it waits on an external completion or a human decision. A build task either runs or does not exist.
 
@@ -60,9 +60,9 @@ Build systems persist nothing about a run in progress.
 
 **Time travel.** `@smthrs/time-travel` forks, rewinds, and compensates over recorded history. A build cache has no history to rewind.
 
-## What Flows is not
+## What Smithers is not
 
-Flows is not a build tool: no target discovery, no file watcher, no toolchain model, no terminal UI, no executor fleet. For building a monorepo, use TurboRepo, Nx, or Bazel. Flows is an embeddable engine for programs that need build-system caching discipline over durable, typed, long-running effects.
+Smithers is not a build tool: no target discovery, no file watcher, no toolchain model, no terminal UI, no executor fleet. For building a monorepo, use TurboRepo, Nx, or Bazel. Smithers is an embeddable engine for programs that need build-system caching discipline over durable, typed, long-running effects.
 
 ## Reading next
 

@@ -5,7 +5,7 @@
  *
  * `@effect/platform-node` already ships `FileSystem`, `Path`,
  * `ChildProcessSpawner`, and an Undici-backed `HttpClient` for Node, so this
- * package adds only what `flows` defines on top: one `NodeHost.layer` that
+ * package adds only what Smithers defines on top: one `NodeHost.layer` that
  * composes the complete closed five-tag Host surface — including the Node
  * `Jj` adapter, which lives in `@smthrs/jj`.
  *

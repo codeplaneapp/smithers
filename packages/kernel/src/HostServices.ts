@@ -27,7 +27,7 @@ import * as Path from "./Path.ts"
 /**
  * The CLOSED LIST of platform ports the kernel protects.
  *
- * Everything that touches the outside world enters `flows` through exactly one
+ * Everything that touches the outside world enters Smithers through exactly one
  * of these tags — there is no ambient `node:fs`, no bare `spawn`, no global
  * `Date.now()`. Two things depend on that closure:
  *
@@ -43,11 +43,11 @@ import * as Path from "./Path.ts"
  * `HttpClient`) the error channel stays Effect's own — `PlatformError`, or
  * `HttpClientError` for the network — and permission failures are projected
  * into it by `Permission.toPlatformError` and `HttpClient.toHttpClientError`;
- * where `flows` owns the service (`Jj`) the interface names the kernel's
+ * where Smithers owns the service (`Jj`) the interface names the kernel's
  * failures directly.
  *
  * `Path` is intentionally retained as an explicit pass-through decision.
- * Network access is Effect's own `HttpClient`: there is no `flows` transport
+ * Network access is Effect's own `HttpClient`: there is no Smithers transport
  * port beneath it, because a raw port would be a second way to reach the
  * network whose contract never mentions permission.
  *
@@ -56,7 +56,7 @@ import * as Path from "./Path.ts"
  * or a `Random` carries no host authority to guard, so they are not ours to
  * define. `ChildProcessSpawner` is the same story one layer out: process spawning is
  * `effect/unstable/process`, and the slot holds Effect's tag rather than a
- * `flows` wrapper around it.
+ * Smithers wrapper around it.
  *
  * @category models
  * @since 0.1.0

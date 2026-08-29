@@ -39,4 +39,4 @@ const program = Effect.gen(function*() {
 
 ## A worked suite
 
-`evals/agent/` in this repository is a committed suite built on these modules. It evaluates the flows agent itself — structured-output decoding, correction re-prompts, cell flow calls, the read-only frame cap, frame budgets, and seat resolution — offline against a scripted model, and gates the run on a committed baseline. Run it with `bun evals/agent/run.ts`.
+`evals/agent/` in this repository is a committed suite built on these modules. It evaluates the Smithers agent itself — structured-output decoding, correction re-prompts, cell flow calls, the read-only frame cap, frame budgets, and seat resolution — offline against a scripted model, and gates the run on a committed baseline. Run it with `bun evals/agent/run.ts`.

@@ -1,5 +1,5 @@
 /**
- * Programmatic smthrs CLI modules.
+ * Programmatic smithers-build CLI modules.
  *
  * @since 0.1.0
  */

@@ -2,7 +2,7 @@
  * Read-only forensic projections of a run's journal events.
  *
  * The vault's Forensics concept fixes the CLI surface at exactly two
- * projections: `flows logs` projects journal queries and `flows status`
+ * projections: `smithers logs` projects journal queries and `smithers status`
  * projects the run summary and its gating cause. This module is the rendering
  * half of both — pure functions from the `ControlEvent` deltas that
  * `Control.watch` already serves, to a turn-by-turn transcript, a one-line
@@ -282,9 +282,11 @@ export const renderDiagnosis = (
     lines.push(`${label("Output")}${clip(firstLine(d.finalOutput), 120)}`)
   }
   if (d.parkedApproval !== undefined) {
-    lines.push(`${label("Unblock")}flows approve '${d.parkedApproval}' --scope run && flows run --resume ${runId}`)
+    lines.push(
+      `${label("Unblock")}smithers approve '${d.parkedApproval}' --scope run && smithers run --resume ${runId}`
+    )
   }
-  lines.push(`${label("Next")}flows logs ${runId}    # turn-by-turn transcript`)
+  lines.push(`${label("Next")}smithers logs ${runId}    # turn-by-turn transcript`)
   return lines.join("\n")
 }
 

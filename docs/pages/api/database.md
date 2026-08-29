@@ -19,13 +19,13 @@ The root is the contract, so it bundles for the browser. The SQLite drivers are 
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/database` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/database/src/index.ts) | any |
-| `@smthrs/database/node/NodeDatabase` | [src/node/NodeDatabase.ts](https://github.com/smithersai/flows/blob/main/packages/database/src/node/NodeDatabase.ts) | Node |
-| `@smthrs/database/test/TestDatabase` | [src/test/TestDatabase.ts](https://github.com/smithersai/flows/blob/main/packages/database/src/test/TestDatabase.ts) | Node |
+| `@smthrs/database` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/index.ts) | any |
+| `@smthrs/database/node/NodeDatabase` | [src/node/NodeDatabase.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/node/NodeDatabase.ts) | Node |
+| `@smthrs/database/test/TestDatabase` | [src/test/TestDatabase.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/test/TestDatabase.ts) | Node |
 
 ## DurableWriter
 
-[src/DurableWriter.ts](https://github.com/smithersai/flows/blob/main/packages/database/src/DurableWriter.ts)
+[src/DurableWriter.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/DurableWriter.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -47,7 +47,7 @@ A backend must run write transactions serializably. `packages/database/test/cont
 
 ## DatabaseMetrics
 
-[src/DatabaseMetrics.ts](https://github.com/smithersai/flows/blob/main/packages/database/src/DatabaseMetrics.ts)
+[src/DatabaseMetrics.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/DatabaseMetrics.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -55,7 +55,7 @@ A backend must run write transactions serializably. `packages/database/test/cont
 
 ## Migrations
 
-[src/Migrations.ts](https://github.com/smithersai/flows/blob/main/packages/database/src/Migrations.ts)
+[src/Migrations.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/Migrations.ts)
 
 Every storage package declares its own `MigrationSet`; this module composes them over one table so two packages' `0001_initial` cannot collide.
 
@@ -72,7 +72,7 @@ The shipped offsets are `journal` at `0`, `run-store` at `idBlock`, `step-cache`
 
 ## NodeDatabase
 
-[src/node/NodeDatabase.ts](https://github.com/smithersai/flows/blob/main/packages/database/src/node/NodeDatabase.ts)
+[src/node/NodeDatabase.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/node/NodeDatabase.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -83,7 +83,7 @@ The shipped offsets are `journal` at `0`, `run-store` at `idBlock`, `step-cache`
 
 ## TestDatabase
 
-[src/test/TestDatabase.ts](https://github.com/smithersai/flows/blob/main/packages/database/src/test/TestDatabase.ts)
+[src/test/TestDatabase.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/test/TestDatabase.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |

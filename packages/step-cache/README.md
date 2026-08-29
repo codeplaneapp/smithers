@@ -1,11 +1,11 @@
 # @smthrs/step-cache
 
-The flows step result cache: which sealed action results may be reused.
-Split out of `@smthrs/journal` — see
-[`docs/specs/Concepts/Journal Split.md`](../../../docs/specs/Concepts/Journal%20Split.md).
+The Smithers step result cache: which sealed action results may be reused.
+Split out of `@smthrs/journal`; see
+[journal concepts](../../docs/concepts/journal.md).
 
 `CacheStore` is a keyed memoization of sealed step results, addressed by the
-step key digest of [Step Keys](../../../docs/specs/Concepts/Step%20Keys.md). It is
+step key digest of [step keys](../../docs/concepts/step-keys.md). It is
 deliberately called a _cache_: entries may be evicted, a stale entry is a miss
 rather than a corruption, and admission is gated the same way for normal
 execution, replay, and speculation validation alike.
@@ -56,4 +56,5 @@ const program = Effect.gen(function*() {
 }).pipe(Effect.provide(cache))
 ```
 
-See the [step keys concept](../../../docs/specs/Concepts/Step%20Keys.md).
+See the [step-cache reference](../../docs/reference/step-cache.md) and
+[step keys](../../docs/concepts/step-keys.md).

@@ -30,8 +30,8 @@ This entry point is Node-only by construction: it resolves `node:child_process`.
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/platform-node` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/platform-node/src/index.ts) | Node |
-| `@smthrs/platform-node/NodeHost` | [src/NodeHost.ts](https://github.com/smithersai/flows/blob/main/packages/platform-node/src/NodeHost.ts) | Node |
+| `@smthrs/platform-node` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-node/src/index.ts) | Node |
+| `@smthrs/platform-node/NodeHost` | [src/NodeHost.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-node/src/NodeHost.ts) | Node |
 
 ## Exports
 

@@ -14,9 +14,9 @@
  * publication is skipped by the workflow's own condition, not by this driver.
  *
  * usage:
- *   node scripts/release-rehearsal.mjs --tag v0.1.0 [options]
+ *   node scripts/release-rehearsal.mjs --tag v1.0.0-rc.0 [options]
  *
- *   --tag <v...>        release tag to rehearse (default: v0.1.0)
+ *   --tag <v...>        release tag to rehearse (default: v1.0.0-rc.0)
  *   --workflow <path>   workflow file (default: .github/workflows/release.yml)
  *   --job <id>          job to execute (default: publish)
  *   --publish           rehearse the publishing path; refuses unless
@@ -416,7 +416,7 @@ const runStep = (body, env, log) =>
 
 const parseArguments = (argv) => {
   const options = {
-    tag: "v0.1.0",
+    tag: "v1.0.0-rc.0",
     workflow: ".github/workflows/release.yml",
     job: "publish",
     publish: false,

@@ -142,6 +142,6 @@ The agent itself comes from `@smthrs/agent/Agent`:
 import * as Agent from "@smthrs/agent/Agent"
 ```
 
-Provide `HostLayer`, `SeatLayer`, `Agent.layer`, and `Agent.layerDefaults` alongside the engine layers. `Agent.layer` is the production agent; `Agent.layerDefaults` supplies the two services a run leaves to the host, the QuickJS sandbox and an empty steering source. A test provides a `SeatResolver` layer that answers with a scripted model and needs no API key; see [`11-agent-step.ts`](https://github.com/smithersai/flows/blob/main/examples/src/11-agent-step.ts).
+Provide `HostLayer`, `SeatLayer`, `Agent.layer`, and `Agent.layerDefaults` alongside the engine layers. `Agent.layer` is the production agent; `Agent.layerDefaults` supplies the two services a run leaves to the host, the QuickJS sandbox and an empty steering source. A test provides a `SeatResolver` layer that answers with a scripted model and needs no API key; see [`11-agent-step.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/11-agent-step.ts).
 
 Continue with [Determinism and replay](../concepts/determinism-and-replay.md), [Step keys](../concepts/step-keys.md), and [Failure and retry](../concepts/failure-and-retry.md).

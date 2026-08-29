@@ -1,6 +1,13 @@
 /**
  * Layered testing, conformance, and assertion utilities for flows.
  *
+ * The vitest adapter is deliberately absent from this barrel. `vitest` refuses
+ * to load through `require()` and throws a message about bundlers, so a barrel
+ * that re-exported it would make `require("@smthrs/testing")` fail for every
+ * CommonJS consumer of the assertion helpers. Import it by its own subpath
+ * instead: `import { ... } from "@smthrs/testing/Vitest"`, which is ESM-only
+ * because vitest is.
+ *
  * @since 0.0.0
  */
 
@@ -15,9 +22,6 @@ export * as EngineSubject from "./EngineSubject.ts"
 
 /** @since 0.0.0 @category services */
 export * as ModelLike from "./ModelLike.ts"
-
-/** @since 0.0.0 @category testing */
-export * as Vitest from "./Vitest.ts"
 
 /** @since 0.0.0 @category layers */
 export * as TestLayers from "./TestLayers.ts"

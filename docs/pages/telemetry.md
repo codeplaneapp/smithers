@@ -8,7 +8,7 @@ How an application exports what the stores already measure. The spans and counte
 
 ## One layer
 
-`@smthrs/observability` composes Effect's own OTLP logger, metrics exporter, and tracer (`effect/unstable/observability`) into one layer with the flows service identity as the default resource. It depends on `effect` alone: no OpenTelemetry SDK is involved, and nothing in it resolves a `node:` built-in, so the same entry point bundles for Node and for the browser.
+`@smthrs/observability` composes Effect's own OTLP logger, metrics exporter, and tracer (`effect/unstable/observability`) into one layer with the Smithers service identity as the default resource. It depends on `effect` alone: no OpenTelemetry SDK is involved, and nothing in it resolves a `node:` built-in, so the same entry point bundles for Node and for the browser.
 
 ```typescript
 import * as Otlp from "@smthrs/observability/Otlp"

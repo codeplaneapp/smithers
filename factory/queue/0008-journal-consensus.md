@@ -6,8 +6,8 @@ priority: p1
 
 # Journal consensus: injectable strategy, then fold the stores
 
-Implement `docs/specs/Concepts/Journal Consensus.md` (will's 2026-08-19
-ruling): the journal is the only durable contract, the journal owns the
+Implement the "Journal Consensus" spec (will's 2026-08-19 ruling): the journal
+is the only durable contract, the journal owns the
 consensus rules R1–R6, and consensus is an injectable strategy.
 
 Stage 1 — the consensus seam (this item's landing gate):
@@ -108,8 +108,8 @@ lane as `46965ad8` on top of `a1697a56f` and `c31aa352`. CONTINUE FROM THE
 LANE, do not restart, and do not redo anything listed as closed.
 
 Round 2 was rejected because the R6 transition events broke two packages
-that are NOT in the diff. `docs/specs/Concepts/Journal Consensus.md` (outer
-main `9ecb8aadf`) now carries the normative answer to both under "Stage 1,
+that are NOT in the diff. The "Journal Consensus" spec (spec vault,
+`9ecb8aadf`) now carries the normative answer to both under "Stage 1,
 round 3 — what the composed system taught about R6"; read it first. Fix:
 
 1. BLOCKER — R6 entries carry no `meta`, so they belong to no lineage.

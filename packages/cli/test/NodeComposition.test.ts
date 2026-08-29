@@ -1,6 +1,6 @@
 /**
  * The Node composition root: argument and environment configuration, the
- * durable local stack the `flows` process actually assembles, the output layer
+ * durable local stack the `smithers` process actually assembles, the output layer
  * that transfers a rendered status to the process exit code, and the server
  * binds that must stay confined to loopback.
  */
@@ -101,7 +101,7 @@ describe("NodeControl.config", () => {
     const argv = process.argv
     const previous = process.env.FLOWS_REMOTE
     try {
-      process.argv = [process.execPath, "flows", "--credential=from-argv"]
+      process.argv = [process.execPath, "smithers", "--credential=from-argv"]
       process.env.FLOWS_REMOTE = "https://from-environment.test"
       expect(Effect.runSync(NodeControl.config)).toEqual({
         remote: "https://from-environment.test",

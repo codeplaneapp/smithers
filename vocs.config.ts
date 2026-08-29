@@ -1,9 +1,9 @@
 import { defineConfig } from "vocs/config"
 
 export default defineConfig({
-  title: "Smithers Flows",
+  title: "Smithers",
   description:
-    "Smithers Flows is an Effect-based durable-execution engine: typed flows that replay from a journal, content-addressed action results, capability-checked host access, read-only sync, and time travel over run history.",
+    "Smithers is an Effect-based durable-execution engine: typed flows that replay from a journal, content-addressed action results, capability-checked host access, read-only sync, and time travel over run history.",
   srcDir: "docs",
   outDir: "docs/dist",
   sidebar: [
@@ -63,9 +63,9 @@ export default defineConfig({
     { text: "Code design", link: "/code-design" }
   ],
   topNav: [
-    { text: "GitHub", link: "https://github.com/smithersai/flows" }
+    { text: "GitHub", link: "https://github.com/smithersai/smithers" }
   ],
   socials: [
-    { icon: "github", link: "https://github.com/smithersai/flows" }
+    { icon: "github", link: "https://github.com/smithersai/smithers" }
   ]
 })

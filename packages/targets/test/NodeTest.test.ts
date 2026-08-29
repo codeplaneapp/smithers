@@ -155,7 +155,7 @@ describe("NodeBinary", () => {
 describe("StandardPackage circular guard", () => {
   /**
    * `pnpm run circular` fanned out to a per-package script the target graph did
-   * not know about, so `smthrs ci` was not gate-equivalent to the pnpm scripts
+   * not know about, so `smithers-build ci` was not gate-equivalent to the pnpm scripts
    * it was meant to replace. The macro emits it now.
    */
   it("emits the conventional per-package circular-dependency guard", () => {

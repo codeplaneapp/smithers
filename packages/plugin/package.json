@@ -1,20 +1,20 @@
 {
   "name": "@smthrs/plugin",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.0",
   "license": "MIT",
   "smthrs": {
     "group": "agent"
   },
   "description": "Vite-style typed plugin kernel for flows: hooks, resolution, and config execution",
-  "homepage": "https://github.com/smithersai/flows",
+  "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
-    "url": "https://github.com/smithersai/flows.git",
+    "url": "https://github.com/smithersai/smithers.git",
     "directory": "packages/plugin"
   },
   "bugs": {
-    "url": "https://github.com/smithersai/flows/issues"
+    "url": "https://github.com/smithersai/smithers/issues"
   },
   "tags": [
     "typescript",
@@ -53,6 +53,7 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
+    "tag": "rc",
     "exports": {
       "./package.json": "./package.json",
       ".": {
@@ -79,7 +80,7 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@smthrs/flow": "0.1.0",
+    "@smthrs/flow": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {

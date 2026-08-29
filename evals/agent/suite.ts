@@ -1,5 +1,5 @@
 /**
- * The fixed suite: seventeen scenarios that put the flows agent through the
+ * The fixed suite: seventeen scenarios that put the Smithers agent through the
  * behaviours a host depends on, and the two scorers that grade them.
  *
  * Each scenario is a whole agent run against a scripted provider, so a case is
@@ -38,7 +38,7 @@ import * as Subject from "./subject.ts"
  */
 export const target = CoreFlow.make({
   name: "evals/agent/subject",
-  description: "One run of the flows agent under a scripted provider."
+  description: "One run of the Smithers agent under a scripted provider."
 })
 
 const canonical = (value: unknown): unknown => {

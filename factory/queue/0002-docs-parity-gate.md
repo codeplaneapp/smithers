@@ -6,26 +6,25 @@ priority: p0
 
 # Docs parity gate as a smithers build rule
 
-Implement the parity gate from `docs/specs/Concepts/Colocated Docs.md` as a
-smithers build rule wired into `BUILD.ts`, so package documentation is a declared
-build input and doc drift is a cache miss.
+Implement the parity gate from the "Colocated Docs" spec as a smithers build
+rule wired into `BUILD.ts`, so package documentation is a declared build input
+and doc drift is a cache miss.
 
 - A `DocsParity` rule per package: README.md present and non-trivial, every
   exported symbol carries JSDoc with `@since`/`@category` (the effect repo
   convention; `eslint.jsdoc.js` is the existing lint half).
 - Declare each package's README as an input to its check targets via the
   Bazel-style `file()` declarations that landed in commit `04b9367`.
-- Prior art to read first: the smithers DDD pack's `checkDocs.ts` and
-  `docsManifest.ts` under `.smithers/lib/ddd/` in the outer repo.
+- Prior art to read first: the Smithers 0.x DDD pack's `checkDocs.ts` and
+  `docsManifest.ts` under `.smithers/lib/ddd/`, which the 1.0 migration removed.
 - Resolve the open question in the Colocated Docs note (which export kinds
   require JSDoc; whether a change may declare "no doc impact") in the note,
   with how it was decided, before merging the rule.
 
 ## Landed
 
-Shipped in the outer repo as `smithers build/rules/src/DocsParity.ts`, exported from
-`smithers build/rules/src/index.ts` and emitted by `StandardPackage` as a fourth
-target beside `lib`, `test`, and `lint`.
+Shipped as `packages/targets/src/DocsParity.ts` and emitted by
+`StandardPackage` as a fourth target beside `lib`, `test`, and `lint`.
 
 - The rule owns README presence and quality only: the file exists, carries a
   level-one title, and holds at least `minimumProseCharacters` (default 120)
@@ -41,7 +40,7 @@ target beside `lib`, `test`, and `lint`.
 - The Colocated Docs note records the resolved surface and how it was decided.
 
 Failing parity at landing time, from the rule's own policy over
-`flows/packages/*`:
+`packages/*`:
 
 - `packages/crypto` — 53 prose characters, below the 120 floor
 - `packages/keys` — 64 prose characters, below the 120 floor

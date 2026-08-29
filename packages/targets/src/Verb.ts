@@ -1,7 +1,7 @@
 /**
  * The CLI verbs a generated pipeline may run across a target graph.
  *
- * A pipeline declaration names verbs, not target kinds: `smthrs test '//...'`
+ * A pipeline declaration names verbs, not target kinds: `smithers-build test '//...'`
  * is one command a CI job runs, the same verb-and-pattern shape Bazel's own CI
  * uses for `bazel test //...`. Before this module a BUILD.ts file named them
  * with bare strings, so the authoring surface was four quoted words whose
@@ -133,7 +133,7 @@ export type Verb = typeof Verb.Type
  * ```ts
  * import { Smithers } from "@smthrs/targets"
  *
- * // Runs `smthrs build '//...'`
+ * // Runs `smithers-build build '//...'`
  * export const verbs = [Smithers.Verb.Build]
  * ```
  *
@@ -185,7 +185,7 @@ export const all: ReadonlyArray<Verb> = [Build, Test, Lint, Docs]
  * ```ts
  * import { Smithers } from "@smthrs/targets"
  *
- * // Runs `smthrs ci '//packages/...'`
+ * // Runs `smithers-build ci '//packages/...'`
  * export const verb = Smithers.Verb.Ci
  * ```
  *

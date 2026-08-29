@@ -27,10 +27,10 @@ The filesystem behind `fs` and the one behind `bash` must be the *same* filesyst
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/platform-browser` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/platform-browser/src/index.ts) | any |
-| `@smthrs/platform-browser/BrowserFileSystem` | [src/BrowserFileSystem.ts](https://github.com/smithersai/flows/blob/main/packages/platform-browser/src/BrowserFileSystem.ts) | any |
-| `@smthrs/platform-browser/BrowserChildProcessSpawner` | [src/BrowserChildProcessSpawner.ts](https://github.com/smithersai/flows/blob/main/packages/platform-browser/src/BrowserChildProcessSpawner.ts) | any |
-| `@smthrs/platform-browser/BrowserServices` | [src/BrowserServices.ts](https://github.com/smithersai/flows/blob/main/packages/platform-browser/src/BrowserServices.ts) | any |
+| `@smthrs/platform-browser` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-browser/src/index.ts) | any |
+| `@smthrs/platform-browser/BrowserFileSystem` | [src/BrowserFileSystem.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-browser/src/BrowserFileSystem.ts) | any |
+| `@smthrs/platform-browser/BrowserChildProcessSpawner` | [src/BrowserChildProcessSpawner.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-browser/src/BrowserChildProcessSpawner.ts) | any |
+| `@smthrs/platform-browser/BrowserServices` | [src/BrowserServices.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-browser/src/BrowserServices.ts) | any |
 
 Every module is browser-bundleable; the root barrel is one of the entry points `scripts/browser-check.mjs` executes.
 

@@ -1,15 +1,15 @@
 /*
  * The remote-cache HTTP service.
  *
- * It implements the protocol the flows client and the smthrs CLI already
+ * It implements the protocol the Smithers client and the smthrs CLI already
  * speak, and adds nothing to it. protocol.js is the protocol, storage.js is
  * the Postgres translation of it, config.js is the environment contract, and
  * this file is only startup.
  *
- * Sources: RemoteCacheStore.ts and RemoteArtifacts.ts in the flows repo, which
+ * Sources: RemoteCacheStore.ts and RemoteArtifacts.ts in this repository, which
  * define the status vocabulary this service mirrors, and infra/worker, which
  * serves the same protocol on Cloudflare. Bazel's HttpCacheClient is the
- * upstream shape; findMissing is the flows addition.
+ * upstream shape; findMissing is the Smithers addition.
  *
  * Written in JavaScript, run by Bun, using Bun's built-in Postgres client so
  * the image has no dependency tree of its own.

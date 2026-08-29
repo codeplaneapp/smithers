@@ -346,7 +346,7 @@ const sessionSources = (
  * One turn on the real agent, streaming every event as a frame.
  *
  * TODO(upstream): this path cannot run inside workerd yet. Three items, all in
- * ~/flows/flows and all listed in TODO.md:
+ * the Smithers packages:
  *
  *  1. `packages/harness/src/QuickJSSandbox.ts:22` imports
  *     `@jitl/quickjs-singlefile-browser-release-sync` and compiles it at

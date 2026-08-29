@@ -6,8 +6,8 @@ priority: p1
 
 # Fold the step cache into the journal
 
-Implement the step-cache row in the fold table from
-`docs/specs/Concepts/Journal Consensus.md`: `flows_step_cache` becomes a
+Implement the step-cache row in the fold table from the "Journal Consensus"
+spec: `flows_step_cache` becomes a
 rebuildable materialization of sealed step-result journal events.
 
 - Keep `@smthrs/step-cache`'s public `CacheStore` API while moving the durable

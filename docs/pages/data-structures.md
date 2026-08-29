@@ -1,10 +1,10 @@
 ---
-description: "Every durable shape in Smithers Flows: where it lives, who writes it, who reads it, and which invariants hold."
+description: "Every durable shape in Smithers: where it lives, who writes it, who reads it, and which invariants hold."
 ---
 
 # Data structures
 
-Everything durable in Smithers Flows is one of a small number of shapes. This page names each shape, says where it lives, who writes it, who reads it, and which invariants hold. Read it before the per-package API pages: those tables list exports, this one explains what the exports move around.
+Everything durable in Smithers is one of a small number of shapes. This page names each shape, says where it lives, who writes it, who reads it, and which invariants hold. Read it before the per-package API pages: those tables list exports, this one explains what the exports move around.
 
 ## Where the shapes live
 

@@ -322,5 +322,5 @@ Then add a page under [the target catalog](../reference/targets/README.md).
 ## Next
 
 - [Writing macros](writing-macros.md)
-- [Default targets](default-targets.md)
+- [Default targets](default-rules.md)
 - [Actions and boundaries](../concepts/actions-and-boundaries.md)

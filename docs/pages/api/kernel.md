@@ -4,7 +4,7 @@ description: "Capability enforcement at the host boundary: grant checks decorate
 
 # @smthrs/kernel
 
-Capability enforcement at the host boundary. The kernel decorates each host service tag in place, as a middleware `Layer` over the very tag the platform adapter provides, checking a capability against a grant store before delegating. There is no second, "protected" tag: where Effect owns the tag (`FileSystem`, `ChildProcessSpawner`) a denied request surfaces as a `PlatformError` whose reason is `PermissionDenied` and whose `cause` carries the structured kernel failure (`Permission.fromPlatformError` reads it back); `HttpClient` is the same story in Effect's network channel, projecting a denial into an `HttpClientError` whose reason is a `TransportError` (`HttpClient.fromHttpClientError` reads it back); where `flows` owns the service (`Jj`) the interface names the kernel's failures directly. The `Capability` and `Permission` namespaces are re-exports from `@smthrs/capability`.
+Capability enforcement at the host boundary. The kernel decorates each host service tag in place, as a middleware `Layer` over the very tag the platform adapter provides, checking a capability against a grant store before delegating. There is no second, "protected" tag: where Effect owns the tag (`FileSystem`, `ChildProcessSpawner`) a denied request surfaces as a `PlatformError` whose reason is `PermissionDenied` and whose `cause` carries the structured kernel failure (`Permission.fromPlatformError` reads it back); `HttpClient` is the same story in Effect's network channel, projecting a denial into an `HttpClientError` whose reason is a `TransportError` (`HttpClient.fromHttpClientError` reads it back); where Smithers owns the service (`Jj`) the interface names the kernel's failures directly. The `Capability` and `Permission` namespaces are re-exports from `@smthrs/capability`.
 
 ```ts
 import { Capability, Permission } from "@smthrs/kernel"
@@ -19,12 +19,12 @@ const rule = new Permission.Rule({
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/kernel` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/index.ts) | any |
-| `@smthrs/kernel/test/TestGrantStore` | [src/test/TestGrantStore.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/test/TestGrantStore.ts) | any |
+| `@smthrs/kernel` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/index.ts) | any |
+| `@smthrs/kernel/test/TestGrantStore` | [src/test/TestGrantStore.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/test/TestGrantStore.ts) | any |
 
 ## Capability
 
-Re-exported from [`@smthrs/capability`](capability.md), source [packages/capability/src/Capability.ts](https://github.com/smithersai/flows/blob/main/packages/capability/src/Capability.ts).
+Re-exported from [`@smthrs/capability`](capability.md), source [packages/capability/src/Capability.ts](https://github.com/smithersai/smithers/blob/main/packages/capability/src/Capability.ts).
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -43,7 +43,7 @@ Re-exported from [`@smthrs/capability`](capability.md), source [packages/capabil
 
 ## CapabilitySet
 
-[src/CapabilitySet.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/CapabilitySet.ts)
+[src/CapabilitySet.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/CapabilitySet.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -56,7 +56,7 @@ Re-exported from [`@smthrs/capability`](capability.md), source [packages/capabil
 
 ## Permission
 
-Re-exported from [`@smthrs/capability`](capability.md), source [packages/capability/src/Permission.ts](https://github.com/smithersai/flows/blob/main/packages/capability/src/Permission.ts).
+Re-exported from [`@smthrs/capability`](capability.md), source [packages/capability/src/Permission.ts](https://github.com/smithersai/smithers/blob/main/packages/capability/src/Permission.ts).
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -76,13 +76,13 @@ Re-exported from [`@smthrs/capability`](capability.md), source [packages/capabil
 
 | Export | Source | Notes |
 | --- | --- | --- |
-| `GrantStore.GrantStore`, `Service`, `make`, `layer`, `makeNoop`, `layerNoop` | [src/GrantStore.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/GrantStore.ts) | `makeNoop` is an explicit allow-all seam |
+| `GrantStore.GrantStore`, `Service`, `make`, `layer`, `makeNoop`, `layerNoop` | [src/GrantStore.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/GrantStore.ts) | `makeNoop` is an explicit allow-all seam |
 | `GrantStore.PendingRequest`, `Resolution`, `EnvelopeGrantOptions`, `MakeOptions`, `Persist` | same | request and resolution shapes |
 | `GrantStore.isValidGrantPattern`, `isValidEnvelopePattern` | same | pattern admission |
-| `GrantEvent.OnceGrant`, `RunGrant`, `RememberedGrant`, `DeniedGrant`, `EnvelopeGrant` | [src/GrantEvent.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/GrantEvent.ts) | durable decision schemas |
+| `GrantEvent.OnceGrant`, `RunGrant`, `RememberedGrant`, `DeniedGrant`, `EnvelopeGrant` | [src/GrantEvent.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/GrantEvent.ts) | durable decision schemas |
 | `GrantEvent.GrantEventSchema`, `GrantEvent`, `GrantTier`, `GrantScope`, `decode`, `encode` | same | |
-| `JournalGrantStore.make`, `layer`, `JournalGrantStoreOptions` | [src/JournalGrantStore.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/JournalGrantStore.ts) | persists decisions as `flows.kernel.grant.*` journal events |
-| `TestGrantStore.layerAllow`, `layerDeny`, `layerScripted` | [src/test/TestGrantStore.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/test/TestGrantStore.ts) | scripted behavior for suites |
+| `JournalGrantStore.make`, `layer`, `JournalGrantStoreOptions` | [src/JournalGrantStore.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/JournalGrantStore.ts) | persists decisions as `flows.kernel.grant.*` journal events |
+| `TestGrantStore.layerAllow`, `layerDeny`, `layerScripted` | [src/test/TestGrantStore.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/test/TestGrantStore.ts) | scripted behavior for suites |
 
 ## Decorated host services
 
@@ -90,16 +90,16 @@ Each module below exports a `layer` that decorates the matching service tag in p
 
 | Module | Source | Guarded actions |
 | --- | --- | --- |
-| `FileSystem` | [src/FileSystem.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/FileSystem.ts) | `fs:read`, `fs:write`; also exports `canonicalResource` |
-| `ChildProcessSpawner` | [src/ChildProcessSpawner.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/ChildProcessSpawner.ts) | `proc:spawn`, whose resource is `CommandLine.render(command)`; re-exports Effect's tag, `make`, plus `makeNoop`/`layerNoop` stubs |
-| `Jj` | [src/Jj.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/Jj.ts) | the six `jj:*` actions; re-exports `@smthrs/jj`'s tag, `make`, `makeNoop`, and `layerNoop` |
-| `HttpClient` | [src/HttpClient.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/HttpClient.ts) | `net:get`, `net:post`, and `model:call` under `withModelCall`; re-exports Effect's tag and `make`, plus `toHttpClientError`/`fromHttpClientError`, the `ModelCall` reference, and `makeNoop`/`layerNoop` stubs. Redirects are followed *above* the guard with Effect's `followRedirects`, so every hop is rechecked |
-| `Path` | [src/Path.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/Path.ts) | none; pure path manipulation is not checked |
-| `Workspace` | [src/Workspace.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/Workspace.ts) | supplies the root used to resolve path capabilities |
+| `FileSystem` | [src/FileSystem.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/FileSystem.ts) | `fs:read`, `fs:write`; also exports `canonicalResource` |
+| `ChildProcessSpawner` | [src/ChildProcessSpawner.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/ChildProcessSpawner.ts) | `proc:spawn`, whose resource is `CommandLine.render(command)`; re-exports Effect's tag, `make`, plus `makeNoop`/`layerNoop` stubs |
+| `Jj` | [src/Jj.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/Jj.ts) | the six `jj:*` actions; re-exports `@smthrs/jj`'s tag, `make`, `makeNoop`, and `layerNoop` |
+| `HttpClient` | [src/HttpClient.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/HttpClient.ts) | `net:get`, `net:post`, and `model:call` under `withModelCall`; re-exports Effect's tag and `make`, plus `toHttpClientError`/`fromHttpClientError`, the `ModelCall` reference, and `makeNoop`/`layerNoop` stubs. Redirects are followed *above* the guard with Effect's `followRedirects`, so every hop is rechecked |
+| `Path` | [src/Path.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/Path.ts) | none; pure path manipulation is not checked |
+| `Workspace` | [src/Workspace.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/Workspace.ts) | supplies the root used to resolve path capabilities |
 
 ## HostServices
 
-[src/HostServices.ts](https://github.com/smithersai/flows/blob/main/packages/kernel/src/HostServices.ts)
+[src/HostServices.ts](https://github.com/smithersai/smithers/blob/main/packages/kernel/src/HostServices.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |

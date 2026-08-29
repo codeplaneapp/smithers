@@ -1,24 +1,31 @@
 #!/usr/bin/env node
-// Simulates what an END USER's npm resolves when installing our published
+// Simulates what an END USER's npm resolves when installing the published
 // packages, and fails on dependency duplication the pnpm monorepo hides.
 //
-// Why: pnpm dedupes across the workspace and our root overrides pin one copy,
-// so check-single-effect-version.mjs stays green even when npm users get 20
-// nested copies of effect (0.31.0 shipped ~660MB of duplicated effect because
-// our exact pins conflicted with the @effect/* ecosystem's caret ranges).
+// Why: pnpm dedupes across the workspace and one exact pin in the workspace
+// settles every internal edge, so check-single-effect-version.mjs stays green
+// even when an npm consumer gets twenty nested copies of effect. Smithers
+// 0.31.0 shipped roughly 660 MB of duplicated effect for exactly that reason:
+// the exact pins conflicted with the @effect/* ecosystem's caret ranges. Effect
+// is also the one dependency that must be a singleton for correctness, because
+// schema internals are not interoperable between instances.
 //
-// How: pack every publishable workspace package's manifest into a minimal
-// tarball (rewriting workspace:* to real versions), point a throwaway fixture
-// at all of them with file: deps, run `npm install --package-lock-only` so
-// npm's own arborist builds the tree, then assert on the resolved lockfile.
+// How: read the release manifest scripts/pack-release.mjs publishes from, pack
+// each of those manifests into a minimal tarball (rewriting workspace: ranges
+// to real versions), point a throwaway fixture at all of them with file: deps,
+// run `npm install --package-lock-only` so npm's own arborist builds the tree,
+// then assert on the resolved lockfile.
+//
+// The install reads registry metadata, so this gate needs the network.
 //
 // Usage: node scripts/check-npm-dedupe.mjs [--max-packages <n>] [--keep-tmp]
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readWorkspaceManifests } from "./pack-release.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
@@ -34,43 +41,29 @@ const npmInstallArgs = [
   "--loglevel=error",
 ];
 
-// Deps that must resolve to exactly one copy for npm users. effect duplicated
-// 20x and pglite 3x in the 0.31.0 install tree.
-const SINGLETONS = ["effect", "@electric-sql/pglite"];
-// Optional peers that must NOT appear in a default install at all.
-const OPTIONAL_ABSENT = [
-  "playwright",
-  "koffi",
-  "@daytonaio/sdk",
-  "@aws-sdk/client-ecs",
-  "@aws-sdk/client-codebuild",
-  "@aws-sdk/client-s3",
-  "@aws-sdk/client-cloudwatch-logs",
-  "@google-cloud/run",
-  "@google-cloud/storage",
-  "@vercel/sandbox",
-  "@cloudflare/sandbox",
-  "microsandbox",
-];
+// The one dependency that must resolve to exactly one copy. Two Effect
+// instances do not share schema internals, so a duplicate is a runtime defect,
+// not a size problem (rc-contract.md section 9, Effect row).
+const SINGLETONS = ["effect"];
 
-function workspacePackages() {
-  const packages = [];
-  for (const entry of ["packages", "apps", "e2e", ".smithers"]) {
-    const entryPath = join(root, entry);
-    const dirs = existsSync(join(entryPath, "package.json"))
-      ? [entryPath]
-      : existsSync(entryPath)
-        ? readdirSync(entryPath).map((name) => join(entryPath, name))
-        : [];
-    for (const dir of dirs) {
-      const packagePath = join(dir, "package.json");
-      if (!existsSync(packagePath)) continue;
-      const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
-      if (!pkg.name || pkg.private) continue;
-      packages.push({ name: pkg.name, version: pkg.version, manifest: pkg });
+// Optional peers must not appear in a default install at all. The list is
+// derived from the release set itself rather than restated, so a package that
+// adds or drops an optional peer needs no edit here.
+const optionalPeersOf = (manifests) => {
+  const names = new Set();
+  for (const manifest of manifests) {
+    for (const [name, meta] of Object.entries(manifest.peerDependenciesMeta ?? {})) {
+      if (meta?.optional === true) names.add(name);
     }
   }
-  return packages.sort((a, b) => a.name.localeCompare(b.name));
+  return [...names].sort();
+};
+
+// The published set, read from the same manifest the release packs.
+function workspacePackages() {
+  return [...readWorkspaceManifests().values()]
+    .map((manifest) => ({ name: manifest.name, version: manifest.version, manifest }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function rewriteWorkspaceProtocol(manifest, versionByName) {
@@ -124,6 +117,7 @@ function copiesOf(lockPackages, name) {
 
 function main() {
   const packages = workspacePackages();
+  const OPTIONAL_ABSENT = optionalPeersOf(packages.map((pkg) => pkg.manifest));
   const versionByName = new Map(packages.map((pkg) => [pkg.name, pkg.version]));
   const tmp = mkdtempSync(join(tmpdir(), "smithers-npm-dedupe-"));
   try {

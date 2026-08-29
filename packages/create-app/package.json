@@ -7,15 +7,16 @@
   "smthrs": {
     "group": "tooling"
   },
+  "private": true,
   "description": "Declare a Smithers app in one PACKAGE.ts: file-routed flows, panes, and Cloudflare targets",
-  "homepage": "https://github.com/smithersai/flows",
+  "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
-    "url": "https://github.com/smithersai/flows.git",
+    "url": "https://github.com/smithersai/smithers.git",
     "directory": "packages/create-app"
   },
   "bugs": {
-    "url": "https://github.com/smithersai/flows/issues"
+    "url": "https://github.com/smithersai/smithers/issues"
   },
   "tags": [
     "typescript",
@@ -34,7 +35,7 @@
   },
   "sideEffects": [],
   "bin": {
-    "smthrs-routes": "./bin/routes.mjs"
+    "smithers-routes": "./bin/routes.mjs"
   },
   "exports": {
     "./package.json": "./package.json",
@@ -128,16 +129,16 @@
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.108",
-    "@smthrs/agent": "0.1.0",
-    "@smthrs/engine": "0.1.0",
-    "@smthrs/flow": "0.1.0",
-    "@smthrs/harness": "0.1.0",
-    "@smthrs/model": "0.1.0",
-    "@smthrs/registry": "0.1.0",
-    "@smthrs/targets": "0.1.0",
-    "@smthrs/testing": "0.1.0",
+    "@smthrs/agent": "1.0.0-rc.0",
+    "@smthrs/engine": "1.0.0-rc.0",
+    "@smthrs/flow": "1.0.0-rc.0",
+    "@smthrs/harness": "1.0.0-rc.0",
+    "@smthrs/model": "1.0.0-rc.0",
+    "@smthrs/registry": "1.0.0-rc.0",
+    "@smthrs/targets": "workspace:*",
+    "@smthrs/testing": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108",
-    "@smthrs/capability": "0.1.0"
+    "@smthrs/capability": "1.0.0-rc.0"
   },
   "peerDependencies": {
     "react": "^19.0.0",

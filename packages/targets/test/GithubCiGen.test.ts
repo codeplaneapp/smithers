@@ -106,9 +106,9 @@ jobs:
       - name: Initialize colocated jj repository
         run: jj git init --colocate
       - name: Workspace targets
-        run: pnpm exec smthrs ci '//packages/...' --jobs 2
+        run: pnpm exec smithers-build ci '//packages/...' --jobs 2
       - name: Script gates
-        run: pnpm exec smthrs test '//scripts/...'
+        run: pnpm exec smithers-build test '//scripts/...'
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -121,7 +121,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Browser bundle guard
-        run: pnpm exec smthrs test '//scripts:browserContract'
+        run: pnpm exec smithers-build test '//scripts:browserContract'
   rust:
     runs-on: ubuntu-latest
     continue-on-error: false
@@ -138,7 +138,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Cargo gates
-        run: pnpm exec smthrs lint '//crates/flows-jj'
+        run: pnpm exec smithers-build lint '//crates/flows-jj'
 `
 
 const attrsOf = (input: unknown): never => GithubCiGen(input as typeof goldenAttrs)[Target.TargetTypeId].attrs as never
@@ -234,7 +234,7 @@ describe("render", () => {
     for (const job of parseWorkflow(golden).jobs) {
       const commands = job.steps.map((step) => step.run ?? step.uses ?? "")
       expect(commands.findIndex((command) => command.startsWith("pnpm install --frozen-lockfile")))
-        .toBeLessThan(commands.findIndex((command) => command.startsWith("pnpm exec smthrs")))
+        .toBeLessThan(commands.findIndex((command) => command.startsWith("pnpm exec smithers-build")))
     }
   })
 
@@ -249,7 +249,7 @@ describe("render", () => {
       packageManager: { name: "bun", version: ">=1.3.0", executable: "bun", runtime: bunRuntime }
     }))
     expect(rendered).toContain("      - run: bun install --frozen-lockfile --ignore-scripts\n")
-    expect(rendered).toContain("        run: bun x smthrs test '//scripts/...'\n")
+    expect(rendered).toContain("        run: bun x smithers-build test '//scripts/...'\n")
     // Bun installs itself; a second manager-setup action would install the same
     // program twice.
     expect(rendered).not.toContain("pnpm/action-setup")
@@ -273,14 +273,14 @@ describe("render", () => {
   })
 
   it("counts the aggregate verb as every verb it plans", () => {
-    // `smthrs ci` over //packages/... satisfies a docs gate on the same pattern,
+    // `smithers-build ci` over //packages/... satisfies a docs gate on the same pattern,
     // because the aggregate command plans the docs verb too.
     expect(
       render(attrsOf({
         ...goldenAttrs,
         gates: [{ name: "documentation parity", verb: Verb.Docs, pattern: "//packages/...", job: "test" }]
       }))
-    ).toContain("pnpm exec smthrs ci '//packages/...'")
+    ).toContain("pnpm exec smithers-build ci '//packages/...'")
     // A wider pattern is a different claim and does not satisfy a narrower gate.
     expect(() =>
       render(attrsOf({
@@ -515,9 +515,9 @@ describe("render", () => {
           steps: [{ verb: Verb.Test, pattern }]
         }]
       }))
-      expect(rendered).toContain(`      - run: pnpm exec smthrs test '${pattern}'\n`)
+      expect(rendered).toContain(`      - run: pnpm exec smithers-build test '${pattern}'\n`)
       expect(parseWorkflow(rendered).jobs[0]!.steps.map((step) => step.run))
-        .toContain(`pnpm exec smthrs test '${pattern}'`)
+        .toContain(`pnpm exec smithers-build test '${pattern}'`)
     }
   })
 
@@ -556,7 +556,7 @@ describe("render", () => {
           steps: [{ verb, pattern: "//..." }]
         }]
       }))
-      for (const [, emittedVerb] of rendered.matchAll(/pnpm exec smthrs ([\w-]+) /g)) emitted.add(emittedVerb!)
+      for (const [, emittedVerb] of rendered.matchAll(/pnpm exec smithers-build ([\w-]+) /g)) emitted.add(emittedVerb!)
     }
     expect([...emitted].filter((verb) => !commands.has(verb))).toEqual([])
   })

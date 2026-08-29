@@ -8,9 +8,9 @@ before choosing one.
 | --------------- | -------------------------------------------------- | ------------------------------------------------------------------------------ |
 | Stores          | The success value of one executed target           | Keyed step results, plus the files a declared `TreeArtifact` boundary produced |
 | Keyed by        | The planner content key                            | The engine step key                                                            |
-| Local tier      | JSON files under `<cacheDirectory>/cache`          | The flows local step cache and artifact store                                  |
+| Local tier      | JSON files under `<cacheDirectory>/cache`          | The Smithers local step cache and artifact store                               |
 | Remote tier     | HTTP `/ac`, read-through                           | HTTP `/ac` and `/cas`                                                          |
-| Wired by        | `packages/build-cli/src/Cache.ts`, when configured | Not composed by the smthrs CLI today                                           |
+| Wired by        | `packages/build-cli/src/Cache.ts`, when configured | Not composed by the smithers-build CLI today                                   |
 | Configured with | Root `RemoteCache`; `SMITHERS_CACHE_URL` overrides | `RemoteCacheStore` and `RemoteArtifacts` layer options                         |
 
 ## The CLI result cache remote tier
@@ -30,14 +30,14 @@ It may name another environment variable, but the bearer-token value must only
 arrive through that variable; never put it in `BUILD.ts`. Every tool the CLI
 spawns gets an environment with `SMITHERS_CACHE_URL` and the declared token
 variable removed, so a target's own commands never see the credential. The
-`smthrs` process itself clears the two default names from its own environment
+`smithers-build` process itself clears the two default names from its own environment
 before it loads any `BUILD.ts` file. It does not delete any other variable from
 the environment it was given, because the programmatic API runs inside a
 caller's process and must not corrupt it.
 
 ```sh
 export SMITHERS_CACHE_TOKEN='<token>'
-smthrs ci //...
+smithers-build ci //...
 ```
 
 `SMITHERS_CACHE_URL` is an optional process override and has precedence over
@@ -69,7 +69,7 @@ bearer token under `cacheTokenEnv`, which defaults to `SMITHERS_CACHE_TOKEN`.
 
 ## The engine step cache services
 
-The flows engine has its own two-store split: `RemoteCacheStore` for keyed step
+The Smithers engine has its own two-store split: `RemoteCacheStore` for keyed step
 entries and `RemoteArtifacts` for content-addressed blobs. Both speak one HTTP
 protocol.
 
@@ -118,7 +118,7 @@ members is `200` rather than `409`.
 The endpoint and its bearer token arrive as layer construction options. They are
 capabilities, so they never enter a step key or the journal.
 
-**The smthrs CLI does not compose these engine layers.** Its target result
+**The smithers-build CLI does not compose these engine layers.** Its target result
 cache uses the same `/ac` service directly. `packages/build-cli/src/Executor.ts` builds its
 runtime from the install layer, `ExecLive`, the catalog action layers, and an
 in-memory flow engine. Using remote engine artifacts still means composing

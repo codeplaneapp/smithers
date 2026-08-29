@@ -48,7 +48,7 @@ export const { lib, check, test, lint, fmt, docs } = Smithers.StandardPackage({
 ```
 
 `cwd` is the workspace-relative directory every emitted tool runs in. The macro's
-defaults follow the flows layout: sources at `src/**/*.ts`, tests at
+defaults follow the Smithers layout: sources at `src/**/*.ts`, tests at
 `test/**/*.test.ts`, `tsc -p tsconfig.json`, Vitest with the package
 `vitest.config.ts`, and ESLint with the package `eslint.config.js` plus the root
 `eslint.jsdoc.js`.
@@ -80,7 +80,7 @@ appears anywhere. See [Dependencies](../concepts/dependencies.md).
 ## 4. List targets
 
 ```sh
-smthrs query //...
+smithers-build query //...
 ```
 
 The result lists each discovered target with its target and the verbs it
@@ -104,7 +104,7 @@ for JSON.
 ## 5. Inspect the graph
 
 ```sh
-smthrs graph //packages/app:lib
+smithers-build graph //packages/app:lib
 ```
 
 ```
@@ -117,7 +117,7 @@ smthrs graph //packages/app:lib
 ## 6. Print a plan without running it
 
 ```sh
-smthrs build //... --plan
+smithers-build build //... --plan
 ```
 
 The plan lists targets in dependency-first order with the expanded declared
@@ -126,9 +126,9 @@ inputs, the four key-material fields, and the sha256 content key. Nothing runs.
 ## 7. Execute
 
 ```sh
-smthrs build //...
-smthrs test //packages/greeter:test
-smthrs lint //packages/...
+smithers-build build //...
+smithers-build test //packages/greeter:test
+smithers-build lint //packages/...
 ```
 
 Each verb selects the targets whose target declares that kind, plans their
@@ -147,13 +147,13 @@ Run it again and the cacheable targets report `hit`.
 merged graph once:
 
 ```sh
-smthrs ci //...
+smithers-build ci //...
 ```
 
 ## 8. Install dependencies
 
 ```sh
-smthrs install --workspace .
+smithers-build install --workspace .
 ```
 
 This runs the `Install` flow under the declared package manager's layer:

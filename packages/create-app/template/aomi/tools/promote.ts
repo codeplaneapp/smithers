@@ -6,11 +6,11 @@
  * follow and the file template to fill in. `flows/write-flow` takes the three
  * files that come back and writes them through a {@link FlowStore}.
  *
- * Both halves are upstream work in progress. `packages/harness` is to ship the
- * `CellHistory` service and `packages/agent` + `packages/std` the two bindings,
- * with the filesystem `FlowStore` upstream and the Durable Object one here
- * (TODO.md, the `~/flows/flows` section). This module is the app-local stand-in
- * with the same shapes, so deleting it later is a change of import path.
+ * Both halves are work in progress in the Smithers packages. `packages/harness`
+ * is to ship the `CellHistory` service and `packages/agent` + `packages/std` the
+ * two bindings, with the filesystem `FlowStore` in the workspace and the Durable
+ * Object one here. This module is the app-local stand-in with the same shapes, so
+ * deleting it later is a change of import path.
  */
 import * as Flow from "@smthrs/core/Flow"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"

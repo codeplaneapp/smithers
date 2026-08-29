@@ -8,10 +8,10 @@ evaluates `deps()`, and `graph` renders the dependency graph.
 Pass a label or a pattern.
 
 ```sh
-smthrs query //...
-smthrs query //packages/...
-smthrs query //packages/flow:lib
-smthrs query :lib
+smithers-build query //...
+smithers-build query //packages/...
+smithers-build query //packages/flow:lib
+smithers-build query :lib
 ```
 
 The result carries the query string and one entry per target with its label, its
@@ -32,8 +32,8 @@ An exact label selects one target, so listing a package prints its default
 target, not everything it exports:
 
 ```sh
-smthrs query //packages/flow      # the default target only
-smthrs query //packages/flow/...  # every target in the subtree
+smithers-build query //packages/flow      # the default target only
+smithers-build query //packages/flow/...  # every target in the subtree
 ```
 
 See [Labels](../concepts/labels.md).
@@ -43,7 +43,7 @@ See [Labels](../concepts/labels.md).
 `deps(label)` reports the transitive dependency closure of one target.
 
 ```sh
-smthrs query 'deps(//packages/engine:lib)'
+smithers-build query 'deps(//packages/engine:lib)'
 ```
 
 ```
@@ -73,7 +73,7 @@ expression so the shell does not interpret the parentheses.
 pattern matches, regardless of its kinds.
 
 ```sh
-smthrs graph //packages/engine:lib
+smithers-build graph //packages/engine:lib
 ```
 
 ```
@@ -90,7 +90,7 @@ without looping.
 `--mermaid` renders a Mermaid `flowchart LR` instead:
 
 ```sh
-smthrs graph //packages/... --mermaid
+smithers-build graph //packages/... --mermaid
 ```
 
 ```
@@ -129,7 +129,7 @@ Both verbs return structured data. The CLI prints TOON by default and accepts
 piping into `jq`:
 
 ```sh
-smthrs query //... --json | jq -r '.targets[].label'
+smithers-build query //... --json | jq -r '.targets[].label'
 ```
 
 ## Next

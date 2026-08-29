@@ -94,7 +94,7 @@ export const packageDefaults = PackageDefaults({
 })
 ```
 
-See [Default targets](../../extending/default-targets.md).
+See [Default targets](../../extending/default-rules.md).
 
 ## Status
 

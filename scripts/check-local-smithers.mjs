@@ -2,22 +2,21 @@
 // Guard: this repo's own scripts must execute the Smithers *working tree*,
 // never an installed copy.
 //
-// `bunx smthrs` downloads and runs the published npm tarball.
-// Inside this checkout it usually re-execs back into the working tree via the
-// published bin's delegation, but that is a fallback, not a guarantee: it needs
-// an installed `node_modules`, so a fresh worktree or a slimmed checkout
-// silently runs last release's build instead of the code under edit. Internal
-// scripts therefore name the source entry (`apps/cli/src/index.js`) directly,
-// or resolve it through `lib/resolve-smithers-cli.mjs`.
+// `bunx smthrs` downloads and runs a published npm tarball. Inside this
+// checkout it may re-exec back into the working tree through the published
+// bin's delegation, but that is a fallback, not a guarantee: it needs an
+// installed `node_modules`, so a fresh worktree or a slimmed checkout silently
+// runs a release build instead of the code under edit. Internal scripts
+// therefore name the source entry (SOURCE_ENTRY below) directly, or resolve it
+// through a plugin's `lib/resolve-smithers-cli.mjs`.
 //
-// User-facing prose still says `bunx smthrs`: that is the right
-// command for someone who has no checkout, and this repo's code is full of it
-// legitimately — agent prompts in the shipped workflow pack, docs assertions,
-// marketing SVGs, eval fixtures. So the scan only looks at positions that
-// actually spawn a process: `package.json` scripts, shell scripts, plugin
-// server/monitor configs, and JS/TS lines that carry a shell-execution call.
-// The few execution sites that must keep the published fallback are allowlisted
-// below with a reason.
+// User-facing prose still says `bunx smthrs`: that is the right command for
+// someone who has no checkout, and this repo's text is full of it legitimately
+// in agent prompts, docs assertions, and fixtures. So the scan only looks at
+// positions that actually spawn a process: `package.json` scripts, shell
+// scripts, plugin server and monitor configs, and JS/TS lines carrying a
+// shell-execution call. The few execution sites that must keep the published
+// fallback are allowlisted below with a reason.
 //
 // Run: node scripts/check-local-smithers.mjs
 
@@ -27,24 +26,49 @@ import { fileURLToPath } from "node:url";
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Directories (and single files) whose code executes the Smithers CLI. */
+/**
+ * The working-tree entry an internal script must name.
+ *
+ * The user-facing binary is `packages/cli/bin/smithers.mjs` (rc-contract.md
+ * section 3.4). The shim runs `dist/esm/bin.js` when a published install has
+ * one and `src/bin.ts` otherwise, so naming it here covers both. Both plugin
+ * `lib/resolve-smithers-cli.mjs` copies change with it.
+ */
+export const SOURCE_ENTRY = "packages/cli/bin/smithers.mjs";
+
+/**
+ * Directories (and single files) whose code executes the Smithers CLI.
+ *
+ * `flows/` holds this repository's own 1.0 flows; the 0.x `.smithers/*`
+ * directories it replaces are gone. A path that does not exist yet is skipped,
+ * so the roster can name a directory a later phase creates.
+ */
 export const SCANNED_PATHS = [
   "package.json",
   "scripts",
+  "ci",
+  "lint",
   "claude-plugin",
   "codex-plugin",
-  ".smithers/scripts",
-  ".smithers/lib",
-  ".smithers/workflows",
-  "e2e",
+  "flows",
   "evals",
+  "examples",
 ];
 
 /** Extensions worth scanning; everything else in those trees is prose or data. */
 export const SCANNED_EXTENSIONS = [".mjs", ".js", ".cjs", ".ts", ".tsx", ".json", ".sh", ".toml"];
 
 /** Never descend into these directory names. */
-const SKIPPED_DIRECTORIES = new Set(["node_modules", "dist", "ui-dist", "_inventory", ".git", ".jj"]);
+const SKIPPED_DIRECTORIES = new Set([
+  "node_modules",
+  "dist",
+  "coverage",
+  "target",
+  // The Smithers 0.x tree later phases port from; its scripts are not run.
+  "legacy",
+  ".git",
+  ".jj",
+]);
 
 /**
  * Files that may keep a published-CLI invocation, each with the reason it is
@@ -55,13 +79,18 @@ export const ALLOWLIST = {
   "codex-plugin/lib/resolve-smithers-cli.mjs": "defines the published fallback used when there is no source checkout",
   "codex-plugin/.mcp.json":
     "Codex does not substitute ${PLUGIN_ROOT} in .mcp.json, so the launcher path cannot be named here; the published bin delegates to the checkout instead",
-  "scripts/normalize-bunx.ts": "rewrites documentation snippets *into* the published command; that is its whole job",
-  "scripts/normalize-bunx.test.ts": "asserts the documentation normalizer's output",
   "scripts/check-local-smithers.mjs": "this guard names the patterns it forbids",
   "scripts/check-local-smithers.test.mjs": "exercises the guard with sample violations",
 };
 
-/** Resolver copies that must stay byte-identical across the plugin trees. */
+/**
+ * Resolver copies that must stay byte-identical across the plugin trees.
+ *
+ * Each plugin ships standalone (Codex sparse-checkouts a plugin directory
+ * alone), so the resolver is copied verbatim rather than imported. The Phase 4
+ * plugin lane restores both copies; until then neither exists, and a tree with
+ * none of them is not a drift failure.
+ */
 export const MIRRORED_RESOLVERS = [
   "claude-plugin/lib/resolve-smithers-cli.mjs",
   "codex-plugin/lib/resolve-smithers-cli.mjs",
@@ -209,6 +238,9 @@ export function checkMirroredResolvers(root = REPO_ROOT) {
       return null;
     }
   });
+  // No copy at all means the plugin lane has not landed yet, which the ledger
+  // records as Phase 4 work. One copy present and another absent is drift.
+  if (contents.every((content) => content === null)) return [];
   const problems = [];
   for (let index = 0; index < MIRRORED_RESOLVERS.length; index++) {
     if (contents[index] === null) problems.push(`${MIRRORED_RESOLVERS[index]} is missing`);
@@ -256,8 +288,8 @@ if (invokedDirectly) {
   if (violations.length) {
     console.error(
       "\nInternal scripts must execute the working tree, not the published package.\n" +
-        "  • shell/npm scripts: `bun apps/cli/src/index.js <cmd>`\n" +
-        "  • plugin code: `resolveSmithersCli()` from lib/resolve-smithers-cli.mjs\n" +
+        `  - shell and npm scripts: run ${SOURCE_ENTRY}\n` +
+        "  - plugin code: `resolveSmithersCli()` from lib/resolve-smithers-cli.mjs\n" +
         "If a file genuinely needs the published fallback, add it to ALLOWLIST in " +
         "scripts/check-local-smithers.mjs with the reason.",
     );

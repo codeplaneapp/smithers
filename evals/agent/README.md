@@ -1,4 +1,4 @@
-# The flows agent eval suite
+# The Smithers agent eval suite
 
 An offline, deterministic evaluation of **our** agent: the loop in
 `@smthrs/agent`, reached through its public API. It replaces the removed
@@ -81,9 +81,8 @@ The `repl-` cases gate the realm's own promises — a binding survives a frame, 
 print reaches the next turn, a completion is decided by a call the cell just
 made, and the loop's discipline is armed the same way. They keep their names
 from the wave that measured the realm against the surface it replaced; that
-surface is gone (`docs/specs/Concepts/Repl Realm.md`), and the names are left
-alone so the committed baseline stays the record of what the agent used to
-do.
+surface is gone, and the names are left alone so the committed baseline stays
+the record of what the agent used to do.
 
 Each case reduces its run to one `Observation`:
 

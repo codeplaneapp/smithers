@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// `smthrs-routes`: regenerate routes.gen.ts and routes.ui.gen.ts at an app
+// `smithers-routes`: regenerate routes.gen.ts and routes.ui.gen.ts at an app
 // root. `--check` writes nothing and exits 1 on drift, which is the form
-// `smthrs '//:routes'` runs.
+// `smithers-build '//:routes'` runs.
 //
 // Runs under Node's built-in type stripping: every module it reaches is
 // erasable syntax only.
@@ -23,7 +23,7 @@ const flag = (name, fallback) => {
 
 if (argv.includes("--help") || argv.includes("-h")) {
   console.log(
-    "usage: smthrs-routes [--check] [--root <dir>] [--app <dir>] [--flows <dir>] [--tools <dir>]\n\n" +
+    "usage: smithers-routes [--check] [--root <dir>] [--app <dir>] [--flows <dir>] [--tools <dir>]\n\n" +
       "  --check  report drift instead of writing; exit 1 when a file is stale"
   )
   process.exit(0)

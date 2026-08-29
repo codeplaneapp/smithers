@@ -34,7 +34,25 @@ describe("vitest coverage isolation conformance", () => {
       return false
     }
   }
-  const packages = readdirSync(packagesDir).filter((name) => isFile(join(packagesDir, name, "package.json")))
+  // One carve-out, named rather than derived: the two Smithers 0.x UI kits.
+  // `@smthrs/ui` and `@smthrs/ui-styleguide` survived the 1.0 Phase 1 deletion
+  // unchanged because the imported product UI imports them
+  // (docs/migration/disposition-ledger.md rows `packages/ui` and
+  // `packages/ui-styleguide`, disposition `keep`). They still carry 0.x
+  // tooling: `bun test tests`, tsup declarations, no vitest config, no
+  // `publishConfig.exports`. Both are private and unpublished at rc.0
+  // (rc-contract.md section 3.2), so no publishable surface escapes the gate
+  // while they sit here. The Phase 4 UI port retargets them onto this baseline
+  // and deletes this list; `pnpm run check:legacy-absent` and the Phase 7
+  // checklist are what keep that from being forgotten.
+  //
+  // This is a smaller universe, not a smaller assertion: every other package
+  // under `packages/` is still derived, so a new config-less package is still
+  // visible to every assertion below.
+  const zeroXUiKits = new Set(["ui", "ui-styleguide"])
+  const packages = readdirSync(packagesDir)
+    .filter((name) => isFile(join(packagesDir, name, "package.json")))
+    .filter((name) => !zeroXUiKits.has(name))
   const configs = packages.map((name) => {
     const path = join(packagesDir, name, "vitest.config.ts")
     return {
@@ -57,6 +75,13 @@ describe("vitest coverage isolation conformance", () => {
     expect(source, `${path} is missing`).not.toBe("")
   })
 
+  // A second named carve-out, and only from the export-shape cell below. The
+  // unscoped `smthrs` package is a migration notice whose single module throws
+  // on import (rc-contract.md sections 3.3 and 3.5 pin its export map to `.`,
+  // with no wildcard). It still ships a vitest config, `scripts.test`, and the
+  // 100% coverage gate, so it is inside every other assertion in this suite.
+  const noticeOnlyPackages = new Set(["smthrs-deprecation"])
+
   it.each(packages.map((name) => ({ name })))(
     "$name retains Effect-style source exports and declares built publication exports",
     ({ name }) => {
@@ -67,6 +92,15 @@ describe("vitest coverage isolation conformance", () => {
         }
       }
       expect(manifest.exports?.["."]).toBe("./src/index.ts")
+      if (noticeOnlyPackages.has(name)) {
+        expect(manifest.exports?.["./*"]).toBeUndefined()
+        expect(manifest.publishConfig?.exports?.["."]).toEqual({
+          types: "./dist/esm/index.d.ts",
+          import: "./dist/esm/index.js",
+          require: "./dist/cjs/index.js"
+        })
+        return
+      }
       expect(manifest.exports?.["./*"]).toBe("./src/*.ts")
       for (const subpath of [".", "./*"] as const) {
         const target = manifest.publishConfig?.exports?.[subpath]
@@ -265,7 +299,7 @@ describe("vitest coverage isolation conformance", () => {
     // packages and runs under the root `pnpm test` fan-out.
     // Widened a second time, deliberately (2026-08-15, smithers build absorption):
     // `packages/build/infra` is the hosted cache Cloudflare Worker that ships
-    // inside the `smthrs` package. It is private and unpublished, and it is a
+    // inside the `smithers-build` package. It is private and unpublished, and it is a
     // workspace member only so its own vitest suite and `tsc --noEmit` run under
     // the root fan-out instead of being dead code. It is NESTED under
     // `packages/build`, so the `packages/` universe derivation above — which
@@ -348,12 +382,30 @@ describe("vitest coverage isolation conformance", () => {
     // `test:jsdoc` is the root-level contract for the repository's custom
     // JSDoc rule harness; pinning it here keeps that non-workspace gate from
     // appearing or disappearing without conformance review.
+    //
+    // Widened twice by the 1.0 migration, deliberately. Every other retained
+    // 0.x gate became a `//scripts/...` target instead of a root script
+    // (rc-contract.md section 9, exception 3); these two cannot:
+    //
+    // `check:legacy-absent` fails while `legacy/` exists, which it does from
+    // the Phase 2 import until the last Phase 4 port lands. A target under
+    // `//scripts/...` would make the required CI step red for every lane for
+    // the length of the migration, so the Phase 7 gate stays a root script
+    // that a person and the Phase 7 checklist invoke by name.
+    //
+    // `check:npm-dedupe` resolves the release set with npm's own arborist and
+    // therefore needs registry metadata, which no target in this graph is
+    // allowed to require. It also currently fails on a pre-existing Effect
+    // duplication that Phase 3's version rewrite fixes
+    // (docs/migration/phase2-baseline.md).
     const root = JSON.parse(readFileSync(join(packagesDir, "..", "package.json"), "utf8")) as {
       readonly scripts?: Record<string, string>
     }
     expect(root.scripts).toEqual({
       browser: "node scripts/browser-check.mjs",
       check: "pnpm --recursive --if-present run check",
+      "check:legacy-absent": "node scripts/check-legacy-absent.mjs",
+      "check:npm-dedupe": "node scripts/check-npm-dedupe.mjs",
       circular: "pnpm --recursive --if-present run circular",
       "deploy:dry": "pnpm --filter smithers-server run deploy:dry",
       dev: "pnpm --filter smithers-ui run start",
@@ -373,19 +425,19 @@ describe("vitest coverage isolation conformance", () => {
     // The gates used to be `pnpm run check`, `pnpm run lint`, `pnpm run
     // circular`, `pnpm run browser`, and `pnpm test` — five recursive scripts
     // named as raw strings in BUILD.ts. They are targets now, so what is pinned
-    // is the verb-and-pattern invocation that plans them: `smthrs ci` over the
+    // is the verb-and-pattern invocation that plans them: `smithers-build ci` over the
     // package graph covers lib, check, test, lint, fmt, docs, and circular for
     // every package, and the browser contract is its own labelled target.
     const ci = readFileSync(join(packagesDir, "..", ".github", "workflows", "ci.yml"), "utf8")
     expect(ci).toMatch(/^\s*- uses: pnpm\/action-setup@v6$/m)
     expect(ci).toMatch(/^\s*- run: pnpm install --frozen-lockfile --ignore-scripts$/m)
-    expect(ci).toMatch(/^\s*run: pnpm exec smthrs ci '\/\/packages\/\.\.\.'/m)
-    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/scripts\/\.\.\.'$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build ci '\/\/packages\/\.\.\.'/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/scripts\/\.\.\.'$/m)
     // Browser support is a hard requirement met through layers; the browser
     // contract target is the only thing that proves it, so CI has to run it
     // (REVIEW.md blocker 7).
-    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/scripts:browserContract'$/m)
-    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/packages\/\.\.\.'$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/scripts:browserContract'$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/packages\/\.\.\.'$/m)
     expect(ci).toMatch(/tool: jj-cli@\d+\.\d+\.\d+/)
     expect(ci).toMatch(/^\s*run: jj git init --colocate$/m)
   })
@@ -400,7 +452,7 @@ describe("vitest coverage isolation conformance", () => {
     const commands = [...ci.matchAll(/^\s*(?:- )?run: (?!\|)(.+)$/gm)].map((match) => match[1]!)
     expect(commands.length).toBeGreaterThan(0)
     const derived = [
-      /^pnpm exec smthrs (?:build|test|lint|docs|ci) '\/\/[^']*'( --jobs \d+)?$/,
+      /^pnpm exec smithers-build (?:build|test|lint|docs|ci) '\/\/[^']*'( --jobs \d+)?$/,
       /^pnpm install --frozen-lockfile --ignore-scripts$/,
       /^rustup toolchain install$/,
       /^jj git init --colocate$/

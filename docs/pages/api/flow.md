@@ -37,11 +37,11 @@ const layer = Layer.mergeAll(
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/flow` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/flow/src/index.ts) | any |
+| `@smthrs/flow` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/flow/src/index.ts) | any |
 
 ## Flow
 
-[src/Flow](https://github.com/smithersai/flows/tree/main/packages/flow/src/Flow)
+[src/Flow](https://github.com/smithersai/smithers/tree/main/packages/flow/src/Flow)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -65,7 +65,7 @@ const layer = Layer.mergeAll(
 
 ## Action
 
-[src/Action/](https://github.com/smithersai/flows/tree/main/packages/flow/src/Action)
+[src/Action/](https://github.com/smithersai/smithers/tree/main/packages/flow/src/Action)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -88,15 +88,15 @@ const layer = Layer.mergeAll(
 
 | Export | Source | Notes |
 | --- | --- | --- |
-| `DurableDeferred.make`, `into`, `raceAll`, `done`, `succeed`, `fail`, `failCause` | [src/DurableDeferred.ts](https://github.com/smithersai/flows/blob/main/packages/flow/src/DurableDeferred.ts) | await suspends the flow until a first exit is stored |
+| `DurableDeferred.make`, `into`, `raceAll`, `done`, `succeed`, `fail`, `failCause` | [src/DurableDeferred.ts](https://github.com/smithersai/smithers/blob/main/packages/flow/src/DurableDeferred.ts) | await suspends the flow until a first exit is stored |
 | `DurableDeferred.Token`, `TokenParsed`, `TokenTypeId`, `token`, `tokenFromExecutionId`, `tokenFromPayload` | same | addressable completion tokens |
 | `DurableDeferred.DurableDeferred`, `Any`, `AnyWithProps` | same | |
-| `DurableClock.make`, `sleep`, `DurableClock` | [src/DurableClock.ts](https://github.com/smithersai/flows/blob/main/packages/flow/src/DurableClock.ts) | absolute deadlines that re-arm on restart |
-| `DurableQueue.make`, `process`, `worker`, `makeWorker`, `DurableQueue`, `TypeId` | [src/DurableQueue.ts](https://github.com/smithersai/flows/blob/main/packages/flow/src/DurableQueue.ts) | persisted queue plus a concurrency-limited worker layer |
+| `DurableClock.make`, `sleep`, `DurableClock` | [src/DurableClock.ts](https://github.com/smithersai/smithers/blob/main/packages/flow/src/DurableClock.ts) | absolute deadlines that re-arm on restart |
+| `DurableQueue.make`, `process`, `worker`, `makeWorker`, `DurableQueue`, `TypeId` | [src/DurableQueue.ts](https://github.com/smithersai/smithers/blob/main/packages/flow/src/DurableQueue.ts) | persisted queue plus a concurrency-limited worker layer |
 
 ## RetryPolicy
 
-[src/RetryPolicy.ts](https://github.com/smithersai/flows/blob/main/packages/flow/src/RetryPolicy.ts)
+[src/RetryPolicy.ts](https://github.com/smithersai/smithers/blob/main/packages/flow/src/RetryPolicy.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -111,7 +111,7 @@ const layer = Layer.mergeAll(
 
 ## StepIdentity
 
-[src/Action/StepIdentity.ts](https://github.com/smithersai/flows/blob/main/packages/flow/src/Action/StepIdentity.ts)
+[src/Action/StepIdentity.ts](https://github.com/smithersai/smithers/blob/main/packages/flow/src/Action/StepIdentity.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -121,7 +121,7 @@ const layer = Layer.mergeAll(
 
 ## FlowRuntime
 
-[src/FlowRuntime](https://github.com/smithersai/flows/tree/main/packages/flow/src/FlowRuntime)
+[src/FlowRuntime](https://github.com/smithersai/smithers/tree/main/packages/flow/src/FlowRuntime)
 
 The execution contract the authoring APIs are written against. This package declares it and depends on nothing that implements it, so the dependency runs `@smthrs/flow` ← `@smthrs/engine` only.
 

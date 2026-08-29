@@ -13,7 +13,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { Flow } from "../../packages/flow/src/index.ts"
 import { Node } from "../../packages/plan/src/index.ts"
-import { AgentTask, FLOWS_ROOT, REPO_ROOT, REPORTS_DIR, runFlow, type TaskResult } from "./harness.ts"
+import { AgentTask, REPO_ROOT, REPORTS_DIR, runFlow, type TaskResult } from "./harness.ts"
 
 const MODEL = "claude-fable-5"
 const TIMEOUT_MS = 60 * 60_000
@@ -28,7 +28,7 @@ const reportPath = path.join(REPORTS_DIR, "BAZEL-PARITY-REVIEW.md")
 const promptFor = (pkg: string): string =>
   [
     "You are a senior reviewer comparing our TypeScript incremental-evaluation engine to Bazel Skyframe.",
-    `Read our package ${FLOWS_ROOT}/packages/${pkg} (src/ especially, tests where they document intent)`,
+    `Read our package ${REPO_ROOT}/packages/${pkg} (src/ especially, tests where they document intent)`,
     `and the Skyframe sources in ${SKYFRAME} (read-only prior art; NEVER modify anything under reference/).`,
     "Hunt for real bugs and design gaps in our package relative to Skyframe's invariants:",
     "node dirtying and change pruning, version handling (graph/evaluation versions), error bubbling and transitive error propagation, cycle detection, dependency bookkeeping and invalidation, partial re-evaluation, interruption handling, memoization and reuse correctness.",
@@ -73,7 +73,7 @@ const sections: Array<string> = [
   "# Bazel Skyframe parity review",
   "",
   `Generated ${new Date().toISOString()} by five parallel ${MODEL} agents`,
-  `run through the flows library itself (factory/flows/bazel-review.ts).`,
+  `run through the Smithers library itself (factory/flows/bazel-review.ts).`,
   ""
 ]
 for (const pkg of PACKAGES) {

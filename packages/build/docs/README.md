@@ -24,16 +24,16 @@ wired is marked as such on the page that covers it.
 
 ## Workspace
 
-| Page                                                    | Description                                                                                                         |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| [Structure](workspace/structure.md)                     | Discovery, `BUILD.ts` placement, package boundaries, default-target synthesis.                                      |
-| [Writing BUILD files](workspace/writing-build-files.md) | Targets as named exports, target calls, import edges, macros.                                                       |
-| [Configuration](workspace/configuration.md)             | The `Workspace` declaration, `cacheDirectory`, `gitignored`, `--cache-dir`.                                         |
-| [Running targets](workspace/running-targets.md)         | `install`, target verbs including `run` and `docs`, `ci`, and what actually executes.                               |
-| [Querying](workspace/querying.md)                       | `query`, `deps()`, and `graph`.                                                                                     |
-| [Caching](workspace/caching.md)                         | Content keys, the result cache, and what re-keys a target.                                                          |
-| [Remote caching](workspace/remote-caching.md)           | The HTTP read-through cache, the hosted and self-hosted `/ac` and `/cas` services, and the current engine boundary. |
-| [Flows repo adoption](workspace/flows-repo-adoption.md) | What the flows monorepo runs through smithers build today, the shadow CI lane, and the promotion criteria.          |
+| Page                                                       | Description                                                                                                         |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| [Structure](workspace/structure.md)                        | Discovery, `BUILD.ts` placement, package boundaries, default-target synthesis.                                      |
+| [Writing BUILD files](workspace/writing-build-files.md)    | Targets as named exports, target calls, import edges, macros.                                                       |
+| [Configuration](workspace/configuration.md)                | The `Workspace` declaration, `cacheDirectory`, `gitignored`, `--cache-dir`.                                         |
+| [Running targets](workspace/running-targets.md)            | `install`, target verbs including `run` and `docs`, `ci`, and what actually executes.                               |
+| [Querying](workspace/querying.md)                          | `query`, `deps()`, and `graph`.                                                                                     |
+| [Caching](workspace/caching.md)                            | Content keys, the result cache, and what re-keys a target.                                                          |
+| [Remote caching](workspace/remote-caching.md)              | The HTTP read-through cache, the hosted and self-hosted `/ac` and `/cas` services, and the current engine boundary. |
+| [Smithers repo adoption](workspace/flows-repo-adoption.md) | What the Smithers monorepo runs through smithers build today, the shadow CI lane, and the promotion criteria.       |
 
 ## Concepts
 
@@ -52,7 +52,7 @@ wired is marked as such on the page that covers it.
 | ----------------------------------------------- | ---------------------------------------------------------------------------------- |
 | [Writing targets](extending/writing-targets.md) | `Target.make`: the attrs schema, the plan-time implementation, and typed failures. |
 | [Writing macros](extending/writing-macros.md)   | `StandardPackage` as the worked example.                                           |
-| [Default targets](extending/default-targets.md) | `PackageDefaults`, `directories`, `marker`, `unless`, and `macro`.                 |
+| [Default targets](extending/default-rules.md)   | `PackageDefaults`, `directories`, `marker`, `unless`, and `macro`.                 |
 
 ## Reference
 

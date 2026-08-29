@@ -58,7 +58,7 @@ const lintPatterns = (sources: ReadonlyArray<Input.Declared>): ReadonlyArray<str
  * Key material contains source and flat-config digests, dependency keys,
  * warning policy, and fix mode. The target remains non-cacheable in either
  * mode until the external ESLint toolchain is complete key material. The target
- * follows ESLint flat-config prior art and the flows repo's current package
+ * follows ESLint flat-config prior art and this repository's current package
  * lint scripts. Executing the plan requires {@link Exec.ExecLive}.
  *
  * @category targets

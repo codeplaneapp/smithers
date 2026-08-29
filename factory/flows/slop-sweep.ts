@@ -13,7 +13,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { Flow } from "../../packages/flow/src/index.ts"
 import { Node } from "../../packages/plan/src/index.ts"
-import { AgentTask, chunk, FLOWS_ROOT, listPackages, REPORTS_DIR, runFlow, type TaskResult } from "./harness.ts"
+import { AgentTask, chunk, listPackages, REPO_ROOT, REPORTS_DIR, runFlow, type TaskResult } from "./harness.ts"
 
 const WAVE_SIZE = 8
 const MODEL = "sonnet"
@@ -24,7 +24,7 @@ const progressPath = `${reportPath}.partial`
 
 const promptFor = (pkg: string): string =>
   [
-    `You are doing a mechanical JSDoc tagging sweep in the pnpm workspace ${FLOWS_ROOT}.`,
+    `You are doing a mechanical JSDoc tagging sweep in the pnpm workspace ${REPO_ROOT}.`,
     `Work ONLY inside packages/${pkg}/src.`,
     "For every exported declaration (functions, consts, classes, interfaces, type aliases, schemas, data structures) whose JSDoc block does not already contain @humanreviewed, add a line `* @slop` inside the JSDoc block, after any existing @category/@since tags.",
     "If an exported declaration has no JSDoc block, create a minimal block directly above it containing only the @slop tag.",
@@ -44,7 +44,7 @@ const writeReport = (done: number) => {
     "",
     "| Package | Exit | Log |",
     "| --- | --- | --- |",
-    ...results.map((r) => `| ${r.id} | ${r.exitCode} | ${path.relative(FLOWS_ROOT, r.logPath)} |`),
+    ...results.map((r) => `| ${r.id} | ${r.exitCode} | ${path.relative(REPO_ROOT, r.logPath)} |`),
     "",
     "Verification: `grep -rn \"@slop\" packages/*/src | wc -l`.",
     ""
@@ -69,12 +69,12 @@ for (let index = 0; index < waves.length; index++) {
             AgentTask.call({
               id: pkg,
               prompt: promptFor(pkg),
-              cwd: FLOWS_ROOT,
+              cwd: REPO_ROOT,
               model: MODEL,
               timeoutMs: TIMEOUT_MS,
               logDir,
               completionMarker: "DONE",
-              allowedPaths: [path.join(FLOWS_ROOT, "packages", pkg, "src")]
+              allowedPaths: [path.join(REPO_ROOT, "packages", pkg, "src")]
             })
           ])
         )
@@ -95,7 +95,7 @@ for (let index = 0; index < waves.length; index++) {
 }
 
 const slopCount = execSync("grep -rn \"@slop\" packages/*/src 2>/dev/null | wc -l", {
-  cwd: FLOWS_ROOT
+  cwd: REPO_ROOT
 })
   .toString()
   .trim()

@@ -107,7 +107,7 @@ describe("Forensics.renderDiagnosis", () => {
     const card = Forensics.renderDiagnosis({ runId: "run-1", flowId: "fix" }, d)
     expect(card).toContain("Verdict   failed — TransportError: gone")
     expect(card).toContain("run-1 · fix")
-    expect(card).toContain("Next      flows logs run-1")
+    expect(card).toContain("Next      smithers logs run-1")
   })
 
   it("calls out a completed run that never attempted an edit", () => {
@@ -128,7 +128,7 @@ describe("Forensics.renderDiagnosis", () => {
     ])
     const card = Forensics.renderDiagnosis({ runId: "run-1" }, d)
     expect(card).toContain("waiting-approval — asks: Q")
-    expect(card).toContain(`Unblock   flows approve '{"k":1}' --scope run && flows run --resume run-1`)
+    expect(card).toContain(`Unblock   smithers approve '{"k":1}' --scope run && smithers run --resume run-1`)
   })
 
   it("lists the top refusals with counts, largest first", () => {

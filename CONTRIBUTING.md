@@ -35,7 +35,7 @@ The cost is that one edit lands in several places. If you change:
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `pnpm-workspace.yaml` package membership    | `packages/flows/test/vitestCoverageIsolation.test.ts` (the coverage-universe policy pin); lockfile inputs are derived automatically                                            |
 | root `package.json` scripts                 | `packages/flows/test/vitestCoverageIsolation.test.ts` (the aggregator roster)                                                                                                  |
-| root `BUILD.ts` CI jobs, steps, or triggers | the generated `.github/workflows/ci.yml` (`pnpm exec smthrs build '//:ci'` with `mode: "write"`), and `packages/flows/test/vitestCoverageIsolation.test.ts` (source-text pins) |
+| root `BUILD.ts` CI jobs, steps, or triggers | the generated `.github/workflows/ci.yml` (`pnpm exec smithers-build build '//:ci'` with `mode: "write"`), and `packages/flows/test/vitestCoverageIsolation.test.ts` (source-text pins) |
 | `.github/workflows/release.yml`             | the same suite, plus `scripts/release-rehearsal.test.mjs`                                                                                                                      |
 
 Miss one and CI reports a generated file as a hand edit, which is exactly
@@ -47,7 +47,7 @@ The root `BUILD.ts` intentionally contains declarations only, with its
 explanatory prose kept here. Nothing in that file is a command. Jobs declare
 the toolchain a runner provides and the targets they invoke; `GithubCiGen`
 derives checkout, installation, tool setup, and every
-`pnpm exec smthrs <verb> <pattern>` argv. A gate must therefore become a target
+`pnpm exec smithers-build <verb> <pattern>` argv. A gate must therefore become a target
 in the package that owns it before CI can invoke it, matching Bazel's rule that
 a BUILD file has no free-form command surface.
 

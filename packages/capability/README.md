@@ -1,6 +1,6 @@
 # @smthrs/capability
 
-Capability values and permission failures — the leaf vocabulary of the `flows`
+Capability values and permission failures — the leaf vocabulary of the Smithers
 permission kernel.
 
 This package holds **only** the words, never the enforcement. `@smthrs/kernel`

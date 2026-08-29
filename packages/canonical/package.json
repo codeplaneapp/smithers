@@ -1,16 +1,16 @@
 {
   "name": "@smthrs/canonical",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.0",
   "license": "MIT",
   "smthrs": {
     "group": "engine"
   },
   "description": "Effect wrapper for RFC 8785 JSON canonicalization",
-  "homepage": "https://github.com/smithersai/flows",
+  "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
-    "url": "https://github.com/smithersai/flows.git",
+    "url": "https://github.com/smithersai/smithers.git",
     "directory": "packages/canonical"
   },
   "engines": {
@@ -31,6 +31,7 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
+    "tag": "rc",
     "exports": {
       "./package.json": "./package.json",
       ".": {

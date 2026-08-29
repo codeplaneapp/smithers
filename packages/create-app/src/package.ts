@@ -4,7 +4,7 @@
  * `CreateApp` turns one declaration into the app manifest plus the four
  * targets an app needs — regenerate the route tables, serve, build, deploy.
  * Every target is an ordinary `@smthrs/targets` rule, so an app runs on the
- * `smthrs` CLI without a new target kind.
+ * `smithers-build` CLI without a new target kind.
  *
  * Only `PACKAGE.ts` imports this module. The browser and Worker bundles import
  * `@smthrs/create-app/app`, which pulls in no build rules.
@@ -103,10 +103,10 @@ export const CreateApp = (options: CreateAppOptions): AppTargets => {
   const sources = S.glob([`${dirs.app}/**`, `${dirs.flows}/**`, `${dirs.tools}/**`, "worker/**", "src/**"])
   const wrangler = S.file(`//${cloudflare.config}`)
 
-  // The generator is the package's own `smthrs-routes` bin, resolved from the
+  // The generator is the package's own `smithers-routes` bin, resolved from the
   // app's node_modules, so an app never names a path inside this package.
   const routes = S.Generate({
-    bin: S.NodeModule.Bin("@smthrs/create-app", "smthrs-routes"),
+    bin: S.NodeModule.Bin("@smthrs/create-app", "smithers-routes"),
     data: [routed, S.file("//PACKAGE.ts")],
     changes: ["routes.gen.ts", "routes.ui.gen.ts"]
   })

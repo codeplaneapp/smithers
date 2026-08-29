@@ -1,309 +1,197 @@
 # Smithers
 
-**Agent workflows you can watch live, rewind, fork, and replay.**
+**Durable agent workflows that survive the process running them.**
 
-[![npm](https://img.shields.io/npm/v/smthrs?color=2563eb&label=npm)](https://www.npmjs.com/package/smthrs)
 [![CI](https://github.com/smithersai/smithers/actions/workflows/ci.yml/badge.svg)](https://github.com/smithersai/smithers/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-2563eb)](#license)
 [![Docs](https://img.shields.io/badge/docs-smithers.sh-2563eb)](https://smithers.sh)
-[![Awesome Smithers](https://img.shields.io/badge/awesome-smithers-2563eb)](https://github.com/smithersai/awesome-smithers)
 
-Tell your coding agent to do real, multi-step work, then Smithers runs it for minutes or
-days: watch every step live, gate the risky ones behind human approvals, and rewind,
-fork, or replay any run. The same workflow runs across Claude Code, Codex, Pi, AI SDK
-models, and remote sandboxes.
+> **Release candidate.** This tree builds `1.0.0-rc.0`. It is a source migration,
+> not a compatible upgrade from Smithers 0.x. There is no JSX workflow API, no
+> `smthrs/jsx-runtime`, no React reconciler, no `<Workflow>` or `<Task>`
+> components, no `createSmithers`, no `smthrs` facade, and no way to load or
+> resume a 0.x run database. No shim or compatibility layer will be published.
+> Read [Compatibility](#compatibility) before you upgrade.
 
-**Zero config: you never write a workflow by hand.** Describe the outcome in plain
-English and your coding agent builds the workflow for you, from the same primitives the
-built-in pack uses. Prompting *is* the authoring step.
+Smithers is a durable-execution engine built on Effect. A flow is a typed program
+whose side effects are recorded in a journal as they happen. When the process
+running it dies, the next process reads the journal and continues where the
+record stops. Agents, approvals, retries, and time travel are all built on that
+one mechanism.
 
-*Time travel: fork a run from any earlier frame and branch an alternate timeline. Every
-step is a database row, so live watching, rewind, and replay are built in.*
+Effect ships a workflow package of its own. This engine vendors that surface
+rather than depending on it, then diverges by being stricter and more cacheable.
+Upstream derives a run's identity by hashing the flow tag and payload, so
+unrelated runs with equal payloads silently join; here the caller chooses the
+execution ID, derivation is opt-in, and a flow with neither dies with a
+structured defect. Upstream derives a step's identity from its activity's name,
+so renaming an activity corrupts replay; here step keys are content-addressed
+over canonical JSON, and a step is keyed by its content, not its name. Upstream
+retries any interruption ten times by default; here cancellation propagates at
+once, and only an interrupt explicitly marked as infrastructure consumes a retry
+policy.
 
-<img src="./docs/images/why/task-fork.gif" alt="Forking a Smithers run from an earlier frame to branch an alternate timeline" width="1032" />
+## Quick start
 
-## What you get
+You need Node.js 22.19.0 or later. The durable engine runs on Node only.
 
-- ✍️ **Zero-config agent workflows**: you don't hand-write workflow files. Describe what
-  you want in plain English and your coding agent authors the workflow, then runs it.
-- ⏪ **Full observability and time travel**: watch every step live, then rewind, fork, or
-  replay any run from any point.
-- 🛡️ **Durable runs that survive crashes**: every completed step is persisted the moment it
-  finishes, so a run resumes from where it stopped instead of starting over.
-- 🧠 **Memory across runs**: wrap tasks in `<Memory>` and agents recall what earlier runs
-  learned, pick up `remember`/`recall` tools mid-task, and retain a digest afterward.
-  Works locally out of the box; connect [Hindsight](https://smithers.sh/guide/setup/semantic-memory)
-  for semantic recall by meaning.
-- 🔌 **Any agent, any model**: Claude Code, Codex, Cursor, Pi, Antigravity, Hermes, OpenClaw, and more, plus any model
-  through the AI SDK. Swap the harness without rewriting the workflow.
-- 🛠️ **Higher-quality output**: review loops, human approvals, and evals give agents the
-  structure that real work demands.
-- 🧩 **A focused workflow pack**: create workflows, author standalone skills, and run
-  docs-driven development; former starters remain available as examples. Your
-  agent can author new ones.
-
-## When to use Smithers
-
-| You want to… | Smithers? |
-| --- | --- |
-| Get one answer from one prompt | No, call the model directly |
-| Let a coding agent change a repo across many steps | **Yes** |
-| Pause for a human approval, then resume later | **Yes** |
-| Run several agents that review, retry, and converge | **Yes** |
-| Survive crashes and replay, fork, or rewind a run | **Yes** |
-
-Smithers is the durable runtime for *coding-agent* work: when the unit of work is an agent
-editing a real repository over many steps, and you need that work to be inspectable,
-approvable, and recoverable.
-
-## Why not just let my agent orchestrate itself?
-
-Claude Code, Codex, and the other harnesses already fan out subagents, and for work that
-fits in one sitting they are the right tool. The fan-out is ephemeral, though: it lives
-inside one session, one vendor, and one terminal.
-
-| Built-in subagent fan-out | A Smithers run |
-| --- | --- |
-| Dies when the session ends or crashes | Persists and resumes from the last finished step |
-| One vendor per session | Claude, Codex, Gemini, and Pi share one workflow |
-| An approval blocks the terminal | An approval suspends the run durably, overnight if needed |
-| A bad decision means starting over | Rewind, fork, or replay from any step |
-| Orchestration is a prompt you retype | A workflow is a file you version, review, and rerun |
-
-When the work has to survive the session, hand the fan-out to Smithers. Your agent still
-drives everything; the run just stops being disposable. Detailed comparisons:
-[vs. Claude Code Workflows](https://smithers.sh/why/vs-claude-code-workflows),
-[vs. Temporal](https://smithers.sh/why/vs-temporal), and
-[vs. LangGraph](https://smithers.sh/why/vs-langgraph). The longer argument is in
-[the open, durable version of agent workflows](https://smithers.sh/why/durable-open-orchestration).
-
-## Get started
-
-Smithers is driven by your coding agent, **not** a GUI you click. Your agent runs Smithers
-on your behalf: it scaffolds workflows, kicks off runs, watches them, and handles
-approvals.
-
-One command sets everything up. From inside your project:
-
-```bash
-bunx smthrs init
+```sh
+pnpm add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108
 ```
 
-`init` does everything:
+Release candidates publish to the `rc` dist-tag, so the `@rc` suffix is
+required. `latest` still resolves the Smithers 0.x line. Install
+`@smthrs/cli@rc` for the `smithers` command. Pin Effect to exactly
+`4.0.0-rc.108`: a project with two Effect instances is unsupported, because
+schema internals are not interoperable between them.
 
-- **Installs the `smithers` skill** into the coding agents on your machine (Claude Code,
-  Pi, and more), so your agent knows how and when to use Smithers. No `mkdir`, no `curl`.
-- **Scaffolds `.smithers/`** with the focused authoring workflows `create-workflow`,
-  `create-skill`, and `docs-driven-development`; former recipes remain in
-  `examples/init-pack/`.
+The only way to learn a new system is to write programs in it. The first program
+to write is the same as it has always been: print a greeting.
 
-Then just ask:
+```ts
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 
-> *"orchestrate an agent to add rate limiting and keep iterating until the tests pass."*
+// The atom that does the work: schemas and a tag, no code.
+export const Greet = Action.make("examples/Greet", {
+  payload: { name: Schema.String },
+  success: Schema.String
+})
 
-Your agent picks the right workflow, starts the run, and keeps going through retries and
-review loops until the work is actually done.
+// The composite: a pure body that names the atom instead of calling it.
+export const Greeting = Flow.make("examples/Greeting", {
+  payload: { name: Schema.String },
+  success: Schema.String,
+  body: (payload) => Greet.call(payload)
+})
 
-To wire the MCP server into every detected agent too, run `bunx smthrs mcp
-add`. See [Agent Support](https://smithers.sh/agents/overview) for the full per-agent
-matrix, and [`skills/smithers/`](./skills/smithers) for the onboarding skill itself.
+// The implementation is attached separately, where the code can run.
+const GreetingLayer = Layer.mergeAll(
+  Greet.toLayer(({ name }) => Effect.succeed(`Hello, ${name}.`)),
+  Interpreter.layer(Greeting)
+).pipe(
+  Layer.provideMerge(Action.layerImplementations),
+  Layer.provideMerge(FlowEngine.layerMemory),
+  // Step identity is a derived hash, so the engine needs a Crypto even in memory.
+  Layer.provideMerge(NodeCrypto.layer)
+)
 
-| Primitive | Meaning |
-| --- | --- |
-| `<Loop>`     | Repeat tasks until a condition is met  |
+const program = Greeting.execute(
+  { name: "Ada" },
+  { executionId: "greeting-ada-1" }
+).pipe(Effect.provide(GreetingLayer))
 
-## What a workflow looks like
-
-A workflow is a JSX tree of tasks. You usually don't write these by hand: you prompt your
-agent, and it writes them from the same primitives the built-in pack uses. Each example
-below starts with the prompt that produces it.
-
-This page is the 90-second version. The **[Tour](https://smithers.sh/tour)** is the
-15-minute version: it builds a real code-review workflow one capability at a time.
-
-### Loop until a reviewer approves
-
-> *"implement this request and keep iterating until a reviewer signs off"*
-
-```tsx
-import { createSmithers, Loop, CodexAgent } from "smthrs";
-import { z } from "zod";
-
-const { Workflow, Task, smithers, outputs } = createSmithers({
-  input: z.object({ request: z.string() }),
-  impl: z.object({ summary: z.string(), filesChanged: z.array(z.string()) }),
-  review: z.object({ approved: z.boolean(), feedback: z.string() }),
-});
-
-const coder = new CodexAgent({
-  model: "gpt-5.6-luna",
-  config: { model_reasoning_effort: "medium" },
-});
-const reviewer = new CodexAgent({
-  model: "gpt-5.6-sol",
-  config: { model_reasoning_effort: "xhigh" },
-  sandbox: "read-only",
-});
-
-export default smithers((ctx) => (
-  <Workflow name="implement-reviewed">
-    <Loop until={ctx.latest(outputs.review, "validate")?.approved} maxIterations={5}>
-      <Task id="implement" output={outputs.impl} agent={coder}>
-        {`Implement: ${ctx.input.request}
-Address this reviewer feedback first: ${ctx.latest(outputs.review, "validate")?.feedback ?? "none yet"}`}
-      </Task>
-
-      <Task id="validate" output={outputs.review} agent={reviewer}>
-        {`Review the working-tree changes for: ${ctx.input.request}.
-Approve only when the change is correct and tested.`}
-      </Task>
-    </Loop>
-  </Workflow>
-));
+Effect.runPromise(program).then(console.log)
+// "Hello, Ada."
 ```
 
-This is the loop a one-shot agent call can't give you: implement, review, feed the
-feedback back in, repeat until approved. Every iteration is persisted, so a crash mid-loop
-resumes at the current iteration instead of iteration one.
-
-The bigger version of this idea (split a request into tickets, implement them in
-parallel worktrees, gate on your approval, land through a merge queue) is
-[`examples/parallel-tickets.jsx`](./examples/parallel-tickets.jsx): a small engineering
-team in one file.
-
-## Durable by default
-
-Durability is the differentiator. Runs survive crashes, restarts, and flaky tools because
-**every completed step is persisted to SQLite the moment it finishes**. The runtime always
-knows what's done and what to run next. Approvals, human questions, retries, and replay are
-first-class.
-
-```text
-prompt → render workflow → run task → validate output → persist to SQLite → re-render → resume · inspect · replay
-```
-
-That loop is the whole model: a task runs, its output is validated against a schema and
-written down, then the workflow re-renders from persisted state to decide the next task. A
-crash at any point resumes from the last write, not from the top.
-
-*A run killed mid-task, then resumed: the completed task is skipped, the interrupted task
-re-runs, the run finishes. No recovery code.*
-
-<img src="./docs/images/why/crash-resume.gif" alt="A Smithers run is killed partway through, then resumes: the completed task is skipped, the in-flight task re-runs as a new attempt, and the run finishes" width="1032" />
-
-```bash
-bunx smthrs up workflow.tsx --input '{"description":"Fix bug"}'
-bunx smthrs up workflow.tsx --run-id abc123 --resume true   # resume after a crash
-bunx smthrs rewind abc123 --frame 4                          # time-travel to an earlier frame
-bunx smthrs fork abc123                                      # branch an alternate timeline
-bunx smthrs replay abc123                                    # replay from a checkpoint
-```
-
-## Drive and watch your runs
-
-Prefer the CLI? The seeded workflows run directly, and whether your agent started a run or
-you did, you can see exactly what's happening:
-
-```bash
-bunx smthrs workflow run create-workflow --prompt "build a small hello workflow"
-# plan is archived under examples/init-pack/; copy it into .smithers/workflows/ first
-bunx smthrs workflow run plan --prompt "add rate limiting and API key rotation"
-
-bunx smthrs ps              # list active, paused, and recently completed runs
-bunx smthrs inspect RUN_ID  # steps, agents, approvals, and outputs for one run
-bunx smthrs logs RUN_ID     # tail the event log
-bunx smthrs chat RUN_ID     # read the agent's chat output
-```
-
-`ps` shows you what needs attention (a paused approval, a recent failure); `inspect` drills
-into a single run so you can follow each step and agent as it works. Run
-`bunx smthrs starters` to browse plain-English starters.
-
-Prefer a live page over every run? `bunx smthrs monitor` opens the Smithers
-Monitor: the grouped run list, each run's execution tree with per-node status, and the
-structured event stream underneath.
-
-<img src="./docs/images/monitor/run-detail.png" alt="A finished run in the Smithers Monitor: a completed execution tree with per-node status and the live event log with agent traces and token usage" width="1032" />
-
-## Any agent, any model
-
-Smithers doesn't bet on one lab or one harness. Point a task at whichever agent is best for
-the job, mix several in one workflow, and switch freely. The workflow doesn't change when
-the model does, so a frontier model can plan, a fast model can fan out, and a specialized
-harness can do the edits.
-
-**Agents that run tasks**
-
-| Agent | How it runs |
-| --- | --- |
-| [Claude Code](./docs/integrations/cli-agents.mdx) | CLI harness |
-| Codex | CLI harness |
-| Cursor | CLI harness |
-| [Pi](./docs/integrations/pi-integration.mdx) | CLI harness |
-| [Nanocodex](./docs/integrations/nanocodex.mdx) | External pinned stock-agent bridge (Linux x86_64 / macOS arm64; direct spawn) |
-| Antigravity | CLI harness |
-| Hermes | CLI harness |
-| OpenClaw | CLI harness |
-| Any [AI SDK](./docs/integrations/sdk-agents.mdx) model | SDK agent, with tools, structured output, and MCP |
-
-The same `<Sandbox>` primitive runs an agent locally (Bubblewrap, Docker, or
-[Microsandbox](https://github.com/superradcompany/microsandbox)) or through any
-backend you implement against `SandboxProvider`.
-
-Beyond [`init`](#get-started), `bunx smthrs mcp add` also wires the MCP
-server into Cursor, Copilot, Hermes, OpenClaw, and ~20 more coding agents.
-
-## Built-in workflows
-
-`bunx smthrs init` installs a focused pack: `create-workflow`, `create-skill`,
-and `docs-driven-development`. Former starter workflows are preserved under
-`examples/init-pack/`.
-
-```bash
-bunx smthrs workflow run create-workflow --prompt "add rate limiting"
-```
-
-See [`docs/workflows/`](./docs/workflows/overview.mdx) for the curated pack and
-`examples/init-pack/` for the archived, copyable workflow patterns.
+The engine above keeps its state in the process, which is fine for a first
+program and no help in a crash. To survive one, drive the same flow, unchanged,
+with `EngineStore.layer` over SQLite. The examples show the wiring.
 
 ## Examples
 
-The [`examples/`](./examples) folder has 100+ runnable workflows, one per orchestration
-pattern. Copy one as a starting point:
+The runnable programs live in [`examples/src`](examples/src), numbered in reading
+order. `pnpm run test:examples` runs every one against the real packages: the
+durable examples open a real SQLite file, the host example spawns a real process,
+and the browser example is bundled by a real bundler.
 
-[![Every orchestration pattern we could find: 100+ real, runnable Smithers workflows in one folder.](./marketing/examples/examples-folder.png)](./examples)
+- `01-define-and-run.ts` — define a typed flow and run it on the in-memory engine
+- `02-run-durably.ts` — run a flow on the durable engine and read the journal it wrote
+- `03-crash-and-resume.ts` — suspend a run, drop the engine, and resume from durable state
+- `04-retry-policy.ts` — retry a flaky action, and read the policy that decides when to stop
+- `05-time-travel-fork.ts` — fork a finished run at a journal frame and drive the copy
+- `06-time-travel-rewind.ts` — rewind a run to an earlier frame and re-derive a view
+- `07-sync-follower.ts` — follow a run's journal from a second process
+- `08-host-adapters.ts` — run the same host program against two adapters
+- `09-browser-use.ts` — use the library from a browser bundle
+- `10-telemetry-export.ts` — export OTLP spans and read the same run three ways
+- `11-agent-step.ts` — chain two model-backed agent steps with declared output schemas
 
-Review loops, parallel ticket fleets, supervisors, panels, debates, migrations, RAG
-citation loops, repo janitors, and dozens more, each a runnable starting point.
+## Features
 
-## Also in the box
+- Schema-typed payloads, successes, and errors.
+- One transaction per step.
+- Fenced ownership; zombie owners interrupt themselves.
+- Durable deferreds, clocks, and queues.
+- Retry deadlines survive restarts.
+- Content-addressed step keys.
+- Grant-checked host access.
+- Node, Bun, browser, and test hosts.
+- Read-only follower sync.
+- Replay, fork, rewind, compensate, recover.
+- Layers, not hooks.
 
-Smithers is built for agents that modify real repositories, so control is wired into
-the runtime:
+## Packages
 
-- **Approvals**: gate risky steps behind a human approve or deny before they run.
-- **Isolation**: sandbox agents so edits never touch your host.
-- **Observability**: Prometheus metrics and OpenTelemetry traces out of the box, plus a
-  one-command local Grafana stack (`bunx smthrs observability`).
-- **Evals and prompt optimization**: repeatable regression suites, and GEPA-style tuning
-  that rewrites prompts only when the score improves.
-- **Cross-run memory**: durable facts, threads, and notes with keyword recall in local
-  SQLite, upgradeable to semantic recall and mental-model primers via Hindsight.
-- **Hot reload**: edit prompts, config, or JSX mid-run; newly scheduled tasks pick up the
-  changes.
+| Package | Role |
+| --- | --- |
+| `@smthrs/flows` | Umbrella barrel re-exporting the engine packages below as namespaces; the `platform-*` bundles are deliberately excluded |
+| `@smthrs/canonical` | RFC 8785 canonical JSON as an Effect Schema |
+| `@smthrs/platform-node` | The Node host bundle: Effect's Node platform services, the Undici transport, and the Node jj adapter |
+| `@smthrs/platform-bun` | The same bundle for Bun, over `@effect/platform-bun` |
+| `@smthrs/jj` | Jujutsu snapshot, restore, diff, and workspace operations as a host service |
+| `@smthrs/sandbox` | Remote `ChildProcessSpawner` implementation and the sandbox liveness probe |
+| `@smthrs/platform-browser` | Browser `FileSystem` and `ChildProcessSpawner` over ZenFS and just-bash, plus the `BrowserHost` bundle |
+| `@smthrs/journal` | Logical WAL, migrations, projections, redaction, the `OwnerId` fence |
+| `@smthrs/run-store` | Run and attempt stores, ownership arbitration, migrations |
+| `@smthrs/step-cache` | Sealed step result cache and its migration |
+| `@smthrs/artifacts` | Content-addressed artifact store, local and remote |
+| `@smthrs/database` | Driver-neutral SQL contract with transactional write retry |
+| `@smthrs/capability` | Capability vocabulary and typed permission failures, shared by the kernel and `@smthrs/jj` |
+| `@smthrs/kernel` | The closed host service list, capability sets, grants, and permission-decorated host services |
+| `@smthrs/crypto` | Injected cryptographic schema transformations |
+| `@smthrs/keys` | Canonical flow keys |
+| `@smthrs/plan` | The persisted plan: a keyed action graph, its append-only store, and its diff |
+| `@smthrs/flow` | Flow definitions, actions, durable primitives, retry policy, and the `FlowRuntime` port |
+| `@smthrs/engine` | The runtime that executes flows, plus the RPC and HTTP facades |
+| `@smthrs/engine-store` | The durable engine: claims, fences, and persists runs over the journal |
+| `@smthrs/sync` | Read-only journal replication for followers |
+| `@smthrs/time-travel` | Replay, fork, rewind, compensation, and recovery protocols |
+| `@smthrs/agent` | Production agent loop on the durable engine: `AgentSession`, `AgentAction`, `CellPlugin` |
+| `@smthrs/cli` | The `smithers` executable and its `NodeControl` composition |
+| `@smthrs/control` | Control services, RPC schema, `ControlServer` and `ControlClient`, credentials |
+| `@smthrs/gateway` | Gateway wire schemas, projections, session tokens, and the `SuperviseRuntime` port |
+| `@smthrs/model` | Schema-first model protocols, routes, streaming, and seat resolution |
+| `@smthrs/memory` | Durable cross-run facts, history, notes, and recall |
+| `@smthrs/observability` | OTLP wiring, `JournalLogger`, metrics |
 
-## Read next
+`docs/pages/package-structure.mdx` lists every package, including the private
+build and testing packages this table omits.
 
-- [Tour](https://smithers.sh/tour): build a real code-review workflow in six steps.
-- [Install the agent skill](./skills/smithers): make your coding agent fluent in Smithers.
-- [How It Works](https://smithers.sh/how-it-works): the durable execution model.
-- [Components](https://smithers.sh/components/workflow): the full primitive set.
-- [Orchestration patterns](https://patterns.smithers.sh): a visual field guide to every primitive, composite pattern, and example.
-- [Awesome Smithers](https://github.com/smithersai/awesome-smithers): community projects, workflow packs, examples, and integrations.
+## Compatibility
 
-## Docs
+Smithers 1.0.0-rc.0 is a source migration, not a compatible upgrade. It provides
+no JSX workflow API, no `smthrs/jsx-runtime` or `smthrs/jsx-dev-runtime`, no
+React reconciler, no `<Workflow>`, `<Task>`, `<Sequence>`, `<Parallel>`,
+`<Loop>`, `<Ralph>`, `<Branch>`, `<Approval>`, `<Signal>`, `<Timer>`,
+`<Subflow>`, `<Worktree>`, or `<Saga>` components, no `createSmithers`,
+`runWorkflow`, `renderFrame`, or `SmithersCtx`, no `smithers-build` facade, no 0.x CLI
+verbs beyond those listed in the 1.0 command table, no 0.x gateway protocol, and
+no ability to load, resume, or migrate 0.x run databases. No shim, adapter, or
+compatibility layer will be published. Flows are written against `@smthrs/flow`
+(`Flow`, `Action`, durable waits, `RetryPolicy`), `@smthrs/engine`,
+`@smthrs/control`, and Effect `4.0.0-rc.108`, and run on Node.js 22.19.0 or later
+with local SQLite. Existing 0.x projects migrate their source with the
+`migrate-smithers-v1` workflow (`smithers migrate`), which rewrites workflows,
+imports, configuration, scripts, and docs and reports every construct it could
+not translate. Runtime behavior between 0.x and 1.0 is not equivalent and is not
+intended to be.
 
-Full documentation lives at **[smithers.sh](https://smithers.sh)**.
+Storage in rc.0 is local SQLite only. PostgreSQL and PGlite are unsupported:
+`SMITHERS_BACKEND=pglite|postgres` and `--backend pglite|postgres` exit with
+`unsupported_database`.
+
+## Documentation
+
+Full documentation lives at [smithers.sh](https://smithers.sh). The pages are
+under [`docs/pages`](docs/pages); `pnpm exec vocs dev` serves the site locally.
+
+`CONTRIBUTING.md` covers the build system, the target graph, and the gates.
 
 ## License
 

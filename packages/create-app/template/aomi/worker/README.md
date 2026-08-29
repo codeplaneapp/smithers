@@ -109,7 +109,7 @@ shell, the pane host, and cancel all work end to end. Setting it to `0` selects
 the real `Agent.run` path, which is written out in full in `liveTurn` and does
 not run under workerd yet.
 
-Three upstream items in `~/flows/flows` block it, all tracked in `TODO.md`:
+Three upstream items in the Smithers packages block it:
 
 1. **The sandbox cannot load.** `packages/harness/src/QuickJSSandbox.ts:22`
    imports `@jitl/quickjs-singlefile-browser-release-sync` and compiles it at

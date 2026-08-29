@@ -62,7 +62,7 @@ session re-runs tests itself.
 | Cacheable | Never; it is a long-lived process                      |
 | Executes  | Yes, through `ExecLive`, as a `run` root or dependency |
 
-Invoke it explicitly with `smthrs run <label>`. The session holds its
+Invoke it explicitly with `smithers-build run <label>`. The session holds its
 concurrency slot until it exits. Do not put a watch target in a dependency chain
 that `build`, `test`, `lint`, or `ci` reaches.
 

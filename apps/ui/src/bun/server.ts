@@ -86,7 +86,7 @@ export interface LocalServerOptions {
   readonly allowManualRepositoryPaths?: boolean
   /** A pre-resolved Node sidecar; the default probes once at startup. */
   readonly node?: NodeSidecar | null
-  /** The smthrs build-cli entry for the targets lane; the default resolves it from the checkout (or SMITHERS_BUILD_CLI). */
+  /** The smithers-build build-cli entry for the targets lane; the default resolves it from the checkout (or SMITHERS_BUILD_CLI). */
   readonly buildCli?: string
   /** The home directory used for PTYs without a repoId and reported by `/api/health`. */
   readonly home?: string

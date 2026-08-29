@@ -6,15 +6,16 @@
   "smthrs": {
     "group": "tooling"
   },
+  "private": true,
   "description": "Bazel-style TypeScript workflow orchestration with explicit pnpm installation",
-  "homepage": "https://github.com/smithersai/flows",
+  "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
-    "url": "https://github.com/smithersai/flows.git",
+    "url": "https://github.com/smithersai/smithers.git",
     "directory": "packages/build"
   },
   "bugs": {
-    "url": "https://github.com/smithersai/flows/issues"
+    "url": "https://github.com/smithersai/smithers/issues"
   },
   "tags": [
     "typescript",
@@ -91,9 +92,9 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@smthrs/crypto": "0.1.0",
-    "@smthrs/flow": "0.1.0",
-    "@smthrs/plan": "0.1.0",
+    "@smthrs/crypto": "1.0.0-rc.0",
+    "@smthrs/flow": "1.0.0-rc.0",
+    "@smthrs/plan": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {

@@ -48,13 +48,13 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@smthrs/canonical": "0.1.0",
-    "@smthrs/crypto": "0.1.0",
-    "@smthrs/database": "0.1.0",
-    "@smthrs/flow": "0.1.0",
-    "@smthrs/keys": "0.1.0",
-    "@smthrs/plan": "0.1.0",
-    "@smthrs/build": "0.1.0",
+    "@smthrs/canonical": "1.0.0-rc.0",
+    "@smthrs/crypto": "1.0.0-rc.0",
+    "@smthrs/database": "1.0.0-rc.0",
+    "@smthrs/flow": "1.0.0-rc.0",
+    "@smthrs/keys": "1.0.0-rc.0",
+    "@smthrs/plan": "1.0.0-rc.0",
+    "@smthrs/build": "workspace:*",
     "ignore": "7.0.6",
     "minimatch": "10.2.6",
     "yaml": "2.9.0"

@@ -3,7 +3,7 @@
  *
  * `BrowserServices` covers the three services a platform package owes Effect —
  * `ChildProcessSpawner`, `FileSystem`, `Path`. This module is the layer above
- * it: the complete closed Host surface `flows` runs on, so the same five tags
+ * it: the complete closed Host surface Smithers runs on, so the same five tags
  * `NodeHost` and `BunHost` provide are present in a tab too.
  *
  * `Jj` is jj-lib compiled to wasm: the page hands this bundle the compiled
@@ -15,7 +15,7 @@
  * than a silent default.
  *
  * Network access is Effect's own `HttpClient` over `fetch` — there is no
- * `flows` wrapper around it. The one thing this bundle configures is
+ * Smithers wrapper around it. The one thing this bundle configures is
  * `redirect: "manual"`, so the runtime never walks to a second origin behind
  * the capability kernel's back; following a redirect is
  * `@smthrs/kernel`'s guarded `HttpClient.layer`, which rechecks every hop.

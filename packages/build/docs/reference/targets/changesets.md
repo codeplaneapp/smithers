@@ -75,7 +75,7 @@ Collected from the attrs: every declaration in `changesets`, plus `config`,
 | Cacheable | Never                                                                                                                                                                                                        |
 | Executes  | `status` yes, through `ExecLive`, as a `run` root or dependency. `version` **no**: the CLI executor does not provide `ExecIrreversibleLive`, so the target fails at interpretation with `unresolved_action`. |
 
-Both operations are selected by `smthrs run`; `build`, `test`, `lint`, and
+Both operations are selected by `smithers-build run`; `build`, `test`, `lint`, and
 `ci` never select them as roots.
 
 ## Release order

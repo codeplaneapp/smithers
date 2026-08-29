@@ -1,5 +1,5 @@
 /**
- * `smthrs create-app` copies a directory and substitutes one placeholder, so
+ * `smithers-build create-app` copies a directory and substitutes one placeholder, so
  * what these tests hold down is the part a copy cannot get right by itself: the
  * refusals, the name substitution reaching every file kind, and the `link:`
  * rewrite that makes a scaffold from a checkout installable before the

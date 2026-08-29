@@ -326,7 +326,7 @@ describe("system verbs", () => {
   it("redirects `up <flow>` to the run verb instead of planning boot", async () => {
     const rendered = await run(text(["up", "review"]), testControl)
 
-    expect(rendered).toBe("did you mean `flows run review`?")
+    expect(rendered).toBe("did you mean `smithers run review`?")
   })
 })
 
@@ -345,7 +345,7 @@ describe("forensic projections", () => {
     // `--json` keeps the stable listing shape; the human reader gets the
     // diagnosis computed from the run's own events.
     expect(result.card).toContain("Verdict")
-    expect(result.card).toContain(`Next      flows logs ${result.runId}`)
+    expect(result.card).toContain(`Next      smithers logs ${result.runId}`)
     expect(result.raw).toMatchObject({ _tag: "runs", items: [{ runId: result.runId }] })
   })
 

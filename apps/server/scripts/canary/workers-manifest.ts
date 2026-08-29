@@ -1,9 +1,10 @@
 /*
  * The nine Cloudflare Workers the product runs on (E2E-CANARY-CHECKLIST CN-18).
  *
- * None of them is in this repository. They are deployed from ~/flows/ui/workers/
- * (see apps/UPSTREAMS.md), so nothing here can build, test, or roll one back —
- * which is exactly why their health has to be assertable from outside. This
+ * None of them is in this repository. They are deployed from smithersai/ui,
+ * under workers/ (see apps/UPSTREAMS.md), so nothing here can build, test, or
+ * roll one back — which is exactly why their health has to be assertable from
+ * outside. This
  * file is the only place the deployment's shape is written down where CI can
  * read it.
  *
@@ -37,7 +38,7 @@
  *            not that its dependencies are up. Promote a Worker to ok-json as
  *            soon as it exposes a health route, and not before — asserting a
  *            route that does not exist would fail forever. Landing one is
- *            work for whoever owns ~/flows/ui/workers/: the chat Worker needs
+ *            work for whoever owns smithersai/ui workers/: the chat Worker needs
  *            an unauthenticated GET /healthz returning HTTP 200 and
  *            {"ok":true,...}, reachable without an allowed Origin header, the
  *            same shape identity, billing, connectors, status and sync

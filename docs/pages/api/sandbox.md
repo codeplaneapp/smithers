@@ -28,9 +28,9 @@ The package depends on `@smthrs/kernel`, for `CommandLine.render` alone, and on 
 
 | Import | Source |
 | --- | --- |
-| `@smthrs/sandbox` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/sandbox/src/index.ts) |
-| `@smthrs/sandbox/RemoteChildProcessSpawner` | [src/RemoteChildProcessSpawner/](https://github.com/smithersai/flows/tree/main/packages/sandbox/src/RemoteChildProcessSpawner) |
-| `@smthrs/sandbox/SandboxHealth` | [src/SandboxHealth/](https://github.com/smithersai/flows/tree/main/packages/sandbox/src/SandboxHealth) |
+| `@smthrs/sandbox` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/sandbox/src/index.ts) |
+| `@smthrs/sandbox/RemoteChildProcessSpawner` | [src/RemoteChildProcessSpawner/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/RemoteChildProcessSpawner) |
+| `@smthrs/sandbox/SandboxHealth` | [src/SandboxHealth/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/SandboxHealth) |
 
 ## RemoteChildProcessSpawner
 

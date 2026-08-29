@@ -17,7 +17,7 @@ import { runHostContract } from "./HostContract.ts"
 
 /**
  * A bundle with no way to start a process still provides the tag; it just
- * fails every spawn in the error channel, the way a `flows` service reports an
+ * fails every spawn in the error channel, the way a Smithers service reports an
  * unsupported capability.
  */
 const layerSpawnerUnsupported: Layer.Layer<ChildProcessSpawner> = Layer.succeed(ChildProcessSpawner)(

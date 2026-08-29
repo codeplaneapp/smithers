@@ -2,7 +2,7 @@ import type * as Route from "@smthrs/model/Route"
 
 /**
  * The credential-free route a test seat resolves to, copied from
- * `examples/src/11-agent-step.ts` in ~/flows/flows.
+ * `examples/src/11-agent-step.ts`.
  *
  * `SeatResolver` hands the agent a model and a route. A replayed run never
  * sends this request anywhere, but the engine still digests it into the sealed

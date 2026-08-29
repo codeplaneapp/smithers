@@ -1,5 +1,5 @@
 /**
- * The `glob` projection of Flows Ripgrep Subset v1.
+ * The `glob` projection of Smithers Ripgrep Subset v1.
  *
  * It has the same two peer implementations as `grep` and corresponds to
  * `rg --files -g`: `*`, `**`, `?`, and brace alternatives are supported;
@@ -66,7 +66,7 @@ export const name = "glob"
  * @category descriptions
  * @since 0.1.0
  */
-export const description = "Find files through the Flows Ripgrep Subset v1 contract."
+export const description = "Find files through the Smithers Ripgrep Subset v1 contract."
 /**
  * Input accepted by {@link flow} and {@link run}.
  *

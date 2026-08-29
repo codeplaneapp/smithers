@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The `flows` executable. It builds the CLI application, runs it on the Node
+ * The `smithers` executable. It builds the CLI application, runs it on the Node
  * runtime, and maps a failed exit to a process exit code.
  *
  * @since 0.1.0

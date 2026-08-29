@@ -94,7 +94,7 @@ export const { lib, test, lint } = Smithers.StandardPackage({
 ## What the example demonstrates
 
 **Defaults are a policy, not a mechanism.** Every default in `StandardPackage`
-encodes the flows repository layout. A caller who overrides `sources` gets a
+encodes the Smithers repository layout. A caller who overrides `sources` gets a
 different declared input; nothing else changes.
 
 **The toolchain has no default.** `packageManager` is a required option: a macro
@@ -218,7 +218,7 @@ Guidelines:
 
 A macro whose remaining required options arrive through the declaration's
 `attrs` can be used directly as a default-target macro, which is how
-`StandardPackage` covers every package in the flows workspace that has no
+`StandardPackage` covers every package in the Smithers workspace that has no
 `BUILD.ts` of its own:
 
 ```ts
@@ -230,10 +230,10 @@ export const packageDefaults = PackageDefaults({
 ```
 
 Synthesis calls the macro with `{ cwd: <directory>, ...attrs }`. See
-[Default targets](default-targets.md).
+[Default targets](default-rules.md).
 
 ## Next
 
-- [Default targets](default-targets.md)
+- [Default targets](default-rules.md)
 - [Writing targets](writing-targets.md)
 - [StandardPackage reference](../reference/targets/standard-package.md)

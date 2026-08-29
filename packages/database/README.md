@@ -1,6 +1,6 @@
 # @smthrs/database
 
-Durable write boundary for the flows persistence packages. It provides the
+Durable write boundary for the Smithers persistence packages. It provides the
 shared write policy (`DurableWriter`), normalized database failures, and
 Node, Cloudflare Durable Object, and in-memory SQLite client layers; queries go
 through Effect's own `SqlClient` service, and journal schema and queries stay

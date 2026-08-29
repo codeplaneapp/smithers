@@ -1,5 +1,5 @@
 /**
- * `flows plan --diff`, as a value.
+ * `smithers plan --diff`, as a value.
  *
  * `docs/specs/Specs/Plan.md`: "which steps changed key (and _which input_
  * changed them), what entered the envelope, what joined the release set —

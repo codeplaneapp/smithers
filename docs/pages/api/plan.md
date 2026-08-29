@@ -53,11 +53,11 @@ const program = Effect.gen(function*() {
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/plan` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/plan/src/index.ts) | Node and browser |
+| `@smthrs/plan` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/plan/src/index.ts) | Node and browser |
 
 ## KeyMaterial
 
-[src/KeyMaterial.ts](https://github.com/smithersai/flows/blob/main/packages/plan/src/KeyMaterial.ts)
+[src/KeyMaterial.ts](https://github.com/smithersai/smithers/blob/main/packages/plan/src/KeyMaterial.ts)
 
 What a planner declares about one node, handed to the compiler.
 
@@ -74,7 +74,7 @@ What a planner declares about one node, handed to the compiler.
 
 ## StepKey
 
-[src/StepKey.ts](https://github.com/smithersai/flows/blob/main/packages/plan/src/StepKey.ts)
+[src/StepKey.ts](https://github.com/smithersai/smithers/blob/main/packages/plan/src/StepKey.ts)
 
 The compiler from material to a [`@smthrs/keys`](/api/keys) `Key`.
 
@@ -100,7 +100,7 @@ The brand behind `digestInput` is private, so a plain object that merely has a `
 
 ## Plan
 
-[src/Plan.ts](https://github.com/smithersai/flows/blob/main/packages/plan/src/Plan.ts)
+[src/Plan.ts](https://github.com/smithersai/smithers/blob/main/packages/plan/src/Plan.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -139,7 +139,7 @@ Declared write sets make overlap detectable at plan time. Writers already ordere
 
 ## Node
 
-[src/Node.ts](https://github.com/smithersai/flows/blob/main/packages/plan/src/Node.ts)
+[src/Node.ts](https://github.com/smithersai/smithers/blob/main/packages/plan/src/Node.ts)
 
 The pure, pipeable authoring AST. Building a node records an inspectable, closure-free, JSON-serializable description and executes nothing.
 
@@ -163,7 +163,7 @@ The functions an author writes (a mapper, a continuation, a branch predicate) li
 
 ## Planned
 
-[src/Planned.ts](https://github.com/smithersai/flows/blob/main/packages/plan/src/Planned.ts)
+[src/Planned.ts](https://github.com/smithersai/smithers/blob/main/packages/plan/src/Planned.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -184,7 +184,7 @@ Misuse fails twice. The type is branded, so arithmetic and template interpolatio
 
 ## GraphBuildError
 
-[src/GraphBuildError.ts](https://github.com/smithersai/flows/blob/main/packages/plan/src/GraphBuildError.ts)
+[src/GraphBuildError.ts](https://github.com/smithersai/smithers/blob/main/packages/plan/src/GraphBuildError.ts)
 
 The refusals a plan-time build raises instead of producing a wrong plan. Each carries the site, `node` plus the recorded property `path`, and states the fix in `message`, because the author reading it is mid-body.
 
@@ -200,7 +200,7 @@ The refusals a plan-time build raises instead of producing a wrong plan. Each ca
 
 ## PlanDiff
 
-[src/PlanDiff.ts](https://github.com/smithersai/flows/blob/main/packages/plan/src/PlanDiff.ts)
+[src/PlanDiff.ts](https://github.com/smithersai/smithers/blob/main/packages/plan/src/PlanDiff.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -212,7 +212,7 @@ The verdict is the key: two nodes with the same id and the same key are the same
 
 ## PlanStore
 
-[src/PlanStore.ts](https://github.com/smithersai/flows/blob/main/packages/plan/src/PlanStore.ts)
+[src/PlanStore.ts](https://github.com/smithersai/smithers/blob/main/packages/plan/src/PlanStore.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -228,7 +228,7 @@ The verdict is the key: two nodes with the same id and the same key are the same
 
 ## Migrations
 
-[src/Migrations.ts](https://github.com/smithersai/flows/blob/main/packages/plan/src/Migrations.ts)
+[src/Migrations.ts](https://github.com/smithersai/smithers/blob/main/packages/plan/src/Migrations.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |

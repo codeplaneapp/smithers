@@ -58,7 +58,7 @@ approximating a verified fetch.
 Run the supported flow with:
 
 ```sh
-smthrs install --workspace /path/to/workspace
+smithers-build install --workspace /path/to/workspace
 ```
 
 The install store is fixed at `.flows/store/pnpm`, so `install` requires the
@@ -114,15 +114,15 @@ The shared hosted and self-hosted protocol exposes:
 - `/cas/findMissing` for batched artifact probes;
 - public `/healthz` readiness checks that reveal no cache state.
 
-The smthrs CLI currently uses `/ac` directly for target success values. It
-does not compose the flows engine's remote step-cache and artifact layers.
+The smithers-build CLI currently uses `/ac` directly for target success values. It
+does not compose the Smithers engine's remote step-cache and artifact layers.
 See [remote caching](docs/workspace/remote-caching.md) for that distinction.
 
 ## Development
 
 Use Node.js 22.19 or newer. The repository's supported gates are:
 
-From the flows repository root, run `pnpm check`, `pnpm lint`, `pnpm test`,
+From the Smithers repository root, run `pnpm check`, `pnpm lint`, `pnpm test`,
 `pnpm circular`, and `pnpm browser`. To work on only these packages, use pnpm's
 `--filter` option with `@smthrs/build`, `@smthrs/targets`, or
 `@smthrs/build-cli`.

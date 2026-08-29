@@ -272,7 +272,7 @@
    ],
    "kind": "package unscoped smthrs 0.35.0 facade (bin smithers)",
    "disposition": "delete",
-   "newHome": "- (the unscoped name is re-published as a notice-only package authored in Phase 3; see the packages/smthrs row)",
+   "newHome": "- (the unscoped name is re-published as a notice-only package authored in Phase 3; see the packages/smthrs-deprecation row)",
    "phase": "1",
    "tree": "old",
    "rationale": "Umbrella JSX facade re-exporting 14 @smthrs/* packages plus createSmithers*, backend selection, external HostNodeJson API, agent tools, jsx-runtime, dom/renderer, mdx-plugin. Decision D6 adopted: deprecation notice only.",
@@ -282,18 +282,18 @@
    "label": "packages/smithers"
   },
   {
-   "path": "packages/smthrs (new: deprecation-notice manifest for unscoped smthrs@1.0.0-rc.0)",
-   "key": "packages/smthrs",
+   "path": "packages/smthrs-deprecation (new: deprecation-notice manifest for unscoped smthrs@1.0.0-rc.0)",
+   "key": "packages/smthrs-deprecation",
    "kind": "new package (decision D6)",
    "disposition": "migrate",
-   "newHome": "packages/smthrs: package.json (name smthrs, version 1.0.0-rc.0, smthrs.group agent, no bin, exports . only), one module that throws the rc-contract.md §3.3 notice on import, README with the same text and the removed-API list",
+   "newHome": "packages/smthrs-deprecation: package.json (name smthrs, version 1.0.0-rc.0, smthrs.group agent, no bin, exports . only, publishConfig.tag rc), one module that throws the rc-contract.md §3.3 notice on import, README with the same text and the removed-API list. The directory is named smthrs-deprecation rather than smthrs so the path does not read as @smthrs/smthrs; the published name is unchanged.",
    "phase": "3",
    "tree": "old",
    "rationale": "Decision D6: publish a deprecation/migration notice only. The old facade is deleted (row above); the notice is new Phase 3 work, recorded as its own row so the packages/smithers delete row keeps the PLAN meaning of delete (nothing survives) and the stub has a phase.",
    "evidence": "rc-contract.md §3.3 and §3.1 (smthrs in the 40 published names); D6 in PLAN.md 'Unscoped smthrs package'.",
    "notes": "",
    "section": "Old execution core (packages/{graph,scheduler,engine,driver,react-reconciler,components,xstate,smithers,errors,protocol,control-plane,db,testing,time-travel})",
-   "label": "packages/smthrs (new: deprecation-notice manifest for unscoped smthrs@1.0.0-rc.0)",
+   "label": "packages/smthrs-deprecation (new: deprecation-notice manifest for unscoped smthrs@1.0.0-rc.0)",
    "executable": false
   },
   {

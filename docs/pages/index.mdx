@@ -1,14 +1,14 @@
 ---
-description: "Smithers Flows is an Effect-based durable-execution engine. Typed flows record every side effect to a journal, so a crashed process resumes from its recorded steps instead of starting over."
+description: "Smithers is an Effect-based durable-execution engine. Typed flows record every side effect to a journal, so a crashed process resumes from its recorded steps instead of starting over."
 ---
 
-# Smithers Flows
+# Smithers
 
-Smithers Flows is an Effect-based durable-execution engine: typed flows that record every side effect to a journal, so a crashed process resumes from its recorded steps instead of starting over.
+Smithers is an Effect-based durable-execution engine: typed flows that record every side effect to a journal, so a crashed process resumes from its recorded steps instead of starting over.
 
 You declare an action once with Schema-typed payload, success, and error, attach its implementation as a layer, and write a flow whose pure body names it. The engine persists run state in SQLite through the journal, computes a content-addressed key for each action, and stores each attempt's encoded result. When a process restarts, it claims the run, re-plans the flow and drives it from the top, and replays every recorded step; the first step without a record is where new work happens. A capability kernel bounds what flow code can reach on the host, read-only sync streams journal entries to followers, and time travel forks and rewinds run history.
 
-A build system remembers what it has done so it can skip it. A workflow engine remembers what it has done so it can resume it. The record is the same; only the reason differs. Flows keeps that record once, content-addressed, and gets both: finished work is skipped, and a crashed run picks up where it left off. [Comparisons](/comparisons) sets the implementation against TurboRepo, Nx, and Bazel.
+A build system remembers what it has done so it can skip it. A workflow engine remembers what it has done so it can resume it. The record is the same; only the reason differs. Smithers keeps that record once, content-addressed, and gets both: finished work is skipped, and a crashed run picks up where it left off. [Comparisons](/comparisons) sets the implementation against TurboRepo, Nx, and Bazel.
 
 ## Quick start
 
@@ -123,4 +123,4 @@ That engine keeps its state in the process. To survive a crash, drive the same f
 | `@smthrs/sync` | read-only journal replication for followers |
 | `@smthrs/time-travel` | replay, fork, rewind, compensation, and recovery protocols |
 
-Packages are pre-1.0 at `0.1.0` in lockstep. Every engine package, including `@smthrs/engine-store` and the barrel, bundles for the browser. The `platform-node`, `platform-bun`, and driver subpaths are the deliberate Node-only entry points.
+Packages are at `1.0.0-rc.0` in lockstep, published to the `rc` dist-tag. Every engine package, including `@smthrs/engine-store` and the barrel, bundles for the browser. The `platform-node`, `platform-bun`, and driver subpaths are the deliberate Node-only entry points.

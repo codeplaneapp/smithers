@@ -109,8 +109,8 @@ describe("EngineStore.layer", () => {
       expect(result.snapshot).toBe("change-1")
       expect(result.diff).toBe("diff-body")
       expect(calls).toEqual([
-        { op: "snapshot", argument: "flows action step/one attempt 2" },
-        { op: "snapshot", argument: "flows action step/one attempt 2 settled" },
+        { op: "snapshot", argument: "smithers action step/one attempt 2" },
+        { op: "snapshot", argument: "smithers action step/one attempt 2 settled" },
         { op: "diff", argument: "change-1->change-2" },
         { op: "restore", argument: "change-1" }
       ])

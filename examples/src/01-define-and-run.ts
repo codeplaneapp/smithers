@@ -2,8 +2,8 @@
  * Define a typed flow and run it on the in-memory engine.
  *
  * This is the shortest complete program in the library, and it is the two nouns
- * of `docs/specs/Concepts/Unified Flow Authoring.md` at their smallest.
- * `Action.make` declares the atom that does the work — schemas and a stable
+ * of the unified flow-authoring model at their smallest. `Action.make`
+ * declares the atom that does the work — schemas and a stable
  * tag, no code — and `toLayer` attaches the implementation separately, where
  * the code can run. `Flow.make` declares the composite, and its `body` names
  * the action rather than calling it: a body is planned, so `Greet.call`

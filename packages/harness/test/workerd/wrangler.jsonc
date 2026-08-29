@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "flows-harness-workerd-smoke",
+  "name": "smithers-harness-workerd-smoke",
   "main": "worker.ts",
   "compatibility_date": "2025-09-01",
   // The harness itself reaches no Node builtin, but the packages it imports for

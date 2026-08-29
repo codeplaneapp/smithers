@@ -4,8 +4,8 @@
 	"compatibility_date": "2026-08-01",
 	"compatibility_flags": ["nodejs_compat"],
 	// Wave 7: this Worker IS the canary. The custom domain was repointed from
-	// the flows/ui POC worker `smithers-ui-canary` (rollback: redeploy that
-	// worker from ~/flows/ui — `bun x wrangler deploy` — and the domain
+	// the POC worker `smithers-ui-canary` (rollback: redeploy that worker from a
+	// `smithersai/ui` checkout — `bun x wrangler deploy` — and the domain
 	// re-attaches; its last POC version was bd819f28-8c25-4443-b3b2-13d1e18cd09d).
 	"routes": [{ "pattern": "canary.smithers.sh", "custom_domain": true }],
 	// The SPA lives in the sibling `smithers-ui` package: this directory is its

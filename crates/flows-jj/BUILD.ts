@@ -2,7 +2,7 @@
  * Targets for the `flows-jj` crate and the WebAssembly artifact it produces.
  *
  * The Rust gates and the wasm reproducibility gate are declared here, beside the
- * crate that owns them, so `smthrs lint '//crates/flows-jj:cargoClippy'` is the
+ * crate that owns them, so `smithers-build lint '//crates/flows-jj:cargoClippy'` is the
  * same command a pipeline runs. The cargo flags that make a check a gate live in
  * the target implementations, not here.
  *

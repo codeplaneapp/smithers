@@ -375,7 +375,7 @@ const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.Memo
  * describe them then commit against the same database.
  *
  * With a `registry`, the runtime knows every discovered flow as well as the
- * reserved system catalog, so `flows plan <flow>` plans a project flow
+ * reserved system catalog, so `smithers plan <flow>` plans a project flow
  * instead of failing `FlowNotFound`.
  *
  * @category layers

@@ -30,9 +30,9 @@ Consequence: the filesystem-backed `StepBoundary.layer` measures declared read s
 
 ## D5. Host access is closed and decorated
 
-The Host surface is exactly FileSystem, Path, ChildProcessSpawner, Jujutsu, and HttpClient, with Effect Clock and Random treated as swappable built-ins. Four of those slots hold Effect's own tags: `flows` supplies implementations rather than wrappers. The `Shell` service that used to occupy the third slot was deleted for duplicating `effect/unstable/process`, and the one-hop `HttpTransport` that used to occupy the fifth was deleted once Effect's `HttpClient.followRedirects`, composed above the kernel's grant check, gave the same hop-by-hop authorization. The kernel decorates these services rather than asking each flow to remember permission checks. PTY support is deliberately outside core because the engine has no production interactive-session consumer.
+The Host surface is exactly FileSystem, Path, ChildProcessSpawner, Jujutsu, and HttpClient, with Effect Clock and Random treated as swappable built-ins. Four of those slots hold Effect's own tags: Smithers supplies implementations rather than wrappers. The `Shell` service that used to occupy the third slot was deleted for duplicating `effect/unstable/process`, and the one-hop `HttpTransport` that used to occupy the fifth was deleted once Effect's `HttpClient.followRedirects`, composed above the kernel's grant check, gave the same hop-by-hop authorization. The kernel decorates these services rather than asking each flow to remember permission checks. PTY support is deliberately outside core because the engine has no production interactive-session consumer.
 
-Consequence: ambient authority can only shrink through `CapabilitySet.attenuate`, and because the kernel decorates each service tag in place, capability failures reach every consumer — as typed `Permission` failures where `flows` owns the contract, and as `PlatformError` with the structured failure on `cause` where Effect does.
+Consequence: ambient authority can only shrink through `CapabilitySet.attenuate`, and because the kernel decorates each service tag in place, capability failures reach every consumer — as typed `Permission` failures where Smithers owns the contract, and as `PlatformError` with the structured failure on `cause` where Effect does.
 
 ## D6. The journal becomes the authoritative logical WAL; only telemetry admission is optimistic
 
@@ -70,7 +70,7 @@ Consequence: consumers can rebuild read models without acquiring run ownership o
 
 ## D11. Core extension is dependency injection; cell-loop extension uses the plugin kernel
 
-`flows` is extended by providing an Effect `Layer`, and a behavior is replaced by providing a different implementation of the service — or a different constructor option — at the seam that owns it. The rule for what becomes a seam: external effects, nondeterminism, and policies a user may reasonably replace become named services or options with defaults; deterministic algorithms stay ordinary functions.
+Smithers is extended by providing an Effect `Layer`, and a behavior is replaced by providing a different implementation of the service — or a different constructor option — at the seam that owns it. The rule for what becomes a seam: external effects, nondeterminism, and policies a user may reasonably replace become named services or options with defaults; deterministic algorithms stay ordinary functions.
 
 `@smthrs/plugin` is the narrower extension point for the assembled agent loop in `@smthrs/agent`. It resolves and orders plugins, runs the `config` waterfall and `configResolved` observers, merges plugin layers, and lets the cell host add only the waterfalls it dispatches: `cellRegistry`, `cellFlows`, and `cellModelRequest`. The broader speculative engine lifecycle catalog was trimmed rather than advertised: run, step, retry, cache, wait, checkpoint, and journal hooks are not extension points unless a runtime first owns and dispatches them. Those policies continue to use their existing services and constructor options, including `Inconsistency`, `OwnerIdentity`, `StepBoundary`, and the closed Host services.
 

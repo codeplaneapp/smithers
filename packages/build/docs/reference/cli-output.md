@@ -1,6 +1,6 @@
 # Terminal output
 
-What `smthrs` prints while it runs, how it decides between a live display, a
+What `smithers-build` prints while it runs, how it decides between a live display, a
 coloured log, and bare lines, and where each stream goes.
 
 Every command still returns structured data on standard output through
@@ -174,7 +174,7 @@ workspace, on a red `biome lint`. `--ui plain` is what every version printed
 before this page existed; the `tty` sample is ANSI-stripped and the spinner
 frames are omitted.
 
-`smthrs //src:lint --ui plain`, piped:
+`smithers-build //src:lint --ui plain`, piped:
 
 ```
 //src:srcs  ran  3ms
@@ -191,7 +191,7 @@ message: 1 of 2 targets failed
 retryable: false
 ```
 
-`smthrs //src:lint --ui tty` on a terminal:
+`smithers-build //src:lint --ui tty` on a terminal:
 
 ```
 ▸ //src:lint  2 targets · 16 jobs
@@ -207,7 +207,7 @@ Tasks: 1 ran, 1 failed, 2 total · Time: 1.9s
 ✗ 1 of 2 targets failed: //src:lint
 ```
 
-`smthrs //src/Server:test --ui tty`, second run, answered from the cache:
+`smithers-build //src/Server:test --ui tty`, second run, answered from the cache:
 
 ```
 ▸ //src/Server:test  3 targets · 16 jobs
@@ -219,7 +219,7 @@ Tasks: 1 ran, 1 failed, 2 total · Time: 1.9s
 Tasks: 2 ran, 1 cached, 3 total · Time: 4ms
 ```
 
-`smthrs query '//...' --ui tty` on a terminal:
+`smithers-build query '//...' --ui tty` on a terminal:
 
 ```
 LABEL                                           TARGET                  KINDS
@@ -230,7 +230,7 @@ LABEL                                           TARGET                  KINDS
 //data:schema                                   Filegroup
 ```
 
-`smthrs graph '//src:build' --ui tty` on a terminal:
+`smithers-build graph '//src:build' --ui tty` on a terminal:
 
 ```
 //src:build

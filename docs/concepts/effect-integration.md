@@ -1,6 +1,6 @@
 # Effect integration and error taxonomy
 
-This page explains how Smithers Flows uses Effect services, layers, schemas, typed failures, defects, and infrastructure interruption. It covers the execution engine’s error model, not application-specific error design.
+This page explains how Smithers uses Effect services, layers, schemas, typed failures, defects, and infrastructure interruption. It covers the execution engine’s error model, not application-specific error design.
 
 ## Effects are the dependency graph
 

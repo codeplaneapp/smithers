@@ -38,7 +38,7 @@ attrs object becomes a dependency edge. See
 `run` selects operational targets that should never be pulled into ordinary
 build, test, lint, or CI selection. Examples are cleaning, watch processes,
 package scaffolding, and generated-file writes. `NewPackage` receives its name
-through `smthrs run <label> --name <package>`.
+through `smithers-build run <label> --name <package>`.
 
 `docs` selects documentation-parity targets on demand. It is deliberately not
 part of `ci`, whose merged graph contains lint, build, and test only.
@@ -58,7 +58,7 @@ with an `unresolved_action` refusal. The per-target status is on each page under
 
 No. `ExecLive` spawns the tool with `node:child_process` in the workspace, with
 `process.env` merged under the payload `env`. Declared effects exist in the
-action declarations, and the flows filesystem boundary can capture and replay a
+action declarations, and the Smithers filesystem boundary can capture and replay a
 declared `TreeArtifact`, but nothing proves that a process wrote nowhere else.
 See [Actions and boundaries](../concepts/actions-and-boundaries.md).
 

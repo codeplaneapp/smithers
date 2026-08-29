@@ -4,7 +4,7 @@
 smithers build <command> [args] [options]
 ```
 
-`smthrs` is built with [incur](https://github.com/wevm/incur). Every command
+`smithers-build` is built with [incur](https://github.com/wevm/incur). Every command
 returns a structured result on standard output. Option names are the kebab-case
 form of their schema key, so `cacheDir` is `--cache-dir`. A boolean option that
 defaults to true is turned off with its `--no-` form.
@@ -34,9 +34,9 @@ incur supplies its own globals on every command, including `--help`,
 `--version`, `--json`, `--format <toon\|json\|yaml\|md\|jsonl>`,
 `--filter-output <keys>`, `--full-output`, `--schema`, `--llms`, and the
 `--token-count`, `--token-limit`, and `--token-offset` trio. Run
-`smthrs <command> --help` for the full list. Output is TOON by default.
+`smithers-build <command> --help` for the full list. Output is TOON by default.
 
-`--ui <auto|tty|stream|plain>` is the one global `smthrs` adds: it selects the
+`--ui <auto|tty|stream|plain>` is the one global `smithers-build` adds: it selects the
 human renderer on standard error, live on a terminal and bare lines under a
 pipe, and never touches the envelope. [Terminal output](cli-output.md) has the
 selection rules and what each renderer draws.
@@ -63,8 +63,8 @@ Plans and executes the `Install` flow under the pnpm package-manager layer. It
 takes no label.
 
 ```sh
-smthrs install
-smthrs install --workspace /path/to/workspace
+smithers-build install
+smithers-build install --workspace /path/to/workspace
 ```
 
 Options: the [common options](#common-options) only.
@@ -97,10 +97,10 @@ See [Install](../concepts/install.md).
 Executes the build targets a pattern selects.
 
 ```sh
-smthrs build //...
-smthrs build //packages/flow:lib
-smthrs build //packages/... --jobs 4
-smthrs build //... --plan
+smithers-build build //...
+smithers-build build //packages/flow:lib
+smithers-build build //packages/... --jobs 4
+smithers-build build //... --plan
 ```
 
 | Argument  | Description                        |
@@ -133,8 +133,8 @@ Identical to [`build`](#build) except that it selects targets whose target decla
 the `test` kind.
 
 ```sh
-smthrs test //packages/...
-smthrs test //packages/flow:test
+smithers-build test //packages/...
+smithers-build test //packages/flow:test
 ```
 
 Failure codes: `test_failed` for planning errors, `targets_failed` for failed
@@ -148,8 +148,8 @@ Identical to [`build`](#build) except that it selects targets whose target decla
 the `lint` kind.
 
 ```sh
-smthrs lint //...
-smthrs lint :lint
+smithers-build lint //...
+smithers-build lint :lint
 ```
 
 Failure codes: `lint_failed` for planning errors, `targets_failed` for failed
@@ -164,8 +164,8 @@ declares the `docs` kind. Documentation checks are on demand and are not part
 of the `ci` merged graph.
 
 ```sh
-smthrs docs //...
-smthrs docs //packages/plan:docs --plan
+smithers-build docs //...
+smithers-build docs //packages/plan:docs --plan
 ```
 
 Failure codes: `docs_failed` for planning errors, `targets_failed` for failed
@@ -181,9 +181,9 @@ process open, or request an externally gated release action, so `run` is never
 folded into `ci`.
 
 ```sh
-smthrs run //:clean
-smthrs run //:newPackage --name @scope/widget
-smthrs run //packages/app:dev --no-cache
+smithers-build run //:clean
+smithers-build run //:newPackage --name @scope/widget
+smithers-build run //packages/app:dev --no-cache
 ```
 
 In addition to the common execution options, `run` accepts:
@@ -204,8 +204,8 @@ Plans `build`, `test`, and `lint` over one pattern and executes the merged graph
 once.
 
 ```sh
-smthrs ci //...
-smthrs ci //packages/... --plan
+smithers-build ci //...
+smithers-build ci //packages/... --plan
 ```
 
 Options: the [common options](#common-options) plus the execution options.
@@ -233,9 +233,9 @@ targets. Exit code 1 for both.
 Lists labels or evaluates `deps(label)`. Never executes.
 
 ```sh
-smthrs query //...
-smthrs query //packages/flow:lib
-smthrs query 'deps(//packages/engine:lib)'
+smithers-build query //...
+smithers-build query //packages/flow:lib
+smithers-build query 'deps(//packages/engine:lib)'
 ```
 
 | Argument | Description                          |
@@ -272,8 +272,8 @@ Failure: error code `query_failed`, exit code 1.
 Prints the target graph without executing it.
 
 ```sh
-smthrs graph //packages/engine:lib
-smthrs graph //packages/... --mermaid
+smithers-build graph //packages/engine:lib
+smithers-build graph //packages/... --mermaid
 ```
 
 | Argument  | Description                        |

@@ -3,7 +3,7 @@ import { Smithers as S } from "@smthrs/targets"
 
 // The whole app is declared here. `App` is the manifest plus the Cloudflare
 // dev/build/deploy targets derived from it; `Package` is the target map the
-// `smthrs` CLI addresses as //:<name>. `App` is not a target, so exporting it
+// `smithers-build` CLI addresses as //:<name>. `App` is not a target, so exporting it
 // beside `Package` is legal for the loader.
 export const App = CreateApp({
   name: "__APP_NAME__",

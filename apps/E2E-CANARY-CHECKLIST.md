@@ -48,9 +48,8 @@ The problem is above unit level:
 4. **Three of the four e2e scripts cannot run unattended** — they need a
    hand-started dev server and a hardcoded macOS Chrome path.
 5. **All five canary scripts are machine-bound** — they `createRequire` a
-   Playwright install at the absolute path
-   `/Users/williamcory/flows/ui/package.json`. Playwright is not a dependency
-   of any package in this repo.
+   Playwright install at a machine-local absolute path outside this
+   repository. Playwright is not a dependency of any package in this repo.
 
 ---
 
@@ -313,9 +312,10 @@ same self-boot the worker script has, and the same browser resolution
 `launch-checklist/BrowserLaunch.ts` already implements.
 
 **I-3. Playwright is not a dependency.** `live-check.ts`,
-`live-signed-in-check.ts`, and `live-workflow-check.ts` all do
-`createRequire("/Users/williamcory/flows/ui/package.json")`. They run on one
-laptop and nowhere else. Add `@playwright/test` as a devDependency.
+`live-signed-in-check.ts`, and `live-workflow-check.ts` all `createRequire` a
+Playwright install at a machine-local absolute path outside this repository.
+They run on one laptop and nowhere else. Add `@playwright/test` as a
+devDependency.
 
 **I-4. `apps-deploy.yml` runs no tests and no post-deploy probe.** It installs,
 builds, deploys. A deploy that breaks the app is indistinguishable from one
@@ -325,8 +325,8 @@ that does not.
 only, so the e2e and canary scripts drift silently.
 
 **I-6. The nine backing Workers are not in this repo.** They live in a dirty
-branch of `~/flows/ui/workers/`. Nothing in CI can build, test, or deploy them,
-and CN-18 cannot be written until they move.
+branch of `smithersai/ui`, under `workers/`. Nothing in CI can build, test, or
+deploy them, and CN-18 cannot be written until they move.
 
 **I-7. `web-chat-e2e.ts` asserts a genuine streamed reply**, which means a real
 model credential and real spend. Split it: a hermetic variant against the stub

@@ -102,7 +102,7 @@ That is the intended upgrade path: start with a default target, and write a real
 
 ## Limitation: no edges
 
-Synthesis passes one static `attrs` value to every match. In the flows workspace
+Synthesis passes one static `attrs` value to every match. In the Smithers workspace
 that value is `{ packageManager }`, so every synthesized package runs the
 declared toolchain but has no dependency edges, even when its `package.json`
 names workspace siblings.

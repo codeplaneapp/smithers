@@ -1,5 +1,5 @@
 /**
- * First-wave LLM lint targets for the flows software factory.
+ * First-wave LLM lint targets for the Smithers software factory.
  *
  * Each target reviews the paths a diff against `origin/main` touched, against
  * one rubric, through a cheap codex agent. `durableIdentityGuard` fails the
@@ -15,7 +15,7 @@ const changes = Smithers.gitDiff("origin/main")
 const model = "gpt-5.6-luna"
 
 /** Shared framing prepended to every rubric. */
-const prompt = "You are reviewing a diff in `flows`, an Effect v4 coding-agent harness written from " +
+const prompt = "You are reviewing a diff in `smithers`, an Effect v4 coding-agent harness written from " +
   "scratch. Report only violations of the rubric below. Judgment calls that the rubric does not " +
   "cover are not findings. Prefer no finding over a speculative one."
 

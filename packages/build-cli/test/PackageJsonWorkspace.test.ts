@@ -76,7 +76,7 @@ describe("manifest declarations in a BUILD.ts", () => {
       readonly [key: symbol]: { readonly attrs: { readonly fields: Record<string, unknown> } }
     })[Symbol.for("smithers-build/Target") as symbol]!
     const attrs = metadata.attrs.fields
-    expect(attrs["scripts"]).toEqual({ build: "smthrs build //packages/widget:lib" })
+    expect(attrs["scripts"]).toEqual({ build: "smithers-build build //packages/widget:lib" })
     // Entry points stay package relative: a manifest's paths resolve against
     // the directory the manifest sits in, not against the workspace root.
     expect(attrs["main"]).toBe("./dist/cjs/index.js")

@@ -18,16 +18,75 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
 const packagesRoot = join(repoRoot, "packages")
 const packageGroups = new Set(["engine", "agent", "tooling"])
-export const releaseGroup = "engine"
 
 /**
- * Reads every publishable engine workspace under `packages/`, keyed by
- * directory name.
+ * The groups the 1.0 release train packs.
  *
- * Membership is derived from `smthrs.group`, never restated. Every manifest
- * must declare a known group so a new package cannot silently fall outside a
- * release train. Directories a deleted package left behind carry no manifest
- * and are skipped.
+ * 0.x shipped the engine group alone and left the agent layer for a second
+ * train. Smithers 1.0 gives every public first-party package one synchronized
+ * version (PLAN.md "Versioning model"), so both groups release together.
+ * `tooling` stays out: the build graph, its CLI, and the hosted cache are
+ * private (rc-contract.md section 3.2).
+ */
+export const releaseGroups = new Set(["engine", "agent"])
+
+/**
+ * The package names published at 1.0.0-rc.0, from rc-contract.md section 3.1.
+ *
+ * Group membership alone would let a new or newly public package join the
+ * release by declaring a group, and it would let a package leave by flipping
+ * `private`. Both are release decisions, so the roster is restated here and
+ * checked against what the workspace actually declares.
+ */
+export const publishedPackages = [
+  "@smthrs/agent",
+  "@smthrs/artifacts",
+  "@smthrs/canonical",
+  "@smthrs/capability",
+  "@smthrs/cli",
+  "@smthrs/control",
+  "@smthrs/core",
+  "@smthrs/crypto",
+  "@smthrs/database",
+  "@smthrs/engine",
+  "@smthrs/engine-store",
+  "@smthrs/flow",
+  "@smthrs/flows",
+  "@smthrs/gateway",
+  "@smthrs/harness",
+  "@smthrs/jj",
+  "@smthrs/journal",
+  "@smthrs/kernel",
+  "@smthrs/keys",
+  "@smthrs/mcp",
+  "@smthrs/memory",
+  "@smthrs/model",
+  "@smthrs/notifications",
+  "@smthrs/observability",
+  "@smthrs/patterns",
+  "@smthrs/plan",
+  "@smthrs/platform-browser",
+  "@smthrs/platform-bun",
+  "@smthrs/platform-node",
+  "@smthrs/plugin",
+  "@smthrs/registry",
+  "@smthrs/run-store",
+  "@smthrs/sandbox",
+  "@smthrs/std",
+  "@smthrs/step-cache",
+  "@smthrs/sync",
+  "@smthrs/testing",
+  "@smthrs/time-travel",
+  "smthrs"
+]
+
+/**
+ * Reads every publishable workspace under `packages/`, keyed by directory name.
+ *
+ * Membership is derived from `smthrs.group` and `private`, then checked against
+ * {@link publishedPackages}. Every manifest must declare a known group so a new
+ * package cannot silently fall outside a release train. Directories a deleted
+ * package left behind carry no manifest and are skipped.
  */
 export const readWorkspaceManifests = (root = packagesRoot) => {
   const manifests = new Map()
@@ -40,8 +99,20 @@ export const readWorkspaceManifests = (root = packagesRoot) => {
     if (!packageGroups.has(group)) {
       throw new Error(`${manifestPath}: smthrs.group must be one of ${[...packageGroups].join(", ")}`)
     }
-    if (manifest.private || group !== releaseGroup) continue
+    if (manifest.private || !releaseGroups.has(group)) continue
     manifests.set(entry.name, manifest)
+  }
+  const declared = [...manifests.values()].map((manifest) => manifest.name).sort()
+  const expected = [...publishedPackages].sort()
+  const missing = expected.filter((name) => !declared.includes(name))
+  const unexpected = declared.filter((name) => !expected.includes(name))
+  if (missing.length > 0 || unexpected.length > 0) {
+    throw new Error(
+      "the publishable workspace set does not match rc-contract.md section 3.1" +
+        (missing.length > 0 ? `\n  missing: ${missing.join(", ")}` : "") +
+        (unexpected.length > 0 ? `\n  unexpected: ${unexpected.join(", ")}` : "") +
+        "\nEither restore the manifest's `private` flag and group or update publishedPackages in this file."
+    )
   }
   return manifests
 }
@@ -268,6 +339,16 @@ export const main = async (args) => {
   }
   const outputDirectory = resolve(repoRoot, destination)
   await mkdir(outputDirectory, { recursive: true })
+  // A pack directory is the whole release artifact, not an accumulator.
+  // Leaving an earlier version's tarballs beside this one makes the directory
+  // disagree with manifest.json, which is what scripts/smoke-release.mjs
+  // checks before it trusts the set. CI packs into a fresh runner.temp, so the
+  // stale files only ever appeared in a local `dist/release-packs`.
+  for (const entry of await readdir(outputDirectory)) {
+    if (entry.endsWith(".tgz") || entry === "manifest.json") {
+      await rm(join(outputDirectory, entry), { force: true })
+    }
+  }
   const stagingRoot = await mkdtemp(join(tmpdir(), "smthrs-release-pack-"))
   try {
     const packed = []

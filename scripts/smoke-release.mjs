@@ -23,6 +23,16 @@ import { join, resolve } from "node:path"
 
 const repoRoot = resolve(import.meta.dirname, "..")
 
+/**
+ * Packages whose published entry throws on purpose.
+ *
+ * `smthrs` keeps its place on the registry only to tell an upgrading project
+ * where the code went, so a successful load is the failure (rc-contract.md
+ * section 3.3).
+ */
+const noticeOnly = new Set(["smthrs"])
+const noticeFirstLine = "smthrs 1.0 is a migration notice, not a runtime."
+
 const run = (command, args, cwd) =>
   new Promise((resolveRun, reject) => {
     const child = spawn(command, args, { cwd, stdio: "inherit" })
@@ -165,6 +175,23 @@ try {
       ["--eval", `require(${JSON.stringify(entry.name)})`],
       smokeRoot
     )
+    if (noticeOnly.has(entry.name)) {
+      // The unscoped `smthrs` package is a migration notice: loading is
+      // supposed to fail, with the notice as the message (rc-contract.md
+      // section 3.3). A load that succeeds means the notice stopped working.
+      const results = [["ESM import", esm], ["CJS require", cjs]]
+      const wrong = results.filter(([, result]) => result.ok || !result.output.includes(noticeFirstLine))
+      const status = wrong.length === 0 ? "ok  " : "FAIL"
+      console.log(
+        `smoke ${status} ${entry.name}@${entry.version} (${entry.filename}, ${(size / 1024).toFixed(1)} kB, migration notice)`
+      )
+      for (const [label, result] of wrong) {
+        failures.push(
+          `${entry.name}: ${label} did not report the migration notice\n${result.output.trimEnd()}`
+        )
+      }
+      continue
+    }
     const status = esm.ok && cjs.ok ? "ok  " : "FAIL"
     console.log(
       `smoke ${status} ${entry.name}@${entry.version} (${entry.filename}, ${(size / 1024).toFixed(1)} kB)`

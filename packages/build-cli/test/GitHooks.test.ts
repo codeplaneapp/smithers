@@ -123,7 +123,7 @@ describe("render goldens", () => {
 })
 
 describe("script behavior", () => {
-  it("fails open with a warning when the smthrs CLI is absent", async () => {
+  it("fails open with a warning when the smithers-build CLI is absent", async () => {
     const root = await temporaryRoot()
     const [hook] = GitHooks.render({ preCommit: "//:preCommit" })
     const script = NodePath.join(root, hook!.file)
@@ -132,11 +132,11 @@ describe("script behavior", () => {
     await Fs.mkdir(empty)
     const result = await runScript(script, empty)
     expect(result.exitCode).toBe(0)
-    expect(result.stderr).toContain("smthrs: CLI not found on PATH")
+    expect(result.stderr).toContain("smithers-build: CLI not found on PATH")
     expect(result.stderr).toContain("fail-open")
   })
 
-  it("invokes the bound label when the smthrs CLI is present", async () => {
+  it("invokes the bound label when the smithers-build CLI is present", async () => {
     const root = await temporaryRoot()
     const [hook] = GitHooks.render({ prePush: "//:prePush" })
     const script = NodePath.join(root, hook!.file)
@@ -145,7 +145,7 @@ describe("script behavior", () => {
     await Fs.mkdir(bin)
     const log = NodePath.join(root, "argv.log")
     await Fs.writeFile(
-      NodePath.join(bin, "smthrs"),
+      NodePath.join(bin, "smithers-build"),
       `#!/bin/sh\nprintf '%s' "$1" > '${log}'\n`,
       { encoding: "utf8", mode: 0o755 }
     )

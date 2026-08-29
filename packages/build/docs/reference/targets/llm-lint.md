@@ -105,11 +105,11 @@ Finding = { file: string, line: number, severity: Severity, message: string }
 
 ## Status
 
-|           |                                                                                                          |
-| --------- | -------------------------------------------------------------------------------------------------------- |
-| Kinds     | `lint`                                                                                                   |
-| Cacheable | Never; remote model output is not reproducible                                                           |
-| Executes  | **Yes.** The CLI executor provides `LlmReviewLive({ workspaceRoot })`, so `smthrs lint` runs the review. |
+|           |                                                                                                                  |
+| --------- | ---------------------------------------------------------------------------------------------------------------- |
+| Kinds     | `lint`                                                                                                           |
+| Cacheable | Never; remote model output is not reproducible                                                                   |
+| Executes  | **Yes.** The CLI executor provides `LlmReviewLive({ workspaceRoot })`, so `smithers-build lint` runs the review. |
 
 Planning, `query`, and `graph` work normally.
 

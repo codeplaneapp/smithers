@@ -57,7 +57,7 @@ describe("targets", () => {
       readonly bin: { readonly package: string; readonly bin: string }
       readonly changes: ReadonlyArray<string>
     }
-    expect(attrs.bin).toMatchObject({ package: "@smthrs/create-app", bin: "smthrs-routes" })
+    expect(attrs.bin).toMatchObject({ package: "@smthrs/create-app", bin: "smithers-routes" })
     expect(attrs.changes).toEqual(["routes.gen.ts", "routes.ui.gen.ts"])
   })
 

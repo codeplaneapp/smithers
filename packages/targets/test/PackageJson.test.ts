@@ -204,8 +204,8 @@ describe("script resolution", () => {
     })
     const fields = manifest(declaration, [[lib, "//packages/widget:lib"], [test, "//packages/widget:test"]])
     expect(fields["scripts"]).toEqual({
-      build: "smthrs build //packages/widget:lib",
-      test: "smthrs test //packages/widget:test"
+      build: "smithers-build build //packages/widget:lib",
+      test: "smithers-build test //packages/widget:test"
     })
   })
 
@@ -353,7 +353,7 @@ describe("template merge", () => {
     expect(fields["scripts"]).toEqual({
       test: "vitest run",
       "test:coverage": "vitest run --coverage",
-      build: "smthrs build //packages/widget:lib"
+      build: "smithers-build build //packages/widget:lib"
     })
   })
 

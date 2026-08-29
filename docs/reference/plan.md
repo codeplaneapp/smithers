@@ -84,7 +84,7 @@ actually bites.
 
 ## PlanDiff
 
-`PlanDiff.diff(previous, next)` is `flows plan --diff` as a value: `added`,
+`PlanDiff.diff(previous, next)` is `smithers plan --diff` as a value: `added`,
 `removed`, `rekeyed`, `unchanged`. The **verdict** is the key — two nodes with
 the same id and key are the same step. The **attribution** on a re-keyed node
 (`changed: ["body", "input[1]"]`) is a report for a human, derived field by

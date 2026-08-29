@@ -46,7 +46,7 @@ const isFile = (path: string) => {
 // the same class of reason, decided in review when smithers build was absorbed into
 // this repo (2026-08-15). It is the BUILD.ts build system — `@smthrs/build`
 // (install/package-manager actions), `@smthrs/targets` (BUILD.ts rules), and
-// `@smthrs/build-cli` (the `smthrs` binary) — not part of the durable flow engine
+// `@smthrs/build-cli` (the `smithers-build` binary) — not part of the durable flow engine
 // surface this barrel exists to gather.
 // Re-exporting them would also break two invariants the barrel holds today:
 // `@smthrs/targets` and `@smthrs/build-cli` are `private: true` and never published, so
@@ -118,7 +118,7 @@ describe("barrel", () => {
     expect(packageNamesForGroup("agent").length).toBeGreaterThan(0)
   })
 
-  it("excludes the smthrs build tooling, and there is some to exclude", () => {
+  it("excludes the smithers-build build tooling, and there is some to exclude", () => {
     // Same guard as the platform bundles above: the tooling group must remain
     // represented rather than turning its exclusion into a silent no-op.
     expect(packageNamesForGroup("tooling").sort()).toEqual(["build", "build-cli", "create-app", "targets"])

@@ -30,9 +30,9 @@ This entry point is Node-only by construction: it falls back to the `@effect/pla
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/platform-bun` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/platform-bun/src/index.ts) | Bun, Node |
-| `@smthrs/platform-bun/BunHost` | [src/BunHost.ts](https://github.com/smithersai/flows/blob/main/packages/platform-bun/src/BunHost.ts) | Bun, Node |
-| `@smthrs/platform-bun/BunFileSystem` | [src/BunFileSystem.ts](https://github.com/smithersai/flows/blob/main/packages/platform-bun/src/BunFileSystem.ts) | Bun, Node |
+| `@smthrs/platform-bun` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-bun/src/index.ts) | Bun, Node |
+| `@smthrs/platform-bun/BunHost` | [src/BunHost.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-bun/src/BunHost.ts) | Bun, Node |
+| `@smthrs/platform-bun/BunFileSystem` | [src/BunFileSystem.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-bun/src/BunFileSystem.ts) | Bun, Node |
 
 ## Exports
 

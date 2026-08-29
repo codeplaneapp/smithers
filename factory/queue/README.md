@@ -1,10 +1,10 @@
 # factory/queue/
 
 The intake of the software factory. One markdown file per requested change;
-presence is registration. The design is in the spec vault:
-`docs/specs/Concepts/Software Factory.md` (process),
-`docs/specs/Concepts/Clean History.md` (the `vibe`/`main` branch model), and
-`docs/specs/Concepts/Colocated Docs.md` (documentation planes).
+presence is registration. The design is in the spec vault, a separate
+repository: the "Software Factory" spec (process), the "Clean History" spec
+(the `vibe`/`main` branch model), and the "Colocated Docs" spec (documentation
+planes).
 
 ## Item format
 

@@ -1,169 +1,109 @@
-# dependencies (bun install)
-node_modules
+# Dependencies
+node_modules/
 
-# local gstack artifacts (security reports, analytics) — keep out of the repo
-.gstack/
-
-# output
-out
-dist
-# daily-ceo-intel: local archive + app-owned sqlite state (config/ stays tracked)
-/reports/????-??-??.md
-/reports/????-??-??.html
-/reports/????-??-??.json
-/data/*.sqlite*
-# staged local-UI bundle: built at pack time, shipped via apps/cli files, not committed
-apps/cli/ui-dist/
-artifacts/
+# Build output
+dist/
+out/
+packages/*/dist/
+packages/*/dist-chrome/
+packages/*/dist-firefox/
+*.tsbuildinfo
 *.tgz
 
-# code coverage
-coverage
+# Cargo build output (crates/flows-jj and friends)
+/target
+
+# Electrobun build output
+app/.electrobun/
+
+# Caches
+.artifacts/
+.eslintcache
+.cache/
+.pnpm-store/
+.nyc_output/
+coverage/
 *.lcov
 
-# logs
-logs
+# Logs and profiles
 *.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
-examples/run-*.log
-# Tracked source directory: the smithers app's logs surface lives here.
-!apps/smithers/src/logs/
-!apps/smithers/src/logs/**
+*.cpuprofile
+tui-debug.log
+default.profraw
 
-# dotenv environment variable files
+# Environment
 .env
+.env.local
 .env.development.local
 .env.test.local
 .env.production.local
-.env.local
 
-# caches
-.eslintcache
-.cache
-*.tsbuildinfo
-
-# tsup transient bundled config (written during --dts builds, must never be committed)
-**/tsup.config.bundled_*.mjs
-
-# playwright
-playwright-report
-test-results
-tui-buffer.txt
-apps/cli/tmp/
-
-# IntelliJ based IDEs
-.idea
-
-# Finder (MacOS) folder config
+# Editor and OS files
+.vscode/
+.zed/
+.idea/
+.claude/
+.opencode/
+.gemini-clipboard/
+*.swp
+*.swo
+*~
 .DS_Store
 
-# Gemini
-.gemini-clipboard/
-
-# Local workflow/runtime reports
-.smithers/reports/
-.claude/
-.claude/scheduled_tasks.lock
-.kanban-reports/
-pg_durable-smithers-report.html
-
-# Profiling artifacts
-default.profraw
-
-# Deno
-deno.lock
-
-# Smithers runtime artifacts
-**/.smithers/sandboxes/
-**/.smithers/executions/
-# Local `smithers bug-report` drafts (per-machine, not history)
-**/.smithers/bug-reports/
-# Benchmark eval staging projects written by `smithers eval` runs
-**/.smithers/eval-runs/
-# Behavioral-test temp op-console stores (random suffixes)
-**/.smithers-op-console-*/
-# PGlite/Postgres durable store (default backend's data dir) + migration marker
-**/.smithers/pg/
-**/.smithers/migrated.json
-# Claude Code plugin monitor subscriptions (per-machine session state)
-**/.smithers/claude-mirror-subscriptions.json
+# Playwright and other test output
+playwright-report/
+test-results/
 .tui-test/
+
+# Local agent and review scratch
+.gstack/
+.smithers-review/
+.e2e-flakes/
+REVIEW-*.md
+packages/*/REVIEW-*.md
+packages/std/test/__repro.test.ts
+packages/std/test/ScratchGrepTiming.test.ts
+compaction-results/
+syntax.jsonl
+out.jsonl
+out.html
+pi-*.html
+collect.sh
+todo.md
+plans/
+.pi/hf-sessions/
+.pi/hf-sessions-backup/
+.pi_config/
+.money-scratch/
+
+# Working copies
 .worktrees/
 worktrees/
-reference/
-!docs/reference/
-!docs/reference/*.mdx
-!deploy/reference/
-!deploy/reference/**
-codex/
-!packages/agents/tests/fixtures/cli-transcripts/codex/
-!packages/agents/tests/fixtures/cli-transcripts/codex/**
-ghostty/
-burns
-observability/data/
-# The observability stack writes runtime data under apps/observability/data/; the
-# bare `observability/data/` rule above is root-anchored (mid-path slash) and never
-# matched it, so grafana/prometheus/loki/tempo state kept polluting the worktree.
-apps/observability/data/
-# Server test harness scratch dirs (`.test-serve-<rand>/` and `.test-workflows-<rand>/`
-# with sqlite db + generated tsx).
-packages/server/tests/.test-serve-*/
-packages/server/tests/.test-workflows-*/
-packages/server/tests/.test-lifecycle-*/
-# Engine dynamic-workflow e2e scratch dirs (sqlite + generated tsx, cleaned after the run
-# but visible to mid-test jj snapshots).
-packages/engine/tests/.tmp-dynamic-wf-*/
-# CLI pack-install e2e scratch dirs (fixture pack + lockfile, cleaned after the run but
-# visible to a concurrent snapshot, which fails the release stale-artifact check).
-apps/cli/tests/.tmp-*/
-**/cov*/
-**/tmp/verification/
-.context/
 
-# External reference repos
-.mastra-ref/
-.opentui_temp/
-temporal-*
+# Infrastructure-as-code and edge local state
+.alchemy/
+.wrangler/
 
-# Worktree script SQLite artifacts
-scripts/worktree-feature/*.db*
+# flows engine state (artifact CAS under .flows/objects, fork lanes under
+# .flows/forks) — derived and engine-owned. jj must not snapshot it: a restore
+# to a pre-publication change would delete CAS blobs live cache rows reference.
+.flows/
+
+# 0.x Smithers pack and run store. `.smithers/` is the 0.x directory the
+# migration workflow reads in a consumer project; nothing in this repository
+# tracks one except the Phase 6 migration fixtures.
+.smithers/
+!packages/build-cli/test/fixtures/force-spec/.smithers/
+packages/*/.smithers/
 smithers.db
 smithers.db-shm
 smithers.db-wal
-smithers.db.bak
-smithers.db.compact
-smithers.db.compact-journal
-workflows/*.db
-workflows/*.db-shm
-workflows/*.db-wal
 
-# smithers review (apps/review) per-repo state
-.smithers-review/
-.smithers/evals/reports/
+# Reference corpus — shallow clones read by agents, never committed.
+reference/*
+!reference/electrobun-shell/
 
-# Alchemy IaC local state
-.alchemy/
-
-# Wrangler local cache
-.wrangler/
-
-# smithers ui scratch workspaces
-packages/server/.smithers-root-landing-ui-*/
-
-# GitHub Actions daily canary cache restored locally only when debugging.
-.smithers-canary-state/
-# Fault-matrix rolling CI history and per-run reports.
-.e2e-flakes/
-
-# Stray local screenshots
-/output-fields.png
-
-# Local Python environment for the marketing technical deck.
-/marketing/technical-deck/.venv/
-
-# Claude plugin mirror runtime state
-.smithers/claude-mirror-subscriptions.json
-.docs-package-import-check.runtime.mjs
-
-# Server resume-test scratch workspaces (created and torn down by bun test)
-packages/server/tests/.test-resume-*/
+# Launch-checklist dry runs prove the runner, not the product: they touch no
+# origin, so they are never evidence and never belong in the tracked report
+# trail under apps/reports/launch-checklist/.
+apps/reports/launch-checklist/*-dry-run/

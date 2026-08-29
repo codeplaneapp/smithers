@@ -188,7 +188,7 @@ export const PtySessionSchema = z.object({
 export type PtySession = z.infer<typeof PtySessionSchema>
 
 /*
- * One Smithers target as `smthrs query '//...' --format json` lists it
+ * One Smithers target as `smithers-build query '//...' --format json` lists it
  * (LOCAL-APP.md "Targets: load and run"): the loader's `{ label, target,
  * kinds }` row plus the label split into its package and name.
  */

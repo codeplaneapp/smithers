@@ -8,8 +8,9 @@ import {
   dependencyOrder,
   packResultFilename,
   publicationManifest,
+  publishedPackages,
   readWorkspaceManifests,
-  releaseGroup,
+  releaseGroups,
   workspaceDependencies,
   workspaces
 } from "./pack-release.mjs"
@@ -88,7 +89,7 @@ test("publicationManifest rejects a package without publication exports", () => 
   )
 })
 
-test("workspaces covers every non-private engine package under packages/", () => {
+test("workspaces covers every non-private engine and agent package under packages/", () => {
   // Recomputed here rather than imported, so a change to the derivation in
   // pack-release.mjs has to agree with an independent reading of packages/.
   const packagesRoot = join(repoRoot, "packages")
@@ -98,13 +99,43 @@ test("workspaces covers every non-private engine package under packages/", () =>
     .filter((name) => existsSync(join(packagesRoot, name, "package.json")))
     .map((name) => [name, JSON.parse(readFileSync(join(packagesRoot, name, "package.json"), "utf8"))])
   const published = manifests
-    .filter(([, manifest]) => !manifest.private && manifest.smthrs?.group === "engine")
+    .filter(([, manifest]) => !manifest.private && releaseGroups.has(manifest.smthrs?.group))
     .map(([name]) => name)
 
-  assert.equal(releaseGroup, "engine")
+  assert.deepEqual([...releaseGroups].sort(), ["agent", "engine"])
   assert.deepEqual([...workspaces].sort(), published.sort())
-  assert.ok(manifests.some(([, manifest]) => !manifest.private && manifest.smthrs?.group === "agent"))
-  assert.ok(manifests.some(([, manifest]) => manifest.smthrs?.group === "tooling"))
+  // Every tooling package is private. The build graph, its CLI, the typed
+  // BUILD.ts rules, and the hosted cache deployment are workspace machinery,
+  // not a supported install (rc-contract.md section 3.2).
+  const tooling = manifests.filter(([, manifest]) => manifest.smthrs?.group === "tooling")
+  assert.ok(tooling.length > 0)
+  assert.deepEqual(tooling.filter(([, manifest]) => manifest.private !== true).map(([name]) => name), [])
+})
+
+test("the packed set is exactly the 39 names the RC contract publishes", () => {
+  // rc-contract.md section 3.1 is the release decision; group membership is
+  // only how it is enforced. Restating the roster here means a package that
+  // joins or leaves the release has to change both files in one diff.
+  const manifests = readWorkspaceManifests()
+  const packed = workspaces.map((directory) => manifests.get(directory).name)
+
+  assert.equal(publishedPackages.length, 39)
+  assert.deepEqual([...packed].sort(), [...publishedPackages].sort())
+  assert.ok(publishedPackages.includes("smthrs"), "the unscoped deprecation notice publishes with the RC")
+})
+
+test("every packed manifest carries the RC version and the rc dist-tag", () => {
+  // A prerelease published to `latest` would upgrade every `smthrs`-adjacent
+  // install that tracks the tag, so the tag is pinned per manifest as well as
+  // on the publish command (docs/release-runbook.md).
+  const manifests = readWorkspaceManifests()
+  for (const directory of workspaces) {
+    const manifest = manifests.get(directory)
+    assert.equal(manifest.version, "1.0.0-rc.0", `${manifest.name} version`)
+    assert.equal(manifest.publishConfig.tag, "rc", `${manifest.name} publishConfig.tag`)
+    assert.equal(manifest.publishConfig.access, "public", `${manifest.name} publishConfig.access`)
+    assert.equal(manifest.publishConfig.provenance, true, `${manifest.name} publishConfig.provenance`)
+  }
 })
 
 test("pack-release lists workspace directories and package names in publication order", () => {

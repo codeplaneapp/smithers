@@ -1,5 +1,5 @@
 /**
- * `smthrs create-app <dir>`: copy a `@smthrs/create-app` template into a new
+ * `smithers-build create-app <dir>`: copy a `@smthrs/create-app` template into a new
  * directory.
  *
  * The templates ship inside `@smthrs/create-app`, so the CLI resolves them

@@ -1,16 +1,38 @@
 #!/usr/bin/env node
+/**
+ * Every import a workspace source makes must be declared by that workspace.
+ *
+ * pnpm links the whole workspace under one `node_modules`, so a package can
+ * import a sibling it never declared and still resolve locally. A consumer who
+ * installs the published tarball gets a module-not-found error instead. This
+ * gate is what PLAN.md Phase 3 means by "no package imports files through
+ * unpublished workspace-relative paths".
+ *
+ * Test files, config files, and anything under a `scripts/` directory may use
+ * `devDependencies`; everything else may use only runtime, peer, and optional
+ * dependencies.
+ *
+ * Run it with `pnpm exec smithers-build test '//scripts:dependencyBoundaries'`, or
+ * directly with `node scripts/check-dependency-boundaries.mjs`.
+ */
 import { builtinModules } from "node:module";
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, extname, join, relative, resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
 
-const repoRoot = process.cwd();
+// Resolved from this file, not from `process.cwd()`: the build system runs a
+// target from the directory that owns it, and this gate is about the whole
+// workspace.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// The `pnpm-workspace.yaml` membership globs: `packages/*` and `apps/*` are
+// scanned by directory, `examples` and `packages/build/infra` are named.
 const workspaceRoots = ["packages", "apps"];
-const directWorkspaceDirs = ["e2e", ".smithers"];
+const directWorkspaceDirs = ["examples", join("packages", "build", "infra")];
 const sourceExtensions = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
 const ignoredDirs = new Set([
   ".alchemy",
+  ".flows",
   ".git",
   ".jj",
   ".claude",
@@ -21,7 +43,11 @@ const ignoredDirs = new Set([
   "coverage",
   "dist",
   "eval-runs",
+  // The Smithers 0.x tree later phases port from. It is outside the workspace
+  // and no live module imports it.
+  "legacy",
   "node_modules",
+  "target",
   "tmp",
 ]);
 const builtinPackages = new Set(["bun", ...builtinModules, ...builtinModules.map((mod) => `node:${mod}`)]);
@@ -91,9 +117,9 @@ export function collectSourceFiles(dir, out, nestedPackageDirs) {
     }
     if (stats.isSymbolicLink()) continue;
     if (stats.isDirectory()) {
-      // A nested package.json with a name marks a standalone package (e.g. a
-      // shipped plugin such as apps/cli/src/openclaw-plugin). Its files are
-      // checked against its own manifest, not the enclosing workspace's.
+      // A nested package.json with a name marks a standalone package (a
+      // template, fixture, or shipped plugin). Its files are checked against
+      // its own manifest, not the enclosing workspace's.
       if (nestedPackageDirs && readPackage(child)) {
         nestedPackageDirs.push(child);
         continue;
@@ -102,25 +128,72 @@ export function collectSourceFiles(dir, out, nestedPackageDirs) {
       continue;
     }
     if (!stats.isFile()) continue;
+    // Build-graph declarations belong to the root workspace, not the package
+    // they sit in: the build CLI loads them from the repository root against
+    // the root install. `collectGraphFiles` gives them to the root package.
+    if (entry === "BUILD.ts" || entry === "PACKAGE.ts") continue;
     if (sourceExtensions.has(extname(entry))) out.push(child);
   }
 }
 
-/** @param {WorkspacePackage} pkg @returns {{ files: string[]; nestedPackageDirs: string[] }} */
-function filesForPackage(pkg) {
+/**
+ * Collects every build-graph declaration in the tree, so the root workspace
+ * checks them against the root manifest.
+ *
+ * The build CLI loads every `BUILD.ts` from the repository root against the
+ * root install, which is why `apps/server/BUILD.ts` may import
+ * `@smthrs/targets` without `apps/server` declaring it. Declarations inside a
+ * scaffolding template describe the app the template generates, not this
+ * repository, so a directory holding a manifest that is not a workspace member
+ * is not descended into.
+ *
+ * @param {string} dir Repo-relative POSIX path, or "" for the repository root.
+ * @param {Set<string>} memberDirs Repo-relative directories of workspace members.
+ * @param {string[]} out
+ */
+export function collectGraphFiles(dir, memberDirs, out) {
+  const absDir = join(repoRoot, dir === "" ? "." : dir);
+  if (!isDirectory(absDir)) return;
+  for (const entry of readdirSync(absDir)) {
+    if (ignoredDirs.has(entry)) continue;
+    const child = dir === "" ? entry : join(dir, entry);
+    const absChild = join(repoRoot, child);
+    let stats;
+    try {
+      stats = lstatSync(absChild);
+    } catch {
+      continue;
+    }
+    if (stats.isSymbolicLink()) continue;
+    if (stats.isDirectory()) {
+      const foreignProject = existsSync(join(absChild, "package.json")) &&
+        !memberDirs.has(child) &&
+        ![...memberDirs].some((member) => member.startsWith(`${child}${sep}`));
+      if (foreignProject) continue;
+      collectGraphFiles(child, memberDirs, out);
+      continue;
+    }
+    if (entry === "BUILD.ts" || entry === "PACKAGE.ts") out.push(child);
+  }
+}
+
+/** @param {WorkspacePackage} pkg @param {Set<string>} [memberDirs] @returns {{ files: string[]; nestedPackageDirs: string[] }} */
+function filesForPackage(pkg, memberDirs = new Set()) {
   /** @type {string[]} */
   const files = [];
   /** @type {string[]} */
   const nestedPackageDirs = [];
   if (pkg.dir === ".") {
-    // The root workspace's own sources live under scripts/.
+    // The root workspace's own sources live under scripts/, and it owns every
+    // build-graph declaration in the tree.
     collectSourceFiles("scripts", files, nestedPackageDirs);
+    collectGraphFiles("", memberDirs, files);
   } else if (isDirectory(join(repoRoot, pkg.dir, "src"))) {
     collectSourceFiles(join(pkg.dir, "src"), files, nestedPackageDirs);
   } else {
-    // Some workspaces (e.g. e2e) have no src/ and keep their sources at the
-    // package root (faults/, exports/, …). Scan the whole package dir; the
-    // recursive collector already skips node_modules/dist/coverage.
+    // Some workspaces have no src/ and keep their sources at the package root.
+    // Scan the whole package dir; the recursive collector already skips
+    // node_modules, dist, coverage, and legacy.
     collectSourceFiles(pkg.dir, files, nestedPackageDirs);
   }
   return { files: files.sort(), nestedPackageDirs: nestedPackageDirs.sort() };
@@ -228,7 +301,16 @@ function dependencyNames(manifest, section) {
   return deps && typeof deps === "object" && !Array.isArray(deps) ? new Set(Object.keys(deps)) : new Set();
 }
 
-/** @param {string} file */
+/**
+ * True for a file that only ever runs from a workspace install: tests, configs,
+ * package scripts, and build-graph declarations. Such a file may use
+ * `devDependencies`; a shipped source file may not.
+ *
+ * `BUILD.ts` is a declaration the build CLI loads with the root install, and
+ * no tarball contains one.
+ *
+ * @param {string} file
+ */
 function isDevOnlyFile(file) {
   const base = basename(file);
   const parts = file.split(sep);
@@ -238,6 +320,7 @@ function isDevOnlyFile(file) {
     parts.includes("__tests__") ||
     parts.includes("__type-tests__") ||
     parts.includes("scripts") ||
+    base === "BUILD.ts" ||
     base.includes(".test.") ||
     base.includes(".spec.") ||
     base.endsWith(".config.ts") ||
@@ -245,20 +328,31 @@ function isDevOnlyFile(file) {
   );
 }
 
-/** @param {WorkspacePackage} pkg */
+/**
+ * The dependency names a package's files may import.
+ *
+ * The runtime/dev split exists so a published tarball never imports something
+ * a consumer's install does not fetch. A `private: true` workspace publishes no
+ * tarball and always runs from the workspace install, so for one of those the
+ * split carries no meaning and every declared section counts as runtime.
+ *
+ * @param {WorkspacePackage} pkg
+ */
 function dependencySets(pkg) {
-  const runtime = new Set([
+  const declared = new Set([
     ...dependencyNames(pkg.manifest, "dependencies"),
     ...dependencyNames(pkg.manifest, "peerDependencies"),
     ...dependencyNames(pkg.manifest, "optionalDependencies"),
   ]);
-  const dev = new Set([...runtime, ...dependencyNames(pkg.manifest, "devDependencies")]);
+  const dev = new Set([...declared, ...dependencyNames(pkg.manifest, "devDependencies")]);
+  const runtime = pkg.manifest.private === true ? dev : declared;
   return { runtime, dev };
 }
 
 function main() {
   const workspacePackages = findWorkspacePackages();
   const workspaceNames = new Set(workspacePackages.map((pkg) => pkg.name));
+  const memberDirs = new Set(workspacePackages.map((pkg) => pkg.dir).filter((dir) => dir !== "."));
   /** @type {Array<{ file: string; specifier: string; packageName: string; section: "dependencies" | "devDependencies" }>} */
   const violations = [];
 
@@ -267,7 +361,7 @@ function main() {
   while (packageQueue.length > 0) {
     const pkg = packageQueue.shift();
     checkedPackageCount += 1;
-    const { files, nestedPackageDirs } = filesForPackage(pkg);
+    const { files, nestedPackageDirs } = filesForPackage(pkg, memberDirs);
     for (const nestedDir of nestedPackageDirs) {
       const nestedPkg = readPackage(nestedDir);
       if (nestedPkg) packageQueue.push(nestedPkg);

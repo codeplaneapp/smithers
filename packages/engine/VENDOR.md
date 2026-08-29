@@ -47,7 +47,7 @@ flow tag and derived key, and always computes that ID inside `execute`.
 Consequently equal payload keys join the same execution. Upstream proxy execute
 and discard requests contain the flow payload directly.
 
-Flows makes `Flow.make({ idempotencyKey })` optional and adds
+Smithers makes `Flow.make({ idempotencyKey })` optional and adds
 `executionId?: string` to `Flow.execute`. An explicit value always wins. If
 it is absent, an opt-in idempotency key is decoded through the injected
 `@smthrs/crypto` `Sha256` transformation. If neither exists, the ambient
@@ -84,7 +84,7 @@ Upstream references:
 Upstream sandwiches every activity effect in a default schedule that retries
 any interrupt cause up to ten times and turns exhaustion into a defect.
 
-Flows removes that default. Ordinary fiber interruption and flow
+Smithers removes that default. Ordinary fiber interruption and flow
 suspension propagate immediately. `InfraInterrupt` is the explicit marker for
 rebalancing or host-loss interruption, and only that marker consumes an
 action's opt-in `interruptRetryPolicy`. Exhaustion still becomes a defect.
@@ -100,7 +100,7 @@ Upstream references:
 ### 3. Flow shape is deliberately not expanded
 
 Upstream flows contain their tag, schemas, annotations, idempotency
-function, and suspension schedule. Flows changes only the idempotency function's
+function, and suspension schedule. Smithers changes only the idempotency function's
 requiredness and execution behavior. It does not add description, capabilities,
 placement, budgets, or other flow-authoring fields, and annotations remain
 `Context.Context<never>`.
@@ -119,7 +119,7 @@ Upstream references:
 Upstream reruns a suspended root execution after sleeping on
 `Schedule.min([Schedule.exponential(200, 1.5), Schedule.spaced(30000)])`.
 
-Flows preserves that schedule verbatim. `FlowEngine.Encoded` additionally
+Smithers preserves that schedule verbatim. `FlowEngine.Encoded` additionally
 accepts optional `resumeSignal(flow, executionId)`, and each fallback sleep
 races that signal when supplied. `@smthrs/engine-store` leaves the optional
 member unimplemented in v1.
@@ -139,7 +139,7 @@ memory engine derives `${executionId}/${activity.name}/${attempt}` internally.
 The `Activity.idempotencyKey` helper separately hashes execution ID, optional
 attempt, and activity name.
 
-Flows passes `{ action, attempt, key, tier, metadata }` through the encoded
+Smithers passes `{ action, attempt, key, tier, metadata }` through the encoded
 seam. `FlowEngine.makeUnsafe` computes `key` before dispatch with
 `@smthrs/keys`: the engine builds sealed identity input and decodes it through `Key`, while
 compensable, irreversible, and identity-free sealed actions use stable
@@ -182,7 +182,7 @@ Upstream (rc.108) registers each awaited deferred name in
 marking it suspended and interrupting its fiber, so the replay observes the
 completion.
 
-Flows has no `awaitedDeferreds` set. `FlowInstance` carries only
+Smithers has no `awaitedDeferreds` set. `FlowInstance` carries only
 `suspended` and `interrupted`, and the runtime port exposes
 `resume(flow, executionId)` instead: `layerMemory.deferredDone` records the
 exit first-writer-wins and then calls `resume`, which re-drives an execution

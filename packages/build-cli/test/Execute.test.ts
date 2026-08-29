@@ -364,7 +364,7 @@ describe("the CI workflow generator", () => {
     const install = generated.indexOf("- run: pnpm install --frozen-lockfile --ignore-scripts")
     // The pattern is rendered as one single-quoted shell word, so the runner's
     // shell cannot expand or re-split it.
-    const execute = generated.indexOf("- run: pnpm exec smthrs test '//packages/...'")
+    const execute = generated.indexOf("- run: pnpm exec smithers-build test '//packages/...'")
     expect(install).toBeGreaterThan(-1)
     // The workspace-pinned CLI, after the install that pinned it, and nothing
     // fetched from a registry.
@@ -384,7 +384,7 @@ describe("the CI workflow generator", () => {
     expect((await run("lint", "//...")).ok).toBe(true)
 
     const edited = generated.replace(
-      "      - run: pnpm exec smthrs test '//packages/...'\n",
+      "      - run: pnpm exec smithers-build test '//packages/...'\n",
       "      - run: echo skipped\n"
     )
     expect(edited).not.toBe(generated)

@@ -6,9 +6,10 @@ priority: p1
 
 # Repo-shaped review docs tree, built by the factory
 
-Make the code reviewable purely through the vocs docs: a tree in the outer
-repo's `website/` site shaped like the repo itself. Repo-wide pages at the
-root, one section per submodule, and one directory per workspace package with
+Make the code reviewable purely through the vocs docs: a tree in this
+repository's `website/` site shaped like the repo itself. Repo-wide pages at
+the root, one section per submodule, and one directory per workspace package
+with
 one `index` plus exactly three leaves: `api` (every export of every entry point), `internals`
 (core data structures, public and private, with their invariants), and
 `tests` (every test file and what it proves). Every package page carries
@@ -34,7 +35,7 @@ reviewing the code; divergence is a defect.
   `factory/reports/review-docs/`.
 
 The initial tree (45 packages, 201 pages) was bootstrapped 2026-08-19 by the
-outer repo's orchestration; this flow supersedes that machinery for all
-maintenance. Run `bun factory/flows/review-docs.ts` for a full sweep,
+orchestration in the flows repository; this flow supersedes that machinery for
+all maintenance. Run `bun factory/flows/review-docs.ts` for a full sweep,
 `--packages a,b,c` for a targeted repair, `--skip-agents` for the
 deterministic steps and build gate only.

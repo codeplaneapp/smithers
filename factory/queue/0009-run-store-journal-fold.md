@@ -6,8 +6,8 @@ priority: p1
 
 # Fold run and attempt state into the journal
 
-Implement the run/attempt row in the fold table from
-`docs/specs/Concepts/Journal Consensus.md`: `flows_runs` status/lineage and
+Implement the run/attempt row in the fold table from the "Journal Consensus"
+spec: `flows_runs` status/lineage and
 `flows_attempts` become rebuildable materializations of journal events.
 
 - Keep `@smthrs/run-store`'s public `RunStore` and `AttemptStore` APIs while
@@ -22,13 +22,14 @@ Implement the run/attempt row in the fold table from
   replayed fold across lifecycle, cancellation, waiting, terminal, and attempt
   mutation paths.
 
-Stage 1 has landed (flows main `361677714`, item 0008 done). Build on it:
+Stage 1 has landed (archived flows repository, `361677714`; item 0008 done).
+Build on it:
 `Consensus` + `SqlConsensus` + `layerLocal` are in `@smthrs/journal`,
 `emitDurable`/`checkpoint`/`compact` admit through `Consensus.guard`,
 `RunStore` already delegates arbitration and appends R6 transitions with
-`meta.lineageId`. Read `docs/specs/Concepts/Journal Consensus.md` first — its
-"Stage 1, round 2/round 3" sections are normative and were paid for in three
-verify rounds.
+`meta.lineageId`. Read the "Journal Consensus" spec first — its "Stage 1,
+round 2/round 3" sections are normative and were paid for in three verify
+rounds.
 
 Lessons from item 0008 that apply directly to this fold:
 

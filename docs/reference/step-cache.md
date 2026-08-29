@@ -3,7 +3,7 @@
 This page is the public API reference for the **step result cache**: sealed
 action results addressed by step-key digest. It was split out of
 `@smthrs/journal` — see
-[`docs/specs/Concepts/Journal Split.md`](../../../docs/specs/Concepts/Journal%20Split.md).
+`docs/specs/Concepts/Journal Split.md`.
 
 It is deliberately a *cache*. Entries may be evicted, a stale entry is a miss
 rather than a corruption, and the same admission gate serves normal execution,
@@ -48,7 +48,7 @@ around `put`. *When* the shared copy is written is the caller's too:
 holding a write transaction can publish afterwards rather than hold a network
 round trip across it. That is the mode the engine composes, publishing through
 its own `CacheSync` seam. See [`@smthrs/artifacts`](artifacts.md) and
-[Remote cache](../../../docs/specs/Concepts/Remote%20Cache.md).
+`docs/specs/Concepts/Remote Cache.md`.
 
 ## Entry points
 
@@ -66,5 +66,5 @@ SQLite database and is therefore imported from
 it with the journal's, the run store's, and the engine's. See
 [`@smthrs/database`](database.md) for the composition rules.
 
-See [Step keys](../../../docs/specs/Concepts/Step%20Keys.md) and the
+See `docs/specs/Concepts/Step Keys.md` and the
 [`@smthrs/engine-store` reference](engine-store.md).

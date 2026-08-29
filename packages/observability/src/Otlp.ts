@@ -37,13 +37,19 @@ export const defaultServiceName = "flows"
 
 /**
  * The `service.version` resource attribute installed when the caller supplies
- * none. Mirrors the workspace release version in `package.json`.
+ * none. Mirrors the release version in this package's `package.json`.
+ *
+ * A published package cannot read its own manifest on every runtime it
+ * supports, so the version lives here as a literal.
+ * `scripts/set-release-version.mjs` rewrites this declaration with the
+ * manifests, and its `--check` mode reports drift, so a release bump cannot
+ * leave it behind.
  *
  * @category resource
  * @since 0.1.0
  * @slop
  */
-export const defaultServiceVersion = "0.1.0"
+export const defaultServiceVersion = "1.0.0-rc.0"
 
 /**
  * Configuration for the default OTLP wiring.

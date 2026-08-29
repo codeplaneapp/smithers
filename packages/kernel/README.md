@@ -8,7 +8,7 @@ permission-aware replacements for every protected Host service.
 The implementations behind those ports live in `@smthrs/platform-node`,
 `@smthrs/platform-bun`, and `@smthrs/platform-browser`. Four of the five ports
 are Effect's own tags — `FileSystem`, `Path`, `ChildProcessSpawner`, and
-`HttpClient` — so `flows` supplies implementations of them rather than wrappers
+`HttpClient` — so Smithers supplies implementations of them rather than wrappers
 around them.
 
 ```sh
@@ -74,7 +74,7 @@ use `withIsolatedFileSystem`. A raw path-only adapter is unsupported and every
 relevant read, write, directory, remove, rename, list, stat, glob, stream, and
 handle operation fails closed.
 
-Network access is Effect's `HttpClient` — there is no `flows` transport port.
+Network access is Effect's `HttpClient` — there is no Smithers transport port.
 Consumers require `HttpClient.HttpClient` from `effect/unstable/http`, and the
 kernel decorator shadows it. A redirect is a second destination, so the
 decorator composes Effect's `followRedirects` _above_ the grant check: every

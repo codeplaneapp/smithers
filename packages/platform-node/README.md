@@ -1,6 +1,6 @@
 # @smthrs/platform-node
 
-The Node.js Host bundle for `flows`.
+The Node.js Host bundle for Smithers.
 
 `@effect/platform-node` already ships `FileSystem`, `Path`,
 `ChildProcessSpawner`, and an Undici-backed `HttpClient`. This package composes

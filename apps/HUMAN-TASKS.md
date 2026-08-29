@@ -1,11 +1,11 @@
-# HUMAN-TASKS.md — flows UI alpha launch
+# HUMAN-TASKS.md — Smithers UI alpha launch
 
 Four tasks remain before the closed alpha opens. Every one of them needs a
 credential, a live target, or a product decision that no agent in this track
 was allowed to make. Everything else in the UI track is landed on `main`.
 
-Source brief: `ui.PROMPT.md` (untracked, in the operator's checkout). Source
-audit: `~/Desktop/flows-alpha-readiness-2026-08-16/ui-readiness.md`.
+Source brief: `ui.PROMPT.md` and source audit: `ui-readiness.md`. Both are
+untracked operator notes and are not in this repository.
 
 ## Status
 
@@ -55,7 +55,7 @@ once by a claude agent, and landed on `main` individually.
 - **U7** — `pnpm run checklist -- --target <origin>`, runbook at
   `apps/ui/scripts/README.md`. See H4.
 - **U8** — `apps/ui/.gitignore` reconciled, `@smthrs/chain` added to
-  `scripts/browser-check.mjs`, both recorded in `apps/MIGRATION.md`.
+  `scripts/browser-check.mjs`.
 - **Evals** — `.smithers/evals` suite (17 cases) with a committed baseline
   report at 17/17.
 
@@ -84,19 +84,19 @@ both are cheap follow-ups.
 Neither is fixable from `apps/**`. Both are recorded in `ui-readiness.md` §8.
 
 1. **Gateway VMs have no AI-provider credential.** Every agent node fails with
-   `OPENROUTER_API_KEY is not set` (`apps/WAVE11-RECEIPT.md:77`). This blocks
-   the headline "make me a workflow" flow end to end and is the single hard
+   `OPENROUTER_API_KEY is not set`. This blocks the headline "make me a
+   workflow" flow end to end and is the single hard
    blocker for the core demo (§8 blocker 1, effort S — one secret on the VM
    image).
 2. **Wedged gateway VMs do not resume.** An idle-suspended VM keeps a `running`
-   row while its relay 502s; re-provisioning returns the same dead gateway
-   (`apps/WAVE11-RECEIPT.md:81`). Plue must discard the dead row so a re-POST
-   provisions fresh (§8 blocker 4, effort M).
+   row while its relay 502s; re-provisioning returns the same dead gateway.
+   Plue must discard the dead row so a re-POST provisions fresh (§8 blocker 4,
+   effort M).
 
 Also unchanged and deliberately so: billing is subsidy-only (no Stripe; alpha
 users run on `admin.grant`), and identity/reco are reachable only on
 `workers.dev` because their `smithers.sh` CNAMEs still point at dead Vercel
-records (`apps/WAVE7-DEPLOY-RECEIPT.md` §1).
+records.
 
 ---
 
@@ -126,8 +126,7 @@ fresh Worker with empty DO storage — the existing state is orphaned, not
 migrated. Removing or changing the `routes` entry detaches `canary.smithers.sh`
 from this Worker; the rollback path is in the `wrangler.jsonc:5-8` comment.
 
-Then repeat the wave-7 secret inventory against the new hostname
-(`apps/WAVE7-DEPLOY-RECEIPT.md` §1 and §3):
+Then repeat the wave-7 secret inventory against the new hostname:
 
 ```sh
 # Per-worker secret inventory, from apps/server
@@ -141,7 +140,7 @@ Re-register the GitHub OAuth callback for the new host on GitHub App
 without it.
 
 **Either way, align the marketing links.** `jjhub.tech` currently points at
-`code.smithers.sh` (the `~/multi` worker), which is not this app. Repoint those
+`code.smithers.sh` (the `../multi` worker), which is not this app. Repoint those
 links at whichever entry point you choose, or invited users land on the wrong
 product.
 
@@ -158,7 +157,7 @@ U4 landed the pipeline; it has never been run with credentials. Runbook:
 Prove the pipeline first — no credentials needed, nothing published:
 
 ```sh
-cd /Users/williamcory/flows2
+cd "$(git rev-parse --show-toplevel)"
 pnpm run deploy:dry
 ```
 
@@ -171,7 +170,7 @@ Then the real run. Both variables are required: `wrangler.jsonc` declares no
 ```sh
 export CLOUDFLARE_API_TOKEN=<token>          # Workers Scripts + Workers Routes edit
 export CLOUDFLARE_ACCOUNT_ID=dd3525a4132493566aeb38de533c8827
-cd /Users/williamcory/flows2
+cd "$(git rev-parse --show-toplevel)"
 pnpm --filter smithers-server run deploy
 ```
 
@@ -206,7 +205,7 @@ Put one GitHub login per line in a file (blank lines and `#` comments are
 skipped), then preview with no credentials and no network call:
 
 ```sh
-cd /Users/williamcory/flows2
+cd "$(git rev-parse --show-toplevel)"
 pnpm --filter smithers-server run seed:allowlist -- --file invitees.txt --dry-run
 ```
 
@@ -254,7 +253,7 @@ writes a storage-state file you can format as `name=value; name2=value2`. You
 need **two** sessions: a normal one, and one parked at $0 for D-4.
 
 ```sh
-cd /Users/williamcory/flows2
+cd "$(git rev-parse --show-toplevel)"
 CHECKLIST_SESSION_COOKIE='smithers_session=<normal session>' \
 CHECKLIST_ZERO_BALANCE_BEARER='smithers_session=<zero-balance account session>' \
 CHECKLIST_BILLING_UPSTREAM_URL=<billing origin> \

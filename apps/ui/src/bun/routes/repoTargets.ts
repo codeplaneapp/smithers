@@ -173,7 +173,7 @@ export const registerRepoTargetRoutes = (
       return jsonError(409, "target_stale", "That target workspace is no longer open.")
     }
     const node = await options.node
-    if (node === null) return jsonError(503, "node_missing", "No Node.js >= 22.19 was found for the smthrs CLI.")
+    if (node === null) return jsonError(503, "node_missing", "No Node.js >= 22.19 was found for the smithers-build CLI.")
     let graph: Awaited<ReturnType<typeof queryTargetGraph>>
     try {
       graph = await queryTargetGraph({

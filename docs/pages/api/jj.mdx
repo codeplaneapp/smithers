@@ -4,7 +4,7 @@ description: "Jujutsu version control as a portable host service, with Node, Bun
 
 # @smthrs/jj
 
-Jujutsu version control as a portable host service: `flows` snapshots the working copy around every step, so jj is host access, not a tool the agent happens to call.
+Jujutsu version control as a portable host service: Smithers snapshots the working copy around every step, so jj is host access, not a tool the agent happens to call.
 
 One program, three layers. The body never changes; the import at the top decides
 which adapter runs it.
@@ -53,14 +53,14 @@ The package root holds the contract, its error, and the no-op layer only, so it 
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/jj` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/jj/src/index.ts) | any |
-| `@smthrs/jj/node/NodeJj` | [src/node/NodeJj.ts](https://github.com/smithersai/flows/blob/main/packages/jj/src/node/NodeJj.ts) | Node |
-| `@smthrs/jj/bun/BunJj` | [src/bun/BunJj.ts](https://github.com/smithersai/flows/blob/main/packages/jj/src/bun/BunJj.ts) | Bun |
-| `@smthrs/jj/browser/BrowserJj` | [src/browser/BrowserJj.ts](https://github.com/smithersai/flows/blob/main/packages/jj/src/browser/BrowserJj.ts) | browser |
+| `@smthrs/jj` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/jj/src/index.ts) | any |
+| `@smthrs/jj/node/NodeJj` | [src/node/NodeJj.ts](https://github.com/smithersai/smithers/blob/main/packages/jj/src/node/NodeJj.ts) | Node |
+| `@smthrs/jj/bun/BunJj` | [src/bun/BunJj.ts](https://github.com/smithersai/smithers/blob/main/packages/jj/src/bun/BunJj.ts) | Bun |
+| `@smthrs/jj/browser/BrowserJj` | [src/browser/BrowserJj.ts](https://github.com/smithersai/smithers/blob/main/packages/jj/src/browser/BrowserJj.ts) | browser |
 
 ## Root exports
 
-[src/Jj.ts](https://github.com/smithersai/flows/blob/main/packages/jj/src/Jj.ts) is re-exported flat from the root.
+[src/Jj.ts](https://github.com/smithersai/smithers/blob/main/packages/jj/src/Jj.ts) is re-exported flat from the root.
 
 | Export | Kind | Notes |
 | --- | --- | --- |

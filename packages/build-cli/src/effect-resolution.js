@@ -8,7 +8,7 @@
  * import from the CLI package that owns the runtime.
  *
  * The CLI also owns the BUILD.ts authoring surface. Resolving
- * `@smthrs/targets` from here lets a globally installed `smthrs` bootstrap a
+ * `@smthrs/targets` from here lets a globally installed `smithers-build` bootstrap a
  * repository that has only a BUILD.ts; requiring the repository to install the
  * package would make generated package.json files circular to create.
  *

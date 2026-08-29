@@ -321,7 +321,7 @@ export type TransitionRecord = z.infer<typeof TransitionRecordSchema>
  * turn. `event` is the @smthrs/chain Event as plain JSON: stored opaque here
  * because state schemas stay runtime-free, and schema-validated by the chain
  * journal layer on read. `seq` orders events within one lineage. This
- * collection is the app-layer stand-in for the flows engine journal; when the
+ * collection is the app-layer stand-in for the Smithers engine journal; when the
  * engine mounts it becomes a sync-fed projection and readers do not change.
  */
 export const ChainEventRecordSchema = z.object({

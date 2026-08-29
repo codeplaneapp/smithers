@@ -5,7 +5,7 @@ it sits: pages, panes, flows, and the three layer files a flow inherits.
 
 ```sh
 pnpm add @smthrs/create-app
-smthrs create-app my-app
+smithers-build create-app my-app
 ```
 
 ## The authoring surface
@@ -23,7 +23,7 @@ export const App = CreateApp({
 
 `App` carries the manifest plus four targets: `routes` regenerates the route
 tables, `dev` serves, `build` bundles, and `deploy` ships. Put them in the
-package's target map and the `smthrs` CLI addresses them as `//:dev`,
+package's target map and the `smithers-build` CLI addresses them as `//:dev`,
 `//:build`, and so on.
 
 | File                   | Export    | Constructor       |
@@ -61,15 +61,15 @@ browser bundles; `sideEffects: []` lets a bundler drop the Node half.
 
 ## Generated files
 
-`smthrs-routes` writes two files at the app root and never anything else.
+`smithers-routes` writes two files at the app root and never anything else.
 
 - `routes.gen.ts` — every flow with its three resolved layers, plus the pane
   names. No React import, so the Worker and a plain vitest run load it.
 - `routes.ui.gen.ts` — the layout, the pages, and the pane components.
 
 ```sh
-smthrs-routes           # write
-smthrs-routes --check   # exit 1 on drift, which is what //:routes runs
+smithers-routes           # write
+smithers-routes --check   # exit 1 on drift, which is what //:routes runs
 ```
 
 The Vite plugin regenerates them on start and on every routed file change, so

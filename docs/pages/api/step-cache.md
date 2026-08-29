@@ -17,12 +17,12 @@ const layer = CacheStore.layer.pipe(Layer.provideMerge(Migrations.layer))
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/step-cache` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/step-cache/src/index.ts) | any |
-| `@smthrs/step-cache/test/TestCacheStore` | [src/test/TestCacheStore.ts](https://github.com/smithersai/flows/blob/main/packages/step-cache/src/test/TestCacheStore.ts) | Node |
+| `@smthrs/step-cache` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/step-cache/src/index.ts) | any |
+| `@smthrs/step-cache/test/TestCacheStore` | [src/test/TestCacheStore.ts](https://github.com/smithersai/smithers/blob/main/packages/step-cache/src/test/TestCacheStore.ts) | Node |
 
 ## CacheStore
 
-[src/CacheStore.ts](https://github.com/smithersai/flows/blob/main/packages/step-cache/src/CacheStore.ts)
+[src/CacheStore.ts](https://github.com/smithersai/smithers/blob/main/packages/step-cache/src/CacheStore.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -36,7 +36,7 @@ const layer = CacheStore.layer.pipe(Layer.provideMerge(Migrations.layer))
 
 ## CacheStoreMetrics
 
-[src/CacheStoreMetrics.ts](https://github.com/smithersai/flows/blob/main/packages/step-cache/src/CacheStoreMetrics.ts)
+[src/CacheStoreMetrics.ts](https://github.com/smithersai/smithers/blob/main/packages/step-cache/src/CacheStoreMetrics.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -47,7 +47,7 @@ const layer = CacheStore.layer.pipe(Layer.provideMerge(Migrations.layer))
 
 ## RemoteCacheStore
 
-[src/RemoteCacheStore.ts](https://github.com/smithersai/flows/blob/main/packages/step-cache/src/RemoteCacheStore.ts)
+[src/RemoteCacheStore.ts](https://github.com/smithersai/smithers/blob/main/packages/step-cache/src/RemoteCacheStore.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -56,7 +56,7 @@ const layer = CacheStore.layer.pipe(Layer.provideMerge(Migrations.layer))
 
 ## CombinedCacheStore
 
-[src/CombinedCacheStore.ts](https://github.com/smithersai/flows/blob/main/packages/step-cache/src/CombinedCacheStore.ts)
+[src/CombinedCacheStore.ts](https://github.com/smithersai/smithers/blob/main/packages/step-cache/src/CombinedCacheStore.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -71,7 +71,7 @@ A write transaction must never span a host call. A caller holding one wants `"de
 
 ## Migrations
 
-[src/Migrations.ts](https://github.com/smithersai/flows/blob/main/packages/step-cache/src/Migrations.ts)
+[src/Migrations.ts](https://github.com/smithersai/smithers/blob/main/packages/step-cache/src/Migrations.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -83,4 +83,4 @@ A write transaction must never span a host call. A caller holding one wants `"de
 
 | Export | Source | Notes |
 | --- | --- | --- |
-| `TestCacheStore.layer` | [src/test/TestCacheStore.ts](https://github.com/smithersai/flows/blob/main/packages/step-cache/src/test/TestCacheStore.ts) | a migrated step cache over in-memory SQLite |
+| `TestCacheStore.layer` | [src/test/TestCacheStore.ts](https://github.com/smithersai/smithers/blob/main/packages/step-cache/src/test/TestCacheStore.ts) | a migrated step cache over in-memory SQLite |

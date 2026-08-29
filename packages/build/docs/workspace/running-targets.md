@@ -4,13 +4,13 @@ A verb selects targets, plans their transitive dependency closure, and executes
 it. Targets carry no per-command shell scripts.
 
 ```sh
-smthrs install --workspace .
-smthrs build //packages/...
-smthrs test //packages/flow:test
-smthrs lint //packages/flow:lint
-smthrs docs //...
-smthrs run //:newPackage --name @scope/widget
-smthrs ci //...
+smithers-build install --workspace .
+smithers-build build //packages/...
+smithers-build test //packages/flow:test
+smithers-build lint //packages/flow:lint
+smithers-build docs //...
+smithers-build run //:newPackage --name @scope/widget
+smithers-build ci //...
 ```
 
 For every flag, output field, and exit code, see
@@ -132,10 +132,10 @@ material, and SHA-256 content key without executing. `query` and `graph` are
 always non-executing.
 
 ```sh
-smthrs build //... --plan
-smthrs docs //... --plan
-smthrs run //:clean --plan
-smthrs ci //... --plan
+smithers-build build //... --plan
+smithers-build docs //... --plan
+smithers-build run //:clean --plan
+smithers-build ci //... --plan
 ```
 
 The planner does not consult the cache, so its `cacheLookup` remains
@@ -144,7 +144,7 @@ lookup.
 
 ## Installing dependencies
 
-`smthrs install` takes no label. It executes the two-round install flow under
+`smithers-build install` takes no label. It executes the two-round install flow under
 the pnpm layer and returns the canonical workspace, manager, first-round nodes,
 and link manifest.
 

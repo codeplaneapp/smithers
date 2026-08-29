@@ -7,7 +7,7 @@
  * targets, groups compose, and the group's contents are the deterministic,
  * deduplicated transitive union of everything it names.
  *
- * The target participates in no CLI verb. `kinds` is empty, so `smthrs build`,
+ * The target participates in no CLI verb. `kinds` is empty, so `smithers-build build`,
  * `test`, `lint`, and `docs` never select a group as a root; the CLI handles
  * that cleanly because {@link Target.Metadata} kinds are only consulted when the
  * planner filters roots, while dependency traversal, `query`, and `graph`
@@ -309,7 +309,7 @@ export const ExpandFilegroupLive = (options: {
  * Names a set of files under one label.
  *
  * A group is addressable like any other target: it has a label, it appears in
- * `smthrs query`, and `deps()` traverses through it. Groups compose, so a
+ * `smithers-build query`, and `deps()` traverses through it. Groups compose, so a
  * group whose `srcs` name other groups expands to their deduplicated
  * transitive union in `srcs` order.
  *

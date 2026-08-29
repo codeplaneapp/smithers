@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Runs the smthrs command-line process against the real process.
+ * Runs the smithers-build command-line process against the real process.
  *
  * @since 0.1.0
  */

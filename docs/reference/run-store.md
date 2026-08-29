@@ -3,7 +3,7 @@
 This page is the public API reference for **executable run state**: run rows,
 action attempt rows, and the ownership arbitration that fences them. It was
 split out of `@smthrs/journal` — see
-[`docs/specs/Concepts/Journal Split.md`](../../../docs/specs/Concepts/Journal%20Split.md).
+`docs/specs/Concepts/Journal Split.md`.
 
 Recovery reads these stores. The journal is history, audit, replay evidence,
 and the sync feed; this package is what a restart rebuilds from.
@@ -98,6 +98,6 @@ its three indexes, and `flows_attempts` — and reserves migration id block
 cache's, and the engine's. See
 [`@smthrs/database`](database.md) for the composition rules.
 
-See [Run ownership](../../../docs/specs/Concepts/Run%20Ownership.md), the
+See `docs/specs/Concepts/Run Ownership.md`, the
 [`@smthrs/journal` reference](journal.md), and the
 [`@smthrs/engine-store` reference](engine-store.md).

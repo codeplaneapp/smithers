@@ -4,7 +4,7 @@ import { aomiBrand, aomiNav } from "./src/brand.ts"
 
 // The whole app is declared here. `App` is the manifest plus the Cloudflare
 // dev/build/deploy targets it derives; `Package` is the target map the
-// `smthrs` CLI addresses as //:<name>. `App` is not a target, so exporting it
+// `smithers-build` CLI addresses as //:<name>. `App` is not a target, so exporting it
 // beside `Package` is legal for the loader.
 export const App = CreateApp({
   name: "aomi",

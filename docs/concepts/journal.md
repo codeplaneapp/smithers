@@ -111,7 +111,7 @@ Time-travel tables use a separate migration in `@smthrs/time-travel`.
 
 The two are nevertheless committed together. Engine-store writes every lifecycle event with `emitDurable` **inside `Journal.transact`**, the write transaction that also carries the state transition it describes — the run-row compare-and-swap with its decision, the attempt write with its attempt event. Those stores use the same `DurableWriter`, so their writes join that transaction as savepoints: either both halves are durable, or neither is. A crash can no longer leave durable state the journal does not explain, which is what lets audit, sync, and time travel treat the log as the account of record.
 
-Of the two shapes this could have taken — deriving the store rows from the log, or committing the state projection and its entry in one transaction — flows took the second. It is the smaller change: the executable rows keep their fenced CAS semantics, and no read path has to be rebuilt on projection.
+Of the two shapes this could have taken — deriving the store rows from the log, or committing the state projection and its entry in one transaction — Smithers took the second. It is the smaller change: the executable rows keep their fenced CAS semantics, and no read path has to be rebuilt on projection.
 
 Two consequences to plan for. Publication follows the commit, so an entry becomes visible on `changes`/`stream` only after the outermost transaction commits. And the unit is all-or-nothing: a crash before COMMIT loses the whole unit, so work that had already run — an action body, for instance — re-executes on the next drive. Local commit is still not remote atomicity: external effects need idempotency keys, fencing tokens, or compensation.
 

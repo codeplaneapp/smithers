@@ -32,7 +32,7 @@ export const sftLaunch = Smithers.ToolRun({
 Run it explicitly, and only through the `run` verb:
 
 ```
-pnpm exec smthrs run '//evals/authoring:sftLaunch'
+pnpm exec smithers-build run '//evals/authoring:sftLaunch'
 ```
 
 ## When to use it
@@ -43,7 +43,7 @@ way [ToolBuild](tool-build.md) is for a one-off build. When the operation has a
 stable identity, add a purpose-built target type instead: the release targets
 [NpmPublish](../../../../targets/src/NpmPublish.ts) and `JsrPublish` are the
 worked examples, and adding a type is what the
-[no-raw-commands rule](../../../../CONTRIBUTING.md) asks for over reaching for
+[no-raw-commands rule](../../../../../CONTRIBUTING.md) asks for over reaching for
 this escape hatch. Do not use `ToolRun` for a check whose exit code is a
 verdict — that is a cacheable gate, so it is a [NodeTest](node-test.md),
 `Vitest`, or a lint target. Do not use it for a long-lived watch process — that

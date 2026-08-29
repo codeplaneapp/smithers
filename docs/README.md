@@ -1,6 +1,6 @@
-# Smithers Flows documentation
+# Smithers documentation
 
-This documentation covers the `flows` durable-execution library: its implemented Effect APIs, durability model, host boundaries, and known gaps. Its scope is limited to the packages in this workspace.
+This documentation covers the Smithers durable-execution library: its implemented Effect APIs, durability model, host boundaries, and known gaps. Its scope is limited to the packages in this workspace.
 
 ## Reading order
 
@@ -85,7 +85,6 @@ documented in the [plugins repository](https://github.com/smithersai/plugins).
 ## Releasing
 
 - [Release runbook](release-runbook.md) — what a human runs to publish the engine train.
-- [Release rehearsal receipt](release-rehearsal.md) — the recorded no-publish rehearsal of that path.
 
 ## Documentation conventions
 

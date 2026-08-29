@@ -4,7 +4,7 @@ description: "Capability values and permission failures: the leaf vocabulary of 
 
 # @smthrs/capability
 
-Capability values and permission failures: the leaf vocabulary of the `flows` permission kernel. This package holds only the words, never the enforcement: `@smthrs/kernel` owns the `GrantStore`, the decorating layers, and the journal. Both the kernel and `@smthrs/jj` depend on this leaf, so a protected Host service can name permission failures in its own interface without a `kernel` ↔ `jj` dependency cycle.
+Capability values and permission failures: the leaf vocabulary of the Smithers permission kernel. This package holds only the words, never the enforcement: `@smthrs/kernel` owns the `GrantStore`, the decorating layers, and the journal. Both the kernel and `@smthrs/jj` depend on this leaf, so a protected Host service can name permission failures in its own interface without a `kernel` ↔ `jj` dependency cycle.
 
 ```ts
 import { Capability, Permission } from "@smthrs/capability"
@@ -23,13 +23,13 @@ Schema ids (`@smthrs/capability/Capability`, `@smthrs/capability/PermissionDenie
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/capability` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/capability/src/index.ts) | any |
-| `@smthrs/capability/Capability` | [src/Capability.ts](https://github.com/smithersai/flows/blob/main/packages/capability/src/Capability.ts) | any |
-| `@smthrs/capability/Permission` | [src/Permission.ts](https://github.com/smithersai/flows/blob/main/packages/capability/src/Permission.ts) | any |
+| `@smthrs/capability` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/capability/src/index.ts) | any |
+| `@smthrs/capability/Capability` | [src/Capability.ts](https://github.com/smithersai/smithers/blob/main/packages/capability/src/Capability.ts) | any |
+| `@smthrs/capability/Permission` | [src/Permission.ts](https://github.com/smithersai/smithers/blob/main/packages/capability/src/Permission.ts) | any |
 
 ## Capability
 
-[src/Capability.ts](https://github.com/smithersai/flows/blob/main/packages/capability/src/Capability.ts)
+[src/Capability.ts](https://github.com/smithersai/smithers/blob/main/packages/capability/src/Capability.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -48,7 +48,7 @@ Schema ids (`@smthrs/capability/Capability`, `@smthrs/capability/PermissionDenie
 
 ## Permission
 
-[src/Permission.ts](https://github.com/smithersai/flows/blob/main/packages/capability/src/Permission.ts)
+[src/Permission.ts](https://github.com/smithersai/smithers/blob/main/packages/capability/src/Permission.ts)
 
 | Export | Kind | Notes |
 | --- | --- | --- |

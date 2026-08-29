@@ -2,7 +2,7 @@
  * A minimal MCP client: the `initialize` handshake, `tools/list`, and
  * `tools/call`, over {@link StdioTransport}.
  *
- * This is deliberately not a general MCP SDK. `flows` has exactly one
+ * This is deliberately not a general MCP SDK. Smithers has exactly one
  * consumer of an MCP session — {@link McpFlows}, which needs a tool catalog
  * and a way to invoke one entry from it — so the client exposes only that.
  * Resources, prompts, sampling, and roots are not wired up; add them here

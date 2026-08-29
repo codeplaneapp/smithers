@@ -1,8 +1,7 @@
 # @smthrs/run-store
 
 Durable run state for flows: what is running now, and who owns it. Split out
-of `@smthrs/journal` — see
-[`docs/specs/Concepts/Journal Split.md`](../../../docs/specs/Concepts/Journal%20Split.md).
+of `@smthrs/journal`; see [journal concepts](../../docs/concepts/journal.md).
 
 `RunStore` and `AttemptStore` hold the **executable authoritative state** that
 recovery reads. They are not derived from the journal's event history: the
@@ -60,4 +59,4 @@ const program = Effect.gen(function*() {
 }).pipe(Effect.provide(runs))
 ```
 
-See the [run ownership concept](../../../docs/specs/Concepts/Run%20Ownership.md).
+See the [run-store reference](../../docs/reference/run-store.md).

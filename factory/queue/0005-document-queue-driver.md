@@ -12,10 +12,10 @@ now exists as the untracked local workflow
 pick → docs → implement → verify → land in an isolated worktree lane, landing
 on `main`+`vibe` together.
 
-- Update the "Cutover, honestly" section of
-  `docs/specs/Concepts/Software Factory.md` (outer repo) to name the
-  queue-driver workflow as the operator implementation that drives the queue
-  until the flows-native factory flow (item 0003) ships.
+- Update the "Cutover, honestly" section of the "Software Factory" spec in the
+  spec vault to name the queue-driver workflow as the operator implementation
+  that drives the queue until the Smithers-native factory flow (item 0003)
+  ships.
 - Update `factory/queue/README.md`'s "Operating it today" section to say: run
   `smithers workflow run queue-driver` (optionally
   `--input '{"item":"<slug>"}'`) instead of the hand-driven DDD pack

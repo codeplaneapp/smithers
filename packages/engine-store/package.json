@@ -1,20 +1,20 @@
 {
   "name": "@smthrs/engine-store",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.0",
   "license": "MIT",
   "smthrs": {
     "group": "engine"
   },
   "description": "Effect services for durable engine action persistence and replay boundaries",
-  "homepage": "https://github.com/smithersai/flows",
+  "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
-    "url": "https://github.com/smithersai/flows.git",
+    "url": "https://github.com/smithersai/smithers.git",
     "directory": "packages/engine-store"
   },
   "bugs": {
-    "url": "https://github.com/smithersai/flows/issues"
+    "url": "https://github.com/smithersai/smithers/issues"
   },
   "tags": [
     "typescript",
@@ -53,6 +53,7 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
+    "tag": "rc",
     "exports": {
       "./package.json": "./package.json",
       ".": {
@@ -79,17 +80,17 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@smthrs/artifacts": "0.1.0",
-    "@smthrs/crypto": "0.1.0",
-    "@smthrs/database": "0.1.0",
-    "@smthrs/engine": "0.1.0",
-    "@smthrs/flow": "0.1.0",
-    "@smthrs/journal": "0.1.0",
-    "@smthrs/kernel": "0.1.0",
-    "@smthrs/keys": "0.1.0",
-    "@smthrs/plan": "0.1.0",
-    "@smthrs/run-store": "0.1.0",
-    "@smthrs/step-cache": "0.1.0",
+    "@smthrs/artifacts": "1.0.0-rc.0",
+    "@smthrs/crypto": "1.0.0-rc.0",
+    "@smthrs/database": "1.0.0-rc.0",
+    "@smthrs/engine": "1.0.0-rc.0",
+    "@smthrs/flow": "1.0.0-rc.0",
+    "@smthrs/journal": "1.0.0-rc.0",
+    "@smthrs/kernel": "1.0.0-rc.0",
+    "@smthrs/keys": "1.0.0-rc.0",
+    "@smthrs/plan": "1.0.0-rc.0",
+    "@smthrs/run-store": "1.0.0-rc.0",
+    "@smthrs/step-cache": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {
@@ -97,8 +98,8 @@
     "@effect/platform-node": "4.0.0-rc.108",
     "@effect/vitest": "4.0.0-rc.108",
     "@eslint/js": "9.39.1",
-    "@smthrs/keys": "0.1.0",
-    "@smthrs/platform-node": "0.1.0",
+    "@smthrs/keys": "1.0.0-rc.0",
+    "@smthrs/platform-node": "1.0.0-rc.0",
     "@types/node": "25.9.5",
     "@vitest/coverage-v8": "4.1.9",
     "dprint": "0.55.2",

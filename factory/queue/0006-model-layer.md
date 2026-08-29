@@ -6,9 +6,9 @@ priority: p1
 
 # The Model layer
 
-Implement the model service specified in
-`docs/specs/Concepts/Model Layer.md` (decided 2026-07-28: hand-roll, "copy
-opencode's skeleton, transplant pi's scar tissue"): a plain stateless Effect
+Implement the model service specified in the "Model Layer" spec (decided
+2026-07-28: hand-roll, "copy opencode's skeleton, transplant pi's scar
+tissue"): a plain stateless Effect
 service, assembled context in, token stream out, typed errors, exact control
 of the wire request because the request is sealed-step key material.
 
@@ -21,5 +21,5 @@ of the wire request because the request is sealed-step key material.
   dependency on it.
 - This is the last engine dependency of the factory flow's agent phases
   (item 0003) besides lanes (item 0004): with Model and Jj lanes, the
-  docs/implement/verify phases become flows-native.
+  docs/implement/verify phases become Smithers-native.
 - Vault cadence applies: reviewed piece; record deviations in the note.

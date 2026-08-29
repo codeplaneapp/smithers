@@ -59,7 +59,7 @@ Collected from the attrs: every entry in `manifests`.
 | Executes  | Yes, through `ExecLive` |
 
 Because the target declares both kinds, one target is selected by both
-`smthrs build` and `smthrs lint`. `smthrs ci` merges the two plans and runs it
+`smithers-build build` and `smithers-build lint`. `smithers-build ci` merges the two plans and runs it
 once.
 
 Under `lint`, `SortPackageJson` forces `check: true`, so lint never rewrites a

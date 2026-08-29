@@ -1,7 +1,7 @@
 /**
  * The append-only journal port — the chain's only state.
  *
- * The in-memory layer is a deletable stand-in for the flows engine journal:
+ * The in-memory layer is a deletable stand-in for the Smithers engine journal:
  * the e2e suite asserts journal contents, not this API, so the suite
  * survives the engine swap (`docs/specs/Concepts/Chain Slice.md`).
  *

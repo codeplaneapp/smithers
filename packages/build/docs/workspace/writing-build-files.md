@@ -62,7 +62,7 @@ become labels. They are still declared inputs of the targets that reference them
 Exports that are not targets are ignored, with two exceptions: a `Workspace` value
 configures the workspace, and a `PackageDefaults` value declares synthesis. See
 [Configuration](configuration.md) and
-[Default targets](../extending/default-targets.md).
+[Default targets](../extending/default-rules.md).
 
 ## BUILD files declare targets, never commands
 

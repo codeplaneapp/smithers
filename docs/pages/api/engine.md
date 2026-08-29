@@ -35,11 +35,11 @@ const layer = Layer.mergeAll(
 
 | Import | Source | Platform |
 | --- | --- | --- |
-| `@smthrs/engine` | [src/index.ts](https://github.com/smithersai/flows/blob/main/packages/engine/src/index.ts) | any |
+| `@smthrs/engine` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/engine/src/index.ts) | any |
 
 ## FlowEngine
 
-[src/FlowEngine](https://github.com/smithersai/flows/tree/main/packages/engine/src/FlowEngine)
+[src/FlowEngine](https://github.com/smithersai/smithers/tree/main/packages/engine/src/FlowEngine)
 
 The engine implements `FlowRuntime`, the port `@smthrs/flow` declares. The service tag, `FlowInstance`, `annotateWaiting`, and `FlowCycleDetected` live there; what this namespace owns is the implementation.
 
@@ -56,5 +56,5 @@ The engine implements `FlowRuntime`, the port `@smthrs/flow` declares. The servi
 
 | Export | Source | Notes |
 | --- | --- | --- |
-| `FlowProxy.toRpcGroup`, `toHttpApiGroup`, `ConvertRpcs`, `ConvertHttpApi` | [src/FlowProxy.ts](https://github.com/smithersai/flows/blob/main/packages/engine/src/FlowProxy.ts) | derives a client surface from flow definitions |
-| `FlowProxyServer.layerRpcHandlers`, `layerHttpApi`, `RpcHandlers` | [src/FlowProxyServer.ts](https://github.com/smithersai/flows/blob/main/packages/engine/src/FlowProxyServer.ts) | serves those definitions |
+| `FlowProxy.toRpcGroup`, `toHttpApiGroup`, `ConvertRpcs`, `ConvertHttpApi` | [src/FlowProxy.ts](https://github.com/smithersai/smithers/blob/main/packages/engine/src/FlowProxy.ts) | derives a client surface from flow definitions |
+| `FlowProxyServer.layerRpcHandlers`, `layerHttpApi`, `RpcHandlers` | [src/FlowProxyServer.ts](https://github.com/smithersai/smithers/blob/main/packages/engine/src/FlowProxyServer.ts) | serves those definitions |

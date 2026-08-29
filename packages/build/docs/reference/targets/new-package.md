@@ -11,7 +11,7 @@ export const newPackage = Smithers.NewPackage({ license: "MIT" })
 The package name is invocation state, not a declaration attribute:
 
 ```sh
-smthrs run //:newPackage --name @scope/widget
+smithers-build run //:newPackage --name @scope/widget
 ```
 
 `@scope/widget` creates `packages/widget`.
@@ -66,5 +66,5 @@ offline and does not invoke a model.
 ## See also
 
 - [Running targets](../../workspace/running-targets.md)
-- [Default targets](../../extending/default-targets.md)
+- [Default targets](../../extending/default-rules.md)
 - [PackageJson](package-json-gen.md)

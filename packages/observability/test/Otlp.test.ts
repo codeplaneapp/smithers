@@ -90,8 +90,8 @@ describe("Otlp", () => {
       expect(exports.length).toBeGreaterThan(0)
       expect(JSON.stringify(exports[0]!.body)).toContain("observability_test_events")
       const attributes = resourceAttributes(exports[0]!)
-      expect(attributes["service.name"]).toBe("flows")
-      expect(attributes["service.version"]).toBe("0.1.0")
+      expect(attributes["service.name"]).toBe(Otlp.defaultServiceName)
+      expect(attributes["service.version"]).toBe(Otlp.defaultServiceVersion)
     }))
 
   it.effect("prefers the caller's service identity and resource attributes", () =>

@@ -87,7 +87,7 @@ The outer target is explicitly `cache: false`. Its `LinkManifest` is not enough
 to restore either `node_modules` or the manager store, so caching that wrapper
 would allow a JSON hit to skip the entire nested install flow.
 
-`smthrs install` runs the same flow directly and requires the default `.flows`
+`smithers-build install` runs the same flow directly and requires the default `.flows`
 cache directory because the store boundary is fixed there.
 
 ## See also

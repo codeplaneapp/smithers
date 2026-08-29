@@ -1,6 +1,6 @@
 # @smthrs/platform-bun
 
-The Bun Host bundle for `flows`.
+The Bun Host bundle for Smithers.
 
 `@effect/platform-bun` re-exports the `@effect/platform-node` filesystem and
 child-process spawner unchanged and ships Effect's fetch-backed `HttpClient`,

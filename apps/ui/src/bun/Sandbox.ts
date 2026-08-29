@@ -64,7 +64,7 @@ const homeDotPrefixes = (paths: SandboxPaths): ReadonlyArray<string> =>
 
 const zshPrefixes = (paths: SandboxPaths): ReadonlyArray<string> => ZSH_PREFIXES.map((prefix) => `${paths.home}/${prefix}`)
 
-/** `smthrs query`: no network; writes only the repo's `.flows` cache and scratch. */
+/** `smithers-build query`: no network; writes only the repo's `.flows` cache and scratch. */
 export const loaderPolicy = (paths: SandboxPaths): SandboxPolicy => ({
   id: "loader",
   network: "deny",

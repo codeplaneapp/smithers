@@ -312,7 +312,7 @@ export const assertPackageName = (name: string): string => {
  *
  * A script names a target, never a command line. The verb is the first of
  * these the target's target participates in, so `scripts: { build: lib }` becomes
- * `smthrs build //pkg:lib` without the declaration restating what the target
+ * `smithers-build build //pkg:lib` without the declaration restating what the target
  * already knows.
  *
  * @category constants
@@ -325,7 +325,7 @@ export const scriptVerbs: ReadonlyArray<Target.Kind> = ["build", "test", "lint",
  *
  * This fails at analysis time, with no execution value anywhere in the
  * picture, when the target's target participates in none of
- * {@link scriptVerbs}: a script no smthrs verb can run is a manifest entry
+ * {@link scriptVerbs}: a script no smithers-build verb can run is a manifest entry
  * that fails for every user of the published package.
  *
  * @category rendering
@@ -346,7 +346,7 @@ export const scriptCommand = (script: string, target: Target.AnyTarget, label: s
         `participates in none of ${scriptVerbs.join(", ")}`
     )
   }
-  return `smthrs ${verb} ${label}`
+  return `smithers-build ${verb} ${label}`
 }
 
 /**

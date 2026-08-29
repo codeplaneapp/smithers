@@ -1,20 +1,20 @@
 {
   "name": "@smthrs/plan",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.0",
   "license": "MIT",
   "smthrs": {
     "group": "engine"
   },
   "description": "The persisted flows plan: a keyed action graph, its append-only store, and its diff",
-  "homepage": "https://github.com/smithersai/flows",
+  "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
-    "url": "https://github.com/smithersai/flows.git",
+    "url": "https://github.com/smithersai/smithers.git",
     "directory": "packages/plan"
   },
   "bugs": {
-    "url": "https://github.com/smithersai/flows/issues"
+    "url": "https://github.com/smithersai/smithers/issues"
   },
   "tags": [
     "typescript",
@@ -56,6 +56,7 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
+    "tag": "rc",
     "exports": {
       "./package.json": "./package.json",
       ".": {
@@ -97,8 +98,8 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@smthrs/database": "0.1.0",
-    "@smthrs/keys": "0.1.0",
+    "@smthrs/database": "1.0.0-rc.0",
+    "@smthrs/keys": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {

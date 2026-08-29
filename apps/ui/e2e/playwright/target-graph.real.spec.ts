@@ -8,7 +8,7 @@ import { join } from "node:path"
  * The target-graph feature end to end against the REAL backend — no fixture
  * seam, no stubbed routes. `target-graph.spec.ts` proves the cards render
  * from the captured fixtures; this spec proves the product actually works:
- * every card here is filled by the Bun backend spawning the real `smthrs`
+ * every card here is filled by the Bun backend spawning the real `smithers-build`
  * loader against a real workspace on this machine.
  *
  * The whole flow, in one session, in the order a human does it:
