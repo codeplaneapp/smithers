@@ -21,6 +21,7 @@
 import { Annotations, Flow } from "@smthrs/core"
 import { Schema } from "effect"
 
+/** The discovered descriptor: the gate's declaration, delegate, and priority. */
 export default Flow.make({
   description: "Runs the release gate's checks, urgent ones first.",
   input: Schema.Struct({ target: Schema.String }),

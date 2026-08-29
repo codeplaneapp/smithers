@@ -4,13 +4,13 @@
  *
  * Example 11 is one model call with no tools. This is the same shape with the
  * one thing a working agent adds: a catalog. There is no `ctx.fs`, no
- * `ctx.shell`, and no tool-call protocol — a capability is an ordinary flow
+ * `ctx.shell`, and no tool-call protocol. A capability is an ordinary flow
  * declaration plus the code that runs it, bound through
  * `@smthrs/harness/FlowBinding`, and the model reaches it the way it reaches
  * anything else: it finds it in `ctx.flows` and calls it with `ctx.call`.
  * `StandardFlows.filesystem` is that pairing for the seven standard file
- * capabilities, over whatever `FileSystem` the host provides — here the real
- * Node one, pointed at a real directory.
+ * capabilities, over whatever `FileSystem` the host provides. Here that is the
+ * real Node one, pointed at a real directory.
  *
  * The model does not run the code either. It answers with a fenced `cell`
  * block, and the block is evaluated inside the QuickJS sandbox
@@ -65,8 +65,8 @@ export const Tally = Schema.Struct({
 })
 
 /**
- * The step. Its prompt names the two paths, which is how a scripted model — and
- * a real one — learns which files this task is about.
+ * The step. Its prompt names the two paths, which is how a scripted model, and
+ * a real one, learns which files this task is about.
  */
 export const Summarize = AgentAction.make("examples/SandboxSummarize", {
   payload: { source: Schema.String, target: Schema.String },
@@ -77,6 +77,7 @@ export const Summarize = AgentAction.make("examples/SandboxSummarize", {
     `Count the lines in the source file and write the count to the target file.\nSOURCE: ${source}\nTARGET: ${target}`
 })
 
+/** The flow that runs the one step whose cell reaches the file tools. */
 export const Audit = Flow.make("examples/Audit", {
   payload: { source: Schema.String, target: Schema.String },
   success: Tally,

@@ -46,8 +46,8 @@ it.effect("restores the pre-image before retrying a compensable step", () =>
 
     expect(summary.result).toBe("0007-lane:applied")
     expect(summary.attempts).toEqual([1, 2])
-    // Two pre-images per attempt — the dispatch's rollback boundary and the
-    // attempt row's own — and a post-image the boundary diffs against.
+    // Two pre-images per attempt, the dispatch's rollback boundary and the
+    // attempt row's own, plus a post-image the boundary diffs against.
     expect(summary.snapshots).toEqual([
       "attempt-1-pre",
       "attempt-1-pre",

@@ -46,7 +46,7 @@ export const Watch = Flow.make("examples/Watch", {
 
 /**
  * The parent. `.child()` makes the call a run of its own, and waiting for its
- * result is what records `onParentExit: "cancel"` on it — an attached child
+ * result is what records `onParentExit: "cancel"` on it. An attached child
  * exists because something is waiting for it.
  */
 export const Deploy = Flow.make("examples/Deploy", {
@@ -218,6 +218,7 @@ export const Hold = Action.make("examples/HoldProcess", {
   success: Schema.String
 })
 
+/** The flow that holds a real process group open while it is cancelled. */
 export const Occupy = Flow.make("examples/Occupy", {
   payload: { seconds: Schema.Number },
   success: Schema.String,

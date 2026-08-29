@@ -1,5 +1,5 @@
 /**
- * Draft, review, revise, and stop — either when the reviewer approves or when
+ * Draft, review, revise, and stop, either when the reviewer approves or when
  * the round budget runs out.
  *
  * A flow body is built before it runs, so it cannot contain a `while` over a

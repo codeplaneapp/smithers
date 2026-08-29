@@ -4,9 +4,9 @@
  *
  * They are three different mechanisms and it is worth keeping them apart.
  *
- * **A plan approval gates the launch.** `Control.plan` produces a `PlanCard` —
+ * **A plan approval gates the launch.** `Control.plan` produces a `PlanCard`:
  * the flow, the input, the capability envelope, the node list, and a digest
- * over all of it — and the card starts `pending`. `Control.run` on a pending
+ * over all of it. The card starts `pending`, and `Control.run` on a pending
  * plan does not start anything: it answers a `Parked` receipt reading
  * `waiting-approval`. Approving the exact digest and envelope that were
  * reviewed is what makes the same call launch, and denying it makes the launch
@@ -26,7 +26,7 @@
  * it and deliberately resumes nothing: a signal says something happened, it
  * does not decide who runs next. Turning a recorded signal into a completed
  * wait point is the host's job, and {@link deliverSignals} below is that job at
- * its smallest — read the signals the control plane admitted, and complete the
+ * its smallest: read the signals the control plane admitted, and complete the
  * `WaitFor` wait point they name.
  *
  * Both parks are real, and the run row says which is which. The clearance step

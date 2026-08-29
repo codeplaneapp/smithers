@@ -109,8 +109,8 @@ export const memorySource = (
 export const Reading = Schema.Struct({ keys: Schema.Array(Schema.String) })
 
 /**
- * The step. Its prompt names the task, which is how a scripted model — and a
- * real one — learns whether this run is writing or reading.
+ * The step. Its prompt names the task, which is how a scripted model, and a
+ * real one, learns whether this run is writing or reading.
  */
 export const Notebook = AgentAction.make("examples/Notebook", {
   payload: { task: Schema.String, note: Schema.String },

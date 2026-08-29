@@ -14,8 +14,8 @@
  * operator reading the plan sees exactly how many checks can be in flight.
  *
  * **Priority is an annotation.** `Node.priority` orders ready work and changes
- * nothing else — it never enters key material, so raising it cannot invalidate
- * a recorded result. Here it decides which members share the first batch, which
+ * nothing else. It never enters key material, so raising it cannot invalidate a
+ * recorded result. Here it decides which members share the first batch, which
  * is what makes the release blocker start first instead of last.
  *
  * **The fan-in is a step.** Each batch settles to a planned record, and each
@@ -108,8 +108,8 @@ export const specs: ReadonlyArray<CheckSpec> = [
  * Splits checks into batches of at most `concurrency`, highest priority first
  * and declaration order among equals.
  *
- * The sort is total, so a plan built twice from the same list is identical —
- * which matters, because the batch a check lands in is part of the topology the
+ * The sort is total, so a plan built twice from the same list is identical.
+ * That matters, because the batch a check lands in is part of the topology the
  * step keys are derived from.
  */
 export const batches = (
@@ -230,8 +230,8 @@ const registry = Executable.layerProject({ root: projectRoot }).pipe(Layer.provi
 /**
  * Starts the bridged flow.
  *
- * A bridged flow declares open requirements — the bridge cannot know at the
- * type level what the delegate a descriptor names will need — so the launch is
+ * A bridged flow declares open requirements, because the bridge cannot know at
+ * the type level what the delegate a descriptor names will need. The launch is
  * narrowed here rather than letting `any` widen every effect downstream.
  */
 const start = (
@@ -266,7 +266,7 @@ export interface DiscoveredSummary {
  *
  * Nothing below names the gate: discovery finds `flows/gate/flow.ts`, the
  * bridge lowers the priority that file declares onto the delegating node, and
- * the plan the engine drives is the plan `main` builds — the same five checks,
+ * the plan the engine drives is the plan `main` builds: the same five checks,
  * the same bound of two, the same report.
  */
 export const discovered = (filename: string): Effect.Effect<DiscoveredSummary> =>

@@ -3,7 +3,7 @@
  * that a re-driven parent does not run them again.
  *
  * `flow.call(payload)` splices a flow's body into the caller's graph: one plan,
- * one run. `flow.child(payload)` is the other thing entirely — a separate
+ * one run. `flow.child(payload)` is the other thing entirely: a separate
  * durable run with its own row, its own claim, and its own journal, opened
  * through the same `execute` a handler would call. The parent suspends while a
  * child is unsettled and resumes when it settles, and the engine records the
@@ -139,9 +139,9 @@ export const toolRunId = "compile-by-tool"
 /**
  * The tool source a host binds so a cell can reach the flow.
  *
- * The handler needs whatever the flow needs — the engine, the crypto the
- * execution id is derived with, and the action implementations the body calls —
- * so the host hands it exactly that context and nothing else.
+ * The handler needs whatever the flow needs: the engine, the crypto the
+ * execution id is derived with, and the action implementations the body calls.
+ * The host hands it exactly that context and nothing else.
  */
 export const compileSource = (
   services: Context.Context<

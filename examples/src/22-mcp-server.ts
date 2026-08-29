@@ -4,8 +4,8 @@
  * It is a separate process on purpose: an MCP session is a subprocess speaking
  * newline-delimited JSON-RPC over stdio, and an in-process double would prove
  * nothing about the transport, the handshake, or the framing. Nothing here
- * imports from this repository — the point of the protocol is that the server
- * on the other end need not be ours.
+ * imports from this repository, because the point of the protocol is that the
+ * server on the other end need not be ours.
  *
  * Usage: `node 22-mcp-server.ts`. It answers `initialize`, `tools/list`, and
  * `tools/call` and exits when its standard input closes.

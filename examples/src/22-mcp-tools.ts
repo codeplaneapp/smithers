@@ -6,8 +6,9 @@
  * cell. `McpFlows.mcp(client)` projects a connected session's catalog as an
  * ordinary `FlowBinding.Source`, one flow per tool, and a cell that calls an MCP
  * tool runs the identical two lines as a cell that reads a file: find it in
- * `ctx.flows`, invoke it with `ctx.call`. Compare `25-agent-tools-in-sandbox.ts`
- * — the composition below differs by one source and one capability.
+ * `ctx.flows`, invoke it with `ctx.call`. Compare
+ * `25-agent-tools-in-sandbox.ts`: the composition below differs by one source
+ * and one capability.
  *
  * Two details are the adapter's honesty rather than its convenience.
  *
@@ -67,7 +68,7 @@ export const grant = `proc:spawn:mcp/${serverName}`
  * Re-declares a source's flows under the capabilities this host grants them.
  *
  * `McpFlows` declares every tool `"*"`, which is the repository's conservative
- * wildcard for authority a projector cannot describe — `MarkdownFlow` uses the
+ * wildcard for authority a projector cannot describe. `MarkdownFlow` uses the
  * same spelling for a skill that declares none. The cell boundary checks a
  * declared capability as an EXACT `namespace:operation:resource` triple, so a
  * wildcard declaration parses as nothing and is refused by every envelope,
@@ -106,6 +107,7 @@ export const Describe = AgentAction.make("examples/DescribeTitle", {
   prompt: ({ title }) => `Count the words in the title and slugify it.\nTITLE: ${title}`
 })
 
+/** The flow that runs the one step reaching the MCP server's tools. */
 export const Titles = Flow.make("examples/Titles", {
   payload: { title: Schema.String },
   success: Reading,

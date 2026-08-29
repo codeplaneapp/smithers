@@ -52,9 +52,9 @@ export class Interrupted extends Schema.TaggedError<Interrupted>()("examples/Int
  *
  * The engine takes two kinds of pre-image around a compensable dispatch and one
  * post-image after it, and each message names the step key and the attempt. The
- * digests are not stable across edits, so the example reports the readable half
- * — which attempt, and whether the snapshot was taken before or after it — and
- * leaves the key out.
+ * digests are not stable across edits, so the example reports the readable
+ * half, which attempt and whether the snapshot was taken before or after it,
+ * and leaves the key out.
  */
 const describe = (message: string | undefined): string => {
   const matched = /attempt (\d+)( settled)?$/.exec(message ?? "")
@@ -134,6 +134,7 @@ export const Build = Action.make("examples/CachedBuild", {
   success: Schema.String
 })
 
+/** The flow that runs one cached build step. */
 export const Package = Flow.make("examples/Package", {
   payload: { target: Schema.String },
   success: Schema.String,
@@ -145,11 +146,12 @@ export const Apply = Action.make("examples/ApplyMigration", {
   payload: { migration: Schema.String },
   success: Schema.String,
   // The retry ladder can still run out, so the failure stays declared rather
-  // than swallowed. It does not happen here — attempt two succeeds — and a
-  // caller that hid it would turn an exhausted migration into a silent one.
+  // than swallowed. It does not happen here, because attempt two succeeds, and
+  // a caller that hid it would turn an exhausted migration into a silent one.
   error: Interrupted
 })
 
+/** The flow that runs one compensable migration step. */
 export const Migrate = Flow.make("examples/Migrate", {
   payload: { migration: Schema.String },
   success: Schema.String,

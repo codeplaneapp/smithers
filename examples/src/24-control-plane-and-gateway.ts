@@ -4,9 +4,10 @@
  *
  * Everything the in-process control plane does is reachable remotely, and
  * nothing about the vtable changes to make that true. `ControlServer.layerHttp`
- * mounts the same `Control` service as RPC — unary procedures over `POST /rpc`,
- * the `watch` stream over `WebSocket /rpc/ws` — and `ControlClient.layer`
- * projects the RPC client back into the identical `Control` interface. The
+ * mounts the same `Control` service as RPC, with unary procedures over
+ * `POST /rpc` and the `watch` stream over `WebSocket /rpc/ws`, and
+ * `ControlClient.layer` projects the RPC client back into the identical
+ * `Control` interface. The
  * caller below could be handed either one and could not tell.
  *
  * Two transports, because the operations divide cleanly. Plan, approve, run and
@@ -122,9 +123,9 @@ const bridge: Executable.Options = { delegates: [Ship] }
  *
  * A bridged flow declares open requirements: the bridge cannot know at the
  * type level what the delegate a descriptor names will need, so `Executable`
- * says `any`. The host does know — it registered the delegate — so the launch
- * is narrowed here instead of letting `any` widen every effect downstream of
- * it.
+ * says `any`. The host does know, because it registered the delegate, so the
+ * launch is narrowed here instead of letting `any` widen every effect
+ * downstream of it.
  */
 const launch = (
   executable: Executable.Executable,
