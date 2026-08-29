@@ -51,12 +51,13 @@
  */
 import * as Capability from "@smthrs/capability/Capability"
 import * as Permission from "@smthrs/capability/Permission"
-import { LaunchFailed } from "@smthrs/control/ControlError"
+import { LaunchFailed, PersistenceError } from "@smthrs/control/ControlError"
 import * as ControlExecutor from "@smthrs/control/ControlExecutor"
 import { ControlRuntime } from "@smthrs/control/ControlRuntime"
-import type { ApprovalPayload, Envelope, RunStatus } from "@smthrs/control/ControlSchema"
+import type { ApprovalPayload, Envelope, RunStatus, SignalPayload } from "@smthrs/control/ControlSchema"
 import * as Digest from "@smthrs/core/Digest"
-import { Flow, FlowRuntime } from "@smthrs/flow"
+import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
+import { DurableDeferred, Flow, FlowRuntime, WaitFor } from "@smthrs/flow"
 import type * as AgentEvent from "@smthrs/harness/AgentEvent"
 import type * as Cell from "@smthrs/harness/Cell"
 import * as CellTurn from "@smthrs/harness/CellTurn"
@@ -72,6 +73,7 @@ import * as ModelRequest from "@smthrs/model/ModelRequest"
 import type { NotificationQueue } from "@smthrs/notifications"
 import { Node } from "@smthrs/plan"
 import * as Registry from "@smthrs/registry/Registry"
+import { RunStore } from "@smthrs/run-store"
 import type { Crypto } from "effect"
 import { Cause, Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect"
 import { Agent } from "./Agent.ts"
@@ -632,15 +634,152 @@ export const settleDriverFailure = <E, R>(
       writeFailed(Cause.pretty(cause))
     )
 
+/**
+ * Records a cancellation on the engine row, whichever process owns the run.
+ *
+ * This is the durable half of `Control.cancel`. Interruption is a fiber
+ * operation and fibers are process-local, so a cancel that only interrupted
+ * would reach nothing when a second `flows` process, the UI, or a gateway asked
+ * — the engine row's `cancel_requested_at_ms` is what the owning driver's
+ * cancel poll reads, and it is first-writer-wins, so a repeat is harmless.
+ *
+ * `NotFound` is `unknown` rather than a failure: an engine that never heard of
+ * the run has nothing to record, and the control plane's own interrupt and
+ * journal entry are still the whole answer for a run this composition launched
+ * nothing for.
+ *
+ * @category helpers
+ * @since 0.1.0
+ */
+export const requestCancel = (
+  input: ControlExecutor.CancelRequest
+): Effect.Effect<ControlExecutor.CancelRecord, PersistenceError, RunStore.RunStore> =>
+  Effect.gen(function*() {
+    const runs = yield* RunStore.RunStore
+    const at = yield* Clock.currentTimeMillis
+    const outcome = yield* runs.requestCancel(input.runId, at).pipe(
+      Effect.mapError((cause) =>
+        new PersistenceError({
+          operation: "AgentSession.requestCancel",
+          message: `The engine could not record a cancellation for ${input.runId}`,
+          cause
+        })
+      )
+    )
+    return outcome._tag === "NotFound" ? "unknown" : "recorded"
+  })
+
+/** The deferred name a `WaitFor` wait point is recorded under. */
+const waitPointName = (signal: string): string => `WaitFor/${signal}`
+
+/**
+ * Completes the `WaitFor` wait point a run is parked on with a signal's
+ * payload.
+ *
+ * The wait point is read off the run's own waiting row rather than derived from
+ * the flow, because the engine writes the deferred's token there when it parks
+ * (`WaitFor.layer` annotates `reason: "event"` with the token). That makes the
+ * bridge flow-agnostic: it completes whatever wait point the parked run
+ * actually declared, through the ordinary `DurableDeferred.succeed` path every
+ * other resolver uses, and the engine's own `scheduleResume` re-drives the run.
+ *
+ * The three answers are distinct on purpose. `delivered` completed a wait
+ * point. `no-match` means the run IS parked and is waiting for something else —
+ * a different signal name, an approval, a timer — which `Control.signal`
+ * refuses rather than recording a delivery nothing consumes. `unknown` means
+ * this executor can see no open wait point at all, which is not the same as
+ * knowing there is none: another process may own the run, or it may not have
+ * parked yet, and the recorded message is what a later start replays.
+ *
+ * @category helpers
+ * @since 0.1.0
+ */
+export const deliverSignal = (
+  input: ControlExecutor.Signal
+): Effect.Effect<
+  ControlExecutor.SignalDelivery,
+  PersistenceError,
+  DurableEngineState.DurableEngineState | FlowRuntime.FlowRuntime
+> =>
+  Effect.gen(function*() {
+    const state = yield* DurableEngineState.DurableEngineState
+    const waiting = yield* state.waiting(input.runId)
+    if (Option.isNone(waiting)) return "unknown" as const
+    const row = waiting.value
+    if (row.reason !== "event" || row.token === null) return "no-match" as const
+    const token = row.token
+    const parsed = yield* Schema.decodeEffect(DurableDeferred.TokenParsed.FromString)(token).pipe(
+      Effect.mapError((cause) =>
+        new PersistenceError({
+          operation: "AgentSession.deliverSignal",
+          message: `The wake token recorded for ${input.runId} is not a durable deferred token`,
+          cause
+        })
+      )
+    )
+    if (parsed.deferredName !== waitPointName(input.signal.name)) return "no-match" as const
+    // `orDie`, not a typed failure: the only way completion refuses a token is
+    // by failing to parse it, and the line above just parsed this one. A
+    // refusal here would mean the two parsers disagree, which is a defect in
+    // this module rather than a condition a caller can answer.
+    yield* DurableDeferred.succeed(WaitFor.deferred(input.signal.name), {
+      token: token as DurableDeferred.Token,
+      value: input.signal.payload
+    }).pipe(Effect.orDie)
+    return "delivered" as const
+  })
+
+/**
+ * Delivers every signal recorded while no executor was running.
+ *
+ * `Control.signal` records the message whether or not an executor could deliver
+ * it, which is the only honest thing to do when the process that owns the run
+ * is down. This is the other half of that promise: at start, every non-terminal
+ * run's recorded signals are replayed against its wait point. Delivery is
+ * first-writer-wins at the deferred, so a signal that already landed is a
+ * no-op, and a run parked on something else is left alone.
+ *
+ * @category helpers
+ * @since 0.1.0
+ */
+export const drainRecordedSignals: Effect.Effect<
+  void,
+  never,
+  ControlRuntime | DurableEngineState.DurableEngineState | FlowRuntime.FlowRuntime
+> = Effect.gen(function*() {
+  const runtime = yield* ControlRuntime
+  const runs = yield* runtime.listRuns
+  yield* Effect.forEach(
+    runs.filter((run) => run.status !== "completed" && run.status !== "failed" && run.status !== "cancelled"),
+    (run) =>
+      runtime.deliveredSignals(run.runId).pipe(
+        Effect.flatMap((signals: ReadonlyArray<SignalPayload>) =>
+          Effect.forEach(signals, (signal) => deliverSignal({ runId: run.runId, signal }), { discard: true })
+        ),
+        Effect.ignore
+      ),
+    { discard: true }
+  )
+}).pipe(
+  Effect.catchCause((cause) =>
+    Effect.annotateLogs(
+      Effect.logWarning("Recorded signals could not be replayed at executor start"),
+      { cause: Cause.pretty(cause) }
+    )
+  )
+)
+
 /** Everything the executor captures at construction and re-provides per run. */
 type Services =
   | Agent
   | ControlRuntime
   | Crypto.Crypto
+  | DurableEngineState.DurableEngineState
   | FlowRuntime.FlowRuntime
   | Journal.Journal
   | NotificationQueue.NotificationQueue
   | Registry.Registry
+  | RunStore.RunStore
   | SeatResolver
 
 /**
@@ -1093,6 +1232,10 @@ export const make = (
       })).pipe(Scope.provide(scope))
 
     yield* Effect.forkIn(resumeBridge, scope)
+    // A signal recorded while this process was down has a wait point still
+    // open and nobody to complete it. Replaying at start is what makes
+    // `Control.signal`'s record a promise rather than a note.
+    yield* Effect.forkIn(Effect.provide(drainRecordedSignals, services), scope)
 
     const launch = (
       input: ControlExecutor.Launch
@@ -1145,7 +1288,9 @@ export const make = (
       })
 
     return ControlExecutor.make({
-      launch: Effect.fn("AgentSession.launch")(launch)
+      launch: Effect.fn("AgentSession.launch")(launch),
+      requestCancel: Effect.fn("AgentSession.requestCancel")((input) => Effect.provide(requestCancel(input), services)),
+      deliverSignal: Effect.fn("AgentSession.deliverSignal")((input) => Effect.provide(deliverSignal(input), services))
     })
   })
 

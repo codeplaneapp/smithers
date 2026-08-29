@@ -23,6 +23,7 @@ import type * as ControlExecutor from "@smthrs/control/ControlExecutor"
 import { ControlRuntime } from "@smthrs/control/ControlRuntime"
 import type { RunStatus } from "@smthrs/control/ControlSchema"
 import { FlowEngine } from "@smthrs/engine"
+import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import { FlowRuntime } from "@smthrs/flow"
 import * as Cell from "@smthrs/harness/Cell"
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
@@ -33,6 +34,7 @@ import { Node } from "@smthrs/plan"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
 import { RegistryError } from "@smthrs/registry/RegistryError"
+import { RunStore } from "@smthrs/run-store"
 import { Deferred, Duration, Effect, Fiber, Layer, Option, PubSub, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
@@ -298,6 +300,11 @@ const withExecutor = <A>(
         journalLayer(record, options.journal),
         NotificationQueue.layerNoop(),
         engineLayer(options.engine),
+        // The two engine stores the cancel and signal ports write through.
+        // This suite exercises the control seam, not those ports, so the
+        // stubs are the ones that record nothing.
+        RunStore.layerNoop(),
+        DurableEngineState.layerMemory,
         NodeCrypto.layer
       )
     ),
@@ -799,5 +806,27 @@ describe("the agent flow the executor registers", () => {
     expect(flow.body({ runId: "run-b", planId: "plan-b" })).toEqual(
       flow.body({ runId: "run-a", planId: "plan-a" })
     )
+  })
+})
+
+describe("the executor's engine ports", () => {
+  it("answers a cancel and a signal for a run its engine does not have", async () => {
+    const record = recorder()
+    const observed = await withExecutor(record, {}, (executor) =>
+      Effect.gen(function*() {
+        return {
+          cancel: yield* executor.requestCancel({ runId: launchInput.run.runId }),
+          signal: yield* executor.deliverSignal({
+            runId: launchInput.run.runId,
+            signal: { name: "approval", payload: null }
+          })
+        }
+      }))
+
+    // The stub stores hold no row and no wait point, and neither port invents
+    // one: `unknown` is what the control plane needs to hear so it records the
+    // request for whichever executor eventually drives the run.
+    expect(observed.cancel).toBe("unknown")
+    expect(observed.signal).toBe("unknown")
   })
 })
