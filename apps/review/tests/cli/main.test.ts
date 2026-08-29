@@ -30,6 +30,17 @@ function spawnMain(args: string[], env?: Record<string, string>): SpawnResult {
 }
 
 describe("main (CLI entrypoint, subprocess)", () => {
+  test("answers --help without loading the review flow", () => {
+    // Importing the flow, the engine, and the walkthrough renderer costs
+    // seconds of module loading. `main.ts` therefore holds only the parsing and
+    // the usage text, and reaches `runReview.ts` through a dynamic import.
+    // A regression here is someone hoisting that import back to the top.
+    const started = Date.now();
+    const result = spawnMain(["--help"]);
+    expect(result.exitCode).toBe(0);
+    expect(Date.now() - started).toBeLessThan(4_000);
+  });
+
   test("--help prints USAGE and exits 0", () => {
     const result = spawnMain(["--help"]);
     expect(result.exitCode).toBe(0);

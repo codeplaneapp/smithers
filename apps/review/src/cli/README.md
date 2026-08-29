@@ -5,6 +5,13 @@ the entry point and `main.ts` starts nothing on import, so a test imports its
 exported helpers (`buildRunSummaryLine`, `parseQuizColumn`) without running a
 review.
 
+The command is split in two on purpose. `main.ts` is the light half: parsing,
+the usage text, and the version, with no import of the flow. `runReview.ts` is
+the heavy half, reached through a dynamic import once a run is actually going to
+happen. Loading the flow, the engine, and the walkthrough renderer costs about
+nine seconds of module loading, and `--help` must not pay it;
+`tests/cli/main.test.ts` pins that.
+
 - `parseReviewArgs.ts` — flag parsing with mutually exclusive review targets
   (`--commit` / `--from`+`--to` / `--pr`).
 - `createProgressReporter.ts` — live stderr progress fed by the
