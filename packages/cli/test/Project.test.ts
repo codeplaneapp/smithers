@@ -53,6 +53,28 @@ describe("the project root", () => {
     expect(Project.root(undefined, join(root, "deep", "er"))).toBe(root)
   })
 
+  it("does not mistake a package directory called flows for a project root", () => {
+    // This repository is the case: `packages/flows` is the `@smthrs/flows`
+    // package, and a bare-name rule made every invocation under `packages/`
+    // write a second `packages/.flows` database.
+    const root = project("package.json")
+    const packages = join(root, "packages")
+    mkdirSync(join(packages, "flows"), { recursive: true })
+    const nested = join(packages, "cli", "scratch")
+    mkdirSync(nested, { recursive: true })
+
+    expect(Project.root(undefined, nested)).toBe(nested)
+  })
+
+  it("anchors on a flows/ directory that sits beside a package manifest", () => {
+    const root = project("flows/", "package.json")
+    rmSync(join(root, ".git"), { recursive: true, force: true })
+    const nested = join(root, "src", "deep")
+    mkdirSync(nested, { recursive: true })
+
+    expect(Project.root(undefined, nested)).toBe(root)
+  })
+
   it("falls back to the invocation directory when nothing anchors", () => {
     const root = project()
     expect(Project.root(undefined, root)).toBe(root)

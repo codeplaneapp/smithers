@@ -9,6 +9,7 @@
  */
 import { spawn, spawnSync } from "node:child_process"
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
@@ -19,7 +20,12 @@ import { Version } from "../src/index.ts"
 const packageRoot = fileURLToPath(new URL("..", import.meta.url))
 const executable = fileURLToPath(new URL("../src/bin.ts", import.meta.url))
 const shim = fileURLToPath(new URL("../bin/smithers.mjs", import.meta.url))
-const temporaryDirectoryPrefix = fileURLToPath(new URL("../.tmp-cli-test-", import.meta.url))
+// Outside the repository on purpose. `Project.root` walks up for `.flows/`,
+// and this checkout grows one the moment any command runs in it, so a working
+// directory under `packages/` would resolve the repository as the project root
+// and every case would read the repository's own run state instead of the
+// empty one it staged.
+const temporaryDirectoryPrefix = join(tmpdir(), "smithers-cli-bin-")
 
 const run = (args: ReadonlyArray<string>, environment: Readonly<Record<string, string>> = {}) => {
   const cwd = mkdtempSync(temporaryDirectoryPrefix)
@@ -171,28 +177,31 @@ describe("the signal exit codes", () => {
         cwd,
         stdio: ["ignore", "pipe", "pipe"]
       })
-      // The engine opens a database and starts a watch before it blocks; the
-      // signal has to land after that, or the process dies during startup and
-      // the exit code says nothing about the teardown contract.
-      const code = await new Promise<number | null>((resolve) => {
-        const timer = setTimeout(() => child.kill(signal), 3000)
-        child.on("exit", (status, killedBy) => {
-          clearTimeout(timer)
-          resolve(status ?? (killedBy === signal ? null : null))
-        })
+      const exited = new Promise<{ readonly status: number | null; readonly signal: string | null }>((resolve) => {
+        child.on("exit", (status, killedBy) => resolve({ status, signal: killedBy }))
       })
-      return code
+      // The signal has to land after the handler is installed and the engine
+      // has opened its database. A fixed sleep is a race: on a loaded machine
+      // the module graph alone can take seconds to parse, and the process then
+      // dies from the default action instead of running its teardown. The
+      // control database appearing is the readiness proof.
+      const database = join(cwd, ".flows", "control.db")
+      const deadline = Date.now() + 30_000
+      while (!existsSync(database) && Date.now() < deadline) await new Promise((wake) => setTimeout(wake, 25))
+      expect(existsSync(database)).toBe(true)
+      child.kill(signal)
+      return await exited
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
   }
 
   it("exits 130 on SIGINT", async () => {
-    expect(await interrupted("SIGINT")).toBe(130)
+    expect(await interrupted("SIGINT")).toEqual({ status: 130, signal: null })
   }, 60_000)
 
   it("exits 143 on SIGTERM", async () => {
-    expect(await interrupted("SIGTERM")).toBe(143)
+    expect(await interrupted("SIGTERM")).toEqual({ status: 143, signal: null })
   }, 60_000)
 })
 

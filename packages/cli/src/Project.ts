@@ -7,7 +7,8 @@
  * from a subdirectory writing a second store). The rule:
  *
  * 1. an explicit `--root`, resolved against the invocation directory;
- * 2. otherwise the nearest ancestor holding `.flows/` or `flows/`;
+ * 2. otherwise the nearest ancestor that anchors a project (see
+ *    {@link anchors});
  * 3. otherwise the invocation directory itself.
  *
  * The same module answers the rc-contract section 6 question: is there
@@ -33,9 +34,6 @@ export const legacyMarkers: ReadonlyArray<string> = [
   "smithers.db-shm"
 ]
 
-/** Names that make a directory the project root when no `--root` is given. */
-const rootMarkers: ReadonlyArray<string> = [".flows", "flows"]
-
 /**
  * Names that end the upward walk.
  *
@@ -46,6 +44,30 @@ const rootMarkers: ReadonlyArray<string> = [".flows", "flows"]
  * false alarm on every invocation.
  */
 const boundaryMarkers: ReadonlyArray<string> = [".git", ".jj"]
+
+/** Names that make a directory a project in its own right. */
+const projectMarkers: ReadonlyArray<string> = ["package.json", ".git", ".jj"]
+
+/**
+ * Whether a directory anchors the project root.
+ *
+ * `.flows/` anchors on its own: rc.0 writes that directory and nothing else
+ * does, so finding one is proof of the project it belongs to.
+ *
+ * `flows/` anchors only beside a project marker. A directory called `flows` is
+ * a source root in a Smithers project and an ordinary package directory
+ * everywhere else, and this repository holds both: `packages/flows` is the
+ * `@smthrs/flows` package, so the bare-name rule made every command run under
+ * `packages/` resolve its root to `packages/` and write a second
+ * `packages/.flows` database. Requiring `package.json`, `.git`, or `.jj` in
+ * the same directory keeps the anchor on the directory a project actually
+ * starts at.
+ */
+const anchors = (directory: string, exists: (path: string) => boolean): boolean => {
+  if (exists(join(directory, ".flows"))) return true
+  return exists(join(directory, "flows")) &&
+    projectMarkers.some((marker) => exists(join(directory, marker)))
+}
 
 /**
  * Resolves the project root for one invocation.
@@ -63,7 +85,7 @@ export const root = (
   }
   let directory = resolve(cwd)
   for (;;) {
-    if (rootMarkers.some((marker) => exists(join(directory, marker)))) return directory
+    if (anchors(directory, exists)) return directory
     const parent = dirname(directory)
     if (parent === directory || boundaryMarkers.some((marker) => exists(join(directory, marker)))) {
       return resolve(cwd)

@@ -119,6 +119,8 @@ export interface Scaffolded {
   readonly flowFile: string
   readonly created: boolean
   readonly gitignore: IgnoreStatus
+  /** The state directory this project's runs will use. */
+  readonly stateDirectory: string
 }
 
 /**
@@ -139,7 +141,14 @@ export const scaffold = (root: string, name: string): Scaffolded => {
     mkdirSync(directory, { recursive: true })
     writeFileSync(flowFile, template(name), "utf8")
   }
-  return { name, flowFile, created: !exists, gitignore: ensureIgnored(root) }
+  // The empty state directory is the project's anchor. `Project.root` treats
+  // `.flows/` as proof on its own and a bare `flows/` only beside a project
+  // marker, so a scaffold in a plain directory that is neither a package nor a
+  // repository would otherwise resolve a different root from every
+  // subdirectory, which is the one failure `init` exists to prevent.
+  const stateDirectory = join(root, ".flows")
+  mkdirSync(stateDirectory, { recursive: true })
+  return { name, flowFile, created: !exists, gitignore: ensureIgnored(root), stateDirectory }
 }
 
 /**
