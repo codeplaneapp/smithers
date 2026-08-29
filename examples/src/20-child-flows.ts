@@ -17,15 +17,47 @@
  *
  * The join is an ordinary `Node.all`: two children settle concurrently, and the
  * report step reads each result off the joined placeholder as a payload field.
+ *
+ * The third phase is the same flow reached from the other direction: a model
+ * calling it as a tool. A flow handed to an agent is an ordinary
+ * `FlowBinding.Source` whose handler executes it, so the cell calls `compile`
+ * the way it calls `read` or an MCP tool, and a real durable run of
+ * `examples/Compile` happens because of it.
+ *
+ * That run is a real child. The engine takes the lineage edge from the
+ * execution the handler ran inside, so `flows_run_parents` links it to the
+ * agent step's run without the handler saying anything about parents.
+ *
+ * What `.child()` adds on top is IDENTITY. The interpreter derives a child's
+ * execution id from the parent's id and the node's address, so a re-driven
+ * parent lands on the child it already started. A tool call names its own id,
+ * which is why {@link toolRunId} is a constant here: the handler owns the
+ * at-most-once question that the boundary would otherwise answer for it.
  */
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as Agent from "@smthrs/agent/Agent"
+import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Seat from "@smthrs/agent/Seat"
+import * as SeatResolver from "@smthrs/agent/SeatResolver"
+import * as Effects from "@smthrs/core/Effects"
+import * as CoreFlow from "@smthrs/core/Flow"
 import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
-import { Action, Flow, Interpreter } from "@smthrs/flow"
+import { Action, Flow, type FlowRuntime, Interpreter } from "@smthrs/flow"
+import * as FlowBinding from "@smthrs/harness/FlowBinding"
+import * as Model from "@smthrs/model/Model"
+import * as ModelEvent from "@smthrs/model/ModelEvent"
+import type * as Route from "@smthrs/model/Route"
 import { Node } from "@smthrs/plan"
 import type * as Planned from "@smthrs/plan/Planned"
+import * as Registry from "@smthrs/registry/Registry"
 import { RunStore } from "@smthrs/run-store"
+import type * as Context from "effect/Context"
+import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import { durableEngine } from "./durable-layer.ts"
 
 /** The work the first child does. */
@@ -78,6 +110,113 @@ export const Release = Flow.make("examples/Release", {
     )
 })
 
+/**
+ * `examples/Compile`, declared as something a model may call.
+ *
+ * A tool is a declaration plus the code that runs it, and the code here is one
+ * line: execute the flow. The model never learns that `compile` is a whole
+ * durable flow rather than a function, which is the point of the binding
+ * contract.
+ */
+export const CompileTool = CoreFlow.make({
+  name: "compile",
+  description: "Compile a target and answer with the bundle path.",
+  input: Schema.Struct({ target: Schema.String }),
+  output: Schema.Struct({ bundle: Schema.String }),
+  effects: Effects.make({ reads: [], writes: [], mode: "expected", onConflict: "serialize" })
+})
+
+/**
+ * The execution id the tool's handler runs `examples/Compile` under.
+ *
+ * A constant, because the handler owns this decision. A `.child()` boundary
+ * derives the id from the parent and the node address; a tool call has no
+ * boundary to derive it from, so a handler that wants at-most-once has to name
+ * an id that is stable for the same work.
+ */
+export const toolRunId = "compile-by-tool"
+
+/**
+ * The tool source a host binds so a cell can reach the flow.
+ *
+ * The handler needs whatever the flow needs — the engine, the crypto the
+ * execution id is derived with, and the action implementations the body calls —
+ * so the host hands it exactly that context and nothing else.
+ */
+export const compileSource = (
+  services: Context.Context<
+    FlowRuntime.FlowRuntime | Crypto.Crypto | Action.Requirement<"examples/Bundle">
+  >
+): FlowBinding.Source =>
+  FlowBinding.source("release/tools", [
+    FlowBinding.provide(
+      FlowBinding.make({
+        flow: CompileTool,
+        handler: ({ target }) =>
+          Effect.map(
+            Compile.execute({ target }, { executionId: toolRunId }),
+            (bundle) => ({ bundle })
+          )
+      }),
+      services
+    )
+  ])
+
+/** What the model must answer with once it has used the tool. */
+export const Built = Schema.Struct({ bundle: Schema.String })
+
+/** The step that reaches the flow as a tool. */
+export const Builder = AgentAction.make("examples/Builder", {
+  payload: { target: Schema.String },
+  output: Built,
+  seat: "anthropic:claude-sonnet-4-5",
+  system: ["You build releases. Use the compile tool rather than guessing at a path."],
+  prompt: ({ target }) => `Compile the target and report the bundle path.\nTARGET: ${target}`
+})
+
+/** The flow the agent step runs inside. */
+export const Build = Flow.make("examples/Build", {
+  payload: { target: Schema.String },
+  success: Built,
+  error: AgentAction.AgentFailure,
+  body: (payload: { readonly target: string }) => Builder.call(payload)
+})
+
+const prepared: Route.PreparedRequest = {
+  routeId: "examples",
+  protocolId: "examples",
+  method: "POST",
+  url: "https://example.invalid/v1/messages",
+  publicHeaders: { "content-type": "application/json" },
+  body: new TextEncoder().encode("{}"),
+  bodyText: "{}"
+}
+
+/** A scripted model that reads the target out of its prompt and calls the tool. */
+export const scripted = (): Model.Model =>
+  Model.make({
+    stream: (request) =>
+      Stream.suspend(() => {
+        const text = [
+          ...request.system.map((part) => part.text),
+          ...request.messages.flatMap((message) =>
+            message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+          )
+        ].join("\n")
+        const target = /TARGET: (.+)/.exec(text)?.[1]?.trim() ?? ""
+        const cell = [
+          `const built = await ctx.call("compile", { target: ${JSON.stringify(target)} })`,
+          "ctx.done({ bundle: built.bundle })"
+        ].join("\n")
+        return Stream.fromIterable([
+          ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "cell" }),
+          ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "cell", text: "```cell\n" + cell + "\n```" }),
+          ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: "cell" }),
+          ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+        ])
+      })
+  })
+
 /** One child run, as durable state records it. */
 export interface Child {
   readonly runId: string
@@ -103,12 +242,28 @@ export interface Summary {
   readonly replayed: string
   /** The children the engine linked to the parent, in the order it linked them. */
   readonly children: ReadonlyArray<Child>
-  /** How many times each child's body ran across BOTH executions. */
+  /**
+   * How many times each child's body ran, across both executions of the parent
+   * and the tool call that compiles a second time under its own run.
+   */
   readonly dispatches: Readonly<Record<string, number>>
+  /** The bundle path the model reported after calling the flow as a tool. */
+  readonly built: string
+  /** The id of the run the tool call opened. */
+  readonly toolRunId: string
+  /** The status of the run the tool call opened. */
+  readonly toolRunStatus: string
+  /** The parents the durable edge table names for that run. */
+  readonly toolRunParents: ReadonlyArray<string>
+  /** The run the agent step itself executed as. */
+  readonly builderRunId: string
 }
 
 /** The parent's execution id. Its children derive theirs from it. */
 export const releaseRunId = "release-1"
+
+/** The execution id the agent step that calls the tool runs under. */
+export const builderRunId = "build-1"
 
 /** Runs the parent twice over one SQLite file and reads its lineage back. */
 export const main = (filename: string): Effect.Effect<Summary> =>
@@ -167,7 +322,63 @@ export const main = (filename: string): Effect.Effect<Summary> =>
             } satisfies Child
           }))
 
-        return { report: first, replayed, children, dispatches } satisfies Summary
+        // ------------------------------------- the same flow, as a model's tool
+        // The context the tool handler runs the flow in: the engine, the
+        // crypto, and the one action the flow's body calls.
+        const services = yield* Effect.context<
+          FlowRuntime.FlowRuntime | Crypto.Crypto | Action.Requirement<"examples/Bundle">
+        >()
+        const built = yield* Build.execute({ target: "server" }, { executionId: builderRunId }).pipe(
+          Effect.provide(
+            Layer.mergeAll(Builder.layer, Interpreter.layer(Build)).pipe(
+              Layer.provideMerge(
+                Layer.mergeAll(
+                  AgentAction.layerHost({
+                    registry: Registry.makeNoop({
+                      list: () => Effect.succeed([]),
+                      visible: () => Effect.succeed([]),
+                      getOption: () => Effect.succeed(Option.none())
+                    }),
+                    flows: [compileSource(services)],
+                    limits: { calls: 4 },
+                    capabilityEnvelope: [],
+                    maxFrames: 2
+                  }),
+                  SeatResolver.layer({
+                    resolve: (id) =>
+                      Effect.succeed(
+                        Seat.make({
+                          id,
+                          model: scripted(),
+                          route: { prepare: () => Effect.succeed(prepared) },
+                          contextWindowTokens: 200_000
+                        })
+                      )
+                  }),
+                  Agent.layer
+                )
+              ),
+              Layer.provideMerge(Agent.layerDefaults)
+            )
+          )
+        )
+
+        // The tool call opened a run of its own, linked to the run the step
+        // was executing in.
+        const toolRun = yield* runs.get(toolRunId)
+        const toolParents = yield* state.runParents(toolRunId)
+
+        return {
+          report: first,
+          replayed,
+          children,
+          dispatches,
+          built: built.bundle,
+          toolRunId: toolRun.runId,
+          toolRunStatus: toolRun.status,
+          toolRunParents: toolParents.map((edge) => edge.parentId),
+          builderRunId
+        } satisfies Summary
       }).pipe(Effect.provide(stack))
     )
-  }).pipe(Effect.orDie)
+  }).pipe(Effect.provide(NodeCrypto.layer), Effect.orDie)
