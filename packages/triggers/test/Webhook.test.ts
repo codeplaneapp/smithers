@@ -101,7 +101,6 @@ const controlLayer = (calls: Array<string>) =>
           return { _tag: "Accepted" as const, receiptId: "signalled" }
         }),
       cancel: () => Effect.die("unused"),
-      pause: () => Effect.die("unused"),
       resume: () => Effect.die("unused"),
       list: () => Effect.die("unused"),
       watch: () => Stream.empty
