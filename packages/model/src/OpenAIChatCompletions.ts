@@ -52,6 +52,56 @@ const ChatMessage = Schema.Union([
 type ChatMessage = typeof ChatMessage.Type
 
 /**
+ * The `response_format` field that turns on native structured output.
+ *
+ * Chat Completions deployments that implement it validate the answer against
+ * the supplied JSON Schema themselves, so the caller receives a document it can
+ * decode rather than prose it has to scan. Measured against a live Cerebras
+ * seat on 2026-08-29: `response_format` alone answers `{"city":"Paris"}`, and
+ * `response_format` together with `tools` is refused with
+ * `"tools" is incompatible with "response_format"` (`wrong_api_format`).
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const ResponseFormat = Schema.Struct({
+  type: Schema.Literal("json_schema"),
+  json_schema: Schema.Struct({
+    name: Schema.String,
+    strict: Schema.Boolean,
+    schema: JsonObject
+  })
+})
+
+/**
+ * The decoded form of {@link ResponseFormat}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type ResponseFormat = typeof ResponseFormat.Type
+
+/**
+ * The native-structured-output toggle a route is configured with.
+ *
+ * Presence is the toggle: a route built without one lowers requests exactly as
+ * before and leaves the schema to the prompt (`@smthrs/harness`
+ * `StructuredOutput.instructions`), and a route built with one asks the
+ * provider to enforce the schema instead.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface StructuredOutput {
+  /** The schema's name, echoed back by the provider on a refusal. */
+  readonly name: string
+  /** The JSON Schema document the answer must satisfy. */
+  readonly schema: JsonObject
+  /** Whether the provider must reject an answer that misses the schema. Defaults to `true`. */
+  readonly strict?: boolean | undefined
+}
+
+/**
  * JSON schema for a Chat Completions request body.
  *
  * @category schemas
@@ -61,6 +111,7 @@ export const Body = Schema.Struct({
   model: Schema.String,
   messages: Schema.Array(ChatMessage),
   tools: Schema.optional(Schema.Array(FunctionTool)),
+  response_format: Schema.optional(ResponseFormat),
   max_tokens: Schema.optional(Schema.Finite),
   temperature: Schema.optional(Schema.Finite),
   top_p: Schema.optional(Schema.Finite),
@@ -123,10 +174,25 @@ const lowerMessages = (request: ModelRequest): ReadonlyArray<ChatMessage> => {
   return messages
 }
 
-const buildBody = (request: ModelRequest): Body => ({
+const responseFormat = (structuredOutput: StructuredOutput): ResponseFormat => ({
+  type: "json_schema",
+  json_schema: {
+    name: structuredOutput.name,
+    strict: structuredOutput.strict ?? true,
+    schema: structuredOutput.schema
+  }
+})
+
+const buildBody = (
+  request: ModelRequest,
+  structuredOutput: StructuredOutput | undefined
+): Body => ({
   model: request.modelId,
   messages: lowerMessages(request),
-  ...(request.tools.length === 0 ? {} : { tools: request.tools.map(functionTool) }),
+  ...(structuredOutput !== undefined || request.tools.length === 0
+    ? {}
+    : { tools: request.tools.map(functionTool) }),
+  ...(structuredOutput === undefined ? {} : { response_format: responseFormat(structuredOutput) }),
   ...(request.params.maxTokens === undefined ? {} : { max_tokens: request.params.maxTokens }),
   ...(request.params.temperature === undefined ? {} : { temperature: request.params.temperature }),
   ...(request.params.topP === undefined ? {} : { top_p: request.params.topP }),
@@ -134,9 +200,22 @@ const buildBody = (request: ModelRequest): Body => ({
   stream_options: { include_usage: true }
 })
 
-const fromRequest = Effect.fn("OpenAIChatCompletions.fromRequest")((
-  request: ModelRequest
-): Effect.Effect<Body, ModelError> => Effect.succeed(buildBody(request)))
+const fromRequest = (structuredOutput: StructuredOutput | undefined) =>
+  Effect.fn("OpenAIChatCompletions.fromRequest")((
+    request: ModelRequest
+  ): Effect.Effect<Body, ModelError> =>
+    structuredOutput !== undefined && request.tools.length > 0
+      // Refusing here costs one local failure; sending it costs a provider
+      // round trip that ends in HTTP 400 with the same meaning.
+      ? Effect.fail(
+        new ModelError({
+          code: "invalid_request",
+          message:
+            "A Chat Completions route with native structured output cannot send tools: the provider rejects tools together with response_format"
+        })
+      )
+      : Effect.succeed(buildBody(request, structuredOutput))
+  )
 
 const ChunkToolCall = Schema.Struct({
   index: Schema.optional(Schema.Number),
@@ -405,25 +484,40 @@ const classifyError = (status: number, body: string): ModelError => {
 }
 
 /**
- * The OpenAI Chat Completions protocol — the wire shape Ollama, Gemini's
- * OpenAI-compatible endpoint, and most other self-hosted or third-party
- * "OpenAI-compatible" servers actually implement.
+ * Builds the OpenAI Chat Completions protocol, optionally with native
+ * structured output turned on.
+ *
+ * The option is presence-based: without it the lowering is byte-for-byte what
+ * it has always been, so existing sealed step keys are unchanged.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const protocolWith = (
+  options: { readonly structuredOutput?: StructuredOutput | undefined } = {}
+): Protocol.Protocol<Body, string, ChatCompletionChunk, State> =>
+  Protocol.make({
+    id: "openai-chat-completions",
+    supportsDeferred: () => false,
+    body: {
+      schema: Body,
+      from: fromRequest(options.structuredOutput)
+    },
+    stream: {
+      event: Schema.fromJsonString(ChatCompletionChunk),
+      initial: () => ({ tools: ToolStream.initial(), callIdByIndex: {}, textOpen: false, settled: false }),
+      step,
+      onHalt: finalize
+    },
+    classifyError
+  })
+
+/**
+ * The OpenAI Chat Completions protocol with native structured output off — the
+ * wire shape Ollama, Gemini's OpenAI-compatible endpoint, and most other
+ * self-hosted or third-party "OpenAI-compatible" servers actually implement.
  *
  * @category models
  * @since 0.1.0
  */
-export const protocol: Protocol.Protocol<Body, string, ChatCompletionChunk, State> = Protocol.make({
-  id: "openai-chat-completions",
-  supportsDeferred: () => false,
-  body: {
-    schema: Body,
-    from: fromRequest
-  },
-  stream: {
-    event: Schema.fromJsonString(ChatCompletionChunk),
-    initial: () => ({ tools: ToolStream.initial(), callIdByIndex: {}, textOpen: false, settled: false }),
-    step,
-    onHalt: finalize
-  },
-  classifyError
-})
+export const protocol: Protocol.Protocol<Body, string, ChatCompletionChunk, State> = protocolWith()

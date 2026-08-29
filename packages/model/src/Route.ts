@@ -323,11 +323,35 @@ export const openai = (
  * it (Ollama ignores its `Authorization` header entirely) — {@link Auth.bearer}
  * only rejects an empty credential.
  *
+ * `structuredOutput` is the native-structured-output toggle. Omitted, the route
+ * lowers requests exactly as it always has and the answer's shape is taught in
+ * the prompt (`@smthrs/harness` `StructuredOutput.instructions`) and validated
+ * locally. Supplied, the route sends `response_format` so the provider enforces
+ * the schema, and it sends no `tools`: measured against a live Cerebras seat on
+ * 2026-08-29, `https://api.cerebras.ai/v1/chat/completions` refuses a body
+ * carrying both with `"tools" is incompatible with "response_format"`
+ * (`wrong_api_format`), so a request that declares tools fails as
+ * `invalid_request` here rather than on the wire.
+ *
+ * ```ts
+ * const cerebras = Route.openaiCompatible({
+ *   id: "cerebras",
+ *   baseUrl: "https://api.cerebras.ai/v1",
+ *   apiKey,
+ *   structuredOutput: { name: "capital", schema: { type: "object", properties: { city: { type: "string" } } } }
+ * })
+ * ```
+ *
  * @since 0.1.0
  * @category constructors
  */
 export const openaiCompatible = (
-  input: { readonly id: string; readonly baseUrl: string; readonly apiKey: Auth.Redacted<string> }
+  input: {
+    readonly id: string
+    readonly baseUrl: string
+    readonly apiKey: Auth.Redacted<string>
+    readonly structuredOutput?: OpenAIChatCompletions.StructuredOutput | undefined
+  }
 ): Result.Result<
   Route<
     OpenAIChatCompletions.Body,
@@ -340,7 +364,9 @@ export const openaiCompatible = (
   Result.map(Endpoint.make({ url: input.baseUrl, path: "/chat/completions" }), (endpoint) =>
     make({
       id: input.id,
-      protocol: OpenAIChatCompletions.protocol,
+      protocol: OpenAIChatCompletions.protocolWith(
+        input.structuredOutput === undefined ? {} : { structuredOutput: input.structuredOutput }
+      ),
       endpoint,
       auth: Auth.bearer(input.apiKey),
       framing: Framing.sse
