@@ -6,9 +6,14 @@
  * "Provider seat"). The suite is gated on `CEREBRAS_API_KEY`; the credential is
  * applied only by the route's auth layer and never enters a prepared request or
  * test output.
+ *
+ * The gate is a `ctx.skip` in each case body rather than a `describe.skipIf`,
+ * so a machine without the credential reports the missing variable by name
+ * instead of a bare skipped count that reads the same as covered work.
  */
 import { Effect, Layer, Redacted, Result, Schema, Stream } from "effect"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import type { TestContext } from "vitest"
 import { describe, expect, it } from "vitest"
 import * as ModelEvent from "../src/ModelEvent.ts"
 import * as ModelRequest from "../src/ModelRequest.ts"
@@ -65,15 +70,22 @@ const weather = ModelRequest.ToolDefinition.make({
   parameters: { type: "object", properties: { city: { type: "string" } }, required: ["city"] }
 })
 
-describe.skipIf(apiKey === undefined || apiKey === "")("Route.openaiCompatible over Cerebras", () => {
-  it("targets the compatible chat-completions path", () => {
+/** Skips with the missing credential named, never with a bare skipped count. */
+const requireKey = (ctx: TestContext): void => {
+  if (apiKey === undefined || apiKey === "") ctx.skip("CEREBRAS_API_KEY is unset")
+}
+
+describe("Route.openaiCompatible over Cerebras", () => {
+  it("targets the compatible chat-completions path", (ctx) => {
+    requireKey(ctx)
     const configured = Result.getOrThrow(route(capital))
 
     expect(configured.protocol.id).toBe("openai-chat-completions")
     expect(configured.endpoint.url).toBe("https://api.cerebras.ai/v1/chat/completions")
   })
 
-  it("streams an answer the declared schema decodes", async () => {
+  it("streams an answer the declared schema decodes", async (ctx) => {
+    requireKey(ctx)
     const events = await ask(capital, [])
 
     const { message } = ModelEvent.ModelEvent.settledMessage(events)
@@ -82,7 +94,8 @@ describe.skipIf(apiKey === undefined || apiKey === "")("Route.openaiCompatible o
     expect(Schema.decodeUnknownSync(Capital)(JSON.parse(text)).city).toContain("Paris")
   }, 180_000)
 
-  it("still streams a plain completion with the toggle off", async () => {
+  it("still streams a plain completion with the toggle off", async (ctx) => {
+    requireKey(ctx)
     const events = await ask(undefined, [])
 
     const { message, usage } = ModelEvent.ModelEvent.settledMessage(events)
@@ -90,7 +103,8 @@ describe.skipIf(apiKey === undefined || apiKey === "")("Route.openaiCompatible o
     expect(usage.outputTokens).toBeGreaterThan(0)
   }, 180_000)
 
-  it("refuses tools locally instead of taking the provider's 400", async () => {
+  it("refuses tools locally instead of taking the provider's 400", async (ctx) => {
+    requireKey(ctx)
     const failure = await Effect.runPromise(
       Effect.result(
         Effect.gen(function*() {
@@ -117,7 +131,8 @@ describe.skipIf(apiKey === undefined || apiKey === "")("Route.openaiCompatible o
   // reject the combination. This proves the premise on the live endpoint,
   // through fetch rather than the route, since the route will not build such a
   // body any more.
-  it("proves the provider rejects tools together with response_format", async () => {
+  it("proves the provider rejects tools together with response_format", async (ctx) => {
+    requireKey(ctx)
     const response = await fetch(`${BASE_URL}/chat/completions`, {
       method: "POST",
       headers: { authorization: `Bearer ${apiKey ?? ""}`, "content-type": "application/json" },
