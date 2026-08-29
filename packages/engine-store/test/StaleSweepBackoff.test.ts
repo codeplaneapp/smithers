@@ -32,6 +32,8 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import { spawn } from "node:child_process"
+import { once } from "node:events"
 import * as DurableEngineState from "../src/DurableEngineState.ts"
 import * as RunDriver from "../src/internal/RunDriver.ts"
 import * as Migrations from "../src/Migrations.ts"
@@ -62,16 +64,16 @@ const rows = 65
 const runIdOf = (index: number) => `stale-${String(index).padStart(2, "0")}`
 
 /**
- * A hard-killed-looking row whose owner is nonetheless alive: `running`, a
- * heartbeat frozen at `index` milliseconds, and no waiting row. The nonce
- * carries the run id so the injected probe can say which row it was asked
- * about — the probe is handed an owner and a lease, never a run id.
+ * A `running` row under a named owner with a frozen lease and no waiting row.
+ *
+ * Written straight through SQL because no live composition can produce it: an
+ * owner that is gone never got to release, and an owner that is alive but
+ * stalled never got to pulse.
  */
-const insertStaleRun = (index: number) =>
+const insertRunOwnedBy = (runId: string, owner: Ownership.OwnerId, heartbeatAtMs: number) =>
   Effect.gen(function*() {
     const sql = yield* Effect.service(SqlClient.SqlClient)
     const writer = yield* DurableWriter.DurableWriter
-    const runId = runIdOf(index)
     const stateJson = JSON.stringify({ version: 1, flowName: TestFlow._tag, payload: {} })
     yield* writer.write(sql`
       INSERT INTO flows_runs (
@@ -89,14 +91,23 @@ const insertStaleRun = (index: number) =>
         'running',
         0,
         0,
-        'live-host',
-        424242,
-        ${runId},
-        ${index},
+        ${owner.hostId},
+        ${owner.pid},
+        ${owner.nonce},
+        ${heartbeatAtMs},
         ${stateJson}
       )
     `).pipe(Effect.orDie)
   })
+
+/**
+ * A hard-killed-looking row whose owner is nonetheless alive: `running`, a
+ * heartbeat frozen at `index` milliseconds, and no waiting row. The nonce
+ * carries the run id so the injected probe can say which row it was asked
+ * about — the probe is handed an owner and a lease, never a run id.
+ */
+const insertStaleRun = (index: number) =>
+  insertRunOwnedBy(runIdOf(index), { hostId: "live-host", pid: 424242, nonce: runIdOf(index) }, index)
 
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   withCrypto(
@@ -116,6 +127,17 @@ const refusalsOf = (runId: string) =>
       entry.eventType === "flows.engine.run-decision" &&
       (entry.payload as { readonly decision?: string }).decision === "steal-refused-owner-alive"
     )
+  })
+
+/** Every run decision journaled for one run, in order. */
+const decisionsFor = (runId: string) =>
+  Effect.gen(function*() {
+    const journal = yield* Journal.Journal
+    yield* journal.flush
+    const page = yield* journal.entries({ runId: runId as never, limit: 200 })
+    return page.entries
+      .filter((entry) => entry.eventType === "flows.engine.run-decision")
+      .map((entry) => (entry.payload as { readonly decision: string }).decision)
   })
 
 describe("the stale-running sweep backs off refused rows (B-04)", () => {
@@ -235,5 +257,96 @@ describe("the stale-running sweep backs off refused rows (B-04)", () => {
       expect(result.whileFresh).toBe(3)
       // The new stall is probed on the first tick that sees it.
       expect(result.afterNewLease).toBe(4)
+    }))
+})
+
+/**
+ * B-09: what two engine processes over one `.flows/engine.db` do to each
+ * other's running rows.
+ *
+ * The lease is only a timeout. A driver whose owner stalls longer than
+ * `heartbeatStaleAfter` — a stop-the-world pause, a swapped-out process, a
+ * disk that blocked — looks exactly like a driver that died, so the other
+ * process reclaims a run that is still executing somewhere. Every composition
+ * in the repository answered `isAlive: () => Effect.succeed(false)`, which
+ * made that the guaranteed outcome rather than the unlucky one.
+ *
+ * `Ownership.sameHostPidProbe` is the evidence the lease was standing in for.
+ * These cases compose two real drivers over one real database and one real
+ * child process, and take the arbitration both ways: refused while the pid is
+ * alive, granted once it has exited.
+ */
+describe("two drivers over one database arbitrate by pid (B-09)", () => {
+  /** A real process this host can be asked about, killed when the scope closes. */
+  const liveProcess = Effect.acquireRelease(
+    Effect.sync(() => spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" })),
+    (child) =>
+      Effect.sync(() => {
+        child.kill("SIGKILL")
+      })
+  )
+
+  it.effect("refuses a live owner's row and takes it once that process exits", () =>
+    Effect.gen(function*() {
+      const result = yield* run(Effect.gen(function*() {
+        const store = yield* RunStore.RunStore
+        const child = yield* liveProcess
+        // The other driver's identity: this very host, and a pid that is
+        // really running until this test stops it.
+        const ownerA: Ownership.OwnerId = { hostId: "sweep-host", pid: child.pid as number, nonce: "driver-a" }
+        yield* insertRunOwnedBy("contested", ownerA, 0)
+
+        let executions = 0
+        const driverB = yield* RunDriver.make({
+          owner: { hostId: "sweep-host", pid: process.pid, nonce: "driver-b" },
+          journalSource: "stale-sweep-backoff",
+          // The production Node check, not a stub: the answer comes from the
+          // operating system's process table.
+          isAlive: Ownership.sameHostPidProbe,
+          engine: Effect.succeed(fakeEngine)
+        })
+        yield* driverB.register(TestFlow, () =>
+          Effect.sync(() => {
+            executions = executions + 1
+            return "taken over"
+          }))
+
+        // Past the lease window, which is the only thing the old code had to
+        // go on. The row is sweepable and driver A is alive.
+        yield* TestClock.adjust(staleAfterMs + heartbeatMs)
+        const whileAlive = {
+          executions,
+          row: yield* store.get("contested"),
+          refusals: (yield* refusalsOf("contested")).length
+        }
+
+        // Driver A dies the way a crash kills it, and is reaped, so the pid
+        // names nothing by the time the next probe asks.
+        child.kill("SIGKILL")
+        yield* Effect.promise(() => once(child, "exit"))
+
+        // Past the first refusal's backoff, which is two ticks.
+        yield* TestClock.adjust(heartbeatMs * 3)
+        return {
+          whileAlive,
+          afterExit: { executions, row: yield* store.get("contested") },
+          decisions: yield* decisionsFor("contested")
+        }
+      }))
+
+      // A live pid is never stolen from, however stale its lease.
+      expect(result.whileAlive.row.status).toBe("running")
+      expect(result.whileAlive.row.owner).toEqual(expect.objectContaining({ nonce: "driver-a" }))
+      expect(result.whileAlive.executions).toBe(0)
+      // And the refusal was recorded once, against the probe rather than the
+      // lease: the lease had already expired.
+      expect(result.whileAlive.refusals).toBe(1)
+      expect(result.decisions).toContain("steal-refused-owner-alive")
+      // Once the process is gone the run is reclaimed and finished, so a crash
+      // does not strand a run behind its own dead owner.
+      expect(result.afterExit.executions).toBe(1)
+      expect(result.afterExit.row.status).toBe("completed")
+      expect(result.afterExit.row.owner).toBeNull()
+      expect(result.decisions).toContain("stolen-and-activated")
     }))
 })
