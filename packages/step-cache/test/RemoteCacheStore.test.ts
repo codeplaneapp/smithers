@@ -316,6 +316,27 @@ describe("evictions", () => {
     }))
 })
 
+describe("retention", () => {
+  it.effect("never sweeps the shared tier and issues no request", () =>
+    Effect.gen(function*() {
+      // Retention on the shared tier belongs to the server: a client that
+      // deleted rows there would drop entries other machines still replay
+      // from. The sweep therefore reports nothing removed rather than
+      // reaching across.
+      const tier = tierOf(() => new Response(null, { status: 204 }))
+      const swept = yield* Effect.flatMap(tier.store, (store) => store.sweepExpired(1000))
+      expect(swept).toBe(0)
+      expect(tier.calls).toEqual([])
+    }))
+
+  it.effect("still reports a bound no row could satisfy", () =>
+    Effect.gen(function*() {
+      const tier = tierOf(() => new Response(null, { status: 204 }))
+      const exit = yield* Effect.exit(Effect.flatMap(tier.store, (store) => store.sweepExpired(-1)))
+      expect(errorOf(exit).code).toBe("invalid_cache")
+    }))
+})
+
 describe("layer", () => {
   it.effect("provides the remote store under the CacheStore tag", () =>
     Effect.gen(function*() {

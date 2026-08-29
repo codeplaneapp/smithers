@@ -13,19 +13,25 @@
  * {@link Service.publish} is that ordering, and `ActionPersistence` calls it
  * before `CacheStore.put`.
  *
- * The read direction is the same protocol in reverse and is deliberately
- * *lazy*: a replay fetches an artifact when materialization actually needs it,
- * not eagerly at lookup, so a metadata-only replay state is representable. The
- * dial that decides which outputs a build wants materialized at all — Bazel's
- * `RemoteOutputChecker` and its `--remote_download_{all,toplevel,minimal}`
- * policy — is out of scope and ticketed
- * (`.smithers/tickets/remote-cache-download-policy.md`).
+ * The read direction is the same protocol in reverse, and how eagerly it runs
+ * is the {@link DownloadPolicy}, declared on the shared tier itself
+ * (`RemoteArtifacts.Options.downloadPolicy`) and split across two seams.
+ * `all` fetches every referenced artifact into this host's store while
+ * admitting the replay. `toplevel` and `minimal` fetch nothing here: one
+ * batched probe establishes that the shared tier can serve them and the
+ * transfer is left to the first read through `CombinedArtifacts`, which then
+ * writes the blob back under `toplevel` and does not under `minimal`. This is
+ * Bazel's `RemoteOutputChecker` dial
+ * (`--remote_download_{all,toplevel,minimal}`) split the way our two seams
+ * split: what a replay prefetches is this module's decision, what a read
+ * materializes is the combined store's.
  *
  * Governing design: `docs/specs/Concepts/Remote Cache.md`.
  *
  * @since 0.1.0
  */
 import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
+import * as RemoteArtifacts from "@smthrs/artifacts/RemoteArtifacts"
 import * as Context from "effect/Context"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
@@ -58,6 +64,25 @@ export class ArtifactPublicationFailed extends Schema.TaggedError<ArtifactPublic
     )
   }
 ) {}
+
+/**
+ * How eagerly a replay materializes the artifacts it references.
+ *
+ * `all` downloads every referenced artifact into this host's local store while
+ * the replay is admitted, so every later read is local and a shared tier that
+ * goes down afterwards costs nothing. `minimal` downloads none of them: it
+ * establishes that each digest is resolvable — locally, or from the shared tier
+ * — and lets the first actual read fetch the bytes.
+ *
+ * `minimal` is only sound when the store the replay reads through can reach the
+ * shared tier, which means `CombinedArtifacts` with the same remote tier. Under
+ * a purely local `ArtifactStore` an admitted `minimal` replay would later read
+ * an artifact this host never fetched.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type DownloadPolicy = RemoteArtifacts.DownloadPolicy
 
 /**
  * The two directions of the artifact protocol: {@link Service.publish} before a
@@ -141,8 +166,14 @@ export const layerLocal: Layer.Layer<ArtifactSync> = Layer.succeed(ArtifactSync)
 export const make = (options: {
   readonly local: ArtifactStore.Service
   readonly remote: ArtifactStore.Service
+  /**
+   * Defaults to the policy the shared tier declares, and to `all` for a tier
+   * that declares none: every referenced artifact is fetched at hydrate.
+   */
+  readonly downloadPolicy?: DownloadPolicy | undefined
 }): Service => {
   const { local, remote } = options
+  const downloadPolicy = options.downloadPolicy ?? RemoteArtifacts.downloadPolicyOf(remote) ?? "all"
   const publicationFailed = (
     digests: ReadonlyArray<string>,
     message: string,
@@ -185,6 +216,18 @@ export const make = (options: {
     hydrate: Effect.fn("ArtifactSync.hydrate")(function*(digests) {
       const missing = yield* local.findMissing(digests).pipe(Effect.catch(() => Effect.succeed(undefined)))
       if (missing === undefined) return false
+      if (downloadPolicy !== "all") {
+        if (missing.length === 0) return true
+        // One batched probe, no body transfer: the answer these policies owe
+        // the caller is "can this replay be satisfied", and `findMissing`
+        // answers exactly that. A tier that refuses the probe is
+        // indistinguishable from one that holds nothing, so the replay is
+        // refused either way.
+        const elsewhere = yield* remote.findMissing(missing).pipe(
+          Effect.catch(() => Effect.succeed(undefined))
+        )
+        return elsewhere !== undefined && elsewhere.length === 0
+      }
       for (const digest of missing) {
         // Read-through, one artifact at a time and only on demand: the remote
         // read is digest-verified by `RemoteArtifacts`, and the local `put`
@@ -213,12 +256,17 @@ export const make = (options: {
  * @slop
  */
 export const layer = <E, R>(
-  remote: Effect.Effect<ArtifactStore.Service, E, R>
+  remote: Effect.Effect<ArtifactStore.Service, E, R>,
+  options?: { readonly downloadPolicy?: DownloadPolicy | undefined } | undefined
 ): Layer.Layer<ArtifactSync, E, ArtifactStore.ArtifactStore | R> =>
   Layer.effect(ArtifactSync)(
     Effect.gen(function*() {
       const local = yield* ArtifactStore.ArtifactStore
       const shared = yield* remote
-      return make({ local, remote: shared })
+      return make({
+        local,
+        remote: shared,
+        ...(options?.downloadPolicy === undefined ? {} : { downloadPolicy: options.downloadPolicy })
+      })
     })
   )

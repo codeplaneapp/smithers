@@ -43,6 +43,13 @@ const tier = (options: { readonly putOutcome?: CacheStore.PutResult } = {}) => {
       Effect.sync(() => {
         calls.push("evict")
         return rows.delete(keyDigest)
+      }),
+    sweepExpired: () =>
+      Effect.sync(() => {
+        calls.push("sweepExpired")
+        const swept = rows.size
+        rows.clear()
+        return swept
       })
   }
   return { rows, calls, store }
@@ -99,6 +106,13 @@ const durableTier = (
       Effect.sync(() => {
         calls.push("evict")
         return rows.delete(keyDigest)
+      }),
+    sweepExpired: () =>
+      Effect.sync(() => {
+        calls.push("sweepExpired")
+        const swept = rows.size
+        rows.clear()
+        return swept
       })
   }
   return { rows, calls, outcomes, store }
@@ -278,6 +292,20 @@ describe("evictions", () => {
       yield* (remote.store.put(entry))
       const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
       expect(yield* (combined.evict(entry.keyDigest))).toBe(true)
+      expect(remote.rows.has(entry.keyDigest)).toBe(true)
+    }))
+
+  it.effect("sweeps only the local tier", () =>
+    Effect.gen(function*() {
+      // Retention is a per-machine judgement for the same reason eviction is.
+      const local = tier()
+      const remote = tier()
+      yield* (local.store.put(entry))
+      yield* (remote.store.put(entry))
+      const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+      expect(yield* (combined.sweepExpired(0))).toBe(1)
+      expect(local.calls).toContain("sweepExpired")
+      expect(remote.calls).not.toContain("sweepExpired")
       expect(remote.rows.has(entry.keyDigest)).toBe(true)
     }))
 })

@@ -16,6 +16,28 @@
  * decorates that tag with `net:get`/`net:post` capability checks, so a remote
  * artifact fetch is permission-checked like every other egress.
  *
+ * ## Chunked uploads
+ *
+ * With `chunkBytes` set, a blob past that size travels as a sequence of
+ * `PUT /cas/{digest}` requests carrying `Content-Range: bytes {a}-{b}/{total}`,
+ * preceded by a `HEAD /cas/{digest}` existence probe and a
+ * `Content-Range: bytes *\/{total}` probe with an empty body. This is the
+ * resumable-upload shape HTTP already has: the range probe asks what prefix
+ * the tier holds and `308` means "keep going", with a `Range: bytes=0-{last}`
+ * header on the probe or on a chunk answer moving the offset.
+ *
+ * Only a `308` continues the sequence, and the completing chunk's `2xx` is
+ * confirmed with `HEAD` before `put` reports the digest as published. A `2xx`
+ * anywhere else, to the empty probe or to a chunk the tier is still owed bytes
+ * after, reads as a tier that ignored `Content-Range` and stored the body it
+ * was handed, which is what plain WebDAV `PUT` does. That tier, the one that
+ * answers `411` or `416`, and the one whose `HEAD` will not confirm the stored
+ * length all get the same treatment: one whole-blob `PUT`, which overwrites
+ * the partial body the sequence left behind. So the blob always lands whole,
+ * and the cost of turning the dial on against a server that never learned
+ * about it is round trips, never a digest published over bytes the server does
+ * not hold.
+ *
  * The endpoint and its credentials arrive as **layer construction options**.
  * They are a capability, never an input: they are not hashed into a step key,
  * not journaled, and not part of any recorded result — see
@@ -36,6 +58,47 @@ import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as ArtifactStore from "./ArtifactStore.ts"
+
+/**
+ * How eagerly a composition materializes shared blobs into its local store.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type DownloadPolicy = "all" | "toplevel" | "minimal"
+
+/**
+ * Every download policy, in materialization order.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const downloadPolicies: ReadonlyArray<DownloadPolicy> = ["all", "toplevel", "minimal"]
+
+/**
+ * A remote artifact tier, which is an ordinary store that also states how
+ * eagerly a composition reading through it should materialize blobs locally.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Service extends ArtifactStore.Service {
+  readonly downloadPolicy: DownloadPolicy
+}
+
+/**
+ * Reads the download policy a store declares, or `undefined` for a store that
+ * declares none — every local store, and any foreign implementation.
+ *
+ * @category getters
+ * @since 0.1.0
+ */
+export const downloadPolicyOf = (store: ArtifactStore.Service): DownloadPolicy | undefined => {
+  const declared = (store as { readonly downloadPolicy?: unknown }).downloadPolicy
+  return typeof declared === "string" && (downloadPolicies as ReadonlyArray<string>).includes(declared)
+    ? declared as DownloadPolicy
+    : undefined
+}
 
 /**
  * How to reach the shared artifact tier.
@@ -78,6 +141,35 @@ export interface Options {
    * 256 MiB.
    */
   readonly maxDownloadBytes?: number | undefined
+  /**
+   * Above this many bytes an upload travels as a sequence of `Content-Range`
+   * `PUT`s instead of one whole-blob body, and a transfer that died partway
+   * resumes from the prefix the tier kept rather than starting over. See
+   * {@link module:RemoteArtifacts | the chunked upload protocol} below.
+   *
+   * Absent by default: every upload is one whole-blob `PUT`, which is what
+   * Bazel's dumb-HTTP client does and what every deployment already serving
+   * this protocol expects. Set it when a proxy caps request bodies, or when
+   * artifacts are large enough that losing a transfer is expensive.
+   */
+  readonly chunkBytes?: number | undefined
+  /**
+   * How eagerly a composition reading through this tier materializes blobs
+   * into its local store. This is Bazel's `--remote_download_{all,toplevel,
+   * minimal}` dial (`RemoteOutputChecker`), and it lives here because the
+   * shared tier is the thing being conserved.
+   *
+   * - `all` (the default) prefetches every referenced blob when a replay is
+   *   admitted, so the replay reads local bytes.
+   * - `toplevel` prefetches nothing and materializes a blob into the local
+   *   store on the first read that actually needs it.
+   * - `minimal` prefetches nothing and materializes nothing: a read is served
+   *   straight from the shared tier and the local store never grows.
+   *
+   * `CombinedArtifacts.get` honors the last two; `@smthrs/engine-store`'s
+   * `ArtifactSync.hydrate` honors the first.
+   */
+  readonly downloadPolicy?: DownloadPolicy | undefined
 }
 
 /**
@@ -134,7 +226,7 @@ const isOk = (response: HttpClientResponse.HttpClientResponse): boolean =>
  */
 export const make = (
   options: Options
-): Effect.Effect<ArtifactStore.Service, ArtifactStore.ArtifactStoreError, HttpClient.HttpClient> =>
+): Effect.Effect<Service, ArtifactStore.ArtifactStoreError, HttpClient.HttpClient> =>
   Effect.gen(function*() {
     const client = yield* HttpClient.HttpClient
     const endpoint = yield* Effect.try({
@@ -177,6 +269,14 @@ export const make = (
     const maxDownloadBytes = options.maxDownloadBytes ?? defaultMaxDownloadBytes
     if (!Number.isSafeInteger(maxDownloadBytes) || maxDownloadBytes <= 0) {
       return yield* Effect.fail(invalidOption("maxDownloadBytes", maxDownloadBytes))
+    }
+    const chunkBytes = options.chunkBytes
+    if (chunkBytes !== undefined && (!Number.isSafeInteger(chunkBytes) || chunkBytes <= 0)) {
+      return yield* Effect.fail(invalidOption("chunkBytes", chunkBytes))
+    }
+    const downloadPolicy = options.downloadPolicy ?? "all"
+    if (!(downloadPolicies as ReadonlyArray<string>).includes(downloadPolicy)) {
+      return yield* Effect.fail(invalidOption("downloadPolicy", downloadPolicy))
     }
     const downloadTooLarge = (received: number): ArtifactStore.ArtifactStoreError =>
       new ArtifactStore.ArtifactStoreError({
@@ -238,10 +338,9 @@ export const make = (
         return yield* readBounded(response)
       })
 
-    const put: ArtifactStore.Service["put"] = Effect.fn("RemoteArtifacts.put")((bytes: Uint8Array) =>
+    /** One whole-blob `PUT`: the protocol every dumb-HTTP CAS already speaks. */
+    const uploadWhole = (digest: string, bytes: Uint8Array) =>
       Effect.gen(function*() {
-        const digest = yield* measure(bytes)
-        yield* Effect.annotateCurrentSpan({ digest })
         const response = yield* send(
           "an upload",
           HttpClientRequest.put(casUrl(digest)).pipe(
@@ -249,6 +348,109 @@ export const make = (
           )
         )
         if (!isOk(response)) return yield* Effect.fail(unexpectedStatus("an upload", response.status))
+      })
+
+    /**
+     * The byte after the prefix a `Range: bytes=0-{last}` header reports, or
+     * `undefined` when the answer names no prefix. Only a prefix starting at
+     * zero is usable: a tier holding a middle span has nothing this client can
+     * continue from, so it is treated as holding nothing.
+     */
+    const resumeOffset = (response: HttpClientResponse.HttpClientResponse): number | undefined => {
+      const header = response.headers["range"]
+      if (header === undefined) return undefined
+      const match = /^bytes=0-(\d+)$/.exec(header.trim())
+      if (match === null) return undefined
+      return Number(match[1]) + 1
+    }
+
+    /** A tier that refuses ranged bodies, in the two ways HTTP has to say so. */
+    const rejectsRanges = (status: number): boolean => status === 411 || status === 416
+
+    /**
+     * Whether the tier holds exactly `total` bytes under `digest`, read from
+     * the `Content-Length` of a `HEAD` answer.
+     *
+     * This is the only claim about a chunked transfer this client will make on
+     * its own behalf. A tier that answers `HEAD` without a length is not
+     * refused — it simply proves nothing, so the caller sends the blob whole.
+     */
+    const holdsWhole = (digest: string, total: number) =>
+      Effect.map(send("an existence probe", HttpClientRequest.head(casUrl(digest))), (response) => {
+        if (!isOk(response)) return false
+        const declared = response.headers["content-length"]
+        return declared !== undefined && Number(declared) === total
+      })
+
+    /**
+     * Sends `bytes` as `Content-Range` chunks, resuming from whatever prefix
+     * the tier reports. Answers `false` when the tier has not proved it stored
+     * the whole blob, which is the caller's signal to send it whole.
+     *
+     * A `2xx` answer is never by itself proof of that. A tier that ignores
+     * `Content-Range`, such as plain WebDAV `PUT`, which Bazel documents as a
+     * supported dumb-HTTP cache, answers every request in this sequence `201`
+     * while storing only the last body it was handed, which for the probe is
+     * zero bytes. So only a `308` continues the sequence, and the completing
+     * chunk's `2xx` is confirmed with `HEAD` before the caller is told the
+     * digest is published. Everything else falls back, and the whole-blob
+     * `PUT` overwrites whatever partial body the sequence left behind.
+     */
+    const uploadChunked = (digest: string, bytes: Uint8Array, chunk: number) =>
+      Effect.gen(function*() {
+        const total = bytes.byteLength
+        const ranged = (range: string, body: Uint8Array) =>
+          send(
+            "an upload",
+            HttpClientRequest.put(casUrl(digest)).pipe(
+              HttpClientRequest.bodyUint8Array(body, "application/octet-stream"),
+              HttpClientRequest.setHeader("content-range", range)
+            )
+          )
+        // A blob the tier already holds whole costs one `HEAD` and no body.
+        // Asking first is also what makes the probe's answer readable: a `2xx`
+        // to it can no longer mean "already there", so the one reading left is
+        // a tier that ignored the header and stored the empty body.
+        if (yield* holdsWhole(digest, total)) return true
+        // The probe carries no bytes: it exists to learn where to start, so
+        // that an interrupted transfer costs one round trip rather than the
+        // whole blob again.
+        const probe = yield* ranged(`bytes */${total}`, new Uint8Array(0))
+        if (isOk(probe) || rejectsRanges(probe.status)) return false
+        if (probe.status !== 308 && probe.status !== 404) {
+          return yield* Effect.fail(unexpectedStatus("an upload probe", probe.status))
+        }
+        let offset = probe.status === 308 ? resumeOffset(probe) ?? 0 : 0
+        while (offset < total) {
+          const end = Math.min(offset + chunk, total)
+          const answer = yield* ranged(`bytes ${offset}-${end - 1}/${total}`, bytes.subarray(offset, end))
+          if (answer.status !== 308) {
+            // The completing chunk may answer `2xx`; anything before it may
+            // not, because a tier that is still owed bytes and reports success
+            // is a tier that is not reading the header. Both are checked
+            // against what the tier actually holds below.
+            if (end === total && isOk(answer)) break
+            if (isOk(answer) || rejectsRanges(answer.status)) return false
+            return yield* Effect.fail(unexpectedStatus("an upload", answer.status))
+          }
+          // A tier that reports a longer prefix than this chunk delivered has
+          // more than we just sent, so the next chunk starts there. Never
+          // backwards: an answer naming a shorter prefix would loop forever.
+          offset = Math.max(end, resumeOffset(answer) ?? 0)
+        }
+        return yield* holdsWhole(digest, total)
+      })
+
+    const put: ArtifactStore.Service["put"] = Effect.fn("RemoteArtifacts.put")((bytes: Uint8Array) =>
+      Effect.gen(function*() {
+        const digest = yield* measure(bytes)
+        yield* Effect.annotateCurrentSpan({ digest })
+        if (chunkBytes === undefined || bytes.byteLength <= chunkBytes) {
+          yield* uploadWhole(digest, bytes)
+          return digest
+        }
+        const transferred = yield* uploadChunked(digest, bytes, chunkBytes)
+        if (!transferred) yield* uploadWhole(digest, bytes)
         return digest
       })
     )
@@ -328,7 +530,7 @@ export const make = (
         })
     )
 
-    return { put, get, has, findMissing }
+    return { put, get, has, findMissing, downloadPolicy }
   })
 
 /**

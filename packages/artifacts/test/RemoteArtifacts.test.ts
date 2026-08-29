@@ -156,6 +156,282 @@ describe("uploads", () => {
     }))
 })
 
+/**
+ * A blob past `chunkBytes` travels as a sequence of `Content-Range` PUTs, so a
+ * transfer that dies partway does not start over and a proxy that caps request
+ * bodies does not cap the artifact size.
+ */
+describe("chunked uploads", () => {
+  const large = "0123456789"
+  const largeDigest = sha256(bytes(large))
+  /** The `Content-Range` of every ranged or whole-blob `PUT`, in order. */
+  const ranges = (calls: ReadonlyArray<Call>) =>
+    calls.filter((call) => call.method === "PUT").map((call) => call.headers["content-range"])
+
+  /**
+   * Answers the two `HEAD` probes the chunked path makes, so each test below
+   * is about the ranged sequence between them: the tier holds nothing until
+   * the sequence has delivered the last byte, and the whole blob afterwards.
+   */
+  const withHeads = (responder: (call: Call) => Response): (call: Call) => Response => {
+    let delivered = 0
+    return (call) => {
+      if (call.method === "HEAD") {
+        return delivered < large.length
+          ? new Response(null, { status: 404 })
+          : new Response(null, { status: 200, headers: { "content-length": String(large.length) } })
+      }
+      const chunk = /^bytes \d+-(\d+)\/\d+$/.exec(call.headers["content-range"] ?? "")
+      if (chunk !== null) delivered = Math.max(delivered, Number(chunk[1]) + 1)
+      return responder(call)
+    }
+  }
+
+  it.effect.each([0, -1, 1.5, NaN])("refuses invalid chunkBytes %s", (chunkBytes) =>
+    Effect.gen(function*() {
+      const tier = remote(() => new Response(null, { status: 200 }), { chunkBytes })
+      const exit = yield* tier.store.pipe(Effect.exit)
+      expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("transport_failed")
+      expect(tier.calls).toEqual([])
+    }))
+
+  it.effect("sends one whole-blob PUT when the bytes fit in a chunk", () =>
+    Effect.gen(function*() {
+      const tier = remote(() => new Response(null, { status: 201 }), { chunkBytes: 64 })
+      yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(tier.calls.length).toBe(1)
+      expect(tier.calls[0]!.headers["content-range"]).toBeUndefined()
+      expect(tier.calls[0]!.body).toBe(large)
+    }))
+
+  it.effect("probes, then sends sequential ranges", () =>
+    Effect.gen(function*() {
+      const tier = remote(
+        withHeads((call) =>
+          call.headers["content-range"] === "bytes 8-9/10"
+            ? new Response(null, { status: 201 })
+            : new Response(null, { status: 308 })
+        ),
+        { chunkBytes: 4 }
+      )
+      const published = yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(published).toBe(largeDigest)
+      expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10", "bytes 4-7/10", "bytes 8-9/10"])
+      expect(tier.calls.filter((call) => call.method === "PUT").map((call) => call.body)).toEqual([
+        "",
+        "0123",
+        "4567",
+        "89"
+      ])
+      // One `HEAD` before the transfer and one after it: the tier is asked
+      // what it holds, and asked again to confirm what it took.
+      expect(tier.calls.filter((call) => call.method === "HEAD").length).toBe(2)
+    }))
+
+  it.effect("sends nothing when the tier already holds the whole blob", () =>
+    Effect.gen(function*() {
+      const tier = remote(
+        () => new Response(null, { status: 200, headers: { "content-length": "10" } }),
+        { chunkBytes: 4 }
+      )
+      const published = yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(published).toBe(largeDigest)
+      expect(tier.calls.map((call) => call.method)).toEqual(["HEAD"])
+    }))
+
+  it.effect("resumes after the prefix the server already holds", () =>
+    Effect.gen(function*() {
+      // The server took chunk 1 during an earlier, interrupted transfer, so it
+      // answers the probe with the prefix it kept. The retry must continue at
+      // chunk 2 rather than re-send bytes the tier already has.
+      const tier = remote(
+        withHeads((call) =>
+          call.headers["content-range"] === "bytes */10"
+            ? new Response(null, { status: 308, headers: { range: "bytes=0-3" } })
+            : call.headers["content-range"] === "bytes 4-7/10"
+            ? new Response(null, { status: 308 })
+            : new Response(null, { status: 201 })
+        ),
+        { chunkBytes: 4 }
+      )
+      yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 4-7/10", "bytes 8-9/10"])
+    }))
+
+  it.effect("skips ahead when a chunk answer reports a longer prefix", () =>
+    Effect.gen(function*() {
+      const tier = remote(
+        withHeads((call) =>
+          call.headers["content-range"] === "bytes */10"
+            ? new Response(null, { status: 308 })
+            : call.headers["content-range"] === "bytes 0-3/10"
+            ? new Response(null, { status: 308, headers: { range: "bytes=0-7" } })
+            : new Response(null, { status: 201 })
+        ),
+        { chunkBytes: 4 }
+      )
+      yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10", "bytes 8-9/10"])
+    }))
+
+  it.effect("sends the blob whole when the probe itself answers 2xx", () =>
+    Effect.gen(function*() {
+      // A tier that ignores `Content-Range` stores the probe's empty body and
+      // answers `201`. Read as a completed transfer, that publishes a digest
+      // over zero bytes, so it is read as the refusal it is.
+      const tier = remote(withHeads(() => new Response(null, { status: 201 })), { chunkBytes: 4 })
+      const published = yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(published).toBe(largeDigest)
+      expect(ranges(tier.calls)).toEqual(["bytes */10", undefined])
+      expect(tier.calls.filter((call) => call.method === "PUT")[1]!.body).toBe(large)
+    }))
+
+  it.effect("sends the blob whole when a chunk the tier still owes bytes after answers 2xx", () =>
+    Effect.gen(function*() {
+      const tier = remote(
+        withHeads((call) =>
+          call.headers["content-range"] === "bytes */10"
+            ? new Response(null, { status: 308 })
+            : new Response(null, { status: 201 })
+        ),
+        { chunkBytes: 4 }
+      )
+      const published = yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(published).toBe(largeDigest)
+      expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10", undefined])
+    }))
+
+  it.effect("sends the blob whole when the closing HEAD reports a shorter blob", () =>
+    Effect.gen(function*() {
+      // Every answer in the sequence is correct and the last one is `2xx`, but
+      // the tier kept four bytes of ten. The stored length is what decides.
+      const tier = remote((call) =>
+        call.method === "HEAD"
+          ? new Response(null, { status: 200, headers: { "content-length": "4" } })
+          : call.headers["content-range"] === undefined || call.headers["content-range"] === "bytes 8-9/10"
+          ? new Response(null, { status: 201 })
+          : new Response(null, { status: 308 }), { chunkBytes: 4 })
+      const published = yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(published).toBe(largeDigest)
+      expect(ranges(tier.calls).at(-1)).toBeUndefined()
+      expect(tier.calls.filter((call) => call.method === "PUT").at(-1)!.body).toBe(large)
+    }))
+
+  it.effect("sends the blob whole when the closing HEAD reports no length at all", () =>
+    Effect.gen(function*() {
+      const tier = remote((call) =>
+        call.method === "HEAD"
+          ? new Response(null, { status: 204 })
+          : call.headers["content-range"] === undefined || call.headers["content-range"] === "bytes 8-9/10"
+          ? new Response(null, { status: 201 })
+          : new Response(null, { status: 308 }), { chunkBytes: 4 })
+      expect(yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))).toBe(largeDigest)
+      expect(tier.calls.filter((call) => call.method === "PUT").at(-1)!.body).toBe(large)
+    }))
+
+  it.effect("starts at zero when the probe finds nothing stored", () =>
+    Effect.gen(function*() {
+      const tier = remote(
+        withHeads((call) =>
+          call.headers["content-range"] === "bytes */10"
+            ? new Response(null, { status: 404 })
+            : call.headers["content-range"] === "bytes 8-9/10"
+            ? new Response(null, { status: 201 })
+            : new Response(null, { status: 308 })
+        ),
+        { chunkBytes: 4 }
+      )
+      yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10", "bytes 4-7/10", "bytes 8-9/10"])
+    }))
+
+  it.effect.each([411, 416])("falls back to a whole-blob PUT on %s", (status) =>
+    Effect.gen(function*() {
+      const tier = remote(
+        withHeads((call) =>
+          call.headers["content-range"] === undefined
+            ? new Response(null, { status: 201 })
+            : new Response(null, { status })
+        ),
+        { chunkBytes: 4 }
+      )
+      const published = yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(published).toBe(largeDigest)
+      expect(ranges(tier.calls)).toEqual(["bytes */10", undefined])
+      expect(tier.calls.filter((call) => call.method === "PUT")[1]!.body).toBe(large)
+    }))
+
+  it.effect("falls back when a chunk, not the probe, is refused for range", () =>
+    Effect.gen(function*() {
+      const tier = remote(
+        withHeads((call) =>
+          call.headers["content-range"] === "bytes */10"
+            ? new Response(null, { status: 308 })
+            : call.headers["content-range"] === undefined
+            ? new Response(null, { status: 201 })
+            : new Response(null, { status: 411 })
+        ),
+        { chunkBytes: 4 }
+      )
+      yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10", undefined])
+    }))
+
+  it.effect("completes when the last chunk is acknowledged with 308", () =>
+    Effect.gen(function*() {
+      // A tier that answers every chunk "keep going" has still taken every
+      // byte once the offset reaches the total; the transfer ends there rather
+      // than waiting for a 2xx that will never come.
+      const tier = remote(withHeads(() => new Response(null, { status: 308 })), { chunkBytes: 4 })
+      const published = yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(published).toBe(largeDigest)
+      expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10", "bytes 4-7/10", "bytes 8-9/10"])
+    }))
+
+  it.effect("ignores a resume header that names no usable prefix", () =>
+    Effect.gen(function*() {
+      // A prefix that does not start at zero, or that is not a byte range at
+      // all, leaves the offset where the chunk put it.
+      const tier = remote(
+        withHeads((call) =>
+          call.headers["content-range"] === "bytes */10"
+            ? new Response(null, { status: 308, headers: { range: "bytes=2-5" } })
+            : new Response(null, { status: 308, headers: { range: "unknown" } })
+        ),
+        { chunkBytes: 4 }
+      )
+      yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10", "bytes 4-7/10", "bytes 8-9/10"])
+    }))
+
+  it.effect("fails when a chunk, not the probe, is refused outright", () =>
+    Effect.gen(function*() {
+      const tier = remote(
+        withHeads((call) =>
+          call.headers["content-range"] === "bytes */10"
+            ? new Response(null, { status: 308 })
+            : new Response(null, { status: 503 })
+        ),
+        { chunkBytes: 4 }
+      )
+      const exit = yield* withCrypto(
+        Effect.flatMap(tier.store, (store) => store.put(bytes(large))).pipe(Effect.exit)
+      )
+      expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("transport_failed")
+      expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10"])
+    }))
+
+  it.effect("fails on any other refusal rather than re-sending the blob", () =>
+    Effect.gen(function*() {
+      const tier = remote(withHeads(() => new Response(null, { status: 500 })), { chunkBytes: 4 })
+      const exit = yield* withCrypto(
+        Effect.flatMap(tier.store, (store) => store.put(bytes(large))).pipe(Effect.exit)
+      )
+      expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("transport_failed")
+      expect(ranges(tier.calls)).toEqual(["bytes */10"])
+    }))
+})
+
 describe("downloads", () => {
   it.effect("GETs /cas/{digest} and verifies the address", () =>
     Effect.gen(function*() {
@@ -400,5 +676,32 @@ describe("layer", () => {
         )
       )
       expect(published).toBe(digest)
+    }))
+})
+
+describe("the declared download policy", () => {
+  it.effect("defaults to all", () =>
+    Effect.gen(function*() {
+      const tier = remote(() => new Response(null, { status: 200 }))
+      const store = yield* tier.store
+      expect(store.downloadPolicy).toBe("all")
+    }))
+
+  it.effect.each(["all", "toplevel", "minimal"] as const)(
+    "carries a declared %s",
+    (downloadPolicy) =>
+      Effect.gen(function*() {
+        const tier = remote(() => new Response(null, { status: 200 }), { downloadPolicy })
+        const store = yield* tier.store
+        expect(store.downloadPolicy).toBe(downloadPolicy)
+      })
+  )
+
+  it.effect("refuses a policy no seam implements", () =>
+    Effect.gen(function*() {
+      const tier = remote(() => new Response(null, { status: 200 }), { downloadPolicy: "everything" as never })
+      const exit = yield* tier.store.pipe(Effect.exit)
+      expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("transport_failed")
+      expect(tier.calls).toEqual([])
     }))
 })

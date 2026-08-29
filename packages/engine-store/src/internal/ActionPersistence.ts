@@ -10,6 +10,8 @@
 import { Sha256 } from "@smthrs/crypto"
 import { FlowEngine } from "@smthrs/engine"
 import type { Action } from "@smthrs/flow"
+import { FlowRuntime } from "@smthrs/flow"
+import * as CacheEnvironment from "@smthrs/flow/CacheEnvironment"
 import type { FileBoundary } from "@smthrs/flow/FileBoundary"
 import { Journal, type JournalEvent } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
@@ -19,6 +21,7 @@ import { AttemptStore, Ownership, RunStore } from "@smthrs/run-store"
 import { CacheStore } from "@smthrs/step-cache"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Metric from "effect/Metric"
@@ -440,6 +443,24 @@ const rehydrateCause = (error: unknown): Cause.Cause<unknown> => {
 }
 
 /**
+ * The {@link module:CacheEnvironment.CachePolicy} the dispatched declaration
+ * annotated, if any.
+ *
+ * The action stays opaque to this module — it is `unknown` on
+ * {@link ActionInput} on purpose — so the policy is read out of its annotation
+ * bag rather than off a field. An action without one, or a caller that hands
+ * the seam a bare object (every unit test of this module does), simply has no
+ * policy and keeps the pre-policy behavior.
+ *
+ * @since 0.1.0
+ * @private
+ */
+const declaredCachePolicy = (action: unknown): CacheEnvironment.CachePolicy | undefined => {
+  const annotations = (action as { readonly annotations?: unknown } | null | undefined)?.annotations
+  return Context.isContext(annotations) ? CacheEnvironment.cachePolicyOf(annotations) : undefined
+}
+
+/**
  * Constructs the encoded action executor. The action itself stays opaque;
  * the supplied dispatcher is the only physical execution point.
  *
@@ -465,9 +486,50 @@ export const make = (deps: Dependencies) => {
       const cache = yield* CacheStore.CacheStore
       const journal = yield* Journal.Journal
       const runs = yield* RunStore.RunStore
-      const keyDigest = yield* Schema.decodeUnknownEffect(Sha256)(input.key).pipe(Effect.orDie)
-      yield* Effect.annotateCurrentSpan({ keyDigest })
-      const attemptId = { runId: deps.runId, stepKeyDigest: keyDigest, attempt: input.attempt }
+      const policy = declaredCachePolicy(input.action)
+      // SCOPE NARROWS THE CACHE ADDRESS. The engine derives a cross-run key
+      // from the inputs and the environment, which is the widest reach a
+      // content address can have. A declaration that wants a narrower one
+      // folds the identity it is narrowing to into the address of its cache
+      // row, so a sibling run derives a different address and never finds the
+      // row: narrowing by construction rather than by a read-time filter that
+      // a second reader could disagree with. `shared` is the unnarrowed
+      // default and folds nothing, so every key predating the policy keeps
+      // its bytes.
+      const scopeTag = policy?.scope === "run"
+        ? `run:${deps.runId}`
+        : policy?.scope === "flow"
+        // The flow tag comes from the executing instance, which the engine
+        // provides around every dispatch. A caller that reaches this seam
+        // without one — the unit tests of this module — cannot name a flow, so
+        // the key narrows to the run instead: never wider than the caller
+        // asked for.
+        ? `flow:${
+          Option.getOrUndefined(
+            Option.map(yield* Effect.serviceOption(FlowRuntime.FlowInstance), (instance) => instance.flow._tag)
+          ) ?? `run:${deps.runId}`
+        }`
+        : undefined
+      // THE STEP KEY DIGEST IS NOT NARROWED. It is the identity the rest of the
+      // engine addresses this dispatch by: `flows_attempts` rows, which
+      // `EngineStore.actionRetryOrigin` and `actionLatestAttempt` probe under
+      // `sha256(input.key)`, and the `stepKeyDigest` on every attempt record,
+      // which `PlanScheduler` maps back to the node that dispatched it. Both
+      // derive the digest from the key alone and neither can see an
+      // annotation, so narrowing this one would hide a scoped step's attempts
+      // from its own retry counter and its deviations from the reconciler.
+      const stepKeyDigest = yield* Schema.decodeUnknownEffect(Sha256)(input.key).pipe(Effect.orDie)
+      // What the scope narrows is the CACHE ROW ADDRESS, which is the only
+      // thing a scope is about: an unscoped declaration addresses the row by
+      // the step key alone, and a narrowed one folds the identity it is
+      // narrowing to into the address, so a sibling derives a different one and
+      // never finds the row. The two digests are the same string for every
+      // declaration that narrows nothing.
+      const keyDigest = scopeTag === undefined
+        ? stepKeyDigest
+        : yield* Schema.decodeUnknownEffect(Sha256)(`${input.key}\u0000scope:${scopeTag}`).pipe(Effect.orDie)
+      yield* Effect.annotateCurrentSpan({ stepKeyDigest, keyDigest })
+      const attemptId = { runId: deps.runId, stepKeyDigest, attempt: input.attempt }
       /**
        * Lifecycle events take the journal's durable channel, fenced to the
        * owning process: the write commits inside the SQL sink while
@@ -552,6 +614,24 @@ export const make = (deps: Dependencies) => {
        * the identity keeps a genuinely new observation — the same action
        * against a *different* recorded row — a distinct producer that still
        * journals.
+       *
+       * The identity names the run, the step-key digest, the decision, and the
+       * recorded row's provenance — everything the decision is ABOUT — and
+       * deliberately nothing about WHO TOOK IT. `deps.sourceId` is the host's
+       * configured `journalSource` (`EngineStore.Options.journalSource`), which
+       * a run outlives: the process that admits a row at 900 ms is routinely
+       * not the process that resumes the run at 1100 ms. Folding it in made the
+       * `ttl` verdict below re-decidable — the resuming incarnation got
+       * `Accepted` for a fresh verdict under its own identity and re-judged the
+       * age against its own clock, which is the one thing a recorded verdict
+       * exists to prevent — and made every other record here re-appendable once
+       * per incarnation rather than once per observation.
+       *
+       * The sibling `recorded` identity below still carries `deps.sourceId`, on
+       * purpose: nothing reads a decision back out of it. It exists so a
+       * convergence re-record collapses into a `Duplicate`, and a resume under
+       * another journal source costs one extra provenance row there, never a
+       * different answer.
        */
       const cacheSource = (
         action: string,
@@ -559,7 +639,7 @@ export const make = (deps: Dependencies) => {
       ): JournalRecords.EventOptions => ({
         runId: deps.runId,
         lineageId,
-        sourceId: `${deps.sourceId}:cache:${keyDigest}:${action}${
+        sourceId: `cache:${keyDigest}:${action}${
           recorded === undefined ? "" : `:${recorded.runId}:${recorded.eventSeq}`
         }`,
         sourceSeq: 0
@@ -748,12 +828,14 @@ export const make = (deps: Dependencies) => {
       // row is visible and replays it instead of re-executing the body, and
       // the cache block's read-verify-materialize-evict span can never
       // interleave with another dispatch's execution. A verified hit returns
-      // from inside the permit. The permit is keyed by (runId, keyDigest)
-      // alone (issue #133): the cache row is addressed by keyDigest with no
-      // attempt material, so folding the attempt counter in let sanctioned
-      // keyed dispatches at skewed attempt counters (#111/#116) acquire
-      // different permits and interleave the very span the permit serializes.
-      return yield* admission.withPermit(`${deps.runId}|${keyDigest}`)(
+      // from inside the permit. The permit is keyed by (runId, stepKeyDigest)
+      // alone (issue #133): the cache row is addressed with no attempt
+      // material, so folding the attempt counter in let sanctioned keyed
+      // dispatches at skewed attempt counters (#111/#116) acquire different
+      // permits and interleave the very span the permit serializes. The step
+      // key, not the narrowed cache address, is what serializes here, because
+      // the attempt rows two scopes of one key share are what they race over.
+      return yield* admission.withPermit(`${deps.runId}|${stepKeyDigest}`)(
         Effect.gen(function*() {
           // Lifecycle announcements take a per-attempt producer identity
           // (issue #91): adoption — or a replay after a crash in the
@@ -771,7 +853,7 @@ export const make = (deps: Dependencies) => {
             // the sealed value instead of re-deriving it, and a cache miss is
             // simply an absent value rather than a broken fold.
             ...(input.tier === "sealed" ? { cacheKey: keyDigest } : {}),
-            sourceId: `${deps.sourceId}:attempt:${keyDigest}:${input.attempt}:${record}`,
+            sourceId: `${deps.sourceId}:attempt:${stepKeyDigest}:${input.attempt}:${record}`,
             sourceSeq: 0
           })
           /**
@@ -790,8 +872,112 @@ export const make = (deps: Dependencies) => {
                 error.code === "idempotency_conflict" ? Effect.succeed(undefined) : Effect.fail(error)
               )
             )
+          /**
+           * Records and clears a row the declared time to live has aged out.
+           *
+           * The age judgement is journalled BEFORE the row is dropped, and
+           * with the age and the bound in the payload, so a reader can tell an
+           * expiry from a plain miss and a replay reads the recorded verdict
+           * instead of re-judging the age against a fresh clock. The eviction
+           * is what keeps `CacheStore.put`'s insert-or-nothing head from
+           * turning the re-execution's genuinely newer result into a
+           * `Conflict` — the same repair the stale-read-set branch performs
+           * (issue #99) — and it is fenced on the expired row's own provenance
+           * (issue #119) so a fresh row another process landed in the meantime
+           * survives.
+           */
+          const expireRow = (ttlMs: number, stale: CacheStore.CacheEntry) =>
+            Effect.gen(function*() {
+              const recorded = {
+                runId: stale.recordedRunId,
+                eventSeq: stale.recordedEventSeq
+              }
+              const nowMs = yield* Clock.currentTimeMillis
+              yield* emitConverging(
+                JournalRecords.cacheProvenance(cacheSource("expired", recorded), {
+                  keyDigest,
+                  action: "expired",
+                  ttlMs,
+                  ageMs: nowMs - stale.createdAtMs,
+                  recordedRunId: recorded.runId,
+                  recordedEventSeq: recorded.eventSeq
+                })
+              )
+              yield* cache.evict(keyDigest, { ifRecordedBy: recorded })
+            })
+          /**
+           * Decides — once, durably — whether a row is inside the declared time
+           * to live, and answers the DECISION THIS RUN RECORDED rather than the
+           * one this clock reading would make.
+           *
+           * A time to live is the one cache input that changes answer on its
+           * own. A dispatch that served a row at 900 ms and then lost its
+           * process would, on the plain reading, re-dispatch at 1100 ms, expire
+           * the row it already served, and execute a body whose result the run
+           * had already consumed. The verdict is therefore journalled before it
+           * is acted on, under a producer identity that names the step key, the
+           * `ttl` decision, and the row's own recorded provenance
+           * (`cacheSource`), with `sourceSeq` 0. That identity belongs to the
+           * RUN, not to the incarnation driving it, so the engine that resumes
+           * the run reads the same verdict rather than taking a second one.
+           *
+           * That identity is what makes the fence read-free. Every field of the
+           * payload except `verdict` is fixed by the identity or by the
+           * declaration — a different `ttlMs` is a different declaration and so
+           * a different step key — so the three receipts are exhaustive and
+           * unambiguous:
+           *
+           * - `Accepted`: this is the first decision. It stands.
+           * - `Duplicate`: the identical verdict is already durable. It stands.
+           * - `idempotency_conflict`: a verdict is durable under this identity
+           *   and it is not this one, so it is the other one, and THAT is the
+           *   answer. No journal scan, no second guess.
+           *
+           * A row re-recorded under a provenance this run already expired keeps
+           * that verdict, which is the same rule read from the other side.
+           */
+          const admitByAge = (ttlMs: number, row: CacheStore.CacheEntry) =>
+            Effect.gen(function*() {
+              const recorded = { runId: row.recordedRunId, eventSeq: row.recordedEventSeq }
+              const nowMs = yield* Clock.currentTimeMillis
+              const measured: "admitted" | "expired" = nowMs - row.createdAtMs <= ttlMs ? "admitted" : "expired"
+              return yield* emitLifecycle(
+                JournalRecords.cacheProvenance(cacheSource("ttl", recorded), {
+                  keyDigest,
+                  action: "ttl",
+                  ttlMs,
+                  verdict: measured,
+                  recordedRunId: recorded.runId,
+                  recordedEventSeq: recorded.eventSeq
+                })
+              ).pipe(
+                Effect.as(measured),
+                Effect.catch((error) =>
+                  error.code === "idempotency_conflict"
+                    ? Effect.succeed<"admitted" | "expired">(measured === "admitted" ? "expired" : "admitted")
+                    : Effect.fail(error)
+                )
+              )
+            })
+          /**
+           * The row this dispatch may serve, after the declared age bound.
+           *
+           * The bound is applied here rather than inside `cache.get` so the
+           * refusal is a decision this run journalled and owns, not a read
+           * policy the store re-derives from a fresh clock on every lookup.
+           */
+          const admissible = (
+            ttlMs: number | undefined,
+            row: Option.Option<CacheStore.CacheEntry>
+          ): Effect.Effect<Option.Option<CacheStore.CacheEntry>, Journal.JournalError | CacheStore.CacheStoreError> =>
+            Effect.gen(function*() {
+              if (ttlMs === undefined || Option.isNone(row)) return row
+              if ((yield* admitByAge(ttlMs, row.value)) === "admitted") return row
+              yield* expireRow(ttlMs, row.value)
+              return Option.none<CacheStore.CacheEntry>()
+            })
           if (cacheable && input.metadata !== undefined) {
-            const cached = yield* cache.get(keyDigest)
+            const cached = yield* admissible(policy?.ttlMs, yield* cache.get(keyDigest))
             if (Option.isSome(cached)) {
               const meta = decodeMeta(cached.value.meta)
               if (
@@ -1043,7 +1229,9 @@ export const make = (deps: Dependencies) => {
                       : Inconsistency.make({ journal, verdict: "fail", owner: deps.owner })
                     const verdict = yield* receiver.noteCorruption({
                       runId: deps.runId,
-                      keyDigest,
+                      // The attempt row, not a cache row: this evidence is
+                      // addressed by (runId, stepKeyDigest, attempt).
+                      keyDigest: stepKeyDigest,
                       path: corruption.path,
                       recordedDigest: corruption.recordedDigest,
                       measuredDigest: corruption.measuredDigest
@@ -1086,7 +1274,7 @@ export const make = (deps: Dependencies) => {
                       return yield* Effect.die(
                         new AttemptEvidenceQuarantined({
                           code: "attempt_evidence_quarantined",
-                          keyDigest,
+                          keyDigest: stepKeyDigest,
                           attempt: input.attempt,
                           path: corruption.path,
                           recordedDigest: corruption.recordedDigest,
@@ -1184,7 +1372,7 @@ export const make = (deps: Dependencies) => {
                 new AttemptSuspended({
                   code: "attempt_suspended",
                   runId: deps.runId,
-                  keyDigest,
+                  keyDigest: stepKeyDigest,
                   attempt: input.attempt
                 })
               )
@@ -1239,7 +1427,7 @@ export const make = (deps: Dependencies) => {
                 return yield* Effect.fail(
                   new AttemptAdmissionRejected({
                     code: "attempt_admission_rejected",
-                    keyDigest,
+                    keyDigest: stepKeyDigest,
                     outcome: put._tag
                   })
                 )
@@ -1320,7 +1508,7 @@ export const make = (deps: Dependencies) => {
                   yield* jj.restore(decodeMeta(previous.value.meta)!.snapshotId!)
                 }
               }
-              const snapshot = yield* jj.snapshot(`smithers action ${keyDigest} attempt ${input.attempt}`)
+              const snapshot = yield* jj.snapshot(`smithers action ${stepKeyDigest} attempt ${input.attempt}`)
               snapshotId = snapshot.changeId
               // Persist the pre-image into the running row before announcing it
               // (issue #87): a SIGKILL mid-attempt must not lose the only
@@ -1446,7 +1634,7 @@ export const make = (deps: Dependencies) => {
            */
           const effect = input.tier === "irreversible" || input.tier === "compensable"
             ? {
-              id: `${deps.runId}:${keyDigest}:${input.attempt}`,
+              id: `${deps.runId}:${stepKeyDigest}:${input.attempt}`,
               kind: actionKind(input.action),
               tier: input.tier,
               runId: deps.runId,

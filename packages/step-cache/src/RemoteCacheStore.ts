@@ -191,7 +191,17 @@ export const make = (
       })
     )
 
-    return { get, put, evict }
+    const sweepExpired: CacheStore.Service["sweepExpired"] = Effect.fn("RemoteCacheStore.sweepExpired")(
+      (olderThanMs) =>
+        // The shared tier owns its retention. A client that swept it would
+        // delete rows other machines are still replaying from, which is the
+        // same reason `CombinedCacheStore.evict` never reaches across. The
+        // argument is still validated, so a caller mistake is reported here
+        // rather than silently absorbed.
+        Effect.as(CacheStore.validateAge("olderThanMs", olderThanMs), 0)
+    )
+
+    return { get, put, evict, sweepExpired }
   })
 
 /**

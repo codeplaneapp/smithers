@@ -15,22 +15,24 @@ The package name says what it stores, per the naming rule in
 
 ## Public API
 
-| Export                                             | Meaning                                                                                                                                 |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `ArtifactStore.ArtifactStore`                      | The service tag. Identity `@smthrs/artifacts/ArtifactStore`                                                                             |
-| `ArtifactStore.Service`                            | `put(bytes)`, `get(digest)`, `has(digest)`, `findMissing(digests)`                                                                      |
-| `ArtifactStore.ArtifactMissing`                    | The typed miss — the answer a read-through composition acts on                                                                          |
-| `ArtifactStore.ArtifactCorruption`                 | Bytes at an address no longer hash to it                                                                                                |
-| `ArtifactStore.ArtifactStoreError`                 | Host, transport, or invalid-address failures; retryable                                                                                 |
-| `ArtifactStore.makeFileSystem`, `.layerFileSystem` | Over Effect's `FileSystem` tag                                                                                                          |
-| `ArtifactStore.makeMemory`, `.layerMemory`         | For tests and browser hosts with no durable filesystem                                                                                  |
-| `ArtifactStore.makeNoop`, `.layerNoop`             | Everything unavailable, with per-method overrides                                                                                       |
-| `ArtifactSweep.ArtifactSweep`                      | The sweep tag. Identity `@smthrs/artifacts/ArtifactSweep`                                                                               |
-| `ArtifactSweep.Service`                            | `inventory`, `remove(digest, { ifUnmodifiedSinceMs })` — host-local enumeration and mtime-fenced deletion for the engine's `ArtifactGc` |
-| `ArtifactSweep.makeFileSystem`, `.layerFileSystem` | Over the same objects directory the store publishes into                                                                                |
-| `ArtifactSweep.makeNoop`, `.layerNoop`             | Everything unavailable, with per-method overrides                                                                                       |
-| `RemoteArtifacts.make`, `.layer`                   | The shared tier over Effect's `HttpClient` tag                                                                                          |
-| `CombinedArtifacts.make`, `.layer`                 | Local-first, remote-second, with local write-back                                                                                       |
+| Export                                                                     | Meaning                                                                                                                                 |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `ArtifactStore.ArtifactStore`                                              | The service tag. Identity `@smthrs/artifacts/ArtifactStore`                                                                             |
+| `ArtifactStore.Service`                                                    | `put(bytes)`, `get(digest)`, `has(digest)`, `findMissing(digests)`                                                                      |
+| `ArtifactStore.ArtifactMissing`                                            | The typed miss — the answer a read-through composition acts on                                                                          |
+| `ArtifactStore.ArtifactCorruption`                                         | Bytes at an address no longer hash to it                                                                                                |
+| `ArtifactStore.ArtifactStoreError`                                         | Host, transport, or invalid-address failures; retryable                                                                                 |
+| `ArtifactStore.makeFileSystem`, `.layerFileSystem`                         | Over Effect's `FileSystem` tag                                                                                                          |
+| `ArtifactStore.makeMemory`, `.layerMemory`                                 | For tests and browser hosts with no durable filesystem                                                                                  |
+| `ArtifactStore.makeNoop`, `.layerNoop`                                     | Everything unavailable, with per-method overrides                                                                                       |
+| `ArtifactSweep.ArtifactSweep`                                              | The sweep tag. Identity `@smthrs/artifacts/ArtifactSweep`                                                                               |
+| `ArtifactSweep.Service`                                                    | `inventory`, `remove(digest, { ifUnmodifiedSinceMs })` — host-local enumeration and mtime-fenced deletion for the engine's `ArtifactGc` |
+| `ArtifactSweep.makeFileSystem`, `.layerFileSystem`                         | Over the same objects directory the store publishes into                                                                                |
+| `ArtifactSweep.makeNoop`, `.layerNoop`                                     | Everything unavailable, with per-method overrides                                                                                       |
+| `RemoteArtifacts.make`, `.layer`                                           | The shared tier over Effect's `HttpClient` tag, with `chunkBytes` for resumable `Content-Range` uploads                                 |
+| `RemoteArtifacts.Service`                                                  | An `ArtifactStore.Service` that also declares its `downloadPolicy`                                                                      |
+| `RemoteArtifacts.DownloadPolicy`, `.downloadPolicies`, `.downloadPolicyOf` | `all` \| `toplevel` \| `minimal`, the list of them, and the reader that answers `undefined` for a store declaring none                  |
+| `CombinedArtifacts.make`, `.layer`                                         | Local-first, remote-second, with local write-back under `all` and `toplevel` and none under `minimal`                                   |
 
 ```ts
 import { ArtifactStore, CombinedArtifacts, RemoteArtifacts } from "@smthrs/artifacts"
@@ -89,8 +91,10 @@ answers "everything is missing" and re-uploads — so `POST /cas/findMissing` an
 `HEAD /cas/{digest}` are ours. Bazel's disk `findMissingDigests` likewise
 returns its whole input; ours probes for real, because our combined store uses
 the local answer to decide what to fetch. And Bazel threads a per-request
-read/write cache policy through every call; we have no such object, so composing
-only the local tier is how a caller opts out.
+read/write cache policy through every call; we have no such per-request object.
+The analogous dial is `RemoteArtifacts.Options.downloadPolicy`, declared once on
+the shared tier, and composing only the local tier is how a caller opts out of a
+shared tier entirely.
 
 ## Not here
 
@@ -99,8 +103,9 @@ Reclaiming published artifacts is an explicit verb per
 operation. The `.tmp-*` sweep in `layerFileSystem` reclaims crash orphans only;
 `ArtifactSweep` is the deletion surface, and the mark phase that decides what
 is live belongs to `@smthrs/engine-store`'s `ArtifactGc`
-(`docs/pages/artifact-gc.mdx`). Two concerns are ticketed rather than silently
-omitted (`docs/specs/Concepts/Tickets Not Exceptions.md`):
+(`docs/pages/artifact-gc.mdx`).
 
-- `.smithers/tickets/cas-chunked-transfer.md` — chunked and resumable transfer.
-- `.smithers/tickets/remote-cache-download-policy.md` — a `RemoteOutputChecker` analogue.
+Chunked and resumable transfer is `RemoteArtifacts.Options.chunkBytes`, and the
+`RemoteOutputChecker` analogue is `RemoteArtifacts.Options.downloadPolicy`
+(`all` | `toplevel` | `minimal`), honored by `CombinedArtifacts.get` and by
+`@smthrs/engine-store`'s `ArtifactSync.hydrate`.

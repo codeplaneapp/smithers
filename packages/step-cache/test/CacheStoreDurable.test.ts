@@ -241,7 +241,8 @@ describe("CacheStore across real connections", () => {
                     return Option.some({ ...entry, result: { output: "from-remote" } })
                   }),
                 put: () => Effect.succeed({ _tag: "Inserted" }),
-                evict: () => Effect.succeed(false)
+                evict: () => Effect.succeed(false),
+                sweepExpired: () => Effect.succeed(0)
               }
               const combined = CombinedCacheStore.make({ local, remote })
               const failure = yield* Effect.flip(combined.get(entry.keyDigest))

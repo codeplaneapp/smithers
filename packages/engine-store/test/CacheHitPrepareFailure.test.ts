@@ -228,6 +228,7 @@ describe("transient prepare host errors on a cache hit (issue #110)", () => {
           const swapping: typeof cache = {
             put: (entry) => cache.put(entry),
             get: (digest) => cache.get(digest),
+            sweepExpired: (olderThanMs) => cache.sweepExpired(olderThanMs),
             evict: (digest, options) =>
               Effect.gen(function*() {
                 // The concurrent run's fresh entry lands before the delete.

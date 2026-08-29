@@ -23,10 +23,10 @@ pnpm add @smthrs/step-cache
 The root exports these namespaces, also available from matching
 `@smthrs/step-cache/*` subpaths.
 
-| Namespace    | Public exports                                                                                                                                                                            |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CacheStore` | `CacheStoreErrorCode`, `CacheStoreError`, `CacheEntry`, and `PutResult`; `Service` / `CacheStore` operations `get`, `put`, and `evict`; `make`, `makeNoop`, `layerNoop`, and SQL `layer`. |
-| `Migrations` | `set` (the namespaced migration set for `flows_step_cache`), `run`, and prerequisite `layer`.                                                                                             |
+| Namespace    | Public exports                                                                                                                                                                                            |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CacheStore` | `CacheStoreErrorCode`, `CacheStoreError`, `CacheEntry`, and `PutResult`; `Service` / `CacheStore` operations `get`, `put`, `evict`, and `sweepExpired`; `make`, `makeNoop`, `layerNoop`, and SQL `layer`. |
+| `Migrations` | `set` (the namespaced migration set for `flows_step_cache`), `run`, and prerequisite `layer`.                                                                                                             |
 
 The root is written against the driver-neutral `@smthrs/database` contract and
 bundles for the browser. The test double binds a Node SQLite database, so it
@@ -55,6 +55,24 @@ const program = Effect.gen(function*() {
   return yield* store.get("digest")
 }).pipe(Effect.provide(cache))
 ```
+
+## Age bounds
+
+`get(keyDigest, { maxAgeMs })` refuses a row recorded more than `maxAgeMs`
+before the current clock reading, so a caller that declared a time to live
+reads a miss instead of a stale result. The bound is a read policy: the row
+stays on disk, and a second caller declaring a longer bound still reads it.
+
+A lookup that also names `recordedBy` reads that exact ledger row. When the
+bound refuses it the answer is a miss, not the head row: the head may hold a
+result a later run recorded, and a replay of the named event must read that
+event's row or nothing.
+
+`sweepExpired(olderThanMs)` is the collection half. It deletes head rows older
+than the bound and answers how many it deleted. It never touches the
+append-only `flows_step_cache_recorded` ledger, because an old frame's replay
+projects what that event recorded and deleting the evidence would change a
+replayed answer.
 
 See the [step-cache reference](../../docs/reference/step-cache.md) and
 [step keys](../../docs/concepts/step-keys.md).

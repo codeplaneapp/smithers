@@ -1,5 +1,8 @@
 import { describe, expectTypeOf, it } from "@effect/vitest"
-import { Effects, Flow, Graph, Node } from "@smthrs/core"
+import { Digest, Effects, Flow, Graph, Node } from "@smthrs/core"
+import * as CacheEnvironment from "@smthrs/flow/CacheEnvironment"
+import type * as Context from "effect/Context"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
 import { PatternError } from "../src/PatternError.ts"
@@ -43,7 +46,119 @@ describe("WithCache", () => {
     expect(Graph.nodes(graph).filter((node) => node.kind === "Dynamic")).toHaveLength(1)
   })
 
-  it("does not expose an unsupported TTL option", () => {
-    expectTypeOf(WithCache.withCache).parameters.toEqualTypeOf<[inner: Flow.Any]>()
+  it("accepts a declared policy alongside the inner flow", () => {
+    expectTypeOf(WithCache.withCache).parameters.toEqualTypeOf<
+      [inner: Flow.Any, options?: WithCache.Options | undefined]
+    >()
+  })
+})
+
+const sealedRead = () =>
+  Flow.make({
+    name: "read",
+    input: Schema.String,
+    output: Schema.String,
+    effects: Effects.make({
+      reads: ["workspace/**"],
+      writes: [],
+      mode: "hermetic",
+      onConflict: "serialize"
+    }),
+    body: () => Node.dynamic({ output: Schema.String })
+  })
+
+describe("WithCache policy", () => {
+  it("names every declared field in the wrapper", () => {
+    const cached = WithCache.withCache(sealedRead(), { ttlMs: 1000, scope: "run", version: "v2" })
+    expect((cached as ReturnType<typeof sealedRead>).name).toBe("withCache(read, ttlMs=1000, scope=run, version=v2)")
+  })
+
+  it("names only the fields the caller declared", () => {
+    const cached = WithCache.withCache(sealedRead(), { scope: "flow" })
+    expect((cached as ReturnType<typeof sealedRead>).name).toBe("withCache(read, scope=flow)")
+  })
+
+  it("leaves an undeclared policy at the pre-policy declaration", () => {
+    const cached = WithCache.withCache(sealedRead())
+    expect((cached as ReturnType<typeof sealedRead>).name).toBe("withCache(read)")
+    expect((cached as ReturnType<typeof sealedRead>).implementation).toEqual(
+      (WithCache.withCache(sealedRead(), {}) as ReturnType<typeof sealedRead>).implementation
+    )
+  })
+
+  it("folds the policy into declaration key material", () => {
+    const inner = sealedRead()
+    const oneSecond = WithCache.withCache(inner, { ttlMs: 1000 }) as typeof inner
+    const oneSecondAgain = WithCache.withCache(inner, { ttlMs: 1000 }) as typeof inner
+    const twoSeconds = WithCache.withCache(inner, { ttlMs: 2000 }) as typeof inner
+    const runScoped = WithCache.withCache(inner, { ttlMs: 1000, scope: "run" }) as typeof inner
+    const versioned = WithCache.withCache(inner, { ttlMs: 1000, version: "v2" }) as typeof inner
+
+    expect(oneSecond.implementation).toEqual(oneSecondAgain.implementation)
+    expect(oneSecond.implementation).not.toEqual(twoSeconds.implementation)
+    expect(oneSecond.implementation).not.toEqual(runScoped.implementation)
+    expect(oneSecond.implementation).not.toEqual(versioned.implementation)
+  })
+
+  it("refuses a time to live no clock reading satisfies", () => {
+    expect(() => WithCache.withCache(sealedRead(), { ttlMs: 0 })).toThrow(PatternError)
+    expect(() => WithCache.withCache(sealedRead(), { ttlMs: -1 })).toThrow(PatternError)
+    expect(() => WithCache.withCache(sealedRead(), { ttlMs: 1.5 })).toThrow(PatternError)
+  })
+
+  it("refuses a blank version", () => {
+    expect(() => WithCache.withCache(sealedRead(), { version: " " })).toThrow(PatternError)
+  })
+})
+
+/** The annotation bag a built flow carries; `Flow.Any` hides the field. */
+const annotationsOf = (flow: Flow.Any): Context.Context<never> =>
+  (flow as unknown as { readonly annotations: Context.Context<never> }).annotations
+
+/** The canonical digest of everything `/keys` hashes for a built graph. */
+const keyDigest = (flow: Flow.Any): string => {
+  const material = Graph.keyMaterial(Graph.build(flow, "file"))
+  if (Result.isFailure(material)) throw material.failure
+  return Digest.canonical(material.success.map((entry) => entry.material))
+}
+
+describe("WithCache policy annotation", () => {
+  it("annotates the wrapper with the policy the engine reads at dispatch", () => {
+    const cached = WithCache.withCache(sealedRead(), { ttlMs: 1000, scope: "run", version: "v2" })
+    // Read back through @smthrs/flow's reader, not this module's: the two keys
+    // are declared separately and only their identifier makes them one, so a
+    // drift in either identifier fails here rather than silently making every
+    // declared policy inert at dispatch.
+    expect(CacheEnvironment.cachePolicyOf(annotationsOf(cached))).toEqual({ ttlMs: 1000, scope: "run" })
+    expect(WithCache.policyOf(annotationsOf(cached))).toEqual({ ttlMs: 1000, scope: "run" })
+  })
+
+  it("carries only the durable fields, because version is identity and not an instruction", () => {
+    const versionOnly = WithCache.withCache(sealedRead(), { version: "v2" })
+    expect(CacheEnvironment.cachePolicyOf(annotationsOf(versionOnly))).toBeUndefined()
+    const ttlOnly = WithCache.withCache(sealedRead(), { ttlMs: 250 })
+    expect(CacheEnvironment.cachePolicyOf(annotationsOf(ttlOnly))).toEqual({ ttlMs: 250 })
+  })
+
+  it("annotates nothing when the caller declares no policy", () => {
+    expect(CacheEnvironment.cachePolicyOf(annotationsOf(WithCache.withCache(sealedRead())))).toBeUndefined()
+  })
+
+  it("keeps the annotation through the seal the combinator applies", () => {
+    const decorated = WithCache.make({ scope: "flow" })(sealedRead())
+    const sealed = WithCache.withCache(sealedRead(), { scope: "flow" })
+    expect(CacheEnvironment.cachePolicyOf(annotationsOf(decorated))).toEqual({ scope: "flow" })
+    expect(CacheEnvironment.cachePolicyOf(annotationsOf(sealed))).toEqual({ scope: "flow" })
+  })
+
+  it("gives two declarations differing only in version different key material", () => {
+    const inner = sealedRead()
+    const first = keyDigest(WithCache.withCache(inner, { version: "v1" }))
+    const firstAgain = keyDigest(WithCache.withCache(inner, { version: "v1" }))
+    const second = keyDigest(WithCache.withCache(inner, { version: "v2" }))
+    // The digest is over what `/keys` hashes, so a step key derived from it
+    // moves with the version and a row recorded under v1 is unreachable at v2.
+    expect(first).toBe(firstAgain)
+    expect(first).not.toBe(second)
   })
 })

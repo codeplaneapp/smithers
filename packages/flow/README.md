@@ -153,7 +153,7 @@ The root exports these namespaces, also available from matching
 - `retry.ts` retries operations while preserving durable identity.
 - `StepIdentity.ts` and `idempotencyKey.ts` derive recorded execution keys.
 - `FileInput.ts`, `FileBoundary.ts`, and `BoundaryMode.ts` describe filesystem access.
-- `CacheEnvironment.ts` describes runtime facts included in cache identity.
+- `CacheEnvironment.ts` describes runtime facts included in cache identity, and carries the `CachePolicy` annotation (`ttlMs`, `scope`) the engine reads at dispatch; `withCache` declares it on an action.
 - `raceAll.ts` durably races actions.
 - `Errors.ts` defines typed failures.
 - `TypeId.ts` contains the private runtime marker.

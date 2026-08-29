@@ -123,7 +123,15 @@ export const make = (options: Options): CacheStore.Service => {
     Effect.annotateCurrentSpan({ keyDigest }).pipe(Effect.andThen(local.evict(keyDigest, evictOptions)))
   )
 
-  return { get, put, evict }
+  const sweepExpired: CacheStore.Service["sweepExpired"] = Effect.fn("CombinedCacheStore.sweepExpired")(
+    (olderThanMs) =>
+      // Local-only for the same reason eviction is: retention on this machine
+      // says nothing about what a sibling machine still needs, and the shared
+      // tier owns its own collection policy.
+      local.sweepExpired(olderThanMs)
+  )
+
+  return { get, put, evict, sweepExpired }
 }
 
 /**

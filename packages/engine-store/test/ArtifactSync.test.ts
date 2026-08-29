@@ -9,9 +9,12 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
+import * as CombinedArtifacts from "@smthrs/artifacts/CombinedArtifacts"
+import type * as RemoteArtifacts from "@smthrs/artifacts/RemoteArtifacts"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Layer from "effect/Layer"
 import * as ArtifactSync from "../src/ArtifactSync.ts"
 import * as CachePublication from "../src/internal/CachePublication.ts"
 import * as StepBoundary from "../src/StepBoundary.ts"
@@ -291,4 +294,135 @@ describe("CachePublication", () => {
     ).toBeUndefined()
     expect(CachePublication.replayMissingArtifact(Cause.die("boom"))).toBeUndefined()
   })
+})
+
+/**
+ * The download policy: whether a replay materializes the bytes it will need
+ * eagerly, or only records that the shared tier can serve them and leaves the
+ * fetch to the first read.
+ */
+describe("the download policy", () => {
+  /** Counts the GETs a tier serves, so "zero downloads" is an assertion. */
+  const countingRemote = (backing: ArtifactStore.Service) => {
+    const gets: Array<string> = []
+    return {
+      gets,
+      service: {
+        ...backing,
+        get: (requested: string) => {
+          gets.push(requested)
+          return backing.get(requested)
+        }
+      } satisfies ArtifactStore.Service
+    }
+  }
+
+  it.effect("all downloads eagerly, which is the default", () =>
+    Effect.gen(function*() {
+      const backing = ArtifactStore.makeMemory()
+      yield* withCrypto(backing.put(payload))
+      const remote = countingRemote(backing)
+      const local = ArtifactStore.makeMemory()
+      const sync = ArtifactSync.make({ local, remote: remote.service, downloadPolicy: "all" })
+      expect(yield* withCrypto(sync.hydrate([digest]))).toBe(true)
+      expect(remote.gets).toEqual([digest])
+      expect(yield* withCrypto(local.has(digest))).toBe(true)
+    }))
+
+  it.effect("minimal admits the replay with no download at all", () =>
+    Effect.gen(function*() {
+      const backing = ArtifactStore.makeMemory()
+      yield* withCrypto(backing.put(payload))
+      const remote = countingRemote(backing)
+      const local = ArtifactStore.makeMemory()
+      const sync = ArtifactSync.make({ local, remote: remote.service, downloadPolicy: "minimal" })
+      expect(yield* withCrypto(sync.hydrate([digest]))).toBe(true)
+      // The digest is recorded as resolvable, not materialized: the read-through
+      // tier fetches it the first time something actually reads it.
+      expect(remote.gets).toEqual([])
+      expect(yield* withCrypto(local.has(digest))).toBe(false)
+    }))
+
+  it.effect("toplevel prefetches nothing and leaves the transfer to the first read", () =>
+    Effect.gen(function*() {
+      const backing = ArtifactStore.makeMemory()
+      yield* withCrypto(backing.put(payload))
+      const remote = countingRemote(backing)
+      const local = ArtifactStore.makeMemory()
+      const sync = ArtifactSync.make({ local, remote: remote.service, downloadPolicy: "toplevel" })
+      expect(yield* withCrypto(sync.hydrate([digest]))).toBe(true)
+      expect(remote.gets).toEqual([])
+      // `toplevel` differs from `minimal` at the combined read seam, not here:
+      // both admit the replay without a download, and the combined store then
+      // writes the blob back under `toplevel` and does not under `minimal`.
+      const combined = CombinedArtifacts.make({ local, remote: remote.service, downloadPolicy: "toplevel" })
+      expect(yield* withCrypto(combined.get(digest))).toBeDefined()
+      expect(remote.gets).toEqual([digest])
+      expect(yield* withCrypto(local.has(digest))).toBe(true)
+    }))
+
+  it.effect("takes the policy the shared tier declares", () =>
+    Effect.gen(function*() {
+      const backing = ArtifactStore.makeMemory()
+      yield* withCrypto(backing.put(payload))
+      const remote = countingRemote(backing)
+      const local = ArtifactStore.makeMemory()
+      // The tier states its own policy, the way `RemoteArtifacts.make` does, so
+      // one deployment setting reaches both seams without being threaded twice.
+      const declaring: RemoteArtifacts.Service = { ...remote.service, downloadPolicy: "minimal" }
+      const sync = ArtifactSync.make({ local, remote: declaring })
+      expect(yield* withCrypto(sync.hydrate([digest]))).toBe(true)
+      expect(remote.gets).toEqual([])
+    }))
+
+  it.effect("minimal refuses the replay when the shared tier cannot serve it either", () =>
+    Effect.gen(function*() {
+      const remote = countingRemote(ArtifactStore.makeMemory())
+      const sync = ArtifactSync.make({
+        local: ArtifactStore.makeMemory(),
+        remote: remote.service,
+        downloadPolicy: "minimal"
+      })
+      expect(yield* withCrypto(sync.hydrate([digest]))).toBe(false)
+      expect(remote.gets).toEqual([])
+    }))
+
+  it.effect("minimal refuses the replay when a tier cannot be probed", () =>
+    Effect.gen(function*() {
+      const sync = ArtifactSync.make({
+        local: ArtifactStore.makeMemory(),
+        remote: ArtifactStore.makeNoop(),
+        downloadPolicy: "minimal"
+      })
+      expect(yield* withCrypto(sync.hydrate([digest]))).toBe(false)
+    }))
+
+  it.effect("layer carries the declared policy through to hydrate", () =>
+    Effect.gen(function*() {
+      const backing = ArtifactStore.makeMemory()
+      yield* withCrypto(backing.put(payload))
+      const remote = countingRemote(backing)
+      const satisfied = yield* withCrypto(
+        Effect.flatMap(ArtifactSync.ArtifactSync, (sync) => sync.hydrate([digest])).pipe(
+          Effect.provide(
+            ArtifactSync.layer(Effect.succeed(remote.service), { downloadPolicy: "minimal" })
+          ),
+          Effect.provide(Layer.succeed(ArtifactStore.ArtifactStore)(ArtifactStore.makeMemory()))
+        )
+      )
+      expect(satisfied).toBe(true)
+      expect(remote.gets).toEqual([])
+    }))
+
+  it.effect("minimal asks nothing of either tier when nothing is referenced", () =>
+    Effect.gen(function*() {
+      const remote = countingRemote(ArtifactStore.makeMemory())
+      const sync = ArtifactSync.make({
+        local: ArtifactStore.makeMemory(),
+        remote: remote.service,
+        downloadPolicy: "minimal"
+      })
+      expect(yield* withCrypto(sync.hydrate([]))).toBe(true)
+      expect(remote.gets).toEqual([])
+    }))
 })

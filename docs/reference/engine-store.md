@@ -179,7 +179,7 @@ The durable suspected-edge store, tagged `@smthrs/engine-store/SelectionStore`. 
 The two-tier artifact protocol, and the seam a shared-cache composition injects into. `makeLocal()` is the default when the tag is absent: publish is a no-op and hydrate reports nothing arrived, so a purely local engine pays nothing. `make({ local, remote })` — or `layer(remote)`, which takes the local tier from the `ArtifactStore` tag — implements the real thing:
 
 - `publish(digests)` runs `findMissing` on the shared tier, uploads what is missing, and re-probes to confirm. `ActionPersistence` calls it immediately **before** the transaction that records the cache entry, and never inside it. This is Bazel's REAPI ordering constraint (`UploadManifest.java:630-633`): an action result is uploaded after every blob it refers to, because a result accessed before its blobs are present cannot be validated. A publication that cannot make the artifacts durable fails with `ArtifactPublicationFailed`, and the **shared** entry is withheld.
-- `hydrate(digests)` fetches what this host is missing and writes it back locally, reporting whether the replay is now worth retrying. It never fails a run: a shared tier that is down must not stop work that can simply be done.
+- `hydrate(digests)` establishes that this host can resolve every referenced artifact, reporting whether the replay is now worth retrying. It never fails a run: a shared tier that is down must not stop work that can simply be done. How eagerly it materializes is the `downloadPolicy` option on `make` and `layer`.
 
 ## `CacheSync`
 
@@ -191,7 +191,19 @@ It is a separate seam from the `CacheStore` tag because of *where* the local row
 
 Neither publication step can fail a run. Both run after `attempts.finish`, so the result is already durably recorded on this host, and failing a completed run because an optional accelerator is unreachable trades a real result for an unavailable one. A refusal withholds the shared copy — never the local row — and journals a `cache-provenance` record with `action: "unpublished"` carrying the stage (`artifacts` or `entry`) and the reason. That is the same "visible, not silent" treatment an unverified read set gets (issue #106); a missing shared entry is explainable from the journal rather than inferred from its absence.
 
-Downloads are lazy — a replay fetches when materialization actually needs the bytes, so a metadata-only replay state is representable. A Bazel-style download policy (`RemoteOutputChecker`, `--remote_download_{all,toplevel,minimal}`) is out of scope and ticketed in `.smithers/tickets/remote-cache-download-policy.md`.
+### `ArtifactSync.DownloadPolicy`
+
+How eagerly a replay materializes the artifacts it references — Bazel's `RemoteOutputChecker` dial at the seam that owns the decision.
+
+The policy is declared on the shared tier as `RemoteArtifacts.Options.downloadPolicy` and `ArtifactSync.make` reads it from the store it was handed, so one deployment setting reaches both seams. An explicit `downloadPolicy` on `make` or `layer` overrides it.
+
+| Policy | `hydrate` behavior |
+| --- | --- |
+| `all` (default) | Downloads every referenced artifact into this host's store while admitting the replay. Every later read is local, and a shared tier that goes down afterwards costs nothing. |
+| `toplevel` | Downloads nothing. One batched `findMissing` establishes that the shared tier can serve what is missing, and `CombinedArtifacts.get` fetches and writes back the blobs a reader actually reads. |
+| `minimal` | The same probe and the same zero downloads here; `CombinedArtifacts.get` then serves without writing back, so this host never accumulates other machines' artifacts. |
+
+The two lazy policies are only sound when the store the replay reads through can reach the shared tier, which means `CombinedArtifacts` with the same remote tier. Under a purely local `ArtifactStore` an admitted lazy replay would later read an artifact this host never fetched. A tier that refuses the probe is indistinguishable from one that holds nothing, so the replay is refused either way and the step executes.
 
 ## Cache admission
 

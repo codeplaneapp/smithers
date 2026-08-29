@@ -17,6 +17,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
+import * as CombinedArtifacts from "@smthrs/artifacts/CombinedArtifacts"
 import { Journal } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
 import { type Ownership, RunStore } from "@smthrs/run-store"
@@ -164,7 +165,8 @@ describe("blobs before metadata", () => {
             sharedRows.set(entry.keyDigest, entry)
             return { _tag: "Inserted" } as const
           }),
-        evict: () => Effect.succeed(false)
+        evict: () => Effect.succeed(false),
+        sweepExpired: () => Effect.succeed(0)
       }
       yield* withCrypto(
         Effect.gen(function*() {
@@ -227,7 +229,8 @@ describe("blobs before metadata", () => {
               remote: {
                 get: () => Effect.succeed(Option.none()),
                 put: (entry) => Effect.sync(() => (shared.push(entry.keyDigest), { _tag: "Inserted" } as const)),
-                evict: () => Effect.succeed(false)
+                evict: () => Effect.succeed(false),
+                sweepExpired: () => Effect.succeed(0)
               }
             })
           ),
@@ -276,7 +279,8 @@ describe("blobs before metadata", () => {
                   Effect.fail(
                     new CacheStore.CacheStoreError({ code: "persistence_failed", message: "the shared tier is down" })
                   ),
-                evict: () => Effect.succeed(false)
+                evict: () => Effect.succeed(false),
+                sweepExpired: () => Effect.succeed(0)
               }
             })
           ),
@@ -336,7 +340,8 @@ describe("the single-tier default", () => {
                 Effect.succeed<CacheStore.Service>({
                   get: () => Effect.succeed(Option.none()),
                   put: (entry) => Effect.sync(() => (rows.push(entry.keyDigest), { _tag: "Inserted" } as const)),
-                  evict: () => Effect.succeed(false)
+                  evict: () => Effect.succeed(false),
+                  sweepExpired: () => Effect.succeed(0)
                 })
               )
             )
@@ -434,5 +439,149 @@ describe("lazy download", () => {
       expect(executions).toBe(2)
       // Exactly one refusal: hydration failed, so the replay is never retried.
       expect(replays).toBe(1)
+    }))
+})
+
+/**
+ * The download policy, through the dispatch.
+ *
+ * `packages/engine-store/test/ArtifactSync.test.ts` proves what each of the
+ * three values does to `hydrate` and to the combined read seam, by calling
+ * them. This is the claim those calls stand in for: a step whose evidence
+ * references an artifact, recorded once and replayed on a host that has never
+ * seen the bytes, is ADMITTED under `minimal` without the shared tier serving
+ * a single byte — and the bytes arrive later, on the first read that actually
+ * wants them.
+ */
+describe("the download policy at the dispatch seam", () => {
+  /** Counts the GETs the shared tier serves, so "zero downloads" is an assertion. */
+  const countingRemote = (backing: ArtifactStore.Service) => {
+    const gets: Array<string> = []
+    return {
+      gets,
+      service: {
+        ...backing,
+        get: (requested: string) => {
+          gets.push(requested)
+          return backing.get(requested)
+        }
+      } satisfies ArtifactStore.Service
+    }
+  }
+
+  it.effect("admits a replay under minimal with no download, and materializes on the first read", () =>
+    Effect.gen(function*() {
+      const key = "remote-cache/minimal-admission"
+      // The producing host's own store, and the shared tier it publishes into.
+      const producer = ArtifactStore.makeMemory()
+      const remote = countingRemote(ArtifactStore.makeMemory())
+      // The consuming host: a different machine, so it holds nothing.
+      const consumer = ArtifactStore.makeMemory()
+      let executions = 0
+      let replays = 0
+      const body = () =>
+        Effect.sync(() => {
+          executions++
+          return "recorded"
+        })
+
+      const outcome = yield* withCrypto(
+        Effect.gen(function*() {
+          yield* producer.put(payload)
+          yield* activate("minimal-producer")
+          yield* dispatch("minimal-producer", key, body).pipe(
+            Effect.provide(boundaryLayer(() => Effect.void)),
+            Effect.provideService(
+              ArtifactSync.ArtifactSync,
+              ArtifactSync.make({ local: producer, remote: remote.service, downloadPolicy: "minimal" })
+            )
+          )
+
+          // The consuming dispatch. Its host cannot resolve the blob locally,
+          // so the first replay refuses; hydration answers "the shared tier can
+          // serve this" from one batched probe and no transfer; the retried
+          // replay records the digest it will read rather than fetching it,
+          // which is what a metadata-only replay is.
+          yield* activate("minimal-consumer")
+          return yield* dispatch("minimal-consumer", key, body).pipe(
+            Effect.provide(
+              boundaryLayer(() =>
+                Effect.suspend(() => {
+                  replays++
+                  return replays === 1 ? missingArtifact : Effect.void
+                })
+              )
+            ),
+            Effect.provideService(
+              ArtifactSync.ArtifactSync,
+              ArtifactSync.make({ local: consumer, remote: remote.service, downloadPolicy: "minimal" })
+            )
+          )
+        }).pipe(Effect.provide(Layer.mergeAll(TestStores.layer(), jjLayer)), Effect.scoped)
+      )
+
+      // A cache hit: the consuming run never ran the body.
+      expect(outcome).toBe("recorded")
+      expect(executions).toBe(1)
+      expect(replays).toBe(2)
+      // ZERO downloads at admission, which is the whole of what `minimal` buys.
+      expect(remote.gets).toEqual([])
+      expect(yield* withCrypto(consumer.has(digest))).toBe(false)
+
+      // The first read that actually wants the bytes gets them, from the shared
+      // tier, one GET. `minimal` serves without writing back, so a host that
+      // must not accumulate other machines' artifacts still does not.
+      const combined = CombinedArtifacts.make({
+        local: consumer,
+        remote: remote.service,
+        downloadPolicy: "minimal"
+      })
+      expect(yield* withCrypto(combined.get(digest))).toEqual(payload)
+      expect(remote.gets).toEqual([digest])
+      expect(yield* withCrypto(consumer.has(digest))).toBe(false)
+    }))
+
+  it.effect("downloads at admission under the default policy, which is the contrast", () =>
+    Effect.gen(function*() {
+      const key = "remote-cache/all-admission"
+      const producer = ArtifactStore.makeMemory()
+      const remote = countingRemote(ArtifactStore.makeMemory())
+      const consumer = ArtifactStore.makeMemory()
+      let replays = 0
+      const body = () => Effect.succeed("recorded")
+
+      yield* withCrypto(
+        Effect.gen(function*() {
+          yield* producer.put(payload)
+          yield* activate("all-producer")
+          yield* dispatch("all-producer", key, body).pipe(
+            Effect.provide(boundaryLayer(() => Effect.void)),
+            Effect.provideService(
+              ArtifactSync.ArtifactSync,
+              ArtifactSync.make({ local: producer, remote: remote.service })
+            )
+          )
+          yield* activate("all-consumer")
+          yield* dispatch("all-consumer", key, body).pipe(
+            Effect.provide(
+              boundaryLayer(() =>
+                Effect.suspend(() => {
+                  replays++
+                  return replays === 1 ? missingArtifact : Effect.void
+                })
+              )
+            ),
+            Effect.provideService(
+              ArtifactSync.ArtifactSync,
+              ArtifactSync.make({ local: consumer, remote: remote.service })
+            )
+          )
+        }).pipe(Effect.provide(Layer.mergeAll(TestStores.layer(), jjLayer)), Effect.scoped)
+      )
+
+      // `all` prefetches: the transfer happens at admission and the blob is on
+      // this host afterwards, which is what `minimal` declines to do.
+      expect(remote.gets).toEqual([digest])
+      expect(yield* withCrypto(consumer.has(digest))).toBe(true)
     }))
 })

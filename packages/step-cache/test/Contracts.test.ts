@@ -17,6 +17,7 @@ describe("service contracts", () => {
       expect((yield* (Effect.flip(service.get("digest")))).message).toContain("get")
       expect((yield* (Effect.flip(service.put(entry)))).message).toContain("put")
       expect((yield* (Effect.flip(service.evict("digest")))).message).toContain("evict")
+      expect((yield* (Effect.flip(service.sweepExpired(0)))).message).toContain("sweepExpired")
 
       const result = yield* (
         Effect.gen(function*() {

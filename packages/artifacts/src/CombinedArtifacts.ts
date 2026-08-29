@@ -23,6 +23,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as ArtifactStore from "./ArtifactStore.ts"
+import * as RemoteArtifacts from "./RemoteArtifacts.ts"
 
 /**
  * The two tiers to compose.
@@ -45,6 +46,18 @@ export interface Options {
    * (`reference/bazel/.../remote/options/RemoteOptions.java`).
    */
   readonly uploadTimeout?: Duration.Input | undefined
+  /**
+   * How eagerly a read materializes a blob into the local tier. Defaults to
+   * the policy the remote tier declares (`RemoteArtifacts.Options.downloadPolicy`),
+   * and to `all` for a remote tier that declares none.
+   *
+   * `all` and `toplevel` both write a fetched blob back into the local tier, so
+   * the second read is local; they differ only in whether
+   * `@smthrs/engine-store`'s `ArtifactSync.hydrate` prefetches. `minimal`
+   * serves the bytes without writing them back, so a host that must not
+   * accumulate other machines' artifacts never does.
+   */
+  readonly downloadPolicy?: RemoteArtifacts.DownloadPolicy | undefined
 }
 
 /**
@@ -60,9 +73,10 @@ const defaultUploadTimeout = Duration.seconds(60)
  * @since 0.1.0
  * @slop
  */
-export const make = (options: Options): ArtifactStore.Service => {
+export const make = (options: Options): RemoteArtifacts.Service => {
   const { local, remote } = options
   const uploadTimeout = options.uploadTimeout ?? defaultUploadTimeout
+  const downloadPolicy = options.downloadPolicy ?? RemoteArtifacts.downloadPolicyOf(remote) ?? "all"
   /**
    * In-flight uploads, keyed by digest. Two settles in one process that spill
    * the same artifact would otherwise both push the same bytes over the
@@ -148,9 +162,16 @@ export const make = (options: Options): ArtifactStore.Service => {
           "@smthrs/artifacts/ArtifactCorruption": () => Effect.void
         }),
         Effect.flatMap((cached) =>
-          cached === undefined
-            ? Effect.tap(remote.get(digest), (bytes) => local.put(bytes))
-            : Effect.succeed(cached)
+          cached !== undefined
+            ? Effect.succeed(cached)
+            // `minimal` reads through without materializing: the caller gets
+            // the bytes, the local tier stays exactly as small as it was, and
+            // the next read pays the network again. Every other policy writes
+            // back, which is what makes the second read local and what heals a
+            // corrupt local address.
+            : downloadPolicy === "minimal"
+            ? remote.get(digest)
+            : Effect.tap(remote.get(digest), (bytes) => local.put(bytes))
         )
       )
     ))
@@ -185,7 +206,7 @@ export const make = (options: Options): ArtifactStore.Service => {
     }
   )
 
-  return { put, get, has, findMissing }
+  return { put, get, has, findMissing, downloadPolicy }
 }
 
 /**

@@ -27,7 +27,7 @@ The root entry point exports these namespaces; each is also importable from `@sm
 | `Trellis`         | `TrellisErrorCode`, `TrellisError`, `Envelope`, `Agent`, `Plan`, `Leaf`, `leaves`, `validate`, `CompileOptions`, `compile`, `MakeOptions`, `make`, `Authoring`, `Continuation`, `Round`, `RunResult`, `RuntimeOptions`, `execute`, `run` | Validates, compiles, and runs a bounded plan a model authored.                      |
 | `TryCatchFinally` | `MakeOptions`, `RuntimeOptions`, `make`, `run`                                                                                                                                                                                           | Protects a body with a filtered recovery arm and a finalizer that always runs.      |
 | `WithApproval`    | `Approved`, `Options`, `make`, `withApproval`                                                                                                                                                                                            | Decorates a flow with an approval boundary.                                         |
-| `WithCache`       | `Options`, `make`, `withCache`                                                                                                                                                                                                           | Decorates a flow with cache policy metadata.                                        |
+| `WithCache`       | `Options`, `Policy`, `Scope`, `CachePolicyAnnotation`, `policyOf`, `make`, `withCache` | Declares a cache policy on a flow, under the annotation identifier the engine reads at dispatch. |
 | `WithRetry`       | `Backoff`, `Options`, `make`, `withRetry`, `retryEffect`                                                                                                                                                                                 | Decorates a flow with retry metadata and supplies an Effect retry helper.           |
 
 ```ts
@@ -42,3 +42,14 @@ const debate = Debate.make({
 ```
 
 `@smthrs/patterns/package.json` is also exported. `internal/*` and nested `*/index` subpaths are not public.
+## What `WithCache` declares today
+
+`WithCache` writes its policy under the annotation identifier
+`@smthrs/flow/Action/CachePolicy`, which is the key `@smthrs/engine-store` reads
+at dispatch. The durable engine executes `@smthrs/flow` actions, and flows HEAD
+has no bridge from a `@smthrs/core` `Flow.make` descriptor to that interpreter,
+so on a core flow the policy is a declaration: it renames the wrapper, enters its
+captured key material, and travels with the flow until the bridge lowers it onto
+the dispatched action. For a policy the engine acts on now, declare it on the
+action with `CacheEnvironment.withCache(action, policy)` from `@smthrs/flow`. See
+`docs/reference/step-cache.md`.

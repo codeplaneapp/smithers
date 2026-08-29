@@ -9,6 +9,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as ArtifactStore from "../src/ArtifactStore.ts"
 import * as CombinedArtifacts from "../src/CombinedArtifacts.ts"
+import type * as RemoteArtifacts from "../src/RemoteArtifacts.ts"
 import { bytes, sha256, text, withCrypto } from "./Crypto.ts"
 
 const artifact = "an artifact that travels"
@@ -298,4 +299,80 @@ describe("layer", () => {
       expect(published).toBe(digest)
       expect(yield* withCrypto(remote.has(digest))).toBe(true)
     }))
+})
+
+describe("the download policy", () => {
+  /** A remote tier that declares a policy, the way `RemoteArtifacts.make` does. */
+  const declaring = (downloadPolicy: RemoteArtifacts.DownloadPolicy) => {
+    const counting = countingMemory()
+    return { ...counting, store: { ...counting.store, downloadPolicy } }
+  }
+
+  it.effect("defaults to all, which writes a fetched blob back locally", () =>
+    Effect.gen(function*() {
+      const local = countingMemory()
+      const remote = countingMemory()
+      const combined = CombinedArtifacts.make({ local: local.store, remote: remote.store })
+      expect(combined.downloadPolicy).toBe("all")
+      yield* withCrypto(remote.store.put(bytes(artifact)))
+      expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
+      expect(yield* withCrypto(local.store.has(digest))).toBe(true)
+    }))
+
+  it.effect("takes the policy the remote tier declares", () =>
+    Effect.gen(function*() {
+      const local = countingMemory()
+      const remote = declaring("minimal")
+      const combined = CombinedArtifacts.make({ local: local.store, remote: remote.store })
+      expect(combined.downloadPolicy).toBe("minimal")
+      yield* withCrypto(remote.store.put(bytes(artifact)))
+
+      // The bytes are served, and the local tier is exactly as empty as before.
+      expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
+      expect(yield* withCrypto(local.store.has(digest))).toBe(false)
+      expect(local.calls.filter((call) => call === "put")).toHaveLength(0)
+
+      // Which means the second read pays the network again, on purpose.
+      expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
+      expect(remote.calls.filter((call) => call === "get")).toHaveLength(2)
+    }))
+
+  it.effect("materializes on first read under toplevel", () =>
+    Effect.gen(function*() {
+      const local = countingMemory()
+      const remote = declaring("toplevel")
+      const combined = CombinedArtifacts.make({ local: local.store, remote: remote.store })
+      expect(combined.downloadPolicy).toBe("toplevel")
+      yield* withCrypto(remote.store.put(bytes(artifact)))
+      expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
+      expect(yield* withCrypto(local.store.has(digest))).toBe(true)
+      // Materialized once: the second read never reaches the shared tier.
+      expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
+      expect(remote.calls.filter((call) => call === "get")).toHaveLength(1)
+    }))
+
+  it.effect("lets the composition override the tier's declaration", () =>
+    Effect.gen(function*() {
+      const local = countingMemory()
+      const remote = declaring("minimal")
+      const combined = CombinedArtifacts.make({
+        local: local.store,
+        remote: remote.store,
+        downloadPolicy: "all"
+      })
+      expect(combined.downloadPolicy).toBe("all")
+      yield* withCrypto(remote.store.put(bytes(artifact)))
+      expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
+      expect(yield* withCrypto(local.store.has(digest))).toBe(true)
+    }))
+
+  it("ignores a declaration that is not a policy", () => {
+    const local = countingMemory()
+    const remote = countingMemory()
+    const combined = CombinedArtifacts.make({
+      local: local.store,
+      remote: { ...remote.store, downloadPolicy: "everything" } as never
+    })
+    expect(combined.downloadPolicy).toBe("all")
+  })
 })

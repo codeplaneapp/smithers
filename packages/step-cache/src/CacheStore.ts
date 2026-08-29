@@ -11,6 +11,7 @@
  */
 import { Canonical } from "@smthrs/canonical/Canonical"
 import { affectedRows, DatabaseError, DurableWriter } from "@smthrs/database/DurableWriter"
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -111,6 +112,17 @@ export type GetOptions = {
     readonly runId: string
     readonly eventSeq: number
   }
+  /**
+   * Refuses an entry recorded more than `maxAgeMs` before the current clock
+   * reading, so a caller that declared a time-to-live reads a miss instead of
+   * a stale result. The bound applies to the recorded ledger and to the head
+   * alike: both carry the `createdAtMs` the age is measured from.
+   *
+   * The bound is a read policy, never a deletion. An expired row stays on
+   * disk until {@link Service.sweepExpired} removes it, so a second caller
+   * declaring a longer bound still reads it.
+   */
+  readonly maxAgeMs?: number
 }
 
 /**
@@ -151,7 +163,9 @@ export interface Service {
   /**
    * The entry under `keyDigest`: the mutable head by default, or — with
    * `recordedBy` — the durable recorded version that exact event landed,
-   * falling back to the head when the ledger holds none.
+   * falling back to the head only when the ledger holds no row for that
+   * provenance. A recorded row the {@link GetOptions.maxAgeMs} bound refuses
+   * is a miss, never a fall-through to the head.
    */
   readonly get: (
     keyDigest: string,
@@ -168,6 +182,17 @@ export interface Service {
     keyDigest: string,
     options?: EvictOptions
   ) => Effect.Effect<boolean, CacheStoreError>
+  /**
+   * Removes every head row recorded more than `olderThanMs` before the
+   * current clock reading, returning how many were deleted.
+   *
+   * The sweep is the collection half of {@link GetOptions.maxAgeMs}: the
+   * bound decides what a read serves, this decides what the database keeps.
+   * The append-only `flows_step_cache_recorded` ledger is never swept — an
+   * old frame's projection is a function of what that event recorded, and
+   * deleting the evidence would change a replayed answer.
+   */
+  readonly sweepExpired: (olderThanMs: number) => Effect.Effect<number, CacheStoreError>
 }
 
 /**
@@ -261,6 +286,19 @@ export const validateFence = (
       Effect.mapError((cause) => error("invalid_cache", "eviction fence violates the persistence contract", cause))
     )
 
+/**
+ * Refuses an age bound no row could satisfy before any statement is issued.
+ * A negative or fractional millisecond count is a caller mistake, and running
+ * it anyway would report that mistake as an ordinary miss.
+ *
+ * @since 0.1.0
+ * @private
+ */
+export const validateAge = (field: string, value: number | undefined): Effect.Effect<void, CacheStoreError> =>
+  value === undefined || (Number.isSafeInteger(value) && value >= 0)
+    ? Effect.void
+    : Effect.fail(error("invalid_cache", `${field} must be a non-negative safe integer`))
+
 const validateEntry = (entry: CacheEntry): Effect.Effect<void, CacheStoreError> =>
   Schema.decodeUnknownEffect(CacheEntry)(entry).pipe(
     Effect.asVoid,
@@ -317,6 +355,14 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     Effect.gen(function*() {
       yield* Effect.annotateCurrentSpan({ keyDigest })
       yield* validateKey(keyDigest)
+      yield* validateAge("maxAgeMs", options?.maxAgeMs)
+      // The age floor is resolved once, from the injected clock, so both reads
+      // below judge the same instant and a row cannot be fresh for the ledger
+      // read and stale for the head read of one lookup.
+      const floorMs = options?.maxAgeMs === undefined
+        ? undefined
+        : (yield* Clock.currentTimeMillis) - options.maxAgeMs
+      const withinBound = (row: CacheEntry): boolean => floorMs === undefined || row.createdAtMs >= floorMs
       const recordedBy = options?.recordedBy
       if (recordedBy !== undefined) {
         // The ledger row is the durable evidence a replay of that exact event
@@ -332,8 +378,16 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         `.pipe(Effect.mapError(mapPersistenceError))
         if (recorded.length > 0) {
           const entry = yield* decodeRow(recorded[0]!)
-          yield* Metric.update(CacheStoreMetrics.hit, 1)
-          return Option.some(entry)
+          if (withinBound(entry)) {
+            yield* Metric.update(CacheStoreMetrics.hit, 1)
+            return Option.some(entry)
+          }
+          // The exact row exists and is older than the bound, so the answer is
+          // a miss. Falling through to the head here would hand a replay of
+          // that event whatever a later run recorded under the same key, which
+          // is a different result than the one the caller asked to read.
+          yield* Metric.update(CacheStoreMetrics.miss, 1)
+          return Option.none()
         }
       }
       const rows = yield* sql<Record<string, unknown>>`
@@ -345,6 +399,10 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         return Option.none()
       }
       const entry = yield* decodeRow(rows[0]!)
+      if (!withinBound(entry)) {
+        yield* Metric.update(CacheStoreMetrics.miss, 1)
+        return Option.none()
+      }
       yield* Metric.update(CacheStoreMetrics.hit, 1)
       return Option.some(entry)
     })
@@ -426,7 +484,25 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     })
   )
 
-  return { get, put, evict }
+  const sweepExpired: Service["sweepExpired"] = Effect.fn("CacheStore.sweepExpired")((olderThanMs) =>
+    Effect.gen(function*() {
+      yield* validateAge("olderThanMs", olderThanMs)
+      const floorMs = (yield* Clock.currentTimeMillis) - olderThanMs
+      yield* Effect.annotateCurrentSpan({ floorMs })
+      // Only the head table is swept. The recorded ledger is the durable
+      // evidence a replay of an old frame reads, so it is append-only by
+      // contract and no retention policy may touch it.
+      const deleted = yield* writer.write(
+        sql`DELETE FROM flows_step_cache WHERE created_at_ms < ${floorMs}`.raw
+      ).pipe(
+        Effect.flatMap(affectedRows),
+        Effect.mapError(mapPersistenceError)
+      )
+      return deleted
+    })
+  )
+
+  return { get, put, evict, sweepExpired }
 })
 
 /**
@@ -441,6 +517,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => {
     get: Effect.fn("CacheStore.get")(() => unavailable("get")),
     put: Effect.fn("CacheStore.put")(() => unavailable("put")),
     evict: Effect.fn("CacheStore.evict")(() => unavailable("evict")),
+    sweepExpired: Effect.fn("CacheStore.sweepExpired")(() => unavailable("sweepExpired")),
     ...overrides
   })
 }
