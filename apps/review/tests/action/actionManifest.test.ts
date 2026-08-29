@@ -26,6 +26,20 @@ describe("review action manifest", () => {
     expect(setup?.with?.version).toBe("11.21.0");
   });
 
+  test("pins bun and node to the runtimes the workspace gates run on", () => {
+    // The action installs this repository's workspace and then runs its
+    // TypeScript sources directly, so its interpreters are the workspace's own
+    // (BUILD.ts: Node 22.19.0, Bun 1.3.14). A looser or older pin runs the
+    // review on a runtime no gate in this repository ever exercised — the Node
+    // resolution contract in tests/nodeRuntimeResolution.test.ts is exactly the
+    // kind of thing that differs between them.
+    const steps = readSteps();
+    const bun = steps.find((step) => step.uses?.startsWith("oven-sh/setup-bun"));
+    expect(bun?.with?.["bun-version"]).toBe("1.3.14");
+    const node = steps.find((step) => step.uses?.startsWith("actions/setup-node"));
+    expect(node?.with?.["node-version"]).toBe("22.19.0");
+  });
+
   test("installs no agent CLI: rc.0 seats are provider routes, not subprocesses", () => {
     const runs = readSteps().map((step) => step.run ?? "").join("\n");
     expect(runs).not.toContain("@openai/codex");
