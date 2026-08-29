@@ -250,10 +250,18 @@ const servedAssets = new Set(assets())
   ]
   const offenders = []
   for (const page of allPages) {
+    // Four exemptions, and each names a removed surface in order to say it is
+    // gone: the 0.x changelogs are the record of the releases that shipped it,
+    // the migration guide maps every construct to its replacement, the
+    // compatibility policy quotes the promise that lists them, and the
+    // known-limitations table quotes contract section 7, which names the
+    // commands and packages the release excludes. Every other page is held to
+    // never mentioning one, which is what makes those four readable as the
+    // places to look.
     if (isHistorical(page.route)) continue
     if (page.route.startsWith("/migration")) continue
-    if (page.route === "/release/known-limitations") continue
     if (page.route === "/changelogs/compatibility-policy") continue
+    if (page.route === "/release/known-limitations") continue
     for (const api of jsxApis) {
       if (page.body.includes(api)) offenders.push(`${page.path}: ${api}`)
     }
