@@ -2458,9 +2458,17 @@ after touching `scorecard.ts`, `prices.ts`, the journal's event shapes,
 
 The run scripts drive the CLI from an extracted testbed, which is an arbitrary
 directory outside this repository. `flows.sh` resolves
-`packages/cli/dist/esm/bin.js` out of the checkout and execs it in place, so the
-CLI reads its project flows from the workspace (`flows/fix/flow.mdx`) and keeps
-its control database in the workspace's `.flows/`.
+`packages/cli/bin/smithers.mjs` — the executable `@smthrs/cli` declares as its
+bin — out of the checkout and execs it in place, so the CLI reads its project
+flows from the workspace (`flows/fix/flow.mdx`) and keeps its control database
+in the workspace's `.flows/`.
+
+That shim runs `dist/esm/bin.js` when a build is there and falls back to
+`src/bin.ts` under Node's type stripping when it is not. The fallback is what
+makes `pnpm exec smithers` work in a source checkout, and it is exactly wrong
+for a wave: the pinned subject is the build. So the wrapper refuses when
+`packages/cli/dist/esm/bin.js` is absent rather than measuring bytes no
+fingerprint covers. `fixtures/check-cli-path.mjs` holds both halves.
 
 The wrapper does not build. `./preflight.sh` builds and pins, once per wave, and
 `flows.sh` checks itself against that pin on every invocation (see [The subject

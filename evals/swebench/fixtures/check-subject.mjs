@@ -18,7 +18,10 @@
  * The third is that the HEAD comparison agrees with git in both directions, so
  * `dirty-subject` cannot quietly stop reporting.
  *
- * The fourth is that the stamp covers `packages/cli/src`. That package is the
+ * The fourth is that the record is machine-independent: no absolute path, so a
+ * committed wave record describes bytes rather than somebody's home directory.
+ *
+ * The fifth is that the stamp covers `packages/cli/src`. That package is the
  * only one whose loaded bytes are a build, so it is the only one whose source
  * can drift away from what runs; leaving it out of the stamp is what let a
  * mid-wave CLI edit pass the pin when the same edit to any other package would
@@ -48,6 +51,14 @@ try {
   const fingerprint = JSON.parse(reported.stdout)
 
   assert.ok(fingerprint.stamp.startsWith("sha256:"), "the fingerprint carries a content stamp")
+
+  // Every path in the record is repository-relative. A fingerprint states which
+  // bytes ran; the absolute directory they ran in is a fact about a machine, and
+  // one written into `scorecard.json` is how this rig arrived naming a checkout
+  // that does not exist here.
+  assert.equal(fingerprint.root, undefined, "the record carries no absolute checkout path")
+  const absolute = JSON.stringify(fingerprint).match(/(?:\/Users|\/home)\/[A-Za-z0-9._-]+\//)
+  assert.equal(absolute, null, `the record names a machine's home directory: ${absolute?.[0]}`)
   assert.equal(
     fingerprint.marker.resolvedBy,
     "packages/harness/src/CellTurn.ts",

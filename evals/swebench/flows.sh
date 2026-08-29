@@ -9,8 +9,15 @@
 # control database in `<cwd>/.flows`, so the wrapper changes no directory: it
 # only resolves the executable out of the checkout and execs it in place.
 #
-# `packages/cli/dist/esm/bin.js` is the published `flows` binary's entry point.
-# It is a build artifact and gitignored, so a fresh checkout has none.
+# `packages/cli/bin/smithers.mjs` is the shipped executable — the file
+# `@smthrs/cli` declares as its `smithers` bin. It runs `dist/esm/bin.js` when a
+# build is there and falls back to `src/bin.ts` under Node's type stripping when
+# it is not, so a source checkout has a working CLI with no build step.
+#
+# That fallback is convenient and, for a wave, wrong: the pinned subject is the
+# build, and a silent fall back to source would run bytes nothing fingerprinted.
+# So this wrapper checks the build is present before it execs the shim, and the
+# pin below re-derives the fingerprint of exactly those bytes.
 #
 # This wrapper does not build. `./preflight.sh` does, once, and pins what it
 # built to `.subject.json`; every invocation here re-derives the fingerprint and
@@ -25,7 +32,8 @@
 set -u
 S="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$S/../.." && pwd)"
-BIN="$ROOT/packages/cli/dist/esm/bin.js"
+BIN="$ROOT/packages/cli/bin/smithers.mjs"
+BUILT="$ROOT/packages/cli/dist/esm/bin.js"
 
 if [ "${SWB_SUBJECT_UNPINNED:-0}" != "1" ]; then
   if [ ! -f "$S/.subject.json" ]; then
@@ -37,7 +45,13 @@ if [ "${SWB_SUBJECT_UNPINNED:-0}" != "1" ]; then
 fi
 
 if [ ! -f "$BIN" ]; then
-  echo "flows.sh: $BIN does not exist; run evals/swebench/preflight.sh" >&2
+  echo "flows.sh: $BIN does not exist; this is not a Smithers checkout" >&2
+  exit 1
+fi
+
+if [ ! -f "$BUILT" ]; then
+  echo "flows.sh: $BUILT does not exist, so $BIN would fall back to src/bin.ts." >&2
+  echo "  That is not the subject a wave pins. Run evals/swebench/preflight.sh." >&2
   exit 1
 fi
 

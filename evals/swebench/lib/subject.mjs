@@ -17,6 +17,13 @@
  *   2. `packages/cli` is the one package whose compiled output IS loaded, via
  *      the `bin.js` entry point. That dist can be older than its own source.
  *
+ * Every path in the record is repository-relative. The absolute directory the
+ * rig happens to sit in is a fact about a machine, not about the bytes under
+ * test, and a wave record that carries one describes a checkout nobody else
+ * has: `scorecard.json` arrived in this repository naming
+ * `/Users/<operator>/flows/flows`, which resolves to nothing here. The gate that
+ * keeps it out is `scripts/repo-contract/machine-paths.test.mjs`.
+ *
  * So the fingerprint is: for every package in the CLI's `@smthrs/*` dependency
  * closure, where its entry point resolves to (src or dist), and a content hash
  * of the directory that answer selects — plus content hashes of the CLI's dist
@@ -211,7 +218,7 @@ export const fingerprint = ({ compareToHead = true } = {}) => {
       code: "no-cli-build",
       message: `${relative(root, binary)} does not exist; run evals/swebench/preflight.sh`
     })
-    return { root, refusals, packages: {}, stamp: undefined }
+    return { refusals, packages: {}, stamp: undefined }
   }
   const require = createRequire(binary)
   const packages = {}
@@ -324,7 +331,7 @@ export const fingerprint = ({ compareToHead = true } = {}) => {
     cliSrc,
     packages
   }
-  return { root, refusals, stamp: stampOf(record), ...record }
+  return { refusals, stamp: stampOf(record), ...record }
 }
 
 const options = process.argv.slice(2)

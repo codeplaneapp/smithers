@@ -77,3 +77,16 @@ export const faultSkips = Smithers.NodeTest({
   srcs: [sources],
   deps: []
 })
+
+/**
+ * No operator rig under `evals/` names one machine's home directory.
+ *
+ * @since 1.0.0
+ * @category test
+ */
+export const machinePaths = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.testRunner([Smithers.file("//scripts/repo-contract/machine-paths.test.mjs")]),
+  srcs: [sources],
+  deps: []
+})
