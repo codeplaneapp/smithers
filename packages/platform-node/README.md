@@ -25,6 +25,46 @@ There is no shell service. Running a command is Effect's `ChildProcess` /
 `ChildProcessSpawner`; a wall-clock budget is `Effect.timeout` around the
 effect, and cancellation is fiber interruption, not an `AbortSignal`.
 
+`NodeHost.layerContained` is the bundle with process containment turned on. It
+composes `@smthrs/kernel`'s `ContainedSpawner` over the raw spawner, so every
+child gets a `SIGTERM`-then-`SIGKILL` deadline and a `ProcessLedger` entry, and
+it runs one `ProcessReaper.reap` sweep while the layer is built, killing the
+process groups a previous incarnation of the same host abandoned. It requires a
+`ProcessLedger` because the durable half is only as good as the journal
+underneath it: `ProcessLedger.layer` inherits a crashed incarnation's
+processes, `ProcessLedger.layerMemory` contains this one and nothing more.
+
+```ts
+import { ProcessLedger } from "@smthrs/kernel"
+import { NodeHost } from "@smthrs/platform-node"
+import { Layer } from "effect"
+
+const host = Layer.provide(
+  NodeHost.layerContained({ graceMs: 2000 }),
+  ProcessLedger.layer({ hostId: "engine-1", ownerPid: process.pid })
+)
+```
+
+`layerContained` also builds `Jj` over the contained spawner, so a `jj`
+invocation a crashed host left running is a ledger record like any other rather
+than a process that went around the host.
+
+A stored pid outlives the process that wrote it and the operating system reuses
+the number, so `ProcessReaper` signals a record only when its owner is provably
+gone (`ESRCH`, never `EPERM`), it names a process group that is neither this
+process's pid nor its real process group, it was written during this boot, and
+the pid's start time still matches the record. Anything else is retired with
+`flows.host.process-reap-skipped.v1` and nothing is signalled. A kill that FAILS
+retires nothing, so the record stays inherited and the next incarnation tries
+again.
+
+`ProcessReaper` is narrow on purpose, because a pid outlives the process that
+recorded it. It signals a record only when the record belongs to a different
+incarnation of the same `hostId`, the owner that wrote it is gone, the record
+names a process group of its own, and that group is not this host's. A reaped
+record is retired through the ledger, so a third incarnation does not re-signal
+a pid the operating system has since reused.
+
 There is no HTTP service either. An outgoing request is Effect's `HttpClient`,
 and the bundle provides `NodeHttpClient.layerUndici`. Undici installs no
 redirect interceptor, so every hop stays a separate, checkable request.
@@ -95,10 +135,24 @@ one addition: a helper failure that carries no errno at all stays
 
 ## Modules
 
-| Module             | What it provides                                                                                                                          |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `AtomicFileSystem` | Descriptor-relative/no-follow Node filesystem layer, with typed fail-closed behavior on unsupported hosts                                 |
-| `NodeHost`         | The complete closed Host bundle, plus `layer`; re-exports `AtomicFileSystem` and Effect's raw `NodeFileSystem`, spawner, and `HttpClient` |
+| Module             | What it provides                                                                                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AtomicFileSystem` | Descriptor-relative/no-follow Node filesystem layer, with typed fail-closed behavior on unsupported hosts                                                                |
+| `NodeHost`         | The complete closed Host bundle, plus `layer` and contained `layerContained`; re-exports `AtomicFileSystem` and Effect's raw `NodeFileSystem`, spawner, and `HttpClient` |
+| `HostLiveness`     | Whether a recorded run owner is still alive: `isAlive`, `Owner`, `Options`                                                                                               |
+| `ProcessReaper`    | Killing the process groups a dead incarnation of this host abandoned: `reap`, `layer`, `System`, `posixSystem`, `windowsSystem`, `systemFor`                             |
+
+`HostLiveness.isAlive` is the answer `EngineStore` steals runs on. An owner
+from a different host is alive, because a pid means nothing across machines; an
+owner from this host is alive exactly while its pid is signalable. Both ways of
+being wrong are unequal, so the rule errs toward "alive": a stranded run waits
+for an operator, while a stolen live run executes twice.
+
+```ts
+import { HostLiveness } from "@smthrs/platform-node"
+
+const isAlive = HostLiveness.isAlive({ hostId: "engine-1" })
+```
 
 **Node-only by construction.** The bundle resolves `node:child_process` and
 friends; `scripts/browser-check.mjs` at the repository root pins that.

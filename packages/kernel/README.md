@@ -35,6 +35,8 @@ their deep imports are `@smthrs/capability/Capability` and
 | `FileSystem`          | `canonicalResource`, the atomic-host extension, isolated-volume attestation, and decorator `layer` over Effect's own `FileSystem` tag. Path operations run only through a descriptor-relative/no-follow executor or an enforceably isolated filesystem; unsupported hosts fail closed with a typed permission error.                                                                                                 |
 | `HttpClient`          | Decorator `layer` over Effect's own `HttpClient` tag; the tag and `make` are re-exported unchanged, plus the `ModelCall` reference and `withModelCall`, the `toHttpClientError` / `fromHttpClientError` projection, and a `makeNoop` / `layerNoop` stub that reports the missing host as a `TransportError`.                                                                                                         |
 | `ChildProcessSpawner` | Decorator `layer` over Effect's own `ChildProcessSpawner` tag; the tag and `make` are re-exported unchanged, plus a `makeNoop` / `layerNoop` stub that reports the missing host as a `NotFound` `PlatformError`.                                                                                                                                                                                                     |
+| `ContainedSpawner`    | `defaultGraceMs`, `Options`, `withContainment`, `groupOf`, and decorator `layer` over Effect's own `ChildProcessSpawner` tag: every child gets a `SIGTERM`-then-`SIGKILL` deadline and a `ProcessLedger` entry released when its scope closes.                                                                                                                                                                       |
+| `ProcessLedger`       | `SpawnedEventType`, `ExitedEventType`, `ReapedEventType`, `SkippedEventType`, `sourceId`, `hostRunId`, `Spawned`, `ProcessRecord`, `Options`; `Service` / `ProcessLedger` operations `record`, `release`, `reaped`, `skipped`, `live`, and `orphans`; `make`, `layer`, journal-free `makeMemory`, and `layerMemory`.                                                                                                 |
 | `CommandLine`         | `render`, `quote`, `cwd`, and `env` — one renderer shared by the `proc:spawn` capability resource and by the interpreters that execute the line.                                                                                                                                                                                                                                                                     |
 | `Jj`                  | Decorator `layer` over `@smthrs/jj`'s own `Jj` tag; the tag, `make`, `makeNoop`, and `layerNoop` are re-exported unchanged.                                                                                                                                                                                                                                                                                          |
 | `Path`                | Effect `Path` type/tag and explicit pass-through `layer`.                                                                                                                                                                                                                                                                                                                                                            |
@@ -80,6 +82,42 @@ kernel decorator shadows it. A redirect is a second destination, so the
 decorator composes Effect's `followRedirects` _above_ the grant check: every
 hop is rechecked, and platform bundles hand over a client that never follows a
 redirect on its own.
+
+## Process containment
+
+Cancelling a run must leave no process behind. Effect's spawner signals a
+child's process group when the spawn scope closes and then waits for the exit,
+and with no `forceKillAfter` it waits forever: a child that traps `SIGTERM`
+turns a cancellation into a hung host. `ContainedSpawner.layer` closes that
+hole by rewriting every command it spawns to carry an escalation deadline
+(`SIGTERM`, then `SIGKILL` after `graceMs`, default 2000) and by recording the
+started process in the `ProcessLedger`, releasing it when the scope closes.
+Both legs of a pipeline get the same policy; a command that already names a
+`killSignal` or `forceKillAfter` keeps the policy its caller chose.
+
+The ledger is the durable half. Each spawn is written to `Journal` as an
+ownerless record on the run `flows.host:<hostId>`, so the next incarnation of
+the same host replays that history, subtracts the processes that reported an
+exit, and reads `orphans`: the process groups an owner that is no longer alive
+abandoned. `@smthrs/platform-node`'s `ProcessReaper` signals them.
+`ProcessLedger.layerMemory` keeps the in-memory half without a journal, which
+contains this incarnation and inherits nothing.
+
+A ledger write that does not commit is reported, not swallowed. `record`,
+`release`, `reaped`, and `skipped` all carry the journal's failure, and the
+spawner refuses a spawn whose record failed: it signals the child and fails the
+call, because a child no incarnation can discover is the exact outcome
+containment exists to prevent. The one exception is the release finalizer, which
+has nowhere to report anything; a missed release leaves the record inherited,
+and the next reaper finds the pid already gone and retires it then.
+
+The release is announced only after the process has been signalled. The
+finalizer that retires a record is registered before the spawn, so scope closure
+runs it after Effect's own kill finalizer.
+
+`groupOf` takes the platform, because Effect detaches a child that names no
+`detached` option everywhere except win32. A win32 record claiming `pgid = pid`
+would name a group the child does not lead, so it records no group instead.
 
 See the [kernel reference](../../docs/reference/kernel.md),
 [host and capability concepts](../../docs/concepts/hosts-and-capabilities.md), and

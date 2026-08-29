@@ -26,15 +26,25 @@ importing the contract never resolves a `node:` built-in.
 
 ## Public API
 
-| Export                              | Meaning                                                                  |
-| ----------------------------------- | ------------------------------------------------------------------------ |
-| `Jj`                                | The service interface and its tag (`@smthrs/jj/Jj`).                     |
-| `ChangeId`                          | The durable handle a run uses to name workspace state.                   |
-| `JjErrorCode`, `JjError`, `jjError` | The closed failure vocabulary and its constructor.                       |
-| `make`, `makeNoop`, `layerNoop`     | Complete, stubbed, and layered service construction.                     |
-| `NodeJj.layer`, `BunJj.layer`       | The jj CLI, spawned with argv and never a shell string.                  |
-| `BrowserJj.layer`                   | jj-lib compiled to `wasm32-wasip1`, run over a virtual filesystem.       |
-| `BrowserJj.layerUnsupported`        | The fallback for hosts that ship no wasm module — fails `not_installed`. |
+| Export                              | Meaning                                                                                          |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `Jj`                                | The service interface and its tag (`@smthrs/jj/Jj`), including optional `root` and `revert`.     |
+| `ChangeId`                          | The durable handle a run uses to name workspace state.                                           |
+| `JjErrorCode`, `JjError`, `jjError` | The closed failure vocabulary and its constructor.                                               |
+| `make`, `makeNoop`, `layerNoop`     | Complete, stubbed, and layered service construction.                                             |
+| `NodeJj.layer`, `BunJj.layer`       | The jj CLI, spawned with argv and never a shell string.                                          |
+| `NodeJj.layerSpawner`               | The same commands through the host's `ChildProcessSpawner`, so a contained host contains jj too. |
+| `BrowserJj.layer`                   | jj-lib compiled to `wasm32-wasip1`, run over a virtual filesystem.                               |
+| `BrowserJj.layerUnsupported`        | The fallback for hosts that ship no wasm module; fails `not_installed`.                          |
+
+`root` and `revert` are optional on the interface. `root` answers the
+repository root that contains a path with `jj root`, which is right for
+colocated repositories and workspaces where walking up looking for `.jj` is not. `revert`
+undoes one change and reports the paths it touched, which `restore` cannot do:
+restoring moves the working copy back to a point and discards everything after
+it, while a revert keeps the rest of the history. `NodeJj` implements both; a
+test double or a backend without them simply does not define them, and a caller
+that needs one checks.
 
 ```ts
 import { Jj } from "@smthrs/jj"

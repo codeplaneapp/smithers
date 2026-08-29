@@ -33,6 +33,8 @@ describe("@smthrs/jj barrel", () => {
 describe("BunJj", () => {
   it("reuses the Node adapter rather than shipping a second implementation", () => {
     expect(BunJj.layer).toBe(NodeJj.layer)
+    // Both layers, so a Bun host that contains what it spawns contains jj too.
+    expect(BunJj.layerSpawner).toBe(NodeJj.layerSpawner)
   })
 })
 

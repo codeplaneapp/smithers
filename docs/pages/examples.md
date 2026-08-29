@@ -33,6 +33,7 @@ The suite is a gate, so a snippet that stops compiling or stops producing the do
 | [`34-poll.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/34-poll.ts) | `Poll.make`: one attempt per durable round, a durable timer between attempts, and a restart in the middle of the wait | the first engine dispatches attempt one and parks; the poll finishes on a second engine with three check dispatches in total, not four |
 | [`34-human-task.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/34-human-task.ts) | `HumanTask.action`: a `confirm` that parks, an answer it refuses, the re-ask that follows, and three processes across the question's life | the run completes with `true`; the engine's waiting row names attempt one and then attempt two, and the refusal recorded under attempt one is read back off its own step |
 | [`35-remote-cache.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/35-remote-cache.ts) | two durable engines over two database files sharing one real HTTP action cache, composed through `CombinedCacheStore` in `"deferred"` publication mode plus the `CacheSync` seam | the second engine answers without executing the body, and when the shared tier refuses every write both runs still succeed and journal `unpublished` |
+| [`37-host-containment.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/37-host-containment.ts) | `SIGKILL`ing a real `layerHost` process that has a child process group open, then standing the same `hostId` back up over the same database | the killed host leaves a live group behind, the next incarnation kills it, and the host's journal run reads `process-spawned` then `process-reaped` |
 
 ## Reading them in order
 
@@ -45,6 +46,14 @@ The first three build on each other. `01` shows what the two nouns are with noth
 `07`, `08`, and `09` cover the seams around the engine rather than the engine itself: replicating history to a second process, running one program on two host adapters, and staying inside the browser-safe entry points.
 
 `10` is `02` plus telemetry. The flow body and the engine layers do not change; providing `Otlp.layerFetch` is the entire wiring, and the example reads the same run through the export, through `Journal.entries`, and through a tagged metric view with `Metric.value`. [Telemetry](/telemetry) documents the layer; [Observability](/observability) tables the spans it exports.
+
+`37` is the case none of the others can produce: a host that was KILLED. Nothing
+this repository writes runs when that happens, so the child process group the
+host had open survives it, and the only thing that can ever reach those
+processes again is the record the host wrote to the journal before it died. The
+example spawns a real host program, kills it with `SIGKILL`, checks that the
+group is genuinely still running, and then builds a second `layerHost` with the
+same `hostId` over the same database. Standing that host up IS the sweep.
 
 `11` is the agent seam. `AgentAction.make` declares a model call as an ordinary action, with the same tag, the same `.call()`, and the same plan node, and ships the implementation with it, so the author writes a seat, a system prompt, a prompt built from the payload, and an `output` schema instead of a `toLayer`. The implementation resolves the declared seat through the `SeatResolver` service and runs one loop of the `Agent` service inside the enclosing execution. The schema is rendered into the run's teaching and enforced on the way out, which is why the second step reads `research.summary` as a `string`. The example provides a `SeatResolver` that answers with a scripted model, so it runs in CI with no API key.
 

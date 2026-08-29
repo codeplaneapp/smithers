@@ -35,10 +35,14 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
+    "./ProviderConformance": "./src/ProviderConformance/index.ts",
+    "./ProviderConformance/*": null,
     "./RemoteChildProcessSpawner": "./src/RemoteChildProcessSpawner/index.ts",
     "./RemoteChildProcessSpawner/*": null,
     "./SandboxHealth": "./src/SandboxHealth/index.ts",
     "./SandboxHealth/*": null,
+    "./SandboxSupervision": "./src/SandboxSupervision/index.ts",
+    "./SandboxSupervision/*": null,
     "./*": "./src/*.ts",
     "./internal/*": null,
     "./*/index": null
@@ -65,6 +69,12 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
+      "./ProviderConformance": {
+        "types": "./dist/esm/ProviderConformance/index.d.ts",
+        "import": "./dist/esm/ProviderConformance/index.js",
+        "require": "./dist/cjs/ProviderConformance/index.js"
+      },
+      "./ProviderConformance/*": null,
       "./RemoteChildProcessSpawner": {
         "types": "./dist/esm/RemoteChildProcessSpawner/index.d.ts",
         "import": "./dist/esm/RemoteChildProcessSpawner/index.js",
@@ -77,6 +87,12 @@
         "require": "./dist/cjs/SandboxHealth/index.js"
       },
       "./SandboxHealth/*": null,
+      "./SandboxSupervision": {
+        "types": "./dist/esm/SandboxSupervision/index.d.ts",
+        "import": "./dist/esm/SandboxSupervision/index.js",
+        "require": "./dist/cjs/SandboxSupervision/index.js"
+      },
+      "./SandboxSupervision/*": null,
       "./*": {
         "types": "./dist/esm/*.d.ts",
         "import": "./dist/esm/*.js",

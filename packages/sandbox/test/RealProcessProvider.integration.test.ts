@@ -3,6 +3,7 @@ import { Effect, Fiber, PlatformError, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process"
+import * as ProviderConformance from "../src/ProviderConformance/index.ts"
 import * as RemoteChildProcessSpawner from "../src/RemoteChildProcessSpawner/index.ts"
 import type { Provider, RemoteProcess } from "../src/RemoteChildProcessSpawner/Provider.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
@@ -149,11 +150,18 @@ async function* stdoutOf(record: ManagedChild): AsyncGenerator<Uint8Array, void,
   }
 }
 
-const processOf = (record: ManagedChild): RemoteProcess => ({
-  stdout: Stream.fromAsyncIterable(stdoutOf(record), (cause) => streamFailed(record, "stdout", cause)),
-  stderr: Stream.fromAsyncIterable(record.child.stderr, (cause) => streamFailed(record, "stderr", cause)),
-  exitCode: exitCode(record)
-})
+/** Lets `kill` find the OS child behind the value `spawn` handed back. */
+const childrenOf = new WeakMap<RemoteProcess, ManagedChild>()
+
+const processOf = (record: ManagedChild): RemoteProcess => {
+  const remote: RemoteProcess = {
+    stdout: Stream.fromAsyncIterable(stdoutOf(record), (cause) => streamFailed(record, "stdout", cause)),
+    stderr: Stream.fromAsyncIterable(record.child.stderr, (cause) => streamFailed(record, "stderr", cause)),
+    exitCode: exitCode(record)
+  }
+  childrenOf.set(remote, record)
+  return remote
+}
 
 const terminateChild = (child: ChildProcessWithoutNullStreams): void => {
   if (child.exitCode !== null || child.signalCode !== null) return
@@ -187,6 +195,23 @@ const makeRealProvider = (scripts: Readonly<Record<string, string>>): RealProvid
               })
           )
       ),
+    ping: Effect.suspend(() => state.unavailable ? Effect.fail(unavailable()) : Effect.void),
+    kill: (remote, signal) =>
+      Effect.suspend(() => {
+        const record = childrenOf.get(remote)
+        if (record === undefined) {
+          return Effect.fail(
+            new ProviderError({ code: "unknown", message: "kill was given a process this provider did not start" })
+          )
+        }
+        return Effect.try({
+          try: () => {
+            record.child.kill(signal)
+          },
+          catch: (cause) =>
+            new ProviderError({ code: "unknown", message: `failed to signal \`${record.command}\``, cause })
+        })
+      }),
     spawn: (command, options) =>
       Effect.suspend(() => {
         if (state.unavailable) return Effect.fail(unavailable())
@@ -402,5 +427,30 @@ describe("RemoteChildProcessSpawner real-process provider", () => {
       }
       expect(result.spawnError).toBeInstanceOf(PlatformError.PlatformError)
       expect(result.spawnError.reason).toMatchObject({ _tag: "NotFound", module: "ChildProcess", method: "spawn" })
+    }), testBudget)
+
+  /**
+   * The suite plugin adapters must pass, run against the one provider this
+   * repository can run for real. A suite that only ever sees the scripted
+   * double would be a statement about the double.
+   */
+  it.live("passes the provider conformance suite against real OS processes", () =>
+    Effect.gen(function*() {
+      const provider = makeRealProvider({
+        writes: "process.stdout.write('hello')",
+        fails: "process.exit(3)",
+        runs: "setInterval(() => {}, 1000)"
+      })
+
+      const violations = yield* ProviderConformance.check(provider.provider, {
+        writes: "writes",
+        output: "hello",
+        fails: "fails",
+        failureCode: 3,
+        runs: "runs"
+      })
+
+      expect(ProviderConformance.format(violations)).toBe("provider conforms")
+      expect(provider.state.started.map((record) => record.command)).toEqual(["writes", "fails", "runs"])
     }), testBudget)
 })

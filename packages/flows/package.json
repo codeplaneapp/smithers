@@ -99,6 +99,7 @@
     "@smthrs/step-cache": "1.0.0-rc.0",
     "@smthrs/sync": "1.0.0-rc.0",
     "@smthrs/time-travel": "1.0.0-rc.0",
+    "@smthrs/platform-node": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {

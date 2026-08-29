@@ -5,6 +5,17 @@
  */
 
 /**
+ * One signal the scripted provider was asked to deliver.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface TestRemoteKill {
+  readonly command: string
+  readonly signal: string
+}
+
+/**
  * Mutable observations exposed by the deterministic test double.
  *
  * @category models
@@ -13,5 +24,7 @@
 export interface TestRemoteState {
   readonly openedSessions: Array<string>
   readonly commands: Array<string>
+  /** Every signal the adapter asked the provider to deliver, in order. */
+  readonly kills: Array<TestRemoteKill>
   cancellations: number
 }

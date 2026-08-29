@@ -30,6 +30,8 @@ export type Action =
   | "jj:restore"
   | "jj:workspace-add"
   | "jj:workspace-forget"
+  | "jj:root"
+  | "jj:revert"
 
 const Action = Schema.Literals(
   [
@@ -44,7 +46,9 @@ const Action = Schema.Literals(
     "jj:snapshot",
     "jj:restore",
     "jj:workspace-add",
-    "jj:workspace-forget"
+    "jj:workspace-forget",
+    "jj:root",
+    "jj:revert"
   ] as const
 )
 
@@ -60,7 +64,9 @@ const actions: ReadonlySet<string> = new Set([
   "jj:snapshot",
   "jj:restore",
   "jj:workspace-add",
-  "jj:workspace-forget"
+  "jj:workspace-forget",
+  "jj:root",
+  "jj:revert"
 ])
 
 /**
@@ -150,6 +156,8 @@ const PatternAction = Schema.Literals(
     "jj:restore",
     "jj:workspace-add",
     "jj:workspace-forget",
+    "jj:root",
+    "jj:revert",
     "fs:*",
     "net:*",
     "model:*",
@@ -378,6 +386,7 @@ export const tierOf = (capability: Capability, options: TierOptions): EffectTier
     case "model:call":
     case "jj:status":
     case "jj:diff":
+    case "jj:root":
       return "sealed"
     case "fs:write":
       return isInsideWorkspace(capability.resource, options.workspaceRoot) ? "compensable" : "irreversible"
@@ -385,6 +394,7 @@ export const tierOf = (capability: Capability, options: TierOptions): EffectTier
     case "jj:restore":
     case "jj:workspace-add":
     case "jj:workspace-forget":
+    case "jj:revert":
       return "compensable"
     case "net:post":
     case "proc:spawn":

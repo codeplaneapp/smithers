@@ -7,6 +7,7 @@ import * as Context from "effect/Context"
 import type * as Effect from "effect/Effect"
 import type { Scope } from "effect/Scope"
 import type * as Stream from "effect/Stream"
+import type { Signal } from "effect/unstable/process/ChildProcess"
 import type { ProviderError } from "./ProviderError.ts"
 
 /**
@@ -41,6 +42,14 @@ export interface RemoteOptions {
  * as a scope finalizer. `spawn` starts one command in that opened session; its
  * scope is the process's lifetime.
  *
+ * `kill` and `ping` are optional because a transport that can only post a
+ * command line has neither. A provider that implements them buys two things it
+ * cannot otherwise have: one command can be stopped without tearing down the
+ * session that runs it, and the session's liveness can be supervised
+ * (`SandboxSupervision`). A provider that omits them keeps the narrower
+ * contract, and the adapter refuses `kill` instead of pretending to have
+ * delivered a signal.
+ *
  * @category services
  * @since 0.1.0
  */
@@ -51,6 +60,14 @@ export interface Provider {
     command: string,
     options: RemoteOptions
   ) => Effect.Effect<RemoteProcess, ProviderError, Scope>
+  /**
+   * Sends one signal to a process this provider started. The `RemoteProcess`
+   * is the value `spawn` returned, which is the only identity for a remote
+   * process that crosses this seam.
+   */
+  readonly kill?: ((process: RemoteProcess, signal: Signal) => Effect.Effect<void, ProviderError>) | undefined
+  /** A cheap round-trip proving the remote session is still alive. */
+  readonly ping?: Effect.Effect<void, ProviderError> | undefined
 }
 
 /**

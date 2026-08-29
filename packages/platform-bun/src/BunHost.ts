@@ -23,7 +23,10 @@ import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpa
 import * as BunHttpClient from "@effect/platform-bun/BunHttpClient"
 import type { Jj } from "@smthrs/jj"
 import * as BunJj from "@smthrs/jj/bun/BunJj"
+import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
 import { HostServiceIds } from "@smthrs/kernel/HostServices"
+import type * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
+import * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
 import type { FileSystem } from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
@@ -97,3 +100,35 @@ export const layer: Layer.Layer<BunHost> = Layer.mergeAll(
   BunJj.layer,
   layerHttpClient
 )
+
+/**
+ * Provides the Bun host with process containment turned on.
+ *
+ * Bun runs Effect's Node child-process implementation, so containment is the
+ * same story it is under Node: `@smthrs/kernel`'s `ContainedSpawner` gives
+ * every child an escalation deadline and a ledger entry, and
+ * `ProcessReaper` sweeps the entries a crashed incarnation of this host left
+ * behind. The reaper module lives in `@smthrs/platform-node` because the calls
+ * it makes — `process.kill` and `taskkill` — are Node's, and Bun implements
+ * them unchanged.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerContained = (
+  options?: ContainedSpawner.Options & ProcessReaper.Options
+): Layer.Layer<BunHost, never, ProcessLedger.ProcessLedger> =>
+  Layer.mergeAll(
+    platform,
+    layerHttpClient,
+    // jj goes through the CONTAINED spawner here, not around it, exactly as in
+    // `NodeHost.layerContained`: a jj child that starts its own process leads
+    // no recorded group, is in no ledger, and outlives the host that ran it.
+    Layer.provideMerge(
+      BunJj.layerSpawner,
+      Layer.provide(
+        ContainedSpawner.layer({ platform: process.platform, ...options }),
+        Layer.provide(BunChildProcessSpawner.layer, platform)
+      )
+    )
+  ).pipe(Layer.provideMerge(ProcessReaper.layer(options)))

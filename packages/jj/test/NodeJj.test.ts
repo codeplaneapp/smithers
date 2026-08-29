@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Jj } from "../src/Jj.ts"
+import { isJjError, Jj } from "../src/Jj.ts"
 import * as NodeJj from "../src/node/NodeJj.ts"
 
 const jjInstalled = (() => {
@@ -124,12 +124,13 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
   it.effect("classifies an empty workspace revision as `invalid_ref` without spawning jj", () =>
     Effect.gen(function*() {
       const lane = join(repository, "..", `empty-revision-${process.pid}`)
-      const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.workspaceAdd("empty", lane, ""))))
+      const failure = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.workspaceAdd("empty", lane, ""))))
 
-      // The union member that carries `code` is JjFailure; a PlatformError
-      // here would be a spawn, which this case asserts never happens.
-      expect(error).toHaveProperty("code", "invalid_ref")
-      expect(error.message).toContain("jj workspaceAdd")
+      // `workspaceAdd` also carries `PlatformError` from the guarded
+      // implementation's path canonicalization, so the code is only readable
+      // after the failure is narrowed to jj's own.
+      expect(isJjError(failure) && failure.code).toBe("invalid_ref")
+      expect(failure.message).toContain("jj workspaceAdd")
       expect(existsSync(lane)).toBe(false)
     }))
 
@@ -174,6 +175,43 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
         process.chdir(repository)
         yield* Effect.promise(() => rm(outside, { recursive: true, force: true }))
       }
+    }))
+
+  it.effect("answers the repository root from a directory inside it", () =>
+    Effect.gen(function*() {
+      const nested = join(repository, "deep", "nest")
+      yield* Effect.promise(() => mkdir(nested, { recursive: true }))
+
+      const root = yield* run(Effect.flatMap(Jj, (jj) => jj.root!(nested)))
+
+      // `realpath` because a temp directory on macOS is reached through a
+      // symlink and jj answers with the resolved path.
+      expect(root).toBe(realpathSync(repository))
+    }))
+
+  it.effect("undoes one change and reports the paths it touched", () =>
+    Effect.gen(function*() {
+      const file = join(repository, "revert-me.txt")
+      yield* Effect.promise(() => writeFile(file, "unwanted\n"))
+      const { changeId } = yield* run(Effect.flatMap(Jj, (jj) => jj.snapshot("add revert-me")))
+      yield* Effect.promise(() => writeFile(join(repository, "keep.txt"), "kept\n"))
+      yield* run(Effect.flatMap(Jj, (jj) => jj.snapshot("add keep")))
+
+      const result = yield* run(Effect.flatMap(Jj, (jj) => jj.revert!(changeId)))
+
+      expect(result.reverted).toEqual(["revert-me.txt"])
+      // The revert is in the WORKING COPY, not parked somewhere else in the
+      // graph: the reverted file is gone and the later change survived.
+      expect(existsSync(file)).toBe(false)
+      expect(existsSync(join(repository, "keep.txt"))).toBe(true)
+    }))
+
+  it.effect("classifies an empty revert revision as `invalid_ref` without spawning jj", () =>
+    Effect.gen(function*() {
+      const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.revert!(""))))
+
+      expect(error.code).toBe("invalid_ref")
+      expect(error.message).toContain("jj revert")
     }))
 
   it.effect("reports `not_installed` when `jj` is not on PATH", () =>

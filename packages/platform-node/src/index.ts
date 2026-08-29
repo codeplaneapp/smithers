@@ -19,3 +19,9 @@
 
 /** The complete closed Host bundle for Node. */
 export * as NodeHost from "./NodeHost.ts"
+
+/** Whether a recorded run owner is still alive on this host. */
+export * as HostLiveness from "./HostLiveness.ts"
+
+/** Reaping the process groups a dead incarnation of this host abandoned. */
+export * as ProcessReaper from "./ProcessReaper.ts"

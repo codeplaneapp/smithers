@@ -8,7 +8,12 @@ import * as Sandbox from "../src/index.ts"
 
 describe("@smthrs/sandbox barrel", () => {
   it("re-exports every module as its own namespace", () => {
-    expect(Object.keys(Sandbox).sort()).toEqual(["RemoteChildProcessSpawner", "SandboxHealth"])
+    expect(Object.keys(Sandbox).sort()).toEqual([
+      "ProviderConformance",
+      "RemoteChildProcessSpawner",
+      "SandboxHealth",
+      "SandboxSupervision"
+    ])
   })
 
   /**
@@ -22,5 +27,8 @@ describe("@smthrs/sandbox barrel", () => {
     )
     expect(new Sandbox.RemoteChildProcessSpawner.ProviderError({ code: "unknown", message: "x" })._tag)
       .toBe("@smthrs/sandbox/RemoteChildProcessSpawner/ProviderError")
+    expect(
+      new Sandbox.SandboxSupervision.SandboxUnhealthy({ session: "s", reason: "ping_failed", probes: 1 })._tag
+    ).toBe("sandbox-unhealthy")
   })
 })

@@ -86,6 +86,103 @@ describe("Jj", () => {
     )
   })
 
+  itEffect("checks the optional operations a backend does implement", () => {
+    const calls: Array<string> = []
+    const checks: Array<Capability.Capability> = []
+    const host = HostJj.makeNoop({
+      root: (from) =>
+        Effect.sync(() => {
+          calls.push(`root:${from}`)
+          return "/repository"
+        }),
+      revert: (changeId) =>
+        Effect.sync(() => {
+          calls.push(`revert:${changeId}`)
+          return { reverted: ["src/a.ts"] }
+        })
+    })
+
+    return Effect.gen(function*() {
+      const jj = yield* Jj.Jj
+      expect(yield* jj.root!("/repository/lane")).toBe("/repository")
+      expect(yield* jj.revert!("change")).toEqual({ reverted: ["src/a.ts"] })
+      expect(calls).toEqual(["root:/repository/lane", "revert:change"])
+      expect(checks).toEqual([
+        { action: "jj:root", resource: "/repository/lane" },
+        { action: "jj:revert", resource: "change" }
+      ])
+    }).pipe(
+      Effect.provide(Jj.layer),
+      Effect.provideService(HostJj.Jj, host),
+      Effect.provideService(EffectFileSystem.FileSystem, fileSystem),
+      Effect.provide(Path.layer),
+      Effect.provide(Workspace.layer("/workspace")),
+      Effect.provideService(GrantStore, scriptedStore(checks))
+    )
+  })
+
+  itEffect("runs `root` in the canonical directory it was authorized for", () => {
+    // A symlink is the whole attack: check `jj:root` on the name the caller
+    // spelled and then run jj somewhere else, and an authorized path decides
+    // the answer for a repository the grant never mentioned.
+    const calls: Array<string> = []
+    const checks: Array<Capability.Capability> = []
+    const aliasing = EffectFileSystem.makeNoop({
+      realPath: (path) => Effect.succeed(path === "/workspace/alias" ? "/elsewhere/repository" : path)
+    })
+    const host = HostJj.makeNoop({
+      root: (from) =>
+        Effect.sync(() => {
+          calls.push(`root:${from}`)
+          return "/elsewhere/repository"
+        })
+    })
+
+    return Effect.gen(function*() {
+      const jj = yield* Jj.Jj
+      expect(yield* jj.root!("alias")).toBe("/elsewhere/repository")
+      // One path, resolved once: the capability and the subprocess cwd cannot
+      // disagree because they are the same value.
+      expect(calls).toEqual(["root:/elsewhere/repository"])
+      expect(checks).toEqual([{ action: "jj:root", resource: "/elsewhere/repository" }])
+    }).pipe(
+      Effect.provide(Jj.layer),
+      Effect.provideService(HostJj.Jj, host),
+      Effect.provideService(EffectFileSystem.FileSystem, aliasing),
+      Effect.provide(Path.layer),
+      Effect.provide(Workspace.layer("/workspace")),
+      Effect.provideService(GrantStore, scriptedStore(checks))
+    )
+  })
+
+  itEffect("forwards the absence of an operation a backend does not implement", () => {
+    // A backend that cannot revert must keep reading as one. Wrapping the
+    // absence in a guarded method that fails on call would answer "your revert
+    // was refused" to a caller asking "can this host revert at all".
+    const host = HostJj.make({
+      status: () => Effect.succeed("status"),
+      diff: () => Effect.succeed("diff"),
+      snapshot: () => Effect.succeed({ changeId: "change" }),
+      restore: () => Effect.void,
+      workspaceAdd: () => Effect.void,
+      workspaceForget: () => Effect.void
+    })
+
+    return Effect.gen(function*() {
+      const jj = yield* Jj.Jj
+      expect(jj.root).toBeUndefined()
+      expect(jj.revert).toBeUndefined()
+      expect(yield* jj.status()).toBe("status")
+    }).pipe(
+      Effect.provide(Jj.layer),
+      Effect.provideService(HostJj.Jj, host),
+      Effect.provideService(EffectFileSystem.FileSystem, fileSystem),
+      Effect.provide(Path.layer),
+      Effect.provide(Workspace.layer("/workspace")),
+      Effect.provideService(GrantStore, scriptedStore([]))
+    )
+  })
+
   itEffect("does not delegate when a Jj capability is denied", () => {
     let invoked = false
     const checks: Array<Capability.Capability> = []

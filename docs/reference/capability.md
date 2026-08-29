@@ -25,6 +25,22 @@ const decision = Permission.evaluate(
 )
 ```
 
+## Actions and tiers
+
+`Action` is the closed vocabulary: `fs:read`, `fs:write`, `net:get`,
+`net:post`, `model:call`, `proc:spawn`, and the jj slot's `jj:status`,
+`jj:diff`, `jj:snapshot`, `jj:restore`, `jj:workspace-add`,
+`jj:workspace-forget`, `jj:root`, and `jj:revert`. Actions are durable
+identity: never repurpose one, add one.
+
+`tierOf` classifies a capability. Reads are `sealed` (`fs:read`, `net:get`,
+`model:call`, `jj:status`, `jj:diff`, `jj:root`). Undoable writes are
+`compensable` (`jj:snapshot`, `jj:restore`, `jj:workspace-add`,
+`jj:workspace-forget`, `jj:revert`, and an `fs:write` inside the workspace
+root). The rest are `irreversible` (`net:post`, `proc:spawn`, and an
+`fs:write` that escapes the workspace), and only those require an idempotency
+key to retry.
+
 ## The `PlatformError` projection
 
 Where Effect owns a decorated tag (`FileSystem`, `ChildProcessSpawner`) the error channel is fixed to `PlatformError`, so the kernel maps its failures through `Permission.toPlatformError`: reason `PermissionDenied`, `description` from `Permission.formatError`, and the structured `PermissionError` on `cause`. `Permission.fromPlatformError` recovers it, so an attended surface can still reply to a `PermissionRequired` request and an unattended report can still name the capability.

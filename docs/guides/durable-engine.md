@@ -58,6 +58,88 @@ For a persistent deployment:
 
 Migrations must complete before any store service is exposed. `DurableWriter.write` wraps a SQL transaction and retries retryable SQLite write failures; non-SQLite drivers retain their own transaction behavior.
 
+## One call on Node
+
+`@smthrs/flows/NodeRuntime` has two entry points, and the difference is how
+much a program has to decide.
+
+`NodeRuntime.layer(options, stepBoundary, workspaceSandbox, registerFlows)`
+composes storage and the engine and leaves the host to the caller: `Jj`,
+Effect's `FileSystem`, and `Crypto` stay requirements, and the boundary and
+sandbox are arguments.
+
+`NodeRuntime.layerHost(options, registerFlows)` adds the host:
+
+```ts
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+
+const runtime = NodeRuntime.layerHost(
+  { filename: ".flows/engine.sqlite", owner: { hostId: "local-worker" } },
+  registerFlows
+)
+```
+
+That single call provides:
+
+- the complete Node host from `@smthrs/platform-node`, with process
+  containment on. A spawned process gets its own process group, is signalled
+  and then killed when its action's scope closes, and is recorded in the
+  `ProcessLedger`, so the next incarnation of the same `hostId` reaps whatever
+  a crash left running;
+- the kernel's guarded host surface over an unattended `GrantStore`, so a flow
+  body reaches the host through the capability check. A capability no rule in
+  `HostOptions.rules` allows is denied rather than escalated: there is no
+  operator to ask;
+- the default `StepBoundary` and the filesystem `WorkspaceSandbox`, which is
+  the pairing that makes a sealed action's result eligible for the step cache;
+- `HostLiveness.isAlive`, which answers from this machine's process table and
+  never declares another host's owner dead;
+- signal handling. `SIGINT` and `SIGTERM` close the runtime scope, which is
+  what releases every run this host owns.
+
+### The engine's own jj grants
+
+A compensable action is snapshotted and restored by the engine, not by the flow
+body, and the engine resolves the same guarded `Jj` the body does. A host with
+no `jj:*` rule could therefore not run a compensable action at all: the refusal
+would arrive before the body started and would be aimed at the engine's own
+bookkeeping.
+
+`layerHost` merges `NodeRuntime.engineRules` underneath whatever
+`HostOptions.rules` says, allowing `jj:snapshot` for the message the engine
+writes and `jj:restore` for the change id it takes back. They are defaults, not
+overrides: a program that denies `jj:snapshot` still denies it, because
+configured policy is evaluated first and a configured deny wins outright.
+
+### Shutdown
+
+`SIGINT` and `SIGTERM` close the runtime scope, and closing it runs the engine's
+finalizers so every owned run parks itself `released` rather than being left
+`running` behind a dead owner.
+
+Installing that handler also removes Node's default disposition, so the handler
+keeps two escapes. A second signal leaves immediately, and a graceful shutdown
+that outlasts `HostOptions.shutdownTimeoutMs` (default 30 seconds) leaves
+anyway. Both exit with the status the default disposition would have produced:
+`130` for `SIGINT`, `143` for `SIGTERM`. Without them a finalizer that never
+returns would turn `Ctrl-C` into a program nothing short of `SIGKILL` can stop.
+
+The engine's machinery and the flow bodies sit on opposite sides of the kernel
+on purpose. The SQLite storage, the step boundary, and the workspace sandbox
+run on the raw host: a database directory the engine must create to exist at
+all is not something the engine asks permission for, and a whole-tree sandbox
+copy is engine bookkeeping. What the engine hands a flow body is the guarded
+surface, because a body is what the capability check exists for.
+
+### Shutdown
+
+A `SIGTERM` to a host composed this way is a release, not a kill. The handler
+closes the runtime scope; the engine interrupts its drive fibers, and each
+interrupted run parks itself `suspended` with the waiting reason `released`
+while its fence is still validly held. Another host reclaims it immediately
+instead of waiting out the 30-second stale window below. Pass `signals: []` to
+install no handler at all when the program owns its own signal wiring.
+
 ## Services still owned by the application
 
 Use `DurableEngineState.layer` for process-restart durability.

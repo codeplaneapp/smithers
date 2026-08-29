@@ -28,15 +28,20 @@
  * because the flows below take no compensable snapshot.
  */
 import { afterAll, describe, expect, it } from "@effect/vitest"
+import * as Capability from "@smthrs/capability/Capability"
+import * as Permission from "@smthrs/capability/Permission"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import { ChildProcess } from "effect/unstable/process"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { createHash, webcrypto } from "node:crypto"
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
@@ -350,5 +355,390 @@ describe("the supported Node SQLite composition", () => {
 
     expect(readBack((database) => database.prepare("SELECT status FROM flows_runs ORDER BY run_id").all()))
       .toEqual([{ status: "completed" }, { status: "completed" }])
+  }, 60_000)
+})
+
+/**
+ * The host half of the composition.
+ *
+ * `layer` leaves the host to the caller: `Jj`, `FileSystem`, `Crypto`, the
+ * step boundary and the workspace sandbox are arguments or requirements, and
+ * every embedder wired the same pieces in the same order to satisfy them.
+ * `layerHost` is that wiring, so these cases supply NOTHING but the option
+ * record — a missing default shows up here as a boot failure or a denied
+ * capability, not as a subtle difference in behavior.
+ */
+describe("the Node host composition", () => {
+  const hostRoot = join(directory, "host")
+  const hostFile = join(hostRoot, "runtime.sqlite")
+  const note = join(hostRoot, "note.txt")
+
+  /** Reads a workspace file through whatever `FileSystem` the host installed. */
+  const ReadNote = Action.make({
+    name: "flows/host/read-note",
+    success: Schema.String,
+    tier: "sealed",
+    idempotencyKey: "flows/host/read-note/v1",
+    execute: Effect.gen(function*() {
+      const files = yield* FileSystem.FileSystem
+      return yield* Effect.orDie(files.readFileString(note))
+    })
+  })
+
+  /** Tries to run a command, and reports the refusal instead of failing on it. */
+  const TrySpawn = Action.make({
+    name: "flows/host/try-spawn",
+    success: Schema.String,
+    tier: "sealed",
+    idempotencyKey: "flows/host/try-spawn/v1",
+    execute: Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner
+      const attempt = yield* Effect.exit(spawner.string(ChildProcess.make("echo", ["hi"])))
+      return Exit.isFailure(attempt) ? `refused: ${String(attempt.cause)}` : `ran: ${attempt.value}`
+    })
+  })
+
+  const Probe = Action.make("flows/host/probe", {
+    payload: { what: Schema.String },
+    success: Schema.String
+  })
+
+  const Host = Flow.make("flows/host/probe-flow", {
+    payload: { what: Schema.String },
+    success: Schema.String,
+    body: (payload) => Probe.call(payload)
+  })
+
+  /** The process group the sleeping action left running, for the kill assertion. */
+  const spawned: Array<number> = []
+
+  /** The same, for the run a SECOND driver interrupts. */
+  const interrupted: Array<number> = []
+
+  /**
+   * A compensable action. The ENGINE, not the body, takes a jj pre-image before
+   * this runs, through the same guarded `Jj` a flow body sees, so a host whose
+   * grant store has no `jj:*` rule could not execute it at all.
+   */
+  const Mutate = Action.make({
+    name: "flows/host/mutate",
+    success: Schema.String,
+    tier: "compensable",
+    idempotencyKey: "flows/host/mutate/v1",
+    execute: Effect.succeed("mutated")
+  })
+
+  /** Spawns a two-process tree and waits for it, so a released run has one to kill. */
+  const Sleep = Action.make({
+    name: "flows/host/sleep",
+    success: Schema.String,
+    tier: "sealed",
+    idempotencyKey: "flows/host/sleep/v1",
+    execute: Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner
+      const handle = yield* Effect.orDie(spawner.spawn(ChildProcess.make("sh", ["-c", "sleep 60 & sleep 60"])))
+      spawned.push(handle.pid as number)
+      yield* Effect.orDie(handle.exitCode)
+      return "woke"
+    })
+  })
+
+  const groupIsAlive = (pgid: number): boolean => {
+    try {
+      process.kill(-pgid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** A second sleeping tree, so the interrupt case does not share the first's. */
+  const SleepAgain = Action.make({
+    name: "flows/host/sleep-again",
+    success: Schema.String,
+    tier: "sealed",
+    idempotencyKey: "flows/host/sleep-again/v1",
+    execute: Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner
+      const handle = yield* Effect.orDie(spawner.spawn(ChildProcess.make("sh", ["-c", "sleep 60 & sleep 60"])))
+      interrupted.push(handle.pid as number)
+      yield* Effect.orDie(handle.exitCode)
+      return "woke"
+    })
+  })
+
+  const probe = ({ what }: { readonly what: string }) =>
+    Effect.gen(function*() {
+      if (what === "read") return yield* ReadNote
+      if (what === "spawn") return yield* TrySpawn
+      if (what === "mutate") return yield* Mutate
+      if (what === "sleep-again") return yield* SleepAgain
+      return yield* Sleep
+    })
+
+  const hostFlows = Interpreter.layer(Host).pipe(
+    Layer.provideMerge(Probe.toLayer(probe)),
+    Layer.provideMerge(Action.layerImplementations)
+  )
+
+  const readHostBack = <A>(query: (database: DatabaseSync) => A): A => {
+    const database = new DatabaseSync(hostFile, { readOnly: true })
+    try {
+      return query(database)
+    } finally {
+      database.close()
+    }
+  }
+
+  it("runs a sealed host-reading action with nothing but its own options", async () => {
+    mkdirSync(hostRoot, { recursive: true })
+    writeFileSync(note, "host note")
+
+    const value = await Effect.runPromise(
+      Host.execute({ what: "read" }, { executionId: "host-read" }).pipe(
+        Effect.provide(
+          NodeRuntime.layerHost(
+            {
+              filename: hostFile,
+              owner: { hostId: "host-a" },
+              signals: [],
+              rules: [[
+                new Permission.Rule({
+                  effect: "allow",
+                  pattern: new Capability.CapabilityPattern({ action: "fs:read", resource: `${hostRoot}/**` })
+                })
+              ]]
+            },
+            hostFlows
+          )
+        ),
+        Effect.scoped
+      )
+    )
+
+    expect(value).toBe("host note")
+  }, 60_000)
+
+  it("denies a process spawn that no rule authorizes", async () => {
+    const value = await Effect.runPromise(
+      Host.execute({ what: "spawn" }, { executionId: "host-spawn" }).pipe(
+        Effect.provide(
+          NodeRuntime.layerHost(
+            { filename: hostFile, owner: { hostId: "host-b" }, signals: [] },
+            hostFlows
+          )
+        ),
+        Effect.scoped
+      )
+    )
+
+    expect(value).toMatch(/^refused:/)
+  }, 60_000)
+
+  it("installs the shutdown signals it was not told about, and removes them again", async () => {
+    const before = process.listenerCount("SIGTERM")
+
+    const during = await Effect.runPromise(
+      Effect.sync(() => process.listenerCount("SIGTERM")).pipe(
+        Effect.provide(
+          NodeRuntime.layerHost({ filename: hostFile, owner: { hostId: "host-c" } }, Layer.empty)
+        ),
+        Effect.scoped
+      )
+    )
+
+    expect(during).toBe(before + 1)
+    expect(process.listenerCount("SIGTERM")).toBe(before)
+  }, 60_000)
+
+  it("releases the run it owns when a shutdown signal arrives, and kills what it spawned", async () => {
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const runs = yield* RunStore.RunStore
+        const running = yield* Effect.forkChild(
+          Effect.exit(Host.execute({ what: "sleep" }, { executionId: "host-signal" })),
+          { startImmediately: true }
+        )
+        let row = yield* runs.get("host-signal")
+        for (let attempt = 0; attempt < 400 && (row.status !== "running" || spawned.length === 0); attempt++) {
+          yield* Effect.sleep("25 millis")
+          row = yield* runs.get("host-signal")
+        }
+        expect(row.status).toBe("running")
+        // The action really did start an OS process tree, so the assertion
+        // below is about a process that existed.
+        expect(spawned).toHaveLength(1)
+        expect(groupIsAlive(spawned[0]!)).toBe(true)
+        // SIGUSR2 is the one user signal Node does not reserve — SIGUSR1
+        // starts the inspector — so the handler under test is the only
+        // listener this raise reaches.
+        yield* Effect.sync(() => process.kill(process.pid, "SIGUSR2"))
+        yield* Effect.exit(Fiber.join(running))
+      }).pipe(
+        Effect.provide(
+          NodeRuntime.layerHost(
+            {
+              filename: hostFile,
+              owner: { hostId: "host-d" },
+              signals: ["SIGUSR2"],
+              rules: [[
+                new Permission.Rule({
+                  effect: "allow",
+                  pattern: new Capability.CapabilityPattern({ action: "proc:spawn", resource: "*" })
+                })
+              ]]
+            },
+            hostFlows
+          )
+        ),
+        Effect.scoped,
+        Effect.exit
+      )
+    )
+
+    // The run is reclaimable, not abandoned: `suspended` with the reason the
+    // engine parks a released run under, and no owner still holding it.
+    expect(
+      readHostBack((database) =>
+        database.prepare("SELECT status, waiting_reason, owner_host_id FROM flows_runs WHERE run_id = 'host-signal'")
+          .get()
+      )
+    ).toMatchObject({ status: "suspended", waiting_reason: "released", owner_host_id: null })
+
+    // Containment is what makes the release complete: the action's scope closed
+    // with the run, and closing it took the whole process group with it rather
+    // than leaving a `sleep` behind for nobody.
+    const deadline = Date.now() + 10_000
+    while (groupIsAlive(spawned[0]!) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    expect(groupIsAlive(spawned[0]!)).toBe(false)
+  }, 60_000)
+
+  it("lets the engine take a compensable action's pre-image with no jj rule configured", async () => {
+    // The engine's own `SnapshotBoundary` and `ActionPersistence` resolve the
+    // GUARDED `Jj`, so before `engineRules` existed this composition could not
+    // run a compensable action at all: the refusal arrived before the body,
+    // aimed at the engine rather than at anything the flow asked for.
+    const outcome = await Effect.runPromise(
+      Effect.exit(Host.execute({ what: "mutate" }, { executionId: "host-mutate" })).pipe(
+        Effect.provide(
+          NodeRuntime.layerHost(
+            { filename: hostFile, owner: { hostId: "host-m" }, signals: [] },
+            hostFlows
+          )
+        ),
+        Effect.scoped
+      )
+    )
+
+    // This machine has no jj repository under the temp directory, so jj itself
+    // says no. What matters is WHICH no: a jj failure means the capability
+    // check let the engine through, a permission failure means it did not.
+    const reported = Exit.isFailure(outcome) ? String(outcome.cause) : "succeeded"
+    expect(reported).not.toMatch(/Permission/)
+    expect(NodeRuntime.engineRules.map((rule) => rule.pattern.action)).toEqual(["jj:snapshot", "jj:restore"])
+  }, 60_000)
+
+  it("still refuses the engine's pre-image when the program denies it", async () => {
+    // `engineRules` are a DEFAULT, merged under the program's own policy: a
+    // host that means to deny jj keeps denying it.
+    const outcome = await Effect.runPromise(
+      Effect.exit(Host.execute({ what: "mutate" }, { executionId: "host-mutate-denied" })).pipe(
+        Effect.provide(
+          NodeRuntime.layerHost(
+            {
+              filename: hostFile,
+              owner: { hostId: "host-n" },
+              signals: [],
+              rules: [
+                new Permission.Rule({
+                  effect: "deny",
+                  pattern: new Capability.CapabilityPattern({ action: "jj:snapshot", resource: "*" })
+                })
+              ]
+            },
+            hostFlows
+          )
+        ),
+        Effect.scoped
+      )
+    )
+
+    expect(Exit.isFailure(outcome)).toBe(true)
+    expect(String(Exit.isFailure(outcome) ? outcome.cause : "")).toMatch(/Permission/)
+  }, 60_000)
+
+  it("kills what a run spawned when a SECOND driver over the same file interrupts it", async () => {
+    // Cancellation from another process is the shape an operator's `cancel`
+    // has: the run is driven here and interrupted from a driver that shares
+    // only the SQLite file. Containment has to survive that route too, not
+    // just the signal one.
+    const host = (hostId: string) =>
+      NodeRuntime.layerHost(
+        {
+          filename: hostFile,
+          owner: { hostId },
+          signals: [],
+          containment: { graceMs: 300 },
+          rules: [
+            new Permission.Rule({
+              effect: "allow",
+              pattern: new Capability.CapabilityPattern({ action: "proc:spawn", resource: "*" })
+            })
+          ]
+        },
+        hostFlows
+      )
+
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const runs = yield* RunStore.RunStore
+        const running = yield* Effect.forkChild(
+          Effect.exit(Host.execute({ what: "sleep-again" }, { executionId: "host-cancel" })),
+          { startImmediately: true }
+        )
+        let row = yield* runs.get("host-cancel")
+        for (let attempt = 0; attempt < 400 && (row.status !== "running" || interrupted.length === 0); attempt++) {
+          yield* Effect.sleep("25 millis")
+          row = yield* runs.get("host-cancel")
+        }
+        expect(row.status).toBe("running")
+        expect(interrupted).toHaveLength(1)
+        expect(groupIsAlive(interrupted[0]!)).toBe(true)
+
+        // The second driver: its own engine, its own owner, the same file. Its
+        // `interrupt` writes a durable cancellation request rather than
+        // touching a fiber it does not hold.
+        yield* Effect.gen(function*() {
+          const engine = yield* FlowRuntime.FlowRuntime
+          yield* engine.interrupt(Host, "host-cancel")
+        }).pipe(Effect.provide(host("host-cancel-b")), Effect.scoped)
+
+        // The owner observes the request on its heartbeat cadence, so the wait
+        // is bounded by that plus the containment grace, not by a poll count.
+        for (let attempt = 0; attempt < 80 && row.status !== "cancelled"; attempt++) {
+          yield* Effect.sleep("100 millis")
+          row = yield* runs.get("host-cancel")
+        }
+        expect(row.status).toBe("cancelled")
+
+        // graceMs is 300 above, so the group has to be gone well inside this.
+        for (let attempt = 0; attempt < 32 && groupIsAlive(interrupted[0]!); attempt++) {
+          yield* Effect.sleep("25 millis")
+        }
+        expect(groupIsAlive(interrupted[0]!)).toBe(false)
+
+        // The run is settled durably; the fiber that asked for it is no longer
+        // this case's subject, and leaving it forked would hold the scope open.
+        yield* Effect.exit(Effect.timeout(Fiber.interrupt(running), "5 seconds"))
+      }).pipe(Effect.provide(host("host-cancel-a")), Effect.scoped, Effect.exit)
+    )
+
+    // Read back through an independent connection: what the second driver's
+    // request produced is a durable row, not an in-process observation.
+    expect(
+      readHostBack((database) => database.prepare("SELECT status FROM flows_runs WHERE run_id = 'host-cancel'").get())
+    ).toMatchObject({ status: "cancelled" })
   }, 60_000)
 })

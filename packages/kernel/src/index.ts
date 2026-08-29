@@ -29,6 +29,14 @@ export * as CapabilitySet from "./CapabilitySet.ts"
 export * as ChildProcessSpawner from "./ChildProcessSpawner.ts"
 
 /**
+ * Process containment middleware over Effect's own `ChildProcessSpawner` tag.
+ *
+ * @category namespace exports
+ * @since 0.1.0
+ */
+export * as ContainedSpawner from "./ContainedSpawner.ts"
+
+/**
  * Rendering `ChildProcess` commands back to command lines.
  *
  * @category namespace exports
@@ -119,6 +127,14 @@ export * as Path from "./Path.ts"
  * @since 0.1.0
  */
 export * as Permission from "@smthrs/capability/Permission"
+
+/**
+ * The host's durable record of the processes it started.
+ *
+ * @category namespace exports
+ * @since 0.1.0
+ */
+export * as ProcessLedger from "./ProcessLedger.ts"
 
 /**
  * The shared workspace-root service.

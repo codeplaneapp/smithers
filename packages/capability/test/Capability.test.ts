@@ -41,7 +41,9 @@ describe("Capability", () => {
       "jj:snapshot",
       "jj:restore",
       "jj:workspace-add",
-      "jj:workspace-forget"
+      "jj:workspace-forget",
+      "jj:root",
+      "jj:revert"
     )
     FastCheck.assert(
       FastCheck.property(action, FastCheck.string(), (selectedAction, resource) => {
@@ -180,6 +182,8 @@ describe("Capability", () => {
     [capability("jj:restore", "repository"), "compensable"],
     [capability("jj:workspace-add", "repository"), "compensable"],
     [capability("jj:workspace-forget", "repository"), "compensable"],
+    [capability("jj:root", "/workspace/lane"), "sealed"],
+    [capability("jj:revert", "abcdef"), "compensable"],
     [capability("proc:spawn", "git status"), "irreversible"],
     [capability("net:post", "example.test"), "irreversible"]
   ])("classifies %o as %s", (value, expected) => {

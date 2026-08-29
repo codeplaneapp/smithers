@@ -37,6 +37,41 @@ The `@smthrs/platform-*` bundles are deliberately not among them, for the same
 reason `effect`'s index does not re-export `@effect/platform-node`: a platform
 bundle is chosen by the program that runs, not by the library it depends on.
 
+## `NodeRuntime`
+
+`@smthrs/flows/NodeRuntime` is a subpath export, not part of the barrel:
+importing it opens a `node:sqlite` database, so the browser-safe root must not
+reach it.
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `Options`, `HostOptions` | interfaces | configuration for `layer` and for `layerHost` |
+| `storage` | layer constructor | the migrated database, stores, owner minter, workspace, and artifact store, without an engine |
+| `make`, `layer` | constructor and layer | storage plus the engine; the host, the step boundary, and the workspace sandbox are the caller's |
+| `layerHost` | layer | the whole Node host, kernel, storage, and engine from one call |
+| `engineRules` | rule list | the `jj:snapshot` / `jj:restore` the ENGINE takes for a compensable action's pre-image, merged under `HostOptions.rules` |
+| `defaultShutdownTimeoutMs`, `signalExitCode` | constant and function | the graceful-shutdown deadline, and the status a signalled host leaves with |
+
+`layerHost` is `layer` with every remaining decision defaulted: the contained
+Node host, the kernel's guarded surface over an unattended `GrantStore`, the
+default step boundary and workspace sandbox, `HostLiveness.isAlive`, and
+`SIGINT`/`SIGTERM` handling that releases the runs this host owns. Its options
+add `rules` (the capabilities the host grants without asking), `signals` (an
+empty list installs none), `shutdownTimeoutMs` (how long a graceful shutdown may
+take before the host leaves anyway), and `containment` (process-group and reaper
+options).
+
+Two of its defaults are decisions rather than conveniences. `engineRules` is
+merged underneath `rules`, because the engine takes a compensable action's jj
+pre-image through the same guarded `Jj` the body sees and a host with no jj
+policy could otherwise not run a compensable action at all; a program that
+denies `jj:snapshot` still denies it. And the signal handler keeps two escapes,
+because installing it removes Node's default disposition: a second signal leaves
+immediately, and a shutdown that outlasts `shutdownTimeoutMs` leaves anyway,
+both with `signalExitCode` (130 for `SIGINT`, 143 for `SIGTERM`).
+
+See the [durable engine guide](../guides/durable-engine.md).
+
 ## When not to use it
 
 Depend on the individual `@smthrs/*` packages when you want a narrower

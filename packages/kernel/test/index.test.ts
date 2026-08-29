@@ -8,6 +8,7 @@ describe("kernel package barrel", () => {
       "CapabilitySet",
       "ChildProcessSpawner",
       "CommandLine",
+      "ContainedSpawner",
       "FileSystem",
       "GrantEvent",
       "GrantStore",
@@ -17,6 +18,7 @@ describe("kernel package barrel", () => {
       "JournalGrantStore",
       "Path",
       "Permission",
+      "ProcessLedger",
       "Workspace"
     ])
   })

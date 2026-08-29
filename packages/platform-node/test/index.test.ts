@@ -5,7 +5,8 @@ import * as NodeHost from "../src/NodeHost.ts"
 
 describe("@smthrs/platform-node barrel", () => {
   it("re-exports every module as a namespace", () => {
-    expect(Object.keys(Index)).toEqual(["NodeHost"])
+    expect(Object.keys(Index).sort()).toEqual(["HostLiveness", "NodeHost", "ProcessReaper"])
     expect(Index.NodeHost.layer).toBe(NodeHost.layer)
+    expect(Index.NodeHost.layerContained).toBe(NodeHost.layerContained)
   })
 })

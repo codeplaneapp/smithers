@@ -62,5 +62,35 @@ either. Import `@smthrs/platform-node`, `@smthrs/platform-bun`,
 `@smthrs/kernel/test/TestHost`, `@smthrs/database/node/NodeDatabase`, or
 `@smthrs/journal/test/TestJournal` directly. See [browser support](../../docs/architecture/browser-support.md).
 
+## The Node runtime
+
+`@smthrs/flows/NodeRuntime` is the one module here that a host program calls
+to stand a durable engine up. `layer` composes storage and the engine and
+leaves the host to the caller; `layerHost` supplies the host too:
+
+```ts
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+
+const runtime = NodeRuntime.layerHost(
+  { filename: ".flows/engine.sqlite", owner: { hostId: "local-worker" } },
+  registerFlows
+)
+```
+
+That call adds the contained Node host, the kernel's guarded host surface over
+an unattended `GrantStore`, the default step boundary and workspace sandbox, a
+process-table liveness probe, and signal handling that releases every run the
+host owns before it shuts down.
+
+Two details of that composition are decisions rather than defaults.
+`NodeRuntime.engineRules` is merged underneath `HostOptions.rules`, allowing the
+`jj:snapshot` and `jj:restore` the ENGINE takes for a compensable action's
+pre-image; without them a host with no jj policy could not run a compensable
+action at all, and a program that denies `jj:snapshot` still denies it. And the
+signal handler keeps two escapes, because installing it removes Node's default
+disposition: a second signal leaves immediately, and a shutdown that outlasts
+`HostOptions.shutdownTimeoutMs` leaves anyway, both with the status the default
+disposition would have produced.
+
 See the [documentation index](../../docs/README.md) and
 [flows reference](../../docs/reference/flows.md).

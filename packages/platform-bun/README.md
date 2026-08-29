@@ -33,12 +33,22 @@ and the bundle provides `@effect/platform-bun`'s own fetch-backed layer with
 behind the capability kernel's back. Bun does **not** depend on
 `@smthrs/platform-browser` to reach `fetch`.
 
+`BunHost.layerContained` is the bundle with process containment turned on:
+`@smthrs/kernel`'s `ContainedSpawner` gives every child a
+`SIGTERM`-then-`SIGKILL` deadline and a `ProcessLedger` entry, and
+`@smthrs/platform-node`'s `ProcessReaper` sweeps the entries a crashed
+incarnation of this host left behind. The reaper lives in the Node package
+because the calls it makes, `process.kill` and `taskkill`, are Node's, and
+Bun implements them unchanged. `layerContained` also builds `Jj` over the
+contained spawner (`BunJj.layerSpawner`), so a `jj` a crashed host left running
+is a ledger record like any other.
+
 ## Modules
 
-| Module          | What it provides                                                                                                |
-| --------------- | --------------------------------------------------------------------------------------------------------------- |
-| `BunHost`       | The complete closed Host bundle, plus `layer`; re-exports Effect's `BunChildProcessSpawner` and `BunHttpClient` |
-| `BunFileSystem` | Bun's `FileSystem`, which is Effect's Node implementation                                                       |
+| Module          | What it provides                                                                                                                               |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BunHost`       | The complete closed Host bundle, plus `layer` and contained `layerContained`; re-exports Effect's `BunChildProcessSpawner` and `BunHttpClient` |
+| `BunFileSystem` | Bun's `FileSystem`, which is Effect's Node implementation                                                                                      |
 
 **No atomic filesystem adapter yet.** `BunFileSystem.layer` is the raw
 `@effect/platform-node` filesystem, so it carries no descriptor-relative,

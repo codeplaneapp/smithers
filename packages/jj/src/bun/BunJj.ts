@@ -8,6 +8,7 @@
  * @since 0.1.0
  */
 import type * as Layer from "effect/Layer"
+import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import type { Jj } from "../Jj.ts"
 import * as NodeJj from "../node/NodeJj.ts"
 
@@ -19,3 +20,15 @@ import * as NodeJj from "../node/NodeJj.ts"
  * @slop
  */
 export const layer: Layer.Layer<Jj> = NodeJj.layer
+
+/**
+ * Provides the `Jj` service through the host's `ChildProcessSpawner` under Bun.
+ *
+ * The contained counterpart of {@link layer}, for the same reason the Node one
+ * has one: a jj child started around the host leads no recorded process group
+ * and no reaper can ever find it.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerSpawner: Layer.Layer<Jj, never, ChildProcessSpawner> = NodeJj.layerSpawner

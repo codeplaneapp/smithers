@@ -178,6 +178,34 @@ export interface Jj {
   readonly workspaceForget: (name: string) => Effect.Effect<void, JjFailure>
   /** The working copy's status, as jj prints it. */
   readonly status: () => Effect.Effect<string, JjFailure>
+  /**
+   * The repository root that contains `from`.
+   *
+   * A program that is handed a path inside a checkout, such as a lane directory
+   * or a file an agent named, needs to know which repository it belongs to
+   * before it can do anything repository-shaped with it, and walking up looking
+   * for `.jj` reimplements a question jj already answers.
+   *
+   * `PlatformError` is in the channel for the same reason it is in
+   * {@link Jj.workspaceAdd}'s: the guarded implementation canonicalizes `from`
+   * against the workspace root before it asks for `jj:root`, so the capability
+   * names the directory jj is actually run in rather than a symlink alias of
+   * it, and resolving a path is a filesystem operation that can itself fail.
+   */
+  readonly root?: ((from: string) => Effect.Effect<string, JjFailure | PlatformError>) | undefined
+  /**
+   * Applies the reverse of `changeId` to the working copy, and reports the
+   * paths that changed.
+   *
+   * `restore` moves the working copy back to a recorded point, which also
+   * discards everything committed after it. A revert undoes ONE change and
+   * keeps the rest, which is what an operator means by "undo that attempt" —
+   * and the paths come back because the caller has to be able to say what was
+   * undone.
+   */
+  readonly revert?:
+    | ((changeId: ChangeId) => Effect.Effect<{ readonly reverted: ReadonlyArray<string> }, JjFailure>)
+    | undefined
 }
 
 /**
@@ -225,6 +253,8 @@ export const makeNoop = (overrides: Partial<Jj>): Jj => {
     workspaceAdd: () => missing("workspaceAdd"),
     workspaceForget: () => missing("workspaceForget"),
     status: () => missing("status"),
+    root: () => missing("root"),
+    revert: () => missing("revert"),
     ...overrides
   })
 }

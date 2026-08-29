@@ -67,6 +67,9 @@ const noKill = (command: string): PlatformError.PlatformError =>
     description: `remote sessions end \`${command}\` by closing its scope, not by signal`
   })
 
+/** The signal a kill delivers when neither the caller nor the command named one. */
+const defaultSignal: ChildProcess.Signal = "SIGTERM"
+
 const rejected = (description: string): PlatformError.PlatformError =>
   PlatformError.badArgument({ module: MODULE, method: "spawn", description })
 
@@ -135,7 +138,8 @@ const handleOf = (
   command: string,
   child: ChildProcess.Command,
   process: RemoteProcess,
-  allocatePid: () => ProcessId
+  allocatePid: () => ProcessId,
+  provider: Provider
 ): Effect.Effect<ChildProcessHandle, never, Scope.Scope> =>
   Effect.gen(function*() {
     let running = true
@@ -163,11 +167,27 @@ const handleOf = (
     // The Deferred memoizes the one provider observation for every waiter, and
     // the scoped fiber cannot outlive the remote session that owns it.
     yield* Effect.forkScoped(Deferred.into(observeExit, completed))
+    const kill = provider.kill
+    const signalled: (signal: ChildProcess.Signal) => Effect.Effect<void, PlatformError.PlatformError> =
+      kill === undefined
+        ? () => Effect.fail(noKill(command))
+        : (signal) => Effect.mapError(kill(process, signal), platformError("kill", command))
+    if (kill !== undefined) {
+      // Closing a process scope asks the provider to stop THAT command before
+      // the provider's own release finalizer tears down whatever it owns. A
+      // process this side has already seen exit is left alone: the pid it
+      // named may belong to someone else by now.
+      yield* Effect.addFinalizer(() =>
+        running
+          ? Effect.ignore(kill(process, rightmostOptions(child).killSignal ?? defaultSignal))
+          : Effect.void
+      )
+    }
     return makeHandle({
       pid: allocatePid(),
       exitCode: Deferred.await(completed),
       isRunning: Effect.sync(() => running),
-      kill: () => Effect.fail(noKill(command)),
+      kill: (options) => signalled(options?.killSignal ?? rightmostOptions(child).killSignal ?? defaultSignal),
       stdin: Sink.fail(noStdin(command)),
       stdout,
       stderr,
@@ -177,6 +197,46 @@ const handleOf = (
       unref: Effect.succeed(Effect.void)
     })
   })
+
+/**
+ * Opens one provider session and adapts it to Effect's `ChildProcessSpawner`.
+ *
+ * The session is acquired in the caller's scope, so closing that scope runs
+ * the finalizer `Provider.open` installed. A session that could not be opened
+ * still yields a service: every command it is given fails with the open error,
+ * which keeps the failure on the action that tried to run something rather
+ * than on whatever was building the layer.
+ *
+ * `SandboxSupervision` uses this constructor to hold one session at a time.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const make = (
+  provider: Provider
+): Effect.Effect<ChildProcessSpawner["Service"], never, Scope.Scope> =>
+  provider.open(provider.session).pipe(
+    Effect.match({
+      onFailure: (error) =>
+        makeSpawner((command: ChildProcess.Command) =>
+          Effect.fail(platformError("open", CommandLine.render(command))(error))
+        ),
+      onSuccess: () => {
+        const allocatePid = pidAllocator()
+        return makeSpawner(
+          Effect.fnUntraced(function*(command: ChildProcess.Command) {
+            yield* validateCommand(command)
+            const rendered = CommandLine.render(command)
+            const started = yield* provider.spawn(rendered, {
+              cwd: CommandLine.cwd(command),
+              env: CommandLine.env(command)
+            }).pipe(Effect.mapError(platformError("spawn", rendered)))
+            return yield* handleOf(rendered, command, started, allocatePid, provider)
+          })
+        )
+      }
+    })
+  )
 
 /**
  * Adapts a configured provider to Effect's `ChildProcessSpawner`.
@@ -193,28 +253,4 @@ const handleOf = (
  * @since 0.1.0
  */
 export const layer = (provider: Provider): Layer.Layer<ChildProcessSpawner> =>
-  Layer.effect(
-    ChildProcessSpawner,
-    provider.open(provider.session).pipe(
-      Effect.match({
-        onFailure: (error) =>
-          makeSpawner((command: ChildProcess.Command) =>
-            Effect.fail(platformError("open", CommandLine.render(command))(error))
-          ),
-        onSuccess: () => {
-          const allocatePid = pidAllocator()
-          return makeSpawner(
-            Effect.fnUntraced(function*(command: ChildProcess.Command) {
-              yield* validateCommand(command)
-              const rendered = CommandLine.render(command)
-              const started = yield* provider.spawn(rendered, {
-                cwd: CommandLine.cwd(command),
-                env: CommandLine.env(command)
-              }).pipe(Effect.mapError(platformError("spawn", rendered)))
-              return yield* handleOf(rendered, command, started, allocatePid)
-            })
-          )
-        }
-      })
-    )
-  )
+  Layer.effect(ChildProcessSpawner, make(provider))

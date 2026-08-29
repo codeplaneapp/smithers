@@ -20,26 +20,36 @@
  * @since 0.1.0
  */
 import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import type { Jj } from "@smthrs/jj"
 import * as NodeJj from "@smthrs/jj/node/NodeJj"
+import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
+import type * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import type { FileSystem } from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import type { HttpClient } from "effect/unstable/http/HttpClient"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as AtomicFileSystem from "./AtomicFileSystem.ts"
+import * as ProcessReaper from "./ProcessReaper.ts"
 
 /**
  * The Node platform modules Effect ships, re-exported so a program that wants
  * only part of the host has one place to reach for them. `NodeJj` belongs to
  * `@smthrs/jj`; import it from there.
  *
+ * `NodeCrypto` is here for a different reason than the rest. `Crypto` is not a
+ * Host service — it carries no host authority the kernel could attenuate, so
+ * it is not in {@link NodeHost} and not in the closed list — but every durable
+ * composition needs one, and a program that already depends on this package
+ * for its host should not have to add a second dependency for the digest.
+ *
  * @category re-exports
  * @since 0.1.0
  */
-export { AtomicFileSystem, NodeChildProcessSpawner, NodeFileSystem, NodeHttpClient }
+export { AtomicFileSystem, NodeChildProcessSpawner, NodeCrypto, NodeFileSystem, NodeHttpClient, ProcessReaper }
 
 /**
  * The union of host services provided by the Node host layer.
@@ -64,3 +74,48 @@ export const layer: Layer.Layer<NodeHost> = Layer.mergeAll(
   NodeHttpClient.layerUndici,
   NodeJj.layer
 )
+
+/**
+ * Provides the Node host with process containment turned on.
+ *
+ * The difference from {@link layer} is what happens to a spawned process when
+ * its run stops. Under {@link layer} a child is signalled when its scope
+ * closes and then waited for, forever if it ignores `SIGTERM`, and a host that
+ * dies without closing its scopes abandons every child it started. This layer
+ * gives each child an escalation deadline and records it in the
+ * `ProcessLedger`, then sweeps the records a previous incarnation of the same
+ * host left behind before it hands the host over
+ * ({@link ProcessReaper.reap}).
+ *
+ * jj is contained here too: `layerContained` builds the `Jj` service over the
+ * same spawner rather than letting it start its own children, so a `jj`
+ * invocation a crashed host left running is a record the next incarnation
+ * reaps like any other.
+ *
+ * The ledger is a requirement rather than a default because the durable half
+ * of containment is only as good as the journal underneath it:
+ * `ProcessLedger.layer` inherits a crashed incarnation's processes,
+ * `ProcessLedger.layerMemory` contains this incarnation and nothing more, and
+ * the choice belongs to the program that knows which it has.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerContained = (
+  options?: ContainedSpawner.Options & ProcessReaper.Options
+): Layer.Layer<NodeHost, never, ProcessLedger.ProcessLedger> => {
+  const spawner = Layer.provide(
+    ContainedSpawner.layer({ platform: process.platform, ...options }),
+    Layer.provide(NodeChildProcessSpawner.layer, platform)
+  )
+  return Layer.mergeAll(
+    platform,
+    NodeHttpClient.layerUndici,
+    // jj goes through the CONTAINED spawner here, not around it. `NodeJj.layer`
+    // spawns its own children, which is right for a host that has no spawner
+    // to offer, but under containment it would mean a `jj` that leads no
+    // recorded process group, appears in no ledger, and survives the
+    // incarnation that started it.
+    Layer.provideMerge(NodeJj.layerSpawner, spawner)
+  ).pipe(Layer.provideMerge(ProcessReaper.layer(options)))
+}

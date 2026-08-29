@@ -7,8 +7,12 @@
  * has no business in a Bun bundle, and the resolved module graph says so.
  */
 import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
+import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Layer from "effect/Layer"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { build } from "esbuild"
 import { describe, expect, it } from "vitest"
 import * as BunFileSystem from "../src/BunFileSystem.ts"
@@ -20,6 +24,28 @@ describe("@smthrs/platform-bun barrel", () => {
     expect(Object.keys(Index).sort()).toEqual(["BunFileSystem", "BunHost"])
     expect(Index.BunFileSystem.layer).toBe(BunFileSystem.layer)
     expect(Index.BunHost.layer).toBe(BunHost.layer)
+    expect(Index.BunHost.layerContained).toBe(BunHost.layerContained)
+  })
+
+  it("contains the processes it spawns and reaps what a dead incarnation left", async () => {
+    const ledger = await Effect.runPromise(
+      ProcessLedger.makeMemory({ hostId: "bun-host", ownerPid: process.pid })
+    )
+    const host = BunHost.layerContained({ graceMs: 250 }).pipe(
+      Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(ledger))
+    )
+
+    const live = await Effect.runPromise(
+      Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner
+        yield* spawner.spawn(ChildProcess.make("sleep", ["30"]))
+        return yield* ledger.live
+      }).pipe(Effect.provide(host), Effect.scoped)
+    )
+
+    expect(live).toEqual([expect.objectContaining({ commandDigest: "sleep 30" })])
+    // The scope closed, so the record is retired with the process.
+    expect(await Effect.runPromise(ledger.live)).toEqual([])
   })
 
   it("names Effect's own Bun HttpClient as the network slot implementation", () => {

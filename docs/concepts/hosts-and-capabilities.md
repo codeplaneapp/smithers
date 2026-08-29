@@ -35,6 +35,8 @@ The kernel decorates each service tag in place — a middleware `Layer` over the
 
 Where Effect owns the tag (`FileSystem`, `ChildProcessSpawner`) the error channel stays `PlatformError`: a refused operation surfaces with reason `PermissionDenied`, and the structured kernel failure rides on its `cause`, recoverable with `Permission.fromPlatformError`. `HttpClient` does the same in Effect's network channel: a refusal is an `HttpClientError` whose reason is a `TransportError` carrying the kernel failure on `cause`, recoverable with `HttpClient.fromHttpClientError`. Where Smithers owns the service (`Jj`) the interface names `Permission.PermissionError` directly.
 
+The `Jj` slot carries two optional operations, `root` and `revert`, checked as `jj:root` (sealed) and `jj:revert` (compensable). The decorator forwards their absence: a backend that cannot revert keeps reading as one, because a caller deciding what it can offer needs "this host has no revert" and not "your revert was refused".
+
 For a spawn, the exact capability is `proc:spawn` with `CommandLine.render(command)` as its resource — the same string a browser interpreter or a remote sandbox is handed for supported commands, so a grant and the thing it authorizes cannot drift apart. A custom shell path is included explicitly in the resource; adapters that cannot select it reject the command.
 
 ```ts
@@ -62,6 +64,22 @@ Pure path manipulation is not permission-checked. Filesystem access derived from
 `GrantStore` supports `once`, `run`, `remembered`, and `deny` resolutions. `JournalGrantStore` persists grant events in the engine journal. `makeNoop` is an explicit allow-all seam, and test grant layers provide scripted behavior; a production deployment should install a deliberate policy.
 
 The kernel is a capability check, not an operating-system sandbox.
+
+## Process containment
+
+A capability check decides whether a process may start. Containment decides what happens to it when the run that started it stops, and that is a separate mechanism with a separate failure mode.
+
+Cancellation already cascades: the engine interrupts the run fiber, the fiber closes the action scopes, and Effect's spawner signals the child a scope owned. Two gaps sit under that. Effect signals once and then waits for the exit, so a child that traps `SIGTERM` parks the releasing fiber and the run never reaches `cancelled`. And a host killed outright runs no finalizer at all, so every process it started keeps running with nobody left holding a handle.
+
+`@smthrs/kernel`'s `ContainedSpawner` closes the first gap by giving every command it spawns an escalation deadline, `SIGTERM` and then `SIGKILL` after `graceMs`. It closes the second by writing each spawn to the `ProcessLedger`. Ledger records are ownerless journal entries on the run `flows.host:<hostId>`, so the next incarnation of the same host replays them, subtracts the exits, and learns which process groups an owner it can prove is dead abandoned. `@smthrs/platform-node`'s `ProcessReaper` kills those groups on host start and journals the reap.
+
+A spawn whose record did not commit is refused rather than started: the child is signalled and the caller is told. A ledger that quietly degraded to memory would leave exactly the child nobody can find, which is the case containment exists for.
+
+The reaper is deliberately hard to convince. A stored pid outlives the process that wrote it and the operating system reuses the number, so a record is signalled only when its owner is provably gone (`ESRCH`, never `EPERM`), its group is not this host's own, it was written during this boot, and the pid's start time still matches the record. Anything else is retired with `flows.host.process-reap-skipped.v1` and nothing is signalled; a kill that fails retires nothing at all, so the next incarnation tries again.
+
+The engine gains no hook. Containment is entirely a host concern: the kernel records pids and process groups and knows nothing about runs, attempts, or ownership fences, and the platform bundle sends the signals. `jj` is contained the same way, because `NodeHost.layerContained` builds the `Jj` service over the contained spawner instead of letting it start children of its own. A remote sandbox reaches the same outcome through its provider's `kill`, described in the [`@smthrs/sandbox` reference](../reference/sandbox.md).
+
+Containment is not confinement. It ends processes this host started and recorded; it does not stop a process from double-forking out of its group or from being started by something other than the guarded spawner.
 
 ## Boundary capture: hermetic execution as a transaction
 

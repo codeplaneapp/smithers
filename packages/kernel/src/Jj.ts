@@ -14,7 +14,7 @@
  * @since 0.1.0
  */
 import { make as makeCapability } from "@smthrs/capability/Capability"
-import { Jj } from "@smthrs/jj"
+import { type ChangeId, Jj } from "@smthrs/jj"
 import { Effect, FileSystem as EffectFileSystem, Layer, Path as EffectPath } from "effect"
 import { canonicalResource } from "./FileSystem.ts"
 import { GrantStore } from "./GrantStore.ts"
@@ -61,9 +61,11 @@ export { makeNoop } from "@smthrs/jj"
  * with `Layer.provide` and every consumer of `Jj` — including one that never
  * heard of the kernel — resolves the guarded implementation.
  *
- * `workspaceAdd` canonicalizes its destination through the *raw* filesystem
- * before asking for `jj:workspace-add` and `fs:write`, so an existing symlink
- * cannot turn an inside-workspace grant into outside authority.
+ * `workspaceAdd` canonicalizes its destination and `root` canonicalizes its
+ * starting directory through the *raw* filesystem before asking for
+ * `jj:workspace-add` and `fs:write`, or for `jj:root`, so an existing symlink
+ * cannot turn an inside-workspace grant into outside authority or separate the
+ * authorized path from the directory jj is run in.
  *
  * @category layers
  * @since 0.1.0
@@ -77,6 +79,8 @@ export const layer: Layer.Layer<
   Jj,
   Effect.gen(function*() {
     const jj = yield* Jj
+    const jjRoot = jj.root
+    const jjRevert = jj.revert
     const fileSystem = yield* EffectFileSystem.FileSystem
     const path = yield* EffectPath.Path
     const workspace = yield* Workspace
@@ -114,7 +118,32 @@ export const layer: Layer.Layer<
       ),
       workspaceForget: Effect.fn("Jj.workspaceForget")((name) =>
         grants.check(makeCapability("jj:workspace-forget", name)).pipe(Effect.andThen(jj.workspaceForget(name)))
-      )
+      ),
+      // `root` and `revert` are optional on the service, so the decorator
+      // forwards the ABSENCE too. A backend that cannot revert must keep
+      // reading as a backend that cannot revert: replacing it with a guarded
+      // method that fails on call would turn "this host has no revert" into
+      // "your revert was refused", which is a different answer to a caller
+      // deciding what it can offer.
+      ...jjRoot === undefined ? {} : {
+        root: Effect.fn("Jj.root")((from: string) =>
+          // Canonicalized BEFORE the check, and the canonical path is what jj
+          // is then run in. Checking the caller's spelling and inspecting a
+          // different directory is the whole symlink-alias problem: an
+          // authorized name would decide the answer for a repository the grant
+          // never mentioned.
+          canonicalResource(fileSystem, path, workspace.root, from).pipe(
+            Effect.flatMap((resource) =>
+              grants.check(makeCapability("jj:root", resource)).pipe(Effect.andThen(jjRoot(resource)))
+            )
+          )
+        )
+      },
+      ...jjRevert === undefined ? {} : {
+        revert: Effect.fn("Jj.revert")((changeId: ChangeId) =>
+          grants.check(makeCapability("jj:revert", changeId)).pipe(Effect.andThen(jjRevert(changeId)))
+        )
+      }
     })
   })
 )

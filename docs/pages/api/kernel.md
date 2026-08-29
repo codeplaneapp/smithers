@@ -28,7 +28,7 @@ Re-exported from [`@smthrs/capability`](capability.md), source [packages/capabil
 
 | Export | Kind | Notes |
 | --- | --- | --- |
-| `Action` | type | `fs:read`, `fs:write`, `net:get`, `net:post`, `model:call`, `proc:spawn`, `jj:status`, `jj:diff`, `jj:snapshot`, `jj:restore`, `jj:workspace-add`, `jj:workspace-forget` |
+| `Action` | type | `fs:read`, `fs:write`, `net:get`, `net:post`, `model:call`, `proc:spawn`, `jj:status`, `jj:diff`, `jj:snapshot`, `jj:restore`, `jj:workspace-add`, `jj:workspace-forget`, `jj:root`, `jj:revert` |
 | `Capability` | schema class | `action` plus exact `resource` |
 | `CapabilityPattern` | schema class | `action` (or a wildcard `PatternAction`) plus a resource glob |
 | `PatternAction` | type | pattern action literals |

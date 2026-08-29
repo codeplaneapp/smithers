@@ -626,6 +626,13 @@ describe("vitest coverage isolation conformance", () => {
       "plan/src/Planned.ts": 1,
       "run-store/src/AttemptStore.ts": 1,
       "run-store/src/RunStore.ts": 1,
+      // `spawn` is the only source of a `RemoteProcess`, and it records every
+      // one it returns, so the scripted provider's kill lookup cannot miss.
+      "sandbox/src/RemoteChildProcessSpawner/TestRemote.ts": 1,
+      // The remote handle answers liveness from a local flag with
+      // `Effect.sync`, so supervision's fallback for a failing `isRunning`
+      // only discharges the error channel the handle type declares.
+      "sandbox/src/SandboxSupervision/make.ts": 1,
       "step-cache/src/CacheStore.ts": 1
     }
     const sourceFiles = (directory: string): Array<string> => {

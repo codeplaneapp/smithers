@@ -20,5 +20,11 @@
 /** Remote implementation of Effect's `ChildProcessSpawner`. */
 export * as RemoteChildProcessSpawner from "./RemoteChildProcessSpawner/index.ts"
 
+/** The conformance suite a provider implementation must pass. */
+export * as ProviderConformance from "./ProviderConformance/index.ts"
+
 /** Sandbox health-check contracts. */
 export * as SandboxHealth from "./SandboxHealth/index.ts"
+
+/** Heartbeat supervision over a remote sandbox session. */
+export * as SandboxSupervision from "./SandboxSupervision/index.ts"

@@ -36,7 +36,11 @@ describe("Jj facade", () => {
         ["diff", jj.diff("a", "b")],
         ["workspaceAdd", jj.workspaceAdd("lane", "/tmp/lane")],
         ["workspaceForget", jj.workspaceForget("lane")],
-        ["status", jj.status()]
+        ["status", jj.status()],
+        // The optional operations are stubbed too: a test that reaches one
+        // gets the named failure, not `undefined is not a function`.
+        ["root", jj.root!("/lane")],
+        ["revert", jj.revert!("abc")]
       ]
 
       for (const [method, effect] of calls) {
