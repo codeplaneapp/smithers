@@ -11,11 +11,16 @@
 // Run: node --test "claude-plugin/**/*.test.mjs"
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const source = readFileSync(fileURLToPath(new URL("./smithers-run.mjs", import.meta.url)), "utf8");
+
+const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+const sourceCli = join(repoRoot, "packages/cli/bin/smithers.mjs");
 
 /** The script body, with the `export const meta` block the harness strips. */
 const body = source.replace(/^export const meta = \{[\s\S]*?^\}\n/m, "");
@@ -86,9 +91,10 @@ describe("the mirror contract", () => {
   });
 });
 
-describe("the commands it builds", () => {
-  const commands = [...source.matchAll(/RUN-EXACTLY: \$\{CLI\} ([^\\\n]*)/g)].map((match) => match[1]);
+/** Every command template the mirror writes as a RUN-EXACTLY line. */
+const commands = [...source.matchAll(/RUN-EXACTLY: \$\{CLI\} ([^\\\n]*)/g)].map((match) => match[1]);
 
+describe("the commands it builds", () => {
   it("builds exactly three CLI commands: launch, tick, and node-wait", () => {
     assert.deepEqual(commands.map((command) => command.split(" ").slice(0, 2).join(" ")).sort(), [
       "claude node-wait",
@@ -123,6 +129,81 @@ describe("the commands it builds", () => {
     for (const removed of ["--started-by-harness", "--started-by-session", "--started-by-prompt"]) {
       assert.ok(!code.includes(removed), `the mirror still passes ${removed}`);
     }
+  });
+});
+
+describe("the CLI in this tree serves those commands", () => {
+  /**
+   * The mirror is a string builder: the flags it writes are never type-checked
+   * against the CLI, so a verb that quietly drops one turns every tick into an
+   * exit-2 usage error at runtime. `effect/unstable/cli` rejects an undeclared
+   * flag rather than ignoring it, so a `--help` listing is a sufficient and
+   * cheap check that the command the mirror emits will parse.
+   */
+  const help = (argv) =>
+    spawnSync(process.execPath, [sourceCli, ...argv, "--help"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 180_000,
+    });
+
+  /** Whether the CLI in this tree carries the mirror's `claude` verb yet. */
+  const hasClaudeVerb = () => {
+    const listing = help([]);
+    return listing.status === 0 && /^\s+claude\s/m.test(listing.stdout);
+  };
+
+  /** Every long flag one RUN-EXACTLY template writes, template holes ignored. */
+  const flagsOf = (command) => [...command.matchAll(/--([a-z][a-z-]*)/g)].map((match) => match[1]);
+
+  const cases = [
+    { argv: ["up"], template: commands.find((command) => command.startsWith("up ")), extra: ["data"] },
+    { argv: ["claude", "tick"], template: commands.find((command) => command.startsWith("claude tick")), extra: ["wait", "timeout-ms"] },
+    { argv: ["claude", "node-wait"], template: commands.find((command) => command.startsWith("claude node-wait")), extra: [] },
+  ];
+
+  for (const { argv, template, extra } of cases) {
+    it(`\`smithers ${argv.join(" ")}\` declares every flag the mirror writes`, (t) => {
+      if (!hasClaudeVerb()) {
+        t.skip(
+          "the `claude` mirror verbs are not in this CLI yet. They are the cli-ops lane's " +
+            "(rc-contract.md section 4.1, claudeMirrorContract 2) and this suite is their consumer.",
+        );
+        return;
+      }
+      const listing = help(argv);
+      assert.equal(listing.status, 0, listing.stderr);
+      // `extra` names flags the mirror writes conditionally, outside the
+      // template literal, so the template alone does not carry them.
+      for (const flag of [...new Set([...flagsOf(template), ...extra])]) {
+        assert.ok(
+          listing.stdout.includes(`--${flag}`),
+          `smithers ${argv.join(" ")} does not declare --${flag}, which the mirror writes; ` +
+            "effect/unstable/cli exits 2 on an undeclared flag",
+        );
+      }
+    });
+  }
+
+  it("passes node-wait its run id the way the CLI reads it", (t) => {
+    if (!hasClaudeVerb()) {
+      t.skip("the `claude` mirror verbs are not in this CLI yet.");
+      return;
+    }
+    const listing = help(["claude", "node-wait"]);
+    assert.equal(listing.status, 0, listing.stderr);
+    // 0.x took the run id as `--run-id` and the node id as the single
+    // positional. A CLI that takes two positionals instead needs the mirror
+    // template changed with it; either shape is fine, a disagreement is not.
+    const template = commands.find((command) => command.startsWith("claude node-wait"));
+    const declaresRunIdFlag = listing.stdout.includes("--run-id");
+    assert.equal(
+      template.includes("--run-id"),
+      declaresRunIdFlag,
+      declaresRunIdFlag
+        ? "the CLI takes --run-id but the mirror does not write it"
+        : "the mirror writes --run-id but the CLI takes the run id as a positional argument",
+    );
   });
 });
 

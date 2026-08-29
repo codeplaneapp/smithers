@@ -24,9 +24,9 @@ npx --package @smthrs/cli smithers skills add
 ```
 
 `skills add` writes this skill into every agent skill directory it detects and
-can write to. Pass `--no-global` to scope the install to the current project
-instead of the agent's global directory. It installs one curated skill; it does
-not generate a skill per CLI command.
+can write to. Pass `--agent claude` or `--agent codex` to write one agent only.
+It installs this one curated skill; it does not generate a skill per CLI
+command.
 
 `smithers skills list` shows which agents were detected and whether each already
 has the skill.
@@ -43,7 +43,7 @@ bundles never drift.
 
 ## The companion skills
 
-Three narrower skills sit beside this one and are installed the same way:
+Four narrower skills sit beside this one and are installed the same way:
 
 | Skill | When to load it |
 | --- | --- |

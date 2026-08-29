@@ -206,7 +206,7 @@ describe("the smithers on-ramp", () => {
   it("ships the README that documents its install", () => {
     const readme = readFileSync(join(skillsRoot, "smithers/README.md"), "utf8");
     assert.match(readme, /smithers skills add/);
-    assert.match(readme, /--no-global/);
+    assert.match(readme, /--agent claude/);
     assert.match(readme, /smithers docs --full/);
     assert.ok(!readme.includes("bunx smthrs"), "the README must not name the 0.x published bin lookup");
   });
@@ -218,13 +218,17 @@ describe("installing the curated skill", () => {
     for (const directory of created) rmSync(directory, { recursive: true, force: true });
   });
 
-  /** A project with a detectable agent skill directory and no skill in it yet. */
+  /**
+   * A home directory with a detectable agent skill directory and no skill in
+   * it yet. `skills add` writes under the home directory, not the working
+   * directory, so the fixture is passed as HOME (USERPROFILE on Windows).
+   */
   const fixture = () => {
-    const root = mkdtempSync(join(tmpdir(), "skills-add-"));
-    created.push(root);
-    mkdirSync(join(root, ".claude", "skills"), { recursive: true });
-    mkdirSync(join(root, ".agents", "skills"), { recursive: true });
-    return root;
+    const home = mkdtempSync(join(tmpdir(), "skills-add-"));
+    created.push(home);
+    mkdirSync(join(home, ".claude", "skills"), { recursive: true });
+    mkdirSync(join(home, ".codex", "skills"), { recursive: true });
+    return home;
   };
 
   /** Whether the CLI in this tree carries the `skills` verb yet. */
@@ -241,22 +245,28 @@ describe("installing the curated skill", () => {
     if (!hasSkillsVerb()) {
       t.skip(
         "`smithers skills add` is not in this CLI yet. It is the cli-ops lane's verb " +
-          "(rc-contract.md section 4.1) and it consumes this lane's skills/ tree. " +
+          "(rc-contract.md section 4.1) and it installs this lane's skills/ tree. " +
           "The install contract this test asserts is pinned by the source-side checks above.",
       );
       return;
     }
 
-    const root = fixture();
-    const result = spawnSync(process.execPath, [sourceCli, "skills", "add", "--no-global"], {
-      cwd: root,
+    const home = fixture();
+    const result = spawnSync(process.execPath, [sourceCli, "skills", "add"], {
+      cwd: repoRoot,
+      env: { ...process.env, HOME: home, USERPROFILE: home },
       encoding: "utf8",
       timeout: 180_000,
     });
     assert.equal(result.status, 0, result.stderr);
 
-    const installed = join(root, ".claude", "skills", "smithers", "SKILL.md");
+    const installed = join(home, ".claude", "skills", "smithers", "SKILL.md");
     assert.ok(statSync(installed).isFile(), "the curated skill did not land in the detected agent directory");
+    // `skills add` installs the curated source, byte for byte. The docs lane's
+    // generate-llms.ts copies this same file to packages/cli/docs/SKILL.md as
+    // "the curated skill the CLI installs", and rc-contract.md ruling F2 says
+    // rc.0 writes "the curated skill" and generates nothing per verb. A CLI
+    // that renders its own text from the verb table fails here, correctly.
     assert.equal(
       readFileSync(installed, "utf8"),
       readFileSync(join(skillsRoot, "smithers", "SKILL.md"), "utf8"),
