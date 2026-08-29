@@ -310,3 +310,76 @@ describe("requestCancel distinguishes an absent row from a cleared column (B10)"
       Effect.scoped
     ))
 })
+
+/**
+ * B-02: `requestCancel` guarded only on `cancel_requested_at_ms IS NULL`, with
+ * no status predicate, so a run that had already settled accepted new
+ * cancellation intent forever. The write was not harmless: nothing ever acts
+ * on it — the run has no owner and no drive to observe it — and
+ * `RunDriver.inheritParentCancellation` reads the column straight off a
+ * terminal parent, so a request written against a `completed` parent cancelled
+ * children that parent had finished with.
+ *
+ * A settled run therefore reports the terminal status instead of recording
+ * anything. The status is read rather than assumed, so the caller learns which
+ * ending it lost to.
+ */
+describe("requestCancel refuses a run that already settled (B-02)", () => {
+  /** Settles a run terminally through the owned transition, as a driver does. */
+  const settle = (store: RunStore.Service, runId: string, status: RunStore.RunStatus) =>
+    Effect.gen(function*() {
+      yield* store.create(runId, "{}")
+      yield* own(store, runId)
+      expect(yield* store.transitionOwned(runId, owner, status, undefined)).toEqual({ _tag: "Transitioned" })
+    })
+
+  effect("a completed run answers Terminal twice and leaves the column NULL", () =>
+    Effect.gen(function*() {
+      const store = yield* RunStore.RunStore
+      yield* settle(store, "run", "completed")
+      expect(yield* store.requestCancel("run", 500)).toEqual({ _tag: "Terminal", status: "completed" })
+      expect((yield* store.get("run")).cancelRequestedAtMs).toBeNull()
+      // Repeating it is the operator retry: it must stay Terminal rather than
+      // decaying into AlreadyRequested off a column the first call wrote.
+      expect(yield* store.requestCancel("run", 900)).toEqual({ _tag: "Terminal", status: "completed" })
+      expect((yield* store.get("run")).cancelRequestedAtMs).toBeNull()
+    }))
+
+  effect("a failed run answers Terminal and leaves the column NULL", () =>
+    Effect.gen(function*() {
+      const store = yield* RunStore.RunStore
+      yield* settle(store, "run", "failed")
+      expect(yield* store.requestCancel("run", 500)).toEqual({ _tag: "Terminal", status: "failed" })
+      expect((yield* store.get("run")).cancelRequestedAtMs).toBeNull()
+    }))
+
+  effect("a cancelled run answers Terminal and keeps the request that closed it", () =>
+    Effect.gen(function*() {
+      const store = yield* RunStore.RunStore
+      yield* store.create("run", "{}")
+      yield* own(store, "run")
+      expect(yield* store.requestCancel("run", 500)).toEqual({ _tag: "CancelRequested", requestedAtMs: 500 })
+      expect(yield* store.transitionOwned("run", owner, "cancelled", undefined)).toEqual({ _tag: "Transitioned" })
+      expect(yield* store.requestCancel("run", 900)).toEqual({ _tag: "Terminal", status: "cancelled" })
+      expect((yield* store.get("run")).cancelRequestedAtMs).toBe(500)
+    }))
+
+  effect("a pending, running, or suspended run still records the request", () =>
+    Effect.gen(function*() {
+      const store = yield* RunStore.RunStore
+      yield* store.create("pending-run", "{}")
+      expect(yield* store.requestCancel("pending-run", 500)).toEqual({ _tag: "CancelRequested", requestedAtMs: 500 })
+
+      yield* store.create("running-run", "{}")
+      yield* own(store, "running-run")
+      expect(yield* store.requestCancel("running-run", 500)).toEqual({ _tag: "CancelRequested", requestedAtMs: 500 })
+
+      yield* store.create("suspended-run", "{}")
+      yield* own(store, "suspended-run")
+      yield* store.transitionOwned("suspended-run", owner, "suspended", undefined)
+      expect(yield* store.requestCancel("suspended-run", 500)).toEqual({
+        _tag: "CancelRequested",
+        requestedAtMs: 500
+      })
+    }))
+})
