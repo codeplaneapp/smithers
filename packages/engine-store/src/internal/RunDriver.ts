@@ -1284,6 +1284,22 @@ export const make = (
         const state = yield* decodeState(initial.stateJson)
         const registration = registrations.get(state.flowName)
         if (registration === undefined) {
+          // Cancelling needs no handler. A parked run whose cancellation was
+          // durably requested used to be dropped here with everything else,
+          // and nothing else could ever reach it: the sweep woke the row every
+          // heartbeat and every wake bailed at this line, so a cancel written
+          // by a control-only process — the operator CLI, a second engine that
+          // registers other flows — stayed write-only forever while the run's
+          // linked children kept going. The terminal transition, the cascade
+          // over the durable edge table, and the interruption record are all
+          // written from the run ROW, so a process that could never execute
+          // this flow can still close it. Claiming first is what makes the
+          // close fenced: `cancelOwned` is owner-fenced, so exactly one of the
+          // sweeping processes wins and the rest see a lost CAS.
+          if (initial.status === "suspended" && initial.cancelRequestedAtMs !== null) {
+            if (!(yield* claimAndActivate(initial))) return
+            return yield* cancelOwned(executionId, withoutResult(state))
+          }
           // A wake for a flow this process has not registered — after a full
           // restart the sweep re-drives released rows before (or without)
           // the flow ever registering here. Dropping the wake silently made
