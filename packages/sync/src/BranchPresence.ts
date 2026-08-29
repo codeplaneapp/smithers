@@ -140,7 +140,12 @@ export const layerNoop: Layer.Layer<BranchPresence> = Layer.succeed(BranchPresen
  * @since 0.1.0
  */
 export const PresenceOptions = Schema.Struct({
-  leaseMs: Schema.Int.check(Schema.isGreaterThan(0))
+  leaseMs: Schema.Int.check(Schema.isGreaterThan(0)),
+  /**
+   * Roster changes a stalled {@link Service.changes} subscriber may fall
+   * behind by. Defaults to {@link defaultChangesCapacity}.
+   */
+  changesCapacity: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0)))
 })
 /**
  * The value form of {@link PresenceOptions}.
@@ -149,6 +154,23 @@ export const PresenceOptions = Schema.Struct({
  * @since 0.1.0
  */
 export type PresenceOptions = typeof PresenceOptions.Type
+
+/**
+ * Roster changes a stalled {@link Service.changes} subscriber may fall behind
+ * by before the oldest are dropped.
+ *
+ * Presence is a lease table, and `changes` only says that some branch's roster
+ * moved: a follower answers it with `list`. Holding an unbounded backlog for a
+ * subscriber that has stopped pulling would let one abandoned watcher retain
+ * every announcement the process has seen since. A subscriber that falls
+ * further behind than this bound loses the oldest notifications and re-lists;
+ * because every notification is answered by a fresh `list`, dropping one never
+ * loses roster state.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const defaultChangesCapacity = 256
 
 const key = (branchId: BranchId, participantId: ParticipantId): string => `${branchId}\u0000${participantId}`
 
@@ -159,6 +181,9 @@ const key = (branchId: BranchId, participantId: ParticipantId): string => `${bra
  * roster but never appears on it, so a shared read link cannot be used to
  * impersonate a collaborator.
  *
+ * The change feed slides at {@link defaultChangesCapacity}: announcing never
+ * waits on a stalled watcher, and never grows the process on its behalf.
+ *
  * @category constructors
  * @since 0.1.0
  */
@@ -166,7 +191,7 @@ export const makeMemory = (options: PresenceOptions): Effect.Effect<Service, nev
   Effect.gen(function*() {
     const share = yield* BranchShare.BranchShare
     const roster = new Map<string, Participant>()
-    const changes = yield* PubSub.unbounded<BranchId>()
+    const changes = yield* PubSub.sliding<BranchId>(options.changesCapacity ?? defaultChangesCapacity)
 
     /** Drops every lease that has run out, so expiry needs no timer fiber. */
     const live = (branchId: BranchId, nowMs: number): Array<Participant> => {

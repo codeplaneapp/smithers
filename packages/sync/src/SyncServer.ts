@@ -82,10 +82,30 @@ const cursorOf = (
 ): JournalEvent.Seq | undefined => cursors.find((cursor) => cursor.runId === runId)?.afterSeq
 
 /**
+ * Largest number of a workspace subscription's run streams the server holds
+ * open at once.
+ *
+ * A workspace subscription attaches one journal stream per run it covers, and
+ * every open stream is a live cursor plus a chunk buffer. Without a bound the
+ * cost of one follower is the size of the workspace: a thousand-run workspace
+ * opened a thousand streams the moment a subscription started, whether or not
+ * the follower ever read from them, and a follower that stalls holds all of
+ * them. Sixty-four is well above the number of runs a workspace has active
+ * traffic on at one time, so a live follower still sees every run's entries
+ * promptly, while an idle or stalled follower's fan-out stays flat as the
+ * workspace's run history grows.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const defaultConcurrency = 64
+
+/**
  * Read-path policy.
  *
  * The default caps the encoded entries of one read page or one subscription
- * frame at 1 MiB.
+ * frame at 1 MiB, and the run streams one subscription holds open at
+ * {@link defaultConcurrency}.
  *
  * @category models
  * @since 0.1.0
@@ -96,6 +116,11 @@ export interface Options {
    * carry, in bytes. Defaults to {@link SyncProtocol.defaultMaxFrameBytes}.
    */
   readonly maxFrameBytes?: number | undefined
+  /**
+   * Largest number of run streams one workspace subscription holds open at
+   * once. Defaults to {@link defaultConcurrency}.
+   */
+  readonly concurrency?: number | undefined
 }
 
 /**
@@ -107,6 +132,12 @@ export interface Options {
  * paged to its durable tail. A page or frame whose encoded entries exceed the
  * frame ceiling is refused with `frame_too_large` instead of served, so one
  * oversized journal payload cannot take down every follower that pulls it.
+ *
+ * A workspace subscription's fan-out is bounded: at most
+ * `Options.concurrency` run streams are open at once on each of the two
+ * branches (the runs the request covers, and the runs the catalog announces
+ * while it is live), so the memory one follower costs is a function of the
+ * bound rather than of the workspace's size.
  *
  * Authorization is fail-closed along two boundaries, both consulted per
  * request:
@@ -134,6 +165,7 @@ export const makeLiveWith = (
     const catalog = yield* RunCatalog.RunCatalog
     const share = yield* Effect.serviceOption(BranchShare.BranchShare)
     const maxFrameBytes = options.maxFrameBytes ?? SyncProtocol.defaultMaxFrameBytes
+    const concurrency = options.concurrency ?? defaultConcurrency
 
     /** Refuses any page or frame whose encoded entries outgrow the ceiling. */
     const guardFrameBytes = (bytes: number): Effect.Effect<void, SyncError> =>
@@ -309,12 +341,12 @@ export const makeLiveWith = (
               Stream.flatMap(
                 Stream.fromIterable(runIds),
                 (runId) => runStream(runId, request.cursors),
-                { concurrency: "unbounded" }
+                { concurrency }
               ),
               Stream.flatMap(
                 Stream.filterEffect(catalog.changes, (runId) => canFollow(runId, request.capability)),
                 (runId) => runStream(runId, request.cursors),
-                { concurrency: "unbounded" }
+                { concurrency }
               )
             ))
       ).pipe(Stream.take(request.credit))
