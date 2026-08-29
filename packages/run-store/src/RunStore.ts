@@ -54,7 +54,15 @@ export type RunStatus = typeof RunStatus.Type
  * @since 0.1.0
  * @category models
  */
-export type TerminalRunStatus = "completed" | "failed" | "cancelled"
+export const TerminalRunStatus = Schema.Literals(["completed", "failed", "cancelled"])
+
+/**
+ * The type of {@link TerminalRunStatus}.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type TerminalRunStatus = typeof TerminalRunStatus.Type
 
 /**
  * Whether a status is one a run never leaves.
@@ -806,16 +814,32 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             // a writer on another connection clearing the column between the UPDATE
             // and this read made a live run report `NotFound` — and the caller
             // skipped the retry it performs for a genuine race. The UPDATE's own
-            // precondition holds again, so re-run it. Only a row that is really
-            // gone reports `NotFound`. The row was read as non-terminal a
-            // statement ago; a run that settled in between loses the retried
-            // UPDATE to the same status predicate and reports `NotFound`,
-            // which is the truthful answer for "nothing was recorded".
+            // precondition holds again, so re-run it.
             const retried = yield* record()
             const recorded = retried[0]
-            return recorded === undefined
-              ? notFound
-              : { _tag: "CancelRequested", requestedAtMs: Number(recorded.requestedAtMs) } as const
+            if (recorded !== undefined) {
+              return { _tag: "CancelRequested", requestedAtMs: Number(recorded.requestedAtMs) } as const
+            }
+            // Two things can refuse the retry, and they are not the same
+            // answer: the row is gone, which is what this retry exists to
+            // distinguish, or the run settled in the statement between the
+            // read above and this write and lost to the status predicate.
+            // Reported as `NotFound`, a run that had just completed sent its
+            // caller looking for a row that is sitting right there. The
+            // terminal test rides in the WHERE clause so the read answers one
+            // question: did it end?
+            const closing = yield* sql<{ readonly status: string }>`
+          SELECT status AS "status" FROM flows_runs
+          WHERE run_id = ${runId} AND status IN ('completed', 'failed', 'cancelled')
+        `
+            const ending = closing[0]
+            if (ending === undefined) {
+              return notFound
+            }
+            return {
+              _tag: "Terminal",
+              status: yield* Schema.decodeUnknownEffect(TerminalRunStatus)(ending.status).pipe(Effect.orDie)
+            } as const
           })
         )
       })),
