@@ -1,10 +1,27 @@
-#!/usr/bin/env bun
-/** Generate Smithers theme records from @shikijs/themes 3.23.0. */
+#!/usr/bin/env node
+/**
+ * Generate Smithers theme records from @shikijs/themes 3.23.0.
+ *
+ * The registry it writes (`packages/ui-styleguide/src/themes/*.ts`) is
+ * generated and checked in, so a consumer never resolves a syntax theme at
+ * runtime. Re-run it when the upstream themes move or a seed here changes,
+ * and commit the result.
+ *
+ * Run it with: node --experimental-strip-types scripts/generate-theme-registry.ts
+ * (or through any TypeScript runner). It resolves paths from its own location
+ * rather than from a runtime-specific global, so it runs under Node and Bun
+ * alike.
+ *
+ * The output goes through the repository formatter before it is committed, so
+ * a regeneration that changes nothing shows up as a key-quoting diff and
+ * nothing else. Format the written files, then diff.
+ */
 import { realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = resolve(import.meta.dir, "..");
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pierre = realpathSync(resolve(root, "packages/ui/node_modules/@pierre/diffs"));
 const requireFromPierre = createRequire(resolve(pierre, "package.json"));
 const outputDir = resolve(root, "packages/ui-styleguide/src/themes");

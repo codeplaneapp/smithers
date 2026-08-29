@@ -41,6 +41,21 @@ export type ChatComposerProps = Omit<ComponentProps<"form">, "onSubmit"> & {
   sendLabel?: ReactNode;
   /** Visible content for the Stop button. Strings also customize its accessible name for compatibility. */
   stopLabel?: ReactNode;
+  /*
+   * Pass-through attributes for the two buttons this component renders on the
+   * host's behalf.
+   *
+   * A host whose affordances must name the act behind them — a `data-flow`
+   * binding, an analytics id, a test hook — otherwise has to reach into this
+   * component's rendered DOM from outside, which is the exact coupling a
+   * pass-through prop exists to prevent (LIBRARY-CHANGE-REQUESTS §3).
+   * Anything set here wins over this component's own attribute of the same
+   * name, so a host can also correct one.
+   */
+  /** Extra attributes for the Send button. */
+  submitProps?: ComponentProps<"button">;
+  /** Extra attributes for the Stop button. */
+  stopProps?: ComponentProps<"button">;
   textareaProps?: Omit<ComponentProps<"textarea">, "value" | "onChange" | "disabled" | "placeholder">;
 };
 
@@ -61,6 +76,8 @@ export function ChatComposer({
   submitLabel = "Send message",
   sendLabel = "↑",
   stopLabel = "■",
+  submitProps,
+  stopProps,
   textareaProps,
   className,
   ...props
@@ -147,6 +164,7 @@ export function ChatComposer({
               aria-label={stopAccessibleLabel}
               title={stopAccessibleLabel}
               onClick={onStop}
+              {...stopProps}
             >
               <span aria-hidden="true">{stopLabel}</span>
             </Button>
@@ -159,6 +177,7 @@ export function ChatComposer({
             aria-label={submitLabel}
             title={submitLabel}
             disabled={!canSubmit}
+            {...submitProps}
           >
             <span aria-hidden="true">{sendLabel}</span>
           </Button>

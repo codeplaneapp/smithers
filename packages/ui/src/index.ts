@@ -15,8 +15,7 @@
  *
  * @example
  * ```tsx
- * import { createGatewayReactRoot } from "smthrs/gateway-react";
- * import { Button, Card, CardHeader, CardTitle, SmithersUiStyles, StatusPill } from "smthrs/ui";
+ * import { Button, Card, CardHeader, CardTitle, SmithersUiStyles, StatusPill } from "@smthrs/ui";
  *
  * function App() {
  *   return (
@@ -32,7 +31,6 @@
  *     </main>
  *   );
  * }
- * createGatewayReactRoot(<App />);
  * ```
  */
 

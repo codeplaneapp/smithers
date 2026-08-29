@@ -23,6 +23,16 @@ export type FileTreeProps = Omit<ComponentProps<"div">, "onSelect"> & {
   onSelect?: (path: string) => void;
   /** Optional trailing affordance rendered beside each leaf (dirty dot, menu, badge). */
   renderAffordance?: (node: FileTreeNode) => ReactNode;
+  /*
+   * Pass-through attributes for the leaf row buttons this component renders on
+   * the host's behalf.
+   *
+   * A host whose affordances must name the act behind them — a `data-flow`
+   * binding, an analytics id, a test hook — otherwise has to reach into this
+   * component's rendered DOM from outside, which is the exact coupling a
+   * pass-through prop exists to prevent (LIBRARY-CHANGE-REQUESTS §3).
+   */
+  nodeProps?: (node: FileTreeNode) => ComponentProps<"button">;
   /** Start with every directory collapsed (default: expanded). */
   defaultCollapsed?: boolean;
 };
@@ -74,6 +84,7 @@ function FileTreeLevel({
   onToggle,
   onSelect,
   renderAffordance,
+  nodeProps,
 }: {
   dir: TreeDir;
   selected: string | null | undefined;
@@ -81,6 +92,7 @@ function FileTreeLevel({
   onToggle: (path: string) => void;
   onSelect?: (path: string) => void;
   renderAffordance?: (node: FileTreeNode) => ReactNode;
+  nodeProps?: (node: FileTreeNode) => ComponentProps<"button">;
 }) {
   return (
     <>
@@ -107,6 +119,7 @@ function FileTreeLevel({
                   onToggle={onToggle}
                   onSelect={onSelect}
                   renderAffordance={renderAffordance}
+                  nodeProps={nodeProps}
                 />
               </div>
             )}
@@ -125,6 +138,7 @@ function FileTreeLevel({
               data-active={active ? "true" : undefined}
               title={node.path}
               onClick={() => onSelect?.(node.path)}
+              {...nodeProps?.(node)}
             >
               <span className="sui-file-tree-file-name">{leafLabel(node)}</span>
             </button>
@@ -151,6 +165,7 @@ export function FileTree({
   selected,
   onSelect,
   renderAffordance,
+  nodeProps,
   defaultCollapsed = false,
   className,
   ...props
@@ -178,6 +193,7 @@ export function FileTree({
         onToggle={onToggle}
         onSelect={onSelect}
         renderAffordance={renderAffordance}
+        nodeProps={nodeProps}
       />
     </div>
   );

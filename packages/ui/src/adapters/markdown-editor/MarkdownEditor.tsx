@@ -1,5 +1,13 @@
 /** @jsxImportSource react */
-import { forwardRef, useEffect, useImperativeHandle, useInsertionEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useInsertionEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { crepeThemeCss } from "./crepeTheme.generated";
 
 /**
@@ -58,6 +66,18 @@ export type MarkdownEditorProps = {
   className?: string;
   /** Accessible label, forwarded to the host and fallback textarea. */
   "aria-label"?: string;
+  /**
+   * Whether Tab and Shift+Tab move focus out of the editor rather than
+   * inserting indentation. Defaults to true.
+   *
+   * ProseMirror binds Tab to "insert indentation", which makes the editor a
+   * focus trap: a keyboard user who reaches it can never leave (an accessibility
+   * bar, and LIBRARY-CHANGE-REQUESTS §4). Indentation stays available on the
+   * editor's own list and block commands, which is what every editor that
+   * ships inside a form does. Set this to false to restore ProseMirror's
+   * binding for a surface where the editor is the whole page.
+   */
+  escapeTabOrder?: boolean;
 };
 
 /** Marker attribute on the injected Crepe theme `<style>` (deduped on it). */
@@ -132,8 +152,22 @@ type CrepeInstance = {
   setReadonly: (readOnly: boolean) => unknown;
 };
 
+/**
+ * Hands Tab back to the browser.
+ *
+ * The handler runs in the capture phase, above ProseMirror's own keymap, so
+ * the editor never sees the key and the document's focus order is the one the
+ * page declares. `Escape`-style chords and every other key are untouched.
+ *
+ * @param event the keyboard event
+ */
+const releaseTab = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+  if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
+  event.stopPropagation();
+};
+
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, readOnly = false, resetKey, className, "aria-label": ariaLabel },
+  { value, onChange, readOnly = false, resetKey, className, "aria-label": ariaLabel, escapeTabOrder = true },
   ref,
 ) {
   useInjectMarkdownEditorCss();
@@ -253,6 +287,10 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         data-slot="markdown-editor"
         data-testid="markdown-editor"
         data-mode="fallback"
+        // A textarea never bound Tab, so the fallback already has the
+        // document's focus order; the attribute reports the same setting
+        // either way so a host can assert one thing.
+        data-escape-tab-order={escapeTabOrder ? "true" : "false"}
         aria-label={ariaLabel}
         readOnly={readOnly}
         value={fallbackValue}
@@ -267,8 +305,10 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       data-slot="markdown-editor"
       data-testid="markdown-editor"
       data-mode="wysiwyg"
+      data-escape-tab-order={escapeTabOrder ? "true" : "false"}
       aria-label={ariaLabel}
       ref={hostRef}
+      onKeyDownCapture={escapeTabOrder ? releaseTab : undefined}
     />
   );
 });

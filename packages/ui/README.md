@@ -11,7 +11,7 @@ component also self-injects the composed sheet plus its lane CSS fragment as a
 fallback. All classes are namespaced `sui-*`.
 
 ```tsx
-import { SmithersUiStyles, Button, StatusPill } from "smthrs/ui";
+import { SmithersUiStyles, Button, StatusPill } from "@smthrs/ui";
 ```
 
 ## Families
