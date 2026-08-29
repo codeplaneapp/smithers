@@ -22,6 +22,13 @@ export interface SystemFlowEntry {
 /**
  * The authoritative command-line verb to reserved-flow map.
  *
+ * `gc` is the retention verb: it resolves `@smthrs/engine-store`'s `retain`
+ * operation, which deletes aged terminal runs with their attempts, clock
+ * deadlines, deferred completions, journal entries, and time-travel archive
+ * rows. It is a procedure rather than a deploy-class system flow because it
+ * takes no plan and bears no approval envelope; the deletion is gated by the
+ * operator invoking it, and automatic retention stays opt-in.
+ *
  * @since 0.1.0
  * @category models
  * @slop
@@ -40,6 +47,7 @@ export const catalog = [
   { verb: "approve", flowId: "system/approve", projection: "procedure", deployClass: false, planBearing: false },
   { verb: "deny", flowId: "system/deny", projection: "procedure", deployClass: false, planBearing: false },
   { verb: "signal", flowId: "system/signal", projection: "procedure", deployClass: false, planBearing: false },
+  { verb: "gc", flowId: "system/gc", projection: "procedure", deployClass: false, planBearing: false },
   { verb: "replay", flowId: "system/replay", projection: "systemFlow", deployClass: false, planBearing: false },
   { verb: "add", flowId: "system/add", projection: "systemFlow", deployClass: false, planBearing: true },
   { verb: "remove", flowId: "system/remove", projection: "systemFlow", deployClass: false, planBearing: true },
