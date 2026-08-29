@@ -38,7 +38,7 @@ import { Clock, Effect, Layer } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Cancellation from "../src/Cancellation.ts"
 import { Control } from "../src/Control.ts"
-import { PersistenceError } from "../src/ControlError.ts"
+import { ClaimLost, PersistenceError } from "../src/ControlError.ts"
 import * as ControlExecutor from "../src/ControlExecutor.ts"
 import * as ControlLive from "../src/ControlLive.ts"
 import { ControlRuntime } from "../src/ControlRuntime.ts"
@@ -281,5 +281,49 @@ describe("a cancel the engine refuses", () => {
     expect(observed.row.status).toBe(observed.beforeRow.status)
     expect(observed.row.cancelRequestedAtMs).toBeNull()
     expect(observed.kinds).not.toContain(Cancellation.requestedEventType)
+  })
+})
+
+describe("resuming a run another process owns", () => {
+  it("answers ClaimLost while a peer holds the run accepted", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runtime = yield* ControlRuntime
+      const runId = yield* start("peer-accepted")
+      // A claim leaves the run `accepted`, and nothing rewrites that until the
+      // run settles: only `Control.run` promotes to `running`, and only for its
+      // own executor. A run a peer restarted therefore spends its whole second
+      // life `accepted`, which is the state this asks about.
+      yield* park(runtime, runId)
+      const peer = yield* SqlControlRuntime.make({
+        owner: { hostId: "local", pid: 4242, nonce: "peer" }
+      }).pipe(Effect.orDie)
+      yield* peer.resume(runId)
+      const held = yield* runtime.getRun(runId)
+
+      const failure = yield* Effect.flip(control.resume({ runId, idempotencyKey: "resume:peer-accepted" }))
+      return { runId, held, failure, after: yield* runtime.getRun(runId), kinds: yield* kinds(runId) }
+    }))
+
+    expect(observed.held.status).toBe("accepted")
+    // rc-contract 5.1: a live peer's run answers ClaimLost. Answering
+    // `Accepted` here reported a restart that never happened and hid the peer.
+    expect(observed.failure).toBeInstanceOf(ClaimLost)
+    expect(observed.after.status).toBe("accepted")
+    expect(observed.kinds).not.toContain("control.run.resume")
+  })
+
+  it("still delegates a run the engine parked, which no peer is holding", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runtime = yield* ControlRuntime
+      const runId = yield* start("engine-parked")
+      yield* park(runtime, runId)
+      const receipt = yield* control.resume({ runId, idempotencyKey: "resume:engine-parked" })
+      return { runId, receipt, after: yield* runtime.getRun(runId) }
+    }))
+
+    expect(observed.receipt._tag).toBe("Accepted")
+    expect(observed.after.status).toBe("accepted")
   })
 })

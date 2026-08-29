@@ -62,6 +62,20 @@ const accepted = (key: IdempotencyKey, runId?: RunId): Receipt =>
 const terminal = (status: RunSummary["status"]): boolean =>
   status === "cancelled" || status === "completed" || status === "failed"
 
+/**
+ * Whether a status means a process is holding the run right now.
+ *
+ * `accepted` is what a claim writes, and nothing rewrites it until the run
+ * settles: only `Control.run` promotes a run to `running`, and only when its
+ * own executor took the launch. A run restarted by `Control.resume` or by an
+ * approval therefore spends its whole second life `accepted`. Both statuses
+ * project onto the store's `running` (`SqlControlRuntime`'s `storeStatus`), so
+ * a lost claim against either one means a live peer owns the row — which
+ * rc-contract 5.1 answers `ClaimLost`. Asking for the literal `running` alone
+ * answered `Accepted` for a peer's accepted run and hid the peer.
+ */
+const live = (status: RunSummary["status"]): boolean => status === "running" || status === "accepted"
+
 const terminalOrAccepted = (
   key: IdempotencyKey,
   run: RunSummary
@@ -239,8 +253,9 @@ export const layer: Layer.Layer<
      * The journal entry is the delegation. It is written either way, and the
      * owning driver's resume bridge follows it, so the intent reaches the run
      * without this plane taking the row away from the process that can act on
-     * it. A run that is RUNNING under a live peer is still `ClaimLost`: there
-     * is nothing to restart, and pretending otherwise would hide the peer.
+     * it. A run a live peer is HOLDING — `running`, or the `accepted` a claim
+     * writes and only a settlement rewrites — is still `ClaimLost`: there is
+     * nothing to restart, and pretending otherwise would hide the peer.
      */
     const runMutation = (
       input: RunMutationInput
@@ -256,7 +271,7 @@ export const layer: Layer.Layer<
           }
           const claimed = yield* runtime.resume(input.runId, { scope: "launched" }).pipe(
             Effect.catchTag("/control/ClaimLost", () =>
-              current.status === "running"
+              live(current.status)
                 ? Effect.fail(new ClaimLost({ runId: input.runId }))
                 : Effect.succeed(undefined))
           )
