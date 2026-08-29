@@ -12,11 +12,11 @@ import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { repoRoot } from "./docs-contract.mjs"
-import { bundlePaths } from "./optimize-llms-full.ts"
+import { checkedPaths } from "./optimize-llms-full.ts"
 
 const read = (path) => (existsSync(path) ? readFileSync(path, "utf8") : undefined)
 
-const before = new Map(bundlePaths.map((path) => [path, read(join(repoRoot, path))]))
+const before = new Map(checkedPaths.map((path) => [path, read(join(repoRoot, path))]))
 
 const result = spawnSync(process.execPath, [join(repoRoot, "scripts", "generate-llms.ts")], {
   cwd: repoRoot,
@@ -29,7 +29,7 @@ if (result.status !== 0) {
   process.exit(result.status ?? 1)
 }
 
-const stale = bundlePaths.filter((path) => before.get(path) !== read(join(repoRoot, path)))
+const stale = checkedPaths.filter((path) => before.get(path) !== read(join(repoRoot, path)))
 
 if (stale.length > 0) {
   for (const path of stale) {
@@ -43,4 +43,4 @@ if (stale.length > 0) {
   process.exit(1)
 }
 
-console.log(`✓ ${bundlePaths.length} documentation bundle(s) are current`)
+console.log(`✓ ${checkedPaths.filter((path) => before.get(path) !== undefined).length} documentation artifact(s) are current`)

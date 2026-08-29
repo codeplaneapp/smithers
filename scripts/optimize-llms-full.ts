@@ -84,6 +84,16 @@ export const bundlePaths = [
   "skills/smithers/llms-full.txt"
 ]
 
+/**
+ * Everything `generate-llms.ts` writes, which is what `check-llms.mjs` compares.
+ *
+ * `packages/cli/docs/SKILL.md` is a copy of `skills/smithers/SKILL.md` rather
+ * than an optimized bundle, so it is not part of {@link bundlePaths}, which is
+ * this script's own input. It is still an artifact the pipeline emits, and an
+ * artifact no gate reads goes stale the first time its source changes.
+ */
+export const checkedPaths = [...bundlePaths, "packages/cli/docs/SKILL.md"]
+
 if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const check = process.argv.includes("--check")
   const drifted: Array<string> = []

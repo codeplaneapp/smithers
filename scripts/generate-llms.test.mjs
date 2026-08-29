@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { isHistorical, pages, parseFrontmatter, routeOf } from "./docs-pages.mjs"
 import { build, demoteHeadings, excluded, orderRoutes, renderPage, topics } from "./generate-llms.ts"
-import { collapseWhitespace, dropNavigation, optimize, stripInternalLinks } from "./optimize-llms-full.ts"
+import { bundlePaths, checkedPaths, collapseWhitespace, dropNavigation, optimize, stripInternalLinks } from "./optimize-llms-full.ts"
 
 test("splits frontmatter off a page", () => {
   const { frontmatter, body } = parseFrontmatter('---\ndescription: "one"\n---\n\n# Title\n\nBody\n')
@@ -103,4 +103,20 @@ test("building twice from one tree produces the same bytes", () => {
 test("no bundle carries a Smithers 0.x changelog", () => {
   const full = build().artifacts.get("docs/llms-full.txt")
   assert.doesNotMatch(full, /Route: \/changelogs\/0\./)
+})
+
+test("every artifact the pipeline writes is one check-llms compares", () => {
+  // `packages/cli/docs/SKILL.md` is copied rather than optimized, so it does not
+  // belong in `bundlePaths`, which is the optimizer's input. It is still an
+  // artifact this pipeline writes, and an artifact no gate reads goes stale the
+  // first time its source changes.
+  const written = [...build().artifacts.keys(), "packages/cli/docs/SKILL.md"]
+  const checked = new Set(checkedPaths)
+  const ungated = written.filter((path) => !checked.has(path))
+  assert.deepEqual(ungated, [])
+})
+
+test("the optimizer's input is the bundles, not the copies", () => {
+  assert.ok(!bundlePaths.includes("packages/cli/docs/SKILL.md"))
+  assert.ok(checkedPaths.length > bundlePaths.length)
 })
