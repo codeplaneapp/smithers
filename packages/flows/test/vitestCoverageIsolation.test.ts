@@ -543,6 +543,11 @@ describe("vitest coverage isolation conformance", () => {
       // freezing the captured object graph, so the descriptor walk only sees
       // data properties in both identity implementations.
       "core/src/internal/node.ts": 1,
+      // The Node runtime merges `engineRules` under a program's configured
+      // ruleset only after returning for the empty case, so the first
+      // ruleset it reads back is always there; the fallback exists to
+      // discharge the optional an index read carries.
+      "flows/src/NodeRuntime.ts": 1,
       // Three unreachable-by-construction branches in the plan scheduler: the
       // ready-set can never be empty while work is pending (the compiler
       // rejects cycles), the dispatch key is built from strings so

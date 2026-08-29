@@ -293,7 +293,7 @@ export const signalExitCode = (signal: NodeJS.Signals): number =>
 export const engineRules: ReadonlyArray<Permission.Rule> = [
   new Permission.Rule({
     effect: "allow",
-    pattern: new Capability.CapabilityPattern({ action: "jj:snapshot", resource: "flows action *" })
+    pattern: new Capability.CapabilityPattern({ action: "jj:snapshot", resource: "smithers action *" })
   }),
   new Permission.Rule({
     effect: "allow",
@@ -311,6 +311,7 @@ const withEngineRules = (
     : [rules as ReadonlyArray<Permission.Rule>]
   // Configured policy is the FIRST ruleset and the last match in it wins, so
   // prepending leaves a program free to deny what it does not want granted.
+  /* v8 ignore next -- the empty-`rules` case already returned, so `nested` always has a first ruleset; the fallback only discharges the optional an index read carries */
   return [[...engineRules, ...(nested[0] ?? [])], ...nested.slice(1)]
 }
 
