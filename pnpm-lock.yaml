@@ -121,7 +121,7 @@ importers:
         specifier: 1.0.0-rc.0
         version: link:../../packages/registry
       '@smthrs/ui-styleguide':
-        specifier: 1.0.0-rc.0
+        specifier: workspace:*
         version: link:../../packages/ui-styleguide
       effect:
         specifier: 4.0.0-rc.108

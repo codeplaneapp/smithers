@@ -1,6 +1,7 @@
 {
   "name": "@smthrs/review",
   "version": "1.0.0-rc.0",
+  "private": true,
   "description": "Code review plus story-form HTML walkthrough, as a Smithers flow",
   "license": "MIT",
   "type": "module",
@@ -44,7 +45,7 @@
     "@smthrs/model": "1.0.0-rc.0",
     "@smthrs/plan": "1.0.0-rc.0",
     "@smthrs/registry": "1.0.0-rc.0",
-    "@smthrs/ui-styleguide": "1.0.0-rc.0",
+    "@smthrs/ui-styleguide": "workspace:*",
     "effect": "4.0.0-rc.108",
     "mermaid": "^11.16.0"
   },

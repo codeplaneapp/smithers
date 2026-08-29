@@ -110,9 +110,11 @@ jobs:
 
 ## Rendering diffs anywhere else
 
-The diff renderer is exported as `@smthrs/review/diffs` so
-humans and agents can embed the same diffs in any artifact (reports, custom
-workflow UIs, dashboards):
+The diff renderer is exported as `@smthrs/review/diffs`, so anything in this
+workspace can embed the same diffs in any artifact (reports, custom workflow
+UIs, dashboards). The package is private at rc.0 (rc-contract.md section 3
+rule (d)), so the import resolves through the workspace link, not a registry
+install:
 
 ```ts
 import { renderPierreFileDiff, extractDiffAssets } from "@smthrs/review/diffs";
