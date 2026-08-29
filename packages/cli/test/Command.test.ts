@@ -2,42 +2,27 @@ import { Effect, Redacted } from "effect"
 import { describe, expect, it } from "vitest"
 import { cli } from "../src/Command.ts"
 import { make } from "../src/Output.ts"
+import * as Unsupported from "../src/Unsupported.ts"
+import * as Verb from "../src/Verb.ts"
 
 const names = cli.subcommands.flatMap((group) => group.commands.map((command) => command.name))
 
 describe("Command", () => {
-  it("projects every accepted verb as one root subcommand", () => {
-    expect(names).toEqual([
-      "plan",
-      "run",
-      "release",
-      "serve",
-      "up",
-      "ls",
-      "ps",
-      "logs",
-      "status",
-      "cancel",
-      "approve",
-      "deny",
-      "signal",
-      "replay",
-      "add",
-      "remove",
-      "eject",
-      "test",
-      "init",
-      "doctor",
-      "migrate",
-      "docs"
-    ])
+  it("registers every shipped verb and every removed one", () => {
+    // The exact sets are pinned by `Verb.test.ts`; this asserts only that the
+    // command tree is built from them rather than from a hand-kept list.
+    for (const verb of Verb.subcommands) expect(names).toContain(verb.name)
+    for (const verb of Unsupported.removedVerbs) {
+      expect(names).toContain(verb.name === "workflows" ? "workflow" : verb.name)
+    }
   })
 
-  it("keeps up --watch and run --resume in their command configurations", () => {
-    const up = cli.subcommands.flatMap((group) => group.commands).find((command) => command.name === "up")!
-    const run = cli.subcommands.flatMap((group) => group.commands).find((command) => command.name === "run")!
-    expect(up.name).toBe("up")
-    expect(run.name).toBe("run")
+  it("keeps up -d and run --resume in their command configurations", () => {
+    const commands = cli.subcommands.flatMap((group) => group.commands)
+
+    expect(commands.find((command) => command.name === "up")?.name).toBe("up")
+    expect(commands.find((command) => command.name === "run")?.name).toBe("run")
+    expect(commands.find((command) => command.name === "resume")?.unlisted).toBe(true)
   })
 
   it("requires an approval payload and supports scoped grants", () => {

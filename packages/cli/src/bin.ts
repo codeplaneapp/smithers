@@ -26,6 +26,25 @@ const onSigterm = () => {
 process.once("SIGINT", onSigint)
 process.once("SIGTERM", onSigterm)
 
+/**
+ * A CLI failure is a sentence for the operator, on stderr.
+ *
+ * Effect's default error reporting logs the cause through the runtime logger,
+ * which writes to STDOUT with a timestamp and a stack. For a command-line tool
+ * that is two bugs at once: a script reading `--json` gets a log line in its
+ * document, and an operator gets a stack trace where the contract promised a
+ * migration message. Reporting is therefore disabled below and the message is
+ * written here instead.
+ */
+const report = (error: unknown): void => {
+  const message = error instanceof CliError.UsageError || error instanceof CliError.UnsupportedError
+    ? error.message
+    : error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : String(error)
+  process.stderr.write(`${message}\n`)
+}
+
 const teardown: Runtime.Teardown = (exit, onExit) => {
   process.removeListener("SIGINT", onSigint)
   process.removeListener("SIGTERM", onSigterm)
@@ -45,9 +64,12 @@ const teardown: Runtime.Teardown = (exit, onExit) => {
 
   const error = Cause.squash(exit.cause)
   if (EffectCliError.isCliError(error)) {
+    // `effect/unstable/cli` renders its own help and usage output; only the
+    // status is this module's to decide.
     onExit(error._tag === "ShowHelp" && error.errors.length === 0 ? 0 : 2)
     return
   }
+  report(error)
   if (error instanceof CliError.UsageError || error instanceof CliError.UnsupportedError) {
     onExit(CliError.exitCode(error))
     return
@@ -62,4 +84,4 @@ const main = Effect.gen(function*() {
   )
 })
 
-NodeRuntime.runMain(main, { teardown })
+NodeRuntime.runMain(main, { teardown, disableErrorReporting: true })
