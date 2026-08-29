@@ -29,8 +29,11 @@ pnpm exec smithers-build test '//scripts/repo-contract/...'
 ## Ported from Smithers 0.x
 
 These replace `packages/smithers/tests/`, which is gone. Fifteen suites lived
-there; four requirements survived the migration. The rest are recorded below
-with why they did not, so the deletion is a decision rather than an omission.
+there. Three of them — the bin-delegation trio — are the cli-ops lane's, per the
+disposition ledger's `packages/smithers/src/bin` row: they pin the bin that row
+ports, and they travel with it. Of the twelve this lane owns, four requirements
+survived the migration. The rest are recorded below with why they did not, so
+each deletion is a decision rather than an omission.
 
 | 0.x suite | Disposition |
 | --- | --- |
@@ -43,4 +46,4 @@ with why they did not, so the deletion is a decision rather than an omission.
 | `release-tag-guard` | Dropped. `scripts/release-tag-guard.mjs` has no successor: the RC release flow is `release.yml`, whose dry-run and tag-push paths are covered by `//scripts:releaseRehearsal`. |
 | `coverage-script-gate` | Dropped. It tested `scripts/coverage.mjs` and the Bun LCOV merge, neither of which exists. Coverage is vitest's, and the gate that keeps its denominator honest is `packages/flows/test/vitestCoverageIsolation.test.ts`. |
 | `workspace-test-sharding` | Dropped. `scripts/run-workspace-tests.mjs` and the Windows shard runner are gone; the Windows lane runs `//packages/...` directly. |
-| `bin-smithers-delegation`, `bin-dangling-workspace-link-hint`, `dangling-many-links` | Dropped. All three tested the 0.x `smthrs` bin's delegation shim, which resolved a locally installed CLI and diagnosed dangling workspace links. The `smithers` binary is `@smthrs/cli`'s and does no delegation, so there is no subject left. |
+| `bin-smithers-delegation`, `bin-dangling-workspace-link-hint`, `dangling-many-links` | Not this lane's. The disposition ledger assigns all three to the `packages/smithers/src/bin` row, which the cli-ops lane executes. That lane ported them: the dangling-workspace-link diagnosis is `packages/cli/bin/dangling-workspace-links.mjs`, driven by `packages/cli/test/DanglingWorkspaceLinks.test.ts`, and the shim's resolution order is `packages/cli/test/Bin.test.ts`. The 0.x delegation to a locally installed CLI has no successor, because `@smthrs/cli`'s bin runs `dist/esm/bin.js` or `src/bin.ts` in its own package and delegates to nothing. |
