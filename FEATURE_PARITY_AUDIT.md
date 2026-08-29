@@ -7,7 +7,7 @@ Post-integration audit against the parity integration tree (flows HEAD 9230168 p
 - Yes before this round: 33
 - Yes (1.0.0-rc.0), closed by the parity lanes and verified in the integration tree: 34
 - Partial after integration: 8 (Human tasks, Child cancellation and process containment, Check suite, Kanban, Runbook, Merge queue, Sidecar, Live client sync)
-- Deferred for rc.0 under Phase 5 enforcement or scope ruling: 11 items (A16, A28b, A58b, A60b, A62, A67, A72, A73, A89a, A89b, A93)
+- Deferred for rc.0 under Phase 5 enforcement or scope ruling: 11 items (A16, A28b, A58b, A60b, A62, A67, A72, A73, A89a, A89b, A93). Every one is listed once on `docs/pages/release/known-limitations.md` under its Phase 5 exclusion id; A89a (Bun durable engine, X-18) and the 0.x database refusal (X-13) are enforced in `packages/database/src/node/NodeDatabase.ts`
 - Pending Phase 4: 10 (External integrations, CLI, MCP server, Gateway and RPC, Product UI, Electric sync proxy, Workflow-specific UIs, Init pack and starters, Open code review, Docs pipeline)
 - Plue-owned: 2 (Usage metering and quotas, Hosted tenancy and billing)
 - Not a runtime feature: 1 (Docs-driven development)
@@ -812,6 +812,9 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 ## SQLite storage
 
 - Parity: Yes
+- Enforcement (X-13): `NodeDatabase.layer` refuses a file that has at least one table and no `flows_migrations` table, with the typed `UnsupportedDatabase` code `unsupported_database_file`, so a 0.x `smithers.db` can never gain `flows_*` tables beside its `_smithers_*` ones
+- Evidence: packages/database/test/NodeDatabaseGuard.test.ts::refuses a file that has tables and no flows_migrations table
+- Evidence: packages/database/test/NodeDatabaseGuard.test.ts::opens a database that carries the flows_migrations table
 
 ## Postgres and PGlite storage
 
@@ -923,7 +926,9 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 ## Runtime portability
 
 - Parity: Deferred for rc.0
-- Enforcement: the Bun durable engine stays unsupported and durable execution under Bun returns the existing unsupported_runtime error (A89a, dropped by ruling); edge and serverless claims are limited to browser-bundleable APIs, with the Cloudflare and Vercel adapters experimental in the plugins repository (A89b), per PLAN.md Phase 5
+- Enforcement (X-18): the Bun durable engine stays unsupported; `NodeDatabase.layer` refuses to open a durable database when `process.versions.bun` is set, with the typed `UnsupportedDatabase` code `unsupported_runtime` (A89a, dropped by ruling); edge and serverless claims are limited to browser-bundleable APIs, with the Cloudflare and Vercel adapters experimental in the plugins repository (A89b), per PLAN.md Phase 5
+- Evidence: packages/database/test/NodeDatabaseGuard.test.ts::refuses to open the durable database under Bun
+- Evidence: packages/database/test/NodeDatabaseGuard.test.ts::refuses before it inspects the file, so an in-memory database is refused too
 
 ## Workflow testing
 
