@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+/** A headline, in either spelling: the one line triage files the report under. */
+const headline = z.string().min(1).max(500);
+
+/** rc.0 sends `darwin-arm64`; 0.x sent `{ os, arch, nodeVersion }`. */
+const platform = z.union([z.string(), z.record(z.string(), z.unknown())]);
+
 /**
  * Bug intake payload.
  *
@@ -19,11 +25,6 @@ import { z } from "zod";
  * One field stays required in substance: a report with no headline at all is
  * refused, because triage cannot file what it cannot name.
  */
-const headline = z.string().min(1).max(500);
-
-/** rc.0 sends `darwin-arm64`; 0.x sent `{ os, arch, nodeVersion }`. */
-const platform = z.union([z.string(), z.record(z.string(), z.unknown())]);
-
 export const bugReportSchema = z
   .object({
     /** 0.x headline. */
