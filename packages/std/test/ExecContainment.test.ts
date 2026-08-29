@@ -41,9 +41,10 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { execFileSync } from "node:child_process"
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import * as Exec from "../src/internal/Exec.ts"
 
 const directory = mkdtempSync(join(tmpdir(), "flows-exec-containment-"))
@@ -196,4 +197,27 @@ describe.skipIf(process.platform === "win32")("a cancelled Exec", () => {
       yield* Fiber.await(cancelling)
       expect(yield* Effect.promise(() => waitForNoSurvivor(run.script, 3_000))).toEqual([])
     }), 30_000)
+
+  it("starts no process except through the spawner the host decorates", () => {
+    // Containment is a property of the SERVICE, not of any call site: the host
+    // decorates `ChildProcessSpawner` once and every path that resolves the
+    // tag inherits the kill deadline and the ledger record. A module that
+    // reached for `node:child_process` would be outside both, silently, and no
+    // behavioral test in this package could see it — the process would simply
+    // outlive a cancel on someone's machine. So the bypass is checked for
+    // directly.
+    const source = join(dirname(fileURLToPath(import.meta.url)), "..", "src")
+    const files: Array<string> = []
+    const walk = (directory: string) => {
+      for (const entry of readdirSync(directory)) {
+        const path = join(directory, entry)
+        if (statSync(path).isDirectory()) walk(path)
+        else if (path.endsWith(".ts")) files.push(path)
+      }
+    }
+    walk(source)
+
+    expect(files.length).toBeGreaterThan(0)
+    expect(files.filter((path) => readFileSync(path, "utf8").includes("node:child_process"))).toEqual([])
+  })
 })
