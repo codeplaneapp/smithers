@@ -1,0 +1,14 @@
+// Values produced by whyExcluded/previewOpenCodeReview in
+// smithers-workflows/lib/open-code-review.
+const reasonLabels: Record<string, string> = {
+  binary: "binary file",
+  user_exclude: "excluded by review rules",
+  unsupported_ext: "file type not reviewed",
+  default_path: "outside the default review set",
+  deleted: "deleted with no reviewable content",
+};
+
+/** Human label for a review exclude reason; unknown enums degrade to readable text. */
+export function humanizeExcludeReason(reason: string): string {
+  return reasonLabels[reason] ?? reason.replace(/_/g, " ");
+}

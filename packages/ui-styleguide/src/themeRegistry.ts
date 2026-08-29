@@ -1,12 +1,12 @@
-import type { SmithersTheme } from "./SmithersTheme";
-import { catppuccin } from "./themes/catppuccin";
-import { fucory } from "./themes/fucory";
-import { github } from "./themes/github";
-import { gruvbox } from "./themes/gruvbox";
-import { nightOwl } from "./themes/nightOwl";
-import { one } from "./themes/one";
-import { rosePine } from "./themes/rosePine";
-import { solarized } from "./themes/solarized";
+import type { SmithersTheme } from "./SmithersTheme.ts";
+import { catppuccin } from "./themes/catppuccin.ts";
+import { fucory } from "./themes/fucory.ts";
+import { github } from "./themes/github.ts";
+import { gruvbox } from "./themes/gruvbox.ts";
+import { nightOwl } from "./themes/nightOwl.ts";
+import { one } from "./themes/one.ts";
+import { rosePine } from "./themes/rosePine.ts";
+import { solarized } from "./themes/solarized.ts";
 
 export const DEFAULT_THEME_KEY = "night-owl";
 

@@ -1,5 +1,5 @@
-import { reducedMotionCss } from "./standaloneThemeCss";
-import { paletteThemeCss } from "./paletteThemeCss";
+import { reducedMotionCss } from "./standaloneThemeCss.ts";
+import { paletteThemeCss } from "./paletteThemeCss.ts";
 
 export const workflowUiThemeCss = [
   ...paletteThemeCss("'"),
@@ -94,12 +94,12 @@ export const workflowUiLayoutCss = [
 ].join("\n");
 
 export const workflowUiStyles = [workflowUiThemeCss, workflowUiLayoutCss].join("\n");
-export { reducedMotionCss, standaloneThemeCss } from "./standaloneThemeCss";
-export { DEFAULT_THEME_KEY, themeRegistry } from "./themeRegistry";
-export { serializeThemeVariant } from "./serializeThemeVariant";
-export { contrastRatio } from "./contrastRatio";
-export { mixColors } from "./mixColors";
-export type { SmithersTheme } from "./SmithersTheme";
-export type { TerminalPalette } from "./TerminalPalette";
-export type { ThemeSyntaxId } from "./ThemeSyntaxId";
-export type { ThemeVariantTokens } from "./ThemeVariantTokens";
+export { reducedMotionCss, standaloneThemeCss } from "./standaloneThemeCss.ts";
+export { DEFAULT_THEME_KEY, themeRegistry } from "./themeRegistry.ts";
+export { serializeThemeVariant } from "./serializeThemeVariant.ts";
+export { contrastRatio } from "./contrastRatio.ts";
+export { mixColors } from "./mixColors.ts";
+export type { SmithersTheme } from "./SmithersTheme.ts";
+export type { TerminalPalette } from "./TerminalPalette.ts";
+export type { ThemeSyntaxId } from "./ThemeSyntaxId.ts";
+export type { ThemeVariantTokens } from "./ThemeVariantTokens.ts";

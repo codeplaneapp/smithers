@@ -1,5 +1,5 @@
-import { serializeThemeVariant } from "./serializeThemeVariant";
-import { DEFAULT_THEME_KEY, themeRegistry } from "./themeRegistry";
+import { serializeThemeVariant } from "./serializeThemeVariant.ts";
+import { DEFAULT_THEME_KEY, themeRegistry } from "./themeRegistry.ts";
 
 export const lightTokens = serializeThemeVariant(themeRegistry[DEFAULT_THEME_KEY].light);
 
