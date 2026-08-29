@@ -189,6 +189,9 @@ importers:
       '@smthrs/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@smthrs/gateway':
+        specifier: workspace:*
+        version: link:../../packages/gateway
       '@smthrs/harness':
         specifier: workspace:*
         version: link:../../packages/harness

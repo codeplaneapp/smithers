@@ -1,28 +1,9 @@
-import { APPROVAL_DECISION_PATH, WORKFLOW_PROVISION_PATH, WORKFLOW_RPC_PATH } from "smithers-shared/AgentApiRoutes"
+import { WORKFLOW_PROVISION_PATH } from "smithers-shared/AgentApiRoutes"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 import { ZERO_BALANCE_EXHAUSTED_TEXT } from "./failures"
 
-export type WorkflowRpcResult =
-  | { readonly status: "ok"; readonly payload: unknown }
-  | { readonly status: "error"; readonly message: string }
-
-export const whatHappenedWords = (result: WorkflowRpcResult): string | null => {
-  if (result.status !== "ok") return null
-  const payload = result.payload
-  if (typeof payload === "string" && payload.trim() !== "") return payload.trim()
-  if (typeof payload === "object" && payload !== null) {
-    for (const key of ["summary", "text", "narrative", "message"]) {
-      const value = (payload as Record<string, unknown>)[key]
-      if (typeof value === "string" && value.trim() !== "") return value.trim()
-    }
-  }
-  return null
-}
-
 export interface WorkflowController {
-  readonly workflowRpc: (repo: string, method: string, params: unknown) => Promise<WorkflowRpcResult>
-  readonly whatHappenedWords: (result: WorkflowRpcResult) => string | null
   readonly createWorkflow: (description: string, repo?: string) => Promise<string | void | { readonly value: string }>
   readonly listWorkspaceWorkflows: () => Promise<string | void | { readonly value: string }>
   readonly runWorkflow: (name: string, repo?: string) => Promise<string | void | { readonly value: string }>
@@ -38,7 +19,7 @@ export const createWorkflowController = (
   nextTranscriptOrdinal: () => number,
   pumpWorkflowRun: (cardId: string) => Promise<void>
 ): WorkflowController => {
-  const { store, baseUrl, boundedFetch, errorMessageOf, unref, workflowPollMs, withToast } = ctx
+  const { store, baseUrl, boundedFetch, errorMessageOf, gateway, unref, workflowPollMs, withToast } = ctx
   const RUN_POLL_MS = workflowPollMs
   const waitMs = (ms: number): Promise<void> =>
     new Promise((resolve) => {
@@ -181,66 +162,6 @@ export const createWorkflowController = (
       () => provisionWorkspaceImpl(repo)
     )
 
-  const workflowRpc = async (repo: string, method: string, params: unknown): Promise<WorkflowRpcResult> => {
-    let body:
-      | {
-        status?: unknown
-        message?: unknown
-        ok?: unknown
-        payload?: unknown
-        error?: { message?: unknown } | unknown
-      }
-      | undefined
-    try {
-      const response = await boundedFetch(`${baseUrl}${WORKFLOW_RPC_PATH}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ repo, method, params })
-      })
-      if (!response.ok) {
-        return { status: "error", message: await errorMessageOf(response, "The workspace didn't answer.") }
-      }
-      body = (await response.json().catch(() => undefined)) as typeof body
-    } catch {
-      return { status: "error", message: "The workspace didn't answer — the workflow service is unreachable." }
-    }
-    if (body?.ok === true) return { status: "ok", payload: body.payload }
-    const gatewayError = body?.error
-    if (body?.ok === false) {
-      return {
-        status: "error",
-        message: typeof gatewayError === "object" &&
-            gatewayError !== null &&
-            "message" in gatewayError &&
-            typeof gatewayError.message === "string"
-          ? gatewayError.message
-          : "The workspace refused the call."
-      }
-    }
-    if (typeof body?.message === "string") return { status: "error", message: body.message }
-    return { status: "error", message: "The workspace answered in a shape I didn't understand." }
-  }
-
-  ctx.workflowRpc = workflowRpc
-
-  interface WorkflowSummary {
-    readonly key: string
-    readonly description: string | null
-  }
-
-  const parseWorkflowSummaries = (wire: unknown): WorkflowSummary[] =>
-    (Array.isArray(wire) ? wire : [])
-      .filter(
-        (entry) => typeof entry === "object" && entry !== null && typeof (entry as { key?: unknown }).key === "string"
-      )
-      .map((entry) => {
-        const row = entry as { key: string; description?: unknown; readableName?: unknown }
-        return {
-          key: row.key,
-          description: typeof row.description === "string" && row.description.trim() !== "" ? row.description : null
-        }
-      })
-
   const upsertRunCard = (args: {
     readonly runId: string
     readonly repo: string
@@ -278,19 +199,9 @@ export const createWorkflowController = (
     readonly input: Record<string, unknown>
     readonly title: string
   }): Promise<{ readonly runId: string } | string> => {
-    const launch = await workflowRpc(args.repo, "launchRun", {
-      workflow: args.workflow,
-      input: args.input
-    })
+    const launch = await gateway.launch(args.repo, args.workflow, args.input)
     if (launch.status !== "ok") return launch.message
-    const payload = launch.payload
-    const runId =
-      typeof payload === "object" && payload !== null && "runId" in payload && typeof payload.runId === "string"
-        ? payload.runId
-        : undefined
-    if (runId === undefined) {
-      return "The run started but the workspace didn't name it — nothing is lost; ask me to check."
-    }
+    const { runId } = launch.value
     upsertRunCard({
       runId,
       repo: args.repo,
@@ -413,9 +324,9 @@ export const createWorkflowController = (
     const repo = target.repo
     const provisioned = await provisionWorkspace(repo)
     if (provisioned !== true) return provisioned
-    const list = await workflowRpc(repo, "listWorkflows", {})
+    const list = await gateway.listFlows(repo)
     if (list.status !== "ok") return list.message
-    const workflows = parseWorkflowSummaries(list.payload)
+    const workflows = list.value.map((flow) => ({ key: flow.flowId, description: flow.description }))
     const existing = store.collections.cards.get(`workflow-list-${repo}`)
     const card: Card = {
       id: `workflow-list-${repo}`,
@@ -454,14 +365,11 @@ export const createWorkflowController = (
       title: `${name} — ${repo}`
     })
     if (typeof launched === "string") {
-      if (!/unknown workflow/i.test(launched)) return launched
+      if (!/unknown|not found/i.test(launched)) return launched
       // A genuine miss: only now is it worth naming what the workspace has.
-      const list = await workflowRpc(repo, "listWorkflows", {})
+      const list = await gateway.listFlows(repo)
       const available = list.status === "ok"
-        ? parseWorkflowSummaries(list.payload)
-          .map((workflow) => workflow.key)
-          .slice(0, 8)
-          .join(", ")
+        ? list.value.map((flow) => flow.flowId).slice(0, 8).join(", ")
         : ""
       return `There's no workflow called ${name} on ${repo}${
         available === "" ? "." : ` — the workspace has: ${available}.`
@@ -471,71 +379,52 @@ export const createWorkflowController = (
     return { value: `run-started workflow=${name} run=${launched.runId} repo=${repo}` }
   }
 
+  /**
+   * Decide one gate.
+   *
+   * The payload the gateway published goes back unchanged, so the client never
+   * reconstructs authority, and one call records the decision AND resumes the
+   * run it unblocked. The card still freezes from the server's answer, never
+   * from local optimism: a decision the workspace did not take is a decision
+   * the human has to be able to take again.
+   */
   const forwardApprovalDecision = async (
     card: Extract<Card, { kind: "approval" }>,
     decision: "approved" | "denied"
   ): Promise<void> => {
-    const { runId, nodeId, iteration, repo } = card.payload
-    let response: Response
-    try {
-      response = await boundedFetch(`${baseUrl}${APPROVAL_DECISION_PATH}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          runId,
-          nodeId,
-          iteration,
-          decision: { approved: decision === "approved" },
-          // Wave 11: a run's approval round-trips through the per-user
-          // gateway for the repo the run lives on.
-          ...(repo === undefined ? {} : { repo })
-        })
-      })
-    } catch {
+    const { repo, approval } = card.payload
+    if (repo === undefined || approval === undefined) {
       store.dispatch({
         type: "card.approval.decision.failed",
         actor: "system",
         id: card.id,
-        message: "The decision could not reach the engine. Nothing was recorded — try again."
+        message: "This approval is not linked to a run, so there is nothing to send the decision to."
       })
       return
     }
-    if (!response.ok) {
+    const submitted = await gateway.submitApproval(
+      repo,
+      approval as Parameters<typeof gateway.submitApproval>[1],
+      decision === "approved" ? "approve" : "deny"
+    )
+    if (submitted.status !== "ok") {
       store.dispatch({
         type: "card.approval.decision.failed",
         actor: "system",
         id: card.id,
-        message: await errorMessageOf(
-          response,
-          "The engine did not accept the decision. Nothing was recorded — try again."
-        )
+        message: submitted.message
       })
       return
     }
-    const echo = (await response.json().catch(() => undefined)) as
-      | { runId?: unknown; nodeId?: unknown; iteration?: unknown; approved?: unknown }
-      | undefined
-    if (echo === undefined || typeof echo.approved !== "boolean") {
-      store.dispatch({
-        type: "card.approval.decision.failed",
-        actor: "system",
-        id: card.id,
-        message: "The engine did not echo the decision, so nothing was recorded — try again."
-      })
-      return
-    }
-    // The card freezes from the server's echo, never from local optimism.
     store.dispatch({
       type: "card.approval.decided",
       actor: "user",
       id: card.id,
-      decision: echo.approved ? "approved" : "denied",
+      decision,
       decidedAt: Date.now()
     })
   }
   return {
-    workflowRpc,
-    whatHappenedWords,
     createWorkflow,
     listWorkspaceWorkflows,
     runWorkflow,

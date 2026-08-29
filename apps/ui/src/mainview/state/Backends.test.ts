@@ -358,20 +358,30 @@ describe("approval round trip", () => {
       status: "active",
       createdAt: Date.now(),
       ordinal: 900,
-      payload: { capability: "run the deploy flow", runId: "run_01", nodeId: "approve", iteration: 0 }
+      payload: {
+        capability: "run the deploy flow",
+        runId: "run_01",
+        requestId: "approve",
+        repo: "codeplanesmithers/smithers-demo",
+        approval: {
+          target: { _tag: "Node", runId: "run_01", requestId: "approve", digest: "d", envelope: {} },
+          scope: "run",
+          idempotencyKey: "approve:approve"
+        }
+      }
     }
     store.dispatch({ type: "card.upsert", actor: "smithers", card })
     return card
   }
 
-  test("decision → pending → worker → echo freezes the card from the server echo", async () => {
+  test("decision → pending → gateway → freeze from the gateway's own answer", async () => {
     const store = await webStore()
     let posted: unknown
     const controller = createAppController(store, unavailableRepositories, silentAgent(), {
       ...backend({
-        "/api/approvals/decision": async (request) => {
+        "/api/workflow/rpc": async (request) => {
           posted = await request.json()
-          return json(200, { runId: "run_01", nodeId: "approve", iteration: 0, approved: true })
+          return json(200, { ok: true, payload: { decision: { _tag: "Accepted" }, resume: { _tag: "Accepted" } } })
         }
       })
     })
@@ -380,11 +390,17 @@ describe("approval round trip", () => {
     const pending = store.collections.cards.get("approval-1")
     if (pending?.kind === "approval") expect(pending.payload.pending).toBe(true)
     await settled()
+    // The exact envelope the gateway published goes back, plus the decision:
+    // the client never reconstructs the authority it is exercising.
     expect(posted).toEqual({
-      runId: "run_01",
-      nodeId: "approve",
-      iteration: 0,
-      decision: { approved: true }
+      repo: "codeplanesmithers/smithers-demo",
+      procedure: "Approval.Submit",
+      payload: {
+        target: { _tag: "Node", runId: "run_01", requestId: "approve", digest: "d", envelope: {} },
+        scope: "run",
+        idempotencyKey: "approve:approve",
+        decision: "approve"
+      }
     })
     const card = store.collections.cards.get("approval-1")
     expect(card?.status).toBe("acted")
@@ -395,16 +411,11 @@ describe("approval round trip", () => {
     }
   })
 
-  test("the deny path round-trips and freezes denied from the echo", async () => {
+  test("the deny path round-trips and freezes denied from the gateway's answer", async () => {
     const store = await webStore()
     const controller = createAppController(store, unavailableRepositories, silentAgent(), {
       ...backend({
-        "/api/approvals/decision": json(200, {
-          runId: "run_01",
-          nodeId: "approve",
-          iteration: 0,
-          approved: false
-        })
+        "/api/workflow/rpc": json(200, { ok: true, payload: { decision: { _tag: "Accepted" } } })
       })
     })
     approvalCard(store)
@@ -421,10 +432,10 @@ describe("approval round trip", () => {
     const controller = createAppController(store, unavailableRepositories, silentAgent(), {
       fetchImpl: async (input) => {
         const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-        if (!url.includes("/api/approvals/decision")) return json(404, {})
+        if (!url.includes("/api/workflow/rpc")) return json(404, {})
         attempts += 1
         if (attempts === 1) return json(502, { status: "error", message: "gateway unreachable" })
-        return json(200, { runId: "run_01", nodeId: "approve", iteration: 0, approved: true })
+        return json(200, { ok: true, payload: { decision: { _tag: "Accepted" } } })
       }
     })
     approvalCard(store)

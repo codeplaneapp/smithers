@@ -365,8 +365,21 @@ describe("wave 13 §F — capability theater in a launch turn is caught determin
           )
         }
         if (pathname === "/api/workflow/rpc") {
+          // One double for the whole launch: `Plan` names the plan, `Run`
+          // names the run, and every read answers an empty projection.
           return new Response(
-            JSON.stringify({ ok: true, payload: { runId: "run-w13" } }),
+            JSON.stringify({
+              ok: true,
+              payload: {
+                planId: "plan-1",
+                digest: "digest-1",
+                envelope: { capabilities: [], flows: [], budget: {} },
+                _tag: "Accepted",
+                runId: "run-w13",
+                cursor: { projection: "run-summary", runId: "run-w13", value: 0 },
+                rows: []
+              }
+            }),
             { status: 200, headers: { "content-type": "application/json" } }
           )
         }

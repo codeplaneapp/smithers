@@ -183,8 +183,12 @@ describe("server-emitted card frames", () => {
       payload: {
         capability: "deploy:production",
         runId: "run_01",
-        nodeId: "approve",
-        iteration: 0
+        requestId: "approve",
+        approval: {
+          target: { _tag: "Node", runId: "run_01", requestId: "approve", digest: "d", envelope: {} },
+          scope: "run",
+          idempotencyKey: "approve:approve"
+        }
       }
     }
     const controller = createAppController(
@@ -202,8 +206,10 @@ describe("server-emitted card frames", () => {
     expect(card?.kind).toBe("approval")
     if (card?.kind === "approval") {
       expect(card.payload.runId).toBe("run_01")
-      expect(card.payload.nodeId).toBe("approve")
-      expect(card.payload.iteration).toBe(0)
+      expect(card.payload.requestId).toBe("approve")
+      // The submit-ready envelope crosses the frame with the card, so a
+      // decision hands back exactly what the gateway published.
+      expect(card.payload.approval).toMatchObject({ target: { _tag: "Node", requestId: "approve" } })
     }
   })
 

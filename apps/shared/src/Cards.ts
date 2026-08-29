@@ -44,14 +44,20 @@ export const CardSchema = z.discriminatedUnion("kind", [
       capability: z.string(),
       detail: z.string().optional(),
       /*
-       * The run identity an approval decision round-trips against
-       * (gateway submitApproval RPC). Optional so Wave-1 demo cards stay
+       * The run identity an approval decision round-trips against (the
+       * gateway's `Approval.Submit` procedure). Optional so demo cards stay
        * valid; a card without them cannot be decided against a backend.
        */
       runId: z.string().optional(),
-      nodeId: z.string().optional(),
-      iteration: z.number().int().nonnegative().optional(),
-      /** Wave 11: the watched repo whose per-user gateway the run lives on. */
+      /** The gate's own id, which is what identifies it to the engine. */
+      requestId: z.string().optional(),
+      /*
+       * The submit-ready `ApprovalTarget.Node` envelope the gateway published
+       * with the request. A decision hands this back unchanged, so the client
+       * never reconstructs the authority it is exercising.
+       */
+      approval: z.record(z.string(), z.unknown()).optional(),
+      /** The watched repo whose per-user gateway the run lives on. */
       repo: z.string().optional(),
       decision: z.enum(["approved", "denied"]).optional(),
       decidedAt: z.number().optional(),
@@ -62,7 +68,7 @@ export const CardSchema = z.discriminatedUnion("kind", [
       /*
        * A chain approval park (DESIGN.md §14): the decision resolves against
        * the in-app chain runtime (runId = the lineage) and resumes it, not
-       * against the workflow gateway — so nodeId/iteration never apply.
+       * against the workflow gateway — so requestId never applies.
        * `background` marks a lineage the runtime resumes itself: the
        * controller freezes the card and starts no turn.
        */

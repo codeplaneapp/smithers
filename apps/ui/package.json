@@ -27,6 +27,7 @@
     "@smthrs/core": "workspace:*",
     "@smthrs/crypto": "workspace:*",
     "@smthrs/database": "workspace:*",
+    "@smthrs/gateway": "workspace:*",
     "@smthrs/harness": "workspace:*",
     "@smthrs/jj": "workspace:*",
     "@smthrs/journal": "workspace:*",

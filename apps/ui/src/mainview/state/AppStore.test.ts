@@ -139,8 +139,8 @@ describe("a decided approval card", () => {
       capability: "deploy:production",
       detail: "Deploy the canary Worker.",
       runId: "run-1",
-      nodeId: "approve",
-      iteration: 0
+      requestId: "approve",
+      approval: { target: { _tag: "Node", runId: "run-1", requestId: "approve" }, scope: "run", idempotencyKey: "k" }
     }
   }
 

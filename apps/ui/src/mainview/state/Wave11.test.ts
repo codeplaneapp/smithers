@@ -2,10 +2,9 @@
  * Wave 11 — "make me a workflow" becomes true, proven at the controller.
  *
  * Every test here drives the REAL controller against a relay double that
- * speaks the shapes the receipts recorded: the product Worker's
- * /api/workflow/{provision,rpc,events} seam in front of a gateway that answers
- * listWorkflows / launchRun / getRun / listApprovals / whatHappened and a
- * per-run event log with monotonic `seq`.
+ * speaks the rc.0 gateway's own procedures behind the product Worker's
+ * /api/workflow/{provision,rpc} seam: `List`, `Plan`, `Run`, `Cancel`,
+ * `Approval.Submit`, and the `run-summary` and `approvals` projections.
  *
  * The bar: a workflow is created, presented, and run — from the conversation —
  * as an EMBEDDED run card that never silently stalls, whose approval only the
@@ -63,73 +62,114 @@ const REPO = "codeplanesmithers/smithers-demo"
 const said = (outcome: { status: string; value?: string; error?: string }): string =>
   outcome.status === "failed" ? (outcome.error ?? "") : (outcome.value ?? "")
 
-interface RunEvent {
-  readonly seq: number
-  readonly event: string
-  readonly payload?: Record<string, unknown>
-}
-
 /**
  * The relay double: one scriptable workspace behind the product Worker's
- * /api/workflow/* seam. `advance()` is what a real run's progress looks like
- * from the outside — new events appear, the run's status moves on.
+ * /api/workflow/* seam, answering the rc.0 gateway's own procedures.
+ *
+ * `advance()` is what a real run's progress looks like from the outside — the
+ * summary's counters move — because the rc.0 read path serves a projection,
+ * not an event log: the state IS the answer, so a poll that misses a beat
+ * loses nothing.
  */
 const relay = (options: {
-  readonly workflows?: ReadonlyArray<{ key: string; description?: string }>
+  readonly flows?: ReadonlyArray<{ flowId: string; description?: string }>
   readonly provision?: () => unknown
-  readonly eventsFail?: () => boolean
+  readonly readsFail?: () => boolean
   /** Make provisioning slow enough to cross the toast debounce (the 300ms law). */
   readonly provisionDelayMs?: number
 } = {}) => {
   const calls: Array<{ path: string; method: string; body: unknown }> = []
-  const events: RunEvent[] = []
   const approvals: Array<Record<string, unknown>> = []
   const state = {
     runStatus: "running" as string,
-    blocked: null as { kind: string; nodeId: string } | null,
-    summary: "I built `summarize-open-issues` — it reads your open issues and writes one digest.",
+    waitingReason: undefined as string | undefined,
+    verdict: "completed — I built `summarize-open-issues`, which writes one digest of your open issues.",
+    turns: 0,
+    calls: 0,
+    callsFailed: 0,
     launched: [] as Array<{ workflow: string; input: unknown }>
   }
-  const workflows = options.workflows ?? [
-    { key: "create-workflow", description: "Build a new Smithers workflow from a plain-English ask." },
-    { key: "review-pr" }
+  const flows = options.flows ?? [
+    { flowId: "create-workflow", description: "Build a new Smithers workflow from a plain-English ask." },
+    { flowId: "review-pr" }
   ]
+  /** What the plan card of the launch in flight said. */
+  let planned: { flowId: string; input: unknown } | undefined
 
-  const rpc = (method: string, params: Record<string, unknown>): Response => {
-    switch (method) {
-      case "listWorkflows":
-        return json(200, { ok: true, payload: workflows })
-      case "launchRun": {
-        // The real gateway resolves its registry on a miss, then answers
-        // NOT_FOUND honestly — the only truthful "no such workflow".
-        const key = String(params.workflow)
-        if (!workflows.some((entry) => entry.key === key)) {
-          return json(200, { ok: false, error: { code: "NOT_FOUND", message: `Unknown workflow: ${key}` } })
-        }
-        state.launched.push({ workflow: key, input: params.input })
-        return json(200, { ok: true, payload: { runId: "run-w11", workflow: params.workflow, system: false } })
-      }
-      case "getRun":
+  const summaryRow = (): Record<string, unknown> => ({
+    runId: "run-w11",
+    flowId: state.launched.at(-1)?.workflow ?? "review-pr",
+    status: state.runStatus,
+    createdAt: 1,
+    updatedAt: 2 + state.turns + state.calls,
+    ...(state.waitingReason === undefined ? {} : { waitingReason: state.waitingReason }),
+    turns: state.turns,
+    calls: state.calls,
+    callsFailed: state.callsFailed,
+    editsAttempted: 0,
+    editsSucceeded: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    verdict: state.verdict,
+    diagnosis: `Verdict   ${state.verdict}`
+  })
+
+  const snapshot = (rows: ReadonlyArray<unknown>, projection: string): Response =>
+    json(200, { ok: true, payload: { cursor: { projection, runId: "run-w11", value: 1 }, rows } })
+
+  const procedure = (name: string, payload: Record<string, unknown>): Response => {
+    switch (name) {
+      case "List":
         return json(200, {
           ok: true,
           payload: {
-            runId: "run-w11",
-            status: state.runStatus,
-            runState: { state: state.runStatus, blocked: state.blocked },
-            errorJson: null
+            _tag: "flows",
+            items: flows.map((flow) => ({ flowId: flow.flowId, description: flow.description ?? "" }))
           }
         })
-      case "listApprovals":
-        return json(200, { ok: true, payload: approvals })
-      case "submitApproval":
-        return json(200, { ok: true, payload: { ...params, approved: true } })
-      case "whatHappened":
+      case "Plan": {
+        // The real gateway resolves its registry on a miss, then refuses
+        // honestly — the only truthful "no such flow".
+        const flowId = String(payload.flowId)
+        if (!flows.some((entry) => entry.flowId === flowId)) {
+          return json(200, { ok: false, error: { message: `Unknown workflow: ${flowId}` } })
+        }
+        planned = { flowId, input: payload.input }
         return json(200, {
           ok: true,
-          payload: { runId: "run-w11", scope: "run", summary: state.summary, source: "facts" }
+          payload: {
+            planId: `plan-${flowId}`,
+            flowId,
+            digest: "digest-1",
+            envelope: { capabilities: [], flows: [], budget: {} },
+            inputSummary: "",
+            deployClass: false,
+            nodes: []
+          }
         })
+      }
+      case "Run": {
+        state.launched.push({ workflow: planned?.flowId ?? "?", input: planned?.input })
+        return json(200, { ok: true, payload: { _tag: "Accepted", receiptId: "r", runId: "run-w11" } })
+      }
+      case "Cancel":
+        state.runStatus = "cancelled"
+        return json(200, { ok: true, payload: { _tag: "Accepted", receiptId: "c", runId: "run-w11" } })
+      case "Approval.Submit":
+        return json(200, {
+          ok: true,
+          payload: { decision: { _tag: "Accepted", receiptId: "a" }, resume: { _tag: "Accepted", receiptId: "b" } }
+        })
+      case "Projection.Snapshot": {
+        if (options.readsFail?.() === true) {
+          return json(200, { ok: false, error: { message: "the workspace gateway is unreachable" } })
+        }
+        const selector = (payload.selector ?? {}) as { _tag?: string }
+        if (selector._tag === "approvals") return snapshot(approvals, "approvals")
+        return snapshot([summaryRow()], "run-summary")
+      }
       default:
-        return json(200, { ok: false, error: { code: "NOT_FOUND", message: `no ${method}` } })
+        return json(200, { ok: false, error: { message: `no ${name}` } })
     }
   }
 
@@ -149,60 +189,66 @@ const relay = (options: {
         return json(200, options.provision?.() ?? { status: "ready", repo: REPO, gatewayId: "gw-1" })
       }
       if (absolute.pathname === "/api/workflow/rpc") {
-        return rpc(String(body.method), (body.params ?? {}) as Record<string, unknown>)
-      }
-      if (absolute.pathname === "/api/workflow/events") {
-        if (options.eventsFail?.() === true) return json(502, { status: "error", message: "gateway unreachable" })
-        const afterSeq = Number(absolute.searchParams.get("afterSeq") ?? "0")
-        return json(200, { ok: true, data: events.filter((event) => event.seq > afterSeq) })
-      }
-      if (absolute.pathname === "/api/approvals/decision") {
-        return json(200, { status: "ok" })
+        return procedure(String(body.procedure), (body.payload ?? {}) as Record<string, unknown>)
       }
       return json(404, { status: "error", message: `no stub for ${absolute.pathname}` })
     }
   }
 
+  const gate = (requestId: string): Record<string, unknown> => ({
+    runId: "run-w11",
+    requestId,
+    title: "Open a pull request with the new workflow",
+    request: {},
+    payload: {
+      target: {
+        _tag: "Node",
+        runId: "run-w11",
+        requestId,
+        digest: `digest-${requestId}`,
+        envelope: { capabilities: [], flows: [], budget: {} }
+      },
+      scope: "run",
+      idempotencyKey: `approve:${requestId}`
+    },
+    requestedAt: 1,
+    status: "pending"
+  })
+
   return {
     services,
     calls,
     state,
-    emit: (...rows: RunEvent[]) => events.push(...rows),
-    park: (nodeId: string) => {
+    /** The run did some work: the summary's counters move. */
+    advance: (turns: number, callCount: number, failed = 0) => {
+      state.turns += turns
+      state.calls += callCount
+      state.callsFailed += failed
+    },
+    park: (requestId: string) => {
       state.runStatus = "waiting-approval"
-      state.blocked = { kind: "approval", nodeId }
-      approvals.push({
-        runId: "run-w11",
-        nodeId,
-        iteration: 0,
-        requestTitle: "Open a pull request with the new workflow",
-        requestSummary: "This pushes a branch and opens a PR on your repository."
-      })
+      state.waitingReason = "approval"
+      approvals.push(gate(requestId))
     },
     /*
-     * The run parks, but getRun says nothing about it: `runState` is DERIVED
-     * and the gateway computes it best-effort (`.catch(() => undefined)`), so
-     * a real parked run can read as plain "running" with no `blocked` at all.
-     * Only the engine's own event announces the gate. `iteration` is omitted
-     * too — the gateway defaults it, and a row that arrives without one is
-     * still a gate the human must be able to decide.
+     * A park the run reports as `parked` rather than `waiting-approval`. Both
+     * are real rc.0 statuses and both mean a human has to decide, so a card
+     * that only recognized one would leave the other with no way to unblock.
      */
-    parkUnannounced: (nodeId: string) => {
-      approvals.push({
-        runId: "run-w11",
-        nodeId,
-        requestTitle: "Open a pull request with the new workflow",
-        requestSummary: "This pushes a branch and opens a PR on your repository."
-      })
+    parkAsParked: (requestId: string) => {
+      state.runStatus = "parked"
+      state.waitingReason = "approval"
+      approvals.push(gate(requestId))
     },
     finish: () => {
-      state.runStatus = "finished"
-      state.blocked = null
+      state.runStatus = "completed"
+      state.waitingReason = undefined
       approvals.length = 0
     },
-    fail: () => {
+    fail: (verdict = "failed — OPENROUTER_API_KEY is not set") => {
       state.runStatus = "failed"
-      state.blocked = null
+      state.waitingReason = undefined
+      state.verdict = verdict
     }
   }
 }
@@ -277,7 +323,7 @@ describe("wave 11 — the full journey: make me a workflow", () => {
     })
     await signIn(store)
 
-    double.emit({ seq: 1, event: "RunStarted" }, { seq: 2, event: "NodeStarted", payload: { nodeId: "clarify" } })
+    double.advance(1, 1)
     const outcome = await controller.commands.run(
       "flow.create",
       "a workflow that summarizes my open issues"
@@ -307,29 +353,41 @@ describe("wave 11 — the full journey: make me a workflow", () => {
 
     // Progress arrives in WORDS, never as a raw payload.
     await settle(20)
-    expect(runCard(store)?.payload.steps.join(" ")).toContain("Working on clarify")
+    expect(runCard(store)?.payload.steps.join(" ")).toContain("1 turn · 1 call")
     expect(runCard(store)?.payload.steps.join(" ")).not.toContain("{")
     expect(runCard(store)?.payload.phase).toBe("running")
 
     // The run parks on an outbound act — the approval tier, not an auto-yes.
-    double.emit({ seq: 3, event: "ApprovalRequested", payload: { nodeId: "open-pr" } })
     double.park("open-pr")
     await settle(25)
     expect(runCard(store)?.payload.phase).toBe("waiting-approval")
-    const approval = store.collections.cards.get("approval-run-w11-open-pr-0")
+    const approval = store.collections.cards.get("approval-run-w11-open-pr")
     expect(approval?.kind).toBe("approval")
     expect(approval?.kind === "approval" && approval.payload.repo).toBe(REPO)
     expect(approval?.title).toContain("pull request")
 
-    // The human decides; the decision names the repo so it round-trips
-    // through THIS user's gateway.
-    await controller.commands.run("approval.approve", "approval-run-w11-open-pr-0")
+    // The human decides. The decision goes back as the exact envelope the
+    // gateway published, through THIS user's gateway.
+    await controller.commands.run("approval.approve", "approval-run-w11-open-pr")
     await settle(6)
-    const decision = double.calls.find((call) => call.path === "/api/approvals/decision")
-    expect(decision?.body).toMatchObject({ runId: "run-w11", nodeId: "open-pr", iteration: 0, repo: REPO })
+    // The plan approval the launch itself takes is an `Approval.Submit` too;
+    // the human's decision is the one on the run's own gate.
+    const decision = double.calls.find((call) => {
+      const body = call.body as { procedure?: string; payload?: { target?: { _tag?: string } } } | undefined
+      return body?.procedure === "Approval.Submit" && body.payload?.target?._tag === "Node"
+    })
+    expect(decision?.body).toMatchObject({
+      repo: REPO,
+      procedure: "Approval.Submit",
+      payload: { decision: "approve", target: { _tag: "Node", runId: "run-w11", requestId: "open-pr" } }
+    })
 
-    // Auto-resume (proven at the relay in wave 4): the run finishes.
-    double.emit({ seq: 4, event: "ApprovalRequested" }, { seq: 5, event: "RunFinished" })
+    // ONE call: the gateway records the decision and resumes the run itself,
+    // so the client never issues a second manual resume.
+    expect(
+      double.calls.filter((call) => (call.body as { procedure?: string } | undefined)?.procedure === "Resume")
+    ).toHaveLength(0)
+
     double.finish()
     await settle(30)
 
@@ -342,8 +400,6 @@ describe("wave 11 — the full journey: make me a workflow", () => {
       .toBe(
         true
       )
-    // The cursor advanced with the stream: a reload resumes, it does not replay.
-    expect(done?.payload.lastSeq).toBe(5)
   })
 
   test("the agent invoking flow.create from the conversation renders the card, never a surface", async () => {
@@ -455,11 +511,11 @@ describe("wave 11 — the run card never silently stalls", () => {
   test("stream loss flips the card to the honest reconnecting state, then it catches up", async () => {
     const store = await webStore()
     let broken = false
-    const double = relay({ eventsFail: () => broken })
+    const double = relay({ readsFail: () => broken })
     const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
     await signIn(store)
 
-    double.emit({ seq: 1, event: "RunStarted" })
+    double.advance(1, 1)
     await controller.commands.run("flow.run", "review-pr")
     await settle(20)
     expect(runCard(store)?.payload.phase).toBe("running")
@@ -470,31 +526,31 @@ describe("wave 11 — the run card never silently stalls", () => {
     expect(runCard(store)?.payload.phase).toBe("reconnecting")
 
     broken = false
-    double.emit({ seq: 2, event: "NodeFinished", payload: { nodeId: "review" } })
+    double.advance(1, 2)
     await settle(30)
     expect(runCard(store)?.payload.phase).toBe("running")
-    expect(runCard(store)?.payload.steps.join(" ")).toContain("review finished")
+    expect(runCard(store)?.payload.steps.join(" ")).toContain("2 turns · 3 calls")
   })
 
-  test("the pump resumes from lastSeq — a replay never re-narrates what the card already said", async () => {
+  test("a re-read never re-narrates what the card already said", async () => {
     const store = await webStore()
     const double = relay()
     const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
     await signIn(store)
 
-    double.emit({ seq: 1, event: "RunStarted" }, { seq: 2, event: "NodeStarted", payload: { nodeId: "plan" } })
+    double.advance(1, 1)
     await controller.commands.run("flow.run", "review-pr")
     await settle(25)
 
-    const afterSeqs = double.calls
-      .filter((call) => call.path.startsWith("/api/workflow/events"))
-      .map((call) => new URL(call.path, "https://app.test").searchParams.get("afterSeq"))
-    // The first read starts at 0; every later one resumes past what landed.
-    expect(afterSeqs[0]).toBe("0")
-    expect(afterSeqs.at(-1)).toBe("2")
-    // "The run started" appears exactly once despite many polls.
+    /*
+     * The rc.0 read path serves a projection, not an event log: every poll
+     * carries the whole current answer, so there is no cursor to resume from
+     * and no replay to de-duplicate. The card narrates a line only when the
+     * answer actually changed.
+     */
     const steps = runCard(store)?.payload.steps ?? []
-    expect(steps.filter((step) => step === "The run started.")).toHaveLength(1)
+    expect(steps.filter((step) => step === "1 turn · 1 call")).toHaveLength(1)
+    expect(double.calls.filter((call) => call.path === "/api/workflow/rpc").length).toBeGreaterThan(1)
   })
 
   test("a failed run states it and stops — no card left spinning", async () => {
@@ -511,12 +567,12 @@ describe("wave 11 — the run card never silently stalls", () => {
     expect([...store.collections.messages.values()].some((message) => message.text.includes("failed"))).toBe(true)
   })
 
-  test("a RunFailed event settles the card even while getRun still says 'running'", async () => {
+  test("a failed run leads with the engine's own reason, never a shrug", async () => {
     /*
-     * The live-caught defect: the real gateway leaves `status:"running"`
-     * after the last node has already failed (summary {failed:1}), so a
-     * card that waits on `status` alone polls that run forever. The
-     * terminal EVENT is authoritative.
+     * The old wire made the client infer failure from an event because
+     * `getRun.status` lagged behind it. The rc.0 run summary carries the
+     * status AND the diagnosis the engine computed from the run's own
+     * events, so the card states the reason rather than guessing at one.
      */
     const store = await webStore()
     const double = relay()
@@ -524,46 +580,26 @@ describe("wave 11 — the run card never silently stalls", () => {
     await signIn(store)
 
     await controller.commands.run("flow.run", "review-pr")
-    // The engine's own sentence for why the step could not run, verbatim
-    // from a real 0.33 stream.
-    double.emit(
-      { seq: 1, event: "NodeStarted", payload: { nodeId: "clarify" } },
-      {
-        seq: 2,
-        event: "AgentTraceEvent",
-        payload: {
-          nodeId: "clarify",
-          trace: {
-            payload: {
-              error:
-                "Smithers generated an OpenRouter default agent, but OPENROUTER_API_KEY is not set. Set OPENROUTER_API_KEY, or run `smithers agent add` to configure another agent, then rerun this workflow."
-            }
-          }
-        }
-      },
-      { seq: 3, event: "NodeFailed", payload: { nodeId: "clarify" } },
-      { seq: 4, event: "RunFailed" }
+    double.fail(
+      "failed — Smithers generated an OpenRouter default agent, but OPENROUTER_API_KEY is not set."
     )
-    // getRun deliberately keeps saying "running" — exactly as it does live.
     await settle(30)
 
     const card = runCard(store)
     expect(card?.payload.phase).toBe("failed")
     expect(card?.payload.error).toContain("OPENROUTER_API_KEY is not set")
-    expect(card?.payload.steps.join(" ")).toContain("clarify failed.")
     // The chat leads with the engine's reason, not a shrug.
     expect(
       [...store.collections.messages.values()].some((message) => message.text.includes("OPENROUTER_API_KEY"))
     ).toBe(true)
   })
 
-  test("a gate the engine announces gets its approval card even when getRun never mentions it", async () => {
+  test("a run parked on approval gets its card whichever parked status it reports", async () => {
     /*
-     * The same lesson as the terminal event, one gate over: `runState` is
-     * derived best-effort, so a parked run can read as plain "running" with
-     * no `blocked`. Gating the approval fetch on `blocked.kind` alone leaves
-     * the human with a card that says Running and no way to unblock it —
-     * the run then waits on a decision it never asked for.
+     * `parked` and `waiting-approval` are both rc.0 statuses and both mean a
+     * human has to decide. A card that recognized only one would leave the
+     * other reading Running with no way to unblock it — the run would then
+     * wait on a decision it never asked for.
      */
     const store = await webStore()
     const double = relay()
@@ -571,51 +607,43 @@ describe("wave 11 — the run card never silently stalls", () => {
     await signIn(store)
 
     await controller.commands.run("flow.run", "review-pr")
-    double.parkUnannounced("open-pr")
-    double.emit({ seq: 1, event: "NodeWaitingApproval", payload: { nodeId: "open-pr" } })
+    double.parkAsParked("open-pr")
     await settle(30)
 
-    // getRun still says "running" with no blocked reason at all.
-    expect(double.state.runStatus).toBe("running")
-    expect(double.state.blocked).toBe(null)
+    expect(double.state.runStatus).toBe("parked")
     // The card asked for the gate anyway, and reads honestly.
-    const approval = store.collections.cards.get("approval-run-w11-open-pr-0")
+    const approval = store.collections.cards.get("approval-run-w11-open-pr")
     expect(approval?.kind).toBe("approval")
     expect(approval?.kind === "approval" && approval.payload.repo).toBe(REPO)
     expect(runCard(store)?.payload.phase).toBe("waiting-approval")
-    expect(runCard(store)?.payload.steps.join(" ")).toContain("Waiting for your approval")
 
     // And it round-trips through this user's gateway like any other.
-    await controller.commands.run("approval.approve", "approval-run-w11-open-pr-0")
+    await controller.commands.run("approval.approve", "approval-run-w11-open-pr")
     await settle(6)
-    expect(double.calls.find((call) => call.path === "/api/approvals/decision")?.body).toMatchObject({
-      runId: "run-w11",
-      nodeId: "open-pr",
-      iteration: 0,
-      repo: REPO
+    const submitted = double.calls.find((call) => {
+      const body = call.body as { procedure?: string; payload?: { target?: { _tag?: string } } } | undefined
+      return body?.procedure === "Approval.Submit" && body.payload?.target?._tag === "Node"
+    })
+    expect(submitted?.body).toMatchObject({
+      repo: REPO,
+      payload: { decision: "approve", target: { requestId: "open-pr" } }
     })
   })
 
-  test("frame and snapshot bookkeeping never reaches the transcript as progress", async () => {
+  test("a run that has done nothing yet narrates nothing", async () => {
     const store = await webStore()
     const double = relay()
     const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
     await signIn(store)
 
     await controller.commands.run("flow.run", "review-pr")
-    double.emit(
-      { seq: 1, event: "FrameCommitted", payload: { frameNo: 1, xmlHash: "fca9f7" } },
-      { seq: 2, event: "SnapshotCaptured", payload: { frameNo: 1, contentHash: "299dd3" } },
-      { seq: 3, event: "NodePending", payload: { nodeId: "clarify" } }
-    )
     await settle(20)
 
-    const steps = runCard(store)?.payload.steps.join(" ") ?? ""
-    expect(steps).not.toContain("fca9f7")
-    expect(steps).not.toContain("Frame")
-    expect(steps).not.toContain("Snapshot")
-    // The cursor still advanced past them — silence is not a stall.
-    expect(runCard(store)?.payload.lastSeq).toBe(3)
+    // No turns and no calls is not progress, and saying so would be noise
+    // where a human is watching for movement.
+    const steps = runCard(store)?.payload.steps ?? []
+    expect(steps.filter((step) => step.includes("turn"))).toHaveLength(0)
+    expect(runCard(store)?.payload.phase).toBe("running")
   })
 
   test("no_capacity is a passing truth — stated honestly, nothing launched, nothing retry-looped", async () => {
@@ -679,7 +707,7 @@ describe("wave 11 — workflows are presented", () => {
     // The live gateway populates its global pack lazily, so a cold
     // listWorkflows is not evidence of absence — only launchRun's NOT_FOUND is.
     const store = await webStore()
-    const double = relay({ workflows: [{ key: "review-pr" }] })
+    const double = relay({ flows: [{ flowId: "review-pr" }] })
     const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
     await signIn(store)
 
@@ -687,7 +715,7 @@ describe("wave 11 — workflows are presented", () => {
     expect(said(outcome)).toContain("Unknown workflow: create-workflow")
     expect(double.state.launched).toHaveLength(0)
     // It tried the launch — it did not refuse on a stale list.
-    expect(double.calls.some((call) => (call.body as { method?: string } | undefined)?.method === "launchRun")).toBe(
+    expect(double.calls.some((call) => (call.body as { procedure?: string } | undefined)?.procedure === "Plan")).toBe(
       true
     )
   })
@@ -696,7 +724,7 @@ describe("wave 11 — workflows are presented", () => {
     // Regression for the live-caught defect: the pre-flight list gate
     // refused `create-workflow` on a workspace that ran it seconds later.
     const store = await webStore()
-    const double = relay({ workflows: [{ key: "create-workflow" }] })
+    const double = relay({ flows: [{ flowId: "create-workflow" }] })
     const controller = createAppController(store, unavailableRepositories, silentAgent(), {
       ...double.services,
       fetchImpl: async (input, init) => {
@@ -705,9 +733,12 @@ describe("wave 11 — workflows are presented", () => {
           "https://app.test"
         )
         const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
-        // A COLD registry: listWorkflows shows only the repo's own workflows.
-        if (absolute.pathname === "/api/workflow/rpc" && body?.method === "listWorkflows") {
-          return json(200, { ok: true, payload: [{ key: "chat" }, { key: "oneshot" }, { key: "workspace" }] })
+        // A COLD registry: the flow listing shows only the repo's own flows.
+        if (absolute.pathname === "/api/workflow/rpc" && body?.procedure === "List") {
+          return json(200, {
+            ok: true,
+            payload: { _tag: "flows", items: [{ flowId: "chat" }, { flowId: "oneshot" }, { flowId: "workspace" }] }
+          })
         }
         return double.services.fetchImpl?.(input, init) ?? json(404, {})
       }
