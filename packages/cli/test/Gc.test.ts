@@ -90,11 +90,9 @@ const engineProject = (
 /** Every run id left in a project's engine database, sorted. */
 const runIdsIn = (root: string): ReadonlyArray<string> => {
   const database = new DatabaseSync(join(root, ".flows", "engine.db"))
-  const rows = database.prepare("SELECT run_id FROM flows_runs ORDER BY run_id").all() as ReadonlyArray<
-    { readonly run_id: string }
-  >
+  const rows = database.prepare("SELECT run_id FROM flows_runs ORDER BY run_id").all()
   database.close()
-  return rows.map((row) => row.run_id)
+  return rows.map((row) => String(row["run_id"]))
 }
 
 afterEach(() => {

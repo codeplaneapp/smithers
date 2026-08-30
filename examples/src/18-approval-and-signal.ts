@@ -252,7 +252,7 @@ export const main = (filename: string): Effect.Effect<Summary> =>
      * drains. An executor that started the run would answer `accepted`.
      */
     const executor = ControlExecutor.layer(
-      ControlExecutor.make({
+      ControlExecutor.makeNoop({
         launch: () =>
           Effect.sync(() => {
             launches += 1

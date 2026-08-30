@@ -204,7 +204,9 @@ const drive = (runId: string, path: string): Effect.Effect<void, never, DriverSe
 const executor = Layer.effect(ControlExecutor.ControlExecutor)(
   Effect.gen(function*() {
     const services = yield* Effect.context<DriverServices>()
-    return ControlExecutor.make({
+    // `makeNoop` supplies the cancel, signal, and resume ports this suite does
+    // not drive; only the acceptance port is this double's subject.
+    return ControlExecutor.makeNoop({
       launch: (input) =>
         Effect.sync(() => {
           const path = (input.plan.decodedInput as { readonly path?: string } | undefined)?.path ?? "unknown"

@@ -52,7 +52,6 @@ const controlLayer = (calls: Array<string>) =>
       deny: () => Effect.die("unused"),
       steer: () => Effect.die("unused"),
       cancel: () => Effect.die("unused"),
-      pause: () => Effect.die("unused"),
       resume: () => Effect.die("unused"),
       list: () => Effect.die("unused"),
       watch: () => Stream.empty

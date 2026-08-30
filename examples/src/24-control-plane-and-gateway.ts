@@ -265,7 +265,7 @@ export const main = (root: string): Effect.Effect<Summary> =>
             yield* plane.writeStatus(runId as ControlSchema.RunId, fence, planeStatus(row.status))
           }).pipe(Effect.orDie)
 
-        return ControlExecutor.make({
+        return ControlExecutor.makeNoop({
           launch: ({ plan, run }) =>
             Effect.gen(function*() {
               launched.push(plan.card.flowId)
