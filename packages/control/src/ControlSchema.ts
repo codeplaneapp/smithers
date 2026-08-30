@@ -410,6 +410,20 @@ export const RunSummary = Schema.Struct({
    * is waiting to be taken up.
    */
   pendingResume: Schema.optional(Schema.Number),
+  /**
+   * The executor claim this run was parked under.
+   *
+   * A parked execution releases its owner columns — that is what makes it
+   * resumable at all — so after a park nothing on the row says which process
+   * is hosting it. Every process that shares the databases can therefore see
+   * the parked execution and resume it, including a short-lived `smithers
+   * approve` that would drive the run and then exit. The fence the park was
+   * written under is recorded here instead, so the host that parked the run
+   * recognizes its own park and every other composition can tell that the
+   * execution is not its to take up (triage B-15). Absent on a run that is not
+   * parked, and on a park written by something that held no fence.
+   */
+  parkedBy: Schema.optional(Schema.String),
   /** Who cancelled this run, why, and on whose behalf. Absent until one did. */
   cancellation: Schema.optional(Cancellation),
   createdAt: Schema.Number,

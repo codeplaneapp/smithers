@@ -175,6 +175,16 @@ export interface MemoryOptions {
 export interface PendingResume {
   readonly runId: RunId
   readonly sequence: number
+  /**
+   * When the delegation was recorded.
+   *
+   * A host reads it to tell a decision it has just been handed from one that
+   * has been standing unanswered: a run parked by a process that has since
+   * exited has nobody left to recognize its own park, so its delegation is
+   * taken up by whichever host can drive it once it has gone unanswered for
+   * `Ownership.heartbeatStaleAfter` (triage B-15).
+   */
+  readonly requestedAtMs: number
 }
 
 /**
@@ -358,6 +368,8 @@ interface MutableRun {
   readonly signals: Array<SignalPayload>
   /** The sequence of the outstanding resume delegation, if there is one. */
   pendingResume?: number | undefined
+  /** When that delegation was recorded. */
+  pendingResumeAtMs?: number | undefined
 }
 
 const asStored = (plan: MutablePlan): StoredPlan => ({
@@ -625,15 +637,17 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           const run = yield* requireRun(runId)
           const sequence = ++resumeSequence
           run.pendingResume = sequence
+          run.pendingResumeAtMs = now()
           updateSummary(run, { pendingResume: sequence })
           return sequence
         }),
         pendingResumes: Effect.sync(() =>
           Array.from(runs.entries()).flatMap(([runId, run]) =>
-            run.pendingResume === undefined || run.summary.status === "cancelled" ||
+            run.pendingResume === undefined || run.pendingResumeAtMs === undefined ||
+              run.summary.status === "cancelled" ||
               run.summary.status === "completed" || run.summary.status === "failed"
               ? []
-              : [{ runId, sequence: run.pendingResume }]
+              : [{ runId, sequence: run.pendingResume, requestedAtMs: run.pendingResumeAtMs }]
           )
         ),
         clearResume: Effect.fn("ControlRuntime.clearResume")((runId, sequence) =>
@@ -641,6 +655,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
             const run = runs.get(runId)
             if (run === undefined || run.pendingResume !== sequence) return
             run.pendingResume = undefined
+            run.pendingResumeAtMs = undefined
             updateSummary(run, { pendingResume: undefined })
           })
         ),
@@ -664,7 +679,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           if (run.fiber !== undefined) yield* Fiber.interrupt(run.fiber)
           run.fence = undefined
           run.localFence = undefined
-          return updateSummary(run, { status: "cancelled", ownerId: undefined })
+          return updateSummary(run, { status: "cancelled", ownerId: undefined, parkedBy: undefined })
         }),
         resume: Effect.fn("ControlRuntime.resume")(function*(runId) {
           const run = yield* requireRun(runId)
@@ -682,7 +697,8 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           const fence = `fence-${++fenceSequence}`
           run.fence = fence
           run.localFence = fence
-          return updateSummary(run, { status: "accepted", ownerId: "memory-owner" })
+          // Claiming ends the park, so it ends the record of who wrote it.
+          return updateSummary(run, { status: "accepted", ownerId: "memory-owner", parkedBy: undefined })
         }),
         claimFence: Effect.fn("ControlRuntime.claimFence")(function*(runId) {
           const run = yield* requireRun(runId)
@@ -694,10 +710,18 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           yield* checkFence(runId, run, fence)
           // Ownership is released by any status that is not being driven, so the
           // fence that wrote a terminal or parked status is spent by writing it.
-          if (status === "accepted" || status === "running") return updateSummary(run, { status })
+          if (status === "accepted" || status === "running") {
+            return updateSummary(run, { status, parkedBy: undefined })
+          }
           run.fence = undefined
           run.localFence = undefined
-          return updateSummary(run, { status, ownerId: undefined })
+          // The spent fence is kept on a park, and only on a park: it is the
+          // only thing left on the row that says which host parked it.
+          return updateSummary(run, {
+            status,
+            ownerId: undefined,
+            parkedBy: status === "parked" || status === "waiting-approval" ? fence : undefined
+          })
         }),
         stampPrincipal: Effect.fn("ControlRuntime.stampPrincipal")((submitted) =>
           Effect.sync(() => ({

@@ -73,7 +73,7 @@ import * as ModelRequest from "@smthrs/model/ModelRequest"
 import type { NotificationQueue } from "@smthrs/notifications"
 import { Node } from "@smthrs/plan"
 import * as Registry from "@smthrs/registry/Registry"
-import { RunStore } from "@smthrs/run-store"
+import { Ownership, RunStore } from "@smthrs/run-store"
 import type { Crypto } from "effect"
 import { Cause, Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect"
 import { Agent } from "./Agent.ts"
@@ -161,6 +161,20 @@ export interface Options {
 }
 
 const sourceId = JournalEvent.SourceId.make("/control/executor")
+
+/**
+ * How long a resume delegation must stand unanswered before a composition
+ * that did not park the run may take it up.
+ *
+ * `Ownership.heartbeatStaleAfter` is the cutoff the engine already uses to
+ * declare an owner gone, and this is the same question asked about a host that
+ * is not writing a heartbeat at all: a parked run has none. Every host drains
+ * its delegations once a second, so one still standing thirty seconds later
+ * belongs to a process that has exited — the `smithers run` that parked at the
+ * approval and returned the shell prompt — and the run it parked has to stay
+ * resumable by the next host that comes along.
+ */
+const abandonedParkAfterMs = Duration.toMillis(Ownership.heartbeatStaleAfter)
 
 const assistantText = (message: ModelRequest.AssistantMessage): string =>
   message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n")
@@ -967,6 +981,21 @@ export const make = (
     })
 
     /**
+     * The fence each run this session parked was parked under.
+     *
+     * `RunSummary.parkedBy` is the durable half; this is the half only the
+     * parking process can hold. A fence is minted per claim, so a fence this
+     * map still holds and the row still names is proof that THIS incarnation
+     * parked THAT execution — which is the only thing that distinguishes the
+     * host of a parked run from any other process that can see it, since a
+     * park releases the owner columns on both rows (triage B-15).
+     */
+    const parkFences = new Map<string, string>()
+
+    /** Whether a status leaves the run parked rather than driving or ending it. */
+    const parks = (status: RunStatus): boolean => status === "parked" || status === "waiting-approval"
+
+    /**
      * Writes one fenced status transition and its journal record.
      *
      * A terminal `failed` carries the rendered cause. Before it did, the
@@ -980,6 +1009,8 @@ export const make = (
       Effect.gen(function*() {
         const fence = yield* runtime.claimFence(runId)
         yield* runtime.writeStatus(runId, fence, status)
+        if (parks(status)) parkFences.set(runId, fence)
+        else parkFences.delete(runId)
         yield* emit(
           runId,
           `control.run.${status}`,
@@ -1217,16 +1248,62 @@ export const make = (
       )
 
     /**
+     * Whether this composition is the one hosting a parked run.
+     *
+     * Engine visibility is not hosting. A parked execution has released its
+     * owner and its heartbeat on both rows — that is what makes it resumable —
+     * so `engine.poll` answers `Suspended` in EVERY process that opened the
+     * same `engine.db`, and the shipped CLI composes an executor in every one
+     * of them (`NodeControl.layerControl` builds `layerExecutor` unless
+     * `--remote`). A `smithers approve` against a run a gateway parked could
+     * therefore claim the control row, drive the run itself, and strand it at
+     * process exit. `RunSummary.parkedBy` is what answers instead: the fence
+     * the park was written under, which only the parking incarnation still
+     * holds (triage B-15).
+     *
+     * Three answers, in order:
+     *
+     * - No `parkedBy` at all: nothing claims to host the run — an operator's
+     *   own park, or a row parked before this field existed — so the take-up
+     *   proceeds as it always did.
+     * - `parkedBy` this session wrote: this is the host. It takes its own
+     *   delegation up at once, which is the ordinary same-process approval.
+     * - Somebody else's `parkedBy`: not this composition's run to drive, so
+     *   the delegation is left standing for the host that parked it — until
+     *   it has stood unanswered for `heartbeatStaleAfter`, the same cutoff the
+     *   engine uses to declare an owner gone. A host polls its delegations
+     *   once a second, so one still standing after thirty is one whose host is
+     *   not coming back, and refusing it forever would leave every run parked
+     *   by a process that has since exited unresumable by anything.
+     *
+     * A control store that cannot answer is not evidence of a foreign host, so
+     * it leaves the decision where it was before this guard existed.
+     */
+    const hostsPark = (
+      runId: string,
+      requestedAtMs: number | undefined
+    ): Effect.Effect<boolean, never> =>
+      Effect.gen(function*() {
+        const summary = yield* runtime.getRun(runId).pipe(
+          Effect.map((run) => run.parkedBy),
+          Effect.catchCause(() => Effect.succeed(undefined))
+        )
+        if (summary === undefined) return true
+        if (parkFences.get(runId) === summary) return true
+        if (requestedAtMs === undefined) return false
+        const nowMs = yield* Clock.currentTimeMillis
+        return nowMs - requestedAtMs >= abandonedParkAfterMs
+      })
+
+    /**
      * Takes up one resume: this executor's execution, this executor's fence.
      *
-     * The park wait comes first and is the whole ownership question. It ends
-     * `false` for an execution this engine does not have, and for one that is
-     * not parked, and neither is this executor's to claim — claiming it would
-     * move the row under a fence whose process cannot drive it, which is
-     * exactly what `ControlLive.decide` used to do from any process holding
-     * the control database (triage B-15).
+     * The park wait comes first. It ends `false` for an execution this engine
+     * does not have, and for one that is not parked, and neither is this
+     * executor's to claim. {@link hostsPark} comes second and is the ownership
+     * question proper: an execution this engine can SEE is not one it hosts.
      *
-     * The claim comes second and is what makes the re-driven run WRITABLE.
+     * The claim comes third and is what makes the re-driven run WRITABLE.
      * `writeStatus` reaches `claimFence`, which requires `ownedByUs`, which
      * requires a `running` row: a run re-driven without a claim runs to its
      * end and then cannot record that it did.
@@ -1234,14 +1311,23 @@ export const make = (
      * `drive` is how the caller wants the re-drive run. The journal bridge
      * awaits it, so one process's re-drives stay serialized; the port forks it,
      * so a control-plane call returns as soon as the run is moving again.
+     *
+     * `requestedAtMs` is when the durable delegation being taken up was
+     * recorded, and only the durable follower has one: a decision taken in
+     * this process arrives with no age at all, and a process deciding for a
+     * run it does not host must never take it up on the strength of having
+     * just decided it.
      */
     const takeUpResume = (
       runId: string,
-      drive: (runId: string) => Effect.Effect<void>
+      drive: (runId: string) => Effect.Effect<void>,
+      requestedAtMs?: number | undefined
     ): Effect.Effect<ControlExecutor.ResumeUptake, never> =>
       Effect.gen(function*() {
         const parked = yield* awaitParked(runId, 500).pipe(Effect.catchCause(() => Effect.succeed(false)))
         if (!parked) return "unknown" as const
+        const hosted = yield* hostsPark(runId, requestedAtMs)
+        if (!hosted) return "unknown" as const
         const claimed = yield* runtime.resume(runId).pipe(
           Effect.as(true),
           // A lost claim is a live peer holding the run, and the delegation
@@ -1301,12 +1387,18 @@ export const make = (
      * reaches this executor through nothing at all. The delegation is durable
      * in the control database instead, and this is what reads it. Runs this
      * executor does not host are left alone with their delegation standing,
-     * for the host that does.
+     * for the host that does — and this is the one caller that knows how long
+     * one has been standing, so it is the only path by which an abandoned
+     * park is ever adopted ({@link hostsPark}).
      */
     const drainPendingResumes = runtime.pendingResumes.pipe(
       Effect.flatMap((pending) =>
         Effect.forEach(pending, (entry) =>
-          takeUpResume(entry.runId, (runId) => Effect.asVoid(Effect.forkIn(resumeExecution(runId), scope))).pipe(
+          takeUpResume(
+            entry.runId,
+            (runId) => Effect.asVoid(Effect.forkIn(resumeExecution(runId), scope)),
+            entry.requestedAtMs
+          ).pipe(
             Effect.flatMap((uptake) =>
               uptake === "resuming" ? runtime.clearResume(entry.runId, entry.sequence) : Effect.void
             )
@@ -1383,8 +1475,7 @@ export const make = (
         )
         yield* Scope.addFinalizer(scope, Fiber.interrupt(fiber))
         yield* registerDriver(
-          () =>
-            runtime.registerFiber(input.run.runId, fiber),
+          () => runtime.registerFiber(input.run.runId, fiber),
           input.run.runId
         ).pipe(
           Effect.onExit((exit) => Exit.isFailure(exit) ? Fiber.interrupt(fiber) : Effect.void)

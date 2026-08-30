@@ -115,7 +115,7 @@ const parkedOnAsk = (suffix: string) =>
     // The park the executor writes when the ask raises `PermissionRequired`.
     const fence = yield* runtime.claimFence(runId)
     yield* runtime.writeStatus(runId, fence, "waiting-approval")
-    return { runId, target }
+    return { runId, target, fence }
   })
 
 /** Every event type the run's journal carries, in order. */
@@ -188,6 +188,32 @@ describe("deciding an in-run approval nobody here can drive", () => {
     const resumed = observed.kinds.indexOf("control.run.resumed")
     expect(denied).toBeGreaterThanOrEqual(0)
     expect(resumed).toBeGreaterThan(denied)
+  })
+
+  it("records the fence the run was parked under, and clears it when the park ends", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runtime = yield* ControlRuntime
+      const { fence, runId, target } = yield* parkedOnAsk("parked-by")
+      const parked = yield* runtime.getRun(runId)
+      yield* control.approve({ target, scope: "run", idempotencyKey: "approve:parked-by" })
+      const delegated = yield* runtime.getRun(runId)
+      return { fence, runId, parked, delegated, claimed: yield* runtime.resume(runId) }
+    }))
+
+    // A park releases the owner columns — that is what makes the execution
+    // resumable — so the fence it was written under is the only thing left on
+    // the row that says which process is hosting it. A second process holding
+    // the same control database can read this and tell that the parked run is
+    // not its own to take up (triage B-15).
+    expect(observed.parked.ownerId).toBeUndefined()
+    expect(observed.parked.parkedBy).toBe(observed.fence)
+    // Recording a delegation does not end the park, so it does not end the
+    // record of who wrote it: the host still has to recognize its own park.
+    expect(observed.delegated.parkedBy).toBe(observed.fence)
+    // Claiming the run does end it. A running row names its owner outright.
+    expect(observed.claimed.parkedBy).toBeUndefined()
+    expect(observed.claimed.ownerId).toBeDefined()
   })
 
   it("leaves a plan-level approval alone: there is no run to resume yet", async () => {

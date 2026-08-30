@@ -1,5 +1,5 @@
 /**
- * An approval decided by a composition that hosts no executor.
+ * An approval decided by a composition that does not host the run.
  *
  * rc-contract 5.1 promises that `Approve` on a `Node` target resumes the run
  * server-side, so a gateway client does not have to call `Resume` afterwards.
@@ -13,12 +13,17 @@
  * `.flows/control.db` shares, so the deciding process TOOK the row from the
  * host that could still drive it (triage B-15).
  *
- * Two compositions over one control database prove both halves. `A` is the
+ * Three compositions over one control database prove all of it. `A` is the
  * host: the real control plane, the production `AgentSession` executor, and
  * the durable engine over its own `engine.db`, exactly as `NodeControl`
  * composes them. `B` is a second control plane over the same file under its
- * own owner identity, with no executor at all — an operator's `smithers
- * approve`, or a gateway that runs nothing. `B` decides; `A` has to wake.
+ * own owner identity, with no executor at all — a gateway that runs nothing.
+ * `C` is what the shipped CLI actually is: a second control plane that ALSO
+ * composes an executor over the SAME `engine.db`, so its engine can see and
+ * resume `A`'s parked execution. `B` and `C` decide; `A` has to wake, and the
+ * frame has to run on `A`'s engine — the note each composition writes is
+ * tagged with the engine that wrote it, so the settled run says which process
+ * drove it rather than merely that some process did.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
@@ -155,14 +160,18 @@ const controlStores = (filename: string) =>
     )
   )
 
-/** Composition A: the host. Control plane, production executor, real engine. */
-const host = (root: string, owner: Ownership.OwnerId) => {
+/**
+ * A composition that hosts executions: control plane, production executor,
+ * real engine. `engineHost` names the engine's owner AND tags every note its
+ * handler writes, so a note identifies the composition that ran the frame.
+ */
+const host = (root: string, owner: Ownership.OwnerId, engineHost = "approval-resume-host") => {
   const registration = AgentSession.layer({
     flows: [
       FlowBinding.source("test/notes", [
         FlowBinding.make({
           flow: noteFlow,
-          handler: (input) => Effect.sync(() => (notes.push(input.text), { saved: notes.length }))
+          handler: (input) => Effect.sync(() => (notes.push(`${engineHost}:${input.text}`), { saved: notes.length }))
         })
       ])
     ],
@@ -172,7 +181,7 @@ const host = (root: string, owner: Ownership.OwnerId) => {
   const engine = NodeRuntime.layer(
     {
       filename: join(root, "engine.db"),
-      owner: { hostId: "approval-resume-host" },
+      owner: { hostId: engineHost },
       isAlive: () => Effect.succeed(false)
     },
     StepBoundary.layer,
@@ -232,7 +241,19 @@ const awaitStatus = (
 const hostOwner: Ownership.OwnerId = { hostId: "approval-resume-host", pid: 1, nonce: "host" }
 const deciderOwner: Ownership.OwnerId = { hostId: "approval-resume-decider", pid: 2, nonce: "decider" }
 
-const decide = (decision: "approve" | "deny") =>
+/**
+ * Runs one approval decision from `peer`, a composition that is not the host.
+ *
+ * `peer` is the whole variable: composition B hosts nothing, composition C
+ * hosts an executor over the same `engine.db` and can therefore see, claim,
+ * and drive `A`'s parked execution — which is exactly what every local
+ * `smithers` process can do, since `NodeControl` composes an executor unless
+ * `--remote` is passed.
+ */
+const decide = (
+  decision: "approve" | "deny",
+  peer: (root: string, owner: Ownership.OwnerId) => Layer.Layer<Control.Control, unknown> = decider
+) =>
   Effect.gen(function*() {
     const root = mkdtempSync(join(tmpdir(), "flows-approval-resume-"))
     roots.add(root)
@@ -277,7 +298,7 @@ const decide = (decision: "approve" | "deny") =>
             Effect.gen(function*() {
               const remote = yield* Control.Control
               return yield* decision === "approve" ? remote.approve(approval) : remote.deny(approval)
-            }).pipe(Effect.provide(decider(root, deciderOwner)), Effect.scoped, Effect.orDie)
+            }).pipe(Effect.provide(peer(root, deciderOwner)), Effect.scoped, Effect.orDie)
           )
         )
         const afterDecision = yield* runtime.getRun(runId)
@@ -305,13 +326,44 @@ describe("an approval decided by a composition that hosts no executor", () => {
     // written its own terminal status: `claimFence` requires `ownedByUs`.
     expect(observed.afterDecision.ownerId ?? "").not.toContain("approval-resume-decider")
     expect(observed.settled.status).toBe("completed")
-    expect(notes).toEqual(["decision=true"])
+    expect(notes).toEqual(["approval-resume-host:decision=true"])
   }, 60_000)
 
   it("delivers a denial the same way, and the resumed frame reads it", async () => {
     const observed = await Effect.runPromise(decide("deny") as Effect.Effect<Observed>)
 
     expect(observed.settled.status).toBe("completed")
-    expect(notes).toEqual(["decision=false"])
+    expect(notes).toEqual(["approval-resume-host:decision=false"])
+  }, 60_000)
+})
+
+describe("an approval decided by a second composition that HOSTS an executor", () => {
+  it("leaves the run to the composition that parked it, which drives the frame", async () => {
+    const observed = await Effect.runPromise(
+      decide("approve", (root, owner) => host(root, owner, "approval-resume-decider")) as Effect.Effect<Observed>
+    )
+
+    // The decider's engine can poll the parked execution and resume it —
+    // engine visibility is a shared FILE, not a hosting claim — so this is the
+    // assertion the claimant design fails: the note carries the engine that
+    // ran the resumed frame, and it has to be the one that parked it.
+    expect(notes).toEqual(["approval-resume-host:decision=true"])
+    // The park names its host durably, so a second executor over the same
+    // engine.db can tell that the execution is not its own to take up.
+    expect(observed.parked.parkedBy ?? "").toContain("approval-resume-host")
+    // The delegation is still standing when the decider's call returns: the
+    // host clears it on its own next tick, up to a second later.
+    expect(observed.afterDecision.pendingResume).toBeDefined()
+    expect(observed.afterDecision.ownerId ?? "").not.toContain("approval-resume-decider")
+    expect(observed.settled.status).toBe("completed")
+  }, 60_000)
+
+  it("delivers a denial the same way, without ever driving the run itself", async () => {
+    const observed = await Effect.runPromise(
+      decide("deny", (root, owner) => host(root, owner, "approval-resume-decider")) as Effect.Effect<Observed>
+    )
+
+    expect(observed.settled.status).toBe("completed")
+    expect(notes).toEqual(["approval-resume-host:decision=false"])
   }, 60_000)
 })

@@ -226,7 +226,8 @@ const migrations = [
   )`,
   `CREATE TABLE IF NOT EXISTS control_run_resumes (
     run_id TEXT PRIMARY KEY,
-    requested_seq INTEGER NOT NULL
+    requested_seq INTEGER NOT NULL,
+    requested_at_ms INTEGER NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS control_run_messages (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -798,7 +799,14 @@ export const make_ = (
           ...summary,
           status,
           updatedAt: timestamp,
-          ...(storeStatus(status) === "running" ? {} : { ownerId: undefined })
+          ...(storeStatus(status) === "running" ? {} : { ownerId: undefined }),
+          // A park releases the owner columns, so the row itself stops saying
+          // which process is hosting the execution. The fence it was parked
+          // under is kept instead: it is what lets the host recognize its own
+          // park, and every other process tell that the execution belongs to
+          // one it cannot see (triage B-15). Any other status ends the park,
+          // so it ends the record with it.
+          parkedBy: storeStatus(status) === "suspended" ? JSON.stringify(claim) : undefined
         }
         const outcome = yield* runStore.transitionOwned(
           runId,
@@ -1157,23 +1165,37 @@ export const make_ = (
       requestResume: Effect.fn("SqlControlRuntime.requestResume")(function*(runId: RunId) {
         yield* requireRow(runId)
         const sequence = yield* nextSequence("resume")
+        const timestamp = yield* now
         yield* writer.write(sql`
-          INSERT INTO control_run_resumes (run_id, requested_seq) VALUES (${runId}, ${sequence})
-          ON CONFLICT (run_id) DO UPDATE SET requested_seq = excluded.requested_seq
+          INSERT INTO control_run_resumes (run_id, requested_seq, requested_at_ms)
+          VALUES (${runId}, ${sequence}, ${timestamp})
+          ON CONFLICT (run_id) DO UPDATE SET
+            requested_seq = excluded.requested_seq,
+            requested_at_ms = excluded.requested_at_ms
         `).pipe(Effect.mapError(persistence("record a resume delegation")))
         return sequence
       }),
       // Terminal runs are filtered in SQL: a delegation nobody will ever take
       // up must not keep appearing in every host's poll.
-      pendingResumes: sql<{ readonly runId: string; readonly requestedSeq: number }>`
-        SELECT resumes.run_id AS "runId", resumes.requested_seq AS "requestedSeq"
+      pendingResumes: sql<
+        { readonly runId: string; readonly requestedSeq: number; readonly requestedAtMs: number }
+      >`
+        SELECT resumes.run_id AS "runId",
+               resumes.requested_seq AS "requestedSeq",
+               resumes.requested_at_ms AS "requestedAtMs"
         FROM control_run_resumes AS resumes
         JOIN flows_runs AS runs ON runs.run_id = resumes.run_id
         WHERE runs.status NOT IN ('completed', 'failed', 'cancelled')
         ORDER BY resumes.requested_seq
       `.pipe(
         query("read pending resumes"),
-        Effect.map((rows) => rows.map((row) => ({ runId: row.runId, sequence: Number(row.requestedSeq) })))
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            runId: row.runId,
+            sequence: Number(row.requestedSeq),
+            requestedAtMs: Number(row.requestedAtMs)
+          }))
+        )
       ),
       clearResume: Effect.fn("SqlControlRuntime.clearResume")((runId: RunId, sequence: number) =>
         writer.write(sql`
