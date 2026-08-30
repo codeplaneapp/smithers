@@ -281,6 +281,7 @@ export const docsUnit = Smithers.NodeTest({
   runner: Smithers.testRunner([
     Smithers.file("//scripts/docs-contract.test.mjs"),
     Smithers.file("//scripts/docs-deploy.test.mjs"),
+    Smithers.file("//scripts/docs-links.test.mjs"),
     Smithers.file("//scripts/docs-removals.test.mjs"),
     Smithers.file("//scripts/docs-render.test.mjs"),
     Smithers.file("//scripts/docs-routes.test.mjs"),

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
 import test from "node:test"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { repoRoot } from "./docs-contract.mjs"
 import { helpBlock, helpEntry, parseHelp } from "./docs-help.mjs"
@@ -117,4 +118,24 @@ test("a removed flag is given the reason the binary prints", () => {
   // adds its own section and error-code citation; the terminal does not.
   assert.match(guide, /\| `global` \| `--backend pglite\\\|postgres` \| SQLite only \(`--backend sqlite` is accepted as a no-op\) \|/)
   assert.match(page, /\| `--to &lt;backend&gt;` \| SQLite only; the 0\.x database move is removed \|/)
+})
+
+test("the release section ships no draft of the known-limitations page", () => {
+  // The known-limitations page is written by the release-enforcement work from
+  // the frozen contract's exclusion table, not by the documentation pipeline.
+  // Two sources writing one path collide at landing, so this lane links to the
+  // route and never authors the file.
+  assert.equal(existsSync(join(repoRoot, "docs/pages/release/known-limitations.md")), false)
+  assert.equal(existsSync(join(repoRoot, "docs/pages/release/known-limitations.mdx")), false)
+})
+
+test("the generator runs green with the release page absent", () => {
+  // A generator that reads a page it does not own crashes the documentation
+  // gate the moment that page arrives from somewhere else, or is not there yet.
+  // `--check` exercises the same code path as a write.
+  const result = spawnSync(process.execPath, [join(repoRoot, "scripts/generate-docs-pages.mjs"), "--check"], {
+    cwd: repoRoot,
+    encoding: "utf8"
+  })
+  assert.equal(result.status, 0, `${result.stdout ?? ""}${result.stderr ?? ""}`)
 })

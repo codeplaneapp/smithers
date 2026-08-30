@@ -103,6 +103,13 @@ export const availableCommands = (source = readFileSync(contractPath, "utf8")) =
   return names
 }
 
+/**
+ * Verbs section 4.2 removes, each with the reason the binary prints.
+ *
+ * A name the same contract still ships is not removed: the table lists a few
+ * verbs that survived as a subcommand of something else, and those are dropped
+ * here so a page may go on naming them.
+ */
 export const removedCommands = (source = readFileSync(contractPath, "utf8")) => {
   const removed = new Map()
   const available = availableCommands(source)

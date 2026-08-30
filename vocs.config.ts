@@ -20,6 +20,12 @@ export default defineConfig({
   // default `dynamic` strategy `docs/dist` holds `serve-node.js` and no
   // `index.html`, and uploading it to Pages publishes a directory listing.
   renderStrategy: "full-static",
+  // `check-docs` is this site's dead-link gate: it reads the same three link
+  // spellings vocs reads, and it also knows the one route that is linked before
+  // the page answering it exists, which vocs has no way to record. vocs still
+  // logs each dead link it finds, so nothing is hidden; it just does not fail
+  // the build twice over on a rule the gate before it already applied.
+  checkDeadlinks: "warn",
   sidebar: [
     { text: "Introduction", link: "/" },
     { text: "Installation", link: "/installation" },

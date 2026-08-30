@@ -2,7 +2,7 @@
 /**
  * The documentation gate.
  *
- * Twelve checks over the vocs page tree, each one a claim the documentation
+ * Thirteen checks over the vocs page tree, each one a claim the documentation
  * makes that can be verified against something else in the repository:
  *
  *   1. house style: no em-dash anywhere in the prose
@@ -19,6 +19,8 @@
  *  11. the compatibility promise is quoted verbatim wherever section 11 says
  *  12. every document that states the size of the published set agrees with
  *      the count section 3.1 spells
+ *  13. no page sits in a tree vocs stopped publishing, and every route linked
+ *      before its page exists is still waiting for it
  *
  * The two normalizers run in `--check` mode first, so their rules stay one
  * implementation rather than a detector and a fixer that can disagree.
@@ -38,9 +40,10 @@ import {
   removedCommands,
   repoRoot
 } from "./docs-contract.mjs"
+import { deadLinks } from "./docs-links.mjs"
 import { assets, isHistorical, pages } from "./docs-pages.mjs"
 import { sidebarRoutes } from "./docs-sidebar.mjs"
-import { routePlan } from "./docs-routes.mjs"
+import { deferredRouteProblems, deferredRoutes, movedTreeProblems, movedTrees, routePlan } from "./docs-routes.mjs"
 import { cliCatalog } from "./docs-help.mjs"
 
 let failed = false
@@ -56,6 +59,10 @@ const pass = (title) => console.log(`✓ ${title}`)
 const allPages = pages()
 const routes = new Set(allPages.map((page) => page.route))
 const servedAssets = new Set(assets())
+// One route is linked before the page answering it exists, because another body
+// of work owns that page. Check 13 keeps the allowance from outliving the gap.
+const deferred = new Set(deferredRoutes.map((entry) => entry.route))
+
 
 // -----------------------------------------------------------------------------
 // 1. House style
@@ -109,17 +116,9 @@ const servedAssets = new Set(assets())
 // -----------------------------------------------------------------------------
 
 {
-  const offenders = []
-  for (const page of allPages) {
-    for (const match of page.body.matchAll(/\]\((\/[A-Za-z0-9._/-]*)(#[A-Za-z0-9._-]*)?\)/g)) {
-      const target = match[1]
-      if (routes.has(target) || routes.has(target.replace(/\/$/, ""))) continue
-      if (servedAssets.has(target)) continue
-      offenders.push(`${page.path}: ${target}`)
-    }
-  }
-  if (offenders.length > 0) fail("internal links must resolve to a page or a served asset", offenders)
-  else pass("every internal link resolves")
+  const { checked, dead } = deadLinks(allPages, { assets: servedAssets, deferred, routes })
+  if (dead.length > 0) fail("internal links must resolve to a page or a served asset", dead)
+  else pass(`all ${checked} internal links resolve`)
 }
 
 // -----------------------------------------------------------------------------
@@ -332,7 +331,7 @@ for (const [title, argv] of [
     offenders.push(`${page.path} is published and the sidebar does not list it`)
   }
   for (const link of links) {
-    if (link.startsWith("http") || routes.has(link)) continue
+    if (link.startsWith("http") || routes.has(link) || deferred.has(link)) continue
     offenders.push(`the sidebar links ${link} and no page answers it`)
   }
   if (offenders.length > 0) fail("the sidebar must reach every page", offenders)
@@ -374,6 +373,25 @@ for (const [title, argv] of [
   }
   if (offenders.length > 0) fail("a document states the wrong number of published packages", offenders)
   else pass(`every stated package count matches the ${declared} names in contract section 3.1`)
+}
+
+// -----------------------------------------------------------------------------
+// 13. Moved trees and deferred routes
+// -----------------------------------------------------------------------------
+
+{
+  // vocs publishes `docs/pages` and nothing else. A page written to one of the
+  // Mintlify page roots builds no route and raises no error, so it leaves the
+  // site, the sidebar and the llms bundles at once and nobody finds out. Other
+  // work still holds patches against those paths, which is what makes this a
+  // gate rather than a note.
+  const offenders = [...movedTreeProblems(), ...deferredRouteProblems(routes)]
+  if (offenders.length > 0) fail("a page must live where vocs publishes it", offenders)
+  else {
+    pass(
+      `no page sits in one of the ${movedTrees.length} moved trees, and ${deferredRoutes.length} deferred route is still waiting for its page`
+    )
+  }
 }
 
 process.exit(failed ? 1 : 0)

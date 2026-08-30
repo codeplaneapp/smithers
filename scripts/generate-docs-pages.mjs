@@ -47,7 +47,7 @@ import {
   variantRows,
   variantTag
 } from "./docs-render.mjs"
-import { routePlan } from "./docs-routes.mjs"
+import { deferredRoutes, movedTrees, routePlan } from "./docs-routes.mjs"
 import { rewrite as normalizeInvocations } from "./normalize-bunx.ts"
 import { rewrite as normalizePlaceholders } from "./normalize-placeholders.ts"
 
@@ -497,7 +497,13 @@ for (const [name, rpc] of rpcEntries) {
   pages.set("docs/pages/release/support-matrix.md", replaceRegion(readFileSync(page, "utf8"), "support-matrix", lines.join("\n")))
 }
 
-{
+// The known-limitations page is authored by the release-enforcement work from
+// the contract's exclusion table, not here. This block only refreshes the
+// `release-notes` region of that page once it exists, so the page is written by
+// one owner and its release-note region still cannot drift from the contract.
+// With the page absent the region has nothing to refresh and the block is
+// skipped, which is what keeps the documentation gate green before it lands.
+if (existsSync(join(repoRoot, "docs/pages/release/known-limitations.md"))) {
   const page = join(repoRoot, "docs/pages/release/known-limitations.md")
   const notes = releaseNotes()
   const excluded = exclusions()
@@ -583,12 +589,14 @@ for (const [name, rpc] of rpcEntries) {
     "The documentation moved from Mintlify to vocs in Smithers 1.0. Pages were",
     "rewritten, but three families of asset were kept rather than replaced: the",
     "release image trees, the Smithers 0.x changelogs, and the SOTA model registry.",
-    "This page says where each one is now.",
+    "This page says where each one is now, and where the page trees themselves",
+    "moved to.",
     "",
-    `It covers ${plan.entries.length} kept assets and ${plan.deletions.length} deletion rules. The table is generated from`,
-    "`docs/migration/disposition-ledger.json` and the tree itself, and `check-docs`",
-    "fails when an asset the ledger keeps has no place here or a file the ledger",
-    "deletes is still present.",
+    `It covers ${plan.entries.length} kept assets, ${movedTrees.length} moved page trees and ${plan.deletions.length} deletion rules. The tables are`,
+    "generated from `docs/migration/disposition-ledger.json` and the tree itself,",
+    "and `check-docs` fails when an asset the ledger keeps has no place here, a",
+    "file the ledger deletes is still present, or a page is written to a tree vocs",
+    "no longer publishes.",
     ""
   ]
   for (const family of families) {
@@ -599,6 +607,31 @@ for (const [name, rpc] of rpcEntries) {
       // The route is printed rather than linked: a Markdown link to a static
       // asset is a dead link to vocs's checker, which only resolves pages.
       body.push(`| \`${row.before}\` | \`${row.path}\` | ${row.route === undefined ? "not routed" : `\`${row.route}\``} |`)
+    }
+    body.push("")
+  }
+  body.push(
+    "## Moved page trees",
+    "",
+    "vocs publishes `docs/pages` and nothing else. These roots held the Mintlify",
+    "pages; a page written to one of them today builds no route, joins no sidebar",
+    "section, and reaches no llms bundle, so `check-docs` fails on any file left",
+    "in one.",
+    "",
+    "| Was | Is | Route or reason |",
+    "| --- | --- | --- |"
+  )
+  for (const moved of movedTrees) {
+    body.push(`| \`${moved.from}\` | \`${moved.to}\` | \`${moved.route}\` |`)
+    for (const exception of moved.exceptions) {
+      body.push(`| \`${exception.from}\` | \`${exception.to}\` | ${cell(exception.note)} |`)
+    }
+  }
+  body.push("")
+  if (deferredRoutes.length > 0) {
+    body.push("## Routes still waiting for their page", "")
+    for (const entry of deferredRoutes) {
+      body.push(`- \`${entry.route}\` is linked from this documentation and written by ${entry.owner}: ${entry.reason}.`)
     }
     body.push("")
   }

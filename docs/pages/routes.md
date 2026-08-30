@@ -7,12 +7,14 @@ description: "Where every asset the Mintlify-era documentation left behind lives
 The documentation moved from Mintlify to vocs in Smithers 1.0. Pages were
 rewritten, but three families of asset were kept rather than replaced: the
 release image trees, the Smithers 0.x changelogs, and the SOTA model registry.
-This page says where each one is now.
+This page says where each one is now, and where the page trees themselves
+moved to.
 
-It covers 90 kept assets and 36 deletion rules. The table is generated from
-`docs/migration/disposition-ledger.json` and the tree itself, and `check-docs`
-fails when an asset the ledger keeps has no place here or a file the ledger
-deletes is still present.
+It covers 90 kept assets, 4 moved page trees and 36 deletion rules. The tables are
+generated from `docs/migration/disposition-ledger.json` and the tree itself,
+and `check-docs` fails when an asset the ledger keeps has no place here, a
+file the ledger deletes is still present, or a page is written to a tree vocs
+no longer publishes.
 
 ## Changelogs
 
@@ -74,6 +76,30 @@ deletes is still present.
 | --- | --- | --- |
 | `docs/data/sota-benchmarks.json` | `docs/data/sota-benchmarks.json` | not routed |
 | `docs/data/sota-models.json` | `docs/data/sota-models.json` | not routed |
+
+## Moved page trees
+
+vocs publishes `docs/pages` and nothing else. These roots held the Mintlify
+pages; a page written to one of them today builds no route, joins no sidebar
+section, and reaches no llms bundle, so `check-docs` fails on any file left
+in one.
+
+| Was | Is | Route or reason |
+| --- | --- | --- |
+| `docs/reference/` | `docs/pages/api/` | `/api/<name>` |
+| `docs/reference/{go-targets,local-repositories,nix,package-workspace,stamps}.md` | `docs/internal/build/` | build-system notes for this repository's own contributors, not part of the published site |
+| `docs/reference/migrate.md` | `docs/pages/migration/migrate-tool.md` | the migration tool is documented on the upgrade path a reader arrives by, not in the API reference |
+| `docs/concepts/` | `docs/pages/concepts/` | `/concepts/<name>` |
+| `docs/guides/` | `docs/pages/guides/` | `/guides/<name>` |
+| `docs/guides/migrating-from-0x.md` | `docs/pages/migration/1.0.md` | rewritten as the 1.0 migration guide, which the removed-verb generator writes into |
+| `docs/architecture/` | `docs/pages/architecture/` | `/architecture/<name>` |
+| `docs/architecture/design-decisions.md` | `docs/pages/design-decisions.md` | a top-level page: the decisions are read on their own, not as a subsection |
+| `docs/architecture/implementation-status.md` | `docs/pages/release/support-matrix.md` | rewritten as the rc.0 support matrix, generated from contract section 3.1 |
+| `docs/architecture/{smithers-replacement-gaps,smithers-applicability-audit-2026-08-13}.md` | `docs/migration/` | migration records rather than product pages; the gap ledger seeds the release known-limitations page |
+
+## Routes still waiting for their page
+
+- `/release/known-limitations` is linked from this documentation and written by release enforcement: the exclusion table is generated from release contract section 7 by its owning work, and two writers on one path collide at landing.
 
 ## Deleted, with the reason
 

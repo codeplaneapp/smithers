@@ -56,6 +56,107 @@ export const additions = [
   }
 ]
 
+/**
+ * The Mintlify-era page roots, and where vocs publishes them now.
+ *
+ * vocs serves `docs/pages` and nothing else, so a page written to one of the
+ * old roots builds no route, joins no sidebar section, and reaches no llms
+ * bundle. It does not fail either: it just disappears. Recording the moves here
+ * gives a reader the new path and gives `check-docs` something to fail on.
+ */
+export const movedTrees = [
+  {
+    from: "docs/reference/",
+    to: "docs/pages/api/",
+    route: "/api/<name>",
+    note: "the per-package API reference, one page per published package",
+    exceptions: [
+      {
+        from: "docs/reference/{go-targets,local-repositories,nix,package-workspace,stamps}.md",
+        to: "docs/internal/build/",
+        note: "build-system notes for this repository's own contributors, not part of the published site"
+      },
+      {
+        from: "docs/reference/migrate.md",
+        to: "docs/pages/migration/migrate-tool.md",
+        note: "the migration tool is documented on the upgrade path a reader arrives by, not in the API reference"
+      }
+    ]
+  },
+  {
+    from: "docs/concepts/",
+    to: "docs/pages/concepts/",
+    route: "/concepts/<name>",
+    note: "the execution-model pages, page for page",
+    exceptions: []
+  },
+  {
+    from: "docs/guides/",
+    to: "docs/pages/guides/",
+    route: "/guides/<name>",
+    note: "the task guides, page for page",
+    exceptions: [
+      {
+        from: "docs/guides/migrating-from-0x.md",
+        to: "docs/pages/migration/1.0.md",
+        note: "rewritten as the 1.0 migration guide, which the removed-verb generator writes into"
+      }
+    ]
+  },
+  {
+    from: "docs/architecture/",
+    to: "docs/pages/architecture/",
+    route: "/architecture/<name>",
+    note: "the three architecture pages the release still describes",
+    exceptions: [
+      {
+        from: "docs/architecture/design-decisions.md",
+        to: "docs/pages/design-decisions.md",
+        note: "a top-level page: the decisions are read on their own, not as a subsection"
+      },
+      {
+        from: "docs/architecture/implementation-status.md",
+        to: "docs/pages/release/support-matrix.md",
+        note: "rewritten as the rc.0 support matrix, generated from contract section 3.1"
+      },
+      {
+        from: "docs/architecture/{smithers-replacement-gaps,smithers-applicability-audit-2026-08-13}.md",
+        to: "docs/migration/",
+        note: "migration records rather than product pages; the gap ledger seeds the release known-limitations page"
+      }
+    ]
+  }
+]
+
+/**
+ * Routes this documentation links before the page answering them exists.
+ *
+ * One page of the site is written by the release-enforcement work from the
+ * frozen contract's exclusion table. This lane links to its route and does not
+ * author a second copy, so the link checker is told about the gap here instead
+ * of being switched off. The entry expires by failing: once the page lands, the
+ * route resolves and `deferredRouteProblems` asks for this list to shrink.
+ */
+export const deferredRoutes = [
+  {
+    route: "/release/known-limitations",
+    owner: "release enforcement",
+    reason:
+      "the exclusion table is generated from release contract section 7 by its owning work, and two writers on one path collide at landing"
+  }
+]
+
+/**
+ * Deferred entries that have outlived their gap, given the routes that exist.
+ *
+ * A deferred route whose page has landed is no longer deferred, and leaving the
+ * entry in place would hide the next broken link behind it.
+ */
+export const deferredRouteProblems = (routes) =>
+  deferredRoutes
+    .filter((entry) => routes.has(entry.route))
+    .map((entry) => `${entry.route} exists now: drop it from the deferred routes in scripts/docs-routes.mjs`)
+
 const walk = (dir, out = []) => {
   if (!existsSync(dir)) return out
   for (const name of readdirSync(dir)) {
@@ -67,15 +168,19 @@ const walk = (dir, out = []) => {
 }
 
 /**
- * Turns a ledger glob into a regular expression over repository paths.
+ * The stand-in a `**` becomes while the single-star rule runs.
  *
- * `**` is converted in two passes through a sentinel so the single-star rule
- * cannot rewrite half of it. The sentinel is spelled as an escape rather than
- * written literally: a raw NUL in the source makes git treat this file as
- * binary and stop diffing it.
+ * It is spelled as an escape rather than written literally: a raw NUL in the
+ * source makes git treat this file as binary and stop diffing it.
  */
 const sentinel = "\u0000"
 
+/**
+ * Turns a ledger glob into a regular expression over repository paths.
+ *
+ * `**` is converted in two passes through the sentinel above so the
+ * single-star rule cannot rewrite half of it.
+ */
 export const globToRegExp = (glob) => {
   const escaped = glob.replace(/[.+^${}()[\]]/g, (character) => `\\${character}`)
   const pattern = escaped.replace(/\*\*\/?/g, sentinel).replace(/\*/g, "[^/]*").replaceAll(sentinel, ".*")
@@ -163,4 +268,15 @@ export const routePlan = (ledger = JSON.parse(readFileSync(ledgerPath, "utf8")))
   }
 
   return { entries, deletions, problems }
+}
+
+/** Files left in a page root vocs does not publish. */
+export const movedTreeProblems = () => {
+  const problems = []
+  for (const moved of movedTrees) {
+    for (const path of walk(join(repoRoot, moved.from)).sort()) {
+      problems.push(`${path} is not published: this tree moved to ${moved.to} (${moved.route})`)
+    }
+  }
+  return problems
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { spawnSync } from "node:child_process"
+import { execFile } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -42,16 +42,41 @@ test("the guide documents no verb the binary does not refuse", () => {
   assert.deepEqual(extra, [])
 })
 
-test("a removed verb really prints its documented sentence", () => {
-  // The table is data; this proves the data reaches a terminal. One spawn, not
-  // sixty-seven: the wiring is shared, only the rows differ.
-  const result = spawnSync(process.execPath, [cliEntry, "hijack"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" }
+test("every removed verb really prints its documented sentence", { concurrency: 8 }, async () => {
+  // The table is data; this proves the data reaches a terminal, for every row
+  // rather than for one. A verb the guide documents as removed while the binary
+  // answers it with the root help is the defect this catches: the table stays
+  // green because the table is not the binary. The spawns run eight at a time
+  // so sixty-seven of them cost seconds, not a minute.
+  const documented = documentedMessages()
+  const run = (verb) =>
+    new Promise((resolve) => {
+      execFile(
+        process.execPath,
+        [cliEntry, verb],
+        { cwd: repoRoot, encoding: "utf8", env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" } },
+        (_error, stdout, stderr) => resolve(`${stdout ?? ""}${stderr ?? ""}`.trim())
+      )
+    })
+
+  const names = Unsupported.removedVerbs.map((verb) => verb.name)
+  const printed = new Map()
+  const queue = [...names]
+  const workers = Array.from({ length: 8 }, async () => {
+    for (let verb = queue.shift(); verb !== undefined; verb = queue.shift()) {
+      printed.set(verb, await run(verb))
+    }
   })
-  const printed = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
-  assert.equal(printed, documentedMessages().get("hijack"))
+  await Promise.all(workers)
+
+  const offenders = []
+  for (const verb of names) {
+    const expected = documented.get(verb)
+    const actual = printed.get(verb)
+    if (actual === expected) continue
+    offenders.push(`${verb}: printed ${JSON.stringify(actual?.split("\n")[0] ?? "")}, guide says ${JSON.stringify(expected)}`)
+  }
+  assert.deepEqual(offenders, [])
 })
 
 test("every refusal obeys the sentence shape section 4.2 mandates", () => {
