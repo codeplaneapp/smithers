@@ -2009,6 +2009,18 @@ importers:
       '@smthrs/database':
         specifier: 1.0.0-rc.0
         version: link:../database
+      '@smthrs/engine-store':
+        specifier: 1.0.0-rc.0
+        version: link:../engine-store
+      '@smthrs/flow':
+        specifier: 1.0.0-rc.0
+        version: link:../flow
+      '@smthrs/flows':
+        specifier: 1.0.0-rc.0
+        version: link:../flows
+      '@smthrs/kernel':
+        specifier: 1.0.0-rc.0
+        version: link:../kernel
       '@smthrs/registry':
         specifier: 1.0.0-rc.0
         version: link:../registry
