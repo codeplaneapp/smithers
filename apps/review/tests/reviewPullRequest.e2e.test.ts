@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
+import { resolveInferenceEnv } from "../action/src/resolveInferenceEnv.ts";
 import { buildPullRequestReview } from "../src/github/buildPullRequestReview.ts";
 import { listPullRequestFiles } from "../src/github/listPullRequestFiles.ts";
 import { resolvePullRequest } from "../src/github/resolvePullRequest.ts";
@@ -56,9 +57,34 @@ afterAll(() => {
 const liveSeat = process.env.SMITHERS_REVIEW_E2E_LIVE_MODEL === "1" &&
   Boolean(process.env.ANTHROPIC_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim());
 
+/**
+ * The environment the live seats resolve against.
+ *
+ * `resolveReviewSeats` defaults to Anthropic models, so a machine carrying only
+ * `OPENAI_API_KEY` would resolve every seat to a credential it does not have
+ * and fail each file review with `SeatUnresolved`. The GitHub action already
+ * solves this: `resolveInferenceEnv` moves both seats onto the `openai:`
+ * provider when that is the key on offer. Reusing it here means the opt-in
+ * honours what this file's header promises for either key, and it exercises the
+ * action's own mapping rather than a second copy of it.
+ *
+ * An explicit `SMITHERS_REVIEW_SEAT` still wins: `process.env` is merged last.
+ */
+function liveEnvironment(): Readonly<Record<string, string | undefined>> {
+  const resolved = resolveInferenceEnv({
+    anthropicBaseUrl: "",
+    sessionToken: "",
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+    openaiApiKey: process.env.OPENAI_API_KEY,
+  });
+  return resolved.mode === "byo-openai" ? { ...resolved.env, ...process.env } : process.env;
+}
+
+const liveSeats = liveSeat ? resolveReviewSeats(liveEnvironment()) : undefined;
+
 /** A seat layer: live when opted into and credentialed, scripted otherwise. */
 function seats(anchors: ReadonlyMap<string, number>) {
-  if (liveSeat) return reviewSeatResolver(resolveReviewSeats());
+  if (liveSeats) return reviewSeatResolver(liveSeats, liveEnvironment());
   return scriptedSeats((ask) => {
     const path = [...anchors.keys()].find((candidate) => ask.includes(candidate));
     const line = path === undefined ? 0 : anchors.get(path) ?? 0;
@@ -150,7 +176,7 @@ describe.skipIf(!enabled)("review a real pull request (live GitHub)", () => {
     );
 
     console.log(
-      `[review e2e] ${slug}#${pr.number}: seat=${liveSeat ? "live" : "scripted"} status=${result.review.status} ` +
+      `[review e2e] ${slug}#${pr.number}: seat=${liveSeats ? liveSeats.review : "scripted"} status=${result.review.status} ` +
         `files=${result.walkthrough.files} findings=${result.review.comments.length} ` +
         `warnings=${result.review.warnings.map((warning) => warning.type).join(",") || "none"}`,
     );
