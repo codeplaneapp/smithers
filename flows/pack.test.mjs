@@ -499,14 +499,35 @@ describe("the fixture under the real CLI", () => {
     const result = smithers(project, "migrate");
 
     // The gate reads any 0.x `smithers.db` for non-terminal runs. The fixture
-    // has none, so the verb gets past it and stops at the Phase 6 flow body,
-    // which this lane does not deliver. A refusal here would mean the gate
+    // has none, so the verb gets past it and reaches the migration tool, which
+    // ships inside `@smthrs/migrate` rather than in a `flows/` directory the
+    // project being migrated does not have. A refusal here would mean the gate
     // fired on a project with nothing to refuse.
-    assert.equal(result.status, 1, result.stderr);
-    assert.match(result.stderr, /The migrate-smithers-v1 flow is not installed in this project/);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^Run state: clean\.$/m);
     assert.ok(
-      !result.stderr.includes("non-terminal"),
+      !`${result.stdout}${result.stderr}`.includes("non-terminal"),
       "the 0.x run gate refused a fixture that holds no run state",
     );
+  });
+
+  it("is a project the migration planner reads as 0.x work, not an empty directory", () => {
+    const project = detached();
+
+    const result = smithers(project, "migrate");
+
+    assert.equal(result.status, 0, result.stderr);
+    // The fixture exists to give the migration tool something real to plan
+    // against. A fixture that planned zero units would pass every gate above
+    // and prove nothing, so the counts are the assertion.
+    const units = /^Units: (\d+) planned, /m.exec(result.stdout);
+    assert.ok(units, `the planner reported no unit line:\n${result.stdout}`);
+    assert.ok(Number(units[1]) >= 3, `the fixture planned only ${units[1]} units`);
+    const constructs = /^Constructs: (\d+) rows across (\d+) mapping decisions\.$/m.exec(result.stdout);
+    assert.ok(constructs, `the planner reported no construct line:\n${result.stdout}`);
+    assert.ok(Number(constructs[1]) > 0 && Number(constructs[2]) > 0);
+    // The 0.x `<UI>` element is the construct the rc contract has no
+    // counterpart for, and the fixture carries one so a person sees it.
+    assert.match(result.stdout, /\.smithers\/workflows\/hello\.tsx/);
   });
 });
