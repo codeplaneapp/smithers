@@ -28,6 +28,13 @@ import { TimeTravelStore } from "../src/TimeTravelStore.ts"
 
 const frame = { lineageId: "parent/root", seq: 0 } as const
 
+/**
+ * The lane every case here provisions: the memory store mints `parent:fork:1`
+ * for the first fork of a fresh store, and the workspace is named after that
+ * child rather than after the parent frame.
+ */
+const lane = Fork.workspaceNameFor("parent:fork:1")
+
 const row = (): RunStore.RunRow => ({
   runId: "parent",
   status: "suspended",
@@ -113,8 +120,7 @@ const runFork = (options: {
     Fork.fork({
       parentRunId: "parent",
       frame,
-      workspaceName: "fork-workspace",
-      workspacePath: "/tmp/fork-workspace",
+      workspaceRoot: "/tmp/lanes",
       pageSize: 1
     }).pipe(
       Effect.map((result) => ({ result, calls })),
@@ -176,7 +182,7 @@ describe("fork boundary assessment", () => {
       // parent's. `docs/specs/Concepts/Time Travel.md` §Fork forbids a fork from
       // restoring it, so the child lane is pinned at the frame's pointer at
       // provisioning time instead: `workspaceAdd` carries the revision.
-      expect(calls).toEqual(["add:fork-workspace@change-at-frame", "forget:fork-workspace"])
+      expect(calls).toEqual([`add:${lane}@change-at-frame`, `forget:${lane}`])
     }))
 
   it.effect("keeps a `warning` classification's own disclosure verbatim", () =>
@@ -210,10 +216,10 @@ describe("fork boundary assessment", () => {
       const { calls, result } = yield* runFork({ entries: [noise(1)] })
 
       expect(result.warnings).toEqual([
-        "Frame parent/root@0 has no recorded jj pointer; the fork workspace fork-workspace starts from the lane " +
+        `Frame parent/root@0 has no recorded jj pointer; the fork workspace ${lane} starts from the lane ` +
         "default rather than the frame."
       ])
-      expect(calls).toEqual(["add:fork-workspace", "forget:fork-workspace"])
+      expect(calls).toEqual([`add:${lane}`, `forget:${lane}`])
     }))
 
   it.effect("maps a suffix read failure and a workspace-add failure to typed errors", () =>
@@ -224,8 +230,7 @@ describe("fork boundary assessment", () => {
             Fork.fork({
               parentRunId: "parent",
               frame,
-              workspaceName: "fork-workspace",
-              workspacePath: "/tmp/fork-workspace"
+              workspaceRoot: "/tmp/lanes"
             }).pipe(
               Effect.provide(
                 Layer.succeed(RunStore.RunStore, RunStore.makeNoop({ get: () => Effect.succeed(row()) }))
@@ -245,8 +250,7 @@ describe("fork boundary assessment", () => {
             Fork.fork({
               parentRunId: "parent",
               frame,
-              workspaceName: "fork-workspace",
-              workspacePath: "/tmp/fork-workspace"
+              workspaceRoot: "/tmp/lanes"
             }).pipe(
               Effect.provide(
                 Layer.succeed(RunStore.RunStore, RunStore.makeNoop({ get: () => Effect.succeed(row()) }))
@@ -289,8 +293,7 @@ describe("fork boundary assessment", () => {
             Fork.fork({
               parentRunId: "parent",
               frame,
-              workspaceName: "fork-workspace",
-              workspacePath: "/tmp/fork-workspace"
+              workspaceRoot: "/tmp/lanes"
             }).pipe(
               Effect.provide(
                 Layer.succeed(RunStore.RunStore, RunStore.makeNoop({ get: () => Effect.succeed(row()) }))
@@ -324,13 +327,12 @@ describe("fork boundary assessment", () => {
               Fork.fork({
                 parentRunId: "parent",
                 frame,
-                workspaceName: "fork-workspace",
-                workspacePath: "/tmp/fork-workspace"
+                workspaceRoot: "/tmp/lanes"
               })
             )
             // Compensation, not scope cleanup: the lane is already forgotten
             // while the fork's scope is still open.
-            expect(calls).toEqual(["add:fork-workspace", "forget:fork-workspace"])
+            expect(calls).toEqual([`add:${lane}`, `forget:${lane}`])
             return failure
           }).pipe(
             Effect.provide(
@@ -396,8 +398,7 @@ describe("fork boundary assessment", () => {
               Fork.fork({
                 parentRunId: "parent",
                 frame,
-                workspaceName: "fork-workspace",
-                workspacePath: "/tmp/fork-workspace"
+                workspaceRoot: "/tmp/lanes"
               }).pipe(
                 Effect.provide(Layer.succeed(Jj.Jj, Jj.makeNoop({ workspaceForget: () => Effect.void }))),
                 Effect.provide(EffectHandlerRegistry.layerNoop)

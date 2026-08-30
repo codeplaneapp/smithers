@@ -24,12 +24,13 @@ import * as Compensation from "./Compensation.ts"
 import type { EffectHandlerRegistry } from "./EffectHandlerRegistry.ts"
 
 /**
- * What a fork needs to know: which parent frame to branch from, and where the
- * child's workspace goes.
+ * What a fork needs to know: which parent frame to branch from, and which lane
+ * the child's workspace goes under.
  *
- * The workspace fields are separate because a fork adds a jj workspace for the
- * child rather than restoring the parent's — the parent keeps its own working
- * copy untouched.
+ * The lane is a root rather than a full path because a fork adds a jj
+ * workspace for the child rather than restoring the parent's — the parent
+ * keeps its own working copy untouched — and the child's own run id, minted
+ * inside the operation, is what names it.
  *
  * @since 0.1.0
  * @category models
@@ -37,13 +38,70 @@ import type { EffectHandlerRegistry } from "./EffectHandlerRegistry.ts"
 export interface ForkOptions {
   readonly parentRunId: string
   readonly frame: Frame
-  /** The jj workspace name to create for the child run. */
-  readonly workspaceName: string
-  /** Where that workspace is materialized on disk. */
-  readonly workspacePath: string
+  /**
+   * The lane the child's jj workspace is materialized under. The workspace's
+   * own name is {@link workspaceNameFor} of the child run id, never a
+   * caller-supplied label: the fork mints the child id first precisely so the
+   * lane and the run it holds carry one identity.
+   */
+  readonly workspaceRoot: string
   /** Journal page size for the suffix scan; defaults to the store's own. */
   readonly pageSize?: number | undefined
 }
+
+/**
+ * Everything a jj workspace name and a directory component both accept.
+ *
+ * @since 0.1.0
+ * @category constructors
+ */
+const sanitize = (value: string): string => value.replace(/[^A-Za-z0-9._-]/g, "-")
+
+/**
+ * FNV-1a over the run id, as eight lowercase hexadecimal characters.
+ *
+ * This is a disambiguator, not an identity: it never crosses the journal, the
+ * cache, or the wire, so it does not go through `@smthrs/crypto`'s injected
+ * SHA-256, whose `Crypto` requirement would follow every fork into every
+ * composition. What it must be is browser-safe, synchronous, and total, which
+ * a 32-bit multiply-and-xor over the code units is.
+ *
+ * @since 0.1.0
+ * @category constructors
+ */
+const digest = (value: string): string => {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, "0")
+}
+
+/**
+ * The workspace name a forked run's lane carries.
+ *
+ * THE CHILD RUN ID IS THE ONLY INPUT, on purpose. Naming the lane after the
+ * parent frame, meaning the parent run id and the frame's seq, gave the second
+ * fork of one frame the first child's name, and gave two parents that differ
+ * only in a character the sanitizer folds (`demo/a` and `demo:a`) one shared
+ * name.
+ * The child run id distinguishes exactly what the store distinguishes, and the
+ * digest of the RAW id restores what sanitizing and the 64-character cap fold
+ * away. Two children share a name only when their sanitized, capped ids match
+ * AND their raw ids share a 32-bit FNV-1a digest, about one pair in 4.3
+ * billion for ids that already differ by an ordinal the store hands out. That
+ * residual case is loud rather than silent: `jj workspace add` refuses a name
+ * the repository already holds, so the fork fails instead of two runs sharing
+ * one directory.
+ *
+ * `jj workspace list` shows this name to an operator, so it carries the
+ * product's name rather than the imported repository's.
+ *
+ * @since 0.1.0
+ * @category constructors
+ */
+export const workspaceNameFor = (childRunId: string): string =>
+  `smithers-fork-${sanitize(childRunId).slice(0, 64)}-${digest(childRunId)}`
 
 /**
  * Reads the journal suffix a fork carries past — the entries the child will
@@ -98,10 +156,11 @@ const normalize = (
  * owned — a fork copies a settled prefix, and a live parent has no settled
  * prefix to copy. Otherwise it reads the journal suffix past the frame,
  * assesses the effects in it, normalizes every classification to a warning
- * (see the module header), provisions the child's jj workspace, and only then
- * asks the store to commit the fork in one transaction — so a failed
- * provision leaves nothing durable, and a failed commit forgets the lane it
- * provisioned. The parent is never mutated.
+ * (see the module header), mints the child's run id, provisions that child's
+ * jj workspace under {@link ForkOptions.workspaceRoot}, and only then asks the
+ * store to commit the fork in one transaction — so a failed provision leaves
+ * nothing durable, and a failed commit forgets the lane it provisioned. The
+ * parent is never mutated.
  *
  * @since 0.1.0
  * @category constructors
@@ -124,8 +183,7 @@ export const fork = (
       yield* Effect.annotateCurrentSpan({
         parentRunId: options.parentRunId,
         lineageId: options.frame.lineageId,
-        seq: options.frame.seq,
-        workspaceName: options.workspaceName
+        seq: options.frame.seq
       })
       const runs = yield* RunStore.RunStore
       const parent = yield* runs.get(options.parentRunId).pipe(
@@ -147,7 +205,13 @@ export const fork = (
 
       const jj = yield* Jj
       /**
-       * PROVISION, THEN COMMIT — in that order, on purpose.
+       * MINT, THEN PROVISION, THEN COMMIT — in that order, on purpose.
+       *
+       * The mint is what makes the lane and the child one identity: the
+       * workspace is named after the run that will live in it, so a frame
+       * forked twice provisions two lanes and two parents that sanitize alike
+       * never share one. Nothing durable exists yet — `nextForkId` writes
+       * nothing — so a mint that is never committed costs an unused ordinal.
        *
        * The store commit is the fork's finalization step, the way Temporal
        * finalizes a workflow record only after what it names exists
@@ -162,13 +226,16 @@ export const fork = (
        * window between the two steps leaves only an unregistered jj
        * workspace on disk, never a lie in the system of record.
        */
-      yield* jj.workspaceAdd(options.workspaceName, options.workspacePath, snapshot?.changeId).pipe(
+      const childRunId = yield* store.nextForkId(options.parentRunId, options.frame)
+      const workspaceName = workspaceNameFor(childRunId)
+      yield* Effect.annotateCurrentSpan({ childRunId, workspaceName })
+      yield* jj.workspaceAdd(workspaceName, `${options.workspaceRoot}/${workspaceName}`, snapshot?.changeId).pipe(
         Effect.mapError((cause) => error("unknown", "could not add fork workspace", cause))
       )
-      const result = yield* store.createFork(options.parentRunId, options.frame).pipe(
-        Effect.onError(() => jj.workspaceForget(options.workspaceName).pipe(Effect.ignore))
+      const result = yield* store.createFork(options.parentRunId, options.frame, childRunId).pipe(
+        Effect.onError(() => jj.workspaceForget(workspaceName).pipe(Effect.ignore))
       )
-      yield* Effect.addFinalizer(() => jj.workspaceForget(options.workspaceName).pipe(Effect.ignore))
+      yield* Effect.addFinalizer(() => jj.workspaceForget(workspaceName).pipe(Effect.ignore))
       /**
        * THE CHILD'S WORKTREE IS PINNED AT THE FRAME'S POINTER.
        *
@@ -186,7 +253,7 @@ export const fork = (
           ? [
             ...warnings,
             `Frame ${options.frame.lineageId}@${options.frame.seq} has no recorded jj pointer; ` +
-            `the fork workspace ${options.workspaceName} starts from the lane default rather than the frame.`
+            `the fork workspace ${workspaceName} starts from the lane default rather than the frame.`
           ]
           : warnings
       }
