@@ -25,6 +25,9 @@ import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
 import * as WorkspaceSandbox from "@smthrs/engine-store/WorkspaceSandbox"
 import * as NodeFlowsRuntime from "@smthrs/flows/NodeRuntime"
+import type * as GatewayServer from "@smthrs/gateway/GatewayServer"
+import * as NodeGateway from "@smthrs/gateway/node/NodeGateway"
+import * as GatewayProjections from "@smthrs/gateway/Projections"
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
 import type * as Sandbox from "@smthrs/harness/Sandbox"
 import * as NodeJj from "@smthrs/jj/node/NodeJj"
@@ -54,6 +57,10 @@ import * as Checkpoints from "@smthrs/std/Checkpoints"
 import * as Container from "@smthrs/std/Container"
 import * as NativeSearch from "@smthrs/std/NativeSearch"
 import * as TestRunner from "@smthrs/std/TestRunner"
+import * as RunCatalog from "@smthrs/sync/RunCatalog"
+import * as SyncAuth from "@smthrs/sync/SyncAuth"
+import * as SyncServer from "@smthrs/sync/SyncServer"
+import * as WorkspaceShare from "@smthrs/sync/WorkspaceShare"
 import type { FileSystem, Path, Result } from "effect"
 import { Context, Effect, Exit, Layer, Redacted, Scope } from "effect"
 import { HttpRouter } from "effect/unstable/http"
@@ -1028,6 +1035,42 @@ export const layerServer = (
   ).pipe(
     Layer.provideMerge(NodeHttpServer.layer(createServer, listenOptions(options)))
   )
+
+/**
+ * Hosts the whole workspace gateway: the control plane, the served
+ * projections, the journal read path, and the health probe, on one socket.
+ *
+ * `@smthrs/gateway` owns the assembly (`GatewayServer.layer`) and its Node
+ * host (`NodeGateway.layer`); this function supplies the four services those
+ * mounts read through that only a project on disk can provide. `Control` stays
+ * a requirement, so the verb hosts the same control plane its own commands
+ * talk to rather than opening a second one.
+ *
+ * The sync read path reads the journal over its own connection to the control
+ * database. SQLite in WAL mode is built for that, and the alternative — a
+ * second `ControlLive` — would be a second writer.
+ *
+ * `RunCatalog` and `WorkspaceShare` are the no-op implementations: a local
+ * gateway shares nothing and publishes no catalog, and the relay
+ * implementations belong to a host that has an account to publish under.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerGateway = (
+  health: GatewayServer.Health,
+  options: NodeGateway.ServerOptions = { host: "127.0.0.1", port: defaultServerOptions.port },
+  root: string = process.cwd()
+) => {
+  const journal = engineDurable(root).journal
+  return NodeGateway.layer(health, options).pipe(
+    Layer.provide([
+      GatewayProjections.layer,
+      SyncServer.layer.pipe(Layer.provide([journal, RunCatalog.layerNoop])),
+      SyncAuth.layer.pipe(Layer.provide(WorkspaceShare.layerNoop))
+    ])
+  )
+}
 
 /**
  * Hosts Control using the alpha's single shared bearer token.

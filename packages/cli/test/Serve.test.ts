@@ -49,7 +49,50 @@ describe("the bind rule", () => {
   })
 })
 
+describe("the mounts", () => {
+  it("names every route the gateway assembly hosts", () => {
+    // `@smthrs/gateway`'s `GatewayServer.layer` mounts exactly these. The
+    // banner is rendered from this list, so an entry that is not hosted cannot
+    // be advertised, which is the defect the previous banner had: it printed
+    // `/health` while the verb hosted the control server alone.
+    expect(Serve.mounts.map((mount) => mount.path)).toEqual([
+      "/rpc",
+      "/rpc/ws",
+      "/projections",
+      "/projections/ws",
+      "/sync",
+      "/sync/ws",
+      "/health"
+    ])
+    expect(Serve.mounts.filter((mount) => mount.protocol === "ws").map((mount) => mount.path)).toEqual([
+      "/rpc/ws",
+      "/projections/ws",
+      "/sync/ws"
+    ])
+  })
+
+  it("identifies the workspace by its root and nothing else", () => {
+    // A supervisor asks `/health` whether the gateway it found belongs to this
+    // workspace. The answer must not carry the operator's directory names.
+    const identity = Serve.health("/tmp/project-one")
+
+    expect(identity.workspaceHash).toBe(Serve.workspaceHash("/tmp/project-one/"))
+    expect(identity.workspaceHash).not.toBe(Serve.workspaceHash("/tmp/project-two"))
+    expect(identity.workspaceHash).not.toContain("project-one")
+    expect(identity.protocolVersion).toBe("1")
+  })
+})
+
 describe("the banner", () => {
+  it("is rendered from the mount list, so it cannot advertise a 404", () => {
+    const banner = Serve.banner(bind())
+
+    for (const mount of Serve.mounts) {
+      const base = mount.protocol === "ws" ? "ws://127.0.0.1:3000" : "http://127.0.0.1:3000"
+      expect(banner).toContain(`${base}${mount.path}`)
+    }
+  })
+
   it("names every mount and how the server authenticates", () => {
     const banner = Serve.banner(bind())
 
