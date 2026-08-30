@@ -73,7 +73,11 @@ export const shipped: ReadonlyArray<Verb> = [
   verb("doctor", "Report registry, database, runtime, and provider readiness"),
   verb("docs", "Print the bundled documentation; --full prints llms-full.txt"),
   verb("migrate", "Convert a Smithers 0.x project to the 1.0 authoring model"),
-  verb("gc", "Delete terminal runs older than a threshold and compact the journal"),
+  // No compaction: `Journal.compact` refuses a run the fence still owns, and
+  // a terminal run's fence is exactly what retention deletes, so the two run
+  // in the wrong order to be one pass. The contract's section 4.1 wording is
+  // the thing that has to change; this verb says what it does.
+  verb("gc", "Delete terminal runs older than a threshold, with the rows they own"),
   verb("memory", "Read and write namespaced facts in the control database"),
   verb("claude", "Claude Code plugin mirror protocol"),
   verb("mcp", "Wire the Smithers MCP server into an agent"),

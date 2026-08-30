@@ -27,6 +27,30 @@ import { registryError } from "./RegistryError.ts"
  */
 export interface Config {
   readonly sources: ReadonlyArray<Source>
+  /**
+   * Installed packs, scanned after `sources` and folded in under the same
+   * first-found rule, so a source entry shadows a pack entry of the same name.
+   * Omit it for a registry with no packs.
+   */
+  readonly packs?: PackConfig | undefined
+}
+
+/**
+ * The pack half of a {@link Config}.
+ *
+ * `runtimeVersion` is required rather than optional because it is the only
+ * thing `requires.smithers` can be checked against: an optional field would
+ * silently skip the check for every caller that forgot it, which is the one
+ * failure mode a compatibility range exists to prevent.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface PackConfig {
+  /** The packs to scan. Precedence is `origin`, not caller order. */
+  readonly installed: ReadonlyArray<Pack.Installed>
+  /** The runtime version every pack's `requires.smithers` is checked against. */
+  readonly runtimeVersion: string
 }
 
 /**
@@ -119,49 +143,109 @@ const snapshotFrom = (
   }
 }
 
+/**
+ * Scans every pack in a {@link PackConfig} and merges the results.
+ *
+ * Compatibility is checked for every pack before anything is scanned, and a
+ * pack source that cannot be scanned fails as an `invalid_pack` naming the
+ * pack rather than as a bare discovery error naming only a directory: a
+ * missing `flows/` under a pack is the pack's defect, and an operator has to
+ * be told which pack to reinstall.
+ */
+const scanPacks = (
+  config: PackConfig,
+  discovery: Discovery
+): Effect.Effect<
+  { readonly entries: ReadonlyArray<FlowDescriptor>; readonly warnings: ReadonlyArray<DiscoveryWarning> },
+  RegistryError,
+  Path.Path
+> =>
+  Effect.gen(function*() {
+    const path = yield* Path.Path
+    const scans: Array<Pack.Scan> = []
+    for (const pack of config.installed) {
+      yield* Pack.checkCompatible(pack, config.runtimeVersion)
+      const entries: Array<FlowDescriptor> = []
+      const warnings: Array<DiscoveryWarning> = []
+      for (const source of Pack.sources(pack, path)) {
+        const scan = yield* discovery.scan(source).pipe(
+          Effect.mapError((cause) =>
+            registryError({
+              code: "invalid_pack",
+              method: "make",
+              description:
+                `pack "${pack.manifest.name}@${pack.manifest.version}" declares a source at "${source.root}" that could not be scanned`,
+              cause
+            })
+          )
+        )
+        entries.push(...scan.entries)
+        warnings.push(...scan.warnings)
+      }
+      scans.push({ pack, entries, warnings })
+    }
+    return Pack.merge(scans)
+  })
+
 const scanSources = (
   config: Config,
   discovery: Discovery
-): Effect.Effect<Snapshot, RegistryError | DiscoveryError> =>
+): Effect.Effect<Snapshot, RegistryError | DiscoveryError, Path.Path> =>
   Effect.gen(function*() {
     const retained = new Map<string, RetainedDescriptor>()
     const entries: Array<FlowDescriptor> = []
     const registryWarnings: Array<DiscoveryWarning> = []
 
-    for (const source of config.sources) {
-      const scan = yield* discovery.scan(source)
-      registryWarnings.push(...scan.warnings)
+    /** Folds one scanned batch into the first-found snapshot under construction. */
+    const fold = (
+      batch: ReadonlyArray<FlowDescriptor>,
+      system: boolean
+    ): Effect.Effect<void, RegistryError> =>
+      Effect.gen(function*() {
+        for (const entry of batch) {
+          const existing = retained.get(entry.name)
+          if (existing === undefined) {
+            retained.set(entry.name, { descriptor: entry, system })
+            entries.push(entry)
+            continue
+          }
 
-      for (const entry of scan.entries) {
-        const existing = retained.get(entry.name)
-        if (existing === undefined) {
-          retained.set(entry.name, {
-            descriptor: entry,
-            system: source.system === true
-          })
-          entries.push(entry)
-          continue
-        }
+          if (existing.system || system) {
+            return yield* Effect.fail(
+              registryError({
+                code: "system_collision",
+                method: "make",
+                description: `flow "${entry.name}" collides with the system namespace`
+              })
+            )
+          }
 
-        if (existing.system || source.system === true) {
-          return yield* Effect.fail(
-            registryError({
-              code: "system_collision",
-              method: "make",
-              description: `flow "${entry.name}" collides with the system namespace`
+          registryWarnings.push(
+            new DiscoveryWarning({
+              code: "duplicate_name",
+              path: entry.path,
+              name: entry.name,
+              message: `Duplicate flow name "${entry.name}"; keeping first entry from "${existing.descriptor.path}"`
             })
           )
         }
+      })
 
-        registryWarnings.push(
-          new DiscoveryWarning({
-            code: "duplicate_name",
-            path: entry.path,
-            name: entry.name,
-            message: `Duplicate flow name "${entry.name}"; keeping first entry from "${existing.descriptor.path}"`
-          })
-        )
-      }
+    for (const source of config.sources) {
+      const scan = yield* discovery.scan(source)
+      registryWarnings.push(...scan.warnings)
+      yield* fold(scan.entries, source.system === true)
+    }
+
+    // A pack's flows are scanned AFTER the caller's own sources and folded in
+    // through the same first-found rule, so a project flow shadows a pack flow
+    // of the same name and reports it as a duplicate. Precedence AMONG packs is
+    // the pack's origin, which is `Pack.merge`'s rule and reports `shadowed`
+    // naming both packs; a pack is never a system source.
+    if (config.packs !== undefined) {
+      const packed = yield* scanPacks(config.packs, discovery)
+      registryWarnings.push(...packed.warnings)
+      yield* fold(packed.entries, false)
     }
 
     return snapshotFrom(entries, registryWarnings)
@@ -254,9 +338,10 @@ export const make = (
     const discovery = yield* Discovery
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const initial = yield* scanSources(config, discovery)
+    const scan = scanSources(config, discovery).pipe(Effect.provideService(Path.Path, path))
+    const initial = yield* scan
     const state = yield* Ref.make(initial)
-    const refresh = Effect.flatMap(scanSources(config, discovery), (snapshot) => Ref.set(state, snapshot))
+    const refresh = Effect.flatMap(scan, (snapshot) => Ref.set(state, snapshot))
     return fromRef(state, fs, path, refresh)
   })
 
@@ -311,6 +396,9 @@ export const layerFromDescriptors = (
  * pack written against a newer runtime fails `incompatible_pack` at load
  * rather than at the first call into one of its flows.
  *
+ * This is {@link layer} with no sources of its own, so `refresh` rescans every
+ * pack the same way it rescans a source.
+ *
  * @category layers
  * @since 0.1.0
  */
@@ -321,30 +409,7 @@ export const layerFromPacks = (
   Registry,
   RegistryError | DiscoveryError,
   Discovery | FileSystem.FileSystem | Path.Path
-> =>
-  Layer.effect(
-    Registry,
-    Effect.gen(function*() {
-      const discovery = yield* Discovery
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const scans: Array<Pack.Scan> = []
-      for (const pack of packs) {
-        yield* Pack.checkCompatible(pack, options.runtimeVersion)
-        const entries: Array<FlowDescriptor> = []
-        const warnings: Array<DiscoveryWarning> = []
-        for (const source of Pack.sources(pack, path)) {
-          const scan = yield* discovery.scan(source)
-          entries.push(...scan.entries)
-          warnings.push(...scan.warnings)
-        }
-        scans.push({ pack, entries, warnings })
-      }
-      const merged = Pack.merge(scans)
-      const state = yield* Ref.make(snapshotFrom(merged.entries, merged.warnings))
-      return fromRef(state, fs, path, Effect.void)
-    })
-  )
+> => layer({ sources: [], packs: { installed: packs, runtimeVersion: options.runtimeVersion } })
 
 /**
  * Creates an empty registry stub with optional method overrides.

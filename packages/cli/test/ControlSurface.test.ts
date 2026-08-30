@@ -42,7 +42,7 @@ const invoke = Effect.fnUntraced(function*(args: ReadonlyArray<string>) {
 
 const scenario = (shared: ReadonlyArray<string> = []) =>
   Effect.gen(function*() {
-    const plan = yield* invoke(["--json", ...shared, "plan", "system/test"])
+    const plan = yield* invoke(["--json", ...shared, "plan", "demo/ship"])
 
     const card = plan.value as {
       readonly approval: unknown
@@ -106,7 +106,23 @@ const addressUrl = (server: HttpServer.HttpServer["Service"]): string => {
   return `http://127.0.0.1:${address.port}`
 }
 
-const testControl = TestControl.layer({ now: () => 0 })
+/**
+ * The project flow these cases plan, approve, and run.
+ *
+ * A reserved `system/*` id would be simpler to reach — `TestControl` falls
+ * back to the whole reserved catalog — but the CLI refuses to plan one, since
+ * a reserved id has no body and a launch would park forever
+ * (`Unsupported.reservedFlowError`). So the fixture registers a flow of its
+ * own, which is also what an operator's project looks like.
+ */
+const demoFlow = {
+  flowId: "demo/ship",
+  description: "The fixture flow these cases plan and run",
+  deployClass: false,
+  envelope: { capabilities: [], flows: [], budget: {} }
+} as const
+
+const testControl = TestControl.layer({ now: () => 0, flows: [demoFlow] })
 const websocketEvent = {
   sequence: 1,
   kind: "control.websocket.connected",
@@ -163,7 +179,7 @@ describe("Control surface", () => {
 
   it.each(
     [
-      ["plan data", ["plan", "system/test", "--data", "{"]],
+      ["plan data", ["plan", "demo/ship", "--data", "{"]],
       ["run approval", ["run", "{"]],
       ["approve payload", ["approve", "{"]],
       ["deny payload", ["deny", "{"]],
@@ -206,7 +222,7 @@ describe("Control surface", () => {
 
   it("mounts the remote parser path on a real ephemeral Node server", async () => {
     const local = await Effect.runPromise(
-      invoke(["--json", "plan", "system/test"]).pipe(
+      invoke(["--json", "plan", "demo/ship"]).pipe(
         Effect.provide(testControl),
         Effect.provide(scenarioServices),
         Effect.provide(NodeServices.layer)
@@ -215,7 +231,7 @@ describe("Control surface", () => {
     const remote = await Effect.runPromise(
       Effect.gen(function*() {
         const server = yield* HttpServer.HttpServer
-        return yield* invoke(["--json", "plan", "system/test"]).pipe(
+        return yield* invoke(["--json", "plan", "demo/ship"]).pipe(
           Effect.provide(NodeControl.layerControl({ remote: addressUrl(server) })),
           Effect.provide(scenarioServices)
         )
@@ -236,7 +252,7 @@ describe("Control surface", () => {
     const accepted = await Effect.runPromise(
       Effect.gen(function*() {
         const shared = ["--remote", "http://control.example.test"]
-        const planned = yield* invoke(["--json", ...shared, "plan", "system/test"])
+        const planned = yield* invoke(["--json", ...shared, "plan", "demo/ship"])
         const card = planned.value as { readonly approval: unknown }
         const approval = JSON.stringify(card.approval)
         yield* invoke(["--json", ...shared, "approve", approval])
@@ -251,25 +267,36 @@ describe("Control surface", () => {
     expect(accepted.value).toMatchObject({ _tag: "Accepted", runId: expect.any(String) })
   })
 
-  it("renders the receipt when the owned executor declines to execute the run", async () => {
-    const accepted = await Effect.runPromise(
-      Effect.gen(function*() {
-        const planned = yield* invoke(["--json", "plan", "system/test"])
-        const card = planned.value as { readonly approval: unknown }
-        const approval = JSON.stringify(card.approval)
-        yield* invoke(["--json", "approve", approval])
-        // The noop test executor answers `pending`, so the run never reaches
-        // `running` or a terminal status; the owned wait must still settle.
-        return yield* invoke(["--json", "run", approval]).pipe(Effect.timeout("5 seconds"))
-      }).pipe(
-        Effect.provide(ExecutorOwnership.layer(true)),
-        Effect.provide(testControl),
-        Effect.provide(scenarioServices),
-        Effect.provide(NodeServices.layer)
+  it("says the owned executor declined the run, and exits non-zero", async () => {
+    // The noop test executor answers `pending`, so the run never reaches
+    // `running` or a terminal status. Rendering the launch receipt there said
+    // `Accepted` and exited 0 for a run that will never take a single step,
+    // and left the operator nothing to read: no seat, no capability, and a
+    // durable run row parked at `accepted` forever.
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        Effect.gen(function*() {
+          const planned = yield* invoke(["--json", "plan", "demo/ship"])
+          const card = planned.value as { readonly approval: unknown }
+          const approval = JSON.stringify(card.approval)
+          yield* invoke(["--json", "approve", approval])
+          return yield* invoke(["--json", "run", approval]).pipe(Effect.timeout("5 seconds"))
+        }).pipe(
+          Effect.provide(ExecutorOwnership.layer(true)),
+          Effect.provide(testControl),
+          Effect.provide(scenarioServices),
+          Effect.provide(NodeServices.layer)
+        )
       )
     )
 
-    expect(accepted.value).toMatchObject({ _tag: "Accepted", runId: expect.any(String) })
+    expect(Exit.isFailure(exit)).toBe(true)
+    const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+    expect(error).toBeInstanceOf(CliError.UnsupportedError)
+    const message = (error as CliError.UnsupportedError).message
+    expect(message).toContain("the executor did not take it")
+    expect(message).toContain("smithers ps")
+    expect(CliError.exitCode(error as CliError.UnsupportedError)).toBe(1)
   })
 
   it("waits for a fresh park after resuming an owned run", async () => {
@@ -333,7 +360,7 @@ describe("Control surface", () => {
         const runtime = yield* ControlRuntime.ControlRuntime
         const journal = yield* Journal.Journal
 
-        const planned = yield* invoke(["--json", "plan", "system/test"])
+        const planned = yield* invoke(["--json", "plan", "demo/ship"])
         const card = planned.value as { readonly approval: unknown }
         const approval = JSON.stringify(card.approval)
         yield* invoke(["--json", "approve", approval])
@@ -438,7 +465,7 @@ describe("Control surface", () => {
         const server = yield* HttpServer.HttpServer
         return yield* Effect.gen(function*() {
           const control = yield* ControlService.Control
-          return yield* control.plan({ flowId: "system/test", input: {} }).pipe(Effect.flip)
+          return yield* control.plan({ flowId: "demo/ship", input: {} }).pipe(Effect.flip)
         }).pipe(
           Effect.provide(NodeControl.layerControl({ remote: addressUrl(server) }))
         )

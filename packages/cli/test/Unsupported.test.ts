@@ -34,13 +34,20 @@ const failure = async (args: ReadonlyArray<string>): Promise<unknown> => {
   return Exit.isSuccess(exit) ? undefined : Cause.squash(exit.cause)
 }
 
+/** The two removed entries whose bare form is a live alias, not a refusal. */
+const ownGroups = new Set(["gateway", "workflow"])
+
 describe("every removed verb", () => {
   it.each(Unsupported.removedVerbs.map((verb) => [verb.name, verb] as const))(
     "`smithers %s` fails with the migration message and exit status 1",
     async (name, verb) => {
-      // `workflows` is answered by the `workflow` command, which keeps
-      // `workflow list` alive as the `ls` alias.
-      const error = await failure(name === "workflows" ? ["workflow", "inspect"] : [name])
+      // Two removed entries have a bare form that still does something:
+      // `gateway` is the `serve` alias and `workflow list` is the `ls` alias.
+      // Both are driven through a removed subcommand instead, which is the
+      // only form section 4.2 removed.
+      const error = await failure(
+        verb.subcommands === undefined || !ownGroups.has(name) ? [name] : [name, verb.subcommands[0]!]
+      )
 
       expect(error).toBeInstanceOf(CliError.UnsupportedError)
       const message = (error as CliError.UnsupportedError).message

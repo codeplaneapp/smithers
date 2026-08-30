@@ -10,7 +10,7 @@
  */
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as Retention from "@smthrs/engine-store/Retention"
-import { Effect, Layer } from "effect"
+import { Cause, Effect, Layer } from "effect"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import * as CliError from "./CliError.ts"
@@ -61,10 +61,42 @@ export const databases = (root: string): ReadonlyArray<string> =>
     .filter((file) => existsSync(file))
 
 /**
+ * One database the sweep could not open, and why.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface Failure {
+  readonly database: string
+  readonly reason: string
+}
+
+/**
+ * What one sweep did, and what it could not do.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface Sweep {
+  readonly olderThan: string
+  readonly dryRun: boolean
+  readonly reports: ReadonlyArray<Retention.Report>
+  /** Databases the pass could not open. Empty on a clean sweep. */
+  readonly failures: ReadonlyArray<Failure>
+}
+
+/**
  * Runs the retention pass over every database this project has.
  *
  * A project with no `.flows/` reports an empty sweep rather than failing: `gc`
- * on a project that has never run anything is a no-op, not an error.
+ * on a project that has never run anything is a no-op, not an error. That is
+ * the only empty sweep this function reports. A database it could not open is
+ * a {@link Failure}, never a report of zero runs: `gc --dry-run` is trusted to
+ * name exactly what a real pass would delete, and a locked or corrupt file
+ * rendered as `{ runs: [] }` reads as "there is nothing to collect".
+ *
+ * The other databases are still swept, so one unreadable file does not stop
+ * the command. The caller decides the exit status from `failures`.
  *
  * @category constructors
  * @since 1.0.0
@@ -72,10 +104,7 @@ export const databases = (root: string): ReadonlyArray<string> =>
 export const sweep = (
   root: string,
   options: { readonly olderThan: string; readonly dryRun: boolean; readonly now?: number | undefined }
-): Effect.Effect<
-  { readonly olderThan: string; readonly dryRun: boolean; readonly reports: ReadonlyArray<Retention.Report> },
-  CliError.UsageError
-> =>
+): Effect.Effect<Sweep, CliError.UsageError> =>
   Effect.gen(function*() {
     const window = duration(options.olderThan)
     if (window === undefined) {
@@ -86,23 +115,43 @@ export const sweep = (
       )
     }
     const olderThanMs = (options.now ?? Date.now()) - window
-    const reports = yield* Effect.forEach(databases(root), (file) =>
+    const swept = yield* Effect.forEach(databases(root), (file) =>
       Retention.collect({ olderThanMs, dryRun: options.dryRun, database: file }).pipe(
         Effect.provide(NodeDatabase.layer({ filename: file })),
-        // A database this pass cannot open is reported as an empty sweep of
-        // that file rather than failing the whole command: the other database
-        // still has work to do, and `gc` must not be the command that cannot
-        // run because something else holds a lock.
-        Effect.catchCause(() =>
-          Effect.succeed<Retention.Report>({
-            database: file,
-            olderThanMs,
-            runs: [],
-            deleted: {},
-            dryRun: options.dryRun
-          })
+        Effect.map((report): Retention.Report | Failure =>
+          report
         ),
+        Effect.catchCause((cause) => Effect.succeed<Failure>({ database: file, reason: reasonOf(cause) })),
         Effect.provide(Layer.empty)
       ))
-    return { olderThan: options.olderThan, dryRun: options.dryRun, reports }
+    return {
+      olderThan: options.olderThan,
+      dryRun: options.dryRun,
+      reports: swept.filter((entry): entry is Retention.Report => !isFailure(entry)),
+      failures: swept.filter(isFailure)
+    }
   })
+
+const isFailure = (entry: Retention.Report | Failure): entry is Failure =>
+  (entry as { readonly reason?: unknown }).reason !== undefined
+
+/** The one sentence a reader can act on, out of whatever the open threw. */
+const reasonOf = (cause: Cause.Cause<unknown>): string => {
+  const squashed = Cause.squash(cause)
+  if (squashed instanceof Error) return squashed.message
+  if (typeof squashed === "object" && squashed !== null && "message" in squashed) {
+    return String((squashed as { readonly message: unknown }).message)
+  }
+  return String(squashed)
+}
+
+/**
+ * The stderr paragraph a sweep with failures owes its operator.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const failureMessage = (failures: ReadonlyArray<Failure>): string =>
+  `gc could not open ${failures.length} database${failures.length === 1 ? "" : "s"}, so nothing was collected ` +
+  `from ${failures.length === 1 ? "it" : "them"}:\n` +
+  failures.map((failure) => `  ${failure.database}: ${failure.reason}`).join("\n")

@@ -72,7 +72,7 @@ describe("the sweep", () => {
 
     const result = await Effect.runPromise(Gc.sweep(root, { olderThan: "30d", dryRun: true }))
 
-    expect(result).toEqual({ olderThan: "30d", dryRun: true, reports: [] })
+    expect(result).toEqual({ olderThan: "30d", dryRun: true, reports: [], failures: [] })
   })
 
   it("reports one entry per database", async () => {
@@ -84,16 +84,27 @@ describe("the sweep", () => {
     expect(result.reports.every((report) => report.runs.length === 0)).toBe(true)
   })
 
-  it("reports an unreadable database as an empty sweep of that file", async () => {
-    // The other database still has work to do, and `gc` must not be the
-    // command that cannot run because something else holds a lock.
-    const root = project()
+  it("names a database it could not open instead of reporting an empty sweep of it", async () => {
+    // An empty report of an unopenable file is the worst answer available:
+    // `gc --dry-run` is trusted to name exactly what a real pass would delete,
+    // and "nothing" is indistinguishable from "nothing to do". The other
+    // database is still swept, so one locked file does not stop the command.
+    const root = project("engine.db")
     writeFileSync(join(root, ".flows", "control.db"), "not a database at all")
 
     const result = await Effect.runPromise(Gc.sweep(root, { olderThan: "1d", dryRun: false }))
 
-    expect(result.reports).toHaveLength(1)
-    expect(result.reports[0]).toMatchObject({ runs: [], deleted: {} })
+    expect(result.failures.map((failure) => failure.database)).toEqual([join(root, ".flows", "control.db")])
+    expect(result.failures[0]!.reason).not.toBe("")
+    expect(result.reports.map((report) => report.database)).toEqual([join(root, ".flows", "engine.db")])
+  })
+
+  it("reports no failure when every database opened", async () => {
+    const result = await Effect.runPromise(
+      Gc.sweep(project("control.db", "engine.db"), { olderThan: "1d", dryRun: true })
+    )
+
+    expect(result.failures).toEqual([])
   })
 
   it("refuses a threshold it cannot read", async () => {

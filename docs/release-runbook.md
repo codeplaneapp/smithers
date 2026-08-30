@@ -1,6 +1,6 @@
 # Release runbook: publishing the Smithers release train
 
-Scope: the 39 packages `node scripts/pack-release.mjs --names` prints — every
+Scope: the 40 packages `node scripts/pack-release.mjs --names` prints — every
 non-private manifest whose `smthrs.group` is `engine` or `agent`, which is the
 public set frozen in `docs/migration/rc-contract.md` section 3.1. Smithers 1.0
 gives them one synchronized version, so `@smthrs/cli`, `@smthrs/control`, the

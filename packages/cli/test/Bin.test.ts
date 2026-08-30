@@ -139,6 +139,34 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
     expect(result.stderr).toContain(`${Unsupported.migrationUrl}#workflows`)
   })
 
+  it("answers `gateway status` and `gateway stop` with the section 4.2 message, not a usage error", () => {
+    // Section 4.2 keeps bare `gateway` as the `serve` alias and removes the
+    // two subcommands. Leaving them unregistered made the parser reject them
+    // as stray positional arguments: exit 2, serve's help, and no migration
+    // message — the same defect the plural `workflows` had.
+    const status = run(["gateway", "status"])
+    const stop = run(["gateway", "stop"])
+
+    expect(status.status).toBe(1)
+    expect(status.stderr).toContain("smithers gateway status was removed in 1.0.0-rc.0")
+    expect(status.stderr).toContain(`${Unsupported.migrationUrl}#gateway`)
+    expect(stop.status).toBe(1)
+    expect(stop.stderr).toContain("smithers gateway stop was removed in 1.0.0-rc.0")
+  })
+
+  it("refuses `workflow run` under the packs reason and the singular spelling", () => {
+    // Section 4.2 lists `workflow run|path|create|inspect|skills|doctor` under
+    // "Packs and scaffolding". Reusing the `workflows` entry printed the
+    // plural spelling and the "use `ls`" reason, which sends an operator
+    // looking for a listing when what they lost was pack tooling.
+    const result = run(["workflow", "path", "ship.tsx"])
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("smithers workflow path was removed in 1.0.0-rc.0")
+    expect(result.stderr).toContain("JSX pack tooling is gone")
+    expect(result.stderr).toContain(`${Unsupported.migrationUrl}#workflow`)
+  })
+
   it("keeps `workflow list` alive as the `ls` alias while removing the rest", () => {
     const listed = run(["--json", "workflow", "list"])
     const removed = run(["workflow", "run"])
@@ -147,6 +175,39 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
     expect(JSON.parse(listed.stdout)).toMatchObject({ _tag: "flows" })
     expect(removed.status).toBe(1)
     expect(removed.stderr).toContain("was removed in 1.0.0-rc.0")
+  })
+})
+
+describe("reserved system flow ids", processBudget, () => {
+  // `SystemFlows.catalog` reserves 22 `system/*` ids so the control plane can
+  // project a verb onto a flow row. None of them has a body in rc.0, so a
+  // launch parks at `accepted` and never moves: the "partial appearance"
+  // rc-contract section 4 forbids. They are not flows an operator may name.
+  it("refuses to plan a reserved system flow", () => {
+    const result = run(["plan", "system/replay", "--json"])
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("smithers plan system/replay")
+    expect(result.stderr).toContain("reserved system flow")
+    expect(result.stdout).not.toContain("planId")
+  })
+
+  it("refuses to launch a reserved system flow instead of parking a run forever", () => {
+    const result = run(["up", "system/release", "--json"])
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("smithers up system/release")
+    expect(result.stdout).not.toContain("Accepted")
+  })
+
+  it("lists no reserved system flow", () => {
+    const result = run(["ls", "--json"])
+    const listed = JSON.parse(result.stdout) as {
+      readonly items: ReadonlyArray<{ readonly flowId: string }>
+    }
+
+    expect(result.status).toBe(0)
+    expect(listed.items.filter((item) => item.flowId.startsWith("system/"))).toEqual([])
   })
 })
 
@@ -339,6 +400,37 @@ describe("Smithers 0.x detection", processBudget, () => {
       expect(result.stderr).toContain("Found Smithers 0.x state at")
       expect(result.stderr).toContain("does not load, resume, or migrate 0.x run databases")
       expect(result.stderr).toContain("https://smithers.sh/migration/1.0#run-data")
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("prints the notice whichever command runs first, not only `ls` and `up`", () => {
+    // Section 6 says "when a command runs in a directory", and an operator
+    // arriving at a 0.x project types `ps` or `status` at least as often as
+    // `ls`. Wiring the notice into two handlers meant the notice depended on
+    // which verb happened to be typed first, and the second command never
+    // printed it because the first had written `.flows/`.
+    for (const argv of [["ps", "--json"], ["status"], ["doctor", "--json"]]) {
+      const cwd = stage()
+      try {
+        const result = inProject(cwd, argv)
+
+        expect(result.stderr).toContain("Found Smithers 0.x state at")
+        expect(result.stderr).toContain("https://smithers.sh/migration/1.0#run-data")
+      } finally {
+        rmSync(cwd, { recursive: true, force: true })
+      }
+    }
+  })
+
+  it("prints the notice once per invocation", () => {
+    const cwd = stage()
+    try {
+      const result = inProject(cwd, ["ls", "--json"])
+      const notices = result.stderr.split("Found Smithers 0.x state at").length - 1
+
+      expect(notices).toBe(1)
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
