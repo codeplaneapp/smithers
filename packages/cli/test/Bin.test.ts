@@ -744,14 +744,17 @@ describe("the migrate verb's option surface", processBudget, () => {
  * are built, before any handler runs.
  */
 describe("the migrate verb's target", processBudget, () => {
-  it("converts the project the operator is standing in, not an rc.0 ancestor", () => {
+  /** An rc.0 project with a 0.x project inside it and no VCS marker between them. */
+  const stageNested = (): { readonly ancestor: string; readonly project: string } => {
     const ancestor = realpathSync(mkdtempSync(temporaryDirectoryPrefix))
-    try {
-      // An rc.0 project, the anchor the root walk looks for.
-      mkdirSync(join(ancestor, ".flows"), { recursive: true })
-      // The 0.x project inside it, with no VCS marker to stop the walk.
-      const project = stageLegacyProject(join(ancestor, "legacy-project"))
+    // The `.flows/` the root walk anchors on, and nothing else.
+    mkdirSync(join(ancestor, ".flows"), { recursive: true })
+    return { ancestor, project: stageLegacyProject(join(ancestor, "legacy-project")) }
+  }
 
+  it("converts the project the operator is standing in, not an rc.0 ancestor", () => {
+    const { ancestor, project } = stageNested()
+    try {
       const result = inProject(project, ["migrate", "--scan", "--json"])
       const report = JSON.parse(result.stdout) as {
         readonly root: string
@@ -759,7 +762,31 @@ describe("the migrate verb's target", processBudget, () => {
       }
 
       expect(report.root).toBe(project)
-      expect(report.units.length).toBeGreaterThan(0)
+      // The fixture's own units, and only those: its `package.json`, the one
+      // workflow under `.smithers/workflows`, and the project itself. The scan
+      // walks down, so these three appear from the ancestor too — `root` is
+      // what separates the two answers, and `root` is what `--apply` writes
+      // against.
+      expect(report.units.map((unit) => unit.id)).toEqual(["dependencies", "workflow:ship", "project"])
+    } finally {
+      rmSync(ancestor, { recursive: true, force: true })
+    }
+  })
+
+  it("names the tree it would rewrite when apply stops at the version-control gate", () => {
+    const { ancestor, project } = stageNested()
+    try {
+      // The gate refuses before anything is written, and the refusal quotes the
+      // directory the migration would have rewritten, so it reports the target
+      // without producing one.
+      const result = inProject(project, ["migrate", "--apply", "--acknowledge-run-state"])
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain(`"${project}" is under no version control`)
+      expect(result.stderr).not.toContain(`"${ancestor}" is under no version control`)
+      // And it wrote nothing anywhere.
+      expect(existsSync(join(ancestor, ".smithers-migrate"))).toBe(false)
+      expect(existsSync(join(project, ".smithers-migrate"))).toBe(false)
     } finally {
       rmSync(ancestor, { recursive: true, force: true })
     }
