@@ -28,6 +28,7 @@ import {
 } from "./reviewActions.ts";
 import { NarrateChanges, QuizChanges, ReviewFile, VerifyFindings } from "./reviewAgentActions.ts";
 import { NarrateReview, Review, ReviewFiles, VerifyReview } from "./reviewFlow.ts";
+import { modelCallEnvelope, modelCallRules } from "./reviewSeatResolver.ts";
 
 /**
  * Every action implementation and flow registration the review workflow needs,
@@ -53,26 +54,33 @@ export const declarations = Layer.mergeAll(
 );
 
 /**
- * The agent host: an empty catalog and an explicit cell budget.
+ * The agent host: an empty catalog, an explicit cell budget, and the one
+ * capability a review actually exercises.
  *
  * The review seats answer from the prompt they were given — every diff a
  * reviewer needs is embedded by `buildNativeReviewPrompt` — so the host offers
  * no tool flows. A cell that tries to reach for one finds an empty registry
  * rather than an unbounded surface on the repository under review.
  *
+ * The envelope is the run's complete authority claim, so it names the model
+ * hosts the seats can dial and nothing else. It is derived from the same
+ * environment the seat resolver reads, which keeps the claim and the grant
+ * rules in {@link layerNode} describing one set of origins.
+ *
  * @since 1.0.0
  * @category layers
  */
-export const agentHost = AgentAction.layerHost({
-  registry: Registry.makeNoop({
-    list: () => Effect.succeed([]),
-    visible: () => Effect.succeed([]),
-    getOption: () => Effect.succeed(Option.none()),
-  }),
-  limits: { calls: 8 },
-  capabilityEnvelope: [],
-  maxFrames: 4,
-});
+export const agentHost = (environment: Readonly<Record<string, string | undefined>> = process.env) =>
+  AgentAction.layerHost({
+    registry: Registry.makeNoop({
+      list: () => Effect.succeed([]),
+      visible: () => Effect.succeed([]),
+      getOption: () => Effect.succeed(Option.none()),
+    }),
+    limits: { calls: 8 },
+    capabilityEnvelope: modelCallEnvelope(environment),
+    maxFrames: 4,
+  });
 
 /**
  * Builds the review workflow over a caller-supplied seat resolver and the
@@ -85,9 +93,12 @@ export const agentHost = AgentAction.layerHost({
  * @since 1.0.0
  * @category layers
  */
-export const layerMemory = (seats: Layer.Layer<SeatResolver.SeatResolver>) =>
+export const layerMemory = (
+  seats: Layer.Layer<SeatResolver.SeatResolver>,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+) =>
   declarations.pipe(
-    Layer.provideMerge(Layer.mergeAll(agentHost, seats, Agent.layer)),
+    Layer.provideMerge(Layer.mergeAll(agentHost(environment), seats, Agent.layer)),
     Layer.provideMerge(Agent.layerDefaults),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
@@ -101,18 +112,34 @@ export const layerMemory = (seats: Layer.Layer<SeatResolver.SeatResolver>) =>
  * resumes into the batches it had already settled instead of re-asking their
  * seats.
  *
+ * `rules` is what makes the run able to call a model at all. The durable host
+ * guards its HTTP client with the capability kernel, which asks `model:call`
+ * on `<host>/<model id>` for every model request; a host built without a rule
+ * for it parks the first request on a permission and, with `attended: false`,
+ * nobody ever answers. `layerMemory` never meets the check because a scripted
+ * seat builds no request, which is why this grant has to be tested through a
+ * real route.
+ *
  * @since 1.0.0
  * @category layers
  */
 export const layerNode = (options: {
   readonly filename: string;
   readonly seats: Layer.Layer<SeatResolver.SeatResolver>;
-}) =>
-  NodeRuntime.layerHost(
-    { filename: options.filename, owner: { hostId: "smithers-review" } },
+  /** The environment the reachable model hosts are read from. */
+  readonly environment?: Readonly<Record<string, string | undefined>>;
+}) => {
+  const environment = options.environment ?? process.env;
+  return NodeRuntime.layerHost(
+    {
+      filename: options.filename,
+      owner: { hostId: "smithers-review" },
+      rules: modelCallRules(environment),
+    },
     declarations.pipe(
-      Layer.provideMerge(Layer.mergeAll(agentHost, options.seats, Agent.layer)),
+      Layer.provideMerge(Layer.mergeAll(agentHost(environment), options.seats, Agent.layer)),
       Layer.provideMerge(Agent.layerDefaults),
       Layer.provideMerge(Action.layerImplementations),
     ),
   );
+};

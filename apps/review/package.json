@@ -37,6 +37,7 @@
     "@effect/platform-node": "4.0.0-rc.108",
     "@pierre/diffs": "^1.2.12",
     "@smthrs/agent": "1.0.0-rc.0",
+    "@smthrs/capability": "1.0.0-rc.0",
     "@smthrs/engine": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
     "@smthrs/flows": "1.0.0-rc.0",

@@ -96,6 +96,9 @@ importers:
       '@smthrs/agent':
         specifier: 1.0.0-rc.0
         version: link:../../packages/agent
+      '@smthrs/capability':
+        specifier: 1.0.0-rc.0
+        version: link:../../packages/capability
       '@smthrs/engine':
         specifier: 1.0.0-rc.0
         version: link:../../packages/engine

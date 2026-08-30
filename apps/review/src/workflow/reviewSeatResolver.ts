@@ -13,6 +13,8 @@
 import * as FlowEngineLike from "@smthrs/agent/FlowEngineLike";
 import * as Seat from "@smthrs/agent/Seat";
 import * as SeatResolver from "@smthrs/agent/SeatResolver";
+import * as Capability from "@smthrs/capability/Capability";
+import * as Permission from "@smthrs/capability/Permission";
 import * as GrantStore from "@smthrs/kernel/GrantStore";
 import * as KernelHttpClient from "@smthrs/kernel/HttpClient";
 import * as AnthropicMessages from "@smthrs/model/AnthropicMessages";
@@ -61,6 +63,77 @@ export function missingSeatCredential(
   if (variable === undefined) return `no route is configured for the ${provider} provider (seat "${seat}")`;
   const value = environment[variable];
   return value === undefined || value.trim() === "" ? `the "${seat}" seat needs ${variable}` : undefined;
+}
+
+/**
+ * The provider origins this module can build a route to.
+ *
+ * `Route.anthropic` pins `api.anthropic.com`, `Route.openai` pins
+ * `api.openai.com`, and the OpenRouter route pins `openrouter.ai`. A host that
+ * is not one of these can only arrive through `ANTHROPIC_BASE_URL`, which
+ * {@link modelCallHosts} adds separately.
+ */
+const PROVIDER_HOSTS: ReadonlyArray<string> = ["api.anthropic.com", "api.openai.com", "openrouter.ai"];
+
+/**
+ * Every host a review's seats can reach, lowercased the way the kernel spells
+ * them.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
+export function modelCallHosts(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): ReadonlyArray<string> {
+  const hosts = new Set(PROVIDER_HOSTS);
+  const baseUrl = environment.ANTHROPIC_BASE_URL?.trim();
+  if (baseUrl !== undefined && baseUrl !== "") {
+    try {
+      hosts.add(new URL(baseUrl).host.toLowerCase());
+    } catch {
+      // An unparseable base URL is the route builder's failure to report, with
+      // a message naming the value. Granting nothing for it keeps this set
+      // honest rather than widening it to cover a string nobody can dial.
+    }
+  }
+  return [...hosts];
+}
+
+/**
+ * The capability patterns a review run needs, one per reachable provider host.
+ *
+ * The kernel asks `model:call` on `<host>/<model id>` for every model request
+ * (`@smthrs/kernel/HttpClient`), so a composition that declares none of these
+ * cannot make a single call: the first request parks on a permission and an
+ * unattended run has nobody to grant it. The pattern is per host rather than
+ * `*` so a compromised seat string cannot dial an arbitrary origin, and the
+ * model id stays a wildcard because the seat names it.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
+export function modelCallEnvelope(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): ReadonlyArray<Capability.CapabilityPattern> {
+  return modelCallHosts(environment).map(
+    (host) => new Capability.CapabilityPattern({ action: "model:call", resource: `${host}/*` }),
+  );
+}
+
+/**
+ * {@link modelCallEnvelope} as host grant rules.
+ *
+ * These go to the durable host's grant store, which is what actually answers
+ * the kernel's check; the envelope is the matching claim the agent boundary
+ * publishes.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
+export function modelCallRules(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): ReadonlyArray<Permission.Rule> {
+  return modelCallEnvelope(environment).map((pattern) => new Permission.Rule({ effect: "allow", pattern }));
 }
 
 /**
