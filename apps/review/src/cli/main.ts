@@ -20,6 +20,16 @@ type Finding = { severity: "critical" | "major" | "minor" | "info" };
 
 const SEVERITIES = ["critical", "major", "minor", "info"] as const;
 
+/**
+ * Decodes a quiz out of the JSON column a run summary carries.
+ *
+ * Anything that is not a valid quiz answers `null` rather than throwing: the
+ * column is written by a previous run and a summary line must still print when
+ * it is absent, truncated, or from an older shape.
+ *
+ * @since 1.0.0
+ * @category parsing
+ */
 export function parseQuizColumn(value: unknown): Quiz | null {
   if (typeof value !== "string" || !value.trim()) return null;
   try {
@@ -52,6 +62,16 @@ function elapsedLabel(ms: number): string {
   return minutes > 0 ? `${minutes}m${String(secondsPart).padStart(2, "0")}s` : `${totalSeconds}s`;
 }
 
+/**
+ * Builds the one line a finished review prints to stderr.
+ *
+ * A review that did not complete says so and withholds the breakdown, because
+ * "0 findings" from a run whose file reviews all failed reads exactly like a
+ * clean pass.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
 export function buildRunSummaryLine(summary: {
   filesChanged: number;
   elapsed: string;

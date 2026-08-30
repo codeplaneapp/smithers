@@ -1,3 +1,10 @@
+/**
+ * One prerendered diff block, split into what every block repeats and what is
+ * unique to this one.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type DiffAssets = {
   sprite: string;
   styles: string[];

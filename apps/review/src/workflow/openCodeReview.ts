@@ -111,6 +111,15 @@ const defaultExcludePatterns = [
   "**/*.test.ets",
 ];
 
+/**
+ * Everything one review run is asked for.
+ *
+ * Every field carries a default, so a caller may name only what it wants to
+ * change and a persisted input from an older shape still decodes.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const OpenCodeReviewInput = Schema.Struct({
   repo: withDefault(Schema.String, "."),
   from: withDefault(Schema.String, ""),
@@ -123,20 +132,58 @@ export const OpenCodeReviewInput = Schema.Struct({
   runReview: withDefault(Schema.Boolean, true),
 });
 
+/**
+ * A decoded review request.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type OpenCodeReviewInput = typeof OpenCodeReviewInput.Type;
 
+/**
+ * Which set of changes a review reads: the working tree, a commit range, or
+ * one commit.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ReviewMode = Schema.Literals(["workspace", "range", "commit"]);
 
+/**
+ * A decoded review mode.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type ReviewMode = typeof ReviewMode.Type;
 
+/**
+ * The resolved change set: which repository, read which way, at which ref.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ReviewTarget = Schema.Struct({
   repoDir: Schema.String,
   mode: ReviewMode,
   ref: Schema.String,
 });
 
+/**
+ * A decoded review target.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type ReviewTarget = typeof ReviewTarget.Type;
 
+/**
+ * One changed file as the preview reports it, including whether the review
+ * filters kept it and, when they did not, why.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const PreviewEntry = Schema.Struct({
   path: Schema.String,
   status: Schema.String,
@@ -146,8 +193,21 @@ export const PreviewEntry = Schema.Struct({
   excludeReason: withDefault(Schema.String, ""),
 });
 
+/**
+ * A decoded preview entry.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type PreviewEntry = typeof PreviewEntry.Type;
 
+/**
+ * The whole change set before any seat is asked: every file, with the totals
+ * the walkthrough header and the run summary both read.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const PreviewOutput = Schema.Struct({
   entries: Schema.mutable(Schema.Array(PreviewEntry)),
   totalInsertions: Schema.Number,
@@ -157,12 +217,37 @@ export const PreviewOutput = Schema.Struct({
   excludedCount: Schema.Number,
 });
 
+/**
+ * A decoded preview.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type PreviewOutput = typeof PreviewOutput.Type;
 
+/**
+ * How much a finding matters. Ordered most to least severe; the run summary
+ * counts by this.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ReviewCommentSeverity = Schema.Literals(["critical", "major", "minor", "info"]);
 
+/**
+ * A decoded severity.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type ReviewCommentSeverity = typeof ReviewCommentSeverity.Type;
 
+/**
+ * What kind of problem a finding reports.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ReviewCommentCategory = Schema.Literals([
   "correctness",
   "security",
@@ -174,8 +259,24 @@ export const ReviewCommentCategory = Schema.Literals([
   "other",
 ]);
 
+/**
+ * A decoded category.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type ReviewCommentCategory = typeof ReviewCommentCategory.Type;
 
+/**
+ * One finding, anchored to a line range in one file.
+ *
+ * Every field defaults, because a seat that omits one should lose that field
+ * rather than the whole finding; `finalizeNativeReview` drops what cannot be
+ * anchored.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ReviewComment = Schema.Struct({
   path: withDefault(Schema.String, ""),
   content: withDefault(Schema.String, ""),
@@ -189,16 +290,42 @@ export const ReviewComment = Schema.Struct({
   confidence: withDefault(Schema.Literals(["confirmed", "plausible"]), "plausible" as const),
 });
 
+/**
+ * A decoded finding.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type ReviewComment = typeof ReviewComment.Type;
 
+/**
+ * Something the run could not do, reported beside the findings rather than
+ * failing the review. A file review that failed arrives here as
+ * `subtask_error`.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ReviewWarning = Schema.Struct({
   file: withDefault(Schema.String, ""),
   message: withDefault(Schema.String, ""),
   type: withDefault(Schema.String, ""),
 });
 
+/**
+ * A decoded warning.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type ReviewWarning = typeof ReviewWarning.Type;
 
+/**
+ * The counts one review run accumulated.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ReviewSummary = Schema.Struct({
   filesReviewed: withDefault(Schema.Number, 0),
   comments: withDefault(Schema.Number, 0),
@@ -208,8 +335,21 @@ export const ReviewSummary = Schema.Struct({
   elapsed: withDefault(Schema.String, ""),
 });
 
+/**
+ * A decoded run summary.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type ReviewSummary = typeof ReviewSummary.Type;
 
+/**
+ * How a review ended. `failed` means no file review produced an answer, which
+ * is why it must never post as a clean pass.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ReviewRunStatus = Schema.Literals([
   "success",
   "skipped",
@@ -218,8 +358,20 @@ export const ReviewRunStatus = Schema.Literals([
   "failed",
 ]);
 
+/**
+ * A decoded run status.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type ReviewRunStatus = typeof ReviewRunStatus.Type;
 
+/**
+ * The finished review: its status, its findings, and what it could not do.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ReviewRunOutput = Schema.Struct({
   status: ReviewRunStatus,
   ok: Schema.Boolean,
@@ -231,8 +383,21 @@ export const ReviewRunOutput = Schema.Struct({
   error: withDefault(Schema.String, ""),
 });
 
+/**
+ * A decoded review result.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type ReviewRunOutput = typeof ReviewRunOutput.Type;
 
+/**
+ * One file the fan-out will review, carrying the diff and the built prompt so
+ * a later round never re-reads a working tree that may have moved.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const NativeReviewFile = Schema.Struct({
   id: Schema.String,
   path: Schema.String,
@@ -243,8 +408,21 @@ export const NativeReviewFile = Schema.Struct({
   prompt: Schema.String,
 });
 
+/**
+ * A decoded reviewable file.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type NativeReviewFile = typeof NativeReviewFile.Type;
 
+/**
+ * Everything the fan-out round needs, decided once by the preparing round:
+ * whether to review at all, and which files with which prompts.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const NativeReviewPrompt = Schema.Struct({
   shouldReview: Schema.Boolean,
   repoDir: Schema.String,
@@ -256,6 +434,12 @@ export const NativeReviewPrompt = Schema.Struct({
   message: withDefault(Schema.String, ""),
 });
 
+/**
+ * A decoded fan-out plan.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type NativeReviewPrompt = typeof NativeReviewPrompt.Type;
 
 /**
@@ -276,8 +460,20 @@ export const NativeReviewAgentOutput = Schema.Struct({
   warnings: arrayOf(ReviewWarning),
 });
 
+/**
+ * A decoded per-file answer.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type NativeReviewAgentOutput = typeof NativeReviewAgentOutput.Type;
 
+/**
+ * The flat summary a caller records for one run.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const WorkflowSummary = Schema.Struct({
   status: ReviewRunStatus,
   repoDir: Schema.String,
@@ -290,6 +486,12 @@ export const WorkflowSummary = Schema.Struct({
   message: Schema.String,
 });
 
+/**
+ * A decoded workflow summary.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type WorkflowSummary = typeof WorkflowSummary.Type;
 
 const decodeInput = Schema.decodeUnknownSync(OpenCodeReviewInput);
@@ -304,6 +506,15 @@ type CommandResult = {
   exitCode: number;
 };
 
+/**
+ * One file's entry in a parsed `git diff`, before any review filter runs.
+ *
+ * A rename carries both paths, and a deletion spells the missing side
+ * `/dev/null`, so `effectivePath` is what decides which name a finding uses.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type DiffRecord = {
   oldPath: string;
   newPath: string;
@@ -320,6 +531,13 @@ type FileFilter = {
   exclude: string[];
 };
 
+/**
+ * One reviewable file paired with what its seat answered, or `null` when that
+ * file's review failed.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type NativeReviewFileResult = {
   file: NativeReviewFile;
   output?: NativeReviewAgentOutput | null;
@@ -346,6 +564,12 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Decodes a review request, filling every field the caller omitted.
+ *
+ * @since 1.0.0
+ * @category parsing
+ */
 export function normalizeOpenCodeReviewInput(value: unknown): OpenCodeReviewInput {
   const record = isPlainRecord(value) ? { ...value } : {};
   for (const key of Object.keys(record)) {
@@ -400,6 +624,13 @@ async function git(repoDir: string, args: string[], timeoutMs = 120_000) {
   return result.stdout;
 }
 
+/**
+ * Reads which mode a request asks for: `--commit` wins, then `--from`/`--to`,
+ * otherwise the working tree.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
 export function reviewMode(input: OpenCodeReviewInput): ReviewTarget["mode"] {
   input = normalizeOpenCodeReviewInput(input);
   if (input.commit.trim()) return "commit";
@@ -407,6 +638,15 @@ export function reviewMode(input: OpenCodeReviewInput): ReviewTarget["mode"] {
   return "workspace";
 }
 
+/**
+ * Refuses a request that names more than one mode, or half a range.
+ *
+ * Throws rather than returning a result: this runs at the CLI boundary, where
+ * the message is the whole output.
+ *
+ * @since 1.0.0
+ * @category validation
+ */
 export function validateReviewInput(input: OpenCodeReviewInput) {
   input = normalizeOpenCodeReviewInput(input);
   if ((input.from.trim() || input.to.trim()) && input.commit.trim()) {
@@ -420,6 +660,13 @@ export function validateReviewInput(input: OpenCodeReviewInput) {
   }
 }
 
+/**
+ * Resolves a request against a real repository: validates the mode, confirms
+ * the directory is a git repository, and pins the ref the review will read.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
 export async function resolveReviewTarget(input: OpenCodeReviewInput): Promise<ReviewTarget> {
   input = normalizeOpenCodeReviewInput(input);
   validateReviewInput(input);
@@ -477,6 +724,13 @@ function globToRegExp(pattern: string) {
   return new RegExp(out);
 }
 
+/**
+ * Matches a path against one include or exclude glob, brace expansion
+ * included.
+ *
+ * @since 1.0.0
+ * @category predicates
+ */
 export function globMatch(pattern: string, path: string) {
   return expandBraces(pattern).some((expanded) => globToRegExp(expanded).test(path));
 }
@@ -526,10 +780,23 @@ function isProviderExcluded(path: string, gitignorePatterns: string[]) {
   return gitignorePatterns.some((pattern) => gitignorePatternMatches(pattern, path));
 }
 
+/**
+ * The path a finding on this diff should name: the new one, except for a
+ * deletion, which has none.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
 export function effectivePath(diff: DiffRecord) {
   return diff.newPath === "/dev/null" ? diff.oldPath : diff.newPath;
 }
 
+/**
+ * How this file changed, as the preview and the walkthrough label it.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
 export function diffStatus(diff: DiffRecord) {
   if (diff.isBinary) return "binary";
   if (diff.isNew) return "added";
@@ -628,6 +895,12 @@ async function workspaceDiffText(repoDir: string) {
   return pieces.filter(Boolean).join("\n\n");
 }
 
+/**
+ * Reads the change set from git and parses it into one record per file.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
 export async function loadDiffs(repoDir: string, input: OpenCodeReviewInput) {
   const mode = reviewMode(input);
   let diffText = "";
@@ -708,6 +981,13 @@ function whyExcluded(diff: DiffRecord, filter: FileFilter | null) {
   return "";
 }
 
+/**
+ * Reports what a review would read without asking any seat: every changed
+ * file, its size, and whether the filters keep it.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
 export async function previewOpenCodeReview(input: OpenCodeReviewInput): Promise<PreviewOutput> {
   input = normalizeOpenCodeReviewInput(input);
   const target = await resolveReviewTarget(input);
@@ -789,6 +1069,15 @@ function reviewableDiffs(diffs: DiffRecord[], filter: FileFilter | null) {
   return diffs.filter((diff) => whyExcluded(diff, filter) === "" && !(diff.isDeleted && diff.deletions === 0));
 }
 
+/**
+ * A stable, readable step id for one file's review.
+ *
+ * The index keeps it unique when two paths slug identically, so a resumed run
+ * lands on the step it left.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
 export function reviewFileTaskId(path: string, index: number) {
   const slug = path
     .toLowerCase()
@@ -899,6 +1188,16 @@ function renderFileReviewPrompt(
   ].join("\n");
 }
 
+/**
+ * Builds the whole fan-out plan: which files to review, and the exact prompt
+ * each one's seat is given.
+ *
+ * The diffs are embedded here rather than read later, so the reviewing round
+ * never depends on a working tree that may have moved under the run.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
 export async function buildNativeReviewPrompt(
   input: OpenCodeReviewInput,
   preview: PreviewOutput,
@@ -1192,6 +1491,17 @@ function normalizedComment(comment: ReviewComment, defaultPath: string) {
   };
 }
 
+/**
+ * Folds every file's answer into one review result.
+ *
+ * This is where a seat's output stops being trusted: findings are scoped to
+ * the file that was reviewed, anchored to lines the diff actually contains,
+ * de-duplicated, and counted. A file whose review failed becomes a
+ * `subtask_error` warning instead of failing the run.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
 export function finalizeNativeReview(
   input: OpenCodeReviewInput,
   prepared: NativeReviewPrompt,
