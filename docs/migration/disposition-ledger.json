@@ -8022,9 +8022,9 @@
    "newHome": "TimeTravel.ts + internal/Fork.ts: derive the slug from the child run id (mint the child id before provisioning) or append a uniqueness suffix; keep provision-then-commit",
    "phase": "5",
    "tree": "flows",
-   "rationale": "Atomicity is closed (provision-then-commit with workspaceForget compensation) but workspaceSlug = flows-fork-${runId}-${seq} sanitized to [A-Za-z0-9._-], so a second fork of the same frame reuses the name and is refused by jj workspace add, and distinct run ids can collide after sanitizing.",
+   "rationale": "Closed by the time-travel lane: Fork.workspaceNameFor derives the lane from the child run id the fork mints, as smithers-fork-<sanitized child id, capped at 64> plus a 32-bit FNV-1a digest of the raw id, so a same-frame re-fork gets a second lane and sanitized collisions keep distinct digests.",
    "evidence": "[flows-gaps-audit §2 F-12] TimeTravel.ts:156-157; Fork.ts:128-170 (commit 4164d9bd3); Fork.test.ts has exactly 3 cases and no same-frame re-fork case.",
-   "notes": "Test: fork the same frame twice -> two children, two workspaces; two run ids differing only in a sanitized character -> distinct slugs.",
+   "notes": "Pinned by packages/time-travel/test/Fork.test.ts, describe \"fork workspace identity\".",
    "section": "Phase 5 correctness and parity triage on the imported code",
    "label": "F-12 packages/time-travel/src/TimeTravel.ts:156-157 (fork workspace identity collides)",
    "executable": false
