@@ -41,11 +41,17 @@ afterEach(() => {
 /**
  * Creates the database in rollback journal mode, so opening it still has to
  * perform the WAL conversion — the step that needs an exclusive lock.
+ *
+ * The migration ledger is seeded beside the table under test because these
+ * cases exercise the open ladder, not the 0.x refusal: a populated file with
+ * no `flows_migrations` table is what `NodeDatabaseGuard.test.ts` pins as an
+ * unsupported 0.x database.
  */
 const seedRollbackMode = (filename: string): void => {
   const db = new DatabaseSync(filename)
   try {
     db.exec("PRAGMA journal_mode = DELETE")
+    db.exec("CREATE TABLE flows_migrations (migration_id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
     db.exec("CREATE TABLE seeded (id INTEGER PRIMARY KEY)")
   } finally {
     db.close()
