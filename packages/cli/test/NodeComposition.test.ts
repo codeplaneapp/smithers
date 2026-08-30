@@ -38,15 +38,16 @@ afterAll(async () => {
 })
 
 /**
- * `makeConfig` also resolves the project root, which every durable layer is
- * built over. These cases are about the flag and environment ladder, so each
- * one pins the root separately and compares the rest.
+ * `makeConfig` also resolves the two roots every invocation needs: the rc.0
+ * project root the durable layers are built over, and the 0.x root `migrate`
+ * converts. These cases are about the flag and environment ladder, so each one
+ * pins the roots separately and compares the rest.
  */
 const configuration = (
   args: ReadonlyArray<string>,
   environment: Readonly<Record<string, string | undefined>>
 ) => {
-  const { root: _root, ...rest } = NodeControl.makeConfig(args, environment, "/work")
+  const { migrationRoot: _migrationRoot, root: _root, ...rest } = NodeControl.makeConfig(args, environment, "/work")
   return rest
 }
 
@@ -58,6 +59,13 @@ describe("NodeControl.makeConfig", () => {
   it("resolves the project root from --root, against the invocation directory", () => {
     expect(NodeControl.makeConfig(["--root", "project"], {}, "/work").root).toBe(join("/work", "project"))
     expect(NodeControl.makeConfig(["--root", "/elsewhere"], {}, "/work").root).toBe("/elsewhere")
+  })
+
+  it("resolves the migration root from the same --root, and never from an rc.0 ancestor", () => {
+    expect(NodeControl.makeConfig(["--root", "/elsewhere"], {}, "/work").migrationRoot).toBe("/elsewhere")
+    // No 0.x marker anywhere above `/work`, so the walk falls back to the
+    // invocation directory instead of climbing to whatever `.flows/` it finds.
+    expect(NodeControl.makeConfig([], {}, "/work").migrationRoot).toBe("/work")
   })
 
   it("falls back to the environment only when the flag is absent", () => {

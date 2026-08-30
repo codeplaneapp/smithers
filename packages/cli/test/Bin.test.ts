@@ -8,12 +8,23 @@
  * handler returns a typed error" — so they are asserted there.
  */
 import { spawn, spawnSync } from "node:child_process"
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
+import * as Agents from "../src/Agents.ts"
 import { Version } from "../src/index.ts"
 import * as Unsupported from "../src/Unsupported.ts"
 import * as Verb from "../src/Verb.ts"
@@ -429,6 +440,42 @@ describe("the smithers bin shim", processBudget, () => {
 })
 
 /**
+ * Stages a Smithers 0.x project whose runs are all terminal, so the section 6
+ * refusal has nothing to hold and the verb gets as far as the migration tool.
+ */
+const stageLegacyProject = (directory: string): string => {
+  mkdirSync(join(directory, ".smithers", "workflows"), { recursive: true })
+  writeFileSync(join(directory, ".smithers", "workflows", "ship.tsx"), "export default null\n")
+  writeFileSync(join(directory, "package.json"), JSON.stringify({ name: "legacy" }))
+  const database = new DatabaseSync(join(directory, "smithers.db"))
+  // The 0.x run table with the columns the migration tool's run-state scan
+  // reads. A three-column stand-in made every scan report the database as one
+  // it "could not open read only", which is the message for a lock and reads
+  // as a defect in the project rather than in the fixture.
+  database.exec(
+    `CREATE TABLE _smithers_runs (
+       run_id TEXT PRIMARY KEY, workflow_name TEXT NOT NULL, workflow_path TEXT, status TEXT NOT NULL,
+       heartbeat_at_ms INTEGER, runtime_owner_id TEXT, parent_run_id TEXT,
+       pause_requested_at_ms INTEGER, cancel_requested_at_ms INTEGER
+     )`
+  )
+  database.exec(
+    "INSERT INTO _smithers_runs (run_id, workflow_name, workflow_path, status) " +
+      "VALUES ('run-old-1','ship','.smithers/workflows/ship.tsx','finished')"
+  )
+  database.close()
+  return directory
+}
+
+/** One `smithers` process, run from inside a staged project. */
+const inProject = (cwd: string, args: ReadonlyArray<string>) =>
+  spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
+    cwd,
+    encoding: "utf8",
+    timeout: 180_000
+  })
+
+/**
  * rc-contract section 6 detection, at the process boundary.
  *
  * The rule is "0.x markers and no `.flows/` beside them", and the CLI creates
@@ -459,13 +506,6 @@ describe("Smithers 0.x detection", processBudget, () => {
     database.close()
     return cwd
   }
-
-  const inProject = (cwd: string, args: ReadonlyArray<string>) =>
-    spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
-      cwd,
-      encoding: "utf8",
-      timeout: 180_000
-    })
 
   it("prints the section 6 notice on a first command in a 0.x project", () => {
     const cwd = stage()
@@ -628,24 +668,7 @@ describe("Smithers 0.x detection", processBudget, () => {
  */
 describe("the migrate verb's option surface", processBudget, () => {
   /** A 0.x project whose runs are all terminal, so section 6 has nothing to hold. */
-  const stageTerminal = (): string => {
-    const cwd = mkdtempSync(temporaryDirectoryPrefix)
-    mkdirSync(join(cwd, ".smithers", "workflows"), { recursive: true })
-    writeFileSync(join(cwd, ".smithers", "workflows", "ship.tsx"), "export default null\n")
-    writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "legacy" }))
-    const database = new DatabaseSync(join(cwd, "smithers.db"))
-    database.exec("CREATE TABLE _smithers_runs (run_id TEXT PRIMARY KEY, workflow_name TEXT, status TEXT)")
-    database.exec("INSERT INTO _smithers_runs VALUES ('run-old-1','ship','finished')")
-    database.close()
-    return cwd
-  }
-
-  const inProject = (cwd: string, args: ReadonlyArray<string>) =>
-    spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
-      cwd,
-      encoding: "utf8",
-      timeout: 180_000
-    })
+  const stageTerminal = (): string => stageLegacyProject(mkdtempSync(temporaryDirectoryPrefix))
 
   it("declares the migration tool's own flags", () => {
     const help = run(["migrate", "--help"])
@@ -711,6 +734,39 @@ describe("the migrate verb's option surface", processBudget, () => {
 })
 
 /**
+ * Which project `smithers migrate` converts.
+ *
+ * The verb's default target used to be the rc.0 project root, whose walk
+ * anchors on `.flows/`. A 0.x project has none — that is what makes it a 0.x
+ * project — so a project without a `.git`/`.jj` marker of its own resolved to
+ * whatever rc.0 project sat above it, and `--apply` rewrote the ancestor's
+ * tree. Only a real process shows it: the resolution happens while the layers
+ * are built, before any handler runs.
+ */
+describe("the migrate verb's target", processBudget, () => {
+  it("converts the project the operator is standing in, not an rc.0 ancestor", () => {
+    const ancestor = realpathSync(mkdtempSync(temporaryDirectoryPrefix))
+    try {
+      // An rc.0 project, the anchor the root walk looks for.
+      mkdirSync(join(ancestor, ".flows"), { recursive: true })
+      // The 0.x project inside it, with no VCS marker to stop the walk.
+      const project = stageLegacyProject(join(ancestor, "legacy-project"))
+
+      const result = inProject(project, ["migrate", "--scan", "--json"])
+      const report = JSON.parse(result.stdout) as {
+        readonly root: string
+        readonly units: ReadonlyArray<{ readonly id: string }>
+      }
+
+      expect(report.root).toBe(project)
+      expect(report.units.length).toBeGreaterThan(0)
+    } finally {
+      rmSync(ancestor, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
  * rc-contract section 4.1 `skills add`, under ruling F2.
  *
  * "Writes the curated skill only" is a promise about a file on disk, so it is
@@ -718,32 +774,60 @@ describe("the migrate verb's option surface", processBudget, () => {
  * The failure it replaces was quiet: the verb rendered a stub from the verb
  * table and reported success, so an agent read a document that carried none of
  * the routing rules the curated skill teaches.
+ *
+ * Both cases run against an installation staged in a temp directory rather
+ * than against this checkout. The two places the verb looks belong to other
+ * lanes — `packages/cli/docs/SKILL.md` is the docs lane's generated copy and
+ * `skills/smithers/SKILL.md` is the pack lane's source — so a case that
+ * asserted this tree's state went red the day either lane landed, and a case
+ * that wrote `packages/cli/docs/SKILL.md` overwrote and then deleted the real
+ * generated file on every run.
  */
 describe("smithers skills add", processBudget, () => {
-  const docsDirectory = join(packageRoot, "docs")
-  const packagedSkill = join(docsDirectory, "SKILL.md")
-  const checkoutSkill = join(packageRoot, "..", "..", "skills", "smithers", "SKILL.md")
-
-  const withHome = <A>(body: (home: string) => A): A => {
-    const home = mkdtempSync(join(tmpdir(), "smithers-cli-home-"))
+  /**
+   * A published installation: a package root holding `bin`, `src`, the
+   * manifest, and whatever `docs` the case is about.
+   *
+   * `src` is copied rather than symlinked. Node resolves `import.meta.url`
+   * through the real path, so a symlinked `src` would put `Docs.directory()`
+   * back inside the checkout and the case would be about this worktree again.
+   * `package.json` comes along because `Version.ts` self-references
+   * `@smthrs/cli/package.json`, and `node_modules` is linked so the dependency
+   * graph resolves.
+   */
+  const inInstallation = <A>(
+    curated: string | undefined,
+    body: (installation: { readonly root: string; readonly home: string }) => A
+  ): A => {
+    const root = realpathSync(mkdtempSync(temporaryDirectoryPrefix))
+    const home = realpathSync(mkdtempSync(temporaryDirectoryPrefix))
     try {
-      return body(home)
+      cpSync(binDirectory, join(root, "bin"), { recursive: true })
+      cpSync(join(packageRoot, "src"), join(root, "src"), { recursive: true })
+      cpSync(join(packageRoot, "package.json"), join(root, "package.json"))
+      symlinkSync(join(packageRoot, "node_modules"), join(root, "node_modules"), "dir")
+      if (curated !== undefined) {
+        mkdirSync(join(root, "docs"), { recursive: true })
+        writeFileSync(join(root, "docs", "SKILL.md"), curated, "utf8")
+      }
+      return body({ home, root })
     } finally {
+      rmSync(root, { recursive: true, force: true })
       rmSync(home, { recursive: true, force: true })
     }
   }
 
-  const skillsAdd = (home: string) =>
-    spawnSync(process.execPath, ["--no-warnings", executable, "skills", "add", "--agent", "claude"], {
+  const skillsAdd = (root: string, home: string) =>
+    spawnSync(process.execPath, [join(root, "bin", "smithers.mjs"), "skills", "add", "--agent", "claude"], {
       cwd: home,
       encoding: "utf8",
       timeout: 180_000,
       env: { ...process.env, HOME: home }
     })
 
+  const installedSkill = (home: string) => join(home, ".claude", "skills", "smithers", "SKILL.md")
+
   it("installs the curated file byte for byte, not a rendering of the verb table", () => {
-    // The docs lane generates this copy; staging one here is how a published
-    // install looks from the outside.
     const curated = [
       "---",
       "name: smithers",
@@ -754,41 +838,28 @@ describe("smithers skills add", processBudget, () => {
       "The curated skill, which a verb table cannot produce.",
       ""
     ].join("\n")
-    const staged = !existsSync(docsDirectory)
-    mkdirSync(docsDirectory, { recursive: true })
-    writeFileSync(packagedSkill, curated, "utf8")
-    try {
-      withHome((home) => {
-        const result = skillsAdd(home)
 
-        expect(result.status).toBe(0)
-        const installed = join(home, ".claude", "skills", "smithers", "SKILL.md")
-        expect(existsSync(installed)).toBe(true)
-        expect(readFileSync(installed, "utf8")).toBe(readFileSync(packagedSkill, "utf8"))
-        expect(readFileSync(installed, "utf8")).not.toContain("## Commands")
-      })
-    } finally {
-      // The docs lane owns this directory; leave the worktree as it was found.
-      if (staged) rmSync(docsDirectory, { recursive: true, force: true })
-      else rmSync(packagedSkill, { force: true })
-    }
+    inInstallation(curated, ({ home, root }) => {
+      const result = skillsAdd(root, home)
+
+      expect(result.status).toBe(0)
+      expect(existsSync(installedSkill(home))).toBe(true)
+      expect(readFileSync(installedSkill(home), "utf8")).toBe(readFileSync(join(root, "docs", "SKILL.md"), "utf8"))
+      expect(readFileSync(installedSkill(home), "utf8")).not.toContain("## Commands")
+    })
   })
 
   it("refuses when the installation ships no curated skill, naming both places it looked", () => {
-    // The state of this worktree: the docs lane's packaged copy and the pack
-    // lane's curated source both land in other branches, and neither is here.
-    expect(existsSync(packagedSkill)).toBe(false)
-    expect(existsSync(checkoutSkill)).toBe(false)
-
-    withHome((home) => {
-      const result = skillsAdd(home)
+    inInstallation(undefined, ({ home, root }) => {
+      const result = skillsAdd(root, home)
 
       expect(result.status).toBe(1)
       expect(result.stderr).toContain("No curated smithers skill in this installation")
-      expect(result.stderr).toContain(packagedSkill)
-      expect(result.stderr).toContain(join(packageRoot, "..", "..", "skills", "smithers", "SKILL.md"))
+      // The packaged copy and the checkout source, both named from the
+      // installation under test.
+      for (const path of Agents.skillSources(join(root, "docs"))) expect(result.stderr).toContain(path)
       // Nothing else is written in its place.
-      expect(existsSync(join(home, ".claude", "skills", "smithers", "SKILL.md"))).toBe(false)
+      expect(existsSync(installedSkill(home))).toBe(false)
     })
   })
 })

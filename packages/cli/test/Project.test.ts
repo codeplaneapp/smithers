@@ -93,6 +93,31 @@ describe("the project root", () => {
     expect(Project.root(undefined, inner)).toBe(inner)
   })
 
+  it("resolves the migration root from the 0.x state, never from an rc.0 ancestor", () => {
+    // The shape that made `migrate --apply` rewrite the wrong tree: an rc.0
+    // project with a 0.x project inside it, and no VCS marker in between.
+    const ancestor = mkdtempSync(join(tmpdir(), "smithers-ancestor-"))
+    staged.push(ancestor)
+    mkdirSync(join(ancestor, ".flows"), { recursive: true })
+    const legacy = join(ancestor, "legacy-project")
+    mkdirSync(join(legacy, ".smithers"), { recursive: true })
+    const nested = join(legacy, "src")
+    mkdirSync(nested, { recursive: true })
+
+    expect(Project.root(undefined, legacy)).toBe(ancestor)
+    expect(Project.legacyRoot(undefined, legacy)).toBe(legacy)
+    // From inside the 0.x project, the same answer: one project, one root.
+    expect(Project.legacyRoot(undefined, nested)).toBe(legacy)
+  })
+
+  it("honors an explicit --root, and otherwise falls back to the invocation directory", () => {
+    expect(Project.legacyRoot("sub/dir", "/a/b")).toBe(resolve("/a/b", "sub/dir"))
+    expect(Project.legacyRoot("/abs/root", "/a/b")).toBe("/abs/root")
+    const bare = project()
+    expect(Project.legacyRoot("", bare)).toBe(bare)
+    expect(Project.legacyRoot(undefined, bare)).toBe(bare)
+  })
+
   it("names the state, log, and flow-source paths off one root", () => {
     expect(Project.stateDirectory("/work")).toBe(join("/work", ".flows"))
     expect(Project.logDirectory("/work")).toBe(join("/work", ".flows", "logs"))

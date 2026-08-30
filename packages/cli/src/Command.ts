@@ -804,8 +804,12 @@ const migrate = Command.make("migrate", {
   Effect.gen(function*() {
     yield* guardGlobals
     yield* refuseRemoved("migrate", { to: config.to })
-    const projectRoot = yield* Project.ProjectRoot
-    const target = Option.getOrElse(config.path, () => projectRoot)
+    // The 0.x project, not the rc.0 one. `Project.ProjectRoot` anchors its
+    // walk on `.flows/`, which a 0.x project does not have, so a project
+    // nested under an rc.0 one was scanned — and with `--apply`, rewritten —
+    // at the ancestor instead of itself.
+    const migrationRoot = yield* Project.MigrationRoot
+    const target = Option.getOrElse(config.path, () => migrationRoot)
     // `legacyDatabases`, not `legacyState`: the section 6 refusal is not
     // gated on `.flows/` being absent, and the project being migrated has
     // one by definition.
@@ -834,7 +838,7 @@ const migrate = Command.make("migrate", {
       verifyFormat: Option.getOrUndefined(config.verifyFormat),
       verifyTypecheck: config.verifyTypecheck,
       verifyTest: Option.getOrUndefined(config.verifyTest)
-    }, projectRoot)
+    }, target)
     const root = yield* rootCommand
     const outcome = yield* Effect.result(MigrateCommand.runNode(options, { environment: process.env }))
     if (outcome._tag === "Failure") {

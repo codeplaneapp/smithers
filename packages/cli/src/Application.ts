@@ -41,6 +41,15 @@ export interface Config {
    * `.flows/` or `flows/`, before any command handler runs.
    */
   readonly root?: string | undefined
+  /**
+   * The 0.x project `smithers migrate` converts when the operator names no
+   * path: `--root`, or the nearest ancestor holding 0.x state.
+   *
+   * Not {@link Config.root}. That one anchors on `.flows/`, which a 0.x
+   * project does not have, so migrating from a directory nested under an rc.0
+   * project targeted the ancestor.
+   */
+  readonly migrationRoot?: string | undefined
 }
 
 /**
