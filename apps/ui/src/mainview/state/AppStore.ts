@@ -141,17 +141,17 @@ type ApprovalCard = Extract<Card, { kind: "approval" }>
 /**
  * The gate an approval card asks about — the thing a decision decides.
  *
- * A workflow gate is the run's node at an iteration; the ask's wording is not
- * part of it, so restating the same gate in different words is still the same
- * decision. A chain park has no node: the runtime reuses one card id per
+ * A workflow gate is the run's own request id; the ask's wording is not part
+ * of it, so restating the same gate in different words is still the same
+ * decision. A chain park has no request id: the runtime reuses one card id per
  * lineage, and what changes between parks is the capability being asked for, so
  * that is the gate's identity there.
  */
 const approvalGateKey = (card: ApprovalCard): string => {
-  const { runId = "", nodeId, iteration = 0, chain, flow = "", capability } = card.payload
-  return nodeId === undefined
+  const { runId = "", requestId, chain, flow = "", capability } = card.payload
+  return requestId === undefined
     ? `ask:${runId}:${chain === true}:${flow}:${capability}`
-    : `gate:${runId}:${nodeId}:${iteration}`
+    : `gate:${runId}:${requestId}`
 }
 
 /**

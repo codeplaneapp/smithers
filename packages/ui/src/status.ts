@@ -23,6 +23,31 @@ const STATUS_CLASS_COLORS: Readonly<Record<StatusClass, string>> = {
 
 const STATUS_CLASS_BY_STATUS = {
   fixed: "ok",
+  /*
+   * The rc.0 run vocabulary (`@smthrs/control` `RunStatus`): accepted,
+   * running, parked, waiting-approval, cancelled, completed, failed. Only
+   * `accepted` and `parked` were new; every other spelling below already had
+   * a bucket, and every addition here is additive — no status changed tone.
+   *
+   * `accepted` is a run the control plane took and has not started: neutral,
+   * like `queued`, because nothing is in flight yet. `parked` is a run
+   * holding on something — an approval, an event, a timer, a quota — which is
+   * the same "waiting on the world" tone every `waiting-*` status carries.
+   */
+  accepted: "muted",
+  parked: "warn",
+  /*
+   * The run-card phases apps/ui renders beside the engine's own statuses. A
+   * card is launching before the engine has a run to report, reconnecting
+   * while the read path is down, quiet when a run stopped moving, stopped
+   * when the human stopped watching, and no-capacity when the workspace could
+   * not be provisioned.
+   */
+  launching: "run",
+  reconnecting: "warn",
+  quiet: "warn",
+  stopped: "muted",
+  "no-capacity": "warn",
   ready: "ok",
   done: "ok",
   finished: "ok",
@@ -107,6 +132,17 @@ export function formatStatus(status: string | undefined): string {
     complete: "Complete",
     completed: "Complete",
     fixed: "Fixed",
+    accepted: "Accepted",
+    parked: "Parked",
+    launching: "Launching",
+    reconnecting: "Reconnecting",
+    // `quiet` is deliberately absent: the mechanical fallback already renders
+    // "Quiet", which is the pill apps/ui's run card has always worn
+    // (apps/ui CardFrames.test.tsx, "a quiet or stopped run card never wears a
+    // Running pill"). A label entry here would change a rendered string, and
+    // this table's Phase 4 additions are additive only.
+    stopped: "Stopped",
+    "no-capacity": "No capacity",
     ready: "Ready",
     done: "Done",
     finished: "Finished",

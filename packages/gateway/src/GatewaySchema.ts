@@ -177,13 +177,20 @@ export const RunTreeSelector = Schema.TaggedStruct("run-tree", { runId: Schema.S
 export const PlanCardsSelector = Schema.TaggedStruct("plan-cards", {})
 
 /**
- * A selector for pending workspace approvals.
+ * A selector for approvals.
+ *
+ * Without `runId` it lists the workspace's pending gates, which is the
+ * approvals inbox. With one it lists that run's gates including the decided
+ * ones, which is what a run card renders: a gate a human already answered
+ * still belongs on the card that asked.
  *
  * @since 0.1.0
  * @category models
  * @slop
  */
-export const ApprovalsSelector = Schema.TaggedStruct("approvals", {})
+export const ApprovalsSelector = Schema.TaggedStruct("approvals", {
+  runId: Schema.optional(Schema.String)
+})
 
 /**
  * A selector for one node's output projection.
@@ -248,6 +255,27 @@ export const ProjectionCursor = Schema.Struct({
  * @slop
  */
 export type ProjectionCursor = typeof ProjectionCursor.Type
+
+/**
+ * Every row one selector currently projects, and the cursor they were read
+ * at. A client that follows the same selector from this cursor sees each
+ * later change exactly once.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export const ProjectionSnapshot = Schema.Struct({
+  cursor: ProjectionCursor,
+  rows: Schema.Array(Schema.Unknown)
+})
+
+/**
+ * A projection snapshot and the cursor it was read at.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type ProjectionSnapshot = typeof ProjectionSnapshot.Type
 
 /**
  * The inputs for one subscription watch tick.

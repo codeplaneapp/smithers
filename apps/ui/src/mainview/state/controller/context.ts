@@ -1,12 +1,13 @@
 import { Effect } from "effect"
 import type { AgentChatMessage, FetchLike } from "smithers-shared/NativeAgent"
+import { createGatewaySeam } from "./gateway"
 import type { CommandRegistry } from "../../flows/Commands"
 import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
 import type { AppServices } from "../AppController"
 import type { AppStore } from "../AppStore"
 import type { ImpossibleAskClass } from "../Instructions"
+import type { GatewaySeam } from "./gateway"
 import type { RepositoryOpenRequest } from "./targets"
-import type { WorkflowRpcResult } from "./workflows"
 
 export interface PendingToolCall {
   readonly callId: string
@@ -72,7 +73,6 @@ export interface ControllerContext {
   readonly workflowPollMs: number
   readonly netRing: NetEntry[]
   readonly toastRuns: Map<string, number>
-  readonly runStreams: Map<string, EventSource>
   readonly pumpPokes: Map<string, () => void>
   readonly runPumps: Map<string, { stopped: boolean }>
   activeTurn: ActiveTurn | undefined
@@ -89,7 +89,11 @@ export interface ControllerContext {
   openRepoChooser: (preselect?: string) => Promise<string | void>
   /** Open a repository through a native grant or explicit headless path. */
   openRepo: (request: RepositoryOpenRequest) => Promise<string | void>
-  workflowRpc: (repo: string, method: string, params: unknown) => Promise<WorkflowRpcResult>
+  /**
+   * The workspace gateway, as this app calls it. Allocated once the transport
+   * exists, because it is built over `boundedFetch`.
+   */
+  gateway: GatewaySeam
   commands: CommandRegistry
   withToast: <T>(
     key: string,
@@ -148,7 +152,6 @@ export const createControllerContext = (
     workflowPollMs: services.workflowPollMs ?? 2500,
     netRing,
     toastRuns: new Map<string, number>(),
-    runStreams: new Map<string, EventSource>(),
     pumpPokes: new Map<string, () => void>(),
     runPumps: new Map<string, { stopped: boolean }>(),
     activeTurn: undefined,
@@ -164,7 +167,7 @@ export const createControllerContext = (
     contextMessages: () => [],
     openRepoChooser: async () => {},
     openRepo: async () => "Opening a repository is not wired.",
-    workflowRpc: async () => ({ status: "error", message: "Workflow RPC is not wired." }),
+    gateway: undefined as unknown as GatewaySeam,
     commands: undefined as unknown as CommandRegistry,
     withToast: undefined as unknown as ControllerContext["withToast"],
     unref,
@@ -270,5 +273,15 @@ export const createControllerContext = (
     }
     return body === "" ? fallback : `${fallback} (${body.slice(0, 200)})`
   }
+  /*
+   * The gateway seam rides the same bounded transport every other controller
+   * call does, so a workspace that stops answering becomes the seam's own
+   * honest refusal rather than a request that never returns.
+   */
+  ctx.gateway = createGatewaySeam({
+    baseUrl: ctx.baseUrl,
+    fetch: (url, init) => ctx.boundedFetch(url, init),
+    errorMessageOf: (response, fallback) => ctx.errorMessageOf(response, fallback)
+  })
   return ctx
 }

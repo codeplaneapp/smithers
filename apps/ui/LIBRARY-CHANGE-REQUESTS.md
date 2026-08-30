@@ -115,7 +115,7 @@ changes personally.
   application-defined namespace — would also work but changes a security-
   relevant closed set, so the host-callback version is proposed first.
 
-## 3. `ChatComposer` and `FileTree` accept no pass-through attributes
+## 3. LANDED: `ChatComposer` and `FileTree` accept no pass-through attributes
 
 - **Files**: `@smthrs/ui` `src/chat/ChatComposer.tsx` (the Send and Stop
   buttons) and `src/file-tree.tsx` (the row buttons).
@@ -149,8 +149,14 @@ changes personally.
 
   and the same shape on `FileTree` as `nodeProps?: (node: FileTreeNode) =>
   ComponentProps<"button">`.
+- **Landed**: `submitProps` / `stopProps` on `ChatComposerProps` and
+  `nodeProps` on `FileTreeProps`, pinned by
+  `packages/ui/tests/host-pass-through.test.tsx`. Anything the host sets wins
+  over the component's own attribute of the same name, so a host can also
+  correct one. `apps/ui/src/mainview/FlowStamp.ts` can drop its ref callback
+  for these three affordances.
 
-## 4. `MarkdownEditor` traps forward Tab
+## 4. LANDED: `MarkdownEditor` traps forward Tab
 
 - **File**: `@smthrs/ui` `src/adapters/markdown-editor/MarkdownEditor.tsx`.
 - **What**: the editor is a ProseMirror body and ProseMirror binds Tab to
@@ -165,8 +171,14 @@ changes personally.
   true) that binds Tab/Shift+Tab to the browser's own behaviour, and offer
   indentation on an explicit chord instead — which is what every editor that
   ships inside a form does.
+- **Landed**: `escapeTabOrder` on `MarkdownEditorProps`, default true. A
+  capture-phase handler above ProseMirror's keymap stops Tab before the editor
+  sees it, so the document's own focus order applies; the host reports the
+  setting as `data-escape-tab-order` on both the editor and the fallback
+  textarea. `apps/ui/src/mainview/FocusRing.ts` can drop its handler for this
+  region.
 
-## 5. `Markdown` has no table rule
+## 5. LANDED: `Markdown` has no table rule
 
 - **File**: `@smthrs/ui` `src/primitives/markdown.tsx`.
 - **What**: the renderer handles fences, headings, lists and inline spans. A
@@ -186,3 +198,8 @@ changes personally.
   fence branch — a header row, a `:?-+:?` delimiter row with a matching column
   count, then rows until a non-pipe line — emitting the same `Table`/`TableRow`
   primitives, with the delimiter's colons as per-column alignment.
+- **Landed**: exactly that, in `renderBlocks` and in `splitBlockSources` so a
+  streaming block boundary agrees with the renderer. A header row with no
+  delimiter row, a delimiter row of the wrong width, a sentence containing a
+  pipe, and a pipe inside a fence all stay what they were.
+  `apps/ui/src/mainview/RichMarkdown.tsx` can drop its own table split.

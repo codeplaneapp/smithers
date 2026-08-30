@@ -37,6 +37,14 @@ export const CONFORMANCE = from(".")
 export const SHARED_SRC = from("../../../shared/src")
 /** The shipped component library the app renders through. */
 export const COMPONENT_LIBRARY = from("../../node_modules/@smthrs/ui/src")
+/**
+ * The gateway the app reads the world through. Since the rc.0 retarget the app
+ * binds projections the gateway folds, so the journal event kinds those
+ * projections switch on are as much part of the app's vocabulary as a card
+ * kind is — a rename there orphans the literals the proof script emits, which
+ * is exactly the rot this pin exists to catch.
+ */
+export const GATEWAY_LIBRARY = from("../../node_modules/@smthrs/gateway/src")
 
 /**
  * Product source: everything the app is built from, minus the trees under
@@ -233,10 +241,15 @@ export const stampedDataAttributes = (trees: ReadonlyArray<string>): ReadonlySet
  * transition types, stream frame types, toast keys. A dotted literal in a test
  * tree that is in no product source file names nothing — `workflow.create`
  * after the rename.
+ *
+ * The gateway source counts alongside the app's own, for the same reason the
+ * component library counts for `data-*` attributes: the app renders what the
+ * gateway's projections fold, and those projections are where a control-plane
+ * event kind such as `control.approval.requested` is spelled.
  */
 export const productDottedIdentifiers = (): ReadonlySet<string> => {
   const owned = new Set<string>()
-  for (const file of productSourceFiles()) {
+  for (const file of [...productSourceFiles(), ...sourceFiles(GATEWAY_LIBRARY)]) {
     for (const literal of extractLiterals(file, readFileSync(file, "utf8"))) {
       if (literal.form === "string" && DOTTED_IDENTIFIER.test(literal.value)) owned.add(literal.value)
     }

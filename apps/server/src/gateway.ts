@@ -523,22 +523,11 @@ const isTunnelFailure = (status: number): boolean => status === 502 || status ==
 const FORCED_REPROVISION_FLOOR_MS = 30_000
 
 /**
- * The one relayed method a repeat could duplicate. Every other allowlisted call
- * is a read, or is keyed by (runId, nodeId, iteration) and lands the same
- * decision twice — safe to replay onto a resumed gateway.
+ * The gateway mounts the relay may address. Nothing else is reachable, so a
+ * path assembled from anything the browser sent can never aim the user's
+ * server-held credential somewhere this seam never allowlisted.
  */
-export const NON_REPLAYABLE_GATEWAY_METHODS: ReadonlyArray<string> = ["launchRun"]
-
-/** The RPC methods the product relays. Nothing else crosses this seam. */
-export const ALLOWED_GATEWAY_METHODS: ReadonlyArray<string> = [
-  "listWorkflows",
-  "launchRun",
-  "getRun",
-  "listApprovals",
-  "submitApproval",
-  "getNodeOutput",
-  "whatHappened"
-]
+export const GATEWAY_RELAY_PATHS: ReadonlyArray<string> = ["/rpc", "/projections", "/health"]
 
 export type GatewayCallOutcome =
   | { readonly status: "ok"; readonly response: Response }
@@ -562,11 +551,19 @@ export const callGateway = async (
   init: {
     readonly method: string
     readonly body?: unknown
+    /** A body forwarded byte for byte, for the RPC mounts. */
+    readonly text?: string
     readonly headers?: Record<string, string>
     /** Whether this call may be replayed onto a re-provisioned gateway. */
     readonly replayable?: boolean
   }
 ): Promise<GatewayCallOutcome> => {
+  // The relay addresses the gateway's own mounts and nothing else. Without
+  // this, a path assembled from anything the browser sent would aim the
+  // user's server-held credential wherever that string pointed.
+  if (!GATEWAY_RELAY_PATHS.includes(path)) {
+    return { status: "unavailable", detail: `${path} is not a gateway path this seam relays.` }
+  }
   const gateway = await ensureGateway(env, login, repo)
   if (gateway.status !== "ready") return gateway
   /** Why the last attempt could not reach the gateway — stated, never swallowed. */
@@ -582,10 +579,12 @@ export const callGateway = async (
           method: init.method,
           headers: {
             authorization: `Bearer ${record.token}`,
-            ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+            ...(init.body === undefined && init.text === undefined ? {} : { "content-type": "application/json" }),
             ...init.headers
           },
-          ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) })
+          ...(init.text === undefined
+            ? init.body === undefined ? {} : { body: JSON.stringify(init.body) }
+            : { body: init.text })
         },
         upstreamTimeoutMs(env)
       )

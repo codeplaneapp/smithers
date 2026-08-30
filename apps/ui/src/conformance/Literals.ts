@@ -469,10 +469,12 @@ export const segmentsOf = (value: string): ReadonlyArray<string> =>
 /**
  * File names are not application vocabulary. `index.html` and `version.json`
  * have the dotted shape but name a build artifact, so the dotted rule skips
- * them rather than sending every new fixture path to the allowlist.
+ * them rather than sending every new fixture path to the allowlist. `db` and
+ * `sqlite` are here because a script that stands up a real control plane names
+ * the database file it writes.
  */
 export const FILE_NAME =
-  /\.(ts|tsx|js|jsx|mjs|cjs|json|jsonc|html|css|md|map|txt|lock|toml|ya?ml|png|svg|ico|woff2?|wasm|tar|t?gz|zip|dmg)$/
+  /\.(ts|tsx|js|jsx|mjs|cjs|json|jsonc|html|css|md|map|txt|lock|toml|ya?ml|png|svg|ico|woff2?|wasm|tar|t?gz|zip|dmg|db|sqlite)$/
 
 /**
  * Every `data-*` attribute name spelled inside a literal.
