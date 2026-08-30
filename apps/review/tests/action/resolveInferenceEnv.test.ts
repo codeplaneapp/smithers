@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import * as Seat from "@smthrs/agent/Seat";
+import * as DeferredTools from "@smthrs/model/DeferredTools";
 import { resolveInferenceEnv } from "../../action/src/resolveInferenceEnv.ts";
+import { liveSuiteGate } from "../support/liveSuite.ts";
 
 const session = { anthropicBaseUrl: "https://review.test/api/anthropic", sessionToken: "srs_tok" };
 
@@ -38,4 +41,40 @@ describe("resolveInferenceEnv", () => {
       ANTHROPIC_API_KEY: "srs_tok",
     });
   });
+});
+
+/** The two model ids the BYO-OpenAI mode puts on the wire. */
+const openaiSeatModels = (): ReadonlyArray<string> => {
+  const resolved = resolveInferenceEnv({ ...session, openaiApiKey: "sk-oai-byo" });
+  return [resolved.env.SMITHERS_REVIEW_SEAT!, resolved.env.SMITHERS_REVIEW_CHEAP_SEAT!].map(Seat.modelIdOf);
+};
+
+describe("the BYO-OpenAI seats name models that exist", () => {
+  // A seat string is never validated: an unserved model id resolves to a route
+  // that 404s on first use, and both steps that run on the cheap seat catch
+  // their own failure, so the mode degrades to "no narration, no quiz" with
+  // nothing in the log. The pin is what makes a typo loud.
+  test("both models are ones @smthrs/model reports wire support for", () => {
+    for (const modelId of openaiSeatModels()) {
+      expect({ modelId, supported: DeferredTools.supportsDeferred("openai-responses", modelId) }).toEqual({
+        modelId,
+        supported: true,
+      });
+    }
+  });
+
+  const liveModels = liveSuiteGate({
+    tag: "openai seats",
+    enabled: Boolean(process.env.OPENAI_API_KEY?.trim()),
+    reason: "no OPENAI_API_KEY: the seat model ids were not checked against the live API",
+  });
+
+  test.skipIf(!liveModels)("the OpenAI API serves both models", async () => {
+    for (const modelId of openaiSeatModels()) {
+      const response = await fetch(`https://api.openai.com/v1/models/${modelId}`, {
+        headers: { authorization: `Bearer ${process.env.OPENAI_API_KEY!.trim()}` },
+      });
+      expect({ modelId, status: response.status }).toEqual({ modelId, status: 200 });
+    }
+  }, 60_000);
 });
