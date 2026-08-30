@@ -136,6 +136,9 @@ export const VerifyReview = Flow.make("smithers-review/VerifyReview", {
 /**
  * The number of files one fan-out batch holds when the input names none.
  *
+ * Batch width, not an enforced ceiling on the provider calls in flight; see
+ * {@link ReviewFiles}.
+ *
  * @since 1.0.0
  * @category constants
  */
@@ -144,11 +147,21 @@ export const DEFAULT_CONCURRENCY = 8;
 /**
  * The file-review round.
  *
- * The fan-out is batched rather than one flat `Node.all`, because
- * `input.concurrency` is a real bound on how many provider calls a review makes
- * at once and `Node.all` has none. Each batch's answers are folded into an
- * accumulator by a recorded step, so a resume mid-review replays the batches
- * that already settled instead of re-asking their seats.
+ * The fan-out is batched rather than one flat `Node.all` so each batch's
+ * answers are folded into an accumulator by a recorded step: a resume
+ * mid-review replays the batches that already settled instead of re-asking
+ * their seats.
+ *
+ * `input.concurrency` is that batch width and nothing more. It does not bound
+ * the provider calls in flight, and no shape this body can build would: the
+ * interpreter settles every dependency of a node concurrently before running
+ * the node (`packages/flow/src/Interpreter.ts`, the `Effect.forEach` over
+ * `KeyMaterial.dependencies` with `concurrency: "unbounded"` above the AST
+ * switch), so a batch chained onto its predecessor with `Node.andThen` starts
+ * alongside it exactly as `Node.all` does. A five-file review makes five calls
+ * at once whatever the flag says. `tests/workflow/reviewFlow.test.ts` holds
+ * every scripted call open and pins that width. The ordering has to come from
+ * the plan contract in `@smthrs/flow`, which this app does not own.
  *
  * @since 1.0.0
  * @category flows

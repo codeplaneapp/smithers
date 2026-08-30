@@ -100,7 +100,7 @@ Review behavior
   --quiz <off|auto|on>      reviewer comprehension quiz (default auto: only for
                             high/critical impact changes); the impact reasons
                             behind the assessment appear in the walkthrough
-  --concurrency <n>         parallel file reviews (default 8)
+  --concurrency <n>         file-review batch width (default 8)
   --timeout <min>           per-agent-task timeout in minutes (default 10)
 
 Output

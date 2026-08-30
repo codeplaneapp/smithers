@@ -21,23 +21,34 @@ const prepared: Route.PreparedRequest = {
 export type Ask = string;
 
 /**
+ * How a scripted seat answers: a value, or a promise of one.
+ *
+ * A promise is what lets a test observe concurrency. A synchronous answer
+ * settles inside the same tick the call was made in, so every call looks
+ * sequential no matter how wide the fan-out really is; a call held on a
+ * promise is still in flight while its siblings start, which is the only way
+ * to see a bound take effect.
+ */
+export type Answer = (ask: Ask) => unknown | Promise<unknown>;
+
+/**
  * A model that answers each call with one fenced `cell` block carrying the
  * value `answer` returns for what it was asked.
  *
  * `answer` returning `undefined` makes the model refuse the way a provider
  * error does, which is how a test drives the caught-failure paths.
  */
-export function scriptedModel(answer: (ask: Ask) => unknown): Model.Model {
+export function scriptedModel(answer: Answer): Model.Model {
   return Model.make({
     stream: (request) =>
-      Stream.suspend(() => {
+      Stream.unwrap(Effect.promise(async () => {
         const ask = [
           ...request.system.map((part) => part.text),
           ...request.messages.flatMap((message) =>
             message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
           ),
         ].join("\n");
-        const value = answer(ask);
+        const value = await answer(ask);
         if (value === undefined) {
           // A real refusal, not a bare Error: a `ModelFailure` is what the
           // agent boundary classifies, and failing with anything else dies as
@@ -56,12 +67,12 @@ export function scriptedModel(answer: (ask: Ask) => unknown): Model.Model {
           ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: "cell" }),
           ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" }),
         ]);
-      }),
+      })),
   });
 }
 
 /** Resolves every declared seat to one scripted model. */
-export function scriptedSeats(answer: (ask: Ask) => unknown): Layer.Layer<SeatResolver.SeatResolver> {
+export function scriptedSeats(answer: Answer): Layer.Layer<SeatResolver.SeatResolver> {
   const model = scriptedModel(answer);
   return SeatResolver.layer({
     resolve: (id) =>

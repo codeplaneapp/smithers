@@ -130,26 +130,72 @@ describe("the review flow", () => {
     expect(readFileSync(out, "utf8")).toContain("<!doctype html>");
   }, 120_000);
 
-  test("honours the concurrency bound by batching the fan-out", async () => {
+  // KNOWN GAP, pinned deliberately: `--concurrency` does not bound the calls.
+  //
+  // The old assertion here was `peak > 0`, which the scripted model satisfied
+  // by answering inside the tick it was called in; it would have held for any
+  // width at all. Held open, the real width shows: all five files are asked at
+  // once under `concurrency: 2`.
+  //
+  // The batch shape is not what fails. `packages/flow/src/Interpreter.ts`
+  // settles every dependency of a node concurrently, with
+  // `concurrency: "unbounded"`, before it runs the node, so a batch chained
+  // onto its predecessor with `Node.andThen` starts alongside it just as the
+  // `Node.all` pairing in `ReviewFiles` does (checked both ways against this
+  // test). Ordering continuations is the plan contract's to change and
+  // `@smthrs/flow` is not this app's to edit, so the suite pins what ships.
+  // When the engine orders them, both assertions below become 2.
+  test("fans out over every file, currently without honouring the bound", async () => {
     const repo = tempRepo(5);
     let inFlight = 0;
     let peak = 0;
-    const result = await runReview(
+    let started = 0;
+    // Every call parks here until the test lets it go, so calls that really are
+    // simultaneous are all in flight at once and `peak` is the true width. A
+    // synchronous answer settles in its own tick and reports a peak of 1 no
+    // matter how wide the fan-out is, which is why the old assertion here
+    // (`peak > 0`) held whatever the engine did.
+    const release: (() => void)[] = [];
+    /** Resolves once at least `count` calls have started. */
+    const reached = (count: number) =>
+      new Promise<void>((resolve) => {
+        const poll = () => (started >= count ? resolve() : setTimeout(poll, 5));
+        poll();
+      });
+
+    const pending = runReview(
       repo,
       { narrate: false, quiz: "off", verify: false, concurrency: 2, out: join(repo, "w.html") },
-      (ask) => {
+      async (ask) => {
         inFlight += 1;
+        started += 1;
         peak = Math.max(peak, inFlight);
-        const answer = answerFor()(ask);
+        await new Promise<void>((resolve) => release.push(resolve));
         inFlight -= 1;
-        return answer;
+        return answerFor()(ask);
       },
     );
 
+    await reached(2);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    // With the bound enforced these would both be 2. All five files are asked
+    // at once instead, which is the gap: a wide PR makes one provider call per
+    // changed file simultaneously, whatever `--concurrency` says.
+    expect(started).toBe(5);
+    expect(peak).toBe(5);
+
+    for (const next of release.splice(0)) next();
+    const result = await pending;
+    // What does hold: every file is reviewed, and every batch merges, so the
+    // findings are complete however the calls were scheduled.
     expect(result.review.comments).toHaveLength(5);
-    // The scripted model answers synchronously, so this asserts the batches are
-    // planned at all; the bound itself is the batch width the body builds.
-    expect(peak).toBeGreaterThan(0);
+    expect(result.review.comments.map((comment) => comment.path).sort()).toEqual([
+      "src/file0.ts",
+      "src/file1.ts",
+      "src/file2.ts",
+      "src/file3.ts",
+      "src/file4.ts",
+    ]);
   }, 120_000);
 
   test("a file review that fails becomes a warning, not a dead run", async () => {
