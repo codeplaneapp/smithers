@@ -1,4 +1,4 @@
-import { paletteThemeCss } from "./paletteThemeCss";
+import { paletteThemeCss } from "./paletteThemeCss.ts";
 
 /**
  * One document-wide motion policy for every house stylesheet and consumer CSS.

@@ -1,4 +1,4 @@
-import type { ThemeVariantTokens } from "./ThemeVariantTokens";
+import type { ThemeVariantTokens } from "./ThemeVariantTokens.ts";
 
 /**
  * Font stacks. Sans carries the UI; mono is reserved for code, ids, and

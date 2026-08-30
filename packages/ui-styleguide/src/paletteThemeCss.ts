@@ -1,6 +1,6 @@
-import { serializeThemeVariant } from "./serializeThemeVariant";
-import { DEFAULT_THEME_KEY, themeRegistry } from "./themeRegistry";
-import { sharedTokens } from "./themeTokens";
+import { serializeThemeVariant } from "./serializeThemeVariant.ts";
+import { DEFAULT_THEME_KEY, themeRegistry } from "./themeRegistry.ts";
+import { sharedTokens } from "./themeTokens.ts";
 
 /** Emit both orthogonal theme axes for a chosen quote style. */
 export function paletteThemeCss(quote: "'" | '"'): string[] {

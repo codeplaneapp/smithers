@@ -1,6 +1,6 @@
-import type { TerminalPalette } from "./TerminalPalette";
-import type { ThemeVariantTokens } from "./ThemeVariantTokens";
-import type { ThemeSyntaxId } from "./ThemeSyntaxId";
+import type { TerminalPalette } from "./TerminalPalette.ts";
+import type { ThemeVariantTokens } from "./ThemeVariantTokens.ts";
+import type { ThemeSyntaxId } from "./ThemeSyntaxId.ts";
 
 /**
  * One house color theme: both light/dark token variants plus the literal

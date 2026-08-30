@@ -1,4 +1,4 @@
-import { rgbChannels } from "./rgbChannels";
+import { rgbChannels } from "./rgbChannels.ts";
 
 function toHex(channels: readonly number[]): string {
   return `#${channels

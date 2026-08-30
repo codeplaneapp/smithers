@@ -15,7 +15,7 @@ jobs:
       - name: Validate GitHub Actions workflows
         uses: docker://rhysd/actionlint:1.7.11
         with:
-          args: ".github/workflows/ci.yml .github/workflows/release.yml .github/workflows/apps-deploy.yml .github/workflows/canary.yml"
+          args: ".github/workflows/ci.yml .github/workflows/release.yml .github/workflows/apps-deploy.yml .github/workflows/canary.yml .github/workflows/pr-review.yml"
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
@@ -48,6 +48,26 @@ jobs:
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Agent eval typecheck
         run: pnpm exec smithers-build build '//evals/agent:types'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Review app and workers
+        run: pnpm exec smithers-build ci '//apps/review'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Bug worker
+        run: pnpm exec smithers-build ci '//apps/bug-worker'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Status site
+        run: pnpm exec smithers-build ci '//apps/status-site'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: "Review eval suite (offline, baseline-gated)"
+        run: pnpm exec smithers-build test '//evals/review-seeded-bugs'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"

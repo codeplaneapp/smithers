@@ -1,4 +1,4 @@
-import type { SmithersTheme } from "../SmithersTheme";
+import type { SmithersTheme } from "../SmithersTheme.ts";
 
 /**
  * Fucory: the original Smithers house palette (zinc neutrals, violet brand).

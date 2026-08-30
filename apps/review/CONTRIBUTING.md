@@ -1,0 +1,229 @@
+# Contributing to smithers review
+
+Internals, architecture, and development workflow for `apps/review`. For
+what the tool does and how to set it up, read the [README](README.md).
+
+Specs: `.smithers/specs/smithers-review-walkthrough.md` (review + walkthrough
+pipeline) and `.smithers/specs/smithers-review-cloud.md` (hosted service:
+OIDC repo auth, metered inference proxy, quota, metrics).
+
+## How it works
+
+One durable Flow, in four rounds. `Flow.to` ends a round and starts the next
+one with its payload as real data, which is what lets round 2 fan out over a
+file list round 1 discovers:
+
+1. `Review` resolves the target, filters files, and hands off. `ReviewFiles`
+   then runs one `ReviewFile` cell per changed file, in `--concurrency`-wide
+   batches, on the `review` seat with the prompt in
+   `src/workflow/openCodeReview.ts`, and `MergeFileBatch` normalizes and
+   anchors each batch's comments. `VerifyReview` adjudicates the findings on
+   the `review-verify` seat when `--verify` is on. The batch width is what
+   `--concurrency` sets; it is not a ceiling on the provider calls in flight,
+   because the flow interpreter settles a node's dependencies concurrently.
+   `tests/workflow/reviewFlow.test.ts` pins that gap and names the fix.
+2. `collect-changes` loads the full diff for every changed file, including
+   files the review filters skip (tests, docs, configs). The walkthrough shows
+   everything.
+3. `narrate` (an agent) writes the story as block streams: prose explanation
+   (markdown), diff blocks that embed each file's diff at the right point in
+   the narrative, and Mermaid diagrams wherever structure or flow changed.
+   Chapters open with the central change and follow dependency order; prose
+   between diffs carries the thread. `normalizeStory` enforces that every
+   changed file appears in exactly one diff block; a deterministic fallback
+   story covers agent failure and `--no-narrate`.
+4. `walkthrough` renders self-contained HTML (inline CSS, no external assets)
+   and writes it to `--out`. Diffs are rendered with `@pierre/diffs` (syntax
+   highlighting, word-level diffs, line numbers, unified or `--split` view);
+   diagrams render via an inlined Mermaid runtime (only included when the
+   story has diagrams); the header shows a deterministic change-overview SVG
+   chart of additions/deletions by area.
+
+Review findings never change the exit code; smithers review reports, humans
+decide.
+
+## Reviewing GitHub PRs
+
+`--pr <number|url>` resolves the PR via the `gh` CLI, defaults the review
+range to `origin/<base>..<headSha>`, and after the run posts one PR review:
+the narrative summary (headline, synopsis, reading order, walkthrough link
+when `--publish` ran) as the body, and every anchorable finding as an inline
+comment with a ` ```suggestion ` fence when replacement code exists. If
+GitHub rejects the inline batch, the findings are folded into the body and
+the review still posts. The PR's head must exist locally (check out the
+branch or fetch it first).
+
+## CI
+
+`.github/workflows/pr-review.yml` runs `--pr <number> --publish` on every
+non-draft PR from a branch in this repo and posts the review onto it. The job
+is scoped to `contents: read` + `pull-requests: write` and stays on the
+`pull_request` event (never `pull_request_target`), so fork PRs run without
+secrets and are skipped. Repo secrets: `ANTHROPIC_API_KEY` for the review
+seats, and `SMITHERS_REVIEW_PUBLISH_TOKEN` for the hosted walkthrough link.
+Missing seat credentials skip the job; a missing publish token posts the review
+without the link. The walkthrough HTML is also uploaded as a run artifact.
+
+## Self-hosted CI (your own credentials)
+
+To run reviews in another repo's CI without the hosted service, bring your own
+provider key and check out smithers next to the repo:
+
+```yaml
+name: PR review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+jobs:
+  review:
+    # Fork PRs have no secrets and a read-only token; drafts are not ready.
+    if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0 # the review diffs origin/<base>..<head>; merge-base needs history
+      - uses: actions/checkout@v6.0.2
+        with:
+          repository: smithersai/smithers
+          path: .smithers-review-tool
+      - uses: pnpm/action-setup@v6.0.8
+        with:
+          version: 11.21.0
+          run_install: false
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 22
+      - run: pnpm -C .smithers-review-tool install --frozen-lockfile
+      - name: Review the PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: >
+          node .smithers-review-tool/apps/review/bin/smithers-review.mjs .
+          --pr ${{ github.event.pull_request.number }}
+```
+
+`OPENAI_API_KEY` works too; point `SMITHERS_REVIEW_SEAT` and
+`SMITHERS_REVIEW_CHEAP_SEAT` at `openai:` seats when you use it. Never use
+`pull_request_target` here.
+
+## Rendering diffs anywhere else
+
+The diff renderer is exported as `@smthrs/review/diffs`, so anything in this
+workspace can embed the same diffs in any artifact (reports, custom workflow
+UIs, dashboards). The package is private at rc.0 (rc-contract.md section 3
+rule (d)), so the import resolves through the workspace link, not a registry
+install:
+
+```ts
+import { renderPierreFileDiff, extractDiffAssets } from "@smthrs/review/diffs";
+
+const html = await renderPierreFileDiff({ diff: gitPatchForOneFile });
+// embedding many diffs in one page? hoist the shared assets once:
+const { sprite, styles, body } = extractDiffAssets(html);
+```
+
+The Pierre reference clone lives at `reference/pierre/` (gitignored).
+
+## Publish service
+
+`--publish` uploads the walkthrough to a Cloudflare Worker (R2-backed,
+deployed with Alchemy from `alchemy.run.ts`) and prints an unlisted share
+URL. The live endpoint is `https://review.jjhub.tech`; set
+`SMITHERS_REVIEW_PUBLISH_URL` to the publish service endpoint before using
+`--publish` (see the spec's "Publishing" section). Credentials come from
+`SMITHERS_REVIEW_PUBLISH_URL` / `SMITHERS_REVIEW_PUBLISH_TOKEN` or
+`~/.smithers-review.json`.
+
+```sh
+REVIEW_PUBLISH_TOKEN=... pnpm -C apps/review deploy   # alchemy deploy
+SMITHERS_REVIEW_E2E=1 pnpm -C apps/review test        # includes live publish e2e
+```
+
+## Seats
+
+The flow declares four logical seats, so a step identity stays put when the
+model behind it changes: `review`, `review-verify`, `review-narrate`, and
+`review-quiz`. `src/workflow/reviewSeats.ts` reads the policy off the
+environment and `src/workflow/reviewSeatResolver.ts` turns each
+`provider:model` string into a credentialed route. It is the only file in the
+app that reads a credential.
+
+| Variable | Seats it sets | Default |
+| --- | --- | --- |
+| `SMITHERS_REVIEW_SEAT` | reviewing and verifying | `anthropic:claude-sonnet-4-5` |
+| `SMITHERS_REVIEW_CHEAP_SEAT` | narrating and quizzing | `anthropic:claude-haiku-4-5` |
+| `SMITHERS_REVIEW_VERIFY_SEAT` | verifying only | `SMITHERS_REVIEW_SEAT` |
+| `SMITHERS_REVIEW_NARRATE_SEAT` | narrating only | `SMITHERS_REVIEW_CHEAP_SEAT` |
+| `SMITHERS_REVIEW_QUIZ_SEAT` | quizzing only | `SMITHERS_REVIEW_CHEAP_SEAT` |
+
+The provider is the half of the seat string ahead of the colon, and it alone
+decides which credential is read: `ANTHROPIC_API_KEY` for `anthropic:` seats,
+`OPENAI_API_KEY` for `openai:`, `OPENROUTER_API_KEY` for `openrouter:`. A seat
+with no colon is a bare model id on the Anthropic route. `ANTHROPIC_BASE_URL`
+moves the Anthropic route to another origin, which is how the action reaches
+the metered proxy.
+
+The action chooses among three modes in `action/src/resolveInferenceEnv.ts`: a
+caller's `ANTHROPIC_API_KEY` (seats stay on their defaults), a caller's
+`OPENAI_API_KEY` (both seats move to `openai:` models), or the metered proxy,
+which mints a session-scoped key and points `ANTHROPIC_BASE_URL` at its own
+origin. Anthropic wins when both keys are set.
+
+rc.0 runs no CLI subprocess, so there is no engine to select and no Codex or
+Claude Code agent pool: a seat resolves to a provider route, and the table
+above is the whole model policy. The 0.x variables that selected an engine and
+its models are gone, and `tests/docsSeatConventions.test.ts` fails if this file
+or the README starts documenting them again.
+
+## Capabilities
+
+`layerNode` runs the flow on the durable host, whose HTTP client is guarded by
+the capability kernel: every model request is checked as `model:call` on
+`<host>/<model id>`. `modelCallRules` in `reviewSeatResolver.ts` grants exactly
+the origins the seats can dial, and `agentHost` declares the same patterns as
+the run's capability envelope. Without the grant the first request parks on a
+permission that an unattended run has nobody to answer, and the CLI dies with
+"All fibers interrupted without error". Scripted seats build no HTTP request
+and never meet the check, so `tests/workflow/reviewLayerNode.test.ts` drives a
+real route against a local fixture provider to cover it.
+
+## Documentation of exports
+
+The workspace convention is JSDoc on every export, and the imported packages
+follow it throughout. Here it is scoped to the published surface: the entry
+points in `package.json`'s `exports` map (`./cli`, `./diffs`, `./workflow`,
+`./workflow/layer`, and `./workflow/openCodeReview`) plus the modules the
+diffs barrel re-exports. Those are the names another workspace project can
+import, and `tests/publicApiDocs.test.ts` fails when one of them loses its doc
+block.
+
+Everything else under `src/` and `action/src/` is an internal seam between
+files in this app. Document those where the reason is not obvious; a one-line
+restatement of the signature is not required.
+
+## Tests
+
+```sh
+pnpm -C apps/review test        # bun test: real git fixtures, real gh, real routes
+pnpm -C apps/review typecheck
+```
+
+Suites that need a real backend go through `tests/support/liveSuite.ts`, which
+prints one line naming what a skip did not prove. `tests/workflow/` covers the
+flow on scripted seats; `tests/workflow/reviewLayerNode.test.ts` spawns Node
+because the durable composition does not build under Bun.
+
+## smithers review
+
+This repo dogfoods `apps/review` on every PR via
+`.github/workflows/pr-review.yml`, which runs the action with the repository's
+`ANTHROPIC_API_KEY`. See `apps/review/README.md`.

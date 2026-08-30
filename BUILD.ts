@@ -98,7 +98,8 @@ export const ci = Smithers.GithubCiGen({
             ".github/workflows/ci.yml",
             ".github/workflows/release.yml",
             ".github/workflows/apps-deploy.yml",
-            ".github/workflows/canary.yml"
+            ".github/workflows/canary.yml",
+            ".github/workflows/pr-review.yml"
           ]
         })
       }),
@@ -111,6 +112,19 @@ export const ci = Smithers.GithubCiGen({
           pattern: "//evals/agent:suite"
         },
         { name: "Agent eval typecheck", verb: Smithers.Verb.Build, pattern: "//evals/agent:types" },
+        // The review app, the two Workers, and the seeded-bug eval. Without
+        // these steps the only pipeline that ran them was the 0.x one this
+        // repository replaced: `//packages/...` does not reach `apps/`, and the
+        // apps-e2e job runs `//apps/ui` alone. They sit in this job rather than
+        // in apps-e2e because none of them needs a browser.
+        { name: "Review app and workers", verb: Smithers.Verb.Ci, pattern: "//apps/review" },
+        { name: "Bug worker", verb: Smithers.Verb.Ci, pattern: "//apps/bug-worker" },
+        { name: "Status site", verb: Smithers.Verb.Ci, pattern: "//apps/status-site" },
+        {
+          name: "Review eval suite (offline, baseline-gated)",
+          verb: Smithers.Verb.Test,
+          pattern: "//evals/review-seeded-bugs"
+        },
         { name: "Generated workflow drift", verb: Smithers.Verb.Lint, pattern: "//:ci" }
       ]
     },
