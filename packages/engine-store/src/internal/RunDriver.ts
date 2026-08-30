@@ -173,6 +173,37 @@ const cancelRequested = { _tag: "CancelRequested" } as const
 const staleRunningSweepBatch = 64
 
 /**
+ * How long a run waits before its live owner is probed again, and how far
+ * that wait doubles.
+ *
+ * A refusal is evidence: the recorded owner answered, so the one thing the
+ * sweep knows is that re-asking immediately is waste. Without a wait the
+ * oldest batch is re-probed every heartbeat forever and nothing behind it is
+ * ever reached (issue #79 follow-up). The first wait is two ticks, which is
+ * already enough for the batch to move on, and it doubles up to the lease
+ * window: an owner that stops heartbeating is therefore re-probed within one
+ * `heartbeatStaleAfter` of the last refusal, which is the same window every
+ * other reclaim decision is made against.
+ */
+const stealRefusalBackoffFirst = Duration.times(Ownership.heartbeatInterval, 2)
+const stealRefusalBackoffMax = Ownership.heartbeatStaleAfter
+
+/**
+ * A refusal this driver remembers: which lease it was refused against, when
+ * the owner may be probed again, and how many consecutive refusals that
+ * lease has produced (the backoff exponent).
+ *
+ * Keyed by run id and holding the heartbeat it was collected against, so an
+ * owner that resumes heartbeating — a new lease — restarts the ladder rather
+ * than inheriting a long wait from the stall that preceded it.
+ */
+interface StealRefusal {
+  readonly heartbeatAtMs: number | null
+  readonly nextProbeAtMs: number
+  readonly attempt: number
+}
+
+/**
  * The type of {@link cancelRequested}: the settlement a round takes when the
  * cancel-request poll wins the race against the flow.
  */
@@ -247,6 +278,71 @@ export const make = (
      * newly registered flow makes previously dropped runs drivable again.
      */
     const warnedUnregistered = new Set<string>()
+    /**
+     * Runs whose owner answered a probe (or held a fresh lease) and are
+     * therefore not worth re-arbitrating yet. See {@link StealRefusal}.
+     *
+     * Bounded by the stale set the sweep can see: every tick drops the entries
+     * whose rows are no longer in the window it read, so a run that is stolen,
+     * released, or settled takes its entry with it.
+     */
+    const stealRefusals = new Map<string, StealRefusal>()
+
+    /**
+     * Records that a run's recorded owner was found alive, and when it may be
+     * asked about again.
+     */
+    const deferSteal = (
+      runId: string,
+      heartbeatAtMs: number | null,
+      nowMs: number
+    ): void => {
+      const previous = stealRefusals.get(runId)
+      // A moved lease is new evidence about a different state of the world, so
+      // it starts the ladder over instead of inheriting the old wait.
+      const attempt = previous !== undefined && previous.heartbeatAtMs === heartbeatAtMs ? previous.attempt + 1 : 1
+      const waitMs = Math.min(
+        Duration.toMillis(stealRefusalBackoffFirst) * Math.pow(2, attempt - 1),
+        Duration.toMillis(stealRefusalBackoffMax)
+      )
+      stealRefusals.set(runId, { heartbeatAtMs, nextProbeAtMs: nowMs + waitMs, attempt })
+    }
+
+    /**
+     * The journal address of one refusal.
+     *
+     * Refusals were emitted through the driver's default source id with no
+     * `sourceSeq`, so nothing deduplicated them: a live owner cost one durable
+     * journal row per refused run per heartbeat, indefinitely. Addressing the
+     * record by the run, the owner, and the lease it was refused against makes
+     * the journal's own first-writer admission the deduplication — the same
+     * mechanism the registration-time wake records use — so a repeated refusal
+     * about an unchanged lease says nothing twice.
+     *
+     * The evidence is part of the address because one lease can be refused for
+     * two different reasons, and they are different records. A wake that
+     * arrives while the owner is still pulsing is refused by the lease alone
+     * (`lease-fresh`); the same owner, still alive but stalled past the
+     * window, is refused by the probe (`probe`). Addressing both to one key
+     * made the second write a different payload under the first one's address,
+     * which the journal rejects as `idempotency_conflict` — a defect that
+     * killed the drive fiber, dropped the probe refusal, and took down any
+     * `execute` joined to that run. One address per (run, owner, lease,
+     * evidence) keeps every reason sayable and still admits each of them once.
+     *
+     * That makes this driver's own payload a pure function of its address, so
+     * it can no longer conflict with itself. It is not the only writer at
+     * these addresses, and a conflict raised by another one is no longer fatal
+     * either: refusals are emitted through {@link emitEvidence}.
+     */
+    const stealRefusedSourceId = (
+      owner: Ownership.OwnerId,
+      heartbeatAtMs: number | null,
+      evidence: "lease-fresh" | "probe"
+    ): string =>
+      `${dependencies.journalSource}:steal-refused:${evidence}:${
+        JSON.stringify([owner.hostId, owner.pid, owner.nonce])
+      }:${heartbeatAtMs}`
     const liveInstances = new Map<string, FlowRuntime.FlowInstance["Service"]>()
     /**
      * Flow scopes retained past a round's settlement.
@@ -346,11 +442,7 @@ export const make = (
      * `roundOrdinal` in the decision payload, which is what walks a whole
      * trampoline chain.
      */
-    const emitDecision = (
-      runId: string,
-      payload: unknown,
-      sourceId = dependencies.journalSource
-    ): Effect.Effect<void> =>
+    const decisionRecord = (runId: string, payload: unknown, sourceId: string) =>
       // Unfenced by design: a decision record commits in the SAME transaction
       // as the store-level owner CAS that is its fence (`transitionOwned`,
       // `activate`, `claim`/`steal` outcomes), and by then the run is often no
@@ -359,14 +451,85 @@ export const make = (
       // steal-refused-owner-alive, activation-lost) also record decisions for
       // runs this driver never owned at all — first-writer-wins evidence,
       // which is what the unfenced channel exists for.
-      journal.emitDurableUnfenced(
-        JournalRecords.runDecision({
-          runId,
-          lineageId: FlowEngine.Lineage.root(runId),
-          sourceId,
-          ...(sourceId === dependencies.journalSource ? {} : { sourceSeq: 0 })
-        }, payload)
-      ).pipe(Effect.asVoid, Effect.orDie)
+      JournalRecords.runDecision({
+        runId,
+        lineageId: FlowEngine.Lineage.root(runId),
+        sourceId,
+        ...(sourceId === dependencies.journalSource ? {} : { sourceSeq: 0 })
+      }, payload)
+
+    /**
+     * Records a decision this driver's own write transaction is responsible
+     * for: the `transitioned` record that commits with its run-row CAS, and
+     * the `claimed-and-activated` / `stolen-and-activated` record that commits
+     * with the activation CAS.
+     *
+     * These stay fatal. They take the driver's default source id, so the
+     * journal allocates them a fresh `sourceSeq` and no address can collide;
+     * a failure here is the storage layer failing under a transaction whose
+     * other half is a run-row write, and the transaction has to take the
+     * driver down with it rather than commit a terminal row whose decision
+     * never reached the journal.
+     */
+    const emitDecision = (
+      runId: string,
+      payload: unknown,
+      sourceId = dependencies.journalSource
+    ): Effect.Effect<void> =>
+      journal.emitDurableUnfenced(decisionRecord(runId, payload, sourceId)).pipe(Effect.asVoid, Effect.orDie)
+
+    /**
+     * Records evidence ABOUT a run this driver does not own, and never raises
+     * on the drive fiber.
+     *
+     * `claim-lost`, `activation-lost` and `steal-refused-owner-alive` are the
+     * three decisions taken about a run another process holds. They are
+     * observations, not commitments: the arbitration they describe already
+     * happened in the store, the caller has already lost, and the very next
+     * thing every one of these call sites does is answer `false`. Routing them
+     * through {@link emitDecision} put an audit write on the failure path of
+     * the loop that drives every run in the process — an `idempotency_conflict`
+     * on a shared refusal address killed the drive fiber, dropped the record
+     * anyway, and took down any `execute` joined to that run.
+     *
+     * So the receipt is folded into a log, the shape `ActionPersistence`'s
+     * `emitConverging` uses for the same reason on the replay branches:
+     *
+     * - `Accepted`: the observation is durable. Nothing to say.
+     * - `Duplicate`: an identical observation is already durable — the
+     *   per-heartbeat deduplication the refusal address exists for. Debug.
+     * - `idempotency_conflict`: this address already holds a DIFFERENT
+     *   observation, so someone (another process, an earlier evidence shape,
+     *   a copied journal after a time-travel fork) said something else about
+     *   the same (run, owner, lease, evidence). The durable record wins and
+     *   the divergence is worth a warning, but it is still only evidence.
+     *
+     * Any other journal failure is folded the same way and for the same
+     * reason: an audit record must never be the thing that stops a driver
+     * from driving. A journal that is genuinely broken still fails the very
+     * next decision write that IS a fence, which is where it belongs.
+     */
+    const emitEvidence = (
+      runId: string,
+      payload: unknown,
+      sourceId = dependencies.journalSource
+    ): Effect.Effect<void> =>
+      journal.emitDurableUnfenced(decisionRecord(runId, payload, sourceId)).pipe(
+        Effect.flatMap((receipt) =>
+          receipt._tag === "Duplicate"
+            ? Effect.logDebug(
+              `engine-store: run ${runId} already recorded this evidence`,
+              { runId, sourceId, seq: receipt.seq }
+            )
+            : Effect.void
+        ),
+        Effect.catch((error) =>
+          Effect.logWarning(
+            `engine-store: evidence about run ${runId} was not admitted to the journal (${error.code}); the run is unaffected`,
+            { runId, sourceId, code: error.code, payload }
+          )
+        )
+      )
 
     /**
      * Commits a run-row transition and the decision describing it in ONE write
@@ -456,19 +619,21 @@ export const make = (
             // operator whose `resume` did nothing can see that a live owner
             // was in the way (issue #53 follow-up).
             if (row.owner !== null && !sameOwner(row.owner, dependencies.owner)) {
-              yield* emitDecision(row.runId, {
+              deferSteal(row.runId, row.heartbeatAtMs, nowMs)
+              yield* emitEvidence(row.runId, {
                 decision: "steal-refused-owner-alive",
                 evidence: "lease-fresh",
                 expectedOwner: row.owner,
                 heartbeatAtMs: row.heartbeatAtMs
-              })
+              }, stealRefusedSourceId(row.owner, row.heartbeatAtMs, "lease-fresh"))
             }
             yield* Effect.annotateCurrentSpan({ outcome: "heartbeat_fresh" })
             yield* Metric.update(EngineStoreMetrics.claim.HeartbeatFresh, 1)
             return false
           }
           if (yield* isAlive(row.owner, { claimant: dependencies.owner, heartbeatAtMs: row.heartbeatAtMs, nowMs })) {
-            yield* emitDecision(row.runId, {
+            deferSteal(row.runId, row.heartbeatAtMs, nowMs)
+            yield* emitEvidence(row.runId, {
               decision: "steal-refused-owner-alive",
               // Always a supplied probe. The default check is the lease, and
               // the lease already refused above for every row that could still
@@ -477,7 +642,7 @@ export const make = (
               evidence: "probe",
               expectedOwner: row.owner,
               heartbeatAtMs: row.heartbeatAtMs
-            })
+            }, stealRefusedSourceId(row.owner, row.heartbeatAtMs, "probe"))
             yield* Effect.annotateCurrentSpan({ outcome: "steal_refused_owner_alive" })
             yield* Metric.update(EngineStoreMetrics.claim.StealRefusedOwnerAlive, 1)
             yield* Effect.logDebug("run steal refused, recorded owner is alive", {
@@ -508,7 +673,7 @@ export const make = (
         }
 
         if (claim._tag !== "Claimed") {
-          yield* emitDecision(row.runId, {
+          yield* emitEvidence(row.runId, {
             decision: "claim-lost",
             outcome: claim._tag,
             expected
@@ -545,7 +710,7 @@ export const make = (
         ).pipe(Effect.orDie)
         if (activation._tag !== "Activated") {
           yield* abandon(row.runId, claim.claimedAtMs)
-          yield* emitDecision(row.runId, {
+          yield* emitEvidence(row.runId, {
             decision: "activation-lost",
             outcome: activation._tag,
             expected
@@ -557,6 +722,9 @@ export const make = (
         }
         yield* Effect.annotateCurrentSpan({ outcome: "activated" })
         yield* Metric.update(EngineStoreMetrics.claim.Activated, 1)
+        // The run is this driver's now, so whatever it was told about the
+        // previous owner is spent.
+        stealRefusals.delete(row.runId)
         return true
       })
     })
@@ -860,6 +1028,13 @@ export const make = (
             // `instance.interrupted` flag, which a durable observation never
             // sets and a second driver instance never has.
             cascaded = yield* requestCancelDescendants(runId, interruptedAtMs)
+            // The run has no future, so neither do its timers. Completing the
+            // clock rows in this transaction is what stops a durable timer
+            // from outliving the run it belongs to: the sweep queries already
+            // skip a settled run's rows, and this stops them being pending at
+            // all — including under an in-memory state with no run view to
+            // join against.
+            yield* engineState.completeRunClocks(runId, interruptedAtMs)
             // A cancel can race the final poll after the run already parked
             // (park precedes the guarded terminal CAS). Clear the waiting row so
             // the terminally cancelled run never surfaces to a sweeper again
@@ -1284,6 +1459,36 @@ export const make = (
         const state = yield* decodeState(initial.stateJson)
         const registration = registrations.get(state.flowName)
         if (registration === undefined) {
+          // Cancelling needs no handler. A parked run whose cancellation was
+          // durably requested used to be dropped here with everything else,
+          // and nothing else could ever reach it: the sweep woke the row every
+          // heartbeat and every wake bailed at this line, so a cancel written
+          // by a control-only process — the operator CLI, a second engine that
+          // registers other flows — stayed write-only forever while the run's
+          // linked children kept going. The terminal transition, the cascade
+          // over the durable edge table, and the interruption record are all
+          // written from the run ROW, so a process that could never execute
+          // this flow can still close it. Claiming first is what makes the
+          // close fenced: `cancelOwned` is owner-fenced, so exactly one of the
+          // sweeping processes wins and the rest see a lost CAS.
+          //
+          // `running` is here for the same reason `suspended` is. The row a
+          // hard-killed owner leaves behind is `running` with a frozen
+          // heartbeat and no waiting row, so the stale-running sweep is the
+          // only thing that reaches it, and it arrives through this same
+          // function: without this arm a control-only process could close a
+          // PARKED run of an unregistered flow and not a hard-killed one,
+          // though the two closes are the identical durable write. Nothing is
+          // weakened by admitting it, because the arbitration is
+          // `claimAndActivate`'s and not this guard's: a fresh lease or a live
+          // owner refuses the takeover and the run is left exactly as it was.
+          if (
+            (initial.status === "suspended" || initial.status === "running") &&
+            initial.cancelRequestedAtMs !== null
+          ) {
+            if (!(yield* claimAndActivate(initial))) return
+            return yield* cancelOwned(executionId, withoutResult(state))
+          }
           // A wake for a flow this process has not registered — after a full
           // restart the sweep re-drives released rows before (or without)
           // the flow ever registering here. Dropping the wake silently made
@@ -1371,7 +1576,7 @@ export const make = (
           // interruptible step ahead of the `ensuring` that removes it, so an
           // interrupt landing there left this round's instance in the map for
           // the driver's lifetime — a slow leak, and a stale instance for
-          // `interruptUnsafe` to mark interrupted.
+          // `interrupt` to mark interrupted.
           liveInstances.set(executionId, instance)
           const result = yield* Effect.scoped(
             Effect.raceFirst(
@@ -1516,9 +1721,13 @@ export const make = (
               { decision: "transitioned", status, owner: dependencies.owner },
               { cancelRequested: "absent" },
               // A suspension is not an exit: the run is parked and will settle
-              // later, so its children keep going. A `completed` or `failed`
-              // run is done, and its attached children end with it.
-              status === "suspended" ? undefined : applyChildExitPolicy(executionId)
+              // later, so its children keep going and its timers stay armed. A
+              // `completed` or `failed` run is done, so its attached children
+              // end with it and its clock rows are closed with it.
+              status === "suspended" ? undefined : Effect.gen(function*() {
+                yield* applyChildExitPolicy(executionId)
+                yield* engineState.completeRunClocks(executionId, yield* Clock.currentTimeMillis)
+              })
             ).pipe(
               // The park becomes durable the instant this transition commits, so
               // the flag that records it is set in the transition's own exit
@@ -1638,6 +1847,11 @@ export const make = (
      */
     const sweepStaleRunning: Effect.Effect<void> = Effect.gen(function*() {
       const nowMs = yield* Clock.currentTimeMillis
+      // Rows this driver has already arbitrated and been refused. They are the
+      // oldest heartbeats in the window, so they sort first and would fill the
+      // batch every tick; the read asks for enough extra rows to see past
+      // exactly the ones it is going to skip.
+      const deferred = Array.from(stealRefusals.values()).filter((entry) => entry.nextProbeAtMs > nowMs).length
       // Capped per tick (issue #79): oldest heartbeats come back first, so a
       // mass owner death drains across successive ticks — batch after batch
       // as each stolen run's heartbeat leaves the stale window — instead of
@@ -1645,9 +1859,22 @@ export const make = (
       // contending N-drivers × M-runs on the claim/steal CAS.
       const stale = yield* engineState.staleRunningRuns(
         nowMs - Duration.toMillis(Ownership.heartbeatStaleAfter),
-        staleRunningSweepBatch
+        staleRunningSweepBatch + deferred
       )
+      // A refusal is remembered only while its row is still in the window this
+      // read covers. A run that was stolen, released, or settled leaves the
+      // stale set, and its entry leaves with it, so the map cannot outgrow the
+      // backlog it describes.
+      const visible = new Set(stale)
+      for (const runId of stealRefusals.keys()) {
+        if (!visible.has(runId)) stealRefusals.delete(runId)
+      }
+      let woken = 0
       for (const runId of stale) {
+        if (woken >= staleRunningSweepBatch) break
+        const refusal = stealRefusals.get(runId)
+        if (refusal !== undefined && refusal.nextProbeAtMs > nowMs) continue
+        woken = woken + 1
         yield* coordinator.wake(runId)
       }
     })
@@ -1911,8 +2138,24 @@ export const make = (
         // `ensureRun` created the row above, so a not-found here is a broken
         // store invariant, not a caller-recoverable state.
         const result = yield* Effect.orDie(poll(flow, options.executionId))
-        return Option.getOrElse(result, () => new Flow.Suspended({})) as Discard extends true ? void
-          : Flow.Result<unknown, unknown>
+        if (Option.isSome(result)) {
+          return result.value as Discard extends true ? void : Flow.Result<unknown, unknown>
+        }
+        // A cancelled run has no `Flow.Result` on its row — cancellation is
+        // recorded as `cancellation`, not as a settlement — so answering the
+        // absence with `Suspended` told the caller to wait for a run that was
+        // over. The engine's suspended-retry loop then did what that answer
+        // means: slept, resumed, re-drove, and asked again, for as long as the
+        // caller lived. A run cancelled underneath its caller interrupts the
+        // caller instead, which is what the memory engine already does
+        // (`layerMemory.ts` `interrupt` settles the round `Complete` with an
+        // interrupt cause) and what a cancellation means: the work the caller
+        // asked for is not going to happen.
+        const settled = yield* rowOf(options.executionId)
+        return (settled?.status === "cancelled"
+          ? new Flow.Complete({ exit: Exit.failCause(Cause.interrupt()) })
+          : new Flow.Suspended({})) as Discard extends true ? void
+            : Flow.Result<unknown, unknown>
       }
     )
 
@@ -1982,6 +2225,13 @@ export const make = (
           )
         )
         if (row === undefined) return
+        // A settled run is not woken and then refused: it is not woken. The
+        // terminal reject used to live one layer down, in `claimAndActivate`,
+        // so a timer armed before its run was cancelled and an external
+        // trigger arriving after the run finished both wrote a
+        // `wake-scheduled` decision into the journal of a run that can never
+        // wake again — one per event, forever, on a durable channel.
+        if (row.status === "completed" || row.status === "failed" || row.status === "cancelled") return
         const state = yield* decodeState(row.stateJson)
         if (state.flowName !== flowName) return
         yield* emitDecision(executionId, {
@@ -2017,7 +2267,33 @@ export const make = (
       execute,
       poll,
       interrupt,
-      interruptUnsafe: Effect.fn("FlowEngine.interruptUnsafe")(interrupt),
+      // The durable engine has ONE cancellation path (rc-contract §7). The
+      // port promises forced cancellation without cleanup; nothing here can
+      // deliver that — a durable run is closed by a fenced transition whose
+      // finalizers, cascade, and interruption record are the point — and
+      // answering with `interrupt` silently reinterpreted the caller's
+      // request as the safe one. Refusing is what keeps the excluded feature
+      // from appearing to half-work; `interrupt` is the supported request and
+      // is still available to the same caller. The memory engine, which does
+      // have two behaviors, is unchanged.
+      //
+      // The reason is rc-contract §7 "Durable interruptUnsafe" verbatim, not a
+      // paraphrase of it: the release note and the failure a caller catches
+      // are the same statement, so an operator who reads one and a developer
+      // who logs the other are reading the same sentence.
+      interruptUnsafe: Effect.fn("FlowEngine.interruptUnsafe")((
+        _flow: Flow.Any,
+        executionId: string
+      ) =>
+        Effect.fail(
+          new FlowRuntime.CancelRequestFailed({
+            code: "unsafe_interrupt_unsupported",
+            executionId,
+            reason:
+              "The durable engine has one cancellation path, interrupt, which is durable and cascades to linked children. FlowRuntime.interruptUnsafe on the durable engine fails with unsafe_interrupt_unsupported instead of forcing cancellation without cleanup."
+          })
+        )
+      ),
       resume: Effect.fn("FlowEngine.resume")((flow, executionId) =>
         Effect.annotateCurrentSpan({ executionId, flow: flow._tag }).pipe(
           Effect.andThen(scheduleResume(flow._tag, executionId, "operator")),

@@ -100,6 +100,9 @@ only.
 | `migrate` | `migrates a single-file JSX project through the bin (${reason})` | `it.skip` without a seat |
 | `migrate` | `records what a single-file project could not settle (${reason})` | `it.skip` without a seat |
 | `migrate` | `refuses what it cannot translate in a multi-workflow pack (${reason})` | `it.skip` without a seat |
+| `integrations` | `GitHub live contract (GITHUB_TOKEN)` | `describe.skipIf(GITHUB_TOKEN === undefined)` |
+| `integrations` | `Linear live contract (LINEAR_API_KEY)` | `describe.skipIf(LINEAR_API_KEY === undefined)` |
+| `integrations` | `Telegram live contract (TELEGRAM_BOT_TOKEN)` | `describe.skipIf(TELEGRAM_BOT_TOKEN === undefined)` |
 
 **`migrate` — apply against a real model.** The three cases in
 `packages/migrate/test/flow/MigrateFlow.live.e2e.test.ts` drive the migration
@@ -118,6 +121,22 @@ breaks if it regresses: the migration path an operator runs at cutover could
 stop producing a compiling flow and only the release rehearsal would find out.
 Closing it for the default gate means paying for a model seat in CI, which
 the RC does not do.
+**`integrations`: the three live contract suites.** Each one talks to a real
+vendor API, `api.github.com`, `api.linear.app`, or `api.telegram.org`. Each
+skips when its credential is absent, naming the variable in the suite title and
+in a comment above it. They exist because the fixture suites prove the clients'
+behavior against a server this repository controls, and only a live call proves
+the wire contract those fixtures encode is still the one the vendor serves.
+What breaks if they regress: a provider changes a response shape, a header, or
+an error code, and nothing notices until an application does. Run them with
+`GITHUB_TOKEN=…`, `LINEAR_API_KEY=…`, or `TELEGRAM_BOT_TOKEN=…`; all three are
+read-only, and the Telegram poll confirms no offset so a running bot keeps its
+backlog. GitHub and Linear are `1.0.0-rc.0`'s release-smoke integrations
+(`rc-contract.md` section 7), so both are run by hand at release time.
+Note for whoever tightens the register: `scripts/check-test-pins.mjs` does not
+currently see these, because `readsOptInEnv` matches `process.env.NAME` and
+these read `process.env["NAME"]`. They are listed here on their merits, not
+because the guard demanded it.
 
 **`harness` — workerd smoke.** The suite boots a real `workerd` process to
 prove the QuickJS cell runtime runs unchanged on the Cloudflare runtime.

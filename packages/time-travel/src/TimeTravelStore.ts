@@ -197,8 +197,10 @@ export type Fork = typeof Fork.Type
  * a frame's past; the audit trio (`writeAudit`, `updateAudit`,
  * `pendingAudits`) makes an in-flight rewind recoverable; and
  * `archiveAndTruncate`, `createFork`, and `recordReceipt` are the three
- * mutations that change the lineage tree. Implement it with
- * {@link make}, or stub it with {@link makeNoop}.
+ * mutations that change the lineage tree. `nextForkId` sits beside them as the
+ * one mint: it names the child a later `createFork` will write, so a caller
+ * can provision that child's workspace before anything durable exists.
+ * Implement it with {@link make}, or stub it with {@link makeNoop}.
  *
  * @since 0.1.0
  * @category services
@@ -265,11 +267,37 @@ export interface Service {
    */
   readonly archivedAt: (runId: string, seq: number) => Effect.Effect<boolean, TimeTravelError>
   /**
+   * Mints the run id the next fork off `(parentRunId, frame)` will carry,
+   * without writing anything.
+   *
+   * A fork provisions the child's workspace BEFORE it commits the child, and a
+   * workspace named after the parent frame alone collides the moment one frame
+   * is forked twice. Minting the id first is what lets the caller name the
+   * lane after the child that will live in it, so the two identities are the
+   * same identity.
+   *
+   * The contract is only that the id differs from every fork already committed
+   * off that frame. What two mints that are NOT separated by a commit return
+   * is the implementation's own business: `SqlTimeTravelStore.layer` derives
+   * the ordinal from the committed edges, so it repeats the id and lets the
+   * run table's primary key settle the race, while `MemoryTimeTravelStore.make`
+   * advances a private counter and hands out two different ids.
+   */
+  readonly nextForkId: (parentRunId: string, frame: Frame) => Effect.Effect<string, TimeTravelError>
+  /**
    * Branches a new run off `parentRunId` at a frame, copying the journal
    * prefix and the attempts that existed there, and recording the `fork`
    * lineage edge. The parent is untouched and keeps running.
+   *
+   * `childRunId` is the id {@link Service.nextForkId} minted for this fork.
+   * Omitting it mints one inside the same transaction, which is what a caller
+   * that provisions nothing beforehand wants.
    */
-  readonly createFork: (parentRunId: string, frame: Frame) => Effect.Effect<Fork, TimeTravelError>
+  readonly createFork: (
+    parentRunId: string,
+    frame: Frame,
+    childRunId?: string
+  ) => Effect.Effect<Fork, TimeTravelError>
   /**
    * Persists one compensation receipt against its audit row, before the
    * journal range that effect belongs to is truncated.
@@ -322,6 +350,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service =>
     pendingAudits: () => unavailable("pendingAudits"),
     archiveAndTruncate: () => unavailable("archiveAndTruncate"),
     archivedAt: () => unavailable("archivedAt"),
+    nextForkId: () => unavailable("nextForkId"),
     createFork: () => unavailable("createFork"),
     recordReceipt: () => unavailable("recordReceipt"),
     ...overrides

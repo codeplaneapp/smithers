@@ -170,8 +170,10 @@ interrupted rewind audits, so recovery is never a call. `Replay`, `Fork`,
 `Rewind`, `Retry`, `Recovery`, `Compensation`, and `EffectHandlerRegistry` are
 internal machinery under `src/internal/`.
 
-`ForkOptions` carries only `workspaceRoot`; the workspace name and path are
-derived from the position. `RewindOptions` carries `detachedChildren` and
+`ForkOptions` carries only `workspaceRoot`; the workspace name is
+`smithers-fork-` followed by the child run id the fork mints, sanitized, capped
+at 64 characters, and suffixed with a short digest of the raw id, so a frame
+forked twice gets two lanes. `RewindOptions` carries `detachedChildren` and
 `pageSize`; the owner and audit ID are minted internally. `RewindResult`
 returns audit, archive, assessments, warnings, and cancelled children.
 

@@ -80,6 +80,11 @@ export const movedTrees = [
         from: "docs/reference/migrate.md",
         to: "docs/pages/migration/migrate-tool.md",
         note: "the migration tool is documented on the upgrade path a reader arrives by, not in the API reference"
+      },
+      {
+        from: "docs/reference/errors.md",
+        to: "docs/pages/reference/errors.md",
+        note: "the route stays /reference/errors because `ERROR_REFERENCE_URL` prints it at the end of every `SmithersError` message"
       }
     ]
   },

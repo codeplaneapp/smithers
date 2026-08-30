@@ -313,6 +313,9 @@ importers:
       '@smthrs/artifacts':
         specifier: 1.0.0-rc.0
         version: link:../packages/artifacts
+      '@smthrs/capability':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/capability
       '@smthrs/control':
         specifier: 1.0.0-rc.0
         version: link:../packages/control
@@ -352,6 +355,12 @@ importers:
       '@smthrs/keys':
         specifier: 1.0.0-rc.0
         version: link:../packages/keys
+      '@smthrs/mcp':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/mcp
+      '@smthrs/memory':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/memory
       '@smthrs/model':
         specifier: 1.0.0-rc.0
         version: link:../packages/model
@@ -1633,6 +1642,60 @@ importers:
         specifier: 4.1.9
         version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@25.9.5)(@vitest/coverage-v8@4.1.9)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))
 
+  packages/errors:
+    devDependencies:
+      '@effect/language-service':
+        specifier: 0.87.1
+        version: 0.87.1
+      '@effect/vitest':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.9)
+      '@eslint/js':
+        specifier: 9.39.1
+        version: 9.39.1
+      '@types/node':
+        specifier: 25.9.5
+        version: 25.9.5
+      '@vitest/coverage-v8':
+        specifier: 4.1.9
+        version: 4.1.9(vitest@4.1.9)
+      dprint:
+        specifier: 0.55.2
+        version: 0.55.2
+      effect:
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
+      esbuild:
+        specifier: 0.28.1
+        version: 0.28.1
+      eslint:
+        specifier: 9.39.1
+        version: 9.39.1(jiti@2.7.0)(supports-color@10.2.2)
+      eslint-import-resolver-typescript:
+        specifier: 4.4.5
+        version: 4.4.5(eslint-plugin-import@2.32.0)(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)
+      eslint-plugin-import:
+        specifier: 2.32.0
+        version: 2.32.0(@typescript-eslint/parser@8.65.0(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3))(eslint-import-resolver-typescript@4.4.5)(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)
+      eslint-plugin-jsdoc:
+        specifier: 64.1.0
+        version: 64.1.0(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)
+      eslint-plugin-unicorn:
+        specifier: 61.0.2
+        version: 61.0.2(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))
+      madge:
+        specifier: 8.0.0
+        version: 8.0.0(supports-color@10.2.2)(typescript@6.0.3)
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      typescript-eslint:
+        specifier: 8.65.0
+        version: 8.65.0(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3)
+      vitest:
+        specifier: 4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@25.9.5)(@vitest/coverage-v8@4.1.9)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))
+
   packages/evals:
     dependencies:
       '@smthrs/core':
@@ -2100,6 +2163,82 @@ importers:
       madge:
         specifier: 8.0.0
         version: 8.0.0(supports-color@10.2.2)(typescript@6.0.3)
+      typescript-eslint:
+        specifier: 8.65.0
+        version: 8.65.0(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3)
+      vitest:
+        specifier: 4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@25.9.5)(@vitest/coverage-v8@4.1.9)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))
+
+  packages/integrations:
+    dependencies:
+      '@smthrs/control':
+        specifier: 1.0.0-rc.0
+        version: link:../control
+      '@smthrs/database':
+        specifier: 1.0.0-rc.0
+        version: link:../database
+      '@smthrs/errors':
+        specifier: 1.0.0-rc.0
+        version: link:../errors
+      '@smthrs/flow':
+        specifier: 1.0.0-rc.0
+        version: link:../flow
+      '@smthrs/notifications':
+        specifier: 1.0.0-rc.0
+        version: link:../notifications
+      effect:
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
+    devDependencies:
+      '@effect/language-service':
+        specifier: 0.87.1
+        version: 0.87.1
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1(supports-color@10.2.2))
+      '@effect/vitest':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.9)
+      '@eslint/js':
+        specifier: 9.39.1
+        version: 9.39.1
+      '@smthrs/engine':
+        specifier: 1.0.0-rc.0
+        version: link:../engine
+      '@types/node':
+        specifier: 25.9.5
+        version: 25.9.5
+      '@vitest/coverage-v8':
+        specifier: 4.1.9
+        version: 4.1.9(vitest@4.1.9)
+      dprint:
+        specifier: 0.55.2
+        version: 0.55.2
+      esbuild:
+        specifier: 0.28.1
+        version: 0.28.1
+      eslint:
+        specifier: 9.39.1
+        version: 9.39.1(jiti@2.7.0)(supports-color@10.2.2)
+      eslint-import-resolver-typescript:
+        specifier: 4.4.5
+        version: 4.4.5(eslint-plugin-import@2.32.0)(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)
+      eslint-plugin-import:
+        specifier: 2.32.0
+        version: 2.32.0(@typescript-eslint/parser@8.65.0(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3))(eslint-import-resolver-typescript@4.4.5)(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)
+      eslint-plugin-jsdoc:
+        specifier: 64.1.0
+        version: 64.1.0(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)
+      eslint-plugin-unicorn:
+        specifier: 61.0.2
+        version: 61.0.2(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))
+      madge:
+        specifier: 8.0.0
+        version: 8.0.0(supports-color@10.2.2)(typescript@6.0.3)
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
       typescript-eslint:
         specifier: 8.65.0
         version: 8.65.0(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3)

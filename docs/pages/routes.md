@@ -89,6 +89,7 @@ in one.
 | `docs/reference/` | `docs/pages/api/` | `/api/<name>` |
 | `docs/reference/{go-targets,local-repositories,nix,package-workspace,stamps}.md` | `docs/internal/build/` | build-system notes for this repository's own contributors, not part of the published site |
 | `docs/reference/migrate.md` | `docs/pages/migration/migrate-tool.md` | the migration tool is documented on the upgrade path a reader arrives by, not in the API reference |
+| `docs/reference/errors.md` | `docs/pages/reference/errors.md` | the route stays /reference/errors because `ERROR_REFERENCE_URL` prints it at the end of every `SmithersError` message |
 | `docs/concepts/` | `docs/pages/concepts/` | `/concepts/<name>` |
 | `docs/guides/` | `docs/pages/guides/` | `/guides/<name>` |
 | `docs/guides/migrating-from-0x.md` | `docs/pages/migration/1.0.md` | rewritten as the 1.0 migration guide, which the removed-verb generator writes into |

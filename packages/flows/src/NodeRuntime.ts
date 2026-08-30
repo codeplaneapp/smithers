@@ -45,9 +45,12 @@ import { dirname, join } from "node:path"
 /**
  * Configuration for the supported Node SQLite runtime.
  *
- * `isAlive` is intentionally required. A local single-process host may return
- * `false`; a multi-process deployment must answer from its supervisor or
- * lease system so the engine never steals work from a live owner.
+ * `isAlive` is intentionally required, and a stub is not an answer: a check
+ * that returns `false` without asking says "that owner is gone" about an owner
+ * it never looked at, and the engine steals runs out of live processes on the
+ * strength of it. A single-machine host passes `Ownership.sameHostPidProbe`,
+ * which asks this machine's process table; a multi-process deployment answers
+ * from its supervisor or lease system instead.
  *
  * @since 0.1.0
  * @category models
@@ -60,8 +63,14 @@ export interface Options {
   readonly owner: {
     readonly hostId: string
   }
-  /** Whether a previously recorded owner is still alive. */
-  readonly isAlive: (owner: Ownership.OwnerId) => Effect.Effect<boolean>
+  /**
+   * Whether a previously recorded owner is still alive.
+   *
+   * Takes the claim context as well as the owner, so a probe can tell whether
+   * the recorded pid names a process on the machine it is running on. A
+   * one-argument check that ignores the context still satisfies this.
+   */
+  readonly isAlive: Ownership.LivenessCheck
 }
 
 const Configuration = Schema.Struct({
@@ -254,7 +263,7 @@ export interface HostOptions {
    * and never declares another host's owner dead. A deployment with a
    * supervisor or a lease system should answer from that instead.
    */
-  readonly isAlive?: ((owner: Ownership.OwnerId) => Effect.Effect<boolean>) | undefined
+  readonly isAlive?: Ownership.LivenessCheck | undefined
   /**
    * The capability rules this host grants without asking. The grant store is
    * unattended — there is no operator to prompt — so a capability no rule

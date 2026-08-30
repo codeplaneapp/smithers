@@ -49,7 +49,7 @@ import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
 import type * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Discovery from "@smthrs/registry/Discovery"
 import * as Registry from "@smthrs/registry/Registry"
-import { Migrations as RunStoreMigrations, RunStore } from "@smthrs/run-store"
+import { Migrations as RunStoreMigrations, Ownership, RunStore } from "@smthrs/run-store"
 import * as Checkpoints from "@smthrs/std/Checkpoints"
 import * as Container from "@smthrs/std/Container"
 import * as NativeSearch from "@smthrs/std/NativeSearch"
@@ -855,9 +855,13 @@ export const layerExecutor = (
     {
       filename: executionDatabasePath(root),
       owner: { hostId: "flows-cli" },
-      // The local CLI has one engine process at a time. A later supervised or
-      // multi-process host must replace this with a real liveness answer.
-      isAlive: () => Effect.succeed(false)
+      // Two terminals over one project are two engine processes over one
+      // `.flows/engine.db`, so "one engine process at a time" was never true
+      // and a stub answering `false` let each steal the other's running rows
+      // 30 seconds after any heartbeat stall. The probe asks the process
+      // table instead, and answers only about this host: a run recorded on
+      // another host is left to the lease, which `RunStore.steal` verifies.
+      isAlive: Ownership.sameHostPidProbe
     },
     StepBoundary.layer,
     WorkspaceSandbox.layerFileSystem(),

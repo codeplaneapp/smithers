@@ -118,7 +118,8 @@ export default defineConfig({
         { text: "Disaster recovery", link: "/disaster-recovery" },
         { text: "Observability", link: "/observability" },
         { text: "Telemetry", link: "/telemetry" },
-        { text: "Model registry", link: "/reference/sota-models" }
+        { text: "Model registry", link: "/reference/sota-models" },
+        { text: "Error codes", link: "/reference/errors" }
       ]
     },
     {
@@ -149,6 +150,7 @@ export default defineConfig({
         { text: "@smthrs/control", link: "/api/control" },
         { text: "@smthrs/gateway", link: "/api/gateway" },
         { text: "@smthrs/agent", link: "/api/agent" },
+        { text: "@smthrs/integrations", link: "/api/integrations" },
         {
           text: "@smthrs/patterns",
           link: "/api/patterns",

@@ -50,10 +50,45 @@ describe("MergeQueue", () => {
     expect(literals(graph).map((value) => value.member)).toEqual(["hotfix", "docs", "feature"])
   })
 
-  it("gives every member the default priority unless it sets its own", () => {
+  it("gives every member the default priority unless it sets its own, as an annotation", () => {
     const graph = Graph.build(MergeQueue.make(members, { failurePolicy: "halt" }), "land")
 
-    expect(literals(graph).map((value) => value.priority)).toEqual([5000, 1000, 1000])
+    // The scheduler reads the annotation. A priority carried as call input
+    // would instead be key material, and re-prioritizing a queue that lands in
+    // the same order would re-land every member.
+    expect(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").map((node) => node.priority))
+      .toEqual([5000, 1000, 1000])
+    expect(literals(graph).map((value) => value.priority)).toEqual([undefined, undefined, undefined])
+  })
+
+  it("keeps a member's step identity when a priority change does not reorder the queue", () => {
+    const body = (priority: number) =>
+      Graph.nodes(
+        Graph.build(
+          MergeQueue.make([{ id: "docs", flow: land }, { id: "hotfix", flow: land, priority }], {
+            failurePolicy: "halt"
+          }),
+          "land"
+        )
+      ).map((node) => node.keyMaterial.body)
+
+    expect(body(5000)).toEqual(body(7000))
+  })
+
+  it("declares one recovery arm per member under the quarantine policy", () => {
+    const serial = Graph.build(MergeQueue.make(members, { failurePolicy: "quarantine" }), "land")
+    const batched = Graph.build(
+      MergeQueue.make(members, { concurrency: 2, failurePolicy: "quarantine" }),
+      "land"
+    )
+    const halting = Graph.build(MergeQueue.make(members, { failurePolicy: "halt" }), "land")
+
+    expect(Graph.nodes(serial).filter((node) => node.kind === "Catch")).toHaveLength(3)
+    expect(Graph.nodes(serial).filter((node) => node.kind === "All")).toHaveLength(0)
+    expect(Graph.nodes(batched).filter((node) => node.kind === "Catch")).toHaveLength(3)
+    expect(Graph.nodes(halting).filter((node) => node.kind === "Catch")).toHaveLength(0)
+    expect(Graph.diagnostics(serial)).toEqual([])
+    expect(Graph.diagnostics(batched)).toEqual([])
   })
 
   it("batches by two at concurrency 2", () => {
@@ -198,14 +233,14 @@ describe("MergeQueue", () => {
       expect(duplicate).toBeInstanceOf(PatternError)
     }))
 
-  it("gives a halting queue and a quarantining queue different step identity", () => {
+  it("gives a halting queue and a quarantining queue different topology and identity", () => {
     const material = (failurePolicy: MergeQueue.FailurePolicy) =>
       Graph.nodes(Graph.build(MergeQueue.make(members, { failurePolicy }), "land"))
 
     const halting = material("halt")
     const quarantining = material("quarantine")
 
-    expect(halting.map((node) => node.kind)).toEqual(quarantining.map((node) => node.kind))
+    expect(halting.map((node) => node.kind)).not.toEqual(quarantining.map((node) => node.kind))
     expect(halting.map((node) => node.keyMaterial.body)).not.toEqual(
       quarantining.map((node) => node.keyMaterial.body)
     )

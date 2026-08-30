@@ -71,6 +71,35 @@ describe("CheckSuite", () => {
     expect(Graph.diagnostics(graph)).toEqual([])
   })
 
+  it("declares one recovery arm per check when continueOnFail is true", () => {
+    const suite = CheckSuite.make({ checks, strategy: "all-pass", concurrency: 3, continueOnFail: true })
+
+    const graph = Graph.build(suite, "head")
+    // One Catch per check is what makes the tolerant suite tolerant in the
+    // PLAN and not only at run time: the join can no longer fail on a check's
+    // behalf, so a failing check does not interrupt its siblings.
+    expect(Graph.nodes(graph).filter((node) => node.kind === "Catch")).toHaveLength(3)
+    expect(Graph.nodes(graph).filter((node) => node.kind === "All")).toHaveLength(1)
+    expect(Graph.nodes(graph).filter((node) => node.kind === "FlowCall")).toHaveLength(3)
+    expect(Graph.diagnostics(graph)).toEqual([])
+  })
+
+  it("reads a quarantined check as failed, whatever the check failed with", () => {
+    // The tolerant join settles a failed check as a Quarantined marker. The
+    // marker is the check's absence, not its answer. A marker is read by its
+    // tag rather than by its payload, because a check may fail with a falsy
+    // error and `{ error: null }` alone would otherwise read as a pass.
+    const boom = { _tag: "Quarantined", member: "test", error: new Error("boom") }
+    const falsy = { _tag: "Quarantined", member: "test", error: null }
+
+    expect(CheckSuite.passed(boom)).toBe(false)
+    expect(CheckSuite.passed(falsy)).toBe(false)
+    expect(CheckSuite.rows({ lint: { ok: true }, test: falsy }, ["lint", "test"])).toEqual([
+      { id: "lint", passed: true },
+      { id: "test", passed: false }
+    ])
+  })
+
   it("batches declared check calls at the concurrency bound", () => {
     const graph = Graph.build(
       CheckSuite.make({ checks, strategy: "all-pass", concurrency: 2, continueOnFail: false }),
@@ -264,7 +293,7 @@ describe("CheckSuite", () => {
       expect(peak).toBe(2)
     }))
 
-  it("gives a tolerant suite and a fail-fast suite different step identity", () => {
+  it("gives a tolerant suite and a fail-fast suite different topology and different identity", () => {
     const material = (continueOnFail: boolean) =>
       Graph.nodes(
         Graph.build(CheckSuite.make({ checks, strategy: "all-pass", concurrency: 3, continueOnFail }), "head")
@@ -273,7 +302,10 @@ describe("CheckSuite", () => {
     const tolerant = material(true)
     const failFast = material(false)
 
-    expect(tolerant.map((node) => node.kind)).toEqual(failFast.map((node) => node.kind))
+    // The tolerant join carries the recovery arms; the fail-fast join is the
+    // plain All that interrupts the siblings of a failing check.
+    expect(tolerant.filter((node) => node.kind === "Catch")).toHaveLength(3)
+    expect(failFast.filter((node) => node.kind === "Catch")).toHaveLength(0)
     expect(tolerant.map((node) => node.keyMaterial.body)).not.toEqual(failFast.map((node) => node.keyMaterial.body))
   })
 })

@@ -1,0 +1,106 @@
+import { describe, expect, it } from "vitest"
+import { chunk, MAX_MESSAGE_LENGTH } from "../src/telegram/Chunk.ts"
+import { clean, escape, toTelegram } from "../src/telegram/Markdown.ts"
+
+// The sentinel character `src/telegram/Markdown.ts` reserves. Written as an
+// escape, never as a raw byte: a literal NUL makes git and review tools
+// treat this source as binary.
+const NUL = String.fromCharCode(0)
+
+describe("chunk", () => {
+  it("returns nothing for empty text and one chunk for short text", () => {
+    expect(chunk("")).toEqual([])
+    expect(chunk("hello")).toEqual(["hello"])
+  })
+
+  it("keeps every chunk inside the limit", () => {
+    const text = "word ".repeat(3000)
+    for (const piece of chunk(text)) expect(piece.length).toBeLessThanOrEqual(MAX_MESSAGE_LENGTH)
+  })
+
+  it("prefers a paragraph break", () => {
+    const first = "a".repeat(60)
+    const second = "b".repeat(60)
+    expect(chunk(`${first}\n\n${second}`, 100)).toEqual([first, second])
+  })
+
+  it("falls back to a line break, then a sentence end, then a word boundary", () => {
+    const line = chunk(`${"a".repeat(60)}\n${"b".repeat(60)}`, 100)
+    expect(line).toEqual(["a".repeat(60), "b".repeat(60)])
+
+    const sentence = chunk(`${"a".repeat(59)}. ${"b".repeat(60)}`, 100)
+    expect(sentence[0]).toBe(`${"a".repeat(59)}.`)
+
+    const word = chunk(`${"a".repeat(60)} ${"b".repeat(60)}`, 100)
+    expect(word).toEqual(["a".repeat(60), "b".repeat(60)])
+  })
+
+  // One early period must not produce a three-word chunk followed by a
+  // four-thousand-character one.
+  it("ignores a boundary in the first tenth of the window", () => {
+    const text = `Hi. ${"a".repeat(200)}`
+    expect(chunk(text, 100)[0]).toHaveLength(100)
+  })
+
+  it("cuts mid-word only when a single run exceeds the limit", () => {
+    const pieces = chunk("a".repeat(250), 100)
+    expect(pieces).toEqual(["a".repeat(100), "a".repeat(100), "a".repeat(50)])
+  })
+
+  it("trims the whitespace it split on and emits no empty chunk", () => {
+    expect(chunk(`${"a".repeat(60)}    ${"b".repeat(60)}`, 100).every((piece) => piece.trim() === piece)).toBe(true)
+    expect(chunk(`${" ".repeat(120)}tail`, 100)).toEqual(["tail"])
+  })
+})
+
+describe("markdown", () => {
+  it("strips NUL, which is the sentinel the converter reserves", () => {
+    expect(clean(`a${NUL}b`)).toBe("ab")
+    expect(clean(undefined)).toBe("")
+    expect(clean(null)).toBe("")
+    expect(clean("")).toBe("")
+  })
+
+  it("escapes every reserved character in plain text", () => {
+    expect(escape("a.b-c!")).toBe("a\\.b\\-c\\!")
+    expect(escape("")).toBe("")
+  })
+
+  it("converts bold, italic, and strikethrough to MarkdownV2 spellings", () => {
+    expect(toTelegram("**bold**")).toBe("*bold*")
+    expect(toTelegram("*italic*")).toBe("_italic_")
+    expect(toTelegram("_italic_")).toBe("_italic_")
+    expect(toTelegram("~~gone~~")).toBe("~gone~")
+  })
+
+  // An unescaped `#` is one of the characters Telegram rejects outright.
+  it("turns a heading into bold", () => {
+    expect(toTelegram("# Title")).toBe("*Title*")
+    expect(toTelegram("### Deep heading")).toBe("*Deep heading*")
+  })
+
+  it("keeps code fences and inline code, escaping only what Telegram needs there", () => {
+    expect(toTelegram("```ts\nconst a = 1\n```")).toBe("```ts\nconst a = 1\n```")
+    expect(toTelegram("```\nplain\n```")).toBe("```\nplain\n```")
+    expect(toTelegram("`a.b`")).toBe("`a.b`")
+    expect(toTelegram("`back\\tick`")).toBe("`back\\\\tick`")
+  })
+
+  it("keeps links, escaping the label fully and the URL minimally", () => {
+    expect(toTelegram("[a.b](https://x.example/p?q=1)")).toBe("[a\\.b](https://x.example/p?q=1)")
+    // Only `)` and `\` need escaping inside a MarkdownV2 URL.
+    expect(toTelegram("[l](https://x.example/a\\b)")).toBe("[l](https://x.example/a\\\\b)")
+  })
+
+  it("preserves a leading blockquote marker while escaping the rest of the line", () => {
+    expect(toTelegram("> quoted.")).toBe("> quoted\\.")
+  })
+
+  it("escapes ordinary text around the tokens", () => {
+    expect(toTelegram("see **this**.")).toBe("see *this*\\.")
+  })
+
+  it("cannot be confused by a NUL the caller supplied", () => {
+    expect(toTelegram(`a${NUL}0${NUL}b **c**`)).toBe("a0b *c*")
+  })
+})

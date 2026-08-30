@@ -22,6 +22,15 @@ import * as Schema from "effect/Schema"
  * never raises it, so its `Effect<void>` remains assignable to the widened
  * contract and no in-memory caller has to handle anything.
  *
+ * The same error carries the durable engine's refusal of `interruptUnsafe`.
+ * That port promises forced cancellation without cleanup, and the durable
+ * engine has no such path — it has one cancellation path, `interrupt`, which
+ * is durable and cascades to linked children. Answering the unsafe request
+ * with the safe one silently reinterpreted it, so 1.0.0-rc.0 refuses it with
+ * code `unsafe_interrupt_unsupported`. It is the same failure type because it
+ * is the same question — "your cancellation request was not carried out" —
+ * and the code says which of the two reasons applies.
+ *
  * The error is declared here because it is part of the `interrupt` contract
  * this package owns; the durable implementation lives in
  * `@smthrs/engine-store`'s `RunDriver`.
@@ -33,8 +42,12 @@ import * as Schema from "effect/Schema"
 export class CancelRequestFailed extends Schema.TaggedError<CancelRequestFailed>()(
   "flows/engine/CancelRequestFailed",
   {
-    /** Stable public error code. */
-    code: Schema.Literal("cancel_request_failed"),
+    /**
+     * Stable public error code. `cancel_request_failed` is a storage failure
+     * on a supported request; `unsafe_interrupt_unsupported` is the durable
+     * engine refusing `interruptUnsafe`, which it does not implement.
+     */
+    code: Schema.Literals(["cancel_request_failed", "unsafe_interrupt_unsupported"]),
     /** The execution whose cancellation could not be recorded. */
     executionId: Schema.String,
     /** The storage failure, rendered for an operator. */

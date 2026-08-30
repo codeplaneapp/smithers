@@ -149,6 +149,7 @@
       "dependencies": {
         "@smthrs/agent": "1.0.0-rc.0",
         "@smthrs/artifacts": "1.0.0-rc.0",
+        "@smthrs/capability": "1.0.0-rc.0",
         "@smthrs/control": "1.0.0-rc.0",
         "@smthrs/core": "1.0.0-rc.0",
         "@smthrs/database": "1.0.0-rc.0",
@@ -162,6 +163,8 @@
         "@smthrs/journal": "1.0.0-rc.0",
         "@smthrs/kernel": "1.0.0-rc.0",
         "@smthrs/keys": "1.0.0-rc.0",
+        "@smthrs/mcp": "1.0.0-rc.0",
+        "@smthrs/memory": "1.0.0-rc.0",
         "@smthrs/model": "1.0.0-rc.0",
         "@smthrs/notifications": "1.0.0-rc.0",
         "@smthrs/observability": "1.0.0-rc.0",
@@ -720,6 +723,29 @@
         "vitest": "4.1.9",
       },
     },
+    "packages/errors": {
+      "name": "@smthrs/errors",
+      "version": "1.0.0-rc.0",
+      "devDependencies": {
+        "@effect/language-service": "0.87.1",
+        "@effect/vitest": "4.0.0-rc.108",
+        "@eslint/js": "9.39.1",
+        "@types/node": "25.9.5",
+        "@vitest/coverage-v8": "4.1.9",
+        "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
+        "esbuild": "0.28.1",
+        "eslint": "9.39.1",
+        "eslint-import-resolver-typescript": "4.4.5",
+        "eslint-plugin-import": "2.32.0",
+        "eslint-plugin-jsdoc": "64.1.0",
+        "eslint-plugin-unicorn": "61.0.2",
+        "madge": "8.0.0",
+        "typescript": "6.0.3",
+        "typescript-eslint": "8.65.0",
+        "vitest": "4.1.9",
+      },
+    },
     "packages/evals": {
       "name": "@smthrs/evals",
       "version": "0.1.0",
@@ -910,6 +936,38 @@
         "@effect/vitest": "4.0.0-rc.108",
         "@eslint/js": "9.39.1",
         "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+        "@types/node": "25.9.5",
+        "@vitest/coverage-v8": "4.1.9",
+        "dprint": "0.55.2",
+        "esbuild": "0.28.1",
+        "eslint": "9.39.1",
+        "eslint-import-resolver-typescript": "4.4.5",
+        "eslint-plugin-import": "2.32.0",
+        "eslint-plugin-jsdoc": "64.1.0",
+        "eslint-plugin-unicorn": "61.0.2",
+        "madge": "8.0.0",
+        "typescript": "6.0.3",
+        "typescript-eslint": "8.65.0",
+        "vitest": "4.1.9",
+      },
+    },
+    "packages/integrations": {
+      "name": "@smthrs/integrations",
+      "version": "1.0.0-rc.0",
+      "dependencies": {
+        "@smthrs/control": "1.0.0-rc.0",
+        "@smthrs/database": "1.0.0-rc.0",
+        "@smthrs/errors": "1.0.0-rc.0",
+        "@smthrs/flow": "1.0.0-rc.0",
+        "@smthrs/notifications": "1.0.0-rc.0",
+        "effect": "4.0.0-rc.108",
+      },
+      "devDependencies": {
+        "@effect/language-service": "0.87.1",
+        "@effect/platform-node": "4.0.0-rc.108",
+        "@effect/vitest": "4.0.0-rc.108",
+        "@eslint/js": "9.39.1",
+        "@smthrs/engine": "1.0.0-rc.0",
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
@@ -2970,6 +3028,8 @@
 
     "@smthrs/engine-store": ["@smthrs/engine-store@workspace:packages/engine-store"],
 
+    "@smthrs/errors": ["@smthrs/errors@workspace:packages/errors"],
+
     "@smthrs/evals": ["@smthrs/evals@workspace:packages/evals"],
 
     "@smthrs/examples": ["@smthrs/examples@workspace:examples"],
@@ -2983,6 +3043,8 @@
     "@smthrs/gateway": ["@smthrs/gateway@workspace:packages/gateway"],
 
     "@smthrs/harness": ["@smthrs/harness@workspace:packages/harness"],
+
+    "@smthrs/integrations": ["@smthrs/integrations@workspace:packages/integrations"],
 
     "@smthrs/jj": ["@smthrs/jj@workspace:packages/jj"],
 

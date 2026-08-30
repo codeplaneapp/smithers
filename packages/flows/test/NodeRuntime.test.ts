@@ -30,6 +30,7 @@
 import { afterAll, describe, expect, it } from "@effect/vitest"
 import * as Capability from "@smthrs/capability/Capability"
 import * as Permission from "@smthrs/capability/Permission"
+import * as Cause from "effect/Cause"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -739,7 +740,7 @@ describe("the Node host composition", () => {
         hostFlows
       )
 
-    await Effect.runPromise(
+    const caller = await Effect.runPromise(
       Effect.gen(function*() {
         const runs = yield* RunStore.RunStore
         const running = yield* Effect.forkChild(
@@ -777,11 +778,26 @@ describe("the Node host composition", () => {
         }
         expect(groupIsAlive(interrupted[0]!)).toBe(false)
 
-        // The run is settled durably; the fiber that asked for it is no longer
-        // this case's subject, and leaving it forked would hold the scope open.
-        yield* Effect.exit(Effect.timeout(Fiber.interrupt(running), "5 seconds"))
+        // The caller settles with the run. A cross-driver cancel interrupts
+        // the fiber that asked for it, so nothing here interrupts it by hand:
+        // the settlement is the assertion.
+        let settled = running.pollUnsafe()
+        for (let attempt = 0; attempt < 200 && settled === undefined; attempt++) {
+          yield* Effect.sleep("25 millis")
+          settled = running.pollUnsafe()
+        }
+        return settled
       }).pipe(Effect.provide(host("host-cancel-a")), Effect.scoped, Effect.exit)
     )
+
+    // Asserted out here, where a failure is the test's: every `expect` inside
+    // the block above is swallowed by its own `Effect.exit`.
+    const settled = Exit.isSuccess(caller) ? caller.value : undefined
+    expect(settled).toBeDefined()
+    const outcome = settled !== undefined && Exit.isSuccess(settled)
+      ? settled.value as Exit.Exit<unknown, unknown>
+      : settled
+    expect(outcome !== undefined && Exit.isFailure(outcome) && Cause.hasInterrupts(outcome.cause)).toBe(true)
 
     // Read back through an independent connection: what the second driver's
     // request produced is a durable row, not an in-process observation.

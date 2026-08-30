@@ -3,12 +3,14 @@ import { Action, DurableDeferred, Flow, FlowRuntime } from "@smthrs/flow"
 import { Journal } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
 import { Node } from "@smthrs/plan"
-import { RunStore } from "@smthrs/run-store"
+import { type Ownership, RunStore } from "@smthrs/run-store"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import { TestClock } from "effect/testing"
 import * as DurableEngineState from "../src/DurableEngineState.ts"
 import * as EngineStore from "../src/EngineStore.ts"
 import * as StepBoundary from "../src/StepBoundary.ts"
@@ -454,5 +456,229 @@ describe("partial dependency readiness across a restart", () => {
         _tag: "Complete",
         exit: { _tag: "Success", value: "a*b" }
       })
+    }))
+})
+
+/**
+ * B-03: what a registration costs, and what it re-arms.
+ *
+ * `completedDeferreds` selected every completion row for the flow with no
+ * run-status join, and `pendingClocks` selected every uncompleted clock row
+ * the same way, so `register` — which sweeps both — paid O(history) and then
+ * scheduled one resume per completion and armed one timer per clock row for
+ * runs that had settled months ago. `waitingRuns` already carries the status
+ * predicate at all four of its sites; these two did not.
+ *
+ * The armed-timer count is read off the `clock-scheduled` records because
+ * `sweepDue` emits exactly one immediately before each `armClock`, in the same
+ * iteration: the record IS the arming, seen from outside the driver.
+ */
+describe("registration does not re-arm a settled run (B-03)", () => {
+  const B03Flow = Flow.make("DeferredRestart/Settled", {
+    payload: {},
+    success: Schema.String,
+    body: opaqueHandlerBody
+  })
+  const gate = DurableDeferred.make("b03-gate", { success: Schema.String })
+  const seeder: Ownership.OwnerId = { hostId: "b03-seed-host", pid: 4242, nonce: "b03-seed" }
+
+  /**
+   * One run with a completed deferred and a pending clock, left in `status`.
+   *
+   * Written through the public store and state contracts, which is how the
+   * rows a real restart finds were written: the clock is owner-fenced, so the
+   * run is claimed and owned first, and the terminal transition happens last.
+   */
+  const seed = (
+    store: RunStore.Service,
+    state: DurableEngineState.Service,
+    runId: string,
+    status: RunStore.RunStatus
+  ) =>
+    Effect.gen(function*() {
+      yield* store.create(runId, JSON.stringify({ version: 1, flowName: B03Flow._tag, payload: {} }))
+      yield* store.claimAndOwn(runId, { status: "pending", owner: null, heartbeatAtMs: null }, seeder, 0)
+      yield* state.scheduleClock({
+        flowName: B03Flow._tag,
+        executionId: runId,
+        clockName: "b03-clock",
+        deferredName: gate.name,
+        dueAtMs: 600_000,
+        completedAtMs: null
+      }, seeder)
+      yield* state.completeDeferred({
+        flowName: B03Flow._tag,
+        executionId: runId,
+        deferredName: gate.name,
+        exit: Exit.void,
+        completedAtMs: 0
+      })
+      if (status === "suspended") {
+        yield* state.park(runId, { reason: "event" }, seeder)
+      }
+      yield* store.transitionOwned(runId, seeder, status, undefined)
+    })
+
+  it.effect("schedules no wake and arms no timer for completed, failed, or cancelled runs", () =>
+    Effect.gen(function*() {
+      const settled = ["b03-completed-a", "b03-completed-b", "b03-failed", "b03-cancelled"]
+      const result = yield* withCrypto(
+        Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* RunStore.RunStore
+            const state = yield* DurableEngineState.DurableEngineState
+            const journal = yield* Journal.Journal
+            yield* seed(store, state, "b03-completed-a", "completed")
+            yield* seed(store, state, "b03-completed-b", "completed")
+            yield* seed(store, state, "b03-failed", "failed")
+            yield* seed(store, state, "b03-cancelled", "cancelled")
+            // The live run is the control: it is parked on the same deferred
+            // and the same clock, and it must still be woken and re-armed.
+            yield* seed(store, state, "b03-live", "suspended")
+
+            // What a registration sweep will read. Both queries are the
+            // change: five runs wrote a completion and a clock row, and only
+            // the one that can still make progress is offered to the sweep.
+            const pendingBefore = yield* state.pendingClocks({ flowName: B03Flow._tag })
+            const completionsBefore = yield* state.completedDeferreds(B03Flow._tag)
+
+            // The restart: a fresh engine over the same storage, registering
+            // the flow for the first time in this incarnation.
+            const engine = yield* EngineStore.make({
+              owner: { hostId: "b03-host" },
+              journalSource: "b03-test",
+              isAlive: () => Effect.succeed(false)
+            })
+            yield* engine.register(B03Flow as never, (() => Effect.succeed("ok")) as never)
+            yield* journal.flush
+
+            const recordsOf = (runId: string) =>
+              journal.entries({ runId: runId as never, limit: 500 }).pipe(
+                Effect.map((page) => ({
+                  wakes: page.entries.filter((entry) =>
+                    entry.eventType === "flows.engine.run-decision" &&
+                    (entry.payload as { readonly decision?: string }).decision === "wake-scheduled"
+                  ).length,
+                  armed: page.entries.filter((entry) => entry.eventType === "flows.engine.clock-scheduled").length
+                }))
+              )
+
+            return {
+              settled: yield* Effect.forEach(settled, recordsOf),
+              live: yield* recordsOf("b03-live"),
+              pendingBefore: pendingBefore.map((row) => row.executionId),
+              completionsBefore: completionsBefore.map((row) => row.executionId),
+              liveRow: yield* store.get("b03-live")
+            }
+          }).pipe(
+            Effect.provide(StepBoundary.layerTest()),
+            Effect.provideService(Jj.Jj, jj)
+          )
+        ).pipe(
+          Effect.provide(TestStores.layerAt(":memory:")),
+          Effect.provide(TestClock.layer()),
+          Effect.orDie
+          // The `as never` flow casts above erase the requirement channel, so
+          // it re-widens to `unknown` here and has to be restated.
+        ) as unknown as Effect.Effect<{
+          readonly settled: ReadonlyArray<{ readonly wakes: number; readonly armed: number }>
+          readonly live: { readonly wakes: number; readonly armed: number }
+          readonly pendingBefore: ReadonlyArray<string>
+          readonly completionsBefore: ReadonlyArray<string>
+          readonly liveRow: RunStore.RunRow
+        }>
+      )
+
+      // Not one resume scheduled and not one timer armed for history.
+      expect(result.settled).toEqual([
+        { wakes: 0, armed: 0 },
+        { wakes: 0, armed: 0 },
+        { wakes: 0, armed: 0 },
+        { wakes: 0, armed: 0 }
+      ])
+      // The run that can still make progress is untouched by the fix.
+      expect(result.live).toEqual({ wakes: 1, armed: 1 })
+      // The queries are the guard: a settled run's rows are simply never
+      // offered to the sweep, whatever the sweep would have done with them.
+      expect(result.pendingBefore).toEqual(["b03-live"])
+      expect(result.completionsBefore).toEqual(["b03-live"])
+      // And the wake the live run did get was a real one: it re-entered the
+      // handler and settled.
+      expect(result.liveRow.status).toBe("completed")
+    }))
+})
+
+/**
+ * The same rule inside the in-memory state, which is what most engine tests
+ * and every embedded composition run on. It has no SQL to join, so it asks
+ * the `runs` view the composition gives it, exactly as `waitingRuns` does,
+ * and stays permissive when there is none.
+ */
+describe("the in-memory sweep queries skip settled runs (B-03)", () => {
+  const flowName = "DeferredRestart/Memory"
+  const runs = new Map<string, DurableEngineState.MemoryRunView>()
+  const state = DurableEngineState.makeMemory({
+    runs: (runId) => Option.fromNullishOr(runs.get(runId)),
+    listRuns: () => runs.entries()
+  })
+
+  const memoryOwner: Ownership.OwnerId = { hostId: "memory-host", pid: 9, nonce: "memory" }
+
+  /**
+   * The rows a run leaves behind, written the way a run writes them — a clock
+   * is owner-fenced, so it is scheduled while the run is still running under
+   * its owner — and then left in `status`.
+   */
+  const seed = (runId: string, status: RunStore.RunStatus) =>
+    Effect.gen(function*() {
+      runs.set(runId, { status: "running", owner: memoryOwner, heartbeatAtMs: 0 })
+      yield* state.completeDeferred({
+        flowName,
+        executionId: runId,
+        deferredName: "gate",
+        exit: Exit.void,
+        completedAtMs: 0
+      })
+      yield* state.scheduleClock({
+        flowName,
+        executionId: runId,
+        clockName: "clock",
+        deferredName: "gate",
+        dueAtMs: 1_000,
+        completedAtMs: null
+      }, memoryOwner)
+      runs.set(runId, { status, owner: null })
+    })
+
+  it.effect("lists a run that can still make progress and skips one that cannot", () =>
+    Effect.gen(function*() {
+      // Every live status, every terminal one, and a row whose run the view
+      // does not know — that last one stays listed, because an unknown run is
+      // not evidence of a settled one.
+      yield* seed("memory-pending", "pending")
+      yield* seed("memory-running", "running")
+      yield* seed("memory-suspended", "suspended")
+      yield* seed("memory-completed", "completed")
+      yield* seed("memory-failed", "failed")
+      yield* seed("memory-cancelled", "cancelled")
+      yield* seed("memory-unknown", "running")
+      runs.delete("memory-unknown")
+
+      const live = ["memory-pending", "memory-running", "memory-suspended", "memory-unknown"]
+      expect((yield* state.completedDeferreds(flowName)).map((row) => row.executionId).sort()).toEqual(live.sort())
+      expect((yield* state.pendingClocks({ flowName })).map((row) => row.executionId).sort()).toEqual(live.sort())
+    }))
+
+  it.effect("completes only the named run's uncompleted clock rows", () =>
+    Effect.gen(function*() {
+      yield* state.completeRunClocks("memory-running", 42)
+      // A second call finds nothing left to do and leaves the first
+      // completion time alone.
+      yield* state.completeRunClocks("memory-running", 99)
+      const running = yield* state.clock({ flowName, executionId: "memory-running", clockName: "clock" })
+      const other = yield* state.clock({ flowName, executionId: "memory-pending", clockName: "clock" })
+      expect(Option.isSome(running) ? running.value.completedAtMs : undefined).toBe(42)
+      // Another run's timer is untouched: this closes one run, not the table.
+      expect(Option.isSome(other) ? other.value.completedAtMs : undefined).toBeNull()
     }))
 })

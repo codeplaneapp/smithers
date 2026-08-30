@@ -92,8 +92,9 @@ export type RewindResult = Rewind.Result
 /**
  * How a fork chooses its workspace.
  *
- * The workspace name and path are derived from the position by default;
- * `workspaceRoot` only moves where the derived lane lands.
+ * The workspace name is derived from the child run id the fork mints, never
+ * supplied; `workspaceRoot` only moves which lane that derived name lands in,
+ * and defaults to `.flows/forks`.
  *
  * @since 0.1.0
  * @category models
@@ -152,9 +153,6 @@ type Requirements =
 
 /** The default lane a derived fork workspace lands in. */
 const workspaceRoot = ".flows/forks"
-
-const workspaceSlug = (position: Position): string =>
-  `flows-fork-${`${position.runId}-${position.frame.seq}`.replace(/[^A-Za-z0-9._-]/g, "-")}`
 
 /**
  * Mints the ownership identity every rewind and every recovery rides.
@@ -268,8 +266,7 @@ export const make: Effect.Effect<Service, TimeTravelError, Requirements | Scope.
           refreshAnchors(position.runId).pipe(Effect.andThen(ForkOperation.fork({
             parentRunId: position.runId,
             frame: position.frame,
-            workspaceName: workspaceSlug(position),
-            workspacePath: `${options?.workspaceRoot ?? workspaceRoot}/${workspaceSlug(position)}`
+            workspaceRoot: options?.workspaceRoot ?? workspaceRoot
           })))
         )
       })(),

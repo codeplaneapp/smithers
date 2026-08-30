@@ -38,6 +38,14 @@ import * as Schema from "effect/Schema"
  * `jitterRatio` spreads the final portion of each delay uniformly;
  * `nonRetryable` lists error tags that must never be retried.
  *
+ * The bounds are per STEP KEY, which is what makes them the provider-retry
+ * budget for one agent ask rather than a budget for the exchange the ask
+ * belongs to. A structured-output correction re-prompts under a NEW session,
+ * so the corrected ask is a different sealed step with its own attempt
+ * sequence: `maxAttempts` bounds the provider retries inside one correction
+ * session and does not bound the correction ladder, which `AgentAction`
+ * bounds separately with its own `corrections` budget.
+ *
  * @category models
  * @since 0.1.0
  * @slop

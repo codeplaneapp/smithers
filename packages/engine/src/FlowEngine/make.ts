@@ -43,6 +43,25 @@ const ActionOrdinalScope = Context.Service<never, string>(
 )
 
 /**
+ * A body failure rendered for one log line, bounded so an oversized payload
+ * cannot flood the log the operator is reading it from.
+ *
+ * @private
+ */
+const stringifyError = (error: unknown): string => {
+  try {
+    // `String` rather than the JSON alone: `JSON.stringify` answers
+    // `undefined` for a value it does not encode, and a log line reading
+    // "undefined" is still a line.
+    return String(JSON.stringify(error)).slice(0, 4096)
+  } catch {
+    // A circular value: rendering it must not replace the defect under
+    // diagnosis with a defect about the diagnosis.
+    return String(error).slice(0, 4096)
+  }
+}
+
+/**
  * Builds a typed `FlowRuntime` service from a low-level encoded
  * implementation.
  *
@@ -87,10 +106,30 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
         (payload, executionId) =>
           Effect.matchEffect(Effect.suspend(() => execute(payload, executionId)), {
             onFailure: (error) =>
-              Effect.flatMap(
-                Effect.orDie(flow.errorSchema.makeEffect(error)),
-                () => Effect.fail(error)
-              ),
+              Effect.matchEffect(flow.errorSchema.makeEffect(error), {
+                // A body failure outside the flow's declared error schema is a
+                // defect, and the defect is the ERROR, not the schema issue
+                // about it. `orDie` on the validation reported only the
+                // mismatch: for a flow declaring no error the whole report was
+                // `InvalidType(<Never>)`, which erased the one message the
+                // operator needed — the interpreter's refusal naming the
+                // action it could not resolve. Dying with the error itself
+                // keeps that message, and keeps it durably: the driver encodes
+                // a settled exit through `Flow.Result({ success, error:
+                // flow.errorSchema })`, whose defect channel is
+                // `Schema.Defect`, so an undeclared failure delivered as a
+                // FAILURE could not be encoded at all and left the run row
+                // `running` and owned forever.
+                onFailure: () =>
+                  Effect.andThen(
+                    Effect.annotateLogs(
+                      Effect.logError("A flow body failed with an error outside its declared error schema"),
+                      { flow: flow._tag, error: stringifyError(error) }
+                    ),
+                    Effect.die(error)
+                  ),
+                onSuccess: () => Effect.fail(error)
+              }),
             onSuccess: (value) =>
               Effect.flatMap(FlowRuntime.FlowInstance, (instance) =>
                 // A handoff has no success value for this round. Its handler

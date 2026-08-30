@@ -27,14 +27,13 @@ the moment the predicate is satisfied, so the work actually performed is the
 loop the author meant. Fiber interruption propagates normally, which is why
 none of these patterns carry a cancellation flag.
 
-Two consequences follow from core's node vocabulary, and both are deliberate:
+One consequence follows from core's node vocabulary, and it is deliberate:
 
-- **A declaration cannot fail.** `Node` has `succeed`, `all`, `map`,
-  `andThen`, `dynamic`, and flow calls, and no failure constructor. So
-  `onMaxReached: "fail"` is applied by `run`; `make` declares the exhausted
-  value instead.
-- **A declaration cannot catch.** `Sidecar`'s shadow quarantine is therefore a
-  property of `run`, not of the declared `Node.all`.
+- **A declaration cannot branch on a value.** Graph planning evaluates a
+  builder once against a symbolic value, so `onMaxReached: "fail"` is applied
+  by `run` and `make` declares the exhausted value instead. Recovery is
+  different: `Node.catch` declares a static arm, which is how `Sidecar`
+  declares its shadow's quarantine.
 
 ## Loop
 
@@ -323,10 +322,14 @@ that number invites a bug report. A tie counts as `cheaperWins`: equal quality
 at lower cost is the cheaper seat winning, which is the finding a sidecar
 exists to produce.
 
-`make` declares both calls under one `Node.all`, which is what makes the shadow
-concurrent rather than an extra sequential step. The quarantine is not
-declared: capability and cost analysis must count the shadow as work that
-happens.
+`make` declares both calls under one `Node.all`, which is what makes the
+shadow concurrent rather than an extra sequential step, with the shadow
+behind a `Node.catch` whose arm settles `{ quarantined: true, error }`.
+Capability and cost analysis still count the shadow as work that happens;
+what the arm adds is that the plan shows a failed shadow does not fail the
+run. The declared result is `{ primary, shadow, delta }`, and the scorer is
+declared unconditionally because a plan has no branch for "only when the
+shadow produced a value": `run` performs that skip.
 
 ## Inline callbacks and inference
 

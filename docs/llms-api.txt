@@ -255,7 +255,7 @@ Each attempt is its own durable wait point, `WaitFor/<name>#<attempt>`, so an an
 
 `HumanTaskFailed` carries `code`, `task`, `attempts`, the `rejections` it collected, and a message. `request_invalid` refuses an unanswerable question before anyone is asked: a `select` with no options, an attempt budget below one, a `timeoutMs` that is not a length of time (`NaN` and a negative length are deadlines that have already passed, so the question would time out on its first park with nobody asked; `Infinity` is a deadline that never arrives), or a schema outside the subset. `rejected` means the budget was spent on answers the task refused. `timeout` means the deadline passed with the question open.
 
-`timeoutMs` races the answer against one `DurableClock` per task through `DurableDeferred.raceAll`. The race parks and settles on whichever arrives first under `@smthrs/engine`'s in-process engine. It does not resume under the SQLite engine store: a run parked on a durable race is woken and then fails with an interrupt-only cause instead of re-driving the race, so on a durable host a question asked with `timeoutMs` never settles on its deadline. Ask without `timeoutMs` there until the store resumes a raced park. A durable race of a `DurableDeferred.await` and a `DurableClock.sleep`, with no human task involved, reproduces it.
+`timeoutMs` races the answer against one `DurableClock` per task through `DurableDeferred.raceAll`. The race parks and settles on whichever arrives first, on both hosts: `@smthrs/engine`'s in-process engine and the SQLite engine store each re-enter a parked race on the next drive, re-registering the raced deferreds against their persisted completions. A parked dispatch keeps its attempt row and its attempt number, so a question that waits out a person costs nothing against the action's retry budget.
 
 `validate(value, request)` returns the reason an answer was refused, or `undefined`; run it in the interface so a typo is refused while the person is still looking at it. `validateSchema(schema)` checks that a schema stays inside the subset at every depth. `decode(schema)` gives the `Schema.Json` answer the caller's own type; the two schema descriptions must agree, and a disagreement surfaces as a defect rather than as a failure a body could catch.
 
@@ -1940,6 +1940,10 @@ A deployment that knows more supplies its own check and refuses the takeover for
 
 The journal says which answer was used. A refusal records `steal-refused-owner-alive` with `evidence: "lease-fresh"` (the lease was still inside the window) or `evidence: "probe"` (the supplied check answered for the owner); a takeover records `stolen-and-activated` with the evidence kind it wrote: `lease-expired`, `same-host-pid-dead`, or `cross-host-unreachable-stale`.
 
+A refusal is journaled once, not once per sweep tick. The record is addressed by the run, the refused owner, the lease it was refused against, and the evidence that refused it, and it carries source sequence 0, so the journal's first-writer admission collapses every repeat about an unchanged lease into the one record. The evidence is part of the address because one lease can be refused twice for different reasons: a wake arriving while the owner is still pulsing is refused by the lease (`lease-fresh`), and the same owner, alive but stalled past the window, is refused by the probe (`probe`). Both records stand.
+
+The driver also stops re-probing a run it was just refused. Each refusal defers the run for two heartbeat ticks, doubling per consecutive refusal against the same lease up to `heartbeatStaleAfter`, and the stale-running sweep reads past exactly the rows it is going to skip so its batch of 64 keeps advancing. Without that, the oldest stale rows sort first every second and a run behind them is never arbitrated at all. A deferral is forgotten as soon as its row leaves the stale window, when the owner resumed heartbeating, the run was stolen, or the run settled, so a fresh stall under a new lease is probed on the first tick that sees it rather than waiting out a backoff it did not earn.
+
 Required services are `Journal`, `RunStore`, `AttemptStore`, `CacheStore`, `DurableEngineState`, kernel `Jj`, `StepBoundary`, `OwnerIdentity`, and `Scope`. `EngineCompositionError` represents an engine that was invoked without a complete composition.
 
 The engine stores a versioned state envelope in each run row, fences run and attempt ownership, replays encoded exits, and writes engine decisions to the journal. Cache addresses are the injected `Sha256` transformation of the step key, not the raw `key1_…` value.
@@ -2251,6 +2255,261 @@ one. See sync.
 
 `@smthrs/gateway/test/TestSuperviseRuntime` provides a controllable supervision
 service for tests that need the port without a host.
+
+---
+
+## `@smthrs/integrations`
+
+Route: /api/integrations
+
+> The GitHub, Linear, and Telegram adapters: clients, webhook channels, schemas, and durable actions.
+
+This page is the API reference for the GitHub, Linear, and Telegram adapters.
+
+The package is private at `1.0.0-rc.0`: no consumer on the registry imports it.
+It is documented here because it is the worked example of what a Smithers
+integration is: a narrow host layer with a verified door into the control
+plane, and no opinion above that line.
+
+GitHub and Linear are the two integrations the `1.0.0-rc.0` release smoke
+exercises against live APIs.
+
+### The shape of an integration
+
+Four things, per provider:
+
+1. **A client.** Authentication, rate limits, pagination, and credential
+   hygiene. Everything a caller would otherwise get wrong against that API.
+2. **A channel.** A `@smthrs/control` `Channel` that verifies an inbound
+   webhook and turns it into one normalized event.
+3. **Schemas.** The payload fields worth typing, with everything else passing
+   through untouched.
+4. **Actions.** The durable steps a flow calls: `GitHub.Actions.CommentOnIssue`,
+   `Linear.Actions.CreateIssue`, `Telegram.Actions.SendMessage`. Each declares
+   its payload, its success, and `IntegrationFailure` as its error, so the
+   engine can journal the result and replay it instead of posting twice.
+
+What an event *means*, which flow a pull request starts and which run an issue
+comment signals, stays a Flow the application writes. A provider adapter that
+decided that for you would be a framework.
+
+### Webhook ingress
+
+Smithers 1.0 has no listener verb and no gateway-level webhook
+configuration. A webhook door is library code:
+
+```ts
+import * as Channels from "@smthrs/control/Channels"
+import { Core, GitHub } from "@smthrs/integrations"
+import { Effect, Redacted } from "effect"
+
+const channel = GitHub.Webhook.channel({
+  credential: Redacted.make({ id: "github-webhook", name: "github-webhook" }),
+  secret: Core.Channel.constantSecret(Redacted.make(secret)),
+  route: Core.Channel.startFlow("triage")
+})
+
+const program = Effect.gen(function*() {
+  const channels = yield* Channels.Channels
+  yield* channels.register(channel)
+  return yield* channels.ingest({ channel: "github", raw })
+})
+```
+
+`Channels.ingest` runs one fixed order: verify the raw bytes, decode, map,
+then reach `Control`. Verification is the amplification guard, so a delivery
+that does not verify never reaches a decoder, a plan, or a database. Ingest
+also drops a replayed `idempotencyKey`, which is what makes accepting a
+provider redelivery safe.
+
+`secret` is how the channel obtains the signing secret behind a credential
+reference. `Core.Channel.constantSecret` is for a single-tenant deployment that
+reads one secret from its environment; `Core.Channel.credentialSecret` resolves
+through the control plane's credential store.
+
+`route` decides what the event does. `Core.Channel.startFlow(flowId)` starts a
+flow with the event as input; `Core.Channel.signalRun(runId)` signals a run
+that is already waiting. There is no broadcast: rc.0 does not deliver one event
+to every run parked on a matching name.
+
+### Verification
+
+`Core.Signature.verifySignature` is the constant-time HMAC-SHA256 check every
+webhook source uses. It accepts GitHub's `sha256=<hex>`, Linear's bare hex, and
+a base64 digest. It returns `false` and never throws for a missing signature,
+an empty secret, a wrong prefix, or an undecodable digest.
+
+The comparison is `Core.Signature.constantTimeEqual`, which always scans the
+longer of its two inputs and folds the length difference into the accumulator.
+An early return on the first differing byte would make the endpoint an oracle
+that leaks the expected digest one byte at a time to anyone who can time it.
+
+Linear webhooks are checked twice: the signature, and then the
+`webhookTimestamp` freshness window. A valid signature never expires, so
+without the window a captured delivery would be replayable forever.
+
+### Events and signals
+
+One delivery decodes to one `Core.ExternalEvent`:
+
+| Field | What it is |
+| --- | --- |
+| `source` | `github`, `linear`, `telegram` |
+| `eventName` | `integration:<service>:<event>`, the most specific form the payload supports |
+| `correlationId` | What the event is about, or `null` |
+| `payload` | The provider payload, as delivered |
+| `dedupeKey` | The provider's delivery identity, so a redelivery is recognizable |
+| `receivedAtMs` | When it arrived |
+
+The `integration:` prefix is reserved. `Core.SignalName.eventName` builds a
+name, `parse` splits one, and `receivedBy` is the attribution stamped on a
+delivered signal. `toSignalPayload` produces the control-plane signal;
+`toNotification` produces a queued `system-event` that coalesces on
+`<eventName>:<correlationId>`, so a burst of edits to one issue leaves one
+pending notification carrying the newest payload.
+
+Each provider also exposes the full ordered ladder its payload answers to, for
+a caller that routes on a broader form:
+
+| Provider | Names | Correlations |
+| --- | --- | --- |
+| GitHub | `…:pull_request.opened`, then `…:pull_request` | `owner/repo#12`, `owner/repo`, `null` |
+| Linear | `…:issue.update`, then `…:issue` | `ENG-123`, `ENG`, `null` |
+
+### Cursors
+
+`Core.CursorStore` persists a polling source's cursor. `layerMemory` keeps it
+for the life of the process; `layerSql` keeps it in the control database, over
+the migration in `core/migrations`.
+
+The contract that matters is ordering: a proposed cursor is committed only
+after the batch it acknowledges has been handled. A process that dies mid-batch
+re-polls that batch instead of skipping it, and the redelivery is dropped
+downstream on the event's dedupe key.
+
+### Declared GitHub webhooks
+
+`GitHub.ListenerRegistry` reconciles a `.smithers/listeners.json` declaration
+against a repository. `plan` is pure and performs no requests; `reconcile`
+plans by default and applies only with `apply: true`.
+
+Ownership is the safety property. A hook is owned only when its numeric GitHub
+id appears in `.smithers/listeners.state.json`; a matching callback URL proves
+nothing, because anyone can point a hook anywhere. So:
+
+- an unowned hook on a declared URL is a `conflict`, and `apply` refuses rather
+  than adopting it;
+- an unowned hook elsewhere in the repository is `leave`, reported once;
+- a delete needs `allowDelete: true` on top of `apply`, and the create half of
+  a repository move is skipped when its delete was refused, because applying
+  the create alone would leave two live hooks for one listener;
+- ownership is written after every remote mutation, so a failure partway
+  through leaves a state file the next run converges from.
+
+A state file that exists but cannot be parsed is fatal. Reconciling without
+knowing what this workspace owns is how somebody else's hook gets deleted.
+
+### OAuth
+
+`Core.Pkce.createPkcePair` returns an RFC 7636 S256 verifier and challenge;
+`Core.AuthorizationUrl.buildAuthorizationUrl` builds the RFC 6749
+authorization-code request around it. Both are for the GitHub and Linear OAuth
+apps, where an intercepted authorization code would otherwise be redeemable by
+whoever caught it.
+
+### Credential hygiene
+
+A token reaches the `Authorization` header and nothing else. It is not in a
+message, not in `details`, and not in a log line, and the Telegram client
+additionally strips its token from errors it did not construct, because the
+token is in the request path and a transport error quotes the URL.
+
+Every GitHub request URL is pinned to the configured API origin, including a
+`Link: rel="next"` target. A redirected page link that left the origin would
+hand the token to whoever received it.
+
+Every client takes an `env` argument that replaces the ambient environment
+rather than layering over it, so a caller that supplies its own credentials
+cannot have an ambient `GITHUB_TOKEN` decide which account a call runs as.
+
+### Actions
+
+Each provider ships one durable action over its client. The client is an
+ordinary Effect service; the action is what makes a call a step of a flow, so
+the engine journals the result and a restart replays it instead of posting a
+second comment.
+
+| Action | Tag | Does |
+| --- | --- | --- |
+| `GitHub.Actions.CommentOnIssue` | `integrations/github/comment-on-issue` | Comments on an issue or pull request. |
+| `Linear.Actions.CreateIssue` | `integrations/linear/create-issue` | Files an issue, resolving team, state, and label names to ids. |
+| `Telegram.Actions.SendMessage` | `integrations/telegram/send-message` | Sends a message, chunked, with the markdown fallback. |
+
+All three are `tier: "irreversible"`. The remote side has acted by the time the
+call returns, so the engine never retries one on its own.
+
+A flow calls the declaration and provides the implementation layer plus the
+client the layer needs:
+
+```ts
+import { Flow } from "@smthrs/flow"
+import { Core, GitHub } from "@smthrs/integrations"
+import { Layer, Schema } from "effect"
+
+const Triage = Flow.make("triage", {
+  payload: { owner: Schema.String, repo: Schema.String, issueNumber: Schema.Number },
+  success: GitHub.Actions.Comment,
+  error: Core.ActionFailure.IntegrationFailure,
+  body: (input) =>
+    GitHub.Actions.CommentOnIssue.call({ ...input, body: "Triaged." })
+})
+
+const layer = Layer.provideMerge(
+  GitHub.Actions.layer,
+  GitHub.GitHubClient.layer({ token: process.env["GITHUB_TOKEN"] })
+)
+```
+
+`.call(payload)` records a plan node and runs nothing. The node demands the
+requirement that `GitHub.Actions.layer` provides, so a composition that forgot
+the layer fails to compile rather than at run time.
+
+An action fails with `Core.ActionFailure.IntegrationFailure`, the schema form
+of `IntegrationError`: a `reason`, a message already safe to persist, and
+`retryable`. A class cannot cross the journal; this can.
+
+An application that needs an endpoint these three do not cover writes its own
+`Action.make` over the same client. That is the intended extension point, not a
+gap.
+
+### Errors
+
+Every failure is one `Core.IntegrationError` carrying a machine-readable
+`reason`, so a caller maps it without reading message text:
+
+| Reason | Raised when |
+| --- | --- |
+| `invalid-config` | A declaration or option is unusable. |
+| `invalid-signature` | A webhook signature did not verify. |
+| `decode-failed` | A payload or response could not be read as expected. |
+| `poll-failed` | A polling source's request failed. |
+| `delivery-failed` | An API call failed. `details.retryable` says whether another attempt is worth making. |
+| `credentials-missing` | A required credential was not configured. |
+| `permission-denied` | The credential lacks the scope the operation needs. |
+| `listener-conflict` | An unowned hook holds a declared callback URL. |
+
+`toUnauthorized` and `toInvalidInput` map a failure onto the control plane's
+own errors at the channel boundary. Only the reason crosses: a verifier that
+reported which byte of a digest mismatched would be a verification oracle.
+
+### Tests
+
+The client and webhook suites drive a real `node:http` fixture server over a
+real socket. Nothing in this package mocks a transport.
+
+Three suites talk to the live APIs and skip, naming the credential, when it is
+absent: `GITHUB_TOKEN`, `LINEAR_API_KEY`, `TELEGRAM_BOT_TOKEN`. All three are
+read-only. They are listed in the pin register in `docs/alpha-notes.md`.
 
 ---
 
@@ -3632,14 +3891,13 @@ the moment the predicate is satisfied, so the work actually performed is the
 loop the author meant. Fiber interruption propagates normally, which is why
 none of these patterns carry a cancellation flag.
 
-Two consequences follow from core's node vocabulary, and both are deliberate:
+One consequence follows from core's node vocabulary, and it is deliberate:
 
-- **A declaration cannot fail.** `Node` has `succeed`, `all`, `map`,
-  `andThen`, `dynamic`, and flow calls, and no failure constructor. So
-  `onMaxReached: "fail"` is applied by `run`; `make` declares the exhausted
-  value instead.
-- **A declaration cannot catch.** `Sidecar`'s shadow quarantine is therefore a
-  property of `run`, not of the declared `Node.all`.
+- **A declaration cannot branch on a value.** Graph planning evaluates a
+  builder once against a symbolic value, so `onMaxReached: "fail"` is applied
+  by `run` and `make` declares the exhausted value instead. Recovery is
+  different: `Node.catch` declares a static arm, which is how `Sidecar`
+  declares its shadow's quarantine.
 
 ### Loop
 
@@ -3928,10 +4186,14 @@ that number invites a bug report. A tie counts as `cheaperWins`: equal quality
 at lower cost is the cheaper seat winning, which is the finding a sidecar
 exists to produce.
 
-`make` declares both calls under one `Node.all`, which is what makes the shadow
-concurrent rather than an extra sequential step. The quarantine is not
-declared: capability and cost analysis must count the shadow as work that
-happens.
+`make` declares both calls under one `Node.all`, which is what makes the
+shadow concurrent rather than an extra sequential step, with the shadow
+behind a `Node.catch` whose arm settles `{ quarantined: true, error }`.
+Capability and cost analysis still count the shadow as work that happens;
+what the arm adds is that the plan shows a failed shadow does not fail the
+run. The declared result is `{ primary, shadow, delta }`, and the scorer is
+declared unconditionally because a plan has no branch for "only when the
+shadow produced a value": `run` performs that skip.
 
 ### Inline callbacks and inference
 
@@ -4047,7 +4309,7 @@ Every module here follows the two-surface shape the package uses everywhere:
 
 Options that change behavior are declared through `Node.capture`, so two plans that differ only in a bound have different step identity.
 
-A declared flow joins its members with `Node.andThen` and `Node.all`. Neither continues past a failed member: `Node.andThen` has no continuation for a step that failed, and `Node.all` fails the join on the first failing member and interrupts the rest. So a declared flow halts on the first failure even where the module's `run` tolerates one. `CheckSuite`'s `continueOnFail`, `Kanban`'s per-item continuation, `Runbook`'s `onDeny: "skip"`, and `MergeQueue`'s `failurePolicy: "quarantine"` are execution semantics today. Each section below repeats this where it applies.
+A declared flow joins its members with `Node.andThen`, `Node.all`, and `Node.catch`. The first two do not continue past a failed member; `Node.catch` is the recovery arm that lets a declaration continue anyway. `CheckSuite`'s `continueOnFail`, `Kanban`'s per-item continuation, and `MergeQueue`'s `failurePolicy: "quarantine"` are declared through that arm, so the plan tolerates what `run` tolerates. `Runbook`'s `onDeny: "skip"` stays a `run` option and `make` refuses it: a denial and a step failure share one error channel, so an arm around the gated step would also declare that a runbook continues past a failed critical step. Each section below repeats this where it applies.
 
 ### `Supervisor`
 
@@ -4162,9 +4424,9 @@ An empty suite never passes under any strategy.
 
 #### Declaration
 
-`make` declares one call per check, batched into `Node.all` groups of `concurrency` members, then one pure verdict map. Each call is a `Node.all` member named by its check id. `continueOnFail` does not change the topology. Every check is declared either way, and the option is captured, so a tolerant suite and a fail-fast suite have different step identity.
+`make` declares one call per check, batched into `Node.all` groups of `concurrency` members, then one pure verdict map. Each call is a `Node.all` member named by its check id. `continueOnFail` changes the topology and is captured as well, so a tolerant suite and a fail-fast suite have different step identity.
 
-The declared flow halts on the first failing check whatever `continueOnFail` says, because `Node.all` fails the join on the first failing member and interrupts the rest. Only `run` keeps the tolerant semantics.
+`continueOnFail` picks the join. A tolerant suite joins each batch with `Quarantine.all` under the `quarantine` policy, so every check carries a recovery arm, a failing check settles as a `Quarantined` marker its siblings ignore, and `passed` reads that marker as a failed check. A fail-fast suite joins under `halt`, the plain `Node.all` that fails on the first failing member and interrupts the rest.
 
 `make` throws a `PatternError` when the record is empty, when an id is the empty string, or when `concurrency` is not a positive safe integer.
 
@@ -4203,7 +4465,7 @@ Every call receives `{ column, item, previous }`. `previous` refers to the same 
 
 `make` throws a `PatternError` when there are no columns, no items, a duplicate item id, or a concurrency that is not a positive safe integer.
 
-The declared flow halts the whole board on the first failing item, because `Node.all` fails the join on the first failing member and interrupts the rest. Only `run` drops a rejected item and lets the others finish.
+A column joins its batch with `Quarantine.all` under the `quarantine` policy, the same call `run` makes: one rejected card does not interrupt the cards beside it, and it settles as a `Quarantined` marker naming the item. The declaration does not drop a quarantined card from the later columns, because a plan has no branch: the card travels on with its marker as `previous`, and `run`, which has the value in hand, drops it. A board's declared call count is an upper bound on the calls a pass makes.
 
 #### Execution
 
@@ -4234,7 +4496,7 @@ const release = Runbook.make({
     { id: "migrate", flow: migrate, risk: "critical" }
   ],
   approval,
-  onDeny: "skip"
+  onDeny: "fail"
 })
 ```
 
@@ -4252,11 +4514,9 @@ const release = Runbook.make({
 
 `make` chains the steps in declaration order and wraps every non-safe step with `WithApproval.withApproval`. Each step is called with `{ step, risk, elevated, input, previous }`, and the approval that gates a step sees that same envelope, so a built graph names the step an approval belongs to and whether it is elevated. A safe step declares no approval call.
 
-`onDeny` does not change the declared topology. A skip is a runtime decision about a value the plan does not have, so `make` captures `onDeny` instead: a stopping runbook and a skipping runbook have different step identity.
+`onDeny: "skip"` is not declarable, and `make` refuses it rather than building a plan that halts where you asked it to skip. The gated step is one flow whose failure channel carries the denial and the step's own failures together, and a plan has no branch to select between them, so the recovery arm that would skip a denial also declares that the runbook continues past a failed critical step. Declare the runbook with `onDeny: "fail"` and call `run` with `onDeny: "skip"`, which skips a denied step at run time.
 
-The declared flow stops at the first denial whatever `onDeny` says, because `WithApproval` fails the wrapped step when the approval does not decode as `"approved"` and the chain has no continuation past a failed step. Only `run` skips a denied step and continues.
-
-`make` throws a `PatternError` when there are no steps, when two steps share an id, or when the approval flow permits any value other than the literal `"approved"`.
+`make` throws a `PatternError` when there are no steps, when two steps share an id, when the approval flow permits any value other than the literal `"approved"`, or when `onDeny` is `"skip"`.
 
 #### Execution
 
@@ -4296,11 +4556,9 @@ A member without its own priority gets `MergeQueue.DefaultPriority`, which is `1
 
 `concurrency` defaults to 1: a merge queue serializes landings unless a caller widens it deliberately. At concurrency 1 the queue is a plain `Node.andThen` chain with no `Node.all` at all, so the declared plan admits exactly one landing at a time. Above 1, members are batched into `Node.all` groups of `concurrency` and the batches are sequenced.
 
-Each call carries `{ member, priority, position, input }`, so a built graph names each member's effective priority and its place in the queue. The priority is key material and queue order, not a scheduler annotation: `@smthrs/core` has no priority annotation to raise a landing above new work.
+Each call carries `{ member, position, input }`, so a built graph names each member's place in the queue. A member's effective priority reaches the plan as a `Node.priority` annotation, which is what lets the scheduler start the higher-priority ready landing first. Priority stays out of key material, so raising a member's number without changing the resulting order re-uses the same steps rather than re-landing the queue.
 
-`failurePolicy` does not change the declared topology. Every member is declared either way, and the option is captured, so a halting queue and a quarantining queue have different step identity.
-
-The declared flow halts on the first failing member whatever `failurePolicy` says: `Node.andThen` has no continuation past a failed step, and `Node.all` fails the join on the first failing member and interrupts the rest. Only `run` quarantines a failed member and lands the rest.
+`failurePolicy` picks the topology and is captured as well. Under `quarantine` every landing carries a recovery arm settling it as the `Quarantined` marker `Quarantine.all` produces, so a failing member neither breaks the serial chain nor interrupts its batch: the queue `run` lands. Under `halt` the chain has no continuation past a failed member, and a batch join fails on the first failing member and interrupts the rest.
 
 `make` throws a `PatternError` when there are no members, when two members share an id, when `concurrency` is not a positive safe integer, or when `priority` is not a safe integer.
 
@@ -5263,13 +5521,13 @@ WHERE json_extract(state_json, '$.flowName') = 'deploy';
 
 Promote a field to a column only when it must appear in a CAS guard. `TransitionGuard` is the seam for that: new guarded metadata extends the interface and the single `UPDATE`, rather than adding a transition variant per rule.
 
-`requestCancel(runId, nowMs)` records the request without an owner fence: any observer may ask, and the owner decides at its next guarded transition. It returns `CancelRequested`, `AlreadyRequested` (with the original request time, which is never overwritten), or `NotFound`. A guarded transition that loses only to its guard returns `GuardFailed`, distinct from `FenceLost`.
+`requestCancel(runId, nowMs)` records the request without an owner fence: any observer may ask, and the owner decides at its next guarded transition. It returns `CancelRequested`, `AlreadyRequested` (with the original request time, which is never overwritten), `Terminal` (the run had already settled, carrying the status it settled with), or `NotFound`. The status predicate is part of the compare-and-swap, so a run that settles under a caller loses the write rather than racing it: a settled run has no owner and no drive to observe a request, and a reader that took the column as live intent would cancel children the run had finished with. `NotFound` means the row is gone and nothing else: a run that settles inside the retry window reports `Terminal`, not absence. A guarded transition that loses only to its guard returns `GuardFailed`, distinct from `FenceLost`.
 
 `Ownership.OwnerId` contains `hostId`, `pid`, and `nonce`. `LivenessEvidence` records observer and observation time. `heartbeatLoop`, `heartbeatInterval`, `heartbeatStaleAfter`, `heartbeatSkewAllowance`, and `heartbeatWriteTolerance` support scoped ownership maintenance. The loop interrupts its owner immediately on durable evidence that the fence is gone (any outcome other than `Updated`), but tolerates failed heartbeat *writes* for `heartbeatWriteTolerance`. That budget is `heartbeatStaleAfter` minus `heartbeatSkewAllowance` minus one heartbeat tick. The allowance is explicit because the owner stamps the heartbeat from its own clock while the stealer judges it against *its* clock, so the hosts' offset is subtracted straight from the owner's margin; the tick covers the budget only being re-evaluated once per pulse. Within the allowance the owner always stops executing side effects before a steal can be admitted. Beyond it the lease is bounded, not guaranteed: durable writes stay safe because the ownership compare-and-set fences them, but non-durable external side effects can overlap: inherent to any wall-clock lease, and a caller that cannot tolerate overlap needs a fencing token at the side effect itself. A successful pulse re-arms that window.
 
 `LivenessEvidence.kind` is one of three. `same-host-pid-dead` is a local process probe and is accepted only from an observer on the owner's host, because a pid means nothing outside its own process namespace. `cross-host-unreachable-stale` is a reachability judgement and is accepted only from another host. `lease-expired` asserts only that the persisted heartbeat is older than `heartbeatStaleAfter`, so it is accepted from any observer: `steal` verifies that claim itself in the same write and refuses a row whose lease is still inside the window.
 
-`LivenessCheck` is the question an engine asks before it steals: `(expectedOwner, { claimant, heartbeatAtMs, nowMs }) => Effect<boolean>`, where `true` refuses the takeover. `leaseLiveness(staleAfter)` is the default answer: the owner is alive while the lease is fresh, gone once it expires, and gone when it recorded no heartbeat at all. It is the weakest honest answer and the one every host can give, so a composition that supplies nothing still reclaims a hard-killed owner's runs. `sameHostIncarnation(expectedOwner, claimant)` is the predicate a stronger check applies before it reads `expectedOwner.pid`.
+`LivenessCheck` is the question an engine asks before it steals: `(expectedOwner, { claimant, heartbeatAtMs, nowMs }) => Effect<boolean>`, where `true` refuses the takeover. `leaseLiveness(staleAfter)` is the default answer: the owner is alive while the lease is fresh, gone once it expires, and gone when it recorded no heartbeat at all. It is the weakest honest answer and the one every host can give, so a composition that supplies nothing still reclaims a hard-killed owner's runs. `sameHostIncarnation(expectedOwner, claimant)` is the predicate a stronger check applies before it reads `expectedOwner.pid`. `sameHostPidProbe` is that stronger check for Node hosts: it answers from `process.kill(pid, 0)` when the recorded owner and the claimant share a host, reads `EPERM` as a live process it may not signal, and answers `false` for any owner on another host, where a pid means nothing and the expired lease decides instead. A composition passes it; nothing defaults to it. `EngineStore.Options.isAlive` left unset is `leaseLiveness(heartbeatStaleAfter)` on every host, the Node CLI hands `sameHostPidProbe` to `EngineStore.layer` explicitly because two `smithers` invocations in one project directory are two engine processes over one `.flows/engine.db`, and a browser composition keeps `leaseLiveness`. `@smthrs/platform-node`'s `HostLiveness.isAlive` asks the same question of the same process table but answers `true` for an owner on another host, which refuses that steal outright and leaves a dead host's runs unreclaimable. Two limits are inherent to asking a pid, and both probes share them. An owner recorded with the claimant's own pid, a previous incarnation of this process or a second engine composed inside it, differs from the claimant only by `nonce` and names this very process, so it is always alive and its row is never stolen while the process lives; an embedded host that re-creates its engine in place keeps `leaseLiveness`, whose timeout does expire. Reading same-pid-different-nonce as death is not the alternative: two engines in one process are the shape the probe exists to arbitrate. A pid the operating system has reused reports the unrelated process that now holds it, which delays a dead owner's reclaim rather than breaking it: the row is still `running` under an expired lease, and the next probe after the pid is free reclaims it.
 
 #### AttemptStore
 
@@ -6084,8 +6342,10 @@ interrupted rewind audits, so recovery is never a call. `Replay`, `Fork`,
 `Rewind`, `Retry`, `Recovery`, `Compensation`, and `EffectHandlerRegistry` are
 internal machinery under `src/internal/`.
 
-`ForkOptions` carries only `workspaceRoot`; the workspace name and path are
-derived from the position. `RewindOptions` carries `detachedChildren` and
+`ForkOptions` carries only `workspaceRoot`; the workspace name is
+`smithers-fork-` followed by the child run id the fork mints, sanitized, capped
+at 64 characters, and suffixed with a short digest of the raw id, so a frame
+forked twice gets two lanes. `RewindOptions` carries `detachedChildren` and
 `pageSize`; the owner and audit ID are minted internally. `RewindResult`
 returns audit, archive, assessments, warnings, and cancelled children.
 

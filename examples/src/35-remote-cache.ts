@@ -186,8 +186,7 @@ const engineLayer = (filename: string, hostId: string, endpoint: string) => {
   ).pipe(Layer.provideMerge(NodeRuntime.storage(filename)))
   return EngineStore.layer({
     owner: { hostId },
-    journalSource: `${hostId}-engine`,
-    isAlive: () => Effect.succeed(false)
+    journalSource: `${hostId}-engine`
   }).pipe(
     Layer.provideMerge(execution),
     Layer.provideMerge(

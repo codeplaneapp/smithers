@@ -45,6 +45,35 @@ export const RunStatus = Schema.Literals([
 export type RunStatus = typeof RunStatus.Type
 
 /**
+ * The run states a run never leaves.
+ *
+ * Named because two rules are written against exactly this set: a settled run
+ * refuses new cancellation intent ({@link RequestCancelOutcome}), and a
+ * settled row is never claimed, activated, or swept.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const TerminalRunStatus = Schema.Literals(["completed", "failed", "cancelled"])
+
+/**
+ * The type of {@link TerminalRunStatus}.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type TerminalRunStatus = typeof TerminalRunStatus.Type
+
+/**
+ * Whether a status is one a run never leaves.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const isTerminalRunStatus = (status: RunStatus): status is TerminalRunStatus =>
+  status === "completed" || status === "failed" || status === "cancelled"
+
+/**
  * Stable failure codes surfaced by `RunStore`.
  *
  * @since 0.1.0
@@ -177,6 +206,15 @@ export type RequestCancelOutcome =
   | { readonly _tag: "CancelRequested"; readonly requestedAtMs: number }
   | { readonly _tag: "AlreadyRequested"; readonly requestedAtMs: number }
   | { readonly _tag: "NotFound" }
+  /**
+   * The run had already settled, so nothing was recorded. A terminal run has
+   * no owner and no drive to observe a request, so writing one would leave
+   * intent nothing ever acts on — and a reader that takes the column as live
+   * intent (`RunDriver.inheritParentCancellation`) would cancel children a
+   * `completed` parent had finished with. The status says which ending the
+   * request lost to.
+   */
+  | { readonly _tag: "Terminal"; readonly status: TerminalRunStatus }
 
 /**
  * Result of acquiring claim columns for a later activation.
@@ -735,24 +773,38 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         return write(
           "requestCancel",
           Effect.gen(function*() {
+            // The status predicate is part of the compare-and-swap rather than
+            // a read-then-write check: a run that settles between a caller's
+            // read and this UPDATE must lose the write, not race it.
             const record = () =>
               sql<{ readonly requestedAtMs: number }>`
           UPDATE flows_runs
           SET cancel_requested_at_ms = ${nowMs}
           WHERE run_id = ${runId}
             AND cancel_requested_at_ms IS NULL
+            AND status NOT IN ('completed', 'failed', 'cancelled')
           RETURNING cancel_requested_at_ms AS "requestedAtMs"
         `
             const rows = yield* record()
             if (rows[0] !== undefined) {
               return { _tag: "CancelRequested", requestedAtMs: Number(rows[0].requestedAtMs) } as const
             }
-            const current = yield* sql<{ readonly requestedAtMs: number | null }>`
-          SELECT cancel_requested_at_ms AS "requestedAtMs" FROM flows_runs WHERE run_id = ${runId}
+            const current = yield* sql<{ readonly requestedAtMs: number | null; readonly status: string }>`
+          SELECT cancel_requested_at_ms AS "requestedAtMs", status AS "status"
+          FROM flows_runs WHERE run_id = ${runId}
         `
             const row = current[0]
             if (row === undefined) {
               return notFound
+            }
+            const status = yield* Schema.decodeUnknownEffect(RunStatus)(row.status).pipe(
+              Effect.orDie
+            )
+            // Read before the request column, so the answer does not depend on
+            // whether the run's own closing request is still on the row: a
+            // settled run reports how it ended either way.
+            if (isTerminalRunStatus(status)) {
+              return { _tag: "Terminal", status } as const
             }
             if (row.requestedAtMs !== null) {
               return { _tag: "AlreadyRequested", requestedAtMs: Number(row.requestedAtMs) } as const
@@ -762,13 +814,32 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             // a writer on another connection clearing the column between the UPDATE
             // and this read made a live run report `NotFound` — and the caller
             // skipped the retry it performs for a genuine race. The UPDATE's own
-            // precondition holds again, so re-run it. Only a row that is really
-            // gone reports `NotFound`.
+            // precondition holds again, so re-run it.
             const retried = yield* record()
             const recorded = retried[0]
-            return recorded === undefined
-              ? notFound
-              : { _tag: "CancelRequested", requestedAtMs: Number(recorded.requestedAtMs) } as const
+            if (recorded !== undefined) {
+              return { _tag: "CancelRequested", requestedAtMs: Number(recorded.requestedAtMs) } as const
+            }
+            // Two things can refuse the retry, and they are not the same
+            // answer: the row is gone, which is what this retry exists to
+            // distinguish, or the run settled in the statement between the
+            // read above and this write and lost to the status predicate.
+            // Reported as `NotFound`, a run that had just completed sent its
+            // caller looking for a row that is sitting right there. The
+            // terminal test rides in the WHERE clause so the read answers one
+            // question: did it end?
+            const closing = yield* sql<{ readonly status: string }>`
+          SELECT status AS "status" FROM flows_runs
+          WHERE run_id = ${runId} AND status IN ('completed', 'failed', 'cancelled')
+        `
+            const ending = closing[0]
+            if (ending === undefined) {
+              return notFound
+            }
+            return {
+              _tag: "Terminal",
+              status: yield* Schema.decodeUnknownEffect(TerminalRunStatus)(ending.status).pipe(Effect.orDie)
+            } as const
           })
         )
       })),
