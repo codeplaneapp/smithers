@@ -6,7 +6,7 @@
  * appears, disappears, or changes its summary shows up as documentation drift
  * instead of as a stale page nobody noticed.
  */
-import { spawnSync } from "node:child_process"
+import { execFile, spawnSync } from "node:child_process"
 import { join } from "node:path"
 import { repoRoot } from "./docs-contract.mjs"
 
@@ -65,6 +65,40 @@ export const runHelp = (args, entry = cliEntry) => {
   })
   if (result.error !== undefined) throw result.error
   return `${result.stdout ?? ""}${result.stderr ?? ""}`
+}
+
+/**
+ * Runs the working-tree CLI once and reports its output and whether it exited.
+ *
+ * Every spawn is bounded. A verb the removal table lists can also be bound as
+ * a live command that starts a server, and then it never returns: without a
+ * bound the proof stops being a test and becomes a hang, which reads as a slow
+ * CI job rather than as the contradiction it is. `exited: false` is that
+ * contradiction, and the caller reports it as an offender.
+ *
+ * @param {ReadonlyArray<string>} args the argument vector after the entry point
+ * @param {{ entry?: string, timeoutMs?: number }} [options] entry point and bound
+ * @returns {Promise<{ text: string, exited: boolean }>} combined output, and whether the child ended on its own
+ */
+export const runCli = (args, options = {}) => {
+  const entry = options.entry ?? cliEntry
+  const timeout = options.timeoutMs ?? 15000
+  return new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      [entry, ...args],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
+        timeout,
+        killSignal: "SIGKILL"
+      },
+      (error, stdout, stderr) => {
+        resolve({ text: `${stdout ?? ""}${stderr ?? ""}`.trim(), exited: error === null || error.killed !== true })
+      }
+    )
+  })
 }
 
 /** The command tree the binary currently offers, keyed by command name. */

@@ -8368,7 +8368,7 @@ A column joins its batch with `Quarantine.all` under the `quarantine` policy, th
 
 A column rejects an item by failing. The item is dropped from the board and listed in `failed`; the other items keep moving, and the column that rejected it is named. A rejected item never reaches a later column, so `board` has no row for an item the first column rejected.
 
-`maxIterations` is the number of passes the board runs over the same items, and defaults to one. The old `<Kanban>` component wrapped its columns in a `<Loop>` whose `maxIterations` defaulted to five, so an unconfigured board reran its columns five times; a port that relied on that default must pass `maxIterations: 5`. `until` stops the board early, after the pass whose result satisfies the predicate, and requires `maxIterations`, because a predicate that never holds would otherwise run forever. Each pass starts from an empty board, and the returned board is the last pass's.
+`maxIterations` is the number of passes the board runs over the same items, and defaults to one. A 0.x board reran its columns five times by default; a port that relied on that number passes `maxIterations: 5`. `until` stops the board early, after the pass whose result satisfies the predicate, and requires `maxIterations`, because a predicate that never holds would otherwise run forever. Each pass starts from an empty board, and the returned board is the last pass's.
 
 ### `Runbook`
 

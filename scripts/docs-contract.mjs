@@ -189,6 +189,89 @@ export const compatibilityPromise = (source = readFileSync(contractPath, "utf8")
 }
 
 /**
+ * Every JSX surface check 7 of `check-docs.mjs` refuses outside the migration
+ * guide.
+ *
+ * The component half is read out of the section 11 promise rather than typed
+ * again, because the promise is the list: a component it retires and a
+ * hand-kept array forgets is a component any page may keep advertising.
+ * `extraComponents` carries the 0.x components the promise does not enumerate
+ * one by one, and `identifiers` carries the JSX entry points, which are import
+ * specifiers and functions rather than elements.
+ *
+ * @param {string} [promise] the promise text, for tests
+ * @returns {ReadonlyArray<string>} every surface, elements written `<Name>`
+ */
+export const removedJsxSurfaces = (promise = compatibilityPromise()) => {
+  const components = [...promise.matchAll(/<([A-Z][A-Za-z]*)>/g)].map((match) => match[0])
+  if (components.length === 0) throw new Error("docs-contract: the promise names no JSX component")
+  const identifiers = [
+    "jsxImportSource",
+    "smthrs/jsx-runtime",
+    "smthrs/jsx-dev-runtime",
+    "createSmithers",
+    "SmithersCtx",
+    "renderFrame"
+  ]
+  // `<Kanban>` shipped as a component of the 0.x board pack, which the promise
+  // covers by retiring the JSX API rather than by naming every element in it.
+  const extraComponents = ["<Kanban>"]
+  return [...identifiers, ...new Set([...components, ...extraComponents])]
+}
+
+/**
+ * The 0.x package names no page outside the migration guide may print.
+ *
+ * @category constants
+ */
+export const removedZeroXPackages = [
+  "smithers-orchestrator",
+  "@smthrs/graph",
+  "@smthrs/scheduler",
+  "@smthrs/driver",
+  "@smthrs/components",
+  "@smthrs/react-reconciler",
+  "@smthrs/gateway-react",
+  "@smthrs/gateway-ui",
+  "@smthrs/gateway-client",
+  "@smthrs/ui-core",
+  "@smthrs/tui",
+  "@smthrs/protocol",
+  "@smthrs/control-plane",
+  "@smthrs/db",
+  "@smthrs/server",
+  "@smthrs/devtools",
+  "@smthrs/xstate"
+]
+
+/**
+ * The removed surfaces one page's body names.
+ *
+ * Check 7 of `check-docs.mjs` is the only caller, and it is here rather than
+ * there so the surfaces and the promise that retires them stay one list. A
+ * command is matched only in its `\`smithers <verb>\`` form, because the bare
+ * word is ordinary English on a page about approvals or a graph.
+ *
+ * @param {string} body the page body
+ * @param {{ jsx?: ReadonlyArray<string>, packages?: ReadonlyArray<string>, commands?: ReadonlyArray<string> }} [surfaces]
+ * @returns {ReadonlyArray<string>} every surface the body names, in the order it was asked about
+ */
+export const namedRemovedSurfaces = (body, surfaces = {}) => {
+  const jsx = surfaces.jsx ?? removedJsxSurfaces()
+  const packages = surfaces.packages ?? removedZeroXPackages
+  const commands = surfaces.commands ?? []
+  const named = []
+  for (const api of jsx) if (body.includes(api)) named.push(api)
+  for (const name of packages) {
+    if (new RegExp(`${name.replace("/", "\\/")}(?![a-z-])`).test(body)) named.push(name)
+  }
+  for (const name of commands) {
+    if (new RegExp(`\`smithers ${name}(?![a-z-])`).test(body)) named.push(`smithers ${name}`)
+  }
+  return named
+}
+
+/**
  * The files section 11 requires the promise in, word for word.
  *
  * The section names "the release notes, README, and migration guide". The

@@ -37,7 +37,10 @@ import {
   countCitingDocuments,
   promiseHolders,
   publishedPackageCount,
+  namedRemovedSurfaces,
   removedCommands,
+  removedJsxSurfaces,
+  removedZeroXPackages,
   repoRoot
 } from "./docs-contract.mjs"
 import { deadLinks } from "./docs-links.mjs"
@@ -223,41 +226,11 @@ const deferred = new Set(deferredRoutes.map((entry) => entry.route))
 {
   const removed = removedCommands()
   const available = availableCommands()
-  const jsxApis = [
-    "jsxImportSource",
-    "smthrs/jsx-runtime",
-    "smthrs/jsx-dev-runtime",
-    "createSmithers",
-    "SmithersCtx",
-    "renderFrame",
-    "<Workflow>",
-    "<Task>",
-    "<Sequence>",
-    "<Parallel>",
-    "<Ralph>",
-    "<Subflow>",
-    "<Worktree>",
-    "<Saga>"
-  ]
-  const oldPackages = [
-    "smithers-orchestrator",
-    "@smthrs/graph",
-    "@smthrs/scheduler",
-    "@smthrs/driver",
-    "@smthrs/components",
-    "@smthrs/react-reconciler",
-    "@smthrs/gateway-react",
-    "@smthrs/gateway-ui",
-    "@smthrs/gateway-client",
-    "@smthrs/ui-core",
-    "@smthrs/tui",
-    "@smthrs/protocol",
-    "@smthrs/control-plane",
-    "@smthrs/db",
-    "@smthrs/server",
-    "@smthrs/devtools",
-    "@smthrs/xstate"
-  ]
+  const surfaces = {
+    jsx: removedJsxSurfaces(),
+    packages: removedZeroXPackages,
+    commands: [...removed.keys()].filter((name) => !available.has(name))
+  }
   const offenders = []
   for (const page of allPages) {
     // Four exemptions, and each names a removed surface in order to say it is
@@ -272,15 +245,8 @@ const deferred = new Set(deferredRoutes.map((entry) => entry.route))
     if (page.route.startsWith("/migration")) continue
     if (page.route === "/changelogs/compatibility-policy") continue
     if (page.route === "/release/known-limitations") continue
-    for (const api of jsxApis) {
-      if (page.body.includes(api)) offenders.push(`${page.path}: ${api}`)
-    }
-    for (const name of oldPackages) {
-      if (new RegExp(`${name.replace("/", "\\/")}(?![a-z-])`).test(page.body)) offenders.push(`${page.path}: ${name}`)
-    }
-    for (const [name] of removed) {
-      if (available.has(name)) continue
-      if (new RegExp(`\`smithers ${name}(?![a-z-])`).test(page.body)) offenders.push(`${page.path}: smithers ${name}`)
+    for (const surface of namedRemovedSurfaces(page.body, surfaces)) {
+      offenders.push(`${page.path}: ${surface}`)
     }
   }
   if (offenders.length > 0) {

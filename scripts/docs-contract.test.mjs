@@ -8,6 +8,7 @@ import {
   codeSpans,
   countCitingDocuments,
   commandName,
+  namedRemovedSurfaces,
   compatibilityPromise,
   contractPath,
   promiseHolders,
@@ -20,7 +21,9 @@ import {
   removedFlags,
   removedForms,
   removalMessage,
+  removedJsxSurfaces,
   removedRpcs,
+  removedZeroXPackages,
   runtimes,
   shippedCommands,
   supportedRunControl,
@@ -180,4 +183,33 @@ test("every document that cites the published set agrees with the contract", () 
       assert.equal(cited, declared, `${path} cites ${cited} published packages and the contract freezes ${declared}`)
     }
   }
+})
+
+// The section 11 promise names thirteen JSX components. Check 7 of
+// `check-docs.mjs` is what enforces the promise's "no page outside the
+// migration guide names one" half, so the two lists have to be one list: a
+// component the promise retires and the check does not know about is a
+// component any page may keep advertising.
+test("every JSX component the compatibility promise retires is a refused surface", () => {
+  const components = [...compatibilityPromise().matchAll(/<([A-Z][A-Za-z]*)>/g)].map((match) => match[0])
+  assert.ok(components.length >= 13, `the promise names ${components.length} components`)
+  const surfaces = removedJsxSurfaces()
+  assert.deepEqual(components.filter((component) => !surfaces.includes(component)), [])
+  // `<Kanban>` shipped in the 0.x board pack, which the promise retires as
+  // part of the JSX API rather than by name.
+  assert.ok(surfaces.includes("<Kanban>"))
+})
+
+test("a page that names a retired JSX component names a removed surface", () => {
+  const body = "The old `<Kanban>` component wrapped its columns in a `<Loop>` whose `maxIterations` defaulted to five."
+  assert.deepEqual(namedRemovedSurfaces(body), ["<Loop>", "<Kanban>"])
+})
+
+test("a removed surface is a 0.x package or a verb in its command form, and nothing else", () => {
+  const surfaces = { jsx: [], packages: removedZeroXPackages, commands: ["rewind"] }
+  assert.deepEqual(namedRemovedSurfaces("a rewind of the plan under @smthrs/engine", surfaces), [])
+  assert.deepEqual(namedRemovedSurfaces("run `smithers rewind` under @smthrs/graph", surfaces), [
+    "@smthrs/graph",
+    "smithers rewind"
+  ])
 })
