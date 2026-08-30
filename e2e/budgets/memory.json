@@ -1,0 +1,6 @@
+{
+  "subscriberFanoutN5": {
+    "rssGrowthBytesMax": 134217728,
+    "comment": "case16: 128 MB maximum resident-set growth over this suite's own baseline for 5 concurrent watch subscribers over 500 journal events. Growth, not an absolute ceiling: the faults suite shares one process, so an absolute number would measure the suite rather than this path."
+  }
+}
