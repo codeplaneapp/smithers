@@ -18,6 +18,7 @@ import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import * as Option from "effect/Option";
+import * as Agents from "../packages/cli/src/Agents.ts";
 import * as Unsupported from "../packages/cli/src/Unsupported.ts";
 import * as Verb from "../packages/cli/src/Verb.ts";
 import * as MarkdownFlow from "../packages/registry/src/MarkdownFlow.ts";
@@ -301,6 +302,27 @@ describe("installing the curated skill", () => {
       t.skip("`smithers skills add` is not in this CLI yet.");
       return;
     }
+    // Pending cli-ops, not pending this lane. `packages/cli/**` is that lane's
+    // fence (triage.md SPEC AMENDMENT 4, and the 2026-08-29 16:25 fence
+    // ruling), so the fix ships as deferred hunk records 4 and 6 in
+    // migration/phase4/pack-skills-plugins-deferred-hunks.{md,patch}:
+    // `Agents.skill()` reads packages/cli/docs/SKILL.md, then this file, and
+    // refuses rather than substituting a rendering of the verb table.
+    //
+    // The skip is gated on whether that code is PRESENT, never on whether the
+    // install matched: a case that skips itself the moment its assertion would
+    // fail pins nothing, and would call a wrong adoption "still renders the
+    // verb table". Once `Agents.skillMissing` exists, the byte-identity
+    // assertion below runs and any other installed content is a failure.
+    if (typeof Agents.skillMissing !== "function") {
+      t.skip(
+        "`packages/cli/src/Agents.ts` has no `skillMissing`, so deferred hunk records 4 and 6 " +
+          "(migration/phase4/pack-skills-plugins-deferred-hunks.patch) are not adopted yet. " +
+          "rc-contract.md ruling F2 is met when they land, and this case then holds the install " +
+          "to the curated file byte for byte.",
+      );
+      return;
+    }
 
     const home = fixture();
     const result = spawnSync(process.execPath, [sourceCli, "skills", "add"], {
@@ -313,23 +335,6 @@ describe("installing the curated skill", () => {
 
     const installed = readFileSync(join(home, ".claude", "skills", "smithers", "SKILL.md"), "utf8");
     const curated = readFileSync(join(skillsRoot, "smithers", "SKILL.md"), "utf8");
-    if (installed !== curated) {
-      // Pending cli-ops, not pending this lane. `packages/cli/**` is that
-      // lane's fence (triage.md SPEC AMENDMENT 4, and the 2026-08-29 16:25
-      // fence ruling), so the fix ships as deferred hunk records 4 and 6 in
-      // migration/phase4/pack-skills-plugins-deferred-hunks.{md,patch}:
-      // `Agents.skill()` reads packages/cli/docs/SKILL.md, then this file, and
-      // refuses rather than substituting a rendering of the verb table. This
-      // case passes the moment cli-ops adopts them, and the assertion below is
-      // what it will then be held to.
-      t.skip(
-        "`smithers skills add` still renders the verb table instead of installing the curated file. " +
-          "The fix is cli-ops-owned and exported as deferred hunk records 4 and 6 " +
-          "(migration/phase4/pack-skills-plugins-deferred-hunks.patch); rc-contract.md ruling F2 " +
-          "is met when they land.",
-      );
-      return;
-    }
     assert.equal(installed, curated, "the installed skill must be this repository's curated source, byte for byte");
   });
 

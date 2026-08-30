@@ -9,18 +9,26 @@ import { homedir } from "node:os";
 import { delimiter, join, resolve, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 
+/** The routing hint this script writes into Codex's spawn-tool guidance. */
 export const HINT_TEXT = "This machine uses Smithers (smithers.sh), a durable control plane for agent work. For multi-step, long-running, or background work, run a Smithers workflow via the smithers MCP tools (list_workflows, run_workflow, watch_run) instead of spawning ad-hoc subagents; spawn agents only for quick one-off lookups.";
+/** Schema version of the routing journal this script writes and accepts. */
 export const STATE_SCHEMA = 1;
+/** Name of the routing journal, resolved inside `CODEX_HOME`. */
 export const STATE_FILE = ".smithers-codex-routing.json";
+/** The two Codex config keys this script manages, as dotted paths. */
 export const FIELD_PATHS = Object.freeze([
   "features.multi_agent_v2.multi_agent_mode_hint_text",
   "features.multi_agent_v2.usage_hint_text",
 ]);
+/** How long one App Server request may take before it is failed. */
 export const RPC_TIMEOUT_MS = 20_000;
+/** How long `codex --version` may take before the probe is killed. */
 export const PROCESS_TIMEOUT_MS = 20_000;
+/** How old the routing lock may be before it counts as abandoned. */
 export const LOCK_MAX_AGE_MS = 10 * 60 * 1000;
 const ABSENT = Object.freeze({ present: false });
 
+/** Parses argv into an action and its flags, rejecting the combinations that contradict each other. */
 export function parseArgs(argv) {
   const args = { action: "preview", apply: false, replaceExistingPolicy: false, requireEffective: false, codexBin: "codex" };
   const actions = [];
@@ -43,6 +51,7 @@ export function parseArgs(argv) {
   return args;
 }
 
+/** Reads a dotted path out of a config object, answering ABSENT for a missing or null segment. */
 export function getNested(object, path) {
   let value = object;
   for (const part of path.split(".")) {
@@ -52,11 +61,16 @@ export function getNested(object, path) {
   return value === null || value === undefined ? ABSENT : value;
 }
 
+/** Renders one config value as a journal snapshot entry. */
 export function snapshotValue(value) { return value === ABSENT ? { present: false } : { present: true, value }; }
+/** Reads the managed fields out of one config layer. */
 export function currentFields(config) { return Object.fromEntries(FIELD_PATHS.map((path) => [path, getNested(config, path)])); }
 function absent(value) { return value === ABSENT || value?.present === false; }
+/** Compares two field values, counting two absences as equal. */
 export function fieldsEqual(actual, expected) { return absent(actual) && absent(expected) || !absent(actual) && !absent(expected) && Object.is(actual, expected); }
+/** Whether a config value is one this script may manage, which is any string. */
 export function isManagedValue(value) { return typeof value === "string"; }
+/** Whether `features` or `features.multi_agent_v2` is a scalar, which no edit can descend into. */
 export function parentIsScalar(config) {
   const features = config && typeof config === "object" ? config.features : undefined;
   const multiAgent = features && typeof features === "object" ? features.multi_agent_v2 : undefined;
@@ -64,6 +78,7 @@ export function parentIsScalar(config) {
     || multiAgent !== undefined && (multiAgent === null || typeof multiAgent !== "object");
 }
 
+/** Names the state of the managed fields: installed, drifted, not installed, or a conflict. */
 export function classifyState(userConfig, effectiveConfig, state) {
   if (parentIsScalar(userConfig) || parentIsScalar(effectiveConfig)) return "incompatible (scalar multi_agent_v2)";
   const user = currentFields(userConfig);
@@ -79,10 +94,13 @@ export function classifyState(userConfig, effectiveConfig, state) {
   return userMatches && effectiveMatches ? "installed" : "drifted";
 }
 
+/** Turns target values into a `config/batchWrite` edit list, writing null for an absent value. */
 export function makeEdits(values) { return FIELD_PATHS.map((keyPath) => ({ keyPath, value: absent(values[keyPath]) ? null : values[keyPath], mergeStrategy: "replace" })); }
+/** Builds a first journal entry: the user's prior values plus the values this script will manage. */
 export function buildSnapshot(config, configPath, version) {
   return { schema: STATE_SCHEMA, managedBy: "smithers-codex-routing", phase: "committed", configPath, userLayerVersion: version ?? null, previous: Object.fromEntries(FIELD_PATHS.map((path) => [path, snapshotValue(getNested(config, path))])), managed: Object.fromEntries(FIELD_PATHS.map((path) => [path, HINT_TEXT])) };
 }
+/** Carries an existing journal onto the current hint text, staging a pending transition when it changed. */
 export function mergeSnapshot(state, configPath) {
   const target = Object.fromEntries(FIELD_PATHS.map((path) => [path, HINT_TEXT]));
   if (FIELD_PATHS.every((path) => Object.is(state.managed[path], target[path]))) return { ...state, configPath };
@@ -94,8 +112,11 @@ export function mergeSnapshot(state, configPath) {
   };
 }
 
+/** The values a write should land: the staged target if there is one, else the managed set. */
 export function targetValues(state) { return state?.pending?.to || state?.managed; }
+/** The values a rollback should restore: the staged source if there is one, else the managed set. */
 export function priorManagedValues(state) { return state?.pending?.from || state?.managed; }
+/** Plans an install: next journal, values to write, and whether the journal is new. Refuses drifted or user-authored fields. */
 export function installTransition(state, current, configPath, version, { replaceExistingPolicy = false } = {}) {
   if (state && !FIELD_PATHS.every((path) => fieldsEqual(current[path], state.managed[path]))) {
     throw new Error("Managed fields drifted outside this plugin; refusing to overwrite them.");
@@ -106,16 +127,19 @@ export function installTransition(state, current, configPath, version, { replace
   const nextState = state ? mergeSnapshot(state, configPath) : buildSnapshot(current, configPath, version);
   return { nextState, target: targetValues(nextState), createdState: !state };
 }
+/** The journal action that undoes a failed install: remove a journal this run created, or roll an older one back. */
 export function installFailureRecovery(nextState, createdState) {
   return createdState
     ? { action: "remove", state: null, values: restoreValues(nextState) }
     : { action: "rollback", state: { ...nextState, phase: "committed", managed: { ...priorManagedValues(nextState) }, pending: undefined }, values: priorManagedValues(nextState) };
 }
+/** The values that restore the user's config, refusing when there is no journal or the managed fields were edited. */
 export function disableTransition(state, current) {
   if (!state) throw new Error("No Smithers snapshot found; refusing to disable user-authored fields.");
   if (!FIELD_PATHS.every((path) => fieldsEqual(current[path], state.managed[path]))) throw new Error("Managed fields were edited after setup; refusing to clobber the user edit.");
   return restoreValues(state);
 }
+/** Resolves a journal a crashed run left pending into a commit, a rollback, or a removal. */
 export function recoverPendingState(state, user, effective = user) {
   if (!state || !state.phase?.startsWith("pending-")) return { state, action: "none" };
   const previous = restoreValues(state);
@@ -145,6 +169,7 @@ export function recoverPendingState(state, user, effective = user) {
 }
 
 function statePath(home) { return join(home, STATE_FILE); }
+/** Reads and validates the routing journal, answering null when there is none. */
 export function readState(codexHome) {
   const path = statePath(codexHome);
   if (!existsSync(path)) return null;
@@ -169,10 +194,12 @@ function processIsAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; }
 }
+/** Whether a lock owner is unusable: malformed, dead, or older than `LOCK_MAX_AGE_MS`. */
 export function isStaleLock(owner, now = Date.now(), pidAlive = processIsAlive) {
   return !owner || !Number.isInteger(owner.pid) || !Number.isFinite(owner.createdAt)
     || !pidAlive(owner.pid) || now - owner.createdAt > LOCK_MAX_AGE_MS;
 }
+/** Reports whether the routing lock is held, by whom, and whether it is stale. */
 export function lockStatus(home, now = Date.now(), pidAlive = processIsAlive) {
   const path = `${statePath(home)}.lock`;
   if (!existsSync(path)) return { locked: false, path };
@@ -188,6 +215,7 @@ function journalSignature(path) {
   // rewrite yields a new inode and mtime, even a byte-identical (ABA) one.
   try { const s = statSync(path); return `${s.ino}:${s.mtimeMs}:${s.size}`; } catch (error) { if (error.code !== "ENOENT") throw error; return null; }
 }
+/** Reads the journal and its revision signature around a state read, so a concurrent rewrite shows as instability. */
 export function statusSnapshot(home) {
   const path = statePath(home);
   let before = null;
@@ -201,6 +229,7 @@ export function statusSnapshot(home) {
   return { state, lock, journalBefore: before, journalAfter: after, sigBefore, sigAfter, stable: before === after && sigBefore === sigAfter };
 }
 
+/** Reads Codex's config while the journal holds still, retrying while a concurrent write moves it. */
 export async function readStatus(home, read) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
@@ -217,11 +246,14 @@ export async function readStatus(home, read) {
   }
   throw new Error("Routing journal changed while reading status; please retry.");
 }
+/** Whether the journal describes the config file this run is about to edit. */
 export function journalOwnership(state, configPath) {
   if (!state?.configPath || resolve(state.configPath) === resolve(configPath)) return { owned: true };
   return { owned: false, journalConfigPath: state.configPath };
 }
+/** Quotes a value as a TOML basic string. */
 export function tomlBasicString(value) { return JSON.stringify(String(value)); }
+/** Takes the routing lock, reclaiming a stale one, and answers the release function. */
 export function withLock(home) {
   const path = `${statePath(home)}.lock`;
   const nonce = randomUUID();
@@ -268,6 +300,7 @@ export function withLock(home) {
   };
 }
 
+/** Finds a binary on PATH, honoring PATHEXT on Windows and an explicit path anywhere. */
 export function resolveExecutable(name, { platform = process.platform, path = process.env.PATH || "", pathext = process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD", exists = existsSync } = {}) {
   if (name.includes("/") || name.includes("\\")) return resolve(name);
   const pathApi = platform === "win32" ? win32 : { join };
@@ -278,6 +311,7 @@ export function resolveExecutable(name, { platform = process.platform, path = pr
   throw new Error(`Codex binary is not on PATH: ${name}`);
 }
 function findBinary(name) { return resolveExecutable(name); }
+/** The command and argv to spawn, routing Windows `.cmd` and `.bat` through the shell. */
 export function spawnSpec(binary, args, platform = process.platform, comspec = process.env.ComSpec || process.env.COMSPEC || "cmd.exe") {
   const lower = binary.toLowerCase();
   if (platform === "win32" && (lower.endsWith(".cmd") || lower.endsWith(".bat"))) {
@@ -287,6 +321,7 @@ export function spawnSpec(binary, args, platform = process.platform, comspec = p
   }
   return { command: binary, args };
 }
+/** Whether a `codex --version` string is 0.144 or newer, the first release with the config RPCs. */
 export function compatibleVersion(version) {
   const match = String(version).match(/(?:^|\s)v?(\d+)\.(\d+)(?:\.(\d+))?/);
   return !!match && (Number(match[1]) > 0 || Number(match[2]) >= 144);
@@ -301,6 +336,7 @@ function runVersion(binary) {
   });
 }
 
+/** A `codex app-server --stdio` process, framed as JSON-RPC over newline-delimited stdout. */
 export class AppServer {
   constructor(binary) {
     this.binary = binary; this.nextId = 0; this.pending = new Map(); this.buffer = ""; this.stderr = ""; this.closed = false;
@@ -317,6 +353,7 @@ export class AppServer {
   close() { if (this.closed) return; this.closed = true; this.fail(new Error("Codex App Server closed by client")); this.child.kill("SIGTERM"); setTimeout(() => { if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGKILL"); }, 250); }
 }
 
+/** Reads the user layer, the effective config, and which layer supplies each managed field. */
 export async function readConfig(app) {
   const result = await app.request("config/read", { includeLayers: true, cwd: process.cwd() }); const layers = Array.isArray(result.layers) ? result.layers : [];
   const layer = layers.find((item) => item?.name?.type === "user" && item.name.profile == null);
@@ -324,12 +361,16 @@ export async function readConfig(app) {
   const effectiveLayerByField = Object.fromEntries(FIELD_PATHS.map((path) => [path, layers.slice().reverse().find((item) => !absent(getNested(item?.config ?? {}, path)) && Object.is(getNested(item.config, path), getNested(effective, path)))?.name ?? null]));
   return { result, user: layer?.config ?? {}, version: typeof layer?.version === "string" ? layer.version : null, hasUserLayer: Boolean(layer), effective, effectiveLayerByField, effectiveLayer: Object.values(effectiveLayerByField).find(Boolean) ?? null };
 }
+/** Writes edits through `config/batchWrite`, failing when the result is not effective. */
 export async function batchWrite(app, edits, expectedVersion, { allowOverridden = false } = {}) { const result = await app.request("config/batchWrite", { edits, expectedVersion, reloadUserConfig: true }); if (result.status === "okOverridden" && !allowOverridden) { const error = new Error("Codex reported okOverridden; the managed fields are not effective"); error.writeResult = result; throw error; } if (result.status !== "ok" && result.status !== "okOverridden") { const error = new Error(`Unexpected config write status: ${result.status}`); error.writeResult = result; throw error; } if (typeof result.version !== "string") throw new Error("Codex config write did not return a version"); return result; }
 function printFields(label, fields) { console.log(`${label}:`); for (const path of FIELD_PATHS) console.log(`  ${path}: ${absent(fields[path]) ? "<absent>" : JSON.stringify(fields[path])}`); }
 function printEffectiveFields(data) { console.log("Effective values:"); for (const path of FIELD_PATHS) { const layer = data.effectiveLayerByField?.[path]; const name = layer ? `${layer.type || "unknown"}${layer.profile ? `/${layer.profile}` : ""}` : "none"; console.log(`  ${path}: ${absent(currentFields(data.effective)[path]) ? "<absent>" : JSON.stringify(currentFields(data.effective)[path])} (layer: ${name})`); } }
+/** The user's pre-install values, read out of the journal snapshot. */
 export function restoreValues(state) { return Object.fromEntries(FIELD_PATHS.map((path) => [path, state.previous[path].present ? state.previous[path].value : ABSENT])); }
 async function rollback(app, expectedVersion, values) { const result = await batchWrite(app, makeEdits(values), expectedVersion, { allowOverridden: true }); const verified = await readConfig(app); if (!restoreMatchesUser(verified.user, values)) throw new Error("Rollback validation failed; managed fields may remain."); return result; }
+/** Whether the user layer now equals the values a restore aimed at. */
 export function restoreMatchesUser(userConfig, values) { return FIELD_PATHS.every((path) => fieldsEqual(currentFields(userConfig)[path], values[path])); }
+/** Runs an install as a journalled write: stage pending, write, verify, commit, and roll back on any failure. */
 export async function executeInstallTransition({ nextState, target, createdState, version, writePending, writeCommitted, removePending, writeBatch, read, classify }) {
   writePending({ ...nextState, phase: "pending-install" });
   let written;

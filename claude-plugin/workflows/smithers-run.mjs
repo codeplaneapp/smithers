@@ -1,3 +1,4 @@
+/** How Claude Code's /workflows list names and describes this mirror. */
 export const meta = {
   name: 'smithers-run',
   description: 'Launch or attach to a durable Smithers run and mirror it live into /workflows',
