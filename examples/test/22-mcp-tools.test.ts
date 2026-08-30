@@ -36,16 +36,18 @@ it.live("pins what an undeclarable authority does at the cell boundary", () =>
   Effect.gen(function*() {
     const summary = yield* main(join(directory, "pinned.sqlite"))
 
-    // The adapter's own declaration is the conservative wildcard, because an
-    // MCP tool is opaque code it cannot describe.
-    expect(summary.declaredCapabilities).toEqual(["*"])
+    // An MCP tool is opaque code the adapter cannot describe, so it declares
+    // everything the tool could reach. It says so one exact
+    // `namespace:operation:resource` at a time, because the cell boundary
+    // reads a declared capability with `Capability.parse` and answers `None`
+    // for a bare `"*"` — which used to refuse every MCP tool before it ran,
+    // under every envelope including an unrestricted one.
+    expect(summary.declaredCapabilities).toContain("proc:spawn:**")
+    expect(summary.declaredCapabilities).toContain("fs:read:**")
+    expect(summary.declaredCapabilities.every((capability) => capability.split(":").length === 3)).toBe(true)
 
-    // A declared capability is checked as an exact `namespace:operation:resource`
-    // triple, and `"*"` is a pattern, so it parses as nothing and no envelope
-    // admits it. This assertion is a pin, not an endorsement: a cell can reach
-    // an MCP tool only because the host re-declared the grant in `granting`.
-    // If `McpFlows` or the cell boundary later reconciles the two spellings,
-    // this expectation is the thing that says so.
+    // A host that granted something else still admits none of it, and the
+    // refusal names what the tool would have needed.
     expect(summary.ungranted).toContain("capability_refused")
-    expect(summary.ungranted).toContain(`mcp/${serverName}/word_count needs *`)
+    expect(summary.ungranted).toContain(`mcp/${serverName}/word_count needs`)
   }), { timeout: 60_000 })

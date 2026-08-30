@@ -197,7 +197,7 @@ export interface Summary {
   readonly declaredCapabilities: ReadonlyArray<string>
   /** Whether the catalog reached the model's request. */
   readonly disclosed: boolean
-  /** What a cell got back when the same tools kept the adapter's wildcard. */
+  /** What a cell got back under an envelope that covers none of them. */
   readonly ungranted: string
 }
 
@@ -270,13 +270,15 @@ export const main = (filename: string): Effect.Effect<Summary> =>
     const envelope = [new Capability.CapabilityPattern({ action: "proc:spawn", resource: `mcp/${serverName}` })]
     const reading = yield* run([source], scripted(asked), envelope, "titles-1")
 
-    // The same tools, still carrying the adapter's wildcard. A wildcard is a
-    // pattern, and a declared capability is checked as an exact one, so the
-    // widest envelope in the world does not admit it.
+    // The same tools under an envelope that grants something else entirely.
+    // The adapter declares an MCP tool's authority as everything it could
+    // possibly reach, one parseable `namespace:operation:resource` at a time,
+    // so a host that granted only `net:get` admits none of it and the refusal
+    // names the first capability the tool would have needed.
     const ungranted = yield* run(
       [projected],
       reporting(`mcp/${serverName}/word_count`),
-      [new Capability.CapabilityPattern({ action: "*", resource: "*" })],
+      [new Capability.CapabilityPattern({ action: "net:get", resource: "example.invalid" })],
       "titles-ungranted"
     )
 

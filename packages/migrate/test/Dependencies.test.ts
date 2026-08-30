@@ -97,7 +97,16 @@ describe("the scan surface's dependency boundary", () => {
   })
 
   it("keeps the flow-lane packages out of the hard dependencies", () => {
-    expect(Object.keys(manifest.dependencies).sort()).toEqual(["@effect/platform-node", "effect", "typescript"])
+    // `@effect/platform-node-shared` is not a fourth dependency: it is the
+    // half `@effect/platform-node` already installs, pinned at the same exact
+    // version so an npm consumer does not resolve its caret range to a newer
+    // release that carries a second Effect (rc-contract section 9).
+    expect(Object.keys(manifest.dependencies).sort()).toEqual([
+      "@effect/platform-node",
+      "@effect/platform-node-shared",
+      "effect",
+      "typescript"
+    ])
     expect(Object.keys(manifest.optionalDependencies).every((name) => name.startsWith("@smthrs/"))).toBe(true)
     expect(Object.keys(manifest.optionalDependencies)).toContain("@smthrs/registry")
   })

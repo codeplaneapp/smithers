@@ -1,13 +1,34 @@
 /**
  * The cursor table's schema migrations.
  *
+ * The set runs through `@smthrs/database`'s ladder rather than a `Migrator` of
+ * its own. Every database this repository opens through `NodeDatabase.layer`
+ * records what it has applied in one `flows_migrations` table (rc-contract
+ * section 2), and the open refuses a file that carries tables and no such
+ * table — that is how a 0.x `smithers.db` is told apart from a 1.0 one. A
+ * bespoke ledger left `cursors.db` looking exactly like a 0.x file to its own
+ * second open.
+ *
  * @since 1.0.0
  */
+import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as Layer from "effect/Layer"
-import * as Migrator from "effect/unstable/sql/Migrator"
 import initial from "./0001_integration_cursors.ts"
 
-const migrations = { "0001_integration_cursors": initial }
+/**
+ * The integration cursor set, in migration id block 6000.
+ *
+ * The blocks below it are journal `0`, run-store `1000`, step-cache `2000`,
+ * engine-store `3000`, plan `4000`, and time-travel `5000`.
+ *
+ * @category migrations
+ * @since 1.0.0
+ */
+export const set: DatabaseMigrations.MigrationSet = {
+  namespace: "integrations",
+  idOffset: DatabaseMigrations.idBlock * 6,
+  migrations: { "0001_integration_cursors": initial }
+}
 
 /**
  * Applies the integration cursor schema migrations.
@@ -15,10 +36,7 @@ const migrations = { "0001_integration_cursors": initial }
  * @category migrations
  * @since 1.0.0
  */
-export const run = Migrator.make({})({
-  loader: Migrator.fromRecord(migrations),
-  table: "smithers_integration_migrations"
-})
+export const run = DatabaseMigrations.run([set])
 
 /**
  * Runs {@link run} once as a layer.

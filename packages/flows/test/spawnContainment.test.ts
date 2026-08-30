@@ -83,6 +83,17 @@ describe("child-process containment conformance", () => {
       "targets/src/LlmLint.ts",
       "Same private build-graph executor path as `targets/src/Exec.ts`."
     ],
+    [
+      "cli/src/Detached.ts",
+      "`smithers up -d`, the one launcher whose child must OUTLIVE the process that "
+      + "started it. Routing it through the host spawner would kill the engine on the "
+      + "launcher's scope release, which is the opposite of what the verb means. Bounded "
+      + "instead: the child is spawned `detached: true` into its own process group and "
+      + "`unref`ed, the launcher signals that whole group with `terminate()` when the child "
+      + "misses its admission deadline, and the child is itself a `smithers` engine that "
+      + "composes the contained host, so everything IT spawns is inside the ledger and the "
+      + "kill deadline (`packages/cli/test/Detached.test.ts`)."
+    ],
     ...[
       "AgentSession.ts",
       "GitCommit.ts",

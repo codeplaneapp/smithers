@@ -78,8 +78,12 @@ describe("the shipped surface", () => {
   it("names the reserved system flow for every verb the control catalog reserves", () => {
     expect(Verb.find("plan")?.flowId).toBe("system/plan")
     expect(Verb.find("serve")?.flowId).toBe("system/serve")
-    // `gc` and `memory` are Phase 4 verbs with no reserved flow at all.
-    expect(Verb.find("gc")?.flowId).toBeUndefined()
+    // `gc` reserves one too: the catalog projects it as a procedure and the
+    // CLI ships the handler (`Gc.sweep`), so it is a verb with a body rather
+    // than the bodiless plan rc-contract section 4 forbids.
+    expect(Verb.find("gc")?.flowId).toBe("system/gc")
+    // `memory` is the Phase 4 verb with no reserved flow at all.
+    expect(Verb.find("memory")?.flowId).toBeUndefined()
     expect(Verb.find("nonexistent")).toBeUndefined()
   })
 })
