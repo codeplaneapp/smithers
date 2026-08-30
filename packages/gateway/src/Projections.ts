@@ -2,7 +2,7 @@
  * The gateway read path: served projections computed from the control plane.
  *
  * Every projection here is a fold over facts `@smthrs/control` already
- * publishes — `Control.list` for run and flow listings, `Control.watch` for a
+ * publishes: `Control.list` for run and flow listings, `Control.watch` for a
  * run's ordered events. The gateway never opens the engine database, so a
  * projection served to a browser through a relay is the same projection a
  * local reader computes, and a projection cannot drift from the control plane
@@ -211,6 +211,14 @@ export const make = (
    * Deltas for a run-scoped selector. A workspace selector has no single
    * event stream to follow, so its subscription is the snapshot plus
    * keepalives; a client refreshes it by re-subscribing.
+   *
+   * A folded selector recomputes its whole row set per event, because a
+   * projection is a reproducible fold and recomputation is the only delta that
+   * cannot disagree with a fresh snapshot. `run-events` is the exception: its
+   * rows ARE the ordered events, so its delta is the one event that arrived.
+   * Re-reading the history for every event made a subscription quadratic in
+   * run length and re-sent the whole log on each frame, which is the opposite
+   * of what a follower asked for.
    */
   const deltaFrames = (
     selector: GatewaySchema.ProjectionSelector,
@@ -218,10 +226,12 @@ export const make = (
   ): Stream.Stream<GatewaySchema.GatewayFrame, GatewayError> => {
     const runId = scopeOf(selector)
     if (runId === undefined) return Stream.never
+    const delta = (event: ControlSchema.ControlEvent): Effect.Effect<ReadonlyArray<unknown>, GatewayError> =>
+      selector._tag === "run-events" ? Effect.succeed([event]) : rowsFor(selector)
     return control.watch({ runId, afterSequence: after, follow: true }).pipe(
       Stream.mapError((cause) => unavailable(`Following ${runId} failed`, cause)),
       Stream.mapEffect((event) =>
-        Effect.map(rowsFor(selector), (rows): GatewaySchema.GatewayFrame => ({
+        Effect.map(delta(event), (rows): GatewaySchema.GatewayFrame => ({
           _tag: "delta",
           selector,
           cursor: cursorOf(selector, event.sequence),
