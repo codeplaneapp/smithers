@@ -176,6 +176,26 @@ const sourceId = JournalEvent.SourceId.make("/control/executor")
  */
 const abandonedParkAfterMs = Duration.toMillis(Ownership.heartbeatStaleAfter)
 
+/**
+ * Why a parked run is being taken up, which decides whether the hosting guard
+ * applies to it.
+ *
+ * `claimed` is an operator's own `Control.resume` or a steer's wake: the plane
+ * that asked has ALREADY claimed the control row (`ControlLive.runMutation`
+ * and the steer wake both call `ControlRuntime.resume` before they journal),
+ * and a wedged run is by definition one nobody is driving. Guarding it would
+ * turn the operator's remedy into a claimed row nothing re-drives.
+ *
+ * `delegated` is the approval seam, where the decision may have been taken in
+ * any process holding the control database and the run belongs to whichever
+ * one parked it. `requestedAtMs` is the age of the durable delegation, and only
+ * the durable follower has one: a process that has just decided an approval
+ * knows nothing about the host from having decided it.
+ */
+type Uptake =
+  | { readonly _tag: "claimed" }
+  | { readonly _tag: "delegated"; readonly requestedAtMs?: number | undefined }
+
 const assistantText = (message: ModelRequest.AssistantMessage): string =>
   message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n")
 
@@ -1281,18 +1301,19 @@ export const make = (
      */
     const hostsPark = (
       runId: string,
-      requestedAtMs: number | undefined
+      uptake: Uptake
     ): Effect.Effect<boolean, never> =>
       Effect.gen(function*() {
-        const summary = yield* runtime.getRun(runId).pipe(
+        if (uptake._tag === "claimed") return true
+        const parkedBy = yield* runtime.getRun(runId).pipe(
           Effect.map((run) => run.parkedBy),
           Effect.catchCause(() => Effect.succeed(undefined))
         )
-        if (summary === undefined) return true
-        if (parkFences.get(runId) === summary) return true
-        if (requestedAtMs === undefined) return false
+        if (parkedBy === undefined) return true
+        if (parkFences.get(runId) === parkedBy) return true
+        if (uptake.requestedAtMs === undefined) return false
         const nowMs = yield* Clock.currentTimeMillis
-        return nowMs - requestedAtMs >= abandonedParkAfterMs
+        return nowMs - uptake.requestedAtMs >= abandonedParkAfterMs
       })
 
     /**
@@ -1312,21 +1333,18 @@ export const make = (
      * awaits it, so one process's re-drives stay serialized; the port forks it,
      * so a control-plane call returns as soon as the run is moving again.
      *
-     * `requestedAtMs` is when the durable delegation being taken up was
-     * recorded, and only the durable follower has one: a decision taken in
-     * this process arrives with no age at all, and a process deciding for a
-     * run it does not host must never take it up on the strength of having
-     * just decided it.
+     * `uptake` says which seam asked. See {@link Uptake}: an operator's own
+     * resume is not guarded, an approval delegation is.
      */
     const takeUpResume = (
       runId: string,
       drive: (runId: string) => Effect.Effect<void>,
-      requestedAtMs?: number | undefined
+      uptake: Uptake
     ): Effect.Effect<ControlExecutor.ResumeUptake, never> =>
       Effect.gen(function*() {
         const parked = yield* awaitParked(runId, 500).pipe(Effect.catchCause(() => Effect.succeed(false)))
         if (!parked) return "unknown" as const
-        const hosted = yield* hostsPark(runId, requestedAtMs)
+        const hosted = yield* hostsPark(runId, uptake)
         if (!hosted) return "unknown" as const
         const claimed = yield* runtime.resume(runId).pipe(
           Effect.as(true),
@@ -1350,7 +1368,18 @@ export const make = (
       const subscription = yield* journal.changes
       yield* Stream.fromSubscription(subscription).pipe(
         Stream.filter((entry) => entry.eventType === "control.run.resume" || entry.eventType === "control.run.resumed"),
-        Stream.mapEffect((entry) => takeUpResume(entry.runId, resumeExecution), { concurrency: 1 }),
+        Stream.mapEffect(
+          (entry) =>
+            takeUpResume(
+              entry.runId,
+              resumeExecution,
+              // `control.run.resume` is the operator's own claim, already taken
+              // in this process by the call that journaled it; `resumed` is the
+              // approval delegation, which belongs to whoever parked the run.
+              entry.eventType === "control.run.resume" ? { _tag: "claimed" } : { _tag: "delegated" }
+            ),
+          { concurrency: 1 }
+        ),
         Stream.runDrain
       )
     }).pipe(
@@ -1397,7 +1426,7 @@ export const make = (
           takeUpResume(
             entry.runId,
             (runId) => Effect.asVoid(Effect.forkIn(resumeExecution(runId), scope)),
-            entry.requestedAtMs
+            { _tag: "delegated", requestedAtMs: entry.requestedAtMs }
           ).pipe(
             Effect.flatMap((uptake) =>
               uptake === "resuming" ? runtime.clearResume(entry.runId, entry.sequence) : Effect.void
@@ -1489,7 +1518,9 @@ export const make = (
       requestCancel: Effect.fn("AgentSession.requestCancel")((input) => Effect.provide(requestCancel(input), services)),
       deliverSignal: Effect.fn("AgentSession.deliverSignal")((input) => Effect.provide(deliverSignal(input), services)),
       resumeRun: Effect.fn("AgentSession.resumeRun")((input) =>
-        takeUpResume(input.runId, (runId) => Effect.asVoid(Effect.forkIn(resumeExecution(runId), scope)))
+        takeUpResume(input.runId, (runId) => Effect.asVoid(Effect.forkIn(resumeExecution(runId), scope)), {
+          _tag: "delegated"
+        })
       )
     })
   })

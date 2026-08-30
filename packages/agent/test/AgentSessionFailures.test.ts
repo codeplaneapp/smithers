@@ -704,6 +704,48 @@ describe("the executor's resume bridge", () => {
     expect(attempted).toEqual(["run-refused", "run-accepted"])
   })
 
+  it("re-drives a run another host parked when an operator's own resume asks for it", async () => {
+    const record = recorder()
+    const resumed: Array<string> = []
+    const drove = Deferred.makeUnsafe<void>()
+    const hub = await Effect.runPromise(PubSub.unbounded<JournalEvent.Entry>())
+    const attempted = await withExecutor(
+      record,
+      {
+        journal: {
+          changes: Effect.tap(PubSub.subscribe(hub), () => Deferred.succeed(record.subscribed, void 0))
+        },
+        runtime: {
+          getRun: () => Effect.succeed({ ...launchInput.run, parkedBy: "fence-another-host" })
+        },
+        engine: (engine) =>
+          ({
+            ...engine,
+            poll: () => Effect.succeed(Option.some({ _tag: "Suspended" })),
+            resume: (_flow: unknown, executionId: string) =>
+              Effect.sync(() => {
+                resumed.push(executionId)
+                Deferred.doneUnsafe(drove, Effect.void)
+              })
+          }) as unknown as EngineService
+      },
+      () =>
+        Effect.gen(function*() {
+          yield* Deferred.await(record.subscribed)
+          yield* PubSub.publish(hub, entry("run-wedged", "control.run.resume"))
+          yield* Deferred.await(drove)
+          return resumed
+        })
+    )
+
+    // `control.run.resume` is an operator's own remedy, and the call that
+    // journaled it already claimed the row in this process. A wedged run is by
+    // definition one nobody is driving, so the hosting guard — which exists to
+    // stop an APPROVAL from taking a run away from its host — does not apply
+    // here. Guarding it would leave the operator a claimed row nothing re-drives.
+    expect(attempted).toEqual(["run-wedged"])
+  })
+
   it("ignores a journal entry that is not a resume event", async () => {
     const record = recorder()
     const resumed: Array<string> = []
