@@ -5,10 +5,10 @@
 Post-integration audit against the parity integration tree (flows HEAD 9230168 plus the ten parity lanes: 16 commits, 326 files, +43693/-624, exported as patches/parity-integration.diff). Counts over 95 audited features (99 tracked items; four sections carry a second item):
 
 - Yes before this round: 33
-- Yes (1.0.0-rc.0), closed by the parity lanes and verified in the integration tree: 35
+- Yes (1.0.0-rc.0), closed by the parity lanes and verified in the integration tree: 36
 - Partial after integration: 7 (Human tasks, Child cancellation and process containment, Check suite, Kanban, Runbook, Merge queue, Sidecar)
 - Deferred for rc.0 under Phase 5 enforcement or scope ruling: 11 items (A16, A28b, A58b, A60b, A62, A67, A72, A73, A89a, A89b, A93). Every one is listed once on `docs/pages/release/known-limitations.md` under its Phase 5 exclusion id; A89a (Bun durable engine, X-18) and the 0.x database refusal (X-13) are enforced in `packages/database/src/node/NodeDatabase.ts`
-- Pending Phase 4: 10 (External integrations, CLI, MCP server, Gateway and RPC, Product UI, Electric sync proxy, Workflow-specific UIs, Init pack and starters, Open code review, Docs pipeline)
+- Pending Phase 4: 9 (CLI, MCP server, Gateway and RPC, Product UI, Electric sync proxy, Workflow-specific UIs, Init pack and starters, Open code review, Docs pipeline)
 - Plue-owned: 2 (Usage metering and quotas, Hosted tenancy and billing)
 - Not a runtime feature: 1 (Docs-driven development)
 
@@ -855,8 +855,16 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## External integrations
 
-- Parity: Pending Phase 4 (integrations)
-- Gap: old packages/integrations and packages/telegram depend on JSX and the old database; they port onto Action, `@smthrs/triggers` Webhook and Channel, Control, and the Credential stores, with vendor adapters bound for the plugins repository or Plue
+- Parity: Yes (1.0.0-rc.0)
+- New: `@smthrs/integrations` ports GitHub, Linear, and Telegram onto Action, `@smthrs/triggers` Webhook and Channel, Control, and the Credential stores
+- Evidence: packages/integrations/test/Actions.test.ts::posts a comment and decodes what GitHub returned
+- Evidence: packages/integrations/test/Actions.test.ts::resolves the team by key and files the issue
+- Evidence: packages/integrations/test/Actions.test.ts::sends a message and reports every chunk id
+- Evidence: packages/integrations/test/WebhookChannel.test.ts::accepts the correctly signed delivery and starts the flow
+- Evidence: packages/integrations/test/WebhookChannel.test.ts::applies a correctly signed delivery once and reports the retry as AlreadyApplied
+- Evidence: packages/integrations/test/GitHubLive.test.ts (live, GITHUB_TOKEN)
+- Evidence: packages/integrations/test/LinearLive.test.ts (live, LINEAR_API_KEY)
+- Note: the JSX components and the old signal delivery are gone; Telegram's live suite is written and skips without TELEGRAM_BOT_TOKEN
 
 ## Schedules
 
