@@ -305,6 +305,30 @@ describe("the ports when a store answers badly", () => {
     expect((failure as PersistenceError).operation).toBe("AgentSession.requestCancel")
   })
 
+  it("reports the store's atomic terminal answer when the run settles mid-request", async () => {
+    // The guard read and the write are not one transaction. This is the run
+    // that settles inside that window: `get` still answers `suspended`, so the
+    // pre-read lets the request through, and the store — which decides
+    // terminality in the same statement that writes the column — answers
+    // `Terminal`. Mapping that to "recorded" is what let `Control.cancel`
+    // transition a control row the engine row disagrees with (triage B-11).
+    const raced = RunStore.layerNoop({
+      get: (runId: string) =>
+        Effect.succeed({
+          runId,
+          status: "suspended",
+          cancelRequestedAtMs: null
+        } as never),
+      requestCancel: () => Effect.succeed({ _tag: "Terminal", status: "cancelled" } as const)
+    })
+
+    const record = await Effect.runPromise(
+      AgentSession.requestCancel({ runId: "ports-cancel-raced" }).pipe(Effect.provide(raced))
+    )
+
+    expect(record).toEqual({ _tag: "Terminal", status: "cancelled" })
+  })
+
   it("refuses a signal to a run parked on something a signal cannot supply", async () => {
     const observed = await Effect.runPromise(
       Effect.all([

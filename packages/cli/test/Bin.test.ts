@@ -25,6 +25,7 @@ import { DatabaseSync } from "node:sqlite"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import * as Agents from "../src/Agents.ts"
+import * as Environment from "../src/Environment.ts"
 import { Version } from "../src/index.ts"
 import * as Unsupported from "../src/Unsupported.ts"
 import * as Verb from "../src/Verb.ts"
@@ -230,19 +231,66 @@ describe("the SQLite-only database contract", processBudget, () => {
     expect(JSON.parse(result.stdout)).toMatchObject({ _tag: "flows" })
   })
 
-  it("refuses `--backend pglite` with unsupported_database", () => {
+  it("refuses `--backend pglite` with rc-contract section 2's sentence", () => {
     const result = run(["--backend", "pglite", "ls"])
 
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain("unsupported_database")
-    expect(result.stderr).toContain("SQLite only")
+    // The whole sentence, not a substring: section 2 fixes it, and a
+    // paraphrase that still contains "unsupported_database" is a contract
+    // change an operator's script would not see coming.
+    expect(result.stderr.trim()).toBe(Environment.unsupportedBackendMessage)
   })
 
   it("refuses SMITHERS_BACKEND=postgres, which a script exports rather than passes", () => {
     const result = run(["ls"], { SMITHERS_BACKEND: "postgres" })
 
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain("unsupported_database")
+    expect(result.stderr.trim()).toBe(Environment.unsupportedBackendMessage)
+  })
+
+  it("says once that a PostgreSQL environment is ignored, and still succeeds", () => {
+    const result = run(["--json", "ls"], {
+      SMITHERS_POSTGRES_URL: "postgres://localhost/smithers",
+      SMITHERS_TEST_PG_URL: "postgres://localhost/test"
+    })
+
+    // A notice, not a refusal: section 2 says these names are ignored, and an
+    // ignored name must not change what the command does or what it returns.
+    expect(result.status).toBe(0)
+    expect(JSON.parse(result.stdout)).toMatchObject({ _tag: "flows" })
+    expect(result.stderr.split("\n").filter((line) => line.startsWith("ignored: "))).toEqual([
+      "ignored: SMITHERS_POSTGRES_URL has no effect in 1.0.0-rc.0 (SQLite only)",
+      "ignored: SMITHERS_TEST_PG_URL has no effect in 1.0.0-rc.0 (SQLite only)"
+    ])
+  })
+
+  it("refuses a 0.x database file by its contract code, on stderr", () => {
+    const cwd = mkdtempSync(temporaryDirectoryPrefix)
+    try {
+      mkdirSync(join(cwd, ".flows"))
+      // One table and no `flows_migrations`: exactly the shape the guard
+      // refuses, and exactly the shape a 0.x `smithers.db` has.
+      const zeroX = new DatabaseSync(join(cwd, ".flows", "control.db"))
+      zeroX.exec("CREATE TABLE _smithers_runs (id TEXT PRIMARY KEY)")
+      zeroX.close()
+
+      const result = spawnSync(process.execPath, ["--no-warnings", executable, "ps"], {
+        cwd,
+        encoding: "utf8",
+        timeout: 180_000,
+        env: { ...process.env }
+      })
+
+      expect(result.status).toBe(1)
+      expect(result.stdout).toBe("")
+      expect(result.stderr).toContain("unsupported_database_file: ")
+      expect(result.stderr).toContain("is not a Smithers 1.0 database")
+      // The tagged-error name is how the value travelled, not what the
+      // contract promises an operator or what a script greps for.
+      expect(result.stderr).not.toContain("@smthrs/database/UnsupportedDatabase")
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
   })
 })
 

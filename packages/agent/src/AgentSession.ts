@@ -708,14 +708,14 @@ export const requestCancel = (
     // is exactly what this port did before the guard existed.
     //
     // The read and the write are not one transaction, and the window between
-    // them is a real one, not a harmless one. A run that settles inside it
-    // still answers `recorded`, and `Control.cancel` goes on to transition the
-    // control row: the engine ignores the request its cancel poll skips for a
-    // terminal row, and the CONTROL row is the half left disagreeing. Closing
-    // the window needs the store to decide terminality in the same statement
-    // that writes the column, which is `RequestCancelOutcome`'s `Terminal` in
-    // the cancel-durability lane; mapping that outcome here — one line at the
-    // return below — makes this read an optimization and the answer atomic.
+    // them was a real one: a run that settled inside it still answered
+    // `recorded`, and `Control.cancel` went on to transition the control row
+    // while the engine ignored the request its cancel poll skips for a terminal
+    // row — the terminal disagreement B-11 forbids, with the CONTROL row as the
+    // half left wrong. `RunStore.requestCancel` now decides terminality in the
+    // same statement that writes the column, so its `Terminal` outcome is the
+    // atomic answer and this read is only an optimization: it saves a write on
+    // a row that is already settled, and a race it loses is decided below.
     const current = yield* runs.get(input.runId).pipe(
       Effect.map((row) => row.status as string | undefined),
       Effect.catch(() => Effect.succeed(undefined))
@@ -724,6 +724,7 @@ export const requestCancel = (
       return { _tag: "Terminal", status: current } as const
     }
     const outcome = yield* runs.requestCancel(input.runId, at).pipe(Effect.mapError(failure(input.runId)))
+    if (outcome._tag === "Terminal") return { _tag: "Terminal", status: outcome.status } as const
     return outcome._tag === "NotFound" ? "unknown" : "recorded"
   })
 

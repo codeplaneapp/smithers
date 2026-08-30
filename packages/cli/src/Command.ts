@@ -14,6 +14,7 @@
  * @since 1.0.0
  */
 import { Control as ControlService, ControlSchema } from "@smthrs/control"
+import * as UnsupportedBackend from "@smthrs/database/UnsupportedBackend"
 import * as ResolveJj from "@smthrs/jj/node/resolveJjBinary"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import type * as Namespace from "@smthrs/memory/Namespace"
@@ -109,6 +110,16 @@ const refuseRemoved = (
  */
 const guardGlobals = Effect.gen(function*() {
   const root = yield* rootCommand
+  // A 0.x PostgreSQL or PGlite project still exports its connection strings.
+  // rc.0 ignores them and says so, once per invocation, because a silently
+  // ignored connection string is how a project ends up running against SQLite
+  // while believing it runs against PostgreSQL. A notice, not a refusal: the
+  // exit code and the command's result do not move (rc-contract section 2; the
+  // names and the sentence are @smthrs/database's, pinned per name in
+  // packages/database/test/UnsupportedBackend.test.ts).
+  for (const name of UnsupportedBackend.ignoredNames(process.env)) {
+    process.stderr.write(`${UnsupportedBackend.ignoredNotice(name)}\n`)
+  }
   const backend = Option.getOrUndefined(root.backend)
   const refusal = Environment.unsupportedBackend(backend)
   if (refusal !== undefined) return yield* Effect.fail(new CliError.UnsupportedError({ message: refusal }))

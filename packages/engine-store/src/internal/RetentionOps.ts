@@ -240,17 +240,16 @@ const terminalList = terminalStatuses.map((status) => `'${status}'`).join(", ")
  */
 export const lineagePrelude = (
   options: { readonly parentEdges: boolean } = { parentEdges: true }
-): string =>
-  `
+): string => `
       WITH RECURSIVE
         link(child_id, parent_id) AS (
           ${
-    options.parentEdges
-      ? `SELECT child_id, parent_id FROM flows_run_parents
+  options.parentEdges
+    ? `SELECT child_id, parent_id FROM flows_run_parents
           UNION
           `
-      : ``
-  }SELECT run_id, parent_run_id FROM flows_runs WHERE parent_run_id IS NOT NULL
+    : ``
+}SELECT run_id, parent_run_id FROM flows_runs WHERE parent_run_id IS NOT NULL
         ),
         live(run_id) AS (
           SELECT run_id FROM flows_runs WHERE status NOT IN (${terminalList})

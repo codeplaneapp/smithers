@@ -6,6 +6,7 @@
  * @since 0.1.0
  */
 import { NodeRuntime } from "@effect/platform-node"
+import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import { Cause, Effect, Exit, Runtime } from "effect"
 import { CliError as EffectCliError, Command } from "effect/unstable/cli"
 import * as CliError from "./CliError.ts"
@@ -41,6 +42,14 @@ process.once("SIGTERM", onSigterm)
 const report = (error: unknown): void => {
   const message = error instanceof CliError.UsageError || error instanceof CliError.UnsupportedError
     ? error.message
+    // A refused database open is a defect by design: `NodeDatabase.layer` keeps
+    // the `never` error channel eleven packages compose against, so the refusal
+    // arrives here rather than as a typed failure. Render it by its contract
+    // code, which is what rc-contract section 2 promises an operator and what a
+    // script greps for; the tagged-error name is an implementation detail of
+    // how the value travelled.
+    : NodeDatabase.isUnsupportedDatabase(error)
+    ? `${error.code}: ${error.message}`
     : error instanceof Error
     ? `${error.name}: ${error.message}`
     : String(error)

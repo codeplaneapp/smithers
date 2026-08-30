@@ -43,6 +43,16 @@ const engineProject = (
   staged.push(root)
   mkdirSync(join(root, ".flows"), { recursive: true })
   const database = new DatabaseSync(join(root, ".flows", "engine.db"))
+  // The 1.0 marker table: `NodeDatabase.layer` refuses to open a file that
+  // holds tables and no `flows_migrations`, which is how a 0.x `smithers.db`
+  // is told apart from this one.
+  database.exec(`CREATE TABLE flows_migrations (
+    namespace TEXT NOT NULL,
+    id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    applied_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (namespace, id)
+  )`)
   database.exec(`CREATE TABLE flows_runs (
     run_id TEXT PRIMARY KEY,
     status TEXT NOT NULL,
@@ -50,18 +60,28 @@ const engineProject = (
     finished_at_ms INTEGER,
     parent_run_id TEXT REFERENCES flows_runs(run_id)
   )`)
+  // No foreign key, exactly as the engine declares it: the two tables live in
+  // different migration lanes, and the trigger is what keeps edges from
+  // outliving their runs.
   database.exec(`CREATE TABLE flows_run_parents (
-    child_id TEXT NOT NULL REFERENCES flows_runs(run_id),
-    parent_id TEXT NOT NULL REFERENCES flows_runs(run_id),
+    child_id TEXT NOT NULL,
+    parent_id TEXT NOT NULL,
+    seq BIGINT NOT NULL,
     PRIMARY KEY (child_id, parent_id)
   )`)
+  database.exec(`CREATE TRIGGER flows_run_parents_gc
+    AFTER DELETE ON flows_runs
+    BEGIN
+      DELETE FROM flows_run_parents
+      WHERE child_id = OLD.run_id OR parent_id = OLD.run_id;
+    END`)
   for (const run of runs) {
     database
       .prepare("INSERT INTO flows_runs (run_id, status, created_at_ms, finished_at_ms) VALUES (?, ?, ?, ?)")
       .run(run.runId, run.status, 1, run.finishedAtMs)
   }
   for (const [child, parent] of edges) {
-    database.prepare("INSERT INTO flows_run_parents (child_id, parent_id) VALUES (?, ?)").run(child, parent)
+    database.prepare("INSERT INTO flows_run_parents (child_id, parent_id, seq) VALUES (?, ?, 0)").run(child, parent)
   }
   database.close()
   return root

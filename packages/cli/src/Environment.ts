@@ -112,6 +112,22 @@ export const readInteger = (environment: Source, name: string): number | undefin
 }
 
 /**
+ * The refusal sentence, verbatim from rc-contract section 2.
+ *
+ * The contract fixes the whole sentence, so this is a constant rather than a
+ * template. An interpolated value cannot be asserted verbatim, and the two
+ * clauses an interpolated version drops are the ones an operator needs: which
+ * backends are unavailable, and what to do next. Repeating the value they
+ * typed is neither.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const unsupportedBackendMessage: string =
+  "unsupported_database: 1.0.0-rc.0 supports local SQLite only. PostgreSQL and PGlite are not available. " +
+  "Unset SMITHERS_BACKEND or set it to sqlite. See https://smithers.sh/migration/1.0#databases"
+
+/**
  * The database-backend refusal required by rc-contract section 2.
  *
  * `sqlite` and an unset value are the supported configuration; every other
@@ -122,11 +138,5 @@ export const readInteger = (environment: Source, name: string): number | undefin
  * @category getters
  * @since 1.0.0
  */
-export const unsupportedBackend = (value: string | undefined): string | undefined => {
-  if (value === undefined || value === "" || value === "sqlite") return undefined
-  // rc-contract section 2's "Exact behavior" sentence, verbatim: an operator's
-  // script greps for it, and it is the one message that names the fix.
-  return `unsupported_database: 1.0.0-rc.0 supports local SQLite only. ` +
-    `PostgreSQL and PGlite are not available. Unset SMITHERS_BACKEND or set it to sqlite. ` +
-    `See https://smithers.sh/migration/1.0#databases`
-}
+export const unsupportedBackend = (value: string | undefined): string | undefined =>
+  value === undefined || value === "" || value === "sqlite" ? undefined : unsupportedBackendMessage
