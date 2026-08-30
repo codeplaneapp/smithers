@@ -429,7 +429,7 @@ importers:
         specifier: 1.0.0-rc.0
         version: link:../packages/engine-store
       '@smthrs/evals':
-        specifier: 0.1.0
+        specifier: 1.0.0-rc.0
         version: link:../packages/evals
       '@smthrs/flow':
         specifier: 1.0.0-rc.0

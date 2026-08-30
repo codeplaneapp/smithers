@@ -17,7 +17,7 @@
     "@smthrs/database": "1.0.0-rc.0",
     "@smthrs/engine": "1.0.0-rc.0",
     "@smthrs/engine-store": "1.0.0-rc.0",
-    "@smthrs/evals": "0.1.0",
+    "@smthrs/evals": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
     "@smthrs/flows": "1.0.0-rc.0",
     "@smthrs/harness": "1.0.0-rc.0",
