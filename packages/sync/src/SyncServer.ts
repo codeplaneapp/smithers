@@ -9,6 +9,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as PubSub from "effect/PubSub"
 import * as Stream from "effect/Stream"
 import type * as Rpc from "effect/unstable/rpc/Rpc"
 import type * as RpcGroup from "effect/unstable/rpc/RpcGroup"
@@ -82,10 +83,60 @@ const cursorOf = (
 ): JournalEvent.Seq | undefined => cursors.find((cursor) => cursor.runId === runId)?.afterSeq
 
 /**
+ * Largest number of journal reads one workspace subscription keeps open at
+ * once.
+ *
+ * A workspace subscription serves every run it covers, and every open read is
+ * a cursor plus a page buffer. Without a bound the cost of one follower is the
+ * size of the workspace: a thousand-run workspace opened a thousand journal
+ * streams the moment a subscription started, whether or not the follower ever
+ * read from them, and a follower that stalled held all of them. Sixty-four
+ * bounds what one follower costs without bounding what it sees: the workspace
+ * tail visits every covered run each round, so a run past the bound waits for
+ * a slot for the length of one round rather than being starved.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const defaultConcurrency = 64
+
+/**
+ * How long a workspace subscription waits before re-reading the runs it
+ * covers, when nothing announces a change, in milliseconds.
+ *
+ * A workspace tail is a fan-in over many runs, and the runs another engine
+ * process owns reach this process only through the database. rc.0 has no
+ * cross-process wake, so the interval is the whole of the freshness policy for
+ * them: a follower sees an entry within one interval of it being durable. A
+ * second matches the rest of the rc.0 posture — the heartbeat sweep, the
+ * cancel poll, and {@link RunCatalog.defaultPollIntervalMs}.
+ *
+ * It is not what an in-process append waits for. An entry this process commits
+ * is published on `Journal.changes`, and a workspace subscription that covers
+ * its run wakes the round on it, so a follower beside the writer sees it at
+ * once rather than at the next tick. A run-scoped subscription is likewise
+ * unaffected: it follows one journal stream directly and keeps that stream's
+ * wake.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const defaultTailIntervalMs = 1000
+
+/**
+ * Entries one workspace tail read pulls per run per page. A round reads at
+ * most `concurrency` pages at once, so this is the page half of the memory one
+ * follower costs; a run with more unserved entries than this is served over
+ * consecutive pages inside the same round.
+ */
+const tailBatchSize = 256
+
+/**
  * Read-path policy.
  *
  * The default caps the encoded entries of one read page or one subscription
- * frame at 1 MiB.
+ * frame at 1 MiB, and the run streams one subscription holds open at
+ * {@link defaultConcurrency}.
  *
  * @category models
  * @since 0.1.0
@@ -96,6 +147,18 @@ export interface Options {
    * carry, in bytes. Defaults to {@link SyncProtocol.defaultMaxFrameBytes}.
    */
   readonly maxFrameBytes?: number | undefined
+  /**
+   * Largest number of journal reads one workspace subscription keeps open at
+   * once. Defaults to {@link defaultConcurrency}.
+   */
+  readonly concurrency?: number | undefined
+  /**
+   * How long a workspace subscription waits before re-reading the runs it
+   * covers, when nothing wakes it — no journal entry committed in this
+   * process, no catalog announcement — in milliseconds. Defaults to
+   * {@link defaultTailIntervalMs}.
+   */
+  readonly tailIntervalMs?: number | undefined
 }
 
 /**
@@ -107,6 +170,18 @@ export interface Options {
  * paged to its durable tail. A page or frame whose encoded entries exceed the
  * frame ceiling is refused with `frame_too_large` instead of served, so one
  * oversized journal payload cannot take down every follower that pulls it.
+ *
+ * A workspace subscription's fan-out is bounded without bounding what it
+ * serves. It reads every run it covers — the runs the request covers plus the
+ * runs the catalog announces while it is live — in rounds, at most
+ * `Options.concurrency` journal reads open at once, repeating each round on a
+ * journal entry committed in this process, on a catalog announcement, or after
+ * `Options.tailIntervalMs`. The memory one follower costs is a function of the
+ * bound, not of the workspace's size, and no run is starved by the runs ahead
+ * of it. The interval is therefore the freshness policy for the runs another
+ * process owns, not for the runs written beside the follower. A run-scoped
+ * subscription follows that one run's journal stream directly and keeps its
+ * in-process wake.
  *
  * Authorization is fail-closed along two boundaries, both consulted per
  * request:
@@ -134,6 +209,8 @@ export const makeLiveWith = (
     const catalog = yield* RunCatalog.RunCatalog
     const share = yield* Effect.serviceOption(BranchShare.BranchShare)
     const maxFrameBytes = options.maxFrameBytes ?? SyncProtocol.defaultMaxFrameBytes
+    const concurrency = options.concurrency ?? defaultConcurrency
+    const tailIntervalMs = options.tailIntervalMs ?? defaultTailIntervalMs
 
     /** Refuses any page or frame whose encoded entries outgrow the ceiling. */
     const guardFrameBytes = (bytes: number): Effect.Effect<void, SyncError> =>
@@ -300,23 +377,131 @@ export const makeLiveWith = (
       )
     }
 
+    /**
+     * The live tail of a whole workspace.
+     *
+     * A journal run stream is replay-then-follow: it never ends. One such
+     * stream per run is therefore not something a bound can be put on and
+     * still serve the workspace — a bounded `Stream.flatMap` over streams that
+     * never end fills its slots with the first `concurrency` runs and no run
+     * behind them is ever attached. The workspace tail inverts that. It reads
+     * each covered run's unserved entries as a finite page walk, so the bound
+     * limits how many reads are open at once and every round still visits
+     * every run, and it repeats the round on a wake — a journal entry
+     * committed in this process for a covered run, or a catalog announcement —
+     * or on {@link defaultTailIntervalMs}. Memory is a function of the bound;
+     * freshness of another process's writes is a function of the interval;
+     * neither is a function of how many runs the workspace holds.
+     *
+     * A run-scoped subscription does not go through here: it follows one
+     * journal stream directly (see {@link runStream}) and keeps that stream's
+     * in-process wake.
+     */
+    const workspaceStream = (
+      covering: ReadonlyArray<JournalEvent.RunId>,
+      request: SyncProtocol.SubscribeRequest
+    ): Stream.Stream<SyncProtocol.Frame, SyncError> =>
+      Stream.unwrap(Effect.gen(function*() {
+        // The runs this subscription serves, and how far each has been served.
+        // Both grow while it is live: the catalog announces the runs the
+        // workspace gains after the subscription attached.
+        const served = new Map<JournalEvent.RunId, JournalEvent.Seq | undefined>()
+        const cover = (runId: JournalEvent.RunId): void => {
+          if (!served.has(runId)) served.set(runId, cursorOf(request.cursors, runId))
+        }
+        for (const runId of covering) cover(runId)
+
+        // Sliding by one: a wake published while a round is running is
+        // remembered, and never more than one round's worth of them.
+        const wake = yield* PubSub.sliding<void>(1)
+        const woken = yield* PubSub.subscribe(wake)
+
+        /** One run's unserved entries, as frames. Finite by construction. */
+        const tail = (runId: JournalEvent.RunId): Stream.Stream<SyncProtocol.Frame, SyncError> =>
+          Stream.unwrap(Effect.gen(function*() {
+            const after = served.get(runId)
+            const page = yield* journal.entries({
+              runId,
+              ...(after === undefined ? {} : { after }),
+              limit: tailBatchSize
+            }).pipe(Effect.mapError(journalFailure))
+            yield* guardEntryChunk(page.entries)
+            const frames: Array<SyncProtocol.Frame> = []
+            let previous = after === undefined ? -1 : after
+            for (const accepted of page.entries) {
+              frames.push({
+                _tag: "Entries",
+                runId,
+                fromSeq: (previous + 1) as JournalEvent.Seq,
+                toSeq: accepted.seq,
+                entries: [accepted]
+              })
+              previous = accepted.seq
+            }
+            const last = page.entries.at(-1)
+            // An empty page ends the walk whatever the page claims, so a
+            // journal that reports more without returning any cannot spin.
+            if (last === undefined) return Stream.empty
+            served.set(runId, last.seq)
+            return page.hasMore
+              ? Stream.concat(Stream.fromIterable(frames), Stream.suspend(() => tail(runId)))
+              : Stream.fromIterable(frames)
+          }))
+
+        /** One pass over every covered run, `concurrency` reads open at most. */
+        const round = Stream.suspend(() =>
+          Stream.flatMap(Stream.fromIterable(Array.from(served.keys())), tail, { concurrency })
+        )
+
+        // Announcements cover the run and wake the tail. Draining keeps this a
+        // control path that emits nothing, while a refusal to authorize an
+        // announced run still fails the subscription rather than being lost in
+        // a forked fiber.
+        const announcements = Stream.filterEffect(
+          catalog.changes,
+          (runId) => canFollow(runId, request.capability)
+        ).pipe(
+          Stream.tap((runId) => Effect.andThen(Effect.sync(() => cover(runId)), PubSub.publish(wake, undefined))),
+          Stream.drain
+        )
+
+        // An entry committed in this process wakes the round it belongs to.
+        // The interval is the freshness policy for the runs another engine
+        // process owns, which reach this one only through the database; it
+        // must not also be what a follower waits for an entry written beside
+        // it. `Journal.changes` is one process-wide sliding feed of every
+        // committed entry, so this costs one subscription per workspace
+        // subscription — not one per run — and the fan-out bound is unchanged.
+        // A run this subscription does not cover is left to the announcement
+        // path, which covers it and wakes the round itself. A wake the feed
+        // slides away under a burst costs its entry at most one interval,
+        // which is what a write from another process already waits.
+        const commits = yield* journal.changes
+        const appends = Stream.fromSubscription(commits).pipe(
+          Stream.filter((entry) => served.has(entry.runId)),
+          Stream.tap(() => PubSub.publish(wake, undefined)),
+          Stream.drain
+        )
+
+        const ticks = Stream.fromEffectRepeat(
+          Effect.raceFirst(PubSub.take(woken), Effect.sleep(tailIntervalMs))
+        )
+
+        return Stream.merge(
+          Stream.merge(
+            Stream.concat(round, Stream.flatMap(ticks, () => round)),
+            announcements
+          ),
+          appends
+        )
+      }))
+
     const subscribe = (request: SyncProtocol.SubscribeRequest): Stream.Stream<SyncProtocol.Frame, SyncError> =>
       Stream.unwrap(
         Effect.map(runIdsFor(request.scope, request.capability), (runIds) =>
           request.scope._tag === "Run"
             ? runStream(request.scope.runId, request.cursors)
-            : Stream.merge(
-              Stream.flatMap(
-                Stream.fromIterable(runIds),
-                (runId) => runStream(runId, request.cursors),
-                { concurrency: "unbounded" }
-              ),
-              Stream.flatMap(
-                Stream.filterEffect(catalog.changes, (runId) => canFollow(runId, request.capability)),
-                (runId) => runStream(runId, request.cursors),
-                { concurrency: "unbounded" }
-              )
-            ))
+            : workspaceStream(runIds, request))
       ).pipe(Stream.take(request.credit))
 
     return make({ read, subscribe })

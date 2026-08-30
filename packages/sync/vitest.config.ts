@@ -5,6 +5,14 @@ import { defineConfig } from "vitest/config"
 export default defineConfig({
   test: {
     environment: "node",
+    // The retained-heap assertion in ServerSoak compares heapUsed across a
+    // forced collection; without --expose-gc the measurement floats with
+    // machine load (observed ~78 MB vs the 64 MB budget on a busy host).
+    // `execArgv` is top level in Vitest 4; the 3.x `poolOptions.forks.execArgv`
+    // shape is accepted by the config type and silently ignored, which is how
+    // an --expose-gc that never reached the worker looks.
+    pool: "forks",
+    execArgv: ["--expose-gc"],
     // Vitest's 5 s default is a wall-clock budget, but no suite in this repo
     // asserts on elapsed time — each is bounded by an explicit iteration,
     // cycle, or completion count. The real gate runs those counts under v8

@@ -3,8 +3,11 @@
  * runs against.
  *
  * The retention operation itself is tested in `@smthrs/engine-store`; what is
- * pinned here is that a project's two databases are both swept, and that a
- * project which has never run anything is a no-op rather than an error.
+ * pinned here is that a project's two databases are both swept, that a project
+ * which has never run anything is a no-op rather than an error, and that the
+ * lineage guard the facade delegates to holds over a real `.flows` — a settled
+ * child under a parked parent is what `agent/await` still reads out of a run
+ * row, and collecting it is data loss the operator did not ask for.
  */
 import { Cause, Effect, Exit } from "effect"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
@@ -26,6 +29,52 @@ const project = (...files: ReadonlyArray<string>): string => {
     database.close()
   }
   return root
+}
+
+/**
+ * A project whose `.flows/engine.db` carries the run rows and the spawn edges
+ * a real engine writes: the two tables the lineage guard walks.
+ */
+const engineProject = (
+  runs: ReadonlyArray<{ readonly runId: string; readonly status: string; readonly finishedAtMs: number | null }>,
+  edges: ReadonlyArray<readonly [child: string, parent: string]>
+): string => {
+  const root = mkdtempSync(join(tmpdir(), "smithers-gc-lineage-"))
+  staged.push(root)
+  mkdirSync(join(root, ".flows"), { recursive: true })
+  const database = new DatabaseSync(join(root, ".flows", "engine.db"))
+  database.exec(`CREATE TABLE flows_runs (
+    run_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    finished_at_ms INTEGER,
+    parent_run_id TEXT REFERENCES flows_runs(run_id)
+  )`)
+  database.exec(`CREATE TABLE flows_run_parents (
+    child_id TEXT NOT NULL REFERENCES flows_runs(run_id),
+    parent_id TEXT NOT NULL REFERENCES flows_runs(run_id),
+    PRIMARY KEY (child_id, parent_id)
+  )`)
+  for (const run of runs) {
+    database
+      .prepare("INSERT INTO flows_runs (run_id, status, created_at_ms, finished_at_ms) VALUES (?, ?, ?, ?)")
+      .run(run.runId, run.status, 1, run.finishedAtMs)
+  }
+  for (const [child, parent] of edges) {
+    database.prepare("INSERT INTO flows_run_parents (child_id, parent_id) VALUES (?, ?)").run(child, parent)
+  }
+  database.close()
+  return root
+}
+
+/** Every run id left in a project's engine database, sorted. */
+const runIdsIn = (root: string): ReadonlyArray<string> => {
+  const database = new DatabaseSync(join(root, ".flows", "engine.db"))
+  const rows = database.prepare("SELECT run_id FROM flows_runs ORDER BY run_id").all() as ReadonlyArray<
+    { readonly run_id: string }
+  >
+  database.close()
+  return rows.map((row) => row.run_id)
 }
 
 afterEach(() => {
@@ -105,6 +154,38 @@ describe("the sweep", () => {
     )
 
     expect(result.failures).toEqual([])
+  })
+
+  it("keeps a spawned settled child whose parent is still parked", async () => {
+    // The child is aged and terminal, so a guard that looked only at status
+    // and age would collect it. Its parent is `suspended` — parked on an
+    // approval — and reads the child's result out of the run row through
+    // `agent/await`, so it stays until the parent settles. The edge is a
+    // `flows_run_parents` row with a NULL `parent_run_id`, which is exactly
+    // the relation the column-only guard missed.
+    const root = engineProject([
+      { runId: "parked-parent", status: "suspended", finishedAtMs: null },
+      { runId: "settled-child", status: "completed", finishedAtMs: 1 }
+    ], [["settled-child", "parked-parent"]])
+
+    const result = await Effect.runPromise(Gc.sweep(root, { olderThan: "1s", dryRun: false, now: 60_000 }))
+
+    const engine = result.reports.find((report) => report.database.endsWith("engine.db"))!
+    expect(engine.runs).toEqual([])
+    expect(runIdsIn(root)).toEqual(["parked-parent", "settled-child"])
+  })
+
+  it("collects that child once its parent has settled", async () => {
+    const root = engineProject([
+      { runId: "settled-parent", status: "completed", finishedAtMs: 1 },
+      { runId: "settled-child", status: "completed", finishedAtMs: 1 }
+    ], [["settled-child", "settled-parent"]])
+
+    const result = await Effect.runPromise(Gc.sweep(root, { olderThan: "1s", dryRun: false, now: 60_000 }))
+
+    const engine = result.reports.find((report) => report.database.endsWith("engine.db"))!
+    expect([...engine.runs].sort()).toEqual(["settled-child", "settled-parent"])
+    expect(runIdsIn(root)).toEqual([])
   })
 
   it("refuses a threshold it cannot read", async () => {

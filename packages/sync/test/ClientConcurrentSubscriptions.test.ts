@@ -21,6 +21,83 @@ const entry = (sequence: number) =>
   })
 
 describe("one SyncClient with concurrent subscriptions", () => {
+  it.effect("follows a live run on a credit window instead of one subscribe per entry", () =>
+    Effect.gen(function*() {
+      // The client asked for `credit: 1`, so the server's `Stream.take(credit)`
+      // closed the subscription after every single frame and the follow
+      // resubscribed. A hundred live entries cost a hundred round trips.
+      const total = 100
+      let subscribes = 0
+      let produced = 0
+      const client = yield* SyncClient.make({
+        client: {
+          "Sync.Read": () => Effect.succeed({ entries: [], cursors: [], done: true }),
+          "Sync.Subscribe": (request: SyncProtocol.SubscribeRequest) => {
+            subscribes += 1
+            const frames: Array<SyncProtocol.Frame> = []
+            // The server serves at most `credit` frames per subscription.
+            while (frames.length < request.credit && produced < total) {
+              const sequence = seq(produced)
+              frames.push({
+                _tag: "Entries",
+                runId,
+                fromSeq: sequence,
+                toSeq: sequence,
+                entries: [entry(produced)]
+              })
+              produced += 1
+            }
+            return Stream.fromIterable(frames)
+          }
+        } as unknown as Parameters<typeof SyncClient.make>[0]["client"]
+      })
+
+      const collected = yield* Stream.runCollect(
+        Stream.take(client.subscribe({ scope: { _tag: "Run", runId }, cursors: [] }), total)
+      )
+
+      expect(Array.from(collected, (value) => value.seq)).toEqual(
+        Array.from({ length: total }, (_, index) => index)
+      )
+      expect(subscribes).toBeLessThanOrEqual(Math.ceil(total / SyncClient.defaultCredit))
+    }))
+
+  it.effect("honours an explicit credit window", () =>
+    Effect.gen(function*() {
+      const total = 12
+      const credit = 4
+      let subscribes = 0
+      let produced = 0
+      const client = yield* SyncClient.make({
+        client: {
+          "Sync.Read": () => Effect.succeed({ entries: [], cursors: [], done: true }),
+          "Sync.Subscribe": (request: SyncProtocol.SubscribeRequest) => {
+            subscribes += 1
+            expect(request.credit).toBe(credit)
+            const frames: Array<SyncProtocol.Frame> = []
+            while (frames.length < request.credit && produced < total) {
+              const sequence = seq(produced)
+              frames.push({
+                _tag: "Entries",
+                runId,
+                fromSeq: sequence,
+                toSeq: sequence,
+                entries: [entry(produced)]
+              })
+              produced += 1
+            }
+            return Stream.fromIterable(frames)
+          }
+        } as unknown as Parameters<typeof SyncClient.make>[0]["client"]
+      })
+
+      yield* Stream.runDrain(
+        Stream.take(client.subscribe({ scope: { _tag: "Run", runId }, cursors: [], credit }), total)
+      )
+
+      expect(subscribes).toBe(total / credit)
+    }))
+
   it.effect("keeps the acknowledged cursor monotonic when a lower commit lands late", () =>
     Effect.gen(function*() {
       const firstRead = yield* (Deferred.make<SyncProtocol.ReadResponse>())

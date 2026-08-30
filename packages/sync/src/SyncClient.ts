@@ -26,6 +26,24 @@ import {
 import { SyncRpcs } from "./SyncRpcs.ts"
 
 /**
+ * Frames one subscription round may carry before the follow replenishes it.
+ *
+ * A subscription's `credit` is a hard frame limit the server enforces with
+ * `Stream.take`, so the number the client sends is the size of its window, not
+ * a hint. At `credit: 1` the window closed after every single entry and the
+ * follow resubscribed: following a run that emits a hundred entries cost a
+ * hundred subscribe round trips, each of them a fresh cursor snapshot and a
+ * fresh server-side fan-out. Replenishing 256 frames at a time makes the
+ * round-trip cost proportional to the window rather than to the traffic, and
+ * keeps it bounded — an unbounded window would hand the server one
+ * never-closing subscription per follower.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const defaultCredit = 256
+
+/**
  * Input accepted by a sync subscription.
  *
  * `capability` authorizes branch reads: following a shared branch's run
@@ -38,6 +56,11 @@ export interface SubscribeOptions {
   readonly scope: Scope
   readonly cursors: WorkspaceCursor
   readonly capability?: ShareCapability
+  /**
+   * Frames one subscription round may carry before the follow replenishes the
+   * window. Defaults to {@link defaultCredit}.
+   */
+  readonly credit?: number | undefined
 }
 
 /**
@@ -202,7 +225,10 @@ const frameViolation = (frame: EntriesFrame): SyncError | undefined => {
  *
  * A live follow that loses its transport reconnects under
  * {@link reconnectPolicy}, resuming from the acknowledged cursors; the failure
- * cause is logged before the retry folds it.
+ * cause is logged before the retry folds it. The follow spends a credit window
+ * of {@link defaultCredit} frames per subscription round and replenishes it by
+ * resubscribing from the cursors it has acknowledged, so an entry is never
+ * re-read and the round-trip cost does not scale with the run's traffic.
  *
  * @category constructors
  * @since 0.1.0
@@ -222,6 +248,7 @@ export const make = ({ client, maxFrameBytes = defaultMaxFrameBytes }: {
 
     const subscribe = (options: SubscribeOptions): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
       Stream.unwrap(Effect.gen(function*() {
+        const credit = options.credit ?? defaultCredit
         const cursor = cursorMap(options.cursors)
         for (const [runId, afterSeq] of yield* Ref.get(acknowledged)) cursor.set(runId, afterSeq)
 
@@ -271,7 +298,7 @@ export const make = ({ client, maxFrameBytes = defaultMaxFrameBytes }: {
               client["Sync.Subscribe"]({
                 scope: options.scope,
                 cursors: snapshot(),
-                credit: 1,
+                credit,
                 ...(options.capability === undefined ? {} : { capability: options.capability })
               })
             )

@@ -8,20 +8,44 @@
  * background sweeper. Retention is an operator decision, taken explicitly,
  * with a dry run available before anything is deleted.
  *
- * The operation is deliberately one pass over one database and takes the
- * database as a service, so a host with a split control/engine layout runs it
- * once per file rather than hard-coding either layout here.
+ * This module is the public surface. The operation lives in
+ * `internal/RetentionOps.ts` beside the other modules that read this package's
+ * own tables, so `internal/` is never imported by a consumer — the same split
+ * `Errors.ts` uses. {@link retain} and {@link layer} are that operation: one
+ * bounded pass over the engine ladder, inside one `journal.transact`.
+ *
+ * {@link collect} is the host-facing pass `smithers gc` runs, and it is a
+ * facade over the same guard. A project keeps its history in two files — the
+ * control plane's database and the engine's — and a sweep of one without the
+ * other leaves half of a deleted run behind, so the pass takes the database as
+ * a service and runs once per file. Which runs it may delete is
+ * {@link RetentionOps.lineagePrelude}'s answer, not a second guard written
+ * here: a run stays whenever a live run stands above or below it, over BOTH
+ * relations that make one run the parent of another — the `flows_run_parents`
+ * edge a spawned child records, and the `parent_run_id` column a trampoline
+ * lineage is chained through.
  *
  * Only terminal runs are ever considered. A `pending`, `running`, or
- * `suspended` row belongs to work that can still resume, and its parent may be
- * terminal, so descendants are collected before deletion and a run whose
- * lineage still holds a live descendant is kept.
+ * `suspended` row belongs to work that can still resume.
  *
  * @since 1.0.0
  */
 import * as Effect from "effect/Effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type { SqlError } from "effect/unstable/sql/SqlError"
+import * as RetentionOps from "./internal/RetentionOps.ts"
+
+export {
+  defaultLimit,
+  layer,
+  make,
+  type RetainOptions,
+  type RetainReport,
+  Retention,
+  RetentionError,
+  RetentionErrorCode,
+  type Service
+} from "./internal/RetentionOps.ts"
 
 /**
  * Run statuses that make a row eligible for deletion.
@@ -101,9 +125,12 @@ const hasTable = (table: string): Effect.Effect<boolean, SqlError, SqlClient.Sql
 /**
  * The terminal runs eligible for deletion, oldest first.
  *
- * A run with a non-terminal descendant is excluded: deleting a parent whose
- * child is still running would break the `parent_run_id` foreign key and cut
- * the live run's lineage.
+ * A run is excluded whenever a live run stands above or below it in the
+ * lineage. Downward, deleting a parent whose child is still running would
+ * break the `parent_run_id` foreign key and drop the live child's edges with
+ * the `flows_run_parents_gc` trigger. Upward, a parked parent still reads a
+ * settled child's result out of its run row through `agent/await`, and it can
+ * be parked for longer than the threshold before it ever asks.
  *
  * @category getters
  * @since 1.0.0
@@ -114,14 +141,18 @@ export const eligible = (
   Effect.gen(function*() {
     const sql = yield* SqlClient.SqlClient
     if (!(yield* hasTable("flows_runs"))) return []
+    // The engine's edge table is absent from the control-plane database, which
+    // migrates the run store and the journal and nothing else. The prelude
+    // drops that half of the walk there and keeps the `parent_run_id` half, so
+    // one guard covers both files.
+    const prelude = RetentionOps.lineagePrelude({ parentEdges: yield* hasTable("flows_run_parents") })
     const rows = yield* sql<{ readonly run_id: string }>`
+      ${sql.unsafe(prelude)}
       SELECT run_id FROM flows_runs
       WHERE status IN ('completed', 'failed', 'cancelled')
         AND COALESCE(finished_at_ms, created_at_ms) < ${olderThanMs}
-        AND run_id NOT IN (
-          SELECT parent_run_id FROM flows_runs
-          WHERE parent_run_id IS NOT NULL AND status NOT IN ('completed', 'failed', 'cancelled')
-        )
+        AND run_id NOT IN (SELECT run_id FROM under_live)
+        AND run_id NOT IN (SELECT run_id FROM over_live)
       ORDER BY COALESCE(finished_at_ms, created_at_ms) ASC
     `
     return rows.map((row) => row.run_id)

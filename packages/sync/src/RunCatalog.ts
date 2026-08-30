@@ -8,6 +8,8 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as PubSub from "effect/PubSub"
+import * as Ref from "effect/Ref"
+import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 
 /**
@@ -57,20 +59,56 @@ export const layerStatic = (
   )
 
 /**
+ * Announcements a stalled {@link Service.changes} subscriber may fall behind
+ * by before the oldest are dropped.
+ *
+ * `changes` is a notification feed, not a log: a follower reads it to learn
+ * that the workspace gained a run and then reads the run itself. Retaining an
+ * unbounded backlog for a subscriber that has stopped pulling — a disconnected
+ * tab whose socket has not timed out yet, a follower blocked behind a slow
+ * consumer — is therefore pure cost, and the workspace's whole run history is
+ * the upper bound on it. A subscriber that falls further behind than this
+ * bound loses the oldest announcements; `list` still names every run, so a
+ * follower that reconnects or re-lists converges.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const defaultChangesCapacity = 1024
+
+/**
+ * Options for the in-memory run catalog.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface MemoryOptions {
+  /**
+   * Announcements a stalled subscriber may fall behind by. Defaults to
+   * {@link defaultChangesCapacity}.
+   */
+  readonly changesCapacity?: number | undefined
+}
+
+/**
  * Constructs a mutable in-memory run catalog.
  *
- * A run is published exactly once, when it is first registered.
+ * A run is published exactly once, when it is first registered. The
+ * announcement feed slides: registering never waits on a stalled subscriber,
+ * and never grows the process on its behalf.
  *
  * @category constructors
  * @since 0.1.0
  */
-export const makeMemory = (): Effect.Effect<{
+export const makeMemory = (options: MemoryOptions = {}): Effect.Effect<{
   readonly catalog: Service
   readonly register: (runId: JournalEvent.RunId) => Effect.Effect<void>
 }> =>
   Effect.gen(function*() {
     const known = new Set<JournalEvent.RunId>()
-    const changes = yield* PubSub.unbounded<JournalEvent.RunId>()
+    const changes = yield* PubSub.sliding<JournalEvent.RunId>(
+      options.changesCapacity ?? defaultChangesCapacity
+    )
     return {
       catalog: make({
         list: Effect.fn("RunCatalog.list")(() => Effect.sync(() => Array.from(known)))(),
@@ -85,6 +123,113 @@ export const makeMemory = (): Effect.Effect<{
       )
     }
   })
+
+/**
+ * How often {@link makePolling} re-reads its source when the caller names no
+ * interval, in milliseconds.
+ *
+ * A workspace follower learns of a new run within one interval of it being
+ * created, and the read costs one bounded query per interval per composition,
+ * not per subscriber. A second is short enough that a run appears in a UI
+ * while the operator is still looking at the command that started it, and
+ * long enough that an idle workspace is close to free.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const defaultPollIntervalMs = 1000
+
+/**
+ * Options for the polling run catalog.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface PollingOptions<E, R> {
+  /**
+   * Reads the workspace's current run set. `@smthrs/engine-store` supplies
+   * the durable one over `flows_runs`; anything that answers the same
+   * question works, and the catalog holds no assumption about which.
+   */
+  readonly read: Effect.Effect<ReadonlyArray<JournalEvent.RunId>, E, R>
+  /** Milliseconds between reads. Defaults to {@link defaultPollIntervalMs}. */
+  readonly intervalMs?: number | undefined
+  /**
+   * Announcements a stalled subscriber may fall behind by. Defaults to
+   * {@link defaultChangesCapacity}.
+   */
+  readonly changesCapacity?: number | undefined
+}
+
+/**
+ * Constructs a run catalog that polls a durable source.
+ *
+ * Polling, not waking. rc.0 has no cross-process event delivery, so a
+ * follower learns of a run another engine created by asking the workspace
+ * again, and the interval is the whole of the policy.
+ *
+ * The catalog primes itself before it returns, so the first read a follower
+ * makes is already current and a workspace that cannot be read at all fails
+ * the composition instead of serving an empty run set. After that a failed
+ * read is a warning and nothing else: the previous view stands, the interval
+ * holds, and no subscription attached to the catalog is torn down for it.
+ *
+ * A run is announced once, when it first appears. A run the read stops
+ * naming, which is what retention collecting it looks like, leaves the view;
+ * `list` is the workspace's run set, not a log of every run it ever had.
+ *
+ * The poll fiber belongs to the caller's scope. Closing the scope stops it.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const makePolling = <E, R>(
+  options: PollingOptions<E, R>
+): Effect.Effect<Service, E, R | Scope.Scope> =>
+  Effect.gen(function*() {
+    const changes = yield* PubSub.sliding<JournalEvent.RunId>(
+      options.changesCapacity ?? defaultChangesCapacity
+    )
+    const snapshot = yield* Ref.make<ReadonlyArray<JournalEvent.RunId>>([])
+
+    const refresh = Effect.gen(function*() {
+      const read = yield* options.read
+      const next = Array.from(new Set(read))
+      const previous = new Set(yield* Ref.get(snapshot))
+      yield* Ref.set(snapshot, next)
+      for (const runId of next) {
+        // Publishing never waits on a stalled subscriber, and never grows the
+        // process on its behalf: the feed slides.
+        if (!previous.has(runId)) yield* PubSub.publish(changes, runId)
+      }
+    })
+
+    yield* refresh
+    yield* refresh.pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("The workspace run catalog could not be read; the previous view stands", cause)
+      ),
+      Effect.delay(options.intervalMs ?? defaultPollIntervalMs),
+      Effect.forever,
+      Effect.forkScoped
+    )
+
+    return make({
+      list: Effect.fn("RunCatalog.list")(() => Ref.get(snapshot))(),
+      changes: Stream.fromPubSub(changes)
+    })
+  })
+
+/**
+ * Provides a run catalog that polls a durable source. The poll fiber lives as
+ * long as the layer's scope.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerPolling = <E, R>(
+  options: PollingOptions<E, R>
+): Layer.Layer<RunCatalog, E, R> => Layer.effect(RunCatalog, makePolling(options))
 
 /**
  * Provides an empty run catalog.

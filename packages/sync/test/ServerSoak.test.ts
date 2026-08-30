@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Journal, JournalEvent } from "@smthrs/journal"
-import { Effect, Layer, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Stream } from "effect"
 import * as RunCatalog from "../src/RunCatalog.ts"
 import * as SyncPrincipal from "../src/SyncPrincipal.ts"
 import * as SyncServer from "../src/SyncServer.ts"
@@ -42,34 +42,38 @@ interface Tracker {
 }
 
 /**
- * A journal whose per-run streams report when they are attached and released,
- * so a subscription that outlives its consumer is observable.
+ * A journal whose per-run reads report when they are open, so both shapes of
+ * per-subscription state are observable: the run streams a run-scoped
+ * subscription attaches, and the paged reads a workspace subscription's tail
+ * keeps open. Both are what the fan-out bound bounds. The tracked read yields
+ * once before it answers so concurrent reads of one round genuinely overlap;
+ * a read that resolved synchronously would report a peak of one however wide
+ * the fan-out was.
  */
-const trackedJournal = (byRun: Record<string, ReadonlyArray<JournalEvent.Entry>>, tracker: Tracker) =>
-  Journal.layerNoop({
-    entries: ({ after, limit, runId: id }: any) => {
-      const all = (byRun[id] ?? []).filter((value) => after === undefined || value.seq > after)
-      const page = all.slice(0, limit)
-      return Effect.succeed({ entries: page, hasMore: page.length < all.length })
-    },
+const trackedJournal = (byRun: Record<string, ReadonlyArray<JournalEvent.Entry>>, tracker: Tracker) => {
+  const opened = Effect.sync(() => {
+    tracker.open += 1
+    tracker.opened += 1
+    tracker.peak = Math.max(tracker.peak, tracker.open)
+  })
+  const closed = Effect.sync(() => {
+    tracker.open -= 1
+  })
+  return Journal.layerNoop({
+    entries: ({ after, limit, runId: id }: any) =>
+      Effect.gen(function*() {
+        yield* opened
+        yield* Effect.yieldNow
+        const all = (byRun[id] ?? []).filter((value) => after === undefined || value.seq > after)
+        const page = all.slice(0, limit)
+        return { entries: page, hasMore: page.length < all.length }
+      }).pipe(Effect.ensuring(closed)),
     stream: ({ afterSequence, runId: id }: any) =>
       Stream.fromIterable(
         (byRun[id] ?? []).filter((value) => afterSequence === undefined || value.seq > afterSequence)
-      ).pipe(
-        Stream.onStart(
-          Effect.sync(() => {
-            tracker.open += 1
-            tracker.opened += 1
-            tracker.peak = Math.max(tracker.peak, tracker.open)
-          })
-        ),
-        Stream.ensuring(
-          Effect.sync(() => {
-            tracker.open -= 1
-          })
-        )
-      )
+      ).pipe(Stream.onStart(opened), Stream.ensuring(closed))
   } as any)
+}
 
 const workspace = (runs: number, perRun: number) => {
   const byRun: Record<string, ReadonlyArray<JournalEvent.Entry>> = {}
@@ -153,6 +157,78 @@ describe("SyncServer fan-out budgets", () => {
       expect(tracker.peak).toBeLessThanOrEqual(2 * ids.length)
     }))
 
+  it.effect("bounds concurrently open run streams when a subscriber stalls", () =>
+    Effect.gen(function*() {
+      // A thousand-run workspace is the shape that made the unbounded fan-out
+      // visible: `Stream.flatMap(..., { concurrency: "unbounded" })` attaches a
+      // journal stream per run the moment a subscription starts, so one
+      // follower costs one open stream per run in the workspace regardless of
+      // how fast it reads. The bound is what keeps a slow follower from
+      // holding the whole workspace open at once.
+      const { byRun, ids } = workspace(1_000, 1)
+      const tracker: Tracker = { open: 0, opened: 0, peak: 0 }
+      const concurrency = 8
+      const release = yield* Deferred.make<void>()
+      const stalled = yield* (
+        Effect.gen(function*() {
+          const server = yield* SyncServer.makeLiveWith({ concurrency })
+          // The permanently slow subscriber: it accepts its first frame and
+          // then never pulls again until the case releases it.
+          const slow = yield* Stream.runDrain(
+            server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 1_000 }).pipe(
+              Stream.tap(() => Deferred.await(release))
+            )
+          ).pipe(Effect.forkChild)
+          // A second follower drains the same workspace to completion, so the
+          // fan-out is known to have run in full before the peak is read.
+          yield* Stream.runDrain(
+            server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 1_000 })
+          )
+          const peakWhileStalled = tracker.peak
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(slow)
+          return peakWhileStalled
+        }).pipe(
+          Effect.provide(Layer.mergeAll(
+            trackedJournal(byRun, tracker),
+            RunCatalog.layerStatic(ids),
+            SyncPrincipal.layerWorkspace("soak-suite")
+          )),
+          Effect.scoped
+        )
+      )
+
+      // Two subscribers, each bounded by the configured concurrency. Unbounded
+      // fan-out puts this in the thousands.
+      expect(stalled).toBeLessThanOrEqual(2 * concurrency)
+      expect(tracker.opened).toBeGreaterThanOrEqual(2 * ids.length)
+      expect(tracker.open).toBe(0)
+    }))
+
+  it.effect("defaults the fan-out bound without an explicit policy", () =>
+    Effect.gen(function*() {
+      const { byRun, ids } = workspace(SyncServer.defaultConcurrency * 2, 1)
+      const tracker: Tracker = { open: 0, opened: 0, peak: 0 }
+      yield* (
+        Effect.gen(function*() {
+          const server = yield* SyncServer.makeLive
+          yield* Stream.runDrain(
+            server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: ids.length })
+          )
+        }).pipe(
+          Effect.provide(Layer.mergeAll(
+            trackedJournal(byRun, tracker),
+            RunCatalog.layerStatic(ids),
+            SyncPrincipal.layerWorkspace("soak-suite")
+          )),
+          Effect.scoped
+        )
+      )
+
+      expect(tracker.peak).toBeLessThanOrEqual(SyncServer.defaultConcurrency)
+      expect(tracker.opened).toBe(ids.length)
+    }))
+
   it.effect("keeps retained heap bounded across a subscriber soak", () =>
     Effect.gen(function*() {
       const { byRun, ids } = workspace(4, 25)
@@ -179,10 +255,15 @@ describe("SyncServer fan-out budgets", () => {
       // Warm up first so the measurement excludes one-time allocation.
       yield* (soak(20))
       const gc = (globalThis as { gc?: () => void }).gc
-      gc?.()
+      if (gc === undefined) {
+        // Without a real collection on both sides the delta measures allocator
+        // noise, not retention; refuse rather than flake.
+        throw new Error("ServerSoak needs --expose-gc; run through packages/sync's vitest config, which sets it")
+      }
+      gc()
       const before = process.memoryUsage().heapUsed
       yield* (soak(200))
-      gc?.()
+      gc()
       const after = process.memoryUsage().heapUsed
 
       // 200 cycles x 5 subscribers x 4 runs x 25 entries: per-subscriber state
