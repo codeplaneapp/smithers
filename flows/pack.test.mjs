@@ -12,7 +12,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { after, describe, it } from "node:test";
@@ -130,7 +130,6 @@ describe("the staged prompt bodies", () => {
         "docs-full",
         "ask-human",
         "smithers ui ",
-        "smithers inspect",
         "props.schema",
       ]) {
         assert.ok(!text.includes(removed), `${name} still mentions "${removed}"`);
@@ -203,6 +202,108 @@ describe("the capabilities the staged prompt bodies declare", () => {
               );
           }),
           `${name} declares ${JSON.stringify(spawns)} but none of them permits \`${command}\``,
+        );
+      }
+    });
+  }
+});
+
+describe("the binary this lane's suites spawn", () => {
+  it("is this working tree's source, not a build sitting beside it", () => {
+    // `packages/cli/bin/smithers.mjs` prefers `dist/esm/bin.js` and falls back
+    // to `src/bin.ts`, which is right for a published install and wrong for a
+    // suite that asks what the source does. A stale `dist/` from an earlier
+    // commit answered last build's behaviour to every real-CLI assertion in
+    // this lane: the skills install, the hook spawns, and the fixture notices
+    // were all green over code the tree no longer had.
+    const built = join(repoRoot, "packages/cli/dist/esm/bin.js");
+    assert.ok(
+      !existsSync(built),
+      `${relative(repoRoot, built)} exists, so every spawn in this lane runs that build instead of ` +
+        "packages/cli/src. Remove packages/cli/dist before running these suites, or rebuild it from " +
+        "the current source if something else needs it.",
+    );
+  });
+});
+
+describe("the CLI the staged prompt bodies teach", () => {
+  const files = markdownFlows();
+  const sourceCli = join(repoRoot, "packages/cli/bin/smithers.mjs");
+
+  /**
+   * `smithers <verb> --help`, once per verb path.
+   *
+   * These bodies are shipped instructions: an agent reads one and runs the
+   * command it names. `effect/unstable/cli` answers an undeclared flag with
+   * exit 2 and a usage dump, so a prompt that teaches a flag the parser does
+   * not have hands the operator a failure instead of an install line. The
+   * parser's own listing is the authority, read from the binary in this tree.
+   */
+  const listings = new Map();
+  const help = (path) => {
+    if (!listings.has(path)) {
+      listings.set(
+        path,
+        spawnSync(process.execPath, [sourceCli, ...path.split(" "), "--help"], {
+          cwd: repoRoot,
+          encoding: "utf8",
+          timeout: 180_000,
+        }),
+      );
+    }
+    return listings.get(path);
+  };
+
+  /** Every `smithers ...` invocation a body names, in code spans or fences. */
+  const invocations = (text) =>
+    [...text.matchAll(/`smithers ([^`\n]+)`|^\s*smithers ([^\n]+)$/gm)]
+      .map((match) => (match[1] ?? match[2]).trim())
+      .filter((argv) => argv.length > 0);
+
+  /** The verb path of one invocation: its leading bare words, at most two. */
+  const verbPath = (argv) => {
+    const words = [];
+    for (const token of argv.split(/\s+/)) {
+      if (!/^[a-z][a-z-]*$/.test(token) || words.length === 2) break;
+      words.push(token);
+    }
+    return words.join(" ");
+  };
+
+  const longFlags = (text) => [...text.matchAll(/--[a-z][a-z-]+/g)].map((match) => match[0]);
+
+  for (const file of files) {
+    const name = relative(flowsRoot, dirname(file)).split("\\").join("/");
+
+    it(`${name} names only commands and flags this CLI declares`, () => {
+      const text = readFileSync(file, "utf8");
+      const named = invocations(text);
+      const paths = new Set();
+
+      for (const argv of named) {
+        const path = verbPath(argv);
+        assert.ok(path.length > 0, `\`smithers ${argv}\` names no verb`);
+        const listing = help(path);
+        assert.equal(listing.status, 0, `\`smithers ${path}\` is not a command: ${listing.stderr}`);
+        paths.add(path);
+        for (const flag of longFlags(argv)) {
+          assert.ok(
+            listing.stdout.includes(flag),
+            `\`smithers ${path}\` does not declare ${flag}, which ${name} tells the operator to run; ` +
+              "effect/unstable/cli exits 2 on an undeclared flag",
+          );
+        }
+      }
+
+      // A flag named on its own, away from its command, is the same defect
+      // wearing a different shape: some command in the body has to declare it.
+      const attached = new Set(named.flatMap((argv) => longFlags(argv)));
+      for (const [, flag] of text.matchAll(/`(--[a-z][a-z-]+)(?:[ =][^`\n]*)?`/g)) {
+        if (attached.has(flag)) continue;
+        const declaring = [...paths].find((path) => help(path).stdout.includes(flag));
+        assert.ok(
+          declaring !== undefined,
+          `${name} names ${flag}, and no command it names declares it: ${[...paths].join(", ")}`,
         );
       }
     });
