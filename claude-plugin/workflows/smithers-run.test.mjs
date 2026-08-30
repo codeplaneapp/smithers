@@ -12,9 +12,10 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const source = readFileSync(fileURLToPath(new URL("./smithers-run.mjs", import.meta.url)), "utf8");
@@ -91,8 +92,15 @@ describe("the mirror contract", () => {
   });
 });
 
-/** Every command template the mirror writes as a RUN-EXACTLY line. */
-const commands = [...source.matchAll(/RUN-EXACTLY: \$\{CLI\} ([^\\\n]*)/g)].map((match) => match[1]);
+/**
+ * Every command template the mirror writes as a RUN-EXACTLY line.
+ *
+ * A template may carry shell prefixes before `${CLI}` (the tick line pauses
+ * first), so the prefix holes are skipped and the CLI argv is what is read.
+ */
+const commands = [...source.matchAll(/RUN-EXACTLY: (?:\$\{\w+\})*\$\{CLI\} ([^\\\n]*)/g)].map(
+  (match) => match[1],
+);
 
 describe("the commands it builds", () => {
   it("builds exactly three CLI commands: launch, tick, and node-wait", () => {
@@ -103,7 +111,7 @@ describe("the commands it builds", () => {
     ]);
     const find = (prefix) => commands.find((command) => command.startsWith(prefix));
     assert.equal(find("up "), "up ${shellQuote(String(workflowArgs.flow))} -d${dataFlag} --json");
-    assert.equal(find("claude tick"), "claude tick ${shellQuote(runId)} --after-seq ${seq}${waitFlag} --json");
+    assert.equal(find("claude tick"), "claude tick ${shellQuote(runId)} --after-seq ${seq} --json");
     // Two positionals in the CLI's own order, run id first. 0.x wrote the node
     // id positionally and the run id as `--run-id`; rc.0 takes both
     // positionally, and `effect/unstable/cli` exits 2 on the undeclared flag.
@@ -126,6 +134,30 @@ describe("the commands it builds", () => {
   it("defaults to naming the package and the bin separately", () => {
     assert.match(source, /'npx --package @smthrs\/cli smithers'/);
     assert.ok(!code.includes("bunx smthrs"), "a bare bin-name lookup is what the resolver exists to avoid");
+  });
+
+  it("paces its own polling, because the shipped `claude tick` does not block", () => {
+    // `claude tick` prints the current frame and exits. Without a pause the
+    // mirror spends one Haiku turn per poll on a run that has not moved, and
+    // the backstop is the only thing between a quiet run and MAX_TICKS turns.
+    // So the pause is part of the command, and the backstop is a spend number
+    // a reader can multiply out.
+    const tick = commands.find((command) => command.startsWith("claude tick"));
+    assert.ok(!tick.includes("--wait"), "the shipped `claude tick` has no blocking mode");
+    assert.match(source, /RUN-EXACTLY: \$\{sleepPrefix\}\$\{CLI\} claude tick/);
+    assert.match(source, /const sleepPrefix = pause === 0 \? '' : `sleep \$\{pause\} && `/);
+    const cap = /^const MAX_TICKS = (\d+)$/m.exec(source);
+    assert.ok(cap, "the tick loop must declare its backstop");
+    assert.ok(
+      Number(cap[1]) <= 1000,
+      `MAX_TICKS is ${cap[1]}; every tick is one agent turn, so the backstop is a spend cap`,
+    );
+    const min = /^const TICK_PAUSE_MIN_S = (\d+)$/m.exec(source);
+    const max = /^const TICK_PAUSE_MAX_S = (\d+)$/m.exec(source);
+    assert.ok(min && max, "the mirror must declare its pause floor and ceiling");
+    assert.ok(Number(min[1]) >= 1 && Number(max[1]) >= Number(min[1]));
+    // The pause doubles while the run is quiet and resets when it moves.
+    assert.match(source, /pauseSeconds = moved \? TICK_PAUSE_MIN_S : Math\.min\(TICK_PAUSE_MAX_S, pauseSeconds \* 2\)/);
   });
 
   it("stamps no attribution flags, because rc.0 stamps the principal server-side", () => {
@@ -161,7 +193,7 @@ describe("the CLI in this tree serves those commands", () => {
 
   const cases = [
     { argv: ["up"], template: commands.find((command) => command.startsWith("up ")), extra: ["data"] },
-    { argv: ["claude", "tick"], template: commands.find((command) => command.startsWith("claude tick")), extra: ["wait", "timeout-ms"] },
+    { argv: ["claude", "tick"], template: commands.find((command) => command.startsWith("claude tick")), extra: [] },
     { argv: ["claude", "node-wait"], template: commands.find((command) => command.startsWith("claude node-wait")), extra: [] },
   ];
 
@@ -187,6 +219,78 @@ describe("the CLI in this tree serves those commands", () => {
       }
     });
   }
+
+  /**
+   * One spawned-bin smoke per mirror invocation. The `--help` checks above read
+   * the parser's declaration; these run the argv the mirror actually writes
+   * through the real binary, in a throwaway project, and read the exit status.
+   * `effect/unstable/cli` answers an undeclared flag with exit 2, so a status
+   * that is anything else proves the line parsed and reached its handler.
+   */
+  describe("the argv the mirror writes runs through the real binary", () => {
+    const created = [];
+    after(() => {
+      for (const directory of created) rmSync(directory, { recursive: true, force: true });
+    });
+
+    /** An empty project directory: a real root with no flows and no run state. */
+    const project = () => {
+      const root = mkdtempSync(join(tmpdir(), "mirror-smoke-"));
+      created.push(root);
+      mkdirSync(join(root, "flows"), { recursive: true });
+      return root;
+    };
+
+    const run = (argv, cwd) =>
+      spawnSync(process.execPath, [sourceCli, ...argv], { cwd, encoding: "utf8", timeout: 180_000 });
+
+    const skipUnlessClaude = (t) => {
+      if (hasClaudeVerb()) return false;
+      t.skip("the `claude` mirror verbs are not in this CLI yet.");
+      return true;
+    };
+
+    it("`claude tick` prints a contract-2 frame for a run this project has never seen", (t) => {
+      if (skipUnlessClaude(t)) return;
+      const result = run(["claude", "tick", "run-nope", "--after-seq", "0", "--json"], project());
+      assert.equal(result.status, 0, result.stderr);
+      const frame = JSON.parse(result.stdout);
+      assert.equal(frame.contract, 2, "the mirror stops on any other contract number");
+      assert.equal(frame.runId, "run-nope");
+      // Every field the mirror reads off a tick, present on the emptiest frame.
+      for (const field of ["status", "seq", "phases", "nodes"]) {
+        assert.ok(field in frame, `the tick frame has no ${field}, which the mirror reads`);
+      }
+    });
+
+    it("`claude node-wait` returns a timed-out verdict rather than hanging", (t) => {
+      if (skipUnlessClaude(t)) return;
+      const result = run(
+        ["claude", "node-wait", "run-nope", "node-nope", "--timeout-ms", "500", "--json"],
+        project(),
+      );
+      assert.equal(result.status, 0, result.stderr);
+      const verdict = JSON.parse(result.stdout);
+      assert.equal(verdict.nodeId, "node-nope");
+      // The watcher prompt re-runs the command while this is true.
+      assert.equal(verdict.timedOut, true);
+    });
+
+    it("`up -d --data --json` reaches the launcher, and reports an unknown flow as one", () => {
+      const result = run(["up", "no-such-flow", "-d", "--data", "{}", "--json"], project());
+      assert.notEqual(result.status, 2, `usage error, not a launch attempt: ${result.stderr}`);
+      assert.match(`${result.stdout}${result.stderr}`, /FlowNotFound/);
+    });
+
+    it("exits 2 on a flag the parser does not declare, which is what these smokes detect", (t) => {
+      if (skipUnlessClaude(t)) return;
+      // The teeth of the three cases above: a mirror template that writes a
+      // flag the CLI dropped fails here, not in a live run.
+      const result = run(["claude", "tick", "run-nope", "--wait", "--json"], project());
+      assert.equal(result.status, 2);
+      assert.match(result.stderr, /Unrecognized flag: --wait/);
+    });
+  });
 
   it("passes node-wait its run id the way the CLI reads it", (t) => {
     if (!hasClaudeVerb()) {

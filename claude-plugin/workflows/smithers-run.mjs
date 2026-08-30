@@ -45,8 +45,18 @@ export const meta = {
 // ---------------------------------------------------------------------------
 
 const CONTRACT = 2
-const MAX_TICKS = 5000
-const TICK_TIMEOUT_MS = 420000 // < the 10-minute Bash cap, with margin
+// Every tick is one agent turn, so the tick cap is a spend cap. rc.0's
+// `smithers claude tick` prints the current frame and exits; there is no
+// blocking mode in the shipped verb surface, so a mirror that loops on it as
+// fast as the model answers buys one Haiku turn per poll of a run that has not
+// moved. The mirror paces itself instead: every tick but the first attach tick
+// sleeps in the same shell command, and the pause doubles while the run is
+// quiet. At the ceiling that is one turn a minute, and MAX_TICKS is the number
+// of turns the mirror is allowed to spend before it tells the operator to
+// re-attach.
+const TICK_PAUSE_MIN_S = 10
+const TICK_PAUSE_MAX_S = 60
+const MAX_TICKS = 400
 const NODE_WAIT_TIMEOUT_MS = 480000
 
 let workflowArgs = args
@@ -154,6 +164,7 @@ let collapsed = false
 let budgetLogged = false
 let finalStatus = 'unknown'
 let errorTicks = 0
+let pauseSeconds = TICK_PAUSE_MIN_S
 
 const ACTIVE_NODE_STATES = new Set(['running', 'waiting-approval', 'waiting-timer', 'waiting-event'])
 const TERMINAL_NODE_STATES = new Set(['completed', 'failed', 'skipped', 'cancelled'])
@@ -245,13 +256,15 @@ function underBudget() {
 phase('Run')
 while (ticks < MAX_TICKS) {
   ticks += 1
-  // Attach mode reads the current state immediately on the first tick; a
-  // just-launched run instead WAITS so the tick cannot race the detached
-  // engine's first store write (`--wait` also waits for the run to appear).
-  const waitFlag = ticks === 1 && attached ? '' : ` --wait --timeout-ms ${TICK_TIMEOUT_MS}`
+  // Attach mode reads the current state immediately on its first tick. Every
+  // other tick, including a just-launched run's first, sleeps first: the pause
+  // is what keeps the tick from racing the detached engine's first store write,
+  // and what keeps a quiet run from costing a turn a second.
+  const pause = ticks === 1 && attached ? 0 : pauseSeconds
+  const sleepPrefix = pause === 0 ? '' : `sleep ${pause} && `
   const tick = await agent(
-    'Run this command once and return its JSON as structured output. It may take several minutes; that is normal (it blocks until the run changes).\n' +
-    `RUN-EXACTLY: ${CLI} claude tick ${shellQuote(runId)} --after-seq ${seq}${waitFlag} --json\n` +
+    'Run this one shell command and return its JSON as structured output. It begins with a sleep; that is deliberate, so let it finish.\n' +
+    `RUN-EXACTLY: ${sleepPrefix}${CLI} claude tick ${shellQuote(runId)} --after-seq ${seq} --json\n` +
     'Copy the JSON fields verbatim. Do not run anything else. If the command fails or prints an error instead of a tick, ' +
     `return {"contract": -1, "runId": "${runId}", "status": "error", "seq": 0, "phases": [], "nodes": []} and put the error message in a top-level "error" string field. Never invent tick data.`,
     {
@@ -287,6 +300,11 @@ while (ticks < MAX_TICKS) {
     log(`smithers claude tick speaks contract ${tick.contract}, this mirror speaks ${CONTRACT}. Update the smithers plugin and @smthrs/cli, then re-attach with args {"runId":"${runId}"}.`)
     break
   }
+  // A tick that reports a higher sequence, or a new status, means the run
+  // moved: poll again promptly. A tick that reports neither means it did not,
+  // so back off before spending the next turn.
+  const moved = (typeof tick.seq === 'number' && tick.seq > seq) || tick.status !== lastStatus
+  pauseSeconds = moved ? TICK_PAUSE_MIN_S : Math.min(TICK_PAUSE_MAX_S, pauseSeconds * 2)
   seq = typeof tick.seq === 'number' ? tick.seq : seq
   finalStatus = tick.status
 
