@@ -143,6 +143,11 @@ describe("vitest coverage isolation conformance", () => {
   // The set is explicit and self-expiring: every member must retain a real,
   // non-zero threshold in all four categories and at least one category below
   // 100. Once a package reaches full coverage it must leave this set.
+  // `integrations` joins them for the same reason: it was ported wholesale in
+  // Phase 4 from the flows tree, its floors (branches 94, functions 98, lines
+  // 99, statements 98) are the measured coverage of adapters that talk to
+  // GitHub, Linear, and Telegram over HTTP, and its own config carries the
+  // instruction to raise them as each case closes.
   const coverageFloorDeferred = new Set([
     "cli",
     "control",
@@ -159,7 +164,8 @@ describe("vitest coverage isolation conformance", () => {
     "triggers",
     "build",
     "build-cli",
-    "targets"
+    "targets",
+    "integrations"
   ])
 
   const assertCoverageDenominator = (source: string) => {

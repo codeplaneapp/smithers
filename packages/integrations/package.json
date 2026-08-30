@@ -44,6 +44,25 @@
     "./internal/*": null,
     "./*/index": null
   },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      },
+      "./*": {
+        "types": "./dist/esm/*.d.ts",
+        "import": "./dist/esm/*.js",
+        "require": "./dist/cjs/*.js"
+      },
+      "./internal/*": null,
+      "./*/index": null
+    }
+  },
   "files": [
     "src/**/*.ts",
     "dist/**/*.js",
