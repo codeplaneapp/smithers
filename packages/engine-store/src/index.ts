@@ -123,3 +123,9 @@ export * as Errors from "./Errors.ts"
  * @category migrations
  */
 export * as Migrations from "./Migrations.ts"
+
+/**
+ * @category retention
+ * @since 1.0.0
+ */
+export * as Retention from "./Retention.ts"

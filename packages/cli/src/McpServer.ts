@@ -1,0 +1,630 @@
+/**
+ * `smithers --mcp`: the control plane as a Model Context Protocol server.
+ *
+ * The protocol is newline-delimited JSON-RPC 2.0 over stdio, which is what
+ * `@smthrs/mcp`'s own client speaks, so the round trip is testable in-process
+ * without a second SDK.
+ *
+ * Two things about the tool surface are deliberate and load-bearing.
+ *
+ * The tool *names* are the 0.x names. An MCP client's tool allowlists, prompts,
+ * and habits are written against names, and renaming them would break every
+ * caller for no gain — the 0.x names are already the vocabulary.
+ *
+ * The ten tools rc.0 does not implement keep their names too, and answer
+ * `{ ok: false, error: { code: "unsupported" } }`. Removing them would make an
+ * agent's call fail as "unknown tool", which reads as a client bug; answering
+ * with a reason tells the agent that time travel, checkpoints, and human
+ * questions are features this release does not have (rc-contract section 4.1).
+ *
+ * Every result is the 0.x `{ ok, data?, error? }` envelope, serialized into the
+ * text content block and repeated as `structuredContent`.
+ *
+ * @since 1.0.0
+ */
+import { Control as ControlService, ControlSchema } from "@smthrs/control"
+import { Cause, Effect, Queue, Schema, Stream } from "effect"
+import { createInterface } from "node:readline"
+import * as Forensics from "./Forensics.ts"
+import * as NodeOutput from "./NodeOutput.ts"
+
+/**
+ * The MCP protocol revision this server implements.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const protocolVersion = "2025-06-18"
+
+/**
+ * Which tool families a session exposes.
+ *
+ * `semantic` is the named control surface below, `raw` mirrors the shipped CLI
+ * verbs one tool per verb, and `both` is the union.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type Surface = "raw" | "semantic" | "both"
+
+/**
+ * The `{ ok, data?, error? }` envelope every tool answers with.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type Envelope =
+  | { readonly ok: true; readonly data: unknown }
+  | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
+
+/**
+ * A successful envelope.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const succeeded = (data: unknown): Envelope => ({ ok: true, data })
+
+/**
+ * A failed envelope.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const failed = (code: string, message: string): Envelope => ({ ok: false, error: { code, message } })
+
+/**
+ * One tool this server exposes.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface Tool {
+  readonly name: string
+  readonly description: string
+  readonly readOnly: boolean
+  readonly inputSchema: Record<string, unknown>
+  readonly call: (args: Record<string, unknown>) => Effect.Effect<Envelope, never, ControlService.Control>
+}
+
+const object = (
+  properties: Record<string, unknown>,
+  required: ReadonlyArray<string> = []
+): Record<string, unknown> => ({ type: "object", properties, required: [...required], additionalProperties: false })
+
+const stringProperty = (description: string) => ({ type: "string", description })
+
+const text = (value: unknown): string | undefined => typeof value === "string" ? value : undefined
+
+const requireRunId = (args: Record<string, unknown>): string | undefined => text(args["runId"]) ?? text(args["run_id"])
+
+/** Every event of one run, oldest first. */
+const eventsOf = (runId: string) =>
+  Effect.gen(function*() {
+    const control = yield* ControlService.Control
+    const collected = yield* Stream.runCollect(control.watch({ runId, follow: false }))
+    return globalThis.Array.from(collected)
+  })
+
+/** One run's summary, or undefined when the control plane has no such run. */
+const summaryOf = (runId: string) =>
+  Effect.gen(function*() {
+    const control = yield* ControlService.Control
+    const listed = yield* control.list({ _tag: "runs", filters: { runId } })
+    return listed._tag === "runs" ? listed.items.find((item) => item.runId === runId) : undefined
+  })
+
+const missingRun = (runId: string): Envelope => failed("RUN_NOT_FOUND", `Run not found: ${runId}`)
+
+const missingArgument = (name: string): Envelope => failed("INVALID_INPUT", `${name} is required and must be a string`)
+
+/** Wraps a control-plane failure in the envelope instead of dying. */
+const envelope = <A>(
+  effect: Effect.Effect<A, unknown, ControlService.Control>,
+  onSuccess: (value: A) => Envelope
+): Effect.Effect<Envelope, never, ControlService.Control> =>
+  effect.pipe(
+    Effect.map(onSuccess),
+    Effect.catchCause((cause) => Effect.succeed(failed("CONTROL_ERROR", String(Cause.squash(cause)))))
+  )
+
+const decodeApproval = (value: unknown): ControlService.ApprovalInput | undefined => {
+  try {
+    return Schema.decodeUnknownSync(ControlSchema.ApprovalPayload)(
+      typeof value === "string" ? JSON.parse(value) : value
+    )
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The eleven Control-backed tools, by their 0.x names.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const supportedTools: ReadonlyArray<Tool> = [
+  {
+    name: "list_workflows",
+    description: "List the flows discovered under this project.",
+    readOnly: true,
+    inputSchema: object({}),
+    call: () =>
+      envelope(
+        Effect.flatMap(ControlService.Control, (control) => control.list({ _tag: "flows" })),
+        (listed) => succeeded(listed._tag === "flows" ? listed.items : [])
+      )
+  },
+  {
+    name: "run_workflow",
+    description: "Plan a flow, approve it for this run, and launch it. Returns the run id.",
+    readOnly: false,
+    inputSchema: object(
+      {
+        flowId: stringProperty("The flow to run, as `smithers ls` names it."),
+        input: { type: "object", description: "The flow's input.", additionalProperties: true }
+      },
+      ["flowId"]
+    ),
+    call: (args) => {
+      const flowId = text(args["flowId"])
+      if (flowId === undefined) return Effect.succeed(missingArgument("flowId"))
+      const input = args["input"] ?? {}
+      return envelope(
+        Effect.gen(function*() {
+          const control = yield* ControlService.Control
+          const card = yield* control.plan({ flowId, input })
+          yield* control.approve({ ...card.approval, scope: "run" })
+          return yield* control.run({
+            _tag: "Plan",
+            planId: card.planId,
+            digest: card.digest,
+            envelope: card.envelope,
+            idempotencyKey: card.approval.idempotencyKey
+          })
+        }),
+        (receipt) => succeeded(receipt)
+      )
+    }
+  },
+  {
+    name: "list_runs",
+    description: "List durable runs, optionally filtered by flow or status.",
+    readOnly: true,
+    inputSchema: object({
+      flowId: stringProperty("Only runs of this flow."),
+      status: stringProperty("Only runs in this status.")
+    }),
+    call: (args) =>
+      envelope(
+        Effect.flatMap(ControlService.Control, (control) =>
+          control.list({
+            _tag: "runs",
+            filters: {
+              ...(text(args["flowId"]) === undefined ? {} : { flowId: text(args["flowId"])! }),
+              ...(text(args["status"]) === undefined
+                ? {}
+                : { status: text(args["status"])! as ControlSchema.RunStatus })
+            }
+          })),
+        (listed) => succeeded(listed._tag === "runs" ? listed.items : [])
+      )
+  },
+  {
+    name: "get_run",
+    description: "Read one run's summary.",
+    readOnly: true,
+    inputSchema: object({ runId: stringProperty("The run to read.") }, ["runId"]),
+    call: (args) => {
+      const runId = requireRunId(args)
+      if (runId === undefined) return Effect.succeed(missingArgument("runId"))
+      return envelope(summaryOf(runId), (run) => run === undefined ? missingRun(runId) : succeeded(run))
+    }
+  },
+  {
+    name: "watch_run",
+    description: "Read the events of one run after a sequence. Returns immediately; poll to follow.",
+    readOnly: true,
+    inputSchema: object({
+      runId: stringProperty("The run to watch."),
+      afterSequence: { type: "number", description: "Only events after this sequence." }
+    }, ["runId"]),
+    call: (args) => {
+      const runId = requireRunId(args)
+      if (runId === undefined) return Effect.succeed(missingArgument("runId"))
+      const after = typeof args["afterSequence"] === "number" ? args["afterSequence"] : 0
+      return envelope(
+        Effect.all([eventsOf(runId), summaryOf(runId)]),
+        ([events, run]) =>
+          succeeded({
+            runId,
+            status: run?.status,
+            events: events.filter((event) => event.sequence > after),
+            sequence: events.at(-1)?.sequence ?? after
+          })
+      )
+    }
+  },
+  {
+    name: "get_run_events",
+    description: "Read every recorded event of one run.",
+    readOnly: true,
+    inputSchema: object({ runId: stringProperty("The run to read.") }, ["runId"]),
+    call: (args) => {
+      const runId = requireRunId(args)
+      if (runId === undefined) return Effect.succeed(missingArgument("runId"))
+      return envelope(eventsOf(runId), (events) => succeeded(events))
+    }
+  },
+  {
+    name: "explain_run",
+    description: "Explain what happened in one run: status, cause, turns, calls, refusals, and cost.",
+    readOnly: true,
+    inputSchema: object({ runId: stringProperty("The run to explain.") }, ["runId"]),
+    call: (args) => {
+      const runId = requireRunId(args)
+      if (runId === undefined) return Effect.succeed(missingArgument("runId"))
+      return envelope(
+        Effect.all([eventsOf(runId), summaryOf(runId)]),
+        ([events, run]) => {
+          const digest = Forensics.digest(events)
+          return succeeded({ runId, status: run?.status, digest, card: Forensics.renderDiagnosis(run, digest) })
+        }
+      )
+    }
+  },
+  {
+    name: "list_pending_approvals",
+    description: "List runs parked on an approval, with the payload that releases each one.",
+    readOnly: true,
+    inputSchema: object({ runId: stringProperty("Only this run.") }),
+    call: (args) =>
+      envelope(
+        Effect.gen(function*() {
+          const control = yield* ControlService.Control
+          const only = requireRunId(args)
+          const listed = yield* control.list({
+            _tag: "runs",
+            filters: { status: "waiting-approval", ...(only === undefined ? {} : { runId: only }) }
+          })
+          const runs = listed._tag === "runs" ? listed.items : []
+          return yield* Effect.forEach(runs, (run) =>
+            Effect.map(eventsOf(run.runId), (events) => {
+              const digest = Forensics.digest(events)
+              return {
+                runId: run.runId,
+                flowId: run.flowId,
+                question: digest.parkedQuestion,
+                approval: digest.parkedApproval
+              }
+            }))
+        }),
+        (approvals) => succeeded(approvals)
+      )
+  },
+  {
+    name: "resolve_approval",
+    description: "Approve or deny a parked run with its serialized approval payload.",
+    readOnly: false,
+    inputSchema: object({
+      approval: { description: "The serialized approval payload from list_pending_approvals." },
+      decision: { type: "string", enum: ["approve", "deny"], description: "What to do." },
+      scope: { type: "string", enum: ["once", "run", "remembered"], description: "How long the grant lasts." }
+    }, ["approval", "decision"]),
+    call: (args) => {
+      const payload = decodeApproval(args["approval"])
+      if (payload === undefined) return Effect.succeed(missingArgument("approval"))
+      const decision = text(args["decision"])
+      if (decision !== "approve" && decision !== "deny") {
+        return Effect.succeed(failed("INVALID_INPUT", "decision must be \"approve\" or \"deny\""))
+      }
+      const scope = text(args["scope"])
+      return envelope(
+        Effect.flatMap(ControlService.Control, (control) =>
+          decision === "approve"
+            ? control.approve({
+              ...payload,
+              scope: scope === "once" || scope === "run" || scope === "remembered" ? scope : "run"
+            })
+            : control.deny(payload)),
+        (receipt) => succeeded(receipt)
+      )
+    }
+  },
+  {
+    name: "get_node_detail",
+    description: "Read one node's recorded output from a run.",
+    readOnly: true,
+    inputSchema: object({
+      runId: stringProperty("The run to read."),
+      nodeId: stringProperty("The node, as `smithers output <run-id>` lists it.")
+    }, ["runId", "nodeId"]),
+    call: (args) => {
+      const runId = requireRunId(args)
+      if (runId === undefined) return Effect.succeed(missingArgument("runId"))
+      const nodeId = text(args["nodeId"])
+      if (nodeId === undefined) return Effect.succeed(missingArgument("nodeId"))
+      return envelope(eventsOf(runId), (events) => {
+        const nodes = NodeOutput.project(events)
+        const node = nodes.find((candidate) => candidate.nodeId === nodeId)
+        return node === undefined
+          ? failed("NODE_NOT_FOUND", NodeOutput.notFound(runId, nodeId, nodes))
+          : succeeded(node)
+      })
+    }
+  },
+  {
+    name: "get_chat_transcript",
+    description: "Read one run's turn-by-turn transcript.",
+    readOnly: true,
+    inputSchema: object({ runId: stringProperty("The run to read.") }, ["runId"]),
+    call: (args) => {
+      const runId = requireRunId(args)
+      if (runId === undefined) return Effect.succeed(missingArgument("runId"))
+      return envelope(eventsOf(runId), (events) => succeeded({ runId, transcript: Forensics.renderTranscript(events) }))
+    }
+  }
+]
+
+/**
+ * The ten 0.x tool names rc.0 answers with an `unsupported` envelope, and the
+ * reason each gives.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const unsupportedReasons: ReadonlyArray<readonly [name: string, reason: string]> = [
+  ["revert_attempt", "time travel is a library API (@smthrs/time-travel) and is not composed into the CLI"],
+  ["fork_run", "time travel is a library API (@smthrs/time-travel) and is not composed into the CLI"],
+  ["replay_run", "time travel is a library API (@smthrs/time-travel) and is not composed into the CLI"],
+  ["rewind_run", "time travel is a library API (@smthrs/time-travel) and is not composed into the CLI"],
+  ["restore_checkpoint", "worktree lanes and snapshot restore are deferred"],
+  ["list_snapshots", "worktree lanes and snapshot restore are deferred"],
+  ["get_timeline", "time travel is a library API (@smthrs/time-travel) and is not composed into the CLI"],
+  ["time_travel", "time travel is a library API (@smthrs/time-travel) and is not composed into the CLI"],
+  ["list_artifacts", "the artifact projection is not part of this release"],
+  ["ask_human", "there is no question or answer RPC; approvals park the run, so use list_pending_approvals"]
+]
+
+/**
+ * The unsupported tools, as tools: named, described, and answering with the
+ * `unsupported` envelope.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const unsupportedTools: ReadonlyArray<Tool> = unsupportedReasons.map(([name, reason]) => ({
+  name,
+  description: `Not available in 1.0.0-rc.0: ${reason}.`,
+  readOnly: true,
+  inputSchema: object({}),
+  call: () =>
+    Effect.succeed(
+      failed("unsupported", `${name} is not available in 1.0.0-rc.0: ${reason}. See https://smithers.sh/migration/1.0`)
+    )
+}))
+
+/**
+ * The raw surface: one tool per shipped CLI verb, describing how to reach it.
+ *
+ * The raw tools are a directory, not a second execution path. 0.x mirrored
+ * every CLI command as an MCP tool by reflecting its argument parser, which
+ * made the MCP surface a second, undocumented copy of the command line.
+ * Naming the verbs and pointing at the semantic tool that performs each one
+ * keeps exactly one execution path.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const rawTools = (
+  verbs: ReadonlyArray<{ readonly name: string; readonly help: string }>
+): ReadonlyArray<Tool> =>
+  verbs.map((verb) => ({
+    name: `cli_${verb.name.replaceAll("-", "_")}`,
+    description: `${verb.help}. Run it as \`smithers ${verb.name}\`.`,
+    readOnly: true,
+    inputSchema: object({}),
+    call: () =>
+      Effect.succeed(
+        succeeded({
+          command: `smithers ${verb.name}`,
+          description: verb.help,
+          note: "Run this from a shell; the semantic tools perform the control-plane operations directly."
+        })
+      )
+  }))
+
+/**
+ * How one session's tool list is scoped.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface Options {
+  readonly surface?: Surface | undefined
+  readonly allowedTools?: ReadonlyArray<string> | undefined
+  readonly readOnly?: boolean | undefined
+  readonly verbs?: ReadonlyArray<{ readonly name: string; readonly help: string }> | undefined
+}
+
+/**
+ * The tools one session exposes, after the surface, allowlist, and read-only
+ * filters.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const tools = (options: Options = {}): ReadonlyArray<Tool> => {
+  const surface = options.surface ?? "semantic"
+  const semantic = surface === "raw" ? [] : [...supportedTools, ...unsupportedTools]
+  const raw = surface === "semantic" ? [] : rawTools(options.verbs ?? [])
+  const all = [...semantic, ...raw]
+  const allowed = options.allowedTools === undefined ? undefined : new Set(options.allowedTools)
+  return all.filter((tool) =>
+    (allowed === undefined || allowed.has(tool.name)) && (options.readOnly !== true || tool.readOnly)
+  )
+}
+
+/**
+ * Whether this invocation is the MCP server rather than a command.
+ *
+ * @category predicates
+ * @since 1.0.0
+ */
+export const requested = (args: ReadonlyArray<string>): boolean => args.includes("--mcp")
+
+const value = (args: ReadonlyArray<string>, flag: string): string | undefined => {
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index]
+    if (argument === `--${flag}`) return args[index + 1]
+    if (argument?.startsWith(`--${flag}=`)) return argument.slice(flag.length + 3)
+  }
+  return undefined
+}
+
+/**
+ * Reads the session's scope out of raw argv.
+ *
+ * The MCP server is selected by a flag rather than a subcommand, because that
+ * is how every MCP client's configuration spells a launch command, so its own
+ * flags are read from argv rather than parsed by the command tree.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const optionsFromArguments = (args: ReadonlyArray<string>): Options => {
+  const surface = value(args, "surface")
+  const allowed = value(args, "allowed-tools")
+  return {
+    surface: surface === "raw" || surface === "both" ? surface : "semantic",
+    ...(allowed === undefined
+      ? {}
+      : { allowedTools: allowed.split(",").map((name) => name.trim()).filter((name) => name !== "") }),
+    readOnly: args.includes("--read-only")
+  }
+}
+
+/** A JSON-RPC message as it arrives on stdin. */
+interface Request {
+  readonly id?: number | string | undefined
+  readonly method?: string | undefined
+  readonly params?: unknown
+}
+
+const parse = (line: string): Request | undefined => {
+  const trimmed = line.trim()
+  if (trimmed === "") return undefined
+  try {
+    const value: unknown = JSON.parse(trimmed)
+    if (typeof value !== "object" || value === null) return undefined
+    if ((value as { readonly jsonrpc?: unknown }).jsonrpc !== "2.0") return undefined
+    return value
+  } catch {
+    return undefined
+  }
+}
+
+const toolResult = (result: Envelope): Record<string, unknown> => ({
+  content: [{ type: "text", text: JSON.stringify(result) }],
+  structuredContent: result,
+  isError: !result.ok
+})
+
+/**
+ * Answers one request, or `undefined` for a notification that needs no reply.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const respond = (
+  request: Request,
+  session: ReadonlyArray<Tool>,
+  version: string
+): Effect.Effect<Record<string, unknown> | undefined, never, ControlService.Control> =>
+  Effect.gen(function*() {
+    if (request.id === undefined) return undefined
+    const reply = (result: unknown) => ({ jsonrpc: "2.0", id: request.id, result })
+    switch (request.method) {
+      case "initialize":
+        return reply({
+          protocolVersion,
+          capabilities: { tools: { listChanged: false } },
+          serverInfo: { name: "smithers", version }
+        })
+      case "ping":
+        return reply({})
+      case "tools/list":
+        return reply({
+          tools: session.map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+            annotations: { readOnlyHint: tool.readOnly }
+          }))
+        })
+      case "tools/call": {
+        const params = typeof request.params === "object" && request.params !== null
+          ? request.params as Record<string, unknown>
+          : {}
+        const name = text(params["name"]) ?? ""
+        const tool = session.find((candidate) => candidate.name === name)
+        if (tool === undefined) {
+          return reply(toolResult(failed("unknown_tool", `No tool named ${name} is exposed by this session`)))
+        }
+        const args = typeof params["arguments"] === "object" && params["arguments"] !== null
+          ? params["arguments"] as Record<string, unknown>
+          : {}
+        return reply(toolResult(yield* tool.call(args)))
+      }
+      default:
+        return {
+          jsonrpc: "2.0",
+          id: request.id,
+          error: { code: -32601, message: `Method not found: ${request.method ?? "?"}` }
+        }
+    }
+  })
+
+/**
+ * Serves the MCP session over stdio until standard input closes.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const serve = (
+  options: Options & {
+    readonly version: string
+    readonly input?: NodeJS.ReadableStream | undefined
+    readonly output?: NodeJS.WritableStream | undefined
+  }
+): Effect.Effect<void, never, ControlService.Control> =>
+  Effect.gen(function*() {
+    const session = tools(options)
+    const input = options.input ?? process.stdin
+    const output = options.output ?? process.stdout
+    // One line in, one reply out, strictly in order: two `tools/call` handlers
+    // writing concurrently would interleave frames and corrupt the protocol,
+    // and an MCP client correlates replies by id rather than by arrival, so
+    // serializing costs nothing an agent can observe.
+    yield* Stream.runForEach(
+      Stream.callback<string>((queue) =>
+        Effect.sync(() => {
+          const lines = createInterface({ input })
+          lines.on("line", (line) => {
+            Queue.offerUnsafe(queue, line)
+          })
+          lines.on("close", () => {
+            Queue.endUnsafe(queue)
+          })
+        })
+      ),
+      (line) =>
+        Effect.gen(function*() {
+          const request = parse(line)
+          if (request === undefined) return
+          const reply = yield* respond(request, session, options.version)
+          if (reply !== undefined) yield* Effect.sync(() => output.write(`${JSON.stringify(reply)}\n`))
+        })
+    )
+  })

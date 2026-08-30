@@ -25,6 +25,9 @@ import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
 import * as WorkspaceSandbox from "@smthrs/engine-store/WorkspaceSandbox"
 import * as NodeFlowsRuntime from "@smthrs/flows/NodeRuntime"
+import type * as GatewayServer from "@smthrs/gateway/GatewayServer"
+import * as NodeGateway from "@smthrs/gateway/node/NodeGateway"
+import * as GatewayProjections from "@smthrs/gateway/Projections"
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
 import type * as Sandbox from "@smthrs/harness/Sandbox"
 import * as NodeJj from "@smthrs/jj/node/NodeJj"
@@ -36,6 +39,7 @@ import * as GrantStore from "@smthrs/kernel/GrantStore"
 import * as Workspace from "@smthrs/kernel/Workspace"
 import type * as McpClient from "@smthrs/mcp/McpClient"
 import * as McpFlows from "@smthrs/mcp/McpFlows"
+import * as MemoryError from "@smthrs/memory/MemoryError"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import * as Recall from "@smthrs/memory/Recall"
 import type * as ModelError from "@smthrs/model/ModelError"
@@ -53,6 +57,10 @@ import * as Checkpoints from "@smthrs/std/Checkpoints"
 import * as Container from "@smthrs/std/Container"
 import * as NativeSearch from "@smthrs/std/NativeSearch"
 import * as TestRunner from "@smthrs/std/TestRunner"
+import * as RunCatalog from "@smthrs/sync/RunCatalog"
+import * as SyncAuth from "@smthrs/sync/SyncAuth"
+import * as SyncServer from "@smthrs/sync/SyncServer"
+import * as WorkspaceShare from "@smthrs/sync/WorkspaceShare"
 import type { FileSystem, Path, Result } from "effect"
 import { Context, Effect, Exit, Layer, Redacted, Scope } from "effect"
 import { HttpRouter } from "effect/unstable/http"
@@ -65,20 +73,22 @@ import type { ListenOptions } from "node:net"
 import { dirname, join } from "node:path"
 import * as Application from "./Application.ts"
 import * as CodexAuth from "./CodexAuth.ts"
+import * as Environment_ from "./Environment.ts"
 import * as Output from "./Output.ts"
+import * as Project from "./Project.ts"
 
 /**
  * The environment subset consulted while resolving Node application
  * configuration.
  *
+ * Names are read through `Environment.read`, so each canonical `SMITHERS_*`
+ * spelling also accepts its rc.0 `FLOWS_*` alias.
+ *
  * @category models
  * @since 0.1.0
  * @slop
  */
-export interface Environment {
-  readonly FLOWS_REMOTE?: string | undefined
-  readonly FLOWS_MCP_CONFIG?: string | undefined
-}
+export type Environment = Environment_.Source
 
 /**
  * Node HTTP listen options accepted by the control server.
@@ -126,7 +136,7 @@ const mcpServersFromArguments = (
   args: ReadonlyArray<string>,
   environment: Environment
 ): ReadonlyArray<McpClient.ConnectOptions> | undefined => {
-  const path = valueFromArguments(args, "mcp-config") ?? environment.FLOWS_MCP_CONFIG
+  const path = valueFromArguments(args, "mcp-config") ?? Environment_.read(environment, "SMITHERS_MCP_CONFIG")
   if (path === undefined) return undefined
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
   if (!Array.isArray(parsed) || !parsed.every(isMcpServerEntry)) {
@@ -147,11 +157,22 @@ const mcpServersFromArguments = (
  */
 export const makeConfig = (
   args: ReadonlyArray<string>,
-  environment: Environment = process.env
+  environment: Environment = process.env,
+  cwd: string = process.cwd()
 ): Application.Config => ({
-  remote: valueFromArguments(args, "remote") ?? environment.FLOWS_REMOTE,
-  credential: valueFromArguments(args, "credential"),
-  mcpServers: mcpServersFromArguments(args, environment)
+  remote: valueFromArguments(args, "remote") ?? Environment_.read(environment, "SMITHERS_REMOTE"),
+  // New in Phase 4: at the import reference `--credential` had no environment
+  // fallback, so a hosted gateway had to spell the token on every command
+  // line (rc-contract section 4).
+  credential: valueFromArguments(args, "credential") ?? Environment_.read(environment, "SMITHERS_API_KEY"),
+  mcpServers: mcpServersFromArguments(args, environment),
+  // `--root` is resolved here rather than in a handler because the durable
+  // layers are built from it, and they are built before any flag is parsed.
+  root: Project.root(valueFromArguments(args, "root"), cwd),
+  // `migrate` converts a 0.x project, which by definition has no `.flows/`
+  // for the root walk to anchor on. Resolved from the same `--root`, and
+  // otherwise from the 0.x state beside the invocation directory.
+  migrationRoot: Project.legacyRoot(valueFromArguments(args, "root"), cwd)
 })
 
 /**
@@ -437,7 +458,7 @@ const apiKeyVariable: Readonly<Record<string, string>> = {
  * lane opts in through the environment without respelling any seat — the
  * journaled seat, its context window, and its committed price stay identical.
  */
-const openaiAuthVariable = "FLOWS_OPENAI_AUTH"
+const openaiAuthVariable = "SMITHERS_OPENAI_AUTH"
 
 /**
  * The Node seat resolver: it turns a `provider:modelId` seat into a live model
@@ -448,7 +469,7 @@ const openaiAuthVariable = "FLOWS_OPENAI_AUTH"
  * A seat with no separator is a bare model id on the Anthropic route, which is
  * the one provider convention this host assumes.
  *
- * `FLOWS_OPENAI_AUTH=chatgpt` swaps the `openai` provider's credential source
+ * `SMITHERS_OPENAI_AUTH=chatgpt` swaps the `openai` provider's credential source
  * from `OPENAI_API_KEY` to the codex CLI's ChatGPT session
  * (`$CODEX_HOME/auth.json`); the token store is shared across every seat that
  * resolves against the same file so its refresh stays single-flight.
@@ -484,7 +505,7 @@ export const seatResolver = (
         }
         // An empty value is treated exactly like an unset variable, the same
         // convention the key variables follow below.
-        const configured = environment[openaiAuthVariable]
+        const configured = Environment_.read(environment, openaiAuthVariable)
         const authMode = provider === "openai" && configured !== undefined && configured !== ""
           ? configured
           : "api-key"
@@ -612,11 +633,11 @@ export const testRunner = (
   environment: Readonly<Record<string, string | undefined>>,
   root: string
 ): TestRunner.Runner | undefined => {
-  const command = environment["FLOWS_TEST_COMMAND"]?.trim()
+  const command = Environment_.read(environment, "SMITHERS_TEST_COMMAND")?.trim()
   if (command === undefined || command === "") return undefined
-  const container = environment["FLOWS_TEST_CONTAINER"]?.trim()
-  const cwd = environment["FLOWS_TEST_CWD"]?.trim()
-  const timeout = Number(environment["FLOWS_TEST_TIMEOUT_MS"])
+  const container = Environment_.read(environment, "SMITHERS_TEST_CONTAINER")?.trim()
+  const cwd = Environment_.read(environment, "SMITHERS_TEST_CWD")?.trim()
+  const timeout = Number(Environment_.read(environment, "SMITHERS_TEST_TIMEOUT_MS"))
   return {
     command,
     // The runner's directory and the repository's are the same path until a
@@ -636,7 +657,7 @@ export const testRunner = (
  * The same two paths {@link testRunner} reads, for the same reason: a
  * checkpoint is materialized as a directory under the repository, and a
  * container reaches that directory through the mount it already has.
- * `FLOWS_TEST_CWD` is the container's name for the repository when there is
+ * `SMITHERS_TEST_CWD` is the container's name for the repository when there is
  * one, and the workspace root is the host's — so a host that declares neither
  * still pins, and pins on one path under both names.
  *
@@ -647,7 +668,7 @@ export const checkpointStore = (
   environment: Readonly<Record<string, string | undefined>>,
   root: string
 ): Checkpoints.GitOptions => {
-  const cwd = environment["FLOWS_TEST_CWD"]?.trim()
+  const cwd = Environment_.read(environment, "SMITHERS_TEST_CWD")?.trim()
   return { root, ...(cwd === undefined || cwd === "" ? {} : { cwd }) }
 }
 
@@ -876,10 +897,11 @@ export const layerExecutor = (
  */
 export const layerControl = (applicationConfig: Application.Config) => {
   const remote = applicationConfig.remote ?? "http://127.0.0.1"
-  const registry = layerRegistry()
-  const engine = engineDurable(process.cwd(), registry)
+  const root = applicationConfig.root ?? process.cwd()
+  const registry = layerRegistry(root)
+  const engine = engineDurable(root, registry)
   const executor = applicationConfig.remote === undefined
-    ? layerExecutor(registry, engine, process.cwd(), process.env, applicationConfig.mcpServers ?? [])
+    ? layerExecutor(registry, engine, root, process.env, applicationConfig.mcpServers ?? [])
     : undefined
   return Application.layer(applicationConfig, registry, engine, executor).pipe(
     Layer.provide([
@@ -922,8 +944,66 @@ export const layerOutput = Layer.succeed(
  * @since 0.1.0
  * @slop
  */
-export const layer = (applicationConfig: Application.Config) =>
-  Layer.mergeAll(layerControl(applicationConfig), layerOutput, NodeServices.layer)
+export const layer = (applicationConfig: Application.Config) => {
+  const root = applicationConfig.root ?? process.cwd()
+  return Layer.mergeAll(
+    layerControl(applicationConfig),
+    layerOutput,
+    NodeServices.layer,
+    Project.layer(root, applicationConfig.migrationRoot),
+    // `smithers memory` reads and writes the same durable store a run's
+    // `memory` flow does, over the same control database. A separate
+    // connection would be a second writer to one SQLite file. A remote
+    // invocation has no local database to be that store, so it gets the
+    // refusal instead of silently writing where nothing reads.
+    applicationConfig.remote === undefined ? layerMemory(root) : layerMemoryRemote
+  )
+}
+
+/**
+ * Provides the memory store a `--remote` invocation gets: none, said out loud.
+ *
+ * The control plane owns memory. Building the local store here would open (and
+ * create) a `.flows/control.db` beside the operator's shell and write facts the
+ * server never reads, which is worse than a refusal because it looks like it
+ * worked.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerMemoryRemote: Layer.Layer<MemoryStore.MemoryStore> = MemoryStore.layerNoop({
+  putFact: () => remoteMemory("memory set"),
+  getFact: () => remoteMemory("memory get"),
+  deleteFact: () => remoteMemory("memory rm"),
+  listFacts: () => remoteMemory("memory list")
+})
+
+const remoteMemory = (verb: string): Effect.Effect<never, MemoryError.MemoryError> =>
+  Effect.fail(
+    new MemoryError.MemoryError({
+      code: "store",
+      message:
+        `${verb} is not available against --remote: the control plane owns memory. Run it on the host that holds .flows/control.db.`
+    })
+  )
+
+/**
+ * Provides the durable memory store the `memory` verbs read and write, over
+ * the control database.
+ *
+ * A remote composition has no local database, so the store is the unavailable
+ * one there: `smithers --remote ... memory set` must say the control plane
+ * owns memory rather than write a fact into a file the server never reads.
+ *
+ * @category layers
+ * @since 1.0.0
+ * @slop
+ */
+export const layerMemory = (root: string = process.cwd()): Layer.Layer<MemoryStore.MemoryStore> =>
+  MemoryStore.layer.pipe(
+    Layer.provide([engineDurable(root).stores, NodeCrypto.layer]),
+    Layer.orDie
+  )
 
 const defaultServerOptions: ServerOptions = { host: "127.0.0.1", port: 3000 }
 
@@ -963,6 +1043,42 @@ export const layerServer = (
   ).pipe(
     Layer.provideMerge(NodeHttpServer.layer(createServer, listenOptions(options)))
   )
+
+/**
+ * Hosts the whole workspace gateway: the control plane, the served
+ * projections, the journal read path, and the health probe, on one socket.
+ *
+ * `@smthrs/gateway` owns the assembly (`GatewayServer.layer`) and its Node
+ * host (`NodeGateway.layer`); this function supplies the four services those
+ * mounts read through that only a project on disk can provide. `Control` stays
+ * a requirement, so the verb hosts the same control plane its own commands
+ * talk to rather than opening a second one.
+ *
+ * The sync read path reads the journal over its own connection to the control
+ * database. SQLite in WAL mode is built for that, and the alternative — a
+ * second `ControlLive` — would be a second writer.
+ *
+ * `RunCatalog` and `WorkspaceShare` are the no-op implementations: a local
+ * gateway shares nothing and publishes no catalog, and the relay
+ * implementations belong to a host that has an account to publish under.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerGateway = (
+  health: GatewayServer.Health,
+  options: NodeGateway.ServerOptions = { host: "127.0.0.1", port: defaultServerOptions.port },
+  root: string = process.cwd()
+) => {
+  const journal = engineDurable(root).journal
+  return NodeGateway.layer(health, options).pipe(
+    Layer.provide([
+      GatewayProjections.layer,
+      SyncServer.layer.pipe(Layer.provide([journal, RunCatalog.layerNoop])),
+      SyncAuth.layer.pipe(Layer.provide(WorkspaceShare.layerNoop))
+    ])
+  )
+}
 
 /**
  * Hosts Control using the alpha's single shared bearer token.

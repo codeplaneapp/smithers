@@ -13,11 +13,16 @@ import * as TestControl from "@smthrs/control/test/TestControl"
 import { Cause, Effect, Exit, Layer, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { Command } from "effect/unstable/cli"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import * as CliError from "../src/CliError.ts"
 import { cli } from "../src/Command.ts"
 import * as ExecutorOwnership from "../src/ExecutorOwnership.ts"
+import * as NodeControl from "../src/NodeControl.ts"
 import * as Output from "../src/Output.ts"
+import * as Project from "../src/Project.ts"
 import { packageVersion } from "../src/Version.ts"
 
 const runCommand = Command.runWith(cli, { version: packageVersion })
@@ -39,8 +44,28 @@ const json = Effect.fnUntraced(function*(args: ReadonlyArray<string>) {
   })
 })
 
-const testControl = TestControl.layer({ now: () => 0 })
-const services = Layer.merge(TestConsole.layer, Output.layer)
+/**
+ * The project flow these cases plan, approve, and run.
+ *
+ * A reserved `system/*` id would be simpler to reach — `TestControl` falls
+ * back to the whole reserved catalog — but the CLI refuses to plan one, since
+ * a reserved id has no body and a launch would park forever
+ * (`Unsupported.reservedFlowError`). So the fixture registers a flow of its
+ * own, which is also what an operator's project looks like.
+ */
+const demoFlow = {
+  flowId: "demo/ship",
+  description: "The fixture flow these cases plan and run",
+  deployClass: false,
+  envelope: { capabilities: [], flows: [], budget: {} }
+} as const
+
+const testControl = TestControl.layer({ now: () => 0, flows: [demoFlow] })
+// `memory` is part of the command tree, so every invocation carries its
+// requirement. These cases have no local database, which is exactly the
+// `--remote` situation, so they get the same refusing store a remote
+// invocation gets rather than opening a `.flows/` beside the test run.
+const services = Layer.mergeAll(TestConsole.layer, Output.layer, NodeControl.layerMemoryRemote)
 
 const run = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -54,9 +79,9 @@ const run = <A, E, R>(
     ) as Effect.Effect<A, E>
   )
 
-/** Plans, approves, and launches `system/test`, returning the run identifier. */
+/** Plans, approves, and launches `demo/ship`, returning the run identifier. */
 const launch = Effect.fnUntraced(function*() {
-  const card = (yield* json(["--json", "plan", "system/test"])) as { readonly approval: unknown }
+  const card = (yield* json(["--json", "plan", "demo/ship"])) as { readonly approval: unknown }
   const approval = JSON.stringify(card.approval)
   yield* json(["--json", "approve", approval])
   const receipt = (yield* json(["--json", "run", approval])) as { readonly runId?: unknown }
@@ -89,7 +114,7 @@ const event = (
 describe("input decoding", () => {
   it("splits pairs on the first separator and treats a bare key as a set flag", async () => {
     const card = await run(
-      json(["--json", "plan", "system/test", "verbose", "a=1", "k=v=w"]),
+      json(["--json", "plan", "demo/ship", "verbose", "a=1", "k=v=w"]),
       testControl
     )
 
@@ -101,7 +126,7 @@ describe("input decoding", () => {
   })
 
   it("treats a leading separator as a bare key, not an empty name", async () => {
-    const card = await run(json(["--json", "plan", "system/test", "=lead", "b="]), testControl)
+    const card = await run(json(["--json", "plan", "demo/ship", "=lead", "b="]), testControl)
 
     // `separator < 1` is the boundary: index 0 is a bare key, index 1 is the
     // shortest real pair and its value is the empty string.
@@ -111,14 +136,14 @@ describe("input decoding", () => {
   })
 
   it("plans with no pairs at all as the empty input object", async () => {
-    const card = await run(json(["--json", "plan", "system/test"]), testControl)
+    const card = await run(json(["--json", "plan", "demo/ship"]), testControl)
 
     expect((card as { readonly inputSummary: string }).inputSummary).toBe("{}")
   })
 
   it("merges an object --data over the positional pairs", async () => {
     const card = await run(
-      json(["--json", "plan", "system/test", "a=1", "b=2", "--data", "{\"a\":\"overridden\",\"c\":3}"]),
+      json(["--json", "plan", "demo/ship", "a=1", "b=2", "--data", "{\"a\":\"overridden\",\"c\":3}"]),
       testControl
     )
 
@@ -136,7 +161,7 @@ describe("input decoding", () => {
     ] as const
   )("nests %s --data under `data` beside the pairs", async (_label, serialized, expected) => {
     const card = await run(
-      json(["--json", "plan", "system/test", "a=1", "--data", serialized]),
+      json(["--json", "plan", "demo/ship", "a=1", "--data", serialized]),
       testControl
     )
 
@@ -156,23 +181,23 @@ describe("input decoding", () => {
 
 describe("presentation flags", () => {
   it("renders human output as indented JSON when --json is absent", async () => {
-    const rendered = await run(text(["plan", "system/test"]), testControl)
+    const rendered = await run(text(["plan", "demo/ship"]), testControl)
 
-    expect(rendered).toContain("\n  \"flowId\": \"system/test\"")
+    expect(rendered).toContain("\n  \"flowId\": \"demo/ship\"")
   })
 
   it("prints nothing at all under --quiet while still performing the mutation", async () => {
     const result = await run(
       Effect.gen(function*() {
-        const quiet = yield* text(["--json", "--quiet", "plan", "system/test"])
-        const loud = yield* text(["--json", "plan", "system/test"])
+        const quiet = yield* text(["--json", "--quiet", "plan", "demo/ship"])
+        const loud = yield* text(["--json", "plan", "demo/ship"])
         return { quiet, loud }
       }),
       testControl
     )
 
     expect(result.quiet).toBe("")
-    expect(JSON.parse(result.loud)).toMatchObject({ flowId: "system/test" })
+    expect(JSON.parse(result.loud)).toMatchObject({ flowId: "demo/ship" })
   })
 })
 
@@ -188,8 +213,8 @@ describe("listing verbs", () => {
       Effect.gen(function*() {
         const launched = yield* launch()
         const all = yield* json(["--json", "ps"])
-        const matching = yield* json(["--json", "ps", "--flow", "system/test", "--status", "accepted"])
-        const wrongStatus = yield* json(["--json", "ps", "--flow", "system/test", "--status", "failed"])
+        const matching = yield* json(["--json", "ps", "--flow", "demo/ship", "--status", "accepted"])
+        const wrongStatus = yield* json(["--json", "ps", "--flow", "demo/ship", "--status", "failed"])
         const wrongFlow = yield* json(["--json", "ps", "--flow", "system/other", "--status", "accepted"])
         return { runId: launched.runId, all, matching, wrongStatus, wrongFlow }
       }),
@@ -270,7 +295,7 @@ describe("lifecycle verbs", () => {
   it("denies a complete approval payload", async () => {
     const receipt = await run(
       Effect.gen(function*() {
-        const card = (yield* json(["--json", "plan", "system/test"])) as { readonly approval: unknown }
+        const card = (yield* json(["--json", "plan", "demo/ship"])) as { readonly approval: unknown }
         return yield* json(["--json", "deny", JSON.stringify(card.approval)])
       }),
       testControl
@@ -299,34 +324,22 @@ describe("lifecycle verbs", () => {
   })
 })
 
-describe("system verbs", () => {
-  it("plans a reserved system flow with its own decoded input", async () => {
-    const card = await run(json(["--json", "docs", "topic=flows"]), testControl)
+describe("up", () => {
+  it("plans, approves for the run, and launches in one command", async () => {
+    const receipt = await run(json(["--json", "up", "demo/ship"]), testControl)
 
-    // A system verb takes every positional argument as input; there is no
-    // leading flow-id argument to skip.
-    expect(card).toMatchObject({ flowId: "system/docs" })
+    // One command, one receipt: the plan and its approval are internal to the
+    // verb, and the caller reads the run id off the receipt because rc.0 has
+    // no operator-supplied run id (rc-contract section 4.1).
+    expect(receipt).toMatchObject({ _tag: "Accepted" })
+    expect(typeof (receipt as { readonly runId: string }).runId).toBe("string")
+  })
+
+  it("carries --data into the planned input", async () => {
+    const card = await run(json(["--json", "plan", "demo/ship", "--data", "{\"topic\":\"flows\"}"]), testControl)
+
+    expect(card).toMatchObject({ flowId: "demo/ship" })
     expect((card as { readonly inputSummary: string }).inputSummary).toBe(JSON.stringify({ topic: "flows" }))
-  })
-
-  it("plans the boot flow, and --watch is the only input it carries", async () => {
-    const result = await run(
-      Effect.gen(function*() {
-        const plain = yield* json(["--json", "up"])
-        const watched = yield* json(["--json", "up", "--watch"])
-        return { plain, watched }
-      }),
-      testControl
-    )
-
-    expect((result.plain as { readonly inputSummary: string }).inputSummary).toBe(JSON.stringify({ watch: false }))
-    expect((result.watched as { readonly inputSummary: string }).inputSummary).toBe(JSON.stringify({ watch: true }))
-  })
-
-  it("redirects `up <flow>` to the run verb instead of planning boot", async () => {
-    const rendered = await run(text(["up", "review"]), testControl)
-
-    expect(rendered).toBe("did you mean `smithers run review`?")
   })
 })
 
@@ -502,7 +515,7 @@ describe("owned-run settlement", () => {
     ] as const
     const results = await Promise.all(settlements.map((kind) =>
       Effect.runPromise(
-        json(["--json", "run", "run-1", "--resume"]).pipe(
+        Effect.exit(json(["--json", "run", "run-1", "--resume"])).pipe(
           Effect.timeout("5 seconds"),
           Effect.provide(ExecutorOwnership.layer(true)),
           Effect.provide(
@@ -531,8 +544,20 @@ describe("owned-run settlement", () => {
     ))
 
     // Every settlement kind releases the wait; a non-settling event before it
-    // does not.
-    for (const receipt of results) expect(receipt).toMatchObject({ _tag: "Accepted" })
+    // does not. `control.run.pending` releases it with the executor's refusal
+    // rather than the launch receipt: the run is durable and stopped.
+    for (const [index, exit] of results.entries()) {
+      const kind = settlements[index]!
+      if (kind === "control.run.pending") {
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : "")).toContain(
+          "the executor did not take it"
+        )
+        continue
+      }
+      expect(Exit.isSuccess(exit)).toBe(true)
+      expect(Exit.isSuccess(exit) ? exit.value : undefined).toMatchObject({ _tag: "Accepted" })
+    }
   })
 })
 
@@ -540,7 +565,7 @@ describe("exit statuses", () => {
   it("gives a parked receipt exit status 3 and an accepted one status 0", async () => {
     const result = await run(
       Effect.gen(function*() {
-        const card = (yield* json(["--json", "plan", "system/test"])) as { readonly approval: unknown }
+        const card = (yield* json(["--json", "plan", "demo/ship"])) as { readonly approval: unknown }
         const approval = JSON.stringify(card.approval)
         const parked = yield* json(["--json", "run", approval])
         yield* json(["--json", "approve", approval])
@@ -565,7 +590,37 @@ describe("exit statuses", () => {
 
     expect(Exit.isFailure(exit)).toBe(true)
     if (Exit.isFailure(exit)) {
-      expect(String(Cause.squash(exit.cause))).not.toContain("system/test")
+      expect(String(Cause.squash(exit.cause))).not.toContain("demo/ship")
+    }
+  })
+})
+
+describe("`gc` over a database it cannot open", () => {
+  it("names the file and fails, instead of rendering an empty sweep and exiting 0", async () => {
+    // `gc --dry-run` is trusted to name exactly what a real pass would delete.
+    // A file it could not even open rendered as `{ runs: [], deleted: {} }`
+    // with exit 0, which reads as "there is nothing to collect".
+    const root = mkdtempSync(join(tmpdir(), "smithers-gc-handler-"))
+    try {
+      mkdirSync(join(root, ".flows"), { recursive: true })
+      writeFileSync(join(root, ".flows", "control.db"), "not a database at all")
+
+      const exit = await Effect.runPromise(
+        Effect.exit(runCommand(["gc", "--dry-run", "--json"])).pipe(
+          Effect.provide(testControl),
+          Effect.provide(services),
+          Effect.provide(Project.layer(root)),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+      expect(error).toBeInstanceOf(CliError.UnsupportedError)
+      expect((error as CliError.UnsupportedError).message).toContain(join(root, ".flows", "control.db"))
+      expect(CliError.exitCode(error as CliError.UnsupportedError)).toBe(1)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   })
 })
