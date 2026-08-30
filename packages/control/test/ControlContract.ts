@@ -372,7 +372,7 @@ export const contract = (name: string, harness: Harness): void => {
       )
     })
 
-    test("delivers a signal without resuming a parked run", () =>
+    test("records a signal when no executor can deliver it, without resuming the run", () =>
       Effect.gen(function*() {
         const control = yield* Control
         const runtime = yield* ControlRuntime
