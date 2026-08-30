@@ -58,8 +58,7 @@ export interface Summary {
 const engineLayer = (filename: string, hostId: string) =>
   EngineStore.layer({
     owner: { hostId },
-    journalSource: `${hostId}-engine`,
-    isAlive: () => Effect.succeed(false)
+    journalSource: `${hostId}-engine`
   }).pipe(
     Layer.provideMerge(
       Layer.mergeAll(

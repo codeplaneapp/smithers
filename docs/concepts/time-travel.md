@@ -44,7 +44,7 @@ Use flow replay when the goal is to resume computation. Use projection replay wh
 
 ## Fork
 
-`fork` requires a terminal or inactive parent run, creates a store-level fork, and asks `Jj` to add an isolated workspace. The workspace name and path are derived from the position rather than supplied, and the lane is forgotten when the service is released.
+`fork` requires a terminal or inactive parent run, creates a store-level fork, and asks `Jj` to add an isolated workspace. The workspace name and path are derived from the child run id the fork mints rather than supplied, so a frame forked twice gets two lanes, and the lane is forgotten when the service is released.
 
 The SQL store copies the parent's versioned engine state without terminal
 result or cancellation fields and clones its attempt rows. The fork can

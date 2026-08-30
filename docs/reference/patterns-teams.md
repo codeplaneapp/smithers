@@ -13,7 +13,7 @@ Every module here follows the two-surface shape the package uses everywhere:
 
 Options that change behavior are declared through `Node.capture`, so two plans that differ only in a bound have different step identity.
 
-A declared flow joins its members with `Node.andThen` and `Node.all`. Neither continues past a failed member: `Node.andThen` has no continuation for a step that failed, and `Node.all` fails the join on the first failing member and interrupts the rest. So a declared flow halts on the first failure even where the module's `run` tolerates one. `CheckSuite`'s `continueOnFail`, `Kanban`'s per-item continuation, `Runbook`'s `onDeny: "skip"`, and `MergeQueue`'s `failurePolicy: "quarantine"` are execution semantics today. Each section below repeats this where it applies.
+A declared flow joins its members with `Node.andThen`, `Node.all`, and `Node.catch`. The first two do not continue past a failed member; `Node.catch` is the recovery arm that lets a declaration continue anyway. `CheckSuite`'s `continueOnFail`, `Kanban`'s per-item continuation, and `MergeQueue`'s `failurePolicy: "quarantine"` are declared through that arm, so the plan tolerates what `run` tolerates. `Runbook`'s `onDeny: "skip"` stays a `run` option and `make` refuses it: a denial and a step failure share one error channel, so an arm around the gated step would also declare that a runbook continues past a failed critical step. Each section below repeats this where it applies.
 
 ## `Supervisor`
 
@@ -128,9 +128,9 @@ An empty suite never passes under any strategy.
 
 ### Declaration
 
-`make` declares one call per check, batched into `Node.all` groups of `concurrency` members, then one pure verdict map. Each call is a `Node.all` member named by its check id. `continueOnFail` does not change the topology. Every check is declared either way, and the option is captured, so a tolerant suite and a fail-fast suite have different step identity.
+`make` declares one call per check, batched into `Node.all` groups of `concurrency` members, then one pure verdict map. Each call is a `Node.all` member named by its check id. `continueOnFail` changes the topology and is captured as well, so a tolerant suite and a fail-fast suite have different step identity.
 
-The declared flow halts on the first failing check whatever `continueOnFail` says, because `Node.all` fails the join on the first failing member and interrupts the rest. Only `run` keeps the tolerant semantics.
+`continueOnFail` picks the join. A tolerant suite joins each batch with `Quarantine.all` under the `quarantine` policy, so every check carries a recovery arm, a failing check settles as a `Quarantined` marker its siblings ignore, and `passed` reads that marker as a failed check. A fail-fast suite joins under `halt`, the plain `Node.all` that fails on the first failing member and interrupts the rest.
 
 `make` throws a `PatternError` when the record is empty, when an id is the empty string, or when `concurrency` is not a positive safe integer.
 
@@ -169,7 +169,7 @@ Every call receives `{ column, item, previous }`. `previous` refers to the same 
 
 `make` throws a `PatternError` when there are no columns, no items, a duplicate item id, or a concurrency that is not a positive safe integer.
 
-The declared flow halts the whole board on the first failing item, because `Node.all` fails the join on the first failing member and interrupts the rest. Only `run` drops a rejected item and lets the others finish.
+A column joins its batch with `Quarantine.all` under the `quarantine` policy, the same call `run` makes: one rejected card does not interrupt the cards beside it, and it settles as a `Quarantined` marker naming the item. The declaration does not drop a quarantined card from the later columns, because a plan has no branch: the card travels on with its marker as `previous`, and `run`, which has the value in hand, drops it. A board's declared call count is an upper bound on the calls a pass makes.
 
 ### Execution
 
@@ -200,7 +200,7 @@ const release = Runbook.make({
     { id: "migrate", flow: migrate, risk: "critical" }
   ],
   approval,
-  onDeny: "skip"
+  onDeny: "fail"
 })
 ```
 
@@ -218,11 +218,9 @@ const release = Runbook.make({
 
 `make` chains the steps in declaration order and wraps every non-safe step with `WithApproval.withApproval`. Each step is called with `{ step, risk, elevated, input, previous }`, and the approval that gates a step sees that same envelope, so a built graph names the step an approval belongs to and whether it is elevated. A safe step declares no approval call.
 
-`onDeny` does not change the declared topology. A skip is a runtime decision about a value the plan does not have, so `make` captures `onDeny` instead: a stopping runbook and a skipping runbook have different step identity.
+`onDeny: "skip"` is not declarable, and `make` refuses it rather than building a plan that halts where you asked it to skip. The gated step is one flow whose failure channel carries the denial and the step's own failures together, and a plan has no branch to select between them, so the recovery arm that would skip a denial also declares that the runbook continues past a failed critical step. Declare the runbook with `onDeny: "fail"` and call `run` with `onDeny: "skip"`, which skips a denied step at run time.
 
-The declared flow stops at the first denial whatever `onDeny` says, because `WithApproval` fails the wrapped step when the approval does not decode as `"approved"` and the chain has no continuation past a failed step. Only `run` skips a denied step and continues.
-
-`make` throws a `PatternError` when there are no steps, when two steps share an id, or when the approval flow permits any value other than the literal `"approved"`.
+`make` throws a `PatternError` when there are no steps, when two steps share an id, when the approval flow permits any value other than the literal `"approved"`, or when `onDeny` is `"skip"`.
 
 ### Execution
 
@@ -262,11 +260,9 @@ A member without its own priority gets `MergeQueue.DefaultPriority`, which is `1
 
 `concurrency` defaults to 1: a merge queue serializes landings unless a caller widens it deliberately. At concurrency 1 the queue is a plain `Node.andThen` chain with no `Node.all` at all, so the declared plan admits exactly one landing at a time. Above 1, members are batched into `Node.all` groups of `concurrency` and the batches are sequenced.
 
-Each call carries `{ member, priority, position, input }`, so a built graph names each member's effective priority and its place in the queue. The priority is key material and queue order, not a scheduler annotation: `@smthrs/core` has no priority annotation to raise a landing above new work.
+Each call carries `{ member, position, input }`, so a built graph names each member's place in the queue. A member's effective priority reaches the plan as a `Node.priority` annotation, which is what lets the scheduler start the higher-priority ready landing first. Priority stays out of key material, so raising a member's number without changing the resulting order re-uses the same steps rather than re-landing the queue.
 
-`failurePolicy` does not change the declared topology. Every member is declared either way, and the option is captured, so a halting queue and a quarantining queue have different step identity.
-
-The declared flow halts on the first failing member whatever `failurePolicy` says: `Node.andThen` has no continuation past a failed step, and `Node.all` fails the join on the first failing member and interrupts the rest. Only `run` quarantines a failed member and lands the rest.
+`failurePolicy` picks the topology and is captured as well. Under `quarantine` every landing carries a recovery arm settling it as the `Quarantined` marker `Quarantine.all` produces, so a failing member neither breaks the serial chain nor interrupts its batch: the queue `run` lands. Under `halt` the chain has no continuation past a failed member, and a batch join fails on the first failing member and interrupts the rest.
 
 `make` throws a `PatternError` when there are no members, when two members share an id, when `concurrency` is not a positive safe integer, or when `priority` is not a safe integer.
 

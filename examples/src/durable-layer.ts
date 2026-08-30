@@ -12,6 +12,7 @@ import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { StepBoundary, WorkspaceSandbox } from "@smthrs/engine-store"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 import { Jj } from "@smthrs/kernel"
+import { Ownership } from "@smthrs/run-store"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
@@ -47,9 +48,11 @@ export const storesLayer = (filename: string) => NodeRuntime.storage(filename)
  * nothing composed this way ever reached the cache.
  *
  * `isAlive` is the liveness probe the store consults before stealing a run
- * from a stale owner. Returning `false` means "that owner is gone, take the
- * run", which is correct for a single-process example and unsafe in a real
- * deployment.
+ * from a stale owner. `Ownership.sameHostPidProbe` asks this machine's process
+ * table, so a second process over the same file cannot take a run out of a
+ * live one; a run recorded on another host is left to the lease. A stub that
+ * returns `false` without asking is the one thing a real deployment must not
+ * do: it says "that owner is gone" about an owner it never looked at.
  *
  * `OwnerIdentity.layer` is the default owner minter — the process id plus a
  * fresh nonce. It is listed here rather than assumed because it is the seam a
@@ -77,7 +80,7 @@ export const durableEngine = (filename: string, hostId: string) =>
     {
       filename,
       owner: { hostId },
-      isAlive: () => Effect.succeed(false)
+      isAlive: Ownership.sameHostPidProbe
     },
     StepBoundary.layer,
     WorkspaceSandbox.layerFileSystem(),

@@ -528,10 +528,11 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Human tasks
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
 - New: `HumanTask.action` (typed ask, confirm, select, and json responses; bounded JSON Schema validation; re-ask to maxAttempts with journaled refusals; `HumanTask.answer` and `HumanTask.decode`)
 - Evidence: packages/flow/test/HumanTask.test.ts::parks on one process and is answered on the next, through the same token
-- Gap: `timeoutMs` does not work on the durable engine-store: a run parked on `DurableDeferred.raceAll` never resumes there because `ActionPersistence` raises an unhandled `AttemptSuspended` on the re-drive (engine-store defect, flow-primitives finding 14, Phase 5 blocker); the deadline behavior is proven on the memory engine only
+- Evidence: packages/engine-store/test/RacedParkResume.test.ts::fails the question with the timeout code when the deadline passes unanswered
+- Evidence: packages/engine-store/test/RacedParkResume.test.ts::parks the raced attempt without settling its row, and settles on the answer
 
 ## Priority and concurrency
 
@@ -659,24 +660,26 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Check suite
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
 - New: `CheckSuite.make` and `CheckSuite.run` (record-keyed checks; verdict strategies all-pass, majority, any-pass; continueOnFail at run time)
 - Evidence: packages/patterns/test/CheckSuite.test.ts::runs every check and lists the failed one when continueOnFail is true
-- Gap: the declared join is `Node.all`, so a tolerant suite's make topology halts on the first failure; wiring `Quarantine.all` into `make` is an integration follow-up the integration round did not apply
+- Evidence: packages/patterns/test/CheckSuite.test.ts::declares one recovery arm per check when continueOnFail is true
 
 ## Kanban
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
 - New: `Kanban.make` and `Kanban.run` (per-column bounded concurrency, until loop, unique item ids, failed items isolated at run time)
 - Evidence: packages/patterns/test/Kanban.test.ts::drops a failed item and lets the rest finish the board
-- Gap: the declared board halts on the first failing item; the make surface waits on the same `Quarantine.all` wiring as Check suite
+- Evidence: packages/patterns/test/Kanban.test.ts::declares one recovery arm per card so a rejected card leaves its column alone
+- Note: the declaration and `run` differ in which calls happen, not only how many: a quarantined card is not dropped from the later columns in the declaration (a plan has no branch), so it travels on with its marker as `previous`, while `run` drops it and makes no call at all
 
 ## Runbook
 
-- Parity: Partial
-- New: `Runbook.make` and `Runbook.run` (risk-gated steps, elevated critical approvals, onDeny fail or skip at run time)
+- Parity: Yes (1.0.0-rc.0)
+- New: `Runbook.make` and `Runbook.run` (risk-gated steps, elevated critical approvals, onDeny fail at declaration, onDeny fail or skip at run time)
 - Evidence: packages/patterns/test/Runbook.test.ts::skips a denied step and runs the next one under onDeny skip
-- Gap: onDeny skip is execution-only; the declared form needs `Node.catch` wired around a gated step, which the integration round did not apply
+- Evidence: packages/patterns/test/Runbook.test.ts::refuses onDeny skip at declaration, naming run as the way to skip
+- Note: `onDeny: "skip"` is a `run` option; `make` refuses it with a `PatternError` because a denial and a step failure share one error channel, so a declared skip arm would also declare that the runbook continues past a failed critical step
 
 ## Scan-fix-verify
 
@@ -699,10 +702,11 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Merge queue
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
 - New: `MergeQueue.make` and `MergeQueue.run` (priority-then-declaration landing order; halt or quarantine failure policy at run time)
 - Evidence: packages/patterns/test/MergeQueue.test.ts::lands members one at a time in priority then declaration order
-- Gap: in the declared form failurePolicy is captured rather than branched and priority is key material rather than a `Node.priority` scheduler annotation; the make-surface wiring was not applied at integration
+- Evidence: packages/patterns/test/MergeQueue.test.ts::declares one recovery arm per member under the quarantine policy
+- Evidence: packages/patterns/test/MergeQueue.test.ts::gives every member the default priority unless it sets its own, as an annotation
 
 ## Poller
 
@@ -720,10 +724,11 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 
 ## Sidecar
 
-- Parity: Partial
+- Parity: Yes (1.0.0-rc.0)
 - New: `Sidecar.make` and `Sidecar.run` (concurrent primary and quarantined shadow, optional score and delta)
 - Evidence: packages/patterns/test/Sidecar.test.ts::returns the primary value when the shadow fails
-- Gap: `make` cannot put the shadow behind a catch (the plan declares one fail-fast All) and declares a result shape `run` never produces; rewiring `Sidecar.make` onto core's `Node.catch` was not applied at integration
+- Evidence: packages/patterns/test/Sidecar.test.ts::puts the shadow behind a catch and leaves the primary bare
+- Evidence: packages/patterns/test/Sidecar.test.ts::hands the scorer the pair run hands it
 
 ## Aspects and budgets
 
