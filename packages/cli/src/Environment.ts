@@ -15,38 +15,49 @@
  */
 
 /**
- * A canonical `SMITHERS_*` name and the `FLOWS_*` alias accepted for rc.0.
+ * A canonical `SMITHERS_*` name, and the `FLOWS_*` alias accepted for rc.0
+ * when the imported CLI read one.
+ *
+ * Most names have no alias. The alias set is not "every name with `SMITHERS_`
+ * swapped for `FLOWS_`": it is the four families rc-contract section 4 names
+ * as renames, which are the only `FLOWS_*` spellings anything has ever set.
  *
  * @category models
  * @since 1.0.0
  */
 export interface Name {
   readonly name: string
-  readonly alias: string
+  readonly alias?: string | undefined
   readonly purpose: string
 }
 
-const entry = (suffix: string, purpose: string): Name => ({
+/** A name the imported CLI read under a `FLOWS_*` spelling. */
+const renamed = (suffix: string, purpose: string): Name => ({
   name: `SMITHERS_${suffix}`,
   alias: `FLOWS_${suffix}`,
   purpose
 })
 
+/** A name with no 0.x spelling to accept. */
+const entry = (suffix: string, purpose: string): Name => ({ name: `SMITHERS_${suffix}`, purpose })
+
 /**
- * Every environment variable rc.0 reads, with its rc.0-only `FLOWS_*` alias.
+ * Every environment variable rc.0 reads, with the rc.0-only `FLOWS_*` alias
+ * for the four families that have one.
  *
  * @category constants
  * @since 1.0.0
  */
 export const names: ReadonlyArray<Name> = [
-  entry("REMOTE", "Control-plane base URL; the environment form of --remote"),
+  renamed("REMOTE", "Control-plane base URL; the environment form of --remote"),
+  // New in rc.0: there is no 0.x spelling for it to accept.
   entry("API_KEY", "Bearer credential; the environment form of --credential"),
-  entry("MCP_CONFIG", "Path to the --mcp-config server array"),
-  entry("OPENAI_AUTH", "`api-key` or `chatgpt`, selecting how openai seats authenticate"),
-  entry("TEST_COMMAND", "The command the `test` flow runs"),
-  entry("TEST_CONTAINER", "The container the `test` flow runs in"),
-  entry("TEST_CWD", "The repository's path inside that container"),
-  entry("TEST_TIMEOUT_MS", "Wall-clock budget for one `test` invocation"),
+  renamed("MCP_CONFIG", "Path to the --mcp-config server array"),
+  renamed("OPENAI_AUTH", "`api-key` or `chatgpt`, selecting how openai seats authenticate"),
+  renamed("TEST_COMMAND", "The command the `test` flow runs"),
+  renamed("TEST_CONTAINER", "The container the `test` flow runs in"),
+  renamed("TEST_CWD", "The repository's path inside that container"),
+  renamed("TEST_TIMEOUT_MS", "Wall-clock budget for one `test` invocation"),
   entry("BACKEND", "Database backend; only `sqlite` is supported (rc-contract section 2)"),
   entry("BUG_ENDPOINT", "Where `smithers bug` posts its report"),
   entry("JJ_PATH", "Explicit path to the jj binary"),
@@ -56,7 +67,9 @@ export const names: ReadonlyArray<Name> = [
 ]
 
 /** Index for `read`, built once so a lookup is not a linear scan per call. */
-const aliasOf = new Map(names.map((name) => [name.name, name.alias]))
+const aliasOf = new Map(
+  names.flatMap((name) => name.alias === undefined ? [] : [[name.name, name.alias] as const])
+)
 
 /**
  * The environment shape this module reads. `process.env` satisfies it.
@@ -111,7 +124,9 @@ export const readInteger = (environment: Source, name: string): number | undefin
  */
 export const unsupportedBackend = (value: string | undefined): string | undefined => {
   if (value === undefined || value === "" || value === "sqlite") return undefined
-  return `unsupported_database: ${value} is not supported in 1.0.0-rc.0. ` +
-    `Smithers 1.0.0-rc.0 stores run state in local SQLite only. ` +
+  // rc-contract section 2's "Exact behavior" sentence, verbatim: an operator's
+  // script greps for it, and it is the one message that names the fix.
+  return `unsupported_database: 1.0.0-rc.0 supports local SQLite only. ` +
+    `PostgreSQL and PGlite are not available. Unset SMITHERS_BACKEND or set it to sqlite. ` +
     `See https://smithers.sh/migration/1.0#databases`
 }
