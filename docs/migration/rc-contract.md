@@ -55,11 +55,12 @@ Rule used (PLAN.md "Public package set" default, made operational): a package is
 - (a) It is in the dependency closure of `@smthrs/cli`, `@smthrs/flows`, or the three platform bundles at the import reference. pnpm resolves internal edges from the registry, so an unpublished transitive dependency breaks `npm install`.
 - (b) It is a documented consumer fixture target: `@smthrs/testing` (conformance suites, `TestHost`, `TestStores`) and `@smthrs/platform-bun` (the Bun fixture).
 - (c) It is required by the Plue cutover gate in §10: `@smthrs/gateway`, which hosts the projection server that `smithers serve` composes in Phase 4.
+- (e) It is the 0.x to 1.0 migration tool `@smthrs/migrate` (PLAN Phase 6), which ships its own `smithers-migrate` bin that operators run at cutover from outside any 1.0 project; an unpublished tool would strand the cutover path. Change-control note (2026-08-29, Phase 6 landing, maintainer-owned decision): this rule and the 40th name were added when the tool landed at `988675d9ae`; no frozen line was rewritten.
 - (d) Nothing else. In particular the two runtime-independent 0.x UI kits `@smthrs/ui` and `@smthrs/ui-styleguide`, public on npm at 0.35.0, have no registry consumer at rc.0: `apps/storybook-site` (storybook.smithers.sh, their only external consumer) is deleted in Phase 1 (ledger row `apps/storybook-site`), the product UI `apps/ui` retargets `@smthrs/ui` from registry `0.33.0` to `workspace:*` in Phase 3 (D14), and `apps/review` links `@smthrs/ui-styleguide` through `workspace:*`. Under D5 they are private at rc.0, the same ruling that keeps `@smthrs/chain` private (§3.2).
 
 Everything else stays private. Build helpers, targets, fixtures, evaluation tooling, and every 0.x package are private or deleted.
 
-### 3.1 Published at 1.0.0-rc.0 (39 names)
+### 3.1 Published at 1.0.0-rc.0 (40 names)
 
 Browser column: "gated yes" means the root entry is in `BROWSER_SAFE`; "gated Node-only" means it is in `NODE_ONLY`; "subpath" means only the named subpaths are gated; "no claim" means no gate entry exists and the docs must not claim browser support until Phase 3 adds one.
 
@@ -86,6 +87,7 @@ Browser column: "gated yes" means the root entry is in `BROWSER_SAFE`; "gated No
 | `@smthrs/keys` | Canonical flow keys. | gated yes |
 | `@smthrs/mcp` | Stdio MCP client (`McpClient`) and `McpFlows`, which projects a server's tools as `FlowBinding` sources (`mcp/<server>/<tool>`); consumed by `@smthrs/cli` `--mcp-config` (rule (a): `packages/cli/package.json:95`). | no claim |
 | `@smthrs/memory` | Durable cross-run facts, history, notes, recall. | no claim |
+| `@smthrs/migrate` | The 0.x to 1.0 migration tool: `smithers-migrate` scan/plan/apply over a 0.x project (PLAN Phase 6, rule (e)). | no claim |
 | `@smthrs/model` | Schema-first model protocols, routes, streaming, seat resolution. | no claim |
 | `@smthrs/notifications` | Durable notification queue and admission policy. | no claim |
 | `@smthrs/observability` | OTLP wiring, `JournalLogger`, metrics. | gated yes |
@@ -105,7 +107,7 @@ Browser column: "gated yes" means the root entry is in `BROWSER_SAFE`; "gated No
 | `@smthrs/time-travel` | Replay, fork, rewind, compensation, `SqlTimeTravelStore` (library API only in rc.0; see §5). | gated yes |
 | `smthrs` | Deprecation/migration notice only (§3.3). | not applicable |
 
-All 39 carry version `1.0.0-rc.0`, `smthrs.group` in `{engine, agent}` (`smthrs` joins the `agent` group so `release.yml` and `scripts/pack-release.mjs` accept it), exact sibling ranges rewritten by `node scripts/set-release-version.mjs 1.0.0-rc.0`, `publishConfig.exports` pointing at `dist/esm` and `dist/cjs`, and `files` including `LICENSE`, `THIRD_PARTY_NOTICES.md`, and `VENDOR.md` where present. Phase 3 sets `private: true` on `@smthrs/{chain,evals,scorers,fs,triggers,build,ui,ui-styleguide}` before `scripts/pack-release.mjs` is widened (§9), then validates that the set of non-private manifests whose `smthrs.group` is `engine` or `agent` equals exactly these 39 names; `pack-release.mjs` refuses to pack otherwise.
+All 40 carry version `1.0.0-rc.0`, `smthrs.group` in `{engine, agent}` (`smthrs` joins the `agent` group so `release.yml` and `scripts/pack-release.mjs` accept it), exact sibling ranges rewritten by `node scripts/set-release-version.mjs 1.0.0-rc.0`, `publishConfig.exports` pointing at `dist/esm` and `dist/cjs`, and `files` including `LICENSE`, `THIRD_PARTY_NOTICES.md`, and `VENDOR.md` where present. Phase 3 sets `private: true` on `@smthrs/{chain,evals,scorers,fs,triggers,build,ui,ui-styleguide}` before `scripts/pack-release.mjs` is widened (§9), then validates that the set of non-private manifests whose `smthrs.group` is `engine` or `agent` equals exactly these 40 names; `pack-release.mjs` refuses to pack otherwise.
 
 Published test helpers stay part of the public surface because they are exported through `./*`: `database/test/TestDatabase`, `journal/test/{TestJournal,Notifying}`, `run-store/test/TestRunStore`, `step-cache/test/TestCacheStore`, `engine-store/test/TestStores`, `kernel/test/{TestHost,TestGrantStore}` and `./test/contract`, `sync/test/{TestSync,TestSocket}`, `gateway/test/TestSuperviseRuntime`.
 

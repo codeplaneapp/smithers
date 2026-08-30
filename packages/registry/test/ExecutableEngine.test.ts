@@ -30,6 +30,7 @@ import { type Ownership, RunStore } from "@smthrs/run-store"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
+import { TestClock } from "effect/testing"
 import { existsSync, mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -37,23 +38,10 @@ import { fileURLToPath } from "node:url"
 import type * as Descriptor from "../src/Descriptor.ts"
 import * as Discovery from "../src/Discovery.ts"
 import * as Executable from "../src/Executable.ts"
-import greetModule from "./fixtures/executable/flows/greet/flow.ts"
-import tunedModule from "./fixtures/executable/flows/tuned/flow.ts"
 
 const flowsRoot = fileURLToPath(new URL("./fixtures/executable/flows", import.meta.url))
 const projectRoot = fileURLToPath(new URL("./fixtures/executable", import.meta.url))
 const platform = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)
-
-const fixtureModules: Readonly<Record<string, unknown>> = {
-  greet: { default: greetModule },
-  tuned: { default: tunedModule }
-}
-
-const load = (path: string): Effect.Effect<unknown, unknown> => {
-  const directory = path.split("/").at(-2) ?? ""
-  const module = fixtureModules[directory]
-  return module === undefined ? Effect.fail(new Error(`no fixture module for ${path}`)) : Effect.succeed(module)
-}
 
 /** What the delegate was handed, in call order. */
 const spawned: Array<Executable.Invocation> = []
@@ -100,6 +88,21 @@ const Echo = Flow.make("test/echo", {
   body: (payload) => Run.call(payload)
 })
 
+/**
+ * The agent driver a descriptor that names no flow delegates to.
+ *
+ * A descriptor naming a delegate flow inherits that flow's authority, which
+ * discovery cannot read, so its projected tier is `irreversible` and the engine
+ * will not reuse its result. A descriptor that names none and declares its own
+ * capabilities projects a real tier, which is what the cache golden needs, so
+ * the fixtures in it delegate here.
+ */
+const Agent = Flow.make("agent", {
+  payload: Executable.Invocation,
+  success: Schema.String,
+  body: (payload) => Run.call(payload)
+})
+
 const runLayer = Run.toLayer((payload) =>
   Effect.map(Compile, (artifact) => {
     spawned.push(payload)
@@ -134,7 +137,7 @@ const descriptorNamed = (name: string) =>
 const executableNamed = (name: string) =>
   Effect.flatMap(
     descriptorNamed(name),
-    (descriptor) => Executable.fromDescriptor(descriptor, { delegates: [Echo], load })
+    (descriptor) => Executable.fromDescriptor(descriptor, { delegates: [Echo, Agent] })
   ).pipe(Effect.provide(platform))
 
 /** A private directory for one case's engine database and workspace. */
@@ -165,7 +168,7 @@ const durable = (filename: string, hostId: string, registration: Layer.Layer<unk
   )
 
 const registrationFor = (executable: Executable.Executable) =>
-  Layer.mergeAll(runLayer, Interpreter.layer(Echo), executable.layer).pipe(
+  Layer.mergeAll(runLayer, Interpreter.layer(Echo), Interpreter.layer(Agent), executable.layer).pipe(
     Layer.provideMerge(Action.layerImplementations)
   ) as Layer.Layer<unknown, never, never>
 
@@ -230,7 +233,7 @@ describe("a discovered flow runs on the durable engine", () => {
     Effect.gen(function*() {
       const descriptor = yield* descriptorNamed("orphan").pipe(Effect.provide(platform))
       const failure = yield* Effect.flip(
-        Executable.fromDescriptor(descriptor, { delegates: [Echo], load }).pipe(Effect.provide(platform))
+        Executable.fromDescriptor(descriptor, { delegates: [Echo, Agent] }).pipe(Effect.provide(platform))
       )
       // The refusal happens before the engine is asked to drive anything, so
       // an operator reads the missing flow's name instead of an empty `AnyOf`
@@ -241,24 +244,137 @@ describe("a discovered flow runs on the durable engine", () => {
 })
 
 describe("the annotation golden", () => {
-  it.effect("serves a second run the result the first one recorded", () =>
+  it.effect("serves a second run the result a declared cache policy made reusable", () =>
     Effect.gen(function*() {
       executions = 0
       spawned.length = 0
       const directory = workspace("cache")
       const filename = join(directory, "engine.db")
-      const executable = yield* executableNamed("tuned")
+      const executable = yield* executableNamed("cacheable")
 
-      const first = yield* execute(executable, filename, "registry-cache-a", "tuned-1", { name: "one" })
-      const second = yield* execute(executable, filename, "registry-cache-b", "tuned-2", { name: "two" })
+      // The SAME invocation, twice, in two separate runs over one database
+      // file. The descriptor declares `{ ttlMs: 60_000, scope: "shared" }`, so
+      // the dispatched step carries an address a sibling run derives too.
+      const first = yield* execute(executable, filename, "registry-cache-a", "cacheable-1", { name: "one" })
+      const second = yield* execute(executable, filename, "registry-cache-b", "cacheable-2", { name: "one" })
 
-      expect(first.result).toBe("tuned:compiled")
-      expect(second.result).toBe("tuned:compiled")
-      // Two runs, two executions, one dispatch of the sealed step: the second
-      // run read the row the first one recorded out of the step cache in the
-      // same SQLite file.
+      expect(first.result).toBe("cacheable:compiled")
+      expect(second.result).toBe("cacheable:compiled")
+      // The second run never started the delegate: it served the row the first
+      // run recorded for the bridged step. That is the whole of what a
+      // descriptor's cache policy buys, and the control below is the same
+      // descriptor without the declaration.
+      expect(spawned.length).toBe(1)
+      expect(executions).toBe(1)
+    }))
+
+  it.effect("runs the delegate again when the descriptor declares no policy", () =>
+    Effect.gen(function*() {
+      executions = 0
+      spawned.length = 0
+      const directory = workspace("uncached")
+      const filename = join(directory, "engine.db")
+      const executable = yield* executableNamed("cacheable-plain")
+
+      yield* execute(executable, filename, "registry-uncached-a", "plain-1", { name: "one" })
+      yield* execute(executable, filename, "registry-uncached-b", "plain-2", { name: "one" })
+
+      // No policy, no cross-run address for the bridged step, so the delegate
+      // runs on every execution. The delegate's OWN sealed step still reuses
+      // its recorded result, which is why `executions` stays 1: the two caches
+      // are different units and only the outer one is the descriptor's to
+      // declare.
+      expect(executable.lowered.cache).toBeUndefined()
       expect(spawned.length).toBe(2)
       expect(executions).toBe(1)
+    }))
+
+  it.effect("narrows the cache address from a descriptor's declared scope", () =>
+    Effect.gen(function*() {
+      executions = 0
+      spawned.length = 0
+      const directory = workspace("scoped")
+      const filename = join(directory, "engine.db")
+      const executable = yield* executableNamed("cacheable-scoped")
+
+      // Identical to the `cacheable` case in everything but the policy: this
+      // descriptor declares `scope: "run"`, which `@smthrs/engine-store`
+      // `ActionPersistence` folds into the cache row's ADDRESS. The second run
+      // derives a different address, finds nothing, and runs the delegate.
+      yield* execute(executable, filename, "registry-scoped-a", "scoped-1", { name: "one" })
+      yield* execute(executable, filename, "registry-scoped-b", "scoped-2", { name: "one" })
+
+      expect(executable.lowered.cache).toEqual({ scope: "run" })
+      expect(spawned.length).toBe(2)
+      expect(executions).toBe(1)
+    }))
+
+  it.effect("stops serving a recorded result past the descriptor's declared ttl", () =>
+    Effect.gen(function*() {
+      executions = 0
+      spawned.length = 0
+      const directory = workspace("expiring")
+      const filename = join(directory, "engine.db")
+      const executable = yield* executableNamed("cacheable-expiring")
+
+      const first = yield* execute(executable, filename, "registry-expiring-a", "expiring-1", { name: "one" })
+      // The suite runs on a test clock, so the age the engine measures is the
+      // one this line states rather than however long the first run took.
+      yield* TestClock.adjust("10 millis")
+      const second = yield* execute(executable, filename, "registry-expiring-b", "expiring-2", { name: "one" })
+
+      expect(executable.lowered.cache).toEqual({ ttlMs: 1, scope: "shared" })
+      // Identical to the `cacheable` case in everything but `ttlMs`, and the
+      // engine journalled the age verdict it acted on rather than leaving the
+      // re-execution to be explained by a fresh clock reading.
+      expect(spawned.length).toBe(2)
+      expect(first.events).toContain("flows.engine.cache-provenance")
+      expect(second.events).toContain("flows.engine.cache-provenance")
+    }))
+
+  it.effect("does not reuse a result whose read set is a pattern and whose boundary is soft", () =>
+    Effect.gen(function*() {
+      executions = 0
+      spawned.length = 0
+      const directory = workspace("reads")
+      const filename = join(directory, "engine.db")
+      const executable = yield* executableNamed("cacheable-reads")
+
+      yield* execute(executable, filename, "registry-reads-a", "reads-1", { name: "one" })
+      yield* execute(executable, filename, "registry-reads-b", "reads-2", { name: "one" })
+
+      // The declared reads reach the dispatched step as one glob, because a
+      // descriptor declares file inputs as strings and discovery measures
+      // nothing. A globbed read set cannot say which expansion its key names,
+      // and `mode: "expected"` is not the hard boundary a shared result needs,
+      // so the policy is honored by being refused: the delegate runs again.
+      expect(executable.lowered.cache).toEqual({ ttlMs: 60_000, scope: "shared" })
+      expect(executable.descriptor.effects.reads).toEqual(["notes/*.md"])
+      expect(spawned.length).toBe(2)
+    }))
+
+  it.effect("does not reuse a delegating descriptor's result, whatever it declares", () =>
+    Effect.gen(function*() {
+      executions = 0
+      spawned.length = 0
+      const directory = workspace("delegating")
+      const filename = join(directory, "engine.db")
+      const executable = yield* executableNamed("tuned")
+
+      yield* execute(executable, filename, "registry-delegating-a", "tuned-1", { name: "one" })
+      yield* execute(executable, filename, "registry-delegating-b", "tuned-2", { name: "one" })
+
+      // `tuned` declares the same policy `cacheable` does AND `tier: "sealed"`,
+      // and still runs twice. Naming a delegate flow is what costs it the
+      // reuse: the delegate's authority is not statically visible, so discovery
+      // projects the conservative wildcard, the descriptor's effective tier
+      // becomes `irreversible`, and `ActionPersistence` caches a `sealed`
+      // dispatch and nothing else. The policy reaches admission and is refused
+      // there. Anything else would let a flow with unbounded authority claim
+      // its own result is reusable.
+      expect(executable.lowered.cache).toEqual({ ttlMs: 60_000, scope: "shared" })
+      expect(executable.descriptor.effects.tier).toBe("irreversible")
+      expect(spawned.length).toBe(2)
     }))
 
   it.effect("hands the delegate the placement the descriptor declared", () =>
@@ -349,7 +465,7 @@ describe("the host seam", () => {
     Effect.gen(function*() {
       spawned.length = 0
       const directory = workspace("host")
-      const options: Executable.Options = { delegates: [Echo], load }
+      const options: Executable.Options = { delegates: [Echo] }
       // The whole seam, composed the way a host composes it: discovery over
       // `<root>/flows/**` is the runtime's registry, and the registration phase
       // is the catalog built from it. Nothing lists a flow by hand.

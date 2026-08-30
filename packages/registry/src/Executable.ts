@@ -16,11 +16,18 @@
  * One delegating node is therefore the whole lowering, and every runtime
  * decision the descriptor carries rides it:
  *
- * - the declared cache policy travels twice, as the flow's
- *   `@smthrs/flow` `CacheEnvironment.CachePolicyAnnotation` and as key material
- *   captured on the delegating node, so a changed policy is a changed step key;
+ * - the declared cache policy goes onto the ACTION the bridged flow
+ *   dispatches, which is the value `@smthrs/engine-store` `ActionPersistence`
+ *   reads a policy off: `ttlMs` bounds the age of the row the engine may
+ *   serve and `scope` narrows the address it is stored under. Declaring one is
+ *   also what makes the delegation a single dispatched step at all; read
+ *   {@link Lowered.cache} and {@link dispatchedAction} for the shape and for
+ *   the one gate a policy still has to pass;
  * - `Node.priority` becomes the delegating node's priority, which is what
- *   reaches `NodeDraft.priority` and the plan scheduler;
+ *   reaches `NodeDraft.priority` and `@smthrs/engine-store`'s `PlanScheduler`.
+ *   The rc.0 `up` path settles a flow through `@smthrs/flow` `Interpreter`,
+ *   which admits every ready node at once, so the priority orders scheduled
+ *   plans and nothing else;
  * - the placement directive becomes both the flow's opaque
  *   `@smthrs/flow` placement annotation and a field of the
  *   {@link Invocation} the delegate reads, which is what a host selects a
@@ -38,13 +45,15 @@ import * as Annotations from "@smthrs/core/Annotations"
 import * as CoreFlow from "@smthrs/core/Flow"
 import * as CoreMarkdown from "@smthrs/core/Markdown"
 import * as CorePlacement from "@smthrs/core/Placement"
-import type { Implementations } from "@smthrs/flow/Action"
+import * as Action from "@smthrs/flow/Action"
 import * as CacheEnvironment from "@smthrs/flow/CacheEnvironment"
 import * as RuntimeFlow from "@smthrs/flow/Flow"
-import type { FlowRuntime } from "@smthrs/flow/FlowRuntime"
+import { FlowInstance, type FlowRuntime } from "@smthrs/flow/FlowRuntime"
 import * as Interpreter from "@smthrs/flow/Interpreter"
+import type * as FileSet from "@smthrs/plan/FileSet"
 import * as PlanNode from "@smthrs/plan/Node"
 import * as Context from "effect/Context"
+import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
@@ -54,9 +63,8 @@ import * as Schema from "effect/Schema"
 import type * as Descriptor from "./Descriptor.ts"
 import * as Discovery from "./Discovery.ts"
 import * as MarkdownFlow from "./MarkdownFlow.ts"
-import * as Pack from "./Pack.ts"
 import * as Registry from "./Registry.ts"
-import type { DiscoveryError, RegistryError } from "./RegistryError.ts"
+import { type DiscoveryError, discoveryError, type RegistryError } from "./RegistryError.ts"
 
 /**
  * The delegate a descriptor runs on when it names no single flow of its own.
@@ -135,16 +143,35 @@ export type Invocation = typeof Invocation.Type
  * A registered `@smthrs/flow` flow a descriptor may delegate to.
  *
  * Structural on purpose: a `Flow.make(...)` value satisfies it, and so does a
- * test double that records what it was called with. The bridge needs the tag
- * to resolve a name and `call` to place the delegation in the caller's plan;
- * it never executes a delegate itself.
+ * test double. The bridge needs the tag to resolve a name, and both ways of
+ * reaching the flow, because the descriptor decides which one it uses: a
+ * declared cache policy makes the delegation one dispatched step and a child
+ * execution beneath it, and no policy leaves it a call in the caller's plan.
+ * See {@link fromDescriptor} for the choice and {@link Lowered.cache} for why
+ * it is a choice at all.
  *
  * @category models
  * @since 0.1.0
  */
 export interface Delegate {
   readonly _tag: string
+  /**
+   * Places the delegation in the caller's plan. This is the shape a descriptor
+   * that declares no cache policy takes: the delegate's own topology — its
+   * fan-out, its priorities, its waits — is part of the plan the engine builds
+   * for the bridged flow, and a host reading that plan sees the real work.
+   */
   readonly call: (payload: any) => PlanNode.Node<any, any, any>
+  /**
+   * Runs the delegate as an execution of its own. This is the shape a
+   * descriptor that DECLARES a cache policy takes, because a result can only
+   * be recorded and served again if the delegation is one dispatched step;
+   * see {@link fromDescriptor}.
+   */
+  readonly execute: (
+    payload: any,
+    options?: { readonly executionId?: string | undefined }
+  ) => Effect.Effect<any, any, any>
 }
 
 /**
@@ -198,9 +225,36 @@ export class ExecutableError extends Schema.TaggedError<ExecutableError>()(
  * @since 0.1.0
  */
 export interface Lowered {
-  /** The declared cache policy, or `undefined` when none was declared. */
+  /**
+   * The declared cache policy, or `undefined` when none was declared.
+   *
+   * A declared policy is what makes a discovered flow's result reusable, and
+   * declaring one changes the shape of the plan: the delegation becomes one
+   * dispatched action ({@link dispatchedAction}) instead of the delegate's own
+   * call, because a result can only be recorded and served again if it is one
+   * step. The policy rides that action under the annotation
+   * `@smthrs/engine-store` `ActionPersistence` reads a policy off, so `ttlMs`
+   * bounds the age of the row the engine may serve and `scope` narrows the
+   * address it is stored under. It also enters the delegating node's captured
+   * key material, so a changed policy is a changed step key.
+   *
+   * One gate remains, and it is the engine's: `ActionPersistence` reuses a
+   * `sealed` dispatch and nothing else. A descriptor that names a delegate flow
+   * inherits authority discovery cannot read, so it projects the conservative
+   * wildcard and its effective tier is `irreversible`; its policy reaches
+   * admission and is refused there. A descriptor whose own capabilities project
+   * a `sealed` tier — an agent-backed skill declaring what it may touch — is
+   * the one whose recorded result travels.
+   */
   readonly cache: CacheEnvironment.CachePolicy | undefined
-  /** The declared scheduling priority, or `undefined`. */
+  /**
+   * The declared scheduling priority, or `undefined`.
+   *
+   * Honored by `@smthrs/engine-store`'s `PlanScheduler`, which admits ready
+   * nodes highest-priority-first under a concurrency limit. The rc.0 `up` path
+   * runs a flow through `@smthrs/flow` `Interpreter`, which settles every ready
+   * node at once, so on that path the priority orders nothing.
+   */
   readonly priority: number | undefined
   /** The declared placement directive, or `undefined`. */
   readonly placement: CorePlacement.Placement | undefined
@@ -208,13 +262,14 @@ export interface Lowered {
 
 /**
  * What a registration layer still needs from its host: the flow runtime it
- * registers with, and the action implementation table its body's delegate
- * resolves calls through.
+ * registers with, the action implementation table a driver resolves the
+ * bridged dispatch through, and the `Crypto` the bridge derives its delegate's
+ * child execution id with.
  *
  * @category models
  * @since 0.1.0
  */
-export type Registration = FlowRuntime | Implementations
+export type Registration = FlowRuntime | Action.Implementations | Crypto.Crypto
 
 /**
  * One discovered flow, made runnable.
@@ -273,16 +328,43 @@ const refuse = (options: {
   })
 
 /**
+ * The three characters a path may legally contain that a URL reads as
+ * structure rather than as a name, in the order they must be escaped: `%`
+ * first, or escaping the other two would corrupt a literal `%` beside them.
+ */
+const urlStructural: ReadonlyArray<readonly [string, string]> = [
+  ["%", "%25"],
+  ["#", "%23"],
+  ["?", "%3F"]
+]
+
+/**
  * A `file:` specifier for an absolute filesystem path.
  *
  * Written by hand rather than with `node:url` because this package is
  * browser-safe: a host that bundles a registry must not pull a Node builtin in
- * behind it.
+ * behind it. Doing it by hand means doing what `pathToFileURL` does. A `#` or
+ * a `?` in a directory name is both a legal filename character and URL syntax,
+ * and concatenating one unescaped truncates the specifier at it, so
+ * `file:///a#b.ts` addresses `/a`. The loader then imports the wrong module,
+ * or none, with nothing in the failure to say why.
+ *
+ * Exported because {@link Options.load} receives a filesystem path, not a
+ * specifier: a host that supplies its own loader has to make the same
+ * conversion, and in a browser bundle it has no `pathToFileURL` to make it
+ * with.
+ *
+ * @category conversions
+ * @since 0.1.0
  */
-const fileSpecifier = (path: string): string => {
+export const fileSpecifier = (path: string): string => {
   if (path.startsWith("file:")) return path
   const posix = path.replaceAll("\\", "/")
-  return posix.startsWith("/") ? `file://${posix}` : `file:///${posix}`
+  const escaped = urlStructural.reduce(
+    (value, [character, escape]) => value.replaceAll(character, escape),
+    posix
+  )
+  return posix.startsWith("/") ? `file://${escaped}` : `file:///${escaped}`
 }
 
 const importModule = (path: string): Effect.Effect<unknown, unknown> =>
@@ -371,10 +453,15 @@ const captured = (lowered: Lowered): Readonly<Record<string, unknown>> => ({
  * The annotation bag the bridged flow carries.
  *
  * Placement is stored under `@smthrs/flow`'s own placement key, which
- * `@smthrs/flow` `Graph` reads while building the plan, and the cache policy
- * under the identifier `@smthrs/engine-store` reads at dispatch. Both keys are
- * declared by other packages on purpose: a bag this module writes is one those
- * modules read.
+ * `@smthrs/flow` `Graph` reads while building the plan. The cache policy is
+ * stored under `CacheEnvironment.CachePolicyAnnotation`, the identifier
+ * `@smthrs/patterns`' `withCache` writes on a flow, so a host reading the
+ * bridged flow back sees the same declaration the descriptor made.
+ *
+ * A flow's bag is not an action's bag, and nothing carries one onto the other:
+ * `@smthrs/engine-store` `ActionPersistence` reads a policy off the DISPATCHED
+ * ACTION. That copy is written by {@link dispatchedAction}, which is the half
+ * that reaches admission. This bag is the declaration surface.
  */
 const annotationsOf = (lowered: Lowered): Context.Context<never> => {
   let bag = Context.empty()
@@ -384,6 +471,31 @@ const annotationsOf = (lowered: Lowered): Context.Context<never> => {
   }
   return bag
 }
+
+/**
+ * The filesystem boundary a descriptor's own effect declaration lowers to.
+ *
+ * A descriptor declares reads and writes as strings plus a `mode`, because it
+ * is serializable metadata read without evaluating anything. An action's
+ * `Action.FileBoundary` wants measured inputs or globs on the read side and
+ * patterns on the write side. A declared read carries no digest at discovery
+ * time, so the whole read set lowers to one glob the host expands and
+ * measures; `@smthrs/engine-store` keeps a globbed read set out of the
+ * cross-run cache, so a descriptor that declares reads is boundary-checked but
+ * not reused. `hermetic` says the two sets are complete, which is exactly what
+ * a `hard` boundary enforces, and `expected` records a deviation rather than
+ * refusing the result.
+ *
+ * The patterns are the author's, not the bridge's: an unusable one is refused
+ * by the host that prepares the boundary, naming the path.
+ */
+const boundaryOf = (descriptor: Descriptor.FlowDescriptor): Action.FileBoundary => ({
+  readSet: descriptor.effects.reads.length === 0
+    ? []
+    : [{ _tag: "Glob", include: descriptor.effects.reads as FileSet.Glob["include"] }],
+  writeSet: descriptor.effects.writes,
+  boundaryMode: descriptor.effects.mode === "hermetic" ? "hard" : "expected"
+})
 
 /**
  * The loaded body of one descriptor: the prompt it renders, and the annotation
@@ -453,6 +565,78 @@ const loadModule = (
   })
 
 /**
+ * The one action a policy-declaring descriptor's bridged flow dispatches, and
+ * the layer carrying its implementation.
+ *
+ * The declaration is a thin named seam: `Declared.toLayer` builds the action it
+ * dispatches from the declaration's own tier and idempotency key and carries no
+ * `metadata`, and an action with no file boundary is never cacheable. The
+ * dispatched unit that carries the descriptor's declarations is therefore the
+ * inline action the implementation returns — its tier, its identity, its file
+ * boundary, and the `CacheEnvironment.CachePolicyAnnotation`
+ * `@smthrs/engine-store` `ActionPersistence` reads off a DISPATCHED action to
+ * bound a row's age by `ttlMs` and narrow its address by `scope`.
+ *
+ * The delegate runs underneath as a CHILD EXECUTION derived from the parent's —
+ * the same derivation `@smthrs/flow` `Interpreter` uses for a `.child()`
+ * boundary — so it keeps its own execution, journal lineage, and retry policy
+ * beneath the step rather than being hidden inside it. Deriving the id from the
+ * parent's is what keeps two runs' children apart: the ambient default derives
+ * an id from the flow tag and the payload, so two runs invoking the same
+ * descriptor the same way would otherwise be one child execution, and a
+ * descriptor that declared nothing would reuse a result anyway.
+ */
+const dispatchedAction = (options: {
+  readonly tag: string
+  readonly descriptor: Descriptor.FlowDescriptor
+  readonly delegate: Delegate
+  readonly cache: CacheEnvironment.CachePolicy
+}) => {
+  const { cache, delegate, descriptor, tag } = options
+  const declaration = Action.make(tag, {
+    payload: Invocation,
+    success: Schema.Unknown,
+    error: Schema.Unknown
+  })
+  const layer = declaration.toLayer((envelope: Invocation) =>
+    CacheEnvironment.withCache(
+      Action.make({
+        name: `${tag}/run`,
+        success: Schema.Unknown,
+        error: Schema.Unknown,
+        // The descriptor's own reversibility tier, declared or inferred from its
+        // projected authority, and never widened here. It is also the gate on
+        // reuse: `ActionPersistence` caches a `sealed` dispatch and nothing
+        // else, so a policy on a descriptor whose authority projects to
+        // `irreversible` — which is every descriptor naming a delegate flow,
+        // because the delegate's authority is not statically visible — reaches
+        // admission and is refused there rather than being dropped here.
+        tier: descriptor.effects.tier,
+        // The cross-run address: the delegate, the whole envelope — the
+        // descriptor's declaration AND the caller's input, so one caller's
+        // recorded answer is never served to the next caller's question — and
+        // the policy itself, because `ActionPersistence` assumes a changed
+        // `ttlMs` is a changed step key when it fences its own expiry verdict.
+        idempotencyKey: { delegate: delegate._tag, invocation: envelope, cache },
+        metadata: boundaryOf(descriptor),
+        execute: Effect.gen(function*() {
+          const instance = yield* FlowInstance
+          const executionId = yield* Interpreter.childExecutionId(
+            instance.executionId,
+            tag,
+            delegate._tag,
+            envelope
+          )
+          return yield* delegate.execute(envelope, { executionId })
+        })
+      }),
+      cache
+    )
+  )
+  return { declaration, layer }
+}
+
+/**
  * Makes one discovered descriptor runnable.
  *
  * The body is loaded — a module through the loader, markdown through
@@ -503,10 +687,29 @@ export const fromDescriptor = (
       capabilities: descriptor.capabilities,
       flows: descriptor.flows
     })
-    // The policy travels twice, exactly as `@smthrs/patterns`' `withCache`
-    // sends it: as an annotation the engine executes at dispatch, and as
-    // captured identity on the node, so two descriptors declaring different
-    // policies are two declarations with two step keys.
+    // WHAT THE BRIDGED FLOW DISPATCHES, AND WHY IT DEPENDS ON THE POLICY.
+    //
+    // Without a cache policy the delegation is a CALL: the delegate's node goes
+    // into the plan the engine builds for this flow, so its fan-out, its
+    // priorities, and its waits are the caller's plan and a host reading that
+    // plan sees the real work. That shape is not a step the engine can record —
+    // it is many steps — so there is nothing there for a policy to govern.
+    //
+    // A declared policy asks for exactly that: one recorded unit, served again
+    // when a later run asks the same question. A descriptor that declares one
+    // therefore dispatches `dispatchedAction` instead of calling the delegate,
+    // and the delegate runs underneath it as a child execution.
+    const bridge = lowered.cache === undefined ? undefined : dispatchedAction({
+      tag: `registry/${descriptor.name}`,
+      descriptor,
+      delegate,
+      cache: lowered.cache
+    })
+    // The policy travels three ways: as an annotation on the flow (the
+    // declaration surface a host reads back), as captured identity on the
+    // delegating node, so two descriptors declaring different policies are two
+    // declarations with two step keys, and — the half that reaches admission —
+    // onto the action the bridged flow dispatches, above.
     const identity = PlanNode.capture(captured(lowered), (value: unknown) => value)
     // The BODY's identity is captured too, and it has to be. A plan-time
     // function JavaScript cannot inspect gets process-local identity, so a
@@ -528,8 +731,10 @@ export const fromDescriptor = (
         ...captured(lowered)
       },
       (payload: Payload) => {
-        const called = delegate.call(invocation(payload.input ?? null))
-        const carried = lowered.cache === undefined ? called : PlanNode.map(called, identity)
+        const envelope = invocation(payload.input ?? null)
+        const carried = bridge === undefined
+          ? delegate.call(envelope)
+          : PlanNode.map(bridge.declaration.call(envelope), identity)
         return lowered.priority === undefined ? carried : PlanNode.priority(carried, lowered.priority)
       }
     )
@@ -546,7 +751,12 @@ export const fromDescriptor = (
       lowered,
       invocation,
       flow,
-      layer: Interpreter.layer(flow)
+      // The cast erases the requirement `bridge` minted for itself. Its key is
+      // built from a tag this function computes, so no caller can spell the
+      // type, and nothing outside the bridged flow's own body asks for it.
+      layer: (bridge === undefined
+        ? Interpreter.layer(flow)
+        : Layer.merge(Interpreter.layer(flow), bridge.layer)) as Layer.Layer<never, never, Registration>
     }
   })
 
@@ -581,16 +791,32 @@ export interface Catalog {
 }
 
 /**
- * Makes every discovered flow runnable, skipping the ones this host cannot
- * run.
+ * Service tag for the catalog a host was built from.
+ *
+ * {@link layer} provides it, so a command that lists or diagnoses flows reads
+ * the same refusals the registration phase acted on instead of rebuilding the
+ * catalog and hoping the two agree.
+ *
+ * @category services
+ * @since 0.1.0
+ */
+export const Catalog: Context.Service<Catalog, Catalog> = Context.Service("flows/registry/Catalog")
+
+/**
+ * Makes every discovered flow runnable, reporting the ones it could not.
  *
  * A project's `flows/` directory is a mixed set: some entries delegate to a
- * flow this host registered, others name a delegate only another host has.
- * Refusing the whole catalog for one of those would make a host's own flows
- * unreachable, so an entry whose delegate is missing is reported in
- * {@link Catalog.refused} and left out. Anything else — an unreadable body, a
- * module that exports the wrong thing — still fails, because it is a defect in
- * the entry rather than a statement about this host.
+ * flow this host registered, others name a delegate only another host has, and
+ * one may simply be broken. None of those is a reason to withhold the rest.
+ * `flows/` is a directory a person edits, so at any moment one file in it is
+ * mid-edit or wrong, and a catalog that failed on it would take down `ls`,
+ * `ps`, and every unrelated `up` with it.
+ *
+ * So every refusal is reported in {@link Catalog.refused} carrying its
+ * {@link ExecutableError} code, and the entries that resolve stay runnable. The
+ * codes are what distinguish the two kinds: `missing_delegate` and
+ * `ambiguous_delegate` are statements about this host, while
+ * `body_unavailable` and `invalid_module` are defects in the entry.
  *
  * @category constructors
  * @since 0.1.0
@@ -599,7 +825,7 @@ export const catalog = (
   options: Options
 ): Effect.Effect<
   Catalog,
-  ExecutableError | RegistryError | DiscoveryError,
+  RegistryError | DiscoveryError,
   Registry.Registry | FileSystem.FileSystem | Path.Path
 > =>
   Effect.gen(function*() {
@@ -613,9 +839,6 @@ export const catalog = (
         executables.push(result.success)
         continue
       }
-      if (result.failure.code !== "missing_delegate" && result.failure.code !== "ambiguous_delegate") {
-        return yield* Effect.fail(result.failure)
-      }
       refused.push(result.failure)
     }
     return { executables, refused }
@@ -628,23 +851,39 @@ export const catalog = (
  * once it has been built, `Control.run` on a discovered flow reaches a
  * registered durable flow instead of an empty catalog.
  *
+ * A refusal is never silent. Each one is logged as a warning naming the flow,
+ * the code, the delegate it wanted, and what is registered instead, and the
+ * whole {@link Catalog} is provided as a service, so a host can print the
+ * refusals rather than let an operator discover them from `up <flow>` failing
+ * inside the runtime.
+ *
  * @category layers
  * @since 0.1.0
  */
 export const layer = (
   options: Options
 ): Layer.Layer<
-  never,
-  ExecutableError | RegistryError | DiscoveryError,
+  Catalog,
+  RegistryError | DiscoveryError,
   Registry.Registry | FileSystem.FileSystem | Path.Path | Registration
 > =>
   Layer.unwrap(
     Effect.map(
-      catalog(options),
+      Effect.tap(catalog(options), (built) =>
+        Effect.forEach(built.refused, (failure) =>
+          Effect.logWarning("discovered flow is not runnable on this host", {
+            flow: failure.flow,
+            code: failure.code,
+            delegate: failure.delegate,
+            available: failure.available,
+            reason: failure.message
+          }), { discard: true })),
       (built) =>
         Layer.mergeAll(
-          Layer.empty,
-          ...built.executables.map((executable) => executable.layer)
+          Layer.succeed(Catalog)(built),
+          ...built.executables.map((executable) =>
+            executable.layer
+          )
         )
     )
   )
@@ -658,10 +897,14 @@ export const layer = (
 export interface ProjectOptions {
   /** The project root. `<root>/flows` is scanned for `flow.ts` and `flow.mdx`. */
   readonly root: string
-  /** Installed packs whose flows join the project's, project entries first. */
-  readonly packs?: ReadonlyArray<Pack.Installed> | undefined
-  /** The runtime version a pack's `requires.smithers` range is checked against. */
-  readonly runtimeVersion?: string | undefined
+  /**
+   * Installed packs whose flows join the project's, project entries first.
+   *
+   * The runtime version rides inside {@link module:Registry.PackConfig} rather
+   * than beside it, so a caller cannot ask for packs without saying what their
+   * `requires.smithers` range is checked against.
+   */
+  readonly packs?: Registry.PackConfig | undefined
 }
 
 /**
@@ -669,9 +912,18 @@ export interface ProjectOptions {
  *
  * `<root>/flows/**` first, then every installed pack's own sources, all under
  * one first-found registry, so a project flow shadows a pack flow of the same
- * name and `refresh` rescans both. A project with no `flows/` directory is not
- * a failure: it simply has no flows yet, which is the state `smithers init`
- * leaves behind.
+ * name and `refresh` rescans both. Packs are scanned through the registry's own
+ * pack path, so each pack descriptor carries its `provenance.pack`, a name two
+ * packs both define is reported as `shadowed` naming both of them with the
+ * `local` pack winning, and every pack's `requires.smithers` is checked against
+ * {@link module:Registry.PackConfig.runtimeVersion}.
+ *
+ * A project with no `flows/` directory is not a failure: it simply has no flows
+ * yet, which is the state `smithers init` leaves behind. That is decided by
+ * looking for the directory, so it stays a statement about the PROJECT: a pack
+ * that declares a flows directory it does not ship fails the layer as an
+ * `invalid_pack` naming the pack, instead of quietly emptying the registry the
+ * project's own flows were in.
  *
  * This is the value a host passes as the durable runtime's registry: the seam
  * `@smthrs/flows` `NodeRuntime` opened so discovery, and not a hand-written
@@ -686,25 +938,31 @@ export const layerProject = (
   Layer.unwrap(
     Effect.gen(function*() {
       const path = yield* Path.Path
-      const packs = options.packs ?? []
-      const runtimeVersion = options.runtimeVersion
-      if (runtimeVersion !== undefined) {
-        for (const pack of packs) yield* Pack.checkCompatible(pack, runtimeVersion)
-      }
-      const ordered = [...packs].sort((left, right) =>
-        Number(right.origin === "local") - Number(left.origin === "local")
-      )
-      const sources: Array<Descriptor.Source> = [
-        { source: "project", root: path.join(options.root, "flows"), naming: "path" },
-        ...ordered.flatMap((pack) => [...Pack.sources(pack, path)])
-      ]
-      return Registry.layer({ sources }).pipe(
-        Layer.provide(Discovery.layer),
-        Layer.catch((error) =>
-          error.code === "root_missing"
-            ? Registry.layerFromDescriptors([])
-            : Layer.effect(Registry.Registry)(Effect.fail(error))
+      const fs = yield* FileSystem.FileSystem
+      const root = path.join(options.root, "flows")
+      // ASKED UP FRONT, not caught afterwards. A project with no `flows/`
+      // directory has no flows yet, which is the state `smithers init` leaves
+      // behind; catching the scan's `root_missing` instead would make every
+      // OTHER missing root — a pack that declares a directory it does not
+      // ship — read as "this project has no flows" and empty the registry the
+      // project's own flows were in.
+      const present = yield* fs.exists(root).pipe(
+        Effect.mapError((cause) =>
+          discoveryError({
+            code: "read_failed",
+            module: "Executable",
+            method: "layerProject",
+            description: `could not access the project flows directory "${root}"`,
+            cause
+          })
         )
       )
+      const sources: ReadonlyArray<Descriptor.Source> = present
+        ? [{ source: "project", root, naming: "path" }]
+        : []
+      return Registry.layer({
+        sources,
+        ...(options.packs === undefined ? {} : { packs: options.packs })
+      }).pipe(Layer.provide(Discovery.layer))
     })
   )

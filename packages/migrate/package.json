@@ -1,7 +1,7 @@
 {
   "name": "@smthrs/migrate",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.0",
   "license": "MIT",
   "smthrs": {
     "group": "agent"
@@ -56,6 +56,7 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
+    "tag": "rc",
     "exports": {
       "./package.json": "./package.json",
       ".": {
@@ -87,19 +88,19 @@
     "typescript": "6.0.3"
   },
   "optionalDependencies": {
-    "@smthrs/agent": "0.1.0",
-    "@smthrs/core": "0.1.0",
-    "@smthrs/engine": "0.1.0",
-    "@smthrs/flow": "0.1.0",
-    "@smthrs/flows": "0.1.0",
-    "@smthrs/harness": "0.1.0",
-    "@smthrs/kernel": "0.1.0",
-    "@smthrs/model": "0.1.0",
-    "@smthrs/patterns": "0.1.0",
-    "@smthrs/plan": "0.1.0",
-    "@smthrs/platform-node": "0.1.0",
-    "@smthrs/registry": "0.1.0",
-    "@smthrs/std": "0.1.0"
+    "@smthrs/agent": "1.0.0-rc.0",
+    "@smthrs/core": "1.0.0-rc.0",
+    "@smthrs/engine": "1.0.0-rc.0",
+    "@smthrs/flow": "1.0.0-rc.0",
+    "@smthrs/flows": "1.0.0-rc.0",
+    "@smthrs/harness": "1.0.0-rc.0",
+    "@smthrs/kernel": "1.0.0-rc.0",
+    "@smthrs/model": "1.0.0-rc.0",
+    "@smthrs/patterns": "1.0.0-rc.0",
+    "@smthrs/plan": "1.0.0-rc.0",
+    "@smthrs/platform-node": "1.0.0-rc.0",
+    "@smthrs/registry": "1.0.0-rc.0",
+    "@smthrs/std": "1.0.0-rc.0"
   },
   "devDependencies": {
     "@effect/language-service": "0.87.1",
