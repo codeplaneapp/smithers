@@ -39,6 +39,33 @@ describe("Sidecar", () => {
     expect(callsTo(graph, "sidecar/score")).toHaveLength(0)
   })
 
+  it("puts the shadow behind a catch and leaves the primary bare", () => {
+    const graph = Graph.build(Sidecar.make({ primary, shadow }), "prompt")
+
+    // One arm, on the shadow. A sidecar is not a fallback ladder: a failed
+    // primary is a failed run, so the primary must not gain an arm of its own.
+    expect(Graph.nodes(graph).filter((node) => node.kind === "Catch")).toHaveLength(1)
+    expect(Graph.nodes(graph).find((node) => node.id.endsWith("all.shadow.recover"))?.keyMaterial.body).toEqual({
+      _tag: "Succeed",
+      value: { error: { _tag: "PlannedInput", path: [] }, quarantined: true }
+    })
+    expect(Graph.diagnostics(graph)).toEqual([])
+  })
+
+  it("hands the scorer the pair run hands it", () => {
+    const graph = Graph.build(Sidecar.make({ primary, shadow, score }), "prompt")
+
+    // The scorer reads the shadow's VALUE, not its quarantine wrapper, so the
+    // declared scorer input is the same object `run` builds.
+    expect(Graph.nodes(graph).find((node) => node.id.endsWith("then.map.flow"))?.keyMaterial.body).toEqual({
+      _tag: "Succeed",
+      value: {
+        primary: { _tag: "PlannedInput", path: ["primary"] },
+        shadow: { _tag: "PlannedInput", path: ["shadow", "value"] }
+      }
+    })
+  })
+
   it("declares the scorer call when one is configured", () => {
     const graph = Graph.build(Sidecar.make({ primary, shadow, score }), "prompt")
 

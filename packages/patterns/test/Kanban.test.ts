@@ -36,6 +36,20 @@ describe("Kanban", () => {
     expect(Graph.nodes(graph).filter((node) => node.kind === "Map")).toHaveLength(2)
   })
 
+  it("declares one recovery arm per card so a rejected card leaves its column alone", () => {
+    const graph = Graph.build(Kanban.make({ columns, items, concurrency: 3 }), "sprint")
+
+    // Three cards through two columns: six calls, six arms. Without them the
+    // first rejected card fails its column's join and interrupts every card
+    // beside it, which is not the board `run` works.
+    expect(Graph.nodes(graph).filter((node) => node.kind === "Catch")).toHaveLength(6)
+    expect(Graph.nodes(graph).find((node) => node.id.endsWith("all.a.recover"))?.keyMaterial.body).toMatchObject({
+      _tag: "Succeed",
+      value: { _tag: "Quarantined", member: "a" }
+    })
+    expect(Graph.diagnostics(graph)).toEqual([])
+  })
+
   it("carries each item's previous column result into the next column", () => {
     const graph = Graph.build(Kanban.make({ columns, items, concurrency: 3 }), "sprint")
     const later = Graph.nodes(graph)

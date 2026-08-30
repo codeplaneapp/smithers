@@ -234,16 +234,28 @@ describe("Runbook", () => {
       expect(duplicate).toBeInstanceOf(PatternError)
     }))
 
-  it("gives a stopping runbook and a skipping runbook different step identity", () => {
-    const material = (onDeny: Runbook.OnDeny) =>
-      Graph.nodes(Graph.build(Runbook.make({ steps, approval, onDeny }), "release"))
+  // A declared plan has no branch to drop a denied step from, and the gated
+  // node carries the step's own failures beside the denial, so an arm here
+  // would declare that the runbook continues past a FAILED critical step.
+  // `make` refuses the option rather than accepting it and building a plan
+  // that halts, which is the shape an operator reading the plan would
+  // misread as a skip.
+  it("refuses onDeny skip at declaration, naming run as the way to skip", () => {
+    expect(() => Runbook.make({ steps, approval, onDeny: "skip" })).toThrow(PatternError)
+    const refusal = (() => {
+      try {
+        Runbook.make({ steps, approval, onDeny: "skip" })
+        return undefined
+      } catch (error) {
+        return error as PatternError
+      }
+    })()
 
-    const stopping = material("fail")
-    const skipping = material("skip")
-
-    expect(stopping.map((node) => node.kind)).toEqual(skipping.map((node) => node.kind))
-    expect(stopping.map((node) => node.keyMaterial.body)).not.toEqual(
-      skipping.map((node) => node.keyMaterial.body)
-    )
+    expect(refusal?.code).toBe("invalid_decorator")
+    expect(refusal?.message).toContain("Runbook.make does not support onDeny: \"skip\"")
+    expect(refusal?.message).toContain("Runbook.run")
+    // The supported declaration is unaffected.
+    expect(Graph.diagnostics(Graph.build(Runbook.make({ steps, approval, onDeny: "fail" }), "release")))
+      .toEqual([])
   })
 })

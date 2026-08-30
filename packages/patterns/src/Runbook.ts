@@ -29,6 +29,9 @@ export type Risk = "safe" | "risky" | "critical"
 /**
  * What a denial does to the rest of the runbook.
  *
+ * `"skip"` is a {@link run} option only. {@link make} refuses it, because a
+ * declared plan cannot express it.
+ *
  * @category models
  * @since 0.1.0
  */
@@ -148,18 +151,18 @@ const identities = (ids: ReadonlyArray<string>): boolean => new Set(ids).size ==
  * approval that gates a step sees that same envelope, so a built graph shows
  * which step an approval belongs to and whether it is elevated.
  *
- * `onDeny` does not change the declared topology. A skip is a runtime decision
- * about a value the plan does not have, and the option is captured, so a
- * stopping runbook and a skipping runbook have different step identity.
- *
- * The declared flow stops at the first denial whatever `onDeny` says, because
- * `WithApproval` fails the wrapped step when the approval does not decode as
- * `"approved"` and the chain has no continuation past a failed step. Only
- * {@link run} skips a denied step and continues.
+ * `onDeny: "skip"` is not declarable, and `make` refuses it rather than
+ * accepting it and building a plan that halts. A skip is a decision about a
+ * value the plan does not have: the gated node is one flow whose failure
+ * channel carries the denial and the step's own failures together, so the
+ * recovery arm that would express a skip also declares that the runbook
+ * continues past a FAILED critical step, which no run does. Declaring the
+ * runbook with `onDeny: "fail"` and calling {@link run} with `onDeny: "skip"`
+ * is how a skipping runbook is expressed today.
  *
  * `make` throws a `PatternError` when there are no steps, when two steps share
- * an id, or when the approval flow permits any value other than the literal
- * `"approved"`.
+ * an id, when the approval flow permits any value other than the literal
+ * `"approved"`, or when `onDeny` is `"skip"`.
  *
  * @category constructors
  * @since 0.1.0
@@ -171,6 +174,15 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   const ids = options.steps.map((step) => step.id)
   if (!identities(ids)) {
     throw new PatternError({ code: "invalid_decorator", message: "Runbook step ids must be unique" })
+  }
+  if (options.onDeny === "skip") {
+    throw new PatternError({
+      code: "invalid_decorator",
+      message: "Runbook.make does not support onDeny: \"skip\". A declared plan has no branch that drops a " +
+        "denied step, and the gated node carries the step's own failures beside the denial, so the arm that " +
+        "would skip also declares that the runbook continues past a failed step. Declare the runbook with " +
+        "onDeny: \"fail\", and call Runbook.run with onDeny: \"skip\" to skip a denied step at run time."
+    })
   }
   const reason = options.reason ?? DEFAULT_REASON
   const captures = { steps: ids, risks: options.steps.map((step) => step.risk), onDeny: options.onDeny, reason }
