@@ -6,7 +6,7 @@
  * database column, or an engine type: every field is either a
  * `@smthrs/control` projection value or something folded out of the ordered
  * `ControlEvent` deltas `Control.watch` publishes. Wire names are the flows
- * names — `flowId`, `createdAt`, and the `ApprovalTarget.Node` envelope — so a
+ * names (`flowId`, `createdAt`, and the `ApprovalTarget.Node` envelope), so a
  * client written against the control plane reads these rows without a
  * translation table.
  *
@@ -50,7 +50,13 @@ export const RunSummaryRow = Schema.Struct({
   editsSucceeded: Schema.Number,
   inputTokens: Schema.Number,
   outputTokens: Schema.Number,
-  /** One line: the status plus the reason that most explains it. */
+  /**
+   * One line: the run row's status plus the reason that most explains it.
+   *
+   * The status is the control plane's, not one folded from the journal: a
+   * fenced status write does not always journal an event, so a verdict read
+   * from events alone can name the run's previous state.
+   */
   verdict: Schema.String,
   /** The whole diagnosis card, which the old wire called `whatHappened`. */
   diagnosis: Schema.String,
@@ -70,6 +76,9 @@ export type RunSummaryRow = typeof RunSummaryRow.Type
  *
  * `label` carries what the old wire called `node.cardLabel`, and `seat`
  * carries `node.agent`: the model seat is the flows name for who ran a node.
+ *
+ * `nodeId` is the ordinal the call opened on, because the emitter names no
+ * node. {@link runTree} says why.
  *
  * @since 1.0.0
  * @category models
@@ -191,7 +200,11 @@ export const runSummary = (
   run: ControlSchema.RunSummary,
   events: ReadonlyArray<ControlSchema.ControlEvent>
 ): RunSummaryRow => {
-  const facts = Diagnosis.digest(events)
+  // The run row is the authority on status; the journal is the evidence for
+  // everything else. A status written under a fence does not always journal an
+  // event of its own, so a verdict folded from events alone can lag the row it
+  // describes by a whole transition.
+  const facts = { ...Diagnosis.digest(events), status: run.status }
   return {
     runId: run.runId,
     flowId: run.flowId,
@@ -221,11 +234,40 @@ export const runSummary = (
 }
 
 /**
+ * Claims the open agent call a settlement belongs to: the oldest one whose
+ * flow name the settlement repeats, or the oldest open call when it names
+ * none. A settlement that matches nothing open is dropped.
+ */
+const takeOpenCall = <A extends { readonly flowName: string }>(
+  open: Array<A>,
+  flowName: string | undefined
+): A | undefined => {
+  const found = flowName === undefined ? -1 : open.findIndex((call) => call.flowName === flowName)
+  return open.splice(found < 0 ? 0 : found, 1)[0]
+}
+
+/**
  * Folds one run's events into its node rows.
  *
  * A node opens on `control.agent.cell-call-started` and settles on the
- * matching `control.agent.cell-call-settled`; a node that never settled stays
- * `running`, which is how a live tree renders work in flight.
+ * matching `control.agent.cell-call-settled`.
+ *
+ * Neither record names a node: `@smthrs/agent` `AgentSession` journals
+ * `{flowName, input}` when a call starts and `{flowName, outcome, message,
+ * value}` when it settles. The ordinal the call opened on is therefore its
+ * published key rather than a fallback, and a settlement is paired with the
+ * oldest open call of the same flow name, which is the only pairing those
+ * fields support.
+ *
+ * The durable engine's own `flows.engine.*` records are not folded here, and
+ * cannot be: a host keeps the control plane and the engine in two databases
+ * with two journals (`@smthrs/cli` `NodeControl.databasePath` and
+ * `executionDatabasePath`), and `Control.watch` reads one run's partition of
+ * the control journal alone (`@smthrs/control` `ControlLive.streamForRun`).
+ * What an engine step did reaches a client as the agent call that made it.
+ *
+ * A node that never settled stays `running`, which is how a live tree renders
+ * work in flight.
  *
  * @param run the control-plane run summary
  * @param events that run's ordered control events
@@ -237,38 +279,42 @@ export const runTree = (
   events: ReadonlyArray<ControlSchema.ControlEvent>
 ): ReadonlyArray<RunTreeRow> => {
   const rows = new Map<string, RunTreeRow>()
+  const openCalls: Array<{ readonly flowName: string; readonly row: RunTreeRow }> = []
   let seat: string | undefined
   let ordinal = 0
+
   for (const event of events) {
     const payload = asRecord(event.payload)
+    const at = timeOf(event)
     if (event.kind === "control.agent.turn-opened") {
       seat = asString(payload.seat) ?? seat
       continue
     }
     if (event.kind === "control.agent.cell-call-started") {
       ordinal += 1
-      const nodeId = asString(payload.nodeId) ?? `call-${ordinal}`
-      rows.set(nodeId, {
+      const nodeId = `call-${ordinal}`
+      const flowName = asString(payload.flowName) ?? nodeId
+      const row: RunTreeRow = {
         runId: run.runId,
         nodeId,
-        label: asString(payload.flowName) ?? nodeId,
+        label: flowName,
         status: "running",
         ...optional("seat", seat),
-        startedAt: timeOf(event),
+        startedAt: at,
         ...optional("parentRunId", run.parentRunId)
-      })
+      }
+      openCalls.push({ flowName, row })
+      rows.set(nodeId, row)
       continue
     }
-    if (event.kind === "control.agent.cell-call-settled") {
-      const nodeId = asString(payload.nodeId) ?? `call-${ordinal}`
-      const open = rows.get(nodeId)
-      if (open === undefined) continue
-      rows.set(nodeId, {
-        ...open,
-        status: asString(payload.outcome) === "failure" ? "failed" : "completed",
-        endedAt: timeOf(event)
-      })
-    }
+    if (event.kind !== "control.agent.cell-call-settled") continue
+    const settled = takeOpenCall(openCalls, asString(payload.flowName))
+    if (settled === undefined) continue
+    rows.set(settled.row.nodeId, {
+      ...settled.row,
+      status: asString(payload.outcome) === "failure" ? "failed" : "completed",
+      endedAt: at
+    })
   }
   return [...rows.values()]
 }
@@ -279,6 +325,13 @@ export const runTree = (
  * A request opens a pending row carrying the submit-ready payload; the
  * matching `control.approval.approved` or `control.approval.denied` closes it
  * without discarding the request, so a decided gate stays readable.
+ *
+ * A decision names the gate it closed by `tokenId`. `@smthrs/control`
+ * `SqlControlRuntime.lookupApproval` mints that token id from the target, and
+ * for the `Node` target a run parks on it is the request id itself, so the two
+ * records join on one field. A decision that names no token closes the oldest
+ * pending row rather than all of them: two gates open at once must not both
+ * flip on one decision.
  *
  * @param events the run's ordered control events
  * @since 1.0.0
@@ -309,16 +362,25 @@ export const approvals = (
     }
     if (event.kind === "control.approval.approved" || event.kind === "control.approval.denied") {
       const decided = event.kind === "control.approval.approved" ? "approved" as const : "denied" as const
-      for (const [requestId, row] of rows) {
-        if (row.status === "pending") rows.set(requestId, { ...row, status: decided })
+      const tokenId = asString(payload.tokenId) ?? asString(payload.requestId)
+      const named = tokenId === undefined ? undefined : rows.get(tokenId)
+      if (named !== undefined) {
+        rows.set(tokenId as string, { ...named, status: decided })
+        continue
       }
+      const oldest = [...rows.entries()].find(([, row]) => row.status === "pending")
+      if (oldest !== undefined) rows.set(oldest[0], { ...oldest[1], status: decided })
     }
   }
   return [...rows.values()]
 }
 
 /**
- * Folds one run's events into its node outputs.
+ * Folds one run's events into its node outputs, keyed the way {@link runTree}
+ * keys its rows: by the ordinal the call opened on.
+ *
+ * A settled call carries the value it produced, so the row carries that value.
+ * A run's own result reaches a client as `RunSummaryRow.finalOutput` instead.
  *
  * @param events the run's ordered control events
  * @since 1.0.0
@@ -328,21 +390,26 @@ export const nodeOutput = (
   events: ReadonlyArray<ControlSchema.ControlEvent>
 ): ReadonlyArray<NodeOutputRow> => {
   const rows = new Map<string, NodeOutputRow>()
+  const openCalls: Array<{ readonly nodeId: string; readonly flowName: string }> = []
   let ordinal = 0
+
   for (const event of events) {
     const payload = asRecord(event.payload)
+    const runId = asString(payload.runId) ?? event.runId
+    if (runId === undefined) continue
     if (event.kind === "control.agent.cell-call-started") {
       ordinal += 1
+      const nodeId = `call-${ordinal}`
+      openCalls.push({ nodeId, flowName: asString(payload.flowName) ?? nodeId })
       continue
     }
     if (event.kind !== "control.agent.cell-call-settled") continue
-    const runId = asString(payload.runId) ?? event.runId
-    if (runId === undefined) continue
-    const nodeId = asString(payload.nodeId) ?? `call-${ordinal}`
+    const settled = takeOpenCall(openCalls, asString(payload.flowName))
+    if (settled === undefined) continue
     const failed = asString(payload.outcome) === "failure"
-    rows.set(nodeId, {
+    rows.set(settled.nodeId, {
       runId,
-      nodeId,
+      nodeId: settled.nodeId,
       outcome: failed ? "failure" : "success",
       output: failed
         ? asString(payload.message) ?? ""
@@ -359,6 +426,7 @@ const transcriptKinds: ReadonlySet<string> = new Set(["control.approval.requeste
 /**
  * Folds one run's events into a turn-numbered transcript.
  *
+
  * @param events the run's ordered control events
  * @since 1.0.0
  * @category projections

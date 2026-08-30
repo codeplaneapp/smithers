@@ -1,7 +1,7 @@
 /*
- * The end-to-end proof: this app's own gateway seam drives a real run.
+ * The end-to-end proof: this app's own gateway seam drives a run.
  *
- * Nothing here is a double. The script stands up
+ * The script stands up
  *
  *   - a real workspace gateway (`@smthrs/gateway` over a real SQLite control
  *     plane, journal, and run store) on a loopback port, behind a bearer
@@ -13,6 +13,18 @@
  *
  * and then does what a human does: list the flows, launch one, watch it,
  * approve the gate it parks on, read what a node produced, and cancel it.
+ *
+ * What is real and what is scripted. The gateway, the relay, the seam, the
+ * control plane, and every mutation are real: each step below is an HTTP call
+ * that crosses all three. The run's own ACTIVITY is scripted: only an agent
+ * run parks on a permission gate, an agent run needs a provider credential
+ * (`ANTHROPIC_API_KEY` or another seat), and a proof that skipped without one
+ * would prove nothing in the environments this is run in. So the turn, the
+ * cell call, and the gate are journaled here with the exact payloads
+ * `@smthrs/agent` `AgentSession` writes: `{seat, contextDigest}`,
+ * `{flowName, input}`, `{flowName, outcome, message, value}`, and the
+ * approval `AgentSession.authorize` registers. A run the durable engine really
+ * executes is proven separately, in `packages/gateway/test/RealEngineRun.test.ts`.
  *
  * The load-bearing assertion is the approval: ONE call decides the gate and
  * resumes the run. The relay counts every procedure it forwards, so a second
@@ -195,15 +207,12 @@ const program = Effect.gen(function*() {
         })
       )
     )
-  yield* emit("control.agent.turn-opened", { runId, seat: "proof-seat", at: 1_000 })
-  yield* emit("control.agent.cell-call-started", { runId, nodeId: "write-file", flowName: "write", at: 1_100 })
+  yield* emit("control.agent.turn-opened", { seat: "proof-seat", contextDigest: "proof-context" })
+  yield* emit("control.agent.cell-call-started", { flowName: "write", input: { path: "docs/proof.md" } })
   yield* emit("control.agent.cell-call-settled", {
-    runId,
-    nodeId: "write-file",
     flowName: "write",
     outcome: "success",
-    value: "wrote docs/proof.md",
-    at: 1_200
+    value: "wrote docs/proof.md"
   })
   const target: ApprovalTarget = {
     _tag: "Node",
@@ -227,7 +236,7 @@ const program = Effect.gen(function*() {
   const gate = gates.value[0]
   check(gate.title === "Open a pull request?", "the gate carries the question the run asked")
 
-  console.log("\n5. approve — one call, no second resume")
+  console.log("\n5. approve: one call, no second resume")
   const before = relayed.length
   const decided = yield* Effect.promise(() => seam.submitApproval(REPO, gate.payload, "approve"))
   check(decided.status === "ok", "the decision was accepted")
@@ -238,7 +247,9 @@ const program = Effect.gen(function*() {
   check(answer?.resume !== undefined, "the gateway resumed the run on the caller's behalf")
 
   console.log("\n6. node output")
-  const output = yield* Effect.promise(() => seam.nodeOutput(REPO, runId, "write-file"))
+  // The emitter names no node, so the projection keys a call by the ordinal it
+  // opened on. `call-1` is this run's first call.
+  const output = yield* Effect.promise(() => seam.nodeOutput(REPO, runId, "call-1"))
   check(output.status === "ok" && output.value !== undefined, "the node's output reaches the seam")
   check(
     output.status === "ok" && output.value?.output === "wrote docs/proof.md",

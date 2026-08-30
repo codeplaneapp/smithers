@@ -1,10 +1,21 @@
 /**
  * The served rows, as pure folds.
  *
- * The suites against the real control plane prove these rows reach a client.
- * These prove what is in them, including the shapes a real journal produces
- * that a happy-path fixture never would: an event with no node id, a decision
- * that arrives before its request, a settled call whose value is not a string.
+ * Every fixture here is the payload a real emitter writes, field for field:
+ *
+ * - `control.agent.*` from `@smthrs/agent` `AgentSession`, which journals
+ *   `{seat, contextDigest}`, `{flowName, input}`, and `{flowName, outcome,
+ *   message, value}`. None of them carries a node id, a run id, or a stamp,
+ *   so none appears in a fixture here either.
+ * - `control.approval.approved` and `control.approval.denied` from
+ *   `@smthrs/control` `ControlLive`, which journals `{tokenId, target, scope,
+ *   envelope, principal}`.
+ *
+ * The suites against the real control plane prove these rows reach a client,
+ * and `RealEngineRun.test.ts` proves a run the durable engine really executed
+ * reads back through them. These prove what is in the rows, including what a
+ * happy path never produces: a decision that names no token, a settlement with
+ * no open call, a settled call whose value is not a string.
  */
 import type { ControlSchema } from "@smthrs/control"
 import { describe, expect, it } from "vitest"
@@ -58,7 +69,7 @@ describe("GatewayProjection.runSummary", () => {
         steering: { pending: 3 },
         cancellation: { requestedAt: 5, source: "control", reason: "stop" }
       },
-      [event("control.agent.turn-opened", { seat: "opus" })]
+      [event("control.agent.turn-opened", { seat: "opus", contextDigest: "ctx" })]
     )
     expect(row).toMatchObject({
       planId: "plan-1",
@@ -75,25 +86,39 @@ describe("GatewayProjection.runSummary", () => {
 })
 
 describe("GatewayProjection.runTree", () => {
-  it("opens a node on a call and settles it on the matching result", () => {
+  it("keys each call by the ordinal it opened on, because the emitter names no node", () => {
     const rows = GatewayProjection.runTree(run, [
-      event("control.agent.turn-opened", { seat: "opus" }),
-      event("control.agent.cell-call-started", { nodeId: "a", flowName: "write", at: 1 }),
-      event("control.agent.cell-call-settled", { nodeId: "a", outcome: "success", at: 2 }),
-      event("control.agent.cell-call-started", { nodeId: "b", flowName: "read", at: 3 }),
-      event("control.agent.cell-call-settled", { nodeId: "b", outcome: "failure", at: 4 }),
-      event("control.agent.cell-call-started", { nodeId: "c", flowName: "grep", at: 5 })
+      event("control.agent.turn-opened", { seat: "opus", contextDigest: "ctx" }),
+      event("control.agent.cell-call-started", { flowName: "write", input: { path: "a" } }, 1),
+      event("control.agent.cell-call-settled", { flowName: "write", outcome: "success", value: "ok" }, 2),
+      event("control.agent.cell-call-started", { flowName: "read", input: {} }, 3),
+      event("control.agent.cell-call-settled", { flowName: "read", outcome: "failure", message: "no" }, 4),
+      event("control.agent.cell-call-started", { flowName: "grep", input: {} }, 5)
     ])
     expect(rows).toMatchObject([
-      { nodeId: "a", label: "write", status: "completed", seat: "opus", startedAt: 1, endedAt: 2 },
-      { nodeId: "b", label: "read", status: "failed", endedAt: 4 },
-      { nodeId: "c", label: "grep", status: "running" }
+      { nodeId: "call-1", label: "write", status: "completed", seat: "opus", startedAt: 1, endedAt: 2 },
+      { nodeId: "call-2", label: "read", status: "failed", endedAt: 4 },
+      { nodeId: "call-3", label: "grep", status: "running" }
     ])
     // A node still open has no end.
     expect(Object.keys(rows[2] ?? {})).not.toContain("endedAt")
   })
 
-  it("numbers a call that names no node and carries the parent run", () => {
+  it("settles the oldest open call of the settlement's flow, not the newest", () => {
+    const rows = GatewayProjection.runTree(run, [
+      event("control.agent.cell-call-started", { flowName: "write", input: {} }, 1),
+      event("control.agent.cell-call-started", { flowName: "read", input: {} }, 2),
+      event("control.agent.cell-call-started", { flowName: "write", input: {} }, 3),
+      event("control.agent.cell-call-settled", { flowName: "write", outcome: "success" }, 4)
+    ])
+    expect(rows.map((row) => `${row.nodeId}:${row.status}`)).toEqual([
+      "call-1:completed",
+      "call-2:running",
+      "call-3:running"
+    ])
+  })
+
+  it("names a call whose flow name is missing after the ordinal it opened on", () => {
     const rows = GatewayProjection.runTree({ ...run, parentRunId: "parent-1" }, [
       event("control.agent.cell-call-started", {}),
       event("control.agent.cell-call-settled", {})
@@ -101,15 +126,16 @@ describe("GatewayProjection.runTree", () => {
     expect(rows).toMatchObject([{ nodeId: "call-1", label: "call-1", status: "completed", parentRunId: "parent-1" }])
   })
 
-  it("drops a result for a call it never saw open", () => {
-    expect(GatewayProjection.runTree(run, [event("control.agent.cell-call-settled", { nodeId: "ghost" })])).toEqual([])
+  it("drops a settlement that matches no open call", () => {
+    expect(GatewayProjection.runTree(run, [event("control.agent.cell-call-settled", { flowName: "write" })]))
+      .toEqual([])
   })
 
   it("keeps the seat from the last turn that named one", () => {
     const rows = GatewayProjection.runTree(run, [
-      event("control.agent.turn-opened", { seat: "opus" }),
-      event("control.agent.turn-opened", {}),
-      event("control.agent.cell-call-started", { nodeId: "a" })
+      event("control.agent.turn-opened", { seat: "opus", contextDigest: "ctx" }),
+      event("control.agent.turn-opened", { contextDigest: "ctx" }),
+      event("control.agent.cell-call-started", { flowName: "write" })
     ])
     expect(rows[0]?.seat).toBe("opus")
   })
@@ -147,60 +173,87 @@ describe("GatewayProjection.approvals", () => {
     ).toEqual([])
   })
 
-  it("marks a decided gate and leaves an already-decided one alone", () => {
-    const denied = GatewayProjection.approvals([
-      event("control.approval.requested", { runId: "run-1", requestId: "gate", payload }),
-      event("control.approval.denied", { runId: "run-1" }),
-      event("control.approval.approved", { runId: "run-1" })
+  it("decides only the gate the decision's token names", () => {
+    // `SqlControlRuntime.lookupApproval` mints the token id from the target,
+    // and for a Node target that is the request id, so one decision closes one
+    // gate even while two are open.
+    const rows = GatewayProjection.approvals([
+      event("control.approval.requested", { runId: "run-1", requestId: "first", payload }),
+      event("control.approval.requested", { runId: "run-1", requestId: "second", payload }),
+      event("control.approval.approved", {
+        tokenId: "second",
+        target: "Node",
+        scope: "run",
+        envelope: {},
+        principal: { id: "operator", kind: "cli", stampedAt: 1 }
+      })
     ])
-    // The first decision is the decision; a later event does not overwrite it.
-    expect(denied.map((row) => row.status)).toEqual(["denied"])
+    expect(rows.map((row) => `${row.requestId}:${row.status}`)).toEqual(["first:pending", "second:approved"])
+  })
+
+  it("closes the oldest pending gate when a decision names no token", () => {
+    const rows = GatewayProjection.approvals([
+      event("control.approval.requested", { runId: "run-1", requestId: "first", payload }),
+      event("control.approval.requested", { runId: "run-1", requestId: "second", payload }),
+      event("control.approval.denied", { target: "Node", scope: "run" }),
+      event("control.approval.approved", { target: "Node", scope: "run" }),
+      event("control.approval.approved", { target: "Node", scope: "run" })
+    ])
+    // Two decisions for two gates; a third finds nothing pending and changes
+    // nothing, so the first decision on a gate stays the decision.
+    expect(rows.map((row) => `${row.requestId}:${row.status}`)).toEqual(["first:denied", "second:approved"])
   })
 
   it("ignores an event that is neither a request nor a decision", () => {
-    expect(GatewayProjection.approvals([event("control.run.accepted", {})])).toEqual([])
+    expect(GatewayProjection.approvals([event("control.run.accepted", { runId: "run-1", status: "accepted" })]))
+      .toEqual([])
   })
 })
 
 describe("GatewayProjection.nodeOutput", () => {
   it("records a success value, a failure message, and a non-string value", () => {
     const rows = GatewayProjection.nodeOutput([
-      event("control.agent.cell-call-started", { nodeId: "a" }),
-      event("control.agent.cell-call-settled", { runId: "run-1", nodeId: "a", outcome: "success", value: "text" }),
-      event("control.agent.cell-call-settled", { runId: "run-1", nodeId: "b", outcome: "failure", message: "no" }),
-      event("control.agent.cell-call-settled", { runId: "run-1", nodeId: "c", outcome: "success", value: { ok: 1 } }),
-      event("control.agent.cell-call-settled", { runId: "run-1", nodeId: "d", outcome: "success" }),
-      event("control.agent.cell-call-settled", { runId: "run-1", nodeId: "e", outcome: "failure" })
+      event("control.agent.cell-call-started", { flowName: "a", input: {} }),
+      event("control.agent.cell-call-settled", { flowName: "a", outcome: "success", value: "text" }),
+      event("control.agent.cell-call-started", { flowName: "b", input: {} }),
+      event("control.agent.cell-call-settled", { flowName: "b", outcome: "failure", message: "no" }),
+      event("control.agent.cell-call-started", { flowName: "c", input: {} }),
+      event("control.agent.cell-call-settled", { flowName: "c", outcome: "success", value: { ok: 1 } }),
+      event("control.agent.cell-call-started", { flowName: "d", input: {} }),
+      event("control.agent.cell-call-settled", { flowName: "d", outcome: "success" }),
+      event("control.agent.cell-call-started", { flowName: "e", input: {} }),
+      event("control.agent.cell-call-settled", { flowName: "e", outcome: "failure" })
     ])
     expect(rows).toMatchObject([
-      { nodeId: "a", outcome: "success", output: "text" },
-      { nodeId: "b", outcome: "failure", output: "no" },
-      { nodeId: "c", outcome: "success", output: "{\"ok\":1}" },
-      { nodeId: "d", outcome: "success", output: "null" },
-      { nodeId: "e", outcome: "failure", output: "" }
+      { nodeId: "call-1", outcome: "success", output: "text" },
+      { nodeId: "call-2", outcome: "failure", output: "no" },
+      { nodeId: "call-3", outcome: "success", output: "{\"ok\":1}" },
+      { nodeId: "call-4", outcome: "success", output: "null" },
+      { nodeId: "call-5", outcome: "failure", output: "" }
     ])
   })
 
-  it("numbers a settled call that names no node, and drops one with no run", () => {
+  it("drops a settlement with no open call and one with no run at all", () => {
     const rows = GatewayProjection.nodeOutput([
       event("control.agent.cell-call-started", {}),
       event("control.agent.cell-call-settled", { outcome: "success", value: "v" }),
+      event("control.agent.cell-call-settled", { outcome: "success", value: "late" }),
       orphan("control.agent.cell-call-settled", { outcome: "success", value: "v" })
     ])
-    expect(rows).toMatchObject([{ nodeId: "call-1", runId: "run-1" }])
+    expect(rows).toMatchObject([{ nodeId: "call-1", runId: "run-1", output: "v" }])
   })
 })
 
 describe("GatewayProjection.transcript", () => {
   it("numbers turns and renders each reported kind as one line", () => {
     const rows = GatewayProjection.transcript([
-      event("control.run.accepted", {}),
-      event("control.agent.turn-opened", { seat: "opus" }),
-      event("control.agent.model-settled", { usage: { inputTokens: 3, outputTokens: 4 } }),
+      event("control.run.accepted", { runId: "run-1", status: "accepted" }),
+      event("control.agent.turn-opened", { seat: "opus", contextDigest: "ctx" }),
+      event("control.agent.model-settled", { text: "t", usage: { inputTokens: 3, outputTokens: 4 } }),
       event("control.agent.model-settled", {}),
-      event("control.agent.cell-call-started", { flowName: "write" }),
+      event("control.agent.cell-call-started", { flowName: "write", input: {} }),
       event("control.agent.cell-call-started", {}),
-      event("control.agent.cell-call-settled", { outcome: "success" }),
+      event("control.agent.cell-call-settled", { flowName: "write", outcome: "success" }),
       event("control.agent.cell-call-settled", { outcome: "failure", message: "no" }),
       event("control.agent.resolved", { text: "done" }),
       event("control.approval.requested", { question: "Ship?" }),
