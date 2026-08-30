@@ -422,6 +422,33 @@ describe("RunDriver scheduleResume", () => {
       expect(decisions).toEqual(["wake-scheduled"])
     }))
 
+  /**
+   * B-03: the decision was emitted before anything checked the row. A timer
+   * armed before its run was cancelled still fires, and an external trigger
+   * can complete a deferred long after the run it belongs to settled; both
+   * reach `scheduleResume`. The terminal reject lived one layer down in
+   * `claimAndActivate`, so every one of those wrote a `wake-scheduled`
+   * decision into the journal of a run that can never wake again.
+   */
+  it.effect("ignores a wake for a run that has already settled", () =>
+    Effect.gen(function*() {
+      const result = yield* withCrypto(provideJournal(Effect.gen(function*() {
+        const store = yield* RunStore.RunStore
+        const driver = yield* makeDriver()
+        yield* store.create("settled", stateJson(EdgeFlow._tag))
+        yield* store.claimAndOwn("settled", { status: "pending", owner: null, heartbeatAtMs: null }, owner, 0)
+        yield* store.transitionOwned("settled", owner, "completed", undefined)
+        yield* driver.scheduleResume(EdgeFlow._tag, "settled", "deferred")
+        yield* driver.scheduleResume(EdgeFlow._tag, "settled", "clock")
+        return { decisions: yield* decisionsFor("settled"), active: yield* driver.active }
+      })))
+
+      expect(result.decisions).toEqual([])
+      // Nothing was enqueued either: a settled run is not woken and then
+      // refused, it is not woken.
+      expect([...result.active]).toEqual([])
+    }))
+
   it.effect("dies when the wake lookup hits a store failure that is not a missing row", () =>
     Effect.gen(function*() {
       const exit = yield* withCrypto(provideJournal(Effect.gen(function*() {
@@ -744,6 +771,113 @@ describe("RunDriver cancellation paths", () => {
       })))
 
       expect(result).toBeInstanceOf(Flow.Suspended)
+    }))
+
+  /**
+   * X-11: the durable engine has ONE cancellation path.
+   *
+   * `interruptUnsafe` promises forced cancellation without cleanup, and the
+   * durable driver answered it with `interrupt` — a cooperative, durable,
+   * cascading cancellation that runs every finalizer. A caller reaching for
+   * the unsafe path to tear a wedged run down got the safe one and no
+   * indication that its request had been reinterpreted. rc.0 refuses it
+   * instead, so the feature cannot appear to half-work.
+   *
+   * The code AND the reason are contract text: rc-contract §7 "Durable
+   * interruptUnsafe" is the release note an operator reads, and the failure a
+   * caller catches has to say the same thing in the same words. Asserted
+   * exactly, not by substring, so a reworded refusal is a test failure rather
+   * than a silent divergence from the published wording.
+   */
+  it.effect("refuses interruptUnsafe with a typed unsupported failure", () =>
+    Effect.gen(function*() {
+      const result = yield* withCrypto(provideJournal(Effect.gen(function*() {
+        const store = yield* RunStore.RunStore
+        const driver = yield* makeDriver()
+        yield* store.create("unsafe-interrupt", stateJson(EdgeFlow._tag))
+        const failure = yield* Effect.flip(driver.interruptUnsafe(EdgeFlow, "unsafe-interrupt"))
+        return { failure, row: yield* store.get("unsafe-interrupt") }
+      })))
+
+      expect(result.failure).toBeInstanceOf(FlowRuntime.CancelRequestFailed)
+      expect(result.failure.code).toBe("unsafe_interrupt_unsupported")
+      expect(result.failure.executionId).toBe("unsafe-interrupt")
+      expect(result.failure.reason).toBe(
+        "The durable engine has one cancellation path, interrupt, which is durable and cascades to " +
+          "linked children. FlowRuntime.interruptUnsafe on the durable engine fails with " +
+          "unsafe_interrupt_unsupported instead of forcing cancellation without cleanup."
+      )
+      // The refusal changes nothing: no cancellation was requested, so the
+      // caller can still ask for the supported one.
+      expect(result.row.cancelRequestedAtMs).toBeNull()
+      expect(result.row.status).toBe("pending")
+    }))
+
+  /**
+   * B-03, the other half: the sweep queries stop OFFERING a settled run's
+   * timers, and the terminal transition stops leaving them pending in the
+   * first place. Both matter — the in-memory state without a `runs` view
+   * cannot join anything, and a clock row that stays pending forever is
+   * durable work no sweep will ever finish.
+   */
+  const scheduleClockFor = (state: DurableEngineState.Service, executionId: string) =>
+    state.scheduleClock({
+      flowName: EdgeFlow._tag,
+      executionId,
+      clockName: "edge-clock",
+      deferredName: "edge-deferred",
+      dueAtMs: 600_000,
+      completedAtMs: null
+    }, owner)
+
+  const clockOf = (state: DurableEngineState.Service, executionId: string) =>
+    state.clock({ flowName: EdgeFlow._tag, executionId, clockName: "edge-clock" })
+
+  it.effect("completes the run's pending clock rows when it finishes", () =>
+    Effect.gen(function*() {
+      const row = yield* withCrypto(provideJournal(Effect.gen(function*() {
+        const store = yield* RunStore.RunStore
+        const state = yield* DurableEngineState.DurableEngineState
+        const driver = yield* makeDriver()
+        yield* store.create("clocked-complete", stateJson(EdgeFlow._tag))
+        yield* scheduleClockFor(state, "clocked-complete")
+        yield* driver.register(EdgeFlow, () => Effect.succeed("done"))
+        yield* driver.execute(EdgeFlow, { executionId: "clocked-complete", payload: {}, discard: true })
+        return yield* clockOf(state, "clocked-complete")
+      })))
+
+      expect(Option.isSome(row)).toBe(true)
+      expect(Option.isSome(row) ? row.value.completedAtMs : undefined).not.toBeNull()
+    }))
+
+  it.effect("completes the run's pending clock rows when it is cancelled", () =>
+    Effect.gen(function*() {
+      const result = yield* withCrypto(provideJournal(Effect.gen(function*() {
+        const store = yield* RunStore.RunStore
+        const state = yield* DurableEngineState.DurableEngineState
+        const driver = yield* makeDriver()
+        const running = yield* Deferred.make<void>()
+        yield* driver.register(
+          EdgeFlow,
+          () => Deferred.succeed(running, undefined).pipe(Effect.andThen(Effect.never))
+        )
+        const fiber = yield* driver.execute(EdgeFlow, {
+          executionId: "clocked-cancel",
+          payload: {},
+          discard: true
+        }).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.await(running)
+        yield* scheduleClockFor(state, "clocked-cancel")
+        yield* driver.interrupt(EdgeFlow, "clocked-cancel")
+        yield* Fiber.await(fiber)
+        return {
+          row: yield* store.get("clocked-cancel"),
+          clock: yield* clockOf(state, "clocked-cancel")
+        }
+      })))
+
+      expect(result.row.status).toBe("cancelled")
+      expect(Option.isSome(result.clock) ? result.clock.value.completedAtMs : undefined).not.toBeNull()
     }))
 })
 

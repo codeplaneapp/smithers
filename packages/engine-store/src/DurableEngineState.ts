@@ -16,6 +16,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as EngineStateSchema from "./internal/EngineStateSchema.ts"
@@ -403,11 +404,31 @@ export interface Service {
   // TODO(piece-6): fold into @smthrs/journal — needs ClockStore.due(nowMs).
   readonly dueClocks: (nowMs: number) => Effect.Effect<ReadonlyArray<ClockRow>>
   /**
+   * Completes every uncompleted clock row of one run in a single statement.
+   *
+   * A run that settled has no future: a timer that fires against it can only
+   * schedule a resume nothing will drive. Terminal transitions call this in
+   * their own transaction, so the rows stop being pending with the run rather
+   * than lingering as durable work no sweep will ever finish.
+   *
+   * It takes the run id rather than a clock address because the caller is
+   * closing a RUN, and it does not read the run row, so it composes with a
+   * terminal transition in either order.
+   */
+  readonly completeRunClocks: (
+    executionId: string,
+    completedAtMs: number
+  ) => Effect.Effect<void>
+  /**
    * Lists uncompleted clock rows scoped to an execution or flow, with no
    * due-time bound. Suspension-reason derivation and registration-time
    * recovery use this instead of abusing `dueClocks` as an all-clocks
    * listing (issue #35): `dueClocks` is a due-timer sweeper query and may
    * grow a result cap without affecting park correctness.
+   *
+   * Rows belonging to a settled run are never listed. Registration sweeps
+   * this to re-arm timers, so without the run-status join every restart armed
+   * one timer per clock row a flow ever wrote, for runs that ended long ago.
    */
   readonly pendingClocks: (scope: {
     readonly executionId?: string
@@ -415,6 +436,11 @@ export interface Service {
   }) => Effect.Effect<ReadonlyArray<ClockRow>>
   /**
    * Lists completed deferred addresses for registration-time wake recovery.
+   *
+   * Rows belonging to a settled run are never listed, for the reason
+   * {@link Service.pendingClocks} gives: this is swept on every registration,
+   * and one resume per completion in a flow's whole history is unbounded work
+   * that can wake nothing.
    */
   readonly completedDeferreds: (
     flowName: string
@@ -676,9 +702,11 @@ const decodeDeferredRow = (input: unknown): Effect.Effect<DeferredRow> =>
     )
   )
 
-const decodeClockRow = (input: unknown): Effect.Effect<ClockRow> =>
+const decodeClockRow = (input: unknown): Effect.Effect<ClockRow> => decodeClockRowResult(input).pipe(Effect.orDie)
+
+/** {@link decodeClockRow} with its parse failure left in the error channel. */
+const decodeClockRowResult = (input: unknown): Effect.Effect<ClockRow, unknown> =>
   Schema.decodeUnknownEffect(ClockDatabaseRow)(input).pipe(
-    Effect.orDie,
     Effect.map((row) => ({
       flowName: row.flowName,
       executionId: row.executionId,
@@ -688,6 +716,50 @@ const decodeClockRow = (input: unknown): Effect.Effect<ClockRow> =>
       completedAtMs: row.completedAtMs
     }))
   )
+
+/** The primary key of a clock row, read defensively off a row that may not decode. */
+const clockRowKey = (row: Record<string, unknown>): string =>
+  JSON.stringify([row["flowName"], row["executionId"], row["clockName"]])
+
+/** The primary key of a deferred completion, read the same way. */
+const deferredAddressRowKey = (row: Record<string, unknown>): string =>
+  JSON.stringify([row["flowName"], row["executionId"], row["deferredName"]])
+
+/**
+ * Decodes the rows one registration-time sweep read, skipping — with a
+ * storage-integrity warning naming the row's key — any row that will not
+ * decode.
+ *
+ * Decoding the batch through `Effect.orDie` made one malformed row fatal for
+ * every row beside it: `completedDeferreds` and `pendingClocks` are what
+ * `register` sweeps, so a single unreadable row anywhere in a flow's history
+ * killed every registration of that flow, and no run of it ever resumed again.
+ * The blast radius of a corrupt row must be that row. The key is logged
+ * because it is what an operator needs to find and repair it, and it is read
+ * field by field off the raw row so a row that failed to decode can still name
+ * itself.
+ */
+const decodeSweep = <A>(
+  rows: ReadonlyArray<Record<string, unknown>>,
+  kind: string,
+  keyOf: (row: Record<string, unknown>) => string,
+  decode: (row: Record<string, unknown>) => Effect.Effect<A, unknown>
+): Effect.Effect<ReadonlyArray<A>> =>
+  Effect.gen(function*() {
+    const decoded: Array<A> = []
+    for (const row of rows) {
+      const result = yield* Effect.result(decode(row))
+      if (Result.isSuccess(result)) {
+        decoded.push(result.success)
+        continue
+      }
+      yield* Effect.logWarning(
+        `engine-store: skipping a malformed ${kind} row ${keyOf(row)}`,
+        result.failure
+      )
+    }
+    return decoded
+  })
 
 /**
  * Constructs the database-backed durable-state implementation.
@@ -945,6 +1017,11 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       FROM flows_clock_deadlines
       WHERE completed_at_ms IS NULL
         AND execution_id = ${scope.executionId}
+        AND EXISTS (
+          SELECT 1 FROM flows_runs
+          WHERE flows_runs.run_id = flows_clock_deadlines.execution_id
+            AND flows_runs.status NOT IN ('completed', 'failed', 'cancelled')
+        )
       ORDER BY due_at_ms, execution_id, clock_name
     `
       : scope.flowName !== undefined
@@ -959,6 +1036,11 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       FROM flows_clock_deadlines
       WHERE completed_at_ms IS NULL
         AND flow_name = ${scope.flowName}
+        AND EXISTS (
+          SELECT 1 FROM flows_runs
+          WHERE flows_runs.run_id = flows_clock_deadlines.execution_id
+            AND flows_runs.status NOT IN ('completed', 'failed', 'cancelled')
+        )
       ORDER BY due_at_ms, execution_id, clock_name
     `
       : sql<ClockDatabaseRow>`
@@ -971,10 +1053,18 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         completed_at_ms AS "completedAtMs"
       FROM flows_clock_deadlines
       WHERE completed_at_ms IS NULL
+        AND EXISTS (
+          SELECT 1 FROM flows_runs
+          WHERE flows_runs.run_id = flows_clock_deadlines.execution_id
+            AND flows_runs.status NOT IN ('completed', 'failed', 'cancelled')
+        )
       ORDER BY due_at_ms, execution_id, clock_name
     `).pipe(
         Effect.orDie,
-        Effect.flatMap((rows) => Effect.forEach(rows, decodeClockRow))
+        // A row that will not decode is a storage-integrity event about that
+        // row. Dying here made one of them fatal for the whole sweep, and so
+        // for `register` itself (issue B-08).
+        Effect.flatMap((rows) => decodeSweep(rows, "clock deadline", clockRowKey, decodeClockRowResult))
       )
   )
 
@@ -988,16 +1078,34 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         deferred_name AS "deferredName"
       FROM flows_deferred_completions
       WHERE flow_name = ${flowName}
+        AND EXISTS (
+          SELECT 1 FROM flows_runs
+          WHERE flows_runs.run_id = flows_deferred_completions.execution_id
+            AND flows_runs.status NOT IN ('completed', 'failed', 'cancelled')
+        )
       ORDER BY execution_id, deferred_name
     `.pipe(
       Effect.orDie,
       Effect.flatMap((rows) =>
-        Effect.forEach(
+        decodeSweep(
           rows,
-          (row) => Schema.decodeUnknownEffect(DeferredAddressDatabaseRow)(row).pipe(Effect.orDie)
+          "deferred completion",
+          deferredAddressRowKey,
+          (row) => Schema.decodeUnknownEffect(DeferredAddressDatabaseRow)(row)
         )
       )
     )
+  )
+
+  const completeRunClocks: Service["completeRunClocks"] = Effect.fn(
+    "DurableEngineState.completeRunClocks"
+  )((executionId, completedAtMs) =>
+    writer.write(sql`
+      UPDATE flows_clock_deadlines
+      SET completed_at_ms = ${completedAtMs}
+      WHERE execution_id = ${executionId}
+        AND completed_at_ms IS NULL
+    `).pipe(Effect.orDie, Effect.asVoid)
   )
 
   const selectWaiting = (runId: string) =>
@@ -1336,6 +1444,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     clock,
     scheduleClock,
     completeClock,
+    completeRunClocks,
     dueClocks,
     pendingClocks,
     completedDeferreds,
@@ -1483,6 +1592,20 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
     return { exists: true, running: view.value.status === "running", owned }
   }
 
+  /**
+   * Mirrors the SQL sweeps' run-status join: a row whose run has settled is
+   * never swept. The permissive default (no `runs` view) treats every run as
+   * live, exactly as `waitingRuns` does, and leaves the guard to the caller.
+   */
+  const isLive = (runId: string): boolean => {
+    if (options.runs === undefined) return true
+    const view = options.runs(runId)
+    return Option.isNone(view) ||
+      view.value.status === "pending" ||
+      view.value.status === "running" ||
+      view.value.status === "suspended"
+  }
+
   return DurableEngineState.of({
     deferred: Effect.fn("DurableEngineState.deferred")((address) =>
       Effect.sync(() => Option.fromNullishOr(deferreds.get(deferredKey(address))))
@@ -1546,11 +1669,20 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
           )
       )
     ),
+    completeRunClocks: Effect.fn("DurableEngineState.completeRunClocks")((executionId, completedAtMs) =>
+      Effect.sync(() => {
+        for (const [key, row] of clocks) {
+          if (row.executionId !== executionId || row.completedAtMs !== null) continue
+          clocks.set(key, { ...row, completedAtMs })
+        }
+      })
+    ),
     pendingClocks: Effect.fn("DurableEngineState.pendingClocks")((scope) =>
       Effect.sync(() =>
         Array.from(clocks.values())
           .filter((row) =>
             row.completedAtMs === null &&
+            isLive(row.executionId) &&
             (scope.executionId === undefined || row.executionId === scope.executionId) &&
             (scope.flowName === undefined || row.flowName === scope.flowName)
           )
@@ -1564,7 +1696,7 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
     completedDeferreds: Effect.fn("DurableEngineState.completedDeferreds")((flowName) =>
       Effect.sync(() =>
         Array.from(deferreds.values())
-          .filter((row) => row.flowName === flowName)
+          .filter((row) => row.flowName === flowName && isLive(row.executionId))
           .map(({ flowName, executionId, deferredName }) => ({
             flowName,
             executionId,

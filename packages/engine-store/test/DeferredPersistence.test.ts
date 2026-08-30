@@ -1,16 +1,21 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import { FlowEngine } from "@smthrs/engine"
 import { DurableClock, DurableDeferred, Flow, FlowRuntime } from "@smthrs/flow"
 import { Journal, JournalEvent } from "@smthrs/journal"
 import { Node } from "@smthrs/plan"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import { TestClock } from "effect/testing"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as DurableEngineState from "../src/DurableEngineState.ts"
 import * as DeferredPersistence from "../src/internal/DeferredPersistence.ts"
+import * as Migrations from "../src/Migrations.ts"
 import { withCrypto } from "./Sha256.ts"
 
 const owner = {
@@ -443,5 +448,101 @@ describe("DeferredPersistence", () => {
         "deferred-test:wake:[\"DeferredPersistence/Test\",\"historical-completion\",\"answer\"]",
         "deferred-test:wake:[\"DeferredPersistence/Test\",\"historical-completion\",\"answer\"]"
       ])
+    }))
+})
+
+/**
+ * B-08: the blast radius of a corrupt row must be that row.
+ *
+ * `completedDeferreds` and `pendingClocks` decoded their whole batch through
+ * `Effect.orDie`, and `register` sweeps both. One unreadable row anywhere in a
+ * flow's history therefore killed every registration of that flow in every
+ * process: the registration died, so nothing was registered, so no run of that
+ * flow ever resumed again — an operator-visible outage caused by a single row
+ * nothing was going to act on anyway.
+ *
+ * The rows are written straight through SQL because that is the only way to
+ * produce the shape: the service's own writers cannot emit one, and the point
+ * is what the reader does with a row it did not write.
+ */
+describe("a malformed sweep row is skipped, not fatal (B-08)", () => {
+  const migratedDatabase = Layer.provideMerge(Migrations.layer, TestDatabase.layer)
+
+  /** A run row, so the sweep's run-status join has something live to find. */
+  const seedRun = (sql: SqlClient.SqlClient, runId: string) =>
+    sql`
+      INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+      VALUES (${runId}, 'suspended', 0, '{}')
+    `.pipe(Effect.orDie, Effect.asVoid)
+
+  it.effect("registration still sweeps every readable row, and says which row it dropped", () =>
+    Effect.gen(function*() {
+      const logs: Array<string> = []
+      const capture = Logger.make((options) => {
+        logs.push(String(options.message))
+      })
+      const resumes: Array<string> = []
+      const events: Array<string> = []
+
+      yield* withCrypto(
+        Effect.scoped(
+          Effect.gen(function*() {
+            const sql = yield* Effect.service(SqlClient.SqlClient)
+            const state = yield* DurableEngineState.make
+            yield* seedRun(sql, "readable-run")
+            yield* seedRun(sql, "corrupt-run")
+
+            // Readable rows: one completion and one pending clock.
+            yield* state.completeDeferred({
+              flowName: TestFlow._tag,
+              executionId: "readable-run",
+              deferredName: "answer",
+              exit: Exit.succeed("ready"),
+              completedAtMs: 1
+            })
+            yield* sql`
+            INSERT INTO flows_clock_deadlines
+              (flow_name, execution_id, clock_name, deferred_name, due_at_ms, completed_at_ms)
+            VALUES (${TestFlow._tag}, 'readable-run', 'readable-clock', 'answer', 60000, NULL)
+          `.pipe(Effect.orDie)
+
+            // The corrupt pair. A BLOB satisfies the table's `length(...) > 0`
+            // check and its TEXT affinity — SQLite does not coerce a blob — and
+            // fails the row schema, which is what a page-level corruption or a
+            // foreign writer leaves behind.
+            yield* sql`
+            INSERT INTO flows_deferred_completions
+              (flow_name, execution_id, deferred_name, exit_json, metadata_json, completed_at_ms)
+            VALUES (${TestFlow._tag}, 'corrupt-run', x'00ff', '{}', NULL, 1)
+          `.pipe(Effect.orDie)
+            yield* sql`
+            INSERT INTO flows_clock_deadlines
+              (flow_name, execution_id, clock_name, deferred_name, due_at_ms, completed_at_ms)
+            VALUES (${TestFlow._tag}, 'corrupt-run', x'00ff', 'answer', 60000, NULL)
+          `.pipe(Effect.orDie)
+
+            const service = yield* build(state, makeJournal(events), resumes)
+            yield* service.sweepDue(TestFlow._tag)
+          }).pipe(
+            Effect.provide(migratedDatabase),
+            Effect.provide(Logger.layer([capture]))
+          )
+        ) as Effect.Effect<void>
+      )
+
+      // The registration survived, and every readable row was swept.
+      expect(resumes).toEqual(["readable-run:deferred"])
+      expect(events.filter((event) => event.endsWith("clock-scheduled"))).toEqual([
+        "emit:flows.engine.clock-scheduled"
+      ])
+      // Both corrupt rows are named by their primary key, which is what an
+      // operator needs to find and repair them.
+      const warnings = logs.filter((message) => message.includes("malformed"))
+      expect(warnings).toHaveLength(2)
+      expect(warnings.some((message) => message.includes("deferred completion") && message.includes("corrupt-run")))
+        .toBe(true)
+      expect(warnings.some((message) => message.includes("clock deadline") && message.includes("corrupt-run"))).toBe(
+        true
+      )
     }))
 })

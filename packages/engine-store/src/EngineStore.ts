@@ -266,6 +266,9 @@ export const make = (
       execute: driver.execute,
       poll: driver.poll,
       interrupt: driver.interrupt,
+      // The driver's refusal, forwarded rather than re-implemented: the
+      // durable engine has one cancellation path, so `interruptUnsafe` fails
+      // with `unsafe_interrupt_unsupported` here too (rc-contract §7).
       interruptUnsafe: driver.interruptUnsafe,
       resume: driver.resume,
       actionExecute,
