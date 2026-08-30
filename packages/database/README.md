@@ -51,15 +51,16 @@ syntax errors, and arbitrary application errors are not.
 
 ## Opens that 1.0.0-rc.0 refuses
 
-`NodeDatabase.layer` refuses two opens before it creates a connection, and
-raises `UnsupportedDatabase` as a defect in both cases. The error channel of
-`layer` stays `never`, so every durable package composes it unchanged; match
-the defect with `isUnsupportedDatabase` when a command needs to report it.
+`NodeDatabase.layer` refuses three opens before it creates a connection, and
+raises `UnsupportedDatabase` as a defect in each case. The error channel of
+`layer` stays `never`, so every durable package composes it unchanged; match the
+defect with `isUnsupportedDatabase` when a command needs to report it.
 
 | Code                        | Refused when                                                    | Message                                                                              |
 | --------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `unsupported_runtime`       | `process.versions.bun` is set                                   | `1.0.0-rc.0 runs the durable engine on Node.js >=22.19.0 only`                       |
 | `unsupported_database_file` | the file has at least one table and no `flows_migrations` table | `<path> is not a Smithers 1.0 database (1.0.0-rc.0 does not load a 0.x smithers.db)` |
+| `database_locked`           | a peer held the file for the whole ladder, so it was never read | `<path> could not be inspected because another process holds it`                     |
 
 The runtime check runs first, so a Bun process learns it is the wrong runtime
 rather than something about the file it named. The file check reads
@@ -70,8 +71,10 @@ database, so the driver's own open decides what happens next.
 
 A file a peer holds locked is not one of those cases. The probe retries on the
 same ladder the open uses, so a 0.x `smithers.db` is refused whether or not a
-0.x writer held it at that moment; a lock nobody releases exhausts the ladder
-and raises SQLite's own lock error, exactly as an unguarded open would.
+0.x writer held it at that moment. A lock nobody releases exhausts the ladder,
+and that is refused too, with `database_locked`: the open would have waited the
+same peer out, so a file rc.0 never read is one it declines to open rather than
+one it reports a transient driver error about.
 
 ## Environment names 1.0.0-rc.0 ignores
 

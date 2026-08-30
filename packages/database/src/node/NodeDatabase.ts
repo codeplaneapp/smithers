@@ -37,14 +37,17 @@ export interface NodeDatabaseOptions {
  *
  * `unsupported_runtime` refuses the durable engine under Bun (rc-contract
  * §1 and §7 "Runtimes", exclusion X-18). `unsupported_database_file` refuses a
- * 0.x `smithers.db` (rc-contract §2 and §6, exclusion X-13).
+ * 0.x `smithers.db`, and `database_locked` refuses a file the guard could not
+ * read because a peer held it for longer than the open ladder waits
+ * (rc-contract §2 and §6, exclusion X-13).
  *
  * @category models
  * @since 1.0.0
  */
 export const UnsupportedDatabaseCode = Schema.Literals([
   "unsupported_runtime",
-  "unsupported_database_file"
+  "unsupported_database_file",
+  "database_locked"
 ])
 
 /**
@@ -158,18 +161,38 @@ const unsupportedOpen = (filename: string): UnsupportedDatabase | undefined => {
 }
 
 /**
+ * Names the one defect the guard's ladder can end on that is not already a
+ * refusal: a peer held the file for longer than the ladder waits, so rc.0
+ * never learned whether it was a 0.x database.
+ *
+ * It is refused rather than passed on. The open ladder waits the same peer out
+ * on the same schedule, so handing SQLite's raw lock error to the caller would
+ * report a database rc.0 declined to open as a transient driver failure, and
+ * `isUnsupportedDatabase` would answer `false` about a refusal this driver made.
+ * That refinement is the one narrowing every caller matches on.
+ */
+const guardDefect = (filename: string) => (defect: unknown): unknown =>
+  isLockedError(defect)
+    ? new UnsupportedDatabase({
+      code: "database_locked",
+      message: `${filename} could not be inspected because another process holds it`
+    })
+    : defect
+
+/**
  * The rc.0 open guard, evaluated once per layer build.
  *
  * A `smithers.db` opened through this ladder would gain `flows_*` tables
  * beside its `_smithers_*` ones and silently mix two schemas; a durable
  * database opened under Bun would fail later, deeper, and less legibly. Both
- * are refused here, before the connection exists.
+ * are refused here, before the connection exists, and so is a file the guard
+ * could not read at all.
  */
 const guardOpen = (filename: string): Effect.Effect<void> =>
   retryWhileLocked(Effect.suspend(() => {
     const refusal = unsupportedOpen(filename)
     return refusal === undefined ? Effect.void : Effect.die(refusal)
-  }))
+  })).pipe(Effect.catchDefect((defect) => Effect.die(guardDefect(filename)(defect))))
 
 /** Bounds how long a connection keeps retrying a peer that holds the database. */
 const openAttempts = 40

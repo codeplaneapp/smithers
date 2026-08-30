@@ -46,6 +46,22 @@ const seedZeroX = (filename: string): void => {
   }
 }
 
+/**
+ * Writes the same 0.x file in WAL mode and closes it cleanly, so no `-shm`
+ * sidecar is left beside it. A read-only open of such a file is the second
+ * path a probe can fail on, and this fixture is what decides whether it does.
+ */
+const seedZeroXWal = (filename: string): void => {
+  const db = new DatabaseSync(filename)
+  try {
+    db.exec("PRAGMA journal_mode = WAL")
+    db.exec("CREATE TABLE _smithers_runs (id TEXT PRIMARY KEY, status TEXT NOT NULL)")
+    db.exec("INSERT INTO _smithers_runs (id, status) VALUES ('run-1', 'running')")
+  } finally {
+    db.close()
+  }
+}
+
 /** Takes the file's write lock, as a 0.x process mid-transaction holds it. */
 const holdWriteLock = (filename: string): { readonly release: () => void } => {
   const db = new DatabaseSync(filename)
@@ -68,6 +84,19 @@ const seedFlows = (filename: string): void => {
   try {
     db.exec("CREATE TABLE flows_migrations (migration_id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT)")
     db.exec("CREATE TABLE flows_runs (id TEXT PRIMARY KEY)")
+  } finally {
+    db.close()
+  }
+}
+
+/** Reads a file's tables without going through the driver, to prove what an open did or did not write. */
+const tableNames = (filename: string): ReadonlyArray<string> => {
+  const db = new DatabaseSync(filename, { readOnly: true })
+  try {
+    return db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+      .all()
+      .map((row) => String((row as { readonly name: unknown }).name))
   } finally {
     db.close()
   }
@@ -123,6 +152,40 @@ describe("NodeDatabase guard: 0.x database files (X-13)", () => {
         clearTimeout(timer)
         lock.release()
       }
+    }))
+
+  // Real elapsed time: the ladder has to actually run out.
+  it.live("refuses a 0.x file whose writer never releases the lock", () =>
+    Effect.gen(function*() {
+      const filename = tempFile("smithers.db")
+      seedZeroX(filename)
+      const lock = holdWriteLock(filename)
+
+      try {
+        const defect = defectOf(yield* build({ filename }))
+
+        expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(true)
+        if (!NodeDatabase.isUnsupportedDatabase(defect)) return
+        expect(defect.code).toBe("database_locked")
+        expect(defect.message).toBe(`${filename} could not be inspected because another process holds it`)
+      } finally {
+        lock.release()
+      }
+
+      // Nothing was written: the file is still the 0.x file it was.
+      expect(tableNames(filename)).toEqual(["_smithers_runs"])
+    }), 60_000)
+
+  it.effect("refuses a 0.x file left in WAL mode with no -shm beside it", () =>
+    Effect.gen(function*() {
+      const filename = tempFile("smithers.db")
+      seedZeroXWal(filename)
+
+      const defect = defectOf(yield* build({ filename }))
+
+      expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(true)
+      if (!NodeDatabase.isUnsupportedDatabase(defect)) return
+      expect(defect.code).toBe("unsupported_database_file")
     }))
 
   it.effect("opens a database that carries the flows_migrations table", () =>
