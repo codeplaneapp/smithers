@@ -26,6 +26,9 @@ export default defineConfig({
       // of an already brace-balanced declaration), and the `Option.getOrElse`
       // fallback in `Discovery` module naming (a path-named source rejects
       // root-level entries, so its path-derived name is always present).
+      //
+      // `Executable.ts` joined the denominator without adding an uncovered
+      // line, so the pinned percentages stand as they were.
       thresholds: {
         branches: 99.65,
         functions: 99.21,
