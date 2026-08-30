@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
  *
  * README.md and CONTRIBUTING.md are the whole documentation surface here, so a
  * stale sentence in one of them is the only thing a reader has. They drifted
- * once already: CONTRIBUTING kept documenting the 0.x agent engine — a Codex or
- * Claude Code subprocess selected by `SMITHERS_REVIEW_ENGINE` — for a release
+ * once already: CONTRIBUTING kept documenting the 0.x agent engine, a Codex or
+ * Claude Code subprocess selected by `SMITHERS_REVIEW_ENGINE`, for a release
  * that runs no subprocess at all, and README already said the opposite.
  *
  * The check is a name check, not a prose check. Every name below belongs to a
