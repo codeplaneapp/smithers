@@ -43,6 +43,18 @@ describe("names rc.0 ignores (X-01, rc-contract section 2)", () => {
     expect(UnsupportedBackend.ignoredNames({ SMITHERS_BACKEND: "sqlite", SMITHERS_REMOTE: "http://x" })).toEqual([])
   })
 
+  /**
+   * The contract lists `SMITHERS_POSTGRES_*`, not every name that starts with
+   * those letters. A prefix test without the separator claims rc.0 ignores
+   * `SMITHERS_POSTGRESQL_URL`, a name it never read, and the notice would
+   * describe a decision nobody made.
+   */
+  it("announces nothing about a name outside the SMITHERS_POSTGRES_ family", () => {
+    expect(UnsupportedBackend.ignoredNames({ SMITHERS_POSTGRESQL_URL: "postgres://localhost/smithers" }))
+      .toEqual([])
+    expect(UnsupportedBackend.ignoredNames({ SMITHERS_POSTGRESTS: "1" })).toEqual([])
+  })
+
   it("treats an exported-but-blank name as unset", () => {
     expect(UnsupportedBackend.ignoredNames({ SMITHERS_POSTGRES_URL: "" })).toEqual([])
     expect(UnsupportedBackend.ignoredNames({ SMITHERS_POSTGRES_URL: undefined })).toEqual([])

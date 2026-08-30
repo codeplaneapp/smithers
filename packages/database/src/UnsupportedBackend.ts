@@ -23,7 +23,13 @@ type Source = Readonly<Record<string, string | undefined>>
 
 /**
  * The `SMITHERS_*` names rc.0 ignores: `SMITHERS_TEST_PG_URL` and every
- * `SMITHERS_POSTGRES*` name (rc-contract section 2).
+ * `SMITHERS_POSTGRES_*` name (rc-contract section 2).
+ *
+ * The separator is part of the prefix. Every name 0.x actually read carries it
+ * (`SMITHERS_POSTGRES_URL`, `SMITHERS_POSTGRES_POOL_MAX`,
+ * `SMITHERS_POSTGRES_ACQUIRE_TIMEOUT_MS`), and dropping it would announce
+ * `SMITHERS_POSTGRESQL_URL`, a name neither release reads, as one rc.0 decided
+ * to ignore.
  *
  * Sorted, so an operator reading two runs compares two identical lists, and
  * de-duplicated by construction because an environment has one value per name.
@@ -36,7 +42,7 @@ type Source = Readonly<Record<string, string | undefined>>
 export const ignoredNames = (environment: Source): ReadonlyArray<string> =>
   Object.keys(environment)
     .filter((name) =>
-      (name === "SMITHERS_TEST_PG_URL" || name.startsWith("SMITHERS_POSTGRES")) &&
+      (name === "SMITHERS_TEST_PG_URL" || name.startsWith("SMITHERS_POSTGRES_")) &&
       environment[name] !== undefined && environment[name] !== ""
     )
     .sort()

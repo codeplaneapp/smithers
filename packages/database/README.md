@@ -79,8 +79,8 @@ one it reports a transient driver error about.
 ## Environment names 1.0.0-rc.0 ignores
 
 `UnsupportedBackend.ignoredNames(process.env)` lists the connection strings a
-0.x PostgreSQL or PGlite deployment exports — `SMITHERS_TEST_PG_URL` and every
-`SMITHERS_POSTGRES*` name — and `ignoredNotice(name)` is the line each one
+0.x PostgreSQL or PGlite deployment exports (`SMITHERS_TEST_PG_URL` and every
+`SMITHERS_POSTGRES_*` name), and `ignoredNotice(name)` is the line each one
 gets:
 
 ```
