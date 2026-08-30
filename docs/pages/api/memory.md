@@ -1,0 +1,140 @@
+---
+description: "@smthrs/memory: durable cross-run facts, message history, notes, and recall."
+---
+
+# Memory
+
+[`@smthrs/memory`](https://github.com/smithersai/smithers/blob/main/packages/memory/README.md) stores durable cross-run
+facts, threads, messages, and notes, ranks them for recall, and exposes two
+callable flows a model can use: `remember` and `recall`.
+
+This page covers the parts a flow author touches: the two flows, and the memory
+policy that decides which namespace a flow tree reads and writes.
+
+## The two flows
+
+`Flows.remember` writes one record into a bank. `Flows.recall` reads advisory
+rows out of named banks. Both are declarations: building a graph performs no
+memory I/O. `Flows.handlersFor(flow)` supplies the runtime bindings for one
+declaration, and `Flows.handlers` is that pair for the bare declarations this
+module exports. `Flows.runRemember` and `Flows.runRecall` are the same
+implementations callable directly, without a policy.
+
+A bank name is the public spelling of a namespace. `Recall.namespaceForBank`
+maps a bank to the structured namespace the store keys rows by, and
+`Recall.bankForNamespace` maps it back. An unprefixed bank is flow-local; a
+prefix such as `flow-` or `global-` names an explicit lifetime.
+
+## Memory policies
+
+A delegated plan generates work its author never named, so the memory settings
+that work runs under cannot be arguments threaded through every call. They are
+attached to the flow instead.
+
+`WithMemory.Policy` has four fields:
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `namespace` | a `Namespace` | where memory this tree reads and writes lives |
+| `recall` | `"auto"`, `"none"` | whether recall runs at all |
+| `maxTokens` | integer | the budget recall answers within |
+| `retain` | `"on-complete"`, `"never"` | whether writes are kept |
+
+`WithMemory.withMemory(flow, policy)` returns a copy of `flow` carrying the
+policy, and gives the same policy to every flow that flow declares. The original
+is untouched. A nested flow that already carries a policy is replaced by this
+one, so the tree runs under exactly one policy and the inherited answer is
+predictable.
+
+Only a flow whose collaborators are data, one declared with `flows: [...]` and
+no body, carries children a decorator can rewrite. A flow with a body reaches
+its collaborators by calling them, and those calls are graph nodes rather than a
+list, so `WithMemory.children` returns nothing for one. `WithMemory.references`
+is the wider view: it includes registry names the runtime has not resolved to a
+flow yet, which a policy carries through untouched.
+
+A policy is an annotation, and an annotation takes no part in flow identity.
+Applying one never changes the graph a flow plans, node for node.
+
+### Reading a policy back
+
+`Flows.runRecallFor(flow, input)` and `Flows.runRememberFor(flow, input)` are
+the policy-aware handlers, and `Flows.handlersFor(flow)` is the pair a host
+binds. The policy supplies defaults and never overrides:
+
+- `runRecallFor` fills in the policy bank when the caller names no banks, and
+  the policy budget when the caller states no `maxTokens`. A caller that names
+  its own keeps them.
+- `runRememberFor` resolves an empty bank to the policy namespace.
+
+Two policy values are refusals rather than defaults, and they win over what the
+caller asked for:
+
+- `recall: "none"` returns no rows and never reaches the recall service.
+- `retain: "never"` drops the write. The caller still receives the key it asked
+  for, and nothing reaches the store.
+
+```ts
+import { Flows, WithMemory } from "@smthrs/memory"
+
+const scoped = WithMemory.withMemory(Flows.recall, {
+  namespace: { kind: "flow", id: "release-notes" },
+  recall: "auto",
+  maxTokens: 2048,
+  retain: "on-complete"
+})
+
+const rows = yield* Flows.runRecallFor(scoped, { banks: [], query: "changelog" })
+```
+
+### Binding a policy-carrying declaration
+
+A host binds the declaration a cell was given. For delegated work that is the
+copy `withMemory` produced, not the bare export, so bind it through
+`handlersFor`:
+
+```ts
+import { FlowBinding } from "@smthrs/harness"
+
+const bound = WithMemory.withMemory(Flows.recall, policy)
+const binding = FlowBinding.make({ flow: bound, handler: Flows.handlersFor(bound).recall })
+```
+
+The copy keeps the declaration's input and output schemas, which is what makes
+that call compile: `FlowBinding.make` reads `flow.input` to type the handler. A
+flow held as `Flow.Any`, the existential a pattern passes around, stays
+`Flow.Any`.
+
+Binding `Flows.recall` with `Flows.runRecall` reaches the store with no
+namespace, no budget cap, and no way to honour `recall: "none"`.
+
+## MemoryTrellis
+
+`MemoryTrellis.make` is the delegation case. `Trellis.make` declares the
+topology a model-authored plan fits inside, and fills its leaf slots at run
+time, so a leaf cannot be handed a namespace at declaration time.
+`MemoryTrellis.make` applies one policy to the author, to the leaf, and to the
+memory flows those declare, then annotates the trellis itself:
+
+```ts
+import { MemoryTrellis } from "@smthrs/memory"
+
+const trellis = MemoryTrellis.make({
+  author: planner,
+  leaf: worker,
+  envelope: { fuel: 6, depth: 3, fanout: 3 },
+  memory: {
+    namespace: { kind: "flow", id: "release-notes" },
+    recall: "auto",
+    maxTokens: 2048,
+    retain: "on-complete"
+  }
+})
+```
+
+The graph is the plain trellis graph, node for node. `MemoryTrellis.parts`
+returns the scoped author and leaf on their own, for a caller that drives the
+plan with `Trellis.run` rather than calling the declared flow: calling the
+originals instead loses the policy.
+
+See [delegation patterns](/api/patterns-delegation) for the trellis itself.

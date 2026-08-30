@@ -87,13 +87,13 @@ describe("error codes", () => {
 // page; this is what stops that from happening again.
 describe("the reference page the messages point at", () => {
   const page = readFileSync(
-    fileURLToPath(new URL("../../../docs/reference/errors.md", import.meta.url)),
+    fileURLToPath(new URL("../../../docs/pages/reference/errors.md", import.meta.url)),
     "utf8"
   )
 
   it("lives at the path ERROR_REFERENCE_URL names", () => {
     expect(ERROR_REFERENCE_URL).toBe("https://smithers.sh/reference/errors")
-    expect(page.startsWith("# Error codes")).toBe(true)
+    expect(page).toContain("\n# Error codes\n")
   })
 
   it("documents every code, and no code the table dropped", () => {

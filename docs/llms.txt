@@ -1,0 +1,31 @@
+# Smithers
+
+> An Effect-based durable-execution engine: typed flows that replay from a journal, content-addressed action results, capability-checked host access, and a control plane that runs them.
+Version: 1.0.0-rc.0
+
+## The whole thing in one file
+
+Read `llms-full.txt` beside this file. It contains every section below.
+
+## Sections
+
+- Smithers: The everyday surface: what a flow is, how to write one, how to run one, and what the command line does.
+- Smithers API: One page per published package: its exports, its layers, and its contracts.
+- Smithers control plane: The control requests a client sends, the projections a UI reads, and the transports that carry them.
+- Smithers operations: Running Smithers in production: storage, limits, recovery, telemetry, and what the release excludes.
+- Smithers migration: Moving a Smithers 0.x project to 1.0, and the compatibility promise that governs the move.
+- Smithers internals: How the engine is built and why: the data structures, the decisions, and the comparisons.
+
+## Where to start
+
+- Install and the release-candidate warning: /installation
+- Write a flow: /guides/writing-a-flow
+- Run one: /guides/running-flows
+- What the release does not do: /release/known-limitations
+- Move a 0.x project: /migration/1.0
+
+## Pointers
+
+- npm: @smthrs/cli, @smthrs/flow, @smthrs/engine, @smthrs/flows
+- github: github.com/smithersai/smithers
+- The Smithers 0.x changelogs are on the site at smithers.sh/changelogs and are not part of these bundles.

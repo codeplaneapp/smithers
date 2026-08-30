@@ -1,0 +1,397 @@
+---
+title: "0.29.0"
+description: "Smithers 0.29.0 introduces first-class memory alongside durable XState folds, a shared cross-app UI library, Microsandbox support, and broad security and durability hardening."
+---
+
+**Smithers 0.29.0 is the first npm release since 0.28.0.** It combines the
+first-class `<Memory>` system with durable XState folds, a shared cross-app UI
+library, Microsandbox support, and broad security and durability hardening.
+Across the full `v0.28.0..HEAD` range that is 225 commits, 726 files changed,
+84,604 insertions and 7,564 deletions, including 52 feature commits, 70 bug-fix
+commits, 4 refactors, 22 test commits, and 47 docs commits.
+
+<img src="/images/0.29.0/hero.svg" alt="Smithers 0.29.0 release card listing the headline features" />
+
+*Smithers 0.29.0: first-class memory, XState folded over durable rows, an open source microVM sandbox provider, and a shared UI component library.*
+
+## Upgrading
+
+```bash
+bunx smthrs update        # upgrade the CLI
+bunx smthrs upgrade       # agent-assisted: reads the changelogs and applies what your project needs
+bunx smthrs packs update  # refresh installed workflow packs
+```
+
+Behavior changes are collected in the [upgrade notes](#upgrade-notes) at the
+bottom.
+
+## First-class memory
+
+Smithers 0.29.0 introduces a declarative `<Memory>` component. Wrap any part
+of a workflow in a `<Memory>` provider and every task inside it can recall
+relevant context before it runs, expose `remember`/`recall` tools to its agent while it runs,
+and retain a digest of what it produced after it finishes: durably, across
+runs, in a [Hindsight](https://hindsight.vectorize.io) memory bank stored in
+your own Postgres.
+
+```tsx
+<Memory bank={`project-${ctx.input.repoId}`} tags={["branch:main"]} recall="auto" primers={["project-primer"]} retain="on-complete" tools>
+  <Task id="implement" agent={agents.coder} output={outputs.impl}>…</Task>
+</Memory>
+```
+
+- `bank`/`banks`, `tags`, `recall` (`"auto"`, a fixed query, or `false`),
+  `budget`, `maxTokens`, `primers`, `retain`, and `tools`: inherited by
+  descendant tasks through context, overridable per task via the existing
+  `memory` prop.
+- Recall is scoped per bank, so distinct banks keep distinct recall scopes
+  instead of bleeding into each other.
+- Every injected block and remembered tag is capped by an explicit bound, so
+  recall never blows past your token budget.
+- Set `HINDSIGHT_URL` (plus optional `HINDSIGHT_API_KEY`) to activate the
+  Hindsight-backed store. Without it, the existing local SQLite facts store
+  and behavior are unchanged.
+
+Because the provider config is inherited through context, a single wrapper
+gives a whole phase memory while individual tasks opt out or narrow their
+scope with the existing `memory` prop:
+
+```tsx
+<Memory bank="repo-knowledge" recall="auto" retain="on-complete" tools>
+  {/* inherits the bank, recall, retain, and tools from the provider */}
+  <Task id="triage" agent={agents.triager} output={outputs.triage}>
+    Classify the failure.
+  </Task>
+
+  {/* narrows recall to a fixed query and skips retaining a digest */}
+  <Task
+    id="repro"
+    agent={agents.coder}
+    output={outputs.repro}
+    memory={{ recall: "known flaky tests in this suite", retain: "off" }}
+  >
+    Reproduce it.
+  </Task>
+
+  {/* opts out: no recall, no tools, no digest */}
+  <Task
+    id="format"
+    agent={agents.fast}
+    output={outputs.format}
+    memory={{ recall: false, retain: "off", tools: false }}
+  >
+    Format the report.
+  </Task>
+</Memory>
+```
+
+Activate the Hindsight-backed store with environment variables; without them
+the local SQLite facts store keeps its existing behavior:
+
+```bash
+export HINDSIGHT_URL="https://hindsight.example.com"
+export HINDSIGHT_API_KEY="…"   # optional
+```
+
+See the Memory component docs and the
+memory concept guide for the full contract.
+
+## XState as durable derived state
+
+`smthrs/xstate` adds an optional XState v5 integration for
+workflows whose control flow has outgrown a set of hand-written conditionals.
+It does not persist an actor or introduce a second scheduler. Instead,
+`useSmithersMachine` folds a machine over the output, approval, timeout, and
+signal rows Smithers already persists. Resume, fork, and rewind therefore
+reconstruct the machine from the same durable history as the rest of the run.
+
+```tsx
+const state = useSmithersMachine(releaseMachine, {
+  id: "release",
+  input: ctx.input,
+  events: [
+    taskOutput(outputs.research, { nodeId: "research" }, () => ({ type: "RESEARCH_DONE" })),
+    eventReceived("REVISE", reviseSchema, {}, (payload) => ({ type: "REVISE", payload })),
+  ],
+});
+
+return state.matches("drafting")
+  ? <Task id={`draft-r${state.context.revision}`} output={outputs.draft}>…</Task>
+  : null;
+```
+
+The integration deliberately stays inside Smithers' durability model:
+
+- Event sources read typed durable rows and order them on the shared
+  provenance sequence, with deterministic declaration-order tie-breaking.
+- Signal sources support `correlationId`, so concurrent listeners using the
+  same signal name do not consume one another's history.
+- A mount-time lint rejects actor-only and side-effecting machine features
+  such as `invoke`, `spawn`, `after`, and custom actions, and detects constant
+  task identities in re-enterable states before they can deadlock a run.
+- A reducer-content hash and run-scoped, bounded prefix cache make incremental
+  folds fast without serving a snapshot produced by another run, fork, or
+  machine definition.
+- `xstate` is an optional peer. Projects that never import the integration do
+  not need it installed, and the main facade remains isolated from it.
+
+See the XState integration guide for the event-source
+contract, re-entry rules, time-travel semantics, and performance bounds.
+
+## A shared UI component library
+
+If you have built a custom workflow UI, you have probably rebuilt a
+terminal, a diff view, or a markdown renderer more than once. 0.29.0 ships a
+shared component library across `smthrs/ui` and
+`smthrs/gateway-ui` so you do not have to.
+
+From `smthrs/ui` directly:
+
+- A dependency-free **Markdown** renderer that renders through React
+  children, never `innerHTML`, so it is XSS-safe by construction. Links with
+  an unsafe scheme render without an `href` and never reach your
+  `onLinkClick` handler.
+- A dependency-free **DiffHunks** component and diff domain, for when you do
+  not need the full diff adapter.
+- **FileTree**, **CollapsiblePanel**, and **StageStrip** components.
+
+The three adapters carry heavy dependencies, so they ship as their own
+subpaths rather than from the `ui` barrel. Import each from its own path:
+
+- **Terminal** over xterm.js, from `smthrs/ui/adapters/terminal`.
+- **MarkdownEditor** over Milkdown Crepe, from
+  `smthrs/ui/adapters/markdown-editor`.
+- **PierreDiffView** over `@pierre/diffs`, from
+  `smthrs/ui/adapters/pierre-diff-view`.
+
+From `smthrs/gateway-ui`: a ReactFlow and dagre powered
+**WorkflowGraph** DAG canvas, and a run-aware **NodeOutputCard**.
+
+```tsx
+// dependency-free, safe from the barrel
+import { Markdown, DiffHunks, FileTree, CollapsiblePanel, StageStrip } from "smthrs/ui";
+// run-aware gateway components
+import { WorkflowGraph, NodeOutputCard } from "smthrs/gateway-ui";
+// heavy adapters: one subpath each, never the barrel
+import { Terminal } from "smthrs/ui/adapters/terminal";
+import { MarkdownEditor } from "smthrs/ui/adapters/markdown-editor";
+import { PierreDiffView } from "smthrs/ui/adapters/pierre-diff-view";
+```
+
+See the UI component library reference for the full
+catalog.
+
+Alongside the new components, `smithers-ui` synced its design tokens to
+design system v2 and rendered the workspace picker mark. The one behavior
+change worth knowing: status colors were realigned to the new semantics.
+Running now reads as brand color, waiting and paused read as amber, and
+queued and pending read as muted. If you built a custom UI against the old
+status colors, check it against the new ones.
+
+## Microsandbox: a first-class sandbox provider
+
+`packages/microsandbox` adds a `SandboxProvider` backed by the open source
+[Microsandbox](https://github.com/superradcompany/microsandbox) microVM SDK.
+Each run boots a local microVM with its own kernel, writes the sandbox
+request through the host-to-guest filesystem channel, and reads the result
+back the same way. No daemon or hosted sandbox service is required.
+
+<img src="/images/0.29.0/microsandbox.svg" alt="Diagram of a Smithers run passing a sandbox request over the host-to-guest filesystem channel into a microVM with its own Linux kernel" />
+
+*One microVM per run: the sandbox request crosses the host-to-guest filesystem channel into a guest with its own Linux kernel, and the result comes back the same way.*
+
+```tsx
+import { Sandbox } from "smthrs";
+import { createMicrosandboxSandboxProvider } from "smthrs/microsandbox";
+
+const provider = createMicrosandboxSandboxProvider({
+  image: "oven/bun:1",
+  cpus: 2,
+  memoryMib: 4096,
+  security: "restricted",
+});
+
+export default parent.smithers((ctx) => (
+  <parent.Workflow name="microsandbox-run">
+    <Sandbox
+      id="isolated-edit"
+      provider={provider}
+      workflow={childWorkflow}
+      input={{ prompt: ctx.input.prompt }}
+      allowNetwork
+      output={parent.outputs.result}
+    />
+  </parent.Workflow>
+));
+```
+
+The provider id is `microsandbox`, exported as `MICROSANDBOX_PROVIDER_ID`.
+
+The Freestyle example provider is retired in its favor. If you were using
+it, switch to Microsandbox or one of the other first-class providers
+(Vercel, AWS, GCP, Daytona).
+
+See the Microsandbox provider docs.
+
+## Durable signal and output rows
+
+Workflow contexts can now read durable signal rows directly, and the driver
+exposes durable typed output rows backed by a new output-provenance
+persistence layer in `packages/db`. Together they give you durable state you
+can query mid-run instead of threading it back through task outputs.
+
+```tsx
+// every durable output row for a node, in provenance order
+const reviews = ctx.outputRows(outputs.review, { nodeId: "review" });
+const rejected = reviews.filter((row) => !row.payload.approved);
+
+// every delivered signal, whether or not a listener was mounted at the time
+const revisions = ctx.signalRows("REVISE");
+const latest = revisions.at(-1);
+```
+
+Both readers return rows carrying their shared provenance `seq`, so output
+and signal history can be interleaved into one causal order.
+
+One fix ships alongside: output provenance metadata is no longer included in
+output payloads returned to consumers. The provenance columns are internal
+bookkeeping, and they used to leak into every payload; they are stripped
+before the payload reaches you.
+
+## Security and durability hardening
+
+Most of this release went where you will not see a single feature callout:
+32 emoji-prefixed bug-fix commits and 6 test commits closing gaps that only show
+up under real load or a misbehaving client.
+
+<img src="/images/0.29.0/release-shape.svg" alt="Stacked bar breaking 213 commits into 67 fixes, 48 features, 43 docs, 22 tests, 22 chores, and 11 other" />
+
+*Where the 213 commits went: 67 fixes and 22 tests against 48 features. Reliability is the feature.*
+
+Two commits are explicitly security-scoped:
+
+- An empty `bind={[]}` provenance binding is parked as missing instead of
+  dispatching an unproven task.
+- Real-process test admission rejects impostor runner scripts instead of
+  trusting an executable path alone.
+
+Additional boundary hardening includes configurable response-body caps for
+generated OpenAPI tools and the built-in HTTP and transcription tools
+(`maxResponseBodyBytes`, default 1 MiB, except the transcription tool's remote
+audio download which keeps its 25 MiB default), plus Gateway WebSocket run-event
+subscription caps at every scope (gateway 256, per-user 32, per-connection 8,
+per-run 64). Alongside those:
+
+- Concurrent resume paths (timer, signal, approval, webhook, operator) are
+  deduplicated through a runId-keyed in-flight gate, and run-tracking
+  cleanup no longer lets an older settling invocation wipe a newer
+  invocation's records.
+- Cron fires are now claimed via compare-and-set before launching, so a
+  scheduler cannot double-fire the same scheduled run.
+- The driver strips the persisted `runId` column from table-shaped
+  `ctx.input`, so it no longer trips an unrecognized-key error in a strict
+  Zod input schema.
+- The standalone Telegram client clamps `retry_after` to a documented cap
+  (default 30s), races the retry wait against the call's `AbortSignal`, and
+  no longer treats an aborted body read as a retryable error that could
+  trigger a duplicate request.
+- Claude subscription accounts with organization-level overage purchasing
+  disabled no longer have every agent invocation misclassified as a quota
+  rejection.
+
+## Other improvements
+
+- The driver gained an `onError` hook so external error reporters, Sentry
+  for example, can capture run failures. It fires once per node or run
+  failure occurrence, and the report names which one:
+
+  ```ts
+  await run(workflow, {
+    input,
+    onError: (report) => {
+      Sentry.captureException(report.rawError, {
+        tags: { runId: report.runId, phase: report.phase },
+        extra: report.phase === "node"
+          ? { nodeId: report.nodeId, iteration: report.iteration, attempt: report.attempt }
+          : {},
+      });
+    },
+  });
+  ```
+
+- Eval suites support LLM-judge assertions, for cases where correctness is
+  about meaning rather than an exact JSON match:
+
+  ```json
+  {"id":"deadline-summary","input":{"prompt":"Summarize the launch plan"},"expected":{"status":"finished"},"judge":{"instructions":"Output must be a polite summary mentioning the deadline","threshold":0.7}}
+  ```
+
+  `judge.threshold` defaults to `0.8`. A case with both `expected` and
+  `judge` passes only when every deterministic assertion passes and the judge
+  score meets its threshold.
+- The observability package supports OTLP authentication headers for
+  authenticated trace export.
+- Detached (`up -d`) run logs now default to
+  `<workspace>/.smithers/logs/<runId>.log` with automatic retention-window
+  and total-size-capped cleanup, instead of accumulating indefinitely in the
+  workflow source directory. One workspace had 711 immortal log files
+  totaling 1.4 GB before this fix.
+- `bunx smthrs ui` no longer silently opens a different workflow's UI when a
+  long-lived gateway's registry predates a newly authored workflow: the
+  gateway now rescans on a registry miss, and the CLI fails loud with an
+  actionable error instead of guessing.
+- The CLI and gateway now tolerate leftover jj merge-conflict markers in the
+  workspace `package.json` instead of crashing on JSON parse; the gateway
+  boots read-only in that state.
+- The db package now probes output tables via `sqlite_master` on
+  sqlite-dialect external backends, fixing a table-detection bug.
+- A new Workflow testing framework guide
+  documents the expanded `@smthrs/testing` suites:
+  cutpoint-conformance, replay-identity, and artifact-parity.
+- A new example workflow, "Daily CEO Intel" (branded in its own docs as "The
+  Smithers Signal"), demonstrates a durable daily-intelligence-brief
+  pipeline with multi-provider SDK-agent fallback (Anthropic to OpenAI to
+  Gemini) and Cloudflare KV and R2 publishing. It ships marked as an example
+  in the workflow pack, not a supported product feature.
+
+## Upgrade notes
+
+- **npm upgrades directly from 0.28.0.** Upgrading to 0.29.0 picks up the
+  complete release described above, headlined by `<Memory>`.
+- **Memory bypasses the output cache when active.** Tasks wrapped in an
+  active bank-based `<Memory>` config bypass the durable output cache,
+  because recalled context is a mutable input that is not part of the cache
+  identity. Legacy namespace or object-form memory metadata remains inert
+  and keeps its previous cache semantics.
+- **`HindsightMemoryStore` assumes a single writer per contract store.**
+  This constraint and its invariant tests are documented in the memory
+  guides.
+- **Wait-for-event tagged results are an explicit opt-in.** Existing waits
+  keep receiving the raw signal payload unchanged. A timeout continuation
+  now requires the tagged envelope instead of writing an ambiguous `null`.
+- **Detached run logs moved.** `up -d` logs now default to
+  `<workspace>/.smithers/logs/<runId>.log` instead of the workflow source
+  directory. An explicit `--log-dir` still overrides, and
+  `SMITHERS_LOG_RETENTION_DAYS` / `SMITHERS_LOG_MAX_TOTAL_BYTES` tune the
+  automatic cleanup.
+- **Tool response bodies are capped by default.** Generated OpenAPI tools and
+  the built-in HTTP tool now stop reading a response body at 1 MiB. The
+  transcription tool's remote audio download keeps its 25 MiB default. Raise
+  or lower either with `maxResponseBodyBytes`. A call that previously
+  streamed a larger body now fails with an explicit limit error instead of
+  buffering without bound.
+- **The Freestyle sandbox provider was removed.** It shipped as an example
+  provider and Microsandbox replaces it. Switch to Microsandbox or one of the
+  other first-class providers (Vercel, AWS, GCP, Daytona).
+- **`StatusClass` gained a `run` member and `statusClass()` re-buckets.**
+  Running now maps to the brand class, and waiting, paused, queued and
+  pending map to their new classes. An exhaustive `switch` or lookup map over
+  `StatusClass` will fail to compile until you handle `run`.
+
+## The full changelog
+
+The complete commit-level history for this release is in
+[CHANGELOG.md](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md)
+on GitHub.
+
+Found a bug? Run `bunx smthrs bug` to file it.

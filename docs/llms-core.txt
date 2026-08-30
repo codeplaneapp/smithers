@@ -1,0 +1,3868 @@
+# Smithers
+
+> The everyday surface: what a flow is, how to write one, how to run one, and what the command line does.
+Version: 1.0.0-rc.0
+
+---
+
+## Smithers
+
+Route: /
+
+> Smithers is an Effect-based durable-execution engine. Typed flows record every side effect to a journal, so a crashed process resumes from its recorded steps instead of starting over.
+
+Smithers is an Effect-based durable-execution engine: typed flows that record every side effect to a journal, so a crashed process resumes from its recorded steps instead of starting over.
+
+You declare an action once with Schema-typed payload, success, and error, attach its implementation as a layer, and write a flow whose pure body names it. The engine persists run state in SQLite through the journal, computes a content-addressed key for each action, and stores each attempt's encoded result. When a process restarts, it claims the run, re-plans the flow and drives it from the top, and replays every recorded step; the first step without a record is where new work happens. A capability kernel bounds what flow code can reach on the host, read-only sync streams journal entries to followers, and time travel forks and rewinds run history.
+
+A build system remembers what it has done so it can skip it. A workflow engine remembers what it has done so it can resume it. The record is the same; only the reason differs. Smithers keeps that record once, content-addressed, and gets both: finished work is skipped, and a crashed run picks up where it left off. Comparisons sets the implementation against TurboRepo, Nx, and Bazel.
+
+### Quick start
+
+Requires Node.js 22.19 or later.
+
+::::steps
+
+#### Install the packages
+
+:::code-group
+
+```bash [pnpm]
+pnpm add @smthrs/flow @smthrs/engine effect
+```
+
+```bash [npm]
+npm install @smthrs/flow @smthrs/engine effect
+```
+
+```bash [bun]
+bun add @smthrs/flow @smthrs/engine effect
+```
+
+:::
+
+#### Declare an action, a flow, and their layers
+
+```ts
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
+
+// The atom that does the work: schemas and a tag, no code.
+export const Greet = Action.make("example/Greet", {
+  payload: { name: Schema.String },
+  success: Schema.String
+})
+
+// The composite: a pure body that names the atom instead of calling it.
+export const Greeting = Flow.make("example/Greeting", {
+  payload: { name: Schema.String },
+  success: Schema.String,
+  body: (payload) => Greet.call(payload)
+})
+
+// The implementation is attached separately, where the code can run.
+const GreetingLayer = Layer.mergeAll(
+  Greet.toLayer(({ name }) => Effect.succeed(`Hello, ${name}.`)),
+  Interpreter.layer(Greeting)
+).pipe(
+  Layer.provideMerge(Action.layerImplementations),
+  Layer.provideMerge(FlowEngine.layerMemory),
+  Layer.provideMerge(NodeCrypto.layer)
+)
+
+const program = Greeting.execute(
+  { name: "Ada" },
+  { executionId: "greeting-ada-1" }
+).pipe(Effect.provide(GreetingLayer))
+
+Effect.runPromise(program).then(console.log)
+// "Hello, Ada."
+```
+
+#### Make it durable
+
+That engine keeps its state in the process. To survive a crash, drive the same flow with `EngineStore.layer` over SQLite. Examples walks the eleven runnable programs that do it, and `pnpm run test:examples` executes every one of them against the real packages.
+
+::::
+
+---
+
+## Installation
+
+Route: /installation
+
+> Install the 1.0.0-rc.0 packages and the smithers command, with the exact Effect pin and the release-candidate warning.
+
+Smithers 1.0.0-rc.0 is a release candidate. It is a source migration, not a
+compatible upgrade from Smithers 0.x: there is no JSX workflow API, no React
+reconciler, and no way to load or resume a 0.x run database. Read
+migrating from 0.x before you install it over an existing
+project.
+
+### Requirements
+
+| Requirement | Version | Why |
+| --- | --- | --- |
+| Node.js | 22.19.0 or later | The durable engine opens SQLite through `node:sqlite`. |
+| Effect | exactly `4.0.0-rc.108` | Two Effect instances in one process are not interoperable. |
+| Bun | 1.3.0 or later, optional | Runs the applications and the non-durable packages. Opening a durable database under Bun fails with `unsupported_runtime`. |
+| `jj` | on `PATH`, optional | Only the Jujutsu host service needs it. `smithers doctor` reports it as missing. |
+
+Windows is unsupported. macOS and Linux x64 are supported.
+
+### Install the libraries
+
+Release candidates publish to the `rc` dist-tag. The `@rc` suffix is required:
+`latest` still resolves the Smithers 0.x line.
+
+:::code-group
+
+```bash [pnpm]
+pnpm add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108
+```
+
+```bash [npm]
+npm install @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108
+```
+
+```bash [bun]
+bun add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108
+```
+
+:::
+
+`@smthrs/flow` carries the authoring model and `@smthrs/engine` runs it in
+memory. Add `@smthrs/flows@rc` when you want the curated aggregate and the
+`NodeRuntime` production composition instead of assembling layers by hand.
+Package selection lists what each package is for.
+
+Pin Effect to exactly `4.0.0-rc.108`. Every published Smithers package declares
+that exact version for `effect` and for the `@effect/*` packages that follow
+Effect's own version line. A project that resolves two Effect versions is
+unsupported, because schema internals are not interoperable between instances.
+
+### Install the command
+
+```bash
+npm install --global @smthrs/cli@rc
+```
+
+The package installs one binary, `smithers`. Its shim starts with
+`#!/usr/bin/env node`, so every installation path runs it under Node even when
+Bun invokes it. Running the CLI with `bun --bun` is unsupported.
+
+Run it without installing:
+
+:::code-group
+
+```bash [npx]
+npx @smthrs/cli@rc smithers ls
+```
+
+```bash [bun]
+bun x --package @smthrs/cli@rc smithers ls
+```
+
+:::
+
+Check the installation:
+
+```bash
+smithers doctor
+```
+
+`doctor` reports flow discovery warnings, the database paths and their
+migration state, the Node version, whether `jj` is on `PATH`, which provider
+keys are present, and whether it found Smithers 0.x state in the directory.
+
+### Start a project
+
+```bash
+smithers init my-project
+```
+
+`init` scaffolds `flows/my-project/flow.mdx` and adds `.flows/` to
+`.gitignore`. Flows live in `flows/**` as `flow.ts`, `flow.mdx`, or `SKILL.md`;
+run state lives in `.flows/`. `smithers init --global` is not supported and
+exits 1: seats resolve from environment keys, not from a global pack.
+
+Writing a flow is the next page.
+
+### Provider keys
+
+The model seats read `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and
+`OPENROUTER_API_KEY` from the environment. `SMITHERS_OPENAI_AUTH=chatgpt`
+selects ChatGPT authentication for the OpenAI seat. Smithers 1.0.0-rc.0 ships no
+multi-account seat pool; one key per provider is the whole configuration.
+
+### What the release candidate does not include
+
+A candidate is not a preview of missing work: the exclusions below are enforced,
+not pending.
+
+- SQLite only. PostgreSQL and PGlite exit with `unsupported_database`. See
+  databases.
+- No 0.x compatibility of any kind. See migrating from 0.x.
+- Time travel is a library API, not a command. See
+  time travel.
+- The full list is in known limitations, and what
+  is supported is in the rc.0 support matrix.
+
+---
+
+## Writing a flow
+
+Route: /guides/writing-a-flow
+
+> Define schemas, put side effects behind actions, suspend durably, retry deliberately, and declare a model call.
+
+This guide shows how to define schemas, execute named actions, suspend on durable primitives, and register a handler. It focuses on code that can replay safely.
+
+### Define the durable interface
+
+```ts
+import { Action, DurableDeferred, Flow } from "@smthrs/flow"
+import { Effect, Schema } from "effect"
+
+class BuildFailure extends Schema.TaggedError<BuildFailure>()(
+  "example/BuildFailure",
+  { message: Schema.String }
+) {}
+
+const Build = Flow.make("example/Build", {
+  payload: {
+    target: Schema.String,
+    sourceDigest: Schema.String
+  },
+  success: Schema.Struct({ artifact: Schema.String }),
+  error: BuildFailure
+})
+```
+
+Tags and encoded schemas are persistence contracts. Change them with the same care as a database schema.
+
+### Put side effects behind actions
+
+```ts
+const Compile = Action.make({
+  name: "example/Compile",
+  success: Schema.String,
+  error: BuildFailure,
+  tier: "sealed",
+  idempotencyKey: {
+    body: "compile-v3",
+    inputs: { source: { kind: "literal", value: "source-bytes" } },
+    layers: ["typescript-6", "linux-amd64"],
+    capabilities: {
+      filesystem: ["fs:read:/workspace/src/**", "fs:write:/workspace/out/**"]
+    },
+    boundary: {
+      readSet: [{ path: "/workspace/src", digest: "sha256:tree" }],
+      writeSet: ["/workspace/out/**"],
+      boundaryMode: "hard"
+    }
+  },
+  execute: Effect.succeed("/workspace/out/server.js"),
+  metadata: {
+    boundaryMode: "hard",
+    readSet: [{ path: "/workspace/src", digest: "sha256:tree" }],
+    writeSet: ["/workspace/out/**"]
+  }
+})
+```
+
+The idempotency identity creates the step key. `metadata` is separately decoded as `FileBoundary` by `EngineStore`; malformed or absent metadata means the production boundary cannot prove the action cacheable.
+
+The built-in `StepBoundary.layerTest` accepts a simplified descriptor and is for tests only. A production boundary implementation is application-supplied today.
+
+### Register the handler
+
+```ts
+const BuildLayer = Build.toLayer(({ target }) =>
+  Effect.gen(function*() {
+    const artifact = yield* Compile
+    return { artifact: `${artifact}?target=${target}` }
+  })
+)
+```
+
+Provide `BuildLayer` with either `FlowEngine.layerMemory` or an `EngineStore.layer`. Registration is scoped; after the layer’s scope closes, its active fibers and registrations are gone even though durable rows remain.
+
+### Suspend durably
+
+`DurableClock.sleep` records a wake time. `DurableDeferred.await` suspends until another process completes its token. `DurableQueue.process` offers persisted work and awaits its deferred result:
+
+```ts
+const Approval = DurableDeferred.make("example/input-ready", {
+  success: Schema.String
+})
+
+const value = yield* DurableDeferred.await(Approval)
+```
+
+The handler re-runs from the beginning after wake. Completed actions and durable primitives return recorded results, so code before the frontier must be deterministic and safe to evaluate again.
+
+### Retry deliberately
+
+```ts
+const artifact = yield* Action.retry(Compile, { times: 2 })
+```
+
+Use `tier: "irreversible"` for effects that cannot be rolled back, and give them an idempotency key before allowing retries. Use `tier: "compensable"` only when snapshot and restore are meaningful for the supplied `Jj` implementation.
+
+### Declare a model call
+
+A model call is an ordinary action, so it is declared like one, except that its implementation ships with it and an author never writes `toLayer` for it. `AgentAction.make` takes the seat, the system teaching, a prompt built from the step payload, and an `output` schema:
+
+```ts
+import * as AgentAction from "@smthrs/agent/AgentAction"
+
+const Review = AgentAction.make("example/Review", {
+  payload: { diff: Schema.String },
+  output: Schema.Struct({
+    approved: Schema.Boolean,
+    issues: Schema.Array(Schema.String)
+  }),
+  seat: "anthropic:claude-sonnet-4-5",
+  system: ["You review diffs."],
+  prompt: ({ diff }) => `Review this diff:\n${diff}`
+})
+```
+
+`Review.call({ diff })` records the same plan node any other action records, and `Review.layer` is the implementation: it resolves the declared seat through the `SeatResolver` service and runs one agent loop through the `Agent` service inside the current execution.
+
+The `output` schema is enforced. It is rendered into the run's system teaching as JSON Schema, and the run's final answer is decoded by it: whole answer first, then the last balanced JSON container inside it. A decode miss spends one correction re-prompt carrying bounded diagnostics before the step fails `StructuredOutputFailure`. Set `corrections: 0` to make a first miss terminal.
+
+The host wiring is two services. `AgentAction.Host` is the composition every model-backed action shares, the registry a cell may call into, the sandbox budget, the capability envelope, the executable catalog:
+
+```ts
+const HostLayer = AgentAction.layerHost({
+  registry,
+  limits: { calls: 32 }
+})
+```
+
+`SeatResolver` is the other, and it is the only place a credential lives. It turns the declared seat string into a live model, its route, and its context window:
+
+```ts
+import * as SeatResolver from "@smthrs/agent/SeatResolver"
+
+const SeatLayer = SeatResolver.layer({
+  resolve: (id) => resolveProviderSeat(id)
+})
+```
+
+The agent itself comes from `@smthrs/agent/Agent`:
+
+```ts
+import * as Agent from "@smthrs/agent/Agent"
+```
+
+Provide `HostLayer`, `SeatLayer`, `Agent.layer`, and `Agent.layerDefaults` alongside the engine layers. `Agent.layer` is the production agent; `Agent.layerDefaults` supplies the two services a run leaves to the host, the QuickJS sandbox and an empty steering source. A test provides a `SeatResolver` layer that answers with a scripted model and needs no API key; see [`11-agent-step.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/11-agent-step.ts).
+
+Continue with Determinism and replay, Step keys, and Failure and retry.
+
+---
+
+## Running a flow
+
+Route: /guides/running-flows
+
+> Plan, approve, run, watch, and read back a flow from the command line.
+
+Writing a flow produces a `Flow` in `flows/**`. This
+guide runs one, from discovery to output, with the commands in
+the CLI reference.
+
+### Discover
+
+```bash
+smithers ls
+```
+
+`ls` lists the flow descriptors under `<project>/flows/**`. A descriptor is a
+`flow.ts`, a `flow.mdx`, or a `SKILL.md`. Discovery warnings, such as a file
+that declares no flow, are reported by `smithers doctor`.
+
+### Plan
+
+```bash
+smithers plan example/Build target=server sourceDigest=sha256:...
+```
+
+`plan` compiles the flow with its input and prints two things: a plan card
+naming every node it will run, and the complete approval payload. Planning does
+no I/O and starts nothing. The plan is a value, so the card you read is the
+plan that will run.
+
+Pass structured input with `--data` instead of `key=value` pairs:
+
+```bash
+smithers plan example/Build --data '{"target":"server"}'
+```
+
+### Approve and run
+
+```bash
+smithers approve '<payload>' --scope run
+smithers run '<payload>'
+```
+
+`approve` takes the serialized payload `plan` printed and records the decision
+with the acting principal. `run` launches an approved plan and blocks until the
+run settles when the local process owns the executor. A denied plan can never
+launch.
+
+One command does all three for the common case:
+
+```bash
+smithers up example/Build --data '{"target":"server"}' --json
+```
+
+`up` plans, approves with scope `run`, and runs. Under `--json` it prints
+`{ runId }`, and its exit code follows the terminal status. Add `-d` to run
+detached: the CLI spawns the run, logs to `.flows/logs/<runId>.log`, and returns
+once the run is admitted.
+
+### Watch
+
+```bash
+smithers ps
+smithers ps --status parked
+smithers status RUN_ID
+smithers logs RUN_ID --follow
+```
+
+`ps` lists runs and filters by flow or status. `status` prints one run's
+diagnosis card, which names what the run is waiting for and what it last did;
+`inspect` and `why` are aliases. `logs` prints the transcript, `--follow`
+streams new events, and `logs --json` prints raw control events. `events` is an
+alias of `logs --json`.
+
+### Steer, signal, and decide
+
+```bash
+smithers steer RUN_ID --message "prefer the smaller change"
+smithers signal RUN_ID '{"name":"approved"}'
+smithers approve '<node payload>' --scope once
+smithers cancel RUN_ID
+```
+
+Steering is durable and attributed: the message goes through the notification
+queue and the agent drains it at its next turn close. Signals and approvals wake
+a parked run. Cancellation is durable and cross-process. See
+durable waits and control.
+
+### Read the result
+
+```bash
+smithers output RUN_ID NODE_ID
+```
+
+`output` prints one node's registered output from the `node-output` projection.
+The projection is a read model over the journal, so reading it never claims the
+run.
+
+### Serve the control plane
+
+```bash
+smithers serve --host 127.0.0.1 --port 7331
+```
+
+`serve` hosts the control server: `/rpc`, `/rpc/ws`, `/sync`, `/sync/ws`,
+`/projections/ws`, and `GET /health`. It listens on loopback by default;
+binding a non-loopback address requires `--listen` and a bearer token. Point any
+command at a served control plane with `--remote` and `--credential`:
+
+```bash
+smithers ps --remote https://smithers.internal --credential "$SMITHERS_API_KEY"
+```
+
+See the control plane for the request surface and
+control-plane trust for the authorization model.
+
+### Clean up
+
+```bash
+smithers gc --older-than 30d --dry-run
+```
+
+`gc` deletes terminal runs older than the threshold with their attempts, clock,
+deferred, and waiting rows, then compacts the journal. Nothing is deleted
+unless you ask: retention is off by default.
+
+---
+
+## Getting started
+
+Route: /guides/getting-started
+
+> Run a typed flow on the in-memory engine: the shortest executable path through @smthrs/flow and @smthrs/engine.
+
+This guide runs a typed flow with the in-memory engine. It is the shortest executable path through `@smthrs/flow` and `@smthrs/engine`; it does not provide process-crash durability.
+
+### Prerequisites
+
+Install Node.js 22.19 or newer, then install the engine and Effect:
+
+```sh
+pnpm add @smthrs/flow @smthrs/engine effect
+```
+
+For source development in this repository, run `pnpm install` followed by
+`pnpm run check` from the workspace root.
+
+### Define and run a flow
+
+```ts
+import { FlowEngine } from "@smthrs/engine"
+import { Flow } from "@smthrs/flow"
+import { Effect, Layer, Schema } from "effect"
+
+const Greeting = Flow.make("example/Greeting", {
+  payload: { name: Schema.String },
+  success: Schema.String
+})
+
+const GreetingLayer = Greeting.toLayer(({ name }) =>
+  Effect.succeed(`Hello, ${name}.`)
+).pipe(
+  Layer.provideMerge(FlowEngine.layerMemory)
+)
+
+const program = Greeting.execute(
+  { name: "Ada" },
+  { executionId: "greeting-ada-1" }
+)
+
+console.log(
+  await Effect.runPromise(program.pipe(Effect.provide(GreetingLayer)))
+)
+```
+
+`Flow.make` defines durable schemas and a stable flow tag. `toLayer` registers the handler with whichever `FlowEngine` is supplied. `execute` requires a caller-selected execution ID because this flow did not opt into an idempotency key.
+
+### Derive an execution ID
+
+Use a flow idempotency key only when identical keys truly mean the same logical execution:
+
+```ts
+const Greeting = Flow.make("example/Greeting", {
+  payload: { name: Schema.String },
+  success: Schema.String,
+  idempotencyKey: ({ name }) => name.normalize("NFC").toLowerCase()
+})
+
+const executionId = yield* Greeting.executionId({ name: "Ada" })
+```
+
+An explicit `executionId` always wins. A flow that declares neither takes its ID from the ambient `Flow.CurrentExecutionIds` source, whose default derives one from the flow tag and the payload, so `yield* Greeting.execute({ name: "Ada" })` runs without naming an execution.
+
+### Choose the next guide
+
+- Add durable boundaries in Writing a flow.
+- Replace memory state with the SQL-backed composition in Assembling a durable engine.
+- Build deterministic fixtures in Testing.
+
+The Durable execution model explains what changes when the durable engine is used.
+
+---
+
+## Architecture
+
+Route: /architecture
+
+> How the workspace packages fit together, which direction data moves, and where the substitutable boundaries are.
+
+Smithers is one durable-execution engine assembled from the workspace packages listed in package structure. This page shows how they fit together, which direction data moves, and where the boundaries you can substitute are. Read it before anything else; the pages after it assume the picture below.
+
+### The whole system
+
+```mermaid
+flowchart TB
+  subgraph app["Your application"]
+    CALL["flow.execute(payload)"]
+    BARREL["@smthrs/flows<br/>barrel, Node and browser"]
+  end
+
+  subgraph define["Definition and identity"]
+    FLOW["@smthrs/flow<br/>Flow, Action, DurableDeferred,<br/>DurableClock, DurableQueue, RetryPolicy"]
+    ENGINE["@smthrs/engine<br/>FlowEngine, FlowProxy"]
+    KEYS["@smthrs/keys<br/>canonical Key"]
+    PLAN["@smthrs/plan<br/>Node AST, Planned, KeyMaterial,<br/>StepKey, Plan, PlanDiff, PlanStore"]
+    CRYPTO["@smthrs/crypto<br/>injected SHA-256"]
+    CANONICAL["@smthrs/canonical<br/>RFC 8785 JSON"]
+  end
+
+  subgraph drive["Durable driver"]
+    STORE["@smthrs/engine-store<br/>claims, fences, heartbeats,<br/>attempt persistence, cache admission"]
+  end
+
+  subgraph persist["Persistence"]
+    JOURNAL["@smthrs/journal<br/>logical WAL, projections,<br/>redaction, OwnerId"]
+    RUNSTORE["@smthrs/run-store<br/>RunStore, AttemptStore,<br/>Ownership"]
+    STEPCACHE["@smthrs/step-cache<br/>CacheStore"]
+    DB["@smthrs/database<br/>DurableWriter over SqlClient,<br/>write retry, composed migrations"]
+    SQL[("SQLite<br/>Node file or wasm")]
+  end
+
+  subgraph guard["Host boundary"]
+    KERNEL["@smthrs/kernel<br/>owns the closed 5-slot list<br/>FileSystem, Path, ChildProcessSpawner, Jj, HttpClient<br/>CapabilitySet, grants, permission-decorated services"]
+    CAP["@smthrs/capability<br/>capability vocabulary,<br/>typed permission failures"]
+    JJ["@smthrs/jj<br/>contract + node / bun / browser adapters"]
+    SANDBOX["@smthrs/sandbox<br/>remote exec, liveness probe"]
+    PN["@smthrs/platform-node<br/>NodeHost bundle"]
+    PBUN["@smthrs/platform-bun<br/>BunHost bundle"]
+    PB["@smthrs/platform-browser<br/>BrowserHost bundle:<br/>effect FileSystem + ChildProcessSpawner for a tab"]
+    TESTHOST["@smthrs/kernel/test/TestHost<br/>deterministic host + contract suite"]
+  end
+
+  subgraph read["Read-only protocols"]
+    SYNC["@smthrs/sync<br/>catch-up and follow over RPC"]
+    TT["@smthrs/time-travel<br/>frames, replay, fork,<br/>rewind, compensation, recovery"]
+  end
+
+  CALL --> FLOW
+  FLOW -->|FlowRuntime port| ENGINE
+  BARREL -.re-exports.-> FLOW
+  BARREL -.re-exports.-> ENGINE
+  BARREL -.re-exports.-> STORE
+  BARREL -.re-exports.-> SYNC
+  BARREL -.re-exports.-> TT
+  FLOW --> KEYS
+  FLOW --> CRYPTO
+  FLOW --> PLAN
+  PLAN --> KEYS
+  PLAN --> DB
+  ENGINE --> KEYS
+  KEYS --> CANONICAL
+  KEYS --> CRYPTO
+  ENGINE -->|Encoded seam| STORE
+  STORE --> JOURNAL
+  STORE --> RUNSTORE
+  STORE --> STEPCACHE
+  STORE --> CRYPTO
+  STORE --> KERNEL
+  STORE --> PLAN
+  JOURNAL --> DB
+  RUNSTORE --> JOURNAL
+  RUNSTORE --> DB
+  STEPCACHE --> DB
+  DB --> SQL
+  KERNEL --> CAP
+  KERNEL --> JJ
+  JJ --> CAP
+  PN -->|fills the slots| KERNEL
+  PBUN -->|fills the slots| KERNEL
+  PB -->|fills the slots| KERNEL
+  TESTHOST -->|fills the slots| KERNEL
+  SANDBOX --> KERNEL
+  JOURNAL --> SYNC
+  JOURNAL --> TT
+  TT --> STORE
+  TT --> RUNSTORE
+  TT --> STEPCACHE
+  TT --> JJ
+```
+
+:::note[Reading the diagram]
+Solid arrows are workspace dependencies that execute. Dotted arrows are re-exports.
+:::
+
+### What each boundary is for
+
+Ask what would break if a boundary were removed, and its purpose becomes clear.
+
+The **host boundary** exists so flow code can run in a browser. `@smthrs/kernel` declares a closed set of five service tags and nothing else; every platform implementation lives in its own package: `@smthrs/platform-node`, `@smthrs/platform-bun`, `@smthrs/platform-browser`. Four of those five tags are Effect's own: `FileSystem`, `Path`, `ChildProcessSpawner`, and `HttpClient` are contracts `effect` already declares, so Smithers supplies implementations rather than wrappers. One more, `Jj`, is a contract of `@smthrs/jj`, whose tag the kernel decorates in place rather than shadowing with a second one, so a consumer that needs only that capability does not take the whole host surface. A module that depends only on the kernel root never statically resolves a `node:` built-in, which is what makes browser bundling possible at all. `@smthrs/kernel` sits in front of that surface and decorates each service with a grant check, so a flow that asks for a file it was never granted fails in the error channel rather than reading the file.
+
+The **database and journal** split separates the storage driver from the shapes stored in it. `@smthrs/database` owns no domain tables; it wraps any Effect `SqlClient` and adds the transactional write retry that the rest of the system assumes. `@smthrs/journal`, `@smthrs/run-store`, `@smthrs/step-cache`, `@smthrs/plan`, and `@smthrs/engine-store` each own their own tables and the migration set that creates them, composed over one migrations table. Swap the driver and every shape survives.
+
+The **canonical, crypto, keys, and engine** chain decides identity before storage sees anything. `@smthrs/canonical` owns RFC 8785 JSON, `@smthrs/crypto` owns injected hashing, `@smthrs/keys` owns the canonical flow-key transformation, and `@smthrs/engine` owns action-key policy above the seam. The engine computes a key before it calls `FlowEngine.Encoded.actionExecute`, so storage never implements key policy.
+
+The **plan** boundary separates describing work from doing it. `@smthrs/plan` holds the authoring AST a flow body builds, the key material a planner declares, the step-key compiler, the compiled graph, its diff, and its append-only store. Planning performs no I/O, so nothing in it reads a file, a clock, or a network: declared effects carry read and write paths, never digests. A node's key is a function of what it consumes, which is the whole invalidation mechanism. An edited declaration re-keys that node and its dependent cone and nothing else, so there is no reverse-dependency index. Driving a compiled plan is `@smthrs/engine-store`'s `PlanScheduler`.
+
+The **flow, engine, and engine-store** chain separates what a durable program is from what runs it and from where it is written. `@smthrs/flow` defines flows, actions, durable deferreds, durable clocks, durable queues, and retry policy as typed values, written against the `FlowRuntime` port it declares. `@smthrs/engine` implements that port and puts an encoded seam beneath it. `@smthrs/engine-store` implements that seam over the journal: it claims a run row before driving it, fences continuing work with a heartbeat, admits and finishes attempt rows, and commits each lifecycle entry in the same transaction as the state transition it describes.
+
+**Extension** has no package of its own, because it is Effect dependency injection. Every behavior a program may reasonably want to replace is either a named service (`Inconsistency` for cache-conflict verdicts, `OwnerIdentity` for owner minting, `StepBoundary` for hermeticity, `Jj` and the rest of the closed host list for host access, `Clock` and `Random` for time and nondeterminism) or a constructor option carrying the built-in behavior as its default, such as `clockFireRetryPolicy` and `suspendedRetryPolicy`, which bounds how long one caller polls a suspended flow and is deliberately not a run-level retry bound. Providing a different `Layer` at the composition root is the whole mechanism; there is no hook registry and no dispatch order to reason about. See design decisions.
+
+The **read-only protocols** consume the journal without acquiring ownership. `@smthrs/sync` streams committed entries to a follower over Effect RPC and can neither mutate a run nor resume one. `@smthrs/time-travel` reads frames out of the same history and adds its own tables for snapshots, lineage edges, audits, receipts, and archived entries.
+
+The **barrel**, `@smthrs/flows`, re-exports the engine packages as namespaces for a single-import application. A browser application may still prefer the per-package roots for a narrower dependency footprint.
+
+### One execution, end to end
+
+```mermaid
+sequenceDiagram
+  participant Caller
+  participant Flow as @smthrs/flow
+  participant Driver as @smthrs/engine-store
+  participant Runs as RunStore
+  participant Rows as AttemptStore / CacheStore
+  participant Host as kernel over host
+  participant Log as Journal
+
+  Caller->>Flow: flow.execute(payload, executionId)
+  Flow->>Driver: Encoded.execute
+  Driver->>Runs: create or load the run row
+  Driver->>Runs: claim(exact snapshot), then activate(claim)
+  Driver->>Runs: heartbeat every second while owned
+  Driver->>Flow: invoke the registered handler from the top
+  Flow->>Driver: actionExecute(action, attempt, stepKey, tier)
+  Driver->>Rows: admit the attempt
+  Driver->>Log: attemptStarted, in the same transaction
+  Driver->>Host: run the guarded effect
+  Driver->>Rows: finish the attempt
+  Driver->>Log: attemptFinished and cache provenance
+  Driver->>Runs: completed, failed, suspended, or cancelled
+```
+
+Six things happen in that sequence, and each one is a decision you can inspect.
+
+**Definition and registration.** `Flow.make` produces a typed value carrying payload, success, and error schemas, a stable tag, and the required pure `body` that is the flow's behavior. `Interpreter.layer(flow)` registers it in the active `FlowEngine` scope and drives that body; an action attaches its own implementation with `Action.toLayer`.
+
+:::warning
+Registration is in memory even when the state is durable. A restarted process must re-register its flows before it can drive stored runs.
+:::
+
+**Execution identity.** The caller supplies `executionId`, or the flow derives one from an opt-in `idempotencyKey`. The driver persists the encoded payload under that identity, and a second request with the same identity must present the same flow tag and the same encoded payload.
+
+**Claim and heartbeat.** The driver reads an exact `RunSnapshot`, performs a compare-and-swap claim against it, activates the claim, and only then moves the row to `running`. A heartbeat fiber refreshes the fence every second. Losing the fence interrupts the driving fiber, so two processes cannot persist terminal state for one run.
+
+**Replay and the frontier.** A resume invokes the handler from the top. At each recorded boundary the driver returns the stored result. The first boundary with no recorded state is the frontier, and that is where new work happens.
+
+:::warning
+Code between boundaries runs again on every replay, so it has to be deterministic.
+:::
+
+**Suspension.** `DurableDeferred.await` and long `DurableClock.sleep` calls return `Flow.Suspended` when no result exists. The driver parks the run with a reason, clears ownership, and waits for a wake. The in-process `WakeBus` completes the engine's `resumeSignal` when runnability durably changes (a deferred completes, a clock fires, an operator resumes); polling and sweeps remain the bounded fallback for cross-process wake.
+
+**Terminal state.** A handler that returns stores its encoded `Flow.Result` and moves the row to `completed` or `failed`; interruption moves an owned run to `cancelled`. Every terminal transition clears ownership.
+
+### What is authoritative
+
+Executable state lives in `RunStore`, `AttemptStore`, `CacheStore`, and `DurableEngineState`. The journal is the account of what happened. Those two are kept consistent by one rule: every lifecycle entry commits in the same write transaction as the state transition it describes, opened by `Journal.transact`. Either both halves are durable or neither is.
+
+:::warning[A local commit is not remote atomicity]
+No database transaction makes an external effect atomic with it. An effect outside the database still needs an idempotency key, a fencing token, or a declared compensation.
+:::
+
+The journal has a second channel. `emitLossy` accepts telemetry into a bounded queue whose `Dropped` receipts and evictions are accepted outcomes, and `flush` is its only barrier. Nothing is ever reconstructed from that channel.
+
+### Reading next
+
+Data structures names every shape the arrows above carry. Package structure gives the workspace layout, the dependency graph as a table, and the browser and Node entry matrix. Internal details documents the rules the durable driver enforces and the tests that pin them.
+
+---
+
+## Browser support
+
+Route: /architecture/browser-support
+
+> Which entry points bundle for a browser, which stay Node-only, and the gate that executes both halves of the claim.
+
+Browser support is a hard requirement of this repository, and it is met the only way an Effect codebase can meet it: **host access goes through a layer**, so a module that only depends on contracts never resolves a `node:` built-in. This page states exactly which entry points honour that today, which do not, and what proves it.
+
+Nothing here is a claim about what *should* bundle. Every row is executed by `scripts/browser-check.mjs`, `pnpm run browser` locally, one step in [CI](https://github.com/smithersai/smithers/blob/main/.github/workflows/ci.yml), which bundles each entry point with esbuild's `platform: "browser"`.
+
+### Browser entry points
+
+These bundle for the browser. A resolution error in any of them fails the build.
+
+| Entry point | Notes |
+| --- | --- |
+| `@smthrs/artifacts` | The content-addressed artifact store: the `ArtifactStore` contract, its filesystem/memory/no-op implementations, the HTTP CAS client over Effect's `HttpClient` tag, and the local-first/remote-second composition |
+| `@smthrs/canonical` | RFC 8785 canonical JSON as an Effect Schema |
+| `@smthrs/platform-browser/BrowserHost` | `layer({ bash, fs, jj })` over an injected browser filesystem, bash interpreter, and the compiled `flows_jj.wasm` with its sync mount slice: all five tags real |
+| `@smthrs/jj` | The `Jj` contract, `JjError`, and the no-op layer |
+| `@smthrs/jj/browser/BrowserJj` | `layer({ fs, wasm })` runs jj-lib compiled to `wasm32-wasip1` over an injected virtual filesystem through this package's WASI preview1 shim; `layerUnsupported` stays the fallback for a host that ships no module, reporting `not_installed` |
+| `@smthrs/sandbox` | `RemoteChildProcessSpawner` provider adaptation and the `SandboxHealth` probe; it owns no host access of its own |
+| `@smthrs/platform-browser` | effect's `FileSystem` over a ZenFS-shaped promises API and effect's `ChildProcessSpawner` over an in-page bash interpreter, plus the `BrowserServices` aggregate and a `BrowserHost` bundle that hands over effect's own fetch-backed `HttpClient` |
+| `@smthrs/kernel` | The closed host service list, `CommandLine.render`, capabilities, grants, and the permission-decorated host services |
+| `@smthrs/crypto` | Injected cryptographic schemas |
+| `@smthrs/keys` | Canonical flow keys |
+| `@smthrs/plan` | The persisted plan contract: the step-key compiler, the graph schemas, the diff, and the append-only store over the same `SqlClient`/`DurableWriter` contracts |
+| `@smthrs/database` | The driver-neutral `DurableWriter` write boundary over Effect's own `SqlClient` service |
+| `@smthrs/journal` | The journal, its migration, projections, and redaction, all over `SqlClient` and the `DurableWriter` contract |
+| `@smthrs/run-store` | Run and attempt stores, ownership arbitration, and their migration, over the same contracts |
+| `@smthrs/step-cache` | The step cache and its migration, over the same contracts, plus the HTTP action-cache client and the two-tier composition |
+| `@smthrs/flow` | Flow, action, durable clock/deferred/queue, retry policy, step identity, and the `FlowRuntime` port |
+| `@smthrs/engine` | The engine that executes flows: the encoded seam, the in-memory runtime, and the RPC/HTTP façades |
+| `@smthrs/engine-store` | The durable engine over the journal. Owner identity, the last `process.pid` and `node:crypto` read, enters through the `OwnerIdentity` service, whose default draws an incarnation number where a host has no process (issue #114) |
+| `@smthrs/flows` | The barrel. It re-exports every engine package, so it bundles exactly when they all do |
+| `@smthrs/sync` | Read-only journal sync and branch protocols |
+| `@smthrs/capability` | Capability grants and the linear glob matcher that authorizes them |
+| `@smthrs/chain` | The chain contracts and their in-memory journal stand-in |
+| `@smthrs/observability` | Structured logging and metrics over Effect's own tags, with no exporter wired |
+| `@smthrs/time-travel` | Frames, replay, fork, rewind, compensation, and recovery |
+
+Bundling is not running: `@smthrs/journal` bundles because it depends on the `DurableWriter` *contract* and Effect's `SqlClient`, and a browser application still has to supply a browser SQL client (for example Effect's sqlite-wasm OPFS worker) to that contract. Bundling is the property that makes such a composition possible; the sqlite-wasm layer itself is not shipped here: see implementation status.
+
+### Node entry points
+
+These are Node-only, deliberately. The gate asserts each one *still* fails to bundle for the browser, and fails the build if it stops failing: a Node-only entry point cannot quietly become browser-safe without this page being corrected.
+
+| Entry point | Why |
+| --- | --- |
+| `@smthrs/platform-node`, `@smthrs/platform-bun` | Child processes, Node/Bun filesystem, and Jujutsu; the Bun bundle falls back to the `@effect/platform-node` adapters off Bun |
+| `@smthrs/jj/node/NodeJj`, `@smthrs/jj/bun/BunJj` | `node:child_process`; the jj CLI is spawned with argv and never a shell string |
+| `@smthrs/kernel/test/TestHost` | `effect/testing`'s `TestClock` imports `node:assert`, so the deterministic host is Node-only even though its own adapters are pure |
+| `@smthrs/database/node/NodeDatabase` | `node:sqlite` through `@effect/sql-sqlite-node` |
+| `@smthrs/flows/NodeRuntime` | The supported production composition: it opens a Node SQLite file and closes over a Node scope |
+
+### The rule this encodes
+
+A platform-neutral package root exports **contracts**; an implementation lives in its platform package, `@smthrs/platform-node`, `@smthrs/platform-bun`, or `@smthrs/platform-browser`, the way `effect` keeps `@effect/platform-node` out of `effect`. A neutral root that re-exports an implementation resolves that implementation's imports for every consumer, including browser ones, before any bundler can tree-shake it. Package barrel tests pin the namespaces each root exports, and the browser gate pins every browser-safe entry point in this table.
+
+### The honest claim
+
+“Smithers has browser-safe canonical JSON, crypto, and host contracts with a working `BrowserHost`, and its journal, keys, kernel, engine, engine-store, sync, time-travel, and barrel surfaces all bundle for the browser. Its durable engine composition is still SQLite-on-Node in practice, because no browser SQL client layer ships here.” Do not shorten that to “the library is browser compatible”: bundling is not running, and every entry in this page's second table is still Node-only.
+
+---
+
+## Execution and data flow
+
+Route: /architecture/execution-data-flow
+
+> One flow execution traced through the packages: the call, ownership, action persistence, suspension, and replay.
+
+This page traces one flow execution through the current implementation, from a typed flow call to ownership, action persistence, suspension, and replay. It focuses on cross-package data flow rather than individual API signatures.
+
+```mermaid
+sequenceDiagram
+  participant Caller
+  participant Flow as @smthrs/flow
+  participant Driver as @smthrs/engine-store
+  participant Runs as @smthrs/run-store RunStore
+  participant Attempts as AttemptStore / CacheStore
+  participant Host as @smthrs/kernel → @smthrs/platform-*
+  participant Journal as Journal
+
+  Caller->>Flow: flow.execute(payload, executionId)
+  Flow->>Driver: Encoded.execute
+  Driver->>Runs: create or load run
+  Driver->>Runs: claim(snapshot) then activate(claim)
+  Driver->>Runs: heartbeat while owned
+  Driver->>Flow: run registered handler from the top
+  Flow->>Driver: actionExecute(action, attempt, key, tier)
+  Driver->>Runs: confirm ownership heartbeat fence
+  Driver->>Attempts: admit attempt
+  Driver->>Journal: attempt-started
+  Driver->>Host: execute guarded effect
+  Driver->>Attempts: finish attempt
+  Driver->>Journal: attempt-finished and cache provenance
+  Driver->>Runs: completed, failed, suspended, or cancelled
+```
+
+### 1. Definition and registration
+
+`Flow.make` creates a typed value containing payload, success, and error schemas. `flow.toLayer(handler)` registers a handler in the active `FlowEngine` scope. Registration is in memory even when execution state is durable, so every process that may drive a run must register the same flow definitions before resuming them.
+
+### 2. Execution identity
+
+The caller supplies `executionId`, or the flow derives one from its opt-in `idempotencyKey`. The durable driver persists the encoded payload under that execution ID. A second request with the same ID must have the same flow tag and encoded payload.
+
+### 3. Claim and heartbeat
+
+The driver reads an exact `RunSnapshot`, performs a claim compare-and-swap, activates that claim, and then changes the row to `running`. A heartbeat fiber updates the row every second. Losing the ownership fence interrupts the driving fiber, preventing two processes from persisting terminal state for one run.
+
+### 4. Re-execution and actions
+
+Resume invokes the handler from the top. Durable behavior exists at `Action`, `DurableDeferred`, and clock boundaries:
+
+- A previously successful attempt returns its stored outcome.
+- An eligible sealed action may restore declared outputs from the shared cache.
+- An unfinished deferred suspends the flow.
+- The first action or deferred without recorded state is the live frontier.
+
+Flow-local JavaScript or Effect code between those boundaries runs again. It must therefore be deterministic.
+
+### 5. Action persistence
+
+The flow runtime computes a `Key` before calling the encoded engine:
+
+- sealed action plus declared cache key input → cache key;
+- otherwise → run-local invocation key.
+
+The engine store hashes that key again for its database address, confirms the run fence, admits an attempt, executes it, and persists the first terminal transition. Only a sealed action with a hard `StepBoundary` descriptor and deviation-free evidence is admitted to the global cache.
+
+### 6. Suspension and wake-up
+
+`DurableDeferred.await` and long `DurableClock.sleep` calls return `Flow.Suspended` when no result exists. The driver transitions the run to `suspended`, clearing owner and heartbeat. Deferred completion is ordered:
+
+1. store the completion;
+2. emit its journal record on the durable channel (which commits it), then flush the lossy queue best-effort: a latched lossy-sink failure is logged, never fatal to delivery;
+3. schedule a claim-gated wake.
+
+`EngineStore` implements `resumeSignal` over the in-process `WakeBus`, so a wake published in this process resumes the waiting engine without a poll tick; the poll loop remains the bounded fallback for wakes published elsewhere.
+
+### 7. Terminal state
+
+A completed handler stores its schema-encoded `Flow.Result` in the run row and moves to `completed` or `failed`. Interruption moves an owned run to `cancelled`. Every terminal transition clears ownership.
+
+### 8. Read paths
+
+The durable data has three independent readers:
+
+- `Journal.entries`, `stream`, and `project` replay committed evidence.
+- `@smthrs/sync` catches up and follows journal entries remotely.
+- `@smthrs/time-travel` reads frames and suffixes, consults cache entries, and coordinates archive/truncation through `TimeTravelStore`.
+
+These readers do not drive flow handlers unless an explicit resume operation enters the claim path.
+
+---
+
+## Package map
+
+Route: /architecture/package-map
+
+> The package boundaries and the direction dependencies actually run between them.
+
+This page defines the repository’s package boundaries and actual workspace dependency direction. It is an architecture map, not an API reference; follow each package link for its exported types and functions.
+
+An arrow means “depends on.” The one dotted edge is a test-only seam: `@smthrs/kernel`’s `test/TestHost` composes `@smthrs/platform-browser`’s in-tab `FileSystem` and `ChildProcessSpawner` to build its deterministic host, so the manifest edge exists in that direction too. No production module in `@smthrs/kernel` imports a platform bundle.
+
+```mermaid
+flowchart TD
+  PN["@smthrs/platform-node"]
+  PBUN["@smthrs/platform-bun"]
+  JJ["@smthrs/jj"]
+  SB["@smthrs/sandbox"]
+  PB["@smthrs/platform-browser"]
+  D["@smthrs/database"]
+  C["@smthrs/canonical"]
+  Crypto["@smthrs/crypto"]
+  CAP["@smthrs/capability"]
+
+  J["@smthrs/journal"] --> D
+  RS["@smthrs/run-store"] --> D
+  RS --> J
+  SC["@smthrs/step-cache"] --> D
+  A["@smthrs/artifacts"] --> Crypto
+  PB --> JJ
+  PB --> K
+  PN --> JJ
+  PN --> K
+  PBUN --> JJ
+  PBUN --> K
+  SB --> K
+  K["@smthrs/kernel"] --> CAP
+  K --> JJ
+  K --> J
+  K -.test seam.-> PB
+  JJ --> CAP
+  F["@smthrs/flow"] --> Keys["@smthrs/keys"]
+  F --> Crypto
+  W["@smthrs/engine"] --> F
+  W --> Keys
+  Keys --> C
+  Keys --> Crypto
+  P["@smthrs/plan"] --> Keys
+  P --> D
+  E["@smthrs/engine-store"] --> W
+  E --> F
+  E --> Crypto
+  E --> D
+  E --> J
+  E --> RS
+  E --> SC
+  E --> A
+  E --> K
+  E --> P
+  S["@smthrs/sync"] --> J
+  T["@smthrs/time-travel"] --> D
+  T --> E
+  T --> JJ
+  T --> J
+  T --> RS
+  T --> SC
+```
+
+| Package | Responsibility | Important boundary |
+| --- | --- | --- |
+| `@smthrs/canonical` | RFC 8785 canonical JSON as an Effect Schema | Wraps the standards-focused `canonicalize` library |
+| `@smthrs/crypto` | Injected cryptographic schema transformations | Platform implementation is supplied through Effect Crypto |
+| `@smthrs/keys` | Canonical flow keys | Composes `canonical` and `crypto` |
+| `@smthrs/database` | `SqlClient` access plus transactional SQLite write retry | Owns no domain tables |
+| `@smthrs/platform-node`, `@smthrs/platform-bun` | The Node and Bun Host bundles: Effect's own platform services, filesystem, path, spawner, `HttpClient`, composed with the `Jj` adapter | Raw effects; no permission decisions. Bun composes `@effect/platform-bun` directly and does not depend on `@smthrs/platform-browser` |
+| `@smthrs/capability` | The capability vocabulary, actions, patterns, tiers, and typed permission failures with their `PlatformError` projection | A leaf both the kernel and `@smthrs/jj` depend on; its schema ids stay `@smthrs/kernel/…` because they are journaled |
+| `@smthrs/jj` | Jujutsu snapshot, restore, diff, and workspace operations | Depends on `effect` and `@smthrs/capability`; the closed Host list still names it |
+| `@smthrs/sandbox` | A remote `ChildProcessSpawner` implementation and sandbox liveness | Adapts a caller's provider onto Effect's `ChildProcessSpawner`; owns no host access |
+| `@smthrs/platform-browser` | Browser implementations of effect's `FileSystem` and `ChildProcessSpawner`, and the `BrowserHost` bundle, which provides effect's own fetch-backed `HttpClient` | Depends on `effect`, `@smthrs/kernel`, and `@smthrs/jj` for the slots it fills; the ZenFS and just-bash backends are arguments, not dependencies |
+| `@smthrs/journal` | The immutable event history: journal rows, projections, redaction, and the `OwnerId` fence its durable channel accepts | Open event envelope; owns `flows_journal_events` only |
+| `@smthrs/run-store` | Executable run state: run rows, attempt rows, and ownership arbitration | Owns `flows_runs` and `flows_attempts`; validates supplied liveness evidence, never probes |
+| `@smthrs/step-cache` | Sealed step results addressed by step-key digest, plus the HTTP action-cache client and the local-first/remote-second composition | Owns `flows_step_cache`; depends on `database` alone |
+| `@smthrs/plan` | The persisted plan: the `KeyMaterial`→`StepKey` compiler, `Plan.compile`/`append`, `PlanDiff`, and the append-only `PlanStore` | Owns `flows_plans`, `flows_plan_nodes`, `flows_plan_edges`, and migration block `4000`; performs no I/O beyond the database and executes nothing |
+| `@smthrs/artifacts` | The content-addressed artifact store the step cache references by digest: local, remote-over-HTTP, and the combination | Owns no tables and no migration; depends on `crypto` alone. Host access is Effect's `FileSystem` and `HttpClient` tags |
+| `@smthrs/flow` | The flow authoring model, flows, actions, durable primitives, retry policy, step identity, and the `FlowRuntime` port they execute against | Declares the runtime port; depends on nothing that implements it |
+| `@smthrs/engine` | The runtime that executes flows: the encoded engine seam, its typed adapter, the in-memory implementation, and the RPC/HTTP façades | Computes action keys above the encoded engine seam |
+| `@smthrs/kernel` | Capability sets, grants, and guarded Host decorators | Permission checks occur immediately before Host delegation |
+| `@smthrs/engine-store` | Durable `FlowEngine` implementation composing the journal, run, and cache stores | Claims runs before driving and fences action persistence; owns the deferred/clock tables and composes every migration set |
+| `@smthrs/sync` | Read-only journal replication protocol and RPC client/server | It does not mutate runs or journal state |
+| `@smthrs/time-travel` | Replay, fork, rewind, compensation, recovery, and retry utilities | Operates through public journal, run-store, step-cache, `Jj`, and time-travel store contracts |
+| `@smthrs/flows` | The umbrella barrel: every engine package re-exported as a namespace, plus `@smthrs/flow` flat and `TimeTravel` as a service key | Owns no code of its own beyond `namespaces`; the three `platform-*` bundles are deliberately not re-exported |
+
+### Two persistence seams
+
+Each storage package owns its own tables and its own migration set:
+`@smthrs/journal` owns `flows_journal_events`, `@smthrs/run-store` owns
+`flows_runs` and `flows_attempts`, `@smthrs/step-cache` owns
+`flows_step_cache`, `@smthrs/plan` owns `flows_plans`, `flows_plan_nodes`, and
+`flows_plan_edges`, and `@smthrs/engine-store` owns
+`flows_deferred_completions` and `flows_clock_deadlines`. `@smthrs/database`'s `Migrations` composes those
+sets over one `flows_migrations` table, namespacing each package's migration
+ids into a reserved block so two packages' `0001_initial` cannot collide.
+`@smthrs/engine-store` adds `DurableEngineState`: `layer` persists those waits
+through `DurableWriter`, while `layerMemory` remains available for deterministic
+tests.
+
+`@smthrs/time-travel` adds audit, receipt, snapshot, lineage-edge, and archive tables through `SqlTimeTravelStore`. Those tables are separate from the journal migration.
+
+### Runtime-specific edges
+
+The core contracts are isomorphic, but not every aggregate is runtime-neutral:
+
+- `@smthrs/engine-store` mints owner identity through the injectable `OwnerIdentity` service rather than reading `process.pid` and `node:crypto` directly, so the package root, and the `@smthrs/flows` barrel above it, bundles for the browser. Running it still needs a browser SQL client for the `DurableWriter` contract, and none ships here.
+- Vendor host adapters (`@smthrs/host-cloudflare`, `@smthrs/host-vercel`) live in the [plugins repository](https://github.com/smithersai/plugins).
+
+See implementation status and the Cloudflare and Vercel guides in the [plugins repository](https://github.com/smithersai/plugins/blob/main/docs/guides/).
+
+---
+
+## CLI
+
+Route: /cli
+
+> Every command the smithers binary offers in 1.0.0-rc.0, with its flags, aliases, and exit codes.
+
+`smithers` is the command line for the control plane. It plans a flow, takes the
+approval decision, runs the plan, and reads back what the run recorded. Every
+command talks to the control services in `@smthrs/control`; none of them reads a
+database table directly, so the same command works against a local project and
+against a remote `smithers serve` with `--remote`.
+
+### Commands
+
+| Command | Summary |
+| --- | --- |
+| `smithers approve` | Approve the complete serialized approval payload |
+| `smithers bug` | Report a bug with a run digest attached |
+| `smithers cancel` | Cancel a durable run |
+| `smithers claude` | Claude Code plugin mirror protocol |
+| `smithers deny` | Deny the complete serialized approval payload |
+| `smithers docs` | Print the bundled documentation; --full prints llms-full.txt |
+| `smithers doctor` | Report registry, database, runtime, and provider readiness |
+| `smithers down` | Cancel every non-terminal run |
+| `smithers gc` | Delete terminal runs older than a threshold and compact the journal |
+| `smithers init` | Scaffold flows/&lt;name&gt;/flow.mdx and ignore .flows/ |
+| `smithers logs` | Read run events; --follow streams future events |
+| `smithers ls` | List the flows discovered under this project |
+| `smithers mcp` | Wire the Smithers MCP server into an agent |
+| `smithers memory` | Read and write namespaced facts in the control database |
+| `smithers migrate` | Convert a Smithers 0.x project to the 1.0 authoring model |
+| `smithers output` | Print one registered node output |
+| `smithers plan` | Render a flow plan and its complete approval payload |
+| `smithers ps` | List durable runs |
+| `smithers run` | Run an approved plan payload, or resume a parked run |
+| `smithers serve` | Host the control server for this project |
+| `smithers signal` | Deliver a durable JSON signal to a run |
+| `smithers skills` | Install and list the smithers agent skill |
+| `smithers status` | Show the diagnosis card for one run, or the run listing |
+| `smithers steer` | Send a durable, attributed steering message to a run |
+| `smithers up` | Plan, approve, and run one flow; -d launches it detached |
+| `smithers update` | Check npm for a newer @smthrs/cli |
+
+### Aliases
+
+| Alias | Command |
+| --- | --- |
+| `smithers events` | `smithers logs` |
+| `smithers gateway` | `smithers serve` |
+| `smithers inspect` | `smithers status` |
+| `smithers resume` | `smithers run` |
+| `smithers why` | `smithers status` |
+| `smithers workflow list` | `smithers ls` |
+
+### Global flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--credential string` | See the command pages. |
+| `--json` | See the command pages. |
+| `--remote string` | See the command pages. |
+| `--quiet` | See the command pages. |
+| `--mcp-config string` | See the command pages. |
+| `--root string` | See the command pages. |
+| `--help, -h` | Show help information |
+| `--version, -v` | Show version information |
+| `--wizard` | Start wizard mode for a command |
+| `--completions &lt;bash\|zsh\|fish\|sh&gt;` | Print shell completion script (choices: bash, zsh, fish, sh) |
+| `--log-level &lt;all\|trace\|debug\|info\|warn\|warning\|error\|fatal\|none&gt;` | Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none) |
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | success |
+| 1 | unsupported or generic error |
+| 2 | usage |
+| 3 | parked (`waiting-approval`) |
+| 130 | SIGINT |
+| 143 | SIGTERM |
+
+### Removed commands
+
+Smithers 1.0.0-rc.0 removed the 0.x verbs that depended on the JSX runtime, the
+old gateway, or a deferred feature. Each one exits 1 with a message naming what
+to use instead; the migration guide lists every
+verb and its replacement.
+
+---
+
+## smithers approve
+
+Route: /cli/approve
+
+> Approve the complete serialized approval payload
+
+Approve the complete serialized approval payload.
+
+### Usage
+
+```sh
+smithers approve [flags] <approval>
+```
+
+### Behavior
+
+Plan-level and node-level (`ask`) approvals; principal stamped server-side.
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--scope choice` | (choices: once, run, remembered) |
+
+---
+
+## smithers bug
+
+Route: /cli/bug
+
+> Report a bug with a run digest attached
+
+Report a bug with a run digest attached.
+
+### Usage
+
+```sh
+smithers bug [flags] [<summary...>]
+```
+
+### Behavior
+
+Posts a report with `Control.list` and a `Control.watch` digest to `bug.smithers.sh` (`SMITHERS_BUG_ENDPOINT`).
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--run string` | See the behavior above. |
+
+---
+
+## smithers cancel
+
+Route: /cli/cancel
+
+> Cancel a durable run
+
+Cancel a durable run.
+
+### Usage
+
+```sh
+smithers cancel [flags] RUN_ID
+```
+
+### Behavior
+
+Durable, cross-process (section 5).
+
+---
+
+## smithers claude
+
+Route: /cli/claude
+
+> Claude Code plugin mirror protocol
+
+Claude Code plugin mirror protocol.
+
+### Usage
+
+```sh
+smithers claude <subcommand> [flags]
+```
+
+### Behavior
+
+Claude Code plugin mirror protocol, `claudeMirrorContract` 2; run status vocabulary is the rc.0 `RunStatus`.
+
+---
+
+## smithers deny
+
+Route: /cli/deny
+
+> Deny the complete serialized approval payload
+
+Deny the complete serialized approval payload.
+
+### Usage
+
+```sh
+smithers deny [flags] <approval>
+```
+
+### Behavior
+
+Denies; a denied plan can never launch.
+
+---
+
+## smithers docs
+
+Route: /cli/docs
+
+> Print the bundled documentation; --full prints llms-full.txt
+
+Print the bundled documentation; --full prints llms-full.txt.
+
+### Usage
+
+```sh
+smithers docs [flags]
+```
+
+### Behavior
+
+Prints the bundled `llms.txt` or `llms-full.txt` generated from the vocs `docs/pages` tree (section 9 exception 2, R-25).
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--full` | See the behavior above. |
+
+---
+
+## smithers doctor
+
+Route: /cli/doctor
+
+> Report registry, database, runtime, and provider readiness
+
+Report registry, database, runtime, and provider readiness.
+
+### Usage
+
+```sh
+smithers doctor [flags]
+```
+
+### Behavior
+
+Reports registry discovery warnings, database paths and ladder state, Node version, `jj` on `PATH`, provider keys present, and 0.x state detected (section 6).
+
+---
+
+## smithers down
+
+Route: /cli/down
+
+> Cancel every non-terminal run
+
+Cancel every non-terminal run.
+
+### Usage
+
+```sh
+smithers down [flags]
+```
+
+### Behavior
+
+Cancels every non-terminal run (`Control.list` then `cancel`).
+
+---
+
+## smithers gc
+
+Route: /cli/gc
+
+> Delete terminal runs older than a threshold and compact the journal
+
+Delete terminal runs older than a threshold and compact the journal.
+
+### Usage
+
+```sh
+smithers gc [flags]
+```
+
+### Behavior
+
+Deletes terminal runs older than the threshold with their attempts, clock, deferred, and waiting rows and time-travel archive entries, then `Journal.compact`. Automatic retention stays off by default.
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--older-than string` | See the behavior above. |
+| `--dry-run` | See the behavior above. |
+
+---
+
+## smithers init
+
+Route: /cli/init
+
+> Scaffold flows/<name>/flow.mdx and ignore .flows/
+
+Scaffold flows/&lt;name&gt;/flow.mdx and ignore .flows/.
+
+### Usage
+
+```sh
+smithers init [flags] [<name>]
+```
+
+### Behavior
+
+Scaffolds `flows/<name>/flow.mdx` and adds `.flows/` to `.gitignore`. `--global` is not supported (seats resolve from environment keys); it exits 1.
+
+### Removed flags
+
+These flags existed in Smithers 0.x. `smithers init` declares each one so it fails with a migration message instead of a usage error, and exits 1.
+
+| Flag | Reason |
+| --- | --- |
+| `--global` | rc.0 has no global pack; seats resolve from environment keys |
+
+---
+
+## smithers logs
+
+Route: /cli/logs
+
+> Read run events; --follow streams future events
+
+Read run events; --follow streams future events.
+
+### Usage
+
+```sh
+smithers logs [flags] [RUN_ID]
+```
+
+### Behavior
+
+Transcript or raw `ControlEvent` stream. `events` is an alias of `logs --json`.
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--follow` | See the behavior above. |
+
+---
+
+## smithers ls
+
+Route: /cli/ls
+
+> List the flows discovered under this project
+
+List the flows discovered under this project.
+
+### Usage
+
+```sh
+smithers ls [flags]
+```
+
+### Behavior
+
+Registry descriptors from `<project>/flows/**`. `workflow list` is an alias.
+
+---
+
+## smithers mcp
+
+Route: /cli/mcp
+
+> Wire the Smithers MCP server into an agent
+
+Wire the Smithers MCP server into an agent.
+
+### Usage
+
+```sh
+smithers mcp <subcommand> [flags]
+```
+
+### Behavior
+
+MCP server over stdio; `{ ok, data?, error? }` envelope kept. Supported tools (11): `list_workflows`, `run_workflow`, `list_runs`, `get_run`, `watch_run`, `get_run_events`, `explain_run`, `list_pending_approvals`, `resolve_approval`, `get_node_detail`, `get_chat_transcript`. Unsupported tools (10) return `{ ok: false, error: { code: "unsupported", ... } }`: `revert_attempt`, `fork_run`, `replay_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, `time_travel`, `list_artifacts`, `ask_human`.
+
+---
+
+## smithers memory
+
+Route: /cli/memory
+
+> Read and write namespaced facts in the control database
+
+Read and write namespaced facts in the control database.
+
+### Usage
+
+```sh
+smithers memory <subcommand> [flags]
+```
+
+### Behavior
+
+Namespaced facts in the control database.
+
+---
+
+## smithers migrate
+
+Route: /cli/migrate
+
+> Convert a Smithers 0.x project to the 1.0 authoring model
+
+Convert a Smithers 0.x project to the 1.0 authoring model.
+
+### Usage
+
+```sh
+smithers migrate [flags] [<path>]
+```
+
+### Behavior
+
+The reserved `system/migrate` flow id is retired so the verb does not collide with the project flow.
+
+### Removed flags
+
+These flags existed in Smithers 0.x. `smithers migrate` declares each one so it fails with a migration message instead of a usage error, and exits 1.
+
+| Flag | Reason |
+| --- | --- |
+| `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed |
+
+---
+
+## smithers output
+
+Route: /cli/output
+
+> Print one registered node output
+
+Print one registered node output.
+
+### Usage
+
+```sh
+smithers output [flags] RUN_ID [NODE_ID]
+```
+
+### Behavior
+
+Registered node output from the `node-output` projection.
+
+---
+
+## smithers plan
+
+Route: /cli/plan
+
+> Render a flow plan and its complete approval payload
+
+Render a flow plan and its complete approval payload.
+
+### Usage
+
+```sh
+smithers plan [flags] [<key=value...>]
+```
+
+### Behavior
+
+`Control.plan`; prints the `PlanCard` and the approval payload.
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--data string` | See the behavior above. |
+
+---
+
+## smithers ps
+
+Route: /cli/ps
+
+> List durable runs
+
+List durable runs.
+
+### Usage
+
+```sh
+smithers ps [flags]
+```
+
+### Behavior
+
+Run listing; `--status` validated against `accepted|running|parked|waiting-approval|cancelled|completed|failed`.
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--flow string` | See the behavior above. |
+| `--status choice` | (choices: accepted, running, parked, waiting-approval, cancelled, completed, failed) |
+
+---
+
+## smithers run
+
+Route: /cli/run
+
+> Run an approved plan payload, or resume a parked run
+
+Run an approved plan payload, or resume a parked run.
+
+### Usage
+
+```sh
+smithers run [flags] <plan-payload>
+```
+
+### Forms
+
+- `smithers run <approval-payload>`
+- `smithers run --resume RUN_ID`
+
+### Behavior
+
+Launches an approved plan; blocks until settlement when the local process owns the executor.
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--resume` | See the behavior above. |
+
+---
+
+## smithers serve
+
+Route: /cli/serve
+
+> Host the control server for this project
+
+Host the control server for this project.
+
+### Usage
+
+```sh
+smithers serve [flags]
+```
+
+### Behavior
+
+Hosts the control server (section 10): `/rpc`, `/rpc/ws`, `/sync`, `/sync/ws`, `/projections/ws`, `GET /health`. Loopback default; non-loopback requires `--listen` and a bearer token. `gateway` is an alias for rc.0 only.
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--host string` | See the behavior above. |
+| `--port integer` | See the behavior above. |
+| `--listen` | See the behavior above. |
+
+---
+
+## smithers signal
+
+Route: /cli/signal
+
+> Deliver a durable JSON signal to a run
+
+Deliver a durable JSON signal to a run.
+
+### Usage
+
+```sh
+smithers signal [flags] RUN_ID <signal-json>
+```
+
+### Behavior
+
+Delivers a named signal to a flow parked on `WaitFor` (section 5).
+
+---
+
+## smithers skills
+
+Route: /cli/skills
+
+> Install and list the smithers agent skill
+
+Install and list the smithers agent skill.
+
+### Usage
+
+```sh
+smithers skills <subcommand> [flags]
+```
+
+### Behavior
+
+Writes the `smithers` skill into detected agents; no automatic refresh side effect on other commands.
+
+---
+
+## smithers status
+
+Route: /cli/status
+
+> Show the diagnosis card for one run, or the run listing
+
+Show the diagnosis card for one run, or the run listing.
+
+### Usage
+
+```sh
+smithers status [flags] [RUN_ID]
+```
+
+### Behavior
+
+Forensics diagnosis card for one run, or the run listing. `inspect` and `why` are aliases.
+
+---
+
+## smithers steer
+
+Route: /cli/steer
+
+> Send a durable, attributed steering message to a run
+
+Send a durable, attributed steering message to a run.
+
+### Usage
+
+```sh
+smithers steer [flags] RUN_ID
+```
+
+### Behavior
+
+Durable, attributed steer through the notification queue; drained at the agent's turn close.
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--message string` | See the behavior above. |
+
+### Removed flags
+
+These flags existed in Smithers 0.x. `smithers steer` declares each one so it fails with a migration message instead of a usage error, and exits 1.
+
+| Flag | Reason |
+| --- | --- |
+| `--takeover` | hijack is not available; `steer --message` is the only mode |
+
+---
+
+## smithers up
+
+Route: /cli/up
+
+> Plan, approve, and run one flow; -d launches it detached
+
+Plan, approve, and run one flow; -d launches it detached.
+
+### Usage
+
+```sh
+smithers up [flags] <flow>
+```
+
+### Behavior
+
+One-shot launch: plan, approve with scope `run`, run; prints `{ runId }` under `--json`; exit code follows the terminal status. `-d` spawns `smithers run` detached, logs to `.flows/logs/<runId>.log`, and returns after the admission line (30 s default). Operator-supplied run ids are not supported; callers read `runId` from the receipt.
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--data string` | See the behavior above. |
+| `--detached, -d` | See the behavior above. |
+
+### Removed flags
+
+These flags existed in Smithers 0.x. `smithers up` declares each one so it fails with a migration message instead of a usage error, and exits 1.
+
+| Flag | Reason |
+| --- | --- |
+| `--serve` | replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted |
+| `--interactive` | replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted |
+| `--supervise` | replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted |
+| `--herdr` | replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted |
+| `--monitor` | replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted |
+| `--report` | replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted |
+| `--force` | the run driver's heartbeat sweep owns recovery |
+| `--steal-ownership` | the run driver's heartbeat sweep owns recovery |
+| `--resume-claim-*` | the run driver's heartbeat sweep owns recovery |
+| `--resume-restore-*` | the run driver's heartbeat sweep owns recovery |
+| `--max-concurrency &lt;n&gt;` | parallelism is declared by the flow and bounded by plan admission |
+
+---
+
+## smithers update
+
+Route: /cli/update
+
+> Check npm for a newer @smthrs/cli
+
+Check npm for a newer @smthrs/cli.
+
+### Usage
+
+```sh
+smithers update [flags]
+```
+
+### Behavior
+
+npm `latest`/`next` check for `@smthrs/cli`.
+
+---
+
+## Flows and the action graph
+
+Route: /concepts/action-graph
+
+> Content-addressed actions, explicit Effect dependencies, hermetic boundaries, and cached results: the Bazel-like properties and their current limits.
+
+This page explains the repository’s Bazel-like properties: content-addressed actions, explicit Effect dependencies, hermetic-boundary contracts, and cached results, while distinguishing them from the static action planner that is not yet implemented.
+
+### The graph that exists today
+
+A flow handler defines dependencies through Effect structure:
+
+```ts
+const program = Effect.gen(function*() {
+  const source = yield* readSource
+  const [types, tests] = yield* Effect.all(
+    [typecheck(source), runTests(source)],
+    { concurrency: "unbounded" }
+  )
+  return yield* packageResult(types, tests)
+})
+```
+
+Sequencing creates dependency edges. `Effect.all` exposes independent branches. `Action.raceAll` and `DurableDeferred.raceAll` create a persisted race result. Calling another flow creates a child execution dependency.
+
+The graph is therefore explicit in the Effect program but discovered dynamically as the handler runs. There is no public `Node` or static graph value in this repository.
+
+### The Bazel-like action boundary
+
+An `Action` carries every piece a Bazel action does:
+
+| Action property | Current representation |
+| --- | --- |
+| caller identity | string or canonical JSON object in `Action.idempotencyKey` |
+| runtime layers | `Action.CacheEnvironment.layers` |
+| authority | `Action.CacheEnvironment.capabilities` |
+| declared reads/writes | action `metadata` decoded as `FileBoundary` |
+| output | schema-encoded action exit and optional `BoundaryEvidence.declaredOutputs` |
+| cache address | content-derived `Key`, then its SHA-256 digest in `CacheStore` |
+
+A sealed action is reusable only when it has an idempotency key, a complete cache environment, and sufficient boundary evidence. Other work receives a run-local key and cannot share results across runs.
+
+### Hermeticity is an evidence gate
+
+The derived `Key` identifies an action but does not enforce hermeticity. Cache admission in `@smthrs/engine-store` additionally requires:
+
+1. action tier `sealed`;
+2. metadata that decodes as `FileBoundary`;
+3. boundary mode `hard`;
+4. successful `prepare` and `settle`;
+5. no expected-set deviation.
+
+The repository ships the contract and a deterministic test layer. A production host implementation that isolates declared reads, detects undeclared writes, captures declared outputs, and restores them on a cache hit is **Planned**.
+
+Without that host layer, the durable engine can still replay an attempt within one run, but it cannot honestly populate the cross-run action cache.
+
+### Graph planning
+
+Resolving graph-local dependency references into digests is `@smthrs/plan`. `Plan.compile` walks drafts in topological order and substitutes each dependency's already-computed key for its `Ref`/`Pending` reference, so a node's key is a function of what it consumes. The declarations and references live with the planner rather than in `@smthrs/keys`, which stays the single hashing transformation.
+
+Two properties fall out and are the reason the package exists:
+
+- **Planning performs no I/O.** Declared `effects` carry read and write *paths*, never digests. Measuring a path is run-time work.
+- **Invalidation is re-keying.** An edited declaration re-keys that node and its dependent cone, and nothing else. There is deliberately no reverse-dependency index and no invalidating node visitor: content addressing subsumes both.
+
+A plan grows rather than being replaced: `Plan.append` adds a pre-keyed subgraph at the next generation, and `PlanStore` enforces append-only with SQL triggers.
+
+### Scheduling
+
+Two schedulers coexist, at different altitudes.
+
+Inside one flow body the runtime schedules **fibers**, not a persisted DAG:
+
+- independent Effect branches can run concurrently;
+- one `RunCoordinator` drain is active per execution ID in a process;
+- distinct execution IDs can be driven concurrently;
+- queue worker concurrency is explicit;
+- run ownership prevents cross-process duplicate drivers.
+
+Above that, `EngineStore.PlanScheduler` drives a **persisted plan**. It walks the graph, admits ready nodes under `steps`/`agents` caps ordered by priority plus one point per round waited, and dispatches each through the same `ActionPersistence` seam an ordinary action uses, so the shared cache, the workspace sandbox, attempt rows, and the fenced journal all apply unchanged. Each node settles as `built`, `clean`, `failed`, or `skipped`, and the outcome is journaled.
+
+There is still no resource pool, critical-path analysis, or package-defined concurrency ceiling; `aspects.ts`-derived caps are supplied to the scheduler by its caller rather than read by it.
+
+### What the plan preserves
+
+The pre-existing contracts constrained the planner, and it keeps all of them:
+
+- key computation stays above the encoded storage seam;
+- graph-local IDs remain lookup addresses, not hash material;
+- Host implementation identities and capabilities enter cache key input;
+- cache hits still replay declared outputs through `StepBoundary`, and a fresh
+  execution still reaches the host only through `WorkspaceSandbox`'s copy-back;
+- planning executes no Host effects;
+- ordinal work remains run-local.
+
+The scheduler adds one: a node's *dispatch* key folds the plan-time key together with the boundary the host measured just before dispatch, because two runs whose input files differ declare the same graph and must not share a result.
+
+See implementation status for what is and is not shipped.
+
+---
+
+## Actions
+
+Route: /concepts/actions
+
+> An action is the unit of durability: a named side effect with a stable identity, a retry policy, a cache admission rule, and a compensation tier.
+
+A flow body is ordinary Effect code that replays from the top after every
+suspension. An action is the part that must not replay: the named side effect
+whose result the journal records once and returns forever after.
+
+```ts
+const Compile = Action.make({
+  name: "example/Compile",
+  success: Schema.String,
+  error: BuildFailure,
+  tier: "sealed",
+  execute: compile
+})
+```
+
+Five properties make an action durable. Each has a page of its own; this page
+says what they are and how they fit together.
+
+### Stable identity
+
+The engine addresses an action by a content-addressed step key, never by its
+position in the program and never by its name alone. The key folds the
+declaration identity, the caller's identity, the resolved inputs, the declared
+capabilities, and the file boundary the host measured. Renaming a variable does
+not change a key; changing what the action reads does.
+
+That is why a step key can be trusted as a cache address: two invocations that
+compute the same key ran the same work in the same environment. See
+step keys.
+
+### Recorded attempts
+
+Every attempt is a durable row: admitted before the body runs, finished with
+the encoded result or the encoded failure. Replay reads the row instead of the
+body. A crash between admission and finish leaves the attempt unfinished, and
+the next owner re-executes it, which is why an irreversible action needs an
+idempotency key. See
+the durable execution model.
+
+### Retry bounds that survive restarts
+
+`RetryPolicy` is data: a `maxAttempts` count, a delay ladder, and an
+`expirationMs` schedule-to-close budget. Both survive process death, because
+the engine reads the attempt count and the first attempt's start time from the
+persisted rows rather than from memory. A restarted process resumes the ladder;
+it does not restart it.
+
+One budget is deliberately not durable. `suspendedRetryPolicy` bounds how long
+one caller polls a flow that is currently suspended. It is a per-caller polling
+budget, not a run-level retry bound, and a new caller starts a new one. See
+failure and retry.
+
+### Cache admission
+
+A recorded result is reusable only when the engine can prove the action was
+hermetic. Proof is evidence, not a promise: the boundary reports the read set
+it measured, the write set it observed, and whether the whole tree was
+verified. An action whose evidence is incomplete keeps its result run-local.
+
+Admission is first-writer-wins and content-addressed, so two runs that compute
+one key share one row. A conflicting write is journalled as
+`flows.engine.cache-conflict`; the core default is strict and fails the run.
+See the action graph.
+
+### Compensation tier
+
+`tier` states what the engine may do with an action after it has run.
+
+| Tier | Meaning |
+| --- | --- |
+| `sealed` | The body is hermetic and its result is cacheable under a proven boundary. |
+| `compensable` | The effect can be undone, and rewind runs the compensation the boundary recorded. |
+| `irreversible` | The effect cannot be undone. Give it an idempotency key before allowing retries. |
+
+Rewind uses the tier to decide what it may reverse: it audits the boundary
+records, compensates what is compensable, restores the workspace, and archives
+the truncated history. An irreversible effect is reported as a warning rather
+than silently repeated. See time travel.
+
+---
+
+## Concurrency
+
+Route: /concepts/concurrency
+
+> Concurrency that exists today: handler fibers, bounded fan-out, priority, durable races, queue workers, and run exclusion.
+
+This page explains concurrency that exists in flow handlers, actions, durable queues, ownership, and journal admission. It separates those mechanisms from the planned static graph scheduler.
+
+### Handler concurrency
+
+Use Effect combinators to express dependencies and concurrency:
+
+```ts
+const [checked, tested] = yield* Effect.all(
+  [typecheck, test],
+  { concurrency: 2 }
+)
+```
+
+The enclosing flow handler does not complete until both effects complete. Error and interruption behavior follows `Effect.all`; Smithers does not add an implicit “continue unrelated nodes” policy.
+
+Actions receive ordinals from a counter scoped to the action's **name**, not from one per-run counter bumped in fiber-arrival order (issue #73), and the name is folded into the ordinal step key. Two distinct actions running concurrently, `Effect.all([chargeCard, sendEmail], { concurrency: "unbounded" })`, therefore keep their identities no matter how a replay interleaves them. What remains order-sensitive: repeated invocations of the *same* action in one run are numbered in allocation order, and changing branch structure before an action can still change which invocation occupies which number. For cross-run cache reuse, or to pin identity across concurrent invocations of one action, declare a cache key input instead of relying on an ordinal.
+
+### Bounded fan-out and quarantine
+
+`@smthrs/patterns` supplies the two join policies a fan-out needs.
+
+`Bounded.all(members, { concurrency, priority? })` splits a named record into batches of `concurrency` and sequences the batches, so a plan states how many calls can be in flight. Members are ordered by priority, highest first, with declaration order breaking a tie. A member that carries its own `Node.priority` keeps it; the rest inherit the container's. Priority never enters key material, so raising it does not invalidate a cached step. `Bounded.run` is the Effect form and follows `Effect.forEach`: the first failure interrupts the members still in flight.
+
+`Quarantine.all(members, { policy })` chooses what a failing member does to its siblings. Under `quarantine` each member gains a recovery arm that succeeds with `{ _tag: "Quarantined", member, error }`, so the join returns a record of settled values and markers and no sibling is interrupted on another's behalf. Under `halt` the join is the ordinary one. `Quarantine.run` mirrors both, and `Quarantine.settle(result)` fails `PatternError { code: "quarantined" }` listing the isolated members when the caller wants halt-after-join.
+
+Quarantine isolates typed failures. A defect and an interruption still propagate, because neither is a result the flow declared.
+
+### Priority
+
+`Node.priority(node, n)` attaches a scheduling priority. A higher number goes first when more work is ready than the run has capacity for. Both node models carry it: `@smthrs/core` records it as the `Annotations.Priority` annotation for the plan-time surface `@smthrs/patterns` reads, and `@smthrs/plan` records it as a plain JSON field on the AST, because a stored plan has to keep it and a `Context` value is not serializable.
+
+`Graph.build` copies the value onto `NodeDraft.priority`, `Plan.compile` copies that onto the plan node, and `PlanScheduler` orders ready nodes by declared priority plus one aging point per capacity-constrained pass, so a low-priority node still runs rather than starving. Inheritance is lexical: a node takes the priority of the nearest enclosing node that declares one, and a node that declares its own keeps it.
+
+Priority changes latency and nothing else. It never enters key material, so raising it reorders work without invalidating a cached step. It does enter the plan digest, because the ordering is part of what a human approves.
+
+### Durable races
+
+`Action.raceAll` and `DurableDeferred.raceAll` preserve the flow abstractions while racing alternatives. They are distinct from a planned graph-level race node. Use them only when every loser has acceptable interruption semantics.
+
+### Queue workers
+
+`DurableQueue.worker` accepts a concurrency limit for persisted-queue processing:
+
+```ts
+const WorkerLayer = DurableQueue.worker(
+  CompileQueue,
+  ({ target }) => compile(target),
+  { concurrency: 4 }
+)
+```
+
+Queue persistence comes from Effect’s `PersistedQueueFactory`. The flow offers an item with a deterministic id, awaits a durable deferred token, and resumes after a worker records the handler exit.
+
+### Run and attempt exclusion
+
+Two storage protocols prevent concurrent duplicate ownership:
+
+- `RunStore` fences a run using a claim, owner identity, and heartbeat.
+- `AttemptStore` claims an individual `(runId, stepKey, attempt)` before an action executes.
+
+The protocols reject mismatched owners and stale snapshots. They do not provide distributed locking for arbitrary application resources.
+
+### Journal admission
+
+The SQL journal queue provides optimistic, non-blocking admission through `emitLossy` for telemetry, where loss is acceptable. Capacity limits bound queued events and bytes; excess input is rejected instead of waiting indefinitely. Lifecycle events use `emitDurable`, which commits inline and blocks until it does.
+
+Sequence allocation may produce holes when a reserved event is rejected or a transaction fails. Consumers must treat sequence numbers as ordered cursors, not contiguous counters.
+
+### Planned scheduler
+
+A resource-aware action scheduler, per-node concurrency ceilings, and first-class graph race/failure policies are **Planned**. Today, compose these constraints with Effect primitives and external worker configuration.
+
+See The action graph, Journal, and Failure and retry.
+
+---
+
+## Determinism and replay
+
+Route: /concepts/determinism-and-replay
+
+> The replay contract: what a flow body may do, how an action is memoized, and how replay differs from a time-travel projection.
+
+This page defines the replay contract for flow authors and engine implementers. It covers current handler re-execution, action memoization, suspension, and the distinction between engine replay and time-travel projection.
+
+### The replay function
+
+Conceptually, a handler should behave like:
+
+```text
+result = handler(encoded payload, recorded durable boundaries)
+```
+
+On resume, the durable engine:
+
+1. claims the run;
+2. decodes the original payload;
+3. starts the registered handler from the top;
+4. returns stored attempts and deferred completions at known boundaries;
+5. dispatches at the first boundary with no recorded result.
+
+Control flow is re-evaluated. It is not restored from a JavaScript stack snapshot.
+
+### Deterministic flow code
+
+Code between durable boundaries must produce the same control flow when given the same payload and recorded values. Do not use:
+
+- `Date.now()` or a process clock directly;
+- `Math.random()` or unseeded random values;
+- global mutable state;
+- unordered external reads;
+- changing environment variables;
+- Host operations outside an `Action`.
+
+Instead, run nondeterministic or effectful work inside a recorded action:
+
+```ts
+const ReadConfig = Action.make({
+  name: "config/read",
+  success: Schema.String,
+  tier: "sealed",
+  idempotencyKey: {
+    operation: "config/read/v1",
+    path: "/workspace/config.json"
+  },
+  execute: readConfigEffect
+})
+```
+
+The output may be nondeterministic. Replay safety comes from recording its encoded exit, not from requiring the output itself to be predictable.
+
+### Action identity
+
+For a sealed action with an `idempotencyKey`, the flow engine computes a cache key. A **string** is namespaced by the action name and declared schemas. An **object** is caller-owned canonical JSON and remains stable across action renames. The engine adds runtime environment and boundary facts separately.
+
+Sealed actions without a cache key input, plus compensable and irreversible actions, use an ordinal allocated from a counter scoped to the action's name, with the name folded into the key (issue #73). Concurrent actions of different names are therefore stable under any interleaving. Repeated invocations of one action are numbered in allocation order, so changing control flow before such a boundary can still change which invocation occupies which ordinal. Prefer stable cache key inputs for replayable reads.
+
+### Suspension
+
+When a durable deferred has no stored exit, `DurableDeferred.await` marks the flow suspended and interrupts the current flow fiber. `Flow.intoResult` converts the suspension interrupt into a `Flow.Suspended` value. The durable driver stores `suspended` and releases ownership.
+
+Completing the deferred persists its first result, records and flushes a journal event, then schedules a claim-gated wake. Re-execution reads the completion and proceeds.
+
+### Races
+
+`DurableDeferred.raceAll` checks for an already persisted winner before running a new `Effect.raceAll`. The first exit is written to a named deferred, so replay returns that exit instead of choosing again from new timing.
+
+The current public API does not expose a separate durable record for every losing branch. Do not assume loser outcomes are individually replayable.
+
+### Replay versus time-travel projection
+
+Two APIs use “replay” differently:
+
+- `EngineStore` replay re-runs a registered flow handler and returns stored boundaries.
+- `TimeTravel.inspect` is read-only. It folds committed journal entries up to a `Frame` and optionally resolves cache values. It never invokes a flow handler or action dispatcher.
+
+The latter is suitable for rebuilding a view or assessing a frame. It is not an engine resume.
+
+### Source changes
+
+There is no flow-source digest check. Existing action keys and ordinal positions determine what reuses recorded state after a code edit:
+
+- changed cache key input → new action result;
+- unchanged cache key input → existing result;
+- changed control flow around ordinal actions → potentially different ordinal mapping;
+- changed flow schemas → stored payload or result decoding may fail as a defect.
+
+Version flow tags, action bodies, and schemas deliberately when compatibility changes.
+
+---
+
+## Durable execution model
+
+Route: /concepts/durable-execution-model
+
+> What survives process loss, what is replayed, and where durability begins and ends.
+
+This page defines the runtime model implemented by `@smthrs/engine`, `@smthrs/engine-store`, and `@smthrs/journal`. It explains what survives process loss, what is replayed, and where the current durability boundary stops.
+
+### Core terms
+
+- A **flow** is a typed definition plus a registered Effect handler.
+- An **execution** is one flow invocation identified by `executionId`.
+- An **action** is a schema-encoded effect boundary with a stable key, attempt number, and durability tier.
+- A **run row** stores execution status, ownership, encoded payload, and encoded result.
+- An **attempt row** stores the state and outcome of one `(run, step-key digest, attempt)` tuple.
+- A **suspension** is a non-terminal result that releases run ownership until a wake resumes the handler.
+
+### The lifecycle
+
+```text
+pending → running → completed
+                  ↘ failed
+                  ↘ suspended → running
+                  ↘ cancelled
+```
+
+Only `running` runs have an owner. A driver reads the exact persisted snapshot, claims it, activates the claim, and maintains a heartbeat. Moving to `suspended` or a terminal status clears owner and heartbeat atomically.
+
+A run that reaches a terminal status also ends the children linked to it. The same transaction that writes `completed` or `failed` cancel-requests every attached descendant and leaves every detached one running, so a crash cannot commit a finished parent over a live child. See Subflows.
+
+All start and wake paths enter the same keyed `RunCoordinator`, so concurrent callers either join one local drain or race through the same database claim. A stale owner may be replaced only after its heartbeat is at least 30 seconds old. By default the expired lease is the whole answer, so a fresh process reclaims the runs of an owner that died without releasing them. A deployment that can probe the owner supplies `EngineStore.Options.isAlive` and the takeover waits for that probe to report the owner gone.
+
+### Replay from the top
+
+The registered handler is not serialized. On resume, the engine invokes it from the beginning with the persisted payload. Each durable boundary decides whether to return recorded state or do new work:
+
+```ts
+const handler = () =>
+  Effect.gen(function*() {
+    const first = yield* firstAction       // recorded attempt on replay
+    const signal = yield* DurableDeferred.await(gate) // suspends until completed
+    const frontier = yield* frontierAction // runs after the wake
+    return `${first}/${signal}/${frontier}`
+  })
+```
+
+This shape is adapted from the repository’s durable replay test. The local statement before the deferred executes again, but `firstAction` does not dispatch again; its recorded attempt is returned. After the deferred is completed and the run is reclaimed, `frontierAction` becomes live.
+
+See determinism and replay for authoring rules.
+
+### What is persisted
+
+With `EngineStore`, the following can outlive the driving fiber:
+
+- encoded flow payload and result;
+- run status, claim, owner, and heartbeat;
+- action attempts, checkpoints, outcomes, errors, and metadata;
+- journal entries;
+- shared cache entries.
+
+Deferred completions and clock deadlines pass through `DurableEngineState`.
+`DurableEngineState.layer` persists them in the journal-migrated SQL schema;
+`layerMemory` is available for deterministic tests. Re-registering a flow
+re-arms every pending absolute deadline and re-delivers claim-gated wakes for
+stored completions.
+
+Flow registrations, active fibers, the flow handler function, and the run coordinator’s active map stay in memory. A restarted process must reconstruct layers and register handlers before it can resume stored executions.
+
+### Execution IDs
+
+`Flow.execute` takes its ID from the first of three sources that has one:
+
+1. an explicit `executionId` supplied by the caller;
+2. an `idempotencyKey(payload)` declared by the flow;
+3. the ambient `Flow.CurrentExecutionIds` source.
+
+The default source derives the ID from the flow tag and the payload's RFC 8785 canonical form, so `yield* Flow.execute(payload)` runs without naming an ID and a re-drive of the same invocation lands on the same execution. It dies with `Flow.ExecutionIdRequired` before the engine is invoked when the payload has no canonical form.
+
+A host for which two equal payloads are two unrelated pieces of work installs its own source:
+
+```ts
+const layer = Flow.layerExecutionIds({
+  mint: (flow, payload) => Effect.map(currentSessionId, (session) => `${session}/${flow._tag}`)
+})
+```
+
+Reusing an ID with a different flow tag or encoded payload is rejected as a defect by the durable driver.
+
+### Durability is boundary-based
+
+Ordinary TypeScript and Effect combinators are not individually journaled. Durability attaches at:
+
+- `Action`;
+- `DurableDeferred`;
+- durable clocks;
+- durable queues built from deferreds and Effect’s persisted queue;
+- child flow execution, attached or detached;
+- explicit journal or time-travel effect boundaries.
+
+Calling an API, reading the filesystem, generating randomness, or consulting wall-clock time outside one of those boundaries can make replay diverge. Host services make these dependencies injectable, but injection alone does not record their results.
+
+### Current phase model
+
+The implemented library has definition, execution, and replay:
+
+1. definitions and layers are assembled in memory;
+2. the handler executes under a flow engine;
+3. a resume re-executes it against stored boundaries.
+
+A separate discovery phase, pure static planning phase, and serializable action-graph builder are **Planned**. The current runtime does not expose a plan value that enumerates every future action or cache hit before execution. See flows and the action graph.
+
+---
+
+## Durable waits and control
+
+Route: /concepts/durable-waits
+
+> Waits, signals, approvals, child flows, cancellation, and recovery: the six ways a run stops and starts again.
+
+A run that waits does not hold a process. It parks: the engine writes why it is
+waiting, releases ownership, and stops. Something else, a clock, a signal, an
+approval, a child flow, or an operator, makes it runnable again, and the next
+process to claim it replays the journal and continues from the frontier.
+
+This page covers the six ways that happens.
+
+### Waits
+
+| Primitive | Parks until |
+| --- | --- |
+| `DurableClock.sleep` | an absolute wake time passes |
+| `DurableDeferred.await` | another process completes the deferred's token |
+| `DurableQueue.process` | offered work settles |
+| `WaitFor.action` | a named signal arrives |
+| `WithApproval.withApproval` | a person approves or denies |
+
+Each writes a waiting row with a reason (`timer`, `event`, `approval`, or
+`quota`) and a wake time where one exists. `smithers ps --status parked` lists
+them, and `smithers status RUN_ID` says which primitive is holding the run.
+
+The wait is durable, not the caller. Nothing is lost when the process that
+started the run exits while it is parked.
+
+### Signals
+
+A signal is a named JSON payload delivered to a parked run.
+
+```bash
+smithers signal RUN_ID '{"name":"approved","payload":{"by":"ops"}}'
+```
+
+Delivery is durable and idempotent. The control plane persists the message,
+journals `control.signal.delivered`, and completes the deferred that
+`WaitFor` is holding, keyed by signal name. A run parked on `WaitFor` wakes
+within one heartbeat tick. The CLI derives its idempotency key from the run id
+and a digest of the payload, so two different signals to one run are two
+mutations and the same signal twice is one.
+
+### Approvals
+
+An approval parks the run as `waiting-approval` and records the exact payload a
+decision needs. Plan-level approval gates a `deployClass` flow before it
+launches; node-level approval gates one step inside a running flow.
+
+```bash
+smithers ps --status waiting-approval
+smithers approve '<payload>' --scope run
+```
+
+`--scope` is `once`, `run`, or `remembered`. The server stamps the acting
+principal; the client cannot claim one. Approving a node target resumes the
+parked run server-side, so a UI does not need a second call. See
+`Control.Approve`.
+
+### Child flows
+
+A child flow is a run with a durable parent edge. The default is attached: the
+caller waits for the result, and the parent's terminal transaction
+cancel-requests every attached descendant in the same write. Detached children
+are not available in this release; `ChildFlows` fails with a typed
+`unsupported` error rather than leaving an orphan.
+
+Cycles are impossible by construction. Recording the parent edge walks the
+child-to-parent chain inside one transaction and rolls back with
+`RunParentCycleError`. See child flows.
+
+### Cancellation
+
+```bash
+smithers cancel RUN_ID
+```
+
+Cancellation is durable and cross-process. The request is recorded on the run
+row whichever process owns the run, and the owning process delivers it within
+one heartbeat tick, interrupting the local fiber and cascading to every linked
+descendant. Cancelling a terminal run returns the terminal receipt and writes
+no event.
+
+Cancellation also reaches the operating system. Every child process the kernel
+spawner started runs in its own process group, and cancelling the run kills the
+group, including a child that ignores `SIGTERM`. What cancellation does not
+cover is a hard-killed engine: no durable process registry exists, so
+process groups outlive a `SIGKILL` of the engine itself and a restarted engine
+does not reap them.
+
+There is one cancellation path. `FlowRuntime.interruptUnsafe` on the durable
+engine fails with `unsafe_interrupt_unsupported` instead of forcing a stop
+without cleanup.
+
+### Recovery
+
+Recovery is a running engine process with the flow registered. There is no
+supervisor process: nothing in this release watches for an abandoned run and
+launches a process for it.
+
+What does happen automatically, in a process that is already running:
+
+- a one-second heartbeat renews ownership of the runs it drives;
+- runs whose heartbeat is older than 30 seconds are stale, and the sweep
+  re-drives up to 64 of them per tick through the ordinary claim path;
+- stealing a run requires liveness evidence, so a live peer keeps its run and
+  the second caller gets `ClaimLost`;
+- a wake for a flow the sweeping process has not registered logs one warning
+  per run and leaves the row parked.
+
+To resume a specific run by hand:
+
+```bash
+smithers run --resume RUN_ID
+```
+
+That is join-or-claim: it joins the owner when one is alive and claims the run
+when none is. Wakes published in another process land through the heartbeat
+sweep and the cancel poll, not through an event bus.
+
+---
+
+## Effect integration and error taxonomy
+
+Route: /concepts/effect-integration
+
+> How Smithers uses Effect services, layers, schemas, typed failures, defects, and interruption.
+
+This page explains how Smithers uses Effect services, layers, schemas, typed failures, defects, and infrastructure interruption. It covers the execution engine’s error model, not application-specific error design.
+
+### Effects are the dependency graph
+
+Flow handlers and actions are ordinary `Effect` programs. Required services remain visible in the environment type, and `Layer` values select implementations at the application boundary:
+
+```ts
+import { Action } from "@smthrs/flow"
+import { Context, Effect, Schema } from "effect"
+
+interface SourceFiles {
+  readonly read: (path: string) => Effect.Effect<string>
+}
+
+const SourceFiles: Context.Service<SourceFiles, SourceFiles> =
+  Context.Service("example/SourceFiles")
+
+const ReadSource = Action.make({
+  name: "ReadSource",
+  success: Schema.String,
+  execute: Effect.flatMap(SourceFiles, (files) => files.read("src/main.ts"))
+})
+```
+
+The `SourceFiles` requirement is part of the action’s type. It is supplied when the flow handler layer is assembled; it is not recovered from a global registry.
+
+### Schemas define durable values
+
+`Flow.make`, `Action.make`, and `DurableDeferred.make` take Effect schemas. The engine encodes payloads, successes, and expected errors before placing them in durable storage. A value that cannot be encoded is a composition or schema defect, not a replayable application result.
+
+Prefer small, explicit schemas whose encoded representation can remain compatible across deployments. Changing an action name or encoded schema can invalidate replay assumptions even when TypeScript still compiles.
+
+### Failure categories
+
+The runtime distinguishes these cases:
+
+| Category | Representation | Durable behavior |
+| --- | --- | --- |
+| Expected application failure | Action or flow error schema | Encoded in `Exit` and returned on replay |
+| Defect | Effect cause outside the error channel | Captured or allowed to die according to `Flow.CaptureDefects` |
+| Infrastructure interruption | `Action.InfraInterrupt` | Retried only when the action declares `interruptRetryPolicy` |
+| Suspension | `Flow.Suspended` result | Releases ownership and leaves the run resumable |
+| Composition failure | `EngineStore.EngineCompositionError` | Indicates missing or incompatible engine services |
+| Permission denial | `Permission.PermissionError`, or `PlatformError` carrying it | `Jj` and `HttpClient` fail with the typed kernel failure directly; Effect-owned tags (`FileSystem`, `ChildProcessSpawner`) surface a `PlatformError` with reason `PermissionDenied` whose `cause` is recovered via `Permission.fromPlatformError` |
+
+`Action.InfraInterrupt` is deliberately narrower than cancellation. An exhausted infrastructure retry schedule becomes a defect:
+
+```ts
+import { Action } from "@smthrs/flow"
+import { Effect, Schedule, Schema } from "effect"
+
+const FetchInput = Action.make({
+  name: "FetchInput",
+  success: Schema.String,
+  execute: Effect.fail(new Action.InfraInterrupt({ reason: "worker lost" })),
+  interruptRetryPolicy: Schedule.recurs(3)
+})
+```
+
+### Runtime references
+
+`Action.CurrentAttempt` exposes the one-based durable attempt selected by the engine. `Action.CurrentOrdinal` carries the stable per-run ordinal used when deriving an ordinal step key. These are `Context.Reference` values; application code normally uses the action helpers instead of setting them.
+
+`Flow.CaptureDefects` and `Flow.SuspendOnFailure` are also context references. Treat overrides as engine policy because they change which outcomes are terminal.
+
+### Host effects and permission effects
+
+The `@smthrs/platform-*` packages provide raw platform capabilities. `@smthrs/kernel` owns the closed list of ports and provides decorated services that check an exact capability through `GrantStore` before delegating. Applications should expose the kernel service to untrusted flow code and keep the raw service at the composition boundary.
+
+See Hosts and capabilities, Failure and retry, and the `@smthrs/flow` reference.
+
+---
+
+## Failure and retry
+
+Route: /concepts/failure-and-retry
+
+> Flow outcomes, action attempts, retry policy, error boundaries, sagas, and the waits that are not failures.
+
+This page describes the retry and terminal-failure rules implemented by flows, actions, run ownership, and time-travel recovery. It does not define a flow-wide graph failure scheduler, which is planned.
+
+### Flow outcomes
+
+A handler completes with an encoded success or expected failure, or returns `Flow.Suspended`. The durable engine persists the decision and updates the run row. A suspended run may be resumed explicitly, by deferred completion, by a clock, or by completion of an attached child flow.
+
+`Flow.SuspendOnFailure` can convert a handler failure into suspension. `Flow.CaptureDefects` controls whether defects are captured into the flow result. These references should be set centrally; changing them between replays changes runtime policy.
+
+### Action attempts
+
+Each durable attempt is addressed by:
+
+```text
+(runId, Sha256(stepKey), attempt)
+```
+
+`Action.retry` increments `Action.CurrentAttempt` and delegates scheduling to Effect:
+
+```ts
+import { Action } from "@smthrs/flow"
+const result = yield* Action.retry(
+  WriteArtifact,
+  { times: 4 }
+)
+```
+
+The engine claims an attempt row before execution. A previously completed attempt is decoded and replayed. A conflicting active attempt is rejected or suspended according to persisted state; it is not silently run twice.
+
+### Pattern retry
+
+`@smthrs/patterns` `WithRetry` decorates a flow declaration with the retry policy and supplies the Effect that performs it. The option names match `RetryPolicy`, so a pattern policy and an engine policy translate one to one.
+
+```ts
+import { WithRetry } from "@smthrs/patterns"
+
+const resilient = WithRetry.withRetry(Publish, {
+  attempts: 4,
+  backoff: { initialMs: 100, factor: 2, maxMs: 250 },
+  nonRetryable: ["examples/Fatal"]
+})
+```
+
+The delay before attempt `n + 1` is `min(initialMs * factor^(n - 1), maxMs)`, so the ladder above waits 100 ms, 200 ms, then 250 ms. There is no jitter: a declaration built twice describes the same waits. The decorator refuses a backoff it cannot use: `initialMs` must be positive and finite, `factor` at least 1, and `maxMs` at least `initialMs`. A failure whose `_tag` appears in `nonRetryable` ends the sequence on its first occurrence, whatever the attempt budget allows.
+
+`attempts`, `backoff`, and `nonRetryable` all enter the decorated flow's name and key material, so changing a policy produces a different declaration rather than reusing the old one's cached steps.
+
+`WithRetry.retryEffect` performs the retry at the Effect boundary. Fiber interruption is not a typed failure, so cancelling a run never consumes an attempt.
+
+### Error boundaries
+
+`@smthrs/patterns` `TryCatchFinally` composes the three arms an error boundary needs: a protected body, a recovery arm filtered by error schema, and a finalizer.
+
+```ts
+import { TryCatchFinally } from "@smthrs/patterns"
+
+const guarded = TryCatchFinally.run(request, {
+  try: (request) => publish(request),
+  catchErrors: (error) => error._tag === "Timeout",
+  catch: (error) => Effect.succeed(retryLater(error)),
+  finally: () => releaseLock(request)
+})
+```
+
+The finalizer runs after success, after recovery, after a failure no handler claimed, and after interruption. A finalizer that fails on its own raises `PatternError { code: "finalizer_failed" }`. A body failure outranks a finalizer failure, so cleanup trouble never hides the reason the body failed.
+
+`TryCatchFinally.make` declares the same boundary as topology: one `Catch` carrying the filter schema, and a finalizer call on both the settled arm and the unhandled arm. The unhandled arm ends in `Node.fail`, which states that the finalizer cleans up and hands the failure back.
+
+### Sagas
+
+A saga answers "the third call failed and the first two already changed the world". `@smthrs/patterns` `Saga` pairs each forward step with the call that undoes it and unwinds in reverse.
+
+```ts
+import { Saga } from "@smthrs/patterns"
+
+const booked = yield* Saga.run(order, {
+  steps: [
+    { id: "hold", action: holdSeat, compensation: releaseSeat },
+    { id: "charge", action: chargeCard, compensation: refundCard },
+    { id: "ticket", action: issueTicket, compensation: voidTicket }
+  ],
+  onFailure: "compensate"
+})
+```
+
+`onFailure` picks what a step failure does to the completed work, and defaults to `compensate`:
+
+| Policy | Behavior |
+| --- | --- |
+| `compensate` | Unwind, then return `{ compensated: true, failure }` |
+| `compensate-and-fail` | Unwind, then re-raise the original failure |
+| `fail` | Leave the completed work alone |
+
+`run` registers one scope finalizer per completed step, so the unwind is LIFO and runs on interruption as well as on failure. A compensation that fails does not stop the ones behind it: every failing step id is collected and the run fails `PatternError { code: "compensation_failed" }` naming them, because state left dirty outranks the failure that started the unwind. A compensation that dies counts as a failed compensation, so a defect inside an undo never hides the residue or the failure that started the unwind.
+
+`Saga.make` declares the same shape as topology: one `Catch` per step whose arm calls that step's compensation and re-raises, so the plan lists the compensation calls in reverse order before anything runs.
+
+### Waits that are not failures
+
+A provider that answers `rate_limited` or `quota_exceeded` is not reporting a
+defect: it is naming a time to come back. A model-backed step
+(`@smthrs/agent/AgentAction`) treats a classified refusal as a wait rather than
+an attempt:
+
+- `QuotaPolicy` decides whether the refusal names a deadline and what that
+  deadline is, and refuses to park at all beyond its configured ceiling.
+- The park is a durable suspension under `annotateWaiting({ reason: "quota" })`,
+  so a supervisor sees a parked run with a wake time.
+- The retry is `Action.retry`, so it runs as a NEW attempt of the same step and
+  the step's own correction budget is untouched.
+
+The engine records a provider refusal as the model step's result, which is what
+makes a replay free. A quota refusal is the exception: it says nothing about the
+request, so it fails the sealed action instead of being recorded, and no cache
+row outlives the window.
+
+Spending is bounded separately. `@smthrs/agent/Budget` accumulates token usage
+across a run's model calls, keyed by each step's content key so a replayed step
+counts exactly once, and refuses, warns, or latches before the next call
+according to the policy an approved `Envelope.budget` carried.
+
+### Tiers
+
+| Tier | Meaning | Retry rule |
+| --- | --- | --- |
+| `sealed` | Intended to execute inside a declared hermetic boundary | Cacheable only with hard-boundary evidence and no deviation |
+| `compensable` | External state may be restored | Engine records snapshot/diff metadata around the attempt |
+| `irreversible` | External state cannot be rolled back safely | Any attempt after attempt one requires an idempotency key |
+
+An irreversible retry without an idempotency key fails with `IrreversibleRetryRequiresIdempotencyKey`. The key may be a string or a caller-owned canonical JSON object.
+
+### Ownership recovery
+
+Runs use a two-stage `claim` then `activate` protocol. Active ownership is fenced by owner identity and heartbeat time. A worker may take over a stale run only with explicit `Ownership.LivenessEvidence`; elapsed wall time alone does not prove that an owner is dead.
+
+The default heartbeat interval is one second and the stale threshold is 30 seconds. These exported values are protocol defaults, not a promise that every deployment can safely infer death at 30 seconds.
+
+### Recovery utilities
+
+`@smthrs/time-travel` exposes one injectable service, `TimeTravel`, and the recovery machinery sits behind it:
+
+- `TimeTravel.rewind` performs a fenced, audited rewind protocol, including the bounded retry that blocks unsafe irreversible reattempts.
+- Compensation assesses and invokes registered rollback handlers as part of that protocol.
+- Building `TimeTravel.layer` completes or rolls back interrupted rewind audits, so startup recovery is never a call the application makes.
+
+The service requires boundary records and store integration supplied by the application. The engine does not create all time-travel records automatically today.
+
+### Planned graph policy
+
+Failure policies such as fail-fast, continue independent branches, quarantine a node, and retry a graph sub-tree are **Planned**. Current concurrency uses ordinary Effect composition, so branch failure semantics are the semantics of the chosen Effect combinator.
+
+See Concurrency, Time travel, and Determinism and replay.
+
+---
+
+## Hosts and capabilities
+
+Route: /concepts/hosts-and-capabilities
+
+> The closed host surface, the permission kernel that decorates it, and the transaction that captures a hermetic boundary.
+
+This page describes the portable host surface and the permission kernel that mediates side effects. It covers engine-facing filesystem, process, network, and workspace operations, not higher-level application policy.
+
+### The closed host surface
+
+`@smthrs/kernel` owns the closed list, `HostServiceTags` and `HostServiceIds`, of these protected services:
+
+- Effect `FileSystem`
+- Effect `Path`
+- Effect `ChildProcessSpawner`
+- `Jj` (contract in `@smthrs/jj`)
+- Effect `HttpClient`
+
+Four of the five slots hold Effect's own tags. Smithers used to define a `Shell` service in the third slot; it was `effect/unstable/process` with fewer features, so it was deleted and the slot now holds `effect/process/ChildProcessSpawner` (see design decisions). The fifth slot went the same way: a Smithers-defined one-hop `HttpTransport` was deleted in favour of `effect/HttpClient`. Smithers supplies implementations of both, Node, Bun, an in-browser one, and a remote one, and adds only the capability check.
+
+The list is closed, not the package: `Jj` ships as its own package so a consumer that only needs that capability does not take the whole host surface. The contract stays in `@smthrs/jj`; the kernel decorates that same tag (and re-exports it for convenience) rather than declaring a second one, and the composite bundles (`NodeHost`, `BunHost`, `BrowserHost`, `TestHost`) provide all five tags. There is no pseudo-terminal service: interactive-terminal support is out of core by design (see design decisions).
+
+Clock and Random are tracked as host built-ins. This workspace ships Node,
+Bun, browser, and deterministic test layers for the same service tags.
+Cloudflare and Vercel adapters live in the separate
+[plugins repository](https://github.com/smithersai/plugins). Unsupported
+operations fail through their service contract; they should not disappear
+from the environment type.
+
+Host bundles provide an `HttpClient` that never follows a redirect on its own: the fetch layers are configured with `RequestInit { redirect: "manual" }`, and Undici installs no redirect interceptor. Redirect following belongs *above* the kernel's guard: the decorator composes Effect's own `HttpClient.followRedirects` over the checked client, so every network hop is authorized independently.
+
+### Kernel decoration
+
+The kernel decorates each service tag in place, a middleware `Layer` over the very tag the platform adapter provides, so there is no second "protected" tag to reach around. Each decorator:
+
+1. derives an exact `Capability`,
+2. asks `GrantStore` to authorize it,
+3. calls the raw platform port only when allowed.
+
+Where Effect owns the tag (`FileSystem`, `ChildProcessSpawner`) the error channel stays `PlatformError`: a refused operation surfaces with reason `PermissionDenied`, and the structured kernel failure rides on its `cause`, recoverable with `Permission.fromPlatformError`. `HttpClient` does the same in Effect's network channel: a refusal is an `HttpClientError` whose reason is a `TransportError` carrying the kernel failure on `cause`, recoverable with `HttpClient.fromHttpClientError`. Where Smithers owns the service (`Jj`) the interface names `Permission.PermissionError` directly.
+
+The `Jj` slot carries two optional operations, `root` and `revert`, checked as `jj:root` (sealed) and `jj:revert` (compensable). The decorator forwards their absence: a backend that cannot revert keeps reading as one, because a caller deciding what it can offer needs "this host has no revert" and not "your revert was refused".
+
+For a spawn, the exact capability is `proc:spawn` with `CommandLine.render(command)` as its resource: the same string a browser interpreter or a remote sandbox is handed for supported commands, so a grant and the thing it authorizes cannot drift apart. A custom shell path is included explicitly in the resource; adapters that cannot select it reject the command.
+
+```ts
+import { Capability, Permission } from "@smthrs/kernel"
+
+const rule = new Permission.Rule({
+  effect: "allow",
+  pattern: new Capability.CapabilityPattern({
+    action: "fs:read",
+    resource: "/workspace/**"
+  })
+})
+```
+
+Capability matching normalizes path separators and matches the whole resource. `Capability.subsumes` is deliberately conservative: it returns `false` when containment cannot be proven syntactically.
+
+### Ambient authority
+
+`CapabilitySet` represents the current envelope. Nested code can only narrow authority by intersection; it cannot widen the set inherited from its caller. `Workspace` provides the root used to resolve and normalize path capabilities.
+
+Pure path manipulation is not permission-checked. Filesystem access derived from a path is.
+
+### Grant stores
+
+`GrantStore` supports `once`, `run`, `remembered`, and `deny` resolutions. `JournalGrantStore` persists grant events in the engine journal. `makeNoop` is an explicit allow-all seam, and test grant layers provide scripted behavior; a production deployment should install a deliberate policy.
+
+The kernel is a capability check, not an operating-system sandbox.
+
+### Process containment
+
+A capability check decides whether a process may start. Containment decides what happens to it when the run that started it stops, and that is a separate mechanism with a separate failure mode.
+
+Cancellation already cascades: the engine interrupts the run fiber, the fiber closes the action scopes, and Effect's spawner signals the child a scope owned. Two gaps sit under that. Effect signals once and then waits for the exit, so a child that traps `SIGTERM` parks the releasing fiber and the run never reaches `cancelled`. And a host killed outright runs no finalizer at all, so every process it started keeps running with nobody left holding a handle.
+
+`@smthrs/kernel`'s `ContainedSpawner` closes the first gap by giving every command it spawns an escalation deadline, `SIGTERM` and then `SIGKILL` after `graceMs`. It closes the second by writing each spawn to the `ProcessLedger`. Ledger records are ownerless journal entries on the run `flows.host:<hostId>`, so the next incarnation of the same host replays them, subtracts the exits, and learns which process groups an owner it can prove is dead abandoned. `@smthrs/platform-node`'s `ProcessReaper` kills those groups on host start and journals the reap.
+
+A spawn whose record did not commit is refused rather than started: the child is signalled and the caller is told. A ledger that quietly degraded to memory would leave exactly the child nobody can find, which is the case containment exists for.
+
+The reaper is deliberately hard to convince. A stored pid outlives the process that wrote it and the operating system reuses the number, so a record is signalled only when its owner is provably gone (`ESRCH`, never `EPERM`), its group is not this host's own, it was written during this boot, and the pid's start time still matches the record. Anything else is retired with `flows.host.process-reap-skipped.v1` and nothing is signalled; a kill that fails retires nothing at all, so the next incarnation tries again.
+
+The engine gains no hook. Containment is entirely a host concern: the kernel records pids and process groups and knows nothing about runs, attempts, or ownership fences, and the platform bundle sends the signals. `jj` is contained the same way, because `NodeHost.layerContained` builds the `Jj` service over the contained spawner instead of letting it start children of its own. A remote sandbox reaches the same outcome through its provider's `kill`, described in the `@smthrs/sandbox` reference.
+
+Containment is not confinement. It ends processes this host started and recorded; it does not stop a process from double-forking out of its group or from being started by something other than the guarded spawner.
+
+### Boundary capture: hermetic execution as a transaction
+
+Hermetic execution needs more than a capability check: it needs to know what a
+body *actually* read and wrote. Two contracts split that job:
+
+- `StepBoundary` measures the
+  declared read set before the body runs, captures the declared write set's
+  post-state afterwards, and re-materializes those outputs on a cache hit. It
+  can only look at paths it was told about.
+- `WorkspaceSandbox` runs the
+  body in an isolated **workspace transaction** instead. The transaction is
+  seeded with exactly the declared read set: an undeclared file is not there
+  to read, which is `docs/specs/Concepts/Effect Taxonomy.md`'s strong
+  enforcement tier, and the body's writes accumulate in the transaction rather
+  than on the host. Settlement is a whole-map diff, so "did this body write
+  outside its declared write set" is a comparison rather than an inference.
+
+The host is untouched until `materialize`, a compare-and-set on every changed
+file's pre-image that applies the whole diff bundle or none of it. That is why
+a sealed action composed this way may enter the shared step cache: its
+evidence carries whole-tree write verification honestly. It is also why writes
+reach the host at exactly one place, which is where the human diff-review gate
+of `docs/specs/Concepts/Diff Review.md` will attach.
+
+The transaction is a **deterministic transaction model, not a security
+boundary**. A body that reaches the host through a service the transaction does
+not seed, a spawned native process, an undecorated socket, is outside it.
+Actually denying that ambient access is the VM/`SandboxProvider` provisioning
+story in `docs/specs/Concepts/Agent Adapters.md`, and it is future work.
+
+### Adapter limitations
+
+- The browser layer wraps an injected ZenFS-like promises API and an injected just-bash interpreter, which must be mounted on the *same* filesystem.
+- The browser spawner is buffered, cannot take stdin or be killed, and rejects custom shells, detached processes, and configured extra file descriptors rather than silently dropping them.
+- Browser `Jj` has a real implementation: `@smthrs/jj/browser/BrowserJj`'s `layer({ fs, wasm })` drives jj-lib compiled to `wasm32-wasip1` over an injected virtual filesystem. `layerUnsupported` remains exported for a host that ships no wasm module; it fails in the error channel rather than omitting the tag, but the `BrowserHost` bundle wires the real layer: `layer({ bash, fs, jj })` takes the compiled module and the sync slice of the same mount, and a jj-less host is an explicit page choice, never the bundle's silent default.
+- Hosted-adapter behavior and limitations are documented with those adapters
+  in the external plugins repository.
+
+See the `@smthrs/jj` and
+`@smthrs/sandbox` references, and the
+`@smthrs/kernel` reference.
+
+---
+
+## Journal
+
+Route: /concepts/journal
+
+> The durable event journal and the run, attempt, and cache stores beside it: semantics, invariants, and ordering.
+
+This page explains the durable event journal in `@smthrs/journal` and the adjacent run, attempt, and cache stores in `@smthrs/run-store` and `@smthrs/step-cache`. It focuses on semantics and invariants; the package reference lists exact exported types.
+
+### Open event envelope
+
+A submitted event contains:
+
+```ts
+const input = Schema.decodeUnknownSync(JournalEvent.Input)({
+  runId: "run-42",
+  sourceId: "worker-a",
+  sourceSeq: 0,
+  eventType: "example.completed",
+  payload: { value: 42 },
+  meta: { lineageId: "root" }
+})
+```
+
+The journal does not define an application-wide event union. `eventType`, `payload`, and `meta` remain open so engine, permission, time-travel, and application events share one ordering substrate.
+
+### Two sequence domains
+
+Each committed entry has:
+
+- `seq`: canonical order within one run;
+- `sourceSeq`: producer-local idempotency order within `(runId, sourceId)`.
+
+`makeEventId(runId, sourceId, sourceSeq)` deterministically encodes the producer identity. An exact retry returns `Duplicate` with the original `seq`. Reusing that identity with different event content fails with `idempotency_conflict`.
+
+There is no global order across runs.
+
+### The journal is intended to be flows' authoritative logical WAL
+
+The journal is flows' own logical (domain) write-ahead log: run decisions, attempt lifecycle, deferred completions, clock schedules, permission decisions, and cache provenance. It is intended to become the authoritative state history. The SQLite or PostgreSQL WAL underneath it is only the storage durability substrate; it is never read as the application event API.
+
+The rule that follows is that **a durable boundary may not advance the run or expose its result until the corresponding logical WAL entry is committed**. `emitDurable` allocates inside the write transaction and returns a receipt that is already committed.
+
+A local commit is not remote atomicity. No journal write makes an external effect atomic with it, so effects outside the database still carry idempotency keys, fencing tokens, or a declared compensation.
+
+### Optimistic admission (only telemetry may accept loss)
+
+`SqlJournal.emitLossy` validates, allocates both sequences, and attempts a non-blocking bounded queue offer. It returns before SQL commits.
+
+An `Accepted` receipt from that queue means only that the event entered the writer queue. It does not mean the row is durable, and a crash can lose it. `emitLossy` is **lossy by construction and off the critical path**; nothing may be reconstructed from it and no correctness argument may cite it. Lifecycle callers use `emitDurable`.
+
+Overflow policy is explicit:
+
+| Policy | Full queue behavior |
+| --- | --- |
+| `reject` | fail with `queue_overflow` |
+| `drop-newest` | return `Dropped` |
+| `drop-oldest` | evict one queued event and return `Accepted` with eviction evidence |
+
+Rejected and dropped admissions consume sequence numbers, so gaps are valid. Consumers must follow declared covered intervals rather than assuming adjacent persisted entries have adjacent sequence values.
+
+### Writer and streams
+
+A single scoped writer persists batches transactionally through `DurableWriter.write`. Committed inserts publish to:
+
+- the general `changes` subscription;
+- per-run wake channels used by `stream`.
+
+`Journal.stream({ runId, afterSequence })` first reads durable history, then follows committed changes. `project` scans that same stream with an effectful deterministic reducer. Projections have no separate durable state.
+
+### Run store
+
+`RunStore` is synchronous control state, not an event-derived projection. Its compare-and-swap outcomes make contention explicit:
+
+- claim and activation;
+- generation-fenced claim abandonment and stale-claim recovery;
+- owner heartbeat;
+- owned status transition;
+- stale-owner steal with liveness evidence.
+
+Ownership decisions write rows directly. Journal events may describe those decisions, but the journal is not consulted to decide who owns a run.
+
+### Attempt store
+
+An attempt address is `(runId, stepKeyDigest, attempt)`. Mutations are fenced by the currently running run owner.
+
+Attempt heartbeats may include a JSON checkpoint up to 1 MiB. Omitting a checkpoint preserves the previous checkpoint. The first fenced terminal transition wins; later finish calls observe `StateChanged`.
+
+### Cache store
+
+`CacheStore` maps a digest to a JSON result, opaque JSON metadata, creation time, and journal provenance. Writes are first-writer-wins:
+
+- equal content → `ExistingSame`;
+- different content → `Conflict`;
+- no row → `Inserted`.
+
+`@smthrs/engine-store` decodes the step key through the injected `Sha256` transformation to obtain the cache address. It admits only hard, deviation-free sealed boundaries.
+
+### Migrations
+
+`Migrations.run` creates:
+
+- `flows_journal_events`;
+- `flows_runs`;
+- `flows_attempts`;
+- `flows_step_cache`;
+- `flows_deferred_completions`;
+- `flows_clock_deadlines`;
+- migration bookkeeping.
+
+Time-travel tables use a separate migration in `@smthrs/time-travel`.
+
+### State authority, and how the log stays consistent with it
+
+`RunStore`, `AttemptStore`, `CacheStore`, and `DurableEngineState` hold the **executable authoritative state**. No engine state is derived from journal entries; the entries explain what happened, the rows decide what happens next.
+
+The two are nevertheless committed together. Engine-store writes every lifecycle event with `emitDurable` **inside `Journal.transact`**, the write transaction that also carries the state transition it describes: the run-row compare-and-swap with its decision, the attempt write with its attempt event. Those stores use the same `DurableWriter`, so their writes join that transaction as savepoints: either both halves are durable, or neither is. A crash can no longer leave durable state the journal does not explain, which is what lets audit, sync, and time travel treat the log as the account of record.
+
+Of the two shapes this could have taken, deriving the store rows from the log, or committing the state projection and its entry in one transaction, Smithers took the second. It is the smaller change: the executable rows keep their fenced CAS semantics, and no read path has to be rebuilt on projection.
+
+Two consequences to plan for. Publication follows the commit, so an entry becomes visible on `changes`/`stream` only after the outermost transaction commits. And the unit is all-or-nothing: a crash before COMMIT loses the whole unit, so work that had already run, an action body, for instance, re-executes on the next drive. Local commit is still not remote atomicity: external effects need idempotency keys, fencing tokens, or compensation.
+
+### Operational rule
+
+Use `emitLossy` only for telemetry where a drop is acceptable. Put anything that authorizes work or is required for recovery on `emitDurable`. A dropping queue cannot serve as the durable source of permission grants, deferred completion ordering, or time-travel audit.
+
+---
+
+## Step keys and content addressing
+
+Route: /concepts/step-keys
+
+> How a step key is computed, what goes into it, and why the engine owns that policy rather than the hashing library.
+
+`@smthrs/keys` only provides the generic `Key` transformation. `@smthrs/crypto` provides SHA-256. The engine owns the policy deciding what data is hashed.
+
+For a sealed action with an `idempotencyKey`, the engine hashes:
+
+```typescript
+{
+  kind: "cache",
+  input: callerIdentity,
+  environment: { layers, capabilities },
+  boundary?: { readSet, writeSet, boundaryMode }
+}
+```
+
+An object identity is caller-owned. A string identity is first combined with the action name and declared schemas. The engine always adds the complete cache environment and any filesystem boundary itself.
+
+When no complete cache environment is provided, `kind` becomes `"run"` and the current run ID is included. This permits replay within that run without claiming the result is safe to reuse elsewhere.
+
+A declaration may narrow how far its recorded result travels with the `CachePolicy` annotation from `@smthrs/flow/CacheEnvironment`, which `@smthrs/patterns`'s `WithCache` attaches for a plan-time declaration. Scope is key material: `shared` folds nothing and keeps the content address the engine already derived, `run` folds the run ID, and `flow` folds the executing flow's tag. A narrowed step therefore addresses a digest no sibling derives, rather than relying on a read-time filter a second reader could disagree with. The same annotation's `ttlMs` bounds the age of a row the engine serves. The verdict is journalled before it is acted on, under a producer identity naming the run, the step key, the decision, and the row's recorded provenance, never the process that took it, so a replay, including one driven by the engine that resumed the run under a different journal source, reads the recorded decision instead of re-judging the age against a fresh clock. Past the bound the engine also journals the row's age, evicts it, and dispatches again.
+
+Compensable, irreversible, and keyless actions receive engine-private invocation keys containing the run ID, allocation scope, ordinal, and durability tier.
+
+All values are canonicalized through [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html) and hashed with injected Effect `Crypto`.
+
+---
+
+## Subflows
+
+Route: /concepts/subflows
+
+> How a flow starts another flow, what happens to the child when the parent ends, and how lineage is recorded.
+
+This page explains how a flow starts another registered flow, what happens to that child when the parent ends, and how a fire-and-forget child is started, steered, and collected later.
+
+Every subflow is a separate durable run. It has its own run row, its own ownership claim, its own journal entries, and its own action attempts. Nothing about a subflow is a fiber.
+
+### Attached children
+
+A flow handler executes another flow with an explicit child execution id:
+
+```ts
+const childResult = yield* Compile.execute(
+  { target: "server" },
+  { executionId: `${parentExecutionId}/compile` }
+)
+```
+
+When `EngineStore` sees that execution inside a running flow, it:
+
+1. records a durable parent edge in `flows_run_parents`, rejecting a cycle inside the same transaction,
+2. creates or reuses the child run, storing the parent execution id on it,
+3. suspends the parent while the child is unsettled,
+4. resumes the parent once the child reaches a terminal result.
+
+Re-executing the parent observes the persisted child result instead of starting a second child under the same execution id.
+
+### What happens to a child when its parent ends
+
+Each child records `onParentExit` for itself when it is spawned, and the parent applies it. There are two values:
+
+| Value | Recorded when | The parent's exit |
+| --- | --- | --- |
+| `cancel` | the caller waits for the child's result | The child is cancel-requested in the parent's own terminal transaction. |
+| `detach` | the caller discards the result | The child is left running and reported in the journal. |
+
+The default is `cancel`, including for a child row written before the field existed. An attached child exists because something is waiting for it, so a parent that stops waiting (because it completed, failed, or was cancelled) leaves nothing behind.
+
+Three things are governed separately:
+
+- **Terminal exit.** A run that settles `completed` or `failed` walks the durable edge table, cancel-requests every attached descendant transitively, and stops at each detached child without walking its subtree. The requests commit in the same transaction as the parent's terminal row, so a crash cannot leave a completed parent over a live child. The walk journals `child-policy-applied` with the runs it cancelled and the runs it left alone, and journals nothing when the run had no linked child.
+
+  The parent writes a durable cancel REQUEST, not the child's terminal row. Ownership fencing forbids a parent writing state for a run another driver owns, so the child's own driver settles the request at its next boundary, and a child whose owner is gone is settled by the stale-run sweep once that owner's lease expires. Nothing external is called: the request and the settlement are both engine work.
+- **Cancellation.** A cancelled run cascades to every linked descendant, detached ones included. An operator who cancels a run is asking for the subtree to stop, and a child does not opt out of that.
+- **Handoff.** A round that hands off to the next round of its lineage is not an exit. The lineage continues, so its children continue with it.
+
+A child linked to a parent that had already exited inherits the same decision at admission: the parent's walk ran before the edge existed, so the child applies its own recorded policy inside the transaction that made it a child.
+
+### Detached children
+
+`@smthrs/agent` exposes the detached lifecycle as three ordinary flows a cell calls by name. `ChildFlows` declares `agent/spawn`, `agent/send`, and `agent/await`, and `EngineChildren` implements them over a durable engine:
+
+```ts
+import { EngineChildren } from "@smthrs/agent"
+
+const children = EngineChildren.layer({ flows: [Reviewer, Builder] })
+```
+
+- `spawn` starts the named flow as a discarded execution under the calling run, which is what records `onParentExit: "detach"`. It answers once the child's run row exists durably, so the id it returns names something a later process can find. The child's id is derived from the caller and the label (`<parent>/child/<label>`), so a re-driven parent spawns the same child rather than a second one, and two concurrent children need two labels.
+- `await` reads the child's settled result out of the run store. It works from another engine, another process, and a later incarnation, because it reads durable state rather than a fiber. It waits by re-reading the child on an interval rather than parking the caller, so the calling round stays open while it waits.
+- `send` steers the child through `Control.steer`, which admits a durable `human-steer` message the child drains at its next turn boundary. The message id is the calling step's key: the parent's execution id folded with an ordinal counted inside the enclosing dispatch. A re-driven round re-derives the same key, so the control plane admits the message once; and because the ordinal is scoped to the dispatch, a send made after a park cannot take the number of a send the engine replayed instead of running. The message itself is replay-stable too: `send` reads its timestamp inside a sealed step, so a re-drive submits the message it submitted before rather than a new one under a used key. `send` then answers from the receipt. `Accepted` and `AlreadyApplied` both mean the child has the message exactly once and report `delivered: true`. Any other receipt fails the call with `ChildError { code: "failed" }`, because the message was not admitted: `Conflict` names the key that already carries different words, and `Terminal` says the child ended first.
+
+`EngineChildren` depends on three services and no engine internals: `FlowRuntime` starts and polls executions, `RunStore` says whether a child exists, and `Control` steers one. It reads the child's flow name out of the one public field `RunStore.RunRow.stateJson`, projected to that single key.
+
+A host without a durable engine supplies `ChildFlows.makeNoop`, whose refusals (`ChildError { code: "unsupported" }`) the cell can see and route around. `ChildError` reports `not_found` for a flow this host does not run, for a start attempt that ended without creating a run row, and for a child id that names nothing; `failed` for a child that ended without a value, for a start that neither created a run nor ended inside its budget, and for a control plane that refused the message, whether by failing outright or by answering with a receipt that is not a delivery.
+
+### Identity requirements
+
+Every flow execution needs either an explicit `executionId` or a flow-level `idempotencyKey` `Flow.executionId` can derive one from. For a child, derive the id from stable parent input. An id derived from timing, randomness, or branch scheduling is not replay-safe.
+
+### Interruption
+
+The engine contract exposes `interrupt` and `interruptUnsafe`. The memory engine lets `interrupt` resume cooperatively so flow cleanup can run, while `interruptUnsafe` interrupts its fiber. The durable engine has one cancellation path: `interrupt` is durable, and `interruptUnsafe` fails with `unsafe_interrupt_unsupported` rather than forcing a stop without cleanup. That one path, and that path cascades over `flows_run_parents`: a cancellation observed from durable state (another CLI, another worker, a lease recovery) reaches every linked descendant, whether or not the observing process ever spawned them.
+
+### Lineage
+
+The parent edge is durable, so lineage survives a restart and is visible to every owner process. The time-travel store represents `child`, `fork`, and `continuation` edges as one tree: fork edges come from its own edge table, child edges from the parent journal's spawn record, and continuation edges from the `handed-off` run decision of the round that advanced. Rewind has policy for detached descendants. The control plane projects engine-created lineage back onto its run summaries and filters: `Control.list` answers `parentRunId` and `lineageId` filters, and `Control.watch` carries a derived `control.run.lineage` event.
+
+`examples/src/36-detached-children.ts` is this page in runnable form: a parent that spawns a detached child and completes, and a second engine over the same database file that collects the child.
+
+See Durable execution model, Time travel, the `@smthrs/flow` reference, and the `@smthrs/engine-store` reference.
+
+---
+
+## Journal synchronization
+
+Route: /concepts/sync
+
+> Read-only journal replication: cursor-based reads and credit-bounded subscriptions over Effect RPC.
+
+This page defines the current journal replication protocol in `@smthrs/sync`: cursor-based reads and credit-bounded subscriptions over Effect RPC. It does not describe bidirectional event writes.
+
+### Scopes and cursors
+
+A client reads either one run or every run in a workspace:
+
+```ts
+import { SyncProtocol } from "@smthrs/sync"
+import { Schema } from "effect"
+
+const scope = Schema.decodeUnknownSync(SyncProtocol.RunScope)({
+  _tag: "Run",
+  runId: "build-42"
+})
+const cursor = Schema.decodeUnknownSync(SyncProtocol.RunCursor)({
+  runId: "build-42",
+  afterSeq: 17
+})
+```
+
+A run cursor stores the last observed sequence. A workspace cursor is an array of per-run cursors. Because journal sequences may have holes, a cursor means “read entries after this number,” not “expect the next number to be exactly one greater.”
+
+### Read
+
+`Sync.Read` accepts a scope, cursor, and limit and returns journal entries plus the next cursor. `RunCatalog` supplies the run list for workspace reads; `SyncServer.layer` combines it with `Journal`.
+
+The server merges workspace entries deterministically. Consumers should persist the returned cursor only after applying the returned batch.
+
+### Subscribe
+
+`Sync.Subscribe` streams:
+
+- `Entries` frames with events and the next cursor,
+- `Heartbeat` frames when no entries arrive,
+- one terminal `Closed` frame.
+
+The request includes a credit count. Credit is a hard limit on frames emitted by that subscription, not a sliding acknowledgement window. There is currently no Ack RPC. A client that needs more data opens another subscription from the last durable cursor.
+
+`SyncClient.subscribe` wraps the RPC stream and detects invalid cursor movement as `SyncGapError`. Transport, authentication, and reconnect policy remain application concerns.
+
+### Authentication
+
+`SyncAuth` is an Effect RPC middleware service, and the package ships its production implementation: `SyncAuth.layer` verifies a `WorkspaceShare` capability, the branch share scheme extended with a signed `kid` for key rotation, presented in the `flows-sync-workspace` request header, and installs the resulting `SyncPrincipal` for the request. The principal defaults to anonymous, and the server refuses anonymous access to every non-branch run and to workspace listings, so an unauthenticated connection can read only branch runs it holds a branch share capability for. Signing secrets are provisioned as `Redacted` values through `WorkspaceShare.layerHmac` (explicit keyring) or `WorkspaceShare.layerConfig` (`FLOWS_SYNC_SECRET`, `FLOWS_SYNC_KEY_ID`); there is no default secret. A deployment may substitute its own `SyncAuth` implementation at the transport boundary.
+
+### Directionality
+
+Current RPCs are read-only: `Read` and `Subscribe`. Client-to-server event submission, bidirectional reconciliation, acknowledgement windows, and resumable transport sessions are **Planned**.
+
+See Journal and the `@smthrs/sync` reference.
+
+---
+
+## Time travel
+
+Route: /concepts/time-travel
+
+> Inspect, fork, and rewind over recorded history, and what of it the release candidate actually ships.
+
+This page explains the inspect, fork, and rewind operations of the one
+`TimeTravel` service in `@smthrs/time-travel`, and the snapshot, compensation,
+and recovery machinery behind them. It also identifies the integration work the
+durable engine does not yet perform automatically.
+
+### Frames and snapshots
+
+A `Frame` identifies a durable point by lineage and journal sequence:
+
+```ts
+import { Frame } from "@smthrs/time-travel"
+
+const frame: Frame.Frame = {
+  lineageId: "build-42/root",
+  seq: 17
+}
+```
+
+A `Position` pairs that frame with the run it addresses: `{ runId, frame }` ,
+and is the only argument every operation takes. A frame is an address into
+history, never a snapshot object.
+
+`TimeTravelStore` stores frame snapshots, run lineage, audits, compensation receipts, and archive metadata. Both memory and SQL implementations exist.
+
+### Projection replay
+
+`inspect` folds journal entries through a caller-provided projection. This reconstructs derived state; it does not execute a flow handler:
+
+```ts
+const timeTravel = yield* TimeTravel
+
+const count = yield* timeTravel.inspect(
+  { runId: "build-42", frame },
+  {
+    initial: 0,
+    reduce: (state) => state + 1
+  }
+)
+```
+
+Use flow replay when the goal is to resume computation. Use projection replay when the goal is to derive a view from committed events.
+
+### Fork
+
+`fork` requires a terminal or inactive parent run, creates a store-level fork, and asks `Jj` to add an isolated workspace. The workspace name and path are derived from the child run id the fork mints rather than supplied, so a frame forked twice gets two lanes, and the lane is forgotten when the service is released.
+
+The SQL store copies the parent's versioned engine state without terminal
+result or cancellation fields and clones its attempt rows. The fork can
+therefore be claimed and driven after engine layers restart. The existing
+`flows_time_travel_edges` row remains the lineage source of truth.
+
+A fork's state is the state at the frame. `SqlTimeTravelStore.createFork`
+folds it from the run-decision records in the journal prefix and copies only
+the attempts that prefix can explain, rather than copying the parent's current
+row. The parent's current state is used only as a compatibility fallback, when
+an older journal carries no frame-derived state. What remains planned
+integration is the automatic creation of frame-addressed snapshots by ordinary
+execution; the fold does not need them.
+
+A cloned attempt row is addressed by its sealed cache key, and a cache key
+computed under an undeclared `Action.CurrentCacheEnvironment` is scoped to
+the execution that produced it (see step keys). A fork
+therefore replays its parent's sealed attempts only when the composition
+declares its environment through `Action.layerCacheEnvironment`. Without a
+declaration the fork re-executes those actions rather than reusing rows it
+cannot prove were produced under the same layers and capabilities. The
+declaration is complete only when `Kernel.make` also receives
+`options.cacheEnvironment`; a capability list alone deliberately leaves the
+identity run-local.
+
+### Effect boundaries and compensation
+
+`EffectBoundary.guard` records intent and outcome around an external effect. Records classify the effect as `sealed`, `compensable`, or `irreversible`, and track `intended`, `succeeded`, or `unknown` status.
+
+Behind the service, an effect-handler registry maps effect kinds to assessment and rollback handlers, classifies suffix records, invokes eligible handlers, and returns receipts. Unknown or irreversible effects can block a rewind. None of it is a caller parameter: `EffectBoundary` is the only half of that contract you touch, from the producer side.
+
+### Rewind protocol
+
+`rewind`:
+
+1. claims and activates an inactive pending or suspended run,
+2. records an audit and rate-limit decision,
+3. loads journal entries after the target frame,
+4. checks descendant lineage,
+5. assesses and compensates external effects,
+6. restores the Jujutsu workspace,
+7. archives and truncates the suffix atomically,
+8. records completion or a recoverable failure.
+
+Detached child policy is either `block` (the default) or `cancel`. Terminal descendants are disclosed as warnings because their external effects cannot be erased by deleting a parent suffix.
+
+Step 8 is why recovery is not an operation: building `TimeTravel.layer` finishes or rolls back any rewind a crash interrupted, before the service accepts new work.
+
+### Current integration boundary
+
+The time-travel package is implemented and tested as a protocol library, but `EngineStore` does not automatically create every snapshot, lineage edge, or effect-boundary record it consumes. Applications must wire those records and migrations explicitly. Automatic end-to-end integration is **Planned**.
+
+### What 1.0.0-rc.0 ships
+
+Time travel is a library API in this release, and only a library API.
+
+| Surface | 1.0.0-rc.0 |
+| --- | --- |
+| `TimeTravel.inspect`, `replay`, `fork`, `rewind` | available from `@smthrs/time-travel` |
+| CLI verbs | none. The Smithers 0.x time-travel verbs exit 1 with a migration message; migrating from 0.x lists them |
+| MCP tools | none. `replay_run`, `fork_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, and `time_travel` answer with the `unsupported` envelope |
+| Composition | not composed into `NodeControl`, and the CLI does not install migration block 5000 |
+
+A program that wants time travel provides `TimeTravelStore` and calls the
+service itself. Nothing in the command line reaches it.
+
+The word "checkpoint" means two different things in this release, and neither
+is a worktree lane. On the journal it is the durable state that replays a run
+from an offset, described in
+checkpoints and compaction. Inside an agent cell it is
+`ctx.checkpoint()`, a pinned git tree taken by `@smthrs/std` `Checkpoints`.
+There is no `Checkpoint` host capability and no lane lifecycle; see
+known limitations.
+
+See Determinism and replay, Subflows, and the `@smthrs/time-travel` reference.
+
+---
+
+## Control-plane trust posture
+
+Route: /guides/control-plane-trust
+
+> The trust boundary of the control server: what it accepts, from whom, and where authorization stops.
+
+The alpha control server has a deliberately small trust boundary: it accepts
+one shared HTTP bearer token and maps every valid request to one configured
+principal. This authenticates access to the deployment; it does not provide
+users, roles, per-flow permissions, or per-run ownership. Any holder of the
+token can perform every control operation the server exposes.
+
+### Safe default
+
+`NodeControl.layerServer` and `layerServerBearerAuth` bind to `127.0.0.1` when
+no host is supplied. A non-loopback host is rejected unless the host adapter
+passes the explicit `listen: true` opt-in corresponding to `--listen`:
+
+```ts
+import { NodeControl } from "@smthrs/cli"
+
+const server = NodeControl.layerServerBearerAuth(
+  {
+    token: process.env.FLOWS_CONTROL_TOKEN ?? "",
+    principal: { id: "alpha-operator", kind: "bearer" }
+  },
+  { host: "0.0.0.0", port: 3000, listen: true }
+)
+```
+
+An empty configured token fails closed: no request authenticates. The
+permissive `layerServerNoopAuth` helper is confined to literal loopback hosts
+even when `listen: true` is passed; it exists only for tests and explicitly
+trusted local processes.
+
+`--listen` removes only the network-bind guard. It does not add encryption,
+rotate the token, or change authorization. Put any non-loopback deployment
+behind TLS, source its token from a secret manager, and restrict ingress at the
+network boundary. A bearer token sent over plaintext HTTP can be replayed by
+anyone who observes it.
+
+### Authenticated CLI requests
+
+Remote CLI commands attach the credential to HTTP RPC requests and WebSocket
+upgrades as `Authorization: Bearer <credential>`:
+
+```sh
+smithers --remote https://control.example.test --credential "$FLOWS_CONTROL_TOKEN" plan system/test
+smithers --remote https://control.example.test --credential "$FLOWS_CONTROL_TOKEN" ps
+```
+
+Missing, malformed, empty, and incorrect credentials all return the same typed
+`Unauthorized` control error. The client does not put the credential into an
+RPC payload. The `--credential` value can still be visible to local process
+inspection and shell history, so this flag is suitable for the private alpha,
+not a final secret-input interface.
+
+### Authorization limit
+
+There is no separate run-owner policy in the alpha. The unused `NotOwner`
+error was removed rather than advertising enforcement that never occurred.
+Engine claim and fence failures remain represented by `ClaimLost`; those
+protect durable execution from stale workers and are not user authorization.
+Use a separate control deployment and token for each trust domain until a
+multi-principal policy is implemented.
+
+---
+
+## Assembling a durable engine
+
+Route: /guides/durable-engine
+
+> The services the durable engine requires, a local SQL composition, and what to replace before deploying more than one process.
+
+This guide describes the services required by `@smthrs/engine-store` and gives a local SQL-backed composition pattern. It also identifies which services must be replaced before a multi-process deployment is durable.
+
+### Required services
+
+`EngineStore.make` requires:
+
+- `Journal`, `RunStore`, `AttemptStore`, and `CacheStore`
+- `DurableEngineState`
+- kernel `Jj`
+- `StepBoundary`
+- an Effect `Scope`
+
+`TestStores.layer()` supplies the four SQL services, journal, run, attempt, and cache, over ONE in-memory SQLite database. It is useful for integration tests, not restart durability:
+
+```ts
+import { DurableEngineState, EngineStore, StepBoundary } from "@smthrs/engine-store"
+import * as TestStores from "@smthrs/engine-store/test/TestStores"
+import { Jj } from "@smthrs/kernel"
+import { Effect, Layer } from "effect"
+
+const jj = Jj.make({
+  snapshot: () => Effect.succeed({ changeId: "local" as never }),
+  restore: () => Effect.void,
+  diff: () => Effect.succeed(""),
+  workspaceAdd: () => Effect.void,
+  workspaceForget: () => Effect.void,
+  status: () => Effect.succeed("")
+})
+
+const Requirements = Layer.mergeAll(
+  TestStores.layer(),
+  DurableEngineState.layerMemory,
+  StepBoundary.layerTest(),
+  Layer.succeed(Jj.Jj, jj)
+)
+
+const EngineLayer = EngineStore.layer({
+    owner: { hostId: "local-worker" },
+    journalSource: "local-engine",
+    isAlive: () => Effect.succeed(false)
+}).pipe(Layer.provide(Requirements))
+```
+
+`EngineLayer` provides the `FlowEngine` service. Merge it with flow handler layers, then run flow operations inside the resulting layer scope.
+
+### Persistent SQL composition
+
+For a persistent deployment:
+
+1. create a compatible Effect `SqlClient`,
+2. wrap it with `DurableWriter.make` or a runtime adapter,
+3. run `Journal.Migrations`,
+4. construct `SqlJournal`, `RunStore`, `AttemptStore`, and `CacheStore` from that database,
+5. construct `DurableEngineState.layer` from the same migrated database,
+6. provide the resulting services to `EngineStore.layer`.
+
+Migrations must complete before any store service is exposed. `DurableWriter.write` wraps a SQL transaction and retries retryable SQLite write failures; non-SQLite drivers retain their own transaction behavior.
+
+### One call on Node
+
+`@smthrs/flows/NodeRuntime` has two entry points, and the difference is how
+much a program has to decide.
+
+`NodeRuntime.layer(options, stepBoundary, workspaceSandbox, registerFlows)`
+composes storage and the engine and leaves the host to the caller: `Jj`,
+Effect's `FileSystem`, and `Crypto` stay requirements, and the boundary and
+sandbox are arguments.
+
+`NodeRuntime.layerHost(options, registerFlows)` adds the host:
+
+```ts
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+
+const runtime = NodeRuntime.layerHost(
+  { filename: ".flows/engine.sqlite", owner: { hostId: "local-worker" } },
+  registerFlows
+)
+```
+
+That single call provides:
+
+- the complete Node host from `@smthrs/platform-node`, with process
+  containment on. A spawned process gets its own process group, is signalled
+  and then killed when its action's scope closes, and is recorded in the
+  `ProcessLedger`, so the next incarnation of the same `hostId` reaps whatever
+  a crash left running;
+- the kernel's guarded host surface over an unattended `GrantStore`, so a flow
+  body reaches the host through the capability check. A capability no rule in
+  `HostOptions.rules` allows is denied rather than escalated: there is no
+  operator to ask;
+- the default `StepBoundary` and the filesystem `WorkspaceSandbox`, which is
+  the pairing that makes a sealed action's result eligible for the step cache;
+- `HostLiveness.isAlive`, which answers from this machine's process table and
+  never declares another host's owner dead;
+- signal handling. `SIGINT` and `SIGTERM` close the runtime scope, which is
+  what releases every run this host owns.
+
+#### The engine's own jj grants
+
+A compensable action is snapshotted and restored by the engine, not by the flow
+body, and the engine resolves the same guarded `Jj` the body does. A host with
+no `jj:*` rule could therefore not run a compensable action at all: the refusal
+would arrive before the body started and would be aimed at the engine's own
+bookkeeping.
+
+`layerHost` merges `NodeRuntime.engineRules` underneath whatever
+`HostOptions.rules` says, allowing `jj:snapshot` for the message the engine
+writes and `jj:restore` for the change id it takes back. They are defaults, not
+overrides: a program that denies `jj:snapshot` still denies it, because
+configured policy is evaluated first and a configured deny wins outright.
+
+#### Shutdown
+
+`SIGINT` and `SIGTERM` close the runtime scope, and closing it runs the engine's
+finalizers so every owned run parks itself `released` rather than being left
+`running` behind a dead owner.
+
+Installing that handler also removes Node's default disposition, so the handler
+keeps two escapes. A second signal leaves immediately, and a graceful shutdown
+that outlasts `HostOptions.shutdownTimeoutMs` (default 30 seconds) leaves
+anyway. Both exit with the status the default disposition would have produced:
+`130` for `SIGINT`, `143` for `SIGTERM`. Without them a finalizer that never
+returns would turn `Ctrl-C` into a program nothing short of `SIGKILL` can stop.
+
+The engine's machinery and the flow bodies sit on opposite sides of the kernel
+on purpose. The SQLite storage, the step boundary, and the workspace sandbox
+run on the raw host: a database directory the engine must create to exist at
+all is not something the engine asks permission for, and a whole-tree sandbox
+copy is engine bookkeeping. What the engine hands a flow body is the guarded
+surface, because a body is what the capability check exists for.
+
+#### Shutdown
+
+A `SIGTERM` to a host composed this way is a release, not a kill. The handler
+closes the runtime scope; the engine interrupts its drive fibers, and each
+interrupted run parks itself `suspended` with the waiting reason `released`
+while its fence is still validly held. Another host reclaims it immediately
+instead of waiting out the 30-second stale window below. Pass `signals: []` to
+install no handler at all when the program owns its own signal wiring.
+
+### Services still owned by the application
+
+Use `DurableEngineState.layer` for process-restart durability.
+`DurableEngineState.layerMemory` remains intended for tests. On flow
+registration, the SQL implementation re-arms every pending future or overdue
+clock and re-delivers wakes for stored completions through the normal run
+claim path.
+
+`StepBoundary.layerTest` does not create a sandbox. `StepBoundary.layer` can
+measure declared paths and materialize outputs, but cannot observe writes
+elsewhere in the tree, so its results are not admitted to the shared cache.
+Supply a stronger boundary that enforces declared writes and returns
+`wholeTreeWritesVerified: true` before admitting cross-run cache entries.
+
+`EngineStore` mints its owner identity through the `OwnerIdentity` service rather than reading `node:crypto.randomUUID` and `process.pid` directly, so the composition itself is edge-safe: the default draws an incarnation number from `Random` where the platform has no process, and `OwnerIdentity.layerConstant` pins the whole token where a host already holds a lease. What is still **Planned** is a browser SQL client behind the `DurableWriter` contract. Without one there is nothing for the composition to run against off Node.
+
+### Ownership and liveness
+
+Give each worker a stable `hostId`; the engine adds process identity and a random nonce for each engine instance. `isAlive` must return trustworthy evidence about another owner. Returning `false` unconditionally, as in tests, permits immediate takeover and is unsafe in a real multi-worker deployment.
+
+### Wake behavior
+
+Deferred and clock completion schedule a resume. A committed journal-driven `resumeSignal` is not implemented, so suspended execution can also rely on the flow engine’s polling schedule.
+
+### Abandoned runs are not auto-resumed
+
+**Nothing in this release watches for runs whose owner died and starts a process to pick them up.** `@smthrs/gateway`'s `SuperviseRuntime` declares the `scan`/`resume` supervision contract but ships only `make`, `makeNoop`, and `layerNoop` (`packages/gateway/src/SuperviseRuntime.ts:121,129,142`) plus a test double; there is no production implementation, and `@smthrs/gateway` is an agent-group package that the engine release train does not pack.
+
+Recovery is scoped to a process that is already running the engine and has the flow registered. Each engine driver sweeps on the one-second heartbeat cadence (`packages/run-store/src/Heartbeat.ts:24`): it delivers pending cancels to parked runs, and it enumerates `running` rows whose heartbeat is older than the 30-second stale cutoff (`Heartbeat.ts:33`), re-driving up to 64 per tick through the ordinary claim/steal path (`packages/engine-store/src/internal/RunDriver.ts:160,1412`). That is what reclaims a SIGKILLed or OOM-killed owner's run. A wake for a flow the sweeping process has not registered logs a once-per-run warning and leaves the row parked for a worker that does register it (`RunDriver.ts:1074`).
+
+To resume abandoned runs manually:
+
+1. Start or restart a host process composed through `@smthrs/flows/NodeRuntime`, pointed at the same SQLite `filename`.
+2. Pass a `registerFlows` layer that registers every flow with stored runs. It is the composition's final startup phase, so nothing resumes before its flow exists in the process.
+3. Supply an `Options.isAlive` that reports the dead owner as not alive. Steal is gated on that answer; while it says the previous owner lives, its runs are not taken over.
+4. Wait out the stale window. There is no command to invoke.
+
+The 30-second cutoff is when a row becomes *eligible*, not when it is reclaimed. The steal predicate is strict (`heartbeat_at_ms < now - 30s`, `packages/run-store/src/RunStore.ts:1184`), the sweep that acts on it runs once per second, and one tick wakes at most 64 stale rows, oldest heartbeat first. So the earliest re-drive is the first tick after the heartbeat passes 30 seconds, and a run sitting behind a backlog of more than 64 stale rows waits for a later tick. `isAlive` gates the steal on top of that. Do not treat 30 seconds as an upper bound on recovery.
+
+A run with no such process running stays put. Its state is durable and it does not advance.
+
+See the `@smthrs/engine-store` reference, Journal, and Implementation status.
+
+---
+
+## Host composition
+
+Route: /guides/host-composition
+
+> Which layers to provide on Node and in a browser, and which parts of the composition stay the application's own.
+
+A flow depends on contracts, not on a host. Composition is where a program says
+which implementations of those contracts it wants. This guide shows the two
+compositions the release supports.
+
+### The shape of a composition
+
+Every durable program provides four things:
+
+1. **Storage.** A `SqlClient`, the migration ladder, and the journal, run,
+   attempt, cache, and durable-engine-state stores.
+2. **The engine.** `EngineStore` over that storage, plus the flow registrations
+   it drives.
+3. **Host services.** The closed host list, decorated by the capability kernel:
+   filesystem, process spawning, `Jj`, crypto, clock, randomness.
+4. **Policy.** The seams whose default you may want to replace, such as
+   `Inconsistency` for cache-conflict verdicts, `OwnerIdentity`, and the
+   boundary and sandbox implementations.
+
+`@smthrs/flows/NodeRuntime` packages the first two on Node. The last two stay
+yours by design: a host bundle that installed itself would decide your
+capability policy for you.
+
+### Node
+
+```ts
+import { NodeRuntime } from "@smthrs/flows/NodeRuntime"
+
+const runtime = NodeRuntime.layer({
+  filename: ".flows/engine.db",
+  boundary,
+  sandbox
+})
+```
+
+`NodeRuntime.storage` opens the SQLite database, runs the migrations, and
+provides the stores, `OwnerIdentity`, `Workspace`, and a filesystem artifact
+store. `layer` and `make` add `EngineStore` over that and run `registerFlows`
+as the final startup phase. Shutdown is scope closure, and nothing installs a
+process or signal handler.
+
+What it does not install: `NodeHost.layer` and the guarded `HostServices`
+kernel. `Jj`, Effect's `FileSystem`, and Effect's `Crypto` stay requirements of
+the returned layer, and `StepBoundary` and `WorkspaceSandbox` are arguments. Add
+`@smthrs/platform-node` for the host services and `@smthrs/kernel` for the
+capability decoration.
+
+The durable engine is Node-only. Opening a durable database under Bun fails with
+`unsupported_runtime`; Bun runs the applications and the non-durable packages.
+
+Worked example: [`examples/src/durable-layer.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/durable-layer.ts).
+
+### Browser
+
+Browser support is a bundling claim, not a deployment claim. Twenty-four entry
+points bundle under esbuild's browser platform, and
+[`scripts/browser-check.mjs`](https://github.com/smithersai/smithers/blob/main/scripts/browser-check.mjs)
+executes that claim on every build. Browser support
+lists every entry point and the seven that stay Node-only.
+
+```ts
+import { BrowserHost } from "@smthrs/platform-browser/BrowserHost"
+
+const host = BrowserHost.layer({ bash, fs, jj })
+```
+
+`@smthrs/platform-browser` supplies Effect's `FileSystem` over a
+ZenFS-shaped promises API and Effect's `ChildProcessSpawner` over an in-page
+bash interpreter. `@smthrs/jj/browser/BrowserJj` runs jj-lib compiled to
+`wasm32-wasip1` over an injected virtual filesystem.
+
+What a browser deployment still needs, and what this release does not ship, is a
+SQL client behind the `DurableWriter` contract. `@smthrs/journal` bundles
+because it depends on the contract rather than on a driver; a browser
+application supplies its own client, for example Effect's sqlite-wasm OPFS
+worker. Until it does, a browser bundle can author and inspect but not durably
+execute.
+
+### Capability decoration
+
+Host access is closed and decorated. `@smthrs/kernel` wraps each host service so
+a call is checked against the capability set the run holds, and a decision is
+journalled. That is what makes a hostile flow body a bounded problem rather than
+an unbounded one, and it is why the host bundle is a separate layer from the
+engine. See hosts and capabilities.
+
+### What no host installs
+
+- A supervisor process. Recovery is a running engine with the flow registered.
+- A cross-process event bus. Wakes land through the heartbeat sweep.
+- A durable process registry. Cancelling a run kills the process groups it
+  spawned; hard-killing the engine does not.
+
+See known limitations.
+
+---
+
+## Testing
+
+Route: /guides/testing
+
+> Deterministic host fixtures, the in-memory engine, and SQL-backed integration tests that need no external service.
+
+This guide covers deterministic host fixtures, an in-memory flow engine, and SQL-backed engine integration tests. It does not require external services.
+
+### Unit-test a handler
+
+Use `FlowEngine.layerMemory` when the behavior under test does not require restart replay:
+
+```ts
+import { assert, it } from "@effect/vitest"
+
+const layer = Build.toLayer(({ target }) =>
+  Effect.succeed({ artifact: `${target}.js` })
+).pipe(
+  Layer.provideMerge(FlowEngine.layerMemory)
+)
+
+it.effect("builds an artifact", () =>
+  Effect.gen(function*() {
+    const result = yield* Build.execute(
+      { target: "server", sourceDigest: "abc" },
+      { executionId: "test-build-1" }
+    ).pipe(Effect.provide(layer))
+
+    assert.deepStrictEqual(result, { artifact: "server.js" })
+  }))
+```
+
+Select explicit execution IDs so failures are reproducible.
+
+### Test host operations
+
+`TestHost.layer` supplies an in-memory filesystem, a scripted command interpreter, seeded Random, a Jujutsu service, and Effect's `HttpClient` tag filled by `HttpClient.layerNoop()`, a stub that fails every request with a `TransportError`, so a test that needs real responses provides its own client over the bundle. Configure only the seams a test exercises:
+
+```ts
+import * as TestHost from "@smthrs/kernel/test/TestHost"
+
+const HostLayer = TestHost.layer({
+  files: { "/workspace/input.txt": "hello" },
+  commands: {
+    "read-input": { stdout: "hello\n", exitCode: 0 }
+  },
+  seed: 42
+})
+```
+
+`TestHost` is imported from its subpath rather than the `@smthrs/kernel` root, which stays browser-safe (browser support); `effect/testing`'s `TestClock` reaches for `node:assert`, so the bundle itself is Node-only. Consult the actual `TestHost.layer` option types when extending a fixture; the filesystem and interpreter helpers deliberately implement only the host contracts used by tests.
+
+For kernel tests, `TestGrantStore.layerAllow`, `layerDeny`, and `layerScripted` provide explicit authorization behavior.
+
+### Test durable persistence
+
+Combine:
+
+- `TestJournal.layer()` (from `@smthrs/journal/test/TestJournal`) for a migrated in-memory SQLite journal, `TestRunStore.layer` and `TestCacheStore.layer` for the run and cache stores, or `TestStores.layer()` (from `@smthrs/engine-store/test/TestStores`) for all four over one database,
+- `DurableEngineState.makeMemory()` for deferred/clock state,
+- `StepBoundary.layerTest()` for deterministic boundary evidence,
+- a stub `Jj` (`@smthrs/jj/browser/BrowserJj`'s `layerUnsupported`).
+
+Create a second `EngineStore.make` within the same service scope to simulate engine restart. Register the same handler, complete a deferred or call `resume`, and assert that completed action code was not dispatched twice.
+
+Flush the journal before reading committed entries:
+
+```ts
+const journal = yield* Journal.Journal
+yield* journal.flush
+const page = yield* journal.entries({ runId, limit: 100 })
+```
+
+An accepted submission is not necessarily durable until `flush` completes.
+
+### Test invariants
+
+High-value properties include:
+
+- canonical inputs produce the same `Key`,
+- reordered object keys and set-like declarations do not change a cache key,
+- replay reuses completed attempt exits,
+- irreversible retries without idempotency fail,
+- stale ownership cannot be stolen without liveness evidence,
+- rejected journal admission does not imply contiguous sequence numbers,
+- sync resumes from the last applied cursor,
+- rewind preserves an audit on injected failure.
+
+Run all package checks with:
+
+```sh
+pnpm run check
+```
+
+See Determinism and replay and the package references for `@smthrs/kernel`, `@smthrs/journal`, `@smthrs/run-store`, and `@smthrs/step-cache`.
+
+---
+
+## Package structure
+
+Route: /package-structure
+
+> Twenty-three workspaces: who owns which tables, which package may import which, and which entry points bundle for a browser.
+
+Twenty-three pnpm workspaces make up the engine group under `packages/`, one closed dependency set. This page is the map: who owns which data, which package may import which, and which entry points bundle for a browser.
+
+### Workspaces
+
+| Workspace | Directory | Published | Owns |
+| --- | --- | --- | --- |
+| `@smthrs/flows` | `packages/flows` | yes | nothing; re-exports the engine packages below as namespaces, but not the `platform-*` bundles |
+| `@smthrs/jj` | `packages/jj` | yes | no tables; the `Jj` contract, `JjError`, and its adapters |
+| `@smthrs/sandbox` | `packages/sandbox` | yes | no tables; remote process execution and the health probe |
+| `@smthrs/platform-browser` | `packages/platform-browser` | yes | no tables; browser `FileSystem` and `ChildProcessSpawner` implementations, and the `BrowserHost` bundle |
+| `@smthrs/platform-node` | `packages/platform-node` | yes | no tables; the `NodeHost` bundle over Effect's own Node adapters |
+| `@smthrs/platform-bun` | `packages/platform-bun` | yes | no tables; the Bun filesystem and the `BunHost` bundle |
+| `@smthrs/journal` | `packages/journal` | yes | `flows_journal_events`, `flows_journal_checkpoints` |
+| `@smthrs/run-store` | `packages/run-store` | yes | `flows_runs`, `flows_attempts` |
+| `@smthrs/step-cache` | `packages/step-cache` | yes | `flows_step_cache` |
+| `@smthrs/database` | `packages/database` | yes | no tables; the `SqlClient` contract and write retry |
+| `@smthrs/capability` | `packages/capability` | yes | no tables; the capability vocabulary and typed permission failures, with their journaled schema ids |
+| `@smthrs/kernel` | `packages/kernel` | yes | the closed host service list, capability sets, grants, and their journal records |
+| `@smthrs/canonical` | `packages/canonical` | yes | no tables; RFC 8785 canonical JSON |
+| `@smthrs/crypto` | `packages/crypto` | yes | no tables; injected cryptographic operations |
+| `@smthrs/keys` | `packages/keys` | yes | no tables; canonical flow keys |
+| `@smthrs/plan` | `packages/plan` | yes | `flows_plans`, `flows_plan_nodes`, `flows_plan_edges` |
+| `@smthrs/artifacts` | `packages/artifacts` | yes | no tables; bytes addressed by their own SHA-256 digest |
+| `@smthrs/flow` | `packages/flow` | yes | no tables; flow, action, and durable-primitive definitions plus the runtime port |
+| `@smthrs/engine` | `packages/engine` | yes | no tables; the engine that executes them, and the RPC/HTTP façades |
+| `@smthrs/engine-store` | `packages/engine-store` | yes | `flows_deferred_completions`, `flows_clock_deadlines`, `flows_run_parents` |
+| `@smthrs/sync` | `packages/sync` | yes | no tables; a wire protocol over journal entries |
+| `@smthrs/time-travel` | `packages/time-travel` | yes | `flows_time_travel_snapshots`, `_edges`, `_audits`, `_receipts`, `_archive` |
+| `@smthrs/observability` | `packages/observability` | yes | no tables; the default OTLP exporter layer over Effect's own observability modules |
+| `@smthrs/examples` | `examples` | no | the runnable example suite |
+
+Every published manifest is `1.0.0-rc.0`, every internal production range naming another published package is an exact `1.0.0-rc.0`, and `effect` is pinned to exact `4.0.0-rc.108`. A range naming a private workspace package uses `workspace:*`, because a private package keeps its own version. Release candidates publish to the `rc` dist-tag, never `latest`.
+
+### Who owns which data
+
+Six packages create schema, in three different ways. Knowing which is which keeps a table in its owning package.
+
+| Owner | Mechanism | Tables |
+| --- | --- | --- |
+| `@smthrs/journal` | `0001_initial` and `0002_checkpoints`, run by `Migrations.layer` | `flows_journal_events`, `flows_journal_checkpoints` |
+| `@smthrs/run-store` | `0001_initial`, run by `Migrations.layer` | `flows_runs`, `flows_attempts` |
+| `@smthrs/step-cache` | `0001_initial`, run by `Migrations.layer` | `flows_step_cache` |
+| `@smthrs/plan` | `0001_initial`, run by `Migrations.layer`; append-only triggers created with the tables | `flows_plans`, `flows_plan_nodes`, `flows_plan_edges` |
+| `@smthrs/engine-store` | `0001_initial`; its `Migrations.layer` composes the journal, run-store, step-cache, and plan sets with its own, plan's last | `flows_deferred_completions`, `flows_clock_deadlines` |
+| `@smthrs/engine-store` | statements issued by `DurableEngineState.make` at construction | `flows_run_parents`, its index, the `flows_run_parents_gc` trigger, the stale-running partial index |
+| `@smthrs/time-travel` | `SqlTimeTravelStore.migrate` | snapshots, lineage edges, audits, receipts, archive |
+
+Each storage package exports its migration set from its own `Migrations` module, and `@smthrs/database`'s `Migrations` composes them over one `flows_migrations` table: a set declares a `namespace` that prefixes its migration names and an `idOffset` that reserves a block of migration ids, so two packages' `0001_initial` land on distinct identities and a mis-declared package fails the migration instead of silently shadowing a table. The blocks are journal `0`, run store `1000`, step cache `2000`, engine store `3000`, and plan `4000`. `@smthrs/engine-store/Migrations` is the composed list an engine installs, and it puts the plan set last because a `Migrator` decides what to run from a single high-water mark, so a set whose ids sit below an already-applied one would be assumed done.
+
+The engine-store statements sit outside its migration deliberately, because the package creates them when its layer is built. They are inventoried in `packages/engine-store/src/internal/EngineStateSchema.ts` with the dialects each one is known to accept, and a catalog-diff test fails when new DDL appears without an inventory entry.
+
+### Dependency graph
+
+The table below is the reference; the diagram is the same edges drawn out. An arrow means the left package imports the right one.
+
+:::details[Dependency graph as a diagram]
+
+```mermaid
+flowchart LR
+  FLOWS["@smthrs/flows"]
+  TT["@smthrs/time-travel"]
+  ES["@smthrs/engine-store"]
+  SYNC["@smthrs/sync"]
+  KERNEL["@smthrs/kernel"]
+  FLOW["@smthrs/flow"]
+  ENGINE["@smthrs/engine"]
+  JOURNAL["@smthrs/journal"]
+  RUNSTORE["@smthrs/run-store"]
+  STEPCACHE["@smthrs/step-cache"]
+  DB["@smthrs/database"]
+  JJ["@smthrs/jj"]
+  SANDBOX["@smthrs/sandbox"]
+  PB["@smthrs/platform-browser"]
+  PN["@smthrs/platform-node"]
+  PBUN["@smthrs/platform-bun"]
+  KEYS["@smthrs/keys"]
+  PLAN["@smthrs/plan"]
+  ART["@smthrs/artifacts"]
+  CRYPTO["@smthrs/crypto"]
+  CANONICAL["@smthrs/canonical"]
+  CAP["@smthrs/capability"]
+  OBS["@smthrs/observability"]
+
+  KERNEL --> CAP
+  JJ --> CAP
+  FLOWS --> CAP
+
+  FLOWS --> JJ
+  FLOWS --> SANDBOX
+  FLOWS --> DB
+  FLOWS --> JOURNAL
+  FLOWS --> RUNSTORE
+  FLOWS --> STEPCACHE
+  FLOWS --> KERNEL
+  FLOWS --> KEYS
+  FLOWS --> PLAN
+  FLOWS --> ART
+  FLOWS --> CRYPTO
+  FLOWS --> CANONICAL
+  FLOWS --> FLOW
+  FLOWS --> ENGINE
+  FLOWS --> ES
+  FLOWS --> SYNC
+  FLOWS --> TT
+  JOURNAL --> DB
+  RUNSTORE --> DB
+  RUNSTORE --> JOURNAL
+  STEPCACHE --> DB
+  STEPCACHE --> CANONICAL
+  SANDBOX --> KERNEL
+  KERNEL --> JJ
+  KERNEL --> PB
+  KERNEL --> JOURNAL
+  PB --> KERNEL
+  PB --> JJ
+  PN --> KERNEL
+  PN --> JJ
+  PBUN --> KERNEL
+  PBUN --> JJ
+  FLOW --> KEYS
+  FLOW --> CRYPTO
+  FLOW --> PLAN
+  ENGINE --> FLOW
+  ENGINE --> KEYS
+  KEYS --> CANONICAL
+  KEYS --> CRYPTO
+  PLAN --> DB
+  PLAN --> KEYS
+  ART --> CRYPTO
+  ES --> FLOW
+  ES --> ENGINE
+  ES --> CRYPTO
+  ES --> DB
+  ES --> KEYS
+  ES --> PLAN
+  ES --> ART
+  ES --> JOURNAL
+  ES --> RUNSTORE
+  ES --> STEPCACHE
+  ES --> KERNEL
+  SYNC --> JOURNAL
+  TT --> DB
+  TT --> ES
+  TT --> JJ
+  TT --> JOURNAL
+  TT --> RUNSTORE
+  TT --> STEPCACHE
+```
+
+:::
+
+| Package | Depends on | Depended on by |
+| --- | --- | --- |
+| `@smthrs/canonical` | nothing in the workspace | `keys`, `step-cache`, `flows` |
+| `@smthrs/crypto` | nothing in the workspace | `artifacts`, `keys`, `flow`, `engine-store`, `flows` |
+| `@smthrs/keys` | `canonical`, `crypto` | `plan`, `flow`, `engine`, `engine-store`, `flows` |
+| `@smthrs/capability` | nothing in the workspace | `jj`, `kernel`, `flows` |
+| `@smthrs/jj` | `capability` | `kernel`, `platform-*`, `time-travel`, `flows` |
+| `@smthrs/platform-browser` | `jj`, `kernel` | `kernel` (test bundle only) |
+| `@smthrs/platform-node` | `jj`, `kernel` | nothing |
+| `@smthrs/platform-bun` | `jj`, `kernel` | nothing |
+| `@smthrs/sandbox` | `kernel` | `flows` |
+| `@smthrs/artifacts` | `crypto` | `engine-store`, `flows` |
+| `@smthrs/database` | nothing in the workspace | `journal`, `run-store`, `step-cache`, `plan`, `engine-store`, `time-travel`, `flows` |
+| `@smthrs/journal` | `database` | `kernel`, `run-store`, `engine-store`, `sync`, `time-travel`, `flows` |
+| `@smthrs/run-store` | `database`, `journal` | `engine-store`, `time-travel`, `flows` |
+| `@smthrs/step-cache` | `canonical`, `database` | `engine-store`, `time-travel`, `flows` |
+| `@smthrs/kernel` | `capability`, `jj`, `journal`, `platform-browser` | `engine-store`, `platform-*`, `sandbox`, `flows` |
+| `@smthrs/plan` | `database`, `keys` | `flow`, `engine-store`, `flows` |
+| `@smthrs/flow` | `crypto`, `keys`, `plan` | `engine`, `engine-store`, `flows` |
+| `@smthrs/engine` | `flow`, `keys` | `engine-store`, `flows` |
+| `@smthrs/engine-store` | `artifacts`, `crypto`, `database`, `engine`, `flow`, `journal`, `kernel`, `keys`, `plan`, `run-store`, `step-cache` | `time-travel`, `flows` |
+| `@smthrs/sync` | `journal` | `flows` |
+| `@smthrs/time-travel` | `database`, `engine-store`, `jj`, `journal`, `run-store`, `step-cache` | `flows` |
+| `@smthrs/observability` | nothing in the workspace | nothing; an application composes it beside the engine, the way it composes a `platform-*` bundle |
+| `@smthrs/flows` | every package except the three `platform-*` bundles | nothing |
+
+`pnpm run circular` fails the build on an import cycle, within a package or across them.
+
+The one cycle at *package* granularity is `kernel` ↔ `platform-browser`: the kernel's deterministic `TestHost` bundle (a test-only subpath) mounts the browser filesystem and interpreter, and `BrowserChildProcessSpawner` renders command lines with the kernel's `CommandLine`. Removing `HttpTransport` cut the network half of it: `BrowserHost` now provides Effect's own `HttpClient` and no longer fills a kernel-owned slot. No module-level cycle exists, which is what `pnpm run circular` checks.
+
+### Entry point matrix
+
+A package root exports contracts. A platform implementation lives under a subpath named for its platform, the way `effect` keeps `@effect/platform-node` out of `effect`. A root that re-exports an implementation resolves that implementation's imports for every consumer, including browser ones, before any bundler can tree-shake it.
+
+`scripts/browser-check.mjs` executes this table. It bundles each browser entry point with esbuild `platform: "browser"` and fails if one breaks, and it bundles each Node entry point and fails if one stops failing. `pnpm run browser` runs it locally and CI runs it as a step.
+
+| Entry point | Browser | Node | Why |
+| --- | --- | --- | --- |
+| `@smthrs/platform-browser` | yes | yes | browser `FileSystem` and `ChildProcessSpawner`, and the `BrowserHost` bundle over effect's own fetch `HttpClient` |
+| `@smthrs/platform-browser/BrowserHost` | yes | yes | `layer({ bash, fs, jj })` over an injected browser filesystem, interpreter, and compiled `flows_jj.wasm`; all five tags real |
+| `@smthrs/platform-node` | no | yes | child processes, Node filesystem, Jujutsu |
+| `@smthrs/platform-bun` | no | yes | the Bun adapters, falling back to `@effect/platform-node` off Bun |
+| `@smthrs/kernel/test/TestHost` | no | yes | `effect/testing`'s `TestClock` imports `node:assert` |
+| `@smthrs/jj` | yes | yes | the `Jj` contract, `JjError`, and the no-op layer |
+| `@smthrs/jj/browser/BrowserJj` | yes | yes | jj-lib as `wasm32-wasip1` over an injected virtual filesystem; `layerUnsupported` is the no-module fallback |
+| `@smthrs/jj/node/NodeJj`, `@smthrs/jj/bun/BunJj` | no | yes | spawn the jj CLI through `node:child_process` |
+| `@smthrs/sandbox` | yes | yes | provider adaptation and the liveness probe; no host access of its own |
+| `@smthrs/capability` | yes | yes | capability vocabulary and typed permission failures |
+| `@smthrs/kernel` | yes | yes | capabilities, grants, decorated services |
+| `@smthrs/canonical` | yes | yes | RFC 8785 canonical JSON schema |
+| `@smthrs/crypto` | yes | yes | injected cryptographic schemas |
+| `@smthrs/keys` | yes | yes | canonical flow-key schema |
+| `@smthrs/plan` | yes | yes | plan compilation, the authoring AST, the diff, and the plan store over the `DurableWriter` contract |
+| `@smthrs/artifacts` | yes | yes | the content-addressed artifact store, local and remote |
+| `@smthrs/database` | yes | yes | the driver-neutral contract only |
+| `@smthrs/database/node/NodeDatabase` | no | yes | `node:sqlite` through `@effect/sql-sqlite-node` |
+| `@smthrs/database/test/TestDatabase` | no | yes | in-memory SQLite through the same driver |
+| `@smthrs/journal` | yes | yes | the journal and its migration over `SqlClient` and the `DurableWriter` contract |
+| `@smthrs/journal/test/TestJournal` | no | yes | composes `TestDatabase` |
+| `@smthrs/run-store` | yes | yes | run and attempt stores over the same contracts |
+| `@smthrs/run-store/test/TestRunStore` | no | yes | composes `TestDatabase` |
+| `@smthrs/step-cache` | yes | yes | the step cache over the same contracts |
+| `@smthrs/step-cache/test/TestCacheStore` | no | yes | composes `TestDatabase` |
+| `@smthrs/flow` | yes | yes | flow, action, durable primitives, retry, identity |
+| `@smthrs/engine` | yes | yes | the engine that executes flows, plus the RPC/HTTP façades |
+| `@smthrs/engine-store` | yes | yes | the durable engine; owner identity enters through `OwnerIdentity` |
+| `@smthrs/sync` | yes | yes | protocol and client and server over RPC |
+| `@smthrs/time-travel` | yes | yes | frames, replay, fork, rewind, compensation, recovery |
+| `@smthrs/observability` | yes | yes | OTLP logs, metrics, and traces layers over Effect's `HttpClient`; the fetch variant binds the host's global `fetch` |
+| `@smthrs/flows` | yes | yes | re-exports every engine package |
+
+Twenty-three entry points bundle for the browser.
+
+:::warning[Bundling is a weaker claim than running]
+`@smthrs/journal`, `@smthrs/run-store`, `@smthrs/step-cache`, and `@smthrs/plan` bundle because they depend on the `DurableWriter` contract. A browser application still has to supply a browser SQL client, such as Effect's sqlite-wasm OPFS worker, to that contract. No such layer ships here.
+:::
+
+The accurate sentence is that canonical JSON, crypto, the host contracts, `BrowserHost`, keys, plan, artifacts, capability, kernel, sandbox, database, journal, run store, step cache, flow, engine, engine-store, the barrel, sync, time travel, and the OTLP exporter bundle for the browser, and the durable engine composition is still SQLite-on-Node first because no browser SQL client layer ships here. `@smthrs/engine-store`'s last two `node:`-flavoured reads (`process.pid` and `node:crypto` `randomUUID`) moved behind the `OwnerIdentity` service, which closed issue #114.
+
+### Build shape
+
+Every published package builds a dual module surface: `dist/esm/index.js`, `dist/esm/index.d.ts`, and `dist/cjs/index.js`, named by a conditional `publishConfig.exports` map with `./internal/*` blocked. `scripts/pack-release.mjs` packs and publishes the twenty-three engine-group workspaces from one dependency-ordered list, so a package cannot be published before something it depends on. Every package ships a byte-identical `LICENSE` in its `files` whitelist. `packages/flow` and `packages/engine` additionally ship `THIRD_PARTY_NOTICES.md`, because they carry the two halves of a fork of Effect's unstable workflow surface; `packages/engine` also ships the `VENDOR.md` that records the fork for both.
+
+New package modules mirror the Effect repository: file structure, module layout, `make` and `layer` naming, error conventions, and `@since` and `@category` JSDoc.
+
+### Reading next
+
+Public API enumerates the exports of each package. Internal details covers the invariants the engine-store owns. External states what a deployment cannot do yet.

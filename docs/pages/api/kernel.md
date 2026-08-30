@@ -24,7 +24,7 @@ const rule = new Permission.Rule({
 
 ## Capability
 
-Re-exported from [`@smthrs/capability`](capability.md), source [packages/capability/src/Capability.ts](https://github.com/smithersai/smithers/blob/main/packages/capability/src/Capability.ts).
+Re-exported from [`@smthrs/capability`](/api/capability), source [packages/capability/src/Capability.ts](https://github.com/smithersai/smithers/blob/main/packages/capability/src/Capability.ts).
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -56,7 +56,7 @@ Re-exported from [`@smthrs/capability`](capability.md), source [packages/capabil
 
 ## Permission
 
-Re-exported from [`@smthrs/capability`](capability.md), source [packages/capability/src/Permission.ts](https://github.com/smithersai/smithers/blob/main/packages/capability/src/Permission.ts).
+Re-exported from [`@smthrs/capability`](/api/capability), source [packages/capability/src/Permission.ts](https://github.com/smithersai/smithers/blob/main/packages/capability/src/Permission.ts).
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -111,3 +111,98 @@ Each module below exports a `layer` that decorates the matching service tag in p
 :::warning
 The kernel is a capability check at the adapter call site. It does not sandbox the operating system, and it does not observe reads or writes that bypass the decorated services. Hermetic execution additionally needs a `StepBoundary` implementation.
 :::
+
+## API reference
+
+This page is the public API reference for capability matching, permission decisions, durable grant handling, and permission-decorated host services. It does not provide an operating-system sandbox.
+
+### Policy namespaces
+
+| Namespace | Main public API |
+| --- | --- |
+| `Capability` | `Capability`, `CapabilityPattern`, `make`, `parse`, `format`, `formatPattern`, `matches`, `subsumes`, `tierOf`, `requiresIdempotencyKey` |
+| `CapabilitySet` | `CapabilitySet` value; `fromPatterns`, `none`, `allows`, `intersect`, `equals`, `current`, and `attenuate` |
+| `Permission` | `Rule`, `evaluate`, `PermissionRequired`, `PermissionDenied`, `GrantStoreError`, `PermissionError`, `toPlatformError`, `fromPlatformError`, `isPermissionError`, `formatError`, constructor helpers |
+| `GrantEvent` | Schema-backed request, resolution, revocation, and envelope grant events |
+| `GrantStore` | `GrantStore` service; `make`, `layer`, `makeNoop`, `layerNoop`; pending request and resolution types |
+| `JournalGrantStore` | Journal-backed `GrantStore` construction and layer |
+| `Workspace` | Workspace-root context used for exact path capabilities |
+
+Rules are ordered and last-match-wins, except an effective configured deny is a hard veto. The default decision is `ask`.
+
+```ts
+const readWorkspace = new Permission.Rule({
+  effect: "allow",
+  pattern: new Capability.CapabilityPattern({
+    action: "fs:read",
+    resource: "/workspace/**"
+  })
+})
+
+const decision = Permission.evaluate(
+  [[readWorkspace]],
+  Capability.make("fs:read", "/workspace/src/main.ts")
+)
+```
+
+`GrantStore` resolutions are `once`, `run`, `remembered`, and `deny`. Journal persistence is explicit through `JournalGrantStore`; the base `makeNoop` is allow-all and should not be mistaken for a production policy.
+
+### Decorated host namespaces
+
+`FileSystem`, `ChildProcessSpawner`, `Jj`, and `HttpClient` export layers that depend on the corresponding raw platform port plus `GrantStore` and related context. `FileSystem`, `ChildProcessSpawner`, and `HttpClient` decorate Effect's own tags in place: the layer provides the same tag it requires, so there is no second kernel tag. `FileSystem` and `ChildProcessSpawner` project permission failures into `PlatformError` via `Permission.toPlatformError` (reason `PermissionDenied`, structured failure on `cause`, recovered with `Permission.fromPlatformError`); `HttpClient` projects them into `HttpClientError` via `HttpClient.toHttpClientError` (reason `TransportError`, structured failure on `cause`, recovered with `HttpClient.fromHttpClientError`). `Jj` decorates `@smthrs/jj`'s own tag, whose error channel already names the kernel's failures. `Path` explicitly re-exports the pure path-service decision without a permission check.
+
+The `HttpClient` decorator wraps `effect/unstable/http`'s own tag; there is no Smithers transport port beneath it. Every request is checked against `net:get` (GET, HEAD) or `net:post` (everything else) with the lowercased URL host as the resource, or against `model:call` with `host/modelId` when `HttpClient.withModelCall(modelId)` is in scope. Redirects cannot escape the check: platform bundles provide a client that never follows one on its own (fetch with `RequestInit { redirect: "manual" }`, Undici with no redirect interceptor), and the decorator composes Effect's own `HttpClient.followRedirects` *above* the guard, so each hop re-enters the guarded `postprocess` and is authorized independently.
+
+The `ChildProcessSpawner` decorator wraps `effect/unstable/process`'s own tag rather than a Smithers wrapper around it: `spawn` is checked against `proc:spawn` with `CommandLine.render(command)` as the resource, and the derived helpers (`exitCode`, `string`, `lines`, `stream*`) are rebuilt from the guarded `spawn` so none of them can route around the check. Because the guarded implementation replaces Effect's tag, a `Command` run as a plain `Effect` is checked too.
+
+`HostServices` composes the protected layer for the closed host service set. Use it at the application composition boundary:
+
+```text
+raw platform port
+        ↓
+kernel decorator → GrantStore
+        ↓
+flow-visible service
+```
+
+### Process containment
+
+| Namespace | Main public API |
+| --- | --- |
+| `ContainedSpawner` | `withContainment`, `groupOf`, `defaultGraceMs`, decorator `layer` over Effect's `ChildProcessSpawner` tag |
+| `ProcessLedger` | `ProcessLedger` service; `record`, `release`, `reaped`, `live`, `orphans`; `make`, `layer`, `makeMemory`, `layerMemory`, `hostRunId`, `ProcessRecord` |
+
+A cancelled run must leave no process running. `ContainedSpawner.layer` decorates Effect's spawner in place, so it stacks with the permission decorator over one host implementation, and it does two things to every process it starts.
+
+It rewrites the command to carry a kill deadline: `SIGTERM` first, then `SIGKILL` after `graceMs` (default 2000). Without that deadline Effect signals the child once and waits for an exit that a `SIGTERM`-trapping child never reports, so the releasing fiber hangs and the run never reaches `cancelled`. Both legs of a pipeline take the same policy. A command that already names a `killSignal` or a `forceKillAfter` keeps it.
+
+It records the process in `ProcessLedger` and releases the record when the spawn scope closes. Records live in memory and in `Journal` as ownerless durable entries on the run `flows.host:<hostId>`, written under the source id `@smthrs/kernel/ProcessLedger`. Replaying that run gives the next incarnation of the same `hostId` the set of processes an owner it can prove is dead left behind, which is `ProcessLedger.orphans`. `ProcessLedger.layerMemory` runs the same bookkeeping without a journal, so it contains the current incarnation and inherits nothing from a crashed one.
+
+Host facts ride the journal's ownerless channel by design. A process record describes the host rather than a run, every incarnation of a host writes under the same source id, and first-writer-wins is exactly the semantics a spawn record wants; none of these entries is a run decision, so the single-writer-per-run rule is not in play and nothing here fences against a run owner.
+
+The durable half is not best effort. `record`, `release`, `reaped`, and `skipped` all report a write that did not commit, and the spawner refuses a spawn whose record failed: it signals the child and fails the call, because a child no incarnation can discover is the one outcome containment exists to prevent. The one place a ledger failure is logged instead of propagated is the release finalizer, which has nowhere to report it; a missed release leaves the record inherited, and the next reaper finds the pid already gone and retires it then.
+
+The release is announced only after the process has been signalled. The finalizer that retires a record is registered before the spawn, so scope closure runs it after Effect's own kill finalizer: a ledger that announced an exit while the kill was still inside its grace window would be telling the next incarnation to stop looking for something still alive.
+
+The engine needs no hook for any of this. `cancelOwned` interrupts the run fiber, the fiber closes the action scopes, and the scopes own the processes. The ledger and the reaper cover the case a scope cannot: a host killed without running its finalizers.
+
+`@smthrs/platform-node` signals what the ledger reports. `ProcessReaper.reap` kills the abandoned group with `SIGKILL` on POSIX and `taskkill /pid <pid> /T /F` on Windows, and `NodeHost.layerContained` / `BunHost.layerContained` compose the spawner decorator and one reaper sweep into the host layer. `layerContained` also builds `Jj` over the contained spawner (`NodeJj.layerSpawner`), so a `jj` invocation a crashed host left running is a record like any other rather than a process that went around the host.
+
+A stored pid outlives the process that wrote it, so the reaper signals a record only when every one of these holds:
+
+| Guard | Refusal |
+| --- | --- |
+| The record has a process group of its own. | `no-group` |
+| That group is neither this process's pid nor its real process group, read from the operating system. | `own-group` |
+| The recorded owner is gone. Only `ESRCH` counts as gone; `EPERM` means another user's live process, and any other answer is a question this host could not ask. | `owner-alive` |
+| The record was written during this boot. | `pre-boot` |
+| The pid's start time, where the platform can report one, matches the recorded one. | `identity-mismatch` |
+| The signal was actually delivered, or the group was already gone. | `kill-failed` |
+
+A kill that succeeded retires the record with `flows.host.process-reaped.v1`. A record refused on identity grounds is retired with `flows.host.process-reap-skipped.v1`, which says in the journal that nothing was signalled. A kill that FAILED retires nothing, so the record stays inherited and the next incarnation tries again; the same is true of `owner-alive`, whose owner will contain its own children.
+
+### Testing
+
+`@smthrs/kernel/test/TestGrantStore` exports `layerAllow`, `layerDeny`, and `layerScripted`. The test module is a public deep import; internal modules are not.
+
+See [Hosts and capabilities](/concepts/hosts-and-capabilities) and the platform bundles that satisfy these ports: [`@smthrs/platform-browser`](/api/platform-browser), `@smthrs/platform-node`, and `@smthrs/platform-bun`.

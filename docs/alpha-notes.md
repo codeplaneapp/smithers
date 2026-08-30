@@ -10,31 +10,31 @@ They are statements of current behavior, not promises of planned behavior.
 
 The shipped pilot target is **Node.js 22 with local SQLite**. Package manifests
 require Node.js `>=22.19.0`, and CI pins Node `22.19.0`. The durable database
-backend is `@effect/sql-sqlite-node`; see the [SQLite operating envelope](pages/sqlite-operating-envelope.md)
+backend is `@effect/sql-sqlite-node`; see the [SQLite operating envelope](../pages/sqlite-operating-envelope.md)
 before placing a database file on disk.
 
 **PostgreSQL and PGlite are unsupported.** The write-retry seam recognizes
 some of their transient failures, but release 1 ships neither a client layer
 nor a migration ladder for either backend. This accepted parity gap is tracked
-as [issue #78](architecture/implementation-status.md#planned-or-incomplete-integration).
+as [issue #78](../pages/release/support-matrix.md#planned-or-incomplete-integration).
 
 No other runtime is a supported durable target. The Bun lane runs the
 non-durable package suites and excludes every durable one, and no browser
 execution suite exists, so neither establishes durable-engine support. The
-[support matrix](architecture/implementation-status.md#support-matrix) states
+[support matrix](../pages/release/support-matrix.md#support-matrix) states
 the status of each platform and storage combination.
 
 The substrate is a release candidate: every release-1 engine manifest pins
 `effect` to exactly `4.0.0-rc.108`. An upstream defect against that pin is not
 fixed by a patch range, so the known ones and their mitigations are tracked in
-[substrate pin and known upstream issues](architecture/implementation-status.md#substrate-pin-and-known-upstream-issues).
+[substrate pin and known upstream issues](../pages/release/support-matrix.md#substrate-pin-and-known-upstream-issues).
 
 The alpha control server defaults to loopback (`127.0.0.1`). A non-loopback
 bind requires the explicit `--listen`/`listen: true` opt-in and does not add
 TLS, token rotation, or multi-principal authorization. Keep ordinary alpha
 use localhost-only; if an operator opts into a network bind, they must provide
 the bearer-token and TLS/ingress protections described in the
-[control-plane trust posture](guides/control-plane-trust.md).
+[control-plane trust posture](../pages/guides/control-plane-trust.md).
 
 ### Advisory CI lanes
 
@@ -62,7 +62,7 @@ rc.0 features: `@smthrs/triggers` and `@smthrs/evals` (both private at rc.0),
 memory semantic recall, and observability OTLP export. `@smthrs/gateway`
 publishes because the Plue cutover needs its wire schemas, but its supervision
 runtime is still a noop. The
-[implementation-status scope table](architecture/implementation-status.md#not-in-release-1)
+[implementation-status scope table](../pages/release/support-matrix.md#not-in-release-1)
 explains the status of each; in particular, the published OTLP layer is
 application-wired rather than a shipped default.
 
@@ -97,6 +97,9 @@ only.
 | `database` | `dies with the original lock defect after the fixed open-retry budget is exhausted` | `it.live.runIf(FLOWS_SLOW_TESTS === "1")` |
 | `harness` | `workerd smoke` | `describe.skipIf(FLOWS_WORKERD_SMOKE !== "1")` |
 | `create-app` | `layerTevm against a mainnet fork` | `it.skip` in `template/aomi` |
+| `migrate` | `migrates a single-file JSX project through the bin (${reason})` | `it.skip` without a seat |
+| `migrate` | `records what a single-file project could not settle (${reason})` | `it.skip` without a seat |
+| `migrate` | `refuses what it cannot translate in a multi-workflow pack (${reason})` | `it.skip` without a seat |
 | `integrations` | `GitHub live contract (GITHUB_TOKEN)` | `describe.skipIf(GITHUB_TOKEN === undefined)` |
 | `integrations` | `Linear live contract (LINEAR_API_KEY)` | `describe.skipIf(LINEAR_API_KEY === undefined)` |
 | `integrations` | `Telegram live contract (TELEGRAM_BOT_TOKEN)` | `describe.skipIf(TELEGRAM_BOT_TOKEN === undefined)` |
@@ -104,6 +107,23 @@ only.
 | `migrate` | `records what a single-file project could not settle (${reason})` | `it.skip` when `SMITHERS_MIGRATE_SEAT` names no funded seat |
 | `migrate` | `refuses what it cannot translate in a multi-workflow pack (${reason})` | `it.skip` when `SMITHERS_MIGRATE_SEAT` names no funded seat |
 
+**`migrate`: apply against a real model.** The three cases in
+`packages/migrate/test/flow/MigrateFlow.live.e2e.test.ts` drive the migration
+tool against a real model: they rewrite a 0.x JSX workflow, record what the
+run could not settle, and refuse a multi-workflow pack the tool cannot
+translate. Everything else under `test/flow` scripts the seat, so these are
+the only cases that prove the contract, the prompt, and the captured sources
+are enough for a model to produce a flow the registry discovers. They cost
+real money and real minutes, and the package hard-codes no model id on
+purpose, so the operator names the seat: set `SMITHERS_MIGRATE_SEAT` to a
+`provider:model` seat and set that provider's key
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`), then run
+`pnpm --filter @smthrs/migrate test`. Without both, each case skips and says
+which variable is missing rather than passing without doing the work. What
+breaks if it regresses: the migration path an operator runs at cutover could
+stop producing a compiling flow and only the release rehearsal would find out.
+Closing it for the default gate means paying for a model seat in CI, which
+the RC does not do.
 **`integrations`: the three live contract suites.** Each one talks to a real
 vendor API, `api.github.com`, `api.linear.app`, or `api.telegram.org`. Each
 skips when its credential is absent, naming the variable in the suite title and
@@ -244,7 +264,7 @@ lives. The items an alpha operator hits first:
   recovery-time objective: a run becomes eligible only after its heartbeat is
   older than the cutoff, the sweep re-drives at most 64 stale rows per
   one-second tick, and a caller-supplied `isAlive` can refuse the steal for
-  unbounded time. See [abandoned runs and supervision](architecture/implementation-status.md#abandoned-runs-and-supervision).
+  unbounded time. See [abandoned runs and supervision](../pages/release/support-matrix.md#abandoned-runs-and-supervision).
 - **Flow registrations are in-memory.** A restarted process resumes nothing
   until it re-registers the handlers for its stored runs, because registration
   is what re-arms durable clocks and deferred wakes.
@@ -255,7 +275,7 @@ lives. The items an alpha operator hits first:
 - **Detached child flows are not exposed.** Subflows are attached
   parent/child only; first-class detached execution, automatic durable
   lineage, and structured parent cancellation policy are planned, not shipped
-  ([subflows](concepts/subflows.md#detached-children-and-lineage)).
+  ([subflows](../pages/concepts/subflows.md#detached-children-and-lineage)).
 - **Cross-process wake is polled.** The in-process `WakeBus` completes a
   resume signal directly; a wake published from another process still lands
   through polling and the stale sweep.
@@ -263,7 +283,7 @@ lives. The items an alpha operator hits first:
   diff bundle to the host itself. The pending-diff review gate is a spec, not
   shipped behavior.
 
-[Implementation status](architecture/implementation-status.md) is the
+[Implementation status](../pages/release/support-matrix.md) is the
 authoritative list; this section names only the limits that change how an
 alpha pilot is operated.
 

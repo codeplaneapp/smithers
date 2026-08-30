@@ -100,17 +100,17 @@ order. `pnpm run test:examples` runs every one against the real packages: the
 durable examples open a real SQLite file, the host example spawns a real process,
 and the browser example is bundled by a real bundler.
 
-- `01-define-and-run.ts` — define a typed flow and run it on the in-memory engine
-- `02-run-durably.ts` — run a flow on the durable engine and read the journal it wrote
-- `03-crash-and-resume.ts` — suspend a run, drop the engine, and resume from durable state
-- `04-retry-policy.ts` — retry a flaky action, and read the policy that decides when to stop
-- `05-time-travel-fork.ts` — fork a finished run at a journal frame and drive the copy
-- `06-time-travel-rewind.ts` — rewind a run to an earlier frame and re-derive a view
-- `07-sync-follower.ts` — follow a run's journal from a second process
-- `08-host-adapters.ts` — run the same host program against two adapters
-- `09-browser-use.ts` — use the library from a browser bundle
-- `10-telemetry-export.ts` — export OTLP spans and read the same run three ways
-- `11-agent-step.ts` — chain two model-backed agent steps with declared output schemas
+- `01-define-and-run.ts`: define a typed flow and run it on the in-memory engine
+- `02-run-durably.ts`: run a flow on the durable engine and read the journal it wrote
+- `03-crash-and-resume.ts`: suspend a run, drop the engine, and resume from durable state
+- `04-retry-policy.ts`: retry a flaky action, and read the policy that decides when to stop
+- `05-time-travel-fork.ts`: fork a finished run at a journal frame and drive the copy
+- `06-time-travel-rewind.ts`: rewind a run to an earlier frame and re-derive a view
+- `07-sync-follower.ts`: follow a run's journal from a second process
+- `08-host-adapters.ts`: run the same host program against two adapters
+- `09-browser-use.ts`: use the library from a browser bundle
+- `10-telemetry-export.ts`: export OTLP spans and read the same run three ways
+- `11-agent-step.ts`: chain two model-backed agent steps with declared output schemas
 
 ## Features
 
@@ -165,22 +165,10 @@ build and testing packages this table omits.
 
 ## Compatibility
 
-Smithers 1.0.0-rc.0 is a source migration, not a compatible upgrade. It provides
-no JSX workflow API, no `smthrs/jsx-runtime` or `smthrs/jsx-dev-runtime`, no
-React reconciler, no `<Workflow>`, `<Task>`, `<Sequence>`, `<Parallel>`,
-`<Loop>`, `<Ralph>`, `<Branch>`, `<Approval>`, `<Signal>`, `<Timer>`,
-`<Subflow>`, `<Worktree>`, or `<Saga>` components, no `createSmithers`,
-`runWorkflow`, `renderFrame`, or `SmithersCtx`, no `smithers-build` facade, no 0.x CLI
-verbs beyond those listed in the 1.0 command table, no 0.x gateway protocol, and
-no ability to load, resume, or migrate 0.x run databases. No shim, adapter, or
-compatibility layer will be published. Flows are written against `@smthrs/flow`
-(`Flow`, `Action`, durable waits, `RetryPolicy`), `@smthrs/engine`,
-`@smthrs/control`, and Effect `4.0.0-rc.108`, and run on Node.js 22.19.0 or later
-with local SQLite. Existing 0.x projects migrate their source with the
-`migrate-smithers-v1` workflow (`smithers migrate`), which rewrites workflows,
-imports, configuration, scripts, and docs and reports every construct it could
-not translate. Runtime behavior between 0.x and 1.0 is not equivalent and is not
-intended to be.
+The release contract freezes this wording, and the README quotes it rather than
+summarizing it:
+
+Smithers 1.0.0-rc.0 is a source migration, not a compatible upgrade. It provides no JSX workflow API, no `smthrs/jsx-runtime` or `smthrs/jsx-dev-runtime`, no React reconciler, no `<Workflow>`, `<Task>`, `<Sequence>`, `<Parallel>`, `<Loop>`, `<Ralph>`, `<Branch>`, `<Approval>`, `<Signal>`, `<Timer>`, `<Subflow>`, `<Worktree>`, or `<Saga>` components, no `createSmithers`, `runWorkflow`, `renderFrame`, or `SmithersCtx`, no `smthrs` facade, no 0.x CLI verbs beyond those listed in the 1.0 command table, no 0.x gateway protocol, and no ability to load, resume, or migrate 0.x run databases. No shim, adapter, or compatibility layer will be published. Flows are written against `@smthrs/flow` (`Flow`, `Action`, durable waits, `RetryPolicy`), `@smthrs/engine`, `@smthrs/control`, and Effect `4.0.0-rc.108`, and run on Node.js 22.19.0 or later with local SQLite. Existing 0.x projects migrate their source with the `migrate-smithers-v1` workflow (`smithers migrate`), which rewrites workflows, imports, configuration, scripts, and docs and reports every construct it could not translate. Runtime behavior between 0.x and 1.0 is not equivalent and is not intended to be.
 
 Storage in rc.0 is local SQLite only. PostgreSQL and PGlite are unsupported:
 `SMITHERS_BACKEND=pglite|postgres` and `--backend pglite|postgres` exit with

@@ -1,5 +1,10 @@
 # Smithers Effect Combinator API — Counter-Proposal
 
+> **Written for Smithers 0.x.** This note is research from before the 1.0
+> rewrite. It describes the JSX workflow runtime, its CLI, or its gateway, none
+> of which exist in 1.0.0-rc.0. It is kept as history, not as guidance; see
+> `docs/pages/migration/1.0.md` for what replaced each surface it names.
+
 In response to [andrueandersoncs's combinator proposal](https://gist.github.com/andrueandersoncs/e4f4e87e2f2c5ab4df6f8879163ad075).
 Adopts the structural ideas; rejects the dual-API framing and the input duplication.
 

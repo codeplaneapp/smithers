@@ -1,0 +1,293 @@
+---
+title: "0.31.0"
+description: "Smithers 0.31.0 lets you mark task and tool side effects with revert handlers so rewind, fork, and replay compensate or block instead of silently re-firing real-world actions, and makes Claude Opus 5 the default implementer and orchestrator."
+---
+
+Smithers 0.31.0 makes time travel side-effect-safe. Rewind, fork, and
+replay have always restored run state and worktree files, but they knew
+nothing about what a run did to the outside world: rewinding past a task
+that posted a message left the message up, and replaying posted it again.
+Now you mark those actions, Smithers journals them durably, and every
+time-travel operation compensates for them, blocks, or reports exactly
+what it crossed. Claude Opus 5 also takes the default implementer, smart,
+and orchestrator seats in the model registry.
+
+<img src="/images/0.31.0/monitor-live.gif" alt="The Smithers Monitor following a live run from running to completed" />
+
+*A release-canary run streaming through the Monitor: the health banner, execution tree, and event feed update live until the run lands on Completed with 4/4 tasks done.*
+
+## Upgrading
+
+```bash
+bunx smthrs update        # upgrade the CLI
+bunx smthrs upgrade       # agent-assisted: reads the changelogs and applies what your project needs
+bunx smthrs packs update  # refresh installed workflow packs
+```
+
+Behavior changes are collected in the [upgrade notes](#upgrade-notes).
+
+## Time travel that respects side effects
+
+The danger was never the state Smithers owns; it was the state you
+touched along the way: the Slack message, the deploy, the charge. Mark a
+task whose callback changes the outside world, and register compensation:
+
+```tsx
+<Task
+  id="announce"
+  output={outputs.announcement}
+  sideEffect={{
+    idempotent: false,
+    revert: async (ctx) => {
+      const message = await findMessageByRun(ctx.runId);
+      if (message) await slack.chat.delete(message);
+    },
+  }}
+>
+  {async () => {
+    const message = await slack.chat.postMessage({ text: "Release complete" });
+    return { messageId: message.ts };
+  }}
+</Task>
+```
+
+When an agent decides for itself when to act, mark the exact tool call
+instead:
+
+```ts
+import { defineTool } from "smthrs/tools";
+import { z } from "zod";
+
+const createTicket = defineTool({
+  name: "create_ticket",
+  schema: z.object({ title: z.string() }),
+  sideEffect: true,
+  execute: async ({ title }, ctx) => {
+    const ticket = await tracker.createIssue({ title }, { idempotencyKey: ctx.idempotencyKey });
+    return { id: ticket.id };
+  },
+  revert: async (_args, ctx) => {
+    if (ctx.output) await tracker.archiveIssue(ctx.output.id);
+  },
+});
+```
+
+Every marked call is journaled durably before it runs, with an effect
+status of intended, then succeeded or unknown. Time travel consults that
+journal:
+
+```bash
+bunx smthrs rewind RUN_ID <frame>              # prints an effect-boundary report
+bunx smthrs rewind RUN_ID <frame> --force      # cross anyway; the run is marked needs-attention
+bunx smthrs rewind RUN_ID <frame> --no-revert  # keep the effects; skip compensation
+```
+
+- **Rewind, fork, replay, and `jumpToFrame` run an effect-boundary
+  guard.** Crossing a marked effect triggers its revert handler; an
+  effect with no way to compensate blocks the operation with a new error
+  code, `TIME_TRAVEL_SIDE_EFFECT_BLOCKED`, instead of quietly re-firing
+  it.
+- **The diagnosis follows you everywhere.** `rewind` and `timetravel`
+  print the effect-boundary report; `why`, `status`, and the MCP tools
+  expose the same diagnosis; and the Gateway RPC surface accepts `force`
+  and `noRevert` and returns an `effectBoundary` report so custom run UIs
+  can render the guard.
+- **The journal is observable.** The `SmithersEvent` union gains
+  side-effect journal event types, so dashboards and OTLP exporters see
+  effect transitions as they happen.
+
+<img src="/images/0.31.0/monitor-tour.gif" alt="Touring a finished run in the Monitor, opening the node inspector, the XML debug view, and the frame scrubber" />
+
+*Inspecting a finished run in the Monitor: the execution tree, the node inspector with transcript and output, Debug power tools with the engine XML view, and frame-by-frame scrubbing with the Frames control.*
+
+Marking is checkable: a new `authoring-side-effects` eval suite (70
+fixture workflows plus handwritten cases and a harness) and a
+`gradeSideEffectCompliance` scorer statically grade whether a workflow
+marks and reverts its side effects.
+
+See the external side effects section of the
+Task docs and the
+time-travel quickstart.
+
+## Claude Opus 5 becomes the default implementer
+
+If you use the shipped registry defaults rather than a custom
+`agents.ts`, the model doing most of your work changed. SOTA registry v7
+routes the `implement` and `smart` seats in CLI-generated agent pools to
+Claude Opus 5; registry v6, also in this release, had already handed it
+the orchestrator seat that Claude Opus 4.8 held. GPT-5.6 Sol and Terra
+move to the review, validation, and checking seats.
+
+```bash
+bunx smthrs oneshot "make the flaky auth test deterministic"
+```
+
+- Cost scoring prices `claude-opus-5` at $5 per million input tokens and
+  $25 per million output tokens, the same as Opus 4.8.
+- `smithers oneshot` falls back in a new order: Claude
+  Opus 5, then Codex Sol, then Kimi K3, then Claude Fable 5.
+
+See the model selection guide for overriding
+any seat.
+
+## Point Opus 5 at your open issues
+
+The new `opus5-bug-sweep` pack workflow applies the routing change:
+Claude Opus 5 triages your open GitHub issues, fixes the straightforward
+bugs in parallel jj worktrees, lands each fix through a serialized
+compare-and-swap merge queue, gates the result with install, typecheck,
+and lint in a scratch worktree, then pushes main and closes the issues.
+It ships with a live UI.
+
+```bash
+bunx smthrs packs update
+bunx smthrs up opus5-bug-sweep
+```
+
+## Reliability and security
+
+This release closes 82 fix commits out of 138 total, most of them triaged,
+fixed, and landed by the `opus5-bug-sweep` workflow above running against this
+repo's own issue tracker. The most noticeable, with a security pin first:
+
+- **CVE-2026-59892 is closed.** The vulnerable `@opentelemetry/propagator-jaeger`
+  2.7.1 arrived transitively through `@effect/opentelemetry`; the workspace now
+  forces 2.9.0 through its dependency overrides in both lockfiles.
+- **Custom run UIs stop going silently stale.** Provider-owned gateway clients
+  are disposed when replaced or unmounted, so a React StrictMode replay or
+  Activity hide/show can no longer leave a UI reading from a closed client
+  (#906), and provider recreation now accounts for every behavior-affecting
+  option (#904).
+- **`bunx smthrs ui` and gateway autostart got honest.** Autostart waits scale
+  instead of racing, `START_IN_PROGRESS` reports what is actually happening,
+  and workflow UIs mount lazily (#1362).
+- **`bunx smthrs events --watch` tails instead of replaying.** It no longer
+  dumps the run's full history before following new events (#1355).
+- **The bash tool stops over-blocking.** With network access off, the denylist
+  scanned every argument token and rejected benign local commands; it now
+  matches actual network use (#691).
+- **Webhook deliveries no longer double-fire on Postgres.** The dedupe contract
+  held on SQLite but the Postgres `ON CONFLICT` loser still reported success
+  (#682).
+- **`bunx smthrs skills add`/`list`/`update` work headless.** The commands own
+  the curated skill and no longer gate on a TTY (#1377).
+- **`bunx smthrs worktree prune` reclaims landed lanes.** Fully-landed jj lane
+  workspaces were misread as unsaved work due to colocated git HEAD skew and
+  held forever (#1379).
+- **Retried agent attempts survive a busy runner.** The engine clears a busy
+  SingleRunner close before retrying instead of failing the attempt.
+- **Shared agent pools close cleanly.** Lifecycle races when several tasks
+  share one pool are fixed, and OMP agents gained RPC fallback parity.
+- **Long runs stay bounded in the Monitor.** DevTools retains a bounded number
+  of tool calls per task (#869), replaying a full event log no longer
+  duplicates tool calls (#713), and finish invalidation stays correct when the
+  event ring evicts (#864).
+- **Time travel got safer on the edges.** A busy or rate-limited rewind
+  retries instead of writing a terminal failed audit (#680), a VCS revert that
+  fails mid-operation now flags the run instead of leaving it silently
+  half-reverted (#679), and `restore` can no longer hang the CLI on an
+  unbounded jj restore (#684).
+- **The TUI stops lying under churn.** The hijack picker follows the node you
+  chose rather than a row index (#726), and timeline scrubbing anchors to the
+  frame, not a drifting ring position (#698).
+- **OpenAPI tools serialize like the spec says.** Array and object params get
+  real form/explode serialization instead of `String()` (#715), templated
+  server URLs substitute their variables (#716), and digit-only string
+  examples stay strings in generated YAML (#703).
+- **Streams and saves hardened.** `streamRunEventsResilient` no longer hangs
+  on a server backpressure disconnect (#702), `mutate()` stops leaking SSE
+  change-streams (#731), and local UI file saves are atomic, mode-preserving,
+  and protected against concurrent overwrites (#909, #910).
+- **Prompt rendering and components.** Ordered lists in agent prompts keep
+  their step numbers (#700), duplicate `Panel` panelist labels no longer
+  collide into a `DUPLICATE_ID` crash (#694), and Telegram message splitting
+  stops breaking MarkdownV2 escapes and surrogate pairs (#739).
+- **Account logins are detected authoritatively.** Registration asks the
+  provider instead of sniffing the config directory, so stale directories no
+  longer read as logged-in seats.
+- **jj workspaces survive symlinked paths.** The engine resolves symlinks when
+  verifying workspace roots, fixing worktree verification on macOS /tmp-style
+  paths.
+- **Sandboxes respect their limits.** A GCP Cloud Run abort during setup
+  cancels the run (#724) and Vercel `extendTimeout` treats the plan cap as
+  absolute (#741).
+
+## Docs for humans, docs for agents
+
+The docs site now separates its two audiences. The Product API tab is for
+you: a Platform Capabilities catalog of what you
+can ask for in plain English, setup pages for each harness (Claude Code,
+Codex, Cursor, Copilot, Pi, Hermes, OpenClaw), and a
+Set Up Semantic Memory page covering
+Hindsight and `HINDSIGHT_URL`. The Technical API tab is the agent-facing
+reference, and its entry pages now say so.
+
+## Other improvements
+
+- **Agent seats load-balance across an account fleet.** Register several
+  Claude or Codex accounts and Smithers picks the seat per attempt from
+  usage-probe headroom instead of pinning one subscription, so big campaigns
+  stop parking on a single exhausted window.
+- **System runs stay out of your way.** Internal runs (autopsies, mirrors)
+  carry a fail-closed visibility stamp and are excluded from run listings
+  unless a caller opts in with `includeSystem`.
+- **Cursor joins the agent adapters.** `CursorAgent` drives Cursor's headless
+  CLI inside workflow tasks, parsing tool calls from its real stream shape,
+  and the agent docs scaffold it alongside Codex. Contributed by Ralf
+  Boltshauser.
+- **Postgres connections stay bounded.** Workflows sharing a Postgres store
+  now draw from one bounded pool (default 16) that fails saturation loudly
+  instead of exhausting the server.
+- **`jjhub-issue-fleet` pack workflow.** Fans each open GitHub issue into its
+  own jjhub sandbox VM with a Codex lane and returns PRs, with a live fleet
+  UI.
+- **Every `@smthrs/ui` component has a browsable
+  catalog:** 47 stories at
+  [storybook.smithers.sh](https://storybook.smithers.sh).
+- **Launching Smithers from the Claude Code native Workflow tool no
+  longer crashes.** That tool's script sandbox defines no Node globals,
+  so the mirror script stopped referencing the bare `process` global.
+
+## Community thanks
+
+Thank you to the external contributors in this release:
+
+- **Ralf Boltshauser ([@ralfboltshauser](https://github.com/ralfboltshauser))**
+  contributed the whole **`CursorAgent` adapter**: the CLI integration, its
+  stream parsing, and the docs scaffolding alongside Codex.
+- **Leonardo Cascianelli ([@H3xept](https://github.com/H3xept))** kept the OMP
+  engine moving: streaming runs now default to persistent RPC, and tool-call
+  args survive start/update events.
+- **[@mindfather](https://github.com/mindfather)** made shared Postgres pools
+  bounded, the fix behind the pool defaults above.
+- **orbisai0security** reported and patched **CVE-2026-59892**, resolved via
+  the dependency override above.
+- **[@paolohajinz75](https://github.com/paolohajinz75)** added the repo
+  `.editorconfig`.
+
+Running into something? `bunx smthrs bug` files a report
+straight from your terminal.
+
+## Upgrade notes
+
+- **Run listings no longer include system runs** (post-failure autopsies and
+  other internal workflows). Pass `includeSystem` to `listRuns` or the CLI
+  debug surfaces if you relied on seeing them.
+
+- **DB migrations 0031 (the side-effect journal) and 0032 (tool-call
+  tokens) run automatically** through the existing schema-migrations
+  runner the first time an upgraded CLI touches a workspace. No manual
+  steps.
+- **`sideEffect` is opt-in.** A workflow that never sets it has no effect
+  boundaries, so rewind, fork, and replay behave exactly as before.
+- **Shipped registry defaults now route the implement, smart, and
+  orchestrator seats to Claude Opus 5,** and `oneshot` prefers Opus 5
+  before Codex Sol, Kimi K3, and Claude Fable 5. A custom `agents.ts` is
+  unaffected.
+
+## The full changelog
+
+The complete commit-level history for this release is in
+[CHANGELOG.md](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
+
+Found a bug? Run `bunx smthrs bug` to file it.

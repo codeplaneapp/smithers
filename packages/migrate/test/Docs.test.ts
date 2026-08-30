@@ -14,7 +14,7 @@ import * as Mapping from "../src/Mapping.ts"
 
 const read = (relative: string): string => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8")
 
-const reference = read("../../../docs/reference/migrate.md")
+const reference = read("../../../docs/pages/migration/migrate-tool.md")
 const index = read("../src/index.ts")
 
 /** Every namespace `src/index.ts` re-exports, in source order. */

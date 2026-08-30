@@ -80,7 +80,7 @@ Replay is read-only: `TimeTravel.inspect` folds committed entries into a project
 
 The alternative was building rewind into the engine's own resume path, which would put a destructive operation behind the same entry point as an ordinary wake.
 
-Cost: time travel depends on explicit effect-boundary records, lineage edges, and snapshot pointers, and ordinary engine execution does not populate all of them yet. `SqlTimeTravelStore.createFork` materializes state from the parent's current persisted snapshot and attempts rather than from a per-frame historical reconstruction.
+Cost: time travel depends on explicit effect-boundary records, lineage edges, and snapshot pointers, and ordinary engine execution does not populate all of them yet. `SqlTimeTravelStore.createFork` folds state at the frame from the journal's own run-decision records and copies only the attempts that prefix explains; the parent's current row is a compatibility fallback for a journal written before frame-derived state existed.
 
 ## D10. Remote sync is read-only
 

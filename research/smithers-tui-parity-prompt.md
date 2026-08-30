@@ -1,5 +1,10 @@
 # Prompt: Bring multi's product UX to the terminal — the Smithers TUI
 
+> **Written for Smithers 0.x.** This note is research from before the 1.0
+> rewrite. It describes the JSX workflow runtime, its CLI, or its gateway, none
+> of which exist in 1.0.0-rc.0. It is kept as history, not as guidance; see
+> `docs/pages/migration/1.0.md` for what replaced each surface it names.
+
 You are implementing a major feature program in the smithers repo (`/Users/williamcory/smithers`). Read this whole prompt first. Your deliverables, in order:
 
 1. **Write the full detailed spec** (a `research/tui-parity/` spec set, screen-by-screen and package-by-package, expanding every section below).

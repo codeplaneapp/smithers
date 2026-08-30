@@ -84,4 +84,68 @@ The package root holds the contract, its error, and the no-op layer only, so it 
 
 ## Reading next
 
-[`@smthrs/kernel`](kernel.md) owns the closed service list and decorates `Jj` with capability checks, and [`@smthrs/time-travel`](time-travel.md) uses it for workspace snapshot and restore.
+[`@smthrs/kernel`](/api/kernel) owns the closed service list and decorates `Jj` with capability checks, and [`@smthrs/time-travel`](/api/time-travel) uses it for workspace snapshot and restore.
+
+## API reference
+
+This page is the public API reference for the `Jj` host service: version control as a capability. Permission enforcement is provided separately by `@smthrs/kernel`, whose `Jj` decorator wraps this contract.
+
+The package depends on `effect` and `@smthrs/capability`: the interface names `Permission.PermissionError` in its error channel so the kernel decorator needs no second tag. `Jj` is still one of the five services in the closed host list `@smthrs/kernel` owns; the contract lives here so a consumer that only snapshots a working copy does not take a process spawner and an HTTP client with it.
+
+### Contract
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `Jj` | interface + service tag | tag key `@smthrs/jj/Jj` |
+| `ChangeId` | type | the durable handle a run uses to name workspace state |
+| `snapshot`, `restore`, `diff`, `workspaceAdd`, `workspaceForget`, `status` | methods | every one fails with `JjError` |
+| `root`, `revert` | optional methods | present only on a backend that implements them; `root` answers the repository root containing a path, `revert` undoes one change and reports the paths it touched |
+| `JjError` | class | tagged `@smthrs/jj/JjError`, carrying `code`, `module`, `method`, `message`, the `command` that produced it, and an optional `cause` holding the underlying host failure |
+| `JjErrorCode` | const + type | `not_installed`, `conflict`, `invalid_ref`, `unknown` |
+| `jjError` | constructor | builds a `JjError` from a code plus context |
+| `make`, `makeNoop`, `layerNoop` | constructors and layer | `makeNoop` fails every method with `not_installed` until overridden |
+
+`snapshot` describes the current change, reads its id, and opens a fresh one: the id returned is the state a later `restore` goes back to.
+
+`root` and `revert` are optional because the contract is also implemented by test doubles and by a browser backend with no repository to walk. A caller that needs one checks for it, and a backend that lacks it keeps reading as a backend that lacks it: the kernel decorator forwards the absence rather than replacing it with a method that fails on call, because "this host cannot revert" and "your revert was refused" are different answers.
+
+The two exist because `restore` cannot express what an operator means by undo. `restore` moves the working copy back to a recorded point, discarding everything committed after it; `revert` undoes ONE change and keeps the rest. `NodeJj` implements it as `jj revert --insert-before @`, so the reverted tree is the working copy rather than a commit parked elsewhere in the graph, and it reads the changed paths before reverting so `{ reverted }` names what was undone. `root` is `jj root`, which answers for colocated repositories and workspaces that a walk up looking for `.jj` would get wrong.
+
+Both are capability-checked like every other operation: `jj:root` is `sealed`, `jj:revert` is `compensable`.
+
+### Implementations
+
+Implementations are **not** root exports. The root is the portable contract and bundles for the browser; each implementation is imported from its own subpath.
+
+| Import | Layer |
+| --- | --- |
+| `@smthrs/jj/node/NodeJj` | `layer` spawning the `jj` CLI with argv, never a shell string; `layerSpawner` running the same commands through the host's `ChildProcessSpawner` |
+| `@smthrs/jj/bun/BunJj` | `layer`: Bun implements the same child-process API, so this is `NodeJj.layer` |
+| `@smthrs/jj/browser/BrowserJj` | `layer({ fs, wasm })`: jj-lib compiled to `wasm32-wasip1`, run over an injected virtual filesystem; `layerUnsupported` is the fallback where no module ships, reporting `not_installed` |
+
+```ts
+import { Jj } from "@smthrs/jj"
+import * as NodeJj from "@smthrs/jj/node/NodeJj"
+```
+
+`NodeJj` ships two layers, and the difference between them is who owns the child process.
+
+`NodeJj.layer` spawns its own children through `node:child_process`. jj invocations are argv arrays with no shell interpretation, and a host must be able to checkpoint work even where a spawner is unavailable, sandboxed, or gated behind a `proc:spawn` grant the user has not given.
+
+`NodeJj.layerSpawner` runs the same commands through Effect's `ChildProcessSpawner`, so whatever decorates that service decorates jj too. That is what `NodeHost.layerContained` uses: a jj child spawned around the host leads no recorded process group, is in no `ProcessLedger`, and is never reaped, so a `jj` that hangs after the host dies is a process nothing on the machine can account for. Both layers share one command vocabulary and one classification, so routing jj through a spawner changes nothing a caller can observe.
+
+Errors are classified from jj's own stderr vocabulary onto the stable codes, the way `NodeFileSystem` classifies errno. A spawner that reports a missing binary as a `NotFound` `PlatformError` produces the same `not_installed` the direct layer produces for `ENOENT`.
+
+The guarded `Jj` canonicalizes `root`'s starting directory before it checks `jj:root`, and runs jj in the canonical directory, so a symlink alias cannot separate the authorized path from the repository inspected. `PlatformError` is in `root`'s error channel for that reason, exactly as it is in `workspaceAdd`'s.
+
+jj is a native binary, but jj-lib compiles to `wasm32-wasip1`. `BrowserJj.layer({ fs, wasm })` runs that module, shipped as `packages/jj/wasm/flows_jj.wasm`, over an injected virtual filesystem, through a hand-written WASI preview1 shim in this package; the mount and the compiled module are arguments, not dependencies, so the library never picks a storage backend for its host. `BrowserJj.layerUnsupported` stays exported for a host that ships no module and reports `not_installed`, the same code the Node layer uses when the binary is absent, so a caller needs no browser-specific branch. It is a ticket, not a silent exception; see `Concepts/Browser jj` in the spec vault.
+
+### Durable identity
+
+The tag key `@smthrs/jj/Jj` and the error `_tag` `@smthrs/jj/JjError` are durable identity: step keys digest the resolved service set, and `JjError` round-trips through the journal, so renaming either invalidates recorded runs. `packages/jj/test/index.test.ts` pins both. See [step keys](/concepts/step-keys).
+
+### Browser support
+
+`@smthrs/jj` and `@smthrs/jj/browser/BrowserJj` are gated as browser entry points by `scripts/browser-check.mjs` (`pnpm run browser`, and one CI step). The same gate asserts `@smthrs/jj/node/NodeJj` and `@smthrs/jj/bun/BunJj` still do *not* bundle, and that the reason is `node:child_process`.
+
+See [Hosts and capabilities](/concepts/hosts-and-capabilities), the [`@smthrs/kernel` reference](/api/kernel), and [time travel](/concepts/time-travel), which uses `Jj` for workspace snapshot and restore.

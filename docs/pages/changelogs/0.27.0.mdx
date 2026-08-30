@@ -1,0 +1,149 @@
+---
+title: "0.27.0"
+description: "The workspace Gateway becomes a hardened singleton daemon, the UI data layer moves to TanStack DB collections, `up --interactive` opens a full-screen TUI monitor, a create-workflow builder turns plain-English descriptions into runnable workflows, runs heal themselves with a post-failure autopsy, and Claude Code & Codex plugins mirror live runs into the chat."
+---
+
+Smithers 0.27.0 is one of the largest releases yet. It rebuilds the control plane around a single per-workspace Gateway daemon (autostarted by the CLI, idle-aware, hardened against DNS rebinding, and tested under 50 concurrent runs with no mocks) and replaces the bespoke gateway-WS sync stack with a TanStack DB collection engine that runs over REST + SSE locally and ElectricSQL for multiplayer. Around that core: a workflow-UI toolkit with a create-workflow builder that turns plain-English descriptions into runnable workflows, a full-screen TUI monitor behind `up --interactive`, [Claude Code and Codex plugins](https://plugins.smithers.sh) that mirror every run into the chat, [self-healing runs](https://self-healing.smithers.sh) with an automatic post-failure autopsy, [docs-driven development](https://ddd.smithers.sh), serverless execution on Cloudflare, Telegram approvals, an interactive init wizard, `smithers update`, HTML run reports, and a batch of security and correctness fixes.
+
+<img src="/images/0.27.0/hero.svg" alt="Smithers 0.27.0 release card listing the headline features" />
+
+*Smithers 0.27.0: one Gateway per workspace, a TanStack DB sync engine, a full-screen TUI monitor, and a security-hardening pass.*
+
+---
+
+## Breaking changes
+
+- **The bespoke gateway-WS collection stack is retired.** `gateway-client` / `gateway-react` now sit on TanStack DB collections via `createSmithersCollections` with per-mode providers. The documented workflow-UI hook surface is preserved on top of collections, so workflow UIs keep working unchanged; direct consumers of the old sync primitives need to migrate.
+- **AI SDK 7 upgrade.** `onStepFinish` is renamed to `onStepEnd`, and Smithers now requires Node >= 22.
+
+See the [migration notes](#migration-notes) at the bottom.
+
+## One Gateway daemon per workspace
+
+The Gateway is now a singleton: CLI commands autostart one shared daemon per workspace (with identity checks so you never attach to the wrong one), and every run in that workspace flows through it over a single shared SQLite store.
+
+- **Manage it explicitly** with `bunx smthrs gateway status` and `bunx smthrs gateway stop`.
+- **Idle spin-down:** autostarted daemons exit after ~5 minutes with no WS clients, in-flight runs, crons, or timers. `SMITHERS_GATEWAY_IDLE_MS` tunes the window; an explicit `bunx smthrs gateway` never idle-exits.
+- **Escape hatch for CI, sandboxes, and containers:** set `SMITHERS_NO_DAEMON=1` (or pass `--no-daemon`) to opt out of autostart. Commands that genuinely need a daemon fail loud and name the hatch instead of silently spawning one.
+- **DNS-rebinding defense:** unauthenticated requests with a non-loopback `Host` are rejected (including correct handling of a bare `::1`), and the local UI gateway proxy blocks cross-origin requests. Remote binds that legitimately serve non-loopback Hosts use auth as the gate, or the explicit `SMITHERS_GATEWAY_TRUST_ANY_HOST=1` opt-out.
+- **Tested under load:** a new no-mocks test runs 50 concurrent workflows through one gateway owner: all 50 finish, every run is attributed exactly once, and per-run event sequences stay contiguous.
+- **Run lists filter by workflow** across the gateway API and UI surfaces.
+
+## TanStack DB sync engine
+
+The UI data layer moved to TanStack DB collections with per-mode providers behind one API. The sync guide covers the architecture.
+
+- **Local mode:** a QueryCollection provider over new `/v1/api` REST routes with SSE invalidation.
+- **Multiplayer mode:** an ElectricSQL provider over Postgres, through a hardened Electric sync proxy.
+- The hooks, collections, and mutation API are identical in both modes, and a 3-lens adversarial audit of the sync engine resolved 10 findings before release.
+
+## Workflow UI toolkit
+
+Workflow UIs are now a first-class authoring surface:
+
+- **A reusable `gateway-ui` component package** and a workflow UI styleguide provide the primitives custom workflow UIs are built from.
+- **A create-workflow builder UI** with a code editor and live graph preview backs `bunx smthrs make-workflow`: describe a workflow in plain English and watch it get designed, scaffolded, and graph-verified.
+- **Experimental:** `bunx smthrs ui --app` serves a local UI app preview with a concierge chat that can create and launch workflows ([ui.smithers.sh](https://ui.smithers.sh)). It requires an LLM API key and is not yet part of the supported product surface.
+
+<img src="/images/why/runs-live.gif" alt="A Smithers run streaming live step transitions into a tree as each task starts and finishes" />
+
+*A run streaming live step transitions into the UI as each task starts and finishes. The same live collections now power the web UI, the TUI monitor, and the chat plugins.*
+
+## Full-screen TUI monitor
+
+`bunx smthrs up --interactive` now opens a full-screen OpenTUI + React monitor with five modes (tree, graph, logs, timeline, and hijack), fed by the same live gateway-react hooks as the web UI, with inline approvals. For watching an already-detached run, [`smithers monitor`](https://monitor.smithers.sh) is the cockpit equivalent.
+
+## Claude Code and Codex plugins: durable runs, inside the chat
+
+Both plugins are covered in depth at [plugins.smithers.sh](https://plugins.smithers.sh).
+
+- **Claude Code** (integration guide): the plugin now mirrors every Smithers run into a live /workflows view by default, with a background monitor that surfaces approvals, human requests, failures, and stalls. It is driven by new versioned protocol commands (`bunx smthrs claude tick|node-wait|monitor`), and the graph layer derives Claude-native phase plans, including from persisted frames, so a restarted session picks the view back up.
+- **Codex** gets its own plugin whose skill drives the agent to run its work through Smithers and open a live `bunx smthrs ui` view per workflow.
+
+## Self-healing runs
+
+When a run fails, Smithers now [investigates itself](https://self-healing.smithers.sh):
+
+- **Post-failure autopsy:** the CLI auto-launches an autopsy workflow on run failure that diagnoses what went wrong from the event history and reports findings (guide).
+- **Fleet medic:** the `monitor-smithers` sweep gains an auto-remediation medic stage that proposes and applies fixes for stuck or degraded runs.
+- **`bunx smthrs supervise`** continues to watch for stale running runs and auto-resume them.
+
+<img src="/images/why/crash-resume.gif" alt="A Smithers run crashing and resuming from its last durable checkpoint" />
+
+*Durability is the point: a run that crashes mid-flight resumes from its last checkpoint, and in 0.27.0 a run that fails gets an automatic autopsy.*
+
+## Serverless and sandboxes
+
+- **Cloudflare:** serverless resume and cron ticks with run-lease claims let a Worker own a durable run without a long-lived process, alongside a Cloudflare sandbox provider (integration guide).
+- **Run on plue:** a plue sandbox provider and a `run-on-plue` workflow run any Smithers workflow on a real remote Freestyle VM, verified end to end (example).
+
+## Integrations: Telegram, GitHub, and Linear
+
+- A new integrations package delivers external webhook events (GitHub, Linear, Telegram) into workflows, with durable persisted integration event state.
+- Telegram becomes an approval surface: a Bot API helper package, inline approval buttons, a mini-app approval page with `initData` verification, and a daily-digest summary bot; see [telegram.smithers.sh](https://telegram.smithers.sh) and the Telegram guide.
+
+## Docs-driven development
+
+A new [docs-driven development](https://ddd.smithers.sh) family of workflows treats your docs as the contract and drives agents to meet it: `ddd-bug-scan` finds where the code disagrees with the docs, `ddd-generate-docs` writes the missing contract, and `ddd-improve` closes the gap. The family also includes DDD quality-loop and test-coverage workflows, a spec pack, a dedicated workflow UI, and a feature-triage library, all covered by real-run e2e tests.
+
+## CLI
+
+- **Interactive `init` wizard** ([init.smithers.sh](https://init.smithers.sh)) with à-la-carte workflow/skill/agent-doc selection and persisted skill deselections; `--yes` / `--non-interactive` for CI. Non-interactive re-init now runs as a durable, replayable system workflow, falling back to the imperative path if the workflow cannot load.
+- **`bunx smthrs make-workflow "<task>"`** dispatches the create-workflow builder from a plain-English description, and `init [prompt]` chains straight into it: install the pack and describe your first workflow in one command. A seeded make-workflow tutorial teaches the authoring loop.
+- **`bunx smthrs update`** detects how Smithers was installed (bunx/npx, global bun/npm/pnpm/yarn, project-local) and upgrades it or prints the exact command, plus a passive once-a-day update notice (`SMITHERS_NO_UPDATE_CHECK` opts out).
+- **HTML run reports:** `bunx smthrs workflow run --report` emits an HTML report with open-in-browser.
+- **`bunx smthrs bug`** files bug reports with scrubbed run context (how we handle them).
+- **Agent availability probing:** the CLI now probes whether agent CLIs can actually run instead of trusting auth files on disk.
+- **Version-pinned LLM docs:** `bunx smthrs docs` / `docs-full` serve `llms.txt` / `llms-full.txt` pinned to the installed version, with a git-tag fallback for older `--docs-version` requests.
+- **Project-local CLI resolution:** a globally-installed `smithers` resolves and delegates to the nearest project-local install, the way tsx and bunx do.
+- **waiting-quota is handled consistently** across the CLI, TUI, gateway, and UI: paused exit code, waiting badge/tone, and active-run treatment instead of reading as failed or terminal.
+
+## Agents
+
+- **OpenClaw** is now a supported agent ([openclaw.smithers.sh](https://openclaw.smithers.sh)): a new adapter, a native OpenClaw plugin with an orchestrate skill, and working session resume (`--session-id` emitted, resume metadata persisted).
+- **elizaOS** ships as the opt-in `@smthrs/agent-eliza` package, wrapping the elizaOS AgentRuntime with an elizaOS-conventions authoring/loading layer; `@elizaos/core` stays out of default installs.
+- **A review agent tier** joins the generated `agents.ts`, so plan/implement/review pools are first-class in fresh installs.
+- **SSRF fixes in agent tools:** the http tool no longer attaches configured secret headers to hosts outside the allowlist, and the transcription tool rejects loopback/private/link-local audio URLs unless explicitly opted in.
+- **MCP stdio deadlock fixed:** the transport now drains the server's stderr pipe, so a verbose MCP server can no longer stall the session once the OS pipe buffer filled.
+
+## Workflow pack
+
+- **Every user-facing seeded workflow now ships a custom UI**: the init pack seeds per-workflow browser UIs built on the new `gateway-ui` package, opened with `bunx smthrs ui RUN_ID`.
+- **Fresh installs default the implement pool to Claude Sonnet 5** in the generated `agents.ts`.
+- **Re-init detects drifted seeded pack files** and offers an interactive update, so upgrading the pack no longer means diffing by hand.
+- Plan and review now run as model-diverse panels whose moderator synthesizes a single verdict, with resilient failover when one CLI cannot authenticate. The Panel component's moderator is gated on actual panelist outputs instead of synthesizing a verdict blind.
+- **System workflows:** internal durable processes (like re-init) are marked `system: true` and hidden from default listings while staying explicitly runnable, so frontends show only your workflows.
+- Cron and event triggers turn a push into a pipeline: see [automate.smithers.sh](https://automate.smithers.sh).
+
+<img src="/images/workflow-ui/implement.png" alt="The implement workflow's custom browser UI showing a live run" />
+
+*Seeded workflows ship with their own UIs: the implement workflow's live view, one of the per-workflow UIs installed by smithers init.*
+
+## Code review service
+
+The open-code-review service that backs `/code-review` grew verification teeth: finding-verification helpers, impact quizzes with verified walkthroughs, sticky PR status comments, cache-token-aware usage accounting, and a monthly spend cap with claim-slot quotas.
+
+## Engine and scheduler fixes
+
+- Agent final-output JSON extraction (`extractLastBalancedJson`) is now a single O(n) pass; a 200KB prose payload previously blocked the event loop about 1.7 seconds.
+- Timer durations like `1d` now park instead of busy-looping: the scheduler's duration parser matches the engine grammar (d unit, case-insensitive), and duration-timer deadlines stay anchored across decide passes.
+- Subflows with arbitrarily-named outputs work as documented via an opt-in `smithers(build, { output })` resolution.
+- The jj repo probe is bounded with a 1.5s timeout so a hung jj no longer blocks durability startup; skipped workspace snapshots and failed durable-resume restores log structured warnings instead of silent nulls.
+- The agent trace buffer and DevTools run store are now bounded (head+tail retention, configurable run/event caps).
+- `Task` gains `depsOptional` for tolerating failed upstream dependencies, and human task kinds survive the snapshot pipeline.
+
+## Security hardening
+
+Beyond the gateway host defense and agent-tool SSRF fixes: canonical 3-segment JWTs with timing-safe signature comparison, OIDC PR-claim verification in the review server, a hardened Electric sync proxy, run idempotency enforcement, and a structured `TOOL_NETWORK_ISOLATION_UNENFORCED` warning when `allowNetwork:false` cannot be enforced at the OS level (Linux).
+
+## Windows CI
+
+The full typecheck and test suites now run on Windows in CI (sharded), with LF line-ending normalization via `.gitattributes` and numerous Windows-specific test and portability fixes.
+
+## Migration notes
+
+- Consumers importing the old gateway-WS sync primitives (`createGatewayCollection`, SyncProvider-era APIs) should move to `createSmithersCollections` / `SmithersCollectionsProvider`; workflow UIs using the documented gateway-react hooks keep working unchanged.
+- Ensure Node >= 22 before upgrading; SDK-agent callers using `onStepFinish` must rename to `onStepEnd`.
+- CI, containers, and sandboxes that must not spawn a background gateway should set `SMITHERS_NO_DAEMON=1` (or pass `--no-daemon`); commands that genuinely need a daemon then fail loud instead of autostarting.
+- Remote gateway binds that legitimately serve non-loopback Hosts need auth (the token is the gate) or the explicit `SMITHERS_GATEWAY_TRUST_ANY_HOST=1` opt-out.
+- http-tool configurations that rely on `defaultHeaders` reaching hosts other than the `baseUrl` host must now list those hosts in `allowedHosts`; transcription of private/loopback audio URLs requires `allowedAudioHosts` or `allowPrivateAudioUrl`.

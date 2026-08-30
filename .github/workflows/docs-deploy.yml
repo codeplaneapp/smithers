@@ -1,0 +1,72 @@
+name: Deploy docs
+
+# smithers.sh is the vocs build of docs/pages. Publishing is a separate job
+# from CI because the gates that decide whether the documentation is correct
+# (check-docs, check-llms, the vocs build itself) already run there on every
+# commit; this workflow's only extra job is to put the built site somewhere.
+#
+# The upload step is deliberately host-neutral: it produces a Pages artifact
+# from docs/dist. Point it at whichever host the maintainer chooses by adding
+# the deploy job's credentials; nothing above that line changes.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+      - 'vocs.config.ts'
+      - 'scripts/generate-docs-pages.mjs'
+      - 'scripts/generate-llms.ts'
+      - 'scripts/docs-*.mjs'
+      - '.github/workflows/docs-deploy.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: vocs build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # The site is only worth publishing if it is the site the gates passed.
+      # check-docs re-runs the page generators, so a stale generated page fails
+      # here rather than reaching smithers.sh.
+      - run: node scripts/check-docs.mjs
+      - run: node scripts/check-llms.mjs
+      - run: pnpm exec vocs build
+      - uses: actions/configure-pages@v5
+      # `renderStrategy: full-static` writes the site under `<outDir>/public`,
+      # beside the server bundle rather than in place of it, so the artifact is
+      # `docs/dist/public`. Uploading `docs/dist` ships `serve-node.js` and no
+      # index.html, which Pages serves as an empty directory.
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/dist/public
+
+  deploy:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

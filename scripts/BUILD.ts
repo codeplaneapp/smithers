@@ -14,8 +14,14 @@
 import { Smithers } from "@smthrs/targets"
 import { runtime } from "../BUILD.ts"
 
-/** Everything under `scripts/`, digested as the input of every gate here. */
-const sources = Smithers.glob("//scripts/**/*.mjs")
+/**
+ * Everything under `scripts/`, digested as the input of every gate here.
+ *
+ * Both extensions: the version guard and the invocation normalizer are
+ * TypeScript, and a glob that saw only `.mjs` would leave an edit to either one
+ * out of the digest every gate here is keyed on.
+ */
+const sources = [Smithers.glob("//scripts/**/*.mjs"), Smithers.glob("//scripts/**/*.ts")]
 
 /**
  * The pack directory the release rehearsal writes and the smoke check reads.
@@ -36,7 +42,7 @@ const packDirectory = "dist/release-packs"
 export const packManifest = Smithers.NodeTest({
   runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/pack-release.test.mjs")]),
-  srcs: [sources],
+  srcs: sources,
   deps: []
 })
 
@@ -53,7 +59,7 @@ export const packManifest = Smithers.NodeTest({
 export const releaseRehearsal = Smithers.NodeTest({
   runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/release-rehearsal.test.mjs")]),
-  srcs: [sources, Smithers.file("//.github/workflows/release.yml")],
+  srcs: [...sources, Smithers.file("//.github/workflows/release.yml")],
   deps: []
 })
 
@@ -67,7 +73,7 @@ export const releaseRehearsal = Smithers.NodeTest({
 export const releaseVersion = Smithers.NodeTest({
   runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/set-release-version.test.mjs")]),
-  srcs: [sources],
+  srcs: sources,
   deps: []
 })
 
@@ -81,7 +87,7 @@ export const releaseVersion = Smithers.NodeTest({
 export const disasterRecovery = Smithers.NodeTest({
   runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/flows-backup.test.mjs")]),
-  srcs: [sources],
+  srcs: sources,
   deps: []
 })
 
@@ -98,7 +104,7 @@ export const disasterRecovery = Smithers.NodeTest({
 export const testPinRegister = Smithers.NodeTest({
   runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/check-test-pins.test.mjs")]),
-  srcs: [sources],
+  srcs: sources,
   deps: []
 })
 
@@ -119,7 +125,7 @@ export const browserContract = Smithers.NodeTest({
   // The entry points this bundles live in other packages, and a declared glob
   // may not cross a package boundary — it would expand to nothing and read as
   // a contract it is not. The gate is not cacheable, so it re-runs regardless.
-  srcs: [sources],
+  srcs: sources,
   deps: []
 })
 
@@ -136,7 +142,7 @@ export const releasePack = Smithers.NodeBinary({
   runtime,
   entry: Smithers.file("//scripts/pack-release.mjs"),
   args: [packDirectory],
-  srcs: [sources],
+  srcs: sources,
   deps: []
 })
 
@@ -154,7 +160,7 @@ export const releasePack = Smithers.NodeBinary({
 export const releaseSmoke = Smithers.NodeTest({
   runtime,
   runner: Smithers.entrypoint(Smithers.file("//scripts/smoke-release.mjs"), [packDirectory]),
-  srcs: [sources],
+  srcs: sources,
   deps: [releasePack]
 })
 
@@ -171,7 +177,7 @@ export const releaseSmoke = Smithers.NodeTest({
 export const effectVersion = Smithers.NodeTest({
   runtime,
   runner: Smithers.entrypoint(Smithers.file("//scripts/check-single-effect-version.mjs")),
-  srcs: [sources, Smithers.file("//pnpm-lock.yaml"), Smithers.file("//bun.lock")],
+  srcs: [...sources, Smithers.file("//pnpm-lock.yaml"), Smithers.file("//bun.lock")],
   deps: []
 })
 
@@ -193,7 +199,7 @@ export const effectVersion = Smithers.NodeTest({
 export const dependencyBoundaries = Smithers.NodeTest({
   runtime,
   runner: Smithers.entrypoint(Smithers.file("//scripts/check-dependency-boundaries.mjs")),
-  srcs: [sources],
+  srcs: sources,
   deps: []
 })
 
@@ -211,7 +217,7 @@ export const dependencyBoundaries = Smithers.NodeTest({
 export const localSmithers = Smithers.NodeTest({
   runtime,
   runner: Smithers.entrypoint(Smithers.file("//scripts/check-local-smithers.mjs")),
-  srcs: [sources],
+  srcs: sources,
   deps: []
 })
 
@@ -225,6 +231,66 @@ export const localSmithers = Smithers.NodeTest({
 export const localSmithersUnit = Smithers.NodeTest({
   runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/check-local-smithers.test.mjs")]),
-  srcs: [sources],
+  srcs: sources,
+  deps: []
+})
+
+/**
+ * The documentation gate: house style, page shape, links, the CLI catalog
+ * against the binary, the removed surfaces, the generated pages, and the route
+ * plan.
+ *
+ * It spawns the working-tree CLI to read `--help`, so it is not cacheable and
+ * re-runs regardless.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const docs = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.entrypoint(Smithers.file("//scripts/check-docs.mjs")),
+  srcs: sources,
+  deps: []
+})
+
+/**
+ * The bundles `smithers docs`, the installed skill, and smithers.sh serve are
+ * regenerated from `docs/pages` and compared byte for byte.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const llms = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.entrypoint(Smithers.file("//scripts/check-llms.mjs")),
+  srcs: sources,
+  deps: []
+})
+
+/**
+ * The unit suites behind those two gates: the contract parser, the deploy
+ * workflow, the removal surface, the render helpers, the help parser, the route
+ * plan, the sidebar, the bundle builder, the version guard, and the invocation
+ * normalizer.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const docsUnit = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.testRunner([
+    Smithers.file("//scripts/docs-contract.test.mjs"),
+    Smithers.file("//scripts/docs-deploy.test.mjs"),
+    Smithers.file("//scripts/docs-links.test.mjs"),
+    Smithers.file("//scripts/docs-removals.test.mjs"),
+    Smithers.file("//scripts/docs-render.test.mjs"),
+    Smithers.file("//scripts/docs-routes.test.mjs"),
+    Smithers.file("//scripts/docs-sidebar.test.mjs"),
+    Smithers.file("//scripts/generate-docs-pages.test.mjs"),
+    Smithers.file("//scripts/generate-llms.test.mjs"),
+    Smithers.file("//scripts/llms-version-guard.test.ts"),
+    Smithers.file("//scripts/normalize-bunx.test.ts")
+  ]),
+  srcs: sources,
   deps: []
 })

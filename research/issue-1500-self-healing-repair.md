@@ -1,5 +1,10 @@
 # Self-healing repair steps (issue #1500, section 3) and the zero-cache-hit finding
 
+> **Written for Smithers 0.x.** This note is research from before the 1.0
+> rewrite. It describes the JSX workflow runtime, its CLI, or its gateway, none
+> of which exist in 1.0.0-rc.0. It is kept as history, not as guidance; see
+> `docs/pages/migration/1.0.md` for what replaced each surface it names.
+
 Status: design only. Nothing in this document is implemented. It builds on the
 non-progress detection, failure classification, enriched run errors, and
 resume affordances that shipped for asks 1, 2, 3, and 4 of

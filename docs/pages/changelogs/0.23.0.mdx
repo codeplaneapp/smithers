@@ -1,0 +1,270 @@
+---
+title: "0.23.0"
+description: "Major release: a PostgreSQL and PGlite persistence dialect, durable workspace snapshots, the Smithers chat PWA, UltraGrill, and custom workflow UIs."
+---
+
+This is the largest release since Smithers went public. The durable engine moves to a production-grade database, the snapshot store learns to capture an agent's worktree as it works, two new products ship, and the agent, gateway, docs, and benchmark surfaces all grow.
+
+The persistence layer now runs unchanged on **PostgreSQL or an embedded PGlite** through a SQL dialect seam, so the crash-and-resume guarantees that worked on SQLite hold on Postgres. **Durable workspace snapshots** (behind a flag) checkpoint a jj worktree as the agent edits it and restore it on resume. **Smithers** is a streaming Cerebras chat PWA deployable to Cloudflare in one command, now with run inspector, review, and live jjhub surfaces over a real gateway. **UltraGrill** is an open-ended real-time collaboration workflow with a live custom UI. **Custom Workflow UIs** get a full guide and two end-to-end examples, the gateway gains a typed **extensions and sync backplane**, and a **create-workflow** metaworkflow turns a plain-English ask into a runnable workflow. Agents can now **escalate to a human** mid-task and block on the answer (`bunx smthrs ask-human` and the `ask_human` MCP tool), connect to any stdio MCP server (`createMcpToolset`), and run against a **bundled jj** binary with no system install. Alongside it: a `bunx smthrs usage` quota command, four benchmark harnesses plus a defending-code example, a Vibe (Mistral) agent and a corrected Antigravity CLI, an interactive `bunx smthrs init` ceremony, a launch article, and a correctness sweep across JSON extraction, DevTools stream recovery, agent schemas, and the test gate.
+
+---
+
+## PostgreSQL & PGlite Persistence
+
+The headline of 0.23.0 is a **PostgreSQL and PGlite dialect for the persistence layer** (`packages/db/src/dialect.js`). Smithers' storage layer is hand-written SQL, and a new dialect seam lets that exact SQL run on SQLite or Postgres without rewriting a query. The dialect handles placeholder translation (`?` to `$1`, literal and comment aware), DDL type and autoincrement mapping (`INTEGER` to `BIGINT`, `REAL` to `DOUBLE PRECISION`, `BLOB` to `BYTEA`, `INTEGER PRIMARY KEY AUTOINCREMENT` to `BIGSERIAL PRIMARY KEY`), `information_schema` introspection, `BEGIN` vs `BEGIN IMMEDIATE` transaction semantics, and `json_extract` to `->>` rewriting.
+
+<img src="/images/why/crash-resume.gif" alt="A Smithers run crashing and resuming from its last durable checkpoint" />
+
+*Durability is the whole point: a run that crashes mid-flight resumes from its last checkpoint. With 0.23.0 that same guarantee holds whether the snapshot store is SQLite, PGlite, or PostgreSQL.*
+
+- **`createSmithersPostgres` boots node-postgres or an embedded PGlite.** A new async API stands up the engine against a real Postgres server or an in-process PGlite over a local socket, so you can develop against an embedded database and deploy against managed Postgres with the same code. `opts` is a discriminated union (`{ provider: 'postgres', connectionString?, connection? }` or `{ provider: 'pglite', dataDir? }`), the result extends the `createSmithers` API with a `close()` teardown, and `BIGINT` values are parsed back to JS numbers so timestamps and counters match SQLite behavior. `pg`, `@electric-sql/pglite`, and `@electric-sql/pglite-socket` are optional dependencies, and the synchronous `bun:sqlite` path is untouched, so existing SQLite users see no change.
+
+- **The dialect is exercised end to end on real PGlite.** New test suites boot an in-process PGlite and run the db dialect, the engine builder, and the time-travel fork/snapshot paths against it (`packages/db/tests/db-postgres-dialect.test.js`, `packages/engine/tests/create-smithers-postgres.test.jsx`, `effect-builder-postgres.test.js`, `time-travel-postgres.test.js`), so the snapshot, replay, and branch-listing Effects are verified on the new dialect rather than only on SQLite. The time-travel fork and snapshot effects route their upserts through the dialect-aware `internalStorage.upsert` on Postgres instead of Drizzle's SQLite-only `onConflictDoUpdate`.
+
+## Durable Workspace Snapshots
+
+A new engine substrate snapshots an agent's worktree **as it works**, so a crashed or resumed run can restore the files on disk to match the agent's transcript. The whole feature is gated behind `SMITHERS_DURABILITY_SNAPSHOTS=1`, off by default, and stays inert when a task has no jj worktree.
+
+- **A serial snapshot service per worktree.** `createSnapshotService` (`packages/engine/src/snapshotService.js`) runs a per-cwd serial queue so jj never races itself. Tier 2 snapshots (source `watch`) dedup an unchanged commit id, Tier 1 boundaries (`hook`/`wrap`) always record a checkpoint, and a monotonic `seq` is kept per `(run, node, iteration, attempt)`. A failed capture or db write becomes a recorded gap through `onGap` and never throws into the agent path.
+
+- **A zero-dependency workspace watcher.** `createWorkspaceWatcher` (`packages/engine/src/workspaceWatcher.js`) is a recursive `fs.watch` with a trailing-idle debounce (150ms default) that fires `onSettle` when the tree quiets. It ignores `.jj/` and `.git/` unconditionally and degrades to a safe no-op when the path cannot be watched. The watch backend is a dependency-injection seam.
+
+- **One handle wires it around an agent attempt.** `startDurability` (`packages/engine/src/startDurability.js`) composes real jj capture (`captureWorkspaceSnapshot`) and the db adapter into a `SnapshotService` and a Tier 2 watcher. It returns a no-op handle when the feature is disabled, there is no cwd, or the worktree is not a jj repo, and on `stop()` it closes the watcher and does a final flush. The engine wires it around each agent attempt and calls `durability.stop()` in `finally`. Same-run parallel attempts keep overlapping; only their brief jj capture operations are serialized. Parent and child run scopes sharing one worktree are isolated so their checkpoints cannot absorb each other's writes, and a lock timeout degrades durability for the waiter instead of failing its task.
+
+- **Resume restores the worktree first.** `restoreWorkspaceToLatestCheckpoint` (`packages/engine/src/restoreWorkspace.js`) lists a task's checkpoints, picks the chronologically latest (ties broken by attempt then seq), and reverts via `jj restore --from <commit_id>`. It never throws and returns a structured `{ restored, reason?, commitId?, seq?, error? }`. The engine calls it before `startDurability`, only when the flag is set and a session is being resumed, so it stays inert for existing runs.
+
+- **Two tables and a granular jj handle back the store.** `_smithers_workspace_states` records deduped jj working-copy handles (the `jj_operation_id` is the durable restore handle, since the operation log survives gc), and `_smithers_workspace_checkpoints` records one never-deduped row per snapshot boundary (migrations `0015` and `0016`). In the vcs package, `captureWorkspaceSnapshot(cwd?)` returns `{ commitId, changeId, operationId }` under a 1500ms timeout and returns `null` on any failure rather than throwing. An end-to-end test drives a file-writing agent through a real jj worktree with the flag on and asserts both tables fill; with the flag off, nothing is recorded.
+
+## Smithers: a Cerebras Chat PWA
+
+This release introduces **Smithers** (`apps/smithers`), a streaming chat PWA powered by Cerebras `gpt-oss-120b` through TanStack AI and deployable to Cloudflare via Alchemy infrastructure-as-code. The browser streams replies from a Cloudflare Worker over Server-Sent Events and never holds the API key; the Worker runs Cerebras server-side with the key bound as a Worker secret. `bun dev` at the repo root now boots this app (the old Studio 2 dev script moved to `bun dev:studio`).
+
+<img src="/images/0.23.0/smithers-pwa.png" alt="The Smithers Cerebras chat PWA in dark mode showing the welcome hero and composer" />
+
+*The Smithers chat PWA: a calm 'How can I help you?' hero, a composer that lays its input on the top line beside the theme, split, mode, and voice controls, and a live workflow toast. Dark mode resolves before first paint, so there is no flash.*
+
+- **Streaming chat with a command menu, voice dictation, and a grill-workflow graph.** The frontend renders streaming Markdown replies, a Cmd-K command menu, toast notifications, voice dictation, and an "ask me" grill workflow graph drawn with ReactFlow. The chat backend is a single Cloudflare Worker route (`POST /api/chat`) that runs Cerebras through TanStack AI's `chat()` and returns a Server-Sent-Events response.
+
+- **Flash-free dark mode tokenized end to end.** Every color in the app is a semantic CSS custom property defined in `:root`, and dark mode ships two ways: the OS preference via `@media (prefers-color-scheme: dark)` and an explicit `[data-theme]` override. An inline script resolves the theme before first paint so there is no flash, `color-scheme` keeps native controls and scrollbars matched, and the workflow graph follows via ReactFlow's `colorMode`.
+
+- **Renamed and rebranded.** The app moved from `apps/search-pwa` to `apps/smithers` (package `@smthrs/smithers`), and every remaining "Huey" string was rebranded to "Smithers" across UI text, the manifest, the Ask Me system prompt, the Alchemy app id, and the `localStorage` key prefix. The Alchemy deploy ships the Worker plus the built PWA as static assets with SPA routing.
+
+## Smithers PWA: Surfaces, Auth, and Live Backends
+
+The chat shell grew into a full operator surface. The app was re-architected onto TanStack Router with a Zustand-only state model (no `useState`/`useEffect` for app state, URL as the source of truth), and a Cloudflare Worker now fronts real backends.
+
+- **A reverse-proxy Worker for auth, the gateway, jjhub, and chat.** `src/worker.ts` proxies four upstreams: Plue auth (`/api/auth/*`, `/api/user`), the Smithers gateway (`/v1/rpc`, `/workflows`, `/health`), the jjhub platform REST API (`/api/repos`, `/api/issues`, `/api/landings`, `/api/workspaces`, `/api/notifications`, and more), and `POST /api/chat` running Cerebras server-side over SSE. It validates the Plue session and injects trusted-proxy headers (`x-user-id`, `x-user-role`, `x-user-scopes`, `x-smithers-token-id`) on the gateway path after stripping any client-forged copies. `/api/chat` enforces a same-origin Origin check (403 cross-origin) and bounds the body (100 messages, ~100KB content, ~4KB system prompt) before the key is touched, so the endpoint cannot be turned into an open proxy.
+
+- **Browser auth with WorkOS or Auth0.** A `/login` page and sign-in modal support `google`/`github`/`email` providers under either strategy, plus bearer-token sign-in and logout. `authClient.ts` exposes `authFetch` (credentials-included fetch with CSRF and auto-redirect on 401) used by every backend call, and a persisted gateway base URL lets a `RemoteModePanel` point the app at any gateway origin. Sign-in state lives in an `authStore` that bootstraps at boot.
+
+- **A live gateway run inspector.** `/gw/$workflowKey/$runId` lists workflows-with-UI and runs, opens a run, renders the DevTools snapshot as a node tree, fetches node output, launches runs, and embeds a workflow's own custom UI in an iframe. It runs on the real `@smthrs/gateway-client` plus `gateway-react` hooks with streaming and resilient reconnect, instrumented for observability.
+
+- **A jjhub backend selector and live Plue data.** A backend-mode store toggles `gateway` (local run context) and `platform` (cloud jjhub repo context, persisted as `smithers.backend`). A jjhub REST transport seam adds a base-URL resolver, `platformFetch`/`platformJson` with `PlatformError`, RFC 5988 link-cursor pagination, and a one-time WebSocket/SSE auth-ticket helper (`issueWebSocketTicket`) for terminal PTY and notification streams. Typed modules for issues, landings, and notifications wire the issues and landings surfaces to real Plue data behind a "Sync from Plue" bar, falling back to seeded data when no platform URL is configured so offline and dev are unchanged.
+
+- **Canvas surfaces reachable as routes and chat cards.** Runs list, run and node inspectors, paginated diff, timeline, logs, approvals, agents, memory, prompts, scores, crons, a command palette, a workflow editor, and per-run review surfaces (`/vcs`, `/issues`, `/tickets`, `/landings`) were added and wired through the command menu, nav, and slide-direction model. First-run onboarding moved into chat, a right-edge app dock and sign-in chrome landed, and an agent-control feature lets the chat agent drive the app: it emits JSONL directives in a `smithers:action` fenced block that parse into the same store and navigation calls a click would, gated behind a control ring and an approval dialog.
+
+- **End-to-end coverage and a capture pipeline.** Twelve Playwright specs cover every surface against the real backend with no route mocking (`/runs` filters and inline approval, `/approvals` tabs, `/agents`, `/crons`, `/scores`, `/memory`, `/prompts`, `/palette`, `/workflow/$id`, `/login`, the auth chip, the toast stack, deep links, command-menu keyboard, and long-message and mobile corner cases), bringing the listed e2e suite to 100 passing out of 102. A Playwright-driven capture harness (`apps/smithers/scripts/capture/`) visits every surface and emits a light, dark, and mobile screenshot deck (Markdown plus zero-dependency static HTML) with each slide linked to the spec that proves it.
+
+## UltraGrill: Real-Time Collaboration
+
+**UltraGrill** is a new durable, open-ended collaboration product built on real Smithers primitives and tested end to end. The workflow (`.smithers/workflows/ultragrill.tsx`) runs two concurrent planes in one never-ending run: an intake `<Loop>` of `<WaitForEvent event="utterance">` that the UI feeds via signals, and dynamic worker dispatch that spawns one `<Task>` per directive, carries out the work, keeps a living Markdown spec in sync, and emits rolling clarifying questions. The run stays open until an `end` utterance arrives.
+
+- **A live custom UI over real gateway hooks.** `.smithers/ui/ultragrill.tsx` is a first-class Gateway UI: a composer that turns text into an `utterance` signal, a conversation feed with live worker activity, the living-spec Markdown panel, and the question pool, all driven by the real `gateway-react` run, event, and node-output hooks over live RPC. The dynamic `gateway.ts` discovers every `.smithers/workflows/*.tsx` and mounts `ui/<key>.tsx` by convention, isolating a broken workflow so it disables only itself.
+
+- **One-command launcher.** `bun .smithers/scripts/ultragrill.ts ["goal"]` boots the gateway (default port 7411), starts an open-ended session, opens the UI in the browser, and stays alive until Ctrl-C. The launcher reports a friendly message on `EADDRINUSE`, handles `startRun`/`listen` errors so a failed listen never leaves a dangling run, and interleaves user utterances with worker activity.
+
+- **Composed from reusable components, verified by a real e2e.** UltraGrill is one workflow assembled from two components: `VerifiableGoals` turns a proposal into independently shippable tickets on disk, and `ShipTickets` discovers the queue and ships each ticket through research, plan, implement, validate, and review in its own git worktree before committing and merging. The e2e executes the real workflow to completion (the repo's fake `claude` agent is the only stub) and then drives a headless browser to assert the real UI renders that real completed run. The generic decompose-to-ship pipeline was renamed `ship-pipeline` to free the `ultragrill` name for the product.
+
+## Custom Workflow UIs
+
+A workflow can ship its own browser UI through the Smithers Gateway, and 0.23.0 lands the full documentation, two end-to-end examples, and the regression test that makes the iframe boundary safe.
+
+- **A complete guide.** Custom Workflow UIs explains how `gateway.register({ ui: { entry } })` bundles and serves the entry at `/workflows/<key>`, what the `__SMITHERS_GATEWAY_UI__` boot config carries, how `?runId=` flows from `location.search` into the bundle, and how `apps/smithers`, Studio 2, and `bunx smthrs ui` all embed the same iframe same-origin. It documents both shipping shapes side by side: `smthrs/gateway-react` (`createGatewayReactRoot` plus `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayRunEvents`, `useGatewayNodeOutput`, `useGatewayApprovals`, `useGatewayActions`, and the escape-hatch `useGatewayRpc`) and the zero-dependency `smthrs/gateway-client` (`SmithersGatewayClient` with `getRun`, `getNodeOutput`, `getNodeDiff`, `submitApproval`, `submitSignal`, `cancelRun`, and the `streamRunEventsResilient` async generator).
+
+- **The stale-data-free contract is documented as first class.** The hooks clear on input change and drop in-flight responses by generation tag, which is the only thing keeping a custom UI from painting the wrong run's data when the host swaps `runId`. The guide states the same three rules for vanilla code: re-key on input change, generation-tag in-flight reads, render after fetches resolve.
+
+- **Two examples and a same-origin proxy section.** A React example and a vanilla example each compile to a single file you can copy into `.smithers/ui/`, walking through every primitive the guide names. A dedicated section documents how Smithers Cloud and Plue front the Gateway with a Cloudflare Worker that terminates the session, strips client-supplied trusted-proxy headers, re-injects them from the validated session, and forwards `/v1/rpc/*`, `/workflows/*`, and `/health` to a private Gateway in `mode: "trusted-proxy"`, with `apps/smithers/src/worker.ts` as the reference implementation.
+
+- **A real-gateway e2e fixture and a hook regression test.** The `apps/smithers` e2e harness boots a real Gateway (no mocks) and now exercises a `gateway-react` bundle alongside the vanilla one, deep-linking to `/gw/demo-react-ui/<runId>` and asserting the bundle rendered inside the iframe with live hook data across the boundary. `packages/gateway-react/tests/gatewayReactBehavior.test.ts` adds the smallest reproducer for the late-stale-response drop: a probe mounted with `runId="run-1"` whose RPC is still in flight is re-rendered with `runId="run-2"`, and the test asserts the run-1 resolution does not repopulate cleared state while run-2 does win.
+
+## Gateway Extensions & Sync Backplane
+
+The gateway gained a typed extension surface and a framework-free sync SDK so a custom UI can subscribe to gateway and extension data without hand-rolling RPC plumbing, stale-update handling, stream resume, or namespace bookkeeping. The full design is in [the gateway-extensions and sync-backplane spec](https://github.com/smithersai/smithers/blob/main/.smithers/specs/gateway-extensions-sync-backplane.md).
+
+- **`gateway.extend(namespace, definition)` registers typed resources, actions, and streams.** Resources are reads, actions are writes, and streams are subscriptions, all flowing through the existing gateway transport with the same auth, payload bounds, and backpressure rules. Wire methods are addressed `ext.<namespace>.<key>` for resources and actions and `ext.stream.<namespace>.<key>` for streams. The registry (`packages/server/src/GatewayExtensions.js`) is its own module: namespace collisions throw at registration, a key declared as both resource and action throws, and identifiers must match `/^[a-z][a-zA-Z0-9_-]*$/`. Scopes are re-checked at dispatch as well as in the connection pipeline, handler errors normalize to one wire envelope (`EXTENSION_HANDLER_ERROR`, message only, no stack), every resource result and stream frame is bounded to 4 MiB, and a saturated subscriber surfaces `BackpressureDisconnect` that tears down only that stream. Connection teardown aborts in-flight handlers and runs extension cleanups.
+
+- **Client and React SDKs for the extension surface.** `SmithersGatewayClient` gains `extensionRpc(namespace, key, params, { signal })` and `streamExtension(namespace, key, params, { signal })`, the latter yielding the initial replay payload first then live frames filtered by the allocated `streamId` so a stale subscription cannot see frames meant for a new one. `@smthrs/gateway-react` adds `useGatewayExtensionResource`, `useGatewayExtensionAction`, and `useGatewayExtensionStream`, all with the same generation-counter stale fences as `useGatewayRpc`, ring-buffered frames, and exponential-backoff reconnect.
+
+- **A declarative sync SDK underneath.** `gateway-client` ships a framework-free `SyncClient` over a typed `SyncCache` (stale-while-revalidate, in-flight dedupe, ref-counted GC, generation-guarded stale discard, optimistic mutations with rollback) and a `SyncSubscriptionHub` that multiplexes many observers onto one upstream stream per key with `lastSeq` resume and jittered backoff. `createSmithersGatewayTransport` wires it to a `SmithersGatewayClient`, `gatewayKeys` provides typed cache-key factories, and `gateway-react` exposes `SyncProvider`, `useSyncQuery`, `useSyncMutation`, `useSyncSubscription`, and typed `useGatewayQuery`/`useGatewayMutation`/`useGatewayRunStream` shortcuts. The resilient run-event stream now surfaces a `GatewayStreamReconnectEvent` on each backoff so a UI can show connection health.
+
+## Workflow Authoring: `create-workflow` and the Seeded Init Pack
+
+`bunx smthrs init` now ships a metaworkflow that writes other workflows, generated from canonical sources rather than hand-embedded strings.
+
+- **`create-workflow` turns a plain-English ask into a runnable workflow.** The seeded `.smithers/workflows/create-workflow.tsx` runs a seven-stage pipeline: clarify the spec, provision the docs and skills it needs, design the graph, an optional human approval of the design, scaffold real files, a verify loop that runs `bunx smthrs graph <file>` until the new workflow compiles (up to three iterations, with a fix step), then document it as an agent-facing skill. Its inputs are `prompt`, an optional kebab-case `name`, and `review` (default `true`, which pauses for approval before any files are written). It is documented at Create a workflow.
+
+- **The seeded pack is generated from `.smithers`.** `scripts/generate-workflow-pack.ts` reads the canonical seeded workflows and the prompts they import straight from `.smithers/` and emits `apps/cli/src/seeded-workflow-pack.generated.js`, which `workflow-pack.js` splices into the init pack verbatim. `SEEDED_WORKFLOW_IDS` (currently `['create-workflow']`) is the registration point, every seeded file must carry a `// smithers-source: seeded` header, and `apps/cli/tests/seeded-pack-fresh.test.js` fails if the generated module drifts from the canonical sources. Adding a workflow to init is now: author it, list its id, re-run the generator.
+
+- **A vcs workflow with its own UI ships in the pack.** `.smithers/workflows/vcs.tsx` inspects and acts on a git or jj working tree: `status` and `log` are deterministic compute tasks that run real git/jj reads, while commit messages and rebase plans are written by an agent and returned as plan-only commands. It ships a first-class custom UI (`.smithers/ui/vcs.tsx`) and is documented at VCS. A new conceptual Context Engineering guide frames Smithers as the context-engineering layer and maps backpressure primitives (schema, test, eval, review, approval, dependency, trace) to where they belong.
+
+## Asking a Human: Durable Agent Escalation
+
+A new path lets an agent stop and ask a person instead of guessing when it is blocked, uncertain, missing information, or about to do something irreversible, then block on the answer.
+
+- **`bunx smthrs ask-human "<question>"` raises a durable, blocking request.** The command (`apps/cli/src/ask-human.js`) records a pending human request bound to the run and blocks until it is answered, cancelled, or expires. Flags cover `--context`, `--choices` (a fixed-choice decision), `--run-id`/`-r`, `--node`/`-n`, `--iteration`, `--timeout`, and `--poll`. It auto-targets its own run from `SMITHERS_RUN_ID`/`SMITHERS_NODE_ID`/`SMITHERS_ITERATION`, writes operator resolve help to stderr and the answer envelope to stdout, and maps status to exit codes (answered `0`, cancelled or aborted `2`, expired `3`, missing `4`).
+
+- **The `ask_human` MCP tool exposes the same on the semantic surface.** Its input is `{ prompt, context?, choices?, runId?, nodeId?, iteration?, timeoutSeconds?, pollSeconds? }` and its output is `{ requestId, runId, nodeId, iteration, status, decision, response, answeredBy }`, returning `decision: "approved"` when answered and `"blocked"` otherwise. An agent must not proceed on `blocked`.
+
+- **Engine substrate, agent contract, and run-context env.** `packages/engine/src/human-requests.js` adds `buildAgentAskRequestRow` and `waitForHumanAnswer` (which polls `getHumanRequest` and expires stale requests), and a human resolves the request directly with `bunx smthrs human answer`/`cancel`. The agent contract now advertises `ask_human` and renders an explicit escalation instruction into the prompt, and every spawned agent process inherits its task's run context as `SMITHERS_RUN_ID`, `SMITHERS_NODE_ID`, `SMITHERS_ITERATION`, and `SMITHERS_ATTEMPT` (via `taskContextEnv`), so the agent and any subprocess it runs can address the right run without being told. The surface is documented in the CLI overview and the MCP server reference.
+
+## `bunx smthrs usage`: Per-Account Quota
+
+A new `bunx smthrs usage` command and a `packages/usage` engine report **how much rate limit or subscription quota each registered account has consumed**, normalized to one `UsageReport` / `UsageWindow` model. The command supports `--account` and `--provider` filters and `--fresh` to bypass the short usage cache, renders a human-readable table to stderr, and emits a structured envelope to stdout with `--format json`, matching `bunx smthrs agents list`. The design is in [the usage-and-limits spec](https://github.com/smithersai/smithers/blob/main/.smithers/specs/usage-and-limits.md).
+
+- **Real adapters per provider, credentials never leave the host.** `getAccountUsage` dispatches per provider: `claude-code` reads the OAuth usage endpoint, `codex` reads `wham/usage`, and `anthropic-api` and `openai-api` read live rate-limit headers. Credentials are read host-side from each account's config directory (Claude `.credentials.json` plus the macOS Keychain, Codex `auth.json` plus a JWT account id) and never leave the process. Google providers and Kimi report `source:"none"` honestly until local-estimate accounting lands. `getUsageForAccounts` fans out in parallel through an on-disk cache with a hard 180s floor for `claude-code`, whose usage endpoint rate-limits aggressively, and a malformed cache entry is now tolerated instead of crashing the report.
+
+## Bundled jj & VCS Tooling
+
+Smithers can now run on a jj binary it ships itself, and it tells you up front when no usable VCS tooling is present.
+
+- **jj is bundled per platform.** Five new packages (`@smthrs/jj-darwin-arm64`, `jj-darwin-x64`, `jj-linux-arm64`, `jj-linux-x64`, `jj-win32-x64`) are gated by `os`/`cpu` so a package manager installs only the one matching the host, and `@smthrs/vcs` lists all five as optional dependencies. The binaries are downloaded from upstream jj releases at release time (`pnpm fetch:jj`, pinnable with `JJ_VERSION`) and are never committed, with a `prepublishOnly` guard that refuses to publish a package with an empty `bin/`.
+
+- **Explicit binary resolution and a synchronous preflight.** `resolveJjBinary()` resolves in order `SMITHERS_JJ_PATH` override, bundled package, then bare `jj` on `PATH`, and `resolveGitBinary()` adds a matching `SMITHERS_GIT_PATH` override. `vcsToolingStatus()` is a single synchronous source of truth that probes whether `jj --version` and `git --version` actually exit `0` (2s timeout each) and returns `{ jj, git, ok }`. `bunx smthrs workflow doctor` now reports a `vcs` section and warns with install guidance when neither is usable, and the engine's worktree error distinguishes "no jj or git installed" from "not inside a repo" so it points at the real fix. The bundled jj, `SMITHERS_JJ_PATH`, and the resolution order are documented in [Installation](/installation).
+
+- **Global workflows with local precedence.** `bunx smthrs init --global` scaffolds the canonical `~/.smithers` pack (honoring `SMITHERS_HOME`) with no nested `.smithers` segment, and workflow discovery now searches the nearest local `.smithers` then the global pack, with local workflows shadowing global ones on id collision. Each discovered workflow carries a `scope` of `local` or `global`, surfaced across the `workflow` commands and the `list_workflows` MCP tool, and `workflow create`/`workflow skills` gained `--global` too.
+
+## Agents
+
+- **Vibe (Mistral) CLI agent.** A new `VibeAgent` drives Mistral's `vibe` CLI with stream-json output parsing, session resume, and the standard build-command flags (`--resume`, `-c`, `--agent`, `--max-turns`, `--max-price`, `--max-tokens`, `--enabled-tools`, `--trust`, `--output streaming`, `--workdir`), plus CLI detection via `VIBE_HOME` / `MISTRAL_API_KEY`, a capability-registry entry, a surface-manifest entry, and a slot in the `cheapFast` tier order.
+
+<img src="/images/why/any-agent.png" alt="Smithers running any coding agent behind the same durable workflow engine" />
+
+*Smithers stays agent-agnostic: a \<Task> can be backed by Claude Code, Codex, Gemini, Antigravity, Hermes, and now Vibe (Mistral), each behind the same durable engine.*
+
+- **Connect any MCP server with `createMcpToolset`.** A new `createMcpToolset(config, options?)` connects to any stdio MCP server (GitHub, Linear, and the like) and projects its tools as AI SDK tools you drop straight into an SDK agent's `tools`. `McpServerConfig` is `{ command, args?, env?, cwd? }`, options mirror the OpenAPI curation knobs (`include`/`exclude`/`namePrefix`), and the returned `{ tools, toolNames, close }` requires calling `close()` to terminate the spawned server. It is the inbound half of MCP-as-integration, imported from a deep path (it is not re-exported from the package index), and a worked example ships under `examples/`.
+
+- **Antigravity (`agy`) launches correctly.** `AntigravityAgent` was forked from the Gemini agent and inherited flags the Antigravity CLI rejects, so `agy` exited immediately on an unknown flag. The flags now match the real CLI surface: `--include-directories` becomes `--add-dir`, resume becomes `--conversation=<id>`, `--output-format` is dropped (the json/stream-json value only selects how Smithers parses stdout), and the nonexistent `--screen-reader`, `--debug`, `--list-sessions`, `--delete-session`, and `--extensions` flags are removed. A regression test asserts the emitted args never use the removed flags. (Closes #202.)
+
+- **Strict Codex output schemas.** OpenAI and Codex structured output requires every object node to set `additionalProperties:false`. `sanitizeForOpenAI` now coerces loose and passthrough objects to strict, and because strict mode also requires every property to appear in `required`, it sets `required = Object.keys(properties)` for strict objects. The consequence for workflow authors: `z.looseObject` output schemas work with Codex, and genuinely optional output fields should be modeled as nullable.
+
+- **A CLI agent surface manifest (#203).** A machine-readable manifest of each built-in CLI agent's exact surface (binary, package export, emitted flags, supported and unsupported flags, option-to-flag mappings, resume contract, docs URLs) now powers the capability doctor report and keeps the documented agent surface in sync with what the adapters emit. `HermesAgent` also now rejects an empty or whitespace `HERMES_BASE_URL` with `AGENT_CONFIG_INVALID` instead of slipping past the guard.
+
+## Benchmarks & Examples
+
+This release adds four self-contained benchmark harnesses, a vulnerability-discovery example, and a native code-review workflow, each driving real Smithers workflows.
+
+- **SWE-Bench Pro** (`benchmarks/swe-bench-pro`) runs ScaleAI's SWE-Bench Pro end to end via a Smithers workflow where Opus 4.8 implements and Codex reviews, scoring against ScaleAI's Docker images with gold and empty-patch integrity gating. A Benchmarks section was added to the root README.
+
+- **SWE-EVO** (`examples/swe-evo`) is a benchmark harness with a dataset loader, a Python scoring harness, the workflow plus prompts, and a gold verifier, also pairing Opus 4.8 with Codex through the gateway.
+
+- **Claw-Eval-Live** (`benchmarks/claw-eval-live`) is a live evaluation harness with a mixture gateway, a Docker sandbox, batch and one-shot runners, and result aggregation.
+
+- **RoadmapBench** (`benchmarks/roadmapbench`) is a long-horizon version-upgrade benchmark with a bash and Python harness (prepare, validate, launch, collect, score, audit) and a companion `.smithers/workflows/roadmapbench.tsx` that mixes Opus 4.8 and Codex against a pinned `V_old` repo, with hidden tests introduced only by the scorer in a fresh container.
+
+- **defending-code** (`examples/defending-code`) ports Anthropic's vulnerability-discovery reference harness to a durable Smithers workflow: build, recon, find, verify, dedupe, report, patch, with AddressSanitizer crashes as the execution-verified signal. It runs on `ClaudeCodeAgent` (subscription auth), and a follow-up hardened it against fan-out id collisions and silent build failures so a broken build fails the run loudly instead of reporting a misleading all-zeros success.
+
+- **Open Code Review** (`.smithers/workflows/open-code-review.tsx`) reviews a git working tree, commit range, or single commit by fanning out a per-file agent review in parallel and finalizing structured comments. It replaced the `write-a-prd` starter in the init pack and uses the native Smithers review flow, with a follow-up correcting its line-number mapping and git-ref guards.
+
+## CLI, Studio & Workflows
+
+- **Interactive `bunx smthrs init` ceremony.** `bunx smthrs init` now reports scaffold and install progress through an `InitReporter` hook on `initWorkflowPack` and renders tailored copy-pasteable next-steps via a clack note and outro, replacing the raw stderr skip lines. Explicit `--format yaml/md/toon` on a TTY no longer double-prints, and the design is captured in [the init-command spec](https://github.com/smithersai/smithers/blob/main/.smithers/specs/smithers-init-command-design.md).
+
+- **Studio 2 chat overlay surfaces.** The chat-first shell's overlay system gained a Views menu and a set of surface overlays: dashboards (issues, runs, scores, search, triage, memory, workflows), tag filtering, a toast stack, a settings overlay, and a resizable split divider, all wired through the overlay store, slash actions, and sidebar. Studio 2's product, design, and engineering specs were also added under `apps/smithers-studio-2/docs/`.
+
+- **Version-matched `bunx smthrs docs`.** The `docs` and `docs-full` commands now serve the llms documentation bundle that ships with the installed CLI version (`apps/cli/docs/llms.txt`, `llms-full.txt`) by default, with `--latest` and `--docs-version <semver>` to fetch the latest or a specific version, so the docs an agent reads match the binary it is driving. An unresolvable package version falls back to the packaged copy instead of erroring, and a `scripts/check-llms.mjs` gate (wired into publish) keeps every bundle in sync.
+
+- **The `Task fork` prop is now in the public types.** `<Task fork="...">` already worked at runtime, but the hand-maintained components type declaration omitted the prop, so TypeScript rejected it. `TaskProps` now declares `fork?: string` with a doc comment and a JSX type-test.
+
+<img src="/images/why/task-fork.gif" alt="A task forking from another task's session context into parallel follow-up branches" />
+
+*Task fork starts a new agent task from a copy of another task's final session context, so plan to implement to verify chains and parallel branches all begin from the same base. The prop is now first-class in the TypeScript surface.*
+
+## Plue Local E2E Harness
+
+The Smithers PWA already runs e2e against a real local Smithers gateway. This release adds the second backend it depends on: a deterministic local Plue REST surface, so the PWA's e2e can drive repos, issues, landings, workspaces, notifications, and auth split or monolith behavior against fake Plue hosts or a real Plue docker-compose stack. The full design is in [the Plue local-e2e-harness spec](https://github.com/smithersai/smithers/blob/main/.smithers/specs/smithers-plue-local-e2e-harness.md).
+
+- **A deterministic fake Plue server.** `tests/fixtures/fakePlueHost.ts` is a `Bun.serve` host that mirrors the Plue routes the UI consumes (`/api/user`, `/api/user/repos`, `/api/repos/:owner/:repo` with issues, landings, and workspaces, `/api/notifications`, plus WorkOS and Auth0 authorize redirects). Seeded data is stable and includes 250 issues per repo for pagination coverage.
+
+- **Auth split and monolith modes, proven distinct.** Vite now supports `SMITHERS_PLATFORM_PROXY_TARGET` separately from `SMITHERS_AUTH_PROXY_TARGET`. Playwright boots two fake-Plue hosts in parallel, one tagged `auth` and one `platform`, and with both targets set Vite mirrors the Worker's platform-user-subpath precedence (`/api/user` stays auth while `/api/user/repos` routes to platform). Responses carry the serving host's label, so worker and e2e tests fail closed if split targets collapse to the same origin.
+
+- **Failure injection without mocking.** The fake host honors `FAKE_PLUE_DOWN=1`, `FAKE_PLUE_FAIL_REPOS=401|403|500`, and analogous knobs, plus a per-request `x-fake-plue-down` header or `?fake_down=1` query that drives a single e2e into a 503 without bouncing the host. A 42-test gauntlet (`pnpm -C apps/bunx smthrs run test:plue` plus the Playwright spec) and a Worker proxy regression suite keep split-mode, monolith fallback, no-Plue 404, down-to-503 propagation, pagination, and per-request failure traversal honest.
+
+## Docs & Messaging
+
+- **A "For Humans" and "For Agents" split.** The docs were re-organized into two audiences. A plain-language guide track was added for non-technical users who drive Smithers by talking to their agent (`what-is-smithers`, `what-you-can-do`, `talk-to-your-agent`, `watch-and-steer`, `concepts`, an expanded `get-started`), and the nav tabs were renamed to "For Humans" and "For Agents" with audience banners on the landing pages.
+
+- **An agent operating playbook with an orchestrator-only rule.** The agent operating playbook documents how an AI harness translates human prompts into Smithers workflows, and a hard "you are an orchestrator, not an implementer" rule was added there and in the `smithers` skill: do background, long-running, or multi-step work through Smithers, never via the agent's own ad-hoc subagents (subagents may only monitor a run).
+
+- **Open, durable orchestration launch article.** A new article (`docs/why/durable-open-orchestration.mdx`) positions Smithers as the open, durable, model-agnostic orchestration layer beneath any agent topology, with supporting diagrams and GIFs. The article section was renamed from "But... Why?" to "Articles," and a harness setup guide (`docs/agents/setup.mdx`) walks through wiring Smithers into an existing agent via a paste-a-prompt path or three manual commands.
+
+- **Copy page / View as Markdown menu.** Every docs page now renders a Copy page button with Copy, View as Markdown, Open in ChatGPT, and Open in Claude.
+
+- **Coverage caught up to the code.** The `usage`, `ui`, and `gui` commands, the `@smthrs/smithers` and `@smthrs/usage` packages, the corrected Antigravity flag surface, the four `TASK_FORK_*` error codes, the custom-UI SDKs, the `ask-human`/`ask_human` surfaces, global workflow discovery, `init --global`, and the bundled-jj install path were all documented, and the README and docs landing copy now lead with the agent authoring the workflow via an installed skill.
+
+## Smithers UI Observability
+
+The Smithers PWA now exposes Prometheus metrics and structured logs out of
+the Cloudflare Worker proxy and instruments every gateway-client RPC call
+in the browser. Two registries make the worker/browser split explicit so a
+scrape never advertises metrics it cannot reach:
+
+- **`GET /metrics` on the Worker** exposes `smithers_ui_worker_proxy_*`
+  (request counter by `route_kind`/`method`/`outcome`, duration histogram,
+  inbound payload-size histogram, auth-failure counter) plus a logger-drop
+  counter. A same-origin guard rejects cross-origin browser scrapes; curl
+  with no Origin header still works for Prometheus.
+
+- **Browser-local metrics** (`smithers_ui_gateway_rpc_*`,
+  `smithers_ui_gateway_stream_*`, `smithers_ui_surface_refresh_*`,
+  `smithers_ui_gateway_connection_state`, `smithers_ui_offline_mode_active`)
+  register into a separate browser registry and stay browser-local. They
+  are not federated through the Worker scrape, and the worker test asserts
+  their absence so a future contributor does not get false confidence.
+
+- **Gateway-client boundary metrics wrap every SDK call.** The shared
+  `getGatewayClient()` wrapper instruments `rpcRaw`, typed SDK methods,
+  extension RPCs, sync and custom-UI direct calls, and stream subscriptions, so
+  metrics are no longer a `gatewayStore` call-site convention. The resilient
+  run-event stream exposes its reconnect/backoff callback to the wrapper;
+  `HTTP_4XX`/`HTTP_5XX` buckets and a closed error-code allow-list keep RPC
+  labels bounded. Stale frames (aborted vs selection-changed) still tick at
+  the store boundary where selection state is known, and the reconnect-storm
+  window remains a true sliding count so PagerDuty sees a continuous rate
+  during sustained outages, not one tick every five reconnects.
+
+- **Defense-in-depth proxy header strip.** Every upstream proxy call now
+  drops attacker-supplied `x-user-id`, `x-user-scopes`, `x-user-role`,
+  and `x-smithers-token-id` headers. The gateway path re-adds them after
+  validating the session; auth, platform, and chat upstreams no longer see
+  client-forged values.
+
+- **Structured JSON logger** (`apps/smithers/src/observability/logger.ts`)
+  redacts `authorization`, `cookie`, `set-cookie`, `x-smithers-key`, the
+  trusted-proxy headers, and OAuth query parameters before serialization.
+  Serialization or sink failures bump `smithers_ui_logger_drops_total`
+  so silent drops are observable instead of vanishing.
+
+See [the Smithers UI observability spec](https://github.com/smithersai/smithers/blob/main/.smithers/specs/smithers-ui-observability.md) for the full table of
+metric names, labels, alert thresholds, and the local-scrape workflow.
+
+## Reliability & Correctness
+
+- **Extracted the outer final JSON object after prose.** `extractLastBalancedJson` scanned backward from the last `{`, which returned an inner nested object when the final JSON itself contained nested objects. It now picks the balanced object that ends latest (the true outer object), with the helpers moved to `packages/engine/src/json-extraction.js` and a regression test.
+
+- **Recovered DevTools stream gaps when route errors are wrapped.** `streamDevTools`' gap recovery detected a missing frame via `error instanceof DevToolsRouteError`, but `captureSnapshot` ran the route through `runPromise()`, which re-threw every failure as a `SmithersError` with the original `DevToolsRouteError` buried in its cause chain, so the `instanceof` checks silently stopped matching and the stream threw `FrameOutOfRange` instead of re-baselining. `captureSnapshot` now unwraps the cause chain and re-throws the original error, restoring all three gap-recovery paths.
+
+- **Decoded every json-mode column on Postgres reads.** Reading from Postgres or PGlite parsed only the literal `payload` column, so other object and array fields came back as raw JSON strings. `pgRowToDrizzle` now decodes every `text({ mode: 'json' })` column via a `getJsonColumnKeys` helper across snapshot reads and the ctx-dependency output path, and `createBuilderDbPostgres` releases the PGlite socket server and pg client if a setup step after boot throws instead of leaking them.
+
+- **Failed fast on an unforkable fork source.** A fork whose source ended terminal-but-not-finished (skipped, cancelled, `continueOnFail`, or non-agent) threw a retryable error and burned the whole retry budget on a deterministic failure. The attempt is now marked non-retryable so it fails fast, mirroring the hijack-unsupported path.
+
+- **Hardened the PWA against post-deploy and gate-state bugs.** A network-first service worker stops a stale cache from white-screening after deploy and no longer caches dynamic same-origin GETs, the approvals toast clears when a run is cancelled at the gate, focus returns to the trigger when the toast actions menu closes, and media-scoped theme-color metas no longer override the toggle.
+
+- **Stopped a global module mock from hanging the suite.** A timer test mocked `node:child_process` via `mock.module()`, which is process-wide under bun's concurrent runner and bled into other files (and is not undone by `mock.restore()`), hanging anything that spawned and timing out `pnpm release`. `runRpcCommandEffect` gained a `spawnFn` injection seam (defaulting to the real `spawn`) so the test passes its fake child through dependency injection without touching global state.
+
+- **Fixed the Pi plugin MCP bridge.** Four mismatches broke `@smthrs/pi-plugin` against `smthrs --mcp` (#223). `list_workflows` advertised its output schema with `additionalProperties: false` but `workflowFromFile` returns a `path` field that `workflowSummarySchema` never declared, so the SDK rejected every call with `-32602 … must NOT have additional properties`; the schema now declares `path`. The plugin's `jsonSchemaToTypebox` coerced object-typed params to `Type.String()`, so `run_workflow.input` could never be passed (Pi said "must be string", the backend said "expected record"); it now maps `object` to `Type.Record` and derives array item types from `items`. `/smithers-run` called a non-existent `run` tool with a path-shaped param and a raw JSON string; it now calls `run_workflow` with `workflowId` and parses the input into an object. The status-bar poll timer captured the session-bound `ctx` and was cleared only on `session_shutdown`, which does not fire on reload, so the stale `ctx.ui` call threw uncaught and exited Pi; the timer is now cleared before re-arming and the callback stops polling on a stale `ctx` instead of crashing. New unit tests cover the schema converter and the `list_workflows` payload-to-schema contract.
+
+- **Smaller fixes.** Targeting an extra agent (`hermes`/`openclaw`/`pi`) with `--agent` no longer skips supplementary wiring on a spurious non-zero exit and uses the detected runner instead of a hardcoded `bunx`. The legacy duplicate-id test asserts the canonical "Duplicate Task id detected" wording, the detached-run poll tolerates transient SQLite lock and busy errors, the architecture line-budget check was removed, and the type declarations were regenerated.
+
+## Smithers PWA Feature Slideshow
+
+- **Validation slideshow capture pipeline.** `apps/smithers/scripts/capture/` adds a Playwright-driven harness (`capture.ts` plus `surfaces.ts` plus `generateSlideshow.ts`) that visits every Smithers PWA surface, captures deterministic light, dark, and mobile screenshots (and short motion frame sequences for the first-run onboarding flow), and emits a Markdown plus zero-dependency static HTML slideshow at `apps/smithers/docs/slideshow/`. Every slide carries a feature description and a link to the Playwright spec that proves the surface. Run with `pnpm -C apps/smithers capture` (or `capture:dry` for a no-browser plan) and render the deck with `pnpm -C apps/smithers capture:slideshow`. Corner cases the manifest already covers: reduced motion (opt in with `SMITHERS_CAPTURE_REDUCED_MOTION=1`), dark and light themes per surface, mobile 390x844 viewport, empty-state surfaces, long-label flex via manifest data, and capture failures recorded as placeholder slides with non-zero exit so regressions are loud. New: `apps/smithers/docs/slideshow-capture.md` (full usage) and a `bun test` suite for the planner.
