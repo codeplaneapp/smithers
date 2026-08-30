@@ -45,6 +45,7 @@
     "@smthrs/database": "workspace:*",
     "@smthrs/engine-store": "workspace:*",
     "@smthrs/targets": "workspace:*",
+    "@types/node": "26.1.0",
     "effect": "4.0.0-rc.108",
     "esbuild": "0.28.1",
     "eslint-plugin-jsdoc": "64.1.0",

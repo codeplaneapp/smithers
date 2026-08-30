@@ -125,6 +125,12 @@ export const ci = Smithers.GithubCiGen({
           verb: Smithers.Verb.Test,
           pattern: "//evals/review-seeded-bugs"
         },
+        // `evals/*` has no manifest of its own, so `types: ["node"]`
+        // (tsconfig.base.json) resolves by walking up to the root
+        // `node_modules/@types`. The root `@types/node` devDependency is what
+        // links it, and this step is the second of the two targets that
+        // typecheck there.
+        { name: "Review eval typecheck", verb: Smithers.Verb.Build, pattern: "//evals/review-seeded-bugs:types" },
         { name: "Generated workflow drift", verb: Smithers.Verb.Lint, pattern: "//:ci" }
       ]
     },
