@@ -143,13 +143,23 @@ const operations = (run: Run) => {
    * describe of the current change followed by a `new` to open a fresh one.
    * The change id returned is the one just closed, the state callers will
    * `restore` to.
+   *
+   * With no message there is no describe at all. `jj describe` without `-m`
+   * starts `$JJ_EDITOR` (`nano` when unset) and waits for it, even with stdout
+   * on a pipe and stdin on `/dev/null`, which would make an unnamed snapshot
+   * hold an interactive child process. The describe is not needed to take the
+   * snapshot either: every jj command snapshots the working copy, so the `log`
+   * below does it, and skipping the describe leaves the existing description
+   * alone where `-m ""` would erase it.
    */
   const snapshot = (message?: string) =>
-    run("snapshot", message === undefined ? ["describe", "--quiet"] : ["describe", "-m", message, "--quiet"]).pipe(
-      Effect.andThen(run("snapshot", ["log", "-r", "@", "--no-graph", "-T", "change_id.short()"])),
-      Effect.tap(() => run("snapshot", ["new", "--quiet"])),
-      Effect.map((changeId) => ({ changeId: changeId.trim() }))
-    )
+    (message === undefined
+      ? Effect.void
+      : Effect.asVoid(run("snapshot", ["describe", "-m", message, "--quiet"]))).pipe(
+        Effect.andThen(run("snapshot", ["log", "-r", "@", "--no-graph", "-T", "change_id.short()"])),
+        Effect.tap(() => run("snapshot", ["new", "--quiet"])),
+        Effect.map((changeId) => ({ changeId: changeId.trim() }))
+      )
 
   const restore = (changeId: string) =>
     Effect.asVoid(
@@ -216,9 +226,28 @@ const operations = (run: Run) => {
 /**
  * Provides the `Jj` service backed by the `jj` CLI, spawning its own children.
  *
+ * This is the layer for a program that has no spawner to offer, so it starts
+ * its children outside whatever kill policy a host has decided on: a `jj` this
+ * layer starts leads no process group the host recorded, appears in no
+ * `ProcessLedger`, and is not reaped by a later incarnation of a host that
+ * died holding it.
+ *
+ * That is a bounded exposure rather than a leak, and the bound is what makes
+ * this layer usable at all. Every command below is short-lived and starts no
+ * long-lived children of its own: each one writes to a pipe, so jj starts no
+ * pager, and no command opens an editor, because `snapshot` either passes
+ * `-m` or runs no `describe` at all (`jj describe` without `-m` starts
+ * `$JJ_EDITOR` and waits for it, which is exactly the child this bound
+ * denies). The invocation holds the handle it started, so cancelling a flow
+ * signals the process rather than losing it
+ * (`packages/jj/test/NodeJjLifetime.test.ts`,
+ * `packages/jj/test/NodeJj.test.ts`). A host that wants the process GROUP
+ * contained, and a record a crash leaves behind, composes
+ * {@link layerSpawner} under a contained spawner instead;
+ * `@smthrs/platform-node`'s `NodeHost.layerContained` does exactly that.
+ *
  * @category layers
  * @since 1.0.0
- * @slop
  */
 export const layer: Layer.Layer<Jj> = Layer.succeed(Jj)(operations(jj))
 

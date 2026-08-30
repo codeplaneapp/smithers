@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { chmodSync, existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -41,6 +41,8 @@ describe.runIf(Boolean(process.env.CI) && !jjInstalled)("NodeJj (CI guard)", () 
 describe.skipIf(!jjInstalled)("NodeJj", () => {
   let repository: string
   let previousCwd: string
+  let editorDirectory: string
+  let editorMarker: string
 
   const run = <A, E>(effect: Effect.Effect<A, E, Jj>) => Effect.provide(effect, NodeJj.layer)
 
@@ -48,14 +50,27 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
     previousCwd = process.cwd()
     repository = await mkdtemp(join(tmpdir(), "flows-node-jj-"))
     execFileSync("jj", ["git", "init", repository], { stdio: "ignore" })
-    // `jj describe` with no `-m` opens an editor; keep the non-interactive path.
-    process.env.JJ_EDITOR = "true"
+
+    // The editor is a MARKER rather than the `true` that used to stand here.
+    // `jj describe` with no `-m` starts `$JJ_EDITOR` (`nano` when unset) even
+    // with stdout on a pipe and stdin on `/dev/null`, so `true` hid a real
+    // interactive child behind a program that exits immediately. Recording the
+    // fact instead lets a case assert that no jj this layer runs ever starts
+    // one, which is the bound `NodeJj.layer`'s own documentation claims.
+    editorDirectory = await mkdtemp(join(tmpdir(), "flows-node-jj-editor-"))
+    editorMarker = join(editorDirectory, "editor-ran")
+    const editor = join(editorDirectory, "editor")
+    writeFileSync(editor, `#!/bin/sh\necho "editor-ran pid=$$" > ${editorMarker}\n`)
+    chmodSync(editor, 0o755)
+    process.env.JJ_EDITOR = editor
+
     process.chdir(repository)
   })
 
   afterAll(async () => {
     process.chdir(previousCwd)
     await rm(repository, { recursive: true, force: true })
+    await rm(editorDirectory, { recursive: true, force: true })
   })
 
   it.effect("snapshots the working copy and restores a file back out of it", () =>
@@ -88,6 +103,23 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
         encoding: "utf8"
       })
       expect(log.trim()).toBe(changeId)
+    }))
+
+  it.effect("snapshots without a message without starting an editor", () =>
+    Effect.gen(function*() {
+      // `NodeJj.layer` starts its children outside any host spawner, and the
+      // bound that makes that acceptable is that every command is short-lived
+      // and starts no long-lived child of its own. An editor is the exact
+      // opposite: `jj describe` with no `-m` runs `$JJ_EDITOR` and waits for
+      // it, so a `snapshot()` with no message would hold an interactive
+      // process that no `ProcessLedger` knows about and no cancel deadline
+      // covers. The marker editor makes that observable instead of a hang.
+      rmSync(editorMarker, { force: true })
+      yield* Effect.promise(() => writeFile(join(repository, "no-editor.txt"), "x\n"))
+
+      yield* run(Effect.flatMap(Jj, (jj) => jj.snapshot()))
+
+      expect(existsSync(editorMarker)).toBe(false)
     }))
 
   it.effect("adds and forgets a named workspace lane", () =>
