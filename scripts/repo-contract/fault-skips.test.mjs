@@ -8,13 +8,24 @@
  *
  * The failure modes are different. A focused test (`.only`) silently drops
  * every other case in its file, and a `.todo` reports as a pass. Both are
- * refused outright, and so is an inverted expectation (`.fails`): a test that
- * passes because the product still has the defect it describes reports a green
- * matrix over a known leak, and a gap belongs in `e2e/fault-gaps.md` where a
- * reader looking for gaps will find it. A conditional skip is legitimate —
- * cases 12 and 21 need the `jj` binary — but every one has to be listed here
- * with the condition it skips on, so "this case has not run in six months" is
- * a fact somebody chose rather than one nobody noticed.
+ * refused outright, and so is an inverted expectation (`.fails`).
+ *
+ * `.fails` is refused for a narrow reason, and the reason is not "a matrix may
+ * not contain a failing test". The opposite: when the product does not meet a
+ * requirement the matrix is required to cover, the sanctioned form is a plain
+ * test that fails, kept in the matrix with its owner cited in the case file,
+ * and reported as a failure in the gate line. `requiredRedGates` below lists
+ * the ones that exist, and this suite asserts they are still there. What
+ * `.fails` does is turn exactly that test into a pass: the run goes green, the
+ * gate line stops naming the defect, and the requirement is enforced by
+ * nothing. So the rule is about the marking, not about the colour — state the
+ * requirement as a plain failing test and record the shipped limitation in
+ * `e2e/fault-gaps.md` beside it.
+ *
+ * A conditional skip is legitimate — cases 12 and 21 need the `jj` binary —
+ * but every one has to be listed here with the condition it skips on, so "this
+ * case has not run in six months" is a fact somebody chose rather than one
+ * nobody noticed.
  *
  * Run it with `node --test "scripts/repo-contract/*.test.mjs"`.
  */
@@ -27,6 +38,26 @@ import { fileURLToPath } from "node:url"
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..")
 const faults = join(root, "e2e", "faults")
 const harness = join(root, "e2e", "harness")
+
+/**
+ * The tests that are required to exist and are expected to be red at rc.0.
+ *
+ * A requirement the product does not meet yet is enforced by a plain failing
+ * test, not by prose. This map is what stops the next person from making the
+ * matrix green by deleting one.
+ */
+const requiredRedGates = new Map([
+  [
+    "faults/case22-secret-never-in-journal.test.ts",
+    {
+      title: "redacts the credential out of the operator's terminal",
+      why: "rc-contract R-12 requires case 22 to cover the logs as well as the journal. rc.0 ships no "
+        + "redacting logger, so this gate is red until the Phase 5 redaction deliverable (rc-contract "
+        + "§5.2) lands. Deleting it, or marking it `.fails`, makes the matrix green over a live "
+        + "credential leak."
+    }
+  ]
+])
 
 /**
  * The conditional skips the matrix is allowed to carry, and what each skips on.
@@ -93,8 +124,21 @@ describe("the fault-suite skip audit", () => {
       assert.equal(
         inverted.length,
         0,
-        `${source.relative} pins a defect with .fails. A case that passes because the product is still broken `
-          + "belongs in e2e/fault-gaps.md, not in the matrix."
+        `${source.relative} pins a defect with .fails, which turns a failing required gate into a pass. `
+          + "State the requirement as a plain test that fails, cite its owner in the case file, and record "
+          + "the shipped limitation in e2e/fault-gaps.md."
+      )
+    }
+  })
+
+  it("keeps every required gate in the matrix, including the ones that are red", () => {
+    const byRelative = new Map(sources.map((source) => [source.relative, source.text]))
+    for (const [relative, gate] of requiredRedGates) {
+      const text = byRelative.get(relative)
+      assert.ok(text !== undefined, `${relative} is a required gate and is not in the matrix any more. ${gate.why}`)
+      assert.ok(
+        text.includes(gate.title),
+        `${relative} no longer contains the required test "${gate.title}". ${gate.why}`
       )
     }
   })

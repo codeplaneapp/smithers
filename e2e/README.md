@@ -99,8 +99,26 @@ Memory budgets are stated as growth over the suite's own baseline. The matrix
 shares one process, so an absolute resident-set ceiling would measure the suite
 rather than the path under test.
 
+## Required gates that are red
+
+One test in this matrix is expected to fail, and the suite is expected to be red
+because of it: `case22 ... redacts the credential out of the operator's terminal`.
+
+rc-contract R-12 makes case 22 a required parity test over the journal *and* the
+logs. rc.0 ships no redacting logger, so an action that logs a credential puts it
+on the operator's terminal. The requirement is enforced by keeping the test in
+the matrix as a plain failure, with the Phase 5 redaction deliverable
+(`docs/migration/rc-contract.md` §5.2) named as its owner in the case file and in
+`fault-gaps.md`. Marking it `.fails`, skipping it, or deleting it would report a
+green matrix over a live credential leak, so
+`scripts/repo-contract/fault-skips.test.mjs` refuses all three.
+
+A redacting logger turns it green with no edit to this suite.
+
 ## Flakes
 
 There is no automated promotion history and no rolling flake cache. A case is
-either in `fault-matrix.json` and expected to pass, or it is not in the suite.
-Record a flake by hand in `flake-log.md` with enough detail to reproduce it.
+either in `fault-matrix.json` and expected to pass — or, for the one required
+gate above, expected to fail for a stated reason with a named owner — or it is
+not in the suite. Record a flake by hand in `flake-log.md` with enough detail to
+reproduce it.
