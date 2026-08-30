@@ -104,7 +104,7 @@ only.
 | `integrations` | `Linear live contract (LINEAR_API_KEY)` | `describe.skipIf(LINEAR_API_KEY === undefined)` |
 | `integrations` | `Telegram live contract (TELEGRAM_BOT_TOKEN)` | `describe.skipIf(TELEGRAM_BOT_TOKEN === undefined)` |
 
-**`migrate` — apply against a real model.** The three cases in
+**`migrate`: apply against a real model.** The three cases in
 `packages/migrate/test/flow/MigrateFlow.live.e2e.test.ts` drive the migration
 tool against a real model: they rewrite a 0.x JSX workflow, record what the
 run could not settle, and refuse a multi-workflow pack the tool cannot

@@ -6241,7 +6241,7 @@ const program = Effect.gen(function*() {
 | Operation | Notes |
 | --- | --- |
 | `inspect(position, projection)` | read-only fold of committed entries up to the frame; never invokes a flow handler or an action dispatcher, which is what separates it from an engine resume |
-| `fork(position, options?)` | requires a terminal or inactive parent; the jj workspace name and path are derived from the position, and the lane is forgotten when the service is released. `options.workspaceRoot` only moves where it lands |
+| `fork(position, options?)` | requires a terminal or inactive parent; the jj workspace name and path are derived from the child run id the fork mints, so a frame forked twice gets two lanes, and the lane is forgotten when the service is released. `options.workspaceRoot` only moves where it lands |
 | `rewind(position, options?)` | the fenced, audited suffix-removal protocol. The ownership claim and audit id are minted inside; `options.detachedChildren` (`"block"` by default, or `"cancel"`) and `options.pageSize` are the only knobs |
 
 Recovery is not an operation. Building `TimeTravel.layer` finishes or rolls
