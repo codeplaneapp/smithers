@@ -817,9 +817,12 @@ describe("the executor's resume bridge", () => {
       record,
       {
         runtime: {
+          // The delegation this executor cannot host comes FIRST, and the
+          // follower drains the list in order, so the assertions below read a
+          // list both entries have been through rather than a race.
           pendingResumes: Effect.succeed([
-            { runId: "run-hosted", sequence: 7 },
-            { runId: "run-elsewhere", sequence: 8 }
+            { runId: "run-elsewhere", sequence: 8 },
+            { runId: "run-hosted", sequence: 7 }
           ]),
           clearResume: (runId) =>
             Effect.sync(() => {
@@ -830,9 +833,14 @@ describe("the executor's resume bridge", () => {
         engine: (engine) =>
           ({
             ...engine,
-            // Only one of the two executions is in this engine.
+            // Only one of the two executions is in this engine. The other is
+            // refused the way every runtime refuses an id it has no record of,
+            // which is also why the wait for it ends at once instead of
+            // holding the follower through the whole park budget.
             poll: (_flow: unknown, executionId: string) =>
-              Effect.succeed(executionId === "run-hosted" ? Option.some({ _tag: "Suspended" }) : Option.none()),
+              executionId === "run-hosted"
+                ? Effect.succeed(Option.some({ _tag: "Suspended" }))
+                : Effect.fail(new FlowRuntime.FlowExecutionNotFound({ code: "execution_not_found", executionId })),
             resume: (_flow: unknown, executionId: string) =>
               Effect.sync(() => {
                 resumed.push(executionId)
