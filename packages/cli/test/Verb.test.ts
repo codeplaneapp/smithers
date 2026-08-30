@@ -103,6 +103,7 @@ describe("the removed surface", () => {
       "worktrees",
       "hijack",
       "pause",
+      "gateway",
       "ui",
       "gui",
       "monitor",
@@ -135,6 +136,7 @@ describe("the removed surface", () => {
       "eject",
       "upgrade",
       "packs",
+      "workflow",
       "human",
       "ask-human",
       "node",
@@ -174,6 +176,28 @@ describe("the removed surface", () => {
     // hidden and refuses on its own, so both spellings exit 1.
     expect(subcommandNames).toContain("workflow")
     expect(listed).not.toContain("workflow")
+  })
+
+  it("keeps `gateway` as a hidden group whose bare form is the `serve` alias", () => {
+    // Section 4.2: bare `gateway` stays an alias of `serve` and only
+    // `gateway status|stop` are removed. An `alias` cannot carry
+    // subcommands, so the two refusals need a group of their own.
+    const gateway = Unsupported.removedVerbs.find((verb) => verb.name === "gateway")!
+
+    expect(gateway.subcommands).toEqual(["status", "stop"])
+    expect(subcommandNames).toContain("gateway")
+    expect(listed).not.toContain("gateway")
+    expect(Unsupported.verbError(gateway, "status").message).toContain("smithers gateway status was removed")
+    expect(Unsupported.verbError(gateway, "stop").message).toContain(`${Unsupported.migrationUrl}#gateway`)
+  })
+
+  it("gives the singular `workflow` the packs reason, not the `workflows` listing reason", () => {
+    const singular = Unsupported.removedVerbs.find((verb) => verb.name === "workflow")!
+    const plural = Unsupported.removedVerbs.find((verb) => verb.name === "workflows")!
+
+    expect(singular.subcommands).toEqual(["run", "path", "create", "inspect", "skills", "doctor"])
+    expect(singular.reason).toContain("JSX pack tooling is gone")
+    expect(plural.reason).toBe("use `ls`")
   })
 
   it("gives every removal a reason and a migration link", () => {

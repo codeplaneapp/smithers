@@ -89,6 +89,10 @@ export const removedVerbs: ReadonlyArray<RemovedVerb> = [
   ]),
   removedGroup("Time travel and checkpoints", timeTravel, "worktrees", ["list", "prune"]),
   ...removed("Hijack and pause", control, ["hijack", "pause"]),
+  // Bare `gateway` survives as the `serve` alias, so only the two subcommands
+  // are removed. They are a group rather than plain verbs for exactly that
+  // reason: the parent still runs.
+  removedGroup("Old gateway and UI hosting", uiHosting, "gateway", ["status", "stop"]),
   ...removed("Old gateway and UI hosting", uiHosting, ["ui", "gui", "monitor"]),
   ...removed("Supervision", recovery, ["supervise", "supervisor", "top"]),
   ...removed("Evaluation and optimization", evaluation, ["eval", "optimize", "scores"]),
@@ -129,6 +133,18 @@ export const removedVerbs: ReadonlyArray<RemovedVerb> = [
     "upgrade"
   ]),
   removedGroup("Packs and scaffolding", packs, "packs", ["list", "update"]),
+  // The singular `workflow` is section 4.2's packs row, not the `workflows`
+  // did-you-mean key: what an operator lost with `workflow path` is pack
+  // tooling, not a listing. `workflow list` survives as the `ls` alias and is
+  // registered as a real subcommand of the group.
+  removedGroup("Packs and scaffolding", packs, "workflow", [
+    "run",
+    "path",
+    "create",
+    "inspect",
+    "skills",
+    "doctor"
+  ]),
   removedGroup("Human requests", approvals, "human", ["list", "resolve"]),
   ...removed("Human requests", approvals, ["ask-human"]),
   ...removed("Node detail", nodeDetail, ["node", "tail"]),
@@ -246,6 +262,36 @@ export const verbError = (verb: RemovedVerb, subcommand?: string | undefined): C
       verb.reason,
       verb.name
     )
+  })
+
+/**
+ * Whether a flow id belongs to the control plane's reserved catalog.
+ *
+ * `@smthrs/control`'s `SystemFlows.catalog` reserves one `system/*` id per
+ * command-line verb so a projection has a flow row to hang off. rc.0 ships a
+ * body for none of them.
+ *
+ * @category predicates
+ * @since 1.0.0
+ */
+export const isReservedFlow = (flowId: string): boolean => flowId.startsWith("system/")
+
+/**
+ * The failure naming a reserved flow raises.
+ *
+ * A bodiless flow plans and launches perfectly well: the run row is durable,
+ * the receipt says `Accepted`, and then nothing ever happens, because there is
+ * no graph to execute. That is the partial appearance rc-contract section 4
+ * forbids, so the verbs that take a flow id refuse the reserved ones outright.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const reservedFlowError = (verb: string, flowId: string): CliError.UnsupportedError =>
+  new CliError.UnsupportedError({
+    message: `smithers ${verb} ${flowId}: ${flowId} is a reserved system flow id and carries no body in ` +
+      `1.0.0-rc.0, so a launch would park with nothing to run. Name a flow from \`smithers ls\`. ` +
+      `See ${migrationUrl}#flows`
   })
 
 /**

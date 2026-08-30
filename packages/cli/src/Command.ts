@@ -62,6 +62,17 @@ const input = Argument.string("key=value").pipe(Argument.variadic())
 const data = Flag.string("data").pipe(Flag.optional)
 const common = { input, data }
 
+/**
+ * Removed verbs that are registered by hand instead of by the loop below,
+ * because their bare form still does something: `gateway` runs `serve` and
+ * `workflow list` is the `ls` alias.
+ */
+const ownGroupCommands = new Set(["gateway", "workflow"])
+
+/** One removed verb by name, so a handler cannot cite the wrong entry. */
+const removedVerb = (name: string): Unsupported.RemovedVerb =>
+  Unsupported.removedVerbs.find((verb) => verb.name === name)!
+
 /** A hidden boolean flag whose presence is a refusal. */
 const removedFlag = (parent: string, name: string) => Flag.boolean(name).pipe(Flag.withHidden)
 
@@ -85,7 +96,16 @@ const refuseRemoved = (
   return Effect.void
 }
 
-/** The shared globals every handler is checked against before it runs. */
+/**
+ * The shared pre-handler: the globals every handler is checked against, and
+ * the one notice every handler owes.
+ *
+ * Section 6's detection is "when a command runs in a directory", so it belongs
+ * here rather than in a verb. Wired into `ls` and `up` alone it printed only
+ * when one of those two happened to be the first command an operator typed in
+ * a 0.x project, because the first invocation writes `.flows/` and the sample
+ * treats that as proof the project has moved on.
+ */
 const guardGlobals = Effect.gen(function*() {
   const root = yield* rootCommand
   const backend = Option.getOrUndefined(root.backend)
@@ -97,6 +117,7 @@ const guardGlobals = Effect.gen(function*() {
   if (fromEnvironment !== undefined) {
     return yield* Effect.fail(new CliError.UnsupportedError({ message: fromEnvironment }))
   }
+  yield* noticeLegacyState
 })
 
 const malformedJson = (label: string): CliError.UsageError =>
@@ -251,8 +272,11 @@ const plan = Command.make("plan", common, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
     const decodedInput = yield* decodeInput(config.input.slice(1), config.data)
-    const control = yield* ControlService.Control
     const flowId = config.input[0] ?? ""
+    if (Unsupported.isReservedFlow(flowId)) {
+      return yield* Effect.fail(Unsupported.reservedFlowError("plan", flowId))
+    }
+    const control = yield* ControlService.Control
     yield* render(yield* control.plan({ flowId, input: decodedInput }))
   })).pipe(Command.withDescription(Verb.find("plan")!.help))
 
@@ -354,7 +378,9 @@ const up = Command.make("up", upFlags, (config) =>
       "resume-restore-heartbeat": config["resume-restore-heartbeat"],
       "max-concurrency": config["max-concurrency"]
     })
-    yield* noticeLegacyState
+    if (Unsupported.isReservedFlow(config.flow)) {
+      return yield* Effect.fail(Unsupported.reservedFlowError("up", config.flow))
+    }
     const decodedInput = yield* decodeInput([], config.data)
     const control = yield* ControlService.Control
     const card = yield* control.plan({ flowId: config.flow, input: decodedInput })
@@ -477,9 +503,16 @@ const steer = Command.make("steer", {
 
 const listFlows = Effect.gen(function*() {
   yield* guardGlobals
-  yield* noticeLegacyState
   const control = yield* ControlService.Control
-  yield* render(yield* control.list({ _tag: "flows" }))
+  const listed = yield* control.list({ _tag: "flows" })
+  // The reserved catalog is the control plane's projection surface, not this
+  // project's flows. Listing it invited `up system/release`, which planned,
+  // launched, and then sat at `accepted` with nothing to run.
+  yield* render(
+    listed._tag === "flows"
+      ? { ...listed, items: listed.items.filter((item) => !Unsupported.isReservedFlow(item.flowId)) }
+      : listed
+  )
 })
 
 const ls = Command.make("ls", {}, () => listFlows).pipe(Command.withDescription(Verb.find("ls")!.help))
@@ -492,13 +525,7 @@ const workflowList = Command.make("list", {}, () => listFlows).pipe(
 const workflow = Command.make(
   "workflow",
   { rest: Argument.string("subcommand").pipe(Argument.variadic()) },
-  (config) =>
-    Effect.fail(
-      Unsupported.verbError(
-        Unsupported.removedVerbs.find((verb) => verb.name === "workflows")!,
-        config.rest[0]
-      )
-    )
+  (config) => Effect.fail(Unsupported.verbError(removedVerb("workflow"), config.rest[0]))
 ).pipe(
   Command.withDescription("Removed; only `workflow list` survives, as an alias of `ls`"),
   Command.unlisted,
@@ -1036,11 +1063,13 @@ const gc = Command.make("gc", {
     yield* render(yield* Gc.sweep(projectRoot, { olderThan: config.olderThan, dryRun: config.dryRun }))
   })).pipe(Command.withDescription(Verb.find("gc")!.help))
 
-const serveCommand = Command.make("serve", {
+const serveFlags = {
   host: Flag.string("host").pipe(Flag.withDefault(Serve.defaultBind.host)),
   port: Flag.integer("port").pipe(Flag.withDefault(Serve.defaultBind.port)),
   listen: Flag.boolean("listen")
-}, (config) =>
+}
+
+const serveHandler = (config: { readonly host: string; readonly port: number; readonly listen: boolean }) =>
   Effect.gen(function*() {
     yield* guardGlobals
     const root = yield* rootCommand
@@ -1056,7 +1085,34 @@ const serveCommand = Command.make("serve", {
     if (refusal !== undefined) return yield* Effect.fail(refusal)
     if (!root.quiet) yield* Console.error(Serve.banner(bind))
     yield* Serve.host(bind)
-  })).pipe(Command.withDescription(Verb.find("serve")!.help), Command.withAlias("gateway"))
+  })
+
+const serveCommand = Command.make("serve", serveFlags, serveHandler).pipe(
+  Command.withDescription(Verb.find("serve")!.help)
+)
+
+/**
+ * `gateway`: the rc.0-only alias of `serve`, and the two subcommands section
+ * 4.2 removed.
+ *
+ * It is a command group rather than `Command.withAlias("gateway")` because an
+ * alias has no subcommands: `gateway status` reached the parser as a stray
+ * positional argument and exited 2 with serve's usage text, which tells an
+ * operator migrating a script nothing about where the gateway lifecycle went.
+ */
+const gatewaySubcommand = (name: string) =>
+  Command.make(name, {}, () => Effect.fail(Unsupported.verbError(removedVerb("gateway"), name))).pipe(
+    Command.withDescription(`Removed in 1.0.0-rc.0: ${removedVerb("gateway").reason}`),
+    Command.unlisted
+  )
+
+const gatewayCommand = Command.make("gateway", serveFlags, serveHandler).pipe(
+  Command.withDescription("Alias of `serve`; `gateway status` and `gateway stop` were removed"),
+  Command.unlisted,
+  Command.withSubcommands(Unsupported.removedVerbs.find((verb) => verb.name === "gateway")!.subcommands!.map(
+    gatewaySubcommand
+  ))
+)
 
 // == section 4.2 refusals
 
@@ -1068,6 +1124,7 @@ const serveCommand = Command.make("serve", {
  * survives as the `ls` alias, and it refuses on its own with the same reason.
  */
 const removedCommands = Unsupported.removedVerbs
+  .filter((verb) => !ownGroupCommands.has(verb.name))
   .map((verb) =>
     Command.make(
       verb.name,
@@ -1109,6 +1166,7 @@ export const cli = rootCommand.pipe(
     output,
     down,
     serveCommand,
+    gatewayCommand,
     init,
     doctor,
     docs,
