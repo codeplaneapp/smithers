@@ -106,6 +106,18 @@ const isLockedError = (error: unknown): boolean => {
 }
 
 /**
+ * A defect SQLite raised because a peer holds the file, and not one this driver
+ * raised about the file itself.
+ *
+ * Reading the text is the only test a raw driver throw allows, and the text
+ * carries a path the caller chose: a 0.x database at
+ * `.../database is locked.db` makes this driver's own refusal read as a lock.
+ * Excluding the refusal keeps the ladder from retrying a decision the guard has
+ * already made, and keeps the code it reports the code the guard chose.
+ */
+const isLockedDefect = (defect: unknown): boolean => !isUnsupportedDatabase(defect) && isLockedError(defect)
+
+/**
  * Reads the tables of a file without joining the WAL or converting it.
  *
  * Returns `undefined` when the file cannot be inspected at all: a path that
@@ -172,7 +184,7 @@ const unsupportedOpen = (filename: string): UnsupportedDatabase | undefined => {
  * That refinement is the one narrowing every caller matches on.
  */
 const guardDefect = (filename: string) => (defect: unknown): unknown =>
-  isLockedError(defect)
+  isLockedDefect(defect)
     ? new UnsupportedDatabase({
       code: "database_locked",
       message: `${filename} could not be inspected because another process holds it`
@@ -231,7 +243,7 @@ const openSchedule = Schedule.exponential(Duration.millis(openBaseDelayMs)).pipe
 const retryWhileLocked = <A>(self: Effect.Effect<A>): Effect.Effect<A> =>
   self.pipe(
     Effect.catchDefect((defect) => Effect.fail<OpenFailure>({ defect })),
-    Effect.retry({ schedule: openSchedule, while: (error) => isLockedError(error.defect) }),
+    Effect.retry({ schedule: openSchedule, while: (error) => isLockedDefect(error.defect) }),
     Effect.catch((error) => Effect.die(error.defect))
   )
 

@@ -176,6 +176,25 @@ describe("NodeDatabase guard: 0.x database files (X-13)", () => {
       expect(tableNames(filename)).toEqual(["_smithers_runs"])
     }), 60_000)
 
+  /**
+   * The path is caller input and the ladder's classifier reads text, so a file
+   * whose own name spells SQLite's lock error is the one input that can make
+   * the guard report the refusal it did not make.
+   */
+  // Real elapsed time: a misclassified refusal is retried, and the assertion
+  // has to be reached rather than parked on a clock the ladder cannot advance.
+  it.live("reports the refusal the guard made, not the one its path spells", () =>
+    Effect.gen(function*() {
+      const filename = tempFile("database is locked.db")
+      seedZeroX(filename)
+
+      const defect = defectOf(yield* build({ filename }))
+
+      expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(true)
+      if (!NodeDatabase.isUnsupportedDatabase(defect)) return
+      expect(defect.code).toBe("unsupported_database_file")
+    }), 60_000)
+
   it.effect("refuses a 0.x file left in WAL mode with no -shm beside it", () =>
     Effect.gen(function*() {
       const filename = tempFile("smithers.db")
