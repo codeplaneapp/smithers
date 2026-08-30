@@ -7,8 +7,9 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Contract from "@smthrs/migrate/flow/Contract"
 import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 
-const auditPath = "/Users/williamcory/smithers-v1/FEATURE_PARITY_AUDIT.md"
+const auditPath = fileURLToPath(new URL("../../../../docs/migration/feature-parity-audit.md", import.meta.url))
 
 const brief: Contract.UnitBrief = {
   id: "workflow:simple-workflow",
@@ -116,7 +117,7 @@ describe("Contract.examples", () => {
     }
   })
 
-  it.skipIf(!existsOrSkip(auditPath))("matches FEATURE_PARITY_AUDIT.md where that file is on this machine", () => {
+  it("matches the feature parity audit this repository carries", () => {
     const audit = readFileSync(auditPath, "utf8")
     for (const example of Contract.examples.slice(0, 5)) {
       // The audit is the source; the contract quotes fragments of it, so every
@@ -226,12 +227,3 @@ describe("Contract.unitPrompt", () => {
     expect(report).toContain("format: skipped (no formatter is configured)")
   })
 })
-
-function existsOrSkip(path: string): boolean {
-  try {
-    readFileSync(path, "utf8")
-    return true
-  } catch {
-    return false
-  }
-}

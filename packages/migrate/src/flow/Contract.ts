@@ -103,7 +103,7 @@ it delegates to the named durable flow the file also exports. A directory with
 no \`description\` is discovered with a warning and is not runnable.`
 
 /**
- * One verified old-to-new pair, copied from `FEATURE_PARITY_AUDIT.md`.
+ * One verified old-to-new pair, copied from `docs/migration/feature-parity-audit.md`.
  *
  * @category models
  * @since 0.1.0

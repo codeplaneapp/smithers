@@ -9,7 +9,7 @@ Re-anchored on 2026-08-28 to the post-parity-integration tree `/Users/williamcor
 Sources, in order of authority:
 
 1. `/Users/williamcory/smithers-v1/PLAN.md`, Phase 5 and the maintainer decision table. Every decision row is adopted at its recommended default (orchestrator brief, 2026-08-28).
-2. `/Users/williamcory/smithers-v1/FEATURE_PARITY_AUDIT.md`, the 2026-08-28 post-integration audit. It is the authority on what the parity lanes shipped.
+2. `docs/migration/feature-parity-audit.md`, the 2026-08-28 post-integration audit. It is the authority on what the parity lanes shipped.
 3. The flows gaps reader's findings (`flows-gaps-audit.md`, Phase 0 scratchpad), which verified the flows audits `docs/architecture/smithers-replacement-gaps.md` and `docs/architecture/smithers-applicability-audit-2026-08-13.md` against source.
 4. The flows CLI/control reader (`flows-cli-control.md`), the Plue consumer contract reader (`plue-consumer-contract.md`), the old CLI reader (`cli.md`), and the old execution core reader (`old-execution-core.md`).
 5. The Phase 5 extra findings (six defect rows plus one class finding) and the cycle-14 review of this document, both folded into the verification ledger below.
