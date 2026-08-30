@@ -149,6 +149,7 @@
       "dependencies": {
         "@smthrs/agent": "1.0.0-rc.0",
         "@smthrs/artifacts": "1.0.0-rc.0",
+        "@smthrs/capability": "1.0.0-rc.0",
         "@smthrs/control": "1.0.0-rc.0",
         "@smthrs/core": "1.0.0-rc.0",
         "@smthrs/database": "1.0.0-rc.0",
@@ -162,6 +163,8 @@
         "@smthrs/journal": "1.0.0-rc.0",
         "@smthrs/kernel": "1.0.0-rc.0",
         "@smthrs/keys": "1.0.0-rc.0",
+        "@smthrs/mcp": "1.0.0-rc.0",
+        "@smthrs/memory": "1.0.0-rc.0",
         "@smthrs/model": "1.0.0-rc.0",
         "@smthrs/notifications": "1.0.0-rc.0",
         "@smthrs/observability": "1.0.0-rc.0",
