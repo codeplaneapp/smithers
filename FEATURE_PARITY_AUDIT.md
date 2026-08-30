@@ -592,7 +592,7 @@ console.log(Graph.nodes(graph).filter((node) => node.kind === "FlowCall").length
 - New: `ProcessLedger` (journaled spawn, exit, and reap facts), `ContainedSpawner` (per-command process group, SIGTERM then SIGKILL after graceMs), `ProcessReaper` (ESRCH-only liveness, start-identity check before kill), `NodeHost.layerContained` and `BunHost.layerContained`, optional remote `Provider.kill`
 - Evidence: packages/flows/test/NodeRuntime.test.ts::releases the run it owns when a shutdown signal arrives, and kills what it spawned
 - Evidence: packages/flows/test/NodeRuntime.test.ts::kills what a run spawned when a SECOND driver over the same file interrupts it
-- Gap: after a cross-driver durable cancel the run reaches cancelled and the process group dies, but the `Flow.execute` fiber never settles (a `RunDriver` defect in engine-children's paths; the test asserts the durable outcome and interrupts the fiber). Containment stays on the Phase 5 blocker list until that fiber settles
+- Evidence: packages/engine-store/test/CrossDriverCancelSettles.test.ts::interrupts the caller instead of leaving it in the suspended-retry loop
 
 ## Run lineage
 
