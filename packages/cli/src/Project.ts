@@ -95,6 +95,39 @@ export const root = (
 }
 
 /**
+ * Resolves the 0.x project one `smithers migrate` invocation converts.
+ *
+ * This is deliberately not {@link root}. That walk anchors on `.flows/`, which
+ * only an rc.0 project has, so a 0.x project without a `.git`/`.jj` marker of
+ * its own resolved to whatever rc.0 project happened to sit above it and
+ * `migrate --apply` rewrote the ancestor's tree. The project being migrated is
+ * the one holding 0.x state, so the walk anchors on {@link legacyMarkers} and
+ * falls back to the invocation directory. `--root` still wins, and so does the
+ * verb's own path argument.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const legacyRoot = (
+  explicit: string | undefined,
+  cwd: string = process.cwd(),
+  exists: (path: string) => boolean = existsSync
+): string => {
+  if (explicit !== undefined && explicit !== "") {
+    return isAbsolute(explicit) ? explicit : resolve(cwd, explicit)
+  }
+  let directory = resolve(cwd)
+  for (;;) {
+    if (legacyMarkers.some((marker) => exists(join(directory, marker)))) return directory
+    const parent = dirname(directory)
+    if (parent === directory || boundaryMarkers.some((marker) => exists(join(directory, marker)))) {
+      return resolve(cwd)
+    }
+    directory = parent
+  }
+}
+
+/**
  * Where this project keeps rc.0 state.
  *
  * @category getters
@@ -226,6 +259,22 @@ export const LegacyState: Context.Reference<ReadonlyArray<string>> = Context.Ref
 )
 
 /**
+ * The 0.x project `smithers migrate` converts when no path is given, as a
+ * service.
+ *
+ * Separate from {@link ProjectRoot} because the two answer different
+ * questions: the durable layers are built over the rc.0 project, and the
+ * migration reads the 0.x project the operator is standing in.
+ *
+ * @category references
+ * @since 1.0.0
+ */
+export const MigrationRoot: Context.Reference<string> = Context.Reference<string>(
+  "/cli/MigrationRoot",
+  { defaultValue: () => legacyRoot(undefined) }
+)
+
+/**
  * Provides the resolved project root, and the 0.x state found beside it.
  *
  * The 0.x sample is taken here, in an ordinary function call, rather than in
@@ -240,8 +289,12 @@ export const LegacyState: Context.Reference<ReadonlyArray<string>> = Context.Ref
  * @category layers
  * @since 1.0.0
  */
-export const layer = (projectRoot: string): Layer.Layer<never> =>
+export const layer = (
+  projectRoot: string,
+  migrationRoot: string = legacyRoot(undefined)
+): Layer.Layer<never> =>
   Layer.mergeAll(
     Layer.succeed(ProjectRoot, projectRoot),
+    Layer.succeed(MigrationRoot, migrationRoot),
     Layer.succeed(LegacyState, legacyState(projectRoot))
   )

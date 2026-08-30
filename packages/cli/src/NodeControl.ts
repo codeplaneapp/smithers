@@ -168,7 +168,11 @@ export const makeConfig = (
   mcpServers: mcpServersFromArguments(args, environment),
   // `--root` is resolved here rather than in a handler because the durable
   // layers are built from it, and they are built before any flag is parsed.
-  root: Project.root(valueFromArguments(args, "root"), cwd)
+  root: Project.root(valueFromArguments(args, "root"), cwd),
+  // `migrate` converts a 0.x project, which by definition has no `.flows/`
+  // for the root walk to anchor on. Resolved from the same `--root`, and
+  // otherwise from the 0.x state beside the invocation directory.
+  migrationRoot: Project.legacyRoot(valueFromArguments(args, "root"), cwd)
 })
 
 /**
@@ -942,7 +946,7 @@ export const layer = (applicationConfig: Application.Config) => {
     layerControl(applicationConfig),
     layerOutput,
     NodeServices.layer,
-    Project.layer(root),
+    Project.layer(root, applicationConfig.migrationRoot),
     // `smithers memory` reads and writes the same durable store a run's
     // `memory` flow does, over the same control database. A separate
     // connection would be a second writer to one SQLite file. A remote

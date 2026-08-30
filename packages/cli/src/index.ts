@@ -4,8 +4,9 @@
  * Every module under `src/` is exported here and is also reachable as
  * `@smthrs/cli/<Module>`. The barrel is complete on purpose: a module that is
  * a subpath export but not a namespace here is public through one spelling and
- * invisible through the other, and `README.md`'s table is generated from this
- * list.
+ * invisible through the other. `test/Readme.test.ts` compares `README.md`'s
+ * table against this list, so a module or a runtime export that reaches one
+ * and not the other fails the suite.
  *
  * @since 0.1.0
  */
