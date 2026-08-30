@@ -727,9 +727,79 @@ const docs = Command.make("docs", { full: Flag.boolean("full") }, (config) =>
     yield* Console.log(bundle.text)
   })).pipe(Command.withDescription(Verb.find("docs")!.help))
 
+/**
+ * The migration tool's own flag set, declared on the verb.
+ *
+ * `smithers migrate` and `smithers-migrate` run the same entry, so they take
+ * the same options. A verb that declared none of them could only ever plan:
+ * `--apply` is what the section 4.1 row calls converting the project source,
+ * and an operator who cannot type it has no way to reach the transformation.
+ * `--json` is not repeated here because it is already a shared global.
+ */
+const migrateFlags = {
+  scan: Flag.boolean("scan").pipe(
+    Flag.withDescription("Inventory the project and write the report without planning any unit")
+  ),
+  apply: Flag.boolean("apply").pipe(
+    Flag.withDescription("Convert the project source, instead of planning the conversion")
+  ),
+  seat: Flag.string("seat").pipe(
+    Flag.withDescription("The model seat the migration's agent runs on"),
+    Flag.optional
+  ),
+  allowUnsafe: Flag.string("allow-unsafe").pipe(
+    Flag.withDescription("Accept the named unsafe constructs, or `all`"),
+    Flag.optional
+  ),
+  acknowledgeRunState: Flag.boolean("acknowledge-run-state").pipe(
+    Flag.withDescription("Accept the 0.x run state the report lists and migrate the source anyway")
+  ),
+  allowNoVcs: Flag.boolean("allow-no-vcs").pipe(
+    Flag.withDescription("Accept a file copy as the only checkpoint, in a project under no version control")
+  ),
+  keepOldSources: Flag.boolean("keep-old-sources").pipe(
+    Flag.withDescription("Leave the 0.x sources in place beside the flows written from them")
+  ),
+  unit: Flag.string("unit").pipe(
+    Flag.withDescription("Migrate only these units, comma separated"),
+    Flag.optional
+  ),
+  maxRepairRounds: Flag.integer("max-repair-rounds").pipe(
+    Flag.withDescription("How many times one unit may be repaired before it is reported as failed"),
+    Flag.optional
+  ),
+  reportDir: Flag.string("report-dir").pipe(
+    Flag.withDescription("Where the report is written, relative to the project root"),
+    Flag.optional
+  ),
+  flowsDir: Flag.string("flows-dir").pipe(
+    Flag.withDescription("Where the written flows go, instead of `flows/`"),
+    Flag.optional
+  ),
+  verifyInstall: Flag.string("verify-install").pipe(
+    Flag.withDescription("The command that installs dependencies, instead of the one the lockfile implies"),
+    Flag.optional
+  ),
+  verifyFormat: Flag.string("verify-format").pipe(
+    Flag.withDescription("The command that formats the project, instead of the one its config implies"),
+    Flag.optional
+  ),
+  verifyTypecheck: Flag.string("verify-typecheck").pipe(
+    Flag.withDescription(
+      "The command that typechecks the project, repeatable; one empty value runs no typecheck at all"
+    ),
+    Flag.atLeast(0)
+  ),
+  verifyTest: Flag.string("verify-test").pipe(
+    Flag.withDescription("The command that runs the tests, instead of the project's own test script"),
+    Flag.optional
+  )
+}
+
 const migrate = Command.make("migrate", {
   path: Argument.string("path").pipe(Argument.optional),
-  to: removedValueFlag("to")
+  to: removedValueFlag("to"),
+  ...migrateFlags
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -749,32 +819,40 @@ const migrate = Command.make("migrate", {
     // runs, so the two spellings are one implementation.
     const options = MigrateCommand.optionsOf({
       root: target,
-      scan: false,
-      apply: false,
-      seat: undefined,
-      allowUnsafe: undefined,
-      acknowledgeRunState: false,
-      allowNoVcs: false,
-      keepOldSources: false,
-      unit: undefined,
-      maxRepairRounds: undefined,
-      reportDir: undefined,
-      flowsDir: undefined,
-      verifyInstall: undefined,
-      verifyFormat: undefined,
-      verifyTypecheck: undefined,
-      verifyTest: undefined
+      scan: config.scan,
+      apply: config.apply,
+      seat: Option.getOrUndefined(config.seat),
+      allowUnsafe: Option.getOrUndefined(config.allowUnsafe),
+      acknowledgeRunState: config.acknowledgeRunState,
+      allowNoVcs: config.allowNoVcs,
+      keepOldSources: config.keepOldSources,
+      unit: Option.getOrUndefined(config.unit),
+      maxRepairRounds: Option.getOrUndefined(config.maxRepairRounds),
+      reportDir: Option.getOrUndefined(config.reportDir),
+      flowsDir: Option.getOrUndefined(config.flowsDir),
+      verifyInstall: Option.getOrUndefined(config.verifyInstall),
+      verifyFormat: Option.getOrUndefined(config.verifyFormat),
+      verifyTypecheck: config.verifyTypecheck,
+      verifyTest: Option.getOrUndefined(config.verifyTest)
     }, projectRoot)
     const root = yield* rootCommand
-    const report = yield* MigrateCommand.runNode(options, { environment: process.env }).pipe(
+    const outcome = yield* Effect.result(MigrateCommand.runNode(options, { environment: process.env }))
+    if (outcome._tag === "Failure") {
+      const error = outcome.failure
       // A refused gate is not a crash: it prints the operator's own
-      // instructions and leaves the project untouched.
-      Effect.mapError((error) =>
-        new CliError.UnsupportedError({
-          message: `smithers migrate: ${error.message}${error.details === undefined ? "" : `\n${error.details}`}`
+      // instructions and leaves the project untouched. The two gates that park
+      // for a decision exit 3, the way `smithers-migrate` and every parked
+      // Smithers run report one.
+      const message = `smithers migrate: ${error.message}${error.details === undefined ? "" : `\n${error.details}`}`
+      if (error.code === "run-state-blocked" || error.code === "unsafe-blocked") {
+        yield* Console.error(message)
+        return yield* Effect.sync(() => {
+          process.exitCode = 3
         })
-      )
-    )
+      }
+      return yield* Effect.fail(new CliError.UnsupportedError({ message }))
+    }
+    const report = outcome.success
     if (!root.quiet) {
       yield* Console.log(
         MigrateCommand.render(report, root.json ? "json" : "human", MigrateCommand.reportDirectory(options))
@@ -1027,8 +1105,14 @@ const skillsAdd = Command.make(
           })
         )
       }
-      const contents = Agents.skill(Verb.shipped)
-      yield* render(yield* Effect.sync(() => targets.map((agent) => Agents.addSkill(agent, contents))))
+      // rc-contract ruling F2: the one curated skill, or nothing. Rendering a
+      // stub from the verb table and reporting success put a document under
+      // the curated skill's name that carried none of what it teaches.
+      const curated = Agents.skill()
+      if (curated._tag === "missing") {
+        return yield* Effect.fail(new CliError.UnsupportedError({ message: Agents.skillMissing(curated.searched) }))
+      }
+      yield* render(yield* Effect.sync(() => targets.map((agent) => Agents.addSkill(agent, curated.contents))))
     })
 ).pipe(Command.withDescription("Install the smithers skill into an agent"))
 

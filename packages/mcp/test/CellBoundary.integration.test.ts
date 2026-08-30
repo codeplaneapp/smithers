@@ -16,12 +16,19 @@
  * functions `CellTurn` calls, against a real server over a real process.
  */
 import { NodeServices } from "@effect/platform-node"
+import type * as AgentEvent from "@smthrs/harness/AgentEvent"
 import * as Cell from "@smthrs/harness/Cell"
 import * as CellCalls from "@smthrs/harness/CellCalls"
+import * as CellTurn from "@smthrs/harness/CellTurn"
+import * as ContextWindow from "@smthrs/harness/ContextWindow"
+import * as EngineLike from "@smthrs/harness/EngineLike"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
-import { Capability, CapabilitySet } from "@smthrs/kernel"
+import * as QuickJSSandbox from "@smthrs/harness/QuickJSSandbox"
+import * as Steering from "@smthrs/harness/Steering"
+import { Capability } from "@smthrs/kernel"
+import { ModelEvent, ModelRequest } from "@smthrs/model"
 import * as Registry from "@smthrs/registry/Registry"
-import { Effect, Option } from "effect"
+import { Effect, Option, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import * as McpFlows from "../src/McpFlows.ts"
 
@@ -61,26 +68,91 @@ const pattern = (declared: string): Capability.CapabilityPattern => {
   })
 }
 
-/**
- * The cell boundary's own decision, transcribed from
- * `@smthrs/harness` `CellTurn`: parse each declared capability, and refuse the
- * call when any one of them is unparseable or outside the envelope.
- */
-const refusedBy = (
-  envelope: ReadonlyArray<Capability.CapabilityPattern>,
-  declared: ReadonlyArray<string>
-): ReadonlyArray<string> => {
-  const set = CapabilitySet.fromPatterns(envelope)
-  return declared.filter((capability) =>
-    Option.match(Capability.parse(capability), {
-      onNone: () => true,
-      onSome: (parsed) => !CapabilitySet.allows(set, parsed)
-    })
-  )
-}
-
 const unrestricted = [new Capability.CapabilityPattern({ action: "*", resource: "*" })]
 const readOnly = [pattern("fs:read:**")]
+
+/** One model frame that emits a fenced cell, then settles. */
+const emits = (cell: string): ReadonlyArray<ModelEvent.ModelEvent> => [
+  ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "cell" }),
+  ModelEvent.ModelEvent.TextDelta({
+    type: "text-delta",
+    id: "cell",
+    text: "Calling the tool.\n\n```cell\n" + cell + "\n```"
+  }),
+  ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: "cell" }),
+  ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+]
+
+/**
+ * One cell turn, with the envelope under test and the real MCP catalog.
+ *
+ * The engine is a stub in everything except the one operation this asks about:
+ * `call` is the production `CellCalls` resolver over the connected server, so a
+ * call that gets past the boundary reaches the real tool in its own process,
+ * and a call the boundary refuses never reaches `call` at all.
+ */
+const turn = (
+  envelope: ReadonlyArray<Capability.CapabilityPattern>
+): Promise<ReadonlyArray<AgentEvent.AgentEvent>> =>
+  Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+    const source = yield* connected
+    const catalog = yield* FlowBinding.catalog([source])
+    const registry = FlowBinding.registry(Registry.makeNoop(), catalog)
+    const descriptor = yield* registry.get("mcp/fixture/add")
+    const resolver = CellCalls.make({ registry, catalog })
+    const engine = EngineLike.makeNoop({
+      sealStep: () =>
+        Stream.fromIterable(
+          emits(`const answer = await ctx.call("mcp/fixture/add", { a: 2, b: 3 })\nctx.done(answer)`)
+        ),
+      call: (call) => resolver.run(call),
+      // Single pass, so journaling a controller read is running it.
+      record: (boundary) => boundary.execute
+    })
+
+    return yield* CellTurn.run({
+      state: CellTurn.make({
+        session: "mcp-cell-turn",
+        seat: "test:model",
+        modelParams: ModelRequest.GenerationParams.make(),
+        layers: [],
+        capabilityEnvelope: envelope,
+        placement: Option.none(),
+        contextWindow: ContextWindow.make({
+          modelId: "test-model",
+          segments: [
+            { kind: "system", zone: "prefix", content: [ModelRequest.SystemPart.make({ text: "cell contract" })] },
+            { kind: "transcript", zone: "tail", content: [ModelRequest.Message.user("add two and three")] }
+          ]
+        }),
+        maxFrames: 1,
+        readOnlyCap: 0,
+        approvalChannel: false
+      }),
+      flows: [descriptor]
+    }).pipe(
+      Stream.runCollect,
+      Effect.provide(EngineLike.layer(engine)),
+      Effect.provide(QuickJSSandbox.layer),
+      Effect.provide(Steering.layerNoop())
+    )
+  })))
+
+/** Every call that actually reached the engine, in order. */
+const dispatched = (
+  events: ReadonlyArray<AgentEvent.AgentEvent>
+): ReadonlyArray<Extract<AgentEvent.AgentEvent, { readonly _tag: "cell-call-settled" }>> =>
+  events.filter((event): event is Extract<AgentEvent.AgentEvent, { readonly _tag: "cell-call-settled" }> =>
+    event._tag === "cell-call-settled"
+  )
+
+/** What the cell settled the run on, as the model would read it back. */
+const completion = (events: ReadonlyArray<AgentEvent.AgentEvent>): string =>
+  events.flatMap((event) =>
+    event._tag === "resolved"
+      ? event.message.content.flatMap((part) => part.type === "text" ? [part.text] : [])
+      : []
+  ).join("\n")
 
 describe("the capability declaration an MCP tool carries", () => {
   it("is written in the vocabulary the boundary parses", () => {
@@ -89,13 +161,6 @@ describe("the capability declaration an MCP tool carries", () => {
     for (const capability of McpFlows.capabilities) {
       expect(Option.isSome(Capability.parse(capability)), capability).toBe(true)
     }
-  })
-
-  it("is authorized by an unrestricted envelope and refused by a narrow one", () => {
-    expect(refusedBy(unrestricted, McpFlows.capabilities)).toEqual([])
-    // Opaque remote code is not something a read-only run may reach, and the
-    // refusal names what it would have needed.
-    expect(refusedBy(readOnly, McpFlows.capabilities)).toContain("fs:write:**")
   })
 })
 
@@ -107,11 +172,7 @@ describe("a cell calling a real MCP tool", () => {
       const registry = FlowBinding.registry(Registry.makeNoop(), catalog)
       const descriptor = yield* registry.get("mcp/fixture/add")
 
-      // Gate one: the declaration the cell was shown, against the run's
-      // envelope. A refusal here never reaches the resolver.
-      const refused = refusedBy(unrestricted, descriptor.capabilities)
-
-      // Gate two: registry resolution and dispatch, exactly as a host composes
+      // Registry resolution and dispatch, exactly as a host composes
       // it. The call carries the declaration digest the boundary re-derives,
       // so a mismatch would be refused rather than dispatched.
       const resolver = CellCalls.make({ registry, catalog })
@@ -132,11 +193,42 @@ describe("a cell calling a real MCP tool", () => {
           })
         })
       )
-      return { refused, settled }
+      return settled
     })))
 
-    expect(result.refused).toEqual([])
-    expect(result.settled.outcome).toBe("success")
-    expect(result.settled.value).toEqual({ content: [{ type: "text", text: "5" }], isError: false })
+    expect(result.outcome).toBe("success")
+    expect(result.value).toEqual({ content: [{ type: "text", text: "5" }], isError: false })
   }, 30_000)
+})
+
+/**
+ * The capability decision, made by the boundary rather than by this file.
+ *
+ * A test that re-derives the rule passes whatever the harness does, which is
+ * the one thing a boundary test must not do. These two cases run
+ * `CellTurn` — the code that owns the decision — over the real catalog
+ * descriptor, under the two envelopes that must disagree.
+ */
+describe("a cell turn reaching an MCP tool", () => {
+  it("dispatches the call under an unrestricted envelope", async () => {
+    const events = await turn(unrestricted)
+    const calls = dispatched(events)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.flowName).toBe("mcp/fixture/add")
+    expect(calls[0]?.result.outcome).toBe("success")
+    // The real server's answer, back through the cell.
+    expect(completion(events)).toContain("\"text\":\"5\"")
+  }, 60_000)
+
+  it("refuses the call under a read-only envelope, naming what it would have needed", async () => {
+    const events = await turn(readOnly)
+
+    // The refusal is the boundary's, before dispatch: nothing reached the
+    // engine, so the tool never ran.
+    expect(dispatched(events)).toEqual([])
+    const output = completion(events)
+    expect(output).toContain("capability_refused")
+    expect(output).toContain("fs:write:**")
+  }, 60_000)
 })

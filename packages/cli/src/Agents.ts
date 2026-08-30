@@ -18,6 +18,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
+import * as Docs from "./Docs.ts"
+
 /**
  * The MCP server name Smithers registers under.
  *
@@ -169,45 +171,69 @@ export const manualInstructions = (targets: ReadonlyArray<string> = agents.map((
 }
 
 /**
- * The `smithers` skill, generated from the shipped verb table so it cannot
- * describe a command this release does not have.
+ * Where the curated `smithers` skill is read from, in order.
+ *
+ * `skills add` installs one hand-written file, not a rendering of the verb
+ * table. The curated skill teaches the routing rules, the mental model, the
+ * removed-verb table, and the MCP tool split, and a file generated from the
+ * verb list carries none of that (rc-contract ruling F2: rc.0 `skills add`
+ * "writes the single curated `smithers` skill ... and generates no per-verb
+ * skills").
+ *
+ * A published install reads the packaged copy the docs generator writes into
+ * this package. A source checkout has no packaged copy until `pnpm docs:llms`
+ * has run, so it falls back to the curated source the generator copies from.
  *
  * @category constructors
  * @since 1.0.0
  */
-export const skill = (verbs: ReadonlyArray<{ readonly name: string; readonly help: string }>): string =>
-  [
-    "---",
-    "name: smithers",
-    "description: Plan, approve, run, and inspect durable Smithers flows from the command line.",
-    "---",
-    "",
-    "# Smithers",
-    "",
-    "Smithers runs durable flows: work that survives a process restart, parks for",
-    "a human approval, and can be cancelled, steered, and replayed from its own",
-    "journal. Drive it with the commands below rather than re-implementing",
-    "retries, approvals, or background processes yourself.",
-    "",
-    "## Commands",
-    "",
-    ...verbs.map((verb) => `- \`smithers ${verb.name}\` — ${verb.help}.`),
-    "",
-    "## The usual shape",
-    "",
-    "```sh",
-    "smithers ls                      # what flows this project has",
-    "smithers up <flow> -d            # launch one detached; prints its run id",
-    "smithers ps                      # what is running",
-    "smithers logs <run-id> --follow  # watch it",
-    "smithers approve <payload>       # release a run parked on an approval",
-    "smithers cancel <run-id>         # stop it, durably",
-    "```",
-    "",
-    "A run that parks for approval exits 3. `--json` makes every command print",
-    "one machine-readable document.",
-    ""
-  ].join("\n")
+export const skillSources = (docsDirectory: string = Docs.directory()): ReadonlyArray<string> => [
+  join(docsDirectory, "SKILL.md"),
+  // `<package>/docs/..` is the package root in both layouts, so the checkout
+  // source is two levels above it. Counting from the docs directory itself
+  // landed on `packages/skills` once the package was built, because `dist`
+  // adds a level the count did not know about.
+  join(docsDirectory, "..", "..", "..", "skills", "smithers", "SKILL.md")
+]
+
+/**
+ * What the curated-skill lookup found.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type CuratedSkill =
+  | { readonly _tag: "found"; readonly path: string; readonly contents: string }
+  | { readonly _tag: "missing"; readonly searched: ReadonlyArray<string> }
+
+/**
+ * The curated `smithers` skill, read from the first source that exists.
+ *
+ * Missing is reported, never substituted: installing a generated stub under
+ * the curated skill's name is the failure this function exists to prevent, so
+ * an installation with no curated file says so instead of writing something
+ * else.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const skill = (docsDirectory: string = Docs.directory()): CuratedSkill => {
+  const searched = skillSources(docsDirectory)
+  for (const path of searched) {
+    if (existsSync(path)) return { _tag: "found", path, contents: readFileSync(path, "utf8") }
+  }
+  return { _tag: "missing", searched }
+}
+
+/**
+ * The message printed when no curated skill ships with this installation.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const skillMissing = (searched: ReadonlyArray<string>): string =>
+  `No curated smithers skill in this installation. Looked in ${searched.join(", ")}. ` +
+  `Run \`pnpm docs:llms\` in a source checkout, or reinstall @smthrs/cli.`
 
 /**
  * Installs the skill into one agent's skills directory.

@@ -14,6 +14,7 @@
  *
  * @since 1.0.0
  */
+import * as Migrations from "@smthrs/database/Migrations"
 import { existsSync, readdirSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
 import * as Environment from "./Environment.ts"
@@ -88,17 +89,20 @@ const ladder = (file: string): Check => {
   let database: DatabaseSync | undefined
   try {
     database = new DatabaseSync(file, { readOnly: true })
+    // `@smthrs/database` owns the name, so a rename there fails to compile
+    // here rather than turning every database into "not created by Smithers".
     const tables = database
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'flows_migrations'")
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${Migrations.table}'`)
       .all()
     if (tables.length === 0) {
       return {
         name: `database ${file}`,
         level: "warn",
-        detail: "no flows_migrations table; this file was not created by Smithers 1.0"
+        detail: `no ${Migrations.table} table; this file was not created by Smithers 1.0`
       }
     }
-    const row = database.prepare("SELECT COUNT(*) AS applied, MAX(migration_id) AS latest FROM flows_migrations")
+    const row = database
+      .prepare(`SELECT COUNT(*) AS applied, MAX(migration_id) AS latest FROM ${Migrations.table}`)
       .get() as Record<string, unknown> | undefined
     const applied = Number(row?.["applied"] ?? 0)
     const latest = row?.["latest"] ?? "none"

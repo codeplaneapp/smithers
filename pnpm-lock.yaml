@@ -2429,6 +2429,9 @@ importers:
       '@eslint/js':
         specifier: 9.39.1
         version: 9.39.1
+      '@smthrs/model':
+        specifier: 1.0.0-rc.0
+        version: link:../model
       '@types/node':
         specifier: 25.9.5
         version: 25.9.5

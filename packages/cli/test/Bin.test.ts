@@ -615,3 +615,180 @@ describe("Smithers 0.x detection", processBudget, () => {
     }
   })
 })
+
+/**
+ * rc-contract section 4.1 `migrate`, and ruling V-4's shape for it.
+ *
+ * The verb runs the flow that ships inside `@smthrs/migrate`, which is the
+ * same entry `smithers-migrate` runs. A verb that reached that entry with
+ * `apply: false` hardcoded could plan and nothing else, so the transformation
+ * the contract row promises was unreachable however the operator typed it.
+ * Only a real process can prove the flag set, because the parser is what
+ * rejects an undeclared flag.
+ */
+describe("the migrate verb's option surface", processBudget, () => {
+  /** A 0.x project whose runs are all terminal, so section 6 has nothing to hold. */
+  const stageTerminal = (): string => {
+    const cwd = mkdtempSync(temporaryDirectoryPrefix)
+    mkdirSync(join(cwd, ".smithers", "workflows"), { recursive: true })
+    writeFileSync(join(cwd, ".smithers", "workflows", "ship.tsx"), "export default null\n")
+    writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "legacy" }))
+    const database = new DatabaseSync(join(cwd, "smithers.db"))
+    database.exec("CREATE TABLE _smithers_runs (run_id TEXT PRIMARY KEY, workflow_name TEXT, status TEXT)")
+    database.exec("INSERT INTO _smithers_runs VALUES ('run-old-1','ship','finished')")
+    database.close()
+    return cwd
+  }
+
+  const inProject = (cwd: string, args: ReadonlyArray<string>) =>
+    spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
+      cwd,
+      encoding: "utf8",
+      timeout: 180_000
+    })
+
+  it("declares the migration tool's own flags", () => {
+    const help = run(["migrate", "--help"])
+    const text = `${help.stdout}${help.stderr}`
+
+    // The set `packages/migrate/src/flow/bin.ts` declares, minus `--json`,
+    // which is a shared global here.
+    for (
+      const flag of [
+        "--scan",
+        "--apply",
+        "--seat",
+        "--allow-unsafe",
+        "--acknowledge-run-state",
+        "--allow-no-vcs",
+        "--keep-old-sources",
+        "--unit",
+        "--max-repair-rounds",
+        "--report-dir",
+        "--flows-dir",
+        "--verify-install",
+        "--verify-format",
+        "--verify-typecheck",
+        "--verify-test"
+      ]
+    ) {
+      expect(text, flag).toContain(flag)
+    }
+  })
+
+  it("runs the tool in scan mode when --scan is given", () => {
+    const cwd = stageTerminal()
+    try {
+      const result = inProject(cwd, ["migrate", "--scan"])
+      const output = `${result.stdout}${result.stderr}`
+
+      expect(output).not.toContain("Unrecognized flag")
+      // The tool's own heading names the mode it ran in, so this is the mode
+      // reaching the flow rather than the flag being parsed and dropped.
+      expect(output).toContain("smithers migrate scan:")
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("reaches apply mode with --apply, where plan mode never writes", () => {
+    const cwd = stageTerminal()
+    try {
+      const result = inProject(cwd, ["migrate", "--apply"])
+      const output = `${result.stdout}${result.stderr}`
+
+      expect(output).not.toContain("Unrecognized flag")
+      // Plan mode renders its own heading and exits 0; apply mode is the only
+      // one the run-state gate parks. Reaching that park is the proof the mode
+      // arrived, and 3 is the status `smithers-migrate` gives a park.
+      expect(output).not.toContain("smithers migrate plan:")
+      expect(result.status).toBe(3)
+      expect(output).toContain("--acknowledge-run-state")
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * rc-contract section 4.1 `skills add`, under ruling F2.
+ *
+ * "Writes the curated skill only" is a promise about a file on disk, so it is
+ * asserted against the file a real process wrote into a real home directory.
+ * The failure it replaces was quiet: the verb rendered a stub from the verb
+ * table and reported success, so an agent read a document that carried none of
+ * the routing rules the curated skill teaches.
+ */
+describe("smithers skills add", processBudget, () => {
+  const docsDirectory = join(packageRoot, "docs")
+  const packagedSkill = join(docsDirectory, "SKILL.md")
+  const checkoutSkill = join(packageRoot, "..", "..", "skills", "smithers", "SKILL.md")
+
+  const withHome = <A>(body: (home: string) => A): A => {
+    const home = mkdtempSync(join(tmpdir(), "smithers-cli-home-"))
+    try {
+      return body(home)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }
+
+  const skillsAdd = (home: string) =>
+    spawnSync(process.execPath, ["--no-warnings", executable, "skills", "add", "--agent", "claude"], {
+      cwd: home,
+      encoding: "utf8",
+      timeout: 180_000,
+      env: { ...process.env, HOME: home }
+    })
+
+  it("installs the curated file byte for byte, not a rendering of the verb table", () => {
+    // The docs lane generates this copy; staging one here is how a published
+    // install looks from the outside.
+    const curated = [
+      "---",
+      "name: smithers",
+      "---",
+      "",
+      "# Smithers",
+      "",
+      "The curated skill, which a verb table cannot produce.",
+      ""
+    ].join("\n")
+    const staged = !existsSync(docsDirectory)
+    mkdirSync(docsDirectory, { recursive: true })
+    writeFileSync(packagedSkill, curated, "utf8")
+    try {
+      withHome((home) => {
+        const result = skillsAdd(home)
+
+        expect(result.status).toBe(0)
+        const installed = join(home, ".claude", "skills", "smithers", "SKILL.md")
+        expect(existsSync(installed)).toBe(true)
+        expect(readFileSync(installed, "utf8")).toBe(readFileSync(packagedSkill, "utf8"))
+        expect(readFileSync(installed, "utf8")).not.toContain("## Commands")
+      })
+    } finally {
+      // The docs lane owns this directory; leave the worktree as it was found.
+      if (staged) rmSync(docsDirectory, { recursive: true, force: true })
+      else rmSync(packagedSkill, { force: true })
+    }
+  })
+
+  it("refuses when the installation ships no curated skill, naming both places it looked", () => {
+    // The state of this worktree: the docs lane's packaged copy and the pack
+    // lane's curated source both land in other branches, and neither is here.
+    expect(existsSync(packagedSkill)).toBe(false)
+    expect(existsSync(checkoutSkill)).toBe(false)
+
+    withHome((home) => {
+      const result = skillsAdd(home)
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain("No curated smithers skill in this installation")
+      expect(result.stderr).toContain(packagedSkill)
+      expect(result.stderr).toContain(join(packageRoot, "..", "..", "skills", "smithers", "SKILL.md"))
+      // Nothing else is written in its place.
+      expect(existsSync(join(home, ".claude", "skills", "smithers", "SKILL.md"))).toBe(false)
+    })
+  })
+})
