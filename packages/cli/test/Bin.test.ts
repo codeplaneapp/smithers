@@ -8,9 +8,10 @@
  * handler returns a typed error" — so they are asserted there.
  */
 import { spawn, spawnSync } from "node:child_process"
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { Version } from "../src/index.ts"
@@ -124,6 +125,18 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
 
     expect(result.status).toBe(1)
     expect(result.stderr).toContain("smithers steer --takeover was removed in 1.0.0-rc.0")
+  })
+
+  it("refuses the plural `workflows`, which is the spelling section 4.2 lists", () => {
+    // The singular is a command group only so `workflow list` stays reachable.
+    // `workflows` is the 0.x did-you-mean key, so it is what a migrating
+    // script says, and leaving it unregistered answered with the parser's
+    // usage error (exit 2) and no migration message at all.
+    const result = run(["workflows"])
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("smithers workflows was removed in 1.0.0-rc.0")
+    expect(result.stderr).toContain(`${Unsupported.migrationUrl}#workflows`)
   })
 
   it("keeps `workflow list` alive as the `ls` alias while removing the rest", () => {
@@ -273,6 +286,132 @@ describe("the smithers bin shim", processBudget, () => {
       expect(result.stderr).not.toContain("Type Stripping")
     } finally {
       rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * rc-contract section 6 detection, at the process boundary.
+ *
+ * The rule is "0.x markers and no `.flows/` beside them", and the CLI creates
+ * `<root>/.flows` as soon as it opens the control database. Sampling the
+ * markers from a handler therefore looked at a directory the same invocation
+ * had just written, and the notice never printed on the projects it exists
+ * for. Only a real process can catch that, because in-process assertions on
+ * `Project.legacyState` pass either way.
+ */
+describe("Smithers 0.x detection", processBudget, () => {
+  const stage = (): string => {
+    const cwd = mkdtempSync(temporaryDirectoryPrefix)
+    mkdirSync(join(cwd, ".smithers", "workflows"), { recursive: true })
+    writeFileSync(join(cwd, ".smithers", "workflows", "ship.tsx"), "export default null\n")
+    writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "legacy" }))
+    // The real 0.x table and column names (`packages/db/src/sql-message-storage.js`
+    // in the 0.x tree), because the point of the check is that it reads a
+    // database the old CLI wrote.
+    const database = new DatabaseSync(join(cwd, "smithers.db"))
+    database.exec(
+      `CREATE TABLE _smithers_runs (
+         run_id TEXT PRIMARY KEY, workflow_name TEXT NOT NULL, status TEXT NOT NULL
+       )`
+    )
+    database.exec(
+      "INSERT INTO _smithers_runs VALUES ('run-old-1','ship','running'),('run-old-2','ship','finished')"
+    )
+    database.close()
+    return cwd
+  }
+
+  const inProject = (cwd: string, args: ReadonlyArray<string>) =>
+    spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
+      cwd,
+      encoding: "utf8",
+      timeout: 180_000
+    })
+
+  it("prints the section 6 notice on a first command in a 0.x project", () => {
+    const cwd = stage()
+    try {
+      const result = inProject(cwd, ["ls", "--json"])
+
+      // Informational: it names the state and does not change the exit code.
+      expect(result.status).toBe(0)
+      expect(result.stderr).toContain("Found Smithers 0.x state at")
+      expect(result.stderr).toContain("does not load, resume, or migrate 0.x run databases")
+      expect(result.stderr).toContain("https://smithers.sh/migration/1.0#run-data")
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("refuses to migrate a project that still holds non-terminal 0.x runs", () => {
+    const cwd = stage()
+    try {
+      const result = inProject(cwd, ["migrate"])
+
+      // The section 6 guard, and it has to win over every later check: the
+      // operator's next step is the 0.x CLI, not installing a flow.
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain("Refusing to migrate")
+      expect(result.stderr).toContain("run-old-1 running (ship)")
+      expect(result.stderr).not.toContain("run-old-2")
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("still refuses once the project has an rc.0 state directory", () => {
+    const cwd = stage()
+    try {
+      // The realistic order: the operator runs something in the project
+      // first, which writes `.flows/`, and only then reaches for `migrate`.
+      // Section 6 gates the informational notice on `.flows/` being absent;
+      // it does not gate the refusal, and gating it there would retire the
+      // guard for every project that ever ran an rc.0 command.
+      expect(inProject(cwd, ["ls", "--json"]).status).toBe(0)
+      expect(existsSync(join(cwd, ".flows"))).toBe(true)
+
+      const result = inProject(cwd, ["migrate"])
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain("Refusing to migrate")
+      expect(result.stderr).toContain("run-old-1 running (ship)")
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("keeps reporting the old database in doctor after the state directory exists", () => {
+    const cwd = stage()
+    try {
+      expect(inProject(cwd, ["ls", "--json"]).status).toBe(0)
+
+      const report = JSON.parse(inProject(cwd, ["doctor", "--json"]).stdout) as {
+        readonly checks: ReadonlyArray<{ readonly name: string; readonly detail: string }>
+      }
+      const legacy = report.checks.filter((check) => check.name === "smithers 0.x")
+
+      expect(legacy.some((check) => check.detail.includes("1 non-terminal runs"))).toBe(true)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("reports the 0.x paths and the runs the old database still holds", () => {
+    const cwd = stage()
+    try {
+      const result = inProject(cwd, ["doctor", "--json"])
+      const report = JSON.parse(result.stdout) as {
+        readonly checks: ReadonlyArray<{ readonly name: string; readonly detail: string }>
+      }
+      const legacy = report.checks.filter((check) => check.name === "smithers 0.x")
+
+      expect(legacy.map((check) => check.detail).join("\n")).toContain(".smithers")
+      // `running` is non-terminal and `finished` is not, and the count is
+      // what tells an operator whether the 0.x CLI still has work to finish.
+      expect(legacy.some((check) => check.detail.includes("1 non-terminal runs"))).toBe(true)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
     }
   })
 })

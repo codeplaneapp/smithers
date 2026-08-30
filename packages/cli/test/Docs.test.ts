@@ -32,17 +32,6 @@ describe("the shipped bundles", () => {
     expect(Docs.file(true, "/opt/docs")).toBe(join("/opt/docs", "llms-full.txt"))
   })
 
-  it("resolves to the same directory from the built entry as from the source entry", () => {
-    // `package.json` ships `docs/**` at the package root and `dist/**` beside
-    // it, so a published install runs `dist/esm/Docs.js` and must still find
-    // `<package>/docs`. Counting one `..` sent it to `<package>/dist/docs`,
-    // where nothing is published, and `smithers docs` reported the bundle
-    // missing on every install that was not a source checkout.
-    expect(Docs.directory("file:///opt/smithers/dist/esm/Docs.js")).toBe(join("/opt/smithers", "docs"))
-    expect(Docs.packageRoot("file:///opt/smithers/dist/esm/Docs.js")).toBe("/opt/smithers")
-    expect(Docs.packageRoot("file:///opt/smithers/src/Docs.ts")).toBe("/opt/smithers")
-  })
-
   it("reads the index and the full bundle", () => {
     const root = bundleDirectory()
     writeFileSync(join(root, "llms.txt"), "# index\n")

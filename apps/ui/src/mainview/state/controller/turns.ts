@@ -779,8 +779,8 @@ export const createTurnController = (
       })
       return
     }
-    const { runId, nodeId, iteration } = card.payload
-    if (runId === undefined || nodeId === undefined || iteration === undefined) {
+    const { runId, requestId, approval } = card.payload
+    if (runId === undefined || requestId === undefined || approval === undefined) {
       // A card without a run identity has no backend to decide against —
       // say so honestly instead of fake-freezing it.
       store.dispatch({

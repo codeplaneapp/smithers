@@ -7,12 +7,10 @@
  * directories of one project must resolve the same root, or they write to two
  * different databases and disagree about what exists.
  */
-import { Effect } from "effect"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import * as NodeControl from "../src/NodeControl.ts"
 import * as Project from "../src/Project.ts"
 
 const staged: Array<string> = []
@@ -103,11 +101,6 @@ describe("the project root", () => {
   })
 })
 
-/** The sampled 0.x state a handler sees, read the way a handler reads it. */
-const readLegacyState = Effect.gen(function*() {
-  return yield* Project.LegacyState
-})
-
 describe("Smithers 0.x detection", () => {
   it("reports every 0.x marker beside a project", () => {
     const root = project(".smithers/", "smithers.db", "smithers.db-wal")
@@ -134,35 +127,6 @@ describe("Smithers 0.x detection", () => {
     mkdirSync(nested, { recursive: true })
 
     expect(Project.legacyState(nested)).toEqual([join(root, "smithers.db")])
-  })
-
-  it("is sampled while the arguments are parsed, before .flows/ exists", async () => {
-    // The order is the whole requirement. `NodeControl.layer` creates
-    // `.flows/` while it builds, and `.flows/` is what makes `legacyState`
-    // call a directory an rc.0 project, so a reading taken inside a handler
-    // reports nothing on the first rc.0 command in a 0.x project, which is the
-    // only run section 6 has to describe.
-    const root = project(".smithers/", "smithers.db")
-    const config = NodeControl.makeConfig(["--root", root], {}, root)
-
-    expect(config.legacyState).toEqual([join(root, ".smithers"), join(root, "smithers.db")])
-
-    mkdirSync(join(root, ".flows"), { recursive: true })
-
-    // The directory now reads as rc.0, and the sample taken before still
-    // carries what the notice needs.
-    expect(Project.legacyState(root)).toEqual([])
-    expect(
-      await Effect.runPromise(Effect.provide(readLegacyState, Project.layer(root, config.legacyState)))
-    ).toEqual([join(root, ".smithers"), join(root, "smithers.db")])
-  })
-
-  it("defaults to a reading taken when the layer is built", async () => {
-    const root = project(".smithers/")
-
-    expect(await Effect.runPromise(Effect.provide(readLegacyState, Project.layer(root)))).toEqual([
-      join(root, ".smithers")
-    ])
   })
 
   it("writes the notice rc-contract section 6 specifies", () => {

@@ -5,7 +5,6 @@ import {
   ADMIN_HEALTH_PATH,
   ADMIN_REQUESTS_PATH,
   ADMIN_ROUTE_PREFIX,
-  APPROVAL_DECISION_PATH,
   AUTH_CALLBACK_PATH,
   AUTH_ROUTE_PREFIX,
   AUTH_SESSION_PATH,
@@ -16,10 +15,8 @@ import {
   MODEL_STREAM_PATH,
   TOOLS_BROWSER_FETCH_PATH,
   TURN_PATH,
-  WORKFLOW_EVENTS_PATH,
   WORKFLOW_PROVISION_PATH,
-  WORKFLOW_RPC_PATH,
-  WORKFLOW_STREAM_PATH
+  WORKFLOW_RPC_PATH
 } from "smithers-shared/AgentApiRoutes"
 import { APP_API_VERSION, APP_BOOTSTRAP_PATH } from "smithers-shared/AppBootstrap"
 import { AgentRuntimeContextSchema, composeAgentInstructions } from "smithers-shared/AgentContext"
@@ -28,16 +25,20 @@ import type { StartAgentTurnRequest } from "smithers-shared/NativeAgent"
 import { appendClientError, ClientErrorLog, readClientErrors } from "./clientErrorLog"
 import type { ClientErrorNamespace } from "./clientErrorLog"
 import {
-  ALLOWED_GATEWAY_METHODS,
   callGateway,
   DEFAULT_CLOUD_API_BASE_URL,
   ensureGateway,
   fetchCloudToken,
   GatewaySessionRegistry,
   isRelayRepoName,
-  NON_REPLAYABLE_GATEWAY_METHODS,
   upstreamTimeoutMs
 } from "./gateway"
+import {
+  decodeGatewayResponse,
+  encodeGatewayRequest,
+  GATEWAY_PROCEDURE_MOUNTS,
+  NON_REPLAYABLE_GATEWAY_PROCEDURES
+} from "./gatewayRpc"
 import type { GatewaySessionNamespace } from "./gateway"
 import { spendTurn, turnLimitResponse, TurnRateLimiter } from "./turnLimit"
 import type { TurnLimitNamespace } from "./turnLimit"
@@ -187,7 +188,12 @@ const STRIPPED_IDENTITY_HEADERS = [
   "authorization"
 ] as const
 
-const GATEWAY_ROUTE_PREFIXES = ["/v1/rpc/", "/v1/api/", "/workflows/"] as const
+/*
+ * The rc.0 gateway's own mounts, as the static GATEWAY_UPSTREAM_URL stub stack
+ * addresses them directly. The 0.x `/v1/rpc/<method>`, `/v1/api/*`, and
+ * `/workflows/*` surfaces are gone with the 0.x gateway.
+ */
+const GATEWAY_ROUTE_PREFIXES = ["/rpc", "/projections", "/sync", "/health"] as const
 
 /*
  * Server-side turn cancellation, the workerd-legal way. workerd forbids
@@ -1911,6 +1917,15 @@ const handleWorkflowProvision = async (request: Request, env: WorkerEnv): Promis
   }
 }
 
+/**
+ * Relay one call to the caller's own workspace gateway.
+ *
+ * The body names the repo (which per-user gateway to reach), the procedure
+ * (what is being called), and its payload. The Worker refuses a procedure the
+ * product does not relay before spending anything, writes the gateway's RPC
+ * frame for it, adds the bearer credential a browser can never hold, and
+ * answers the gateway's own outcome unwrapped.
+ */
 const handleWorkflowRpc = async (request: Request, env: WorkerEnv): Promise<Response> => {
   const session = await requireWorkflowSession(request, env)
   if (session instanceof Response) return session
@@ -1925,247 +1940,27 @@ const handleWorkflowRpc = async (request: Request, env: WorkerEnv): Promise<Resp
   }
   const candidate = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : undefined
   const repo = parseWorkflowRepo(candidate?.repo)
-  const method = typeof candidate?.method === "string" ? candidate.method : ""
-  if (repo === undefined || method === "") {
-    return json(400, { status: "error", message: "Body must be { repo, method, params? }." })
+  const procedure = typeof candidate?.procedure === "string" ? candidate.procedure : ""
+  if (repo === undefined || procedure === "") {
+    return json(400, { status: "error", message: "Body must be { repo, procedure, payload? }." })
   }
-  if (!ALLOWED_GATEWAY_METHODS.includes(method)) {
-    return json(400, { status: "error", message: `The workflow seam does not relay ${method}.` })
+  const mount = GATEWAY_PROCEDURE_MOUNTS[procedure]
+  if (mount === undefined) {
+    return json(400, { status: "error", message: `The workflow seam does not relay ${procedure}.` })
   }
-  const call = await callGateway(env, session.login, repo, `/v1/rpc/${method}`, {
+  const call = await callGateway(env, session.login, repo, mount, {
     method: "POST",
-    body: candidate?.params ?? {},
-    replayable: !NON_REPLAYABLE_GATEWAY_METHODS.includes(method)
+    text: encodeGatewayRequest(procedure, candidate?.payload),
+    replayable: !NON_REPLAYABLE_GATEWAY_PROCEDURES.includes(procedure)
   })
-  if (call.status !== "ok") return gatewayCallResponse(call)
-  // The gateway's own frame passes through verbatim (ok/payload or ok/error).
-  const text = await call.response.text()
-  return new Response(text, {
-    status: call.response.status,
-    headers: {
-      "content-type": call.response.headers.get("content-type") ?? "application/json",
-      ...ISOLATION_HEADERS
-    }
-  })
-}
-
-const handleWorkflowEvents = async (request: Request, env: WorkerEnv, url: URL): Promise<Response> => {
-  const session = await requireWorkflowSession(request, env)
-  if (session instanceof Response) return session
-  const repo = parseWorkflowRepo(url.searchParams.get("repo") ?? undefined)
-  const runId = url.searchParams.get("runId") ?? ""
-  if (repo === undefined || runId === "") {
-    return json(400, { status: "error", message: "Query must carry repo and runId." })
-  }
-  const afterSeqRaw = url.searchParams.get("afterSeq")
-  const afterSeq = afterSeqRaw === null ? undefined : Number(afterSeqRaw)
-  if (afterSeq !== undefined && (!Number.isInteger(afterSeq) || afterSeq < 0)) {
-    return json(400, { status: "error", message: "afterSeq must be a non-negative integer." })
-  }
-  const limitRaw = Number(url.searchParams.get("limit") ?? "200")
-  const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 500 ? limitRaw : 200
-  const call = await callGateway(
-    env,
-    session.login,
-    repo,
-    `/v1/api/runs/${encodeURIComponent(runId)}/events?limit=${limit}${
-      afterSeq === undefined ? "" : `&afterSeq=${afterSeq}`
-    }`,
-    { method: "GET" }
-  )
   if (call.status !== "ok") return gatewayCallResponse(call)
   const text = await call.response.text()
-  return new Response(text, {
-    status: call.response.status,
-    headers: {
-      "content-type": call.response.headers.get("content-type") ?? "application/json",
-      ...ISOLATION_HEADERS
-    }
-  })
-}
-
-/**
- * The relay SSE change stream, proxied end-to-end (Wave 11 streaming): the
- * Worker holds the token and forwards Last-Event-ID, so a browser EventSource
- * reconnect replays through the relay exactly like a native client. The 600s
- * relay cap makes stream loss ROUTINE — the client treats reconnect as normal.
- */
-const handleWorkflowStream = async (request: Request, env: WorkerEnv, url: URL): Promise<Response> => {
-  const session = await requireWorkflowSession(request, env)
-  if (session instanceof Response) return session
-  const repo = parseWorkflowRepo(url.searchParams.get("repo") ?? undefined)
-  if (repo === undefined) {
-    return json(400, { status: "error", message: "Query must carry repo." })
-  }
-  const lastEventId = request.headers.get("last-event-id")
-  const call = await callGateway(env, session.login, repo, "/v1/api/stream", {
-    method: "GET",
-    headers: lastEventId === null ? {} : { "last-event-id": lastEventId }
-  })
-  if (call.status !== "ok") return gatewayCallResponse(call)
-  if (call.response.body === null) {
-    return json(502, { status: "error", message: "The gateway stream had no body." })
-  }
-  return new Response(call.response.body, {
-    status: call.response.status,
-    headers: {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-store",
-      ...ISOLATION_HEADERS
-    }
-  })
-}
-
-interface ApprovalDecisionBody {
-  readonly runId: string
-  readonly nodeId: string
-  readonly iteration: number
-  readonly decision: { readonly approved: boolean; readonly note?: string }
-  /** Wave 11: the watched repo whose per-user gateway runs the run. */
-  readonly repo?: string
-}
-
-const parseApprovalDecision = (body: unknown): ApprovalDecisionBody | undefined => {
-  if (typeof body !== "object" || body === null) return undefined
-  const candidate = body as Record<string, unknown>
-  const decision = candidate.decision
-  if (
-    typeof candidate.runId !== "string" ||
-    candidate.runId === "" ||
-    typeof candidate.nodeId !== "string" ||
-    candidate.nodeId === "" ||
-    typeof candidate.iteration !== "number" ||
-    !Number.isInteger(candidate.iteration) ||
-    candidate.iteration < 0 ||
-    typeof decision !== "object" ||
-    decision === null ||
-    typeof (decision as Record<string, unknown>).approved !== "boolean"
-  ) {
-    return undefined
-  }
-  const note = (decision as Record<string, unknown>).note
-  return {
-    runId: candidate.runId,
-    nodeId: candidate.nodeId,
-    iteration: candidate.iteration,
-    decision: {
-      approved: (decision as { approved: boolean }).approved,
-      ...(typeof note === "string" ? { note } : {})
-    },
-    ...(typeof candidate.repo === "string" && isRelayRepoName(candidate.repo)
-      ? { repo: candidate.repo }
-      : {})
-  }
-}
-
-/**
- * The approval round trip (Wave 2a): the client's decision forwards to the
- * gateway upstream's submitApproval RPC with the seam's identity injection.
- * The upstream echo is returned verbatim — the client freezes its card from
- * that echo, never from its own optimism.
- */
-const handleApprovalDecision = async (request: Request, env: WorkerEnv): Promise<Response> => {
-  let body: unknown
-  try {
-    body = await readTurnBody(request)
-  } catch (error) {
-    return json(error instanceof BodyTooLargeError ? 413 : 400, {
-      status: "error",
-      message: error instanceof Error ? error.message : "Invalid request."
-    })
-  }
-  const decision = parseApprovalDecision(body)
-  if (decision === undefined) {
-    return json(400, {
-      status: "error",
-      message: "Body must be { runId, nodeId, iteration, decision: { approved, note? } }."
-    })
-  }
-
-  /*
-   * Wave 11: a decision that names its repo round-trips through the
-   * caller's per-user gateway (the relay path the run actually lives on).
-   * The static GATEWAY_UPSTREAM_URL mode stays for the local stub stack.
-   */
-  if (decision.repo !== undefined) {
-    const session = await requireWorkflowSession(request, env)
-    if (session instanceof Response) return session
-    const call = await callGateway(env, session.login, decision.repo, "/v1/rpc/submitApproval", {
-      method: "POST",
-      body: {
-        runId: decision.runId,
-        nodeId: decision.nodeId,
-        iteration: decision.iteration,
-        decision: decision.decision
-      },
-      // Keyed by (runId, nodeId, iteration): the same decision, twice, is
-      // the same decision — safe to replay onto a resumed gateway.
-      replayable: true
-    })
-    if (call.status !== "ok") return gatewayCallResponse(call)
-    /*
-     * The relayed gateway answers the RPC envelope ({ ok, payload }) while
-     * this route's contract — the static seam's, which the client freezes
-     * the card from — is the flat decision echo ({ runId, nodeId,
-     * iteration, approved }). Pass the envelope through untouched and the
-     * client reads a top-level `approved` that is never there: the decision
-     * IS recorded (a retry proves it with 409 AlreadyDecided), the run
-     * resumes, and the card still reports "the engine did not echo the
-     * decision" — the live F-6 failure of waves 13b/14b. Unwrap the success
-     * frame here so both seams answer the same shape; anything that is not
-     * the success frame passes through verbatim.
-     */
-    const text = await call.response.text()
-    let frame: { ok?: unknown; payload?: unknown } | undefined
-    try {
-      const parsed: unknown = JSON.parse(text)
-      if (typeof parsed === "object" && parsed !== null) {
-        frame = parsed as { ok?: unknown; payload?: unknown }
-      }
-    } catch {
-      frame = undefined
-    }
-    if (
-      call.response.status === 200 &&
-      frame !== undefined &&
-      frame.ok === true &&
-      typeof frame.payload === "object" &&
-      frame.payload !== null
-    ) {
-      return json(200, frame.payload)
-    }
-    return new Response(text, {
-      status: call.response.status,
-      headers: {
-        "content-type": call.response.headers.get("content-type") ?? "application/json",
-        ...ISOLATION_HEADERS
-      }
-    })
-  }
-
-  const upstream = env.GATEWAY_UPSTREAM_URL?.trim()
-  if (upstream === undefined || upstream === "") return gatewayNotConfigured()
-  const identity = gatewayIdentityHeaders(env)
-  if (identity instanceof Response) return identity
-
-  let response: Response
-  try {
-    response = await fetch(new URL("/v1/rpc/submitApproval", upstream).toString(), {
-      method: "POST",
-      headers: { "content-type": "application/json", ...identity },
-      body: JSON.stringify(decision)
-    })
-  } catch (error) {
-    return json(502, {
-      status: "error",
-      message: `The engine gateway is unreachable: ${error instanceof Error ? error.message : "unknown error"}`
-    })
-  }
-  const text = await response.text()
-  return new Response(text, {
-    status: response.status,
-    headers: { "content-type": response.headers.get("content-type") ?? "application/json", ...ISOLATION_HEADERS }
-  })
+  // A gateway that answered at the HTTP level but not with a frame is still a
+  // refusal the client can render, never a 500 from this Worker.
+  const frame = call.response.status === 200
+    ? decodeGatewayResponse(text)
+    : { ok: false as const, error: { message: `The workspace answered HTTP ${call.response.status}.` } }
+  return json(200, frame)
 }
 
 const isApiRoute = (pathname: string): boolean => pathname.startsWith("/api/") || isGatewayRoute(pathname)
@@ -2199,10 +1994,10 @@ const handleBrowserFetch = async (request: Request): Promise<Response> => {
 
 /**
  * Same-origin guard for the API surface. These routes spend the deployment's
- * own credentials — `/api/approvals/decision` submits a decision under the
- * seam's injected identity — and a `text/plain` or form POST from another site
- * is not preflighted, so nothing else would stop a page anywhere from driving
- * them. Requests without an `Origin` (same-origin GETs, top-level OAuth
+ * own credentials — `/api/workflow/rpc` relays a gateway procedure under the
+ * credential the Worker holds and the browser never sees — and a `text/plain`
+ * or form POST from another site is not preflighted, so nothing else would
+ * stop a page anywhere from driving them. Requests without an `Origin` (same-origin GETs, top-level OAuth
  * navigation, curl, the e2e) are untouched.
  */
 const isCrossOriginRequest = (request: Request, url: URL): boolean => {
@@ -2489,12 +2284,6 @@ export default {
       }
       return handleModelStream(request, env, gate)
     }
-    if (url.pathname === APPROVAL_DECISION_PATH) {
-      if (request.method !== "POST") {
-        return json(405, { status: "error", message: "Method not allowed." })
-      }
-      return handleApprovalDecision(request, env)
-    }
     if (url.pathname === WORKFLOW_PROVISION_PATH) {
       if (request.method !== "POST") {
         return json(405, { status: "error", message: "Method not allowed." })
@@ -2506,18 +2295,6 @@ export default {
         return json(405, { status: "error", message: "Method not allowed." })
       }
       return handleWorkflowRpc(request, env)
-    }
-    if (url.pathname === WORKFLOW_EVENTS_PATH) {
-      if (request.method !== "GET") {
-        return json(405, { status: "error", message: "Method not allowed." })
-      }
-      return handleWorkflowEvents(request, env, url)
-    }
-    if (url.pathname === WORKFLOW_STREAM_PATH) {
-      if (request.method !== "GET") {
-        return json(405, { status: "error", message: "Method not allowed." })
-      }
-      return handleWorkflowStream(request, env, url)
     }
     if (url.pathname === TOOLS_BROWSER_FETCH_PATH) {
       if (request.method !== "POST") {

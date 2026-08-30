@@ -15,7 +15,7 @@
  * @since 1.0.0
  */
 import { existsSync, readFileSync } from "node:fs"
-import { basename, dirname, join } from "node:path"
+import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 /**
@@ -27,35 +27,17 @@ import { fileURLToPath } from "node:url"
 export const bundles = { index: "llms.txt", full: "llms-full.txt" } as const
 
 /**
- * The root of the installed package, from the location of one of its modules.
- *
- * Source and build put this module at two different depths: `src/Docs.ts` in a
- * checkout, `dist/esm/Docs.js` in a tarball. Counting `..` once is right for
- * the first and one segment short for the second, so the build layout is
- * recognized by name instead.
- *
- * @category constructors
- * @since 1.0.0
- */
-export const packageRoot = (moduleUrl: string = import.meta.url): string => {
-  const enclosing = dirname(fileURLToPath(moduleUrl))
-  const parent = dirname(enclosing)
-  return basename(parent) === "dist" ? dirname(parent) : parent
-}
-
-/**
  * Where the bundles live inside the installed package.
  *
  * Resolved from this module rather than from the working directory, so
  * `smithers docs` prints the installed release's documentation wherever it is
- * invoked from. `package.json` ships `docs/` at the package root, never inside
- * `dist/`, so the built entry has to resolve to the same directory the source
- * entry does.
+ * invoked from.
  *
  * @category constructors
  * @since 1.0.0
  */
-export const directory = (moduleUrl: string = import.meta.url): string => join(packageRoot(moduleUrl), "docs")
+export const directory = (moduleUrl: string = import.meta.url): string =>
+  join(dirname(fileURLToPath(moduleUrl)), "..", "docs")
 
 /**
  * The path of one bundle.

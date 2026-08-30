@@ -370,7 +370,7 @@ describe("smithers mvp worker", () => {
   })
 
   test("gateway seam 501s honestly when no upstream is configured", async () => {
-    for (const path of ["/v1/rpc/getRun", "/v1/api/runs", "/workflows/demo"]) {
+    for (const path of ["/rpc", "/projections", "/sync", "/health"]) {
       const response = await worker.fetch(new Request(`https://mvp.test${path}`), assetsEnv())
       expect(response.status).toBe(501)
       const body = (await response.json()) as { message: string }
@@ -397,7 +397,7 @@ describe("smithers mvp worker", () => {
       return originalFetch(request)
     }) as typeof fetch
     try {
-      const request = new Request("https://mvp.test/v1/rpc/getRun", {
+      const request = new Request("https://mvp.test/rpc", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -974,12 +974,12 @@ describe("same-origin guard", () => {
       async () => {
         for (
           const path of [
-            "/api/approvals/decision",
+            "/api/workflow/rpc",
             "/api/agent/turn",
             "/api/auth/session",
             "/api/identity/request-access",
             "/api/billing/balance",
-            "/v1/rpc/getRun"
+            "/rpc"
           ]
         ) {
           const response = await worker.fetch(crossOrigin(path), env)
@@ -1189,79 +1189,20 @@ describe("billing seam", () => {
   })
 })
 
-describe("approval decision round trip", () => {
-  const decisionBody = {
-    runId: "run_01",
-    nodeId: "approve",
-    iteration: 0,
-    decision: { approved: true, note: "ship it" }
-  }
-
-  test("501s honestly when no gateway upstream is configured", async () => {
-    const response = await worker.fetch(post("/api/approvals/decision", decisionBody), assetsEnv())
-    expect(response.status).toBe(501)
-    const body = (await response.json()) as { message: string }
-    expect(body.message).toContain("GATEWAY_UPSTREAM_URL")
-  })
-
-  test("rejects a malformed decision body with 400", async () => {
+describe("the deleted approval-decision route", () => {
+  /*
+   * An approval is the gateway's own `Approval.Submit` procedure now, relayed
+   * through /api/workflow/rpc: one call that records the decision AND resumes
+   * the run it unblocked. The Worker no longer owns an approval shape, so it
+   * cannot drift from the engine's.
+   */
+  test("/api/approvals/decision is the canonical unknown-route 404 now", async () => {
     const response = await worker.fetch(
-      post("/api/approvals/decision", { runId: "run_01", nodeId: "approve" }),
+      post("/api/approvals/decision", { runId: "run_01", nodeId: "approve", iteration: 0 }),
       assetsEnv()
     )
-    expect(response.status).toBe(400)
-  })
-
-  test("forwards to submitApproval with injected identity and returns the echo", async () => {
-    let seen: { url: string; headers: Headers; body: unknown } | undefined
-    const env: WorkerEnv = {
-      ...assetsEnv(),
-      GATEWAY_UPSTREAM_URL: "https://gateway.test",
-      GATEWAY_SESSION_USER_ID: "user-123"
-    }
-    await withMockedFetch(
-      (request) => {
-        const url = new URL(request.url)
-        if (url.hostname !== "gateway.test") return undefined
-        seen = { url: request.url, headers: request.headers, body: undefined }
-        return new Response(
-          JSON.stringify({ runId: "run_01", nodeId: "approve", iteration: 0, approved: true }),
-          { status: 200, headers: { "content-type": "application/json" } }
-        )
-      },
-      async () => {
-        const response = await worker.fetch(post("/api/approvals/decision", decisionBody), env)
-        expect(response.status).toBe(200)
-        expect(await response.json()).toEqual({
-          runId: "run_01",
-          nodeId: "approve",
-          iteration: 0,
-          approved: true
-        })
-      }
-    )
-    expect(seen?.url).toBe("https://gateway.test/v1/rpc/submitApproval")
-    expect(seen?.headers.get("x-user-id")).toBe("user-123")
-    expect(seen?.headers.get("authorization")).toBeNull()
-  })
-
-  test("passes an upstream failure through honestly", async () => {
-    const env: WorkerEnv = {
-      ...assetsEnv(),
-      GATEWAY_UPSTREAM_URL: "https://gateway.test",
-      GATEWAY_SESSION_USER_ID: "user-123"
-    }
-    await withMockedFetch(
-      (request) => {
-        if (new URL(request.url).hostname !== "gateway.test") return undefined
-        return new Response(JSON.stringify({ error: "AlreadyDecided" }), { status: 409 })
-      },
-      async () => {
-        const response = await worker.fetch(post("/api/approvals/decision", decisionBody), env)
-        expect(response.status).toBe(409)
-        expect(await response.json()).toEqual({ error: "AlreadyDecided" })
-      }
-    )
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ status: "error", message: "Not found." })
   })
 })
 

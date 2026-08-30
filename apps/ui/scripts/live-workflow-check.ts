@@ -9,7 +9,7 @@
  *   2. POST /api/workflow/provision — provision-or-resume through the
  *      wave-11b Cloud token door; idempotent on a second call,
  *   3. no gateway credential ever reaches the browser,
- *   4. listWorkflows through the relay — is `create-workflow` really there,
+ *   4. List flows through the relay — is `create-workflow` really there,
  *   5. the real conversation: ask for a workflow, watch the embedded run card
  *      go live, approve if it parks, see it complete.
  *
@@ -156,19 +156,19 @@ if (ready) {
     `${firstBody.gatewayId} → ${secondBody.gatewayId}`
   )
 
-  /* ---- 4. listWorkflows through the relay: is create-workflow really there ---- */
-  const list = await post("/api/workflow/rpc", { repo: target, method: "listWorkflows", params: {} })
-  note(`listWorkflows → HTTP ${list.status} ${list.text.slice(0, 400)}`)
-  const listBody = JSON.parse(list.text) as { ok?: boolean; payload?: Array<{ key?: string }> }
-  const keys = (listBody.payload ?? []).map((entry) => entry.key).filter(Boolean)
-  check("listWorkflows answered through the relay", listBody.ok === true, JSON.stringify(keys).slice(0, 300))
-  if (keys.includes("create-workflow")) {
-    check("the workspace lists the stock create-workflow workflow", true, JSON.stringify(keys).slice(0, 300))
+  /* ---- 4. List flows through the relay: is create-workflow really there ---- */
+  const list = await post("/api/workflow/rpc", { repo: target, procedure: "List", payload: { _tag: "flows" } })
+  note(`List flows → HTTP ${list.status} ${list.text.slice(0, 400)}`)
+  const listBody = JSON.parse(list.text) as { ok?: boolean; payload?: { items?: Array<{ flowId?: string }> } }
+  const ids = (listBody.payload?.items ?? []).map((entry) => entry.flowId).filter(Boolean)
+  check("List flows answered through the relay", listBody.ok === true, JSON.stringify(ids).slice(0, 300))
+  if (ids.includes("create-workflow")) {
+    check("the workspace lists the stock create-workflow flow", true, JSON.stringify(ids).slice(0, 300))
   } else {
-    // Not a failure: the gateway populates its global pack LAZILY, so a cold
-    // list shows only the repo's own workflows and the pack appears moments
-    // later. launchRun resolves the registry on a miss — that is the truth.
-    note(`cold listWorkflows (global pack not yet resolved): ${JSON.stringify(keys)}`)
+    // Not a failure: discovery is a directory walk the workspace does when it
+    // starts, so a cold list shows only what was on disk at boot. `Plan`
+    // resolves the registry on a miss — that is the truth.
+    note(`cold List flows (registry not yet resolved): ${JSON.stringify(ids)}`)
   }
 } else {
   note(

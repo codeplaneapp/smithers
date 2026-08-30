@@ -50,8 +50,6 @@
     "dist/**/*.d.ts",
     "dist/**/*.d.ts.map",
     "dist/**/package.json",
-    "docs/**/*.md",
-    "docs/**/*.txt",
     "LICENSE",
     "README.md",
     "CHANGELOG.md"

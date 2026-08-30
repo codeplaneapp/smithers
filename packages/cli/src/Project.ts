@@ -127,6 +127,35 @@ export const logFile = (projectRoot: string, runId: string): string => join(logD
 export const flowsDirectory = (projectRoot: string): string => join(projectRoot, "flows")
 
 /**
+ * Every 0.x run database beside a project, newest ancestor first.
+ *
+ * Unlike {@link legacyState} this does not stop at a directory that holds
+ * `.flows/`. rc-contract section 6 gates only the informational notice on
+ * "no `.flows/` beside it"; the refusal that `smithers migrate` and the
+ * database listing that `smithers doctor` perform are not gated, and they
+ * must not be: the project an operator actually migrates is one that has
+ * already run an rc.0 command, so it already has `.flows/`, and gating the
+ * refusal there would answer "nothing to finish" for every real migration.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const legacyDatabases = (
+  cwd: string = process.cwd(),
+  exists: (path: string) => boolean = existsSync
+): ReadonlyArray<string> => {
+  const found: Array<string> = []
+  let directory = resolve(cwd)
+  for (;;) {
+    const candidate = join(directory, "smithers.db")
+    if (exists(candidate)) found.push(candidate)
+    const parent = dirname(directory)
+    if (parent === directory || boundaryMarkers.some((marker) => exists(join(directory, marker)))) return found
+    directory = parent
+  }
+}
+
+/**
  * Smithers 0.x state found beside a project, newest ancestor first.
  *
  * A directory that already holds `.flows/` is an rc.0 project and reports
@@ -185,38 +214,34 @@ export const ProjectRoot: Context.Reference<string> = Context.Reference<string>(
 )
 
 /**
- * The 0.x state this invocation found, sampled before rc.0 wrote anything.
- *
- * {@link legacyState} reports nothing once `.flows/` exists beside the 0.x
- * markers, and the durable layers create `.flows/` while they are built, which
- * is before any handler runs. Sampling at read time therefore answered "no 0.x
- * state here" on exactly the run the section 6 notice exists for: the first
- * rc.0 command in a 0.x project. The sample is taken once, from the resolved
- * root, at argument-parse time, and handlers read it from here.
+ * The Smithers 0.x state found beside this project when the invocation
+ * started, as a service.
  *
  * @category references
  * @since 1.0.0
  */
 export const LegacyState: Context.Reference<ReadonlyArray<string>> = Context.Reference<ReadonlyArray<string>>(
   "/cli/LegacyState",
-  { defaultValue: () => [] }
+  { defaultValue: () => legacyState() }
 )
 
 /**
  * Provides the resolved project root, and the 0.x state found beside it.
  *
- * `legacy` defaults to a reading taken now. A composition that builds this
- * layer after opening the database has already lost the sample and must pass
- * one taken earlier.
+ * The 0.x sample is taken here, in an ordinary function call, rather than in
+ * the handler that reports it. {@link legacyState} treats a `.flows/`
+ * directory as proof the project already moved on, and opening the control
+ * database creates `<root>/.flows`. A handler-time sample therefore inspected
+ * a directory the same invocation had just written, and the rc-contract
+ * section 6 notice printed on no project it was written for. This function
+ * runs while the layers are still being described, before any of them is
+ * built, so the sample is of the directory as the operator left it.
  *
  * @category layers
  * @since 1.0.0
  */
-export const layer = (
-  projectRoot: string,
-  legacy: ReadonlyArray<string> = legacyState(projectRoot)
-): Layer.Layer<never> =>
+export const layer = (projectRoot: string): Layer.Layer<never> =>
   Layer.mergeAll(
     Layer.succeed(ProjectRoot, projectRoot),
-    Layer.succeed(LegacyState, legacy)
+    Layer.succeed(LegacyState, legacyState(projectRoot))
   )

@@ -189,6 +189,9 @@ importers:
       '@smthrs/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@smthrs/gateway':
+        specifier: workspace:*
+        version: link:../../packages/gateway
       '@smthrs/harness':
         specifier: workspace:*
         version: link:../../packages/harness
@@ -259,12 +262,27 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1(supports-color@10.2.2))
       '@happy-dom/global-registrator':
         specifier: ^20.11.2
         version: 20.11.2
       '@playwright/test':
         specifier: 1.62.1
         version: 1.62.1
+      '@smthrs/control':
+        specifier: workspace:*
+        version: link:../../packages/control
+      '@smthrs/notifications':
+        specifier: workspace:*
+        version: link:../../packages/notifications
+      '@smthrs/run-store':
+        specifier: workspace:*
+        version: link:../../packages/run-store
+      '@smthrs/sync':
+        specifier: workspace:*
+        version: link:../../packages/sync
       '@types/bun':
         specifier: latest
         version: 1.4.0
@@ -295,9 +313,15 @@ importers:
       postcss:
         specifier: ^8.4.49
         version: 8.5.26
+      smithers-server:
+        specifier: workspace:*
+        version: link:../server
       tailwindcss:
         specifier: ^3.4.16
         version: 3.4.19(tsx@4.23.12)(yaml@2.9.0)
+      tsx:
+        specifier: 4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -1951,6 +1975,9 @@ importers:
 
   packages/gateway:
     dependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1(supports-color@10.2.2))
       '@smthrs/control':
         specifier: 1.0.0-rc.0
         version: link:../control
@@ -1979,6 +2006,12 @@ importers:
       '@eslint/js':
         specifier: 9.39.1
         version: 9.39.1
+      '@smthrs/database':
+        specifier: 1.0.0-rc.0
+        version: link:../database
+      '@smthrs/registry':
+        specifier: 1.0.0-rc.0
+        version: link:../registry
       '@types/node':
         specifier: 25.9.5
         version: 25.9.5

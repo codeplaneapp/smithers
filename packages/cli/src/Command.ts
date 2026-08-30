@@ -236,7 +236,11 @@ const summaryOf = (control: ControlService.Service, runId: string) =>
 
 /** A digest of one 0.x notice, printed once per invocation. */
 const noticeLegacyState = Effect.gen(function*() {
-  const first = (yield* Project.LegacyState)[0]
+  // The snapshot, not a fresh walk: this invocation's own control database
+  // has created `<root>/.flows` by now, and `Project.legacyState` reads that
+  // directory as proof the project already moved on (rc-contract section 6).
+  const found = yield* Project.LegacyState
+  const first = found[0]
   if (first === undefined) return
   yield* Effect.sync(() => process.stderr.write(`${Project.legacyNotice(first)}\n`))
 })
@@ -668,9 +672,10 @@ const migrate = Command.make("migrate", {
     yield* refuseRemoved("migrate", { to: config.to })
     const projectRoot = yield* Project.ProjectRoot
     const target = Option.getOrElse(config.path, () => projectRoot)
-    const databases = Project.legacyState(target)
-      .filter((path) => path.endsWith("smithers.db"))
-      .map(Legacy.read)
+    // `legacyDatabases`, not `legacyState`: the section 6 refusal is not
+    // gated on `.flows/` being absent, and the project being migrated has
+    // one by definition.
+    const databases = Project.legacyDatabases(target).map(Legacy.read)
     const refusal = Legacy.refusal(databases)
     if (refusal !== undefined) return yield* Effect.fail(new CliError.UnsupportedError({ message: refusal }))
     const control = yield* ControlService.Control
@@ -780,9 +785,7 @@ const sessionId = (raw: Option.Option<string>): string =>
 const claudeTick = Command.make("tick", {
   runId: Argument.string("run-id"),
   session: claudeSession,
-  afterSeq: Flag.integer("after-seq").pipe(Flag.withDefault(0)),
-  wait: Flag.boolean("wait"),
-  timeout: Flag.integer("timeout-ms").pipe(Flag.withDefault(120_000))
+  afterSeq: Flag.integer("after-seq").pipe(Flag.withDefault(0))
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -791,28 +794,16 @@ const claudeTick = Command.make("tick", {
     // Following a run is subscribing: every tick re-asserts the entry, so a
     // registry lost to a crash repairs itself on the next frame.
     yield* Effect.sync(() => ClaudeMirror.subscribe(projectRoot, config.runId, sessionId(config.session)))
-    // `--wait` is what makes a mirror affordable. Without it a follower polls
-    // on its own clock and spends one agent turn per poll on a run that has
-    // not moved; with it the process blocks here, in one cheap loop, and the
-    // follower spends a turn only when the run actually changed. A deadline
-    // always produces a frame with `timedOut: true` rather than a failure, so
-    // the follower can tick again without treating expiry as an error.
-    const deadline = Date.now() + config.timeout
-    for (;;) {
-      const collected = yield* eventsOf(control, config.runId)
-      const run = yield* summaryOf(control, config.runId)
-      const digest = Forensics.digest(collected)
-      const expired = Date.now() >= deadline
-      const frame = ClaudeMirror.frame(config.runId, run, collected, {
+    const collected = yield* eventsOf(control, config.runId)
+    const run = yield* summaryOf(control, config.runId)
+    const digest = Forensics.digest(collected)
+    yield* renderJson(
+      ClaudeMirror.frame(config.runId, run, collected, {
         afterSeq: config.afterSeq,
-        parked: { question: digest.parkedQuestion, approval: digest.parkedApproval },
-        timedOut: config.wait && expired
+        parked: { question: digest.parkedQuestion, approval: digest.parkedApproval }
       })
-      const moved = run !== undefined && (frame.seq > config.afterSeq || ClaudeMirror.isTerminal(frame.status))
-      if (!config.wait || moved || expired) return yield* renderJson(frame)
-      yield* Effect.sleep("250 millis")
-    }
-  })).pipe(Command.withDescription("Print one mirror frame for a run; --wait blocks until the run moves"))
+    )
+  })).pipe(Command.withDescription("Print one mirror frame for a run"))
 
 const claudeNodeWait = Command.make("node-wait", {
   runId: Argument.string("run-id"),
@@ -943,11 +934,8 @@ const skillsAdd = Command.make(
           })
         )
       }
-      const curated = Agents.skill()
-      if (curated._tag === "missing") {
-        return yield* Effect.fail(new CliError.UnsupportedError({ message: Agents.skillMissing(curated.searched) }))
-      }
-      yield* render(yield* Effect.sync(() => targets.map((agent) => Agents.addSkill(agent, curated.contents))))
+      const contents = Agents.skill(Verb.shipped)
+      yield* render(yield* Effect.sync(() => targets.map((agent) => Agents.addSkill(agent, contents))))
     })
 ).pipe(Command.withDescription("Install the smithers skill into an agent"))
 
@@ -1030,7 +1018,7 @@ const doctor = Command.make("doctor", {}, () =>
     yield* guardGlobals
     const projectRoot = yield* Project.ProjectRoot
     const jj = ResolveJj.resolveJjBinary()
-    const report = Doctor.inspect({ root: projectRoot, jj })
+    const report = Doctor.inspect({ root: projectRoot, jj, legacyPaths: yield* Project.LegacyState })
     const root = yield* rootCommand
     yield* render(root.json ? report : Doctor.render(report))
     if (Doctor.failed(report)) {
@@ -1072,9 +1060,14 @@ const serveCommand = Command.make("serve", {
 
 // == section 4.2 refusals
 
-/** Every removed verb, as a hidden subcommand that exits 1 with its reason. */
+/**
+ * Every removed verb, as a hidden subcommand that exits 1 with its reason.
+ *
+ * `workflows` is registered here under its own spelling like the rest. The
+ * singular `workflow` is a separate command group, because `workflow list`
+ * survives as the `ls` alias, and it refuses on its own with the same reason.
+ */
 const removedCommands = Unsupported.removedVerbs
-  .filter((verb) => verb.name !== "workflows")
   .map((verb) =>
     Command.make(
       verb.name,

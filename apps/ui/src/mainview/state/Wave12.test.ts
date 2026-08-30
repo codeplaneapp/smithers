@@ -71,48 +71,85 @@ const OTHER_REPO = "codeplanesmithers/smithers-cloud"
 const said = (outcome: { status: string; value?: string; error?: string }): string =>
   outcome.status === "failed" ? (outcome.error ?? "") : (outcome.value ?? "")
 
-interface RunEvent {
-  readonly seq: number
-  readonly event: string
-  readonly payload?: Record<string, unknown>
-}
-
 /** The same relay double wave 11 proved against, with the states §3/§4 need. */
 const relay = (options: {
   readonly provision?: () => unknown
-  readonly workflows?: ReadonlyArray<{ key: string }>
+  readonly flows?: ReadonlyArray<{ flowId: string }>
 } = {}) => {
   const calls: Array<{ path: string; method: string; body: unknown }> = []
-  const events: RunEvent[] = []
   const state = {
     runStatus: "running" as string,
+    turns: 0,
+    calls: 0,
     launched: [] as Array<{ workflow: string; input: unknown; repo: string }>
   }
-  const workflows = options.workflows ?? [{ key: "create-workflow" }, { key: "review-pr" }]
+  const flows = options.flows ?? [{ flowId: "create-workflow" }, { flowId: "review-pr" }]
+  let planned: { flowId: string; input: unknown } | undefined
 
-  const rpc = (repo: string, method: string, params: Record<string, unknown>): Response => {
-    switch (method) {
-      case "listWorkflows":
-        return json(200, { ok: true, payload: workflows })
-      case "launchRun": {
-        const key = String(params.workflow)
-        if (!workflows.some((entry) => entry.key === key)) {
-          return json(200, { ok: false, error: { code: "NOT_FOUND", message: `Unknown workflow: ${key}` } })
-        }
-        state.launched.push({ workflow: key, input: params.input, repo })
-        return json(200, { ok: true, payload: { runId: "run-w12" } })
-      }
-      case "getRun":
+  const procedure = (repo: string, name: string, payload: Record<string, unknown>): Response => {
+    switch (name) {
+      case "List":
         return json(200, {
           ok: true,
-          payload: { runId: "run-w12", status: state.runStatus, runState: { blocked: null }, errorJson: null }
+          payload: { _tag: "flows", items: flows.map((flow) => ({ flowId: flow.flowId, description: "" })) }
         })
-      case "listApprovals":
-        return json(200, { ok: true, payload: [] })
-      case "whatHappened":
-        return json(200, { ok: true, payload: { summary: "Done." } })
+      case "Plan": {
+        const flowId = String(payload.flowId)
+        if (!flows.some((entry) => entry.flowId === flowId)) {
+          return json(200, { ok: false, error: { message: `Unknown workflow: ${flowId}` } })
+        }
+        planned = { flowId, input: payload.input }
+        return json(200, {
+          ok: true,
+          payload: {
+            planId: `plan-${flowId}`,
+            flowId,
+            digest: "digest-1",
+            envelope: { capabilities: [], flows: [], budget: {} },
+            inputSummary: "",
+            deployClass: false,
+            nodes: []
+          }
+        })
+      }
+      case "Run":
+        state.launched.push({ workflow: planned?.flowId ?? "?", input: planned?.input, repo })
+        return json(200, { ok: true, payload: { _tag: "Accepted", receiptId: "r", runId: "run-w12" } })
+      case "Cancel":
+        state.runStatus = "cancelled"
+        return json(200, { ok: true, payload: { _tag: "Accepted", receiptId: "c", runId: "run-w12" } })
+      case "Approval.Submit":
+        return json(200, { ok: true, payload: { decision: { _tag: "Accepted", receiptId: "a" } } })
+      case "Projection.Snapshot": {
+        const selector = (payload.selector ?? {}) as { _tag?: string }
+        if (selector._tag === "approvals") {
+          return json(200, { ok: true, payload: { cursor: { projection: "approvals", runId: null, value: 0 }, rows: [] } })
+        }
+        return json(200, {
+          ok: true,
+          payload: {
+            cursor: { projection: "run-summary", runId: "run-w12", value: 1 },
+            rows: [{
+              runId: "run-w12",
+              flowId: state.launched.at(-1)?.workflow ?? "review-pr",
+              status: state.runStatus,
+              createdAt: 1,
+              updatedAt: 2 + state.turns + state.calls,
+              turns: state.turns,
+              calls: state.calls,
+              callsFailed: 0,
+              editsAttempted: 0,
+              editsSucceeded: 0,
+              inputTokens: 0,
+              outputTokens: 0,
+              verdict: state.runStatus === "completed" ? "completed — done." : state.runStatus,
+              diagnosis: "Verdict   done."
+            }]
+          }
+        })
+      }
       default:
-        return json(200, { ok: false, error: { code: "NOT_FOUND", message: `no ${method}` } })
+        return json(200, { ok: false, error: { message: `no ${name}` } })
     }
   }
 
@@ -129,17 +166,22 @@ const relay = (options: {
         return json(200, options.provision?.() ?? { status: "ready", repo: body?.repo, gatewayId: "gw-1" })
       }
       if (absolute.pathname === "/api/workflow/rpc") {
-        return rpc(String(body.repo), String(body.method), (body.params ?? {}) as Record<string, unknown>)
-      }
-      if (absolute.pathname === "/api/workflow/events") {
-        const afterSeq = Number(absolute.searchParams.get("afterSeq") ?? "0")
-        return json(200, { ok: true, data: events.filter((event) => event.seq > afterSeq) })
+        return procedure(String(body.repo), String(body.procedure), (body.payload ?? {}) as Record<string, unknown>)
       }
       return json(404, { status: "error", message: `no stub for ${absolute.pathname}` })
     }
   }
 
-  return { services, calls, state, emit: (...rows: RunEvent[]) => events.push(...rows) }
+  return {
+    services,
+    calls,
+    state,
+    /** The run did some work: the summary's counters move. */
+    advance: (turns: number, callCount: number) => {
+      state.turns += turns
+      state.calls += callCount
+    }
+  }
 }
 
 const signIn = async (store: Awaited<ReturnType<typeof webStore>>, watched: string[] = [REPO]) => {
@@ -613,9 +655,8 @@ describe("wave 12 §3 — a run the workspace never finishes", () => {
     })
     await signIn(store)
 
-    // The wave-11 live shape exactly: the run keeps reading "running" and the
-    // event stream never says another word.
-    double.emit({ seq: 1, event: "RunStarted" })
+    // The live shape exactly: the run keeps reading "running" and its
+    // summary never says another word.
     await controller.commands.run("flow.run", "review-pr")
     await waitFor(() => runCard(store)?.payload.phase === "quiet")
 
@@ -623,10 +664,10 @@ describe("wave 12 §3 — a run the workspace never finishes", () => {
     expect(card?.payload.phase).toBe("quiet")
     expect(card?.payload.quietForMs).toBeGreaterThanOrEqual(25)
 
-    // The pump stopped hammering: no further event reads after it settled.
-    const before = double.calls.filter((call) => call.path.startsWith("/api/workflow/events")).length
+    // The pump stopped hammering: no further reads after it settled.
+    const before = double.calls.filter((call) => call.path === "/api/workflow/rpc").length
     await settle(30)
-    const after = double.calls.filter((call) => call.path.startsWith("/api/workflow/events")).length
+    const after = double.calls.filter((call) => call.path === "/api/workflow/rpc").length
     expect(after).toBe(before)
   })
 
@@ -643,7 +684,7 @@ describe("wave 12 §3 — a run the workspace never finishes", () => {
 
     await controller.commands.run("flow.run", "review-pr")
     for (let step = 1; step <= 5; step += 1) {
-      double.emit({ seq: step, event: "NodeStarted", payload: { nodeId: `step-${step}` } })
+      double.advance(1, 1)
       await settle(10)
     }
     expect(runCard(store)?.payload.phase).toBe("running")
@@ -666,13 +707,20 @@ describe("wave 12 §3 — a run the workspace never finishes", () => {
     expect(runCard(store)?.payload.steps.join(" ")).toContain("Checking the run again")
     await settle(4)
 
-    // Stop is stop WATCHING — never a claim that the run was cancelled.
+    /*
+     * Stop now stops the RUN: the rc.0 gateway relays a durable `Cancel`, so
+     * the card can say the run was cancelled without claiming anything the
+     * workspace did not do.
+     */
     expect((await controller.commands.run("flow.run.stop", "flow-run-run-w12")).status).toBe("executed")
-    await waitFor(() => runCard(store)?.payload.phase === "stopped")
-    expect(runCard(store)?.payload.steps.join(" ")).toContain("Stopped watching this run.")
-    const settledCalls = double.calls.filter((call) => call.path.startsWith("/api/workflow/events")).length
+    await waitFor(() => runCard(store)?.payload.phase === "cancelled")
+    expect(runCard(store)?.payload.steps.join(" ")).toContain("Cancelled this run.")
+    expect(
+      double.calls.some((call) => (call.body as { procedure?: string } | undefined)?.procedure === "Cancel")
+    ).toBe(true)
+    const settledCalls = double.calls.filter((call) => call.path === "/api/workflow/rpc").length
     await settle(30)
-    expect(double.calls.filter((call) => call.path.startsWith("/api/workflow/events")).length).toBe(settledCalls)
+    expect(double.calls.filter((call) => call.path === "/api/workflow/rpc").length).toBe(settledCalls)
   })
 })
 
