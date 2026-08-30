@@ -28,7 +28,6 @@
     "@smthrs/run-store": "1.0.0-rc.0",
     "@smthrs/sandbox": "1.0.0-rc.0",
     "@smthrs/std": "1.0.0-rc.0",
-    "@smthrs/sync": "1.0.0-rc.0",
     "@smthrs/time-travel": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
   },
