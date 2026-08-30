@@ -45,6 +45,7 @@
   "files": [
     "bin/**/*.mjs",
     "src/**/*.ts",
+    "docs/**",
     "dist/**/*.js",
     "dist/**/*.js.map",
     "dist/**/*.d.ts",

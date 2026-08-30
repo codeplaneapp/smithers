@@ -359,23 +359,40 @@ describe("the smithers bin shim", processBudget, () => {
     // user-facing name (rc-contract.md section 3.4).
     expect(manifest.bin).toEqual({ smithers: "./bin/smithers.mjs" })
     expect(manifest.files).toContain("bin/**/*.mjs")
+    // `smithers docs` prints the bundles the docs lane generates into
+    // `<package>/docs`. Left out of `files` they ship nowhere, and the verb
+    // reports them missing on every published install.
+    expect(manifest.files).toContain("docs/**")
   })
 
-  // The packaged install path needs a built artifact, so it is a capability
-  // gate: `dist/esm/bin.js` exists in every tarball and in a built checkout,
-  // and the suite also runs before `pnpm run build` in a fresh clone.
-  const built = existsSync(join(packageRoot, "dist", "esm", "bin.js"))
-
-  it.skipIf(!built)("runs the built entry when dist is present", () => {
-    const cwd = mkdtempSync(temporaryDirectoryPrefix)
+  it("runs the built entry when dist is present, and leaves src alone", () => {
+    // The packaged install: a tarball ships `dist/esm/bin.js` beside `src`,
+    // and the shim must run the build. Staging the build here rather than
+    // gating on `existsSync(dist)` is the point — `dist` is gitignored, so the
+    // gated form skipped in every fresh clone and in this worktree, which is
+    // no pin at all. The marker proves which entry ran, where asserting
+    // `--version` could not: both entries print the same version.
+    const root = mkdtempSync(temporaryDirectoryPrefix)
     try {
-      const result = spawnSync(process.execPath, [shim, "--version"], { cwd, encoding: "utf8", timeout: 180_000 })
+      cpSync(binDirectory, join(root, "bin"), { recursive: true })
+      symlinkSync(join(packageRoot, "src"), join(root, "src"), "dir")
+      mkdirSync(join(root, "dist", "esm"), { recursive: true })
+      writeFileSync(join(root, "dist", "esm", "bin.js"), "process.stdout.write(\"built entry ran\\n\")\n")
+
+      const result = spawnSync(process.execPath, [join(root, "bin", "smithers.mjs"), "--version"], {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 180_000
+      })
 
       expect(result.error).toBeUndefined()
       expect(result.status).toBe(0)
-      expect(result.stdout).toContain(Version.packageVersion)
+      expect(result.stdout).toContain("built entry ran")
+      // `src/bin.ts` is right there and must not have run: an installed CLI
+      // that type-stripped its own sources would be running unbuilt code.
+      expect(result.stdout).not.toContain(Version.packageVersion)
     } finally {
-      rmSync(cwd, { recursive: true, force: true })
+      rmSync(root, { recursive: true, force: true })
     }
   })
 

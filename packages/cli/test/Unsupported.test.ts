@@ -15,6 +15,7 @@ import { Command } from "effect/unstable/cli"
 import { describe, expect, it } from "vitest"
 import * as CliError from "../src/CliError.ts"
 import { cli } from "../src/Command.ts"
+import * as Environment from "../src/Environment.ts"
 import * as Output from "../src/Output.ts"
 import * as Unsupported from "../src/Unsupported.ts"
 import { packageVersion } from "../src/Version.ts"
@@ -113,8 +114,9 @@ describe("the SQLite-only backend flag", () => {
     for (const backend of ["pglite", "postgres", "mysql"]) {
       const error = await failure(["--backend", backend, "ls"])
 
-      expect((error as CliError.UnsupportedError).message).toContain("unsupported_database")
-      expect((error as CliError.UnsupportedError).message).toContain(backend)
+      // rc-contract section 2 prints one exact sentence for every rejected
+      // value, so the message names the fix rather than echoing the value.
+      expect((error as CliError.UnsupportedError).message).toBe(Environment.unsupportedBackend(backend))
     }
   })
 })
