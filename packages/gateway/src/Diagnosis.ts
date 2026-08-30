@@ -18,6 +18,37 @@
 import type { ControlSchema } from "@smthrs/control"
 
 /**
+ * The run statuses a digest may report.
+ *
+ * `@smthrs/control` `ControlSchema.RunStatus` is the vocabulary; this is the
+ * runtime set the fold checks a journaled kind against.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type RunStatus = ControlSchema.RunStatus
+
+/**
+ * Every `control.run.*` suffix that names a status rather than an operation.
+ *
+ * `@smthrs/control` journals `control.run.lineage`, `control.run.resume`,
+ * `control.run.resumed`, `control.run.cancel-requested`, and
+ * `control.run.pending` under the same prefix as the status transitions, and
+ * `Lineage.derive` adds one more to every followed stream. Reading a status
+ * off the prefix alone made a live run's verdict read `lineage` or `resume`,
+ * so the fold accepts only the seven names a client may render.
+ */
+const runStatuses: ReadonlySet<string> = new Set([
+  "accepted",
+  "running",
+  "parked",
+  "waiting-approval",
+  "cancelled",
+  "completed",
+  "failed"
+])
+
+/**
  * One refused flow call, aggregated by its refusal message.
  *
  * @since 1.0.0
@@ -35,8 +66,8 @@ export interface Refusal {
  * @category models
  */
 export interface Digest {
-  /** The last `control.run.*` transition seen, or undefined before launch. */
-  readonly status: string | undefined
+  /** The last run status seen, or undefined before launch. */
+  readonly status: RunStatus | undefined
   /** The journaled failure cause, when the run failed and recorded one. */
   readonly cause: string | undefined
   /** The model seat the last opened turn ran on. */
@@ -94,7 +125,7 @@ export const clip = (text: string, width: number): string =>
 
 /** The mutable accumulator the fold below writes into. */
 interface Accumulator {
-  status: string | undefined
+  status: RunStatus | undefined
   cause: string | undefined
   seat: string | undefined
   turns: number
@@ -182,8 +213,10 @@ export const digest = (events: ReadonlyArray<ControlSchema.ControlEvent>): Diges
       continue
     }
     if (event.kind.startsWith("control.run.")) {
-      accumulator.status = event.kind.slice("control.run.".length)
-      if (accumulator.status === "failed") accumulator.cause = asString(payload.cause)
+      const status = event.kind.slice("control.run.".length)
+      if (!runStatuses.has(status)) continue
+      accumulator.status = status as RunStatus
+      if (status === "failed") accumulator.cause = asString(payload.cause)
     }
   }
 

@@ -100,6 +100,37 @@ describe("Diagnosis.digest", () => {
   })
 })
 
+describe("Diagnosis.digest over the run lifecycle", () => {
+  it("keeps the last STATUS, not the last `control.run.` event", () => {
+    // `@smthrs/control` journals lineage, resume, cancel-requested, and
+    // pending under the same prefix, and `Lineage.derive` adds one to every
+    // followed stream. Reading a status off the prefix made a live run's
+    // verdict read "lineage" or "resume".
+    const digest = Diagnosis.digest([
+      event("control.run.accepted", { runId: "run-1", status: "accepted" }),
+      event("control.run.running", { runId: "run-1", status: "running" }),
+      event("control.run.pending", { runId: "run-1", status: "accepted" }),
+      event("control.run.cancel-requested", { runId: "run-1" }),
+      event("control.run.resume", { runId: "run-1", status: "accepted" }),
+      event("control.run.resumed", { runId: "run-1", status: "accepted" }),
+      event("control.run.lineage", { runId: "run-1", origin: {} })
+    ])
+    expect(digest.status).toBe("running")
+    expect(Diagnosis.verdict(digest)).toBe("running")
+  })
+
+  it("ignores a kind under another prefix entirely", () => {
+    // The durable engine writes `flows.engine.*` into its own database's
+    // journal, which a control watch never reads. A record under that prefix
+    // reaching this fold is not a status, and must not become one.
+    const digest = Diagnosis.digest([
+      event("control.run.running", { runId: "run-1", status: "running" }),
+      event("flows.engine.run-decision", { decision: "transitioned", status: "completed" })
+    ])
+    expect(digest.status).toBe("running")
+  })
+})
+
 describe("Diagnosis.verdict", () => {
   const facts = (overrides: Partial<Diagnosis.Digest>): Diagnosis.Digest => ({
     ...Diagnosis.digest([]),

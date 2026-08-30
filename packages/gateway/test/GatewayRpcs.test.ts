@@ -71,8 +71,13 @@ describe("Approval.Submit", () => {
         digest: "gate-digest",
         envelope: { capabilities: ["model:call"], flows: ["ask"], budget: {} }
       }
-      // The run registers its gate exactly as `AgentSession.authorize` does.
+      // The run registers its gate and parks on it exactly as
+      // `AgentSession.authorize` and `AgentSession.settle` do: the ask is
+      // registered, then the run's status is moved under its own fence.
       yield* runtime.registerApproval(target)
+      const fence = yield* runtime.claimFence(runId)
+      yield* runtime.writeStatus(runId, fence, "waiting-approval")
+      expect((yield* runtime.getRun(runId)).status).toBe("waiting-approval")
 
       const submitted = yield* rpc["Approval.Submit"]({
         target,
@@ -85,6 +90,22 @@ describe("Approval.Submit", () => {
       // One call, two mutations: the grant AND the restart. Nothing is left
       // for the client to remember to do.
       expect(submitted.resume).toBeDefined()
+      // The run really left the parked state, which is the requirement
+      // `server-resume-lifecycle` pinned: an approval that grants but never
+      // restarts is the state a human reads as "nothing happened".
+      expect((yield* runtime.getRun(runId)).status).not.toBe("waiting-approval")
+      const events = yield* Stream.runCollect(
+        (yield* Control).watch({ runId, follow: false })
+      )
+      // `Control.resume` journals `control.run.resume`, which is an operation
+      // and not a status. The verdict must still read the run's own status:
+      // folding a status off the `control.run.` prefix made it read "resume".
+      expect(events.map((event) => event.kind)).toContain("control.run.resume")
+      const summary = ((yield* (yield* Projections).snapshot({ _tag: "run-summary", runId }))
+        .rows as ReadonlyArray<GatewayProjection.RunSummaryRow>)[0]
+      const resumed = yield* runtime.getRun(runId)
+      expect(summary?.verdict).toBe(resumed.status)
+      expect(summary?.status).toBe(resumed.status)
     }).pipe(Effect.provide(served)))
 
   test("denies a gate without resuming the run it parked", () =>
@@ -100,6 +121,8 @@ describe("Approval.Submit", () => {
         envelope: { capabilities: ["model:call"], flows: ["ask"], budget: {} }
       }
       yield* runtime.registerApproval(target)
+      const fence = yield* runtime.claimFence(runId)
+      yield* runtime.writeStatus(runId, fence, "waiting-approval")
 
       const submitted = yield* rpc["Approval.Submit"]({
         target,
@@ -111,6 +134,7 @@ describe("Approval.Submit", () => {
       expect(submitted.decision._tag).toBe("Accepted")
       // A denial means the run stays where it is.
       expect(submitted.resume).toBeUndefined()
+      expect((yield* runtime.getRun(runId)).status).toBe("waiting-approval")
     }).pipe(Effect.provide(served)))
 
   test("approves a plan without a run to resume", () =>
