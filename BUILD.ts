@@ -99,6 +99,7 @@ export const ci = Smithers.GithubCiGen({
             ".github/workflows/release.yml",
             ".github/workflows/apps-deploy.yml",
             ".github/workflows/canary.yml",
+            ".github/workflows/docs-deploy.yml",
             ".github/workflows/pr-review.yml"
           ]
         })
