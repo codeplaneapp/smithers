@@ -671,10 +671,17 @@ export const requestCancel = (
     //
     // The read is a guard, not the answer: a store that cannot answer `get` —
     // a stub host, a missing row — leaves the request itself to decide, which
-    // is exactly what this port did before the guard existed. The read and the
-    // write are not one transaction either: a run that settles between them
-    // takes a cancel request nobody acts on, the harmless direction, and the
-    // one `RunDriver`'s cancel poll already ignores.
+    // is exactly what this port did before the guard existed.
+    //
+    // The read and the write are not one transaction, and the window between
+    // them is a real one, not a harmless one. A run that settles inside it
+    // still answers `recorded`, and `Control.cancel` goes on to transition the
+    // control row: the engine ignores the request its cancel poll skips for a
+    // terminal row, and the CONTROL row is the half left disagreeing. Closing
+    // the window needs the store to decide terminality in the same statement
+    // that writes the column, which is `RequestCancelOutcome`'s `Terminal` in
+    // the cancel-durability lane; mapping that outcome here — one line at the
+    // return below — makes this read an optimization and the answer atomic.
     const current = yield* runs.get(input.runId).pipe(
       Effect.map((row) => row.status as string | undefined),
       Effect.catch(() => Effect.succeed(undefined))
