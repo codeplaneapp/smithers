@@ -9,13 +9,23 @@
  * and the control plane's own projection of the run moves to `cancelled` with
  * it (triage B-10 and B-11).
  *
- * The two "rows" of B-11 are one row. `SqlControlRuntime` keeps its runs in
- * `flows_runs` beside the engine's, with the control summary in `state_json`
- * and the engine status in `status`; a run the engine has activated carries the
- * engine's own `RunState` in `state_json`, so `summaryFrom` projects the
- * control status from `status` itself. That is why they cannot disagree
- * terminally — and it is exactly the property a regression would break, so it
- * is asserted here rather than assumed.
+ * One database is this file's test layering, not the product's shape. The
+ * shipped CLI keeps two: `.flows/control.db` holds the control plane's
+ * `flows_runs` row and `.flows/engine.db` holds the engine's, so one run has
+ * two rows in two files. They converge because the cancel is recorded durably
+ * on the ENGINE row through the `requestCancel` port and the owning driver
+ * settles from that request at its next tick; nothing projects one row onto
+ * the other. Here both halves share one database, which is why the case can
+ * assert the engine row and the control projection in one read — and why it
+ * proves the convergence rather than the impossibility of divergence.
+ *
+ * The fence between two local processes is soft for a second reason worth
+ * stating: `SqlControlRuntime`'s default identity is `{hostId: "local",
+ * pid: 0}` and `sameProcess` compares host and pid only, so every local CLI
+ * process is "the same process" to the store. That is why a cancel from a
+ * second process can answer `Terminal` rather than `Accepted`, and why the run
+ * process that parked a run can still write its terminal status after another
+ * process claimed the row.
  *
  * The `Flow.execute` fiber's own settlement after a cross-driver cancel is a
  * separate defect (triage N-09, `RunDriver.ts`, the cancel-durability lane), so
