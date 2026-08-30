@@ -267,25 +267,36 @@ describe("Control surface", () => {
     expect(accepted.value).toMatchObject({ _tag: "Accepted", runId: expect.any(String) })
   })
 
-  it("renders the receipt when the owned executor declines to execute the run", async () => {
-    const accepted = await Effect.runPromise(
-      Effect.gen(function*() {
-        const planned = yield* invoke(["--json", "plan", "demo/ship"])
-        const card = planned.value as { readonly approval: unknown }
-        const approval = JSON.stringify(card.approval)
-        yield* invoke(["--json", "approve", approval])
-        // The noop test executor answers `pending`, so the run never reaches
-        // `running` or a terminal status; the owned wait must still settle.
-        return yield* invoke(["--json", "run", approval]).pipe(Effect.timeout("5 seconds"))
-      }).pipe(
-        Effect.provide(ExecutorOwnership.layer(true)),
-        Effect.provide(testControl),
-        Effect.provide(scenarioServices),
-        Effect.provide(NodeServices.layer)
+  it("says the owned executor declined the run, and exits non-zero", async () => {
+    // The noop test executor answers `pending`, so the run never reaches
+    // `running` or a terminal status. Rendering the launch receipt there said
+    // `Accepted` and exited 0 for a run that will never take a single step,
+    // and left the operator nothing to read: no seat, no capability, and a
+    // durable run row parked at `accepted` forever.
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        Effect.gen(function*() {
+          const planned = yield* invoke(["--json", "plan", "demo/ship"])
+          const card = planned.value as { readonly approval: unknown }
+          const approval = JSON.stringify(card.approval)
+          yield* invoke(["--json", "approve", approval])
+          return yield* invoke(["--json", "run", approval]).pipe(Effect.timeout("5 seconds"))
+        }).pipe(
+          Effect.provide(ExecutorOwnership.layer(true)),
+          Effect.provide(testControl),
+          Effect.provide(scenarioServices),
+          Effect.provide(NodeServices.layer)
+        )
       )
     )
 
-    expect(accepted.value).toMatchObject({ _tag: "Accepted", runId: expect.any(String) })
+    expect(Exit.isFailure(exit)).toBe(true)
+    const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+    expect(error).toBeInstanceOf(CliError.UnsupportedError)
+    const message = (error as CliError.UnsupportedError).message
+    expect(message).toContain("the executor did not take it")
+    expect(message).toContain("smithers ps")
+    expect(CliError.exitCode(error as CliError.UnsupportedError)).toBe(1)
   })
 
   it("waits for a fresh park after resuming an owned run", async () => {

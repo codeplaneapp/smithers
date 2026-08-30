@@ -13,12 +13,16 @@ import * as TestControl from "@smthrs/control/test/TestControl"
 import { Cause, Effect, Exit, Layer, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { Command } from "effect/unstable/cli"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import * as CliError from "../src/CliError.ts"
 import { cli } from "../src/Command.ts"
 import * as ExecutorOwnership from "../src/ExecutorOwnership.ts"
 import * as NodeControl from "../src/NodeControl.ts"
 import * as Output from "../src/Output.ts"
+import * as Project from "../src/Project.ts"
 import { packageVersion } from "../src/Version.ts"
 
 const runCommand = Command.runWith(cli, { version: packageVersion })
@@ -511,7 +515,7 @@ describe("owned-run settlement", () => {
     ] as const
     const results = await Promise.all(settlements.map((kind) =>
       Effect.runPromise(
-        json(["--json", "run", "run-1", "--resume"]).pipe(
+        Effect.exit(json(["--json", "run", "run-1", "--resume"])).pipe(
           Effect.timeout("5 seconds"),
           Effect.provide(ExecutorOwnership.layer(true)),
           Effect.provide(
@@ -540,8 +544,20 @@ describe("owned-run settlement", () => {
     ))
 
     // Every settlement kind releases the wait; a non-settling event before it
-    // does not.
-    for (const receipt of results) expect(receipt).toMatchObject({ _tag: "Accepted" })
+    // does not. `control.run.pending` releases it with the executor's refusal
+    // rather than the launch receipt: the run is durable and stopped.
+    for (const [index, exit] of results.entries()) {
+      const kind = settlements[index]!
+      if (kind === "control.run.pending") {
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : "")).toContain(
+          "the executor did not take it"
+        )
+        continue
+      }
+      expect(Exit.isSuccess(exit)).toBe(true)
+      expect(Exit.isSuccess(exit) ? exit.value : undefined).toMatchObject({ _tag: "Accepted" })
+    }
   })
 })
 
@@ -575,6 +591,36 @@ describe("exit statuses", () => {
     expect(Exit.isFailure(exit)).toBe(true)
     if (Exit.isFailure(exit)) {
       expect(String(Cause.squash(exit.cause))).not.toContain("demo/ship")
+    }
+  })
+})
+
+describe("`gc` over a database it cannot open", () => {
+  it("names the file and fails, instead of rendering an empty sweep and exiting 0", async () => {
+    // `gc --dry-run` is trusted to name exactly what a real pass would delete.
+    // A file it could not even open rendered as `{ runs: [], deleted: {} }`
+    // with exit 0, which reads as "there is nothing to collect".
+    const root = mkdtempSync(join(tmpdir(), "smithers-gc-handler-"))
+    try {
+      mkdirSync(join(root, ".flows"), { recursive: true })
+      writeFileSync(join(root, ".flows", "control.db"), "not a database at all")
+
+      const exit = await Effect.runPromise(
+        Effect.exit(runCommand(["gc", "--dry-run", "--json"])).pipe(
+          Effect.provide(testControl),
+          Effect.provide(services),
+          Effect.provide(Project.layer(root)),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+      expect(error).toBeInstanceOf(CliError.UnsupportedError)
+      expect((error as CliError.UnsupportedError).message).toContain(join(root, ".flows", "control.db"))
+      expect(CliError.exitCode(error as CliError.UnsupportedError)).toBe(1)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   })
 })

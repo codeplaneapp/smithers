@@ -199,18 +199,23 @@ const settled = (kind: string): boolean =>
   kind === "control.run.failed" ||
   kind === "control.run.cancelled"
 
+/**
+ * Waits for the run to settle and reports the event kind that settled it, or
+ * `undefined` when nothing was waited for.
+ */
 const awaitRun = (
   control: ControlService.Service,
   runId: string,
   afterSequence: number | undefined
-): Effect.Effect<void, never> =>
+): Effect.Effect<string | undefined, never> =>
   control.watch(afterSequence === undefined ? { runId } : { runId, afterSequence }).pipe(
     Stream.filter((event) => settled(event.kind)),
     Stream.take(1),
-    Stream.runDrain,
+    Stream.runCollect,
+    Effect.map((events) => globalThis.Array.from(events)[0]?.kind),
     // A transport failure still lets the process close normally; remote CLI
     // ownership belongs to the server, and the receipt was already durable.
-    Effect.catchCause(() => Effect.void)
+    Effect.catchCause(() => Effect.succeed(undefined))
   )
 
 /**
@@ -234,12 +239,37 @@ const awaitOwnedRun = (
   control: ControlService.Service,
   receipt: ControlSchema.Receipt,
   afterSequence: number | undefined
-): Effect.Effect<void, never> =>
+): Effect.Effect<string | undefined, never> =>
   Effect.gen(function*() {
     const ownsExecutor = yield* ExecutorOwnership.ExecutorOwnership
-    if (!ownsExecutor || receipt._tag !== "Accepted" || receipt.runId === undefined) return
-    yield* awaitRun(control, receipt.runId, afterSequence)
+    if (!ownsExecutor || receipt._tag !== "Accepted" || receipt.runId === undefined) return undefined
+    return yield* awaitRun(control, receipt.runId, afterSequence)
   })
+
+/**
+ * Renders what the control plane knows about a declined launch, and returns
+ * the refusal the verb exits with.
+ *
+ * `control.run.pending` is the executor saying it will not take the run: no
+ * seat resolved, a capability was not granted, or the host refused it. The run
+ * row is durable and stays at `accepted` with nothing driving it. Printing the
+ * launch receipt there said `Accepted` and exited 0, which is the one answer
+ * that is wrong in both halves.
+ */
+const declinedLaunch = (control: ControlService.Service, runId: string) =>
+  Effect.gen(function*() {
+    const summary = yield* summaryOf(control, runId)
+    if (summary !== undefined) yield* render(summary)
+    return new CliError.UnsupportedError({
+      message: `Run ${runId} was accepted but the executor did not take it: it is ` +
+        `${summary?.status ?? "accepted"} with nothing running. This host resolved no seat for the flow, or ` +
+        `refused the launch. Read \`smithers status ${runId}\` and \`smithers ps\`, then run ` +
+        `\`smithers doctor\` to see which provider keys this project has.`
+    })
+  })
+
+/** Whether the settlement this process waited for was the executor declining. */
+const wasDeclined = (settlement: string | undefined): boolean => settlement === "control.run.pending"
 
 /** Every event of one run, oldest first. */
 const eventsOf = (control: ControlService.Service, runId: string) =>
@@ -290,7 +320,10 @@ const runResume = (planOrRunId: string) =>
         ? `cli:resume:${planOrRunId}`
         : `cli:resume:${planOrRunId}:${parkSequence}`
     })
-    yield* awaitOwnedRun(control, receipt, parkSequence)
+    const settlement = yield* awaitOwnedRun(control, receipt, parkSequence)
+    if (wasDeclined(settlement) && receipt._tag === "Accepted" && receipt.runId !== undefined) {
+      return yield* Effect.fail(yield* declinedLaunch(control, receipt.runId))
+    }
     return yield* render(receipt)
   })
 
@@ -321,7 +354,10 @@ const runLaunch = (payload: ControlService.ApprovalInput) =>
       idempotencyKey: payload.idempotencyKey
     })
     yield* announceAdmission(receipt)
-    yield* awaitOwnedRun(control, receipt, undefined)
+    const settlement = yield* awaitOwnedRun(control, receipt, undefined)
+    if (wasDeclined(settlement) && receipt._tag === "Accepted" && receipt.runId !== undefined) {
+      return yield* Effect.fail(yield* declinedLaunch(control, receipt.runId))
+    }
     yield* render(receipt)
   })
 
@@ -1060,7 +1096,14 @@ const gc = Command.make("gc", {
   Effect.gen(function*() {
     yield* guardGlobals
     const projectRoot = yield* Project.ProjectRoot
-    yield* render(yield* Gc.sweep(projectRoot, { olderThan: config.olderThan, dryRun: config.dryRun }))
+    const swept = yield* Gc.sweep(projectRoot, { olderThan: config.olderThan, dryRun: config.dryRun })
+    yield* render(swept)
+    // The report is rendered either way, so a `--json` caller still sees what
+    // the readable databases held; the status is what tells a script that the
+    // sweep was partial.
+    if (swept.failures.length > 0) {
+      return yield* Effect.fail(new CliError.UnsupportedError({ message: Gc.failureMessage(swept.failures) }))
+    }
   })).pipe(Command.withDescription(Verb.find("gc")!.help))
 
 const serveFlags = {
