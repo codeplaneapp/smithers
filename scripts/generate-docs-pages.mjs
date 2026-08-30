@@ -23,6 +23,7 @@ import {
   removedFlags,
   removedRpcs,
   removedForms,
+  partitionRemovals,
   exclusions,
   publishedPackages,
   releaseNotes,
@@ -69,6 +70,16 @@ const importSource = async (path) => import(pathToFileURL(join(repoRoot, path)).
 
 /** The CLI's own removal registry: the refusals and reasons a terminal prints. */
 const Unsupported = await importSource("packages/cli/src/Unsupported.ts")
+
+/**
+ * The removal rows whose parent command section 4.1 keeps, such as the
+ * `gateway status|stop` row under the surviving `gateway` alias.
+ *
+ * They are not removed verbs and get no row in the verb table, but their
+ * refusals link to `#<parent>`, so the guide owes each one a heading and the
+ * sentences printed under it.
+ */
+const survivingParents = partitionRemovals(Unsupported.removedVerbs, contractSource).parentSurvives
 
 const pages = new Map()
 
@@ -417,7 +428,27 @@ for (const [name, rpc] of rpcEntries) {
     lines.push(`| \`${cell(flag.parent)}\` | \`${cell(flag.flag)}\` | ${cell(contractProse(reason))} |`)
   }
   lines.push("")
-  for (const name of names) {
+  for (const name of [...names, ...survivingParents.map((verb) => verb.name)].sort()) {
+    const parent = survivingParents.find((verb) => verb.name === name)
+    if (parent !== undefined) {
+      // Not a removed verb: section 4.1 keeps the command and section 4.2
+      // removes subcommands of it. The heading exists because every one of
+      // those refusals links to `#<parent>`, and an operator who follows the
+      // link from their terminal has to land on the sentence they were shown.
+      const kept = [...aliases].filter((alias) => alias.split(/\s+/)[0] === name)
+      lines.push(
+        `### ${name}`,
+        "",
+        `Section 4.1 keeps ${(kept.length > 0 ? kept : [name]).map((form) => `\`smithers ${form}\``).join(" and ")}.` +
+          " These forms are removed, and each prints its own sentence:",
+        "",
+        "```",
+        ...parent.subcommands.map((sub) => Unsupported.message(`${name} ${sub}`, parent.reason, name)),
+        "```",
+        ""
+      )
+      continue
+    }
     const entry = removed.get(name)
     // Byte for byte what the binary prints. The contract decides which verbs are
     // removed; the binary owns the sentence it puts on a terminal, and the two

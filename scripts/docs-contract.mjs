@@ -150,6 +150,43 @@ export const removedForms = (source = readFileSync(contractPath, "utf8")) => {
 }
 
 /**
+ * Sorts the binary's removal table into the three shapes the guide documents.
+ *
+ * `Unsupported.removedVerbs` keys every row by a command name, including the
+ * rows that remove subcommands of a command section 4.1 keeps: the tip's
+ * `gateway status|stop` row is named `gateway`, and `smithers gateway` is the
+ * surviving `serve` alias. Reading that row as a removed verb is what makes a
+ * proof spawn `smithers gateway`, wait for a server that never exits, and
+ * report a fifteen-second kill instead of the shape it actually is.
+ *
+ * - `bare`: the name itself is gone. The guide gives it a `### <name>` block
+ *   and the binary refuses the bare verb.
+ * - `parentSurvives`: the parent runs and only the listed subcommands are
+ *   gone. The provable unit is `<name> <subcommand>`, never the bare name.
+ * - `contradictions`: a name section 4.1 ships that the removal table removes
+ *   outright, with no subcommands to qualify it. The command tree binds one of
+ *   the two meanings and the other is unreachable, so no spawn can prove
+ *   either. It is a defect in whichever source is wrong, and the caller
+ *   reports it by name.
+ *
+ * @param {ReadonlyArray<{ name: string, reason: string, subcommands?: ReadonlyArray<string> }>} removedVerbs the binary's table
+ * @param {string} [source] the contract text
+ * @returns {{ bare: Array<object>, parentSurvives: Array<object>, contradictions: Array<object> }}
+ */
+export const partitionRemovals = (removedVerbs, source = readFileSync(contractPath, "utf8")) => {
+  const available = availableCommands(source)
+  const bare = []
+  const parentSurvives = []
+  const contradictions = []
+  for (const verb of removedVerbs) {
+    if (!available.has(verb.name)) bare.push(verb)
+    else if (verb.subcommands !== undefined && verb.subcommands.length > 0) parentSurvives.push(verb)
+    else contradictions.push(verb)
+  }
+  return { bare, parentSurvives, contradictions }
+}
+
+/**
  * The control RPCs section 5.2 removes, read from its enforcement column.
  *
  * A CLI verb and an RPC can share a name: section 4.2 removes the 0.x

@@ -9,6 +9,7 @@ import {
   countCitingDocuments,
   commandName,
   namedRemovedSurfaces,
+  partitionRemovals,
   compatibilityPromise,
   contractPath,
   promiseHolders,
@@ -71,6 +72,30 @@ test("treats a surviving alias as available rather than removed", () => {
   const removed = removedCommands()
   assert.ok(!removed.has("gateway"), "gateway is an alias of serve, not a removed verb")
   assert.ok(availableCommands().has("inspect"))
+})
+
+test("sorts a removal row whose parent the contract keeps out of the bare verbs", () => {
+  // The tip's table names this row `gateway` and qualifies it with the two
+  // subcommands that went. Read as a bare removal it sends a proof at
+  // `smithers gateway`, which is the surviving `serve` alias and never exits.
+  const table = [
+    { name: "gateway", reason: "replaced by `smithers serve`", subcommands: ["status", "stop"] },
+    { name: "hijack", reason: "not available" }
+  ]
+  const { bare, contradictions, parentSurvives } = partitionRemovals(table)
+  assert.deepEqual(bare.map((verb) => verb.name), ["hijack"])
+  assert.deepEqual(parentSurvives.map((verb) => verb.name), ["gateway"])
+  assert.deepEqual(contradictions, [])
+})
+
+test("reports a row that removes a shipped name outright as a contradiction", () => {
+  // No subcommands to qualify it: section 4.1 ships `serve` and this table
+  // removes it, so the command tree binds one meaning and no spawn can prove
+  // the other. It is reported by name rather than run.
+  const { bare, contradictions, parentSurvives } = partitionRemovals([{ name: "serve", reason: "removed" }])
+  assert.deepEqual(contradictions.map((verb) => verb.name), ["serve"])
+  assert.deepEqual(bare, [])
+  assert.deepEqual(parentSurvives, [])
 })
 
 test("records a removed subcommand of a surviving verb as a form", () => {

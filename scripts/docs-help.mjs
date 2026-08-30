@@ -76,8 +76,13 @@ export const runHelp = (args, entry = cliEntry) => {
  * CI job rather than as the contradiction it is. `exited: false` is that
  * contradiction, and the caller reports it as an offender.
  *
+ * The bound is belt and braces. `signal` is the braces: a caller that owns a
+ * bound of its own, such as a test with a `timeout` option, passes its signal
+ * so the child dies with the caller instead of outliving it and holding the
+ * runner open long after the failure was reported.
+ *
  * @param {ReadonlyArray<string>} args the argument vector after the entry point
- * @param {{ entry?: string, timeoutMs?: number }} [options] entry point and bound
+ * @param {{ entry?: string, timeoutMs?: number, signal?: AbortSignal }} [options] entry point, bound, and the caller's cancellation
  * @returns {Promise<{ text: string, exited: boolean }>} combined output, and whether the child ended on its own
  */
 export const runCli = (args, options = {}) => {
@@ -92,6 +97,7 @@ export const runCli = (args, options = {}) => {
         encoding: "utf8",
         env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
         timeout,
+        signal: options.signal,
         killSignal: "SIGKILL"
       },
       (error, stdout, stderr) => {
