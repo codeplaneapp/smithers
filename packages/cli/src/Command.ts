@@ -236,8 +236,10 @@ const summaryOf = (control: ControlService.Service, runId: string) =>
 
 /** A digest of one 0.x notice, printed once per invocation. */
 const noticeLegacyState = Effect.gen(function*() {
-  const root = yield* Project.ProjectRoot
-  const found = Project.legacyState(root)
+  // The snapshot, not a fresh walk: this invocation's own control database
+  // has created `<root>/.flows` by now, and `Project.legacyState` reads that
+  // directory as proof the project already moved on (rc-contract section 6).
+  const found = yield* Project.LegacyState
   const first = found[0]
   if (first === undefined) return
   yield* Effect.sync(() => process.stderr.write(`${Project.legacyNotice(first)}\n`))
@@ -670,9 +672,10 @@ const migrate = Command.make("migrate", {
     yield* refuseRemoved("migrate", { to: config.to })
     const projectRoot = yield* Project.ProjectRoot
     const target = Option.getOrElse(config.path, () => projectRoot)
-    const databases = Project.legacyState(target)
-      .filter((path) => path.endsWith("smithers.db"))
-      .map(Legacy.read)
+    // `legacyDatabases`, not `legacyState`: the section 6 refusal is not
+    // gated on `.flows/` being absent, and the project being migrated has
+    // one by definition.
+    const databases = Project.legacyDatabases(target).map(Legacy.read)
     const refusal = Legacy.refusal(databases)
     if (refusal !== undefined) return yield* Effect.fail(new CliError.UnsupportedError({ message: refusal }))
     const control = yield* ControlService.Control
@@ -1015,7 +1018,7 @@ const doctor = Command.make("doctor", {}, () =>
     yield* guardGlobals
     const projectRoot = yield* Project.ProjectRoot
     const jj = ResolveJj.resolveJjBinary()
-    const report = Doctor.inspect({ root: projectRoot, jj })
+    const report = Doctor.inspect({ root: projectRoot, jj, legacyPaths: yield* Project.LegacyState })
     const root = yield* rootCommand
     yield* render(root.json ? report : Doctor.render(report))
     if (Doctor.failed(report)) {
@@ -1057,9 +1060,14 @@ const serveCommand = Command.make("serve", {
 
 // == section 4.2 refusals
 
-/** Every removed verb, as a hidden subcommand that exits 1 with its reason. */
+/**
+ * Every removed verb, as a hidden subcommand that exits 1 with its reason.
+ *
+ * `workflows` is registered here under its own spelling like the rest. The
+ * singular `workflow` is a separate command group, because `workflow list`
+ * survives as the `ls` alias, and it refuses on its own with the same reason.
+ */
 const removedCommands = Unsupported.removedVerbs
-  .filter((verb) => verb.name !== "workflows")
   .map((verb) =>
     Command.make(
       verb.name,
