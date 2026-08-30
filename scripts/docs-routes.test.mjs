@@ -104,17 +104,25 @@ test("every moved tree names where it went and how a reader gets there", () => {
 })
 
 test("a deferred route is allowed while its page is missing and retires when it lands", () => {
-  // One route is linked before its page exists: the release known-limitations
-  // page belongs to the release-enforcement work, and this lane links to it
-  // rather than authoring a second copy. The allowance is deliberate, so it is
-  // written down, and it expires by failing once the page arrives.
-  assert.deepEqual(deferredRoutes.map((entry) => entry.route), ["/release/known-limitations"])
+  // The rule, exercised on an entry of its own so it survives the shipped list
+  // being empty: an allowance holds while its page is missing and reports
+  // itself the moment the page arrives.
+  const entries = [
+    { route: "/release/known-limitations", owner: "release enforcement", reason: "two writers on one path collide at landing" }
+  ]
+  assert.deepEqual(deferredRouteProblems(new Set(["/installation"]), entries), [])
+  const landed = deferredRouteProblems(new Set(["/release/known-limitations"]), entries)
+  assert.equal(landed.length, 1, landed.join("\n"))
+  assert.match(landed[0], /\/release\/known-limitations/)
+})
+
+test("the shipped deferred list is empty, and every entry it ever carries names an owner", () => {
+  // `/release/known-limitations` was the one entry. The release-enforcement
+  // page landed, the route resolves, and the allowance retired as designed.
+  assert.deepEqual(deferredRoutes, [])
   for (const entry of deferredRoutes) {
     assert.ok(entry.owner.length > 0)
     assert.ok(entry.reason.length > 20)
   }
-  assert.deepEqual(deferredRouteProblems(new Set(["/installation"])), [])
-  const landed = deferredRouteProblems(new Set(["/release/known-limitations"]))
-  assert.equal(landed.length, 1, landed.join("\n"))
-  assert.match(landed[0], /\/release\/known-limitations/)
+  assert.deepEqual(deferredRouteProblems(new Set(["/release/known-limitations"])), [])
 })

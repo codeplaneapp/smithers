@@ -1,11 +1,12 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import test from "node:test"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, renameSync } from "node:fs"
 import { join } from "node:path"
 import { repoRoot } from "./docs-contract.mjs"
 import { helpBlock, helpEntry, parseHelp } from "./docs-help.mjs"
 import { pages } from "./docs-pages.mjs"
+import { regionEnd, regionStart } from "./docs-render.mjs"
 
 const help = [
   "DESCRIPTION",
@@ -120,22 +121,46 @@ test("a removed flag is given the reason the binary prints", () => {
   assert.match(page, /\| `--to &lt;backend&gt;` \| SQLite only; the 0\.x database move is removed \|/)
 })
 
-test("the release section ships no draft of the known-limitations page", () => {
+test("the release page is authored by its owner and this generator refreshes one region of it", () => {
   // The known-limitations page is written by the release-enforcement work from
   // the frozen contract's exclusion table, not by the documentation pipeline.
-  // Two sources writing one path collide at landing, so this lane links to the
-  // route and never authors the file.
-  assert.equal(existsSync(join(repoRoot, "docs/pages/release/known-limitations.md")), false)
+  // Two sources writing one path collide, so the pipeline owns the
+  // `release-notes` region and nothing else on the page. The prose on either
+  // side of the markers is the owner's and has to survive a generation.
+  const page = readFileSync(join(repoRoot, "docs/pages/release/known-limitations.md"), "utf8")
   assert.equal(existsSync(join(repoRoot, "docs/pages/release/known-limitations.mdx")), false)
+
+  const start = page.indexOf(regionStart("release-notes"))
+  const end = page.indexOf(regionEnd("release-notes"))
+  assert.ok(start > 0, "the page carries no release-notes region for the generator to refresh")
+  assert.ok(end > start, "the release-notes region is not closed")
+  assert.equal(page.indexOf(regionStart("release-notes"), start + 1), -1, "two release-notes regions")
+
+  const before = page.slice(0, start)
+  const after = page.slice(end)
+  assert.match(before, /^# Known limitations$/m)
+  assert.match(before, /The sections after the block are written by hand/)
+  assert.match(after, /^## Where each exclusion is enforced in the tree$/m)
+  assert.match(after, /^## What shipped, and is not a limitation$/m)
+  assert.match(page.slice(start, end), /^## Release notes$/m)
 })
 
 test("the generator runs green with the release page absent", () => {
   // A generator that reads a page it does not own crashes the documentation
-  // gate the moment that page arrives from somewhere else, or is not there yet.
-  // `--check` exercises the same code path as a write.
-  const result = spawnSync(process.execPath, [join(repoRoot, "scripts/generate-docs-pages.mjs"), "--check"], {
-    cwd: repoRoot,
-    encoding: "utf8"
-  })
-  assert.equal(result.status, 0, `${result.stdout ?? ""}${result.stderr ?? ""}`)
+  // gate the moment that page is not there: the release-enforcement work owns
+  // this one, and a lane branched before it landed has no such file. `--check`
+  // exercises the same code path as a write. The page is moved aside for the
+  // run rather than deleted, and put back whatever the spawn does.
+  const page = join(repoRoot, "docs/pages/release/known-limitations.md")
+  const parked = `${page}.absent-for-test`
+  renameSync(page, parked)
+  try {
+    const result = spawnSync(process.execPath, [join(repoRoot, "scripts/generate-docs-pages.mjs"), "--check"], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    })
+    assert.equal(result.status, 0, `${result.stdout ?? ""}${result.stderr ?? ""}`)
+  } finally {
+    renameSync(parked, page)
+  }
 })

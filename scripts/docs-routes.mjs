@@ -136,29 +136,25 @@ export const movedTrees = [
 /**
  * Routes this documentation links before the page answering them exists.
  *
- * One page of the site is written by the release-enforcement work from the
- * frozen contract's exclusion table. This lane links to its route and does not
- * author a second copy, so the link checker is told about the gap here instead
- * of being switched off. The entry expires by failing: once the page lands, the
- * route resolves and `deferredRouteProblems` asks for this list to shrink.
+ * The list is empty. It held one entry while the release-enforcement work still
+ * owed `/release/known-limitations`: this documentation linked the route and
+ * did not author a second copy, so the link checker was told about the gap here
+ * instead of being switched off. That page landed with the enforcement lane and
+ * the entry retired, which is how the allowance was built to end. A future gap
+ * of the same shape is written down the same way, with the owner who closes it
+ * and the reason two writers on one path collide.
  */
-export const deferredRoutes = [
-  {
-    route: "/release/known-limitations",
-    owner: "release enforcement",
-    reason:
-      "the exclusion table is generated from release contract section 7 by its owning work, and two writers on one path collide at landing"
-  }
-]
+export const deferredRoutes = []
 
 /**
  * Deferred entries that have outlived their gap, given the routes that exist.
  *
  * A deferred route whose page has landed is no longer deferred, and leaving the
- * entry in place would hide the next broken link behind it.
+ * entry in place would hide the next broken link behind it. The entries default
+ * to the shipped list; a caller passes its own to exercise the rule.
  */
-export const deferredRouteProblems = (routes) =>
-  deferredRoutes
+export const deferredRouteProblems = (routes, entries = deferredRoutes) =>
+  entries
     .filter((entry) => routes.has(entry.route))
     .map((entry) => `${entry.route} exists now: drop it from the deferred routes in scripts/docs-routes.mjs`)
 
