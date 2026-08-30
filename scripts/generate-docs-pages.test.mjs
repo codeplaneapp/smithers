@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import test from "node:test"
-import { existsSync, readFileSync, renameSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { repoRoot } from "./docs-contract.mjs"
 import { helpBlock, helpEntry, parseHelp } from "./docs-help.mjs"
@@ -145,22 +145,22 @@ test("the release page is authored by its owner and this generator refreshes one
   assert.match(page.slice(start, end), /^## Release notes$/m)
 })
 
-test("the generator runs green with the release page absent", () => {
-  // A generator that reads a page it does not own crashes the documentation
-  // gate the moment that page is not there: the release-enforcement work owns
-  // this one, and a lane branched before it landed has no such file. `--check`
-  // exercises the same code path as a write. The page is moved aside for the
-  // run rather than deleted, and put back whatever the spawn does.
-  const page = join(repoRoot, "docs/pages/release/known-limitations.md")
-  const parked = `${page}.absent-for-test`
-  renameSync(page, parked)
-  try {
-    const result = spawnSync(process.execPath, [join(repoRoot, "scripts/generate-docs-pages.mjs"), "--check"], {
-      cwd: repoRoot,
-      encoding: "utf8"
-    })
-    assert.equal(result.status, 0, `${result.stdout ?? ""}${result.stderr ?? ""}`)
-  } finally {
-    renameSync(parked, page)
-  }
+test("the generator runs green against the pages it does not own", () => {
+  // A generator that reads a page another body of work writes crashes the
+  // documentation gate the moment that page changes shape. `--check` exercises
+  // the same code path as a write, over the release pages the enforcement work
+  // owns and this generator only refreshes a region of.
+  //
+  // The absent-page half of the guard at `generate-docs-pages.mjs`'s
+  // `existsSync` is not spawned here. Faking the absence means renaming a
+  // tracked page out of the checkout, and `node --test` runs these files in
+  // parallel processes over one working copy: doing that failed
+  // `docs-contract.test.mjs` with ENOENT and `docs-sidebar.test.mjs` with a
+  // dangling `/release/known-limitations` in the same run. A test that breaks
+  // its neighbours proves less than the comment on the guard does.
+  const result = spawnSync(process.execPath, [join(repoRoot, "scripts/generate-docs-pages.mjs"), "--check"], {
+    cwd: repoRoot,
+    encoding: "utf8"
+  })
+  assert.equal(result.status, 0, `${result.stdout ?? ""}${result.stderr ?? ""}`)
 })
