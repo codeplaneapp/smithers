@@ -59,7 +59,7 @@ const main = Cli.run(Command.cli, { version: Version.packageVersion }).pipe(
 
 `@smthrs/cli/package.json` is exported for package metadata. `internal/*` and nested `*/index` subpaths are not public.
 
-Control servers bind `127.0.0.1` by default. See the [control-plane trust posture](../../docs/guides/control-plane-trust.md) before opting into a non-loopback bind.
+Control servers bind `127.0.0.1` by default. See the [control-plane trust posture](../../docs/pages/guides/control-plane-trust.md) before opting into a non-loopback bind.
 
 ## Manual smoke: run an agent flow with a real key
 

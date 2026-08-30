@@ -1,7 +1,7 @@
 /**
  * The single typed failure of the plugin kernel.
  *
- * Governing contract: D11 in `docs/architecture/design-decisions.md`. These
+ * Governing contract: D11 in `docs/pages/design-decisions.md`. These
  * failures cover bounded plugin resolution, configuration, layer composition,
  * and host-owned hook dispatch; they are not durable-engine lifecycle errors.
  *

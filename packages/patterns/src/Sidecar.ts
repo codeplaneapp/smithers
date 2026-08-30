@@ -8,7 +8,7 @@
  * failed primary is a failed run. {@link Escalation} is the pattern for
  * alternatives.
  *
- * @see docs/reference/patterns-loops.md
+ * @see docs/pages/api/patterns-loops.md
  *
  * @since 0.1.0
  */

@@ -12,7 +12,7 @@
  * (`docs/specs/Concepts/Events And Errors.md`), [[Engine Hardening Round 1]]
  * (`docs/specs/Concepts/Engine Hardening Round 1.md`),
  * `docs/specs/Concepts/Run Ownership.md`,
- * `docs/architecture/implementation-status.md`.
+ * `docs/pages/release/support-matrix.md`.
  *
  * @since 0.1.0
  */

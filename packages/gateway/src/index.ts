@@ -2,7 +2,7 @@
  * Workspace gateway contracts and supervision ports for flows.
  *
  * The mounts, the bind and credential policy, and the keepalive cadence are
- * documented in this package's README. `docs/reference/gateway.md` is the
+ * documented in this package's README. `docs/pages/api/gateway.md` is the
  * repository page for it and is the docs lane's to write.
  *
  * @since 0.1.0

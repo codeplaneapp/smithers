@@ -143,7 +143,7 @@ jobs:
           # A prerelease never takes `latest`: `npm install smthrs` and every
           # range that tracks the tag must keep resolving 0.35.0 until 1.0.0 is
           # final. Release candidates publish under `rc`, which is also pinned
-          # in each manifest's publishConfig.tag (docs/release-runbook.md).
+          # in each manifest's publishConfig.tag (docs/internal/release-runbook.md).
           publish_tag="latest"
           case "$release_version" in *-*) publish_tag="rc" ;; esac
           node -e '

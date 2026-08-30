@@ -3,7 +3,7 @@
  * whether it is gated by an approval, and a denial either stops the runbook or
  * skips the step.
  *
- * @see docs/reference/patterns-teams.md
+ * @see docs/pages/api/patterns-teams.md
  *
  * @since 0.1.0
  */

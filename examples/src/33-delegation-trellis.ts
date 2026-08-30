@@ -18,7 +18,7 @@
  *
  * Each round is its own journal segment, so a crash resumes at a round boundary
  * and never inside a tree no graph described. See
- * `docs/reference/patterns-delegation.md`.
+ * `docs/pages/api/patterns-delegation.md`.
  */
 import { Action, Flow, Graph, Interpreter } from "@smthrs/flow"
 import { Trellis } from "@smthrs/patterns"

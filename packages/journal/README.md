@@ -90,7 +90,7 @@ consistent across the package boundary: it runs a state projection and the
 through the same `DurableWriter`, so their writes join it as savepoints — and
 defers publication until that transaction commits. Either a transition and its
 lifecycle entry are both durable, or neither is. See
-[implementation status](../../docs/architecture/implementation-status.md).
+[implementation status](../../docs/pages/release/support-matrix.md).
 
 One coupling outlives the split at the SQL level: a fenced `emitDurable` gates
 its insert on a `flows_runs` row still naming the given owner, so the journal
@@ -98,5 +98,5 @@ reads a table `@smthrs/run-store` owns. `test/JournalFence.test.ts` pins that
 contract here against a fixture of the columns the fence reads;
 `@smthrs/engine-store` pins it against the real migrated schema.
 
-See the [journal reference](../../docs/reference/journal.md) and
-[journal concepts](../../docs/concepts/journal.md).
+See the [journal reference](../../docs/pages/api/journal.md) and
+[journal concepts](../../docs/pages/concepts/journal.md).

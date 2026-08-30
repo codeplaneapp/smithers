@@ -1,7 +1,7 @@
 /**
  * The plugin object: a plain record produced by a factory function.
  *
- * Governing contract: D11 in `docs/architecture/design-decisions.md`. The
+ * Governing contract: D11 in `docs/pages/design-decisions.md`. The
  * shipped consumer is the assembled cell host in `@smthrs/agent`;
  * durable-core policy continues to use Effect services and constructor
  * options rather than plugin lifecycle hooks.

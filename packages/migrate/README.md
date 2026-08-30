@@ -118,5 +118,5 @@ The first live case spawns the built bin, which is what an operator runs. Its `t
 ## Guides
 
 - `skills/migrate-smithers-v1/SKILL.md`: when to run it and what to do with the report.
-- `docs/guides/migrating-from-0x.md`: the operator guide.
-- `docs/reference/migrate.md`: the API reference.
+- `docs/pages/migration/1.0.md`: the operator guide.
+- `docs/pages/migration/migrate-tool.md`: the API reference.

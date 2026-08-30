@@ -8,7 +8,7 @@
  * `Node.all` per batch, batches sequenced. {@link run} is the Effect form of
  * the same contract.
  *
- * @see docs/concepts/concurrency.md
+ * @see docs/pages/concepts/concurrency.md
  *
  * @since 0.1.0
  */

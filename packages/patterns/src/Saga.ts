@@ -5,7 +5,7 @@
  * changed the world". Each step registers the call that undoes it, and a
  * failure walks those calls backwards, most recent first.
  *
- * @see docs/concepts/failure-and-retry.md
+ * @see docs/pages/concepts/failure-and-retry.md
  *
  * @since 0.1.0
  */

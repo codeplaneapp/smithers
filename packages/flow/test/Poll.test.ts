@@ -35,7 +35,7 @@ const probeLayer = Probe.toLayer(({ attempt, until }) =>
 )
 
 /**
- * A check whose own work never answers, bounded the way `docs/reference/flow.md`
+ * A check whose own work never answers, bounded the way `docs/pages/api/flow.md`
  * says to bound one: the work is raced against a durable clock INSIDE the
  * check's implementation, and the clock's branch reports "not ready yet" so the
  * poll goes on to its next attempt instead of hanging on this one.

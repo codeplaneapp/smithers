@@ -11,7 +11,7 @@
  * worst case. {@link run} performs the real fan-out over the issues the
  * scanner actually returned.
  *
- * @see docs/reference/patterns-loops.md
+ * @see docs/pages/api/patterns-loops.md
  *
  * @since 0.1.0
  */

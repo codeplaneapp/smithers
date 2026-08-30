@@ -60,7 +60,7 @@ are `node:sqlite`-backed, so a browser deployment must supply its own.
 Platform implementations are never re-exported through the namespaces here
 either. Import `@smthrs/platform-node`, `@smthrs/platform-bun`,
 `@smthrs/kernel/test/TestHost`, `@smthrs/database/node/NodeDatabase`, or
-`@smthrs/journal/test/TestJournal` directly. See [browser support](../../docs/architecture/browser-support.md).
+`@smthrs/journal/test/TestJournal` directly. See [browser support](../../docs/pages/architecture/browser-support.md).
 
 ## The Node runtime
 
@@ -93,4 +93,4 @@ disposition: a second signal leaves immediately, and a shutdown that outlasts
 disposition would have produced.
 
 See the [documentation index](../../docs/README.md) and
-[flows reference](../../docs/reference/flows.md).
+[flows reference](../../docs/pages/api/flows.md).

@@ -5,7 +5,7 @@
  * topology, unrolling the bound so a plan states the worst case. `run` is the
  * Effect that stops when the work is actually done. This program uses `run`,
  * because the value the loop stops on is a runtime value; see
- * `docs/reference/patterns-loops.md` for what the declarations look like.
+ * `docs/pages/api/patterns-loops.md` for what the declarations look like.
  *
  * The fixtures are deterministic, so the program answers the same way on every
  * run and needs no model, no engine, and no network.

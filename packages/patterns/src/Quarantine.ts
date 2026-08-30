@@ -7,7 +7,7 @@
  * member instead: its siblings run to completion and the join returns a record
  * of settled values and {@link Quarantined} markers.
  *
- * @see docs/concepts/concurrency.md
+ * @see docs/pages/concepts/concurrency.md
  *
  * @since 0.1.0
  */

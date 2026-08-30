@@ -22,7 +22,7 @@ deployment must supply its own SQL client.
 
 `scripts/browser-check.mjs` at the repository root pins that boundary: it
 bundles this entry point for the browser and fails the build if it regresses.
-See [browser support](../../docs/architecture/browser-support.md).
+See [browser support](../../docs/pages/architecture/browser-support.md).
 
 ## Public API
 
@@ -85,7 +85,7 @@ verification and `ActionPersistence` never publishes it. Compose
 workspace instead — seeded with exactly its declared read set, diffed whole at
 settlement, copied back as a compare-and-set on every pre-image — and its
 result becomes eligible for the shared cross-run cache. `examples/src/durable-layer.ts`
-is that composition; `docs/concepts/hosts-and-capabilities.md` explains why the
+is that composition; `docs/pages/concepts/hosts-and-capabilities.md` explains why the
 transaction is not a security boundary.
 
 `RunStore`, `AttemptStore`, `CacheStore`, and `DurableEngineState` are the
@@ -197,6 +197,6 @@ needs human review; and scheduled recertification cadence, because scheduling
 nightly or per-merge full passes is a product/system-flow concern. The
 recertification primitive itself ships here.
 
-See the [engine-store reference](../../docs/reference/engine-store.md),
-[durable execution model](../../docs/concepts/durable-execution-model.md), and
-[step keys](../../docs/concepts/step-keys.md).
+See the [engine-store reference](../../docs/pages/api/engine-store.md),
+[durable execution model](../../docs/pages/concepts/durable-execution-model.md), and
+[step keys](../../docs/pages/concepts/step-keys.md).

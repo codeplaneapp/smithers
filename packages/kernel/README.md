@@ -119,6 +119,6 @@ runs it after Effect's own kill finalizer.
 `detached` option everywhere except win32. A win32 record claiming `pgid = pid`
 would name a group the child does not lead, so it records no group instead.
 
-See the [kernel reference](../../docs/reference/kernel.md),
-[host and capability concepts](../../docs/concepts/hosts-and-capabilities.md), and
-[step keys](../../docs/concepts/step-keys.md).
+See the [kernel reference](../../docs/pages/api/kernel.md),
+[host and capability concepts](../../docs/pages/concepts/hosts-and-capabilities.md), and
+[step keys](../../docs/pages/concepts/step-keys.md).

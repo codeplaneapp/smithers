@@ -2,7 +2,7 @@
  * Supervisor pattern: one boss plans, workers execute in parallel, the boss
  * reviews, and only the tasks the review calls retriable are re-delegated.
  *
- * @see docs/reference/patterns-teams.md
+ * @see docs/pages/api/patterns-teams.md
  *
  * @since 0.1.0
  */

@@ -2,7 +2,7 @@
  * The dispatcher: a plain service over a resolved plugin list, generic over the
  * hook interface.
  *
- * Governing contract: D11 in `docs/architecture/design-decisions.md`. Each
+ * Governing contract: D11 in `docs/pages/design-decisions.md`. Each
  * host holds an instance over its augmented `FlowsHooks` and may dispatch only
  * the runtime catalog it supplied. The shipped cell host owns the three
  * waterfalls declared in `packages/agent/src/CellPlugin.ts`; there is

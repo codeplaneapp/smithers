@@ -2,10 +2,10 @@
 
 The Smithers step result cache: which sealed action results may be reused.
 Split out of `@smthrs/journal`; see
-[journal concepts](../../docs/concepts/journal.md).
+[journal concepts](../../docs/pages/concepts/journal.md).
 
 `CacheStore` is a keyed memoization of sealed step results, addressed by the
-step key digest of [step keys](../../docs/concepts/step-keys.md). It is
+step key digest of [step keys](../../docs/pages/concepts/step-keys.md). It is
 deliberately called a _cache_: entries may be evicted, a stale entry is a miss
 rather than a corruption, and admission is gated the same way for normal
 execution, replay, and speculation validation alike.
@@ -74,5 +74,5 @@ append-only `flows_step_cache_recorded` ledger, because an old frame's replay
 projects what that event recorded and deleting the evidence would change a
 replayed answer.
 
-See the [step-cache reference](../../docs/reference/step-cache.md) and
-[step keys](../../docs/concepts/step-keys.md).
+See the [step-cache reference](../../docs/pages/api/step-cache.md) and
+[step keys](../../docs/pages/concepts/step-keys.md).

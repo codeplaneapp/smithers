@@ -292,7 +292,7 @@ const Deployment = Poll.make("deploy/wait", {
 // A spent budget fails Poll.PollExhausted, which a body catches like any
 // other declared failure. Provide Poll.layer beside Sleep.layer. A check that
 // can hang bounds itself: race the work against a durable clock inside the
-// check's own implementation (docs/reference/flow.md shows the recipe), so the
+// check's own implementation (docs/pages/api/flow.md shows the recipe), so the
 // bound is replayable and a check that ran out of time costs one attempt.
 //
 // A schedule no clock can keep is refused at declaration with a RangeError:
@@ -338,7 +338,7 @@ const recorded = HumanTask.answer({ token, value: { decision: "ship" } })
 // `timeoutMs` races the answer against one durable clock per question. Both
 // hosts resume a run parked on that race, so a deadline settles under
 // `@smthrs/engine`'s in-process engine and under the SQLite engine store
-// alike (docs/reference/flow.md has the detail).
+// alike (docs/pages/api/flow.md has the detail).
 ```
 
 ### DurableClock — durable sleep
@@ -453,6 +453,6 @@ RetryPolicy.isNonRetryable(policy, new Error("x"))
 // yields RetryPolicy.RetryAttemptsExhausted.
 ```
 
-See the [engine reference](../../docs/reference/engine.md),
-[failure and retry](../../docs/concepts/failure-and-retry.md), and
-[step keys](../../docs/concepts/step-keys.md).
+See the [engine reference](../../docs/pages/api/engine.md),
+[failure and retry](../../docs/pages/concepts/failure-and-retry.md), and
+[step keys](../../docs/pages/concepts/step-keys.md).

@@ -70,5 +70,5 @@ satisfies the type and leaks a process for every cancelled action, so the check
 waits `Commands.stopsWithin` for the command to stop and names it when it does
 not.
 
-See the [sandbox reference](../../docs/reference/sandbox.md) and the
-[kernel reference](../../docs/reference/kernel.md).
+See the [sandbox reference](../../docs/pages/api/sandbox.md) and the
+[kernel reference](../../docs/pages/api/kernel.md).

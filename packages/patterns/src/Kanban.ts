@@ -2,7 +2,7 @@
  * Kanban pattern: move every item through an ordered list of columns, with a
  * concurrency bound applied inside each column.
  *
- * @see docs/reference/patterns-teams.md
+ * @see docs/pages/api/patterns-teams.md
  *
  * @since 0.1.0
  */

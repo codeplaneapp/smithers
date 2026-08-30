@@ -7,7 +7,7 @@
  * `@smthrs/flow` `RetryPolicy`, so a pattern policy and an engine policy
  * translate one to one.
  *
- * @see docs/concepts/failure-and-retry.md
+ * @see docs/pages/concepts/failure-and-retry.md
  * @see docs/specs/Concepts/Injection And Decoration.md
  *
  * @since 0.1.0

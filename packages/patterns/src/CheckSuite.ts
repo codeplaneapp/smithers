@@ -2,7 +2,7 @@
  * Check-suite pattern: run independent checks with bounded concurrency and
  * reduce their rows to one verdict.
  *
- * @see docs/reference/patterns-teams.md
+ * @see docs/pages/api/patterns-teams.md
  *
  * @since 0.1.0
  */

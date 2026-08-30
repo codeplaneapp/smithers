@@ -27,7 +27,7 @@ driver is platform-specific, so they live under explicit subpaths.
 
 Any Effect `SqlClient` works underneath `DurableWriter.layer()`, so a browser or
 Postgres client gets the same normalized errors and write retry — see
-[browser support](../../docs/architecture/browser-support.md).
+[browser support](../../docs/pages/architecture/browser-support.md).
 
 ```ts
 import { DurableWriter } from "@smthrs/database"
@@ -147,5 +147,5 @@ transaction policy that must live at one boundary:
   PGlite, and Postgres one stable `busy`/`constraint`/`io` vocabulary, so
   store logic never branches on driver-specific codes.
 
-See the [database reference](../../docs/reference/database.md) and
-[journal concepts](../../docs/concepts/journal.md).
+See the [database reference](../../docs/pages/api/database.md) and
+[journal concepts](../../docs/pages/concepts/journal.md).

@@ -7,7 +7,7 @@
  * handler claimed. The declaration shows the finalizer on both arms, so a
  * reader sees that nothing leaves the boundary without it.
  *
- * @see docs/concepts/failure-and-retry.md
+ * @see docs/pages/concepts/failure-and-retry.md
  *
  * @since 0.1.0
  */

@@ -93,5 +93,5 @@ subscriber, and never grows the process on its behalf. A subscriber that loses
 a notification re-lists — `RunCatalog.list` and `BranchPresence.list` are the
 authoritative state — so a dropped notification never loses state.
 
-See the [sync reference](../../docs/reference/sync.md) and
-[sync concepts](../../docs/concepts/sync.md).
+See the [sync reference](../../docs/pages/api/sync.md) and
+[sync concepts](../../docs/pages/concepts/sync.md).

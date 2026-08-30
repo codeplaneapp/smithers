@@ -143,4 +143,4 @@ smithers logs <run-id> --json     # the events, including any correction round
 ```
 
 See `skills/smithers/SKILL.md` for the runtime and CLI surface, and
-`docs/guides/writing-a-flow.md` for the exact decode-and-correct mechanics.
+`docs/pages/guides/writing-a-flow.md` for the exact decode-and-correct mechanics.

@@ -11,7 +11,7 @@
  *
  * For a loop whose rounds must survive a crash, hand each iteration to the
  * durable trampoline instead: `Flow.to` with `maxRounds`, described in
- * `docs/reference/patterns-loops.md`.
+ * `docs/pages/api/patterns-loops.md`.
  *
  * @see docs/specs/Concepts/Higher Order Flows.md
  *

@@ -120,4 +120,4 @@ recorded answer, which is exactly what you want while tuning and worth knowing
 before you reformat a prompt you did not mean to re-run.
 
 See `skills/smithers/SKILL.md` for the runtime and CLI surface, and
-`docs/guides/writing-a-flow.md` for the model-call declaration in full.
+`docs/pages/guides/writing-a-flow.md` for the model-call declaration in full.

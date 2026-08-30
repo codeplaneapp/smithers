@@ -90,5 +90,3 @@ cachedModelTest("chat answers a balance question", {
 
 Replay is the default: no network, no key. `SMTHRS_RECORD=1` records against
 the live seat named by `options.live` and rewrites the fixture.
-
-See [the create-app guide](../../docs/pages/create-app.md).

@@ -5,7 +5,7 @@
  * and hands one moderator every answer. {@link make} declares that topology,
  * {@link run} performs it.
  *
- * @see docs/concepts/concurrency.md
+ * @see docs/pages/concepts/concurrency.md
  *
  * @since 0.1.0
  */

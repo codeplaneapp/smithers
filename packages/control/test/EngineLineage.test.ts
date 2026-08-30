@@ -49,7 +49,7 @@ const Child = Flow.make("engine-lineage/child", {
  *
  * A body is planned rather than run, so the execution that makes one run the
  * parent of another happens inside a handler, where the parent's own
- * `FlowInstance` is the ambient one (`docs/concepts/subflows.md`).
+ * `FlowInstance` is the ambient one (`docs/pages/concepts/subflows.md`).
  */
 const StartChildren = Action.make("engine-lineage/start-children", {
   payload: {},

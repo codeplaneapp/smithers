@@ -4,7 +4,7 @@
  * GC trigger (SQLite-only syntax), and the stale-running partial index — and
  * a future Postgres/PGlite backend dies at layer construction on them. They
  * were previously inline `sql` literals with no machine-readable inventory,
- * so the porting plan in `docs/architecture/smithers-replacement-gaps.md`
+ * so the porting plan in `docs/migration/smithers-replacement-gaps.md`
  * could omit them silently.
  *
  * The inventory in `internal/EngineStateSchema` is now the single source of

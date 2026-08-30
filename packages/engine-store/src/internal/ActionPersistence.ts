@@ -799,7 +799,7 @@ export const make = (deps: Dependencies) => {
             const receiverOption = yield* Effect.serviceOption(Inconsistency.Inconsistency)
             // Core default is STRICT: journal the conflict and fail the run,
             // which is Skyframe's throwing `GraphInconsistencyReceiver`
-            // (`docs/architecture/implementation-status.md`, cache-conflict
+            // (`docs/pages/release/support-matrix.md`, cache-conflict
             // receiver). Providing `Inconsistency.layerTolerant` opts out.
             const receiver = Option.isSome(receiverOption)
               ? receiverOption.value

@@ -148,5 +148,5 @@ does not own the mount and never syncs for you.
   `conflict`, `invalid_ref`, and `unknown`; `not_installed` comes from the TS
   side — `layerUnsupported`, kept exported for hosts that ship no module.
 
-See the [kernel reference](../../docs/reference/kernel.md), which owns the closed
+See the [kernel reference](../../docs/pages/api/kernel.md), which owns the closed
 host service list this contract is one slot of.

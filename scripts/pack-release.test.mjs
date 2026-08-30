@@ -127,7 +127,7 @@ test("the packed set is exactly the 40 names the RC contract publishes", () => {
 test("every packed manifest carries the RC version and the rc dist-tag", () => {
   // A prerelease published to `latest` would upgrade every `smthrs`-adjacent
   // install that tracks the tag, so the tag is pinned per manifest as well as
-  // on the publish command (docs/release-runbook.md).
+  // on the publish command (docs/internal/release-runbook.md).
   const manifests = readWorkspaceManifests()
   for (const directory of workspaces) {
     const manifest = manifests.get(directory)

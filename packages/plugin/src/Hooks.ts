@@ -2,7 +2,7 @@
  * The typed hook surface: hook kinds, the hook entry shape, and the shared
  * kernel's base hook catalog.
  *
- * Governing contract: D11 in `docs/architecture/design-decisions.md`. The
+ * Governing contract: D11 in `docs/pages/design-decisions.md`. The
  * shared catalog is limited to `config` and `configResolved`;
  * `@smthrs/agent` adds only `cellRegistry`, `cellFlows`, and
  * `cellModelRequest`. Durable-core lifecycle policy is not a hook catalog.

@@ -42,5 +42,5 @@ const rewound = Effect.gen(function*() {
 })
 ```
 
-See the [time-travel reference](../../docs/reference/time-travel.md) and
-[time-travel concepts](../../docs/concepts/time-travel.md).
+See the [time-travel reference](../../docs/pages/api/time-travel.md) and
+[time-travel concepts](../../docs/pages/concepts/time-travel.md).

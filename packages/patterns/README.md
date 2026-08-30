@@ -53,4 +53,4 @@ so on a core flow the policy is a declaration: it renames the wrapper, enters it
 captured key material, and travels with the flow until the bridge lowers it onto
 the dispatched action. For a policy the engine acts on now, declare it on the
 action with `CacheEnvironment.withCache(action, policy)` from `@smthrs/flow`. See
-`docs/reference/step-cache.md`.
+`docs/pages/api/step-cache.md`.

@@ -12,7 +12,7 @@
  * candidates against a fixed suite belongs above the pattern layer, in the
  * caller that owns the suite.
  *
- * @see docs/reference/patterns-loops.md
+ * @see docs/pages/api/patterns-loops.md
  *
  * @since 0.1.0
  */

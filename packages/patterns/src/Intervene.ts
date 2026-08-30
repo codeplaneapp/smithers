@@ -2,7 +2,7 @@
  * Intervene pattern: read a target, propose a change, apply it behind an
  * optional approval, and report what happened.
  *
- * @see docs/reference/patterns-teams.md
+ * @see docs/pages/api/patterns-teams.md
  *
  * @since 0.1.0
  */

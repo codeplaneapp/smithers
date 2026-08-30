@@ -61,7 +61,7 @@ node scripts/set-release-version.mjs --check 1.0.0-rc.0
 git add packages/*/package.json pnpm-lock.yaml bun.lock
 git commit -m "🔧 chore(release): set every manifest to 1.0.0-rc.0
 
-Docs: docs/release-runbook.md"
+Docs: docs/internal/release-runbook.md"
 ```
 
 Land that commit on `main` the normal way (pull request, or a direct push if

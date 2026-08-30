@@ -25,7 +25,7 @@ import type { ControlEvent } from "./ControlSchema.ts"
  * How a run came to exist.
  *
  * The three values are the lineage-edge kinds of
- * `docs/concepts/time-travel.md`: a `child` is a run its parent spawned, a
+ * `docs/pages/concepts/time-travel.md`: a `child` is a run its parent spawned, a
  * `fork` is a run branched off a parent frame, and a `continuation` is a later
  * round of one trampoline lineage. A rewind is deliberately absent — it
  * truncates a run in place and creates none — and a run with no ancestor has

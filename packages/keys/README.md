@@ -30,4 +30,4 @@ const key = Effect.runSync(
 // "key1_<64 lowercase hex>"
 ```
 
-See the [keys reference](../../docs/reference/keys.md).
+See the [keys reference](../../docs/pages/api/keys.md).

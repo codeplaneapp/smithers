@@ -9,9 +9,9 @@
  * to look is a deployment decision rather than a property of the check: wrap
  * {@link run} in `Loop.run` for rounds inside one execution, or hand it to a
  * `@smthrs/triggers` schedule for rounds the control plane owns. The recipe is
- * in `docs/reference/patterns-loops.md`.
+ * in `docs/pages/api/patterns-loops.md`.
  *
- * @see docs/reference/patterns-loops.md
+ * @see docs/pages/api/patterns-loops.md
  *
  * @since 0.1.0
  */

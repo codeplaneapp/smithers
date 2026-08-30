@@ -2,7 +2,7 @@
  * Merge-queue pattern: land a set of members in one prioritized order, at a
  * concurrency the queue owns rather than the members.
  *
- * @see docs/reference/patterns-teams.md
+ * @see docs/pages/api/patterns-teams.md
  *
  * @since 0.1.0
  */

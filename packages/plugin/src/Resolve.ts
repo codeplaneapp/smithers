@@ -1,7 +1,7 @@
 /**
  * Plugin resolution: flatten, filter, validate, order — once, at construction.
  *
- * Governing contract: D11 in `docs/architecture/design-decisions.md`. Runtime
+ * Governing contract: D11 in `docs/pages/design-decisions.md`. Runtime
  * dispatch is an array walk over the frozen, host-supplied catalog this module
  * produces; there is no lookup, late registration, or durable-engine lifecycle
  * registry after startup.

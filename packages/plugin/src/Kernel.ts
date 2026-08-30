@@ -2,7 +2,7 @@
  * Startup: resolve the plugin list, run the config pipeline, hand back a
  * dispatcher, a frozen config, and the merged layer.
  *
- * Governing contract: D11 in `docs/architecture/design-decisions.md`, with the
+ * Governing contract: D11 in `docs/pages/design-decisions.md`, with the
  * shipped host catalog in `packages/agent/src/CellPlugin.ts`. This
  * startup composes the bounded cell-host extension point; it does not install
  * lifecycle hooks into the durable engine.

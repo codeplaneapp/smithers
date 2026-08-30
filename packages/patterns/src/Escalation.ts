@@ -7,7 +7,7 @@
  * every rung escalated, which is where a human approval flow belongs.
  *
  * @see docs/specs/Concepts/Higher Order Flows.md
- * @see docs/concepts/failure-and-retry.md
+ * @see docs/pages/concepts/failure-and-retry.md
  *
  * @since 0.1.0
  */

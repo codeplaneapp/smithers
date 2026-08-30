@@ -63,7 +63,7 @@ export type BunHost = FileSystem | Path.Path | ChildProcessSpawner | Jj | HttpCl
  *
  * These strings are identity tokens digested into step keys, not import
  * specifiers, so a rename invalidates every cached step run against a Bun
- * host ([[Step Keys]], `docs/concepts/step-keys.md`).
+ * host ([[Step Keys]], `docs/pages/concepts/step-keys.md`).
  *
  * @category models
  * @since 0.1.0
