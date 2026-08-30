@@ -168,6 +168,24 @@ export class LaunchFailed extends Schema.TaggedError<LaunchFailed>()("/control/L
 }) {}
 
 /**
+ * A signal named a wait point the run does not have open.
+ *
+ * `Control.signal` completes the `WaitFor` deferred a run is parked on. A
+ * signal whose name matches no open wait point completes nothing, and recording
+ * it anyway would leave an operator watching a delivery that never lands, so it
+ * is refused where it arrives.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class NoMatchingWait extends Schema.TaggedError<NoMatchingWait>()("/control/NoMatchingWait", {
+  code: constantCode("no_matching_wait"),
+  runId: RunId,
+  name: Schema.String
+}) {}
+
+/**
  * A credential write lost a race: the record moved on before this writer
  * committed, so the update is refused rather than silently overwriting the
  * winner.
@@ -203,3 +221,4 @@ export type ControlError =
   | TransportError
   | PersistenceError
   | LaunchFailed
+  | NoMatchingWait

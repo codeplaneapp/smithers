@@ -154,7 +154,7 @@ const lastAttemptFailed = (events: ReadonlyArray<ControlEvent>): boolean => {
  * | `failed` | `failing` | The run itself reported the failure. |
  * | `completed`, `cancelled` | `healthy` | A finished run needs nothing. |
  * | `waiting-approval`, or parked on `approval` | `awaiting-human` | A human owes it an answer; no machine can supply one. |
- * | Parked with no waiting reason | `awaiting-human` | Only `Control.pause` parks a run without declaring a reason, so a person stopped it and a person restarts it. |
+ * | Parked with no waiting reason | `awaiting-human` | Only an operator's own park writes no waiting reason, so a person stopped it and a person restarts it. |
  * | `roundOrdinal` at or past the bound | `runaway-loop` | The lineage is looping without converging. |
  * | The last settled attempt failed | `failing` | The run is still alive but its work is not landing. |
  * | No progress for `stallBeats`, an attempt open | `wedged-node` | One attempt started and never settled: the work is stuck, not the run. |
@@ -167,9 +167,9 @@ const lastAttemptFailed = (events: ReadonlyArray<ControlEvent>): boolean => {
  *
  * A park with no reason is the same case. The engine names every park it makes
  * — `event`, `approval`, `timer`, `quota`, `released` — so a parked run whose
- * `waitingReason` is absent was paused through `Control.pause` by an operator.
- * Calling that a stall and resuming it would undo a deliberate act, which is
- * the worst thing an unattended heal loop can do.
+ * `waitingReason` is absent was parked by an operator through
+ * `ControlRuntime.writeStatus`. Calling that a stall and resuming it would undo
+ * a deliberate act, which is the worst thing an unattended heal loop can do.
  *
  * @param observation what the beat saw
  * @category projections

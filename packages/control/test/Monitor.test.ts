@@ -19,6 +19,7 @@ import { ControlRuntime } from "../src/ControlRuntime.ts"
 import type { ControlEvent, RunSummary } from "../src/ControlSchema.ts"
 import * as Monitor from "../src/Monitor.ts"
 import { durable, type DurableStack } from "./DurableStack.ts"
+import { park } from "./Park.ts"
 
 /** Parks a run on a reason the way the engine parks one. */
 const parkOn = (runId: string, reason: string) =>
@@ -105,7 +106,7 @@ describe("Monitor.classify", () => {
       "awaiting-human"
     ],
     [
-      "a run an operator paused, which declares no waiting reason",
+      "a run an operator parked, which declares no waiting reason",
       { summary: summary({ status: "parked" }), beatsWithoutProgress: 9 },
       "awaiting-human"
     ],
@@ -213,10 +214,9 @@ describe("Monitor.run over the durable control plane", () => {
 
   it("calls an approval-parked run awaiting-human and heals nothing", async () => {
     const observed = await run(Effect.gen(function*() {
-      const control = yield* Control
       const runtime = yield* ControlRuntime
       const runId = yield* start("approval")
-      yield* control.pause({ runId, idempotencyKey: `pause:${runId}` })
+      yield* park(runtime, runId)
       yield* parkOn(runId, "approval")
       const before = yield* runtime.getRun(runId)
       const report = yield* Monitor.run({
@@ -244,9 +244,8 @@ describe("Monitor.run over the durable control plane", () => {
 
   it("resumes a stalled run once and stops when the resume moves it", async () => {
     const observed = await run(Effect.gen(function*() {
-      const control = yield* Control
       const runId = yield* start("stalled")
-      yield* control.pause({ runId, idempotencyKey: `pause:${runId}` })
+      yield* park(yield* ControlRuntime, runId)
       // A stall is a run nobody is driving: `released` is what a sweep writes
       // on a run whose owner died. A park with no reason is an operator's, and
       // the case below proves the monitor leaves that one alone.
@@ -278,9 +277,8 @@ describe("Monitor.run over the durable control plane", () => {
 
   it("journals the heal only after the remedy returned a receipt", async () => {
     const observed = await run(Effect.gen(function*() {
-      const control = yield* Control
       const runId = yield* start("healed-after")
-      yield* control.pause({ runId, idempotencyKey: `pause:${runId}` })
+      yield* park(yield* ControlRuntime, runId)
       yield* parkOn(runId, "released")
       const report = yield* Monitor.run({
         runId,
@@ -318,9 +316,8 @@ describe("Monitor.run over the durable control plane", () => {
 
   it("journals nothing healed when the remedy fails", async () => {
     const observed = await run(Effect.gen(function*() {
-      const control = yield* Control
       const runId = yield* start("failed-heal")
-      yield* control.pause({ runId, idempotencyKey: `pause:${runId}` })
+      yield* park(yield* ControlRuntime, runId)
       yield* parkOn(runId, "released")
       const exit = yield* Effect.exit(Monitor.run({
         runId,
@@ -352,9 +349,8 @@ describe("Monitor.run over the durable control plane", () => {
 
   it("names the monitor on every record it writes, so two of them are tellable apart", async () => {
     const observed = await run(Effect.gen(function*() {
-      const control = yield* Control
       const runId = yield* start("two-monitors")
-      yield* control.pause({ runId, idempotencyKey: `pause:${runId}` })
+      yield* park(yield* ControlRuntime, runId)
       yield* parkOn(runId, "released")
       // Two supervisors pointed at one run. Nothing stops that, so the
       // evidence has to say which of them wrote each record, and their
@@ -387,14 +383,13 @@ describe("Monitor.run over the durable control plane", () => {
     expect(monitors).toEqual(new Set(["supervisor-a", "supervisor-b"]))
   })
 
-  it("leaves a run an operator paused where the operator left it", async () => {
+  it("leaves a run an operator parked where the operator left it", async () => {
     const observed = await run(Effect.gen(function*() {
-      const control = yield* Control
       const runtime = yield* ControlRuntime
-      const runId = yield* start("operator-pause")
-      // `Control.pause` writes no waiting reason. Every engine park names one,
-      // so an absent reason is an operator's hand on the run.
-      yield* control.pause({ runId, idempotencyKey: `pause:${runId}` })
+      const runId = yield* start("operator-park")
+      // An operator's own park writes no waiting reason. Every engine park
+      // names one, so an absent reason is an operator's hand on the run.
+      yield* park(runtime, runId)
       const report = yield* Monitor.run({
         runId,
         intervalMs: 0,

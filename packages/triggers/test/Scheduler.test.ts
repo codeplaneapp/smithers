@@ -428,7 +428,6 @@ describe("Scheduler", () => {
         steer: () => Effect.die("unused"),
         signal: () => Effect.die("unused"),
         cancel: () => Effect.die("unused"),
-        pause: () => Effect.die("unused"),
         resume: () => Effect.die("unused"),
         list: () => Effect.die("unused"),
         watch: () => Stream.empty

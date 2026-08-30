@@ -31,7 +31,7 @@
  *
  * A fence is a serialized `OwnerId`. `hostId` and `pid` identify the process;
  * the `nonce` is regenerated on **every** claim, so a fence taken before a
- * pause is not the fence held after the resume that follows it, and the stale
+ * park is not the fence held after the resume that follows it, and the stale
  * one is refused by the CAS. This is the `rangeID`-style monotonic fence from
  * `reference/temporal`'s history service, narrowed to a per-run token.
  *
@@ -223,6 +223,11 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS control_runs (
     run_id TEXT PRIMARY KEY,
     created_seq INTEGER NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS control_run_resumes (
+    run_id TEXT PRIMARY KEY,
+    requested_seq INTEGER NOT NULL,
+    requested_at_ms INTEGER NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS control_run_messages (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -419,6 +424,8 @@ export const make_ = (
       readonly waitingFor: ReadonlyMap<string, string>
       /** Who cancelled each cancelled run, by run id. */
       readonly cancellations: ReadonlyMap<string, Cancellation>
+      /** The outstanding resume delegation of each run that has one. */
+      readonly pendingResumes: ReadonlyMap<string, number>
     }
 
     /**
@@ -459,8 +466,10 @@ export const make_ = (
       })
       const waitingReason = ancestry.waitingFor.get(row.runId)
       const cancellation = ancestry.cancellations.get(row.runId)
+      const pendingResume = ancestry.pendingResumes.get(row.runId)
       return {
         ...base,
+        ...(pendingResume === undefined ? {} : { pendingResume }),
         ...(parentRunId === undefined ? {} : { parentRunId }),
         ...(lineageId === undefined ? {} : { lineageId }),
         ...(roundOrdinal === undefined ? {} : { roundOrdinal }),
@@ -681,6 +690,24 @@ export const make_ = (
           })
       )
 
+    /**
+     * The outstanding resume delegation of each run in the scope.
+     *
+     * Read from `control_run_resumes` rather than from the journal because the
+     * question is "what has not been taken up yet", which a log of what was
+     * asked cannot answer without a per-run cursor.
+     */
+    const pendingResumeIndex = (scope: IndexScope): Effect.Effect<ReadonlyMap<string, number>, PersistenceError> =>
+      sql<{ readonly runId: string; readonly requestedSeq: number }>`
+      SELECT run_id AS "runId", requested_seq AS "requestedSeq"
+      FROM control_run_resumes WHERE ${within("run_id", scope)}
+    `.pipe(
+        Effect.map((rows) =>
+          new Map(rows.map((row) => [row.runId, Number(row.requestedSeq)] as const)) as ReadonlyMap<string, number>
+        ),
+        Effect.mapError(persistence("read pending resumes"))
+      )
+
     /** Every index a projection needs over one scope, read together. */
     const ancestryIndex = (scope: IndexScope): Effect.Effect<AncestryIndex, PersistenceError> =>
       Effect.map(
@@ -688,7 +715,8 @@ export const make_ = (
           forked: forkedRunIds(scope),
           spawnedBy: spawnedBy(scope),
           waitingFor: waitingFor(scope),
-          cancellations: cancellations(scope)
+          cancellations: cancellations(scope),
+          pendingResumes: pendingResumeIndex(scope)
         }),
         (index): AncestryIndex => index
       )
@@ -771,7 +799,14 @@ export const make_ = (
           ...summary,
           status,
           updatedAt: timestamp,
-          ...(storeStatus(status) === "running" ? {} : { ownerId: undefined })
+          ...(storeStatus(status) === "running" ? {} : { ownerId: undefined }),
+          // A park releases the owner columns, so the row itself stops saying
+          // which process is hosting the execution. The fence it was parked
+          // under is kept instead: it is what lets the host recognize its own
+          // park, and every other process tell that the execution belongs to
+          // one it cannot see (triage B-15). Any other status ends the park,
+          // so it ends the record with it.
+          parkedBy: storeStatus(status) === "suspended" ? JSON.stringify(claim) : undefined
         }
         const outcome = yield* runStore.transitionOwned(
           runId,
@@ -1127,6 +1162,46 @@ export const make_ = (
         yield* requireRow(runId)
         return (yield* messages(runId, "signal")) as ReadonlyArray<SignalPayload>
       }),
+      requestResume: Effect.fn("SqlControlRuntime.requestResume")(function*(runId: RunId) {
+        yield* requireRow(runId)
+        const sequence = yield* nextSequence("resume")
+        const timestamp = yield* now
+        yield* writer.write(sql`
+          INSERT INTO control_run_resumes (run_id, requested_seq, requested_at_ms)
+          VALUES (${runId}, ${sequence}, ${timestamp})
+          ON CONFLICT (run_id) DO UPDATE SET
+            requested_seq = excluded.requested_seq,
+            requested_at_ms = excluded.requested_at_ms
+        `).pipe(Effect.mapError(persistence("record a resume delegation")))
+        return sequence
+      }),
+      // Terminal runs are filtered in SQL: a delegation nobody will ever take
+      // up must not keep appearing in every host's poll.
+      pendingResumes: sql<
+        { readonly runId: string; readonly requestedSeq: number; readonly requestedAtMs: number }
+      >`
+        SELECT resumes.run_id AS "runId",
+               resumes.requested_seq AS "requestedSeq",
+               resumes.requested_at_ms AS "requestedAtMs"
+        FROM control_run_resumes AS resumes
+        JOIN flows_runs AS runs ON runs.run_id = resumes.run_id
+        WHERE runs.status NOT IN ('completed', 'failed', 'cancelled')
+        ORDER BY resumes.requested_seq
+      `.pipe(
+        query("read pending resumes"),
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            runId: row.runId,
+            sequence: Number(row.requestedSeq),
+            requestedAtMs: Number(row.requestedAtMs)
+          }))
+        )
+      ),
+      clearResume: Effect.fn("SqlControlRuntime.clearResume")((runId: RunId, sequence: number) =>
+        writer.write(sql`
+          DELETE FROM control_run_resumes WHERE run_id = ${runId} AND requested_seq = ${sequence}
+        `).pipe(Effect.mapError(persistence("clear a resume delegation")), Effect.asVoid)
+      ),
       registerFiber: Effect.fn("SqlControlRuntime.registerFiber")(function*(
         runId: RunId,
         fiber: Fiber.Fiber<unknown, unknown>
@@ -1136,17 +1211,19 @@ export const make_ = (
       }),
       interrupt: Effect.fn("SqlControlRuntime.interrupt")(function*(runId: RunId) {
         const row = yield* requireRow(runId)
+        const summary = summaryOf(row)
+        // Terminality is asked FIRST, as `resume` asks it. A settled run has
+        // released its owner, so `ownedByUs` is false for every process
+        // including the one that ran it, and asking ownership first answered
+        // `ClaimLost` — "somebody else has it" — for a run that had simply
+        // finished. Its caller has a `Terminal` receipt for exactly this.
+        if (terminal(summary.status)) return summary
         if (!ownedByUs(row)) return yield* new ClaimLost({ runId })
         const fiber = fibers.get(runId)
         // Cancellation is fiber interruption, not a flag anyone polls.
         if (fiber !== undefined) yield* Fiber.interrupt(fiber)
         fibers.delete(runId)
-        return yield* transition(runId, row.owner, summaryOf(row), "cancelled")
-      }),
-      pause: Effect.fn("SqlControlRuntime.pause")(function*(runId: RunId) {
-        const row = yield* requireRow(runId)
-        if (!ownedByUs(row)) return yield* new ClaimLost({ runId })
-        return yield* transition(runId, row.owner, summaryOf(row), "parked")
+        return yield* transition(runId, row.owner, summary, "cancelled")
       }),
       resume: Effect.fn("SqlControlRuntime.resume")(function*(
         runId: RunId,

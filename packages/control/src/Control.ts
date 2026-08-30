@@ -12,6 +12,7 @@ import type {
   FlowNotFound,
   InvalidInput,
   LaunchFailed,
+  NoMatchingWait,
   PersistenceError,
   PlanDigestMismatch,
   RunNotFound,
@@ -124,7 +125,7 @@ export interface RunMutationInput {
   readonly runId: RunId
   readonly idempotencyKey: IdempotencyKey
   /**
-   * Why the run is being cancelled, paused, or resumed.
+   * Why the run is being cancelled or resumed.
    *
    * Free text, recorded on the journal entry the mutation writes and projected
    * back onto `RunSummary.cancellation`. An operator reading a cancelled run a
@@ -169,11 +170,10 @@ export interface Service {
     PlanDigestMismatch | EnvelopeMismatch | AlreadyResolved | RunNotFound | PersistenceError | Unavailable
   >
   readonly steer: (input: SteerInput) => Effect.Effect<Receipt, RunNotFound | PersistenceError | Unavailable>
-  readonly signal: (input: SignalInput) => Effect.Effect<Receipt, RunNotFound | PersistenceError | Unavailable>
+  readonly signal: (
+    input: SignalInput
+  ) => Effect.Effect<Receipt, RunNotFound | NoMatchingWait | PersistenceError | Unavailable>
   readonly cancel: (
-    input: RunMutationInput
-  ) => Effect.Effect<Receipt, RunNotFound | ClaimLost | PersistenceError | Unavailable>
-  readonly pause: (
     input: RunMutationInput
   ) => Effect.Effect<Receipt, RunNotFound | ClaimLost | PersistenceError | Unavailable>
   readonly resume: (
@@ -221,7 +221,6 @@ export const layerNoop: Layer.Layer<Control> = Layer.succeed(
     steer: Effect.fn("Control.steer")(() => Effect.fail(unavailable("steer"))),
     signal: Effect.fn("Control.signal")(() => Effect.fail(unavailable("signal"))),
     cancel: Effect.fn("Control.cancel")(() => Effect.fail(unavailable("cancel"))),
-    pause: Effect.fn("Control.pause")(() => Effect.fail(unavailable("pause"))),
     resume: Effect.fn("Control.resume")(() => Effect.fail(unavailable("resume"))),
     list: Effect.fn("Control.list")(() => Effect.fail(unavailable("list"))),
     watch: () => Stream.fail(unavailable("watch"))

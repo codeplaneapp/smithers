@@ -166,6 +166,28 @@ export interface MemoryOptions {
 }
 
 /**
+ * One run that has been told to resume, and the sequence of the request.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface PendingResume {
+  readonly runId: RunId
+  readonly sequence: number
+  /**
+   * When the delegation was recorded.
+   *
+   * A host reads it to tell a decision it has just been handed from one that
+   * has been standing unanswered: a run parked by a process that has since
+   * exited has nobody left to recognize its own park, so its delegation is
+   * taken up by whichever host can drive it once it has gone unanswered for
+   * `Ownership.heartbeatStaleAfter` (triage B-15).
+   */
+  readonly requestedAtMs: number
+}
+
+/**
  * Execution-engine operations required by `ControlLive`.
  *
  * A production adapter must fence every owner-sensitive write, implement
@@ -239,12 +261,39 @@ export interface Service {
   readonly deliveredSignals: (
     runId: RunId
   ) => Effect.Effect<ReadonlyArray<SignalPayload>, RunNotFound | PersistenceError>
+  /**
+   * Records, durably, that this run has been told to resume.
+   *
+   * The record is the delegation. A decision on an in-run approval can be
+   * taken by any process holding the control database, and only the process
+   * hosting the execution can act on it, so the intent has to outlive the call
+   * that made it: an in-process event bus reaches one process, and a journal
+   * entry is per run and needs a reader that already knows which run to read.
+   * The returned sequence is the cursor {@link Service.clearResume} checks, so
+   * a resume requested while one is being taken up is not lost with it.
+   */
+  readonly requestResume: (runId: RunId) => Effect.Effect<number, RunNotFound | PersistenceError>
+  /**
+   * Every outstanding resume delegation for a run that is not terminal.
+   *
+   * This is what a host polls. A settled run's delegation is not reported: no
+   * host will ever take it up, and reporting it forever would make an
+   * unbounded backlog out of a run that is finished.
+   */
+  readonly pendingResumes: Effect.Effect<ReadonlyArray<PendingResume>, PersistenceError>
+  /**
+   * Clears a delegation a host has taken up, if it is still the one it read.
+   *
+   * The sequence check is what makes the clear safe: a resume requested
+   * between the read and the clear has a higher sequence and survives, so the
+   * host takes it up on its next tick instead of losing it.
+   */
+  readonly clearResume: (runId: RunId, sequence: number) => Effect.Effect<void, PersistenceError>
   readonly registerFiber: (
     runId: RunId,
     fiber: Fiber.Fiber<unknown, unknown>
   ) => Effect.Effect<void, RunNotFound | PersistenceError>
   readonly interrupt: (runId: RunId) => Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
-  readonly pause: (runId: RunId) => Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
   /**
    * Joins or claims a suspended run.
    *
@@ -317,6 +366,10 @@ interface MutableRun {
   fiber?: Fiber.Fiber<unknown, unknown> | undefined
   readonly steering: Array<SteerMessage>
   readonly signals: Array<SignalPayload>
+  /** The sequence of the outstanding resume delegation, if there is one. */
+  pendingResume?: number | undefined
+  /** When that delegation was recorded. */
+  pendingResumeAtMs?: number | undefined
 }
 
 const asStored = (plan: MutablePlan): StoredPlan => ({
@@ -359,6 +412,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
       let planSequence = 0
       let runSequence = 0
       let fenceSequence = 0
+      let resumeSequence = 0
 
       const requireRun = (runId: RunId): Effect.Effect<MutableRun, RunNotFound> =>
         Effect.fromOption(Option.fromNullishOr(runs.get(runId)), () => new RunNotFound({ runId }))
@@ -579,6 +633,32 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
         deliveredSignals: Effect.fn("ControlRuntime.deliveredSignals")((runId) =>
           Effect.map(requireRun(runId), (run) => run.signals.slice())
         ),
+        requestResume: Effect.fn("ControlRuntime.requestResume")(function*(runId) {
+          const run = yield* requireRun(runId)
+          const sequence = ++resumeSequence
+          run.pendingResume = sequence
+          run.pendingResumeAtMs = now()
+          updateSummary(run, { pendingResume: sequence })
+          return sequence
+        }),
+        pendingResumes: Effect.sync(() =>
+          Array.from(runs.entries()).flatMap(([runId, run]) =>
+            run.pendingResume === undefined || run.pendingResumeAtMs === undefined ||
+              run.summary.status === "cancelled" ||
+              run.summary.status === "completed" || run.summary.status === "failed"
+              ? []
+              : [{ runId, sequence: run.pendingResume, requestedAtMs: run.pendingResumeAtMs }]
+          )
+        ),
+        clearResume: Effect.fn("ControlRuntime.clearResume")((runId, sequence) =>
+          Effect.sync(() => {
+            const run = runs.get(runId)
+            if (run === undefined || run.pendingResume !== sequence) return
+            run.pendingResume = undefined
+            run.pendingResumeAtMs = undefined
+            updateSummary(run, { pendingResume: undefined })
+          })
+        ),
         registerFiber: Effect.fn("ControlRuntime.registerFiber")((runId, fiber) =>
           Effect.tap(requireRun(runId), (run) =>
             Effect.sync(() => {
@@ -587,20 +667,19 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
         ),
         interrupt: Effect.fn("ControlRuntime.interrupt")(function*(runId) {
           const run = yield* requireRun(runId)
+          // Terminal first, as `resume` does: a settled run released its fence,
+          // and answering `ClaimLost` there would name the wrong problem.
+          if (
+            run.summary.status === "cancelled" ||
+            run.summary.status === "completed" ||
+            run.summary.status === "failed"
+          ) return run.summary
           if (run.localFence === undefined) return yield* new ClaimLost({ runId })
           yield* checkFence(runId, run, run.localFence)
           if (run.fiber !== undefined) yield* Fiber.interrupt(run.fiber)
           run.fence = undefined
           run.localFence = undefined
-          return updateSummary(run, { status: "cancelled", ownerId: undefined })
-        }),
-        pause: Effect.fn("ControlRuntime.pause")(function*(runId) {
-          const run = yield* requireRun(runId)
-          if (run.localFence === undefined) return yield* new ClaimLost({ runId })
-          yield* checkFence(runId, run, run.localFence)
-          run.fence = undefined
-          run.localFence = undefined
-          return updateSummary(run, { status: "parked", ownerId: undefined })
+          return updateSummary(run, { status: "cancelled", ownerId: undefined, parkedBy: undefined })
         }),
         resume: Effect.fn("ControlRuntime.resume")(function*(runId) {
           const run = yield* requireRun(runId)
@@ -618,7 +697,8 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           const fence = `fence-${++fenceSequence}`
           run.fence = fence
           run.localFence = fence
-          return updateSummary(run, { status: "accepted", ownerId: "memory-owner" })
+          // Claiming ends the park, so it ends the record of who wrote it.
+          return updateSummary(run, { status: "accepted", ownerId: "memory-owner", parkedBy: undefined })
         }),
         claimFence: Effect.fn("ControlRuntime.claimFence")(function*(runId) {
           const run = yield* requireRun(runId)
@@ -630,10 +710,18 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           yield* checkFence(runId, run, fence)
           // Ownership is released by any status that is not being driven, so the
           // fence that wrote a terminal or parked status is spent by writing it.
-          if (status === "accepted" || status === "running") return updateSummary(run, { status })
+          if (status === "accepted" || status === "running") {
+            return updateSummary(run, { status, parkedBy: undefined })
+          }
           run.fence = undefined
           run.localFence = undefined
-          return updateSummary(run, { status, ownerId: undefined })
+          // The spent fence is kept on a park, and only on a park: it is the
+          // only thing left on the row that says which host parked it.
+          return updateSummary(run, {
+            status,
+            ownerId: undefined,
+            parkedBy: status === "parked" || status === "waiting-approval" ? fence : undefined
+          })
         }),
         stampPrincipal: Effect.fn("ControlRuntime.stampPrincipal")((submitted) =>
           Effect.sync(() => ({

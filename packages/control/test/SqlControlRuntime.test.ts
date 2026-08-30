@@ -23,6 +23,7 @@ import * as ControlLive from "../src/ControlLive.ts"
 import { ControlRuntime, type Service as ControlRuntimeService } from "../src/ControlRuntime.ts"
 import * as SqlControlRuntime from "../src/SqlControlRuntime.ts"
 import { contract, type Stack } from "./ControlContract.ts"
+import { park } from "./Park.ts"
 
 /**
  * The durable journal bundle, with `Database` kept in the output so the control
@@ -127,9 +128,9 @@ describe("SqlControlRuntime", () => {
     const shared = durableJournal
     const observed = await Effect.runPromise(
       Effect.gen(function*() {
-        const control = yield* Control
+        const runtime = yield* ControlRuntime
         const { card, runId } = yield* started
-        yield* control.pause({ runId, idempotencyKey: "pause:restart" })
+        yield* park(runtime, runId)
 
         // Nothing of the first runtime is carried across — only the database.
         const restarted = yield* SqlControlRuntime.make({
@@ -164,9 +165,9 @@ describe("SqlControlRuntime", () => {
       Effect.gen(function*() {
         const { runId } = yield* started
         const staleFence = yield* first.claimFence(runId)
-        yield* control.pause({ runId, idempotencyKey: "pause:peer" })
+        yield* park(first, runId)
         // The peer takes ownership. The first runtime still holds the fence it
-        // had before the pause, and that fence is now spent.
+        // had before the park, and that fence is now spent.
         const claimed = yield* second.resume(runId)
         const stale = yield* first.writeStatus(runId, staleFence, "running").pipe(Effect.flip)
         const peerFence = yield* second.claimFence(runId)
@@ -186,7 +187,7 @@ describe("SqlControlRuntime", () => {
     const observed = await twoOwners((first, second, control) =>
       Effect.gen(function*() {
         const { runId } = yield* started
-        yield* control.pause({ runId, idempotencyKey: "pause:race" })
+        yield* park(first, runId)
         const results = yield* Effect.all(
           [Effect.exit(first.resume(runId)), Effect.exit(second.resume(runId))],
           { concurrency: 2 }
@@ -200,20 +201,24 @@ describe("SqlControlRuntime", () => {
     expect(observed).toBeGreaterThanOrEqual(1)
   })
 
-  it("refuses to interrupt or pause a run this process does not own", async () => {
-    const observed = await twoOwners((first, second, control) =>
+  it("refuses to interrupt a live run this process does not own", async () => {
+    const observed = await twoOwners((first, second) =>
       Effect.gen(function*() {
         const { runId } = yield* started
-        yield* control.pause({ runId, idempotencyKey: "pause:foreign" })
+        yield* park(first, runId)
         yield* second.resume(runId)
+        const fence = yield* second.claimFence(runId)
+        // Running, and owned by the peer: the terminal short-circuit B-12 adds
+        // cannot answer this one, so the ownership check still has to.
+        yield* second.writeStatus(runId, fence, "running")
         const interrupted = yield* first.interrupt(runId).pipe(Effect.flip)
-        const paused = yield* first.pause(runId).pipe(Effect.flip)
-        return { interrupted, paused }
+        const evicted = yield* first.claimFence(runId).pipe(Effect.flip)
+        return { interrupted, evicted }
       })
     )
 
     expect(observed.interrupted).toBeInstanceOf(ClaimLost)
-    expect(observed.paused).toBeInstanceOf(ClaimLost)
+    expect(observed.evicted).toBeInstanceOf(ClaimLost)
   })
 
   it("reports unknown ids and unknown flows as typed failures", async () => {
@@ -299,7 +304,7 @@ describe("SqlControlRuntime", () => {
   it("allows a concurrent write while a finite snapshot page is being consumed", async () => {
     const pageStarted = Deferred.makeUnsafe<void>()
     const releasePage = Deferred.makeUnsafe<void>()
-    let paused = false
+    let held = false
     const observedJournal = Layer.effect(
       Journal.Journal,
       Effect.map(Journal.Journal, (journal) =>
@@ -307,8 +312,8 @@ describe("SqlControlRuntime", () => {
           ...journal,
           entries: (options) =>
             Effect.suspend(() => {
-              if (paused || options.limit !== 1024) return journal.entries(options)
-              paused = true
+              if (held || options.limit !== 1024) return journal.entries(options)
+              held = true
               return Deferred.succeed(pageStarted, undefined).pipe(
                 Effect.andThen(Deferred.await(releasePage)),
                 Effect.andThen(journal.entries(options))

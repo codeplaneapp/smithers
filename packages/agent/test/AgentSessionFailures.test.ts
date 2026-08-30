@@ -18,11 +18,12 @@
  * executor hands it, `authorize` and the composed `ask` flow.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
-import { LaunchFailed, PersistenceError } from "@smthrs/control/ControlError"
+import { ClaimLost, LaunchFailed, PersistenceError } from "@smthrs/control/ControlError"
 import type * as ControlExecutor from "@smthrs/control/ControlExecutor"
 import { ControlRuntime } from "@smthrs/control/ControlRuntime"
 import type { RunStatus } from "@smthrs/control/ControlSchema"
 import { FlowEngine } from "@smthrs/engine"
+import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import { FlowRuntime } from "@smthrs/flow"
 import * as Cell from "@smthrs/harness/Cell"
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
@@ -33,7 +34,8 @@ import { Node } from "@smthrs/plan"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
 import { RegistryError } from "@smthrs/registry/RegistryError"
-import { Deferred, Duration, Effect, Fiber, Layer, Option, PubSub, Stream } from "effect"
+import { RunStore } from "@smthrs/run-store"
+import { Clock, Deferred, Duration, Effect, Fiber, Layer, Option, PubSub, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
 import * as AgentSession from "../src/AgentSession.ts"
@@ -115,11 +117,13 @@ const launchInput: ControlExecutor.Launch = {
 const accepted = { _tag: "Accepted" as const, seq: JournalEvent.Seq.make(1), sourceSeq: JournalEvent.SourceSeq.make(1) }
 
 /**
- * The seven `ControlRuntime` members the executor actually reaches, and no
+ * The ten `ControlRuntime` members the executor actually reaches, and no
  * others. Writing the stub against this shape rather than the whole service
  * states the executor's real dependency surface: a run driver reads the run
  * and its plan, registers its own fiber for cancellation, registers and reads
- * approvals, and fences every status write.
+ * approvals, fences every status write, and — since a decision on an in-run
+ * approval is recorded rather than performed (triage B-15) — claims the row it
+ * is about to re-drive and follows the durable resume delegations.
  */
 interface RuntimeStub {
   readonly getRun: ControlRuntime["Service"]["getRun"]
@@ -129,6 +133,9 @@ interface RuntimeStub {
   readonly grants: ControlRuntime["Service"]["grants"]
   readonly claimFence: ControlRuntime["Service"]["claimFence"]
   readonly writeStatus: ControlRuntime["Service"]["writeStatus"]
+  readonly resume: ControlRuntime["Service"]["resume"]
+  readonly pendingResumes: ControlRuntime["Service"]["pendingResumes"]
+  readonly clearResume: ControlRuntime["Service"]["clearResume"]
 }
 
 interface Recorder {
@@ -166,6 +173,11 @@ const runtimeLayer = (
         Deferred.doneUnsafe(record.settled, Effect.succeed(status))
         return { ...launchInput.run, status }
       }),
+    resume: () => Effect.succeed(launchInput.run),
+    // No delegation is standing by default, so the durable follower has
+    // nothing to take up and every case below observes only what it published.
+    pendingResumes: Effect.succeed([]),
+    clearResume: () => Effect.void,
     ...overrides
   }
   return Layer.succeed(ControlRuntime)(stub as unknown as ControlRuntime["Service"])
@@ -298,6 +310,11 @@ const withExecutor = <A>(
         journalLayer(record, options.journal),
         NotificationQueue.layerNoop(),
         engineLayer(options.engine),
+        // The two engine stores the cancel and signal ports write through.
+        // This suite exercises the control seam, not those ports, so the
+        // stubs are the ones that record nothing.
+        RunStore.layerNoop(),
+        DurableEngineState.layerMemory,
         NodeCrypto.layer
       )
     ),
@@ -687,6 +704,48 @@ describe("the executor's resume bridge", () => {
     expect(attempted).toEqual(["run-refused", "run-accepted"])
   })
 
+  it("re-drives a run another host parked when an operator's own resume asks for it", async () => {
+    const record = recorder()
+    const resumed: Array<string> = []
+    const drove = Deferred.makeUnsafe<void>()
+    const hub = await Effect.runPromise(PubSub.unbounded<JournalEvent.Entry>())
+    const attempted = await withExecutor(
+      record,
+      {
+        journal: {
+          changes: Effect.tap(PubSub.subscribe(hub), () => Deferred.succeed(record.subscribed, void 0))
+        },
+        runtime: {
+          getRun: () => Effect.succeed({ ...launchInput.run, parkedBy: "fence-another-host" })
+        },
+        engine: (engine) =>
+          ({
+            ...engine,
+            poll: () => Effect.succeed(Option.some({ _tag: "Suspended" })),
+            resume: (_flow: unknown, executionId: string) =>
+              Effect.sync(() => {
+                resumed.push(executionId)
+                Deferred.doneUnsafe(drove, Effect.void)
+              })
+          }) as unknown as EngineService
+      },
+      () =>
+        Effect.gen(function*() {
+          yield* Deferred.await(record.subscribed)
+          yield* PubSub.publish(hub, entry("run-wedged", "control.run.resume"))
+          yield* Deferred.await(drove)
+          return resumed
+        })
+    )
+
+    // `control.run.resume` is an operator's own remedy, and the call that
+    // journaled it already claimed the row in this process. A wedged run is by
+    // definition one nobody is driving, so the hosting guard — which exists to
+    // stop an APPROVAL from taking a run away from its host — does not apply
+    // here. Guarding it would leave the operator a claimed row nothing re-drives.
+    expect(attempted).toEqual(["run-wedged"])
+  })
+
   it("ignores a journal entry that is not a resume event", async () => {
     const record = recorder()
     const resumed: Array<string> = []
@@ -752,6 +811,207 @@ describe("the executor's resume bridge", () => {
     expect(attempted).toEqual([])
   })
 
+  it("leaves a run a live peer holds to the peer, and re-drives nothing", async () => {
+    const record = recorder()
+    const resumed: Array<string> = []
+    const refused = Deferred.makeUnsafe<void>()
+    const hub = await Effect.runPromise(PubSub.unbounded<JournalEvent.Entry>())
+    const attempted = await withExecutor(
+      record,
+      {
+        journal: {
+          changes: Effect.tap(PubSub.subscribe(hub), () => Deferred.succeed(record.subscribed, void 0))
+        },
+        runtime: {
+          // What a claim answers while another process is driving the run.
+          resume: (runId) =>
+            Deferred.succeed(refused, void 0).pipe(Effect.andThen(Effect.fail(new ClaimLost({ runId }))))
+        },
+        engine: (engine) =>
+          ({
+            ...engine,
+            poll: () => Effect.succeed(Option.some({ _tag: "Suspended" })),
+            resume: (_flow: unknown, executionId: string) => Effect.sync(() => void resumed.push(executionId))
+          }) as unknown as EngineService
+      },
+      () =>
+        Effect.gen(function*() {
+          yield* Deferred.await(record.subscribed)
+          yield* PubSub.publish(hub, entry("run-held", "control.run.resumed"))
+          yield* Deferred.await(refused)
+          yield* Effect.yieldNow
+          return resumed
+        })
+    )
+
+    // A run this executor cannot fence is a run it cannot settle, so it does
+    // not start one: the owner's own poll takes the delegation up instead.
+    expect(attempted).toEqual([])
+  })
+
+  it("takes up the delegations it hosts and leaves the rest standing", async () => {
+    const record = recorder()
+    const resumed: Array<string> = []
+    const cleared: Array<string> = []
+    const done = Deferred.makeUnsafe<void>()
+    const drove = Deferred.makeUnsafe<void>()
+    const attempted = await withExecutor(
+      record,
+      {
+        runtime: {
+          // The delegation this executor cannot host comes FIRST, and the
+          // follower drains the list in order, so the assertions below read a
+          // list both entries have been through rather than a race.
+          pendingResumes: Effect.succeed([
+            { runId: "run-elsewhere", sequence: 8, requestedAtMs: 1 },
+            { runId: "run-hosted", sequence: 7, requestedAtMs: 1 }
+          ]),
+          clearResume: (runId) =>
+            Effect.sync(() => {
+              cleared.push(runId)
+              Deferred.doneUnsafe(done, Effect.void)
+            })
+        },
+        engine: (engine) =>
+          ({
+            ...engine,
+            // Only one of the two executions is in this engine. The other is
+            // refused the way every runtime refuses an id it has no record of,
+            // which is also why the wait for it ends at once instead of
+            // holding the follower through the whole park budget.
+            poll: (_flow: unknown, executionId: string) =>
+              executionId === "run-hosted"
+                ? Effect.succeed(Option.some({ _tag: "Suspended" }))
+                : Effect.fail(new FlowRuntime.FlowExecutionNotFound({ code: "execution_not_found", executionId })),
+            resume: (_flow: unknown, executionId: string) =>
+              Effect.sync(() => {
+                resumed.push(executionId)
+                Deferred.doneUnsafe(drove, Effect.void)
+              })
+          }) as unknown as EngineService
+      },
+      // The re-drive is forked, so both halves are awaited: the clear proves
+      // the delegation was consumed, the drive proves the run was restarted.
+      () => Effect.as(Effect.all([Deferred.await(done), Deferred.await(drove)]), { resumed, cleared })
+    )
+
+    // The delegation this executor hosts is taken up and cleared. The other
+    // one is left exactly where it is: clearing it would strand a run whose
+    // host has not seen the decision yet.
+    expect(attempted.cleared).toEqual(["run-hosted"])
+    expect(attempted.resumed).toEqual(["run-hosted"])
+  })
+
+  it("leaves a delegation for a run another host parked standing while that host could still answer", async () => {
+    const record = recorder()
+    const resumed: Array<string> = []
+    const cleared: Array<string> = []
+    const done = Deferred.makeUnsafe<void>()
+    const drove = Deferred.makeUnsafe<void>()
+    const attempted = await withExecutor(
+      record,
+      {
+        runtime: {
+          // `run-foreign` names another host's fence on the row and comes
+          // FIRST, so the assertions below read a list it has been through.
+          getRun: (runId) =>
+            Effect.succeed(
+              runId === "run-foreign" ? { ...launchInput.run, parkedBy: "fence-another-host" } : launchInput.run
+            ),
+          pendingResumes: Effect.map(Clock.currentTimeMillis, (nowMs) => [
+            { runId: "run-foreign", sequence: 8, requestedAtMs: nowMs },
+            { runId: "run-hosted", sequence: 7, requestedAtMs: nowMs }
+          ]),
+          clearResume: (runId) =>
+            Effect.sync(() => {
+              cleared.push(runId)
+              Deferred.doneUnsafe(done, Effect.void)
+            })
+        },
+        engine: (engine) =>
+          ({
+            ...engine,
+            // Both executions are in THIS engine and both are parked: engine
+            // visibility is a shared file, which is exactly why it cannot be
+            // the hosting test.
+            poll: () => Effect.succeed(Option.some({ _tag: "Suspended" })),
+            resume: (_flow: unknown, executionId: string) =>
+              Effect.sync(() => {
+                resumed.push(executionId)
+                Deferred.doneUnsafe(drove, Effect.void)
+              })
+          }) as unknown as EngineService
+      },
+      () => Effect.as(Effect.all([Deferred.await(done), Deferred.await(drove)]), { resumed, cleared })
+    )
+
+    // The park this composition wrote is taken up; the one another host wrote
+    // is not driven and not cleared, however plainly this engine can see it.
+    expect(attempted.resumed).toEqual(["run-hosted"])
+    expect(attempted.cleared).toEqual(["run-hosted"])
+  })
+
+  it("adopts a park whose host has left the delegation standing past the staleness cutoff", async () => {
+    const record = recorder()
+    const resumed: Array<string> = []
+    const cleared: Array<string> = []
+    const done = Deferred.makeUnsafe<void>()
+    const drove = Deferred.makeUnsafe<void>()
+    const attempted = await withExecutor(
+      record,
+      {
+        runtime: {
+          getRun: () => Effect.succeed({ ...launchInput.run, parkedBy: "fence-a-process-that-exited" }),
+          // Recorded at the epoch: older than `Ownership.heartbeatStaleAfter`
+          // by every clock this suite can be run under.
+          pendingResumes: Effect.succeed([{ runId: "run-abandoned", sequence: 9, requestedAtMs: 0 }]),
+          clearResume: (runId) =>
+            Effect.sync(() => {
+              cleared.push(runId)
+              Deferred.doneUnsafe(done, Effect.void)
+            })
+        },
+        engine: (engine) =>
+          ({
+            ...engine,
+            poll: () => Effect.succeed(Option.some({ _tag: "Suspended" })),
+            resume: (_flow: unknown, executionId: string) =>
+              Effect.sync(() => {
+                resumed.push(executionId)
+                Deferred.doneUnsafe(drove, Effect.void)
+              })
+          }) as unknown as EngineService
+      },
+      () => Effect.as(Effect.all([Deferred.await(done), Deferred.await(drove)]), { resumed, cleared })
+    )
+
+    // `smithers run` exits at the approval park. Nothing would ever resume the
+    // run it left behind if a park could only be taken up by the incarnation
+    // that wrote it, so a delegation no host has answered for thirty seconds
+    // is adopted by one that can drive it.
+    expect(attempted.resumed).toEqual(["run-abandoned"])
+    expect(attempted.cleared).toEqual(["run-abandoned"])
+  })
+
+  it("keeps the executor alive when the control store cannot list resume delegations", async () => {
+    const record = recorder()
+    const result = await launched(record, {
+      runtime: {
+        pendingResumes: Effect.fail(
+          new PersistenceError({
+            operation: "ControlRuntime.pendingResumes",
+            message: "the control database is unreadable"
+          })
+        )
+      }
+    })
+
+    // The durable follower is contained the same way the journal bridge is: a
+    // control store that cannot answer stops resumes, not launches.
+    expect(result.acceptance).toBe("accepted")
+    expect(result.status).toBe("completed")
+  })
+
   it("stops the bridge without stopping the executor when the journal subscription itself fails", async () => {
     const record = recorder()
     const result = await launched(record, { journal: { changes: Effect.die("the journal cannot publish changes") } })
@@ -761,6 +1021,152 @@ describe("the executor's resume bridge", () => {
     // exists to buy.
     expect(result.acceptance).toBe("accepted")
     expect(result.status).toBe("completed")
+  })
+})
+
+describe("the executor's resume port", () => {
+  it("re-drives a run it hosts and reports that it is driving", async () => {
+    const record = recorder()
+    const resumed: Array<string> = []
+    const drove = Deferred.makeUnsafe<void>()
+    const observed = await withExecutor(
+      record,
+      {
+        engine: (engine) =>
+          ({
+            ...engine,
+            poll: () => Effect.succeed(Option.some({ _tag: "Suspended" })),
+            resume: (_flow: unknown, executionId: string) =>
+              Effect.sync(() => {
+                resumed.push(executionId)
+                Deferred.doneUnsafe(drove, Effect.void)
+              })
+          }) as unknown as EngineService
+      },
+      (executor) =>
+        Effect.gen(function*() {
+          const uptake = yield* executor.resumeRun({ runId: "run-port" })
+          yield* Deferred.await(drove)
+          return { uptake, resumed }
+        })
+    )
+
+    // `resuming` is the control plane's cue to stop: the run is moving under
+    // this executor's fence, so the delegation can be cleared.
+    expect(observed.uptake).toBe("resuming")
+    expect(observed.resumed).toEqual(["run-port"])
+  })
+
+  it("reports an engine that cannot say whether the run is parked as unknown", async () => {
+    const record = recorder()
+    const resumed: Array<string> = []
+    const observed = await withExecutor(
+      record,
+      {
+        engine: (engine) =>
+          ({
+            ...engine,
+            poll: () => Effect.die("the execution store is unreadable"),
+            resume: (_flow: unknown, executionId: string) => Effect.sync(() => void resumed.push(executionId))
+          }) as unknown as EngineService
+      },
+      (executor) => Effect.map(executor.resumeRun({ runId: "run-unreadable" }), (uptake) => ({ uptake, resumed }))
+    )
+
+    // The delegation stays standing rather than being cleared against a read
+    // that failed, and the control plane is not failed by an engine defect.
+    expect(observed.uptake).toBe("unknown")
+    expect(observed.resumed).toEqual([])
+  })
+
+  it("reports a run another composition parked as unknown, however visible the execution is", async () => {
+    const record = recorder()
+    const resumed: Array<string> = []
+    const observed = await withExecutor(
+      record,
+      {
+        runtime: {
+          getRun: () => Effect.succeed({ ...launchInput.run, parkedBy: "fence-another-host" })
+        },
+        engine: (engine) =>
+          ({
+            ...engine,
+            poll: () => Effect.succeed(Option.some({ _tag: "Suspended" })),
+            resume: (_flow: unknown, executionId: string) => Effect.sync(() => void resumed.push(executionId))
+          }) as unknown as EngineService
+      },
+      (executor) => Effect.map(executor.resumeRun({ runId: "run-parked-elsewhere" }), (uptake) => ({ uptake, resumed }))
+    )
+
+    // The port is the decision path: a `smithers approve` reaches it with a
+    // decision it has just taken, which is no evidence at all that the host
+    // that parked the run is gone. It answers `unknown`, the delegation stays
+    // standing, and the run keeps waiting for the process that parked it.
+    expect(observed.uptake).toBe("unknown")
+    expect(observed.resumed).toEqual([])
+  })
+
+  it("takes up a run whose control row cannot be read at all, as it did before the guard", async () => {
+    const record = recorder()
+    const resumed: Array<string> = []
+    const drove = Deferred.makeUnsafe<void>()
+    const observed = await withExecutor(
+      record,
+      {
+        runtime: {
+          getRun: () =>
+            Effect.fail(
+              new PersistenceError({
+                operation: "ControlRuntime.getRun",
+                message: "the control database is unreadable"
+              })
+            )
+        },
+        engine: (engine) =>
+          ({
+            ...engine,
+            poll: () => Effect.succeed(Option.some({ _tag: "Suspended" })),
+            resume: (_flow: unknown, executionId: string) =>
+              Effect.sync(() => {
+                resumed.push(executionId)
+                Deferred.doneUnsafe(drove, Effect.void)
+              })
+          }) as unknown as EngineService
+      },
+      (executor) =>
+        Effect.gen(function*() {
+          const uptake = yield* executor.resumeRun({ runId: "run-unreadable-row" })
+          yield* Deferred.await(drove)
+          return { uptake, resumed }
+        })
+    )
+
+    // A store that cannot answer is not evidence that another host parked the
+    // run, so the refusal it produces must not become one: the take-up falls
+    // back to what it did before `parkedBy` existed rather than stranding a
+    // run this executor may well be hosting.
+    expect(observed.uptake).toBe("resuming")
+    expect(observed.resumed).toEqual(["run-unreadable-row"])
+  })
+
+  it("reports a run it does not host as unknown, and drives nothing", async () => {
+    const record = recorder()
+    const resumed: Array<string> = []
+    const observed = await withExecutor(
+      record,
+      {
+        engine: (engine) =>
+          ({
+            ...engine,
+            poll: () => Effect.succeed(Option.none()),
+            resume: (_flow: unknown, executionId: string) => Effect.sync(() => void resumed.push(executionId))
+          }) as unknown as EngineService
+      },
+      (executor) => Effect.map(executor.resumeRun({ runId: "run-elsewhere" }), (uptake) => ({ uptake, resumed }))
+    )
+
+    expect(observed.uptake).toBe("unknown")
+    expect(observed.resumed).toEqual([])
   })
 })
 
@@ -799,5 +1205,27 @@ describe("the agent flow the executor registers", () => {
     expect(flow.body({ runId: "run-b", planId: "plan-b" })).toEqual(
       flow.body({ runId: "run-a", planId: "plan-a" })
     )
+  })
+})
+
+describe("the executor's engine ports", () => {
+  it("answers a cancel and a signal for a run its engine does not have", async () => {
+    const record = recorder()
+    const observed = await withExecutor(record, {}, (executor) =>
+      Effect.gen(function*() {
+        return {
+          cancel: yield* executor.requestCancel({ runId: launchInput.run.runId }),
+          signal: yield* executor.deliverSignal({
+            runId: launchInput.run.runId,
+            signal: { name: "approval", payload: null }
+          })
+        }
+      }))
+
+    // The stub stores hold no row and no wait point, and neither port invents
+    // one: `unknown` is what the control plane needs to hear so it records the
+    // request for whichever executor eventually drives the run.
+    expect(observed.cancel).toBe("unknown")
+    expect(observed.signal).toBe("unknown")
   })
 })

@@ -13,6 +13,7 @@ import { ClaimLost, LaunchFailed, PersistenceError } from "../src/ControlError.t
 import * as ControlExecutor from "../src/ControlExecutor.ts"
 import { ControlRuntime, type MemoryFlow } from "../src/ControlRuntime.ts"
 import type { Envelope, ListResponse, Principal, Receipt } from "../src/ControlSchema.ts"
+import { park } from "./Park.ts"
 import { descriptor, live, memoryRuntime, type Stack } from "./TestStack.ts"
 
 const envelope: Envelope = { capabilities: [], flows: [], budget: {} }
@@ -117,7 +118,7 @@ describe("ControlLive listings", () => {
       const control = yield* Control
       const first = yield* start("system/test", "one")
       const second = yield* start("review/pull-request", "two")
-      yield* control.pause({ runId: second.runId, idempotencyKey: "pause:two" })
+      yield* park(yield* ControlRuntime, second.runId)
       return {
         byFlow: yield* control.list({ _tag: "runs", filters: { flowId: "review/pull-request" } }),
         byStatus: yield* control.list({ _tag: "runs", filters: { status: "accepted" } }),
@@ -202,7 +203,7 @@ describe("ControlLive mutations", () => {
     const observed = await run(Effect.gen(function*() {
       const control = yield* Control
       const { runId } = yield* start("system/test", "resume")
-      yield* control.pause({ runId, idempotencyKey: "pause:resume" })
+      yield* park(yield* ControlRuntime, runId)
       const resumed = yield* control.run({ _tag: "Resume", runId, idempotencyKey: "rejoin:resume" })
       const listed = yield* control.list({ _tag: "runs", filters: { runId } })
       yield* control.cancel({ runId, idempotencyKey: "cancel:resume" })
@@ -317,7 +318,7 @@ describe("ControlLive executor acceptance", () => {
       }),
       live({
         runtime: memoryRuntime({ flows }),
-        executor: ControlExecutor.make({
+        executor: ControlExecutor.makeNoop({
           launch: Effect.fn("RefusingExecutor.launch")(({ run }) =>
             Effect.fail(new LaunchFailed({ runId: run.runId, message: "no capacity" }))
           )
@@ -345,7 +346,7 @@ describe("ControlLive executor acceptance", () => {
       }),
       live({
         runtime: memoryRuntime({ flows }),
-        executor: ControlExecutor.make({
+        executor: ControlExecutor.makeNoop({
           launch: Effect.fn("AcceptingExecutor.launch")(({ plan, run }) =>
             Effect.sync(() => {
               accepted.push(`${plan.card.planId}:${run.runId}`)

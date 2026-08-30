@@ -12,6 +12,7 @@ import {
   FlowNotFound,
   InvalidInput,
   LaunchFailed,
+  NoMatchingWait,
   PersistenceError,
   PlanDigestMismatch,
   RunNotFound,
@@ -92,7 +93,7 @@ const SignalInput = Schema.Struct({
 const RunMutationInput = Schema.Struct({ runId: RunId, idempotencyKey: IdempotencyKey })
 
 /**
- * A cancel carries the operator's stated reason; a pause and a resume do not.
+ * A cancel carries the operator's stated reason; a resume does not.
  *
  * The reason is on the wire because attribution is written where the
  * cancellation is decided, and a remote operator decides it here. The
@@ -107,7 +108,7 @@ const CancelInput = Schema.Struct({
 const mutationErrors = Schema.Union([RunNotFound, ClaimLost, PersistenceError, Unavailable])
 
 /**
- * The eleven remote procedures corresponding to `Control` operations.
+ * The ten remote procedures corresponding to `Control` operations.
  *
  * @category groups
  * @since 0.1.0
@@ -164,10 +165,9 @@ export const ControlRpcs = RpcGroup.make(
   Rpc.make("Signal", {
     payload: SignalInput,
     success: Receipt,
-    error: Schema.Union([RunNotFound, PersistenceError, Unavailable])
+    error: Schema.Union([RunNotFound, NoMatchingWait, PersistenceError, Unavailable])
   }),
   Rpc.make("Cancel", { payload: CancelInput, success: Receipt, error: mutationErrors }),
-  Rpc.make("Pause", { payload: RunMutationInput, success: Receipt, error: mutationErrors }),
   Rpc.make("Resume", { payload: RunMutationInput, success: Receipt, error: mutationErrors }),
   Rpc.make("List", {
     payload: ListRequest,
@@ -184,7 +184,8 @@ export const ControlRpcs = RpcGroup.make(
       Unavailable,
       TransportError,
       PersistenceError,
-      LaunchFailed
+      LaunchFailed,
+      NoMatchingWait
     ])
   }),
   Rpc.make("Watch", {
@@ -202,7 +203,8 @@ export const ControlRpcs = RpcGroup.make(
       Unavailable,
       TransportError,
       PersistenceError,
-      LaunchFailed
+      LaunchFailed,
+      NoMatchingWait
     ]),
     stream: true
   })

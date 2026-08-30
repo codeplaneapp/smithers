@@ -19,15 +19,17 @@ import {
   type SteerInput
 } from "./Control.ts"
 import {
-  type ClaimLost,
+  ClaimLost,
   type ControlError,
   type EnvelopeMismatch,
   type LaunchFailed,
+  NoMatchingWait,
   PersistenceError,
   type PlanDigestMismatch,
   type RunNotFound,
   Unavailable
 } from "./ControlError.ts"
+import type { CancelRecord } from "./ControlExecutor.ts"
 import { ControlExecutor } from "./ControlExecutor.ts"
 import { ControlRuntime } from "./ControlRuntime.ts"
 import type {
@@ -60,6 +62,20 @@ const accepted = (key: IdempotencyKey, runId?: RunId): Receipt =>
 
 const terminal = (status: RunSummary["status"]): boolean =>
   status === "cancelled" || status === "completed" || status === "failed"
+
+/**
+ * Whether a status means a process is holding the run right now.
+ *
+ * `accepted` is what a claim writes, and nothing rewrites it until the run
+ * settles: only `Control.run` promotes a run to `running`, and only when its
+ * own executor took the launch. A run restarted by `Control.resume` or by an
+ * approval therefore spends its whole second life `accepted`. Both statuses
+ * project onto the store's `running` (`SqlControlRuntime`'s `storeStatus`), so
+ * a lost claim against either one means a live peer owns the row — which
+ * rc-contract 5.1 answers `ClaimLost`. Asking for the literal `running` alone
+ * answered `Accepted` for a peer's accepted run and hid the peer.
+ */
+const live = (status: RunSummary["status"]): boolean => status === "running" || status === "accepted"
 
 const terminalOrAccepted = (
   key: IdempotencyKey,
@@ -175,57 +191,128 @@ export const layer: Layer.Layer<
         )
       )
 
+    /**
+     * Hands a decided run's resume to whoever hosts its execution.
+     *
+     * Outside the mutation's write transaction, for `signal`'s reason: taking
+     * the resume up re-drives the run, and the engine's own writes would wait
+     * on the writer the transaction holds. A host that answers `resuming` has
+     * claimed the row and is driving, so its delegation is cleared here; every
+     * other composition leaves it standing for the host's own poll.
+     */
+    const takeUpResume = (
+      runId: RunId,
+      sequence: number
+    ): Effect.Effect<void, PersistenceError> =>
+      Option.isNone(executor)
+        ? Effect.void
+        : executor.value.resumeRun({ runId }).pipe(
+          Effect.flatMap((uptake) => uptake === "resuming" ? runtime.clearResume(runId, sequence) : Effect.void)
+        )
+
     const decide = (
       decision: "approved" | "denied",
       input: ApprovalInput
     ) =>
-      mutate(
-        decision,
-        input.idempotencyKey,
-        fingerprint(decision, input),
-        Effect.gen(function*() {
-          const token = yield* runtime.lookupApproval(input.target)
-          const principal = yield* runtime.stampPrincipal(input.principal)
-          if (decision === "approved") {
-            yield* runtime.installBulkGrant(token, input.target.envelope, input.scope)
-          }
-          yield* emit(
-            input.target._tag === "Plan" ? `plan:${input.target.planId}` : input.target.runId,
-            `control.approval.${decision}`,
-            json({
-              tokenId: token.tokenId,
-              target: input.target._tag,
-              scope: input.scope,
-              envelope: input.target.envelope,
-              principal
-            })
-          )
-          yield* runtime.resolveApproval(token, decision, principal)
-          return accepted(input.idempotencyKey, input.target._tag === "Node" ? input.target.runId : undefined)
-        })
-      )
-
-    const runMutation = (
-      operation: "pause" | "resume",
-      input: RunMutationInput
-    ): Effect.Effect<Receipt, RunNotFound | ClaimLost | PersistenceError> => {
-      const transition = operation === "pause"
-        ? runtime.pause(input.runId)
-        : runtime.resume(input.runId)
-      return mutate(
-        operation,
-        input.idempotencyKey,
-        fingerprint(operation, input),
-        Effect.gen(function*() {
-          const run = yield* transition
-          yield* emit(input.runId, `control.run.${operation}`, {
-            runId: input.runId,
-            status: run.status
+      Effect.gen(function*() {
+        // Set by the mutation when it records a delegation, and left unset on
+        // the idempotency replay path — where the original call already
+        // delegated and the host's own poll is what takes it up.
+        let delegated: number | undefined
+        const receipt = yield* mutate(
+          decision,
+          input.idempotencyKey,
+          fingerprint(decision, input),
+          Effect.gen(function*() {
+            const token = yield* runtime.lookupApproval(input.target)
+            const principal = yield* runtime.stampPrincipal(input.principal)
+            if (decision === "approved") {
+              yield* runtime.installBulkGrant(token, input.target.envelope, input.scope)
+            }
+            yield* emit(
+              input.target._tag === "Plan" ? `plan:${input.target.planId}` : input.target.runId,
+              `control.approval.${decision}`,
+              json({
+                tokenId: token.tokenId,
+                target: input.target._tag,
+                scope: input.scope,
+                envelope: input.target.envelope,
+                principal
+              })
+            )
+            yield* runtime.resolveApproval(token, decision, principal)
+            if (input.target._tag === "Plan") return accepted(input.idempotencyKey)
+            // A decision on a node target has to restart the run the ask parked,
+            // in this call. Answering without a restart left the run in
+            // `waiting-approval` until a second call arrived, and a denial the
+            // run never learns about is a denial that decided nothing.
+            //
+            // The restart is recorded, not performed, and this plane does NOT
+            // claim the row. `scope: "launched"` reads like a process scope and
+            // is not one — it is a `control_runs` lookup, a durable table every
+            // process over one control database shares — so claiming here took
+            // the row away from the host that could still drive it, and left it
+            // `accepted` under a process with no executor. The delegation is
+            // durable instead: the host takes it up on its next poll and clears
+            // it, and the journal entry stays as the operator's record of why
+            // (triage B-15).
+            const runId = input.target.runId
+            delegated = yield* runtime.requestResume(runId)
+            yield* emit(runId, "control.run.resumed", { runId })
+            return accepted(input.idempotencyKey, runId)
           })
-          return terminalOrAccepted(input.idempotencyKey, run)
+        )
+        if (input.target._tag === "Node" && delegated !== undefined) {
+          yield* takeUpResume(input.target.runId, delegated)
+        }
+        return receipt
+      })
+
+    /**
+     * Restarts a parked run, by claiming it or by asking whoever owns it.
+     *
+     * A run this plane launched is this plane's to claim, and `scope:
+     * "launched"` is how the runtime is told to check. A run the ENGINE created
+     * — a child, a fork, a trampoline round — has its own driver, and claiming
+     * it here overwrote the engine's `state_json` and owner columns with a
+     * control-plane summary, after which that driver's `scheduleResume` no
+     * longer recognized the row: the run stayed suspended with its waiting
+     * reason set and its execution never returned (control-plane example 38).
+     *
+     * The journal entry is the delegation. It is written either way, and the
+     * owning driver's resume bridge follows it, so the intent reaches the run
+     * without this plane taking the row away from the process that can act on
+     * it. A run a live peer is HOLDING — `running`, or the `accepted` a claim
+     * writes and only a settlement rewrites — is still `ClaimLost`: there is
+     * nothing to restart, and pretending otherwise would hide the peer.
+     */
+    const runMutation = (
+      input: RunMutationInput
+    ): Effect.Effect<Receipt, RunNotFound | ClaimLost | PersistenceError> =>
+      mutate(
+        "resume",
+        input.idempotencyKey,
+        fingerprint("resume", input),
+        Effect.gen(function*() {
+          const current = yield* runtime.getRun(input.runId)
+          if (terminal(current.status)) {
+            return { _tag: "Terminal", runId: current.runId, status: current.status }
+          }
+          const claimed = yield* runtime.resume(input.runId, { scope: "launched" }).pipe(
+            Effect.catchTag("/control/ClaimLost", () =>
+              live(current.status)
+                ? Effect.fail(new ClaimLost({ runId: input.runId }))
+                : Effect.succeed(undefined))
+          )
+          yield* emit(input.runId, "control.run.resume", {
+            runId: input.runId,
+            status: (claimed ?? current).status
+          })
+          return claimed === undefined
+            ? accepted(input.idempotencyKey, input.runId)
+            : terminalOrAccepted(input.idempotencyKey, claimed)
         })
       )
-    }
 
     /**
      * Resumes a parked run whose park a steer has just answered.
@@ -238,11 +325,12 @@ export const layer: Layer.Layer<
      *
      * Every other park keeps waiting. An `approval`, `timer`, or `quota` park
      * is waiting for a decision, a clock, or a budget that a message does not
-     * supply. A park with NO reason at all is an operator's `Control.pause`,
-     * which is the one park a steer must not end: an operator who paused a run
-     * and then sent it a message is queuing the message for when they resume
-     * it, not asking for the pause to be undone. A park a control plane cannot
-     * explain is left alone for the same reason.
+     * supply. A park with NO reason at all is an operator's own park, written
+     * through `ControlRuntime.writeStatus`, and it is the one park a steer must
+     * not end: an operator who stopped a run and then sent it a message is
+     * queuing the message for when they restart it, not asking for the stop to
+     * be undone. A park a control plane cannot explain is left alone for the
+     * same reason.
      *
      * A lost claim is not a failure here. It means another process already
      * owns the run, or the run belongs to a driver this plane did not launch
@@ -251,6 +339,21 @@ export const layer: Layer.Layer<
      * steer itself is already durable in the notification queue, so the
      * owning driver delivers it at the run's next boundary.
      */
+    /**
+     * Makes a cancellation durable on the engine row through the executor.
+     *
+     * Absent executor, absent engine: the composition runs nothing, so there is
+     * no row to write and the local interrupt is the whole cancel. An executor
+     * that answers `unknown` has an engine that never heard of the run, which
+     * is the same situation with a different messenger.
+     */
+    const executorRequestCancel = (
+      runId: RunId
+    ): Effect.Effect<CancelRecord, PersistenceError> =>
+      Option.isNone(executor)
+        ? Effect.succeed("unknown" as const)
+        : executor.value.requestCancel({ runId })
+
     const wake = (
       run: RunSummary,
       messageId: string
@@ -624,20 +727,50 @@ export const layer: Layer.Layer<
         )
       ),
       signal: Effect.fn("Control.signal")((input: SignalInput) =>
-        mutate(
-          "signal",
-          input.idempotencyKey,
-          fingerprint("signal", input),
-          Effect.gen(function*() {
-            yield* runtime.deliverSignal(input.runId, input.signal)
-            yield* emit(input.runId, "control.signal.delivered", {
-              runId: input.runId,
-              name: input.signal.name,
-              payload: input.signal.payload
+        Effect.gen(function*() {
+          const key = fingerprint("signal", input)
+          // The idempotency lookup runs first and outside the mutation, because
+          // delivery has to happen before the record and a re-sent signal must
+          // answer with its original receipt rather than be matched against a
+          // wait point its own first delivery already closed.
+          const prior = yield* runtime.lookupMutation(`signal:${input.idempotencyKey}`, key)
+          if (prior !== undefined) {
+            return prior._tag === "AlreadyApplied" ? { ...prior, receiptId: input.idempotencyKey } : prior
+          }
+          const current = yield* runtime.getRun(input.runId)
+          if (terminal(current.status)) {
+            return { _tag: "Terminal", runId: current.runId, status: current.status }
+          }
+          // Delivery decides the receipt, and it runs OUTSIDE the mutation's
+          // write transaction: completing a wait point re-drives the run, and
+          // the engine's own deferred completion flushes the journal on its way
+          // out — a flush that waits on the writer this transaction would be
+          // holding. A crash between delivery and record leaves the run awake
+          // with no control record, which is the survivable half of the pair.
+          const delivery = Option.isNone(executor)
+            ? "unknown" as const
+            : yield* executor.value.deliverSignal({ runId: input.runId, signal: input.signal })
+          // The run is parked, and parked on something else. Recording a
+          // delivery here would leave an operator watching a signal that never
+          // lands, which is exactly the partial behavior rc.0 forbids.
+          if (delivery === "no-match") {
+            return yield* new NoMatchingWait({ runId: input.runId, name: input.signal.name })
+          }
+          return yield* mutate(
+            "signal",
+            input.idempotencyKey,
+            key,
+            Effect.gen(function*() {
+              yield* runtime.deliverSignal(input.runId, input.signal)
+              yield* emit(input.runId, "control.signal.delivered", {
+                runId: input.runId,
+                name: input.signal.name,
+                payload: input.signal.payload
+              })
+              return accepted(input.idempotencyKey, input.runId)
             })
-            return accepted(input.idempotencyKey, input.runId)
-          })
-        )
+          )
+        })
       ),
       cancel: Effect.fn("Control.cancel")((input) =>
         mutate(
@@ -645,11 +778,40 @@ export const layer: Layer.Layer<
           input.idempotencyKey,
           fingerprint("cancel", input),
           Effect.gen(function*() {
-            yield* runtime.getRun(input.runId)
+            const current = yield* runtime.getRun(input.runId)
+            // A run that has already settled cannot be cancelled, and a cancel
+            // request journaled against it would be a request nothing can ever
+            // act on. Answer with what actually happened to the run.
+            if (terminal(current.status)) {
+              return { _tag: "Terminal", runId: current.runId, status: current.status }
+            }
+            // The durable half, and the only half that reaches a run another
+            // process owns: fibers are process-local, so an interrupt can only
+            // stop a run this process is driving. The executor writes
+            // `cancel_requested_at_ms` on the engine row instead, and the
+            // owner's cancel poll acts on it within a heartbeat.
+            //
+            // It runs INSIDE the mutation's transaction on purpose. An engine
+            // that refuses the request rolls the whole cancel back — no
+            // attribution event, no terminal control status — because a
+            // control row that says `cancelled` while the engine row is still
+            // running is the one state an operator can never recover from.
+            //
+            // It runs BEFORE the attribution event for the mirror-image
+            // reason. The control row this plane read may be stale — the two
+            // `flows_runs` tables are two files in the shipped CLI — and an
+            // engine row that has already settled makes the cancel a request
+            // nobody can act on. Attributing and transitioning it anyway is
+            // exactly the terminal disagreement B-11 forbids, so the engine's
+            // own status becomes the receipt and nothing else happens.
+            const record = yield* executorRequestCancel(input.runId)
+            if (typeof record !== "string") {
+              return { _tag: "Terminal", runId: input.runId, status: record.status }
+            }
             const principal = yield* runtime.stampPrincipal(input.principal)
-            // Attribution first, and in the mutation's own transaction. A
-            // cancellation that committed without it would be durable and
-            // anonymous, and nothing afterwards could say who asked.
+            // Attribution before the interrupt, and in the mutation's own
+            // transaction. A cancellation that committed without it would be
+            // durable and anonymous, and nothing afterwards could say who asked.
             yield* emit(
               input.runId,
               Cancellation.requestedEventType,
@@ -660,13 +822,20 @@ export const layer: Layer.Layer<
                 ...(input.reason === undefined ? {} : { reason: input.reason })
               })
             )
-            const run = yield* runtime.interrupt(input.runId)
-            return terminalOrAccepted(input.idempotencyKey, run)
+            const run = yield* runtime.interrupt(input.runId).pipe(
+              // Another live process owns the run. The request is durable and
+              // that process will act on it, so the honest receipt is
+              // `Accepted` — the cancel was taken — rather than `ClaimLost`,
+              // which reads as a refusal.
+              Effect.catchTag("/control/ClaimLost", () => Effect.succeed(undefined))
+            )
+            return run === undefined
+              ? accepted(input.idempotencyKey, input.runId)
+              : terminalOrAccepted(input.idempotencyKey, run)
           })
         )
       ),
-      pause: Effect.fn("Control.pause")((input) => runMutation("pause", input)),
-      resume: Effect.fn("Control.resume")((input) => runMutation("resume", input)),
+      resume: Effect.fn("Control.resume")((input) => runMutation(input)),
       list,
       watch
     }

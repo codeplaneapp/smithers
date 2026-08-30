@@ -51,12 +51,13 @@
  */
 import * as Capability from "@smthrs/capability/Capability"
 import * as Permission from "@smthrs/capability/Permission"
-import { LaunchFailed } from "@smthrs/control/ControlError"
+import { LaunchFailed, PersistenceError } from "@smthrs/control/ControlError"
 import * as ControlExecutor from "@smthrs/control/ControlExecutor"
 import { ControlRuntime } from "@smthrs/control/ControlRuntime"
-import type { ApprovalPayload, Envelope, RunStatus } from "@smthrs/control/ControlSchema"
+import type { ApprovalPayload, Envelope, RunStatus, SignalPayload } from "@smthrs/control/ControlSchema"
 import * as Digest from "@smthrs/core/Digest"
-import { Flow, FlowRuntime } from "@smthrs/flow"
+import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
+import { DurableDeferred, Flow, FlowRuntime, WaitFor } from "@smthrs/flow"
 import type * as AgentEvent from "@smthrs/harness/AgentEvent"
 import type * as Cell from "@smthrs/harness/Cell"
 import * as CellTurn from "@smthrs/harness/CellTurn"
@@ -72,6 +73,7 @@ import * as ModelRequest from "@smthrs/model/ModelRequest"
 import type { NotificationQueue } from "@smthrs/notifications"
 import { Node } from "@smthrs/plan"
 import * as Registry from "@smthrs/registry/Registry"
+import { Ownership, RunStore } from "@smthrs/run-store"
 import type { Crypto } from "effect"
 import { Cause, Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect"
 import { Agent } from "./Agent.ts"
@@ -159,6 +161,40 @@ export interface Options {
 }
 
 const sourceId = JournalEvent.SourceId.make("/control/executor")
+
+/**
+ * How long a resume delegation must stand unanswered before a composition
+ * that did not park the run may take it up.
+ *
+ * `Ownership.heartbeatStaleAfter` is the cutoff the engine already uses to
+ * declare an owner gone, and this is the same question asked about a host that
+ * is not writing a heartbeat at all: a parked run has none. Every host drains
+ * its delegations once a second, so one still standing thirty seconds later
+ * belongs to a process that has exited — the `smithers run` that parked at the
+ * approval and returned the shell prompt — and the run it parked has to stay
+ * resumable by the next host that comes along.
+ */
+const abandonedParkAfterMs = Duration.toMillis(Ownership.heartbeatStaleAfter)
+
+/**
+ * Why a parked run is being taken up, which decides whether the hosting guard
+ * applies to it.
+ *
+ * `claimed` is an operator's own `Control.resume` or a steer's wake: the plane
+ * that asked has ALREADY claimed the control row (`ControlLive.runMutation`
+ * and the steer wake both call `ControlRuntime.resume` before they journal),
+ * and a wedged run is by definition one nobody is driving. Guarding it would
+ * turn the operator's remedy into a claimed row nothing re-drives.
+ *
+ * `delegated` is the approval seam, where the decision may have been taken in
+ * any process holding the control database and the run belongs to whichever
+ * one parked it. `requestedAtMs` is the age of the durable delegation, and only
+ * the durable follower has one: a process that has just decided an approval
+ * knows nothing about the host from having decided it.
+ */
+type Uptake =
+  | { readonly _tag: "claimed" }
+  | { readonly _tag: "delegated"; readonly requestedAtMs?: number | undefined }
 
 const assistantText = (message: ModelRequest.AssistantMessage): string =>
   message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n")
@@ -632,15 +668,176 @@ export const settleDriverFailure = <E, R>(
       writeFailed(Cause.pretty(cause))
     )
 
+/**
+ * Records a cancellation on the engine row, whichever process owns the run.
+ *
+ * This is the durable half of `Control.cancel`. Interruption is a fiber
+ * operation and fibers are process-local, so a cancel that only interrupted
+ * would reach nothing when a second `flows` process, the UI, or a gateway asked
+ * — the engine row's `cancel_requested_at_ms` is what the owning driver's
+ * cancel poll reads, and it is first-writer-wins, so a repeat is harmless.
+ *
+ * `NotFound` is `unknown` rather than a failure: an engine that never heard of
+ * the run has nothing to record, and the control plane's own interrupt and
+ * journal entry are still the whole answer for a run this composition launched
+ * nothing for.
+ *
+ * @category helpers
+ * @since 0.1.0
+ */
+export const requestCancel = (
+  input: ControlExecutor.CancelRequest
+): Effect.Effect<ControlExecutor.CancelRecord, PersistenceError, RunStore.RunStore> =>
+  Effect.gen(function*() {
+    const runs = yield* RunStore.RunStore
+    const at = yield* Clock.currentTimeMillis
+    const failure = (runId: string) => (cause: unknown) =>
+      new PersistenceError({
+        operation: "AgentSession.requestCancel",
+        message: `The engine could not record a cancellation for ${runId}`,
+        cause
+      })
+    // The row is read BEFORE the request. `RunStore.requestCancel` has no
+    // status predicate yet (triage B-02), so a settled row would take the
+    // column and answer `AlreadyRequested` forever after — and `Control.cancel`
+    // would then transition a stale control row to `cancelled` over an engine
+    // row reading `completed`, which is the terminal disagreement B-11 forbids.
+    //
+    // The read is a guard, not the answer: a store that cannot answer `get` —
+    // a stub host, a missing row — leaves the request itself to decide, which
+    // is exactly what this port did before the guard existed.
+    //
+    // The read and the write are not one transaction, and the window between
+    // them is a real one, not a harmless one. A run that settles inside it
+    // still answers `recorded`, and `Control.cancel` goes on to transition the
+    // control row: the engine ignores the request its cancel poll skips for a
+    // terminal row, and the CONTROL row is the half left disagreeing. Closing
+    // the window needs the store to decide terminality in the same statement
+    // that writes the column, which is `RequestCancelOutcome`'s `Terminal` in
+    // the cancel-durability lane; mapping that outcome here — one line at the
+    // return below — makes this read an optimization and the answer atomic.
+    const current = yield* runs.get(input.runId).pipe(
+      Effect.map((row) => row.status as string | undefined),
+      Effect.catch(() => Effect.succeed(undefined))
+    )
+    if (current === "completed" || current === "failed" || current === "cancelled") {
+      return { _tag: "Terminal", status: current } as const
+    }
+    const outcome = yield* runs.requestCancel(input.runId, at).pipe(Effect.mapError(failure(input.runId)))
+    return outcome._tag === "NotFound" ? "unknown" : "recorded"
+  })
+
+/** The deferred name a `WaitFor` wait point is recorded under. */
+const waitPointName = (signal: string): string => `WaitFor/${signal}`
+
+/**
+ * Completes the `WaitFor` wait point a run is parked on with a signal's
+ * payload.
+ *
+ * The wait point is read off the run's own waiting row rather than derived from
+ * the flow, because the engine writes the deferred's token there when it parks
+ * (`WaitFor.layer` annotates `reason: "event"` with the token). That makes the
+ * bridge flow-agnostic: it completes whatever wait point the parked run
+ * actually declared, through the ordinary `DurableDeferred.succeed` path every
+ * other resolver uses, and the engine's own `scheduleResume` re-drives the run.
+ *
+ * The three answers are distinct on purpose. `delivered` completed a wait
+ * point. `no-match` means the run IS parked and is waiting for something else —
+ * a different signal name, an approval, a timer — which `Control.signal`
+ * refuses rather than recording a delivery nothing consumes. `unknown` means
+ * this executor can see no open wait point at all, which is not the same as
+ * knowing there is none: another process may own the run, or it may not have
+ * parked yet, and the recorded message is what a later start replays.
+ *
+ * @category helpers
+ * @since 0.1.0
+ */
+export const deliverSignal = (
+  input: ControlExecutor.Signal
+): Effect.Effect<
+  ControlExecutor.SignalDelivery,
+  PersistenceError,
+  DurableEngineState.DurableEngineState | FlowRuntime.FlowRuntime
+> =>
+  Effect.gen(function*() {
+    const state = yield* DurableEngineState.DurableEngineState
+    const waiting = yield* state.waiting(input.runId)
+    if (Option.isNone(waiting)) return "unknown" as const
+    const row = waiting.value
+    if (row.reason !== "event" || row.token === null) return "no-match" as const
+    const token = row.token
+    const parsed = yield* Schema.decodeEffect(DurableDeferred.TokenParsed.FromString)(token).pipe(
+      Effect.mapError((cause) =>
+        new PersistenceError({
+          operation: "AgentSession.deliverSignal",
+          message: `The wake token recorded for ${input.runId} is not a durable deferred token`,
+          cause
+        })
+      )
+    )
+    if (parsed.deferredName !== waitPointName(input.signal.name)) return "no-match" as const
+    // `orDie`, not a typed failure: the only way completion refuses a token is
+    // by failing to parse it, and the line above just parsed this one. A
+    // refusal here would mean the two parsers disagree, which is a defect in
+    // this module rather than a condition a caller can answer.
+    yield* DurableDeferred.succeed(WaitFor.deferred(input.signal.name), {
+      token: token as DurableDeferred.Token,
+      value: input.signal.payload
+    }).pipe(Effect.orDie)
+    return "delivered" as const
+  })
+
+/**
+ * Delivers every signal recorded while no executor was running.
+ *
+ * `Control.signal` records the message whether or not an executor could deliver
+ * it, which is the only honest thing to do when the process that owns the run
+ * is down. This is the other half of that promise: at start, every non-terminal
+ * run's recorded signals are replayed against its wait point. Delivery is
+ * first-writer-wins at the deferred, so a signal that already landed is a
+ * no-op, and a run parked on something else is left alone.
+ *
+ * @category helpers
+ * @since 0.1.0
+ */
+export const drainRecordedSignals: Effect.Effect<
+  void,
+  never,
+  ControlRuntime | DurableEngineState.DurableEngineState | FlowRuntime.FlowRuntime
+> = Effect.gen(function*() {
+  const runtime = yield* ControlRuntime
+  const runs = yield* runtime.listRuns
+  yield* Effect.forEach(
+    runs.filter((run) => run.status !== "completed" && run.status !== "failed" && run.status !== "cancelled"),
+    (run) =>
+      runtime.deliveredSignals(run.runId).pipe(
+        Effect.flatMap((signals: ReadonlyArray<SignalPayload>) =>
+          Effect.forEach(signals, (signal) => deliverSignal({ runId: run.runId, signal }), { discard: true })
+        ),
+        Effect.ignore
+      ),
+    { discard: true }
+  )
+}).pipe(
+  Effect.catchCause((cause) =>
+    Effect.annotateLogs(
+      Effect.logWarning("Recorded signals could not be replayed at executor start"),
+      { cause: Cause.pretty(cause) }
+    )
+  )
+)
+
 /** Everything the executor captures at construction and re-provides per run. */
 type Services =
   | Agent
   | ControlRuntime
   | Crypto.Crypto
+  | DurableEngineState.DurableEngineState
   | FlowRuntime.FlowRuntime
   | Journal.Journal
   | NotificationQueue.NotificationQueue
   | Registry.Registry
+  | RunStore.RunStore
   | SeatResolver
 
 /**
@@ -804,6 +1001,21 @@ export const make = (
     })
 
     /**
+     * The fence each run this session parked was parked under.
+     *
+     * `RunSummary.parkedBy` is the durable half; this is the half only the
+     * parking process can hold. A fence is minted per claim, so a fence this
+     * map still holds and the row still names is proof that THIS incarnation
+     * parked THAT execution — which is the only thing that distinguishes the
+     * host of a parked run from any other process that can see it, since a
+     * park releases the owner columns on both rows (triage B-15).
+     */
+    const parkFences = new Map<string, string>()
+
+    /** Whether a status leaves the run parked rather than driving or ending it. */
+    const parks = (status: RunStatus): boolean => status === "parked" || status === "waiting-approval"
+
+    /**
      * Writes one fenced status transition and its journal record.
      *
      * A terminal `failed` carries the rendered cause. Before it did, the
@@ -817,6 +1029,8 @@ export const make = (
       Effect.gen(function*() {
         const fence = yield* runtime.claimFence(runId)
         yield* runtime.writeStatus(runId, fence, status)
+        if (parks(status)) parkFences.set(runId, fence)
+        else parkFences.delete(runId)
         yield* emit(
           runId,
           `control.run.${status}`,
@@ -1037,13 +1251,13 @@ export const make = (
         attempts
       )
 
+    /**
+     * Re-drives one execution `takeUpResume` has already found parked here and
+     * claimed. A refusal is contained: one run that cannot restart must not
+     * take the follower or the journal bridge down with it.
+     */
     const resumeExecution = (runId: string): Effect.Effect<void> =>
-      Effect.gen(function*() {
-        const parked = yield* awaitParked(runId, 500)
-        // False when the execution settled before the resume arrived, or when
-        // the resumed run belongs to an executor other than this one.
-        if (parked) yield* engine.resume(agentFlow, runId)
-      }).pipe(
+      engine.resume(agentFlow, runId).pipe(
         Effect.catchCause(
           (cause) =>
             Effect.annotateLogs(
@@ -1052,6 +1266,97 @@ export const make = (
             )
         )
       )
+
+    /**
+     * Whether this composition is the one hosting a parked run.
+     *
+     * Engine visibility is not hosting. A parked execution has released its
+     * owner and its heartbeat on both rows — that is what makes it resumable —
+     * so `engine.poll` answers `Suspended` in EVERY process that opened the
+     * same `engine.db`, and the shipped CLI composes an executor in every one
+     * of them (`NodeControl.layerControl` builds `layerExecutor` unless
+     * `--remote`). A `smithers approve` against a run a gateway parked could
+     * therefore claim the control row, drive the run itself, and strand it at
+     * process exit. `RunSummary.parkedBy` is what answers instead: the fence
+     * the park was written under, which only the parking incarnation still
+     * holds (triage B-15).
+     *
+     * Three answers, in order:
+     *
+     * - No `parkedBy` at all: nothing claims to host the run — an operator's
+     *   own park, or a row parked before this field existed — so the take-up
+     *   proceeds as it always did.
+     * - `parkedBy` this session wrote: this is the host. It takes its own
+     *   delegation up at once, which is the ordinary same-process approval.
+     * - Somebody else's `parkedBy`: not this composition's run to drive, so
+     *   the delegation is left standing for the host that parked it — until
+     *   it has stood unanswered for `heartbeatStaleAfter`, the same cutoff the
+     *   engine uses to declare an owner gone. A host polls its delegations
+     *   once a second, so one still standing after thirty is one whose host is
+     *   not coming back, and refusing it forever would leave every run parked
+     *   by a process that has since exited unresumable by anything.
+     *
+     * A control store that cannot answer is not evidence of a foreign host, so
+     * it leaves the decision where it was before this guard existed.
+     */
+    const hostsPark = (
+      runId: string,
+      uptake: Uptake
+    ): Effect.Effect<boolean, never> =>
+      Effect.gen(function*() {
+        if (uptake._tag === "claimed") return true
+        const parkedBy = yield* runtime.getRun(runId).pipe(
+          Effect.map((run) => run.parkedBy),
+          Effect.catchCause(() => Effect.succeed(undefined))
+        )
+        if (parkedBy === undefined) return true
+        if (parkFences.get(runId) === parkedBy) return true
+        if (uptake.requestedAtMs === undefined) return false
+        const nowMs = yield* Clock.currentTimeMillis
+        return nowMs - uptake.requestedAtMs >= abandonedParkAfterMs
+      })
+
+    /**
+     * Takes up one resume: this executor's execution, this executor's fence.
+     *
+     * The park wait comes first. It ends `false` for an execution this engine
+     * does not have, and for one that is not parked, and neither is this
+     * executor's to claim. {@link hostsPark} comes second and is the ownership
+     * question proper: an execution this engine can SEE is not one it hosts.
+     *
+     * The claim comes third and is what makes the re-driven run WRITABLE.
+     * `writeStatus` reaches `claimFence`, which requires `ownedByUs`, which
+     * requires a `running` row: a run re-driven without a claim runs to its
+     * end and then cannot record that it did.
+     *
+     * `drive` is how the caller wants the re-drive run. The journal bridge
+     * awaits it, so one process's re-drives stay serialized; the port forks it,
+     * so a control-plane call returns as soon as the run is moving again.
+     *
+     * `uptake` says which seam asked. See {@link Uptake}: an operator's own
+     * resume is not guarded, an approval delegation is.
+     */
+    const takeUpResume = (
+      runId: string,
+      drive: (runId: string) => Effect.Effect<void>,
+      uptake: Uptake
+    ): Effect.Effect<ControlExecutor.ResumeUptake, never> =>
+      Effect.gen(function*() {
+        const parked = yield* awaitParked(runId, 500).pipe(Effect.catchCause(() => Effect.succeed(false)))
+        if (!parked) return "unknown" as const
+        const hosted = yield* hostsPark(runId, uptake)
+        if (!hosted) return "unknown" as const
+        const claimed = yield* runtime.resume(runId).pipe(
+          Effect.as(true),
+          // A lost claim is a live peer holding the run, and the delegation
+          // stays standing for it. Answering "resuming" here would clear a
+          // delegation this executor is not going to honour.
+          Effect.catchCause(() => Effect.succeed(false))
+        )
+        if (!claimed) return "unknown" as const
+        yield* drive(runId)
+        return "resuming" as const
+      })
 
     /**
      * Follows the journal for the control plane's resume events and re-drives
@@ -1063,7 +1368,18 @@ export const make = (
       const subscription = yield* journal.changes
       yield* Stream.fromSubscription(subscription).pipe(
         Stream.filter((entry) => entry.eventType === "control.run.resume" || entry.eventType === "control.run.resumed"),
-        Stream.mapEffect((entry) => resumeExecution(entry.runId), { concurrency: 1 }),
+        Stream.mapEffect(
+          (entry) =>
+            takeUpResume(
+              entry.runId,
+              resumeExecution,
+              // `control.run.resume` is the operator's own claim, already taken
+              // in this process by the call that journaled it; `resumed` is the
+              // approval delegation, which belongs to whoever parked the run.
+              entry.eventType === "control.run.resume" ? { _tag: "claimed" } : { _tag: "delegated" }
+            ),
+          { concurrency: 1 }
+        ),
         Stream.runDrain
       )
     }).pipe(
@@ -1092,7 +1408,58 @@ export const make = (
         )
       })).pipe(Scope.provide(scope))
 
+    /**
+     * Takes up every resume delegation this executor hosts, once.
+     *
+     * The journal's `changes` hub is an in-process `PubSub`: no other journal
+     * instance can publish into it, so a decision taken in another process
+     * reaches this executor through nothing at all. The delegation is durable
+     * in the control database instead, and this is what reads it. Runs this
+     * executor does not host are left alone with their delegation standing,
+     * for the host that does — and this is the one caller that knows how long
+     * one has been standing, so it is the only path by which an abandoned
+     * park is ever adopted ({@link hostsPark}).
+     */
+    const drainPendingResumes = runtime.pendingResumes.pipe(
+      Effect.flatMap((pending) =>
+        Effect.forEach(pending, (entry) =>
+          takeUpResume(
+            entry.runId,
+            (runId) => Effect.asVoid(Effect.forkIn(resumeExecution(runId), scope)),
+            { _tag: "delegated", requestedAtMs: entry.requestedAtMs }
+          ).pipe(
+            Effect.flatMap((uptake) =>
+              uptake === "resuming" ? runtime.clearResume(entry.runId, entry.sequence) : Effect.void
+            )
+          ), { discard: true })
+      ),
+      Effect.catchCause((cause) =>
+        Effect.annotateLogs(
+          Effect.logWarning("A pending resume delegation could not be taken up"),
+          { cause: Cause.pretty(cause) }
+        )
+      )
+    )
+
+    /**
+     * The durable follower: one pass, then one every second, forever.
+     *
+     * A second is the same bound `SqlJournal`'s own cross-process follower
+     * uses to recheck the durable tail, and the same heartbeat tick the engine
+     * sweeps cancellations on. Nothing here is event-driven, because rc.0 has
+     * no cross-process wake (rc-contract §5.2).
+     */
+    const pendingResumeBridge = drainPendingResumes.pipe(
+      Effect.andThen(Effect.sleep(Duration.seconds(1))),
+      Effect.forever
+    )
+
     yield* Effect.forkIn(resumeBridge, scope)
+    yield* Effect.forkIn(pendingResumeBridge, scope)
+    // A signal recorded while this process was down has a wait point still
+    // open and nobody to complete it. Replaying at start is what makes
+    // `Control.signal`'s record a promise rather than a note.
+    yield* Effect.forkIn(Effect.provide(drainRecordedSignals, services), scope)
 
     const launch = (
       input: ControlExecutor.Launch
@@ -1115,7 +1482,9 @@ export const make = (
               })
           )
         )
-        if (flowBody._tag !== "Prompt") return "pending" as const
+        if (flowBody._tag !== "Prompt") {
+          return "pending" as const
+        }
         // Resolve the seat now, so a missing key refuses the launch as a
         // typed failure instead of failing the run after it was accepted.
         yield* seats.resolve(descriptor.value.model.value).pipe(
@@ -1145,7 +1514,14 @@ export const make = (
       })
 
     return ControlExecutor.make({
-      launch: Effect.fn("AgentSession.launch")(launch)
+      launch: Effect.fn("AgentSession.launch")(launch),
+      requestCancel: Effect.fn("AgentSession.requestCancel")((input) => Effect.provide(requestCancel(input), services)),
+      deliverSignal: Effect.fn("AgentSession.deliverSignal")((input) => Effect.provide(deliverSignal(input), services)),
+      resumeRun: Effect.fn("AgentSession.resumeRun")((input) =>
+        takeUpResume(input.runId, (runId) => Effect.asVoid(Effect.forkIn(resumeExecution(runId), scope)), {
+          _tag: "delegated"
+        })
+      )
     })
   })
 
