@@ -228,6 +228,69 @@ describe("SyncServer bounded fan-out liveness", () => {
       expect(Option.isSome(settled)).toBe(true)
     }))
 
+  it.live("serves an entry committed in this process before the tail interval elapses", () =>
+    Effect.gen(function*() {
+      // The tail interval is the freshness policy for runs another process
+      // owns, which reach this one only through the database. It must not also
+      // be what a follower waits for an entry written beside it: the journal
+      // publishes every committed entry on `Journal.changes`, so a workspace
+      // subscription that covers the run is woken at once, exactly as a
+      // run-scoped subscription is. The interval here is two hundred times the
+      // budget, so arrival inside the budget cannot come from a tick.
+      const runs = 5
+      const tailIntervalMs = 5000
+      const arrivalBudgetMs = 2000
+      const { ids } = workspace(runs)
+      const { record, seen } = recorder()
+      let elapsed = Number.NaN
+      const database = Layer.provideMerge(DurableWriter.layer(), NodeDatabase.layer({ filename: ":memory:" }))
+      const journal = SqlJournal.layer({ capacity: 64, overflow: "reject" }).pipe(
+        Layer.provide(Layer.provideMerge(JournalMigrations.layer, database))
+      )
+      const append = (durable: Journal.Service, id: JournalEvent.RunId, eventType: string) =>
+        durable.emitDurableUnfenced(
+          new JournalEvent.Input({ runId: id, sourceId: sourceId("source"), eventType, payload: { id } }, {
+            disableChecks: true
+          })
+        )
+      const live = yield* (
+        Effect.gen(function*() {
+          const durable = yield* Journal.Journal
+          for (const id of ids) yield* append(durable, id, "created")
+          const server = yield* SyncServer.makeLiveWith({ concurrency: 2, tailIntervalMs })
+          const follower = yield* Effect.forkChild(
+            Stream.runDrain(
+              server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: runs * 2 }).pipe(
+                Stream.tap(record)
+              )
+            ),
+            { startImmediately: true }
+          )
+          // The seeded round has to be done, or the wait below would be
+          // measuring the first round rather than the wake.
+          yield* Effect.sleep("10 millis").pipe(
+            Effect.repeat({ until: () => seen.length >= runs, times: 200 })
+          )
+          const startedAt = Date.now()
+          for (const id of ids) yield* append(durable, id, "live")
+          const joined = yield* Fiber.join(follower).pipe(Effect.timeoutOption(`${arrivalBudgetMs} millis`))
+          elapsed = Date.now() - startedAt
+          return joined
+        }).pipe(
+          Effect.provide(Layer.mergeAll(
+            journal,
+            RunCatalog.layerStatic(ids),
+            SyncPrincipal.layerWorkspace("fan-out-suite")
+          )),
+          Effect.scoped
+        )
+      )
+
+      expect(seen.slice(runs).sort()).toEqual(["run-0", "run-1", "run-2", "run-3", "run-4"])
+      expect(Option.isSome(live)).toBe(true)
+      expect(elapsed).toBeLessThan(tailIntervalMs)
+    }))
+
   it.live("walks one run's backlog across pages inside a single round", () =>
     Effect.gen(function*() {
       // A run with more unserved entries than one page must not be served one

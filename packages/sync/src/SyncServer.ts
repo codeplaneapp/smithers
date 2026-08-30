@@ -109,9 +109,14 @@ export const defaultConcurrency = 64
  * cross-process wake, so the interval is the whole of the freshness policy for
  * them: a follower sees an entry within one interval of it being durable. A
  * second matches the rest of the rc.0 posture — the heartbeat sweep, the
- * cancel poll, and {@link RunCatalog.defaultPollIntervalMs} — and a run-scoped
- * subscription is unaffected, since it follows one journal stream directly and
- * is woken in process.
+ * cancel poll, and {@link RunCatalog.defaultPollIntervalMs}.
+ *
+ * It is not what an in-process append waits for. An entry this process commits
+ * is published on `Journal.changes`, and a workspace subscription that covers
+ * its run wakes the round on it, so a follower beside the writer sees it at
+ * once rather than at the next tick. A run-scoped subscription is likewise
+ * unaffected: it follows one journal stream directly and keeps that stream's
+ * wake.
  *
  * @category constants
  * @since 0.1.0
@@ -149,7 +154,8 @@ export interface Options {
   readonly concurrency?: number | undefined
   /**
    * How long a workspace subscription waits before re-reading the runs it
-   * covers, when nothing announces a change, in milliseconds. Defaults to
+   * covers, when nothing wakes it — no journal entry committed in this
+   * process, no catalog announcement — in milliseconds. Defaults to
    * {@link defaultTailIntervalMs}.
    */
   readonly tailIntervalMs?: number | undefined
@@ -168,11 +174,14 @@ export interface Options {
  * A workspace subscription's fan-out is bounded without bounding what it
  * serves. It reads every run it covers — the runs the request covers plus the
  * runs the catalog announces while it is live — in rounds, at most
- * `Options.concurrency` journal reads open at once, repeating each round on an
- * announcement or after `Options.tailIntervalMs`. The memory one follower
- * costs is a function of the bound, not of the workspace's size, and no run is
- * starved by the runs ahead of it. A run-scoped subscription follows that one
- * run's journal stream directly and keeps its in-process wake.
+ * `Options.concurrency` journal reads open at once, repeating each round on a
+ * journal entry committed in this process, on a catalog announcement, or after
+ * `Options.tailIntervalMs`. The memory one follower costs is a function of the
+ * bound, not of the workspace's size, and no run is starved by the runs ahead
+ * of it. The interval is therefore the freshness policy for the runs another
+ * process owns, not for the runs written beside the follower. A run-scoped
+ * subscription follows that one run's journal stream directly and keeps its
+ * in-process wake.
  *
  * Authorization is fail-closed along two boundaries, both consulted per
  * request:
@@ -378,10 +387,11 @@ export const makeLiveWith = (
      * behind them is ever attached. The workspace tail inverts that. It reads
      * each covered run's unserved entries as a finite page walk, so the bound
      * limits how many reads are open at once and every round still visits
-     * every run, and it repeats the round on a wake or on
-     * {@link defaultTailIntervalMs}. Memory is a function of the bound;
-     * freshness is a function of the interval; neither is a function of how
-     * many runs the workspace holds.
+     * every run, and it repeats the round on a wake — a journal entry
+     * committed in this process for a covered run, or a catalog announcement —
+     * or on {@link defaultTailIntervalMs}. Memory is a function of the bound;
+     * freshness of another process's writes is a function of the interval;
+     * neither is a function of how many runs the workspace holds.
      *
      * A run-scoped subscription does not go through here: it follows one
      * journal stream directly (see {@link runStream}) and keeps that stream's
@@ -455,13 +465,34 @@ export const makeLiveWith = (
           Stream.drain
         )
 
+        // An entry committed in this process wakes the round it belongs to.
+        // The interval is the freshness policy for the runs another engine
+        // process owns, which reach this one only through the database; it
+        // must not also be what a follower waits for an entry written beside
+        // it. `Journal.changes` is one process-wide sliding feed of every
+        // committed entry, so this costs one subscription per workspace
+        // subscription — not one per run — and the fan-out bound is unchanged.
+        // A run this subscription does not cover is left to the announcement
+        // path, which covers it and wakes the round itself. A wake the feed
+        // slides away under a burst costs its entry at most one interval,
+        // which is what a write from another process already waits.
+        const commits = yield* journal.changes
+        const appends = Stream.fromSubscription(commits).pipe(
+          Stream.filter((entry) => served.has(entry.runId)),
+          Stream.tap(() => PubSub.publish(wake, undefined)),
+          Stream.drain
+        )
+
         const ticks = Stream.fromEffectRepeat(
           Effect.raceFirst(PubSub.take(woken), Effect.sleep(tailIntervalMs))
         )
 
         return Stream.merge(
-          Stream.concat(round, Stream.flatMap(ticks, () => round)),
-          announcements
+          Stream.merge(
+            Stream.concat(round, Stream.flatMap(ticks, () => round)),
+            announcements
+          ),
+          appends
         )
       }))
 
