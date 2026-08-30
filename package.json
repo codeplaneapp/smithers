@@ -29,6 +29,8 @@
     "circular": "pnpm --recursive --if-present run circular",
     "dev": "pnpm --filter smithers-ui run start",
     "deploy:dry": "pnpm --filter smithers-server run deploy:dry",
+    "docs:llms": "node scripts/generate-llms.ts",
+    "docs:pages": "node scripts/generate-docs-pages.mjs",
     "lint": "pnpm --recursive --if-present run lint",
     "test": "pnpm --recursive --if-present run test",
     "test:jsdoc": "node --test scripts/eslint-jsdoc.test.mjs",

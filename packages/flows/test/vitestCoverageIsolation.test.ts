@@ -409,6 +409,15 @@ describe("vitest coverage isolation conformance", () => {
     // allowed to require. It also currently fails on a pre-existing Effect
     // duplication that Phase 3's version rewrite fixes
     // (docs/migration/phase2-baseline.md).
+    //
+    // Widened once more when the documentation site landed, for the two
+    // generators and not for their gates. `scripts/generate-docs-pages.mjs`
+    // and `scripts/generate-llms.ts` print "Run `pnpm docs:pages`" and "Run
+    // `pnpm docs:llms` and commit the result" in their own output, so the
+    // names have to resolve or the instruction is false. The gates that read
+    // what they write stay targets, `//scripts:docs` and `//scripts:llms`,
+    // per rc-contract.md section 9 exception 3, and `.github/workflows/
+    // docs-deploy.yml` invokes those two by path.
     const root = JSON.parse(readFileSync(join(packagesDir, "..", "package.json"), "utf8")) as {
       readonly scripts?: Record<string, string>
     }
@@ -420,6 +429,8 @@ describe("vitest coverage isolation conformance", () => {
       circular: "pnpm --recursive --if-present run circular",
       "deploy:dry": "pnpm --filter smithers-server run deploy:dry",
       dev: "pnpm --filter smithers-ui run start",
+      "docs:llms": "node scripts/generate-llms.ts",
+      "docs:pages": "node scripts/generate-docs-pages.mjs",
       lint: "pnpm --recursive --if-present run lint",
       test: "pnpm --recursive --if-present run test",
       "test:examples": "pnpm --filter @smthrs/examples run test",
