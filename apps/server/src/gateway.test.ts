@@ -665,16 +665,14 @@ describe("wave 11 — the /api/workflow/* routes", () => {
       expect(unnamed.status).toBe(400)
       expect(calls.filter((call) => call.url.includes("/api/gateways/"))).toHaveLength(0)
     })
-    // The allowlist is exactly the product's floor — nothing else crosses.
+    // The allowlist is exactly the product's floor. Nothing else crosses.
     expect([...ALLOWED_GATEWAY_PROCEDURES].sort()).toEqual([
       "Approval.Submit",
       "Cancel",
       "List",
       "Plan",
       "Projection.Snapshot",
-      "Run",
-      "Signal",
-      "Steer"
+      "Run"
     ])
   })
 

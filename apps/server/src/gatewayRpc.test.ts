@@ -21,8 +21,6 @@ describe("the relayed procedure catalog", () => {
       Plan: "/rpc",
       Run: "/rpc",
       Cancel: "/rpc",
-      Signal: "/rpc",
-      Steer: "/rpc",
       List: "/rpc",
       "Projection.Snapshot": "/projections",
       "Approval.Submit": "/projections"
@@ -33,10 +31,19 @@ describe("the relayed procedure catalog", () => {
       "List",
       "Plan",
       "Projection.Snapshot",
-      "Run",
-      "Signal",
-      "Steer"
+      "Run"
     ])
+  })
+
+  test("relays no control procedure the product does not call", () => {
+    // The relay holds the gateway credential on the product's behalf, so the
+    // allowlist is the reach a compromised session gets. `Signal` and `Steer`
+    // are real control procedures with no caller in `apps/ui`; each returns
+    // beside the call that needs it.
+    expect(ALLOWED_GATEWAY_PROCEDURES).not.toContain("Signal")
+    expect(ALLOWED_GATEWAY_PROCEDURES).not.toContain("Steer")
+    expect(ALLOWED_GATEWAY_PROCEDURES).not.toContain("Approve")
+    expect(ALLOWED_GATEWAY_PROCEDURES).not.toContain("Deny")
   })
 
   test("relays no streaming procedure, which belongs on the gateway's socket mounts", () => {
