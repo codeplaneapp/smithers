@@ -176,7 +176,8 @@ describe.skipIf(!enabled)("review a real pull request (live GitHub)", () => {
     );
 
     console.log(
-      `[review e2e] ${slug}#${pr.number}: seat=${liveSeats ? liveSeats.review : "scripted"} status=${result.review.status} ` +
+      `[review e2e] ${slug}#${pr.number}: seat=${liveSeats ? liveSeats.review : "scripted"} ` +
+        `status=${result.review.status} ` +
         `files=${result.walkthrough.files} findings=${result.review.comments.length} ` +
         `warnings=${result.review.warnings.map((warning) => warning.type).join(",") || "none"}`,
     );
