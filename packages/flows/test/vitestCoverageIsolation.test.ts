@@ -148,6 +148,10 @@ describe("vitest coverage isolation conformance", () => {
   // 99, statements 98) are the measured coverage of adapters that talk to
   // GitHub, Linear, and Telegram over HTTP, and its own config carries the
   // instruction to raise them as each case closes.
+  // `migrate` joins them too: its floors are 70 in all four categories, the
+  // measured coverage of a translator whose remaining branches are the 0.x
+  // shapes only a live model run reaches, and those three cases are pinned in
+  // `docs/alpha-notes.md` rather than run by the default gate.
   const coverageFloorDeferred = new Set([
     "cli",
     "control",
@@ -165,7 +169,8 @@ describe("vitest coverage isolation conformance", () => {
     "build",
     "build-cli",
     "targets",
-    "integrations"
+    "integrations",
+    "migrate"
   ])
 
   const assertCoverageDenominator = (source: string) => {

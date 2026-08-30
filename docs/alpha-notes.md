@@ -100,6 +100,9 @@ only.
 | `integrations` | `GitHub live contract (GITHUB_TOKEN)` | `describe.skipIf(GITHUB_TOKEN === undefined)` |
 | `integrations` | `Linear live contract (LINEAR_API_KEY)` | `describe.skipIf(LINEAR_API_KEY === undefined)` |
 | `integrations` | `Telegram live contract (TELEGRAM_BOT_TOKEN)` | `describe.skipIf(TELEGRAM_BOT_TOKEN === undefined)` |
+| `migrate` | `migrates a single-file JSX project through the bin (${reason})` | `it.skip` when `SMITHERS_MIGRATE_SEAT` names no funded seat |
+| `migrate` | `records what a single-file project could not settle (${reason})` | `it.skip` when `SMITHERS_MIGRATE_SEAT` names no funded seat |
+| `migrate` | `refuses what it cannot translate in a multi-workflow pack (${reason})` | `it.skip` when `SMITHERS_MIGRATE_SEAT` names no funded seat |
 
 **`integrations`: the three live contract suites.** Each one talks to a real
 vendor API, `api.github.com`, `api.linear.app`, or `api.telegram.org`. Each
@@ -128,6 +131,20 @@ with `FLOWS_WORKERD_SMOKE=1 pnpm --filter @smthrs/harness test` after
 installing `workerd`. Closing it for the default gate means adding `workerd` to
 the toolchain the CI lane installs, which the RC does not claim (see the
 browser and edge entry in `rc-contract.md` section 7).
+
+**`migrate` — the three live-model cases.** `MigrateFlow.live.e2e.test.ts`
+runs the migration flow against a real provider, and a real provider costs
+money: the suite reads `SMITHERS_MIGRATE_SEAT` for a `provider:model` seat and
+requires that provider's key, and skips with the reason in the test title when
+either is missing. It is written as `it.skip` inside the no-seat branch rather
+than `describe.skipIf` so the skipped titles carry the reason an operator has
+to act on, which is why the register scanner counts three pins here. Everything
+the flow does with the seat scripted is covered by the rest of `test/flow`;
+what only a live call proves is that a real model's output still translates.
+Run it with `SMITHERS_MIGRATE_SEAT=anthropic:<model> ANTHROPIC_API_KEY=... pnpm
+--filter @smthrs/migrate test`. What breaks if it regresses: `smithers migrate`
+could stop producing a flow the registry discovers, and only a paid run would
+notice.
 
 **`create-app` — `layerTevm` against a mainnet fork.** The pin is inside
 `packages/create-app/template/aomi`, a scaffolding template copied into a new

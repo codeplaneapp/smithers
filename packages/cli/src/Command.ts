@@ -259,6 +259,24 @@ const awaitOwnedRun = (
   })
 
 /**
+ * The park a decision answers, or nothing for a plan-level decision.
+ *
+ * `Control.approve` and `Control.deny` restart the run their `ask` parked, in
+ * the deciding call (rc-contract section 5.1). The driver that picks that
+ * resume up is this process's own executor, so a command that printed its
+ * receipt and returned took the driver down with it and left the run it had
+ * just restarted exactly where it stood — still needing `run --resume`, which
+ * is the second call the contract says a decision replaces.
+ *
+ * A plan-level decision has no run yet, and the settlement wait needs one.
+ */
+const decisionPark = (
+  control: ControlService.Service,
+  target: ControlSchema.ApprovalTarget
+): Effect.Effect<number | undefined, never> =>
+  target._tag === "Node" ? latestPark(control, target.runId) : Effect.succeed(undefined)
+
+/**
  * Renders what the control plane knows about a declined launch, and returns
  * the refusal the verb exits with.
  *
@@ -467,7 +485,10 @@ const approve = Command.make("approve", {
     yield* guardGlobals
     const payload = yield* approval(config.approval)
     const control = yield* ControlService.Control
-    yield* render(yield* control.approve({ ...payload, scope: config.scope }))
+    const parkSequence = yield* decisionPark(control, payload.target)
+    const receipt = yield* control.approve({ ...payload, scope: config.scope })
+    yield* awaitOwnedRun(control, receipt, parkSequence)
+    yield* render(receipt)
   })).pipe(Command.withDescription(Verb.find("approve")!.help))
 
 const deny = Command.make("deny", { approval: Argument.string("approval") }, (config) =>
@@ -475,7 +496,10 @@ const deny = Command.make("deny", { approval: Argument.string("approval") }, (co
     yield* guardGlobals
     const payload = yield* approval(config.approval)
     const control = yield* ControlService.Control
-    yield* render(yield* control.deny(payload))
+    const parkSequence = yield* decisionPark(control, payload.target)
+    const receipt = yield* control.deny(payload)
+    yield* awaitOwnedRun(control, receipt, parkSequence)
+    yield* render(receipt)
   })).pipe(Command.withDescription(Verb.find("deny")!.help))
 
 const cancel = Command.make("cancel", { runId: Argument.string("run-id") }, (config) =>

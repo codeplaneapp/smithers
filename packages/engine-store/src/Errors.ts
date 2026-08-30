@@ -23,3 +23,5 @@ export {
   CacheConflictDetected,
   CacheCorruptionDetected
 } from "./internal/ActionPersistence.ts"
+export { RetentionError, RetentionErrorCode } from "./internal/RetentionOps.ts"
+export { RunCatalogError, RunCatalogErrorCode } from "./internal/RunCatalogOps.ts"

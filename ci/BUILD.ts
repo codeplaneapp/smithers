@@ -15,6 +15,11 @@
  * - database, engine-store, flows, journal, kernel, plan, run-store, step-cache,
  *   sync, time-travel (and examples): Bun's `node:sqlite` binds the host SQLite,
  *   built with `SQLITE_OMIT_LOAD_EXTENSION`, which the sqlite layer requires.
+ *   This exclusion is now a contract, not a limitation: rc.0 does not run the
+ *   durable engine under Bun, and `NodeDatabase.layer` refuses to open a
+ *   database when `process.versions.bun` is set (`unsupported_runtime`,
+ *   exclusion X-18). A Bun target for any of those suites would assert the
+ *   refusal, not durable execution.
  * - jj: `NodeJjClassification` expects spawn failures to classify as `unknown`;
  *   Bun's `child_process` error shape classifies as `not_installed`.
  * - platform-node: the Node host contract suite asserts Node-host behavior and

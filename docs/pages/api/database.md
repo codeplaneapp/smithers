@@ -78,8 +78,24 @@ The shipped offsets are `journal` at `0`, `run-store` at `idBlock`, `step-cache`
 | --- | --- | --- |
 | `NodeDatabaseOptions` | interface | `filename`, optional `sqlite` config |
 | `layer` | layer | `node:sqlite` through `@effect/sql-sqlite-node`, WAL enabled |
+| `UnsupportedDatabase` | error | the refusal `layer` raises as a defect, carrying `code` and `message` |
+| `UnsupportedDatabaseCode` | schema | `unsupported_runtime`, `unsupported_database_file`, and `database_locked` |
+| `isUnsupportedDatabase` | refinement | narrows an unknown defect to that refusal, for a caller that reports it |
 
-`layer` retries connection opening while SQLite reports the file locked, because the driver issues `PRAGMA journal_mode = WAL` inside its constructor and WAL conversion or recovery can race another opener. The current driver also sets `PRAGMA busy_timeout` and uses `BEGIN IMMEDIATE` for writable transactions; see [SQLite operating envelope](/sqlite-operating-envelope) for the operator-facing limits.
+`layer` refuses three opens before it creates a connection. `unsupported_runtime` refuses the durable engine when `process.versions.bun` is set (exclusion X-18); `unsupported_database_file` refuses a file that has at least one table and no `flows_migrations` table, which is a 0.x `smithers.db` (exclusion X-13); `database_locked` refuses a file a peer held for the whole open ladder, because 1.0.0-rc.0 does not open a database it could not inspect. All three are defects rather than typed failures, so `layer` keeps the `never` error channel every durable package composes against; see [known limitations](/release/known-limitations).
+
+`layer` retries connection opening while SQLite reports the file locked, because the driver issues `PRAGMA journal_mode = WAL` inside its constructor and WAL conversion or recovery can race another opener. The file check retries on the same ladder, so a 0.x database is refused whether or not a 0.x writer holds it at that moment. The current driver also sets `PRAGMA busy_timeout` and uses `BEGIN IMMEDIATE` for writable transactions; see [SQLite operating envelope](/sqlite-operating-envelope) for the operator-facing limits.
+
+## UnsupportedBackend
+
+[src/UnsupportedBackend.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/UnsupportedBackend.ts)
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `ignoredNames` | getter | the `SMITHERS_TEST_PG_URL` and `SMITHERS_POSTGRES_*` names 1.0.0-rc.0 ignores, sorted |
+| `ignoredNotice` | constructor | the one line each ignored name gets |
+
+A notice, not a refusal: an ignored name changes no exit code and no result. Choosing a backend is the separate case, and `SMITHERS_BACKEND` or `--backend` with any value but `sqlite` exits 1 with `unsupported_database`.
 
 ## TestDatabase
 

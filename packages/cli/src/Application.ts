@@ -56,7 +56,7 @@ export interface Config {
  * The runtime and journal a local composition executes on.
  *
  * A journal is required, not optional: `Journal.layerNoop()` is a closed stub,
- * so every mutation event (decide/pause/resume/launch) failed with
+ * so every mutation event (decide/resume/launch) failed with
  * `journal_closed` after the runtime had already transitioned.
  *
  * @category models

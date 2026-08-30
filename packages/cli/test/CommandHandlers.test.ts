@@ -624,3 +624,157 @@ describe("`gc` over a database it cannot open", () => {
     }
   })
 })
+
+describe("deciding an in-run approval from the CLI", () => {
+  const nodePayload = (runId: string) =>
+    JSON.stringify({
+      target: {
+        _tag: "Node",
+        runId,
+        requestId: "request-1",
+        digest: "digest-1",
+        envelope: { capabilities: [], flows: [], budget: {} }
+      },
+      scope: "run",
+      idempotencyKey: `approve:${runId}`
+    })
+
+  /**
+   * A control whose run settles only while somebody is watching it.
+   *
+   * That is what a local executor is: `Control.approve` resumes the parked run
+   * server-side, and the driver that picks the resume up lives exactly as long
+   * as the process that opened it. A command that prints its receipt and
+   * returns takes the driver down with it, so the run it just restarted stops
+   * where it stood.
+   *
+   * The committed park is served as history so the wait has to be scoped past
+   * it: `control.run.waiting-approval` is itself a settling kind, and a wait
+   * that replayed it would return without ever driving the run.
+   */
+  const settlingControl = (state: { status: string; runs: number }) =>
+    Layer.effect(
+      ControlService.Control,
+      Effect.gen(function*() {
+        const control = yield* ControlService.Control
+        const decided = (input: ControlService.ApprovalInput): ControlSchema.Receipt =>
+          input.target._tag === "Node"
+            ? { _tag: "Accepted", receiptId: input.idempotencyKey, runId: input.target.runId }
+            : { _tag: "Accepted", receiptId: input.idempotencyKey }
+        return ControlService.make({
+          ...control,
+          run: (input) => {
+            state.runs += 1
+            return control.run(input)
+          },
+          approve: (input) => Effect.succeed(decided(input)),
+          deny: (input) => Effect.succeed(decided(input)),
+          watch: (filter) => {
+            const history = (filter.afterSequence ?? 0) < 1
+              ? [event(1, "control.run.waiting-approval")]
+              : []
+            if (filter.follow === false) return Stream.fromIterable(history)
+            return Stream.fromIterable(history).pipe(
+              Stream.concat(Stream.fromEffect(
+                Effect.delay(
+                  Effect.sync(() => {
+                    state.status = "completed"
+                    return event(2, "control.run.completed")
+                  }),
+                  "20 millis"
+                )
+              )),
+              Stream.concat(Stream.never)
+            )
+          }
+        })
+      })
+    ).pipe(Layer.provide(testControl))
+
+  const decide = (verb: "approve" | "deny") => json(["--json", verb, nodePayload("run-1")])
+
+  it.each(["approve", "deny"] as const)("settles a parked run on %s alone", async (verb) => {
+    const state = { status: "waiting-approval", runs: 0 }
+    const receipt = await Effect.runPromise(
+      decide(verb).pipe(
+        Effect.timeout("5 seconds"),
+        Effect.provide(ExecutorOwnership.layer(true)),
+        Effect.provide(settlingControl(state)),
+        Effect.provide(services),
+        Effect.provide(NodeServices.layer)
+      )
+    )
+
+    // rc-contract §5.1: the decision resumes the run, so one call settles it.
+    expect(receipt).toMatchObject({ _tag: "Accepted", runId: "run-1" })
+    expect(state.status).toBe("completed")
+    // And it settles through the decision, not through a second verb.
+    expect(state.runs).toBe(0)
+  })
+
+  it("does not wait on a decision when this process does not own the executor", async () => {
+    const state = { status: "waiting-approval", runs: 0 }
+    const receipt = await Effect.runPromise(
+      decide("approve").pipe(
+        Effect.timeout("5 seconds"),
+        Effect.provide(ExecutorOwnership.layer(false)),
+        Effect.provide(settlingControl(state)),
+        Effect.provide(services),
+        Effect.provide(NodeServices.layer)
+      )
+    )
+
+    // A remote CLI owns no driver; the server it called owns the resume.
+    expect(receipt).toMatchObject({ _tag: "Accepted" })
+    expect(state.status).toBe("waiting-approval")
+  })
+})
+
+describe("signal idempotency", () => {
+  /** Records the mutation key each `signal` invocation minted. */
+  const recordingSignals = (keys: Array<string>) =>
+    Layer.effect(
+      ControlService.Control,
+      Effect.gen(function*() {
+        const control = yield* ControlService.Control
+        return ControlService.make({
+          ...control,
+          signal: (input) =>
+            Effect.sync(() => {
+              keys.push(input.idempotencyKey)
+              return { _tag: "Accepted", receiptId: input.idempotencyKey, runId: input.runId }
+            })
+        })
+      })
+    ).pipe(Layer.provide(testControl))
+
+  it("mints one mutation per signal payload", async () => {
+    const keys: Array<string> = []
+    await run(
+      Effect.gen(function*() {
+        yield* json(["--json", "signal", "run-1", "{\"name\":\"first\",\"payload\":null}"])
+        yield* json(["--json", "signal", "run-1", "{\"name\":\"second\",\"payload\":null}"])
+      }),
+      recordingSignals(keys)
+    )
+
+    // rc-contract §5.1: two different signals to one run are two mutations. A
+    // key that named the run alone replayed the first receipt for the second
+    // signal, and the second signal was never delivered.
+    expect(new Set(keys).size).toBe(2)
+    expect(keys.every((key) => key.startsWith("cli:signal:run-1:"))).toBe(true)
+  })
+
+  it("replays one mutation for the same signal sent twice", async () => {
+    const keys: Array<string> = []
+    await run(
+      Effect.gen(function*() {
+        yield* json(["--json", "signal", "run-1", "{\"name\":\"first\",\"payload\":null}"])
+        yield* json(["--json", "signal", "run-1", "{\"name\":\"first\",\"payload\":null}"])
+      }),
+      recordingSignals(keys)
+    )
+
+    expect(new Set(keys).size).toBe(1)
+  })
+})
