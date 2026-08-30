@@ -191,54 +191,82 @@ export const layer: Layer.Layer<
         )
       )
 
+    /**
+     * Hands a decided run's resume to whoever hosts its execution.
+     *
+     * Outside the mutation's write transaction, for `signal`'s reason: taking
+     * the resume up re-drives the run, and the engine's own writes would wait
+     * on the writer the transaction holds. A host that answers `resuming` has
+     * claimed the row and is driving, so its delegation is cleared here; every
+     * other composition leaves it standing for the host's own poll.
+     */
+    const takeUpResume = (
+      runId: RunId,
+      sequence: number
+    ): Effect.Effect<void, PersistenceError> =>
+      Option.isNone(executor)
+        ? Effect.void
+        : executor.value.resumeRun({ runId }).pipe(
+          Effect.flatMap((uptake) => uptake === "resuming" ? runtime.clearResume(runId, sequence) : Effect.void)
+        )
+
     const decide = (
       decision: "approved" | "denied",
       input: ApprovalInput
     ) =>
-      mutate(
-        decision,
-        input.idempotencyKey,
-        fingerprint(decision, input),
-        Effect.gen(function*() {
-          const token = yield* runtime.lookupApproval(input.target)
-          const principal = yield* runtime.stampPrincipal(input.principal)
-          if (decision === "approved") {
-            yield* runtime.installBulkGrant(token, input.target.envelope, input.scope)
-          }
-          yield* emit(
-            input.target._tag === "Plan" ? `plan:${input.target.planId}` : input.target.runId,
-            `control.approval.${decision}`,
-            json({
-              tokenId: token.tokenId,
-              target: input.target._tag,
-              scope: input.scope,
-              envelope: input.target.envelope,
-              principal
-            })
-          )
-          yield* runtime.resolveApproval(token, decision, principal)
-          if (input.target._tag === "Plan") return accepted(input.idempotencyKey)
-          // A decision on a node target has to restart the run the ask parked,
-          // in this call. The executor re-drives a parked execution only when
-          // it sees a resume event, so answering without one left the run in
-          // `waiting-approval` until a second call arrived — and a denial the
-          // run never learns about is a denial that decided nothing.
-          //
-          // The claim is scoped to runs this plane launched, for the same
-          // reason `Control.resume` scopes it: a run another driver owns keeps
-          // its owner, and the journal entry is what reaches it.
-          const runId = input.target.runId
-          const resumed = yield* runtime.resume(runId, { scope: "launched" }).pipe(
-            Effect.catchTag("/control/ClaimLost", () => Effect.succeed(undefined)),
-            Effect.catchTag("/control/RunNotFound", () => Effect.succeed(undefined))
-          )
-          yield* emit(runId, "control.run.resumed", {
-            runId,
-            ...(resumed === undefined ? {} : { status: resumed.status })
+      Effect.gen(function*() {
+        // Set by the mutation when it records a delegation, and left unset on
+        // the idempotency replay path — where the original call already
+        // delegated and the host's own poll is what takes it up.
+        let delegated: number | undefined
+        const receipt = yield* mutate(
+          decision,
+          input.idempotencyKey,
+          fingerprint(decision, input),
+          Effect.gen(function*() {
+            const token = yield* runtime.lookupApproval(input.target)
+            const principal = yield* runtime.stampPrincipal(input.principal)
+            if (decision === "approved") {
+              yield* runtime.installBulkGrant(token, input.target.envelope, input.scope)
+            }
+            yield* emit(
+              input.target._tag === "Plan" ? `plan:${input.target.planId}` : input.target.runId,
+              `control.approval.${decision}`,
+              json({
+                tokenId: token.tokenId,
+                target: input.target._tag,
+                scope: input.scope,
+                envelope: input.target.envelope,
+                principal
+              })
+            )
+            yield* runtime.resolveApproval(token, decision, principal)
+            if (input.target._tag === "Plan") return accepted(input.idempotencyKey)
+            // A decision on a node target has to restart the run the ask parked,
+            // in this call. Answering without a restart left the run in
+            // `waiting-approval` until a second call arrived, and a denial the
+            // run never learns about is a denial that decided nothing.
+            //
+            // The restart is recorded, not performed, and this plane does NOT
+            // claim the row. `scope: "launched"` reads like a process scope and
+            // is not one — it is a `control_runs` lookup, a durable table every
+            // process over one control database shares — so claiming here took
+            // the row away from the host that could still drive it, and left it
+            // `accepted` under a process with no executor. The delegation is
+            // durable instead: the host takes it up on its next poll and clears
+            // it, and the journal entry stays as the operator's record of why
+            // (triage B-15).
+            const runId = input.target.runId
+            delegated = yield* runtime.requestResume(runId)
+            yield* emit(runId, "control.run.resumed", { runId })
+            return accepted(input.idempotencyKey, runId)
           })
-          return accepted(input.idempotencyKey, runId)
-        })
-      )
+        )
+        if (input.target._tag === "Node" && delegated !== undefined) {
+          yield* takeUpResume(input.target.runId, delegated)
+        }
+        return receipt
+      })
 
     /**
      * Restarts a parked run, by claiming it or by asking whoever owns it.

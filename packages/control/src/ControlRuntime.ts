@@ -166,6 +166,18 @@ export interface MemoryOptions {
 }
 
 /**
+ * One run that has been told to resume, and the sequence of the request.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface PendingResume {
+  readonly runId: RunId
+  readonly sequence: number
+}
+
+/**
  * Execution-engine operations required by `ControlLive`.
  *
  * A production adapter must fence every owner-sensitive write, implement
@@ -239,6 +251,34 @@ export interface Service {
   readonly deliveredSignals: (
     runId: RunId
   ) => Effect.Effect<ReadonlyArray<SignalPayload>, RunNotFound | PersistenceError>
+  /**
+   * Records, durably, that this run has been told to resume.
+   *
+   * The record is the delegation. A decision on an in-run approval can be
+   * taken by any process holding the control database, and only the process
+   * hosting the execution can act on it, so the intent has to outlive the call
+   * that made it: an in-process event bus reaches one process, and a journal
+   * entry is per run and needs a reader that already knows which run to read.
+   * The returned sequence is the cursor {@link Service.clearResume} checks, so
+   * a resume requested while one is being taken up is not lost with it.
+   */
+  readonly requestResume: (runId: RunId) => Effect.Effect<number, RunNotFound | PersistenceError>
+  /**
+   * Every outstanding resume delegation for a run that is not terminal.
+   *
+   * This is what a host polls. A settled run's delegation is not reported: no
+   * host will ever take it up, and reporting it forever would make an
+   * unbounded backlog out of a run that is finished.
+   */
+  readonly pendingResumes: Effect.Effect<ReadonlyArray<PendingResume>, PersistenceError>
+  /**
+   * Clears a delegation a host has taken up, if it is still the one it read.
+   *
+   * The sequence check is what makes the clear safe: a resume requested
+   * between the read and the clear has a higher sequence and survives, so the
+   * host takes it up on its next tick instead of losing it.
+   */
+  readonly clearResume: (runId: RunId, sequence: number) => Effect.Effect<void, PersistenceError>
   readonly registerFiber: (
     runId: RunId,
     fiber: Fiber.Fiber<unknown, unknown>
@@ -316,6 +356,8 @@ interface MutableRun {
   fiber?: Fiber.Fiber<unknown, unknown> | undefined
   readonly steering: Array<SteerMessage>
   readonly signals: Array<SignalPayload>
+  /** The sequence of the outstanding resume delegation, if there is one. */
+  pendingResume?: number | undefined
 }
 
 const asStored = (plan: MutablePlan): StoredPlan => ({
@@ -358,6 +400,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
       let planSequence = 0
       let runSequence = 0
       let fenceSequence = 0
+      let resumeSequence = 0
 
       const requireRun = (runId: RunId): Effect.Effect<MutableRun, RunNotFound> =>
         Effect.fromOption(Option.fromNullishOr(runs.get(runId)), () => new RunNotFound({ runId }))
@@ -577,6 +620,29 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
         ),
         deliveredSignals: Effect.fn("ControlRuntime.deliveredSignals")((runId) =>
           Effect.map(requireRun(runId), (run) => run.signals.slice())
+        ),
+        requestResume: Effect.fn("ControlRuntime.requestResume")(function*(runId) {
+          const run = yield* requireRun(runId)
+          const sequence = ++resumeSequence
+          run.pendingResume = sequence
+          updateSummary(run, { pendingResume: sequence })
+          return sequence
+        }),
+        pendingResumes: Effect.sync(() =>
+          Array.from(runs.entries()).flatMap(([runId, run]) =>
+            run.pendingResume === undefined || run.summary.status === "cancelled" ||
+              run.summary.status === "completed" || run.summary.status === "failed"
+              ? []
+              : [{ runId, sequence: run.pendingResume }]
+          )
+        ),
+        clearResume: Effect.fn("ControlRuntime.clearResume")((runId, sequence) =>
+          Effect.sync(() => {
+            const run = runs.get(runId)
+            if (run === undefined || run.pendingResume !== sequence) return
+            run.pendingResume = undefined
+            updateSummary(run, { pendingResume: undefined })
+          })
         ),
         registerFiber: Effect.fn("ControlRuntime.registerFiber")((runId, fiber) =>
           Effect.tap(requireRun(runId), (run) =>

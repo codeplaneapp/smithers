@@ -79,6 +79,33 @@ export interface CancelTerminal {
 export type CancelRecord = "recorded" | "unknown" | CancelTerminal
 
 /**
+ * One parked run that has been told to resume.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface ResumeRequest {
+  readonly runId: RunId
+}
+
+/**
+ * What the executor did with a resume request.
+ *
+ * `resuming` means this executor hosts the run's execution, has taken the
+ * control row's fence, and is re-driving it: the caller can stop, and the run
+ * moves on its own. `unknown` means this executor drives no execution for the
+ * run, which is the answer an operator's CLI, a gateway, or any second process
+ * gives, and it is why the control plane records the delegation durably
+ * instead of treating its own journal entry as the delivery (triage B-15).
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export type ResumeUptake = "resuming" | "unknown"
+
+/**
  * One signal to deliver to a run's open wait point.
  *
  * @category models
@@ -111,13 +138,15 @@ export type SignalDelivery = "delivered" | "no-match" | "unknown"
  * The executor port: the control plane hands work over to a real run executor
  * and learns only what the executor did with it.
  *
- * `launch` is acceptance. `requestCancel` and `deliverSignal` are the two
- * requests that have to reach the engine to mean anything: a cancel is durable
- * on the engine row so that whichever process owns the run stops it, and a
- * signal completes the wait point a parked run is actually waiting on. Without
- * them the control plane records facts nobody reads — a cancel that answers
- * `ClaimLost` to every process but the owner, and a signal a parked run never
- * sees (rc-contract §5.1; triage B-10, B-13).
+ * `launch` is acceptance. `requestCancel`, `deliverSignal`, and `resumeRun`
+ * are the three requests that have to reach the engine to mean anything: a
+ * cancel is durable on the engine row so that whichever process owns the run
+ * stops it, a signal completes the wait point a parked run is actually waiting
+ * on, and a resume re-drives the execution an approval decision unblocked.
+ * Without them the control plane records facts nobody reads — a cancel that
+ * answers `ClaimLost` to every process but the owner, a signal a parked run
+ * never sees, and a resume event published into an in-process hub no other
+ * process subscribes to (rc-contract §5.1; triage B-10, B-13, B-15).
  *
  * @category services
  * @since 0.1.0
@@ -134,6 +163,11 @@ export interface Service {
    * Completes the run's open `WaitFor` wait point with the signal's payload.
    */
   readonly deliverSignal: (input: Signal) => Effect.Effect<SignalDelivery, PersistenceError>
+  /**
+   * Takes up a resume: claims the control row and re-drives the execution,
+   * when this executor is the one hosting it.
+   */
+  readonly resumeRun: (input: ResumeRequest) => Effect.Effect<ResumeUptake, PersistenceError>
 }
 
 /**
@@ -173,6 +207,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service =>
     // still records the message: both are what the port's absence already did.
     requestCancel: Effect.fn("ControlExecutor.requestCancel")(() => Effect.succeed("unknown" as const)),
     deliverSignal: Effect.fn("ControlExecutor.deliverSignal")(() => Effect.succeed("unknown" as const)),
+    resumeRun: Effect.fn("ControlExecutor.resumeRun")(() => Effect.succeed("unknown" as const)),
     ...overrides
   })
 

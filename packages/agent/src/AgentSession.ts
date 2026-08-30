@@ -1193,13 +1193,13 @@ export const make = (
         attempts
       )
 
+    /**
+     * Re-drives one execution `takeUpResume` has already found parked here and
+     * claimed. A refusal is contained: one run that cannot restart must not
+     * take the follower or the journal bridge down with it.
+     */
     const resumeExecution = (runId: string): Effect.Effect<void> =>
-      Effect.gen(function*() {
-        const parked = yield* awaitParked(runId, 500)
-        // False when the execution settled before the resume arrived, or when
-        // the resumed run belongs to an executor other than this one.
-        if (parked) yield* engine.resume(agentFlow, runId)
-      }).pipe(
+      engine.resume(agentFlow, runId).pipe(
         Effect.catchCause(
           (cause) =>
             Effect.annotateLogs(
@@ -1208,6 +1208,44 @@ export const make = (
             )
         )
       )
+
+    /**
+     * Takes up one resume: this executor's execution, this executor's fence.
+     *
+     * The park wait comes first and is the whole ownership question. It ends
+     * `false` for an execution this engine does not have, and for one that is
+     * not parked, and neither is this executor's to claim — claiming it would
+     * move the row under a fence whose process cannot drive it, which is
+     * exactly what `ControlLive.decide` used to do from any process holding
+     * the control database (triage B-15).
+     *
+     * The claim comes second and is what makes the re-driven run WRITABLE.
+     * `writeStatus` reaches `claimFence`, which requires `ownedByUs`, which
+     * requires a `running` row: a run re-driven without a claim runs to its
+     * end and then cannot record that it did.
+     *
+     * `drive` is how the caller wants the re-drive run. The journal bridge
+     * awaits it, so one process's re-drives stay serialized; the port forks it,
+     * so a control-plane call returns as soon as the run is moving again.
+     */
+    const takeUpResume = (
+      runId: string,
+      drive: (runId: string) => Effect.Effect<void>
+    ): Effect.Effect<ControlExecutor.ResumeUptake, never> =>
+      Effect.gen(function*() {
+        const parked = yield* awaitParked(runId, 500).pipe(Effect.catchCause(() => Effect.succeed(false)))
+        if (!parked) return "unknown" as const
+        const claimed = yield* runtime.resume(runId).pipe(
+          Effect.as(true),
+          // A lost claim is a live peer holding the run, and the delegation
+          // stays standing for it. Answering "resuming" here would clear a
+          // delegation this executor is not going to honour.
+          Effect.catchCause(() => Effect.succeed(false))
+        )
+        if (!claimed) return "unknown" as const
+        yield* drive(runId)
+        return "resuming" as const
+      })
 
     /**
      * Follows the journal for the control plane's resume events and re-drives
@@ -1219,7 +1257,7 @@ export const make = (
       const subscription = yield* journal.changes
       yield* Stream.fromSubscription(subscription).pipe(
         Stream.filter((entry) => entry.eventType === "control.run.resume" || entry.eventType === "control.run.resumed"),
-        Stream.mapEffect((entry) => resumeExecution(entry.runId), { concurrency: 1 }),
+        Stream.mapEffect((entry) => takeUpResume(entry.runId, resumeExecution), { concurrency: 1 }),
         Stream.runDrain
       )
     }).pipe(
@@ -1248,7 +1286,48 @@ export const make = (
         )
       })).pipe(Scope.provide(scope))
 
+    /**
+     * Takes up every resume delegation this executor hosts, once.
+     *
+     * The journal's `changes` hub is an in-process `PubSub`: no other journal
+     * instance can publish into it, so a decision taken in another process
+     * reaches this executor through nothing at all. The delegation is durable
+     * in the control database instead, and this is what reads it. Runs this
+     * executor does not host are left alone with their delegation standing,
+     * for the host that does.
+     */
+    const drainPendingResumes = runtime.pendingResumes.pipe(
+      Effect.flatMap((pending) =>
+        Effect.forEach(pending, (entry) =>
+          takeUpResume(entry.runId, (runId) => Effect.asVoid(Effect.forkIn(resumeExecution(runId), scope))).pipe(
+            Effect.flatMap((uptake) =>
+              uptake === "resuming" ? runtime.clearResume(entry.runId, entry.sequence) : Effect.void
+            )
+          ), { discard: true })
+      ),
+      Effect.catchCause((cause) =>
+        Effect.annotateLogs(
+          Effect.logWarning("A pending resume delegation could not be taken up"),
+          { cause: Cause.pretty(cause) }
+        )
+      )
+    )
+
+    /**
+     * The durable follower: one pass, then one every second, forever.
+     *
+     * A second is the same bound `SqlJournal`'s own cross-process follower
+     * uses to recheck the durable tail, and the same heartbeat tick the engine
+     * sweeps cancellations on. Nothing here is event-driven, because rc.0 has
+     * no cross-process wake (rc-contract §5.2).
+     */
+    const pendingResumeBridge = drainPendingResumes.pipe(
+      Effect.andThen(Effect.sleep(Duration.seconds(1))),
+      Effect.forever
+    )
+
     yield* Effect.forkIn(resumeBridge, scope)
+    yield* Effect.forkIn(pendingResumeBridge, scope)
     // A signal recorded while this process was down has a wait point still
     // open and nobody to complete it. Replaying at start is what makes
     // `Control.signal`'s record a promise rather than a note.
@@ -1275,7 +1354,9 @@ export const make = (
               })
           )
         )
-        if (flowBody._tag !== "Prompt") return "pending" as const
+        if (flowBody._tag !== "Prompt") {
+          return "pending" as const
+        }
         // Resolve the seat now, so a missing key refuses the launch as a
         // typed failure instead of failing the run after it was accepted.
         yield* seats.resolve(descriptor.value.model.value).pipe(
@@ -1295,7 +1376,8 @@ export const make = (
         )
         yield* Scope.addFinalizer(scope, Fiber.interrupt(fiber))
         yield* registerDriver(
-          () => runtime.registerFiber(input.run.runId, fiber),
+          () =>
+            runtime.registerFiber(input.run.runId, fiber),
           input.run.runId
         ).pipe(
           Effect.onExit((exit) => Exit.isFailure(exit) ? Fiber.interrupt(fiber) : Effect.void)
@@ -1307,7 +1389,10 @@ export const make = (
     return ControlExecutor.make({
       launch: Effect.fn("AgentSession.launch")(launch),
       requestCancel: Effect.fn("AgentSession.requestCancel")((input) => Effect.provide(requestCancel(input), services)),
-      deliverSignal: Effect.fn("AgentSession.deliverSignal")((input) => Effect.provide(deliverSignal(input), services))
+      deliverSignal: Effect.fn("AgentSession.deliverSignal")((input) => Effect.provide(deliverSignal(input), services)),
+      resumeRun: Effect.fn("AgentSession.resumeRun")((input) =>
+        takeUpResume(input.runId, (runId) => Effect.asVoid(Effect.forkIn(resumeExecution(runId), scope)))
+      )
     })
   })
 
