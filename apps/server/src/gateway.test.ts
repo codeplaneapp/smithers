@@ -12,12 +12,12 @@
  */
 import { afterEach, describe, expect, test } from "bun:test"
 import {
-  ALLOWED_GATEWAY_METHODS,
   callGateway,
   clearMemoryGatewayRecords,
   ensureGateway,
   seedMemoryGatewayRecord
 } from "./gateway"
+import { ALLOWED_GATEWAY_PROCEDURES } from "./gatewayRpc"
 import worker from "./index"
 import type { WorkerEnv } from "./index"
 
@@ -400,14 +400,14 @@ describe("wave 11 — provision-or-resume (§5)", () => {
 
   test("callGateway sets the bearer the browser cannot, and joins the relay's PATH base", async () => {
     await withRelay({}, async (calls) => {
-      const call = await callGateway(env(), "will", "will/mvp", "/v1/rpc/listWorkflows", {
+      const call = await callGateway(env(), "will", "will/mvp", "/rpc", {
         method: "POST",
         body: {}
       })
       expect(call.status).toBe("ok")
-      const rpc = calls.find((entry) => entry.url.includes("/v1/rpc/"))
+      const rpc = calls.find((entry) => entry.url.endsWith("/rpc"))
       // base_url is a PATH base — URL-joining an absolute path would drop it.
-      expect(rpc?.url).toBe("https://api.jjhub.test/api/gateways/gw-1/v1/rpc/listWorkflows")
+      expect(rpc?.url).toBe("https://api.jjhub.test/api/gateways/gw-1/rpc")
       expect(rpc?.authorization).toBe(`Bearer ${GATEWAY_TOKEN}`)
     })
   })
@@ -435,12 +435,12 @@ describe("wave 11 — provision-or-resume (§5)", () => {
         }
       },
       async (calls) => {
-        const call = await callGateway(env(), "will", "will/mvp", "/v1/rpc/listWorkflows", {
+        const call = await callGateway(env(), "will", "will/mvp", "/rpc", {
           method: "POST",
           body: {}
         })
         expect(call.status).toBe("ok")
-        const rpcCalls = calls.filter((entry) => entry.url.includes("/v1/rpc/"))
+        const rpcCalls = calls.filter((entry) => entry.url.endsWith("/rpc"))
         expect(rpcCalls).toHaveLength(2)
         expect(rpcCalls[1]?.url).toContain("/api/gateways/gw-2/")
         // Bounded: exactly two provisions, never a loop.
@@ -457,14 +457,14 @@ describe("wave 11 — provision-or-resume (§5)", () => {
         }
       },
       async (calls) => {
-        const call = await callGateway(env(), "will", "will/mvp", "/v1/rpc/listWorkflows", {
+        const call = await callGateway(env(), "will", "will/mvp", "/rpc", {
           method: "POST",
           body: {}
         })
         expect(call.status).toBe("unavailable")
         // The reason is stated, never swallowed into a flat sentence.
         expect(call.status === "unavailable" && call.detail).toContain("Network connection lost.")
-        expect(calls.filter((entry) => entry.url.includes("/v1/rpc/"))).toHaveLength(2)
+        expect(calls.filter((entry) => entry.url.endsWith("/rpc"))).toHaveLength(2)
       }
     )
   })
@@ -485,14 +485,14 @@ describe("wave 11 — provision-or-resume (§5)", () => {
             : json(200, { ok: true, payload: [{ key: "create-workflow" }] })
       },
       async (calls) => {
-        const call = await callGateway(env(), "will", "will/mvp", "/v1/rpc/listWorkflows", {
+        const call = await callGateway(env(), "will", "will/mvp", "/rpc", {
           method: "POST",
           body: {}
         })
         expect(call.status).toBe("ok")
         if (call.status !== "ok") return
         expect(await call.response.json()).toEqual({ ok: true, payload: [{ key: "create-workflow" }] })
-        const rpcCalls = calls.filter((entry) => entry.url.includes("/v1/rpc/"))
+        const rpcCalls = calls.filter((entry) => entry.url.endsWith("/rpc"))
         expect(rpcCalls).toHaveLength(2)
         // The retry adopted the reprovisioned gateway, id and token both.
         expect(rpcCalls[1]?.url).toContain("/api/gateways/gw-2/")
@@ -535,7 +535,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
           provisionedAt: Date.now() - 60 * 60 * 1000
         })
 
-        const call = await callGateway(env(), "will", "will/mvp", "/v1/rpc/getRun", {
+        const call = await callGateway(env(), "will", "will/mvp", "/rpc", {
           method: "POST",
           body: { runId: "run-1" },
           replayable: true
@@ -543,7 +543,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
         expect(call.status).toBe("ok")
         if (call.status !== "ok") return
         expect(call.response.status).toBe(200)
-        const rpcCalls = calls.filter((entry) => entry.url.includes("/v1/rpc/"))
+        const rpcCalls = calls.filter((entry) => entry.url.endsWith("/rpc"))
         expect(rpcCalls).toHaveLength(2)
         expect(rpcCalls[1]?.url).toContain("/api/gateways/gw-")
       }
@@ -565,7 +565,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
           renewAfter: Date.now() + 20 * 60 * 1000,
           provisionedAt: Date.now() - 60 * 60 * 1000
         })
-        const call = await callGateway(env(), "will", "will/mvp", "/v1/rpc/launchRun", {
+        const call = await callGateway(env(), "will", "will/mvp", "/rpc", {
           method: "POST",
           body: { workflow: "create-workflow", input: { prompt: "x" } },
           replayable: false
@@ -574,7 +574,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
         // reported as what it was, and the run was never launched twice.
         expect(call.status).toBe("unavailable")
         expect(call.status === "unavailable" && call.detail).toContain("gone to sleep")
-        expect(calls.filter((entry) => entry.url.includes("/v1/rpc/launchRun"))).toHaveLength(1)
+        expect(calls.filter((entry) => entry.url.includes("/rpc"))).toHaveLength(1)
       }
     )
   })
@@ -589,7 +589,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
         // anything, and an EventSource reconnect loop must not drive one
         // provision call per retry.
         for (let index = 0; index < 4; index += 1) {
-          const call = await callGateway(env(), "will", "will/mvp", "/v1/api/runs/run-1/events", {
+          const call = await callGateway(env(), "will", "will/mvp", "/projections", {
             method: "GET"
           })
           expect(call.status).toBe("ok")
@@ -645,28 +645,36 @@ describe("wave 11 — the /api/workflow/* routes", () => {
     }
   })
 
-  test("the rpc relay refuses any method outside the allowlist before touching the gateway", async () => {
+  test("the rpc relay refuses any procedure outside the allowlist before touching the gateway", async () => {
     await withRelay({}, async (calls) => {
-      const response = await worker.fetch(
+      const refused = await worker.fetch(
         signedIn("/api/workflow/rpc", {
           method: "POST",
-          body: JSON.stringify({ repo: "will/mvp", method: "runShell", params: { cmd: "rm -rf /" } })
+          body: JSON.stringify({ repo: "will/mvp", procedure: "RunShell", payload: { cmd: "rm -rf /" } })
         }),
         env()
       )
-      expect(response.status).toBe(400)
-      expect(((await response.json()) as { message: string }).message).toContain("does not relay runShell")
+      expect(refused.status).toBe(400)
+      expect(((await refused.json()) as { message: string }).message).toContain("does not relay RunShell")
+
+      // A call that names no procedure at all is refused the same way.
+      const unnamed = await worker.fetch(
+        signedIn("/api/workflow/rpc", { method: "POST", body: JSON.stringify({ repo: "will/mvp" }) }),
+        env()
+      )
+      expect(unnamed.status).toBe(400)
       expect(calls.filter((call) => call.url.includes("/api/gateways/"))).toHaveLength(0)
     })
-    // The allowlist is exactly the product's seam — nothing else crosses.
-    expect([...ALLOWED_GATEWAY_METHODS].sort()).toEqual([
-      "getNodeOutput",
-      "getRun",
-      "launchRun",
-      "listApprovals",
-      "listWorkflows",
-      "submitApproval",
-      "whatHappened"
+    // The allowlist is exactly the product's floor — nothing else crosses.
+    expect([...ALLOWED_GATEWAY_PROCEDURES].sort()).toEqual([
+      "Approval.Submit",
+      "Cancel",
+      "List",
+      "Plan",
+      "Projection.Snapshot",
+      "Run",
+      "Signal",
+      "Steer"
     ])
   })
 
@@ -676,7 +684,7 @@ describe("wave 11 — the /api/workflow/* routes", () => {
         const response = await worker.fetch(
           signedIn("/api/workflow/rpc", {
             method: "POST",
-            body: JSON.stringify({ repo, method: "listWorkflows", params: {} })
+            body: JSON.stringify({ repo, procedure: "List", payload: { _tag: "runs" } })
           }),
           env()
         )
@@ -699,7 +707,7 @@ describe("wave 11 — the /api/workflow/* routes", () => {
         const rpc = await worker.fetch(
           signedIn("/api/workflow/rpc", {
             method: "POST",
-            body: JSON.stringify({ repo, method: "listWorkflows", params: {} })
+            body: JSON.stringify({ repo, procedure: "List", payload: { _tag: "runs" } })
           }),
           env()
         )
@@ -751,54 +759,97 @@ describe("wave 11 — the /api/workflow/* routes", () => {
     )
   })
 
-  test("run events relay with afterSeq resume, and the gateway's envelope passes through", async () => {
+  test("a projection read reaches the gateway's projections mount under the seam's bearer", async () => {
     await withRelay(
       {
-        gateway: (call) =>
-          json(200, {
-            ok: true,
-            data: [{ runId: "run-9", seq: 12, event: "node.started", payload: { nodeId: "design" } }],
-            echoUrl: call.url
-          })
+        gateway: () =>
+          new Response(
+            `${
+              JSON.stringify({
+                _tag: "Exit",
+                requestId: 1,
+                exit: { _tag: "Success", value: { cursor: { projection: "run-summary" }, rows: [{ runId: "run-9" }] } }
+              })
+            }\n`,
+            { status: 200 }
+          )
       },
       async (calls) => {
         const response = await worker.fetch(
-          signedIn("/api/workflow/events?repo=will/mvp&runId=run-9&afterSeq=11"),
+          signedIn("/api/workflow/rpc", {
+            method: "POST",
+            body: JSON.stringify({
+              repo: "will/mvp",
+              procedure: "Projection.Snapshot",
+              payload: { selector: { _tag: "run-summary", runId: "run-9" } }
+            })
+          }),
           env()
         )
         expect(response.status).toBe(200)
-        const body = (await response.json()) as { ok: boolean; data: Array<{ seq: number }> }
-        expect(body.ok).toBe(true)
-        expect(body.data[0]?.seq).toBe(12)
-        const events = calls.find((call) => call.url.includes("/events"))
-        expect(events?.url).toContain("/api/gateways/gw-1/v1/api/runs/run-9/events")
-        expect(events?.url).toContain("afterSeq=11")
-        expect(events?.authorization).toBe(`Bearer ${GATEWAY_TOKEN}`)
+        expect(await response.json()).toEqual({
+          ok: true,
+          payload: { cursor: { projection: "run-summary" }, rows: [{ runId: "run-9" }] }
+        })
+        const relayed = calls.find((call) => call.url.endsWith("/projections"))
+        // The credential the browser can never hold is added on this side.
+        expect(relayed?.url).toBe("https://api.jjhub.test/api/gateways/gw-1/projections")
+        expect(relayed?.authorization).toBe(`Bearer ${GATEWAY_TOKEN}`)
+        expect(relayed?.body).toMatchObject({ _tag: "Request", tag: "Projection.Snapshot" })
       }
     )
   })
 
-  test("the SSE stream proxies Last-Event-ID through so a reconnect replays", async () => {
+  test("an approval decision is one relayed call that also resumes the run", async () => {
     await withRelay(
       {
-        gateway: (call) =>
-          new Response(`id: 42\nevent: change\ndata: {"seq":42}\n\n`, {
-            status: 200,
-            headers: { "content-type": "text/event-stream", "x-echo-last-event-id": call.url }
-          })
+        gateway: () =>
+          new Response(
+            `${
+              JSON.stringify({
+                _tag: "Exit",
+                requestId: 1,
+                exit: {
+                  _tag: "Success",
+                  value: { decision: { _tag: "Accepted" }, resume: { _tag: "Accepted" } }
+                }
+              })
+            }\n`,
+            { status: 200 }
+          )
       },
       async (calls) => {
         const response = await worker.fetch(
-          signedIn("/api/workflow/stream?repo=will/mvp", { headers: { "last-event-id": "41" } }),
+          signedIn("/api/workflow/rpc", {
+            method: "POST",
+            body: JSON.stringify({
+              repo: "will/mvp",
+              procedure: "Approval.Submit",
+              payload: { decision: "approve" }
+            })
+          }),
           env()
         )
         expect(response.status).toBe(200)
-        expect(response.headers.get("content-type")).toContain("text/event-stream")
-        expect(await response.text()).toContain("event: change")
-        const stream = calls.find((call) => call.url.endsWith("/v1/api/stream"))
-        expect(stream?.url).toBe("https://api.jjhub.test/api/gateways/gw-1/v1/api/stream")
+        const body = (await response.json()) as { ok: boolean; payload: { resume?: unknown } }
+        expect(body.ok).toBe(true)
+        // One relayed call records the decision AND resumes the run, because
+        // the gateway binds the pair behind `Approval.Submit`. There is no
+        // second round trip for a lost answer to strand.
+        expect(body.payload.resume).toEqual({ _tag: "Accepted" })
+        expect(calls.filter((call) => call.url.includes("/api/gateways/"))).toHaveLength(1)
       }
     )
+  })
+
+  test("the relay refuses a gateway path the product does not address", async () => {
+    await withRelay({}, async (calls) => {
+      const call = await callGateway(env(), "will", "will/mvp", "/admin/tokens", { method: "POST", text: "{}" })
+      expect(call.status).toBe("unavailable")
+      expect(call.status === "unavailable" && call.detail).toContain("not a gateway path")
+      // Not one call left the Worker: no Cloud token was minted, let alone spent.
+      expect(calls).toHaveLength(0)
+    })
   })
 
   test("no_capacity reaches the browser as an honest state, not a 500 and not a retry loop", async () => {
@@ -819,59 +870,5 @@ describe("wave 11 — the /api/workflow/* routes", () => {
         expect(calls.filter((call) => call.url.includes("/gateway"))).toHaveLength(1)
       }
     )
-  })
-
-  test("an approval decision naming its repo round-trips through the per-user gateway", async () => {
-    await withRelay(
-      { gateway: () => json(200, { ok: true, payload: { runId: "run-9", nodeId: "gate", approved: true } }) },
-      async (calls) => {
-        const response = await worker.fetch(
-          signedIn("/api/approvals/decision", {
-            method: "POST",
-            body: JSON.stringify({
-              runId: "run-9",
-              nodeId: "gate",
-              iteration: 0,
-              decision: { approved: true },
-              repo: "will/mvp"
-            })
-          }),
-          env()
-        )
-        expect(response.status).toBe(200)
-        const submit = calls.find((call) => call.url.includes("/v1/rpc/submitApproval"))
-        expect(submit?.url).toBe("https://api.jjhub.test/api/gateways/gw-1/v1/rpc/submitApproval")
-        expect(submit?.authorization).toBe(`Bearer ${GATEWAY_TOKEN}`)
-        expect(submit?.body).toEqual({
-          runId: "run-9",
-          nodeId: "gate",
-          iteration: 0,
-          decision: { approved: true }
-        })
-        // The client freezes the card from the flat echo — the static
-        // seam's shape. The relayed gateway's RPC envelope must be
-        // unwrapped to it, or the decision is recorded while the card
-        // reports "the engine did not echo the decision" (live F-6).
-        const echo = (await response.json()) as { approved?: unknown; runId?: unknown }
-        expect(echo.approved).toBe(true)
-        expect(echo.runId).toBe("run-9")
-      }
-    )
-  })
-
-  test("a repo-less approval keeps the static GATEWAY_UPSTREAM_URL mode (the local stub stack)", async () => {
-    await withRelay({}, async (calls) => {
-      const response = await worker.fetch(
-        signedIn("/api/approvals/decision", {
-          method: "POST",
-          body: JSON.stringify({ runId: "run-9", nodeId: "gate", iteration: 0, decision: { approved: true } })
-        }),
-        env({ GATEWAY_UPSTREAM_URL: undefined })
-      )
-      // No static upstream configured → the honest not-configured answer,
-      // and NOT a per-user provision.
-      expect(response.status).toBe(501)
-      expect(calls.filter((call) => call.url.includes("/gateway")).length).toBe(0)
-    })
   })
 })

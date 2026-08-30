@@ -6,10 +6,8 @@ export const TURN_PATH = "/api/agent/turn"
 export const CANCEL_PATH = "/api/agent/turn/cancel"
 
 /*
- * The product Worker's backend seams (Wave 2a): auth/identity proxy routes, the
- * billing proxy routes, and the approval decision round trip. The identity and
- * billing prefixes are proxied wholesale; the approval path is implemented on
- * the Worker itself (it forwards to the gateway's submitApproval RPC).
+ * The product Worker's backend seams: auth/identity proxy routes and the
+ * billing proxy routes, both proxied wholesale.
  */
 export const AUTH_ROUTE_PREFIX = "/api/auth/"
 export const IDENTITY_ROUTE_PREFIX = "/api/identity/"
@@ -33,7 +31,12 @@ export const REPO_CANDIDATES_PATH = "/api/identity/repos"
 export const WATCHED_REPOS_PATH = "/api/identity/watched"
 export const BILLING_BALANCE_PATH = "/api/billing/balance"
 export const BILLING_USAGE_PATH = "/api/billing/usage"
-export const APPROVAL_DECISION_PATH = "/api/approvals/decision"
+/*
+ * Approvals are no longer a route of their own. A decision is the gateway's
+ * `Approval.Submit` procedure, relayed through {@link WORKFLOW_RPC_PATH}: one
+ * call that records the decision AND resumes the run it unblocked, so a lost
+ * second call can never leave a run approved and stopped.
+ */
 
 /*
  * The browser tool's server-side fetch (Wave 10, §2d): implemented ON the
@@ -41,15 +44,21 @@ export const APPROVAL_DECISION_PATH = "/api/approvals/decision"
  */
 export const TOOLS_BROWSER_FETCH_PATH = "/api/tools/browser-fetch"
 /*
- * Wave 11 — the per-user workflow seam (implemented ON the product Worker):
- * provision-or-resume the caller's workspace gateway, relay whitelisted RPCs,
- * read per-run events with afterSeq resume, and proxy the relay SSE change
- * stream. Gateway tokens never reach the browser.
+ * The per-user workflow seam (implemented ON the product Worker):
+ * provision-or-resume the caller's workspace gateway, then relay one
+ * allowlisted gateway procedure per call. Gateway tokens never reach the
+ * browser: the Worker holds the credential and writes the gateway's RPC frame.
+ *
+ * The body is `{ repo, procedure, payload }` and the answer is the gateway's
+ * own outcome, unwrapped: `{ ok: true, payload }` or `{ ok: false, error }`.
+ *
+ * The 0.x per-run events route and SSE change stream are gone. A run is
+ * followed through the `run-summary`, `transcript`, and `approvals`
+ * projections, which carry their own cursor; a live stream belongs on the
+ * gateway's own WebSocket mounts, which a path-prefixed relay proxies.
  */
 export const WORKFLOW_PROVISION_PATH = "/api/workflow/provision"
 export const WORKFLOW_RPC_PATH = "/api/workflow/rpc"
-export const WORKFLOW_EVENTS_PATH = "/api/workflow/events"
-export const WORKFLOW_STREAM_PATH = "/api/workflow/stream"
 /*
  * The chain backend's model relay (DESIGN.md §14, decision D1): the browser
  * runs the real @smthrs/model provider wire against this path; the Worker

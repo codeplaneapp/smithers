@@ -119,16 +119,9 @@ if (cookie === undefined) {
 
 // 5. Gateway seam: the INVERTED check — GATEWAY_UPSTREAM_URL is unset on
 //    purpose this pass, so the seam MUST answer the honest 501 that names it.
-const approval = await fetch(`${origin}/api/approvals/decision`, {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({
-    runId: "canary-seam-probe-run",
-    nodeId: "canary-seam-probe-node",
-    iteration: 0,
-    decision: { approved: true, note: "canary seam probe" }
-  })
-})
+//    `/health` is one of the four gateway mounts the Worker proxies, and it
+//    needs no session, so it is the smallest request that reaches the seam.
+const approval = await fetch(`${origin}/health`)
 const approvalBody = await approval.text()
 check(
   "gateway seam answers the EXPECTED honest 501 naming GATEWAY_UPSTREAM_URL",

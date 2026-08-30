@@ -15,7 +15,8 @@
     "check": "node scripts/ensure-devkit.mjs && tsc --noEmit",
     "test": "bun test src",
     "test:e2e": "playwright test",
-    "test:e2e:native": "bun e2e/playwright/native/run.ts"
+    "test:e2e:native": "bun e2e/playwright/native/run.ts",
+    "proof:gateway": "tsx scripts/gateway-run-proof.ts"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "5.3.0",
@@ -27,6 +28,7 @@
     "@smthrs/core": "workspace:*",
     "@smthrs/crypto": "workspace:*",
     "@smthrs/database": "workspace:*",
+    "@smthrs/gateway": "workspace:*",
     "@smthrs/harness": "workspace:*",
     "@smthrs/jj": "workspace:*",
     "@smthrs/journal": "workspace:*",
@@ -52,8 +54,13 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@effect/platform-node": "4.0.0-rc.108",
     "@happy-dom/global-registrator": "^20.11.2",
     "@playwright/test": "1.62.1",
+    "@smthrs/control": "workspace:*",
+    "@smthrs/notifications": "workspace:*",
+    "@smthrs/run-store": "workspace:*",
+    "@smthrs/sync": "workspace:*",
     "@types/bun": "latest",
     "@types/d3-force": "3.0.10",
     "@types/dagre": "0.7.53",
@@ -64,7 +71,9 @@
     "autoprefixer": "^10.4.20",
     "playwright": "1.62.1",
     "postcss": "^8.4.49",
+    "smithers-server": "workspace:*",
     "tailwindcss": "^3.4.16",
+    "tsx": "4.23.12",
     "typescript": "^5.7.2",
     "vite": "8.2.1"
   }
