@@ -1,22 +1,32 @@
 /**
- * `smithers serve`: the control plane over HTTP, for the product UI and for
- * any client that is not this process.
+ * `smithers serve`: the workspace gateway over HTTP, for the product UI and
+ * for any client that is not this process.
  *
- * The composition itself lives in `NodeControl` (`layerServerBearerAuth` and
- * `layerServerNoopAuth`); this module owns the one decision the verb has to
- * make, which is whether the requested bind is allowed at all.
+ * The assembly is `@smthrs/gateway`'s: the control plane on `/rpc`, the served
+ * projections on `/projections`, the journal read path on `/sync`, and an
+ * unauthenticated `GET /health` a supervisor probes to learn which workspace a
+ * gateway belongs to. This module owns the two decisions the verb has to make:
+ * whether the requested bind is allowed at all, and what it says it is
+ * serving.
  *
- * The rule is the rc contract's (section 4.1): loopback needs nothing,
+ * The bind rule is the rc contract's (section 4.1): loopback needs nothing,
  * anything else needs both an explicit `--listen` and a bearer token. It is
  * spelled out here, as data, because the failure mode it prevents —
  * an unauthenticated control plane on a laptop's LAN address, able to launch
  * agents with the operator's credentials — is silent when it happens.
  *
+ * The banner is derived from {@link mounts}, the same list the composition is
+ * built from, so it cannot advertise a route that answers 404.
+ *
  * @since 1.0.0
  */
+import type * as GatewayServer from "@smthrs/gateway/GatewayServer"
 import { Effect, Layer } from "effect"
+import { createHash } from "node:crypto"
+import { resolve } from "node:path"
 import * as CliError from "./CliError.ts"
 import * as NodeControl from "./NodeControl.ts"
+import { packageVersion } from "./Version.ts"
 
 /**
  * The addresses that need no opt-in.
@@ -33,6 +43,41 @@ export const loopbackHosts: ReadonlyArray<string> = ["127.0.0.1", "::1", "localh
  * @since 1.0.0
  */
 export const defaultBind = { host: "127.0.0.1", port: 3000 } as const
+
+/**
+ * One route the gateway serves.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface Mount {
+  readonly protocol: "http" | "ws"
+  readonly path: string
+  readonly serves: string
+}
+
+/**
+ * Every route `@smthrs/gateway`'s `GatewayServer.layer` mounts, in the order
+ * the banner prints them.
+ *
+ * This list and the composition are the same fact stated once: the banner is
+ * rendered from it, so a mount that is not hosted cannot be advertised. The
+ * previous banner named `/health` while the verb hosted the control server
+ * alone, and an operator following the printed URL got a 404 with nothing to
+ * explain it.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const mounts: ReadonlyArray<Mount> = [
+  { protocol: "http", path: "/rpc", serves: "control rpc" },
+  { protocol: "ws", path: "/rpc/ws", serves: "control rpc, including watch" },
+  { protocol: "http", path: "/projections", serves: "projection snapshots" },
+  { protocol: "ws", path: "/projections/ws", serves: "projection subscriptions" },
+  { protocol: "http", path: "/sync", serves: "journal sync" },
+  { protocol: "ws", path: "/sync/ws", serves: "journal sync stream" },
+  { protocol: "http", path: "/health", serves: "workspace identity" }
+]
 
 /**
  * Whether a host is a loopback address.
@@ -77,6 +122,33 @@ export const refuse = (bind: Bind): CliError.UnsupportedError | undefined => {
 }
 
 /**
+ * The workspace this gateway belongs to, as a stable short hash of its root.
+ *
+ * A supervisor that finds a gateway on a port asks `/health` whether it is
+ * this workspace's before deciding to keep or replace it, so the answer has to
+ * be derived from the workspace and from nothing else. The path itself is not
+ * published: it names directories on the operator's machine.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const workspaceHash = (root: string): string =>
+  createHash("sha256").update(resolve(root)).digest("hex").slice(0, 16)
+
+/**
+ * The identity `GET /health` answers with.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const health = (root: string): GatewayServer.Health => ({
+  workspaceHash: workspaceHash(root),
+  gatewayId: `cli-${process.pid}`,
+  protocolVersion: "1",
+  version: packageVersion
+})
+
+/**
  * The line printed once the server is listening.
  *
  * @category constructors
@@ -84,34 +156,36 @@ export const refuse = (bind: Bind): CliError.UnsupportedError | undefined => {
  */
 export const banner = (bind: Bind): string => {
   const base = `http://${bind.host.includes(":") ? `[${bind.host}]` : bind.host}:${bind.port}`
+  const socket = base.replace(/^http/, "ws")
+  const width = Math.max(...mounts.map((mount) => mount.path.length))
   return [
     `smithers serve listening on ${base}`,
-    `  control rpc      ${base}/rpc, ${base.replace(/^http/, "ws")}/rpc/ws`,
-    `  health           ${base}/health`,
-    bind.credential === undefined ? "  auth             none (loopback only)" : "  auth             bearer token"
+    ...mounts.map((mount) =>
+      `  ${mount.path.padEnd(width)}  ${mount.protocol === "ws" ? socket : base}${mount.path}  ${mount.serves}`
+    ),
+    bind.credential === undefined ? "  auth  none (loopback only)" : "  auth  bearer token"
   ].join("\n")
 }
 
 /**
- * Hosts the control server until the process is interrupted.
+ * Hosts the assembled gateway until the process is interrupted.
  *
- * The composition is `NodeControl`'s: bearer authentication when a credential
- * is configured, permissive authentication only on loopback. `Layer.launch`
- * keeps the scope alive, so the server lives exactly as long as the command.
+ * `Layer.launch` keeps the scope alive, so the server lives exactly as long as
+ * the command.
  *
  * @category constructors
  * @since 1.0.0
  */
-export const host = (bind: Bind) =>
+export const host = (bind: Bind, root: string = process.cwd()) =>
   Effect.gen(function*() {
     const refusal = refuse(bind)
     if (refusal !== undefined) return yield* Effect.fail(refusal)
-    const options = { host: bind.host, port: bind.port, listen: bind.listen }
-    const server = bind.credential === undefined || bind.credential === ""
-      ? NodeControl.layerServerNoopAuth(options)
-      : NodeControl.layerServerBearerAuth(
-        { token: bind.credential, principal: { kind: "operator", id: "cli" } },
-        options
-      )
-    yield* Layer.launch(server)
+    yield* Layer.launch(
+      NodeControl.layerGateway(health(root), {
+        host: bind.host,
+        port: bind.port,
+        listen: bind.listen,
+        ...(bind.credential === undefined || bind.credential === "" ? {} : { credential: bind.credential })
+      }, root)
+    )
   })

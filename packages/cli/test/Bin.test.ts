@@ -235,6 +235,66 @@ describe("the SQLite-only database contract", processBudget, () => {
   })
 })
 
+describe("the served gateway", processBudget, () => {
+  /** A loopback port nothing else in this suite is using. */
+  const port = 34_000 + Math.floor(Math.random() * 8000)
+
+  it("answers every mount its banner advertises", async () => {
+    const cwd = mkdtempSync(temporaryDirectoryPrefix)
+    const child = spawn(process.execPath, ["--no-warnings", executable, "serve", "--port", String(port)], {
+      cwd,
+      env: { ...process.env }
+    })
+    let banner = ""
+    child.stderr.setEncoding("utf8")
+    child.stderr.on("data", (chunk: string) => {
+      banner += chunk
+    })
+    try {
+      const base = `http://127.0.0.1:${port}`
+      const deadline = Date.now() + 120_000
+      let health: Response | undefined
+      for (;;) {
+        try {
+          health = await fetch(`${base}/health`)
+          break
+        } catch (cause) {
+          if (Date.now() > deadline) throw cause
+          await new Promise((resolve) => setTimeout(resolve, 250))
+        }
+      }
+
+      // `GET /health` is the probe a supervisor uses to decide whether the
+      // gateway it found belongs to this workspace, so it answers unauthenticated
+      // and carries identity only.
+      expect(health!.status).toBe(200)
+      const identity = await health!.json() as Record<string, unknown>
+      expect(typeof identity.workspaceHash).toBe("string")
+      expect(identity.version).toBe(Version.packageVersion)
+
+      // The three RPC mounts. A 404 here is the defect this case exists for:
+      // the banner advertised routes only the control server carried.
+      for (const path of ["/rpc", "/projections", "/sync"]) {
+        const response = await fetch(`${base}${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/ndjson" },
+          body: ""
+        })
+        expect({ path, status: response.status }).not.toEqual({ path, status: 404 })
+      }
+
+      // Every line the banner advertises is a route that answered.
+      expect(banner).toContain(`${base}/health`)
+      expect(banner).toContain(`${base}/sync`)
+      expect(banner).toContain("/projections/ws")
+    } finally {
+      child.kill("SIGTERM")
+      await new Promise((resolve) => child.once("exit", resolve))
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  }, 240_000)
+})
+
 describe("the --json stdout contract", processBudget, () => {
   it("prints exactly one JSON document on stdout and nothing else", () => {
     const result = run(["--json", "ls"])
@@ -468,6 +528,37 @@ describe("Smithers 0.x detection", processBudget, () => {
       expect(result.status).toBe(1)
       expect(result.stderr).toContain("Refusing to migrate")
       expect(result.stderr).toContain("run-old-1 running (ship)")
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("reaches the migration tool shipped in @smthrs/migrate, not a project-local flow file", () => {
+    // A 0.x project has no `flows/` directory by definition, so demanding one
+    // made the verb unreachable for every project it exists for. The flow
+    // ships inside `@smthrs/migrate` (rc-contract section 4.1, PLAN phase 6);
+    // the verb runs that, and what it answers is the migration tool's own
+    // report or the migration tool's own refusal.
+    const cwd = mkdtempSync(temporaryDirectoryPrefix)
+    try {
+      mkdirSync(join(cwd, ".smithers", "workflows"), { recursive: true })
+      writeFileSync(join(cwd, ".smithers", "workflows", "ship.tsx"), "export default null\n")
+      writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "legacy" }))
+      const database = new DatabaseSync(join(cwd, "smithers.db"))
+      database.exec("CREATE TABLE _smithers_runs (run_id TEXT PRIMARY KEY, workflow_name TEXT, status TEXT)")
+      // Terminal only: the section 6 refusal has nothing to hold, so the verb
+      // gets as far as the tool.
+      database.exec("INSERT INTO _smithers_runs VALUES ('run-old-1','ship','finished')")
+      database.close()
+
+      const result = inProject(cwd, ["migrate"])
+      const output = `${result.stdout}${result.stderr}`
+
+      expect(output).not.toContain("is not installed in this project")
+      expect(output).not.toContain("Add it under flows/")
+      // The migration tool's own rendering: `smithers migrate <mode>: <root>`,
+      // or its own refusal, `smithers migrate: <reason>`.
+      expect(output).toMatch(/smithers migrate (plan|scan|apply):|smithers migrate: /)
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }

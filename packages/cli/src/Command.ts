@@ -17,6 +17,7 @@ import { Control as ControlService, ControlSchema } from "@smthrs/control"
 import * as ResolveJj from "@smthrs/jj/node/resolveJjBinary"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import type * as Namespace from "@smthrs/memory/Namespace"
+import * as MigrateCommand from "@smthrs/migrate/flow/Command"
 import { Console, Effect, Option, Schema, Stream } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import * as Agents from "./Agents.ts"
@@ -741,22 +742,51 @@ const migrate = Command.make("migrate", {
     const databases = Project.legacyDatabases(target).map(Legacy.read)
     const refusal = Legacy.refusal(databases)
     if (refusal !== undefined) return yield* Effect.fail(new CliError.UnsupportedError({ message: refusal }))
-    const control = yield* ControlService.Control
-    const listed = yield* control.list({ _tag: "flows" })
-    const flow = listed._tag === "flows"
-      ? listed.items.find((item) => item.flowId.endsWith("migrate-smithers-v1"))
-      : undefined
-    if (flow === undefined) {
-      return yield* Effect.fail(
+    // The flow ships inside `@smthrs/migrate`, which is where a 0.x project can
+    // reach it: such a project has no `flows/` directory by definition, so
+    // looking for `flows/**/migrate-smithers-v1` made the verb unreachable for
+    // every project it exists for. This is the same entry `smithers-migrate`
+    // runs, so the two spellings are one implementation.
+    const options = MigrateCommand.optionsOf({
+      root: target,
+      scan: false,
+      apply: false,
+      seat: undefined,
+      allowUnsafe: undefined,
+      acknowledgeRunState: false,
+      allowNoVcs: false,
+      keepOldSources: false,
+      unit: undefined,
+      maxRepairRounds: undefined,
+      reportDir: undefined,
+      flowsDir: undefined,
+      verifyInstall: undefined,
+      verifyFormat: undefined,
+      verifyTypecheck: undefined,
+      verifyTest: undefined
+    }, projectRoot)
+    const root = yield* rootCommand
+    const report = yield* MigrateCommand.runNode(options, { environment: process.env }).pipe(
+      // A refused gate is not a crash: it prints the operator's own
+      // instructions and leaves the project untouched.
+      Effect.mapError((error) =>
         new CliError.UnsupportedError({
-          message: "The migrate-smithers-v1 flow is not installed in this project. " +
-            "Add it under flows/ and run `smithers migrate` again. " +
-            "See https://smithers.sh/migration/1.0#migrate"
+          message: `smithers migrate: ${error.message}${error.details === undefined ? "" : `\n${error.details}`}`
         })
       )
+    )
+    if (!root.quiet) {
+      yield* Console.log(
+        MigrateCommand.render(report, root.json ? "json" : "human", MigrateCommand.reportDirectory(options))
+      )
     }
-    const card = yield* control.plan({ flowId: flow.flowId, input: { path: target } })
-    yield* render(card)
+    // The migration's own status, the way `smithers-migrate` reports it: 3 is
+    // "parked, the operator has a decision", not a failure. `bin.ts` hands a
+    // successful exit whatever `process.exitCode` holds, which is also how
+    // `NodeControl.layerOutput` transfers a rendered status.
+    yield* Effect.sync(() => {
+      process.exitCode = MigrateCommand.exitCode(report)
+    })
   })).pipe(Command.withDescription(Verb.find("migrate")!.help))
 
 const memoryNamespace = (raw: Option.Option<string>): Namespace.Namespace => {
@@ -1126,8 +1156,9 @@ const serveHandler = (config: { readonly host: string; readonly port: number; re
     }
     const refusal = Serve.refuse(bind)
     if (refusal !== undefined) return yield* Effect.fail(refusal)
+    const projectRoot = yield* Project.ProjectRoot
     if (!root.quiet) yield* Console.error(Serve.banner(bind))
-    yield* Serve.host(bind)
+    yield* Serve.host(bind, projectRoot)
   })
 
 const serveCommand = Command.make("serve", serveFlags, serveHandler).pipe(
