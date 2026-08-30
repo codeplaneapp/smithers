@@ -7,7 +7,7 @@
  * | Path | Protocol | Serves |
  * | --- | --- | --- |
  * | `POST /rpc` | RPC over HTTP | `@smthrs/control` `ControlRpcs` |
- * | `/rpc/ws` | RPC over WebSocket | `ControlRpcs`, including `Watch` |
+ * | `/rpc/ws` | RPC over WebSocket | `ControlRpcs`, including a kept-alive `Watch` |
  * | `POST /projections` | RPC over HTTP | `GatewayRpcs` |
  * | `/projections/ws` | RPC over WebSocket | `GatewayRpcs`, including `Projection.Subscribe` |
  * | `POST /sync` | RPC over HTTP | `@smthrs/sync` `SyncRpcs` |
@@ -17,22 +17,24 @@
  * `/health` is deliberately unauthenticated: a supervisor decides whether to
  * keep or replace a gateway process by asking which workspace it belongs to,
  * and a probe that needed a credential could not answer that question about a
- * gateway it did not start. The response carries identity only — the
+ * gateway it did not start. The response carries identity only: the
  * workspace hash, the gateway id, the protocol version, and the package
- * version — never a token, a run, or a path.
+ * version. It never carries a token, a run, or a path.
  *
  * @since 1.0.0
  */
 import { Control } from "@smthrs/control/Control"
+import type * as ControlError from "@smthrs/control/ControlError"
+import type * as ControlSchema from "@smthrs/control/ControlSchema"
 import * as ControlServer from "@smthrs/control/ControlServer"
 import { SyncRpcs } from "@smthrs/sync/SyncRpcs"
 import * as SyncServer from "@smthrs/sync/SyncServer"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer, Schema, Stream } from "effect"
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http"
 import { RpcServer } from "effect/unstable/rpc"
 import { GatewayRpcs } from "./GatewayRpcs.ts"
 import * as GatewaySchema from "./GatewaySchema.ts"
-import { Projections } from "./Projections.ts"
+import { heartbeatIntervalMillis, Projections } from "./Projections.ts"
 
 /**
  * What `GET /health` answers: the `GatewaySchema.GatewayHealth` identity plus
@@ -108,6 +110,93 @@ export const layerHandlers = GatewayRpcs.toLayer(
   })
 )
 
+/**
+ * The kind a `Watch` keepalive carries.
+ *
+ * `ControlRpcs.Watch` answers `ControlSchema.ControlEvent` and has no frame of
+ * its own for a keepalive, so the gateway publishes one as an event whose kind
+ * no emitter uses. A fold that does not know the kind ignores it, which is
+ * what every fold in this package and in `@smthrs/cli` `Forensics` already
+ * does with an unknown kind.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export const watchHeartbeatKind = "control.gateway.heartbeat"
+
+/**
+ * Merges a keepalive into a followed `Watch` stream.
+ *
+ * A followed stream is silent while a run is thinking, and a relay cuts an
+ * idle tunnel at 600 s (plue-consumer-contract §11). The Effect RPC client
+ * sends its own `Ping` every 5 s, but a non-Effect consumer behind a relay
+ * sends nothing, so the keepalive has to come from the server.
+ *
+ * The keepalive repeats the sequence of the last event delivered, so a client
+ * that resumes from the last sequence it saw does not rewind on a heartbeat,
+ * and it carries the watched run id so a client routing by run keeps routing.
+ * A snapshot read (`follow: false`) is left alone: it has to end.
+ */
+const keptAlive = (
+  millis: number,
+  filter: ControlSchema.WatchFilter,
+  events: Stream.Stream<ControlSchema.ControlEvent, ControlError.ControlError>
+): Stream.Stream<ControlSchema.ControlEvent, ControlError.ControlError> => {
+  if (filter.follow === false) return events
+  let sequence = filter.afterSequence ?? 0
+  const tracked = Stream.map(events, (event) => {
+    sequence = event.sequence
+    return event
+  })
+  const beats = Stream.tick(millis).pipe(
+    Stream.drop(1),
+    Stream.mapEffect(() =>
+      Effect.map(
+        Effect.clockWith((clock) => clock.currentTimeMillis),
+        (occurredAt): ControlSchema.ControlEvent => ({
+          sequence,
+          kind: watchHeartbeatKind,
+          ...(filter.runId === undefined ? {} : { runId: filter.runId }),
+          occurredAt,
+          payload: null
+        })
+      )
+    )
+  )
+  return Stream.merge(tracked, beats, { haltStrategy: "left" })
+}
+
+/**
+ * The control service the `/rpc` mounts read through: the ambient one, with
+ * the keepalive merged into `watch`.
+ *
+ * Wrapping the service rather than re-declaring the handlers keeps
+ * `@smthrs/control` `ControlServer` the single definition of what every
+ * procedure does, principal stamping on `Approve` and `Deny` included. Only
+ * `watch` behaves differently, and only in what it adds.
+ *
+ * @since 1.0.0
+ * @category layers
+ */
+export const layerKeepAlive = (
+  millis: number = heartbeatIntervalMillis
+): Layer.Layer<Control, never, Control> =>
+  Layer.effect(Control)(
+    Effect.map(Control, (control) =>
+      Control.of({ ...control, watch: (filter) => keptAlive(millis, filter, control.watch(filter)) }))
+  )
+
+/**
+ * Mounts the control plane on `POST /rpc` and `/rpc/ws`, with the keepalive.
+ *
+ * @param millis how often an idle followed watch emits one, defaulting to
+ * `Projections.heartbeatIntervalMillis`
+ * @since 1.0.0
+ * @category layers
+ */
+export const layerControlHttp = (millis?: number | undefined) =>
+  ControlServer.layerHttp.pipe(Layer.provide(layerKeepAlive(millis)))
+
 const gateway = RpcServer.layer(GatewayRpcs, { disableFatalDefects: true })
 
 const sync = RpcServer.layer(SyncRpcs, { disableFatalDefects: true })
@@ -164,12 +253,14 @@ export const layerSyncHttp = Layer.mergeAll(
  * is the Node host that binds this to a socket.
  *
  * @param health the identity `GET /health` answers with
+ * @param heartbeatMillis how often an idle followed `Watch` emits a keepalive,
+ * defaulting to `Projections.heartbeatIntervalMillis`
  * @since 1.0.0
  * @category layers
  */
-export const layer = (health: Health) =>
+export const layer = (health: Health, heartbeatMillis?: number | undefined) =>
   Layer.mergeAll(
-    ControlServer.layerHttp,
+    layerControlHttp(heartbeatMillis),
     layerProjectionsHttp,
     layerSyncHttp,
     layerHealth(health)

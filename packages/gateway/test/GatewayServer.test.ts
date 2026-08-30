@@ -15,6 +15,10 @@
  *   itself listed, and carries the parent it came from.
  * - `serve.startup-recovery`: a gateway whose read path is unavailable still
  *   comes up and still answers `/health`.
+ *
+ * The keepalive suite pins rc-contract §10 item 4 on the socket rather than in
+ * the service: a `Watch` a client follows over `/rpc/ws` carries a frame while
+ * the run it watches is silent.
  */
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
@@ -184,6 +188,73 @@ describe("the assembled gateway over a real loopback bind", () => {
       // spawns children must not be the only run it shows.
       expect(rows.map((row) => row.runId)).toContain(receipt.runId)
     }).pipe(Effect.provide(served())))
+
+  test("keeps an idle followed Watch alive on /rpc/ws", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const control = yield* Control
+      const card = yield* control.plan({ flowId: "system/test", input: {} })
+      yield* control.approve(approvalOf(card))
+      const receipt = yield* control.run({
+        _tag: "Plan",
+        planId: card.planId,
+        digest: card.digest,
+        envelope: card.envelope,
+        idempotencyKey: `run:${card.planId}`
+      })
+      if (receipt._tag !== "Accepted" || receipt.runId === undefined) return yield* Effect.die("expected a run")
+      const runId = receipt.runId
+
+      const observed = yield* Effect.gen(function*() {
+        const remote = yield* Control
+        const history = yield* Stream.runCollect(remote.watch({ runId, follow: false }))
+        const last = history.at(-1)?.sequence ?? 0
+        // Nothing will happen to this run again, so every frame from here is
+        // the server's own keepalive. Without it the socket is silent until
+        // the run moves, and a relay cuts the tunnel first.
+        const frames = yield* Stream.runCollect(
+          Stream.take(remote.watch({ runId, afterSequence: last, follow: true }), 2)
+        )
+        return { last, frames }
+      }).pipe(Effect.provide(client(url)))
+
+      expect(observed.frames.map((frame) => frame.kind)).toEqual([
+        GatewayServer.watchHeartbeatKind,
+        GatewayServer.watchHeartbeatKind
+      ])
+      // It repeats the last sequence delivered, so a client resuming from the
+      // last sequence it saw does not rewind on a keepalive, and it names the
+      // run so a client routing by run keeps routing.
+      expect(observed.frames.map((frame) => frame.sequence)).toEqual([observed.last, observed.last])
+      expect(observed.frames[0]?.runId).toBe(runId)
+    }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, heartbeatMillis: 25 }))))
+})
+
+describe("the Watch keepalive", () => {
+  const kept = GatewayServer.layerKeepAlive(25).pipe(Layer.provideMerge(stack()))
+
+  test("leaves a snapshot read alone and names no run on a workspace watch", () =>
+    Effect.gen(function*() {
+      const control = yield* Control
+      const card = yield* control.plan({ flowId: "system/test", input: {} })
+      yield* control.approve(approvalOf(card))
+
+      // A snapshot read has to end, so nothing is merged into it.
+      const snapshot = yield* Stream.runCollect(control.watch({ follow: false }))
+      expect(snapshot.length).toBeGreaterThan(0)
+      expect(snapshot.filter((event) => event.kind === GatewayServer.watchHeartbeatKind)).toEqual([])
+
+      // A workspace-wide watch is not about one run, so its keepalive names
+      // none: a client routing by run must not route a keepalive anywhere.
+      const beats = yield* Stream.runCollect(
+        Stream.take(
+          Stream.filter(control.watch({ follow: true }), (event) => event.kind === GatewayServer.watchHeartbeatKind),
+          1
+        )
+      )
+      expect(beats[0]?.runId).toBeUndefined()
+      expect(beats[0]?.payload).toBeNull()
+    }).pipe(Effect.provide(kept)))
 })
 
 describe("gateway bind policy", () => {

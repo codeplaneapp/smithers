@@ -37,6 +37,12 @@ export interface ServerOptions extends ListenOptions {
   readonly listen?: boolean | undefined
   /** The shared bearer credential, required for a non-loopback bind. */
   readonly credential?: string | undefined
+  /**
+   * How often an idle followed `Watch` emits a keepalive frame on `/rpc/ws`,
+   * defaulting to `Projections.heartbeatIntervalMillis`. A relay with an idle
+   * cut shorter than that one needs a shorter cadence here.
+   */
+  readonly heartbeatMillis?: number | undefined
 }
 
 /**
@@ -64,7 +70,9 @@ export const isLoopbackHost = (host: string): boolean => host === "127.0.0.1" ||
  * @category constructors
  */
 export const listenOptions = (options: ServerOptions): ListenOptions => {
-  const { credential, listen, ...node } = options
+  // `credential`, `listen`, and the keepalive cadence are this module's, not
+  // `node:net`'s: they are named here so the rest is exactly a bind.
+  const { credential, heartbeatMillis: _cadence, listen, ...node } = options
   const host = node.host ?? "127.0.0.1"
   if (isLoopbackHost(host)) return { ...node, host }
   if (listen !== true) {
@@ -117,7 +125,7 @@ export const layer = (
   options: ServerOptions = defaultServerOptions
 ) =>
   HttpRouter.serve(
-    GatewayServer.layer(health).pipe(
+    GatewayServer.layer(health, options.heartbeatMillis).pipe(
       Layer.provide(layerAuth(options)),
       Layer.provide(RpcSerialization.layerNdjson)
     ),
