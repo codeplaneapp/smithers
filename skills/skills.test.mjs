@@ -302,24 +302,27 @@ describe("installing the curated skill", () => {
       t.skip("`smithers skills add` is not in this CLI yet.");
       return;
     }
-    // Pending cli-ops, not pending this lane. `packages/cli/**` is that lane's
-    // fence (triage.md SPEC AMENDMENT 4, and the 2026-08-29 16:25 fence
-    // ruling), so the fix ships as deferred hunk records 4 and 6 in
-    // migration/phase4/pack-skills-plugins-deferred-hunks.{md,patch}:
-    // `Agents.skill()` reads packages/cli/docs/SKILL.md, then this file, and
-    // refuses rather than substituting a rendering of the verb table.
+    // `packages/cli/**` is the cli-ops fence (triage.md SPEC AMENDMENT 4, and
+    // the 2026-08-29 16:25 fence ruling), so this lane asked for the install
+    // as deferred hunk records 4 and 6 in
+    // migration/phase4/pack-skills-plugins-deferred-hunks.{md,patch}. cli-ops
+    // adopted them in 3db3a1b3bf: `Agents.skill()` reads
+    // packages/cli/docs/SKILL.md, then this file, and refuses rather than
+    // substituting a rendering of the verb table.
     //
-    // The skip is gated on whether that code is PRESENT, never on whether the
-    // install matched: a case that skips itself the moment its assertion would
-    // fail pins nothing, and would call a wrong adoption "still renders the
-    // verb table". Once `Agents.skillMissing` exists, the byte-identity
-    // assertion below runs and any other installed content is a failure.
+    // The guard below is gated on whether that code is PRESENT, never on
+    // whether the install matched: a case that skips itself the moment its
+    // assertion would fail pins nothing, and would call a wrong adoption
+    // "still renders the verb table". Against every merged cli-ops tip since
+    // 3db3a1b3bf it does not fire and the byte-identity assertion runs, so any
+    // other installed content is a failure.
     if (typeof Agents.skillMissing !== "function") {
       t.skip(
-        "`packages/cli/src/Agents.ts` has no `skillMissing`, so deferred hunk records 4 and 6 " +
-          "(migration/phase4/pack-skills-plugins-deferred-hunks.patch) are not adopted yet. " +
-          "rc-contract.md ruling F2 is met when they land, and this case then holds the install " +
-          "to the curated file byte for byte.",
+        "`packages/cli/src/Agents.ts` has no `skillMissing`, so this tree is below cli-ops " +
+          "3db3a1b3bf, which adopted deferred hunk records 4 and 6 " +
+          "(migration/phase4/pack-skills-plugins-deferred-hunks.patch). rc-contract.md ruling F2 " +
+          "is met at that commit and later, and this case then holds the install to the curated " +
+          "file byte for byte.",
       );
       return;
     }

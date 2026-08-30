@@ -9,11 +9,12 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import * as Frontmatter from "../../../packages/registry/src/internal/Frontmatter.ts";
+import * as Option from "effect/Option";
 import * as McpServer from "../../../packages/cli/src/McpServer.ts";
+import * as MarkdownFlow from "../../../packages/registry/src/MarkdownFlow.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(dirname(dirname(here)));
@@ -63,25 +64,43 @@ const REMOVED = [
 for (const [agent, path] of Object.entries(PLUGIN_SKILLS)) {
   describe(`the ${agent} plugin skill`, () => {
     const text = read(path);
-    const { fields, warnings } = Frontmatter.parse({ text, path });
+    // Read through the registry's public surface, the same call
+    // `skills/skills.test.mjs` uses on the curated skills, so a plugin skill
+    // is held to the loader that actually reads it rather than to an internal
+    // module the package does not export.
+    const skillDirectory = dirname(join(repoRoot, path));
+    const result = MarkdownFlow.fromMarkdown({
+      text,
+      path,
+      baseDirectory: skillDirectory,
+      naming: "frontmatter",
+      name: Option.none(),
+      dirBasename: basename(skillDirectory),
+      provenance: { source: "project", root: dirname(skillDirectory) },
+    });
+    // A skill declares no capabilities of its own, so the conservative
+    // wildcard warning is the expected outcome for a document.
+    const warnings = result.warnings.filter((warning) => warning.code !== "unprojectable_authority");
+    const description = Option.isSome(result.descriptor) ? result.descriptor.value.description : "";
 
-    it("has frontmatter that parses", () => {
-      assert.deepEqual(warnings.map((warning) => warning.code), []);
-      assert.equal(fields.name, "smithers");
-      assert.equal(typeof fields.description, "string");
+    it("has frontmatter the registry loader reads", () => {
+      assert.deepEqual(warnings.map((warning) => `${warning.code}: ${warning.message}`), []);
+      assert.ok(Option.isSome(result.descriptor), `${path} produced no descriptor`);
+      assert.equal(result.descriptor.value.name, "smithers");
+      assert.equal(typeof result.descriptor.value.description, "string");
     });
 
     it("has a description inside the 1024-character Agent Skills limit", () => {
       assert.ok(
-        [...String(fields.description)].length <= 1024,
-        `${path}: description is ${[...String(fields.description)].length} characters`,
+        [...description].length <= 1024,
+        `${path}: description is ${[...description].length} characters`,
       );
     });
 
     it("carries Rule 0, route sizing, and the no-JSX rule", () => {
-      assert.match(String(fields.description), /SMITHERS_INSIDE_RUN/);
-      assert.match(String(fields.description), /right-size the route first/);
-      assert.match(String(fields.description), /no JSX API/);
+      assert.match(description, /SMITHERS_INSIDE_RUN/);
+      assert.match(description, /right-size the route first/);
+      assert.match(description, /no JSX API/);
       assert.match(text, /Rule 0: if you are already inside a Smithers run/);
       assert.match(text, /Right-size the route first/);
     });
