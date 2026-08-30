@@ -1,6 +1,6 @@
 {
   "name": "smithersai",
-  "description": "Smithers: durable, resumable AI workflows with a live UI for Claude Code.",
+  "description": "Smithers: durable, resumable AI flows for Claude Code.",
   "owner": {
     "name": "Smithers",
     "url": "https://smithers.sh"
@@ -9,7 +9,7 @@
     {
       "name": "smithers",
       "source": "./claude-plugin",
-      "description": "Durable, resumable AI workflows with a live UI. Drive Smithers as an orchestrator instead of hand-rolling Task/Agent/Workflow subagents.",
+      "description": "Plan, approve, run, watch, and resume durable Smithers flows. Drive Smithers as an orchestrator instead of hand-rolling Task/Agent/Workflow subagents, and see every run live in /workflows.",
       "category": "Productivity"
     }
   ]

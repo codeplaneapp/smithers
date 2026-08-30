@@ -382,7 +382,10 @@ realTest("real Codex CLI lifecycle uses an isolated temporary home", async () =>
     else process.env.CODEX_HOME = oldHome;
     rmSync(home, { recursive: true, force: true });
   }
-}, 30_000);
+  // Real `codex` starts, several per case, each costing seconds. 30 s was a
+  // budget this suite fit into only on an idle machine and timed out on a
+  // loaded one. The budget bounds a hang, not the work, so it is generous.
+}, 180_000);
 
 realTest("real Codex status and dry-run attribute each effective field to its winning layer", async () => {
   const binary = Bun.which("codex");
@@ -411,4 +414,7 @@ realTest("real Codex status and dry-run attribute each effective field to its wi
     rmSync(project, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   }
-}, 30_000);
+  // Real `codex` starts, several per case, each costing seconds. 30 s was a
+  // budget this suite fit into only on an idle machine and timed out on a
+  // loaded one. The budget bounds a hang, not the work, so it is generous.
+}, 180_000);

@@ -2,7 +2,7 @@
   "name": "smithersai",
   "interface": {
     "displayName": "Smithers",
-    "shortDescription": "Durable, resumable AI workflows with a live UI for Codex"
+    "shortDescription": "Durable, resumable AI flows you drive from Codex"
   },
   "plugins": [
     {

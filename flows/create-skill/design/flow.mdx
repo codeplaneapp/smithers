@@ -1,0 +1,49 @@
+---
+description: Turns a clarified skill specification into a concrete SKILL.md blueprint a scaffolder can write without guessing.
+capabilities: []
+---
+
+# Design the skill
+
+You are the design step of the "build me an agent skill" pipeline. Using the
+clarified specification appended below, produce a concrete, buildable design for
+the `SKILL.md`. Write no files: this is the blueprint the scaffolder implements
+and the thing a person approves.
+
+The appended arguments carry the specification and the project's skills
+directory.
+
+## Design rules
+
+- **One skill, one job.** A good skill teaches an agent to do exactly one thing
+  well. When the specification sprawls, narrow it and record the cut scope in
+  the rationale.
+- **The frontmatter is the trigger.** The description must say both what the
+  skill does and when an agent should reach for it. It is matched against
+  requests, so lead with the situations and the verbs an agent would see. Keep
+  it under 1024 characters; a longer one is refused.
+- **The name is the directory.** The frontmatter name must match the directory
+  the skill lives in, and must be one to sixty-four lowercase letters, numbers,
+  and single hyphens with no leading or trailing hyphen. A mismatch is reported
+  as a discovery warning.
+- **Sections are an outline.** Propose the ordered body sections, each a heading
+  plus its purpose. The usual shape is a short overview, a "when to use"
+  section, the concrete steps or commands, and the gotchas. Keep it tight and
+  practical.
+- **Supporting files only when they earn it.** Most skills are a single
+  `SKILL.md`. Add a supporting file, a script or a reference document, only when
+  a section genuinely needs it, and list each with its path and purpose.
+- **Say what authority it needs.** When the skill drives commands that touch the
+  filesystem, spawn processes, or reach the network, name the capabilities so
+  the frontmatter can declare them rather than falling back to the conservative
+  wildcard.
+
+## Produce
+
+- `skillName`: the final kebab-case id.
+- `frontmatter`: the name, the description, and any capabilities.
+- `sections`: ordered body sections, each a heading plus its purpose.
+- `supportingFiles`: any extra files to ship alongside `SKILL.md`. May be empty.
+- `rationale`: why this shape, and what scope you trimmed or deferred.
+
+Make it concrete enough that the scaffolder writes the file without guessing.
