@@ -115,7 +115,7 @@ changes personally.
   application-defined namespace — would also work but changes a security-
   relevant closed set, so the host-callback version is proposed first.
 
-## 3. `ChatComposer` and `FileTree` accept no pass-through attributes — LANDED
+## 3. LANDED: `ChatComposer` and `FileTree` accept no pass-through attributes
 
 - **Files**: `@smthrs/ui` `src/chat/ChatComposer.tsx` (the Send and Stop
   buttons) and `src/file-tree.tsx` (the row buttons).
@@ -156,7 +156,7 @@ changes personally.
   correct one. `apps/ui/src/mainview/FlowStamp.ts` can drop its ref callback
   for these three affordances.
 
-## 4. `MarkdownEditor` traps forward Tab — LANDED
+## 4. LANDED: `MarkdownEditor` traps forward Tab
 
 - **File**: `@smthrs/ui` `src/adapters/markdown-editor/MarkdownEditor.tsx`.
 - **What**: the editor is a ProseMirror body and ProseMirror binds Tab to
@@ -178,7 +178,7 @@ changes personally.
   textarea. `apps/ui/src/mainview/FocusRing.ts` can drop its handler for this
   region.
 
-## 5. `Markdown` has no table rule — LANDED
+## 5. LANDED: `Markdown` has no table rule
 
 - **File**: `@smthrs/ui` `src/primitives/markdown.tsx`.
 - **What**: the renderer handles fences, headings, lists and inline spans. A
