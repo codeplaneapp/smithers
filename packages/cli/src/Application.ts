@@ -41,6 +41,13 @@ export interface Config {
    * `.flows/` or `flows/`, before any command handler runs.
    */
   readonly root?: string | undefined
+  /**
+   * The Smithers 0.x state found beside {@link Config.root}, sampled while the
+   * arguments were parsed. It has to be sampled then: building the durable
+   * layers creates `.flows/`, and `.flows/` is what tells the detector this is
+   * an rc.0 project rather than a 0.x one.
+   */
+  readonly legacyState?: ReadonlyArray<string> | undefined
 }
 
 /**

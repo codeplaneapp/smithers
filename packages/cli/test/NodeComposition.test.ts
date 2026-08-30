@@ -39,14 +39,15 @@ afterAll(async () => {
 
 /**
  * `makeConfig` also resolves the project root, which every durable layer is
- * built over. These cases are about the flag and environment ladder, so each
- * one pins the root separately and compares the rest.
+ * built over, and samples the 0.x state beside it before those layers create
+ * `.flows/`. Both read the filesystem. These cases are about the flag and
+ * environment ladder, so each one pins those separately and compares the rest.
  */
 const configuration = (
   args: ReadonlyArray<string>,
   environment: Readonly<Record<string, string | undefined>>
 ) => {
-  const { root: _root, ...rest } = NodeControl.makeConfig(args, environment, "/work")
+  const { legacyState: _legacyState, root: _root, ...rest } = NodeControl.makeConfig(args, environment, "/work")
   return rest
 }
 

@@ -236,9 +236,7 @@ const summaryOf = (control: ControlService.Service, runId: string) =>
 
 /** A digest of one 0.x notice, printed once per invocation. */
 const noticeLegacyState = Effect.gen(function*() {
-  const root = yield* Project.ProjectRoot
-  const found = Project.legacyState(root)
-  const first = found[0]
+  const first = (yield* Project.LegacyState)[0]
   if (first === undefined) return
   yield* Effect.sync(() => process.stderr.write(`${Project.legacyNotice(first)}\n`))
 })

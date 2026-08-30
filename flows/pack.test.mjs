@@ -12,9 +12,10 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
@@ -339,5 +340,72 @@ describe("the smithers-0x-hello fixture", () => {
     for (const path of [".smithers/smithers.db", "smithers.db", ".smithers/executions"]) {
       assert.throws(() => statSync(join(root, path)), /ENOENT/, `${path} must not exist in the fixture`);
     }
+  });
+});
+
+describe("the fixture under the real CLI", () => {
+  const staged = [];
+  after(() => {
+    for (const directory of staged) rmSync(directory, { recursive: true, force: true });
+  });
+
+  const cli = join(repoRoot, "packages", "cli", "bin", "smithers.mjs");
+
+  /**
+   * A copy of the fixture outside this repository.
+   *
+   * In place, the fixture resolves its project root to this repository, whose
+   * `flows/` directory anchors it, so a command run inside the fixture reads
+   * the repository's flows and not the fixture at all. A detached copy is what
+   * an external 0.x project looks like.
+   */
+  const detached = () => {
+    const directory = mkdtempSync(join(tmpdir(), "smithers-0x-"));
+    staged.push(directory);
+    const project = join(directory, "project");
+    cpSync(join(flowsRoot, FIXTURE), project, { recursive: true });
+    return project;
+  };
+
+  const smithers = (project, ...args) =>
+    spawnSync(process.execPath, [cli, ...args], { cwd: project, encoding: "utf8", timeout: 300_000 });
+
+  it("prints the section 6 notice the first time a command runs in it", () => {
+    const project = detached();
+
+    const first = smithers(project, "ls");
+
+    assert.equal(first.status, 0, first.stderr);
+    // rc-contract.md section 6, verbatim opening. Building the durable layers
+    // creates `.flows/`, which is the very thing the detector reads as "this
+    // is an rc.0 project", so a reading taken inside the handler found nothing
+    // on precisely the run this notice is written for.
+    assert.match(first.stderr, /^Found Smithers 0\.x state at .*\.smithers\./);
+    assert.match(first.stderr, /1\.0\.0-rc\.0 does not load, resume, or migrate 0\.x run databases/);
+    assert.match(first.stderr, /https:\/\/smithers\.sh\/migration\/1\.0#run-data/);
+
+    const second = smithers(project, "ls");
+
+    // Once `.flows/` exists the project is mid-migration, and section 6 stops
+    // the notice rather than repeating it on every command forever.
+    assert.equal(second.status, 0, second.stderr);
+    assert.equal(second.stderr, "");
+  });
+
+  it("passes the migrate verb's 0.x run gate, having no run state to refuse", () => {
+    const project = detached();
+
+    const result = smithers(project, "migrate");
+
+    // The gate reads any 0.x `smithers.db` for non-terminal runs. The fixture
+    // has none, so the verb gets past it and stops at the Phase 6 flow body,
+    // which this lane does not deliver. A refusal here would mean the gate
+    // fired on a project with nothing to refuse.
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /The migrate-smithers-v1 flow is not installed in this project/);
+    assert.ok(
+      !result.stderr.includes("non-terminal"),
+      "the 0.x run gate refused a fixture that holds no run state",
+    );
   });
 });

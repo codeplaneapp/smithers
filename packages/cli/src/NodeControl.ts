@@ -161,7 +161,12 @@ export const makeConfig = (
   mcpServers: mcpServersFromArguments(args, environment),
   // `--root` is resolved here rather than in a handler because the durable
   // layers are built from it, and they are built before any flag is parsed.
-  root: Project.root(valueFromArguments(args, "root"), cwd)
+  root: Project.root(valueFromArguments(args, "root"), cwd),
+  // Sampled here for the same reason, and one step more urgently: building
+  // those layers creates `.flows/`, which is exactly what makes the detector
+  // call a directory an rc.0 project. Read any later and the section 6 notice
+  // never fires on the run it is written for.
+  legacyState: Project.legacyState(Project.root(valueFromArguments(args, "root"), cwd))
 })
 
 /**
@@ -935,7 +940,7 @@ export const layer = (applicationConfig: Application.Config) => {
     layerControl(applicationConfig),
     layerOutput,
     NodeServices.layer,
-    Project.layer(root),
+    Project.layer(root, applicationConfig.legacyState),
     // `smithers memory` reads and writes the same durable store a run's
     // `memory` flow does, over the same control database. A separate
     // connection would be a second writer to one SQLite file. A remote

@@ -185,9 +185,38 @@ export const ProjectRoot: Context.Reference<string> = Context.Reference<string>(
 )
 
 /**
- * Provides the resolved project root for one invocation.
+ * The 0.x state this invocation found, sampled before rc.0 wrote anything.
+ *
+ * {@link legacyState} reports nothing once `.flows/` exists beside the 0.x
+ * markers, and the durable layers create `.flows/` while they are built, which
+ * is before any handler runs. Sampling at read time therefore answered "no 0.x
+ * state here" on exactly the run the section 6 notice exists for: the first
+ * rc.0 command in a 0.x project. The sample is taken once, from the resolved
+ * root, at argument-parse time, and handlers read it from here.
+ *
+ * @category references
+ * @since 1.0.0
+ */
+export const LegacyState: Context.Reference<ReadonlyArray<string>> = Context.Reference<ReadonlyArray<string>>(
+  "/cli/LegacyState",
+  { defaultValue: () => [] }
+)
+
+/**
+ * Provides the resolved project root, and the 0.x state found beside it.
+ *
+ * `legacy` defaults to a reading taken now. A composition that builds this
+ * layer after opening the database has already lost the sample and must pass
+ * one taken earlier.
  *
  * @category layers
  * @since 1.0.0
  */
-export const layer = (projectRoot: string): Layer.Layer<never> => Layer.succeed(ProjectRoot, projectRoot)
+export const layer = (
+  projectRoot: string,
+  legacy: ReadonlyArray<string> = legacyState(projectRoot)
+): Layer.Layer<never> =>
+  Layer.mergeAll(
+    Layer.succeed(ProjectRoot, projectRoot),
+    Layer.succeed(LegacyState, legacy)
+  )
