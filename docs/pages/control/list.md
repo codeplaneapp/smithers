@@ -37,6 +37,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | `TransportError` | `transport_error` |
 | `PersistenceError` | `persistence_failed` |
 | `LaunchFailed` | `launch_failed` |
+| `NoMatchingWait` | `no_matching_wait` |
 
 ## Source
 

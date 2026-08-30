@@ -22,7 +22,7 @@ against a remote `smithers serve` with `--remote`.
 | [`smithers docs`](/cli/docs) | Print the bundled documentation; --full prints llms-full.txt |
 | [`smithers doctor`](/cli/doctor) | Report registry, database, runtime, and provider readiness |
 | [`smithers down`](/cli/down) | Cancel every non-terminal run |
-| [`smithers gc`](/cli/gc) | Delete terminal runs older than a threshold and compact the journal |
+| [`smithers gc`](/cli/gc) | Delete terminal runs older than a threshold, with the rows they own |
 | [`smithers init`](/cli/init) | Scaffold flows/&lt;name&gt;/flow.mdx and ignore .flows/ |
 | [`smithers logs`](/cli/logs) | Read run events; --follow streams future events |
 | [`smithers ls`](/cli/ls) | List the flows discovered under this project |

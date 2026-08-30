@@ -1,10 +1,10 @@
 ---
-description: "Delete terminal runs older than a threshold and compact the journal"
+description: "Delete terminal runs older than a threshold, with the rows they own"
 ---
 
 # smithers gc
 
-Delete terminal runs older than a threshold and compact the journal.
+Delete terminal runs older than a threshold, with the rows they own.
 
 ## Usage
 

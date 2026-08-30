@@ -98,10 +98,6 @@ in one.
 | `docs/architecture/implementation-status.md` | `docs/pages/release/support-matrix.md` | rewritten as the rc.0 support matrix, generated from contract section 3.1 |
 | `docs/architecture/{smithers-replacement-gaps,smithers-applicability-audit-2026-08-13}.md` | `docs/migration/` | migration records rather than product pages; the gap ledger seeds the release known-limitations page |
 
-## Routes still waiting for their page
-
-- `/release/known-limitations` is linked from this documentation and written by release enforcement: the exclusion table is generated from release contract section 7 by its owning work, and two writers on one path collide at landing.
-
 ## Deleted, with the reason
 
 Each rule below names assets the ledger deletes. Nothing in the tree matches

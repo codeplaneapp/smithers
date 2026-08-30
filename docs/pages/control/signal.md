@@ -30,6 +30,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | Error | Code |
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
+| `NoMatchingWait` | `no_matching_wait` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
