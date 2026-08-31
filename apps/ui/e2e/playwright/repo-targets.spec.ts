@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test"
 import type { Page } from "@playwright/test"
 import { execFileSync } from "node:child_process"
-import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { localApiGet, localApiPost } from "./localApi"
@@ -231,9 +231,8 @@ test("a featured pattern run renders one row per resolved target, failures first
   execFileSync("git", ["init", "-q"], { cwd: copy })
   execFileSync("git", ["add", "-A"], { cwd: copy })
   execFileSync("git", ["-c", "user.email=e2e@smithers.sh", "-c", "user.name=e2e", "commit", "-qm", "fixture"], { cwd: copy })
-  mkdirSync(join(copy, ".smithers"), { recursive: true })
   writeFileSync(
-    join(copy, ".smithers", "UI.json"),
+    join(copy, "smithers-ui.json"),
     JSON.stringify({
       schemaVersion: 1,
       name: "force",

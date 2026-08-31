@@ -206,9 +206,9 @@ describe("the repo card", () => {
   })
 
   test("states the manifest problems the open reported", () => {
-    const host = render(<RepoCardBody card={repo([".smithers/UI.json is not valid JSON."])} />)
+    const host = render(<RepoCardBody card={repo(["smithers-ui.json is not valid JSON."])} />)
     const alert = host.querySelector("[role=\"alert\"]")
-    expect(alert?.textContent).toContain(".smithers/UI.json is not valid JSON.")
+    expect(alert?.textContent).toContain("smithers-ui.json is not valid JSON.")
   })
 
   test("a clean open shows no warning row at all", () => {

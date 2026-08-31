@@ -79,7 +79,8 @@ workspace and label on the server; extra renderer-supplied fields cannot move a
 process to another directory or change the command.
 
 A repository may declare a strict version-1 plugin manifest at
-`.smithers/UI.json`. Groups and entries are schema-validated, every entry must
+`smithers-ui.json` in its root (never under `.smithers/`, which rc.0 treats as
+0.x state; a manifest left there is reported as a repository warning). Groups and entries are schema-validated, every entry must
 name a detected workspace and a Smithers target label, and invalid manifests
 become visible repository warnings rather than partial UI. A valid manifest
 renders a trusted `repo-plugin` React card. Its actions use the same target

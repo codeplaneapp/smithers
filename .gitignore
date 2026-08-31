@@ -96,7 +96,6 @@ worktrees/
 # The repository's own UI plugin manifest (apps/ui/docs/LOCAL-APP.md "Plugin manifest") is source, not run state.
 !/.smithers/
 /.smithers/*
-!/.smithers/UI.json
 !packages/build-cli/test/fixtures/force-spec/.smithers/
 packages/*/.smithers/
 smithers.db

@@ -3,7 +3,7 @@ import { CardSchema } from "./Cards"
 
 /*
  * The repo-plugin card (apps/ui/docs/LOCAL-APP.md "Cards"): the repository's
- * parsed `.smithers/UI.json` manifest embedded in the transcript, one Run
+ * parsed `smithers-ui.json` manifest embedded in the transcript, one Run
  * affordance per entry riding the existing target.run flow.
  */
 

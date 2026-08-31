@@ -498,7 +498,7 @@ export const TargetsCardBody = ({
                   <tr>
                     <td colSpan={7} className="targets-table-empty">
                       {mode === "featured"
-                        ? "Nothing featured yet: star a target, or mark essentials in .smithers/UI.json."
+                        ? "Nothing featured yet: star a target, or mark essentials in smithers-ui.json."
                         : mode === "recent"
                         ? "Nothing has run yet."
                         : "No targets match this filter."}

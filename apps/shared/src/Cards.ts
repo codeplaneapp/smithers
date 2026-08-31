@@ -546,7 +546,7 @@ export const CardSchema = z.discriminatedUnion("kind", [
       runs: z.array(RunRecordSchema).optional(),
       /** Per-label facts the drawer read (declaration site, plan, deps/rdeps), keyed by label. */
       details: z.record(z.string(), TargetDetailSchema).optional(),
-      /** The labels the repository's `.smithers/UI.json` marks featured (LocalApp featuredLabels). */
+      /** The labels the repository's `smithers-ui.json` marks featured (LocalApp featuredLabels). */
       featured: z.array(z.string()).optional(),
       /** The labels this user starred for the repository (target.star), mirrored from app-starred-targets. */
       starred: z.array(z.string()).optional(),
@@ -608,7 +608,7 @@ export const CardSchema = z.discriminatedUnion("kind", [
   z.object({ ...cardBaseShape, kind: z.literal("ci-matrix"), payload: CiMatrixCardPayloadSchema }),
   /*
    * The repo plugin card (LOCAL-APP.md "Plugin manifest"): the repository's
-   * parsed `.smithers/UI.json`, upserted ahead of the targets card when the
+   * parsed `smithers-ui.json`, upserted ahead of the targets card when the
    * manifest is valid. Each entry's Run rides the existing `target.run` flow.
    */
   z.object({

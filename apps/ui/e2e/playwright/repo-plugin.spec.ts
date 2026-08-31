@@ -7,7 +7,7 @@ import { localApiGet, localApiPost } from "./localApi"
 
 /*
  * The repo plugin (docs/LOCAL-APP.md "Plugin manifest"): a repository with a
- * valid .smithers/UI.json opens with the repo-plugin card ahead of its
+ * valid smithers-ui.json opens with the repo-plugin card ahead of its
  * targets card, the generative panel turn is skipped (no html card), and an
  * entry's Run streams a target run from the entry's workspace. The primary
  * fixture is the tiny two-workspace repo under e2e/fixtures/repo-plugin
@@ -75,7 +75,7 @@ test.afterEach(async ({ page, request }) => {
   await closeOpened(page, request)
 })
 
-test("a repo with .smithers/UI.json opens with the plugin card, no panel, and Run streams from the workspace", async ({ page }) => {
+test("a repo with smithers-ui.json opens with the plugin card, no panel, and Run streams from the workspace", async ({ page }) => {
   const copy = mkdtempSync(join(tmpdir(), "smithers-repo-plugin-"))
   temporary.push(copy)
   cpSync(FIXTURE, copy, { recursive: true })
@@ -120,7 +120,7 @@ test("a repo with .smithers/UI.json opens with the plugin card, no panel, and Ru
 })
 
 test("the aomi checkout opens with its declared plugin groups when present", async ({ page }) => {
-  test.skip(!existsSync(join(AOMI, ".smithers", "UI.json")), `${AOMI} with a plugin manifest is not on this machine`)
+  test.skip(!existsSync(join(AOMI, "smithers-ui.json")), `${AOMI} with a plugin manifest is not on this machine`)
   await page.goto("/")
   await openRepo(page, AOMI)
   opened.push(realpathSync(AOMI))

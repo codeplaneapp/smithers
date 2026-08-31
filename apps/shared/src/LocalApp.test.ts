@@ -3,7 +3,7 @@ import { featuredLabels, featuredPatternRuns, parseRepoPlugin, RepoPluginSchema,
 
 /*
  * The repo plugin manifest (apps/ui/docs/LOCAL-APP.md "Plugin manifest"):
- * a repository's `.smithers/UI.json` declares the groups and entries the
+ * a repository's `smithers-ui.json` declares the groups and entries the
  * repo-plugin card renders. The schema is strict — root, group and entry
  * objects reject additional keys — group references must resolve, labels
  * are `//pkg:name`, and every entry's workspace must be one of the

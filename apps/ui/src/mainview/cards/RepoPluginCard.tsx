@@ -1,6 +1,6 @@
 /*
  * The repo-plugin card (docs/LOCAL-APP.md "Plugin manifest"): the
- * repository's parsed `.smithers/UI.json` as group sections of entries, each
+ * repository's parsed `smithers-ui.json` as group sections of entries, each
  * with its workspace, approval, agentic and kind badges and one Run button
  * riding the existing `target.run` flow. Embedded like every card (EMBED
  * LAW); maximizing is the user's act on the card chrome.

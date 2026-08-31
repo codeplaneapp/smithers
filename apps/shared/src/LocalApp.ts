@@ -36,7 +36,7 @@ export type Harness = z.infer<typeof HarnessSchema>
 
 /*
  * The repo plugin manifest (apps/ui/docs/LOCAL-APP.md "Plugin manifest"):
- * the parsed contents of a repository's `.smithers/UI.json`. Strict at every
+ * the parsed contents of a repository's `smithers-ui.json`. Strict at every
  * level — an additional root, group or entry key rejects the file — so a
  * hand-edited manifest fails loudly at open instead of rendering a guess.
  */
@@ -245,7 +245,7 @@ export const RepoSchema = z.object({
   git: z.object({ branch: z.string().nullable(), remote: z.string().nullable() }).nullable(),
   /** Loader and manifest problems surfaced at open; empty when the open was clean. */
   warnings: z.array(z.string()),
-  /** The parsed `.smithers/UI.json`; absent when the repo declares none (or an invalid one). */
+  /** The parsed `smithers-ui.json`; absent when the repo declares none (or an invalid one). */
   plugin: RepoPluginSchema.optional(),
   smithers: z.object({
     detected: z.boolean(),
