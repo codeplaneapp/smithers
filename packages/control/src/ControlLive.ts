@@ -852,6 +852,21 @@ export const layer: Layer.Layer<
               // which reads as a refusal.
               Effect.catchTag("/control/ClaimLost", () => Effect.succeed(undefined))
             )
+            // The terminal status, in the run's own journal, because this is
+            // the only writer of it. `AgentSession.settle` deliberately writes
+            // nothing for a cancellation — the control operation owns that
+            // write — and `ControlRuntime.interrupt` moves the ROW without
+            // journaling. So `control.run.cancelled` had no writer at all, and
+            // `smithers run` waits on exactly that event to know it has
+            // nothing left to drive: a detached engine whose only run was
+            // cancelled by a second process waited for it forever (Phase 7
+            // smoke, section 5; pid 10105 alive 4 min 33 s).
+            if (run !== undefined && terminal(run.status)) {
+              yield* emit(input.runId, `control.run.${run.status}`, {
+                runId: input.runId,
+                status: run.status
+              })
+            }
             return run === undefined
               ? accepted(input.idempotencyKey, input.runId)
               : terminalOrAccepted(input.idempotencyKey, run)
