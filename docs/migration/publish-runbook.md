@@ -8,34 +8,26 @@ This runbook is the rc.0 instance of the general
 [release runbook](../internal/release-runbook.md). Where the two differ, this
 file wins for this candidate.
 
-## 0. Do not publish yet
+## 0. Preconditions
 
-One Phase 7 gate fails, `docs-generation-links`. Read
-[verification-evidence.md](verification-evidence.md) first and close, or record
-a written acceptance of, each of its three findings:
+All seventeen Phase 7 gates pass and the adversarial verdict is `ready=true`
+at the release commit. Read [verification-evidence.md](verification-evidence.md)
+first; the three findings its previous round listed are closed: the removed-verb
+refusal and the served llms bundles landed in wave 7 (`92febad82c`) and the
+docs gate re-ran PASS, and the plugins repository remains the one
+publication-order item below.
 
-1. Every removed-verb refusal creates and opens `.flows/engine.db` and
-   `.flows/control.db` in the working directory before it prints, so the
-   concurrent removal test in `//scripts:docsUnit` contends on two SQLite files
-   and either exceeds its 15 s per-spawn bound or surfaces `disk I/O error`.
-   That target is selected by the required CI `test` job. Fix lane
-   `phase7/cli-refuse-before-boot` is done, commit `a506d60231`, staged on
-   `land/wave-7`.
-2. The built site serves vocs' own `llms-full.txt` (1,432,111 bytes, 44
-   historical 0.x changelog bodies, 40 JSX `<Task` tags) at the URL the shipped
-   skill tells agents to read first, instead of the 957,481-byte curated bundle
-   `check-llms` guards. Fix lane `phase7/docs-served-llms` is done, commit
-   `510621c763`, staged on `land/wave-7`.
-3. `https://github.com/smithersai/plugins` returns 404 from five pages because
-   the repository is private (`gh api repos/smithersai/plugins` prints
-   `private=true`; `smithersai/smithers-plugins` redirects to it). It is a
-   maintainer prerequisite in release contract section 10: make it public, or
-   change the five links, before the docs deploy.
+Before the docs deploy, make `https://github.com/smithersai/plugins` public
+(`gh api repos/smithersai/plugins` prints `private=true` today;
+`smithersai/smithers-plugins` redirects to it) or change the five pages that
+link to it. Release contract section 10 holds it as a maintainer prerequisite.
 
-Land `land/wave-7`, then re-run the gate from a clean checkout. Nothing else in
-the gate table is red: the previous round's two blockers, an unrecorded
-terminal result in the engine store and an attached launch that exited 0 for a
-failed run, are closed and re-proven live by the smoke and plue-cutover gates.
+Push the branch and require a green CI run for the exact commit you tag: no
+GitHub CI run exists for the release commit while the branch is unpushed, and
+`ci.yml` runs on `pull_request` and on pushes to `main`, so open the cutover
+pull request (or dispatch the workflow) rather than trusting a bare branch
+push to run it. Steps 3 and 5 gate the tag and the publish on
+`gh run watch --exit-status`.
 
 One further item is a maintainer decision rather than a lane.
 `e2e/faults/case22-secret-never-in-journal.test.ts` keeps one red half: rc.0

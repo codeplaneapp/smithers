@@ -3,70 +3,89 @@
 Verdict: PASS
 
 All 28 advertised browser-safe entry points bundle under esbuild
-`--platform=browser` from the clean checkout at `cd14388ed7`, all 7 documented
-Node-only entry points fail only on their documented `node:` builtin, both the
-`pnpm run browser` script route and the CI `//scripts:browserContract` target
-route exit 0, and the final line matches the Phase 2 baseline verbatim.
+`--platform=browser` from the clean checkout at `341c8fa87e`, all 7 documented
+Node-only entry points fail only on their documented `node:` builtin, the
+`pnpm run browser` route, the CI `//scripts:browserContract` route, and the
+`scripts/check-docs.mjs` browser-table check all exit 0, the final line matches
+the Phase 2 baseline verbatim, and the docs pages agree with the contract the
+gate executes.
 
-This file supersedes the 2026-08-30 23:59 PT evidence taken at `20b32c6316` in
-`migration/clean-checkout-2` (that directory no longer exists). The superseded
-file is kept beside this one as `browser-bundling-prev-20b32c6316.md` with its
-logs in `browser-bundling-logs-prev-20b32c6316/`.
+This file supersedes the 2026-08-31 04:59 PT evidence taken at `cd14388ed7`
+from this same checkout. The superseded file is kept beside this one as
+`browser-bundling-prev-cd14388ed7.md` with its logs in
+`browser-bundling-logs-prev-cd14388ed7/`. The earlier run at `20b32c6316`
+remains preserved as `browser-bundling-prev-20b32c6316.md`.
 
 ## Scope
 
 PLAN.md Phase 7 requires "browser bundling for advertised browser-safe entry
 points". `docs/migration/rc-contract.md` section 1 defines the advertised list:
-the 28 `BROWSER_SAFE` entries in `scripts/browser-check.mjs` must bundle, and
-the 7 `NODE_ONLY` entries (`@smthrs/platform-node`, `@smthrs/platform-bun`,
-`@smthrs/kernel/test/TestHost`, `@smthrs/jj/node/NodeJj`, `@smthrs/jj/bun/BunJj`,
+28 `BROWSER_SAFE` entries must bundle and the 7 `NODE_ONLY` entries
+(`@smthrs/platform-node`, `@smthrs/platform-bun`, `@smthrs/kernel/test/TestHost`,
+`@smthrs/jj/node/NodeJj`, `@smthrs/jj/bun/BunJj`,
 `@smthrs/database/node/NodeDatabase`, `@smthrs/flows/NodeRuntime`) must fail
 only on their documented `node:` builtin. `docs/migration/phase2-baseline.md`
 line 25 pins the expected result: `corepack pnpm run browser` exits 0 with
 `browser contract holds: 28 browser entry points, 7 Node-only`. CI runs the
-same script through the `browser` job (`.github/workflows/ci.yml:234-250`,
-`pnpm exec smithers-build test '//scripts:browserContract'`, target declared at
-`scripts/BUILD.ts:122`).
+same script through the `browser` job
+(`pnpm exec smithers-build test '//scripts:browserContract'`, target declared
+at `scripts/BUILD.ts:122`).
 
-The script bundles each entry with esbuild (`bundle: true`, `write: false`,
-`platform: "browser"`, `format: "esm"`, `target: "es2022"`). A bundle is
-produced in memory and its byte size is reported; nothing is mocked and no
-files are written. `scripts/browser-check.mjs` is byte-identical between
-`20b32c6316` and `cd14388ed7` (`git diff --quiet` exits 0).
+New since the `cd14388ed7` run: commit `6f4f2bacf9` (landed through the wave-8
+polish-2 merge `a42f8f6e5d`) moved the `BROWSER_SAFE` and `NODE_ONLY` lists out
+of `scripts/browser-check.mjs` into `scripts/browser-contract.mjs`
+(`git diff --stat cd14388ed7 341c8fa87e`: browser-check.mjs -88 lines,
+browser-contract.mjs +122). `scripts/browser-check.mjs` imports both lists and
+executes them with esbuild exactly as before (`bundle: true`, `write: false`,
+`platform: "browser"`, `format: "esm"`, `target: "es2022"`; bundles stay in
+memory, nothing is written). `scripts/check-docs.mjs` check 15 reads the same
+declaration (`browserEntryNames`, `nodeEntryNames`, `citedBrowserCounts`) and
+fails when `docs/pages/architecture/browser-support.md` tables list a
+different set or when any page under `docs/` (plus `README.md`, excluding
+`docs/dist` and `docs/migration/evidence`) states a different count. This gate
+therefore runs check-docs as well, which the task requires to agree with
+`docs/pages/architecture/browser-support.md` and
+`docs/pages/package-structure.mdx`.
 
 ## Environment
 
 | Item | Value |
 | --- | --- |
 | Checkout | `/Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-4` |
-| HEAD | `cd14388ed782aac6e5f5b23d66c8fa9dc01dd6ba` (`v1/rc0-migration`, `chore(wave-6): regenerate known-files.d.ts for the two landed lanes`, 2026-08-31 04:08:04 -0700); `git status --porcelain` empty before the run; `vendor/jj` submodule clean |
-| Host | macOS 26.2 (25C56), Darwin 25.2.0, arm64; load averages 9.76 10.82 8.27 at start (other Phase 7 gates were running in the same checkout) |
-| Date | 2026-08-31 11:59:15 to 12:00:31 UTC (2026-08-31 04:59 to 05:00 PT) |
+| HEAD | `341c8fa87e2dadbe80d0f0d3258dae112a7d03d3` (`v1/rc0-migration`, `docs(release): consumer overrides note and the browser-contract list's new home`); `git status --porcelain` empty before and after the run; `vendor/jj` submodule clean at `47589ada70c` |
+| Host | macOS, Darwin 25.2.0, arm64; load averages 3.37 4.30 5.40 at start, 6.71 4.86 5.48 before check-docs (other Phase 7 gates share the machine and checkout) |
+| Date | 2026-08-31 16:17:39 to 16:19:39 UTC (09:17 to 09:19 PT) |
 | Node | v24.18.0 (rc-contract floor `>=22.19.0`; CI pins 22.19.0) |
 | corepack / pnpm | 0.35.0 / 11.21.0 (`packageManager: pnpm@11.21.0`) |
 | Bun | 1.4.0 (not used by this gate) |
-| esbuild | 0.28.1, resolved by the script from `node_modules/.pnpm/esbuild@0.28.1/node_modules/esbuild/lib/main.js` (root `devDependencies.esbuild: "0.28.1"`) |
-| Environment | `SMITHERS_HOME` unset in the calling shell and stripped with `env -u`; `SMITHERS_CACHE_URL` and `SMITHERS_CACHE_TOKEN` stripped for the build-CLI route so no remote cache could answer |
+| esbuild | 0.28.1 from the checkout's `node_modules` (root `devDependencies.esbuild: "0.28.1"`) |
+| Environment | `SMITHERS_HOME` stripped with `env -u` on every command; `SMITHERS_CACHE_URL` and `SMITHERS_CACHE_TOKEN` also stripped for the build-CLI route so no remote cache could answer |
 
-Dependencies were installed by the clean-install gate at this HEAD
-(`00-clean-install.md`, `corepack pnpm install --frozen-lockfile`, exit 0).
+Dependencies come from the setup step's frozen offline install at this HEAD
+(`corepack pnpm install --frozen-lockfile --offline`, exit 0).
 
 ## Commands and results
 
-Logs: `browser-bundling-logs/` next to this file. Each log ends with an
-`exit=<code> duration=<seconds>s` line appended by the harness.
+Logs: `browser-bundling-logs/` next to this file. Each log starts with a
+`start <UTC timestamp>` line and ends with an `exit=<code> duration=<seconds>s`
+line appended by the harness.
 
 | Command (from the checkout root) | Exit | Duration | Final output line | Log |
 | --- | --- | --- | --- | --- |
-| `env -u SMITHERS_HOME corepack pnpm run browser` | 0 | 5 s | `browser contract holds: 28 browser entry points, 7 Node-only.` | `pnpm-run-browser.log` |
-| `env -u SMITHERS_HOME -u SMITHERS_CACHE_URL -u SMITHERS_CACHE_TOKEN pnpm exec smithers-build test '//scripts:browserContract'` | 0 | 12 s (target 4.2 s) | `1 targets: 0 hit, 1 ran, 0 failed, 0 skipped (4.2s)`; `ok: true`; result row `"//scripts:browserContract",NodeTest,ran` | `smithers-build-test-browserContract.log` |
-| `node browser-bundling-logs/extra-browser-bundle.mjs <checkout>` (ad hoc, see below) | 0 | 2 s | `esbuild 0.28.1; 5/5 bundled` | `extra-doc-advertised-entries.log` |
+| `env -u SMITHERS_HOME corepack pnpm run browser` | 0 | 2 s | `browser contract holds: 28 browser entry points, 7 Node-only.` | `pnpm-run-browser.log` |
+| `env -u SMITHERS_HOME -u SMITHERS_CACHE_URL -u SMITHERS_CACHE_TOKEN pnpm exec smithers-build test '//scripts:browserContract'` | 0 | 5 s (target 2.6 s) | `ok: true`; result row `"//scripts:browserContract",NodeTest,ran` | `smithers-build-test-browserContract.log` |
+| `env -u SMITHERS_HOME node scripts/check-docs.mjs` | 0 | 77 s | `✓ the browser tables and counts match the 28 entry points the gate bundles` (17 of 17 checks pass) | `check-docs.log` |
+| `node browser-bundling-logs/extra-browser-bundle.mjs <checkout>` (ad hoc, see below) | 0 | 0 s | `esbuild 0.28.1; 3/3 bundled` | `extra-doc-advertised-entries.log` |
 
-`git status --porcelain` in the checkout is empty after every command.
+The `pnpm run browser` final line matches `docs/migration/phase2-baseline.md`
+line 25 verbatim. `git status --porcelain` in the checkout is empty after
+every command.
 
 ### Browser-safe entry points that bundled (28 of 28)
 
-Sizes are the in-memory ESM bundle reported by the script.
+Sizes are the in-memory ESM bundle reported by the script. All 28 sizes are
+byte-for-byte identical to the `cd14388ed7` run: `6f4f2bacf9` moved the list
+declaration but changed no bundled source.
 
 | Entry point | Source | Bundle size |
 | --- | --- | --- |
@@ -99,13 +118,6 @@ Sizes are the in-memory ESM bundle reported by the script.
 | @smthrs/std/Search | packages/std/src/Search.ts | 597.7 kB |
 | @smthrs/std/PortableSearch | packages/std/src/PortableSearch.ts | 629.5 kB |
 
-Compared with the superseded `20b32c6316` run, `@smthrs/engine-store` grew
-from 1459.6 kB to 1462.8 kB and `@smthrs/flows` from 2100.3 kB to 2103.6 kB;
-the other 26 sizes are unchanged. The only commit in `20b32c6316..cd14388ed7`
-that touches `packages/engine-store/src` is `e44159b9ef fix(engine-store):
-persist a failed run whose exit cause the flow codec rejects`, and `@smthrs/flows`
-re-exports `@smthrs/engine-store`, which accounts for both deltas.
-
 ### Node-only entry points that failed on the documented builtin (7 of 7)
 
 | Entry point | Documented builtin | Reason recorded by the gate |
@@ -122,6 +134,25 @@ The script accepts a Node-only entry only when every esbuild error is an
 unresolved `node:` builtin and one of them is the documented module, so each
 row above is a real failure of the documented kind and nothing else.
 
+## Docs agreement
+
+The check-docs browser-table check (check 15, `scripts/check-docs.mjs:395-430`)
+reads `BROWSER_SAFE` and `NODE_ONLY` from `scripts/browser-contract.mjs` and:
+
+1. compares the "## Browser entry points" and "## Node entry points" tables in
+   `docs/pages/architecture/browser-support.md` against the two lists in both
+   directions (an omitted or extra entry fails the check);
+2. reads every `docs/**/*.md{,x}` page plus `README.md` (excluding `docs/dist`
+   and `docs/migration/evidence`) and fails any stated browser entry-point
+   count that is not 28.
+
+It passed: `✓ the browser tables and counts match the 28 entry points the gate
+bundles`, the last of 17 passing checks, exit 0. Verified directly in the
+sources as well: `docs/pages/architecture/browser-support.md` lists all 28
+browser rows (the four `@smthrs/std` subpaths included) and all 7 Node rows,
+and `docs/pages/package-structure.mdx:232` states "28 entry points bundle for
+the browser, and 7 are documented Node-only."
+
 ## Coverage of the advertised list
 
 The rc-contract section 3.1 package table (rows marked "gated yes", "subpath",
@@ -134,58 +165,59 @@ advertised entry is missing from the gate.
 
 ### Doc-advertised entries the script does not gate
 
-The docs advertise five more browser bundles outside `BROWSER_SAFE`. Each was
-bundled ad hoc with the same esbuild options and the checkout's esbuild 0.28.1
-(`browser-bundling-logs/extra-browser-bundle.mjs`, unchanged from the previous
-run). All five bundle, at the same sizes as at `20b32c6316`:
+The docs and the rc-contract advertise three more browser bundles outside
+`BROWSER_SAFE`. Each was bundled ad hoc with the same esbuild options and the
+checkout's esbuild 0.28.1 (`browser-bundling-logs/extra-browser-bundle.mjs`).
+All three bundle, at the same sizes as at `cd14388ed7`:
 
 | Advertised where | Entry | Bundle size |
 | --- | --- | --- |
 | `docs/pages/examples.md:28` (example 09, also covered by `examples/test/09-browser-use.test.ts`, which bundles the file with `platform: "browser"`) | examples/src/09-browser-use.ts | 444.9 kB |
-| `docs/pages/api/patterns.md:9` ("every export here is browser safe"; contract row: no claim) | packages/patterns/src/index.ts | 311.5 kB |
-| dependency of the row above (contract row: no claim) | packages/core/src/index.ts | 761.7 kB |
 | rc-contract line 162 named subpath | packages/platform-browser/src/BrowserChildProcessSpawner/index.ts | 124.5 kB |
 | rc-contract line 162 named subpath | packages/platform-browser/src/BrowserFileSystem/index.ts | 846.3 kB |
 
+The `cd14388ed7` run's `@smthrs/patterns` and `@smthrs/core` rows are gone
+from this list because `6f4f2bacf9` removed the ungated browser claim from
+`docs/pages/api/patterns.md`; the page now states "Neither package has an
+entry in the browser gate, so this page makes no claim about bundling it for a
+browser", which satisfies rc-contract line 65.
+
+## Observations from the previous run: all four closed
+
+The `cd14388ed7` evidence recorded four prose surfaces that disagreed with the
+measured contract. Commit `6f4f2bacf9` (wave-8 polish-2) closed every one, and
+this run verified each fix:
+
+1. `docs/pages/architecture/browser-support.md` now lists all 28 browser
+   entries; the four `@smthrs/std` subpaths were added.
+2. `docs/pages/package-structure.mdx:232` now states 28 entry points, not 23.
+3. `examples/src/09-browser-use.ts:11-14` now states that `@smthrs/flows` and
+   `@smthrs/engine-store` bundle for the browser and names
+   `@smthrs/flows/NodeRuntime` as the Node-only subpath.
+4. `docs/pages/api/patterns.md` no longer claims browser support for the
+   ungated `@smthrs/patterns`.
+
+The new check-docs check 15 pins all four so they cannot regress silently.
+
 ## Concurrent activity in the checkout
 
-Other Phase 7 gates ran in the same checkout during this window: `tsc`
-processes started at 05:00:36 PT and git-ignored `packages/*/dist/` directories
-appeared from 04:59:48 PT onward (`packages/journal/dist` first). They do not
-affect this gate's inputs. Every workspace manifest's working-tree `exports`
-map points at `src/*.ts` (for example `packages/journal/package.json`:
-`".": "./src/index.ts"`, `"./*": "./src/*.ts"`), and `node_modules/@smthrs/*`
-are symlinks into `packages/*`, so esbuild resolves source files regardless of
-`dist/`. The two gate commands finished at 04:59:23 and 04:59:30 PT, before the
-first `dist/` appeared. All three bundle commands use `write: false`, so this
-gate created none of those directories. Tracked files are unchanged
-(`git status --porcelain` empty after every command).
-
-## Observations for the docs lane (not gate failures)
-
-The measured contract is correct; four prose surfaces still disagree with it
-at `cd14388ed7`. None of these files changed in `20b32c6316..cd14388ed7`.
-
-1. `docs/pages/architecture/browser-support.md` "Browser entry points" table
-   (lines 17-40) lists 24 rows. It omits `@smthrs/std/Grep`, `@smthrs/std/Glob`,
-   `@smthrs/std/Search`, and `@smthrs/std/PortableSearch`, which the gate
-   bundles and the contract table marks "subpath".
-2. `docs/pages/package-structure.mdx:229` states "Twenty-three entry points
-   bundle for the browser." The gate bundles 28.
-3. `examples/src/09-browser-use.ts:11-12` header comment states "The barrel
-   `@smthrs/flows` and `@smthrs/engine-store` are Node entry points". Both are
-   `BROWSER_SAFE` and bundled in this run (2103.6 kB and 1462.8 kB).
-4. `docs/pages/api/patterns.md:9` claims `@smthrs/patterns` is browser safe.
-   rc-contract line 65 says a "no claim" package's docs must not claim browser
-   support until a gate entry exists. The claim is true in measurement
-   (311.5 kB bundle) but ungated; either add `@smthrs/patterns` (and
-   `@smthrs/core`) to `BROWSER_SAFE` and the contract table, or remove the
-   sentence.
+Other Phase 7 gate agents ran in the same checkout during and after this
+window: `tsc` and vitest worker processes appeared from 09:20 PT, and the
+git-ignored `docs/dist/` was rebuilt at 09:19:48 PT by another agent's docs
+gate (this gate's `scripts/check-docs.mjs` does not write `docs/dist`, and all
+three bundle commands use `write: false`). Workspace manifests' working-tree
+`exports` maps point at `src/*.ts` and `node_modules/@smthrs/*` are symlinks
+into `packages/*`, so esbuild resolves source files regardless of any `dist/`
+directories other gates emit. Tracked files are unchanged
+(`git status --porcelain` empty after every command). This gate created no
+pack copies and no `docs/dist`; nothing needed removal.
 
 ## Verdict
 
-PASS. Every advertised browser-safe entry point (all 28 in the contract list)
-bundles under esbuild `--platform=browser` at `cd14388ed7`, every documented
-Node-only entry fails only on its documented `node:` builtin, both the script
-route and the CI target route exit 0, the final line matches the Phase 2
-baseline exactly, and the checkout's tracked files are unchanged after the run.
+PASS. Every advertised browser-safe entry point (all 28 declared in
+`scripts/browser-contract.mjs`) bundles under esbuild `--platform=browser` at
+`341c8fa87e`, every documented Node-only entry fails only on its documented
+`node:` builtin, the script route, the CI target route, and the check-docs
+browser-table check all exit 0, the final line matches the Phase 2 baseline
+exactly, and `docs/pages/architecture/browser-support.md` and
+`docs/pages/package-structure.mdx` agree with the executed contract.
