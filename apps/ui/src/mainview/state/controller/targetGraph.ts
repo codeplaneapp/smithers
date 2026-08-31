@@ -328,6 +328,20 @@ export const createTargetGraphController = (
     const repoId = resolveRepoId(repoIdArg)
     if (typeof repoId !== "string") return repoId.error
     if (runIdArg === undefined) return "Name the run to show — pick one from the history card."
+    /*
+     * A run this session never folded (started before the app opened, or
+     * settled before anything watched it) has no frames left to stream: the
+     * live path below would open a RUNNING card that never changes. Its
+     * recording is the timeline, so a settled run paints from the replay.
+     * A run the recording still calls running attaches live as before.
+     */
+    if (!liveRuns.has(runIdArg)) {
+      const recorded = await fetchReplay(runIdArg)
+      if (typeof recorded === "object" && recorded.run.status !== "running" && recorded.run.status !== "pending") {
+        paintReplay(repoId, runIdArg, recorded)
+        return
+      }
+    }
     upsert({
       id: runTimelineCardId(runIdArg),
       kind: "run-timeline",
@@ -373,9 +387,8 @@ export const createTargetGraphController = (
     }))
   }
 
-  const selectRun: TargetGraphController["selectRun"] = async (repoIdArg, runId) => {
-    const repoId = resolveRepoId(repoIdArg)
-    if (typeof repoId !== "string") return repoId.error
+  /** One run's recording: the replay, the refusal text, or undefined when nothing was recorded. */
+  const fetchReplay = async (runId: string): Promise<RunReplayResponse | string | undefined> => {
     const answer = devFixtures !== undefined
       ? devFixtures.replay(runId)
       : await post(
@@ -384,9 +397,22 @@ export const createTargetGraphController = (
         RunReplayResponseSchema,
         "The replay route answered an unexpected shape."
       )
-    if (answer === undefined) return `There is no recording of run ${runId}.`
+    if (answer === undefined) return undefined
     if ("error" in answer) return answer.error
-    const replay = answer as RunReplayResponse
+    return answer as RunReplayResponse
+  }
+
+  const selectRun: TargetGraphController["selectRun"] = async (repoIdArg, runId) => {
+    const repoId = resolveRepoId(repoIdArg)
+    if (typeof repoId !== "string") return repoId.error
+    const recorded = await fetchReplay(runId)
+    if (recorded === undefined) return `There is no recording of run ${runId}.`
+    if (typeof recorded === "string") return recorded
+    paintReplay(repoId, runId, recorded)
+  }
+
+  /** Paint a recording as the (replay) timeline card, the history selection, and the graph overlay. */
+  const paintReplay = (repoId: string, runId: string, replay: RunReplayResponse): void => {
     replayEvents.set(runId, replay.events)
     /*
      * The end of a run that never recorded `endedAt` is its last timed frame.

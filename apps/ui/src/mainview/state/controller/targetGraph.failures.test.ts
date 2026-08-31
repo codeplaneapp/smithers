@@ -281,3 +281,29 @@ test("a declaration site with no line number still opens", async () => {
   const { controller } = await controllerWith(["force"])
   expect((await controller.commands.run("target.source.open", "force src/PACKAGE.ts")).status).toBe("executed")
 })
+
+test("the timeline of a run this session never watched paints from its recording, settled, not as a RUNNING card that never changes", async () => {
+  // Reproduced on the Smithers checkout: `/target.timeline <runId>` for a finished run stayed
+  // "RUNNING — No node timings yet" because the live path attached to a stream with no frames left.
+  const replay = {
+    run: { runId: "run-9", repoId: "force", label: "//src:typeCheck", labels: ["//src:typeCheck"], status: "done", startedAt: 1_000, endedAt: 2_000, exitCode: 0 },
+    events: [
+      { type: "node", at: 1_500, node: { label: "//src:typeCheck", status: "ran", startedAt: 1_000, endedAt: 1_500, durationMs: 500 } },
+      { type: "summary", at: 2_000, summary: { total: 1, hit: 0, ran: 1, failed: 0, skipped: 0, durationMs: 1_000, ok: true, criticalPath: ["//src:typeCheck"] } },
+      { type: "exit", code: 0 }
+    ]
+  }
+  restore = answerWith((url) =>
+    url.endsWith(TARGET_GRAPH_ROUTES.replay)
+      ? new Response(JSON.stringify(replay), { status: 200, headers: { "content-type": "application/json" } })
+      : new Response(JSON.stringify({ error: { message: "unexpected route" } }), { status: 500, headers: { "content-type": "application/json" } })
+  )
+  const { store, controller } = await controllerWith(["force"])
+  await controller.commands.run("target.timeline", "force run-9")
+  const timeline = cardOf(store, "run-timeline-run-9")
+  if (timeline?.kind !== "run-timeline") throw new Error("expected a run-timeline card")
+  expect(timeline.payload.status).toBe("done")
+  expect(timeline.payload.nodes.map((node) => node.label)).toEqual(["//src:typeCheck"])
+  expect(timeline.payload.summary?.ok).toBe(true)
+  expect(timeline.status).toBe("acted")
+})
