@@ -27,6 +27,7 @@ import { type OnParentExit, RunState } from "../RunState.ts"
 import * as WakeBus from "../WakeBus.ts"
 import * as ActionPersistence from "./ActionPersistence.ts"
 import * as EffectRecords from "./EffectRecords.ts"
+import * as ExitEncoding from "./ExitEncoding.ts"
 import * as JournalRecords from "./JournalRecords.ts"
 import * as RunCoordinator from "./RunCoordinator.ts"
 
@@ -1145,10 +1146,10 @@ export const make = (
         // --resume` accepted the request and then drove nothing (Phase 7
         // smoke, section 3).
         const suspension = round !== undefined && waiting.reason !== "released"
-          ? yield* encodeResult(
+          ? (yield* encodeResult(
             round.flow,
             new Flow.Suspended({ cause: round.instance.cause })
-          )
+          )).encoded
           : undefined
         const parked = yield* engineState.park(runId, waiting, dependencies.owner)
         const transitioned = yield* transitionAndRecord(
@@ -1199,16 +1200,26 @@ export const make = (
         Effect.flatMap((requested) => requested ? cancelOwned(runId, state) : releaseOwned(runId, state, round))
       )
 
+    /**
+     * Encodes a settlement for the row, and never fails.
+     *
+     * The encode used to be guarded with `Effect.orDie`, which made a
+     * settlement the flow's own codec rejects fatal for the drain rather than
+     * terminal for the run. `agent/run` declares both channels
+     * `Schema.Unknown`, so every `Data.TaggedError` an agent body fails with
+     * is such a settlement, and the Phase 7 Plue cutover watched the whole
+     * chain: the drain died with `SchemaError: Expected JSON value at
+     * ["exit"]["cause"][0]["error"]`, `engine.db` kept the run `running`
+     * under a pid that had exited while `control.db` said `failed`, and the
+     * next process's stale-running sweep stole the row and billed the
+     * provider seat a second time. `ExitEncoding.encode` fails closed
+     * instead: on rejection it answers a JSON projection of the settlement
+     * and a `note`, and a noted settlement is written `failed`.
+     */
     const encodeResult = (
       flow: Flow.Any,
       result: Flow.Result<unknown, unknown>
-    ): Effect.Effect<unknown> =>
-      Schema.encodeEffect(
-        Schema.toCodecJson(Flow.Result({
-          success: flow.successSchema,
-          error: flow.errorSchema
-        }))
-      )(result).pipe(Effect.orDie) as Effect.Effect<unknown>
+    ): Effect.Effect<ExitEncoding.EncodedResult> => ExitEncoding.encode(flow, result)
 
     /**
      * Re-encodes a handoff payload through the target flow's own codec, so the
@@ -1378,7 +1389,7 @@ export const make = (
         })
         const settledStateJson = yield* encodeState({
           ...seam.state,
-          result: yield* encodeResult(seam.flow, seam.handoff)
+          result: (yield* encodeResult(seam.flow, seam.handoff)).encoded
         })
         const cancelled = { _tag: "HandoffCancelled" } as const
         const fenceLost = { _tag: "HandoffFenceLost" } as const
@@ -1461,7 +1472,7 @@ export const make = (
       Effect.gen(function*() {
         const stateJson = yield* encodeState({
           ...seam.state,
-          result: yield* encodeResult(seam.flow, new Flow.Complete({ exit: Exit.die(error) }))
+          result: (yield* encodeResult(seam.flow, new Flow.Complete({ exit: Exit.die(error) }))).encoded
         })
         const transitioned = yield* transitionAndRecord(
           seam.executionId,
@@ -1742,8 +1753,14 @@ export const make = (
             }
 
             const encodedResult = yield* encodeResult(registration.flow, result)
-            const nextState: RunState = { ...activeState, result: encodedResult }
-            const status: RunStore.RunStatus = result._tag === "Suspended"
+            const nextState: RunState = { ...activeState, result: encodedResult.encoded }
+            // A settlement the flow's codec rejected is written `failed`
+            // whatever it claimed to be: the row must reach a terminal status
+            // in this process, because the alternative — the `running` row the
+            // Phase 7 cutover found — is re-executed by the next one.
+            const status: RunStore.RunStatus = encodedResult.note !== undefined
+              ? "failed"
+              : result._tag === "Suspended"
               ? "suspended"
               : Exit.isSuccess(result.exit)
               ? "completed"
