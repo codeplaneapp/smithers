@@ -1026,45 +1026,45 @@ describe("smithers skills add", processBudget, () => {
  * reading it. That is a real `control.run.failed` settlement, written by the
  * real agent session into the project's own `.flows/control.db`.
  */
+/** A project whose one flow's seat resolves and whose turns cannot. */
+const stageUnservableSeat = (): string => {
+  const cwd = realpathSync(mkdtempSync(temporaryDirectoryPrefix))
+  mkdirSync(join(cwd, "flows", "failing"), { recursive: true })
+  writeFileSync(
+    join(cwd, "flows", "failing", "flow.mdx"),
+    [
+      "---",
+      "name: failing",
+      "description: A flow whose seat resolves and whose first turn cannot.",
+      "model: openai:gpt-5-mini",
+      "---",
+      "",
+      "# failing",
+      "",
+      "Report the repository state.",
+      ""
+    ].join("\n")
+  )
+  mkdirSync(join(cwd, "codex"), { recursive: true })
+  // A store the resolver accepts and the turn cannot use: `CodexAuth.locate`
+  // only asks whether the file is there.
+  writeFileSync(join(cwd, "codex", "auth.json"), "{}")
+  return cwd
+}
+
+const launch = (cwd: string, args: ReadonlyArray<string>) =>
+  spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
+    cwd,
+    encoding: "utf8",
+    timeout: 180_000,
+    env: {
+      ...process.env,
+      SMITHERS_OPENAI_AUTH: "chatgpt",
+      CODEX_HOME: join(cwd, "codex")
+    }
+  })
+
 describe("an attached launch's exit status", processBudget, () => {
-  /** A project whose one flow's seat resolves and whose turns cannot. */
-  const stageUnservableSeat = (): string => {
-    const cwd = realpathSync(mkdtempSync(temporaryDirectoryPrefix))
-    mkdirSync(join(cwd, "flows", "failing"), { recursive: true })
-    writeFileSync(
-      join(cwd, "flows", "failing", "flow.mdx"),
-      [
-        "---",
-        "name: failing",
-        "description: A flow whose seat resolves and whose first turn cannot.",
-        "model: openai:gpt-5-mini",
-        "---",
-        "",
-        "# failing",
-        "",
-        "Report the repository state.",
-        ""
-      ].join("\n")
-    )
-    mkdirSync(join(cwd, "codex"), { recursive: true })
-    // A store the resolver accepts and the turn cannot use: `CodexAuth.locate`
-    // only asks whether the file is there.
-    writeFileSync(join(cwd, "codex", "auth.json"), "{}")
-    return cwd
-  }
-
-  const launch = (cwd: string, args: ReadonlyArray<string>) =>
-    spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
-      cwd,
-      encoding: "utf8",
-      timeout: 180_000,
-      env: {
-        ...process.env,
-        SMITHERS_OPENAI_AUTH: "chatgpt",
-        CODEX_HOME: join(cwd, "codex")
-      }
-    })
-
   it("exits 1 for a run that settled failed, and still prints the receipt", () => {
     const cwd = stageUnservableSeat()
     try {
@@ -1094,6 +1094,141 @@ describe("an attached launch's exit status", processBudget, () => {
     }
   })
 
+  /** Every run decision the engine journal holds for a run, in order. */
+  const engineDecisions = (cwd: string, runId: string): ReadonlyArray<string> => {
+    const handle = new DatabaseSync(join(cwd, ".flows", "engine.db"), { readOnly: true })
+    try {
+      return (handle.prepare(
+        "SELECT payload_json FROM flows_journal_events WHERE run_id = ? " +
+          "AND event_type = 'flows.engine.run-decision' ORDER BY seq"
+      ).all(runId) as unknown as ReadonlyArray<{ readonly payload_json: string }>)
+        .map((row) => String((JSON.parse(row.payload_json) as { decision?: unknown }).decision))
+    } finally {
+      handle.close()
+    }
+  }
+
+  /** One run's engine row, as the next process finds it. */
+  const engineRun = (cwd: string, runId: string): { status: string; finished_at_ms: number | null } | undefined => {
+    const handle = new DatabaseSync(join(cwd, ".flows", "engine.db"), { readOnly: true })
+    try {
+      return handle.prepare(
+        "SELECT status, finished_at_ms FROM flows_runs WHERE run_id = ?"
+      ).get(runId) as unknown as { status: string; finished_at_ms: number | null } | undefined
+    } finally {
+      handle.close()
+    }
+  }
+
+  /** How many turns the control journal recorded for a run. */
+  const turnsOpened = (cwd: string, runId: string): number => {
+    const handle = new DatabaseSync(join(cwd, ".flows", "control.db"), { readOnly: true })
+    try {
+      return (handle.prepare(
+        "SELECT COUNT(*) AS turns FROM flows_journal_events WHERE run_id = ? " +
+          "AND event_type = 'control.agent.turn-opened'"
+      ).get(runId) as unknown as { readonly turns: number }).turns
+    } finally {
+      handle.close()
+    }
+  }
+
+  /**
+   * What the launching process leaves in `engine.db` when it exits.
+   *
+   * The control settlement and the engine's terminal write are two writes, and
+   * this process returns on the first. In the Phase 7 smoke it then closed its
+   * scope and interrupted its own executor 10 to 14 ms before the second one
+   * landed, leaving the row `suspended`/`released`; every later process that
+   * composed an executor claimed that row and re-drove the run. The pin is at
+   * the process boundary because the promise is about what is on disk after
+   * the process is gone.
+   */
+  it("leaves a terminal engine row behind, with no interrupt-released decision", () => {
+    const cwd = stageUnservableSeat()
+    try {
+      const launched = launch(cwd, ["up", "failing", "--json"])
+      expect(launched.status).toBe(1)
+      const runId = (JSON.parse(launched.stdout) as { readonly runId: string }).runId
+
+      const row = engineRun(cwd, runId)
+      expect(row?.status).toBe("failed")
+      expect(row?.finished_at_ms).not.toBeNull()
+      expect(engineDecisions(cwd, runId)).not.toContain("interrupt-released")
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("is not claimed, re-driven, or re-opened by the next process over the same project", () => {
+    const cwd = stageUnservableSeat()
+    try {
+      const first = launch(cwd, ["up", "failing", "--json"])
+      expect(first.status).toBe(1)
+      const runId = (JSON.parse(first.stdout) as { readonly runId: string }).runId
+      const decisions = engineDecisions(cwd, runId)
+      const turns = turnsOpened(cwd, runId)
+
+      // A second `smithers` over the same `.flows`, which composes its own
+      // executor exactly as every local verb does.
+      const second = launch(cwd, ["up", "failing", "--json"])
+      expect(second.status).toBe(1)
+      expect((JSON.parse(second.stdout) as { readonly runId: string }).runId).not.toBe(runId)
+
+      expect(engineDecisions(cwd, runId)).toEqual(decisions)
+      expect(decisions).not.toContain("stolen-and-activated")
+      expect(turnsOpened(cwd, runId)).toBe(turns)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * `run --resume` against a run that has already settled.
+   *
+   * `Control.resume` answers `{"_tag":"Terminal","runId":...,"status":...}`
+   * and there is no settlement event left to wait for, so the verb reported
+   * nothing and exited 0 for a run its own document called `failed`.
+   */
+  it("exits 1 from `run --resume` against a run that already settled failed", () => {
+    const cwd = stageUnservableSeat()
+    try {
+      const launched = launch(cwd, ["up", "failing", "--json"])
+      expect(launched.status).toBe(1)
+      const runId = (JSON.parse(launched.stdout) as { readonly runId: string }).runId
+
+      const resumed = launch(cwd, ["run", "--resume", runId, "--json"])
+
+      expect(resumed.status).toBe(1)
+      expect(JSON.parse(resumed.stdout)).toMatchObject({ _tag: "Terminal", runId, status: "failed" })
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * The `--json` stdout contract for the verb the smoke caught breaking it.
+   *
+   * `smithers up hello -d --json` wrote 1773 bytes to stdout and none to
+   * stderr: a runtime `WARN` block first and the receipt last, so a pipeline
+   * parsing the document read a syntax error. `bin.ts` provides
+   * `Logger.LogToStderr` for exactly that; this holds the detached shape to it.
+   */
+  it("writes one JSON document and nothing else to stdout when detached", () => {
+    const cwd = stageUnservableSeat()
+    try {
+      const launched = launch(cwd, ["up", "failing", "-d", "--json"])
+
+      expect(launched.status).toBe(0)
+      expect(launched.stdout.trimEnd().split("\n")).toHaveLength(1)
+      const receipt = JSON.parse(launched.stdout) as { readonly detached?: unknown; readonly runId?: unknown }
+      expect(receipt.detached).toBe(true)
+      expect(receipt.runId).toMatch(/^run-/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
   it("exits 1 from `run` too, which is the same attached launch", () => {
     const cwd = stageUnservableSeat()
     try {
@@ -1109,6 +1244,75 @@ describe("an attached launch's exit status", processBudget, () => {
       expect(launched.status).toBe(1)
       expect(launched.stdout.trimEnd().split("\n")).toHaveLength(1)
       expect((JSON.parse(launched.stdout) as { readonly runId?: unknown }).runId).toMatch(/^run-/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * What `smithers signal` tells an operator when the run is parked on something
+ * else.
+ *
+ * The Phase 7 smoke ran `smithers signal run-3 '{"name":"go", ...}'` against a
+ * run parked on a 150 second timer. It exited 1 with `go: ` on stderr: the
+ * refusal declared a `name` field, which shadows `Error.prototype.name`, and
+ * declared no message, so `bin.ts` `report` printed the operator's own word
+ * followed by nothing (defect D3).
+ *
+ * The park is written onto the two databases rather than driven, because
+ * parking a real run needs a model turn and this host has no provider. The
+ * rows are the ones a timer park leaves: `suspended` with `waiting_reason`
+ * `timer` and a deadline still ahead, on both the engine row and the control
+ * summary.
+ */
+describe("smithers signal against a run parked on something else", processBudget, () => {
+  const parkOnTimer = (cwd: string, runId: string): void => {
+    const wakeAtMs = Date.now() + 150_000
+    const engine = new DatabaseSync(join(cwd, ".flows", "engine.db"))
+    try {
+      engine.prepare(
+        `UPDATE flows_runs SET status = 'suspended', waiting_reason = 'timer', waiting_wake_at_ms = ?,
+           finished_at_ms = NULL, owner_host_id = NULL, owner_pid = NULL, owner_nonce = NULL,
+           heartbeat_at_ms = NULL, claim_host_id = NULL, claim_pid = NULL, claim_nonce = NULL,
+           claimed_at_ms = NULL, state_json = json_remove(state_json, '$.result')
+         WHERE run_id = ?`
+      ).run(wakeAtMs, runId)
+    } finally {
+      engine.close()
+    }
+    const control = new DatabaseSync(join(cwd, ".flows", "control.db"))
+    try {
+      // The control run's status lives in the summary document, which is what
+      // `SqlControlRuntime.getRun` parses.
+      control.prepare(
+        `UPDATE flows_runs SET status = 'suspended', waiting_reason = 'timer', waiting_wake_at_ms = ?,
+           finished_at_ms = NULL, owner_host_id = NULL, owner_pid = NULL, owner_nonce = NULL,
+           heartbeat_at_ms = NULL, state_json = json_set(state_json, '$.status', 'suspended')
+         WHERE run_id = ?`
+      ).run(wakeAtMs, runId)
+    } finally {
+      control.close()
+    }
+  }
+
+  it("names the refusal and says what is open, instead of echoing the signal's name", () => {
+    const cwd = stageUnservableSeat()
+    try {
+      const launched = launch(cwd, ["up", "failing", "--json"])
+      expect(launched.status).toBe(1)
+      const runId = (JSON.parse(launched.stdout) as { readonly runId: string }).runId
+      parkOnTimer(cwd, runId)
+
+      const signalled = launch(cwd, ["signal", runId, JSON.stringify({ name: "go", payload: {} })])
+
+      expect(signalled.status).toBe(1)
+      expect(signalled.stderr.trimEnd()).toBe(
+        `NoMatchingWait: no wait point named "go" is open on run ${runId}. ` +
+          `Read \`smithers status ${runId}\` to see what that run is waiting for.`
+      )
+      // Nothing was written where the document goes.
+      expect(signalled.stdout).toBe("")
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }

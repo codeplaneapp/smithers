@@ -823,7 +823,7 @@ export const layer: Layer.Layer<
           // delivery here would leave an operator watching a signal that never
           // lands, which is exactly the partial behavior rc.0 forbids.
           if (delivery === "no-match") {
-            return yield* new NoMatchingWait({ runId: input.runId, name: input.signal.name })
+            return yield* new NoMatchingWait({ runId: input.runId, waitName: input.signal.name })
           }
           return yield* mutate(
             "signal",

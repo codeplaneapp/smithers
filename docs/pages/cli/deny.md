@@ -14,7 +14,7 @@ smithers deny [flags] <approval>
 
 ## Behavior
 
-Denies; a denied plan can never launch.
+Denies; a denied plan can never launch. A node-level denial restarts the run in the deciding call, and the exit code follows that run's terminal status.
 
 ## Source
 

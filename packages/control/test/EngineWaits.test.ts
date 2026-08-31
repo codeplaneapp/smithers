@@ -302,6 +302,41 @@ describe("signalling a run parked on a wait point", () => {
     expect(observed.recorded).toEqual([])
   })
 
+  /**
+   * How that refusal reads to the operator who caused it.
+   *
+   * `smithers signal run-3 '{"name":"go", ...}'` against a timer-parked run
+   * exited 1 with `go: ` on stderr and nothing else (Phase 7 smoke, defect
+   * D3). The class declared a `name` field, which shadows
+   * `Error.prototype.name`, and declared no message, and `bin.ts` `report`
+   * prints `${name}: ${message}`. The operator was handed back the word they
+   * had typed.
+   */
+  it("renders the refusal as the failure it is, not as the signal's own name", async () => {
+    const failure = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        yield* parkedRun("signal-render", "approval")
+        return yield* Effect.flip(control.signal({
+          runId: "signal-render",
+          signal: { name: "shipped", payload: null },
+          idempotencyKey: "signal:render"
+        }))
+      }),
+      true
+    ) as NoMatchingWait
+
+    // The two halves every renderer in the tree reads. `name` was the signal's
+    // own name and `message` was empty.
+    expect(failure.name).toBe("/control/NoMatchingWait")
+    expect(failure.message).toContain(`no wait point named "shipped"`)
+    expect(failure.message).toContain("signal-render")
+    expect(failure.waitName).toBe("shipped")
+    // Which is what the CLI prints, and it is no longer the operator's word
+    // followed by an empty message.
+    expect(`${failure.name}: ${failure.message}`).not.toBe("shipped: ")
+  })
+
   it("lands two different signals, each on its own wait point", async () => {
     const observed = await run(
       Effect.gen(function*() {

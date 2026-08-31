@@ -1226,6 +1226,67 @@ export const make = (
 
     const activeBodies = new Map<string, Fiber.Fiber<unknown, unknown>>()
 
+    /** One launched run's drive, for as long as this composition owns its fiber. */
+    interface Drive {
+      /**
+       * Whether the flow body has exited, leaving only the engine's own
+       * terminal write.
+       *
+       * The control status and the engine's terminal transition are two
+       * writes, in that order: `settle` runs on the body's exit, INSIDE the
+       * registered handler, and the engine records the round's result only
+       * after that handler returns.
+       */
+      settled: boolean
+    }
+
+    /**
+     * The drive of every run this composition launched and still owns. An
+     * entry is created by `launch` and removed when its fiber ends, so nothing
+     * a sweep or a resume drives ever enters it.
+     */
+    const launchedDrives = new Map<string, Drive>()
+
+    /**
+     * How long a closing scope waits for a drive fiber whose body has already
+     * settled.
+     *
+     * The wait is for one engine transaction, which is milliseconds. The bound
+     * exists so a wedged store costs a bounded exit rather than a hung one.
+     */
+    const settlementGrace = Duration.seconds(5)
+
+    /**
+     * Releases one drive fiber when this composition's scope closes.
+     *
+     * A drive fiber that is still executing is interrupted at once. That is
+     * process shutdown, and `RunDriver.settleInterrupted` releases the row for
+     * reclaim, which is the contract. A drive fiber whose body has already
+     * settled is a different thing: nothing is left to interrupt but the
+     * engine's own terminal write, so that write is awaited first.
+     *
+     * Without the wait, an attached launch tore that write in half. The CLI
+     * returns on `control.run.completed` (`packages/cli/src/Command.ts`
+     * `awaitRun`), its scope closes, and this finalizer interrupted the driver
+     * 10 to 14 ms before `engine.execute` had recorded the `Complete` result.
+     * The Phase 7 smoke measured it on both a foreground `smithers run` and a
+     * `smithers up -d`: `control.run.completed` at 1788163027537,
+     * `flows.engine.run-decision interrupt-released` at 1788163027551. The row
+     * was left `suspended`/`released` with no result, so every later process
+     * that composed an executor claimed it and replayed the agent turn: 16 run
+     * decisions across 11 pids for one run, tokens reported six times over,
+     * and `gc` never collecting it from `engine.db`.
+     */
+    const releaseDrive = (drive: Drive, fiber: Fiber.Fiber<unknown, unknown>): Effect.Effect<void> =>
+      Effect.suspend(() =>
+        drive.settled
+          ? Effect.andThen(
+            Effect.ignore(Effect.timeout(Fiber.await(fiber), settlementGrace)),
+            Fiber.interrupt(fiber)
+          )
+          : Fiber.interrupt(fiber)
+      )
+
     const driver = (runId: string, planId: string) =>
       Effect.gen(function*() {
         const admitted = yield* waitForRunning(
@@ -1482,12 +1543,47 @@ export const make = (
       )
     )
 
+    /**
+     * Whether the control plane has already settled this run.
+     *
+     * A control database that cannot be read answers "no": a composition with
+     * no evidence must drive the run rather than abandon it.
+     */
+    const settledAlready = (runId: string): Effect.Effect<boolean> =>
+      runtime.getRun(runId).pipe(
+        Effect.map((run) => run.status === "completed" || run.status === "failed" || run.status === "cancelled"),
+        Effect.catchCause(() => Effect.succeed(false))
+      )
+
     yield* engine.register(agentFlow, (payload) =>
       Effect.gen(function*() {
+        // A run the control plane has already settled is finished here without
+        // being executed again.
+        //
+        // A launcher killed between the two settlement writes leaves the
+        // engine row `suspended`/`released` with no result, and that row is
+        // reclaimable by design: `RunDriver.sweepCancelRequested` wakes every
+        // released row once per heartbeat, in EVERY process that opened the
+        // same `engine.db`. Without this guard each of them re-enters the
+        // agent body: the Phase 7 smoke counted ten processes replaying run-1,
+        // 162 journal events against 36 for an untouched run, and a token
+        // total six times the truth. Returning here records a terminal
+        // result instead, which is the one write the row is missing, so the
+        // next `gc` can collect it. The control row is the run's outcome of
+        // record and is not rewritten.
+        if (yield* settledAlready(payload.runId)) return []
         const instance = yield* FlowRuntime.FlowInstance
         const fiber = yield* Effect.forkChild(
           body(payload, instance).pipe(
-            Effect.onExit((exit) => settle(payload.runId, instance.suspended, exit)),
+            Effect.onExit((exit) =>
+              Effect.andThen(
+                Effect.sync(() => {
+                  const drive = launchedDrives.get(payload.runId)
+                  if (drive !== undefined) drive.settled = true
+                }),
+                settle(payload.runId, instance.suspended, exit)
+              )
+            ),
             Effect.provide(services)
           ),
           { startImmediately: true }
@@ -1587,12 +1683,17 @@ export const make = (
           )
         )
         const start = yield* Deferred.make<void>()
+        const drive: Drive = { settled: false }
+        launchedDrives.set(input.run.runId, drive)
         const fiber = Effect.runForkWith(services)(
           Deferred.await(start).pipe(
-            Effect.andThen(driver(input.run.runId, input.plan.card.planId))
+            Effect.andThen(driver(input.run.runId, input.plan.card.planId)),
+            // The drive is over: whatever the engine was going to record, it
+            // has. Nothing may wait on this fiber after this point.
+            Effect.ensuring(Effect.sync(() => launchedDrives.delete(input.run.runId)))
           )
         )
-        yield* Scope.addFinalizer(scope, Fiber.interrupt(fiber))
+        yield* Scope.addFinalizer(scope, releaseDrive(drive, fiber))
         yield* registerDriver(
           () => runtime.registerFiber(input.run.runId, fiber),
           input.run.runId

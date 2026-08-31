@@ -201,11 +201,11 @@ Every other `SMITHERS_*` name in Plue (`SMITHERS_TOKEN`, `SMITHERS_DATABASE_URL`
 | --- | --- | --- |
 | `plan <flow> [k=v...] [--data <json>]` | flows | `Control.plan`; prints the `PlanCard` and the approval payload. |
 | `run <approval-payload>` | flows | Launches an approved plan; blocks until settlement when the local process owns the executor. |
-| `run --resume <run-id>` | flows | Join-or-claim resume of a parked run. |
+| `run --resume <run-id>` | flows | Join-or-claim resume of a parked run; exit code follows the terminal status, including the status a `Terminal` receipt reports for a run that had already settled. |
 | `resume <run-id>` | ported alias | Alias of `run --resume`. |
 | `up <flow> [--data <json>] [--root <dir>] [-d] [--json]` | flows verb, ported 0.x behavior | One-shot launch: plan, approve with scope `run`, run; prints `{ runId }` under `--json`; exit code follows the terminal status. `-d` spawns `smithers run` detached, logs to `.flows/logs/<runId>.log`, and returns after the admission line (30 s default). Operator-supplied run ids are not supported; callers read `runId` from the receipt. |
-| `approve <payload> [--scope once\|run\|remembered]` | flows | Plan-level and node-level (`ask`) approvals; principal stamped server-side. |
-| `deny <payload>` | flows | Denies; a denied plan can never launch. |
+| `approve <payload> [--scope once\|run\|remembered]` | flows | Plan-level and node-level (`ask`) approvals; principal stamped server-side. A node-level decision restarts the run in the deciding call (§5.1), and the exit code follows that run's terminal status. |
+| `deny <payload>` | flows | Denies; a denied plan can never launch. A node-level denial restarts the run in the deciding call, and the exit code follows that run's terminal status. |
 | `cancel <run-id>` | flows, fixed in Phase 5 | Durable, cross-process (§5). |
 | `signal <run-id> <json>` | flows, fixed in Phase 5 | Delivers a named signal to a flow parked on `WaitFor` (§5). |
 | `steer <run-id> --message <text>` | ported over `Control.steer` | Durable, attributed steer through the notification queue; drained at the agent's turn close. |

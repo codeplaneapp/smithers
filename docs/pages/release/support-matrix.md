@@ -33,12 +33,12 @@ SQLite only. PostgreSQL and PGlite exit with `unsupported_database`; see
 
 | Command | Behavior |
 | --- | --- |
-| [`smithers approve`](/cli/approve) | Plan-level and node-level (`ask`) approvals; principal stamped server-side. |
+| [`smithers approve`](/cli/approve) | Plan-level and node-level (`ask`) approvals; principal stamped server-side. A node-level decision restarts the run in the deciding call (section 5.1), and the exit code follows that run's terminal status. |
 | [`smithers bug`](/cli/bug) | Posts a report with `Control.list` and a `Control.watch` digest to `bug.smithers.sh` (`SMITHERS_BUG_ENDPOINT`). |
 | [`smithers cancel`](/cli/cancel) | Durable, cross-process (section 5). |
 | [`smithers claude`](/cli/claude) | Claude Code plugin mirror protocol, `claudeMirrorContract` 2; run status vocabulary is the rc.0 `RunStatus`. |
 | `smithers completions` | Standard. |
-| [`smithers deny`](/cli/deny) | Denies; a denied plan can never launch. |
+| [`smithers deny`](/cli/deny) | Denies; a denied plan can never launch. A node-level denial restarts the run in the deciding call, and the exit code follows that run's terminal status. |
 | [`smithers docs`](/cli/docs) | Prints the bundled `llms.txt` or `llms-full.txt` generated from the vocs `docs/pages` tree (section 9 exception 2, R-25). |
 | [`smithers doctor`](/cli/doctor) | Reports registry discovery warnings, database paths and ladder state, Node version, `jj` on `PATH`, provider keys present, and 0.x state detected (section 6). |
 | [`smithers down`](/cli/down) | Cancels every non-terminal run (`Control.list` then `cancel`). |

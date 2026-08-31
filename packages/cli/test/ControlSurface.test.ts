@@ -163,6 +163,47 @@ const settlingControl = (kind: string) =>
     })
   ).pipe(Layer.provide(testControl))
 
+/**
+ * A control plane whose decision verbs answer for a run that then settles with
+ * one named lifecycle event.
+ *
+ * `Control.approve` and `Control.deny` restart the run their `ask` parked, in
+ * the deciding call, on this process's own executor. Reaching that state for
+ * real needs a model turn, so the decision's receipt is scripted and only the
+ * settlement mapping is under test.
+ */
+const decidingControl = (kind: string) =>
+  Layer.effect(
+    ControlService.Control,
+    Effect.gen(function*() {
+      const control = yield* ControlService.Control
+      const receipt = { _tag: "Accepted", receiptId: "decision-1", runId: "run-decided" } as ControlSchema.Receipt
+      return ControlService.make({
+        ...control,
+        approve: () => Effect.succeed(receipt),
+        deny: () => Effect.succeed(receipt),
+        watch: (filter) =>
+          filter.runId === undefined
+            ? control.watch(filter)
+            : Stream.succeed({ sequence: 1, kind, runId: filter.runId, occurredAt: 0, payload: null })
+      })
+    })
+  ).pipe(Layer.provide(testControl))
+
+/** A control plane that answers every resume with an already-settled run. */
+const terminalResumeControl = (status: ControlSchema.RunStatus) =>
+  Layer.effect(
+    ControlService.Control,
+    Effect.gen(function*() {
+      const control = yield* ControlService.Control
+      return ControlService.make({
+        ...control,
+        resume: (input) => Effect.succeed({ _tag: "Terminal", runId: input.runId, status } as ControlSchema.Receipt),
+        watch: (filter) => filter.runId === undefined ? control.watch(filter) : Stream.empty
+      })
+    })
+  ).pipe(Layer.provide(testControl))
+
 const nonTerminalControl = Layer.effect(
   ControlService.Control,
   Effect.gen(function*() {
@@ -362,6 +403,84 @@ describe("Control surface", () => {
       // The `--json` document is the launch receipt whatever the run then did:
       // a caller reads `runId` from it.
       expect(receipt.value).toMatchObject({ _tag: "Accepted", runId: expect.any(String) })
+    } finally {
+      process.exitCode = previous
+    }
+  })
+
+  /**
+   * A decision drives the run it answers, so it owes the shell the run's
+   * status.
+   *
+   * `approve` and `deny` waited for the resumed run in-process and then
+   * reported nothing, so an approval whose run went on to fail exited 0. The
+   * Plue sandbox decides approvals from a second process and gates on `$?`.
+   */
+  it.each(
+    [
+      ["approve", "control.run.failed", 1],
+      ["approve", "control.run.cancelled", 130],
+      ["approve", "control.run.completed", 0],
+      ["deny", "control.run.failed", 1]
+    ] as const
+  )("`%s` exits with the status of the run it resumed when it settled %s", async (verb, kind, expected) => {
+    const previous = process.exitCode
+    try {
+      await Effect.runPromise(
+        Effect.gen(function*() {
+          const planned = yield* invoke(["--json", "plan", "demo/ship"])
+          const approval = JSON.stringify((planned.value as { readonly approval: unknown }).approval)
+          yield* Effect.sync(() => {
+            process.exitCode = 7
+          })
+          return yield* invoke(["--json", verb, approval]).pipe(Effect.timeout("5 seconds"))
+        }).pipe(
+          Effect.provide(ExecutorOwnership.layer(true)),
+          Effect.provide(decidingControl(kind)),
+          Effect.provide(scenarioServices),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+
+      expect(process.exitCode).toBe(expected)
+    } finally {
+      process.exitCode = previous
+    }
+  })
+
+  /**
+   * `run --resume` against a run that already settled.
+   *
+   * The receipt is `Terminal` and carries the status, and nothing is left to
+   * wait for; reporting nothing exited 0 for a run the same document called
+   * `failed`.
+   */
+  it.each(
+    [
+      ["failed", 1],
+      ["cancelled", 130],
+      ["completed", 0]
+    ] as const
+  )("`run --resume` exits with the status a Terminal receipt reports for %s", async (status, expected) => {
+    const previous = process.exitCode
+    try {
+      const resumed = await Effect.runPromise(
+        Effect.gen(function*() {
+          yield* Effect.sync(() => {
+            process.exitCode = 7
+          })
+          return yield* invoke(["--json", "run", "--resume", "run-settled"]).pipe(Effect.timeout("5 seconds"))
+        }).pipe(
+          Effect.provide(ExecutorOwnership.layer(true)),
+          Effect.provide(terminalResumeControl(status)),
+          Effect.provide(scenarioServices),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+
+      expect(process.exitCode).toBe(expected)
+      // The document still carries what it always did.
+      expect(resumed.value).toMatchObject({ _tag: "Terminal", runId: "run-settled", status })
     } finally {
       process.exitCode = previous
     }
