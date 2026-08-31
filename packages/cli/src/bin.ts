@@ -13,6 +13,7 @@ import * as CliError from "./CliError.ts"
 import { cli } from "./Command.ts"
 import * as McpServer from "./McpServer.ts"
 import * as NodeControl from "./NodeControl.ts"
+import * as Unsupported from "./Unsupported.ts"
 import * as Verb from "./Verb.ts"
 import { packageVersion } from "./Version.ts"
 
@@ -135,6 +136,14 @@ const main = Effect.gen(function*() {
       Effect.provide(NodeServices.layer)
     ) as Effect.Effect<void, EffectCliError.CliError>)
   }
+  // A removed verb is a document too: one sentence and exit 1. Refusing it
+  // here rather than from its hidden command in `Command.ts` is what keeps a
+  // refusal from creating `<cwd>/.flows/` and opening both databases on its
+  // way to saying the verb is gone. `Unsupported.refusal` reads only the
+  // shapes it can read without guessing; everything else still refuses from
+  // the command tree.
+  const refused = Unsupported.refusal(argv)
+  if (refused !== undefined) return yield* Effect.fail(refused)
   const applicationConfig = yield* NodeControl.config
   // `--mcp` is a mode, not a verb: every MCP client configures a launch
   // command, so the flag has to be readable before the command tree parses

@@ -68,6 +68,58 @@ describe("every removed verb", () => {
   })
 })
 
+describe("the refusal `bin.ts` answers before the control plane boots", () => {
+  /**
+   * Every form section 4.2 removes, spelled the way an operator types it:
+   * the bare verbs, and the removed subcommands of the two parents that live.
+   */
+  const forms = Unsupported.removedVerbs.flatMap((verb) =>
+    verb.subcommands === undefined || !ownGroups.has(verb.name)
+      ? [[verb.name]]
+      : verb.subcommands.map((subcommand) => [verb.name, subcommand])
+  )
+
+  it.each(forms.map((args) => [args.join(" "), args] as const))(
+    "`smithers %s` gets the same sentence before boot as the command tree gives after it",
+    async (_label, args) => {
+      // The short-circuit exists so a refusal never opens a database. It earns
+      // that only while it says exactly what the parser says: two tables that
+      // drift are worse than one slow table.
+      const early = Unsupported.refusal(args)
+      const parsed = await failure(args)
+
+      expect(early).toBeInstanceOf(CliError.UnsupportedError)
+      expect(early!.message).toBe((parsed as CliError.UnsupportedError).message)
+      expect(CliError.exitCode(early!)).toBe(1)
+    }
+  )
+
+  it("carries the sub-verb of a removed group, as the command tree does", () => {
+    expect(Unsupported.refusal(["agents", "add"])!.message).toContain("smithers agents add was removed")
+    expect(Unsupported.refusal(["worktrees", "prune", "extra"])!.message).toContain("smithers worktrees prune was")
+    // A verb with no subcommands names itself whatever follows it, because
+    // `Command.ts` reads the group's sub-verb and ignores a plain argument.
+    expect(Unsupported.refusal(["rewind", "run-1"])!.message).toContain("smithers rewind was removed")
+  })
+
+  it("leaves every surviving invocation to the command tree", () => {
+    // `gateway` is `serve` and `workflow list` is `ls`; a short-circuit that
+    // swallowed either would turn a working command into a refusal.
+    for (const args of [[], ["ls"], ["gateway"], ["gateway", "serve"], ["workflow", "list"], ["--version"]]) {
+      expect(Unsupported.refusal(args)).toBeUndefined()
+    }
+  })
+
+  it("declines to read any vector carrying a flag, and refuses nothing", () => {
+    // A flag can take a value and a value can be spelled like a verb, so a
+    // vector with a flag in it is handed to the parser, which knows which is
+    // which. These still refuse; they refuse one layer later.
+    for (const args of [["--backend", "pglite", "ui"], ["ui", "--json"], ["worktrees", "--json", "prune"]]) {
+      expect(Unsupported.refusal(args)).toBeUndefined()
+    }
+  })
+})
+
 describe("every removed flag", () => {
   /** How each removed flag is spelled on its surviving parent command. */
   const invocation = (flag: Unsupported.RemovedFlag): ReadonlyArray<string> => {
