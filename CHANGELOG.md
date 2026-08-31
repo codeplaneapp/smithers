@@ -18,6 +18,11 @@ journal and continues from the record. No JSX authoring API, no React
 reconciler, no old graph, scheduler, driver, or execution loop, and no
 dual-engine runtime survive.
 
+Consumer install note: pin `@effect/platform-node-shared` to `4.0.0-rc.108` in
+your project's `overrides` (in `pnpm-workspace.yaml` for pnpm 11); the registry
+serves `4.0.0-rc.112` for the declared range and `npm ls` exits 1 without the
+pin, although the install runs on a single Effect copy either way.
+
 Read `docs/releases/1.0.0-rc.0.md` before upgrading, and
 `docs/migration/removed-apis.md` for the complete inventory of what is gone
 and what replaces it. The compatibility promise is quoted verbatim in the
