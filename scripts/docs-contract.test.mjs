@@ -197,6 +197,18 @@ test("finds both spellings a document uses to cite the published set", () => {
   assert.deepEqual(citedPackageCounts(body), [39, 41, 42])
 })
 
+test("finds the count the contract cites in its own cross-references", () => {
+  // Section 9 cited "the 39 names in §3.1" while section 3.1 froze 40, and
+  // every gate stayed green: the citation reader knew "names frozen in" and
+  // not the shorter spelling the contract uses to point at itself.
+  const body = [
+    "with a check that the non-private set equals the 39 names in §3.1 (update the roster test)",
+    "the 41 names in section 3.1 are what the smoke installs",
+    "39 packages of prose that cite nothing"
+  ].join("\n")
+  assert.deepEqual(citedPackageCounts(body), [39, 41])
+})
+
 test("finds no citation in a document that states no count", () => {
   assert.deepEqual(citedPackageCounts("The release publishes several packages."), [])
 })

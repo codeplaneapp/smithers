@@ -19,6 +19,10 @@
 // The install reads registry metadata, so this gate needs the network.
 //
 // Usage: node scripts/check-npm-dedupe.mjs [--max-packages <n>] [--keep-tmp]
+//
+// `resolveConsumerTree`, `copiesOf`, and `SINGLETONS` are exported so
+// check-npm-dedupe.test.mjs asserts the same two claims over the same fixture
+// without restating the recipe.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
@@ -44,12 +48,12 @@ const npmInstallArgs = [
 // The one dependency that must resolve to exactly one copy. Two Effect
 // instances do not share schema internals, so a duplicate is a runtime defect,
 // not a size problem (rc-contract.md section 9, Effect row).
-const SINGLETONS = ["effect"];
+export const SINGLETONS = ["effect"];
 
 // Optional peers must not appear in a default install at all. The list is
 // derived from the release set itself rather than restated, so a package that
 // adds or drops an optional peer needs no edit here.
-const optionalPeersOf = (manifests) => {
+export const optionalPeersOf = (manifests) => {
   const names = new Set();
   for (const manifest of manifests) {
     for (const [name, meta] of Object.entries(manifest.peerDependenciesMeta ?? {})) {
@@ -106,7 +110,7 @@ function manifestTarball(manifest) {
   return gzipSync(Buffer.concat([header, body, pad, end]));
 }
 
-function copiesOf(lockPackages, name) {
+export function copiesOf(lockPackages, name) {
   const top = `node_modules/${name}`;
   const copies = [];
   for (const key of Object.keys(lockPackages)) {
@@ -115,9 +119,18 @@ function copiesOf(lockPackages, name) {
   return copies;
 }
 
-function main() {
+/**
+ * Builds the throwaway npm consumer fixture and resolves it with npm's own
+ * arborist.
+ *
+ * The caller gets the resolved lockfile's package map, the optional-peer set
+ * the release manifests declare, and the fixture directory when it was kept.
+ * Nothing here decides pass or fail, so the CLI and the node:test suite judge
+ * the same tree.
+ */
+export function resolveConsumerTree({ keepTmp: keep = false } = {}) {
   const packages = workspacePackages();
-  const OPTIONAL_ABSENT = optionalPeersOf(packages.map((pkg) => pkg.manifest));
+  const optionalPeers = optionalPeersOf(packages.map((pkg) => pkg.manifest));
   const versionByName = new Map(packages.map((pkg) => [pkg.name, pkg.version]));
   const tmp = mkdtempSync(join(tmpdir(), "smithers-npm-dedupe-"));
   try {
@@ -162,45 +175,49 @@ function main() {
       throw new Error(`npm install --package-lock-only failed: ${install.error?.message ?? `exit ${install.status}`}`);
     }
     const lock = JSON.parse(readFileSync(join(tmp, "package-lock.json"), "utf8"));
-    const lockPackages = lock.packages ?? {};
-
-    const failures = [];
-    for (const name of SINGLETONS) {
-      const copies = copiesOf(lockPackages, name);
-      const versions = new Set(copies.map((key) => lockPackages[key]?.version));
-      if (copies.length > 1 || versions.size > 1) {
-        failures.push(
-          `${name} resolves to ${copies.length} copie(s) at ${[...versions].join(", ")}:\n  - ${copies.join("\n  - ")}`,
-        );
-      } else if (copies.length === 1) {
-        console.log(`ok: ${name}@${[...versions][0]} (single copy)`);
-      } else {
-        console.log(`ok: ${name} not in tree`);
-      }
-    }
-    for (const name of OPTIONAL_ABSENT) {
-      const copies = copiesOf(lockPackages, name);
-      if (copies.length > 0) {
-        failures.push(
-          `${name} must stay out of the default install (optional peer), found:\n  - ${copies.join("\n  - ")}`,
-        );
-      }
-    }
-    console.log(`ok: ${OPTIONAL_ABSENT.length} optional peers absent from default install`);
-
-    const total = Object.keys(lockPackages).filter((key) => key.startsWith("node_modules/")).length;
-    console.log(`resolved package count: ${total} (budget ${maxPackages})`);
-    if (total > maxPackages) {
-      failures.push(`package count ${total} exceeds budget ${maxPackages}`);
-    }
-
-    if (keepTmp) console.log(`fixture kept at ${tmp}`);
-    if (failures.length > 0) {
-      console.error(`\nnpm dedupe check failed:\n${failures.map((f) => `- ${f}`).join("\n")}`);
-      process.exitCode = 1;
-    }
+    return { packages, optionalPeers, lockPackages: lock.packages ?? {}, tmp: keep ? tmp : undefined };
   } finally {
-    if (!keepTmp) rmSync(tmp, { recursive: true, force: true });
+    if (!keep) rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+function main() {
+  const { optionalPeers: OPTIONAL_ABSENT, lockPackages, tmp } = resolveConsumerTree({ keepTmp });
+
+  const failures = [];
+  for (const name of SINGLETONS) {
+    const copies = copiesOf(lockPackages, name);
+    const versions = new Set(copies.map((key) => lockPackages[key]?.version));
+    if (copies.length > 1 || versions.size > 1) {
+      failures.push(
+        `${name} resolves to ${copies.length} copie(s) at ${[...versions].join(", ")}:\n  - ${copies.join("\n  - ")}`,
+      );
+    } else if (copies.length === 1) {
+      console.log(`ok: ${name}@${[...versions][0]} (single copy)`);
+    } else {
+      console.log(`ok: ${name} not in tree`);
+    }
+  }
+  for (const name of OPTIONAL_ABSENT) {
+    const copies = copiesOf(lockPackages, name);
+    if (copies.length > 0) {
+      failures.push(
+        `${name} must stay out of the default install (optional peer), found:\n  - ${copies.join("\n  - ")}`,
+      );
+    }
+  }
+  console.log(`ok: ${OPTIONAL_ABSENT.length} optional peers absent from default install`);
+
+  const total = Object.keys(lockPackages).filter((key) => key.startsWith("node_modules/")).length;
+  console.log(`resolved package count: ${total} (budget ${maxPackages})`);
+  if (total > maxPackages) {
+    failures.push(`package count ${total} exceeds budget ${maxPackages}`);
+  }
+
+  if (tmp !== undefined) console.log(`fixture kept at ${tmp}`);
+  if (failures.length > 0) {
+    console.error(`\nnpm dedupe check failed:\n${failures.map((f) => `- ${f}`).join("\n")}`);
+    process.exitCode = 1;
   }
 }
 
