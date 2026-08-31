@@ -158,23 +158,46 @@ export const layer: Layer.Layer<
         )
       )
 
+    /**
+     * Runs one mutation under its idempotency key.
+     *
+     * `replay` is what a recorded receipt is worth on a second ask. For every
+     * mutation that CHANGES something — a launch, a decision, a signal — it is
+     * everything: the receipt is the proof the change was made once, and
+     * replaying it is the whole guarantee.
+     *
+     * `cancel` is the exception, and it is `replay: false`. Its receipt is an
+     * answer ABOUT a run, and the run can be in a different state by the time
+     * the operator asks again: a cancel against a run a live peer owns answers
+     * `Accepted` and finishes nothing, and replaying that answer as
+     * `AlreadyApplied` turned a run nobody could reach into a run nobody could
+     * ask about either — the Phase 7 smoke left two of them, with `smithers
+     * cancel` and `smithers down` both answering from the receipt and neither
+     * ever reaching the row. Cancellation needs no receipt to be idempotent:
+     * the run's own terminality is stronger, and `cancel` reads it first and
+     * answers `Terminal` without touching anything.
+     */
     const mutate = <E, R>(
       operation: string,
       key: IdempotencyKey,
       mutationFingerprint: string,
-      effect: Effect.Effect<Receipt, E, R>
+      effect: Effect.Effect<Receipt, E, R>,
+      replay = true
     ): Effect.Effect<Receipt, E | PersistenceError, R> =>
       mutationSemaphore.withPermits(1)(
         journal.transact(Effect.gen(function*() {
           const mutationKey = `${operation}:${key}`
           const prior = yield* runtime.lookupMutation(mutationKey, mutationFingerprint)
-          if (prior !== undefined) {
+          if (prior !== undefined && (replay || prior._tag === "Conflict")) {
             return prior._tag === "AlreadyApplied"
               ? { ...prior, receiptId: key }
               : prior
           }
           const receipt = yield* effect
-          if (receipt._tag !== "Parked") {
+          // A key that already carries a receipt is not re-recorded: the store
+          // refuses to overwrite one, and the answer this call returns is the
+          // fresh read of the run rather than the record.
+          if (receipt._tag !== "Parked" && prior === undefined) {
             yield* runtime.recordMutation(mutationKey, mutationFingerprint, receipt)
           }
           return receipt
@@ -832,7 +855,8 @@ export const layer: Layer.Layer<
             return run === undefined
               ? accepted(input.idempotencyKey, input.runId)
               : terminalOrAccepted(input.idempotencyKey, run)
-          })
+          }),
+          false
         )
       ),
       resume: Effect.fn("Control.resume")((input) => runMutation(input)),
