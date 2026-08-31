@@ -55,14 +55,30 @@ describe("detectSmithers", () => {
     expect(verdict.workspaces).toEqual([{ path: ".", title: basename(root) }])
   })
 
-  test("no WORKSPACE.ts is not a workspace, whatever else imports smthrs", async () => {
+  test("a root BUILD.ts importing smthrs is the root workspace: the loader answers `query //...` for it", async () => {
+    // The Smithers checkout itself is rooted on BUILD.ts; opening it used to
+    // say "no WORKSPACE.ts" and load no targets while the CLI listed 100+.
     const root = await scratch()
     await writeFile(join(root, "BUILD.ts"), WORKSPACE)
+    expect(detectSmithers(root)).toEqual({
+      detected: true,
+      workspaceFile: null,
+      declarationFiles: ["BUILD.ts"],
+      reason: "1 workspace detected",
+      workspaces: [{ path: ".", title: basename(root) }]
+    })
+  })
+
+  test("a BUILD.ts that does not import smthrs is not a workspace, and a package's BUILD.ts below the root never is", async () => {
+    const root = await scratch()
+    await writeFile(join(root, "BUILD.ts"), "export const bazel = 1\n")
+    await mkdir(join(root, "packages", "a"), { recursive: true })
+    await writeFile(join(root, "packages", "a", "BUILD.ts"), WORKSPACE)
     expect(detectSmithers(root)).toEqual({
       detected: false,
       workspaceFile: null,
       declarationFiles: [],
-      reason: "no WORKSPACE.ts",
+      reason: "no WORKSPACE.ts or smthrs BUILD.ts",
       workspaces: []
     })
   })
@@ -148,7 +164,7 @@ describe("repository records", () => {
       name: basename(root),
       git: null,
       warnings: [],
-      smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts", workspaces: [] }
+      smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts or smthrs BUILD.ts", workspaces: [] }
     })
   })
 
@@ -173,5 +189,19 @@ describe("repository records", () => {
     expect(store.close(repoId(first))).toBe(false)
     expect(store.list().map((repo) => repo.path)).toEqual([second])
     expect(store.get(repoId(second))?.path).toBe(second)
+  })
+})
+
+describe("declaration files on a BUILD.ts-rooted checkout", () => {
+  test("package BUILD.ts files that import smthrs are declarations, so target.source.open can reach them", async () => {
+    const root = await scratch()
+    await writeFile(join(root, "BUILD.ts"), WORKSPACE)
+    await mkdir(join(root, "packages", "a"), { recursive: true })
+    await writeFile(join(root, "packages", "a", "BUILD.ts"), WORKSPACE)
+    await mkdir(join(root, "packages", "b"), { recursive: true })
+    await writeFile(join(root, "packages", "b", "BUILD.ts"), "export const plain = 1\n")
+    await mkdir(join(root, "node_modules", "x"), { recursive: true })
+    await writeFile(join(root, "node_modules", "x", "BUILD.ts"), WORKSPACE)
+    expect(detectSmithers(root).declarationFiles).toEqual(["BUILD.ts", "packages/a/BUILD.ts"])
   })
 })

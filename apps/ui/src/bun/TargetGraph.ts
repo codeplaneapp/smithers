@@ -160,6 +160,34 @@ export interface TargetGraphOptions {
   readonly timeoutMs?: number
 }
 
+/*
+ * What a failed loader actually said. `smithers-build --format json` reports
+ * its own failures as a `{ code, message }` envelope on STDOUT with a nonzero
+ * exit and nothing on stderr, so reading stderr alone showed the human
+ * "The loader exited 1: " and hid the reason (a declared input that is not a
+ * regular file, on this very checkout). The envelope's message leads; stderr
+ * follows when it has anything; a bare exit says so.
+ */
+export const loaderFailureText = (stdout: string, stderr: string): string => {
+  const parts: Array<string> = []
+  try {
+    const parsed: unknown = JSON.parse(stdout)
+    if (typeof parsed === "object" && parsed !== null && "message" in parsed && typeof parsed.message === "string") {
+      const code = "code" in parsed && typeof parsed.code === "string" ? `${parsed.code}: ` : ""
+      parts.push(`${code}${parsed.message}`)
+    }
+  } catch {
+    // Not an envelope: stderr (or the raw stdout) is the story.
+  }
+  const err = stderr.trim()
+  if (err !== "") parts.push(err)
+  if (parts.length === 0) {
+    const out = stdout.trim()
+    return out === "" ? "no output" : out
+  }
+  return parts.join("\n").slice(0, 2000)
+}
+
 const runJson = async (options: TargetGraphOptions, args: ReadonlyArray<string>): Promise<unknown> => {
   if (options.node === null) throw new Error("No Node.js >= 22.19 was found for the smithers-build loader.")
   const cli = options.cli ?? resolveBuildCli()
@@ -177,8 +205,31 @@ const runJson = async (options: TargetGraphOptions, args: ReadonlyArray<string>)
     new Response(child.stderr as ReadableStream).text()
   ])
   clearTimeout(timer)
-  if (code !== 0) throw new Error(`The loader exited ${code}: ${stderr.trim().slice(0, 2000)}`)
+  if (code !== 0) throw new Error(`The loader exited ${code}: ${loaderFailureText(stdout, stderr)}`)
   try { return JSON.parse(stdout) } catch { throw new Error(`The loader did not answer JSON: ${stdout.trim().slice(0, 200)}`) }
+}
+
+/*
+ * The one target's own subgraph — `graph <label>` — for revalidating a run.
+ *
+ * The run route used to revalidate against the WHOLE `//...` graph, so a
+ * single bad declaration anywhere in the checkout (this repository's
+ * `vendor/jj` input) answered `target_graph_unavailable` for every target,
+ * including the hundreds that load fine. The label-scoped graph is exactly
+ * what a run needs (the target and the edges into it) and fails only when
+ * that target's own closure is broken. Uncached: a revalidation must read the
+ * declarations as they are now.
+ */
+export const revalidateTarget = async (
+  options: TargetGraphOptions,
+  label: string
+): Promise<{ readonly nodes: Array<GraphNode>; readonly edges: Array<GraphEdge> }> => {
+  const body = object(await runJson(options, ["graph", label, "--format", "json"]))
+  if (typeof body?.graph !== "string") throw new Error("The graph envelope has no text graph field.")
+  const rows = Array.isArray(body.targets)
+    ? body.targets.map(object).filter((row): row is JsonObject => row !== undefined).filter((row) => typeof row.label === "string").map((row) => ({ label: row.label as string, target: typeof row.target === "string" ? row.target : "", kinds: strings(row.kinds) ?? [] }))
+    : []
+  return parseTextGraph(body.graph, rows)
 }
 
 export const queryTargetGraph = async (options: TargetGraphOptions): Promise<TargetGraphResponse> => {

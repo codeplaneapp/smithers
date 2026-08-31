@@ -48,7 +48,15 @@ const importsSmthrs = (path: string): boolean => {
   }
 }
 
-/** Every PACKAGE.ts below the root, skipping the vendored and generated trees. */
+/*
+ * Every PACKAGE.ts — and, below the root, every BUILD.ts — skipping the
+ * vendored and generated trees. A BUILD.ts-rooted checkout declares its
+ * targets in `packages/x/BUILD.ts`; leaving those out meant `target.source.open`
+ * refused every package target's declaration ("must be one of the
+ * repository's declaration files") while the targets card listed them all.
+ * The root's own BUILD.ts is a root declaration file, listed by its caller.
+ */
+const DECLARATION_BASENAMES = new Set(["PACKAGE.ts", "BUILD.ts"])
 const packageFiles = (root: string): Array<string> => {
   const found: Array<string> = []
   const walk = (dir: string, depth: number): void => {
@@ -63,7 +71,7 @@ const packageFiles = (root: string): Array<string> => {
       const path = join(dir, entry.name)
       if (entry.isDirectory()) {
         if (!SKIPPED_DIRS.has(entry.name)) walk(path, depth + 1)
-      } else if (entry.name === "PACKAGE.ts" && entry.isFile()) {
+      } else if (DECLARATION_BASENAMES.has(entry.name) && entry.isFile() && !(depth === 0 && entry.name === "BUILD.ts")) {
         found.push(path)
       }
     }
@@ -74,6 +82,20 @@ const packageFiles = (root: string): Array<string> => {
 
 /** The directory's own workspace file, or null. */
 const workspaceFileOf = (dir: string): string | null => WORKSPACE_FILES.find((file) => isFile(join(dir, file))) ?? null
+
+/*
+ * The root-level `BUILD.ts` authoring surface. `smithers-build query //...`
+ * loads a checkout rooted on BUILD.ts (this repository is one), so the UI must
+ * count it as the root workspace too: refusing it left the Smithers checkout
+ * itself opening with "no WORKSPACE.ts" and no targets card. Only the ROOT
+ * qualifies — a package's BUILD.ts below it is a target file the root loads,
+ * never a workspace of its own — and only when it imports the smthrs surface,
+ * so an unrelated BUILD.ts (Bazel's, say) stays undetected.
+ */
+const rootBuildFileOf = (root: string): string | null => {
+  const file = join(root, "BUILD.ts")
+  return isFile(file) && importsSmthrs(file) ? "BUILD.ts" : null
+}
 
 const childDirs = (dir: string): Array<string> => {
   let entries: Array<import("node:fs").Dirent>
@@ -96,7 +118,7 @@ const childDirs = (dir: string): Array<string> => {
  */
 export const discoverWorkspaces = (root: string): Array<RepoWorkspace> => {
   const found: Array<RepoWorkspace> = []
-  if (workspaceFileOf(root) !== null) found.push({ path: ".", title: basename(root) })
+  if (workspaceFileOf(root) !== null || rootBuildFileOf(root) !== null) found.push({ path: ".", title: basename(root) })
   let frontier = childDirs(root)
   for (let depth = 1; depth <= MAX_WORKSPACE_DEPTH && frontier.length > 0; depth += 1) {
     const next: Array<string> = []
@@ -116,7 +138,13 @@ export const discoverWorkspaces = (root: string): Array<RepoWorkspace> => {
 export const detectSmithers = (root: string): SmithersDetection => {
   const workspaces = discoverWorkspaces(root)
   if (workspaces.length === 0) {
-    return { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts", workspaces }
+    return {
+      detected: false,
+      workspaceFile: null,
+      declarationFiles: [],
+      reason: "no WORKSPACE.ts or smthrs BUILD.ts",
+      workspaces
+    }
   }
   const candidates = [
     ...ROOT_DECLARATION_FILES.map((file) => join(root, file)).filter(isFile),

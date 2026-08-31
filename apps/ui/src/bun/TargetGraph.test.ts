@@ -1,7 +1,20 @@
 import { describe, expect, test } from "bun:test"
 import forceGraph from "../../../shared/fixtures/force/graph.json"
 import forcePlan from "../../../shared/fixtures/force/plan-typeCheck.json"
-import { foldPlan, parseTextGraph } from "./TargetGraph"
+import { foldPlan, loaderFailureText, parseTextGraph } from "./TargetGraph"
+
+describe("loaderFailureText", () => {
+  test("a JSON failure envelope on stdout leads, even with an empty stderr", () => {
+    // `smithers-build graph //... --format json` on this checkout: exit 1, nothing on stderr.
+    const stdout = JSON.stringify({ code: "graph_failed", message: "declared input is not a regular file: vendor/jj" })
+    expect(loaderFailureText(stdout, "")).toBe("graph_failed: declared input is not a regular file: vendor/jj")
+  })
+  test("stderr follows the envelope, stands alone without one, and a silent exit says so", () => {
+    expect(loaderFailureText(JSON.stringify({ message: "boom" }), "  trace\n")).toBe("boom\ntrace")
+    expect(loaderFailureText("not json", "ENOENT")).toBe("ENOENT")
+    expect(loaderFailureText("", "")).toBe("no output")
+  })
+})
 
 describe("parseTextGraph", () => {
   test("parses the force fixture exactly", () => {

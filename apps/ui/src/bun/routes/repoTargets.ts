@@ -13,7 +13,7 @@ import { json, jsonError, readJson } from "../routes"
 import type { LocalServer } from "../server"
 import { createTargetRunner, queryTargets, TargetRunCapacityError, workspaceCwd } from "../Targets"
 import type { TargetRunner } from "../Targets"
-import { queryTargetGraph } from "../TargetGraph"
+import { queryTargetGraph, revalidateTarget } from "../TargetGraph"
 import { createTargetRunHistory } from "../TargetRunHistory"
 import type { TargetRunHistory } from "../TargetRunHistory"
 
@@ -41,6 +41,8 @@ interface TargetGrant {
   readonly id: string
   readonly label: string
   readonly workspace: string
+  /** The snapshot's kinds: a BUILD.ts workspace runs the target with the verb its first kind names. */
+  readonly kinds: ReadonlyArray<string>
 }
 
 const RepoOpenRequestSchema = z.union([
@@ -143,7 +145,7 @@ export const registerRepoTargetRoutes = (
     const grants = new Map<string, TargetGrant>()
     const targets: Array<Target> = result.targets.map((target) => {
       const id = crypto.randomUUID()
-      grants.set(id, { id, label: target.label, workspace: target.workspace })
+      grants.set(id, { id, label: target.label, workspace: target.workspace, kinds: target.kinds })
       return { ...target, id }
     })
     targetGrants.set(repoId, grants)
@@ -174,17 +176,35 @@ export const registerRepoTargetRoutes = (
     }
     const node = await options.node
     if (node === null) return jsonError(503, "node_missing", "No Node.js >= 22.19 was found for the smithers-build CLI.")
-    let graph: Awaited<ReturnType<typeof queryTargetGraph>>
+    const graphOptions = {
+      repoId,
+      repo: workspaceCwd(repo.path, workspace),
+      node,
+      ...(options.cli === undefined ? {} : { cli: options.cli })
+    }
+    let graph: { readonly nodes: ReadonlyArray<{ readonly label: string }>; readonly edges: Awaited<ReturnType<typeof queryTargetGraph>>["edges"] }
     try {
-      graph = await queryTargetGraph({
-        repoId,
-        repo: workspaceCwd(repo.path, workspace),
-        node,
-        ...(options.cli === undefined ? {} : { cli: options.cli })
-      })
+      graph = await queryTargetGraph(graphOptions)
     } catch (error) {
-      options.log?.(`target-run graph unavailable: ${error instanceof Error ? error.message : String(error)}`)
-      return jsonError(503, "target_graph_unavailable", "The target graph could not be revalidated before execution.")
+      /*
+       * The whole-repository graph is unavailable (one broken declaration
+       * anywhere does that). The run only needs THIS target's closure, so
+       * revalidate against `graph <label>`; only when that fails too is the
+       * run refused, and the refusal then names the loader's reason.
+       */
+      const whole = error instanceof Error ? error.message : String(error)
+      options.log?.(`target-run graph unavailable: ${whole}; revalidating ${grant.label} alone`)
+      try {
+        graph = await revalidateTarget(graphOptions, grant.label)
+      } catch (scoped) {
+        const reason = scoped instanceof Error ? scoped.message : String(scoped)
+        options.log?.(`target-run ${grant.label} unavailable: ${reason}`)
+        return jsonError(
+          503,
+          "target_graph_unavailable",
+          `The target graph could not be revalidated before execution: ${reason}`
+        )
+      }
     }
     if (!graph.nodes.some((candidate) => candidate.label === grant.label)) {
       targetGrants.get(repoId)?.delete(targetId)
@@ -197,6 +217,7 @@ export const registerRepoTargetRoutes = (
         repo: repo.path,
         workspace,
         label: grant.label,
+        kinds: grant.kinds,
         node,
         edges: graph.edges
       })

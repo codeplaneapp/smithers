@@ -225,6 +225,8 @@ export interface TargetRunner {
     readonly repo: string
     readonly workspace: string
     readonly label: string
+    /** The target's kinds from the snapshot; the first one is the verb a BUILD.ts workspace runs it with. */
+    readonly kinds?: ReadonlyArray<string>
     readonly node: NodeSidecar; readonly edges?: ReadonlyArray<GraphEdge> }) => TargetRun
   /** A subscriber is listening: spawn now if not yet started. */
   readonly attach: (runId: string) => boolean
@@ -247,6 +249,36 @@ export interface RunStdoutParser {
   readonly finish: (at?: number) => ReadonlyArray<TargetRunEvent>
   readonly timings: () => ReadonlyArray<NodeTiming>
   readonly summary: () => RunSummary | undefined
+}
+
+/*
+ * The CLI verbs a target kind maps to. The kinds come from `query --format
+ * json` in the CLI's own order, so a target's first kind is the verb the
+ * repository authored it for.
+ */
+const VERB_BY_KIND: Readonly<Record<string, string>> = { build: "build", test: "test", lint: "lint", run: "run", docs: "docs" }
+
+/**
+ * The argv that executes one target in a workspace.
+ *
+ * Two authoring surfaces, two forms. A WORKSPACE.ts (package-mode) workspace
+ * runs the bare-label form, `smithers-build <label>`, whose verb the target's
+ * flavor implies. A BUILD.ts-rooted workspace has no WORKSPACE.ts and the CLI
+ * refuses that form there ("the bare-label form executes PACKAGE.ts targets;
+ * this workspace has no WORKSPACE.ts"), so it runs `smithers-build <verb>
+ * <label>` with the verb from the target's first kind. `--ui plain` keeps the
+ * status lines the parser reads in both forms.
+ */
+export const runArgv = (
+  cwd: string,
+  label: string,
+  kinds: ReadonlyArray<string>,
+  exists: (path: string) => boolean = existsSync
+): Array<string> => {
+  const packageMode = exists(join(cwd, "WORKSPACE.ts")) || exists(join(cwd, ".smithers", "WORKSPACE.ts"))
+  if (packageMode) return [label]
+  const verb = kinds.map((kind) => VERB_BY_KIND[kind]).find((candidate) => candidate !== undefined) ?? "build"
+  return [verb, label, "--ui", "plain"]
 }
 
 /** Incrementally parses stable executor status/summary lines and JSON envelopes. */
@@ -372,6 +404,7 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
     child: ReturnType<typeof Bun.spawn> | undefined
     timer: ReturnType<typeof setTimeout> | undefined
     readonly edges: ReadonlyArray<GraphEdge>
+    readonly kinds: ReadonlyArray<string>
     readonly parser: RunStdoutParser
     summaryEmitted: boolean
     nextSeq: number
@@ -431,10 +464,11 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
       emit(live.run, { type: "exit", code: null })
       return
     }
+    const cwd = workspaceCwd(live.run.repo, live.run.workspace)
     let child: ReturnType<typeof Bun.spawn>
     try {
-      child = Bun.spawn([live.node.path, cli, live.run.label], {
-        cwd: workspaceCwd(live.run.repo, live.run.workspace),
+      child = Bun.spawn([live.node.path, cli, ...runArgv(cwd, live.run.label, live.kinds)], {
+        cwd,
         stdout: "pipe",
         stderr: "pipe",
         stdin: "ignore"
@@ -472,7 +506,7 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
   }
 
   return {
-    start: ({ repoId, repo, workspace, label, node, edges = [] }) => {
+    start: ({ repoId, repo, workspace, label, node, edges = [], kinds = [] }) => {
       const active = [...runs.values()].filter((live) => live.run.status === "pending" || live.run.status === "running")
       if (active.length >= maxActiveRuns) {
         throw new TargetRunCapacityError(`At most ${maxActiveRuns} target runs may execute at once.`)
@@ -487,7 +521,7 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
       const startedAt = Date.now()
       const labels = label.split(/\s+/).filter((part) => part.startsWith("//"))
       const run: TargetRun = { runId: crypto.randomUUID(), repoId, repo, workspace, label, labels, startedAt, status: "pending", exitCode: null }
-      const live: Live = { run, node, edges, parser: createRunStdoutParser({ edges, startedAt }), child: undefined, timer: undefined, summaryEmitted: false, nextSeq: 0 }
+      const live: Live = { run, node, edges, kinds, parser: createRunStdoutParser({ edges, startedAt }), child: undefined, timer: undefined, summaryEmitted: false, nextSeq: 0 }
       runs.set(run.runId, live)
       live.timer = setTimeout(() => spawn(live), options.autoStartMs ?? 1000)
       return run

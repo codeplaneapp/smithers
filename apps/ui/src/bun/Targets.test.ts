@@ -187,6 +187,8 @@ describe("createTargetRunner", () => {
 
   test("attach starts the child; stdout, stderr and the exit code stream to the topic", async () => {
     const dir = await scratch()
+    // A package-mode workspace: the runner uses the bare-label form here (see runArgv).
+    await writeFile(join(dir, "WORKSPACE.ts"), "export const Workspace = {}\n")
     const cli = join(dir, "run-cli.js")
     await writeFile(
       cli,
@@ -257,5 +259,19 @@ describe("createTargetRunner", () => {
     expect(runner.cancel(run.runId)).toBe(false)
     expect(runner.cancel("nope")).toBe(false)
     runner.stop()
+  })
+})
+
+describe("runArgv picks the CLI form the workspace's authoring surface accepts", () => {
+  const { runArgv } = require("./Targets") as typeof import("./Targets")
+  test("a WORKSPACE.ts workspace runs the bare-label form", () => {
+    const exists = (path: string) => path.endsWith("/WORKSPACE.ts")
+    expect(runArgv("/w", "//src:lint", ["lint"], exists)).toEqual(["//src:lint"])
+  })
+  test("a BUILD.ts-rooted workspace runs `<verb> <label> --ui plain` with the verb from the first kind", () => {
+    const exists = () => false
+    expect(runArgv("/w", "//packages/canonical:check", ["build"], exists)).toEqual(["build", "//packages/canonical:check", "--ui", "plain"])
+    expect(runArgv("/w", "//:knownFiles", ["run", "lint"], exists)).toEqual(["run", "//:knownFiles", "--ui", "plain"])
+    expect(runArgv("/w", "//x:y", [], exists)).toEqual(["build", "//x:y", "--ui", "plain"])
   })
 })

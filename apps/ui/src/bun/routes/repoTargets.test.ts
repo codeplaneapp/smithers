@@ -122,7 +122,7 @@ describe("/api/repo/*", () => {
     const plain = await post("/api/repo/open", { path: plainDir })
     expect(((await plain.json()) as { repo: { smithers: { detected: boolean; reason: string } } }).repo.smithers).toMatchObject({
       detected: false,
-      reason: "no WORKSPACE.ts"
+      reason: "no WORKSPACE.ts or smthrs BUILD.ts"
     })
 
     const listed = ReposResponseSchema.parse(await (await get("/api/repos")).json())
@@ -247,5 +247,89 @@ describe("/api/targets/*", () => {
     expect((await post("/api/targets/run", { repoId: "nope", targetId: "unknown" })).status).toBe(404)
     expect((await post("/api/targets/run", { repoId: opened.repo.id, targetId: "unknown" })).status).toBe(404)
     expect((await post("/api/targets/run", { repoId: opened.repo.id })).status).toBe(400)
+  })
+})
+
+/*
+ * One broken declaration anywhere in a checkout (a `vendor/jj` input on the
+ * Smithers repository itself) fails `graph //...`; a run must still start
+ * from the target's own `graph <label>`, and when that fails too the refusal
+ * names the loader's reason instead of a bare "could not be revalidated".
+ */
+describe("/api/targets/run revalidates against the target's own graph when the whole graph is broken", () => {
+  let brokenDist = ""
+  let brokenRepo = ""
+  let broken: Awaited<ReturnType<typeof startLocalServer>>
+  const brokenPost = (path: string, body: unknown): Promise<Response> =>
+    fetch(`${broken.origin}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", [LOCAL_SESSION_HEADER]: broken.sessionToken },
+      body: JSON.stringify(body)
+    })
+
+  beforeAll(async () => {
+    brokenDist = await mkdtemp(join(tmpdir(), "smithers-l3-broken-dist-"))
+    await writeFile(join(brokenDist, "index.html"), "<!doctype html><title>Smithers</title>")
+    brokenRepo = await realpath(await mkdtemp(join(tmpdir(), "smithers-l3-broken-repo-")))
+    await writeFile(join(brokenRepo, "BUILD.ts"), "import { Smithers as S } from \"@smthrs/targets\"\n")
+    const cli = join(brokenDist, "fake-cli.js")
+    await writeFile(
+      cli,
+      [
+        "const [verb, pattern] = process.argv.slice(2)",
+        "if (verb === \"query\") {",
+        "  console.log(JSON.stringify({ query: \"//...\", targets: [{ label: \"//:ok\", target: \"Shell.Test\", kinds: [\"test\"] }, { label: \"//:doomed\", target: \"Shell.Test\", kinds: [\"test\"] }] }))",
+        "  process.exit(0)",
+        "}",
+        "if (verb === \"graph\" && pattern === \"//...\") {",
+        "  console.log(JSON.stringify({ code: \"graph_failed\", message: \"declared input is not a regular file: vendor/jj\" }))",
+        "  process.exit(1)",
+        "}",
+        "if (verb === \"graph\" && pattern === \"//:ok\") {",
+        "  console.log(JSON.stringify({ graph: \"//:ok (Shell.Test)\", targets: [{ label: \"//:ok\", target: \"Shell.Test\" }], edges: [] }))",
+        "  process.exit(0)",
+        "}",
+        "if (verb === \"graph\") {",
+        "  console.log(JSON.stringify({ code: \"graph_failed\", message: `no closure for ${pattern}` }))",
+        "  process.exit(1)",
+        "}",
+        "console.log(`ran ${verb}`)",
+        "process.exit(0)"
+      ].join("\n")
+    )
+    broken = await startLocalServer({
+      port: 0,
+      distDir: brokenDist,
+      chatStub: true,
+      allowManualRepositoryPaths: true,
+      node: { path: process.execPath, version: "v22.19.0" },
+      buildCli: cli,
+      log: () => {}
+    })
+  })
+
+  afterAll(async () => {
+    await broken.stop()
+    await rm(brokenDist, { recursive: true, force: true })
+    await rm(brokenRepo, { recursive: true, force: true })
+  })
+
+  test("a target whose own closure loads runs; one whose closure is broken is refused with the loader's reason", async () => {
+    const opened = (await (await brokenPost("/api/repo/open", { path: brokenRepo })).json()) as { repo: { id: string } }
+    const queried = TargetsQueryResponseSchema.parse(await (await brokenPost("/api/targets/query", { repoId: opened.repo.id })).json())
+    const ok = queried.targets.find((target) => target.label === "//:ok")?.id
+    const doomed = queried.targets.find((target) => target.label === "//:doomed")?.id
+    expect(ok).toBeDefined()
+    expect(doomed).toBeDefined()
+
+    const started = await brokenPost("/api/targets/run", { repoId: opened.repo.id, targetId: ok })
+    expect(started.status).toBe(200)
+    expect(typeof ((await started.json()) as { runId: string }).runId).toBe("string")
+
+    const refused = await brokenPost("/api/targets/run", { repoId: opened.repo.id, targetId: doomed })
+    expect(refused.status).toBe(503)
+    const body = (await refused.json()) as { error: { code: string; message: string } }
+    expect(body.error.code).toBe("target_graph_unavailable")
+    expect(body.error.message).toContain("graph_failed: no closure for //:doomed")
   })
 })
