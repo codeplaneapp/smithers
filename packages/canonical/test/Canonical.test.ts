@@ -130,6 +130,37 @@ describe("toJSON", () => {
   })
 })
 
+describe("values JSON.stringify coerces", () => {
+  // JSON.stringify parity: a value with no JSON representation (a function, a
+  // symbol, undefined, or a toJSON that returns undefined) serializes as null
+  // inside an array and is omitted from an object. The pre-fix serializer
+  // interpolated the recursive undefined instead, emitting invalid documents
+  // such as `{"x":undefined}` and `[,]`.
+  it.each([
+    ["a function element", [(): number => 1], "[null]"],
+    ["a function between elements", [123, (): number => 1, "hello"], "[123,null,\"hello\"]"],
+    ["a toJSON returning undefined, in an array", [{ toJSON: (): undefined => undefined }], "[null]"],
+    ["a function property", { x: (): number => 1 }, "{}"],
+    ["a function property beside a kept one", { x: (): number => 1, y: 2 }, "{\"y\":2}"],
+    ["a toJSON returning undefined, as a property", { x: { toJSON: (): undefined => undefined } }, "{}"]
+  ])("serializes %s the way JSON.stringify does", (_name, input, expected) => {
+    expect(serialize(input)).toBe(expected)
+    expect(serialize(input)).toBe(JSON.stringify(input))
+  })
+
+  it("canonicalizes the toJSON result of a function, which JSON.stringify also consults", () => {
+    const fn = Object.assign(() => 1, { toJSON: () => ({ b: 1, a: 2 }) })
+    // JSON.stringify(fn) is `{"b":1,"a":2}`; the canonical form sorts the keys.
+    expect(serialize({ x: fn })).toBe("{\"x\":{\"a\":2,\"b\":1}}")
+  })
+
+  it("rejects a function whose toJSON returns itself", () => {
+    const fn: { (): number; toJSON?: () => unknown } = (): number => 1
+    fn.toJSON = (): unknown => fn
+    expect(failureMessage({ x: fn })).toContain("Circular reference detected")
+  })
+})
+
 describe("toJSON well-formedness", () => {
   it("has no canonical form for a lone surrogate returned by toJSON", () => {
     // The module docblock promises a value carrying a lone surrogate has no
@@ -440,12 +471,17 @@ describe("unsupported value boundaries", () => {
     expect(failureMessage(input)).toContain("The value is not valid JSON")
   })
 
-  it("rejects a function-valued object property rather than returning invalid JSON", () => {
-    expect(failure({ kept: true, omitted: () => undefined })).toEqual(expect.objectContaining({ _tag: "SchemaError" }))
+  // Restated 2026-08-31. These two cells used to pin the pre-fix behavior (a
+  // decode failure born from the invalid `{"kept":true,"omitted":undefined}`
+  // interpolation, and `[]` from joining a recursive undefined). The exported
+  // contract is JSON.stringify parity: a function property is omitted and a
+  // function element serializes as null.
+  it("omits a function-valued object property, as JSON.stringify does", () => {
+    expect(serialize({ kept: true, omitted: () => undefined })).toBe("{\"kept\":true}")
   })
 
-  it("omits a function-valued array element", () => {
-    expect(serialize([() => undefined])).toBe("[]")
+  it("serializes a function-valued array element as null, as JSON.stringify does", () => {
+    expect(serialize([() => undefined])).toBe("[null]")
   })
 })
 
