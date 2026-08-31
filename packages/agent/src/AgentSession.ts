@@ -922,8 +922,7 @@ export const make = (
      * `PermissionRequired`; a resolved one lets the activity run and read the
      * decision.
      */
-    const authorize =
-      (runId: string) => (call: Cell.Call): Effect.Effect<void, HarnessError.HarnessError> =>
+    const authorize = (runId: string) => (call: Cell.Call): Effect.Effect<void, HarnessError.HarnessError> =>
       Effect.gen(function*() {
         if (call.flowName !== StandardFlows.askFlow.name) return
         const input = call.input as unknown as AskInput
