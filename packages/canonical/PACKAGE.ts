@@ -1,0 +1,61 @@
+// Package-mode port of the check surface BUILD-era PackageDefaults
+// synthesized for this package (root BUILD.ts `packageDefaults` +
+// packages/targets/src/StandardPackage.ts): lib, check, test, lint, fmt,
+// circular, re-expressed in the executable PACKAGE.ts vocabulary. The
+// synthesized DocsParity `docs` target has no package-mode rule yet; the
+// wave-2 contract in docs/migration/package-mode-port.md records the gap.
+import { Smithers as S } from "@smthrs/targets"
+
+const srcs = S.Filegroup({ srcs: [S.glob("src/**/*.ts")] })
+const tests = S.Filegroup({ srcs: [S.glob("test/**/*.ts")] })
+const tsconfig = S.file("tsconfig.json")
+const testTsconfig = S.file("tsconfig.test.json")
+const rootTsconfig = S.file("//tsconfig.base.json")
+
+// StandardPackage's `lib` is a dual-format TsBuild into dist/. The package
+// scripts/build.mjs is what the pnpm build script runs; it stays the one
+// build path.
+const lib = S.Shell.Build({
+  script: S.file("scripts/build.mjs"),
+  data: [srcs, tsconfig, rootTsconfig, S.file("package.json")],
+  outDirs: ["dist"]
+})
+
+// StandardPackage `check`: tsc -p tsconfig.test.json --noEmit, after lib so
+// workspace dependents resolve through built declarations.
+const check = S.Shell.Test({
+  bin: S.NodeModule.Bin("typescript", "tsc"),
+  args: ["-p", "tsconfig.test.json", "--noEmit"],
+  data: [srcs, tests, testTsconfig, tsconfig, rootTsconfig, lib]
+})
+
+const test = S.Shell.Test({
+  bin: S.NodeModule.Bin("vitest"),
+  args: ["run"],
+  data: [srcs, tests, S.file("vitest.config.ts"), lib]
+})
+
+const lint = S.Shell.Test({
+  bin: S.NodeModule.Bin("eslint"),
+  args: ["--max-warnings", "0", "src"],
+  data: [srcs, S.file("eslint.config.js"), S.file("//eslint.jsdoc.js")]
+})
+
+const fmt = S.Shell.Test({
+  bin: S.NodeModule.Bin("dprint"),
+  args: ["check"],
+  data: [srcs, tests, S.file("dprint.json")]
+})
+
+const circular = S.Shell.Test({
+  script: S.file("scripts/circular.mjs"),
+  data: [srcs]
+})
+
+const ci = S.Suite({
+  tests: [check, test, lint, fmt, circular]
+})
+
+export const Package = S.Package({
+  targets: { srcs, tests, lib, check, test, lint, fmt, circular, ci }
+})
