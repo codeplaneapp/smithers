@@ -86,7 +86,9 @@ const streamTurn = (
             // The tool-loop contract (Wave 3b): the tool specs ride every turn on
             // this boundary exactly as they do on the product Worker, otherwise the
             // model is never offered a command and the loop can never start.
-            ...(request.tools === undefined ? {} : { tools: request.tools })
+            ...(request.tools === undefined ? {} : { tools: request.tools }),
+            // The model-tier hint (the recommender's `cheap`); the serving side maps it.
+            ...(request.tier === undefined ? {} : { tier: request.tier })
           })
         }),
       catch: asError

@@ -47,6 +47,19 @@ export interface StartAgentTurnRequest {
    * upstream instructions — it is never persisted into the visible transcript.
    */
   readonly context?: AgentRuntimeContext
+  /**
+   * The model tier this turn asks for. A side turn that only has to pick the
+   * next click (the recommender) asks for `cheap`; the conversation's own turns
+   * leave it unset and get the deployment's default. The hint rides the wire
+   * untouched; the serving side maps it to a configured model.
+   */
+  readonly tier?: "cheap" | "default"
+  /**
+   * What the turn is for. Unset (or "conversation") is the transcript's own
+   * turn; "recommend" is the background next-step read, which a scripted or
+   * stub seam must not treat as the conversation's next leg.
+   */
+  readonly purpose?: "conversation" | "recommend"
 }
 
 export type StartAgentTurnResult =
