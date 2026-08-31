@@ -270,6 +270,34 @@ describe("lifecycle verbs", () => {
     expect(result.second).toMatchObject({ _tag: "Terminal", status: "cancelled" })
   })
 
+  it("answers a repeated resume from the run rather than from its receipt", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const launched = yield* launch()
+        const first = yield* json(["--json", "run", launched.runId, "--resume"])
+        yield* json(["--json", "cancel", launched.runId])
+        const second = yield* json(["--json", "run", launched.runId, "--resume"])
+        return { first, second }
+      }).pipe(
+        Effect.timeout("20 seconds"),
+        // A remote CLI owns no driver, so the receipt is the whole answer and
+        // the settlement wait is out of the way of what this asks.
+        Effect.provide(ExecutorOwnership.layer(false)),
+        Effect.provide(testControl),
+        Effect.provide(services),
+        Effect.provide(NodeServices.layer)
+      )
+    )
+
+    // The key is `cli:resume:<runId>` when no park was ever committed, so the
+    // second call reuses the first one's receipt. Replaying it answered
+    // `AlreadyApplied` for a run that had since been cancelled: the Phase 7
+    // smoke got that answer for `run --resume` against a completed run and for
+    // `approve` against another, and neither says anything about the run.
+    expect(result.first).toMatchObject({ _tag: "Accepted" })
+    expect(result.second).toMatchObject({ _tag: "Terminal", status: "cancelled" })
+  })
+
   it("delivers a named JSON signal to a run", async () => {
     const receipt = await run(
       Effect.gen(function*() {

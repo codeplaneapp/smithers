@@ -453,3 +453,29 @@ describe("a cancel repeated against a run it cannot finish", () => {
     ])
   })
 })
+
+describe("resuming a run that has already settled", () => {
+  it("answers Terminal even when the resume key already carries a receipt", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runtime = yield* ControlRuntime
+      const runId = yield* start("resume-settled")
+      yield* park(runtime, runId)
+      // The CLI derives one key per park, so a second `run --resume` against
+      // the same park reuses it.
+      const key = `cli:resume:${runId}`
+      const first = yield* control.resume({ runId, idempotencyKey: key })
+      const fence = yield* runtime.claimFence(runId)
+      yield* runtime.writeStatus(runId, fence, "completed")
+      const again = yield* control.resume({ runId, idempotencyKey: key })
+      return { runId, first, again }
+    }))
+
+    expect(observed.first._tag).toBe("Accepted")
+    // Terminality is read BEFORE the replay, as `cancel` reads it. Replaying
+    // the recorded receipt answered `AlreadyApplied` for a run that had since
+    // finished, which tells the operator a restart happened and says nothing
+    // about the run they asked about (Phase 7 smoke, spec item 3).
+    expect(observed.again).toEqual({ _tag: "Terminal", runId: observed.runId, status: "completed" })
+  })
+})

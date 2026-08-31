@@ -238,6 +238,23 @@ export const layer: Layer.Layer<
       input: ApprovalInput
     ) =>
       Effect.gen(function*() {
+        // A decision on a settled run decides nothing, and it is read BEFORE
+        // the idempotency replay for `resume`'s reason: the recorded receipt
+        // describes the earlier call, not the run. Answering `Accepted` sent
+        // `smithers approve` into `awaitRun` waiting for a settlement that had
+        // already happened — the Phase 7 smoke's 120-second silent block — and
+        // recorded a resume delegation for a run no host may take up.
+        //
+        // A plan-level decision has no run yet, and a target whose run this
+        // plane cannot find is left to `lookupApproval` to refuse.
+        if (input.target._tag === "Node") {
+          const current = yield* runtime.getRun(input.target.runId).pipe(
+            Effect.catchTag("/control/RunNotFound", () => Effect.succeed(undefined))
+          )
+          if (current !== undefined && terminal(current.status)) {
+            return { _tag: "Terminal", runId: current.runId, status: current.status }
+          }
+        }
         // Set by the mutation when it records a delegation, and left unset on
         // the idempotency replay path — where the original call already
         // delegated and the host's own poll is what takes it up.
@@ -312,30 +329,42 @@ export const layer: Layer.Layer<
     const runMutation = (
       input: RunMutationInput
     ): Effect.Effect<Receipt, RunNotFound | ClaimLost | PersistenceError> =>
-      mutate(
-        "resume",
-        input.idempotencyKey,
-        fingerprint("resume", input),
-        Effect.gen(function*() {
-          const current = yield* runtime.getRun(input.runId)
-          if (terminal(current.status)) {
-            return { _tag: "Terminal", runId: current.runId, status: current.status }
-          }
-          const claimed = yield* runtime.resume(input.runId, { scope: "launched" }).pipe(
-            Effect.catchTag("/control/ClaimLost", () =>
-              live(current.status)
-                ? Effect.fail(new ClaimLost({ runId: input.runId }))
-                : Effect.succeed(undefined))
-          )
-          yield* emit(input.runId, "control.run.resume", {
-            runId: input.runId,
-            status: (claimed ?? current).status
+      Effect.gen(function*() {
+        // Terminality is read BEFORE the idempotency replay, as `cancel` reads
+        // it. A recorded receipt is the proof a restart was made once; it is
+        // not an answer about the run, and the run settles afterwards. The
+        // Phase 7 smoke asked `run --resume` for a completed run and was told
+        // `AlreadyApplied`, which describes the earlier call and says nothing
+        // about the run the operator named (spec item 3).
+        const settled = yield* runtime.getRun(input.runId)
+        if (terminal(settled.status)) {
+          return { _tag: "Terminal", runId: settled.runId, status: settled.status }
+        }
+        return yield* mutate(
+          "resume",
+          input.idempotencyKey,
+          fingerprint("resume", input),
+          Effect.gen(function*() {
+            const current = yield* runtime.getRun(input.runId)
+            if (terminal(current.status)) {
+              return { _tag: "Terminal", runId: current.runId, status: current.status }
+            }
+            const claimed = yield* runtime.resume(input.runId, { scope: "launched" }).pipe(
+              Effect.catchTag("/control/ClaimLost", () =>
+                live(current.status)
+                  ? Effect.fail(new ClaimLost({ runId: input.runId }))
+                  : Effect.succeed(undefined))
+            )
+            yield* emit(input.runId, "control.run.resume", {
+              runId: input.runId,
+              status: (claimed ?? current).status
+            })
+            return claimed === undefined
+              ? accepted(input.idempotencyKey, input.runId)
+              : terminalOrAccepted(input.idempotencyKey, claimed)
           })
-          return claimed === undefined
-            ? accepted(input.idempotencyKey, input.runId)
-            : terminalOrAccepted(input.idempotencyKey, claimed)
-        })
-      )
+        )
+      })
 
     /**
      * Resumes a parked run whose park a steer has just answered.

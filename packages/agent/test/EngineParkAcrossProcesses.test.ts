@@ -562,9 +562,13 @@ describe("a run parked on an in-run ask that a later process cancels", () => {
           idempotencyKey: `cli:cancel:${parked.runId}`
         })
         const engineRow = yield* awaitEngineStatus(root, parked.runId, "cancelled")
+        // The operator answers the ask afterwards, which is the Phase 7
+        // smoke's own sequence. It hung for 120 s and printed nothing.
+        const decided = yield* control.approve(parked.approval).pipe(Effect.timeout("15 seconds"))
         const events = yield* Stream.runCollect(control.watch({ runId: parked.runId, follow: false }))
         return {
           cancelled,
+          decided,
           engineRow,
           summary: yield* runtime.getRun(parked.runId),
           kinds: events.map((event) => event.kind)
@@ -585,5 +589,7 @@ describe("a run parked on an in-run ask that a later process cancels", () => {
     // The event `smithers run` waits on, and the one `gc` needs to collect the
     // run: without it the smoke left two permanently non-terminal rows.
     expect(observed.kinds.filter(settledKind)).toContain("control.run.cancelled")
+    // And the decision answers the run instead of blocking on it.
+    expect(observed.decided).toEqual({ _tag: "Terminal", runId: parked.runId, status: "cancelled" })
   }, 180_000)
 })
