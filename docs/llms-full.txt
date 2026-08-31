@@ -162,6 +162,36 @@ that exact version for `effect` and for the `@effect/*` packages that follow
 Effect's own version line. A project that resolves two Effect versions is
 unsupported, because schema internals are not interoperable between instances.
 
+### Override the drifted peer
+
+Pin one transitive package as well. `@effect/platform-node@4.0.0-rc.108` asks
+for `@effect/platform-node-shared` `^4.0.0-rc.108`, the registry answers
+`4.0.0-rc.112`, and that version's own peer range demands Effect
+`4.0.0-rc.112`. Your project still runs on a single Effect copy, and `npm ls`
+exits 1 with `invalid: "^4.0.0-rc.112"` until you override the range.
+
+:::code-group
+
+```json [package.json (npm, bun)]
+{
+  "overrides": {
+    "@effect/platform-node-shared": "4.0.0-rc.108"
+  }
+}
+```
+
+```yaml [pnpm-workspace.yaml (pnpm)]
+overrides:
+  "@effect/platform-node-shared": 4.0.0-rc.108
+```
+
+:::
+
+pnpm 11 no longer reads a `pnpm` field from `package.json`, so a
+`pnpm.overrides` block there is ignored with a warning and the drifted version
+is installed anyway. With the pin applied, `npm ls` exits 0 and the tree holds
+one `@effect/platform-node-shared@4.0.0-rc.108`.
+
 ### Install the command
 
 ```bash
@@ -819,6 +849,10 @@ These bundle for the browser. A resolution error in any of them fails the build.
 | `@smthrs/chain` | The chain contracts and their in-memory journal stand-in |
 | `@smthrs/observability` | Structured logging and metrics over Effect's own tags, with no exporter wired |
 | `@smthrs/time-travel` | Frames, replay, fork, rewind, compensation, and recovery |
+| `@smthrs/std/Grep` | The ripgrep search contract and its result schemas, with no adapter bound |
+| `@smthrs/std/Glob` | Glob matching over the injected `FileSystem` |
+| `@smthrs/std/Search` | The search contract shared by the two implementations |
+| `@smthrs/std/PortableSearch` | The in-process search implementation, over the injected `FileSystem` alone |
 
 Bundling is not running: `@smthrs/journal` bundles because it depends on the `DurableWriter` *contract* and Effect's `SqlClient`, and a browser application still has to supply a browser SQL client (for example Effect's sqlite-wasm OPFS worker) to that contract. Bundling is the property that makes such a composition possible; the sqlite-wasm layer itself is not shipped here: see implementation status.
 
@@ -3889,14 +3923,17 @@ A package root exports contracts. A platform implementation lives under a subpat
 | `@smthrs/time-travel` | yes | yes | frames, replay, fork, rewind, compensation, recovery |
 | `@smthrs/observability` | yes | yes | OTLP logs, metrics, and traces layers over Effect's `HttpClient`; the fetch variant binds the host's global `fetch` |
 | `@smthrs/flows` | yes | yes | re-exports every engine package |
+| `@smthrs/chain` | yes | yes | the chain contracts and their in-memory journal stand-in |
+| `@smthrs/std/Grep`, `@smthrs/std/Glob` | yes | yes | search and glob contracts over the injected `FileSystem`, with no adapter bound |
+| `@smthrs/std/Search`, `@smthrs/std/PortableSearch` | yes | yes | the search contract and its in-process implementation |
 
-Twenty-three entry points bundle for the browser.
+28 entry points bundle for the browser, and 7 are documented Node-only.
 
 :::warning[Bundling is a weaker claim than running]
 `@smthrs/journal`, `@smthrs/run-store`, `@smthrs/step-cache`, and `@smthrs/plan` bundle because they depend on the `DurableWriter` contract. A browser application still has to supply a browser SQL client, such as Effect's sqlite-wasm OPFS worker, to that contract. No such layer ships here.
 :::
 
-The accurate sentence is that canonical JSON, crypto, the host contracts, `BrowserHost`, keys, plan, artifacts, capability, kernel, sandbox, database, journal, run store, step cache, flow, engine, engine-store, the barrel, sync, time travel, and the OTLP exporter bundle for the browser, and the durable engine composition is still SQLite-on-Node first because no browser SQL client layer ships here. `@smthrs/engine-store`'s last two `node:`-flavoured reads (`process.pid` and `node:crypto` `randomUUID`) moved behind the `OwnerIdentity` service, which closed issue #114.
+The accurate sentence is that canonical JSON, crypto, the host contracts, `BrowserHost`, keys, plan, artifacts, capability, kernel, sandbox, database, journal, run store, step cache, flow, engine, engine-store, the barrel, sync, time travel, the chain contracts, the four `@smthrs/std` search subpaths, and the OTLP exporter bundle for the browser, and the durable engine composition is still SQLite-on-Node first because no browser SQL client layer ships here. `@smthrs/engine-store`'s last two `node:`-flavoured reads (`process.pid` and `node:crypto` `randomUUID`) moved behind the `OwnerIdentity` service, which closed issue #114.
 
 ### Build shape
 
@@ -7387,9 +7424,10 @@ Route: /api/patterns
 
 This page is the public API reference for the higher-order flow patterns:
 decorators that wrap one flow, and containers that compose several. The package
-depends on `@smthrs/core` alone, so every export here is browser safe and
-builds plan-time topology out of `Flow` and `Node`. Nothing in it reaches the
-engine, the journal, or a host capability.
+depends on `@smthrs/core` alone and builds plan-time topology out of `Flow` and
+`Node`. Nothing in it reaches the engine, the journal, or a host capability.
+Neither package has an entry in the browser gate, so this page makes no claim
+about bundling it for a browser.
 
 ### The two halves of a pattern
 
@@ -14844,7 +14882,7 @@ Node.js 22.19 or later. `pnpm install` at the root installs every workspace.
 | tests | `pnpm test` | every package suite at 100% coverage over `src/**` |
 | lint | `pnpm run lint` | formatting and lint rules |
 | cycles | `pnpm run circular` | no import cycle inside or across packages |
-| entry contract | `pnpm run browser` | every entry in `scripts/browser-check.mjs`'s `BROWSER_SAFE` list bundles for the browser, and every `NODE_ONLY` entry still fails |
+| entry contract | `pnpm run browser` | every entry in `scripts/browser-contract.mjs`'s `BROWSER_SAFE` list bundles for the browser, and every `NODE_ONLY` entry still fails |
 | examples | `pnpm run test:examples` | every documented example runs against the real packages |
 | launch checklist | `pnpm run checklist` | runs the UI workspace's operator launch checklist |
 | docs | `pnpm exec vocs build` | the site builds and no page links to a dead route |

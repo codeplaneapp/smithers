@@ -23,6 +23,8 @@
  *      before its page exists is still waiting for it
  *  14. every anchor a removal message sends an operator to has a heading in
  *      the migration guide
+ *  15. the browser-support tables and every stated browser entry-point count
+ *      match the contract `pnpm run browser` executes
  *
  * The two normalizers run in `--check` mode first, so their rules stay one
  * implementation rather than a detector and a fixer that can disagree.
@@ -50,6 +52,8 @@ import { assets, isHistorical, pages } from "./docs-pages.mjs"
 import { sidebarRoutes } from "./docs-sidebar.mjs"
 import { deferredRouteProblems, deferredRoutes, movedTreeProblems, movedTrees, routePlan } from "./docs-routes.mjs"
 import { cliCatalog } from "./docs-help.mjs"
+import { codeSpans, tableUnder } from "./docs-contract.mjs"
+import { browserEntryNames, citedBrowserCounts, nodeEntryNames } from "./browser-contract.mjs"
 
 let failed = false
 
@@ -385,6 +389,44 @@ for (const [title, argv] of [
     : missingAnchors(guide.body, anchors).map((anchor) => `docs/pages/migration/1.0.md: #${anchor}`)
   if (missing.length > 0) fail("a removal message links to an anchor the migration guide has no heading for", missing)
   else pass(`all ${anchors.size} anchors the removal messages link to have a heading in the migration guide`)
+}
+
+// -----------------------------------------------------------------------------
+// 15. The browser contract's prose
+// -----------------------------------------------------------------------------
+
+{
+  // `pnpm run browser` executes two lists. The support page reproduces them as
+  // tables and two other pages state their size, and none of that is checked by
+  // bundling anything: the gate stays green while the page names the wrong
+  // entry points. Both halves are read back from the same declaration here.
+  const offenders = []
+  const support = allPages.find((candidate) => candidate.route === "/architecture/browser-support")
+  const compare = (heading, declared) => {
+    if (support === undefined) {
+      offenders.push("docs/pages/architecture/browser-support.md: the page is not published")
+      return
+    }
+    const listed = new Set(tableUnder(support.body, heading).flatMap((row) => codeSpans(row[0])))
+    for (const name of declared) {
+      if (!listed.has(name)) offenders.push(`browser-support.md: ${heading} omits ${name}`)
+    }
+    for (const name of listed) {
+      if (!declared.includes(name)) offenders.push(`browser-support.md: ${heading} lists ${name}, which the gate does not`)
+    }
+  }
+  const browser = browserEntryNames()
+  compare("## Browser entry points", browser)
+  compare("## Node entry points", nodeEntryNames())
+  for (const path of countCitingDocuments()) {
+    for (const cited of citedBrowserCounts(readFileSync(join(repoRoot, path), "utf8"))) {
+      if (cited !== browser.length) {
+        offenders.push(`${path}: states ${cited} browser entry points, the gate bundles ${browser.length}`)
+      }
+    }
+  }
+  if (offenders.length > 0) fail("the browser prose disagrees with the contract the gate executes", offenders)
+  else pass(`the browser tables and counts match the ${browser.length} entry points the gate bundles`)
 }
 
 process.exit(failed ? 1 : 0)

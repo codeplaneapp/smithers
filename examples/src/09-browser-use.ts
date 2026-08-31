@@ -8,10 +8,12 @@
  * built-in, because platform access lives in layers, and the Node and Bun
  * bundles are their own packages.
  *
- * The barrel `@smthrs/flows` and `@smthrs/engine-store` are Node entry points,
- * so a browser app imports the per-package roots, as this file does. The test
- * for this example bundles the file itself for the browser and fails if a
- * Node-only import ever sneaks in.
+ * The barrel `@smthrs/flows` and `@smthrs/engine-store` bundle for the browser
+ * as well, and this file still imports the per-package roots: the barrel pulls
+ * every engine package into the bundle, and the Node-only composition is the
+ * `@smthrs/flows/NodeRuntime` subpath, which opens SQLite through `node:sqlite`.
+ * The test for this example bundles the file itself for the browser and fails
+ * if a Node-only import ever sneaks in.
  */
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Flow, Interpreter } from "@smthrs/flow"

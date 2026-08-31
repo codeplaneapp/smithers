@@ -45,6 +45,28 @@ required. `latest` still resolves the Smithers 0.x line. Install
 `4.0.0-rc.108`: a project with two Effect instances is unsupported, because
 schema internals are not interoperable between them.
 
+Pin one transitive package as well. `@effect/platform-node@4.0.0-rc.108` asks
+for `@effect/platform-node-shared` `^4.0.0-rc.108`, the registry answers
+`4.0.0-rc.112`, and that version's own peer range demands Effect
+`4.0.0-rc.112`. The install runs, on a single Effect copy, and `npm ls` exits 1
+until you override the range. In `package.json`, for npm and for Bun:
+
+```json
+{
+  "overrides": {
+    "@effect/platform-node-shared": "4.0.0-rc.108"
+  }
+}
+```
+
+pnpm 11 no longer reads a `pnpm` field from `package.json`. Put the same pin in
+`pnpm-workspace.yaml`:
+
+```yaml
+overrides:
+  "@effect/platform-node-shared": 4.0.0-rc.108
+```
+
 The only way to learn a new system is to write programs in it. The first program
 to write is the same as it has always been: print a greeting.
 

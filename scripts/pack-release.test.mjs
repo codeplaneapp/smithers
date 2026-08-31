@@ -205,3 +205,87 @@ test("dependencyOrder enters a cycle at its alphabetically first member", () => 
     ["d", "b", "c", "a"]
   )
 })
+
+/**
+ * Whether an npm `files` entry packs one path. A bare directory packs
+ * everything under it; `**` crosses directory boundaries and `*` does not.
+ */
+const packsPath = (pattern, path) => {
+  if (!pattern.includes("*")) return pattern === path || path.startsWith(`${pattern}/`)
+  const source = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*\//g, "\u0000")
+    .replace(/\*\*/g, "\u0001")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\u0000/g, "(?:.*/)?")
+    .replace(/\u0001/g, ".*")
+  return new RegExp(`^${source}$`).test(path)
+}
+
+test("every published manifest packs the module-type marker its build writes", () => {
+  // scripts/build.mjs writes `{"type":"commonjs"}` to dist/cjs/package.json so
+  // Node reads the CJS output as CommonJS inside a "type": "module" package. A
+  // `files` array whose globs miss that path drops the marker from the tarball
+  // while every other package ships it, which is how `smthrs` shipped without
+  // it. `dist/**/*` packs it and `dist/**/*.js` does not, so the claim is
+  // checked against the path, not against one spelling of the glob.
+  const manifests = readWorkspaceManifests()
+  const missing = workspaces.filter((directory) =>
+    !(manifests.get(directory).files ?? []).some((pattern) => packsPath(pattern, "dist/cjs/package.json"))
+  )
+
+  assert.deepEqual(missing, [], "these manifests do not pack dist/cjs/package.json")
+})
+
+test("packsPath reads npm files globs the way npm packs them", () => {
+  assert.equal(packsPath("dist/**/*", "dist/cjs/package.json"), true)
+  assert.equal(packsPath("dist/**/package.json", "dist/cjs/package.json"), true)
+  assert.equal(packsPath("dist/**/*.js", "dist/cjs/package.json"), false)
+  assert.equal(packsPath("dist/*", "dist/cjs/package.json"), false)
+  assert.equal(packsPath("dist", "dist/cjs/package.json"), true)
+  assert.equal(packsPath("src/**/*.sql", "src/migrations/0001_memory.sql"), true)
+  assert.equal(packsPath("src/**/*.ts", "src/migrations/0001_memory.sql"), false)
+})
+
+test("@smthrs/memory packs the SQL reference copies its shipped source cites", () => {
+  // The runtime migration is the TypeScript in src/internal/Sql.ts, whose
+  // docstring sends a reader to `src/migrations/*.sql`. The tarball ships that
+  // source, so it has to ship the files the source names.
+  const manifests = readWorkspaceManifests()
+  const memory = manifests.get("memory")
+  const references = readdirSync(join(repoRoot, "packages", "memory", "src", "migrations"))
+    .filter((name) => name.endsWith(".sql"))
+
+  assert.ok(references.length > 0, "the reference copies exist in the tree")
+  assert.ok(
+    memory.files.includes("src/**/*.sql"),
+    `@smthrs/memory files must pack ${references.length} reference migrations`
+  )
+})
+
+test("the install docs pin the drifted @effect/platform-node-shared to the packed effect version", () => {
+  // @effect/platform-node@4.0.0-rc.108 asks for @effect/platform-node-shared
+  // ^4.0.0-rc.108, the registry answers 4.0.0-rc.112, and rc.112 peers on
+  // effect ^4.0.0-rc.112. A fresh consumer following the install line installs
+  // the drifted copy and `npm ls` exits 1. The documented remedy is an
+  // overrides pin, and it has to name the version the packed manifests pin.
+  const manifests = readWorkspaceManifests()
+  const pins = new Set(
+    workspaces
+      .map((directory) => manifests.get(directory))
+      .map((manifest) => manifest.dependencies?.effect ?? manifest.peerDependencies?.effect)
+      .filter((range) => typeof range === "string")
+  )
+
+  assert.deepEqual([...pins], ["4.0.0-rc.108"], "one effect pin across the published set")
+  const pin = [...pins][0]
+  for (const relative of ["README.md", join("docs", "pages", "installation.md")]) {
+    const source = readFileSync(join(repoRoot, relative), "utf8")
+    assert.match(
+      source,
+      new RegExp(`"@effect/platform-node-shared":\\s*"${pin.replace(/\./g, "\\.")}"`),
+      `${relative} must document the overrides pin`
+    )
+    assert.match(source, /overrides/, `${relative} must name the overrides field`)
+  }
+})

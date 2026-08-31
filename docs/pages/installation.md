@@ -52,6 +52,36 @@ that exact version for `effect` and for the `@effect/*` packages that follow
 Effect's own version line. A project that resolves two Effect versions is
 unsupported, because schema internals are not interoperable between instances.
 
+## Override the drifted peer
+
+Pin one transitive package as well. `@effect/platform-node@4.0.0-rc.108` asks
+for `@effect/platform-node-shared` `^4.0.0-rc.108`, the registry answers
+`4.0.0-rc.112`, and that version's own peer range demands Effect
+`4.0.0-rc.112`. Your project still runs on a single Effect copy, and `npm ls`
+exits 1 with `invalid: "^4.0.0-rc.112"` until you override the range.
+
+:::code-group
+
+```json [package.json (npm, bun)]
+{
+  "overrides": {
+    "@effect/platform-node-shared": "4.0.0-rc.108"
+  }
+}
+```
+
+```yaml [pnpm-workspace.yaml (pnpm)]
+overrides:
+  "@effect/platform-node-shared": 4.0.0-rc.108
+```
+
+:::
+
+pnpm 11 no longer reads a `pnpm` field from `package.json`, so a
+`pnpm.overrides` block there is ignored with a warning and the drifted version
+is installed anyway. With the pin applied, `npm ls` exits 0 and the tree holds
+one `@effect/platform-node-shared@4.0.0-rc.108`.
+
 ## Install the command
 
 ```bash

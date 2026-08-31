@@ -16,7 +16,7 @@ Node.js 22.19 or later. `pnpm install` at the root installs every workspace.
 | tests | `pnpm test` | every package suite at 100% coverage over `src/**` |
 | lint | `pnpm run lint` | formatting and lint rules |
 | cycles | `pnpm run circular` | no import cycle inside or across packages |
-| entry contract | `pnpm run browser` | every entry in `scripts/browser-check.mjs`'s `BROWSER_SAFE` list bundles for the browser, and every `NODE_ONLY` entry still fails |
+| entry contract | `pnpm run browser` | every entry in `scripts/browser-contract.mjs`'s `BROWSER_SAFE` list bundles for the browser, and every `NODE_ONLY` entry still fails |
 | examples | `pnpm run test:examples` | every documented example runs against the real packages |
 | launch checklist | `pnpm run checklist` | runs the UI workspace's operator launch checklist |
 | docs | `pnpm exec vocs build` | the site builds and no page links to a dead route |
