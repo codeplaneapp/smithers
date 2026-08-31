@@ -13,6 +13,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -256,6 +257,88 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
     expect(JSON.parse(listed.stdout)).toMatchObject({ _tag: "flows" })
     expect(removed.status).toBe(1)
     expect(removed.stderr).toContain("was removed in 1.0.0-rc.0")
+  })
+})
+
+describe("a removed verb refuses before the control plane boots", processBudget, () => {
+  /**
+   * A refusal is a sentence, not work.
+   *
+   * Every removed verb used to run under `NodeControl.layer`, so before the
+   * one documented sentence reached stderr the process created
+   * `<cwd>/.flows/`, opened `engine.db`, and opened `control.db`. Two costs
+   * followed. An operator who typed a 0.x verb in any directory got a project
+   * state directory there as the side effect of being told the verb is gone.
+   * And `scripts/docs-removals.test.mjs` spawns the 75 removed forms eight at
+   * a time in one working directory, so eight processes contended on the same
+   * two SQLite files and answered with `disk I/O error` or with nothing before
+   * the harness's fifteen-second bound.
+   *
+   * The proof is the file system: run the refusal in an empty directory and
+   * assert that it is still empty afterwards.
+   */
+  const runIn = (
+    cwd: string,
+    args: ReadonlyArray<string>,
+    environment: Readonly<Record<string, string>> = {}
+  ) =>
+    spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
+      cwd,
+      encoding: "utf8",
+      timeout: 180_000,
+      // `HOME` points at the same empty directory so a fallback that writes to
+      // the home tree instead of the working directory is caught by the same
+      // assertion.
+      env: { ...process.env, HOME: cwd, ...environment }
+    })
+
+  const inEmptyDirectory = <A>(use: (cwd: string) => A): A => {
+    const cwd = realpathSync(mkdtempSync(temporaryDirectoryPrefix))
+    try {
+      return use(cwd)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  }
+
+  it("prints its sentence and leaves the working directory empty", () => {
+    const ui = Unsupported.removedVerbs.find((verb) => verb.name === "ui")!
+
+    inEmptyDirectory((cwd) => {
+      const result = runIn(cwd, ["ui"])
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(1)
+      expect(result.stderr.trim()).toBe(Unsupported.message("ui", ui.reason, "ui"))
+      expect(readdirSync(cwd)).toEqual([])
+    })
+  })
+
+  it("leaves the working directory empty for a removed form of a surviving parent", () => {
+    const gateway = Unsupported.removedVerbs.find((verb) => verb.name === "gateway")!
+
+    inEmptyDirectory((cwd) => {
+      const result = runIn(cwd, ["gateway", "status"])
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(1)
+      expect(result.stderr.trim()).toBe(Unsupported.message("gateway status", gateway.reason, "gateway"))
+      expect(readdirSync(cwd)).toEqual([])
+    })
+  })
+
+  it("still boots the control plane for a surviving verb", () => {
+    // The guard is scoped to the removal table. `ls` is a real verb, so it
+    // still resolves a project and opens its databases, and a guard that
+    // swallowed it would show up here rather than as a silent listing of
+    // nothing.
+    inEmptyDirectory((cwd) => {
+      const result = runIn(cwd, ["--json", "ls"])
+
+      expect(result.status).toBe(0)
+      expect(JSON.parse(result.stdout)).toMatchObject({ _tag: "flows" })
+      expect(readdirSync(join(cwd, ".flows")).sort()).toContain("control.db")
+    })
   })
 })
 

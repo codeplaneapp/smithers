@@ -307,10 +307,10 @@ export const llms = Smithers.NodeTest({
 })
 
 /**
- * The unit suites behind those two gates: the contract parser, the deploy
- * workflow, the removal surface, the render helpers, the help parser, the route
- * plan, the sidebar, the bundle builder, the version guard, and the invocation
- * normalizer.
+ * The unit suites behind those two gates: the served-bundle comparison, the
+ * contract parser, the deploy workflow, the removal surface, the render
+ * helpers, the help parser, the route plan, the sidebar, the bundle builder,
+ * the version guard, and the invocation normalizer.
  *
  * @since 0.1.0
  * @category test
@@ -318,6 +318,7 @@ export const llms = Smithers.NodeTest({
 export const docsUnit = Smithers.NodeTest({
   runtime,
   runner: Smithers.testRunner([
+    Smithers.file("//scripts/check-llms.test.mjs"),
     Smithers.file("//scripts/docs-contract.test.mjs"),
     Smithers.file("//scripts/docs-deploy.test.mjs"),
     Smithers.file("//scripts/docs-links.test.mjs"),
