@@ -654,7 +654,11 @@ export const artifactSteps = (upload: CiToolchain.ArtifactUpload): ReadonlyArray
     const destination = source.as === undefined
       ? root
       : `"$RUNNER_TEMP/${artifact}/${CiToolchain.validatePath(source.as, "artifact destination")}"`
-    return `cp -R -- ${from} ${destination}`
+    // A green run often leaves nothing to collect: an unexpanded glob must not
+    // fail the job (PR #1631: the e2e suites passed and the bare `cp` of
+    // /tmp/smithers-*.png exited 1). Guard each source on existence; a source
+    // that exists but fails to copy still fails the step loudly.
+    return `for f in ${from}; do if [ -e "$f" ]; then cp -R -- "$f" ${destination}; fi; done`
   })
   return [
     { name: `Collect ${upload.artifact}`, run: [`mkdir -p ${root}`, ...copies].join("\n") },

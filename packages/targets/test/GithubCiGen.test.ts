@@ -582,8 +582,15 @@ describe("render", () => {
     expect(rendered).toContain("          if [ ! -x /usr/bin/google-chrome ]; then\n")
     expect(rendered).toContain("          /usr/bin/google-chrome --version\n")
     expect(rendered).toContain("          mkdir -p \"$RUNNER_TEMP/e2e-artifacts\"\n")
-    expect(rendered).toContain("          cp -R -- '/tmp/shot-'*'.png' \"$RUNNER_TEMP/e2e-artifacts\"\n")
-    expect(rendered).toContain("          cp -R -- 'apps/reports' \"$RUNNER_TEMP/e2e-artifacts/reports\"\n")
+    // Each copy is existence-guarded: a green run leaves no screenshots, and an
+    // unexpanded glob handed to a bare `cp` fails the whole job (PR #1631).
+    expect(rendered).toContain(
+      "          for f in '/tmp/shot-'*'.png'; do if [ -e \"$f\" ]; then cp -R -- \"$f\" \"$RUNNER_TEMP/e2e-artifacts\"; fi; done\n"
+    )
+    expect(rendered).toContain(
+      "          for f in 'apps/reports'; do if [ -e \"$f\" ]; then cp -R -- \"$f\" \"$RUNNER_TEMP/e2e-artifacts/reports\"; fi; done\n"
+    )
+    expect(rendered).not.toContain("cp -R -- '/tmp/shot-'*'.png'")
     expect(rendered).not.toContain("2>/dev/null || true")
     expect(rendered).toContain("          if-no-files-found: ignore\n")
     // Issue #176: the generated workflow carries no step condition at all, so

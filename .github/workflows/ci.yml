@@ -122,8 +122,8 @@ jobs:
       - name: Collect apps-e2e-artifacts
         run: |
           mkdir -p "$RUNNER_TEMP/apps-e2e-artifacts"
-          cp -R -- '/tmp/smithers-'*'.png' "$RUNNER_TEMP/apps-e2e-artifacts"
-          cp -R -- 'apps/reports' "$RUNNER_TEMP/apps-e2e-artifacts/reports"
+          for f in '/tmp/smithers-'*'.png'; do if [ -e "$f" ]; then cp -R -- "$f" "$RUNNER_TEMP/apps-e2e-artifacts"; fi; done
+          for f in 'apps/reports'; do if [ -e "$f" ]; then cp -R -- "$f" "$RUNNER_TEMP/apps-e2e-artifacts/reports"; fi; done
       - name: Upload apps-e2e-artifacts
         uses: actions/upload-artifact@v4
         with:
