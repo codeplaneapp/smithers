@@ -14,6 +14,7 @@ export const HARNESS_IDS = [
   "gemini",
   "kimi",
   "opencode",
+  "opencode-kimi",
   "crush",
   "amp",
   "cursor-agent",
@@ -183,7 +184,9 @@ export const PtySessionSchema = z.object({
   harnessId: z.enum(HARNESS_IDS).optional(),
   cwd: z.string(),
   pid: z.number(),
-  alive: z.boolean()
+  alive: z.boolean(),
+  /** The exit code once the process has exited (null when it died by signal); absent while alive. */
+  exitCode: z.number().nullable().optional()
 })
 export type PtySession = z.infer<typeof PtySessionSchema>
 
@@ -273,3 +276,14 @@ export const HarnessesResponseSchema = z.object({ harnesses: z.array(HarnessSche
 export const ReposResponseSchema = z.object({ repos: z.array(RepoSchema) })
 /** `POST /api/pty` */
 export const PtyCreateResponseSchema = z.object({ sessionId: z.string() })
+
+/** `GET /api/pty/:id/output`: the session's recent output (the tail of a bounded scrollback). */
+export const PtyOutputResponseSchema = z.object({
+  sessionId: z.string(),
+  alive: z.boolean(),
+  /** Plain text: ANSI escapes stripped, carriage returns dropped. */
+  output: z.string(),
+  /** True when older output fell out of the bounded buffer or was cut by `tail`. */
+  truncated: z.boolean()
+})
+export type PtyOutputResponse = z.infer<typeof PtyOutputResponseSchema>

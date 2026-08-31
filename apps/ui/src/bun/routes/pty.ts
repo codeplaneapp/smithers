@@ -76,6 +76,23 @@ export const registerPtyRoutes = (
     return json({ sessionId: result.session.sessionId }, 201)
   })
 
+  /*
+   * The tab's recent output as text, for `tab.read` (the agent reading
+   * another tab). `?tail=<bytes>` keeps only the end; the manager's own
+   * scrollback bound applies before it.
+   */
+  router.add("GET", `${PTY_PATH}/:id/output`, ({ request, params }) => {
+    const id = params.id ?? ""
+    const tailParam = new URL(request.url).searchParams.get("tail")
+    const tail = tailParam === null ? undefined : Number(tailParam)
+    if (tail !== undefined && (!Number.isInteger(tail) || tail < 0)) {
+      return jsonError(400, "invalid_request", "tail must be a non-negative integer.")
+    }
+    const output = manager.read(id, tail)
+    if (output === undefined) return jsonError(404, "not_found", `No PTY session ${id}.`)
+    return json({ sessionId: id, ...output })
+  })
+
   router.add("POST", `${PTY_PATH}/:id/resize`, async ({ request, params }) => {
     const parsed = await readJson(request)
     if ("error" in parsed) return parsed.error

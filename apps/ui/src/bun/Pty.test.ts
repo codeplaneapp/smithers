@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Harness } from "smithers-shared/LocalApp"
-import { childEnv, createPtyManager, ENV_ALLOWLIST, expandCwd } from "./Pty"
+import { childEnv, createPtyManager, ENV_ALLOWLIST, expandCwd, plainText, PTY_SCROLLBACK_BYTES } from "./Pty"
 import type { PtyManager } from "./Pty"
 
 /*
@@ -110,7 +110,7 @@ describe("sessions", () => {
     expect(exitOf(sessionId)?.message).toEqual({ type: "pty.exit", sessionId, code: 7 })
     expect(frames.filter((frame) => frame.message.type === "pty.exit" && frame.message.sessionId === sessionId)).toHaveLength(1)
     // Exited sessions stay listed, dead, until deleted; input is refused.
-    expect(m.get(sessionId)).toMatchObject({ alive: false })
+    expect(m.get(sessionId)).toMatchObject({ alive: false, exitCode: 7 })
     expect(m.write(sessionId, "x")).toBe(false)
     expect(m.resize(sessionId, 1, 1)).toBe(false)
     expect(await m.kill(sessionId)).toBe(true)
@@ -165,5 +165,29 @@ describe("sessions", () => {
     await until(() => exitOf(created.session.sessionId) !== undefined)
     expect(outputOf(created.session.sessionId)).toContain("harness-ok")
     expect(exitOf(created.session.sessionId)?.message.code).toBe(3)
+  })
+
+  test("read serves the scrollback as plain text: escapes stripped, bounded, tail-cut on request", async () => {
+    const created = manager()
+    const result = await created.create({ kind: "terminal", cwd: "~", cols: 80, rows: 24 })
+    if (result.status !== "ok") throw new Error(result.message)
+    const { sessionId } = result.session
+    created.write(sessionId, "printf 'a\\033[31mred\\033[0m b\\n'; echo hi-from-read\n")
+    await until(() => /hi-from-read\r?\n/.test(outputOf(sessionId).replace(/echo hi-from-read/g, "")))
+    const whole = created.read(sessionId)
+    expect(whole?.alive).toBe(true)
+    expect(whole?.output).toContain("hi-from-read")
+    expect(whole?.output).toContain("ared b")
+    expect(whole?.output).not.toMatch(/\u001b|\r/)
+    const cut = created.read(sessionId, 8)
+    expect(cut?.output.length).toBe(8)
+    expect(cut?.truncated).toBe(true)
+    expect(created.read("nope")).toBeUndefined()
+    await created.kill(sessionId)
+  })
+
+  test("plainText drops CSI, OSC, and C0 controls but keeps tabs and newlines; the scrollback bound is 64 KiB", () => {
+    expect(plainText("\u001b[1;32mok\u001b[0m\r\n\u001b]0;title\u0007x\ty\u0008")).toBe("ok\nx\ty")
+    expect(PTY_SCROLLBACK_BYTES).toBe(64 * 1024)
   })
 })

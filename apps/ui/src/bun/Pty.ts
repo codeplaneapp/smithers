@@ -43,7 +43,33 @@ export interface PtyManager {
   /** SIGHUP, then SIGKILL after a grace period; the record is dropped. False when unknown. */
   readonly kill: (sessionId: string) => Promise<boolean>
   readonly killAll: () => Promise<void>
+  /**
+   * The session's recent output as plain text (`tab.read`): the tail of a
+   * bounded scrollback with ANSI escapes stripped. `tailBytes` cuts it
+   * further from the end. Undefined when the session is unknown.
+   */
+  readonly read: (sessionId: string, tailBytes?: number) => PtyOutput | undefined
 }
+
+export interface PtyOutput {
+  readonly output: string
+  readonly alive: boolean
+  readonly truncated: boolean
+}
+
+/** How much raw output a session keeps for `read`; older bytes fall off the front. */
+export const PTY_SCROLLBACK_BYTES = 64 * 1024
+
+/*
+ * Escape sequences an emulator would consume: CSI (`ESC [ ... final`), OSC
+ * (`ESC ] ... BEL|ST`), the two-byte ESC forms, and the C0 controls other
+ * than tab and newline. The model reads text, not cursor motion.
+ */
+// eslint-disable-next-line no-control-regex
+const ANSI = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]|[\u0000-\u0008\u000b-\u001f\u007f]/g
+
+/** The buffered output as the model should read it. */
+export const plainText = (raw: string): string => raw.replace(ANSI, "").replace(/\r/g, "")
 
 export interface PtyManagerOptions {
   /** `pty:<sessionId>` frames go out through here (the server's publish). */
@@ -95,6 +121,8 @@ export const ENV_ALLOWLIST: ReadonlyArray<string> = [
   "GOOGLE_API_KEY",
   "OPENROUTER_API_KEY",
   "OPENCODE_API_KEY",
+  /* OpenCode's "Kimi For Coding" provider reads this (`opencode providers list`). */
+  "KIMI_API_KEY",
   "CURSOR_API_KEY",
   "AMP_API_KEY"
 ]
@@ -159,10 +187,14 @@ const isDirectory = (path: string): boolean => {
 }
 
 interface LiveSession {
-  readonly record: PtySession
+  record: PtySession
   readonly proc: ReturnType<typeof Bun.spawn>
   readonly decoder: TextDecoder
   exited: Promise<void>
+  /** The bounded scrollback `read` serves; appended by every output frame. */
+  scrollback: string
+  /** True once older output has fallen off the front of `scrollback`. */
+  dropped: boolean
 }
 
 export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
@@ -177,6 +209,22 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
   const sessions = new Map<string, LiveSession>()
 
   const topic = (sessionId: string): string => `pty:${sessionId}`
+
+  /** Publish one output frame and keep it in the session's scrollback. */
+  const emitOutput = (sessionId: string, text: string): void => {
+    if (text === "") return
+    const live = sessions.get(sessionId)
+    if (live !== undefined) {
+      const joined = live.scrollback + text
+      if (joined.length > PTY_SCROLLBACK_BYTES) {
+        live.scrollback = joined.slice(joined.length - PTY_SCROLLBACK_BYTES)
+        live.dropped = true
+      } else {
+        live.scrollback = joined
+      }
+    }
+    options.publish(topic(sessionId), { type: "pty.output", sessionId, data: text })
+  }
 
   const create: PtyManager["create"] = async (input) => {
     const liveCount = [...sessions.values()].filter((session) => session.record.alive).length
@@ -221,8 +269,7 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
           rows: Math.max(1, Math.floor(input.rows)),
           name: "xterm-256color",
           data: (_terminal, chunk) => {
-            const text = decoder.decode(chunk, { stream: true })
-            if (text !== "") options.publish(topic(sessionId), { type: "pty.output", sessionId, data: text })
+            emitOutput(sessionId, decoder.decode(chunk, { stream: true }))
           },
           exit: () => eof()
         }
@@ -238,17 +285,18 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
       pid: proc.pid,
       alive: true
     }
-    const live: LiveSession = { record, proc, decoder, exited: Promise.resolve() }
+    const live: LiveSession = { record, proc, decoder, exited: Promise.resolve(), scrollback: "", dropped: false }
     sessions.set(sessionId, live)
     log(`pty ${sessionId}: ${input.kind} pid ${proc.pid} in ${cwd} (sandbox ${wrapped.enforced ? "on" : "off"})`)
     live.exited = proc.exited.then(async (code) => {
       // The last output usually lands after SIGCHLD; the PTY's EOF (or a short grace) orders it before the exit frame.
       await Promise.race([eofSeen, Bun.sleep(300)])
-      const tail = decoder.decode()
-      if (tail !== "") options.publish(topic(sessionId), { type: "pty.output", sessionId, data: tail })
+      emitOutput(sessionId, decoder.decode())
       const current = sessions.get(sessionId)
-      if (current !== undefined) sessions.set(sessionId, { ...current, record: { ...current.record, alive: false } })
-      options.publish(topic(sessionId), { type: "pty.exit", sessionId, code: typeof code === "number" ? code : null })
+      const exitCode = typeof code === "number" ? code : null
+      // The list (and tab.read) name the exit code too, not only the one-shot exit frame.
+      if (current !== undefined) current.record = { ...current.record, alive: false, exitCode }
+      options.publish(topic(sessionId), { type: "pty.exit", sessionId, code: exitCode })
       log(`pty ${sessionId}: exited ${String(code)}`)
       try {
         proc.terminal?.close()
@@ -320,7 +368,19 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
     await Promise.all([...sessions.keys()].map((sessionId) => kill(sessionId)))
   }
 
-  return { create, list, get, write, resize, kill, killAll }
+  const read: PtyManager["read"] = (sessionId, tailBytes) => {
+    const live = sessions.get(sessionId)
+    if (live === undefined) return undefined
+    const text = plainText(live.scrollback)
+    const cut = tailBytes !== undefined && tailBytes >= 0 && text.length > tailBytes
+    return {
+      output: cut ? text.slice(text.length - tailBytes) : text,
+      alive: live.record.alive,
+      truncated: live.dropped || cut
+    }
+  }
+
+  return { create, list, get, write, resize, kill, killAll, read }
 }
 
 const safeRealpath = (path: string): string => {
