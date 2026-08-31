@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import { existsSync } from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as NodeNet from "node:net"
 import * as Os from "node:os"
@@ -14,6 +15,30 @@ const temporaryDirectories: Array<string> = []
 afterAll(async () => {
   await Promise.all(temporaryDirectories.map((directory) => Fs.rm(directory, { recursive: true, force: true })))
 })
+
+/**
+ * Runs `body` with every PATH directory holding `binary` removed.
+ *
+ * A case that asserts a host-binary refusal has to ARRANGE the absence. The
+ * Mise case below inherited it from whatever PATH the suite happened to run
+ * with, so it asserted a refusal a developer machine with mise installed never
+ * produces: on this macOS host the plan resolved
+ * `argv[2]: /opt/homebrew/bin/mise,"--version"` and the case failed. The rest
+ * of PATH is kept, so nothing else the planner resolves changes.
+ */
+const withoutOnPath = async <A>(binary: string, body: () => Promise<A>): Promise<A> => {
+  const original = process.env["PATH"] ?? ""
+  const holdsBinary = (directory: string): boolean =>
+    directory !== "" &&
+    [binary, `${binary}.exe`, `${binary}.cmd`].some((name) => existsSync(NodePath.join(directory, name)))
+  process.env["PATH"] = original.split(NodePath.delimiter).filter((directory) => !holdsBinary(directory))
+    .join(NodePath.delimiter)
+  try {
+    return await body()
+  } finally {
+    process.env["PATH"] = original
+  }
+}
 
 const workspace = async (): Promise<string> => {
   const root = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-chain-exec-")))
@@ -248,7 +273,7 @@ export const Package = S.Package({ targets: { tool } })
 `,
       "utf8"
     )
-    const result = await serve(root, ["//:tool", "--plan"])
+    const result = await withoutOnPath("mise", () => serve(root, ["//:tool", "--plan"]))
     expect(result.exitCode).toBe(0)
     expect(result.output).toContain("host binary")
     expect(result.output).toContain("mise")
