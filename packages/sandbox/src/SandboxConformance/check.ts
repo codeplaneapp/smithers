@@ -28,8 +28,7 @@ const inSession = <A>(
   provider: Provider,
   session: string,
   body: (session: Session) => Effect.Effect<A, unknown, never>
-): Effect.Effect<Exit.Exit<A, unknown>> =>
-  Effect.exit(Effect.scoped(Effect.flatMap(provider.acquire(session), body)))
+): Effect.Effect<Exit.Exit<A, unknown>> => Effect.exit(Effect.scoped(Effect.flatMap(provider.acquire(session), body)))
 
 const output = (process: RemoteProcess): Effect.Effect<string, ProviderError> =>
   Effect.map(
@@ -126,7 +125,9 @@ export const check = (
     const found: Array<Violation | undefined> = [
       Exit.isSuccess(roundTrips) &&
         roundTrips.value.length === conformanceBytes.length &&
-        roundTrips.value.every((byte, index) => byte === conformanceBytes[index])
+        roundTrips.value.every((byte, index) =>
+          byte === conformanceBytes[index]
+        )
         ? undefined
         : {
           check: "round-trips-binary-bytes",
@@ -162,7 +163,9 @@ export const check = (
       }
     ]
     return [
-      ...found.filter((violation): violation is Violation => violation !== undefined),
+      ...found.filter((violation): violation is Violation =>
+        violation !== undefined
+      ),
       ...spawnChecks
     ]
   })

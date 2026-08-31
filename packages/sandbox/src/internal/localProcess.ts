@@ -15,8 +15,8 @@ import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
  * @category constructors
  * @since 0.1.0
  */
-export const providerFailure = (code: ProviderError["code"], message: string) =>
-(cause: unknown): ProviderError => new ProviderError({ code, message, cause })
+export const providerFailure = (code: ProviderError["code"], message: string) => (cause: unknown): ProviderError =>
+  new ProviderError({ code, message, cause })
 
 /**
  * Presents a locally spawned handle as a remote process. The in-repository

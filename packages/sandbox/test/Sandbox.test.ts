@@ -68,8 +68,7 @@ describe("Sandbox.TestSession", () => {
       const outcome = yield* withSession(provider, (session) =>
         Effect.gen(function*() {
           const direct = yield* Effect.scoped(
-            Effect.flatMap(session.spawn("direct", {}), (process) =>
-              Stream.mkString(Stream.decodeText(process.stdout)))
+            Effect.flatMap(session.spawn("direct", {}), (process) => Stream.mkString(Stream.decodeText(process.stdout)))
           )
           const resolved = yield* Effect.scoped(
             Effect.flatMap(session.spawn("resolved", {}), (process) => process.exitCode)
@@ -108,8 +107,10 @@ describe("Sandbox.commandProvider", () => {
         Effect.gen(function*() {
           yield* projected.open("cmd")
           return yield* Effect.scoped(
-            Effect.flatMap(projected.spawn("greet", {}), (process) =>
-              Stream.mkString(Stream.decodeText(process.stdout)))
+            Effect.flatMap(
+              projected.spawn("greet", {}),
+              (process) => Stream.mkString(Stream.decodeText(process.stdout))
+            )
           )
         })
       )
@@ -179,8 +180,7 @@ describe("Sandbox.commandProvider", () => {
         // Closing the FIRST generation must not clear the second's session.
         yield* Scope.close(first, Exit.void)
         const output = yield* Effect.scoped(
-          Effect.flatMap(projected.spawn("greet", {}), (process) =>
-            Stream.mkString(Stream.decodeText(process.stdout)))
+          Effect.flatMap(projected.spawn("greet", {}), (process) => Stream.mkString(Stream.decodeText(process.stdout)))
         )
         yield* Scope.close(second, Exit.void)
         return output
@@ -219,9 +219,9 @@ describe("Sandbox.fileSystem", () => {
     Effect.gen(function*() {
       const provider = Sandbox.TestSession.make({
         script: (command) =>
-          command.includes(' /there')
+          command.includes(" /there")
             ? { exitCode: 0 }
-            : command.includes(' /absent')
+            : command.includes(" /absent")
             ? { exitCode: 1 }
             : { exitCode: 2, stderr: "sh: test: broken" }
       })
@@ -243,15 +243,15 @@ describe("Sandbox.fileSystem", () => {
     Effect.gen(function*() {
       const provider = Sandbox.TestSession.make({
         script: (command) =>
-          command.includes(' /file ')
+          command.includes(" /file ")
             ? { stdout: "File 42" }
-            : command.includes(' /dir ')
+            : command.includes(" /dir ")
             ? { stdout: "Directory 0" }
-            : command.includes(' /dangling ')
+            : command.includes(" /dangling ")
             ? { stdout: "SymbolicLink 0" }
-            : command.includes(' /odd ')
+            : command.includes(" /odd ")
             ? { stdout: "Fifo 0" }
-            : command.includes(' /absent')
+            : command.includes(" /absent")
             ? { exitCode: 9 }
             : { exitCode: 2, stderr: "stat probe broke" }
       })
@@ -280,9 +280,9 @@ describe("Sandbox.fileSystem", () => {
     Effect.gen(function*() {
       const provider = Sandbox.TestSession.make({
         script: (command) =>
-          command.startsWith('if [ -d /tree/ ]')
+          command.startsWith("if [ -d /tree/ ]")
             ? { stdout: command.includes("find") ? "/tree/a\n/tree/a/b.txt\n/elsewhere/x\n" : "a\nz.txt\n" }
-            : command.includes(' /gone ')
+            : command.includes(" /gone ")
             ? { exitCode: 9 }
             : { exitCode: 2, stderr: "ls: exploded" }
       })

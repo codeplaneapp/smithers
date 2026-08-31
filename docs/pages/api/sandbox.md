@@ -1,10 +1,10 @@
 ---
-description: "Provider-neutral remote process execution and sandbox liveness, above Effect's ChildProcessSpawner."
+description: "Provider-neutral remote process execution, provisioned-machine lifecycle, conformance, and sandbox liveness."
 ---
 
 # @smthrs/sandbox
 
-Provider-neutral remote process execution and sandbox liveness. Provider packages adapt their SDK sessions to `RemoteChildProcessSpawner.Provider`; this package converts them onto Effect's `ChildProcessSpawner` contract and adds the health taxonomy above it.
+Provider-neutral remote process execution, provisioned-machine lifecycle, conformance, liveness, and supervision. The package exports `RemoteChildProcessSpawner`, `ProviderConformance`, `Sandbox`, `SandboxConformance`, `DirectorySandbox`, `ContainerSandbox`, `SandboxHealth`, and `SandboxSupervision` as namespaces. Provider packages adapt their SDK sessions to either the spawn-only or provisioned-machine contract; this package derives Effect's host services and health machinery from those contracts.
 
 ```ts
 import { RemoteChildProcessSpawner } from "@smthrs/sandbox"
@@ -22,7 +22,7 @@ const program = Effect.gen(function*() {
 }).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
 ```
 
-The package depends on `@smthrs/kernel`, for `CommandLine.render` alone, and on nothing else in the workspace: a sandbox is one way to satisfy `ChildProcessSpawner`, so it sits above the closed host list rather than inside it. It bundles for the browser, because it only runs the effect a provider hands it.
+The package depends on `@smthrs/kernel`, for `CommandLine.render` alone, and on nothing else in the workspace: a sandbox is one way to satisfy `ChildProcessSpawner`, so it sits above the closed host list rather than inside it. It bundles for the browser because host access arrives through a provider or injected host services.
 
 ## Entry points
 
@@ -30,13 +30,19 @@ The package depends on `@smthrs/kernel`, for `CommandLine.render` alone, and on 
 | --- | --- |
 | `@smthrs/sandbox` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/sandbox/src/index.ts) |
 | `@smthrs/sandbox/RemoteChildProcessSpawner` | [src/RemoteChildProcessSpawner/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/RemoteChildProcessSpawner) |
+| `@smthrs/sandbox/ProviderConformance` | [src/ProviderConformance/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/ProviderConformance) |
+| `@smthrs/sandbox/Sandbox` | [src/Sandbox/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/Sandbox) |
+| `@smthrs/sandbox/SandboxConformance` | [src/SandboxConformance/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/SandboxConformance) |
+| `@smthrs/sandbox/DirectorySandbox` | [src/DirectorySandbox/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/DirectorySandbox) |
+| `@smthrs/sandbox/ContainerSandbox` | [src/ContainerSandbox/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/ContainerSandbox) |
 | `@smthrs/sandbox/SandboxHealth` | [src/SandboxHealth/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/SandboxHealth) |
+| `@smthrs/sandbox/SandboxSupervision` | [src/SandboxSupervision/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/SandboxSupervision) |
 
 ## RemoteChildProcessSpawner
 
 | Export | Kind | Notes |
 | --- | --- | --- |
-| `ProviderErrorCode` | const + type | `aborted`, `timeout`, `unavailable`, `spawn_error`, `unknown`: this seam's own closed set |
+| `ProviderErrorCode` | const + type | `aborted`, `timeout`, `unavailable`, `not_found`, `spawn_error`, `unknown`: this seam's own closed set |
 | `ProviderError` | class | tagged `@smthrs/sandbox/RemoteChildProcessSpawner/ProviderError` |
 | `Provider` | interface + service tag | `session`, scoped `open`, scoped `spawn` |
 | `RemoteProcess`, `RemoteOptions` | interfaces | a started remote process (`stdout`, `stderr`, `exitCode`) and the `cwd`/`env` carried across |
@@ -75,7 +81,7 @@ rather than when the remote process ends. Both are stated in the module header.
 
 ## API reference
 
-This page is the public API reference for remote process execution and sandbox liveness. Provider packages adapt their SDK sessions to `RemoteChildProcessSpawner.Provider`; this package owns the conversion onto Effect's `ChildProcessSpawner` contract and its `PlatformError` surface, plus the health taxonomy above it.
+This page is the public API reference for the package's eight namespace exports: `RemoteChildProcessSpawner`, `ProviderConformance`, `Sandbox`, `SandboxConformance`, `DirectorySandbox`, `ContainerSandbox`, `SandboxHealth`, and `SandboxSupervision`. Provider packages adapt their SDK sessions to the spawn-only `RemoteChildProcessSpawner.Provider` or lifecycle-owning `Sandbox.Provider`; this package derives Effect host services, conformance checks, health, and supervision from those seams.
 
 It depends on `@smthrs/kernel`, for `CommandLine.render` alone, and nothing else in the workspace. That direction is deliberate: a sandbox is one way to satisfy `ChildProcessSpawner`, so it sits above the closed host list rather than inside it.
 
@@ -85,7 +91,7 @@ It depends on `@smthrs/kernel`, for `CommandLine.render` alone, and nothing else
 | --- | --- | --- |
 | `Provider` | interface + service tag | `session`, scoped `open`, and a scoped `spawn` returning a `RemoteProcess` |
 | `RemoteProcess`, `RemoteOptions` | interfaces | a started remote process in the same three pieces a child process has (`stdout`, `stderr`, `exitCode`), and the `cwd`/`env` a rendered command carries across |
-| `ProviderErrorCode` | const + type | `aborted`, `timeout`, `unavailable`, `spawn_error`, `unknown` |
+| `ProviderErrorCode` | const + type | `aborted`, `timeout`, `unavailable`, `not_found`, `spawn_error`, `unknown` |
 | `ProviderError` | class | tagged `@smthrs/sandbox/RemoteChildProcessSpawner/ProviderError` |
 | `layer` | layer | adapts a configured provider to Effect's `ChildProcessSpawner` |
 | `make` | constructor | the scoped spawner behind `layer`, for a caller that holds sessions itself (`SandboxSupervision`) |
@@ -95,7 +101,7 @@ It depends on `@smthrs/kernel`, for `CommandLine.render` alone, and nothing else
 
 Provider acquisition is tied to the layer scope: interrupting an execution or a stream consumer closes that scope and therefore runs the finalizer installed by `Provider.open`. No `AbortSignal` crosses this seam.
 
-A provider may add SDK details to `ProviderError.cause`, but it cannot create new host-visible failure kinds: the code set is closed, and `layer` normalizes each code onto the `PlatformError` reason that already means it (`timeout` → `TimedOut`, `unavailable` → `NotFound`, the rest → `Unknown`), naming the `ChildProcess` module the sibling spawners name.
+A provider may add SDK details to `ProviderError.cause`, but it cannot create new host-visible failure kinds: the code set is closed, and `layer` normalizes each code onto the `PlatformError` reason that already means it (`timeout` → `TimedOut`, `unavailable` and `not_found` → `NotFound`, the rest → `Unknown`), naming the `ChildProcess` module the sibling spawners name. `not_found` means a requested guest path is absent; it stays distinct from a session that is unavailable until that normalization boundary.
 
 `Provider.kill` and `Provider.ping` are optional, because a transport that can only post a command line has neither. A provider that implements them buys two things it cannot otherwise have: one command can be stopped without tearing down the session that runs it, and the session's liveness can be supervised. When `kill` is present the adapter maps `ChildProcessHandle.kill` onto it and signals a still-running command when its scope closes, ahead of the provider's own release finalizer; a process this side has already seen exit is left alone. When `kill` is absent the adapter keeps the old refusal, a `BadArgument` `PlatformError`, rather than pretending to have delivered a signal.
 
@@ -159,9 +165,12 @@ const violations = yield* ProviderConformance.check(provider, {
   output: "hello",
   fails: "sh -c 'exit 3'",
   failureCode: 3,
-  runs: "sh -c 'sleep 60'"
+  runs: "sh -c 'sleep 60'",
+  shell: true
 })
 ```
+
+`Commands.shell` defaults to `false`. Set it to `true` when the fixture strings are shell lines; the suite then renders them verbatim instead of POSIX-quoting each whole string as one program token. `SandboxConformance.posixCommands` sets it for its POSIX fixtures.
 
 The checklist:
 
@@ -175,6 +184,114 @@ The checklist:
 The kill check watches the process, not the call. A `kill` that returns success and leaves the command running satisfies the type and leaks a process inside the sandbox for every cancelled action, so the check waits for `runs` to stop and reports `the command was still running after the signal` when it does not. How it stopped is not the subject: a provider that reports a signalled process as a failed `exitCode` is as conforming as one that reports a status. `Commands.stopsWithin` bounds the wait, defaulting to `ProviderConformance.defaultStopsWithin` (5 seconds).
 
 The checks run through `RemoteChildProcessSpawner.layer`, because a provider that satisfies the interface but not the adapter is of no use to a caller, and each check gets a fresh session so a check that leaves one unusable cannot decide the next. The optional capabilities are checked only when the provider declares them: an absent `ping` or `kill` is a documented absence, not a defect.
+
+### Sandbox
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `Session` | interface | one held machine: identity, workdir, spawn, byte-typed file transfer, and optional `kill`, `ping`, and native file operations |
+| `Provider` | interface + service tag | scoped `acquire(session)` creates or reattaches a machine and owns its teardown |
+| `CommandProviderOptions`, `commandProvider` | interface and constructor | projects a lifecycle provider onto `RemoteChildProcessSpawner.Provider` |
+| `fileSystem` | constructor | derives Effect's `FileSystem` from one session |
+| `LayerHostOptions`, `layerHost` | interface and layer | holds one machine as `ChildProcessSpawner`, `FileSystem`, and `Path` |
+| `TestSession`, `TestSessionProvider`, `TestSessionState` | const and interfaces | deterministic scripted lifecycle provider, guest tree, commands, and acquire/release observations |
+
+`Session` is a machine contract, not just a command transport. Its file operations and spawned commands must see the same tree.
+
+| Obligation | Required behavior |
+| --- | --- |
+| default directory | `spawn(command, {})` runs in `Session.workdir` |
+| parent creation | `writeFile` creates missing parent directories |
+| absence | `readFile` fails with `ProviderError.code === "not_found"` when the path is absent |
+| contents | file contents cross as bytes and round-trip unchanged |
+| optional control | `kill` and `ping` keep the spawner-level meanings |
+
+```ts
+import { Sandbox } from "@smthrs/sandbox"
+import * as Effect from "effect/Effect"
+
+const useMachine = Effect.scoped(
+  Effect.gen(function*() {
+    const session = yield* provider.acquire("run:01J...")
+    yield* session.writeFile(`${session.workdir}/src/input.bin`, bytes)
+    return yield* session.spawn("pnpm test", {})
+  })
+)
+```
+
+`Provider.acquire(key)` is scoped. Acquisition registers teardown as a finalizer of that scope; closing the scope is the only lifecycle end exposed to the caller. The stable key lets an implementation deterministically name and reattach a crash-left machine when it can. Image, memory, network policy, and other machine shape belong to provider construction, not `acquire`.
+
+`commandProvider(provider, options)` projects that lifecycle back onto the spawn-only provider. Existing `RemoteChildProcessSpawner` adapters, `SandboxHealth.fromProvider`, `SandboxSupervision`, and `ProviderConformance` then compose unchanged. `options.provides` declares `kill` and `ping` before acquisition, because the projected provider must expose those capabilities statically. A supervision retire-and-reopen cycle acquires a new generation; an older generation's late finalizer cannot clear the newer held session.
+
+`fileSystem(session)` uses `Session.readFile` and `Session.writeFile` for byte transfer. It derives `exists`, `stat`, `makeDirectory`, `readDirectory`, `remove`, `rename`, `realPath`, and `readLink` with POSIX `sh` probes. Entries in `session.files` override the derived operations one by one. Other `FileSystem` operations retain `makeNoop`'s explicit refusal rather than simulating watches, open handles, or temporary directories.
+
+The probe surface is intentionally honest. `stat` reports exact file size, but mode is `0` and times and ownership are absent. Directory output is line-framed, so a newline in a filename is misread. Probes require the named POSIX utilities on the machine.
+
+```ts
+const machineHost = Sandbox.layerHost(provider, { session: "run:01J..." })
+```
+
+`layerHost` acquires one session for the layer scope and derives `ChildProcessSpawner`, `FileSystem`, and `Path` from it. This layer context is what a caller hands to an agent's standard filesystem and shell tools to place both on the same machine. The machine boundary, not a path guard, denies ambient host access; closing the layer scope runs provider teardown.
+
+### SandboxConformance
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `CheckOptions` | interface | session key, command fixture, and declared `kill` / `ping` capabilities |
+| `check` | function | returns all violations of the session and delegated spawn contracts |
+| `posixCommands` | const | default `Commands` fixture for POSIX-shell sessions; sets `shell: true` |
+
+```ts
+import { SandboxConformance } from "@smthrs/sandbox"
+
+const violations = yield* SandboxConformance.check(provider, {
+  provides: { kill: true, ping: true }
+})
+```
+
+Each check acquires a fresh session. The suite verifies byte round-trips, `not_found`, parent creation, the default workdir, environment delivery, and a working release-then-reacquire cycle. It projects the provider through `Sandbox.commandProvider` and delegates spawn, exit, ping, and real process-stop checks to `ProviderConformance`. A provider package asserts that the returned array is empty.
+
+### DirectorySandbox
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `DirectorySandboxOptions` | interface | injected host `FileSystem`, `ChildProcessSpawner`, and scratch root |
+| `make` | constructor | builds a `Sandbox.Provider` backed by one host directory per session key |
+
+```ts
+import { DirectorySandbox } from "@smthrs/sandbox"
+
+const provider = DirectorySandbox.make({
+  fs,
+  spawner,
+  root: "/var/tmp/smithers"
+})
+```
+
+`acquire` creates the deterministic scratch directory, runs shell commands there by default, exposes native host file operations, delivers real process signals, and removes the directory when the scope closes. The filesystem and spawner are injected values; the package takes no ambient host dependency.
+
+This is a trusted local workspace backend, **not a security boundary**. A spawned process is not confined to the scratch directory and can address whatever its host credentials permit. Use it for local composition, tests, or CI placement where the body is trusted.
+
+### ContainerSandbox
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `ContainerSandboxOptions` | interface | injected spawner, image, and optional CLI, workdir, environment, network, create arguments, and name prefix |
+| `make` | constructor | builds a create-or-reattach `Sandbox.Provider` over a Docker-compatible CLI |
+
+```ts
+import { ContainerSandbox } from "@smthrs/sandbox"
+
+const provider = ContainerSandbox.make({
+  spawner,
+  image: "node:22",
+  network: "none"
+})
+```
+
+The default CLI is `docker`; set `program: "podman"` for Podman or name a compatible wrapper. `acquire` deterministically names the container, runs `create` then `start`, and reattaches when that name already exists. Commands, reads, and writes all travel through `exec` to the same guest workdir. The scope finalizer runs `rm --force`, ending the container and everything still inside it.
+
+Killing the local `docker exec` client does not reliably signal the guest process. Each spawned command therefore writes its guest pid to a session-private pidfile. `kill` starts a second guest command that walks descendants through `/proc`, signals children first, and then signals the recorded process. Acquisition wipes the pidfile directory before reuse, so reattachment cannot target stale pids.
 
 ### Browser support
 

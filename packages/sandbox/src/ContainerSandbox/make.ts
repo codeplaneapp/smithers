@@ -140,9 +140,7 @@ export const make = (options: ContainerSandboxOptions): Provider => {
               return yield* Effect.fail(
                 new ProviderError({
                   code: "unavailable",
-                  message: `the container ${name} could not be created from ${options.image}: ${
-                    created.stderr.trim()
-                  }`
+                  message: `the container ${name} could not be created from ${options.image}: ${created.stderr.trim()}`
                 })
               )
             }

@@ -48,15 +48,19 @@ const conformanceBudget = 300_000
 const budget = 120_000
 
 describe.skipIf(!engineAvailable)("ContainerSandbox against a real engine", () => {
-  it.effect("passes the sandbox conformance suite, the kill check included, against real containers", () =>
-    Effect.gen(function*() {
-      const container = yield* provider
-      const violations = yield* SandboxConformance.check(container, {
-        session: keys[0]!,
-        provides: { kill: true, ping: true }
-      })
-      expect(violations).toEqual([])
-    }), conformanceBudget)
+  it.effect(
+    "passes the sandbox conformance suite, the kill check included, against real containers",
+    () =>
+      Effect.gen(function*() {
+        const container = yield* provider
+        const violations = yield* SandboxConformance.check(container, {
+          session: keys[0]!,
+          provides: { kill: true, ping: true }
+        })
+        expect(violations).toEqual([])
+      }),
+    conformanceBudget
+  )
 
   it.effect("really places file IO and processes on the container's machine", () =>
     Effect.gen(function*() {
@@ -92,7 +96,8 @@ describe.skipIf(!engineAvailable)("ContainerSandbox against a real engine", () =
           expect(stat.type).toBe("File")
           expect(stat.size).toBe(BigInt(bytes.length))
           yield* Effect.scoped(
-            Effect.flatMap(session.spawn("ln -s nested/deep/out.bin link.bin", {}), (process) => process.exitCode)
+            Effect.flatMap(session.spawn("ln -s nested/deep/out.bin link.bin", {}), (process) =>
+              process.exitCode)
           )
           expect(yield* files.readLink(`${session.workdir}/link.bin`)).toBe("nested/deep/out.bin")
           expect(yield* files.realPath(`${session.workdir}/link.bin`)).toBe(

@@ -36,58 +36,66 @@ const provider = Effect.map(services, ({ fs, spawner }) => DirectorySandbox.make
 const budget = 30_000
 
 describe("DirectorySandbox", () => {
-  it.effect("passes the sandbox conformance suite against real directories and processes", () =>
-    Effect.gen(function*() {
-      const directory = yield* provider
-      const violations = yield* SandboxConformance.check(directory, {
-        provides: { kill: true, ping: true }
-      })
-      expect(violations).toEqual([])
-    }), budget)
-
-  it.effect("serves the whole probe dialect against a real tree when native overrides are stripped", () =>
-    Effect.gen(function*() {
-      const directory = yield* provider
-      yield* Effect.scoped(
-        Effect.gen(function*() {
-          const session = yield* directory.acquire("probe-dialect")
-          const { fs } = yield* services
-          // Stripping the native overrides forces every derived operation
-          // through the POSIX probes, against the same real directory.
-          const probed = Sandbox.fileSystem({ ...session, files: undefined })
-          const native = Sandbox.fileSystem(session)
-          const file = `${session.workdir}/notes/agenda.txt`
-          yield* session.writeFile(file, new TextEncoder().encode("prepared"))
-          yield* fs.symlink(file, `${session.workdir}/notes/link.txt`)
-
-          expect(yield* probed.exists(file)).toBe(true)
-          expect(yield* probed.exists(`${session.workdir}/nowhere`)).toBe(false)
-          const stat = yield* probed.stat(file)
-          expect(stat.type).toBe("File")
-          expect(stat.size).toBe(8n)
-          expect((yield* probed.stat(`${session.workdir}/notes`)).type).toBe("Directory")
-          expect(yield* probed.readDirectory(`${session.workdir}/notes`)).toEqual(["agenda.txt", "link.txt"])
-          expect(yield* probed.readDirectory(session.workdir, { recursive: true })).toEqual([
-            "notes",
-            "notes/agenda.txt",
-            "notes/link.txt"
-          ])
-          expect(yield* probed.readLink(`${session.workdir}/notes/link.txt`)).toBe(file)
-          expect(yield* probed.realPath(`${session.workdir}/notes/link.txt`)).toBe(file)
-          yield* probed.makeDirectory(`${session.workdir}/build/out`, { recursive: true })
-          yield* probed.rename(file, `${session.workdir}/build/out/agenda.txt`)
-          yield* probed.remove(`${session.workdir}/notes`, { recursive: true, force: true })
-          expect(yield* probed.exists(`${session.workdir}/notes`)).toBe(false)
-          expect(yield* native.readDirectory(`${session.workdir}/build/out`)).toEqual(["agenda.txt"])
-          // Relative paths are the workspace's on both the probe and the
-          // native surface, never the host process's cwd.
-          yield* native.writeFileString("relative.txt", "rooted")
-          expect(yield* probed.readFileString("relative.txt")).toBe("rooted")
-          expect(yield* native.exists("relative.txt")).toBe(true)
-          expect(yield* fs.exists(`${session.workdir}/relative.txt`)).toBe(true)
+  it.effect(
+    "passes the sandbox conformance suite against real directories and processes",
+    () =>
+      Effect.gen(function*() {
+        const directory = yield* provider
+        const violations = yield* SandboxConformance.check(directory, {
+          provides: { kill: true, ping: true }
         })
-      )
-    }), budget)
+        expect(violations).toEqual([])
+      }),
+    budget
+  )
+
+  it.effect(
+    "serves the whole probe dialect against a real tree when native overrides are stripped",
+    () =>
+      Effect.gen(function*() {
+        const directory = yield* provider
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            const session = yield* directory.acquire("probe-dialect")
+            const { fs } = yield* services
+            // Stripping the native overrides forces every derived operation
+            // through the POSIX probes, against the same real directory.
+            const probed = Sandbox.fileSystem({ ...session, files: undefined })
+            const native = Sandbox.fileSystem(session)
+            const file = `${session.workdir}/notes/agenda.txt`
+            yield* session.writeFile(file, new TextEncoder().encode("prepared"))
+            yield* fs.symlink(file, `${session.workdir}/notes/link.txt`)
+
+            expect(yield* probed.exists(file)).toBe(true)
+            expect(yield* probed.exists(`${session.workdir}/nowhere`)).toBe(false)
+            const stat = yield* probed.stat(file)
+            expect(stat.type).toBe("File")
+            expect(stat.size).toBe(8n)
+            expect((yield* probed.stat(`${session.workdir}/notes`)).type).toBe("Directory")
+            expect(yield* probed.readDirectory(`${session.workdir}/notes`)).toEqual(["agenda.txt", "link.txt"])
+            expect(yield* probed.readDirectory(session.workdir, { recursive: true })).toEqual([
+              "notes",
+              "notes/agenda.txt",
+              "notes/link.txt"
+            ])
+            expect(yield* probed.readLink(`${session.workdir}/notes/link.txt`)).toBe(file)
+            expect(yield* probed.realPath(`${session.workdir}/notes/link.txt`)).toBe(file)
+            yield* probed.makeDirectory(`${session.workdir}/build/out`, { recursive: true })
+            yield* probed.rename(file, `${session.workdir}/build/out/agenda.txt`)
+            yield* probed.remove(`${session.workdir}/notes`, { recursive: true, force: true })
+            expect(yield* probed.exists(`${session.workdir}/notes`)).toBe(false)
+            expect(yield* native.readDirectory(`${session.workdir}/build/out`)).toEqual(["agenda.txt"])
+            // Relative paths are the workspace's on both the probe and the
+            // native surface, never the host process's cwd.
+            yield* native.writeFileString("relative.txt", "rooted")
+            expect(yield* probed.readFileString("relative.txt")).toBe("rooted")
+            expect(yield* native.exists("relative.txt")).toBe(true)
+            expect(yield* fs.exists(`${session.workdir}/relative.txt`)).toBe(true)
+          })
+        )
+      }),
+    budget
+  )
 
   it.effect("keeps sessions in distinct workspaces and removes them on release", () =>
     Effect.gen(function*() {
@@ -108,31 +116,35 @@ describe("DirectorySandbox", () => {
       }
     }), budget)
 
-  it.effect("runs commands in the session workdir with the caller's environment and real signals", () =>
-    Effect.gen(function*() {
-      const directory = yield* provider
-      yield* Effect.scoped(
-        Effect.gen(function*() {
-          const session = yield* directory.acquire("spawn-shape")
-          const output = yield* Effect.scoped(
-            Effect.flatMap(
-              session.spawn(`printf '%s:%s' "$PWD" "$DIRECTORY_SANDBOX_PROOF"`, {
-                env: { DIRECTORY_SANDBOX_PROOF: "delivered" }
-              }),
-              (process) => Stream.mkString(Stream.decodeText(process.stdout))
+  it.effect(
+    "runs commands in the session workdir with the caller's environment and real signals",
+    () =>
+      Effect.gen(function*() {
+        const directory = yield* provider
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            const session = yield* directory.acquire("spawn-shape")
+            const output = yield* Effect.scoped(
+              Effect.flatMap(
+                session.spawn(`printf '%s:%s' "$PWD" "$DIRECTORY_SANDBOX_PROOF"`, {
+                  env: { DIRECTORY_SANDBOX_PROOF: "delivered" }
+                }),
+                (process) => Stream.mkString(Stream.decodeText(process.stdout))
+              )
             )
-          )
-          expect(output).toBe(`${session.workdir}:delivered`)
-          const elsewhere = yield* Effect.scoped(
-            Effect.flatMap(
-              session.spawn("pwd", { cwd: root }),
-              (process) => Stream.mkString(Stream.decodeText(process.stdout))
+            expect(output).toBe(`${session.workdir}:delivered`)
+            const elsewhere = yield* Effect.scoped(
+              Effect.flatMap(
+                session.spawn("pwd", { cwd: root }),
+                (process) => Stream.mkString(Stream.decodeText(process.stdout))
+              )
             )
-          )
-          expect(elsewhere.trim()).toBe(root)
-        })
-      )
-    }), budget)
+            expect(elsewhere.trim()).toBe(root)
+          })
+        )
+      }),
+    budget
+  )
 
   it.effect("refuses a spawn against a command that cannot start", () =>
     Effect.gen(function*() {

@@ -19,9 +19,13 @@ const serve = (): Harness => {
     port: 0,
     fetch: (request, self) => self.upgrade(request) ? undefined : new Response("no"),
     websocket: {
-      open: (socket) => void open.add(socket as never),
+      open: (socket) => {
+        open.add(socket as never)
+      },
       close: (socket) => void open.delete(socket as never),
-      message: (_socket, message) => seen.push(JSON.parse(String(message)) as Record<string, unknown>)
+      message: (_socket, message) => {
+        seen.push(JSON.parse(String(message)) as Record<string, unknown>)
+      }
     }
   })
   const harness: Harness = {
@@ -62,7 +66,7 @@ test("terminal input waits for the topic acknowledgement, then output reaches ev
   const second: Array<string> = []
   const detachFirst = client.attach("pty-1", { onOutput: (data) => first.push(data), onExit: () => {} })
   const detachSecond = client.attach("pty-1", { onOutput: (data) => second.push(data), onExit: () => {} })
-  client.input("pty-1", "printf ready\\r")
+  client.input("pty-1", "printf ready\r")
 
   await until(() => server.seen.some((frame) => frame.type === "subscribe"))
   expect(server.seen.some((frame) => frame.type === "pty.input")).toBe(false)

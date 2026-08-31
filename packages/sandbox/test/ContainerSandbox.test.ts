@@ -148,9 +148,7 @@ describe("ContainerSandbox", () => {
       )
       expect(reused.startsWith("smthrs-sbx-")).toBe(true)
 
-      const refusing = engine((args) =>
-        args[0] === "create" ? { exitCode: 125, stderr: "no such image" } : {}
-      )
+      const refusing = engine((args) => args[0] === "create" ? { exitCode: 125, stderr: "no such image" } : {})
       const refusal = yield* Effect.flip(
         acquired(ContainerSandbox.make({ spawner: refusing.spawner, image: "img" }), Effect.succeed)
       )
@@ -166,7 +164,9 @@ describe("ContainerSandbox", () => {
       )
       expect((startFailure as ProviderError).message).toContain("could not be started")
 
-      const unpreparable = engine((args) => args[1] !== undefined && args[0] === "exec" ? { exitCode: 1, stderr: "ro fs" } : {})
+      const unpreparable = engine((args) =>
+        args[1] !== undefined && args[0] === "exec" ? { exitCode: 1, stderr: "ro fs" } : {}
+      )
       const prepareFailure = yield* Effect.flip(
         acquired(ContainerSandbox.make({ spawner: unpreparable.spawner, image: "img" }), Effect.succeed)
       )
@@ -237,7 +237,9 @@ describe("ContainerSandbox", () => {
 
   it.effect("writes files through the exec's stdin, creating parents", () =>
     Effect.gen(function*() {
-      const { calls, spawner } = engine((args) => args.at(-1)?.includes("refused") === true ? { exitCode: 1, stderr: "refused" } : {})
+      const { calls, spawner } = engine((args) =>
+        args.at(-1)?.includes("refused") === true ? { exitCode: 1, stderr: "refused" } : {}
+      )
       const provider = ContainerSandbox.make({ spawner, image: "img" })
       yield* acquired(provider, (session) =>
         Effect.gen(function*() {
@@ -270,7 +272,9 @@ describe("ContainerSandbox", () => {
       expect(killCall!.args.at(-1)).toContain("cat /tmp/.smthrs-sbx/0.pid")
       expect(killCall!.args.at(-1)).toContain("kill -s TERM")
 
-      const refusing = engine((args) => args.at(-1)?.includes("kids()") === true ? { exitCode: 1, stderr: "no exec" } : {})
+      const refusing = engine((args) =>
+        args.at(-1)?.includes("kids()") === true ? { exitCode: 1, stderr: "no exec" } : {}
+      )
       const refusal = yield* Effect.flip(
         acquired(ContainerSandbox.make({ spawner: refusing.spawner, image: "img" }), (session) =>
           Effect.scoped(
@@ -317,7 +321,9 @@ describe("ContainerSandbox", () => {
       )
       expect((writeFailure as ProviderError).code).toBe("spawn_error")
 
-      const failingExec = engine((args) => args.includes("sh") ? { failSpawn: true } : {})
+      const failingExec = engine((args) =>
+        args.includes("sh") ? { failSpawn: true } : {}
+      )
       const execFailure = yield* Effect.flip(
         acquired(ContainerSandbox.make({ spawner: failingExec.spawner, image: "img" }), (session) =>
           Effect.scoped(Effect.asVoid(session.spawn("true", {}))))

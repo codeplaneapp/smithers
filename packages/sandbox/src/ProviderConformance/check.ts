@@ -46,8 +46,10 @@ const reportsANonzeroExit = (provider: Provider, commands: Commands): Effect.Eff
   Effect.map(
     inSession(
       provider,
-      Effect.flatMap(ChildProcessSpawner, (spawner) =>
-        spawner.exitCode(ChildProcess.make(commands.fails, { shell: commands.shell ?? false })))
+      Effect.flatMap(
+        ChildProcessSpawner,
+        (spawner) => spawner.exitCode(ChildProcess.make(commands.fails, { shell: commands.shell ?? false }))
+      )
     ),
     (exit) =>
       Exit.isSuccess(exit) && exit.value === commands.failureCode ? undefined : {
