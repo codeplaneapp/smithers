@@ -207,6 +207,16 @@ export const createWorldController = (ctx: ControllerContext): WorldController =
         confidence: 1
       }
     })
+    /*
+     * A note created from the chat (`/world.new-note` typed, or the agent's
+     * call) used to land in a pane that stayed closed: the act "executed"
+     * and nothing on screen changed. The new note is the selected document
+     * of the World pane, so the pane opens to show it — for the USER's act
+     * only: the agent's output embeds (THE EMBED LAW), never opens a pane.
+     */
+    if (ctx.commandActor === "user" && ctx.store.session().surface !== "world") {
+      ctx.store.dispatch({ type: "surface.changed", actor: "user", surface: "world" })
+    }
   }
 
   /*
