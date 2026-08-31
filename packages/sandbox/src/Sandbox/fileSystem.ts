@@ -175,12 +175,17 @@ export const fileSystem = (session: Session): FileSystem.FileSystem => {
       size: FileSystem.Size(BigInt(size ?? "0"))
     } satisfies FileSystem.File.Info
   })
-  const readFile = (path: string): Effect.Effect<Uint8Array, PlatformError.PlatformError> =>
-    session.readFile(path).pipe(Effect.mapError(providerFailure("readFile", path)))
-  const writeFile = (path: string, data: Uint8Array): Effect.Effect<void, PlatformError.PlatformError> =>
-    session.writeFile(path, data).pipe(Effect.mapError(providerFailure("writeFile", path)))
+  const readFile = (raw: string): Effect.Effect<Uint8Array, PlatformError.PlatformError> => {
+    const path = resolve(raw)
+    return session.readFile(path).pipe(Effect.mapError(providerFailure("readFile", path)))
+  }
+  const writeFile = (raw: string, data: Uint8Array): Effect.Effect<void, PlatformError.PlatformError> => {
+    const path = resolve(raw)
+    return session.writeFile(path, data).pipe(Effect.mapError(providerFailure("writeFile", path)))
+  }
   return FileSystem.makeNoop({
-    exists: Effect.fn("Sandbox.fileSystem.exists")(function*(path) {
+    exists: Effect.fn("Sandbox.fileSystem.exists")(function*(raw) {
+      const path = resolve(raw)
       const result = yield* probe(session, "exists", path, `test -e ${quote(path)}`)
       if (result.code === 0) return true
       if (result.code === 1) return false
@@ -191,12 +196,14 @@ export const fileSystem = (session: Session): FileSystem.FileSystem => {
     readFileString: (path) => Effect.map(readFile(path), (bytes) => decoder.decode(bytes)),
     writeFile: (path, data) => writeFile(path, data),
     writeFileString: (path, data) => writeFile(path, encoder.encode(data)),
-    makeDirectory: Effect.fn("Sandbox.fileSystem.makeDirectory")(function*(path, options) {
+    makeDirectory: Effect.fn("Sandbox.fileSystem.makeDirectory")(function*(raw, options) {
+      const path = resolve(raw)
       const flag = options?.recursive === true ? "-p " : ""
       const result = yield* probe(session, "makeDirectory", path, `mkdir ${flag}${quote(path)}`)
       if (result.code !== 0) return yield* Effect.fail(probeFailed("makeDirectory", path)(result))
     }),
-    readDirectory: Effect.fn("Sandbox.fileSystem.readDirectory")(function*(path, options) {
+    readDirectory: Effect.fn("Sandbox.fileSystem.readDirectory")(function*(raw, options) {
+      const path = resolve(raw)
       const target = quote(path)
       const recursive = options?.recursive === true
       const script = recursive
@@ -211,21 +218,26 @@ export const fileSystem = (session: Session): FileSystem.FileSystem => {
       const prefix = `${path.replace(/\/+$/, "")}/`
       return lines.map((line) => line.startsWith(prefix) ? line.slice(prefix.length) : line).sort()
     }),
-    remove: Effect.fn("Sandbox.fileSystem.remove")(function*(path, options) {
+    remove: Effect.fn("Sandbox.fileSystem.remove")(function*(raw, options) {
+      const path = resolve(raw)
       const flags = `${options?.recursive === true ? "-r " : ""}${options?.force === true ? "-f " : ""}`
       const result = yield* probe(session, "remove", path, `rm ${flags}${quote(path)}`)
       if (result.code !== 0) return yield* Effect.fail(probeFailed("remove", path)(result))
     }),
-    rename: Effect.fn("Sandbox.fileSystem.rename")(function*(oldPath, newPath) {
+    rename: Effect.fn("Sandbox.fileSystem.rename")(function*(rawOld, rawNew) {
+      const oldPath = resolve(rawOld)
+      const newPath = resolve(rawNew)
       const result = yield* probe(session, "rename", oldPath, `mv ${quote(oldPath)} ${quote(newPath)}`)
       if (result.code !== 0) return yield* Effect.fail(probeFailed("rename", oldPath)(result))
     }),
-    realPath: Effect.fn("Sandbox.fileSystem.realPath")(function*(path) {
+    realPath: Effect.fn("Sandbox.fileSystem.realPath")(function*(raw) {
+      const path = resolve(raw)
       const result = yield* probe(session, "realPath", path, `readlink -f ${quote(path)}`)
       if (result.code !== 0) return yield* Effect.fail(notFound("realPath", path))
       return result.stdout.replace(/\n$/, "")
     }),
-    readLink: Effect.fn("Sandbox.fileSystem.readLink")(function*(path) {
+    readLink: Effect.fn("Sandbox.fileSystem.readLink")(function*(raw) {
+      const path = resolve(raw)
       const result = yield* probe(session, "readLink", path, `readlink ${quote(path)}`)
       if (result.code !== 0) {
         return yield* Effect.fail(

@@ -41,6 +41,7 @@ export interface PtyClientOptions {
 type ServerFrame =
   | { readonly type: "pty.output"; readonly sessionId: string; readonly data: string }
   | { readonly type: "pty.exit"; readonly sessionId: string; readonly code: number | null }
+  | { readonly type: "subscribed"; readonly topic: string }
 
 const parseFrame = (raw: unknown): ServerFrame | undefined => {
   if (typeof raw !== "string") return undefined
@@ -48,6 +49,10 @@ const parseFrame = (raw: unknown): ServerFrame | undefined => {
     const frame: unknown = JSON.parse(raw)
     if (typeof frame !== "object" || frame === null) return undefined
     const { type, sessionId } = frame as { type?: unknown; sessionId?: unknown }
+    if (type === "subscribed") {
+      const { topic } = frame as { topic?: unknown }
+      return typeof topic === "string" ? { type, topic } : undefined
+    }
     if (typeof sessionId !== "string") return undefined
     if (type === "pty.output") {
       const { data } = frame as { data?: unknown }
@@ -72,18 +77,32 @@ export const pageSocketUrl = (): string | undefined => {
 
 export const createPtyClient = (options: PtyClientOptions): PtyClient => {
   const attachments = new Map<string, Set<PtyAttachment>>()
-  const queue: Array<string> = []
+  const queue: Array<{ readonly sessionId: string; readonly text: string }> = []
+  const subscribed = new Set<string>()
   let socket: WebSocket | undefined
   let disposed = false
   let reconnect: ReturnType<typeof setTimeout> | undefined
 
-  const send = (frame: Record<string, unknown>): void => {
+  const flush = (sessionId: string): void => {
+    if (socket === undefined || socket.readyState !== WebSocket.OPEN || !subscribed.has(sessionId)) return
+    for (let index = 0; index < queue.length;) {
+      const queued = queue[index]!
+      if (queued.sessionId !== sessionId) {
+        index += 1
+        continue
+      }
+      socket.send(queued.text)
+      queue.splice(index, 1)
+    }
+  }
+
+  const send = (frame: Record<string, unknown> & { readonly sessionId: string }): void => {
     const text = JSON.stringify(frame)
-    if (socket !== undefined && socket.readyState === WebSocket.OPEN) {
+    if (socket !== undefined && socket.readyState === WebSocket.OPEN && subscribed.has(frame.sessionId)) {
       socket.send(text)
       return
     }
-    queue.push(text)
+    queue.push({ sessionId: frame.sessionId, text })
     ensureSocket()
   }
 
@@ -105,15 +124,25 @@ export const createPtyClient = (options: PtyClientOptions): PtyClient => {
     socket = opened
     opened.onopen = () => {
       if (socket !== opened) return
-      // Every live topic first, so output resumes before queued input goes out.
+      subscribed.clear()
+      // The backend acknowledges each subscription. Queued input waits for
+      // that acknowledgement so a fast shell cannot publish output before
+      // this socket is actually listening to its topic.
       for (const sessionId of attachments.keys()) {
         opened.send(JSON.stringify({ type: "subscribe", topic: `pty:${sessionId}` }))
       }
-      for (const text of queue.splice(0)) opened.send(text)
     }
     opened.onmessage = (event: MessageEvent) => {
       const frame = parseFrame(event.data)
       if (frame === undefined) return
+      if (frame.type === "subscribed") {
+        if (!frame.topic.startsWith("pty:")) return
+        const sessionId = frame.topic.slice("pty:".length)
+        if (!attachments.has(sessionId)) return
+        subscribed.add(sessionId)
+        flush(sessionId)
+        return
+      }
       const listeners = attachments.get(frame.sessionId)
       if (listeners === undefined) return
       for (const listener of listeners) {
@@ -122,7 +151,10 @@ export const createPtyClient = (options: PtyClientOptions): PtyClient => {
       }
     }
     opened.onclose = () => {
-      if (socket === opened) socket = undefined
+      if (socket === opened) {
+        socket = undefined
+        subscribed.clear()
+      }
       scheduleReconnect()
     }
     opened.onerror = () => {
@@ -137,6 +169,7 @@ export const createPtyClient = (options: PtyClientOptions): PtyClient => {
     attachments.set(sessionId, listeners)
     if (first) {
       if (socket !== undefined && socket.readyState === WebSocket.OPEN) {
+        subscribed.delete(sessionId)
         socket.send(JSON.stringify({ type: "subscribe", topic: `pty:${sessionId}` }))
       } else {
         // onopen subscribes every attached topic; only make sure a socket is coming.
@@ -149,6 +182,10 @@ export const createPtyClient = (options: PtyClientOptions): PtyClient => {
       current.delete(attachment)
       if (current.size > 0) return
       attachments.delete(sessionId)
+      subscribed.delete(sessionId)
+      for (let index = queue.length - 1; index >= 0; index -= 1) {
+        if (queue[index]?.sessionId === sessionId) queue.splice(index, 1)
+      }
       if (socket !== undefined && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: "unsubscribe", topic: `pty:${sessionId}` }))
       }
@@ -176,6 +213,7 @@ export const createPtyClient = (options: PtyClientOptions): PtyClient => {
     if (reconnect !== undefined) clearTimeout(reconnect)
     attachments.clear()
     queue.length = 0
+    subscribed.clear()
     const closing = socket
     socket = undefined
     closing?.close()

@@ -110,16 +110,25 @@ export const make = (options: DirectorySandboxOptions): Provider => ({
             )
           }),
         ping: Effect.void,
-        files: {
-          exists: options.fs.exists,
-          stat: options.fs.stat,
-          readDirectory: options.fs.readDirectory,
-          makeDirectory: options.fs.makeDirectory,
-          remove: options.fs.remove,
-          rename: options.fs.rename,
-          realPath: options.fs.realPath,
-          readLink: options.fs.readLink
-        }
+        // Native overrides mirror `Sandbox.fileSystem`'s rooting rule: a
+        // relative path is the workspace's, never the host process's cwd.
+        files: (() => {
+          const resolve = (path: string): string => {
+            if (path.startsWith("/")) return path
+            const trimmed = path.replace(/^(\.\/)+/, "")
+            return trimmed === "" || trimmed === "." ? workdir : `${workdir}/${trimmed}`
+          }
+          return {
+            exists: (path) => options.fs.exists(resolve(path)),
+            stat: (path) => options.fs.stat(resolve(path)),
+            readDirectory: (path, directoryOptions) => options.fs.readDirectory(resolve(path), directoryOptions),
+            makeDirectory: (path, directoryOptions) => options.fs.makeDirectory(resolve(path), directoryOptions),
+            remove: (path, removeOptions) => options.fs.remove(resolve(path), removeOptions),
+            rename: (oldPath, newPath) => options.fs.rename(resolve(oldPath), resolve(newPath)),
+            realPath: (path) => options.fs.realPath(resolve(path)),
+            readLink: (path) => options.fs.readLink(resolve(path))
+          } satisfies Partial<FileSystem.FileSystem>
+        })()
       }
       return session
     })
