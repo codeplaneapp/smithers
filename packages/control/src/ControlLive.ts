@@ -8,7 +8,7 @@ import { Journal, JournalEvent } from "@smthrs/journal"
 import { NotificationQueue } from "@smthrs/notifications"
 import * as SteerPayload from "@smthrs/notifications/SteerPayload"
 import { Registry } from "@smthrs/registry"
-import { Effect, Layer, Option, Semaphore, Stream } from "effect"
+import { Cause, Effect, Layer, Option, Semaphore, Stream } from "effect"
 import * as Cancellation from "./Cancellation.ts"
 import {
   type ApprovalInput,
@@ -22,7 +22,7 @@ import {
   ClaimLost,
   type ControlError,
   type EnvelopeMismatch,
-  type LaunchFailed,
+  LaunchFailed,
   NoMatchingWait,
   PersistenceError,
   type PlanDigestMismatch,
@@ -155,6 +155,42 @@ export const layer: Layer.Layer<
             message: `Failed to persist ${eventType}`,
             cause
           })
+        )
+      )
+
+    /**
+     * Ends a run the executor was handed and could not take.
+     *
+     * `ControlExecutor.launch` fails when nothing in this composition will
+     * ever drive the run: no seat resolved, the flow declares none, the body
+     * would not load, the provider could not be constructed. The run row is
+     * already durable by then — `ControlRuntime.launch` writes it before the
+     * executor is consulted — and the failure rolls the mutation's transaction
+     * back, so the run survived with no journal entry, `status` reported it
+     * unlaunched forever, and `smithers cancel` was the only verb that could
+     * end it (Phase 7 verdict cd14388ed7; plue-cutover S3).
+     *
+     * It runs OUTSIDE the mutation, for that rollback's reason: a settlement
+     * written inside the failing transaction is discarded with it.
+     *
+     * A settlement that cannot be written is logged rather than raised. The
+     * caller is already receiving the refusal it has to act on, and replacing
+     * it with a persistence error would hide which key is missing.
+     */
+    const settleUnlaunched = (
+      runId: RunId,
+      cause: string
+    ): Effect.Effect<void> =>
+      Effect.gen(function*() {
+        const fence = yield* runtime.claimFence(runId)
+        yield* runtime.writeStatus(runId, fence, "failed")
+        yield* emit(runId, "control.run.failed", { runId, status: "failed", cause: cause.slice(0, 4096) })
+      }).pipe(
+        Effect.catchCause((failure) =>
+          Effect.annotateLogs(
+            Effect.logWarning("A refused launch could not be settled"),
+            { runId, cause: Cause.pretty(failure) }
+          )
         )
       )
 
@@ -748,6 +784,10 @@ export const layer: Layer.Layer<
                 runId: launched.run.runId
               }
             })
+        ).pipe(
+          Effect.tapError((error) =>
+            error instanceof LaunchFailed ? settleUnlaunched(error.runId, error.message) : Effect.void
+          )
         )
       ),
       approve: Effect.fn("Control.approve")((input) => decide("approved", input)),

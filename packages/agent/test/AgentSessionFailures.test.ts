@@ -554,15 +554,26 @@ describe("the executor's registry seam", () => {
     expect(record.statuses).toEqual([])
   })
 
-  it("leaves a discovered flow with no declared seat pending, and drives nothing", async () => {
+  /**
+   * A prompt flow that declares no seat is refused, not left pending.
+   *
+   * `pending` says "not mine, somebody else may take it". No agent host can
+   * ever take a prompt flow with no seat, so the acceptance promised a driver
+   * that was never coming: `smithers init hello && smithers up hello` exited 1
+   * and left `run-1` at `accepted` with nothing running (Phase 7 verdict
+   * cd14388ed7, D1).
+   */
+  it("refuses a discovered flow with no declared seat, and drives nothing", async () => {
     const record = recorder()
-    const acceptance = await withExecutor(
+    const failure = await withExecutor(
       record,
       { registry: { getOption: () => Effect.succeed(Option.some(descriptorOf(Option.none()))) } },
-      (executor) => executor.launch(launchInput)
+      (executor) => Effect.flip(executor.launch(launchInput))
     )
 
-    expect(acceptance).toBe("pending")
+    expect(failure.message).toContain("declares no model seat")
+    expect(failure.message).toContain("model:")
+    expect(failure.runId).toBe(launchInput.run.runId)
     expect(record.statuses).toEqual([])
   })
 

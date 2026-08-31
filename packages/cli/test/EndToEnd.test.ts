@@ -15,11 +15,19 @@
  * against the same SQLite file leaves the durable state identical, so the
  * `approve` verb still crosses a process boundary to decide a token another
  * process wrote.
+ *
+ * The run every verb below acts on is a MODULE flow, for the same reason: an
+ * agent host answers `pending` for one and drives nothing (`AgentSession`
+ * "only prompt flows run on the cell harness"), which leaves a durable
+ * non-terminal run without a seat, a network call, or a stubbed composition.
+ * The scaffolded prompt flow cannot stand in for it: since it carries a
+ * `model:` line, launching it either runs a real model or is refused, and a
+ * refused launch settles the run `failed` in the launching process.
  */
 import * as ControlRuntime from "@smthrs/control/ControlRuntime"
 import { Effect } from "effect"
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -98,8 +106,26 @@ describe("one project, from init to gc", processBudget, () => {
     json("down")
   })
 
-  it("launches the discovered flow detached and returns only the receipt's run id", () => {
-    const launched = json("up", "hello", "-d")
+  it("launches a flow detached and returns only the receipt's run id", () => {
+    // Written here rather than beside the scaffold so the `ls` assertion above
+    // still sees exactly what `init` created.
+    mkdirSync(join(project, "flows", "idle"), { recursive: true })
+    writeFileSync(
+      join(project, "flows", "idle", "flow.ts"),
+      [
+        "import { Flow } from \"@smthrs/core\"",
+        "import { Schema } from \"effect\"",
+        "",
+        "export default Flow.make({",
+        "  description: \"A module flow this host accepts and drives nothing for.\",",
+        "  input: Schema.Struct({ args: Schema.String }),",
+        "  output: Schema.String",
+        "})",
+        ""
+      ].join("\n"),
+      "utf8"
+    )
+    const launched = json("up", "idle", "-d")
 
     // The receipt's own field. rc.0 has no `--run-id`, so this is the only
     // place a caller learns which run it started.
@@ -123,7 +149,7 @@ describe("one project, from init to gc", processBudget, () => {
 
     expect(run).toBeDefined()
     expect(statuses).toContain(run.status)
-    expect(run.flowId).toBe("hello")
+    expect(run.flowId).toBe("idle")
     expect(json("ps", "--status", run.status).items.map((entry: { readonly runId: string }) => entry.runId))
       .toContain(runId)
     // An eighth status is not a status.
@@ -231,7 +257,7 @@ describe("one project, from init to gc", processBudget, () => {
   })
 
   it("takes every remaining run down", () => {
-    const launched = json("up", "hello", "-d")
+    const launched = json("up", "idle", "-d")
     expect(json("ps").items.some((entry: { readonly status: string }) => entry.status !== "cancelled")).toBe(true)
 
     json("down")
