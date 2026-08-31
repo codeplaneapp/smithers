@@ -17,9 +17,14 @@ const pulled = await fetch(`${daemon}/api/tags`, { signal: AbortSignal.timeout(2
 /**
  * The answer has to decode, three times, against the step's declared schema.
  *
- * One run proves nothing here: the defect this pins was a model that answered
- * `ctx.done("Paris")` on roughly one run in three, so the example failed with
- * `"Paris" is not valid JSON` for a reader who had done everything right.
+ * One run proves nothing here, because both defects this pins were
+ * intermittent. The model answered `ctx.done("Paris")` — a sentence, not a
+ * document — and the example failed with `"Paris" is not valid JSON`; and,
+ * more often, it spent all eight frames writing prose and never called
+ * `ctx.done` at all, which failed the step with `model_failed`, "ended
+ * without a completed answer". Three runs a suite is the cheap standing
+ * check; the example's own header records the 60 direct runs and 12 suite
+ * runs that measured the fix.
  */
 it.effect.skipIf(!pulled)(
   "answers a question through the local agent stack, and decodes every time",
