@@ -913,22 +913,15 @@ export const make = (
       )
 
     /**
-     * The flow instance each in-flight run's round is executing under.
-     *
-     * The ask gate needs it to classify the park it is about to take, and the
-     * gate is a plain `Cell.Call` handler with no flow context of its own.
-     * Written and cleared by the registered handler, beside `activeBodies`.
-     */
-    const activeInstances = new Map<string, FlowRuntime.FlowInstance["Service"]>()
-
-    /**
      * Decides one ask before its durable boundary opens. An unresolved ask
      * registers its token, publishes the exact approval payload an operator
      * replays through `smithers approve`, and parks the run with an encoded
      * `PermissionRequired`; a resolved one lets the activity run and read the
      * decision.
      */
-    const authorize = (runId: string) => (call: Cell.Call): Effect.Effect<void, HarnessError.HarnessError> =>
+    const authorize =
+      (runId: string, instance: FlowRuntime.FlowInstance["Service"]) =>
+      (call: Cell.Call): Effect.Effect<void, HarnessError.HarnessError> =>
       Effect.gen(function*() {
         if (call.flowName !== StandardFlows.askFlow.name) return
         const input = call.input as unknown as AskInput
@@ -978,15 +971,17 @@ export const make = (
         // `approval` is what the run is actually waiting for, and the request
         // id is the token a wake handler matches (engine-store issue #31).
         // The annotation cannot go stale: a round that parks here ends, and
-        // the resumed round runs under an instance of its own.
-        const instance = activeInstances.get(runId)
-        if (instance !== undefined) {
-          yield* Effect.provideService(
-            FlowRuntime.annotateWaiting({ reason: "approval", token: identity.requestId }),
-            FlowRuntime.FlowInstance,
-            instance
-          )
-        }
+        // the resumed round runs under an instance of its own. The instance
+        // travels down from the registered handler rather than through a map
+        // the handler writes: the body is forked with `startImmediately`, so a
+        // map written after the fork is not yet written when the body's first
+        // ask reaches this line, and the park then took the derived `event`
+        // reason instead of `approval`.
+        yield* Effect.provideService(
+          FlowRuntime.annotateWaiting({ reason: "approval", token: identity.requestId }),
+          FlowRuntime.FlowInstance,
+          instance
+        )
         return yield* Effect.fail(
           new HarnessError.HarnessError({
             code: "engine_failed",
@@ -1111,7 +1106,10 @@ export const make = (
         )
 
     /** One agent run, executed as the whole of one durable flow execution. */
-    const body = (payload: { readonly runId: string; readonly planId: string }) =>
+    const body = (
+      payload: { readonly runId: string; readonly planId: string },
+      instance: FlowRuntime.FlowInstance["Service"]
+    ) =>
       Effect.gen(function*() {
         const plan = yield* runtime.getPlan(payload.planId)
         const card = plan.card
@@ -1196,7 +1194,7 @@ export const make = (
             StandardFlows.clock(engineServices),
             StandardFlows.approval(asker(payload.runId))
           ],
-          authorize: authorize(payload.runId),
+          authorize: authorize(payload.runId, instance),
           capabilityEnvelope: patterns(card.envelope.capabilities),
           limits: options.limits,
           maxFrames: options.maxFrames,
@@ -1447,21 +1445,15 @@ export const make = (
       Effect.gen(function*() {
         const instance = yield* FlowRuntime.FlowInstance
         const fiber = yield* Effect.forkChild(
-          body(payload).pipe(
+          body(payload, instance).pipe(
             Effect.onExit((exit) => settle(payload.runId, instance.suspended, exit)),
             Effect.provide(services)
           ),
           { startImmediately: true }
         )
         activeBodies.set(payload.runId, fiber)
-        activeInstances.set(payload.runId, instance)
         return yield* Fiber.join(fiber).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              activeBodies.delete(payload.runId)
-              activeInstances.delete(payload.runId)
-            })
-          )
+          Effect.ensuring(Effect.sync(() => activeBodies.delete(payload.runId)))
         )
       })).pipe(Scope.provide(scope))
 
