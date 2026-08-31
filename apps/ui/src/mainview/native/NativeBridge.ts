@@ -2,6 +2,7 @@ import { Electroview } from "electrobun/view"
 import type { AgentTurnFrame, StartAgentTurnRequest, StartAgentTurnResult } from "smithers-shared/NativeAgent"
 import type { PickLocalRepositoryResult, RepositoryAccess } from "smithers-shared/NativeRepository"
 import type { SmithersNativeRPC } from "smithers-shared/NativeRPC"
+import { pickLocalRepositoryVia } from "./PickerRequest"
 
 const rpc = (() => {
   if (typeof window === "undefined" || window.__electrobun === undefined) return undefined
@@ -40,7 +41,7 @@ export const nativeRepositories: NativeRepositories = {
         code: "native-required",
         message: "Local repositories can only be connected from the Smithers native app."
       })
-      : rpc.proxy.request.pickLocalRepository({ access })
+      : pickLocalRepositoryVia((params, options) => rpc.proxy.request.pickLocalRepository(params, options), access)
 }
 
 export interface NativeAgent {
