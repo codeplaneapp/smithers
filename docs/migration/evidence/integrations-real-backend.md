@@ -1,106 +1,208 @@
-# Gate: integrations-real-backend
+# Phase 7 gate: integrations-real-backend
 
-Verdict: PASS
+Verdict: **PASS**.
+
+GitHub and Linear, the two rc.0 real integrations (rc-contract section 3.2, `@smthrs/integrations` row; PLAN Phase 7 "exercise one real integration"), pass their real-backend contract suites against `api.github.com` and `api.linear.app` from the clean checkout. Telegram, the third adapter in the package, is **ENV-SKIP**: neither `TELEGRAM_BOT_TOKEN` nor `SMITHERS_TELEGRAM_BOT_TOKEN` is present on this host. The rc-contract and the suite header both state that Telegram is not an rc.0 release-smoke integration. The full `@smthrs/integrations` suite, fixture and live together, passes with its coverage thresholds.
 
 ## Scope
 
-PLAN.md Phase 7 requires "real-backend integration tests for every integration
-included in the RC". rc-contract.md (sections 3 and 10, ruling A7) names the
-rc.0 integrations: the GitHub, Linear, and Telegram adapters rebuilt as the
-private workspace package `@smthrs/integrations`, with GitHub and Linear as
-"rc.0's real integrations" that "satisfy the Phase 7 smoke". Telegram is
-explicitly "not an rc.0 release-smoke integration" (TelegramLive.test.ts
-header); its live suite runs only when a bot token is available.
+rc-contract section 3.2 (`@smthrs/integrations`, ruling A7) defines the rc.0 integration set as the GitHub, Linear, and Telegram clients rebuilt on the action, notification, and trigger APIs, with webhook ingress as library code bound to `@smthrs/control` `WebhookChannel`. It states: "GitHub and Linear are rc.0's real integrations and satisfy the Phase 7 'exercise one real integration' smoke." Every other vendor adapter moved to the plugins repository or was deleted. Section 10 (Plue cutover) names no additional integration.
 
-The real-backend suites live in the clean checkout at
-`packages/integrations/test/{GitHubLive,LinearLive,TelegramLive}.test.ts`.
-They hit api.github.com, api.linear.app, and api.telegram.org directly with no
-fixture server. All calls are read-only.
+Real-backend suites in the clean checkout, found by scanning for `*Live*.test.ts` and `skipIf(` on credential environment variables outside `legacy/` and `node_modules/`:
+
+| Suite | Backend | Credential variable | Writes |
+| --- | --- | --- | --- |
+| `packages/integrations/test/GitHubLive.test.ts` | `https://api.github.com` | `GITHUB_TOKEN` or `SMITHERS_GITHUB_TOKEN` | none |
+| `packages/integrations/test/LinearLive.test.ts` | `https://api.linear.app/graphql` | `LINEAR_API_KEY` or `SMITHERS_LINEAR_API_KEY` | none |
+| `packages/integrations/test/TelegramLive.test.ts` | `https://api.telegram.org` | `TELEGRAM_BOT_TOKEN` or `SMITHERS_TELEGRAM_BOT_TOKEN` | none (`getUpdates` with no offset confirms nothing) |
+
+Out of scope, with the reason:
+
+- `packages/control/test/ControlLive*.test.ts`, `packages/engine-store/test/LeaseLiveness.test.ts`, `packages/platform-node/test/HostLiveness.test.ts`: engine liveness suites over local SQLite, not vendor integrations. They run in the package-test gate.
+- `packages/build-cli/test/AgentSession.test.ts` (`SMTHRS_CODEX_SMOKE=1`) and `packages/harness/test/WorkerdSmoke.test.ts` (`FLOWS_WORKERD_SMOKE=1`): opt-in agent CLI and workerd smokes, not `@smthrs/integrations` adapters.
+- `examples/test/12-agent-live-smoke.test.ts`: model-seat smoke, owned by the examples gate.
 
 ## Environment
 
-- Checkout: /Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout
-- Commit: 9c464343f0cfada6aa36f0a08144ed7cf1f0ce14 (v1/rc0-migration)
-- node v24.18.0 (engines requires >=22.19.0), pnpm 11.21.0, bun 1.4.0
-- vitest 4.1.9
-- Date: 2026-08-30
+| Item | Value |
+| --- | --- |
+| Checkout | `/Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-2` |
+| Branch and HEAD | `v1/rc0-migration` at `20b32c6316487497301db74ec70cbe951428ef53` |
+| `git status --short` | empty (clean) |
+| `git submodule status` | ` 47589ada70c12b3e829b5c98ab32503abad49eac vendor/jj (v0.25.0-3759-g47589ada7)` |
+| Host | macOS arm64, Darwin 25.2.0 |
+| Node | `v24.18.0` |
+| Bun | `1.4.0` |
+| pnpm | `11.21.0` (`corepack pnpm --version` matches `packageManager: pnpm@11.21.0`) |
+| vitest | `4.1.9` |
+| Date | 2026-08-30 23:59 to 2026-08-31 00:01 local time |
 
-## Credentials
+Credential presence, checked by name only (values never printed):
 
-- GITHUB_TOKEN: exported from `gh auth token` (account roninjin10, scopes
-  gist, read:org, repo, workflow). Read-only use.
-- LINEAR_API_KEY: present in the shell environment.
-- TELEGRAM_BOT_TOKEN / SMITHERS_TELEGRAM_BOT_TOKEN: absent. Not in the
-  environment, not in ~/.smithers/config.json or accounts.json. The Telegram
-  live suite therefore skips itself, naming the variable in its describe
-  title. This is the designed ENV-SKIP path and does not block the gate
-  because Telegram is not an rc.0 release-smoke integration.
+| Variable | State | Source used |
+| --- | --- | --- |
+| `GITHUB_TOKEN` | unset in the shell | Supplied per command as `GITHUB_TOKEN="$(gh auth token)"`. `gh auth status`: logged in to github.com as `roninjin10` via keyring, scopes `gist`, `read:org`, `repo`, `workflow`. The suite is read-only. |
+| `SMITHERS_GITHUB_TOKEN` | unset | not needed |
+| `LINEAR_API_KEY` | set in the shell | ambient environment |
+| `SMITHERS_LINEAR_API_KEY` | unset | not needed |
+| `TELEGRAM_BOT_TOKEN` | unset | absent |
+| `SMITHERS_TELEGRAM_BOT_TOKEN` | unset | absent |
+
+Telegram credential search: shell environment, `~/.smithers/.env`, `~/.smithers/env`, `~/smithers/.env`, `~/smithers/.env.local`, `~/.zshrc`, `~/.zshenv`, `~/.zprofile`, `~/.config/smithers/.env` (assignment by name), and the macOS keychain (`security find-generic-password -s TELEGRAM_BOT_TOKEN`). No assignment found.
+
+Network preflight, unauthenticated:
+
+```
+api.github.com /rate_limit (unauth) HTTP 200
+api.linear.app /graphql (unauth POST) HTTP 401
+api.telegram.org (no token) HTTP 404
+```
 
 ## Commands and results
 
-1. Full package suite with live credentials, from the clean checkout:
+### 0. Frozen install
 
-```
-cd <clean-checkout>/packages/integrations
-GITHUB_TOKEN="$(gh auth token)" pnpm exec vitest run
-```
-
-Final output:
-
-```
- Test Files  17 passed | 1 skipped (18)
-      Tests  311 passed | 3 skipped (314)
-   Duration  2.99s
-Statements   : 98.81% ( 1413/1430 )
-Branches     : 94.02% ( 975/1037 )
-Functions    : 98.6% ( 282/286 )
-Lines        : 99.2% ( 1245/1255 )
+```sh
+cd /Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-2
+corepack pnpm install --frozen-lockfile --offline
 ```
 
-Exit code: 0. Coverage thresholds (94/98/99/98) held. The one skipped file is
-TelegramLive.test.ts; the 3 skipped tests are its cases.
-
-2. Live suites alone, verbose, to prove the real-backend cases executed:
+Final lines:
 
 ```
-GITHUB_TOKEN="$(gh auth token)" pnpm exec vitest run \
-  --coverage.enabled=false --reporter=verbose \
-  test/GitHubLive.test.ts test/LinearLive.test.ts test/TelegramLive.test.ts
-```
-
-Final output:
-
-```
- ✓ GitHubLive > authenticates and returns the viewer 262ms
- ✓ GitHubLive > reports the rate-limit headers the retry policy reads 146ms
- ✓ GitHubLive > paginates a real Link header 729ms
- ✓ GitHubLive > classifies a real 404 as a non-retryable delivery failure 215ms
- ✓ LinearLive > authenticates and returns the viewer 208ms
- ✓ LinearLive > resolves a real team by key and caches it 273ms
- ✓ LinearLive > lists the workflow states and labels the name resolution depends on 438ms
- ✓ LinearLive > reports a GraphQL error rather than a transport failure 160ms
- ↓ TelegramLive (3 tests skipped: TELEGRAM_BOT_TOKEN absent)
- Test Files  2 passed | 1 skipped (3)
-      Tests  8 passed | 3 skipped (11)
+Scope: all 64 workspace projects
+Already up to date
+Done in 467ms using pnpm v11.21.0
 ```
 
 Exit code: 0.
 
-## Assessment
+### 1. GitHub live contract (PASS)
 
-- GitHub live contract: 4/4 passed against api.github.com. Covers
-  authentication, rate-limit header shape, real Link-header pagination, and
-  404 classification with token-redaction assertion.
-- Linear live contract: 4/4 passed against api.linear.app. Covers
-  authentication, team resolution with cache verification via a counting
-  fetch wrapper, workflow state and label listing, and GraphQL error
-  classification.
-- Telegram live contract: skipped, credential TELEGRAM_BOT_TOKEN (or
-  SMITHERS_TELEGRAM_BOT_TOKEN) absent. Telegram is not required for the rc.0
-  release smoke per rc-contract section 3.
-- The remaining 15 test files (fixture-backed behavior suites, webhook HMAC,
-  cursor store on real SQLite files, listener registry, actions) also passed
-  in the same run.
+The package's `vitest.config.ts` enables v8 coverage with thresholds by default. Running one live file alone would fail those thresholds for a reason unrelated to the backend, so isolated runs disable coverage. Command 4 below measures coverage over the whole suite.
 
-The gate requirement, real-backend tests for GitHub and Linear at minimum, is
-met with both suites fully passing. PASS.
+```sh
+cd /Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-2/packages/integrations
+GITHUB_TOKEN="$(gh auth token)" corepack pnpm exec vitest run test/GitHubLive.test.ts --coverage.enabled=false --reporter=verbose
+```
+
+Output:
+
+```
+ RUN  v4.1.9 .../clean-checkout-2/packages/integrations
+
+ ✓ test/GitHubLive.test.ts > GitHub live contract (GITHUB_TOKEN) > authenticates and returns the viewer 367ms
+ ✓ test/GitHubLive.test.ts > GitHub live contract (GITHUB_TOKEN) > reports the rate-limit headers the retry policy reads 227ms
+ ✓ test/GitHubLive.test.ts > GitHub live contract (GITHUB_TOKEN) > paginates a real Link header 881ms
+ ✓ test/GitHubLive.test.ts > GitHub live contract (GITHUB_TOKEN) > classifies a real 404 as a non-retryable delivery failure 225ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  23:59:36
+   Duration  3.64s (transform 309ms, setup 0ms, import 1.22s, tests 1.70s, environment 0ms)
+```
+
+Exit code: 0.
+
+What the run proved against the live API: `GET /user` authenticates and returns a string login; `GET /rate_limit` returns numeric `limit`, `remaining`, and `reset` under `resources.core`; `paginate("/repos/microsoft/TypeScript/issues", { perPage: 5, maxPages: 2 })` follows a real `Link: rel="next"` header and returns more than 5 items; a real 404 classifies as `reason: "delivery-failed"` with `{ status: 404, retryable: false }` and the token does not appear in the serialized failure details.
+
+### 2. Linear live contract (PASS)
+
+```sh
+cd /Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-2/packages/integrations
+corepack pnpm exec vitest run test/LinearLive.test.ts --coverage.enabled=false --reporter=verbose
+```
+
+`LINEAR_API_KEY` came from the ambient shell environment.
+
+Output:
+
+```
+ RUN  v4.1.9 .../clean-checkout-2/packages/integrations
+
+ ✓ test/LinearLive.test.ts > Linear live contract (LINEAR_API_KEY) > authenticates and returns the viewer 310ms
+ ✓ test/LinearLive.test.ts > Linear live contract (LINEAR_API_KEY) > resolves a real team by key and caches it 638ms
+ ✓ test/LinearLive.test.ts > Linear live contract (LINEAR_API_KEY) > lists the workflow states and labels the name resolution depends on 454ms
+ ✓ test/LinearLive.test.ts > Linear live contract (LINEAR_API_KEY) > reports a GraphQL error rather than a transport failure 388ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  00:00:07
+   Duration  3.51s (transform 292ms, setup 0ms, import 1.25s, tests 1.79s, environment 0ms)
+```
+
+Exit code: 0.
+
+What the run proved against the live API: the viewer query returns a string id; the workspace has at least one team, so the two in-suite `ctx.skip` branches did not fire and the team cache claim was exercised (a second `resolveTeam` issued zero additional `fetch` calls); `workflowStates` filtered by team returns an array; an invalid GraphQL field returns `reason: "delivery-failed"` with a message that names Linear and does not contain the key.
+
+### 3. Telegram live contract (ENV-SKIP)
+
+```sh
+cd /Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-2/packages/integrations
+env -u TELEGRAM_BOT_TOKEN -u SMITHERS_TELEGRAM_BOT_TOKEN corepack pnpm exec vitest run test/TelegramLive.test.ts --coverage.enabled=false --reporter=verbose
+```
+
+Output:
+
+```
+ RUN  v4.1.9 .../clean-checkout-2/packages/integrations
+
+ ↓ test/TelegramLive.test.ts > Telegram live contract (TELEGRAM_BOT_TOKEN) > authenticates and identifies the bot
+ ↓ test/TelegramLive.test.ts > Telegram live contract (TELEGRAM_BOT_TOKEN) > long-polls without confirming any update
+ ↓ test/TelegramLive.test.ts > Telegram live contract (TELEGRAM_BOT_TOKEN) > reports an unknown method with the API's own error code, and no token
+
+ Test Files  1 skipped (1)
+      Tests  3 skipped (3)
+   Start at  00:01:07
+   Duration  1.15s (transform 373ms, setup 0ms, import 947ms, tests 0ms, environment 0ms)
+```
+
+Exit code: 0.
+
+Reason: `TELEGRAM_BOT_TOKEN` and `SMITHERS_TELEGRAM_BOT_TOKEN` are absent on this host. The suite skips with the credential named in its title. Telegram is not an rc.0 release-smoke integration (rc-contract section 3.2 and the suite header). To run it, set `TELEGRAM_BOT_TOKEN` to a BotFather token and rerun the command above without `env -u`.
+
+### 4. Full `@smthrs/integrations` suite with credentials and coverage thresholds (PASS)
+
+```sh
+cd /Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-2
+GITHUB_TOKEN="$(gh auth token)" corepack pnpm --filter @smthrs/integrations test -- --run
+```
+
+Final lines:
+
+```
+ Test Files  17 passed | 1 skipped (18)
+      Tests  311 passed | 3 skipped (314)
+   Start at  00:01:20
+   Duration  4.57s (transform 10.70s, setup 0ms, import 28.35s, tests 6.29s, environment 2ms)
+ % Coverage report from v8
+All files          |   98.81 |    94.02 |    98.6 |    99.2 |
+=============================== Coverage summary ===============================
+Statements   : 98.81% ( 1413/1430 )
+Branches     : 94.02% ( 975/1037 )
+Functions    : 98.6% ( 282/286 )
+Lines        : 99.2% ( 1245/1255 )
+================================================================================
+```
+
+Exit code: 0.
+
+The one skipped file is `TelegramLive.test.ts` (3 tests). Coverage clears the configured thresholds (`branches 94`, `functions 98`, `lines 99`, `statements 98`) with the live suites contributing provider-side paths.
+
+## Persisted state
+
+The live suites are read-only by design and persist nothing on the vendor side. The `CursorStore.test.ts` suite in the same package run writes cursors through the real `@smthrs/database` SQLite path; it is part of the 311 passing tests. No mocks replace a backend: the Linear suite wraps the installed `fetch` only to count calls and forwards every call to `api.linear.app`.
+
+## Logs
+
+Raw logs, credential patterns redacted before quoting, are in the scratchpad of the session that ran the gate:
+
+- `/private/tmp/claude-501/-Users-williamcory-smithers/b0a4ab15-ceef-429c-8898-089a3db0bc0d/scratchpad/github-live.log`
+- `/private/tmp/claude-501/-Users-williamcory-smithers/b0a4ab15-ceef-429c-8898-089a3db0bc0d/scratchpad/linear-live.log`
+- `/private/tmp/claude-501/-Users-williamcory-smithers/b0a4ab15-ceef-429c-8898-089a3db0bc0d/scratchpad/telegram-live.log`
+- `/private/tmp/claude-501/-Users-williamcory-smithers/b0a4ab15-ceef-429c-8898-089a3db0bc0d/scratchpad/integrations-full.log`
+
+## Notes for the maintainer
+
+- `GITHUB_TOKEN` is not exported in the operator shell. The GitHub suite ran with the `gh` CLI keyring token. The maintainer publish checklist should either export `GITHUB_TOKEN` or record `GITHUB_TOKEN="$(gh auth token)"` as the sanctioned invocation.
+- Running a single `*Live.test.ts` file requires `--coverage.enabled=false`; otherwise the package coverage thresholds fail for a reason unrelated to the backend. The README for `packages/integrations` does not state this. This is a documentation gap, not a gate failure.

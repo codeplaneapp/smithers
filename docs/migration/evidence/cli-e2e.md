@@ -2,45 +2,53 @@
 
 Verdict: PASS
 
+This file supersedes the 2026-08-30 16:00 evidence taken at `9c464343f0` in
+`migration/clean-checkout` (that directory no longer exists). Every result
+below was taken in `migration/clean-checkout-2` at `20b32c6316`.
+
 ## Scope
 
 PLAN.md Phase 7 requires "CLI end-to-end tests using the working-tree CLI".
 The task adds the negative gates: every unsupported or removed command in
 `docs/migration/rc-contract.md` sections 4 and 5 must refuse with exit 1 and
-the migration sentence, never a usage error or a silent success.
+the migration sentence, never a usage error and never a silent success.
 
-Three layers of evidence, all from the clean checkout:
+Four layers of evidence, all from the clean checkout:
 
-1. The complete `@smthrs/cli` test suite (36 files, 605 tests), which contains
+1. The complete `@smthrs/cli` test suite (36 files, 608 tests). It contains
    the end-to-end suite `test/EndToEnd.test.ts` (real `smithers` processes
-   against one real project: init, ls, plan, detached up, ps --status, logs,
-   two distinct signals, a cross-process approval decision, memory, steer,
-   output, doctor, cancel, down, gc, all against real
-   `.flows/control.db`/`.flows/engine.db` SQLite files), the process-boundary
-   suite `test/Bin.test.ts` (exit codes 0/1/2/130/143, the help surface pinned
-   to section 4.1, removed verbs and flags across the process boundary, the
+   against one real project: init, ls, plan parked with the parked exit
+   status, detached up, ps --status, logs, two distinct signals, a
+   cross-process approval decision, memory, steer, output, doctor, cancel,
+   down, gc, all against real `.flows/control.db` and `.flows/engine.db`
+   SQLite files), the process-boundary suite `test/Bin.test.ts` (exit codes
+   0/1/2/130/143, the help surface pinned to section 4.1, removed verbs and
+   flags across the process boundary, reserved `system/*` flow ids, the
    SQLite-only database contract including `SMITHERS_BACKEND`, the ignored
-   PostgreSQL names, the 0.x database-file refusal, the served gateway mounts,
-   the `--json`/`--quiet` stdout contract, the bin shim dist/src selection,
-   0.x detection and the migrate verb), the surface pins `test/Verb.test.ts`
+   PostgreSQL names, the 0.x database-file refusal, the served gateway
+   mounts, the `--json`/`--quiet` stdout contract, the bin shim dist/src
+   selection, the `--version`/`--help` fast path, section 6 0.x detection,
+   the migrate verb, and `skills add`), the surface pins `test/Verb.test.ts`
    (shipped set equals section 4.1; removed set equals section 4.2) and
    `test/Unsupported.test.ts` (every removed verb and flag through the real
-   parser), and `test/McpServer.test.ts` (the 11 supported MCP tools, the 10
+   parser), `test/McpServer.test.ts` (the 11 supported MCP tools, the 10
    unsupported tools answering `{ ok: false, error: { code: "unsupported" } }`,
    and a real stdio round trip), plus CrossProcessCancel, Detached, Serve,
    Legacy, Doctor, Docs, Gc, Init, and the rest.
-2. A direct sweep of all 122 negative and control invocations of the
-   working-tree CLI: 101 removed-verb invocations (every plain verb, every
-   removed group bare, and every subcommand of every removed group in the
-   section 4.2 verb table, which includes the section 5.2 rows `hijack`,
-   `pause`, and the time-travel verbs), 18 removed-flag invocations (every row
-   of the section 4.2 flag table, plus `--backend pglite`), the
-   `--backend sqlite` no-op, and the 2 surviving aliases (`workflow list`,
-   `ls`).
-3. Literal `corepack pnpm exec smithers ...` transcripts for a representative
-   subset, plus the environment-variable gates (`SMITHERS_BACKEND`,
-   `SMITHERS_POSTGRES_URL`, `SMITHERS_TEST_PG_URL`) and the usage-error
-   control (`definitely-not-a-verb` exits 2, distinct from removals).
+2. A direct sweep of 127 negative and control invocations of the working-tree
+   CLI: 101 removed-verb invocations (every plain verb, every removed group
+   bare, and every subcommand of every removed group in the section 4.2 verb
+   table, which includes the section 5.2 rows `hijack`, `pause`, and the
+   time-travel verbs), 18 removed-flag invocations (every row of the section
+   4.2 flag table, plus `--backend pglite`), the `--backend sqlite` no-op,
+   the 2 surviving aliases (`workflow list`, `ls`), the usage-error control
+   (`definitely-not-a-verb` exits 2), and 4 environment-variable gates
+   (`SMITHERS_BACKEND` pglite, postgres, sqlite; ignored PostgreSQL URLs).
+3. A literal stdio round trip against `corepack pnpm exec smithers --mcp`:
+   handshake, `tools/list`, one supported call, and all 10 unsupported tools
+   from section 4.1 (`ask_human` included).
+4. Literal `corepack pnpm exec smithers ...` transcripts for a representative
+   subset.
 
 The crash/restart fault suites under `e2e/faults` belong to the "real SQLite
 persistence and crash/restart suites" gate, not this one.
@@ -49,57 +57,107 @@ persistence and crash/restart suites" gate, not this one.
 
 | Item | Value |
 | --- | --- |
-| Checkout | /Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout |
-| HEAD | `9c464343f0cfada6aa36f0a08144ed7cf1f0ce14` (`v1/rc0-migration`) |
+| Checkout | `/Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-2` |
+| HEAD | `20b32c6316487497301db74ec70cbe951428ef53` (`v1/rc0-migration`, `git status --porcelain` empty before and after) |
 | Node | v24.18.0 (engines floor `>=22.19.0`) |
-| pnpm (corepack 0.35.0, `packageManager: pnpm@11.21.0`) | 11.21.0 |
-| Bun | 1.4.0 (not used by this gate) |
+| pnpm | 11.21.0 via corepack 0.35.0 (`packageManager: pnpm@11.21.0`) |
+| Bun | 1.4.0 (not used by this gate; the bin shim pins Node) |
 | vitest | 4.1.9, v8 coverage enabled by `packages/cli/vitest.config.ts` |
-| Date | 2026-08-30 |
-| Host load | 1-minute load average 19-69 during the runs (other agent sessions on this machine); every result below was green regardless |
+| Date | 2026-08-30 23:58 to 2026-08-31 00:10 PT |
+| Host load | 1-minute load average 8 to 52 during the runs. Other Phase 7 gate agents ran `tsc`, vitest, `pack-release.mjs`, and the migrate flow in this same checkout concurrently (`ps` at 00:02 listed them). |
+| `SMITHERS_HOME` | unset for every invocation (`env -u SMITHERS_HOME`) |
 
 Dependencies were installed by the clean-install gate (`00-clean-install.md`).
 The working-tree CLI resolves through `node_modules/.bin/smithers` to
 `packages/cli/bin/smithers.mjs`, which executes `src/bin.ts` because no `dist`
-build exists in this checkout; `corepack pnpm exec smithers --version` from
+build exists in this checkout. `corepack pnpm exec smithers --version` from
 the checkout root prints `smithers v1.0.0-rc.0`, exit 0.
+
+Since the superseded evidence at `9c464343f0`, 48 commits landed. The removal
+surface (`packages/cli/src/Unsupported.ts`, `Command.ts`, `Verb.ts`,
+`test/Verb.test.ts`, `test/Unsupported.test.ts`, `test/EndToEnd.test.ts`,
+`test/McpServer.test.ts`) is byte-identical; only `src/bin.ts` and
+`test/Bin.test.ts` changed (commit `5d127f2dc7`, the `--version`/`--help`
+fast path and its two new tests, which is why the suite grew from 605 to 608
+tests).
 
 ## 1. Full @smthrs/cli test suite
 
+Command, run twice from `packages/cli` in the clean checkout:
+
 ```
-cd packages/cli && corepack pnpm exec vitest run
+cd packages/cli && env -u SMITHERS_HOME corepack pnpm exec vitest run
 ```
 
-Exit code: 0. Final output lines:
+### Run 1 (23:59:35 to 00:02:20 PT, load 8 to 33): exit 1
+
+```
+ ❯ test/Bin.test.ts (46 tests | 1 failed) 141187ms
+     × answers --help without discovery or a database, from a directory with no project marker 5765ms
+ FAIL  test/Bin.test.ts > smithers executable > answers --help without discovery or a database, from a directory with no project marker
+AssertionError: expected 5736 to be less than 5000
+ ❯ test/Bin.test.ts:138:23
+ Test Files  1 failed | 35 passed (36)
+      Tests  1 failed | 607 passed (608)
+   Duration  161.72s (transform 78.35s, setup 0ms, import 175.01s, tests 329.06s, environment 4ms)
+```
+
+The one failure is the wall-clock assertion `expect(elapsed).toBeLessThan(5_000)`
+at `packages/cli/test/Bin.test.ts:138`. Every functional assertion in that
+test held: exit status 0, `--help` output contains `plan`, and no
+`.flows/control.db` was created under the staged home (the point of commit
+`5d127f2dc7`). The sibling `--version` test with the same 5 s budget passed in
+the same run. The breach was 736 ms over budget while the suite's own
+coverage-instrumented workers and the other gates' processes held the host at
+load 31 to 33.
+
+### Isolated rerun of the two timed tests (00:03:59 to 00:04:18 PT, load 31): exit 0
+
+```
+cd packages/cli && env -u SMITHERS_HOME corepack pnpm exec vitest run test/Bin.test.ts -t "without discovery or a database" --coverage.enabled=false
+ Test Files  1 passed (1)
+      Tests  2 passed | 44 skipped (46)
+   Duration  18.43s
+```
+
+Direct wall-clock samples at load 31, `node --no-warnings packages/cli/bin/smithers.mjs <flag>`
+from a directory with no project marker under a staged `HOME`:
+`--version` 2213, 2106, 3600 ms; `--help` 3192, 5244, 4966 ms; every exit 0;
+no `control.db` created. One `--help` sample of three crossed 5000 ms at that
+load, so the budget is marginal on a shared host at load 30+, not on the
+idle machine the test comment assumes.
+
+### Run 2 (00:07:55 to 00:09:17 PT, load 17 to 19): exit 0
 
 ```
  Test Files  36 passed (36)
-      Tests  605 passed (605)
-   Start at  15:50:48
-   Duration  120.44s (transform 67.07s, setup 0ms, import 138.63s, tests 233.58s, environment 4ms)
-Statements   : 81.77% ( 1633/1997 )
-Branches     : 78.6% ( 966/1229 )
-Functions    : 76.41% ( 405/530 )
-Lines        : 82.02% ( 1447/1764 )
+      Tests  608 passed (608)
+   Start at  00:07:56
+   Duration  80.84s (transform 20.03s, setup 0ms, import 53.32s, tests 164.02s, environment 3ms)
+Statements   : 81.54% ( 1635/2005 )
+Branches     : 78.46% ( 969/1235 )
+Functions    : 76.27% ( 405/531 )
+Lines        : 81.87% ( 1450/1771 )
 ```
 
 The coverage ratchet in `packages/cli/vitest.config.ts` (branches 76,
-functions 72, lines 79, statements 78) passed. Full log:
-`/private/tmp/claude-501/-Users-williamcory-smithers/b0a4ab15-ceef-429c-8898-089a3db0bc0d/scratchpad/cli-vitest.log`.
+functions 72, lines 79, statements 78) passed. Full logs:
+`cli-e2e-logs/cli-vitest-run1.log`, `cli-e2e-logs/cli-bin-isolated.log`,
+`cli-e2e-logs/cli-vitest-run2.log` beside this file.
 
-## 2. Negative-gate sweep: 122 invocations, 122 ok
+## 2. Negative-gate sweep: 127 invocations, 127 ok
 
-Every invocation ran the working-tree CLI from the clean checkout root
-(`node_modules/.bin/smithers`, the identical shim `pnpm exec smithers`
-resolves; six invocations in parallel for wall time on the loaded host). Each
-case checks both the exit code and the exact contract sentence in the output.
-Result: `SWEEP-DONE 122 ok / 122 total`, zero failures.
+Every invocation ran `corepack pnpm exec smithers ...` from the clean checkout
+root, eight at a time for wall time on the shared host
+(`cli-e2e-logs/negative-sweep.mjs`, 00:03:50 to 00:07:43 PT). Each case
+checks both the exit code and the exact contract sentence in the combined
+output. Result: `SWEEP-DONE PASS=127 FAIL=0 TOTAL=127`, exit 0.
 
 - 101 removed-verb invocations: exit 1, message
   `smithers <verb> was removed in 1.0.0-rc.0: <reason>. See
   https://smithers.sh/migration/1.0#<anchor>`, with the sub-verb carried into
   the message for every removed group (`agents add`, `cron list`,
-  `workflow run`, `gateway status`, ...).
+  `workflow run`, `gateway status`, `worktrees prune`, ...).
 - 18 removed-flag invocations on their surviving parents (`steer --takeover`;
   the 13 `up` flags including `--max-concurrency 4`; `migrate --to postgres`;
   `init example --global`; global `--backend postgres` and `--backend pglite`):
@@ -107,23 +165,70 @@ Result: `SWEEP-DONE 122 ok / 122 total`, zero failures.
   `unsupported_database` sentence; every other flag fails with the removal
   sentence.
 - `--backend sqlite ls`: accepted as a no-op, exit 0.
-- Surviving aliases `workflow list` and `ls`: exit 0, so the removals did not
-  take the live alias surface with them.
+- Surviving aliases `workflow list` and `ls`: exit 0.
+- Control: `definitely-not-a-verb` exits 2 with `Unknown subcommand`, so a
+  removed verb's exit 1 is a deliberate refusal, not the parser's usage error.
+- Environment: `SMITHERS_BACKEND=pglite` and `SMITHERS_BACKEND=postgres` exit
+  1 with `unsupported_database`; `SMITHERS_BACKEND=sqlite` is a no-op, exit 0;
+  `SMITHERS_POSTGRES_URL` and `SMITHERS_TEST_PG_URL` print one `ignored:` line
+  each on stderr and the command still exits 0.
 
-The section 5 rows are covered inside that set: `hijack` and `pause` (5.2
-rows one and two), `steer --takeover` (hijack enforcement), every time-travel
-verb (`replay`, `rewind`, `fork`, `timetravel`, `snapshots`, `restore`,
-`snapshot-hook`, `revert`, `timeline`, `diff`), the checkpoint and worktree
-verbs (`worktrees list|prune`, `tree`, `graph`), and the supervision surface
-(`supervise`, `supervisor`, `top`, the `up --force`/`--steal-ownership`/
-`--resume-*` flags). The MCP half of section 5's enforcement (the 10
-unsupported tools answering the `unsupported` envelope, `ask_human` included)
-is pinned by `test/McpServer.test.ts` inside the passing suite, including a
-real stdio round trip.
+Section 4.2 coverage, row by row: time travel and checkpoints (13 verbs plus
+`worktrees`, `worktrees list`, `worktrees prune`); hijack and pause; old
+gateway and UI hosting (`gateway status`, `gateway stop`, `ui`, `gui`,
+`monitor`); supervision (`supervise`, `supervisor`, `top`); evaluation
+(`eval`, `optimize`, `scores`); chat and narration (`chat`, `chat-create`,
+`what`, `ask`); accounts and providers (`agents` and its 7 subcommands,
+`usage`, `claude-shell`, `hermes`, `listeners`, `observability`, `alerts`,
+`herdr` and 4, `openapi` and 2, `token` and 3, `cron` and 4); packs and
+scaffolding (`make-workflow`, `starters`, `share`, `add`, `remove`, `eject`,
+`upgrade`, `packs` and 2, `workflow` and its 6 removed subcommands); human
+requests (`human`, `human list`, `human resolve`, `ask-human`); node detail
+(`node`, `tail`); review and release (`review`, `release`, `test`); old
+aliases and did-you-mean keys (all 12).
 
-## 3. Literal `corepack pnpm exec smithers` transcripts
+Section 5 coverage inside that set: `hijack` and `pause` (5.2 rows one and
+two), `steer --takeover` (hijack enforcement), every time-travel verb
+(`replay`, `rewind`, `fork`, `timetravel`, `snapshots`, `restore`,
+`snapshot-hook`, `revert`, `timeline`, `diff`; 5.1 "Time travel" and X-19),
+the checkpoint and worktree verbs (`worktrees list|prune`, `tree`, `graph`;
+5.2 "Checkpoints and worktree lanes"), the supervision surface (`supervise`,
+`supervisor`, `top`, the `up --force`/`--steal-ownership`/`--resume-*` flags;
+5.2 "Supervisor process"), and the diff-review gate (`diff`; 5.2 "Diff-review
+gate"). The remaining 5.2 rows (`interruptUnsafe`, `Continued`, quota wake,
+`WakeBus`, detached children, edge engine, plan admission caps, orphan
+reaping) are library behavior with no CLI verb and are outside this gate.
 
-Run from the clean checkout root. Every invocation agreed with the sweep.
+## 3. MCP stdio round trip: 21 tools, 10 unsupported envelopes
+
+`node cli-e2e-logs/mcp-probe.mjs <checkout>` spawns
+`corepack pnpm exec smithers --mcp` from the clean checkout root and speaks
+newline-delimited JSON-RPC over stdio. Exit 0, `MCP-PROBE-DONE unsupported=10 bad=0`.
+
+```
+initialize -> {"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"smithers","version":"1.0.0-rc.0"}}
+tools/list -> 21 tools: list_workflows, run_workflow, list_runs, get_run, watch_run, get_run_events, explain_run, list_pending_approvals, resolve_approval, get_node_detail, get_chat_transcript, revert_attempt, fork_run, replay_run, rewind_run, restore_checkpoint, list_snapshots, get_timeline, time_travel, list_artifacts, ask_human
+tools/call list_workflows -> {"isError":false,"ok":true}
+tools/call revert_attempt -> ok isError=true envelope={"ok":false,"error":{"code":"unsupported","message":"revert_attempt is not available in 1.0.0-rc.0: time travel is a library API (@smthrs/time-travel) and is not composed into the CLI. See https://smithers.sh/migration/1.0"}}
+tools/call fork_run -> ok isError=true envelope={"ok":false,"error":{"code":"unsupported",...}}
+tools/call replay_run -> ok isError=true envelope={"ok":false,"error":{"code":"unsupported",...}}
+tools/call rewind_run -> ok isError=true envelope={"ok":false,"error":{"code":"unsupported",...}}
+tools/call restore_checkpoint -> ok isError=true envelope={"ok":false,"error":{"code":"unsupported","message":"restore_checkpoint is not available in 1.0.0-rc.0: worktree lanes and snapshot restore are deferred. ..."}}
+tools/call list_snapshots -> ok isError=true envelope={"ok":false,"error":{"code":"unsupported",...}}
+tools/call get_timeline -> ok isError=true envelope={"ok":false,"error":{"code":"unsupported",...}}
+tools/call time_travel -> ok isError=true envelope={"ok":false,"error":{"code":"unsupported",...}}
+tools/call list_artifacts -> ok isError=true envelope={"ok":false,"error":{"code":"unsupported","message":"list_artifacts is not available in 1.0.0-rc.0: the artifact projection is not part of this release. ..."}}
+tools/call ask_human -> ok isError=true envelope={"ok":false,"error":{"code":"unsupported","message":"ask_human is not available in 1.0.0-rc.0: there is no question or answer RPC; approvals park the run, so use list_pending_approvals. See https://smithers.sh/migration/1.0"}}
+```
+
+The 11 listed before `revert_attempt` are exactly section 4.1's supported
+set; the 10 after are exactly its unsupported set. Full output with every
+message: `cli-e2e-logs/mcp-probe.log`.
+
+## 4. Literal `corepack pnpm exec smithers` transcripts
+
+Run from the clean checkout root (`cli-e2e-logs/cli-transcripts.txt` holds the
+complete output, including the full `ls` document and help text).
 
 ```
 $ corepack pnpm exec smithers replay
@@ -142,6 +247,14 @@ $ corepack pnpm exec smithers agents add
 smithers agents add was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#agents
 exit=1
 
+$ corepack pnpm exec smithers worktrees prune
+smithers worktrees prune was removed in 1.0.0-rc.0: time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. See https://smithers.sh/migration/1.0#worktrees
+exit=1
+
+$ corepack pnpm exec smithers steer run-1 --message hello --takeover
+smithers steer --takeover was removed in 1.0.0-rc.0: hijack is not available; `steer --message` is the only mode. See https://smithers.sh/migration/1.0#hijack
+exit=1
+
 $ corepack pnpm exec smithers up system/test --max-concurrency 4
 smithers up --max-concurrency was removed in 1.0.0-rc.0: parallelism is declared by the flow and bounded by plan admission. See https://smithers.sh/migration/1.0#plan-admission
 exit=1
@@ -158,9 +271,15 @@ $ corepack pnpm exec smithers --backend postgres ls
 unsupported_database: 1.0.0-rc.0 supports local SQLite only. PostgreSQL and PGlite are not available. Unset SMITHERS_BACKEND or set it to sqlite. See https://smithers.sh/migration/1.0#databases
 exit=1
 
-$ SMITHERS_BACKEND=pglite corepack pnpm exec smithers ls
+$ env SMITHERS_BACKEND=pglite corepack pnpm exec smithers ls
 unsupported_database: 1.0.0-rc.0 supports local SQLite only. PostgreSQL and PGlite are not available. Unset SMITHERS_BACKEND or set it to sqlite. See https://smithers.sh/migration/1.0#databases
 exit=1
+
+$ env SMITHERS_POSTGRES_URL=postgres://x SMITHERS_TEST_PG_URL=postgres://y corepack pnpm exec smithers ls
+ignored: SMITHERS_POSTGRES_URL has no effect in 1.0.0-rc.0 (SQLite only)
+ignored: SMITHERS_TEST_PG_URL has no effect in 1.0.0-rc.0 (SQLite only)
+{ "_tag": "flows", "items": [ ...10 flows from <checkout>/flows/** ... ] }
+exit=0
 
 $ corepack pnpm exec smithers definitely-not-a-verb
 [help text, then:]
@@ -169,38 +288,58 @@ ERROR
 exit=2
 ```
 
-The `definitely-not-a-verb` control proves removed verbs are a deliberate
-exit-1 refusal, not the parser's exit-2 usage error, and its help output lists
-exactly the 26 section 4.1 subcommands (plus the built-in `--completions`)
-with no removed verb advertised.
+`corepack pnpm exec smithers --help` (exit 0, `cli-e2e-logs/cli-help.txt`)
+lists exactly the 26 section 4.1 subcommands (`plan`, `run`, `up`, `approve`,
+`deny`, `cancel`, `signal`, `steer`, `ls`, `ps`, `status, inspect`, `logs`,
+`output`, `down`, `serve`, `init`, `doctor`, `docs`, `gc`, `migrate`,
+`memory`, `claude`, `mcp`, `skills`, `update`, `bug`) plus the built-in
+`--completions`, and advertises no removed verb.
 
-Environment-variable gates:
-
-```
-$ SMITHERS_POSTGRES_URL=postgres://x SMITHERS_TEST_PG_URL=postgres://y corepack pnpm exec smithers ls
-stderr:
-ignored: SMITHERS_POSTGRES_URL has no effect in 1.0.0-rc.0 (SQLite only)
-ignored: SMITHERS_TEST_PG_URL has no effect in 1.0.0-rc.0 (SQLite only)
-exit=0 (the ls result itself is unchanged)
-```
-
-## 4. Checkout integrity
+## 5. Checkout integrity
 
 `git status --porcelain` in the clean checkout is empty after all runs. The
-only state the runs touched is the git-ignored `.flows/` engine directory
-(control.db, engine.db, WAL and cache files), which is engine-owned run state,
-not a source edit. No fix was applied in the clean checkout.
+only state the runs created is the git-ignored `.flows/` engine directory at
+the checkout root (`cache/`, `control.db`, `engine.db`), which is
+engine-owned run state written by the `ls` invocations, not a source edit.
+No fix was applied in the clean checkout.
+
+## 6. Follow-up for a fix lane (advisory, not a blocker)
+
+`packages/cli/test/Bin.test.ts:114` and `:138` assert an absolute wall clock
+(`elapsed < 5000 ms`) around a real `smithers --version` / `--help` process.
+The assertion protects a real contract (commit `5d127f2dc7`: the two
+documents must not walk the project root, scan flows, or open SQLite), but it
+measures that contract through host speed. Inside the coverage-instrumented
+parallel suite on a host at load 31 to 33 the `--help` case took 5736 ms and
+failed once (run 1 above), then passed in isolation and in run 2 at load 17
+to 19. The functional half of the same test (`control.db` absent, exit 0)
+never failed. A fix lane should make the assertion insensitive to load: for
+example, assert that no `.flows/` directory and no database file appear
+(already asserted) and compare the document's elapsed time against a same-run
+baseline invocation instead of a constant, or move the constant under the
+describe's `processBudget` rationale with a bound that survives a loaded CI
+runner. Ownership: `packages/cli/test/Bin.test.ts`.
+
+## Raw logs
+
+`cli-e2e-logs/` beside this file: `cli-vitest-run1.log`,
+`cli-bin-isolated.log`, `cli-vitest-run2.log`, `negative-sweep.mjs`,
+`negative-sweep.tsv`, `mcp-probe.mjs`, `mcp-probe.log`, `cli-help.txt`,
+`cli-transcripts.txt`.
 
 ## Appendix: full sweep results
 
 One line per invocation: verdict, label, exit code, invocation, first output
-line. Produced by
-`/private/tmp/claude-501/-Users-williamcory-smithers/b0a4ab15-ceef-429c-8898-089a3db0bc0d/scratchpad/negative-sweep.sh`
-(case table: `cases.tsv` in the same directory).
+line. Produced by `cli-e2e-logs/negative-sweep.mjs`.
 
 ```
 ok	alias: ls	exit=0	smithers ls	{
 ok	alias: workflow list	exit=0	smithers workflow list	{
+ok	control: unknown verb exits 2	exit=2	smithers definitely-not-a-verb	DESCRIPTION
+ok	env: PG urls ignored	exit=0	SMITHERS_POSTGRES_URL=postgres://x SMITHERS_TEST_PG_URL=postgres://y smithers ls	ignored: SMITHERS_POSTGRES_URL has no effect in 1.0.0-rc.0 (SQLite only)
+ok	env: SMITHERS_BACKEND=pglite	exit=1	SMITHERS_BACKEND=pglite smithers ls	unsupported_database: 1.0.0-rc.0 supports local SQLite only. PostgreSQL and PGlite are not available. Unset SMITHERS_BACKEND or set it to sqlite. See https://smithers.sh/migration/1.0#databases
+ok	env: SMITHERS_BACKEND=postgres	exit=1	SMITHERS_BACKEND=postgres smithers ls	unsupported_database: 1.0.0-rc.0 supports local SQLite only. PostgreSQL and PGlite are not available. Unset SMITHERS_BACKEND or set it to sqlite. See https://smithers.sh/migration/1.0#databases
+ok	env: SMITHERS_BACKEND=sqlite no-op	exit=0	SMITHERS_BACKEND=sqlite smithers ls	{
 ok	flag: --backend pglite	exit=1	smithers --backend pglite ls	unsupported_database: 1.0.0-rc.0 supports local SQLite only. PostgreSQL and PGlite are not available. Unset SMITHERS_BACKEND or set it to sqlite. See https://smithers.sh/migration/1.0#databases
 ok	flag: --backend postgres	exit=1	smithers --backend postgres ls	unsupported_database: 1.0.0-rc.0 supports local SQLite only. PostgreSQL and PGlite are not available. Unset SMITHERS_BACKEND or set it to sqlite. See https://smithers.sh/migration/1.0#databases
 ok	flag: init --global	exit=1	smithers init example --global	smithers init --global was removed in 1.0.0-rc.0: rc.0 has no global pack; seats resolve from environment keys. See https://smithers.sh/migration/1.0#init
@@ -321,5 +460,5 @@ ok	removed: workflows	exit=1	smithers workflows	smithers workflows was removed i
 ok	removed: worktrees	exit=1	smithers worktrees	smithers worktrees was removed in 1.0.0-rc.0: time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. See https://smithers.sh/migration/1.0#worktrees
 ok	removed: worktrees list	exit=1	smithers worktrees list	smithers worktrees list was removed in 1.0.0-rc.0: time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. See https://smithers.sh/migration/1.0#worktrees
 ok	removed: worktrees prune	exit=1	smithers worktrees prune	smithers worktrees prune was removed in 1.0.0-rc.0: time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. See https://smithers.sh/migration/1.0#worktrees
-SWEEP-DONE 122 ok / 122 total
+PASS=127 FAIL=0
 ```

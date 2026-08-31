@@ -4,11 +4,11 @@ This is the complete, commit-level changelog. For the guided tour of each
 release (what changed and why it matters, with screenshots and examples), see
 the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
-## 1.0.0-rc.0 (2026-08-30)
+## 1.0.0-rc.0 (2026-08-31)
 
-The first release candidate of Smithers 1.0. 297 commits since
+The first release candidate of Smithers 1.0. 347 commits since
 [cfb570f193](https://github.com/smithersai/smithers/commit/cfb570f193), the
-0.x tree: 13,031 files changed, +1,014,566 / -1,601,511 lines. Release notes:
+0.x tree: 13,087 files changed, +1,033,212 / -1,601,495 lines. Release notes:
 `docs/releases/1.0.0-rc.0.md`.
 
 This is not an increment on 0.x. The 0.x JSX workflow engine is replaced
@@ -86,6 +86,18 @@ release notes, the README, and the migration guide.
   construct it refused to translate.
 - It refuses to transform a project that still holds non-terminal 0.x run
   state, and it never writes to `smithers.db`.
+
+### Validation
+
+- Phase 7 ran seventeen gates from clean checkouts with real backends and real
+  persisted data. Fifteen pass. The verdicts, the commands, and the evidence
+  are in `docs/migration/verification-evidence.md`, with each gate's file
+  copied under `docs/migration/evidence/`.
+- Two gates fail on two defects in this repository, both open: a run's terminal
+  result is not recorded in the engine store when the launching process owns
+  the executor, and an attached `smithers up` or `smithers run` exits 0 for a
+  run that settled `failed`. This candidate is not publishable until they close
+  or the maintainer accepts them in writing.
 
 ### Known limitations
 

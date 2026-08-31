@@ -10,21 +10,42 @@ file wins for this candidate.
 
 ## 0. Do not publish yet
 
-Five Phase 7 gates fail. Publishing while they fail ships a candidate whose
-core promise is unproven.
+Two Phase 7 gates fail, on two defects in this repository. Publishing while they
+fail ships a candidate whose core promise is unproven.
 
 Read [verification-evidence.md](verification-evidence.md) first and close, or
 record a written acceptance of, each of:
 
-1. A run parked on a durable wait is never continued (smoke).
-2. Path D workflows cannot resolve the JSX runtime (plue-cutover).
-3. `known-files.d.ts` is not reproducible and nothing gates it (scans,
-   exports-types-sync).
-4. `examples/src/13-agent-live-smoke-local.ts` fails with its prerequisites
-   met (examples).
+1. A run's terminal result is never recorded in the engine store when the
+   launching process owns the executor. The engine row is left
+   `suspended`/`released`, every later executor process claims and replays it,
+   and the drain fails with `SchemaError: Expected JSON value` at
+   `["exit"]["cause"][0]["error"]`. Seen for a completed run by the smoke gate
+   and for a failed run by the plue-cutover gate, where the replay called a
+   real model seat again. Fix lane `phase7/engine-failed-persist`.
+2. An attached `smithers up` or `smithers run` exits 0 for a run that settled
+   `failed`, so a red CI tier reports a green step. Fix lane
+   `phase7/cli-exit-code`.
 
 Blocker 1 is the one that decides whether this candidate is publishable.
-Durable resume is what the release is for.
+Durable settlement is what the release is for.
+
+Two smaller defects are recorded on the smoke gate and are not blockers:
+runtime warnings reach stdout inside a `--json` document, and `NoMatchingWait`
+prints the signal name with an empty message.
+
+One gate in step 2 below, `check-npm-dedupe`, exits 1 today on a peer-dependency
+disagreement between `@smthrs/kernel` and `@smthrs/testing`. It needs a decision
+before you publish, and section 2 records the measurement and the two options.
+
+Plue is the other half of the cutover. PLAN completion criterion 9 is met on the
+branch `smithers-rc0-cutover` for everything that runs without the live stack.
+That branch is unmerged, and its remaining items cannot run until `@smthrs/*`
+`1.0.0-rc.0` is on the registry: the agent-host links swap to published pins,
+the agent VM image builds, and `zig build e2e`, the live-API suites, and the
+pipeline receipts follow. Publishing this candidate is what unblocks them, so
+plan that pass before you tag. `plue-consumer-contract.md` section 13 holds the
+checklist.
 
 Two maintainer preconditions, neither of them code:
 
@@ -36,6 +57,12 @@ Two maintainer preconditions, neither of them code:
   rights. The workflow publishes with `--provenance` under `id-token: write`.
 
 ## 1. Set the version
+
+The tree is already at `1.0.0-rc.0`: on 2026-08-31 at `20b32c6316`,
+`node scripts/set-release-version.mjs --check 1.0.0-rc.0` answered
+`63 workspace manifests and 1 versioned source are at 1.0.0-rc.0.` and exited 0.
+Run this step for `rc.1` and later, or after any manifest change; today it is a
+verification, not an edit.
 
 Every public manifest must equal the tag's version, and the public packages
 depend on each other by exact version, so both move together. A range naming a
@@ -72,7 +99,9 @@ node scripts/set-release-version.mjs --check 1.0.0-rc.0
 # Exactly one effect version resolves across every manifest and BOTH lockfiles.
 node scripts/check-single-effect-version.mjs
 
-# No duplicate copy of a package that must be a singleton.
+# No duplicate copy of a package that must be a singleton. Needs the network:
+# it packs the release manifests into a throwaway fixture and lets npm's own
+# arborist resolve the tree an end user would get.
 node scripts/check-npm-dedupe.mjs
 
 # Both lockfiles are current and installable offline with no writes.
@@ -90,6 +119,36 @@ git status --porcelain                            # empty
 `pack-release.mjs` refuses to pack when the set of non-private manifests whose
 `smthrs.group` is `engine` or `agent` is not exactly those 40 names, so a
 package cannot join or leave the train unnoticed.
+
+### Measured on 2026-08-31 at `20b32c6316`, in `migration/clean-checkout-2`
+
+| Command | Exit | Output |
+| --- | --- | --- |
+| `node scripts/set-release-version.mjs --check 1.0.0-rc.0` | 0 | `63 workspace manifests and 1 versioned source are at 1.0.0-rc.0.` |
+| `node scripts/check-single-effect-version.mjs` | 0 | `effect@4.0.0-rc.108 everywhere (63 sources)` |
+| `node scripts/check-npm-dedupe.mjs` | **1** | `ok: effect@4.0.0-rc.108 (single copy)`, `resolved package count: 165 (budget 925)`, then `vitest must stay out of the default install (optional peer), found: node_modules/vitest` |
+| `node scripts/pack-release.mjs --names \| wc -l` | 0 | `40`, in the order section 6 lists |
+| `git status --porcelain` | 0 | empty |
+
+The frozen offline installs for both package managers are the clean-install
+gate, which passes.
+
+`check-npm-dedupe` fails on a disagreement between two published manifests.
+`@smthrs/kernel` declares `vitest` an optional peer
+(`peerDependenciesMeta.vitest.optional`), and `@smthrs/testing` declares
+`vitest: "^4.1.0"` as a plain peer with no meta entry, so npm auto-installs it
+into an end user's default tree. The singleton that matters, `effect`, resolves
+to one copy, and the resolved package count is well inside budget.
+
+Two things to settle before publishing, neither of them a code emergency:
+
+1. Decide whether `@smthrs/testing` should mark `vitest` optional like
+   `@smthrs/kernel` does, or whether the gate should accept a required peer on
+   that package. The two manifests currently contradict each other.
+2. Wire the gate. Release contract R-35 says `check-npm-dedupe` is a
+   `scripts/BUILD.ts` target run by `smithers-build test '//scripts/...'`. It is
+   declared in no `BUILD.ts` and selected by no CI job, which is why the
+   failure survived to this runbook rather than being caught in Phase 7.
 
 ## 3. Rehearse without publishing
 
