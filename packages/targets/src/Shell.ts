@@ -14,7 +14,7 @@
  */
 import * as Schema from "effect/Schema"
 import * as Attr from "./Attr.ts"
-import type * as Exec from "./Exec.ts"
+import * as Exec from "./Exec.ts"
 import * as Input from "./Input.ts"
 import * as Reference from "./Reference.ts"
 import * as Runtime from "./Runtime.ts"
@@ -159,7 +159,7 @@ export const bunProgramToken = "{smthrs:bun-program}"
  * @category tokens
  * @since 0.1.0
  */
-export const scriptToken = (path: string): string => `{smthrs:script:${path}}`
+export const scriptToken = (path: string): string => `${Exec.scriptTokenPrefix}${path}}`
 
 /**
  * The argv[0] a declared `script` runs under, chosen from its extension.
@@ -174,7 +174,7 @@ export const scriptToken = (path: string): string => `{smthrs:script:${path}}`
  * @since 0.1.0
  */
 export const scriptInterpreterToken = (path: string): string =>
-  /\.(?:sh|bash)$/.test(path) ? "/bin/sh" : toolToken(Reference.runtimeBin)
+  /\.(?:sh|bash)$/.test(path) ? "/bin/sh" : Exec.runtimeBinToken
 
 /**
  * Wall-clock bound for one package-mode tool process.

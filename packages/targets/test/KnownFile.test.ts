@@ -53,6 +53,43 @@ describe("known-file discovery", () => {
     expect(discovery.files).not.toContain("pkg/node_modules/dependency.txt")
     expect(discovery.files).not.toContain(".flows/state.txt")
   })
+
+  it("stops at an initialized nested repository instead of listing its files", async () => {
+    await Fs.writeFile(NodePath.join(root, "BUILD.ts"), "")
+    await Fs.mkdir(NodePath.join(root, "vendor", "submodule", "src"), { recursive: true })
+    // An initialized submodule carries `.git` as a gitfile, a vendored clone
+    // carries it as a directory; both are repositories of their own.
+    await Fs.writeFile(
+      NodePath.join(root, "vendor", "submodule", ".git"),
+      "gitdir: ../../.git/modules/vendor/submodule\n"
+    )
+    await Fs.writeFile(NodePath.join(root, "vendor", "submodule", "src", "lib.rs"), "")
+    await Fs.mkdir(NodePath.join(root, "vendor", "clone", ".git"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "vendor", "clone", ".git", "HEAD"), "ref: refs/heads/main\n")
+    await Fs.writeFile(NodePath.join(root, "vendor", "clone", "README.md"), "")
+    await Fs.mkdir(NodePath.join(root, "vendor", "owned"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "vendor", "owned", "kept.txt"), "kept")
+
+    const discovery = await KnownFile.discoverKnownFiles(root)
+    expect(discovery.files).toContain("vendor/owned/kept.txt")
+    expect(discovery.files.filter((path) => path.startsWith("vendor/submodule/"))).toEqual([])
+    expect(discovery.files.filter((path) => path.startsWith("vendor/clone/"))).toEqual([])
+  })
+
+  it("stops at every path .gitmodules declares, initialized or not", async () => {
+    await Fs.writeFile(NodePath.join(root, "BUILD.ts"), "")
+    await Fs.writeFile(
+      NodePath.join(root, ".gitmodules"),
+      `[submodule "vendor/jj"]\n\tpath = vendor/jj\n\turl = https://example.invalid/jj.git\n`
+    )
+    await Fs.mkdir(NodePath.join(root, "vendor", "jj", "lib"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "vendor", "jj", "Cargo.toml"), "")
+    await Fs.writeFile(NodePath.join(root, "vendor", "jj", "lib", "lib.rs"), "")
+
+    const discovery = await KnownFile.discoverKnownFiles(root)
+    expect(discovery.files).toContain(".gitmodules")
+    expect(discovery.files.filter((path) => path.startsWith("vendor/jj/"))).toEqual([])
+  })
 })
 
 describe("known-file generated declarations", () => {

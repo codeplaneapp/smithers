@@ -434,3 +434,140 @@ describe("the CI workflow generator", () => {
     await expect(read(".github/workflows/generated.yml")).rejects.toThrow()
   })
 })
+
+/**
+ * `S.Generate`'s script form in a BUILD.ts workspace.
+ *
+ * The declaration names the workspace runtime rather than a host path, so the
+ * planned argv carries the `{smthrs:tool:...}` placeholder until the exec
+ * boundary substitutes it. A run that spawns the placeholder verbatim fails
+ * with ENOENT and never runs the generator, which is how the only
+ * `S.Generate` in this repository sat ungated: no verb could execute it.
+ */
+describe("generate script form", () => {
+  const generatorWorkspace = async (): Promise<void> => {
+    await write(
+      "BUILD.ts",
+      `import { file, Generate } from "${rulesModule}"\n` +
+        `export const generated = Generate({\n` +
+        `  script: file("//gen.mjs"),\n` +
+        `  changes: ["generated.txt"]\n` +
+        `})\n`
+    )
+    await write(
+      "gen.mjs",
+      `import { writeFileSync } from "node:fs"\nwriteFileSync("generated.txt", "generated\\n")\n`
+    )
+  }
+
+  it("substitutes the runtime placeholder and regenerates under the run verb", async () => {
+    await generatorWorkspace()
+    const summary = await run("run", "//:generated")
+
+    expect(JSON.stringify(summary.results)).not.toContain("{smthrs:tool:")
+    expect(summary.ok, JSON.stringify(summary.results)).toBe(true)
+    expect(await read("generated.txt")).toBe("generated\n")
+  })
+
+  it("fails the lint verb on a drifted file and leaves the tree unchanged", async () => {
+    await generatorWorkspace()
+    await write("generated.txt", "hand edited\n")
+    const drifted = await run("lint", "//:generated")
+
+    expect(drifted.ok).toBe(false)
+    expect(JSON.stringify(drifted.results)).toContain("generated.txt")
+    expect(await read("generated.txt")).toBe("hand edited\n")
+  })
+
+  it("reports drift through the target's declared error schema", async () => {
+    await generatorWorkspace()
+    await write("generated.txt", "hand edited\n")
+    const result = await invoke(["lint", "//:generated"])
+
+    expect(result.code).not.toBe(0)
+    expect(result.output).toContain("generated.txt drifted from its generated form")
+    expect(result.output).not.toContain("outside its declared error schema")
+  })
+
+  it("refuses a process generator that declares no write set", async () => {
+    await write(
+      "BUILD.ts",
+      `import { file, Generate } from "${rulesModule}"\n` +
+        `export const generated = Generate({\n` +
+        `  script: file("//gen.mjs")\n` +
+        `})\n`
+    )
+    await write(
+      "gen.mjs",
+      `import { writeFileSync } from "node:fs"\nwriteFileSync("generated.txt", "generated\\n")\n`
+    )
+    await write("generated.txt", "hand edited\n")
+
+    await expect(run("lint", "//:generated")).rejects.toThrow(/changes or stdout/)
+    expect(await read("generated.txt")).toBe("hand edited\n")
+  })
+
+  it("refuses the lint verb on a stdout generator a BUILD.ts workspace cannot confine", async () => {
+    await write(
+      "BUILD.ts",
+      `import { Generate } from "${rulesModule}"\n` +
+        `export const generated = Generate({\n` +
+        `  command: "printf generated",\n` +
+        `  stdout: "generated.txt"\n` +
+        `})\n`
+    )
+    await write("generated.txt", "hand edited\n")
+    const refused = await run("lint", "//:generated")
+
+    expect(refused.ok).toBe(false)
+    expect(JSON.stringify(refused.results)).toContain("Generate check without declared changes")
+    expect(await read("generated.txt")).toBe("hand edited\n")
+  })
+
+  it("fails the lint verb on a drifted file inside a nested package", async () => {
+    await write(
+      "BUILD.ts",
+      `import { file, Generate } from "${rulesModule}"\n` +
+        `export const generated = Generate({\n` +
+        `  script: file("//gen.mjs"),\n` +
+        `  changes: ["pkg/generated.txt"]\n` +
+        `})\n`
+    )
+    await write("pkg/BUILD.ts", "export const nested = 1\n")
+    await write(
+      "gen.mjs",
+      `import { writeFileSync } from "node:fs"\nwriteFileSync("pkg/generated.txt", "generated\\n")\n`
+    )
+    await write("pkg/generated.txt", "hand edited\n")
+    const drifted = await run("lint", "//:generated")
+
+    expect(drifted.ok).toBe(false)
+    expect(JSON.stringify(drifted.results)).toContain("pkg/generated.txt drifted from its generated form")
+    expect(await read("pkg/generated.txt")).toBe("hand edited\n")
+  })
+
+  it("refuses the run verb on a stdout generator a BUILD.ts workspace cannot capture", async () => {
+    await write(
+      "BUILD.ts",
+      `import { Generate } from "${rulesModule}"\n` +
+        `export const generated = Generate({\n` +
+        `  command: "printf generated",\n` +
+        `  stdout: "generated.txt"\n` +
+        `})\n`
+    )
+    const refused = await run("run", "//:generated")
+
+    expect(refused.ok).toBe(false)
+    expect(JSON.stringify(refused.results)).toContain("Generate stdout form in a BUILD.ts workspace")
+    await expect(read("generated.txt")).rejects.toThrow()
+  })
+
+  it("passes the lint verb when the checked-in file matches its generator", async () => {
+    await generatorWorkspace()
+    await write("generated.txt", "generated\n")
+    const clean = await run("lint", "//:generated")
+
+    expect(clean.ok, JSON.stringify(clean.results)).toBe(true)
+    expect(await read("generated.txt")).toBe("generated\n")
+  })
+})

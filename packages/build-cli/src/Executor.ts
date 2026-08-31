@@ -16,6 +16,7 @@
 import { FlowEngine } from "@smthrs/engine"
 import { Action, type Flow, Interpreter } from "@smthrs/flow"
 import { ExecIrreversibleLive } from "@smthrs/targets/Changesets"
+import { GenerateCheckLive } from "@smthrs/targets/Compose"
 import { CheckDocsLive } from "@smthrs/targets/DocsParity"
 import { ExecLive } from "@smthrs/targets/Exec"
 import { ExpandFilegroupLive, isFilegroup } from "@smthrs/targets/Filegroup"
@@ -249,6 +250,7 @@ const runTarget = (
   const runtime = Layer.mergeAll(
     layerInstall,
     ExecLive({ workspaceRoot, cacheDirectory, sensitiveEnv }),
+    GenerateCheckLive({ workspaceRoot, cacheDirectory, sensitiveEnv }),
     ExecIrreversibleLive({ workspaceRoot }),
     CaptureOutputsLive({ workspaceRoot, cacheDirectory }),
     ExpandFilegroupLive({ workspaceRoot, cacheDirectory }),

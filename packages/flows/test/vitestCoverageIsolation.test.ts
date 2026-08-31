@@ -460,6 +460,10 @@ describe("vitest coverage isolation conformance", () => {
     // (REVIEW.md blocker 7).
     expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/scripts:browserContract'$/m)
     expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/packages\/\.\.\.'$/m)
+    // The known-file registry is the one committed generated `.d.ts`. Its
+    // drift check runs nowhere else, so dropping this step would let a stale
+    // registry ship with every other cell green.
+    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build lint '\/\/:knownFiles'$/m)
     expect(ci).toMatch(/tool: jj-cli@\d+\.\d+\.\d+/)
     expect(ci).toMatch(/^\s*run: jj git init --colocate$/m)
   })

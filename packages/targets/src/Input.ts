@@ -403,6 +403,7 @@ const inputNoun = "declared input"
 const ignoreNoun = ".gitignore"
 const directoryNoun = "declared input directory"
 const buildNoun = "BUILD.ts"
+const submoduleNoun = ".gitmodules"
 
 /**
  * Everything one glob expansion reads the filesystem through.
@@ -508,6 +509,48 @@ const isPackage = async (
     scanOptions(scan, buildNoun)
   )
   return resolved !== undefined
+}
+
+/**
+ * Reports whether a directory listing makes the directory a repository of its
+ * own, meaning it holds a `.git` entry.
+ *
+ * An initialized submodule carries `.git` as a gitfile and a vendored clone
+ * carries it as a directory; either way the files below it belong to that
+ * repository, not to this workspace. The walk therefore treats the directory
+ * as a boundary, the same answer {@link Scan.repositoryBoundaries} gives for a
+ * repository the workspace declares. Without it a workspace listing would
+ * change with the host's submodule state, so a generated registry would only
+ * be reproducible in a checkout that never ran `git submodule update`.
+ */
+const isRepository = (entries: ReadonlyArray<Dirent>): boolean => entries.some((entry) => entry.name === ".git")
+
+/**
+ * Reads the repository paths a workspace's `.gitmodules` declares.
+ *
+ * A declared submodule is a boundary whether or not it is initialized, so the
+ * declaration answers for the directory that is still empty and
+ * {@link isRepository} answers for a clone the workspace never declared. A
+ * workspace without the file declares none.
+ */
+const declaredSubmodules = async (
+  root: string,
+  io: SafeFs.Io,
+  signal: AbortSignal | undefined
+): Promise<ReadonlyArray<string>> => {
+  const text = await SafeFs.readText(NodePath.join(root, ".gitmodules"), {
+    root,
+    io,
+    what: submoduleNoun,
+    signal
+  })
+  if (text === undefined) return []
+  const declared: Array<string> = []
+  for (const line of text.split("\n")) {
+    const match = /^\s*path\s*=\s*(\S.*?)\s*$/.exec(line)
+    if (match?.[1] !== undefined) declared.push(resolvePath("", match[1]))
+  }
+  return declared
 }
 
 /**
@@ -633,6 +676,7 @@ const walk = async (
   checkCancelled(scan)
   const relative = opened.relative
   if (bounded && scan.packageScoped && await isPackage(scan, relative, opened.entries)) return
+  if (bounded && isRepository(opened.entries)) return
   const matcher = await readIgnore(scan, relative)
   const next = matcher === undefined ? scopes : [...scopes, { base: relative, matcher }]
   // Classify this listing without I/O first, then open the children that need
@@ -693,7 +737,9 @@ const walk = async (
  * declaring package's scope. Files in another package belong to that
  * package's own targets, and a target that wants them depends on its label
  * instead. The target applies to every glob in every target, not only to
- * `Filegroup`.
+ * `Filegroup`. The `packageScoped` option turns the boundary off for a caller
+ * that is not expanding a declared input, such as the generated-output check
+ * resolving the write set a generator declared.
  *
  * ## Confinement
  *
@@ -724,6 +770,13 @@ export const expandGlob = async (
     readonly limits?: Partial<ScanLimits> | undefined
     /** Opaque child repositories that broad globs must not descend into. */
     readonly repositoryBoundaries?: ReadonlyArray<string> | undefined
+    /**
+     * Whether a nested `BUILD.ts` bounds the expansion. Defaults to `true`,
+     * which is what a declared input glob means. A declared write set is not
+     * a glob over the declaring package, so the generated-output check passes
+     * `false`: the paths a generator names are its own wherever they live.
+     */
+    readonly packageScoped?: boolean | undefined
     readonly signal?: AbortSignal | undefined
   } = {}
 ): Promise<ReadonlyArray<string>> => {
@@ -753,7 +806,7 @@ export const expandGlob = async (
     root: await SafeFs.canonicalRoot(workspaceRoot, io),
     io,
     cacheDirectory,
-    packageScoped: true,
+    packageScoped: options.packageScoped ?? true,
     repositoryBoundaries,
     enteredRepositories,
     found: [],
@@ -768,7 +821,7 @@ export const expandGlob = async (
   if (chain === undefined) return []
   const resolvedPackage = resolvePath("", packageDir)
   const packageRoot = resolvedPackage === "." ? "" : resolvedPackage
-  if (await crossesPackageBoundary(scan, packageRoot, start, chain)) return []
+  if (scan.packageScoped && await crossesPackageBoundary(scan, packageRoot, start, chain)) return []
   const scopes: Array<IgnoreScope> = []
   for (const ancestor of chain.slice(0, -1)) {
     const matcher = await readIgnore(scan, ancestor.relative)
@@ -793,6 +846,11 @@ export const expandGlob = async (
  * symbolic links name workspace content, which directories are confined to the
  * root, and which host-state paths are never listed at all.
  *
+ * Nested repositories are a boundary here as they are for a glob: a directory
+ * holding a `.git` gitfile or directory is skipped, and so is every path the
+ * root `.gitmodules` declares. A workspace listing is therefore the same
+ * whether or not the host has run `git submodule update`.
+ *
  * `.gitignore` files apply from the workspace root down, not only at the root,
  * so the listing matches what git would have reported. The result is sorted by
  * UTF-16 code unit.
@@ -810,14 +868,15 @@ export const discoverFiles = async (
   } = {}
 ): Promise<ReadonlyArray<string>> => {
   const io = options.io ?? SafeFs.defaultIo
+  const root = await SafeFs.canonicalRoot(workspaceRoot, io)
   const scan: Scan = {
-    root: await SafeFs.canonicalRoot(workspaceRoot, io),
+    root,
     io,
     cacheDirectory: Config.normalizeCacheDirectory(
       options.cacheDirectory ?? Config.defaultCacheDirectory
     ),
     packageScoped: false,
-    repositoryBoundaries: [],
+    repositoryBoundaries: await declaredSubmodules(root, io, options.signal),
     enteredRepositories: new Set(),
     found: [],
     limits: validatedScanLimits(options.limits),
