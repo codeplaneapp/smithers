@@ -83,7 +83,7 @@ export const ci = Smithers.GithubCiGen({
     { name: "documentation parity", verb: Smithers.Verb.Docs, pattern: "//packages/...", job: "test" },
     { name: "browser contract", verb: Smithers.Verb.Test, pattern: "//scripts:browserContract" }
   ],
-  requiredJobs: ["test", "apps-e2e", "rust", "wasm-repro", "bun", "browser", "node-macos", "node-windows"],
+  requiredJobs: ["test", "apps-e2e", "rust", "wasm-repro", "bun", "browser", "packages"],
   jobs: [
     {
       id: "test",
@@ -244,19 +244,31 @@ export const ci = Smithers.GithubCiGen({
       steps: [{ name: "Browser bundle guard", verb: Smithers.Verb.Test, pattern: "//scripts:browserContract" }]
     },
     {
-      id: "node-macos",
-      name: "package suites (macOS, advisory)",
-      runsOn: "macos-latest",
-      continueOnError: true,
-      timeoutMinutes: 60,
-      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj }),
-      steps: [{ name: "Package test targets", verb: Smithers.Verb.Test, pattern: "//packages/..." }]
-    },
-    {
-      id: "node-windows",
-      name: "package suites (Windows, advisory)",
-      runsOn: "windows-latest",
-      continueOnError: true,
+      // One matrix over the three platforms, replacing a required ubuntu job
+      // and two copy-pasted advisory ones. The steps, the toolchain, and the
+      // timeout are declared once, so a platform can never drift into running
+      // a different suite than its neighbours.
+      //
+      // The advisory bit is per row, and it is data: `continue-on-error` reads
+      // `matrix.advisory` out of the `include:` rows below, because this
+      // generator emits no `if:` key and a job-level `continue-on-error: true`
+      // would excuse ubuntu along with the rest. ubuntu is required. macOS and
+      // Windows are advisory ONLY until the matrix proves them green; promoting
+      // one is flipping its boolean to `false`, and `requiredJobs` already
+      // names `packages`, so at least one row must stay required.
+      //
+      // Windows red today (run 33441825323, job 99651619667) was the build tool
+      // itself: `packageManagerEnvironment` held `process.env` to the POSIX
+      // name rule, and `windows-latest` sets `ProgramFiles(x86)`, so every
+      // target died in 13 s with "environment source contains a non-portable
+      // name" before a single suite ran.
+      id: "packages",
+      name: "package suites (${{ matrix.os }})",
+      matrix: [
+        { os: ubuntu, advisory: false },
+        { os: "macos-latest", advisory: true },
+        { os: "windows-latest", advisory: true }
+      ],
       timeoutMinutes: 60,
       toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj }),
       steps: [{ name: "Package test targets", verb: Smithers.Verb.Test, pattern: "//packages/..." }]
