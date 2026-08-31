@@ -837,6 +837,11 @@ export const expandGlob = async (
  * symbolic links name workspace content, which directories are confined to the
  * root, and which host-state paths are never listed at all.
  *
+ * Nested repositories are a boundary here as they are for a glob: a directory
+ * holding a `.git` gitfile or directory is skipped, and so is every path the
+ * root `.gitmodules` declares. A workspace listing is therefore the same
+ * whether or not the host has run `git submodule update`.
+ *
  * `.gitignore` files apply from the workspace root down, not only at the root,
  * so the listing matches what git would have reported. The result is sorted by
  * UTF-16 code unit.

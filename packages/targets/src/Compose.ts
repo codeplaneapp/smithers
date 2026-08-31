@@ -156,6 +156,11 @@ export const attachFiles = <T extends Target.AnyTarget>(target: T): T & { readon
  * literal `emit` map, a `script` writing inside `changes`, and a `bin`
  * printing to `stdout` — exactly one of the three selectors is present.
  *
+ * `mode` is the write/check pair every generated-file target carries. It
+ * defaults to `write`, and the `lint` verb maps it to `check`, so a declaration
+ * states what the generator produces and the verb decides whether the run
+ * applies it or reports drift.
+ *
  * @category schemas
  * @since 0.1.0
  */
@@ -405,10 +410,13 @@ const generateDefinition = Target.make("Generate", {
   // The script and bin forms plan the shared exec node: the generator runs
   // under the workspace runtime (script) or the referenced tool (bin), and
   // the package executor brackets the spawn with write-set enforcement in
-  // write mode or a scratch-copy drift check in check mode. The emit form
-  // plans no process at all — the package executor writes or checks the
-  // declared file bytes and symlinks natively — so its node stays the typed
-  // refusal for any path that is not the package executor.
+  // write mode or a scratch-copy drift check in check mode. A BUILD.ts
+  // workspace has no package executor to bracket it, so `check` plans
+  // {@link GenerateCheck} instead: the same spawn, with the declared outputs
+  // compared and restored around it. The emit form plans no process at all —
+  // the package executor writes or checks the declared file bytes and symlinks
+  // natively — so its node stays the typed refusal for any path that is not
+  // the package executor.
   attrsForKind: (kind, attrs) =>
     kind === "lint" && attrs.mode === "write" ? { ...attrs, mode: "check" as const } : attrs,
   implementation: (attrs): Node.Node<unknown, unknown, GenerateRequires> => {
