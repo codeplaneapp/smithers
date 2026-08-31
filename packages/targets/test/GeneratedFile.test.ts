@@ -4,6 +4,7 @@ import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import * as Compose from "../src/Compose.ts"
 import {
   checkGeneratedFile,
   failureMessage,
@@ -186,5 +187,84 @@ describe("generated-file checks", () => {
   it.skipIf(process.platform === "win32")("refuses a FIFO without waiting for a writer", async () => {
     execFileSync("mkfifo", [NodePath.join(root, "config.json")])
     await expect(check("config.json", "expected\n")).rejects.toThrow(/not a regular file/)
+  })
+})
+
+/**
+ * The generator drift check `S.Generate` plans for the `lint` verb.
+ *
+ * The generator writes into the real tree, so what is pinned here is the
+ * bracket around it: every declared output is compared and restored, whether
+ * the generator rewrote it, created it, or failed outright.
+ */
+describe("checkGenerator", () => {
+  const generator = (body: string): Promise<void> => Fs.writeFile(NodePath.join(root, "gen.mjs"), body, "utf8")
+
+  const payload = (changes: ReadonlyArray<string>): Compose.GenerateCheckPayload => ({
+    run: {
+      cwd: ".",
+      argv: [process.execPath, "gen.mjs"],
+      env: {},
+      secrets: [],
+      expectedExitCodes: [0],
+      timeoutMs: 60_000
+    },
+    changes
+  })
+
+  const check = (changes: ReadonlyArray<string>): Promise<void> =>
+    Effect.runPromise(Compose.checkGenerator({ workspaceRoot: root }, payload(changes)))
+
+  const failure = (
+    changes: ReadonlyArray<string>
+  ): Promise<{ readonly tag: string; readonly message: string; readonly text: string }> =>
+    Effect.runPromise(
+      Effect.flip(
+        Compose.checkGenerator({ workspaceRoot: root }, payload(changes)).pipe(
+          Effect.mapError((error) => ({
+            tag: error._tag,
+            message: "message" in error ? error.message : "",
+            text: JSON.stringify(error)
+          }))
+        )
+      )
+    )
+
+  it("passes when the generator rewrites the bytes already checked in", async () => {
+    await generator(`import { writeFileSync } from "node:fs"\nwriteFileSync("out.txt", "generated\\n")\n`)
+    await Fs.writeFile(NodePath.join(root, "out.txt"), "generated\n", "utf8")
+
+    await expect(check(["out.txt"])).resolves.toBeUndefined()
+    expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("generated\n")
+  })
+
+  it("fails with the first differing line and restores the checked-in file", async () => {
+    await generator(`import { writeFileSync } from "node:fs"\nwriteFileSync("out.txt", "generated\\n")\n`)
+    await Fs.writeFile(NodePath.join(root, "out.txt"), "hand edited\n", "utf8")
+
+    expect((await failure(["out.txt"])).message).toBe(
+      "out.txt drifted from its generated form: 2 line(s) checked in, 2 regenerated; " +
+        "first difference at line 1: \"hand edited\" became \"generated\""
+    )
+    expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("hand edited\n")
+  })
+
+  it("fails and removes a declared output the checkout does not carry", async () => {
+    await generator(`import { writeFileSync } from "node:fs"\nwriteFileSync("out.txt", "generated\\n")\n`)
+
+    expect((await failure(["out.txt"])).message).toContain("the checkout does not carry it")
+    await expect(Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).rejects.toThrow()
+  })
+
+  it("reports a generator that failed, with the tree restored", async () => {
+    await generator(
+      `import { writeFileSync } from "node:fs"\nwriteFileSync("out.txt", "half written\\n")\nprocess.exit(3)\n`
+    )
+    await Fs.writeFile(NodePath.join(root, "out.txt"), "generated\n", "utf8")
+
+    const reported = await failure(["out.txt"])
+    expect(reported.tag).toBe("smithers-build/ExecError")
+    expect(reported.text).toContain("\"exitCode\":3")
+    expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("generated\n")
   })
 })

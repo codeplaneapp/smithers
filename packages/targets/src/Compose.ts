@@ -9,14 +9,21 @@
  *
  * @since 0.1.0
  */
-import { Action } from "@smthrs/flow"
+import { Action, type FlowRuntime } from "@smthrs/flow"
 import type * as Node from "@smthrs/plan/Node"
+import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import type * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
+import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import * as Attr from "./Attr.ts"
+import * as Exec from "./Exec.ts"
 import * as Filegroup from "./Filegroup.ts"
+import * as GeneratedFile from "./GeneratedFile.ts"
 import * as Input from "./Input.ts"
 import * as Reference from "./Reference.ts"
+import * as SafeFs from "./SafeFs.ts"
 import * as Shell from "./Shell.ts"
 import * as Target from "./Target.ts"
 
@@ -24,6 +31,7 @@ import * as Target from "./Target.ts"
 type GenerateRequires =
   | Action.Requirement<"smithers-build/not-implemented">
   | Action.Requirement<"smithers-build/exec">
+  | Action.Requirement<"smithers-build/generate-check">
 
 /**
  * Schema for a reference to the file rows a resolver-style target produces,
@@ -162,8 +170,234 @@ export const GenerateAttrs = Schema.Struct({
   sandbox: Schema.optional(Attr.Sandbox),
   stdout: Schema.optional(Schema.NonEmptyString),
   data: Schema.optional(Attr.Data),
-  changes: Schema.optional(Schema.Array(Schema.NonEmptyString))
+  changes: Schema.optional(Schema.Array(Schema.NonEmptyString)),
+  mode: GeneratedFile.Mode
 })
+
+/**
+ * Payload for one generator drift check: the process the write form spawns,
+ * and the declared outputs the check compares and restores.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const GenerateCheckPayload = Schema.Struct({
+  run: Exec.Payload,
+  changes: Schema.Array(Schema.NonEmptyString)
+})
+
+/**
+ * Payload for one generator drift check.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type GenerateCheckPayload = typeof GenerateCheckPayload.Type
+
+/**
+ * Runs a generator and reports whether its declared outputs were already
+ * current.
+ *
+ * @category actions
+ * @since 0.1.0
+ */
+export const GenerateCheck = Action.make("smithers-build/generate-check", {
+  payload: GenerateCheckPayload,
+  error: Schema.Union([Exec.ExecError, GeneratedFile.DriftError]),
+  tier: "sealed"
+})
+
+/** One declared output as it stood before the generator ran. */
+interface OutputSnapshot {
+  readonly path: string
+  readonly bytes: Buffer | undefined
+}
+
+/** Maximum code units one excerpted line contributes to a drift message. */
+const maximumDriftExcerptCodeUnits = 200
+
+const excerpt = (line: string | undefined): string =>
+  line === undefined
+    ? "(end of file)"
+    : JSON.stringify(
+      line.length > maximumDriftExcerptCodeUnits ? `${line.slice(0, maximumDriftExcerptCodeUnits)}...` : line
+    )
+
+/**
+ * Renders the first line at which a regenerated output differs.
+ *
+ * The path leads the message because a failure is reported by its message
+ * alone, and an operator's next move is to open the file the generator would
+ * have rewritten.
+ */
+const driftMessage = (path: string, previous: Buffer | undefined, current: Buffer | undefined): string => {
+  if (previous === undefined) return `${path} is written by the generator and the checkout does not carry it`
+  if (current === undefined) return `${path} is carried by the checkout and the generator removes it`
+  const checkedIn = previous.toString("utf8").split("\n")
+  const regenerated = current.toString("utf8").split("\n")
+  const differing = checkedIn.findIndex((line, position) => line !== regenerated[position])
+  const line = differing === -1 ? Math.min(checkedIn.length, regenerated.length) : differing
+  return `${path} drifted from its generated form: ` +
+    `${checkedIn.length} line(s) checked in, ${regenerated.length} regenerated; ` +
+    `first difference at line ${line + 1}: ${excerpt(checkedIn[line])} became ${excerpt(regenerated[line])}`
+}
+
+/** Reads one declared output, or undefined when the generator has not written it. */
+const readOutput = async (absolute: string): Promise<Buffer | undefined> => {
+  try {
+    return await Fs.readFile(absolute)
+  } catch (cause) {
+    if (SafeFs.errorCode(cause) === "ENOENT") return undefined
+    throw cause
+  }
+}
+
+/** Expands the declared `changes` patterns against the real tree. */
+const outputPaths = async (
+  workspaceRoot: string,
+  changes: ReadonlyArray<string>,
+  signal: AbortSignal | undefined
+): Promise<ReadonlyArray<string>> => {
+  const paths = new Set<string>()
+  for (const pattern of changes) {
+    for (const path of await Input.expandGlob(workspaceRoot, "", pattern, { signal })) paths.add(path)
+  }
+  return [...paths].sort()
+}
+
+const snapshotOutputs = async (
+  workspaceRoot: string,
+  changes: ReadonlyArray<string>,
+  signal: AbortSignal | undefined
+): Promise<ReadonlyArray<OutputSnapshot>> =>
+  Promise.all(
+    (await outputPaths(workspaceRoot, changes, signal)).map(async (path) => ({
+      path,
+      bytes: await readOutput(NodePath.join(workspaceRoot, path))
+    }))
+  )
+
+const unchanged = (previous: Buffer | undefined, current: Buffer | undefined): boolean =>
+  previous === undefined ? current === undefined : current !== undefined && previous.equals(current)
+
+/**
+ * Restores every declared output and reports the first one the generator
+ * rewrote.
+ */
+const restoreOutputs = async (
+  workspaceRoot: string,
+  before: ReadonlyArray<OutputSnapshot>,
+  changes: ReadonlyArray<string>,
+  signal: AbortSignal | undefined
+): Promise<GeneratedFile.DriftError | undefined> => {
+  const paths = new Set(before.map((entry) => entry.path))
+  for (const path of await outputPaths(workspaceRoot, changes, signal)) paths.add(path)
+  let drift: GeneratedFile.DriftError | undefined
+  for (const path of [...paths].sort()) {
+    const absolute = NodePath.join(workspaceRoot, path)
+    const previous = before.find((entry) => entry.path === path)?.bytes
+    const current = await readOutput(absolute)
+    if (unchanged(previous, current)) continue
+    drift ??= GeneratedFile.driftError(path, driftMessage(path, previous, current))
+    if (previous === undefined) await Fs.rm(absolute, { force: true })
+    else await Fs.writeFile(absolute, previous)
+  }
+  return drift
+}
+
+/**
+ * Runs a generator and fails when it rewrote a declared output.
+ *
+ * A generator writes into the real tree, which is the only tree it knows how
+ * to write; the check snapshots every declared output first and restores each
+ * one before it settles, so a `lint` run leaves the working tree byte for byte
+ * as it found it, whether the generator succeeded, drifted, or failed. A
+ * generator that writes outside its declared `changes` is outside the
+ * contract, exactly as it is under package mode's enforced write set.
+ *
+ * @category effects
+ * @since 0.1.0
+ */
+export const checkGenerator = (
+  options: {
+    readonly workspaceRoot: string
+    readonly cacheDirectory?: string | undefined
+    readonly sensitiveEnv?: ReadonlyArray<string> | undefined
+  },
+  payload: GenerateCheckPayload
+): Effect.Effect<void, Exec.ExecError | GeneratedFile.DriftError> => {
+  const failed = (path: string) => (cause: unknown): GeneratedFile.DriftError =>
+    GeneratedFile.driftError(path, GeneratedFile.failureMessage(cause))
+  const declared = payload.changes[0] ?? "generated output"
+  const restore = (before: ReadonlyArray<OutputSnapshot>) =>
+    Effect.tryPromise({
+      try: (signal) => restoreOutputs(options.workspaceRoot, before, payload.changes, signal),
+      catch: failed(declared)
+    })
+  return Effect.flatMap(
+    Effect.tryPromise({
+      try: (signal) => snapshotOutputs(options.workspaceRoot, payload.changes, signal),
+      catch: failed(declared)
+    }),
+    (before) =>
+      Effect.flatMap(
+        Effect.exit(Exec.run(options, payload.run)),
+        (ran) =>
+          Effect.flatMap(
+            restore(before),
+            (drift): Effect.Effect<void, Exec.ExecError | GeneratedFile.DriftError> =>
+              Exit.isFailure(ran)
+                ? Effect.failCause(ran.cause)
+                : drift === undefined
+                ? Effect.void
+                : Effect.fail(drift)
+          )
+      )
+  )
+}
+
+/**
+ * Implements {@link GenerateCheck} by running the generator against the real
+ * tree and restoring its declared outputs.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const GenerateCheckLive = (options: {
+  readonly workspaceRoot: string
+  readonly cacheDirectory?: string | undefined
+  readonly sensitiveEnv?: ReadonlyArray<string> | undefined
+}): Layer.Layer<Action.Requirement<"smithers-build/generate-check">, never, FlowRuntime.FlowRuntime> =>
+  GenerateCheck.toLayer((payload) => checkGenerator(options, payload))
+
+/** Builds the exec payload one Generate declaration's process form spawns. */
+const generatePayload = (attrs: typeof GenerateAttrs.Type): Exec.CallPayload | undefined => {
+  if (attrs.script !== undefined) {
+    return {
+      cwd: ".",
+      argv: [Shell.scriptInterpreterToken(attrs.script.path), Shell.scriptToken(attrs.script.path)],
+      env: attrs.env ?? {},
+      secrets: attrs.secrets ?? [],
+      timeoutMs: Shell.packageExecTimeoutMs
+    }
+  }
+  if (attrs.bin !== undefined) {
+    return Shell.execPayload({
+      bin: attrs.bin,
+      args: attrs.args,
+      env: attrs.env,
+      secrets: attrs.secrets
+    })
+  }
+  if (attrs.command !== undefined) {
+    return Shell.execPayload({
+      command: attrs.command,
+      env: attrs.env,
+      secrets: attrs.secrets
+    })
+  }
+  return undefined
+}
 
 const generateDefinition = Target.make("Generate", {
   attrs: GenerateAttrs,
@@ -175,32 +409,14 @@ const generateDefinition = Target.make("Generate", {
   // plans no process at all — the package executor writes or checks the
   // declared file bytes and symlinks natively — so its node stays the typed
   // refusal for any path that is not the package executor.
+  attrsForKind: (kind, attrs) =>
+    kind === "lint" && attrs.mode === "write" ? { ...attrs, mode: "check" as const } : attrs,
   implementation: (attrs): Node.Node<unknown, unknown, GenerateRequires> => {
-    if (attrs.script !== undefined) {
-      return Target.runTool({
-        cwd: ".",
-        argv: [Shell.scriptInterpreterToken(attrs.script.path), Shell.scriptToken(attrs.script.path)],
-        env: attrs.env ?? {},
-        secrets: attrs.secrets ?? [],
-        timeoutMs: Shell.packageExecTimeoutMs
-      })
-    }
-    if (attrs.bin !== undefined) {
-      return Target.runTool(Shell.execPayload({
-        bin: attrs.bin,
-        args: attrs.args,
-        env: attrs.env,
-        secrets: attrs.secrets
-      }))
-    }
-    if (attrs.command !== undefined) {
-      return Target.runTool(Shell.execPayload({
-        command: attrs.command,
-        env: attrs.env,
-        secrets: attrs.secrets
-      }))
-    }
-    return Target.notImplemented("Generate")
+    const payload = generatePayload(attrs)
+    if (payload === undefined) return Target.notImplemented("Generate")
+    return attrs.mode === "check"
+      ? GenerateCheck.call({ run: payload, changes: attrs.changes ?? [] })
+      : Target.runTool(payload)
   }
 })
 

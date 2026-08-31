@@ -434,3 +434,57 @@ describe("the CI workflow generator", () => {
     await expect(read(".github/workflows/generated.yml")).rejects.toThrow()
   })
 })
+
+/**
+ * `S.Generate`'s script form in a BUILD.ts workspace.
+ *
+ * The declaration names the workspace runtime rather than a host path, so the
+ * planned argv carries the `{smthrs:tool:...}` placeholder until the exec
+ * boundary substitutes it. A run that spawns the placeholder verbatim fails
+ * with ENOENT and never runs the generator, which is how the only
+ * `S.Generate` in this repository sat ungated: no verb could execute it.
+ */
+describe("generate script form", () => {
+  const generatorWorkspace = async (): Promise<void> => {
+    await write(
+      "BUILD.ts",
+      `import { file, Generate } from "${rulesModule}"\n` +
+        `export const generated = Generate({\n` +
+        `  script: file("//gen.mjs"),\n` +
+        `  changes: ["generated.txt"]\n` +
+        `})\n`
+    )
+    await write(
+      "gen.mjs",
+      `import { writeFileSync } from "node:fs"\nwriteFileSync("generated.txt", "generated\\n")\n`
+    )
+  }
+
+  it("substitutes the runtime placeholder and regenerates under the run verb", async () => {
+    await generatorWorkspace()
+    const summary = await run("run", "//:generated")
+
+    expect(JSON.stringify(summary.results)).not.toContain("{smthrs:tool:")
+    expect(summary.ok, JSON.stringify(summary.results)).toBe(true)
+    expect(await read("generated.txt")).toBe("generated\n")
+  })
+
+  it("fails the lint verb on a drifted file and leaves the tree unchanged", async () => {
+    await generatorWorkspace()
+    await write("generated.txt", "hand edited\n")
+    const drifted = await run("lint", "//:generated")
+
+    expect(drifted.ok).toBe(false)
+    expect(JSON.stringify(drifted.results)).toContain("generated.txt")
+    expect(await read("generated.txt")).toBe("hand edited\n")
+  })
+
+  it("passes the lint verb when the checked-in file matches its generator", async () => {
+    await generatorWorkspace()
+    await write("generated.txt", "generated\n")
+    const clean = await run("lint", "//:generated")
+
+    expect(clean.ok, JSON.stringify(clean.results)).toBe(true)
+    expect(await read("generated.txt")).toBe("generated\n")
+  })
+})

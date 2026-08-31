@@ -18,6 +18,7 @@ import * as NodePath from "node:path"
 import * as NodeUtil from "node:util/types"
 import * as Config from "./Config.ts"
 import { failureMessage } from "./GeneratedFile.ts"
+import * as Input from "./Input.ts"
 import * as SafeFs from "./SafeFs.ts"
 import * as Secret from "./Secret.ts"
 import * as SecretProxy from "./SecretProxy.ts"
@@ -32,6 +33,38 @@ import * as SecretProxy from "./SecretProxy.ts"
  * @since 0.1.0
  */
 export const cacheDirectoryToken = "{smthrs:cache-directory}"
+
+/**
+ * Placeholder resolved to the interpreter this build runs under, the argv[0]
+ * a `S.Runtime.bin` declaration renders.
+ *
+ * A declaration names the workspace runtime rather than a host path, so the
+ * path stays out of the action payload and the step key. The boundary
+ * substitutes `process.execPath`, the same answer the package executor
+ * resolves a `RuntimeBin` reference to, immediately before spawn.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const runtimeBinToken = `{smthrs:tool:${JSON.stringify({ _tag: "RuntimeBin" })}}`
+
+/**
+ * Prefix of the placeholder standing for a declared generator script.
+ *
+ * The declared spelling is workspace-anchored (`//scripts/generate.mjs`); the
+ * boundary substitutes the workspace-relative path, which is what a child
+ * spawned in the workspace root can open.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const scriptTokenPrefix = "{smthrs:script:"
+
+/** Resolves a declared-script placeholder to its workspace-relative path. */
+const resolveScriptToken = (value: string): string =>
+  value.startsWith(scriptTokenPrefix) && value.endsWith("}")
+    ? Input.resolvePath("", value.slice(scriptTokenPrefix.length, -1))
+    : value
 
 /**
  * Maximum length kept for captured stdout and stderr, in UTF-16 code units.
@@ -871,7 +904,10 @@ export const run = (
         // settles the lexical question only: a `.flows` that is a symbolic
         // link to somewhere else entirely is refused here.
         resolveWorkspacePath(options.workspaceRoot, cacheDirectory)
-        const substitute = (value: string): string => value.replaceAll(cacheDirectoryToken, cacheDirectory)
+        const substitute = (value: string): string =>
+          resolveScriptToken(
+            value.replaceAll(cacheDirectoryToken, cacheDirectory).replaceAll(runtimeBinToken, process.execPath)
+          )
         const [executable, ...args] = payload.argv
         const resolved: Payload = {
           ...payload,
