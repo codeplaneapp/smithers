@@ -257,7 +257,16 @@ const readOutput = async (absolute: string): Promise<Buffer | undefined> => {
   }
 }
 
-/** Expands the declared `changes` patterns against the real tree. */
+/**
+ * Expands the declared `changes` patterns against the real tree.
+ *
+ * The expansion is not package scoped. `changes` is a write set, not an input
+ * glob: a root declaration that names `packages/cli/generated.ts` owns that
+ * path even though `packages/cli/BUILD.ts` makes the directory its own
+ * package. Scoping it would expand to nothing, so the check would snapshot
+ * nothing, compare nothing, and leave the generator's rewrite in the tree
+ * while reporting success.
+ */
 const outputPaths = async (
   workspaceRoot: string,
   changes: ReadonlyArray<string>,
@@ -265,7 +274,8 @@ const outputPaths = async (
 ): Promise<ReadonlyArray<string>> => {
   const paths = new Set<string>()
   for (const pattern of changes) {
-    for (const path of await Input.expandGlob(workspaceRoot, "", pattern, { signal })) paths.add(path)
+    const expanded = await Input.expandGlob(workspaceRoot, "", pattern, { packageScoped: false, signal })
+    for (const path of expanded) paths.add(path)
   }
   return [...paths].sort()
 }
@@ -345,18 +355,27 @@ export const checkGenerator = (
       catch: failed(declared)
     }),
     (before) =>
-      Effect.flatMap(
-        Effect.exit(Exec.run(options, payload.run)),
-        (ran) =>
-          Effect.flatMap(
-            restore(before),
-            (drift): Effect.Effect<void, Exec.ExecError | GeneratedFile.DriftError> =>
-              Exit.isFailure(ran)
-                ? Effect.failCause(ran.cause)
-                : drift === undefined
-                ? Effect.void
-                : Effect.fail(drift)
-          )
+      Effect.onInterrupt(
+        Effect.flatMap(
+          Effect.exit(Exec.run(options, payload.run)),
+          (ran) =>
+            Effect.flatMap(
+              restore(before),
+              (drift): Effect.Effect<void, Exec.ExecError | GeneratedFile.DriftError> =>
+                Exit.isFailure(ran)
+                  ? Effect.failCause(ran.cause)
+                  : drift === undefined
+                  ? Effect.void
+                  : Effect.fail(drift)
+            )
+        ),
+        // Cancellation settles the check after the generator has already
+        // written, and an interrupted fiber runs no more interruptible work,
+        // so the restore on the success and failure paths never reaches the
+        // disk. As a finalizer it does, and a cancelled `lint` leaves the
+        // checked-in bytes behind like every other way the check settles.
+        // The finalizer reports nothing: the interruption is the outcome.
+        () => Effect.ignore(restore(before))
       )
   )
 }
@@ -427,12 +446,18 @@ const generateDefinition = Target.make("Generate", {
   implementation: (attrs): Node.Node<unknown, unknown, GenerateRequires> => {
     const payload = generatePayload(attrs)
     if (payload === undefined) return Target.notImplemented("Generate")
-    if (attrs.mode !== "check") return Target.runTool(payload)
-    // A check with no declared outputs snapshots nothing, so the generator
-    // would rewrite the real tree and the verb would report success. The
-    // stdout form declares its output that way and a BUILD.ts workspace does
-    // not capture it, so the check is refused rather than run unconfined.
+    // A declaration with no `changes` is the stdout form, whose output only
+    // the package executor captures. Both verbs are refused rather than run
+    // against nothing: `run` would spawn the generator and report success
+    // without writing the declared file, and `check` would snapshot nothing,
+    // so the generator's rewrite would stay in the real tree behind an ok
+    // verdict.
     const changes = attrs.changes ?? []
+    if (attrs.mode !== "check") {
+      return changes.length === 0
+        ? Target.notImplemented("Generate stdout form in a BUILD.ts workspace")
+        : Target.runTool(payload)
+    }
     return changes.length === 0
       ? Target.notImplemented("Generate check without declared changes")
       : GenerateCheck.call({ run: payload, changes })

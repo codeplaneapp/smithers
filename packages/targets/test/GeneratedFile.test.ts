@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import { execFileSync } from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
@@ -23,6 +24,17 @@ const scratchOutside = async (): Promise<string> => {
   const directory = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-generated-outside-"))
   outside.push(directory)
   return directory
+}
+
+/** Polls until `read` reports a value, so a test never sleeps a fixed span. */
+const until = async <A>(read: () => Promise<A | undefined>): Promise<A> => {
+  const deadline = Date.now() + 20_000
+  for (;;) {
+    const value = await read()
+    if (value !== undefined) return value
+    if (Date.now() > deadline) throw new Error("condition never held")
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
 }
 
 const write = (path: string, contents: string): Promise<void> =>
@@ -256,6 +268,49 @@ describe("checkGenerator", () => {
 
     expect((await failure(["out.txt"])).message).toContain("the checkout does not carry it")
     await expect(Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).rejects.toThrow()
+  })
+
+  /**
+   * A declared output inside a nested package is still this declaration's
+   * output. `changes` is a write set, not a glob over the declaring package,
+   * so package scope must not shrink it: scoping it would snapshot nothing,
+   * and the check would rewrite the tree and report success.
+   */
+  it("compares and restores a declared output inside a nested package", async () => {
+    await Fs.mkdir(NodePath.join(root, "pkg"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "pkg/BUILD.ts"), "export const nested = 1\n", "utf8")
+    await generator(`import { writeFileSync } from "node:fs"\nwriteFileSync("pkg/out.txt", "generated\\n")\n`)
+    await Fs.writeFile(NodePath.join(root, "pkg/out.txt"), "hand edited\n", "utf8")
+
+    const outcome = await check(["pkg/out.txt"]).then(() => "the check passed", String)
+
+    expect(await Fs.readFile(NodePath.join(root, "pkg/out.txt"), "utf8")).toBe("hand edited\n")
+    expect(outcome).toContain("pkg/out.txt drifted from its generated form")
+  })
+
+  /**
+   * Interruption is one more way the check settles, and it settles after the
+   * generator has already written. The restore is a finalizer so that a
+   * cancelled `lint` leaves the checked-in bytes behind, exactly as a passing
+   * or failing one does.
+   */
+  it("restores the checked-in bytes when the check is interrupted", async () => {
+    await generator(
+      `import { writeFileSync } from "node:fs"\n` +
+        `writeFileSync("out.txt", "generated\\n")\n` +
+        `setInterval(() => {}, 1000)\n`
+    )
+    await Fs.writeFile(NodePath.join(root, "out.txt"), "hand edited\n", "utf8")
+
+    const fiber = Effect.runFork(Compose.checkGenerator({ workspaceRoot: root }, payload(["out.txt"])))
+    await until(async () =>
+      (await Fs.readFile(NodePath.join(root, "out.txt"), "utf8").catch(() => "")) === "generated\n"
+        ? true
+        : undefined
+    )
+    await Effect.runPromise(Fiber.interrupt(fiber))
+
+    expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("hand edited\n")
   })
 
   it("reports a generator that failed, with the tree restored", async () => {

@@ -737,7 +737,9 @@ const walk = async (
  * declaring package's scope. Files in another package belong to that
  * package's own targets, and a target that wants them depends on its label
  * instead. The target applies to every glob in every target, not only to
- * `Filegroup`.
+ * `Filegroup`. The `packageScoped` option turns the boundary off for a caller
+ * that is not expanding a declared input, such as the generated-output check
+ * resolving the write set a generator declared.
  *
  * ## Confinement
  *
@@ -768,6 +770,13 @@ export const expandGlob = async (
     readonly limits?: Partial<ScanLimits> | undefined
     /** Opaque child repositories that broad globs must not descend into. */
     readonly repositoryBoundaries?: ReadonlyArray<string> | undefined
+    /**
+     * Whether a nested `BUILD.ts` bounds the expansion. Defaults to `true`,
+     * which is what a declared input glob means. A declared write set is not
+     * a glob over the declaring package, so the generated-output check passes
+     * `false`: the paths a generator names are its own wherever they live.
+     */
+    readonly packageScoped?: boolean | undefined
     readonly signal?: AbortSignal | undefined
   } = {}
 ): Promise<ReadonlyArray<string>> => {
@@ -797,7 +806,7 @@ export const expandGlob = async (
     root: await SafeFs.canonicalRoot(workspaceRoot, io),
     io,
     cacheDirectory,
-    packageScoped: true,
+    packageScoped: options.packageScoped ?? true,
     repositoryBoundaries,
     enteredRepositories,
     found: [],
@@ -812,7 +821,7 @@ export const expandGlob = async (
   if (chain === undefined) return []
   const resolvedPackage = resolvePath("", packageDir)
   const packageRoot = resolvedPackage === "." ? "" : resolvedPackage
-  if (await crossesPackageBoundary(scan, packageRoot, start, chain)) return []
+  if (scan.packageScoped && await crossesPackageBoundary(scan, packageRoot, start, chain)) return []
   const scopes: Array<IgnoreScope> = []
   for (const ancestor of chain.slice(0, -1)) {
     const matcher = await readIgnore(scan, ancestor.relative)
