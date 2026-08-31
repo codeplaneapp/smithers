@@ -40,12 +40,12 @@ databases for the files, the ladder, and the operating limits.
 
 | Command | Behavior |
 | --- | --- |
-| `smithers approve` | Plan-level and node-level (`ask`) approvals; principal stamped server-side. |
+| `smithers approve` | Plan-level and node-level (`ask`) approvals; principal stamped server-side. A node-level decision restarts the run in the deciding call (section 5.1), and the exit code follows that run's terminal status. |
 | `smithers bug` | Posts a report with `Control.list` and a `Control.watch` digest to `bug.smithers.sh` (`SMITHERS_BUG_ENDPOINT`). |
 | `smithers cancel` | Durable, cross-process (section 5). |
 | `smithers claude` | Claude Code plugin mirror protocol, `claudeMirrorContract` 2; run status vocabulary is the rc.0 `RunStatus`. |
 | `smithers completions` | Standard. |
-| `smithers deny` | Denies; a denied plan can never launch. |
+| `smithers deny` | Denies; a denied plan can never launch. A node-level denial restarts the run in the deciding call, and the exit code follows that run's terminal status. |
 | `smithers docs` | Prints the bundled `llms.txt` or `llms-full.txt` generated from the vocs `docs/pages` tree (section 9 exception 2, R-25). |
 | `smithers doctor` | Reports registry discovery warnings, database paths and ladder state, Node version, `jj` on `PATH`, provider keys present, and 0.x state detected (section 6). |
 | `smithers down` | Cancels every non-terminal run (`Control.list` then `cancel`). |

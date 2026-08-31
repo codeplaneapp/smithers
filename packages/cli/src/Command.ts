@@ -253,6 +253,13 @@ const awaitOwnedRun = (
   afterSequence: number | undefined
 ): Effect.Effect<string | undefined, never> =>
   Effect.gen(function*() {
+    // A run that had already settled when the verb reached it has no
+    // settlement event left to wait for, and the receipt carries the answer.
+    // Without this, `smithers run --resume <run-id>` against a run that
+    // settled `failed` printed `{"_tag":"Terminal","status":"failed"}` and
+    // exited 0, because every receipt tag but `Accepted` reported nothing at
+    // all (recorded by the cli-exit-code lane's verifier).
+    if (receipt._tag === "Terminal") return `control.run.${receipt.status}`
     const ownsExecutor = yield* ExecutorOwnership.ExecutorOwnership
     if (!ownsExecutor || receipt._tag !== "Accepted" || receipt.runId === undefined) return undefined
     return yield* awaitRun(control, receipt.runId, afterSequence)
@@ -537,8 +544,13 @@ const approve = Command.make("approve", {
     const control = yield* ControlService.Control
     const parkSequence = yield* decisionPark(control, payload.target)
     const receipt = yield* control.approve({ ...payload, scope: config.scope })
-    yield* awaitOwnedRun(control, receipt, parkSequence)
+    // A decision restarts the run it answers, in this call, on this process's
+    // own executor (rc-contract section 5.1). The decision therefore ends with
+    // a settled run, and the shell that ran `smithers approve` is entitled to
+    // read that run's status from `$?` exactly as `up` and `run` promise it.
+    const settlement = yield* awaitOwnedRun(control, receipt, parkSequence)
     yield* render(receipt)
+    yield* reportSettlement(settlement)
   })).pipe(Command.withDescription(Verb.find("approve")!.help))
 
 const deny = Command.make("deny", { approval: Argument.string("approval") }, (config) =>
@@ -548,8 +560,9 @@ const deny = Command.make("deny", { approval: Argument.string("approval") }, (co
     const control = yield* ControlService.Control
     const parkSequence = yield* decisionPark(control, payload.target)
     const receipt = yield* control.deny(payload)
-    yield* awaitOwnedRun(control, receipt, parkSequence)
+    const settlement = yield* awaitOwnedRun(control, receipt, parkSequence)
     yield* render(receipt)
+    yield* reportSettlement(settlement)
   })).pipe(Command.withDescription(Verb.find("deny")!.help))
 
 const cancel = Command.make("cancel", { runId: Argument.string("run-id") }, (config) =>

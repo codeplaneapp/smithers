@@ -14,7 +14,7 @@ smithers approve [flags] <approval>
 
 ## Behavior
 
-Plan-level and node-level (`ask`) approvals; principal stamped server-side.
+Plan-level and node-level (`ask`) approvals; principal stamped server-side. A node-level decision restarts the run in the deciding call (section 5.1), and the exit code follows that run's terminal status.
 
 ## Flags
 
