@@ -252,7 +252,8 @@ export const layer: Layer.Layer<
             Effect.catchTag("/control/RunNotFound", () => Effect.succeed(undefined))
           )
           if (current !== undefined && terminal(current.status)) {
-            return { _tag: "Terminal", runId: current.runId, status: current.status }
+            const settled: Receipt = { _tag: "Terminal", runId: current.runId, status: current.status }
+            return settled
           }
         }
         // Set by the mutation when it records a delegation, and left unset on
