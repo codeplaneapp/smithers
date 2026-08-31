@@ -58,7 +58,7 @@ smithers up example/Build --data '{"target":"server"}' --json
 run, 1 for a failed one, 130 for a cancelled one, and 3 for one parked on an
 approval. `run` reports the same statuses, since it is the same attached
 launch. Add `-d` to run detached: the CLI spawns the run, logs to
-`.flows/logs/<runId>.log`, and returns once the run is admitted — that exit
+`.flows/logs/<runId>.log`, and returns once the run is admitted. That exit
 code is the launch's, not the run's, so a CI step that has to gate on the
 result launches attached.
 
