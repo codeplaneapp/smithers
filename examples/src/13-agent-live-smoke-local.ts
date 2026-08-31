@@ -4,7 +4,7 @@
  * run against Ollama over `Route.openaiCompatible` instead of a paid provider.
  *
  * This needs no API key, no billing, and no external network access — only
- * a local Ollama daemon with a model pulled (`ollama pull qwen2.5:3b`). It
+ * a local Ollama daemon with a model pulled (`ollama pull qwen2.5:7b`). It
  * exists because both real provider keys available in the authoring
  * environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) were out of credit,
  * and a "production ready candidate" has to be testable without asking
@@ -82,7 +82,7 @@ export const liveLocalSeats = (baseUrl: string) =>
 export const LiveSmokeLocal = AgentAction.make("examples/LiveSmokeLocal", {
   payload: { question: Schema.String },
   output: Schema.Struct({ answer: Schema.String }),
-  seat: "local:qwen2.5-coder:1.5b",
+  seat: "local:qwen2.5:7b",
   system: ["You are a terse assistant. Answer in one short sentence and nothing else."],
   prompt: ({ question }) => question
 })

@@ -458,6 +458,17 @@ Scans (zero matches in tracked source, excluding fixtures under the migration wo
 | D1. Plue CI DSL syntax | keep for the static renderer and evaluator; migrate for `packages/workflow` (ruled, rc-contract R-19) | Plue's decision in shape, not a Smithers contract item: Plue keeps `@smithers-ai/workflow` as a TSX DSL under its own name because the Go runner already executes a JSX-free shim and the static renderer (`node:fs`, `node:path`, `typescript` only) needs no change. The package itself is engine-bound today (`src/create.tsx:8-12` imports `createSmithers`, `src/index.ts:24-32` re-exports the JSX components and `runWorkflow`, `tsconfig.json:7` `jsxImportSource: smithers-orchestrator`) and is rewritten under rc-contract §10. The rc.0 gate is that `packages/workflow` and `scripts/lib/workflow-renderer.ts` import nothing from `smithers-orchestrator` or `smthrs`, carry no smithers `jsxImportSource`, and Plue docs stop calling the DSL "Smithers JSX" (checklist items 12 and 13). Recorded in the disposition ledger section `Plue cutover decisions` as two rows. |
 | D2. Tier 2 dev-automation survivors | delete; Phase 6 fixtures (ruled, rc-contract R-21) | None is re-authored before `1.0.0-rc.0`: `fix-all-issues` (with its cron controllers), `alpha-plue`, `ticket-fleet*`, `byok-*`, `ddd-*`, `docs-concision`, `create-workflow`, `research-plan-implement`, `issue-pipeline`, `ticket-kanban`, `batch-issues` (deleted as dead under ruling E6 and kept at the tag as the extra `file:`-dependency fixture), `triage-review-findings`, `create-ui`, and `scripts/smithers.tsx` are Phase 6 fixtures preserved at a Plue tag (`pair-poc` was on the list at the survey revision and was deleted from Plue at `2db1ecff2`), because they alone use worktree lanes, `fallbackAgents`, `openSmithersBackend`, `pglite`, tickets and cron RPCs, and custom React run UIs. The re-author list is empty; re-authoring is Plue backlog after the cutover. Recorded in the disposition ledger section `Plue cutover decisions`. |
 
+### 14.1 Cutover branch (recorded 2026-08-30)
+
+The Plue cutover is implemented on branch `smithers-rc0-cutover` in the Plue repository
+(base `664c95c60`, the survey revision's successor; tag `smithers-0x-pack-final` marks the
+last 0.x pack). During the migration program it was checked out at
+`<program base>/wt/plue-cutover` (a git worktree of `/Users/williamcory/plue`); the
+acceptance checklist in section 13 binds to that branch's tip, and the per-item evidence
+lives in the program's `finish/plue-cutover-report.md`. Items 3, 5 to 10 remain
+BLOCKED-ON-publication or ENV-SKIP until `@smthrs/*` `1.0.0-rc.0` is on npm and the live
+stack (Postgres, API, sandbox provider) is up; each row names its proving command.
+
 ## 15. Items not re-verified in this pass
 
 - `apps/docs-smithers` hit counts (52 old-surface hits in `guides/workflows.mdx`, 23 in `first-workflow.mdx`, 24 command mentions in `commands.mdx`) are the reader's numbers; this pass verified the JSX claim at `workflows.mdx:9,69` and the file set only.
