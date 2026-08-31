@@ -6,10 +6,10 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 1.0.0-rc.0 (2026-08-31)
 
-The first release candidate of Smithers 1.0. 347 commits since
+The first release candidate of Smithers 1.0. 366 commits since
 [cfb570f193](https://github.com/smithersai/smithers/commit/cfb570f193), the
-0.x tree: 13,087 files changed, +1,033,212 / -1,601,495 lines. Release notes:
-`docs/releases/1.0.0-rc.0.md`.
+0.x tree: 13,100 files changed, +1,041,392 / -1,601,527 lines, measured at
+`f63809382b`. Release notes: `docs/releases/1.0.0-rc.0.md`.
 
 This is not an increment on 0.x. The 0.x JSX workflow engine is replaced
 wholesale by a durable Effect engine. A flow is a typed Effect program whose
@@ -89,15 +89,21 @@ release notes, the README, and the migration guide.
 
 ### Validation
 
-- Phase 7 ran seventeen gates from clean checkouts with real backends and real
-  persisted data. Fifteen pass. The verdicts, the commands, and the evidence
-  are in `docs/migration/verification-evidence.md`, with each gate's file
-  copied under `docs/migration/evidence/`.
-- Two gates fail on two defects in this repository, both open: a run's terminal
-  result is not recorded in the engine store when the launching process owns
-  the executor, and an attached `smithers up` or `smithers run` exits 0 for a
-  run that settled `failed`. This candidate is not publishable until they close
-  or the maintainer accepts them in writing.
+- Phase 7 ran seventeen gates from a clean checkout at `cd14388ed7` with real
+  backends and real persisted data. Sixteen pass. The verdicts, the commands,
+  and the evidence are in `docs/migration/verification-evidence.md`, with each
+  gate's file copied under `docs/migration/evidence/`.
+- The manual smoke ran all eight items end to end and the Plue cutover gate
+  passes every item that runs without the published registry. The recursive
+  test fan-out is `2 fails, 61 passes` over 63 projects and 14,649 tests; the
+  five failing tests all need live external state.
+- One gate fails, `docs-generation-links`, on three findings: a removed-verb
+  refusal opens both SQLite databases before it prints, the built docs site
+  serves vocs' own `llms-full.txt` instead of the curated bundle, and
+  `https://github.com/smithersai/plugins` does not exist yet. The first two
+  have finished fix lanes staged on `land/wave-7`. This candidate is not
+  publishable until the gate is green or the maintainer accepts the findings in
+  writing.
 
 ### Known limitations
 
@@ -139,6 +145,8 @@ The paragraphs below are the release contract's own wording
 > **Plan admission and repair.** A model-authored plan is admitted against a declared envelope: a plan past its depth, fanout, or fuel budget is refused with `depth_exceeded`, `fanout_exceeded`, or `fuel_exhausted` before anything runs. Linked child runs are not counted against those caps, so a plan that spawns children can exceed an envelope its own steps stayed inside. Failure handling is retry; there is no self-healing repair primitive.
 
 > **Hard-killed engine processes.** Cooperative cancellation (`smithers cancel`) kills the process group of every child the engine spawned. If the engine process itself is hard-killed, the groups it spawned keep running until the next incarnation of the same host starts: every spawn is journaled as an ownerless durable record, and on start the reaper signals each group a previous incarnation abandoned. It refuses any record whose number the operating system has moved on from, so only a process that answers `ESRCH` counts as dead and the recorded start time must still match. A host that never restarts reaps nothing, and reaping a remote sandbox's processes requires that provider's optional `kill`.
+
+> **Credential redaction in logs.** The journal redacts credentials on the way in: a value a cell logs or returns is rewritten by field name and inside the text of the value before any row is committed, and `e2e/faults/case22-secret-never-in-journal.test.ts` proves it by reading the SQLite file rather than an API that could redact on the way out. The operator's terminal is not covered. 1.0.0-rc.0 ships no redacting logger, so an action that passes a credential to `Effect.logInfo` writes it to the child's stderr in full and it reaches whatever collects that stream. R-12 requires case 22 to cover the log as well as the journal, so the log half stays in the fault matrix as a plain failing test rather than a skip or an inverted expectation, and the `e2e-faults` CI job is advisory for that reason. It becomes required, with `continueOnError` dropped and `e2e-faults` added to `requiredJobs`, when the redaction deliverable in section 5.2 of this contract lands and the durable-park defect recorded in `e2e/fault-gaps.md` closes. Until then keep credentials out of log calls: the journal protects a value that reaches it, the terminal does not.
 
 > **Effect.** Every published package pins `effect` and the `@effect/*` packages to exactly `4.0.0-rc.108`. Install the same exact version; two Effect instances in one process are not interoperable. Each candidate declares one exact Effect version; a changed pin is a breaking change listed in that candidate's notes.
 

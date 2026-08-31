@@ -1,58 +1,35 @@
-# Phase 7 gate: docs-generation-links
+# Gate: docs-generation-links
 
-Verdict: PASS
+Verdict: **FAIL**
 
-PLAN Phase 7 line covered: "documentation generation and link checks". The
-canonical order comes from `.github/workflows/docs-deploy.yml` (the smithers.sh
-publish job): `node scripts/check-docs.mjs`, `node scripts/check-llms.mjs`,
-`pnpm exec vocs build`. This gate ran those three, the llms bundle regeneration
-named by the root `package.json` (`docs:llms` = `node scripts/generate-llms.ts`)
-with a clean-tree check after it, a standalone dead-link enumeration through
-`scripts/docs-links.mjs`, and the `docsUnit` test group from `scripts/BUILD.ts`.
-rc-contract ruling A2, row R-25, and section 9 exception 2 name `check-docs`,
-`check-llms`, and `pnpm docs:llms` as the rewritten vocs-tree docs gates.
-
-This file replaces the evidence recorded at `9c464343f0` in full. Every number
-below was measured at `20b32c6316`.
+The three checks the gate names are green: `vocs build` exits 0 and emits 174 routes with zero dead-link warnings, `pnpm docs:llms` rewrites 12 artifacts with 0 bytes changed and `check-llms` confirms them, and `check-docs` resolves all 504 internal links (a crawl of the built site adds 28,241 same-site links with 0 dead). The gate fails on two defects found while running the docs gate family in the same checkout: the docs unit target `//scripts:docsUnit` is red because every removed-verb refusal opens two SQLite databases before it prints, and the built site ships vocs' auto-generated `llms-full.txt` (1.43 MB, 40 JSX `<Task` tags, 8 `smithers oneshot` mentions) instead of the curated 957 KB bundle that `smithers docs --full`, the installed skill, and `check-llms` agree on. One external link target, `https://github.com/smithersai/plugins`, returns 404 from five pages.
 
 ## Environment
 
 | Item | Value |
 | --- | --- |
-| Checkout | /Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-2 |
-| HEAD | `20b32c6316487497301db74ec70cbe951428ef53` on `v1/rc0-migration` (`git describe`: `v0.35.0-401-g20b32c6316`) |
-| Submodule | `vendor/jj` at `47589ada70c12b3e829b5c98ab32503abad49eac` |
-| Node | v24.18.0 (CI pins 22.19.0; the repo floor is >=22.19.0) |
+| Checkout | `/Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-4` |
+| HEAD | `cd14388ed782aac6e5f5b23d66c8fa9dc01dd6ba` on `v1/rc0-migration` (GitHub `main` is `cfb570f1`, GitHub `v1/rc0-migration` is `0d068d87`) |
+| Submodule | `vendor/jj` at `47589ada70c1` |
+| Working tree | clean before and after every command (`git status --short` empty; `docs/dist` and `.flows` are gitignored) |
+| node | v24.18.0 (the rc-contract pins 22.19.0 for CI; no gate here pins a Node version) |
 | pnpm | 11.21.0 |
-| Bun | 1.4.0 (not used by these gates) |
-| vocs | 2.8.5 (`node_modules/vocs/package.json`), `patches/vocs@2.8.5.patch` applied through `pnpm-workspace.yaml` `patchedDependencies` |
-| vite | 8.2.1 (from the vocs build banner) |
-| Date | 2026-08-31, 07:10Z to 07:20Z |
-| Load | `uptime` 1-minute load 39.67 at start, 17 to 22 during the runs, 4.10 at the end |
+| bun | 1.4.0 |
+| vocs | 2.8.5 (`pnpm exec vocs --version`: `vocs/2.8.5 darwin-arm64 node-v24.18.0`) |
+| Install | `node_modules/.modules.yaml` present from the setup agent's frozen install; no install was re-run |
+| Host load | 16 cores; `uptime` load average 59 to 62 during the first runs (other Phase 7 lanes were running `smithers release`, `smithers review`, eslint, and tsc in this checkout), 9 to 17 during the reruns |
+| Disk | `/System/Volumes/Data` 99% used, 14 GiB free |
+| Date | 2026-08-31, 05:00 to 05:35 local |
 
-Dependencies were installed by the Phase 7 setup agent. No `pnpm install` ran
-in this gate. `git status --porcelain` printed 0 lines before the first command.
+Raw logs: `/Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/phase7/logs/docs-generation-links/`.
 
-## 1. check-docs (documentation gate, includes the dead-link authority)
+## 1. Documentation gate and link checker: `check-docs`
 
-Command, run from the checkout root:
-
-```
-timeout 1500 node scripts/check-docs.mjs; echo "CHECK_DOCS_EXIT=$?"
+```sh
+cd <checkout> && node scripts/check-docs.mjs
 ```
 
-The command ran under `nohup` with stdout and stderr redirected to a log file,
-and the session waited on that log in the foreground with a bounded loop
-(`timeout 570 sh -c "until grep -q CHECK_DOCS_EXIT <log>; do sleep 5; done"`).
-The Bash tool caps one foreground call at 600 seconds, which is shorter than the
-1500-second bound the gate asked for; the log-plus-bounded-wait shape keeps the
-run alive across that cap without a background monitor.
-
-Started 07:10:56Z, finished 07:12:17Z: 81 seconds wall time.
-
-Exit code: 0.
-
-Complete output (16 checks, all pass):
+Exit 0 (4 min 3 s wall under load 60). Final lines:
 
 ```
 ✓ no em-dashes in the documentation
@@ -71,220 +48,137 @@ Complete output (16 checks, all pass):
 ✓ every stated package count matches the 40 names in contract section 3.1
 ✓ no page sits in one of the 4 moved trees, and 0 deferred route is still waiting for its page
 ✓ all 74 anchors the removal messages link to have a heading in the migration guide
-CHECK_DOCS_EXIT=0
 ```
 
-`scripts/docs-links.mjs` is the site's dead-link authority: it resolves every
-Markdown link, reference definition, and hand-written `href` on every page
-against the published routes, the served assets, and the deferred-route
-register. vocs' own checker runs in warning mode by design
-(`vocs.config.ts:28`, `checkDeadlinks: "warn"`).
+`scripts/docs-links.mjs` is the site's dead-link authority (`vocs.config.ts` sets `checkDeadlinks: "warn"` and defers to it). Log: `check-docs.log`.
 
-## 2. check-llms (bundle staleness gate)
+## 2. llms bundle regeneration and its check
 
-Command: `node scripts/check-llms.mjs; echo "CHECK_LLMS_EXIT=$?"`
-
-Exit code: 0. Complete output:
-
-```
-✓ 12 documentation artifact(s) are current
-CHECK_LLMS_EXIT=0
+```sh
+node scripts/check-llms.mjs        # exit 0: "✓ 12 documentation artifact(s) are current"
+pnpm docs:llms                     # exit 0
+git status --short                 # empty
 ```
 
-## 3. llms bundle regeneration and idempotency
-
-Command: `pnpm run docs:llms; echo "DOCS_LLMS_EXIT=$?"` (runs
-`node scripts/generate-llms.ts`, the generator the root `package.json` names).
-
-Exit code: 0. Complete output:
+`pnpm docs:llms` output:
 
 ```
-$ node scripts/generate-llms.ts
-  core        55 pages  187,404 bytes
+  core        55 pages  187,932 bytes
   api         34 pages  395,895 bytes
   control     11 pages  11,879 bytes
-  operations  13 pages  139,279 bytes
+  operations  13 pages  140,707 bytes
   migration    3 pages  109,260 bytes
   internals   10 pages  110,518 bytes
-  full       126 pages  955,345 bytes
+  full       126 pages  957,301 bytes
 
 12 artifact(s) written, 0 changed.
-DOCS_LLMS_EXIT=0
 ```
 
-Clean-tree check immediately after the regeneration:
+The 12 checked paths (`checkedPaths` in `scripts/optimize-llms-full.ts`): `docs/llms.txt`, `docs/llms-full.txt`, `docs/llms-{core,api,control,operations,migration,internals}.txt`, `packages/cli/docs/llms.txt`, `packages/cli/docs/llms-full.txt`, `skills/smithers/llms-full.txt`, `packages/cli/docs/SKILL.md`. `docs/llms-full.txt` is 957,481 bytes. Logs: `check-llms.log`, `docs-llms-regen.log`.
+
+## 3. Documentation build: `vocs build`
+
+```sh
+rm -rf docs/dist && pnpm exec vocs build
+```
+
+Exit 0 (2 min 19 s wall). Final lines:
 
 ```
-git status --short          -> (no output)
-git status --porcelain | wc -l   -> 0
-```
-
-The 12 committed artifacts (`docs/llms.txt`, `docs/llms-full.txt`, six
-`docs/llms-<topic>.txt` bundles, `packages/cli/docs/llms.txt`,
-`packages/cli/docs/llms-full.txt`, `packages/cli/docs/SKILL.md`,
-`skills/smithers/llms-full.txt`) are byte-identical to what the generator emits
-from `docs/pages` at this revision.
-
-## 4. vocs build (documentation generation)
-
-Command: `timeout 570 pnpm exec vocs build > <log> 2>&1; echo "VOCS_BUILD_EXIT=$?"`
-
-Started 07:12:40Z, finished 07:13:29Z: 49 seconds wall time.
-
-Exit code: 0. The log is 1,127 lines; the verdict lines:
-
-```
-[1/5] analyze client references...
-vite v8.2.1 building rsc environment for production...
-✓ 1648 modules transformed.
-✓ built in 17.75s
-...
-✓ built in 6.72s
+✓ built in 37.72s
+[PLUGIN_TIMINGS] Your build spent 77% of 37.7s inside plugin hooks (29.2s).
+  - vocs:llms buildEnd (46%, 17.5s, 1 call)
 [ssg] processing static generation...
 [prune] removed static-only 173 chunk(s) and 0 asset(s) from server bundle
-✓ 349 files generated in 4840ms
-VOCS_BUILD_EXIT=0
+✓ 349 files generated in 13502ms
 ```
 
-Outputs: `docs/dist/{preview.js,public,serve-node.js,server}`;
-`docs/dist/public` holds 39 top-level entries and 173 `index.html` pages, with
-`docs/dist/public/index.html` present. `renderStrategy: "full-static"`
-(`vocs.config.ts:22`) is the shape `docs-deploy.yml` uploads from
-`docs/dist/public`.
+Output: `docs/dist/public` (92 MB) holds 174 HTML files including `index.html`, `404.html`, `cli/index.html`, and `migration/1.0/index.html`, matching the `renderStrategy: "full-static"` layout `docs-deploy.yml` uploads. The build log contains no dead-link warning (grep for `dead`, `broken`, `not found` finds none). Log: `vocs-build.log`.
 
-Warnings in the log: Rollup's chunk-size advisory for
-`playground-modal.client` (5,722 kB before gzip) and a `PLUGIN_TIMINGS`
-notice. `grep -i "deadlink|dead link|dead-link"` over the full log matched
-nothing (grep exit 1): vocs' warning-mode checker reported no dead link.
+### Built-site crawl
 
-`docs/dist` is ignored (`.gitignore:5`, `dist/`). `git status --porcelain`
-printed 0 lines after the build.
-
-## 5. Link check through scripts/docs-links.mjs
-
-`scripts/docs-links.mjs` exports functions (`linkTargets`, `isInternal`,
-`resolveLink`, `deadLinks`, `headingAnchors`, `anchorsLinkedTo`,
-`missingAnchors`) and has no `main` or `process.argv` handling, so
-`node scripts/docs-links.mjs` prints nothing. The link check the docs gate
-scripts expose is check-docs check 3 (section 1 above). To record the count
-independently, a 12-line script in the session scratchpad imported
-`deadLinks` and `linkTargets` from the checkout's `scripts/docs-links.mjs`,
-`pages` and `assets` from `scripts/docs-pages.mjs`, and `deferredRoutes` from
-`scripts/docs-routes.mjs`, and ran the same call check-docs runs.
-
-Exit code: 0. Output:
+A crawl of every `href` and `src` in the 174 emitted HTML files against the files on disk (`crawl-built-site.mjs` beside the logs; output in `built-site-links.log`):
 
 ```
-{
-  "pages": 171,
-  "routes": 171,
-  "servedAssets": 43,
-  "deferredRoutes": 0,
-  "internalTargets": 504,
-  "externalOrHashTargets": 451,
-  "result": {
-    "checked": 504,
-    "dead": []
-  }
-}
+html files: 174; same-site href/src checked: 28241; external or scheme links skipped: 681
+PASS: 0 dead same-site links in the built site
 ```
 
-171 routes here against 127 in the sidebar check: check-docs excludes the 44
-historical changelog pages from the sidebar count (`isHistorical` in
-`scripts/docs-pages.mjs`); every one of the 171 pages is still a link target.
+## 4. Docs unit target: `//scripts:docsUnit` (red)
 
-## 6. docsUnit test group
-
-`scripts/BUILD.ts:279` declares `docsUnit` over ten test files. Command:
-
-```
-timeout 570 node --test scripts/docs-contract.test.mjs scripts/docs-deploy.test.mjs \
-  scripts/docs-links.test.mjs scripts/docs-removals.test.mjs scripts/docs-render.test.mjs \
-  scripts/docs-routes.test.mjs scripts/docs-sidebar.test.mjs scripts/generate-docs-pages.test.mjs \
-  scripts/generate-llms.test.mjs scripts/llms-version-guard.test.ts
+```sh
+pnpm exec smithers-build test '//scripts:docsUnit'
 ```
 
-Run 1 (started about 07:13:35Z, 1-minute load 16 to 19, immediately after the
-vocs build and beside the other Phase 7 gate agents): one test failed,
-`docs-removals.test.mjs:113`, "every removed verb really prints its documented
-sentence":
+Run 1 (05:06, load 60): exit 1, `1 targets: 0 hit, 0 ran, 1 failed`; 124 pass, 1 fail, 1 cancelled. `scripts/docs-removals.test.mjs` "every removed verb really prints its documented sentence" hit its 120,000 ms timeout; "a surviving parent's removed forms are documented and refuse" reported all 8 forms (`gateway status|stop`, `workflow run|path|create|inspect|skills|doctor`) as `did not exit`.
 
-```
-actual: [ 'rewind: did not exit', 'fork: did not exit', 'timetravel: did not exit', 'restore: did not exit' ],
-expected: [],
-```
+Run 2 (05:19, load 13): exit 1; 125 pass, 1 fail. The same test finished in 98 s and reported 8 verbs as `did not exit` (`human`, `ask-human`, `node`, `tail`, `review`, `release`, `test`, `docs-full`).
 
-Run 1 was piped through `tail`, and the zsh `PIPESTATUS` spelling used to read
-the node exit code printed empty, so run 1's exit code is not recorded; the
-assertion diff above is its failure evidence.
+Run 3, the file alone (`node --test scripts/docs-removals.test.mjs`, 05:21, load 9): exit 1; 6 pass, 1 fail. The same test reported 7 verbs printing a database error instead of the refusal: `ui`, `gui`, `monitor`, `supervisor`, `top`, `optimize` printed `Error: disk I/O error`; `supervise` printed `SqlError: Failed to execute statement`.
 
-Run 2 (07:15:53Z to 07:17:25Z, same command, output redirected to a log file,
-exit code read directly):
+The other 10 test files in the target, including `docs-links.test.mjs`, pass in every run. Logs: `docs-unit.log`, `docs-unit-rerun.log`, `docs-removals-alone.log`.
 
-```
-ℹ tests 118
-ℹ suites 0
-ℹ pass 118
-ℹ fail 0
-ℹ cancelled 0
-ℹ skipped 0
-ℹ todo 0
-ℹ duration_ms 92573.451416
-DOCS_UNIT_EXIT=0
+### Root cause: the refusal path opens SQLite
+
+`packages/cli/src/bin.ts` `main` short-circuits only `--help` and `--version` (`documentRequested`). Every other invocation first resolves `NodeControl.config` and runs the command tree under `Effect.provide(NodeControl.layer(applicationConfig))`, and a hidden removed verb's handler (`Command.ts` `removedCommands`) runs inside that layer. Proof from an empty directory:
+
+```sh
+mkdir -p $S/empty $S/home && cd $S/empty
+SMITHERS_HOME=$S/home node <checkout>/packages/cli/src/bin.ts ui
+# exit 1, stderr: smithers ui was removed in 1.0.0-rc.0: ... See https://smithers.sh/migration/1.0#ui
+find $S/home $S/empty -type f
+# empty/.flows/engine.db
+# empty/.flows/control.db
 ```
 
-Cause of the run 1 failure: `runCli` in `scripts/docs-help.mjs:90` kills a
-spawned CLI with SIGKILL after `timeoutMs ?? 15000` and reports
-`exited: false`; the test spawns the working-tree CLI eight at a time for every
-removed verb. Spawned one at a time at 1-minute load 4.10, each of the four
-verbs exits on its own and prints the documented sentence:
+`--version` from the same directory creates nothing. The test spawns 67 verbs 8 at a time with `cwd: repoRoot` and a 15,000 ms `execFile` timeout (`scripts/docs-help.mjs` `runCli`), so 8 processes at a time create and open `<checkout>/.flows/engine.db` and `control.db` while the other Phase 7 lanes' `smithers release` and `smithers review` processes use the same files. One cold start costs 7.1 s wall and 6.2 s CPU on this host (`time node packages/cli/src/bin.ts rewind`, twice, and the same for `dist/esm/bin.js`), which leaves 8 s of headroom for the shared SQLite open under the 15 s bound. Log: `removed-verb-db-open.log`, `removed-verb-probes.log`.
+
+### The claim the test makes is true
+
+A harness with the same data and comparison as the test but a 120 s per-spawn bound and 4-way concurrency (`removals-harness.mjs` beside the logs, output in `removals-harness.log`):
 
 ```
-rewind:     exit=1 wall=7.6s  smithers rewind was removed in 1.0.0-rc.0: ... See https://smithers.sh/migration/1.0#rewind
-fork:       exit=1 wall=7.3s  smithers fork was removed in 1.0.0-rc.0: ... See https://smithers.sh/migration/1.0#fork
-timetravel: exit=1 wall=8.7s  smithers timetravel was removed in 1.0.0-rc.0: ... See https://smithers.sh/migration/1.0#timetravel
-restore:    exit=1 wall=7.3s  smithers restore was removed in 1.0.0-rc.0: ... See https://smithers.sh/migration/1.0#restore
+entry=<checkout>/packages/cli/src/bin.ts
+bare verbs=67 surviving-parent forms=8 total spawns=75
+spawn wall ms: min=7262 median=7486 max=9810; spawns over the test's 15000 ms bound: 0/75
+  gateway status: exited=true 8650ms first line="smithers gateway status was removed in 1.0.0-rc.0: ..."
+  workflow run: exited=true 8616ms first line="smithers workflow run was removed in 1.0.0-rc.0: ..."
+PASS: all 75 removed verbs and forms print their documented sentence
 ```
 
-A 7 to 9 second boot per verb on an idle machine leaves under 2x headroom
-against the 15 second bound once eight boots share the CPU with other gates.
-The verbs are refused, the guide matches the binary, and the test is green at
-normal load; the bound is what failed, not the documentation.
+Note for whoever reruns this: `packages/cli/dist/esm/bin.js` appeared in the checkout at 05:08, written by another lane. `packages/cli/bin/smithers.mjs` prefers `dist` when it exists, so the launcher no longer runs the working-tree source that CI runs. `check-docs` ran before the dist existed; the harness passes `entry: packages/cli/src/bin.ts` explicitly.
 
-## Broken links
+## 5. Served llms bundle differs from the checked bundle
 
-None.
+vocs' built-in llms plugin (`vocs:llms buildEnd` in the build log) writes its own `docs/dist/public/llms.txt` (24,886 bytes) and `docs/dist/public/llms-full.txt` (1,432,111 bytes). `docs-deploy.yml` uploads `docs/dist/public`, so smithers.sh serves these, not the 12 artifacts `check-llms` guards. `claude-plugin/skills/smithers/SKILL.md` lines 17, 141, and 156 instruct agents to read `https://smithers.sh/llms-full.txt` first.
 
-- check-docs check 3: `all 504 internal links resolve` across 171 pages, 171
-  routes, 43 served assets, and an empty deferred-route register.
-- Standalone enumeration through `scripts/docs-links.mjs`: `checked: 504`,
-  `dead: []`.
-- check-docs check 16: all 74 anchors the CLI removal messages link to have a
-  heading in `docs/pages/migration/1.0.md`.
-- Sidebar: `the sidebar reaches all 127 routes the site publishes`.
-- vocs build: no dead-link line in the 1,127-line build log.
+```
+docs/dist/public/llms-full.txt: bytes=1432111 jsx-Task-tags=40 'smithers oneshot'=8 version-stamp=0
+docs/llms-full.txt:             bytes= 957481 jsx-Task-tags=7  'smithers oneshot'=0 version-stamp=7
+cmp docs/dist/public/llms-full.txt docs/llms-full.txt -> differ: char 11, line 1
+```
 
-## Observations (no gate impact)
+The vocs bundle carries the 44 historical 0.x changelog bodies that `scripts/generate-llms.test.mjs` ("no bundle carries a Smithers 0.x changelog") excludes from the curated bundle. No `docs/public` directory exists to override the plugin output. Log: `llms-served-vs-committed.log`.
 
-- `scripts/docs-removals.test.mjs` is load-sensitive through the 15 second
-  SIGKILL bound in `scripts/docs-help.mjs` `runCli`. On this machine with
-  other Phase 7 gates running it failed once and passed once. Any Phase 7 lane
-  that runs `docsUnit` or `//scripts/...` under load should expect this row
-  and rerun it before reading it as a docs defect. Raising the bound or the
-  test's `timeoutMs` is a `scripts/` change for the maintainer, not a docs
-  edit, and it was not made in the clean checkout.
-- Compared with the `9c464343f0` evidence: check-docs grew from 15 to 16
-  checks (the 74-anchor check), the internal link count moved from 503 to
-  504, and the `migration` bundle grew from 107,352 to 109,260 bytes
-  (`full` from 953,437 to 955,345). All committed bundles match the generator.
-- The working tree ended the gate clean: `git status --porcelain` printed 0
-  lines after the regeneration and again after the vocs build.
+## 6. External links (informational, network)
+
+348 unique `http(s)` URLs in `docs/pages` were probed with `curl -I -L --max-time 15`, falling back to `GET` (`external-links.log`, classification in `external-links-triage.log`): 98 return 2xx, 250 do not.
+
+| Count | Class | Status |
+| --- | --- | --- |
+| 169 | `https://github.com/smithersai/smithers/blob|tree/main/<path>` from 66 pages (api pages, `examples.md`, generated CLI and control pages) | 404 today: GitHub `main` is 0.x (`cfb570f1`); the paths exist only on `v1/rc0-migration`. Resolves when the branch lands on `main`. |
+| 70 | `https://smithers.sh/migration/1.0#<verb>` from `docs/pages/migration/1.0.md` (the URL every refusal prints) | 404 today: smithers.sh still serves the Mintlify 0.x site on Vercel (`/` and `/installation` 200, `/migration/1.0` 404). Resolves when the vocs `docs/dist/public` deploy replaces it. |
+| 2 | `https://github.com/smithersai/plugins` and `.../blob/main/docs/guides/` from `architecture/package-map.md`, `concepts/hosts-and-capabilities.md`, `api/flows.md`, `external.mdx` | 404: the repository does not exist publicly. Dead link. |
+| 2 | `https://www.npmjs.com/package/{smthrs,canonicalize}` | 403 to curl; `registry.npmjs.org` returns 200 for both. Not dead. |
+| 2 | `api.deepgram.com`, `api.openai.com/v1/audio/transcriptions` in changelog 0.25.0 | 401: auth-gated API endpoints quoted in a historical changelog. Not links. |
+| 5 | `smithers.internal`, `control.example.test`, `runbook/approvals` (sample placeholders); `herdr.sh` and `codeplaneapp/smithers/issues/123` (historical changelogs 0.34.0 and 0.15.1) | Placeholders and historical pages, which `check-docs` exempts. |
 
 ## Verdict
 
-PASS. At `20b32c6316` from the clean checkout, `check-docs` (16 checks, 504
-internal links, 0 dead), `check-llms` (12 artifacts current), the `docs:llms`
-regeneration (0 changed, clean tree), `pnpm exec vocs build` (exit 0, 349
-files, 173 pages), the standalone dead-link enumeration (0 dead), and the
-`docsUnit` group (118 of 118 on the recorded run) all exit 0 with zero broken
-links.
+FAIL. The build, the bundle regeneration and its check, and the internal link checks pass with zero broken internal links. The gate fails because:
+
+1. `//scripts:docsUnit`, a target the required CI `test` job runs via `smithers-build test '//scripts/...'`, is red in three of three runs on this host. The cause is in the CLI, not in the docs: every removed-verb refusal creates and opens `.flows/engine.db` and `.flows/control.db` in the working directory before it prints, so 8 concurrent spawns contend on two SQLite files and either exceed the 15 s bound or surface `disk I/O error`. Fix in `packages/cli/src/bin.ts` (refuse removed verbs before `NodeControl.layer`, the way `--help` and `--version` already skip startup), or give each spawn in `scripts/docs-removals.test.mjs` its own working directory. All 75 refusals print the documented sentence when given 120 s.
+2. The generated site serves vocs' auto-generated `llms-full.txt` (1.43 MB, 44 historical 0.x changelogs, 40 JSX `<Task` tags, 8 `smithers oneshot` mentions, no version stamp) at the URL the shipped skill tells agents to read first, instead of the 957 KB bundle `check-llms` guards. Fix by disabling the vocs llms emission or overriding it with the curated bundles in the served public directory, and extend `check-llms` to the served copy.
+3. Five pages link to `https://github.com/smithersai/plugins`, which returns 404.
+
+Cutover-order dependencies, not defects: 169 `github.com/smithersai/smithers/blob/main` links and 70 `smithers.sh/migration/1.0` links resolve only after the branch lands on `main` and the vocs site is deployed.

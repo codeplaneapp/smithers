@@ -411,10 +411,14 @@ export const citedPackageCounts = (body) =>
 
 /**
  * The documents the citation check reads: every source Markdown file under
- * `docs/` plus the README. `docs/dist` is the site vocs renders, so reading it
- * would report the same sentence twice and would report it from a directory
- * a fix cannot be applied to. Paths are repository-relative and sorted, so a
- * failure names the same file on every machine.
+ * `docs/` plus the README. Two directories are skipped, both for the same
+ * reason: a fix cannot be applied to them. `docs/dist` is the site vocs
+ * renders, so reading it would report the same sentence twice.
+ * `docs/migration/evidence` holds Phase 7 gate and fix-lane transcripts copied
+ * in byte for byte, and a transcript that records a count the release later
+ * corrected has to keep quoting the wrong number to stay a transcript. Paths
+ * are repository-relative and sorted, so a failure names the same file on
+ * every machine.
  */
 export const countCitingDocuments = (root = repoRoot) => {
   const found = []
@@ -424,7 +428,7 @@ export const countCitingDocuments = (root = repoRoot) => {
     )) {
       const next = relative === "" ? entry.name : `${relative}/${entry.name}`
       if (entry.isDirectory()) {
-        if (next !== "docs/dist") walk(next)
+        if (next !== "docs/dist" && next !== "docs/migration/evidence") walk(next)
       } else if (entry.name.endsWith(".md") || entry.name.endsWith(".mdx")) found.push(next)
     }
   }

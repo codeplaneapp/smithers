@@ -217,6 +217,24 @@ test("finds no citation in a document that states no count", () => {
   assert.deepEqual(citedPackageCounts("The release publishes several packages."), [])
 })
 
+// A Phase 7 evidence file is a transcript. `fix-release-hygiene-report.md`
+// records the release-hygiene lane finding a contract row that said "39 names
+// in §3.1" and correcting it to 40, and it has to keep quoting the wrong
+// number to record the correction. Reading those files would make the citation
+// check red on prose no fix can touch, the same reason `docs/dist` is skipped.
+test("the citation check skips the rendered site and the Phase 7 evidence transcripts", () => {
+  const documents = countCitingDocuments()
+  assert.ok(documents.includes("docs/migration/rc-contract.md"), "the contract itself is read")
+  assert.ok(documents.includes("README.md"), "the README is read")
+  assert.deepEqual(documents.filter((path) => path.startsWith("docs/dist/")), [])
+  assert.deepEqual(documents.filter((path) => path.startsWith("docs/migration/evidence/")), [])
+  const transcript = readFileSync(join(repoRoot, "docs/migration/evidence/fix-release-hygiene-report.md"), "utf8")
+  assert.ok(
+    citedPackageCounts(transcript).includes(39),
+    "the transcript still quotes the count the lane corrected"
+  )
+})
+
 test("every document that cites the published set agrees with the contract", () => {
   const declared = publishedPackageCount()
   for (const path of countCitingDocuments()) {

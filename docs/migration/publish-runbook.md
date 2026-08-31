@@ -10,41 +10,50 @@ file wins for this candidate.
 
 ## 0. Do not publish yet
 
-Two Phase 7 gates fail, on two defects in this repository. Publishing while they
-fail ships a candidate whose core promise is unproven.
+One Phase 7 gate fails, `docs-generation-links`. Read
+[verification-evidence.md](verification-evidence.md) first and close, or record
+a written acceptance of, each of its three findings:
 
-Read [verification-evidence.md](verification-evidence.md) first and close, or
-record a written acceptance of, each of:
+1. Every removed-verb refusal creates and opens `.flows/engine.db` and
+   `.flows/control.db` in the working directory before it prints, so the
+   concurrent removal test in `//scripts:docsUnit` contends on two SQLite files
+   and either exceeds its 15 s per-spawn bound or surfaces `disk I/O error`.
+   That target is selected by the required CI `test` job. Fix lane
+   `phase7/cli-refuse-before-boot` is done, commit `a506d60231`, staged on
+   `land/wave-7`.
+2. The built site serves vocs' own `llms-full.txt` (1,432,111 bytes, 44
+   historical 0.x changelog bodies, 40 JSX `<Task` tags) at the URL the shipped
+   skill tells agents to read first, instead of the 957,481-byte curated bundle
+   `check-llms` guards. Fix lane `phase7/docs-served-llms` is done, commit
+   `510621c763`, staged on `land/wave-7`.
+3. `https://github.com/smithersai/plugins` returns 404 from five pages because
+   the repository is private (`gh api repos/smithersai/plugins` prints
+   `private=true`; `smithersai/smithers-plugins` redirects to it). It is a
+   maintainer prerequisite in release contract section 10: make it public, or
+   change the five links, before the docs deploy.
 
-1. A run's terminal result is never recorded in the engine store when the
-   launching process owns the executor. The engine row is left
-   `suspended`/`released`, every later executor process claims and replays it,
-   and the drain fails with `SchemaError: Expected JSON value` at
-   `["exit"]["cause"][0]["error"]`. Seen for a completed run by the smoke gate
-   and for a failed run by the plue-cutover gate, where the replay called a
-   real model seat again. Fix lane `phase7/engine-failed-persist`.
-2. An attached `smithers up` or `smithers run` exits 0 for a run that settled
-   `failed`, so a red CI tier reports a green step. Fix lane
-   `phase7/cli-exit-code`.
+Land `land/wave-7`, then re-run the gate from a clean checkout. Nothing else in
+the gate table is red: the previous round's two blockers, an unrecorded
+terminal result in the engine store and an attached launch that exited 0 for a
+failed run, are closed and re-proven live by the smoke and plue-cutover gates.
 
-Blocker 1 is the one that decides whether this candidate is publishable.
-Durable settlement is what the release is for.
+One further item is a maintainer decision rather than a lane.
+`e2e/faults/case22-secret-never-in-journal.test.ts` keeps one red half: rc.0
+ships no redacting logger, so a credential an action passes to `Effect.logInfo`
+reaches the operator's terminal in full. The journal half passes, reading the
+SQLite file directly. Ruling R-12 makes case 22 a required parity test, and
+root `BUILD.ts` keeps the `e2e-faults` CI job advisory until the section 5.2
+redaction deliverable lands. The limitation ships documented in the release
+notes and on the known-limitations page. Decide whether it publishes that way.
 
-Two smaller defects are recorded on the smoke gate and are not blockers:
-runtime warnings reach stdout inside a `--json` document, and `NoMatchingWait`
-prints the signal name with an empty message.
-
-One gate in step 2 below, `check-npm-dedupe`, exits 1 today on a peer-dependency
-disagreement between `@smthrs/kernel` and `@smthrs/testing`. It needs a decision
-before you publish, and section 2 records the measurement and the two options.
-
-Plue is the other half of the cutover. PLAN completion criterion 9 is met on the
-branch `smithers-rc0-cutover` for everything that runs without the live stack.
-That branch is unmerged, and its remaining items cannot run until `@smthrs/*`
-`1.0.0-rc.0` is on the registry: the agent-host links swap to published pins,
-the agent VM image builds, and `zig build e2e`, the live-API suites, and the
-pipeline receipts follow. Publishing this candidate is what unblocks them, so
-plan that pass before you tag. `plue-consumer-contract.md` section 13 holds the
+Plue is the other half of the cutover. PLAN completion criterion 9 is met on
+the branch `smithers-rc0-cutover` (tip `976a170a6`) for everything that runs
+without the live stack, and the plue-cutover gate is green. That branch is
+unmerged, and its remaining items cannot run until `@smthrs/*` `1.0.0-rc.0` is
+on the registry: the agent-host links swap to published pins, the agent VM
+image builds, and `zig build e2e`, the live-API suites, and the pipeline
+receipts follow. Publishing this candidate is what unblocks them, so plan that
+pass before you tag. `plue-consumer-contract.md` section 13 holds the
 checklist.
 
 Two maintainer preconditions, neither of them code:
@@ -58,7 +67,7 @@ Two maintainer preconditions, neither of them code:
 
 ## 1. Set the version
 
-The tree is already at `1.0.0-rc.0`: on 2026-08-31 at `20b32c6316`,
+The tree is already at `1.0.0-rc.0`: on 2026-08-31 at `cd14388ed7`,
 `node scripts/set-release-version.mjs --check 1.0.0-rc.0` answered
 `63 workspace manifests and 1 versioned source are at 1.0.0-rc.0.` and exited 0.
 Run this step for `rc.1` and later, or after any manifest change; today it is a
@@ -120,35 +129,27 @@ git status --porcelain                            # empty
 `smthrs.group` is `engine` or `agent` is not exactly those 40 names, so a
 package cannot join or leave the train unnoticed.
 
-### Measured on 2026-08-31 at `20b32c6316`, in `migration/clean-checkout-2`
+### Measured on 2026-08-31 at `cd14388ed7`, in `migration/clean-checkout-4`
 
 | Command | Exit | Output |
 | --- | --- | --- |
 | `node scripts/set-release-version.mjs --check 1.0.0-rc.0` | 0 | `63 workspace manifests and 1 versioned source are at 1.0.0-rc.0.` |
-| `node scripts/check-single-effect-version.mjs` | 0 | `effect@4.0.0-rc.108 everywhere (63 sources)` |
-| `node scripts/check-npm-dedupe.mjs` | **1** | `ok: effect@4.0.0-rc.108 (single copy)`, `resolved package count: 165 (budget 925)`, then `vitest must stay out of the default install (optional peer), found: node_modules/vitest` |
+| `node scripts/check-single-effect-version.mjs` | 0 | `check-single-effect-version: effect@4.0.0-rc.108 everywhere (63 sources)` |
+| `node scripts/check-npm-dedupe.mjs` | 0 | `ok: effect@4.0.0-rc.108 (single copy)`, `ok: 3 optional peers absent from default install`, `resolved package count: 97 (budget 925)` |
 | `node scripts/pack-release.mjs --names \| wc -l` | 0 | `40`, in the order section 6 lists |
 | `git status --porcelain` | 0 | empty |
 
 The frozen offline installs for both package managers are the clean-install
 gate, which passes.
 
-`check-npm-dedupe` fails on a disagreement between two published manifests.
-`@smthrs/kernel` declares `vitest` an optional peer
-(`peerDependenciesMeta.vitest.optional`), and `@smthrs/testing` declares
-`vitest: "^4.1.0"` as a plain peer with no meta entry, so npm auto-installs it
-into an end user's default tree. The singleton that matters, `effect`, resolves
-to one copy, and the resolved package count is well inside budget.
-
-Two things to settle before publishing, neither of them a code emergency:
-
-1. Decide whether `@smthrs/testing` should mark `vitest` optional like
-   `@smthrs/kernel` does, or whether the gate should accept a required peer on
-   that package. The two manifests currently contradict each other.
-2. Wire the gate. Release contract R-35 says `check-npm-dedupe` is a
-   `scripts/BUILD.ts` target run by `smithers-build test '//scripts/...'`. It is
-   declared in no `BUILD.ts` and selected by no CI job, which is why the
-   failure survived to this runbook rather than being caught in Phase 7.
+`check-npm-dedupe` failed in the previous round because `@smthrs/kernel`
+declared `vitest` an optional peer and `@smthrs/testing` declared it a plain
+one, so npm installed vitest into an end user's default tree. The
+release-hygiene lane (`b22c47e5f5`) made `vitest` and `@effect/vitest` optional
+peers of `@smthrs/testing` and declared the gate as `//scripts:npmDedupe`, with
+a unit test at `//scripts:npmDedupeUnit`, so `smithers-build test
+'//scripts/...'` selects it the way release contract R-35 requires. The
+resolved package count fell from 165 to 97 with the change.
 
 ## 3. Rehearse without publishing
 

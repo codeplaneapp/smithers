@@ -1,164 +1,400 @@
-# Phase 7 gate: dependency-cycles-names
+# Gate: dependency-cycles-names
 
-Verdict: PASS
+Verdict: **PASS**
 
-`corepack pnpm run circular` exits 0 with zero import cycles across the 51
-workspace projects that declare the check (888 modules, 1,613 edges), and all
-64 workspace project names are unique. `legacy/` is absent from the tree, so no
-retired package can contribute a name.
+PLAN.md Phase 7 requires "dependency-cycle and duplicate-package-name checks" to pass from a clean checkout. Both pass. The repository's cycle check (`corepack pnpm run circular`, madge 8.0.0 per package as rc-contract section 9 names it) exits 0 across all 51 packages that declare it and reports 0 cycles. The workspace holds 64 projects with 64 distinct names and 0 duplicates; pnpm's own project listing agrees.
 
-PLAN.md Phase 7 item: "dependency-cycle and duplicate-package-name checks".
-Contract reference: rc-contract.md section 9 pins `madge 8.0.0` (`circular`) as
-the tooling baseline, and the `@smthrs/targets` `PackageDefaults` synthesizes a
-`circular` target for every `packages/*` directory. phase3-validation.md row
-"Circular dependencies" records the same command at exit 0 for Phase 3.
-
-This file supersedes the 2026-08-30 evidence taken at `9c464343f0` in
-`migration/clean-checkout` (that directory no longer exists).
-
-## Environment
+## Checkout and environment
 
 | Item | Value |
 | --- | --- |
-| Host | macOS 26.2 (25C56), Darwin 25.2.0, arm64 |
-| Date | 2026-08-31 06:57 to 07:02 UTC (2026-08-30 23:57 to 2026-08-31 00:02 PT) |
+| Checkout | `/Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-4` |
+| Branch and HEAD | `v1/rc0-migration` at `cd14388ed782aac6e5f5b23d66c8fa9dc01dd6ba` (identical to `/Users/williamcory/smithers` HEAD and its `v1/rc0-migration` ref at validation time) |
+| Working tree | `git status --short` empty |
+| Submodule | `vendor/jj` at `47589ada70c12b3e829b5c98ab32503abad49eac` |
+| Host | macOS Darwin 25.2.0, arm64 |
 | Node | v24.18.0 |
-| corepack | 0.35.0 |
-| pnpm (via corepack, `packageManager: pnpm@11.21.0`) | 11.21.0 |
-| Bun | 1.4.0 (`bun --version`; canary 1.4.0-canary.1+6618e7f7e) |
-| madge | 8.0.0, one copy in the pnpm store (`madge@8.0.0_supports-color@10.2.2_typescript@6.0.3`); `require("madge/package.json").version` prints `8.0.0` from `packages/flow`, `packages/cli`, `packages/build-cli`, and `packages/engine` |
+| Bun | 1.4.0 |
+| pnpm | 11.21.0 via corepack (`packageManager: pnpm@11.21.0`) |
+| madge | 8.0.0 (resolved from each package, for example `packages/engine/node_modules/madge`) |
+| Date | 2026-08-31 |
 
-`SMITHERS_HOME` was unset (`env -u SMITHERS_HOME`) for every pnpm invocation.
+## 1. Frozen install
 
-## Checkout
-
-Clean checkout at
-`/Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-2`,
-HEAD `20b32c6316487497301db74ec70cbe951428ef53` on `v1/rc0-migration`, the same
-commit as `/Users/williamcory/smithers` HEAD at gate time. Dependencies were
-installed by the clean-install gate (`00-clean-install.md`). `git status --short`
-was empty before and after this gate; the gate wrote nothing into the checkout.
-
-Logs: `dependency-cycles-names-logs/` next to this file (`circular.log`,
-`circular.exit`, `circular.start`, `circular.end`, `pnpm-m-ls.json`,
-`check-unique-names.mjs`, `unique-names.txt`, `all-package-json.txt`,
-`tree-wide-names.txt`, `madge-module-counts.txt`, `positive-control.txt`).
-
-## 1. Dependency-cycle check
-
-Command, from the checkout root:
+Command, run from the checkout root:
 
 ```sh
-env -u SMITHERS_HOME corepack pnpm run circular
+corepack pnpm install --frozen-lockfile --offline
 ```
 
-Exit code: 0. Wall time: 14 s (06:57:53Z to 06:58:07Z).
-
-The root script is `pnpm --recursive --if-present run circular`. pnpm printed
-`Scope: 63 of 64 workspace projects` (the private root is excluded from the
-recursive scope). 51 projects define `"circular": "node scripts/circular.mjs"`.
-Each script calls `madge("src", { fileExtensions: ["ts"], tsConfig:
-"./tsconfig.json", detectiveOptions: { ts: { skipTypeImports: true } } })` and
-sets exit code 1 with `Circular dependencies found` when `result.circular()`
-is non-empty. `circular.log` contains 51 `circular: Done` lines and zero
-`Circular dependencies found`, `ELIFECYCLE`, or `ERR_PNPM` lines. Final output
-lines:
+Output and exit code:
 
 ```
+Scope: all 64 workspace projects
+Already up to date
+Done in 1.8s using pnpm v11.21.0
+install exit=0
+```
+
+The install printed no cyclic-workspace warning (`grep -ic cyclic` over the full output returned 0).
+
+## 2. Dependency-cycle check
+
+Root script (`package.json:30`): `"circular": "pnpm --recursive --if-present run circular"`. Each of the 51 packages that declares the script runs `node scripts/circular.mjs`, which calls madge on `src` with `fileExtensions: ["ts"]`, the package `tsconfig.json`, and `skipTypeImports: true`, then exits 1 if `result.circular()` is non-empty.
+
+Command, run from the checkout root:
+
+```sh
+corepack pnpm run circular
+```
+
+Result:
+
+| Measure | Value |
+| --- | --- |
+| Exit code | 0 |
+| Scope line | `Scope: 63 of 64 workspace projects` (root excluded by `--recursive`) |
+| Packages that ran `circular` | 51 (`circular: Done` lines) |
+| Packages that failed | 0 (`circular: Failed` lines) |
+| `Circular dependencies found` messages | 0 |
+| Warnings or other stderr lines | none |
+
+The same 51 checks exist as build-graph targets: `pnpm exec smithers-build query '//packages/...'` lists 51 `//packages/<name>:circular` targets of type `NodeTest`, and the required CI `test` job runs them through `pnpm exec smithers-build ci '//packages/...' --jobs 2` (`.github/workflows/ci.yml:35`).
+
+Packages under the workspace globs without a `circular` script: `packages/ui`, `packages/ui-styleguide`, `packages/build/infra` (private; the two UI kits carry 0.x tooling per phase2-baseline.md section on `vitestCoverageIsolation`). `apps/*`, `e2e`, and `examples` declare none either. Section 5 covers them for information.
+
+Full output of `corepack pnpm run circular`:
+
+```
+### corepack pnpm run circular
+$ pnpm --recursive --if-present run circular
+Scope: 63 of 64 workspace projects
+packages/canonical circular$ node scripts/circular.mjs
+packages/capability circular$ node scripts/circular.mjs
+packages/crypto circular$ node scripts/circular.mjs
+packages/database circular$ node scripts/circular.mjs
+packages/crypto circular: Done
+packages/errors circular$ node scripts/circular.mjs
+packages/canonical circular: Done
+packages/smthrs-deprecation circular$ node scripts/circular.mjs
+packages/capability circular: Done
+packages/database circular: Done
+packages/smthrs-deprecation circular: Done
+packages/errors circular: Done
+packages/jj circular$ node scripts/circular.mjs
+packages/journal circular$ node scripts/circular.mjs
+packages/artifacts circular$ node scripts/circular.mjs
+packages/core circular$ node scripts/circular.mjs
+packages/jj circular: Done
+packages/keys circular$ node scripts/circular.mjs
+packages/artifacts circular: Done
+packages/step-cache circular$ node scripts/circular.mjs
+packages/core circular: Done
+packages/journal circular: Done
+packages/keys circular: Done
+packages/step-cache circular: Done
+packages/observability circular$ node scripts/circular.mjs
+packages/run-store circular$ node scripts/circular.mjs
+packages/plan circular$ node scripts/circular.mjs
+packages/notifications circular$ node scripts/circular.mjs
+packages/notifications circular: Done
+packages/scorers circular$ node scripts/circular.mjs
+packages/observability circular: Done
+packages/sync circular$ node scripts/circular.mjs
+packages/run-store circular: Done
+packages/plan circular: Done
+packages/scorers circular: Done
+packages/sync circular: Done
+packages/flow circular$ node scripts/circular.mjs
+packages/flow circular: Done
+packages/build circular$ node scripts/circular.mjs
+packages/engine circular$ node scripts/circular.mjs
+packages/patterns circular$ node scripts/circular.mjs
+packages/plugin circular$ node scripts/circular.mjs
+packages/plugin circular: Done
+packages/build circular: Done
+packages/engine circular: Done
+packages/patterns circular: Done
+packages/targets circular$ node scripts/circular.mjs
+packages/targets circular: Done
+packages/kernel circular$ node scripts/circular.mjs
+packages/platform-browser circular$ node scripts/circular.mjs
+packages/platform-browser circular: Done
+packages/kernel circular: Done
+packages/model circular$ node scripts/circular.mjs
+packages/platform-node circular$ node scripts/circular.mjs
+packages/sandbox circular$ node scripts/circular.mjs
+packages/platform-node circular: Done
+packages/sandbox circular: Done
+packages/model circular: Done
+packages/memory circular$ node scripts/circular.mjs
+packages/platform-bun circular$ node scripts/circular.mjs
+packages/engine-store circular$ node scripts/circular.mjs
+packages/platform-bun circular: Done
+packages/memory circular: Done
+packages/engine-store circular: Done
+packages/time-travel circular$ node scripts/circular.mjs
+packages/time-travel circular: Done
+packages/flows circular$ node scripts/circular.mjs
+packages/flows circular: Done
+packages/registry circular$ node scripts/circular.mjs
+packages/registry circular: Done
+packages/fs circular$ node scripts/circular.mjs
+packages/control circular$ node scripts/circular.mjs
+packages/harness circular$ node scripts/circular.mjs
+packages/fs circular: Done
+packages/control circular: Done
+packages/harness circular: Done
+packages/integrations circular$ node scripts/circular.mjs
+packages/gateway circular$ node scripts/circular.mjs
+packages/mcp circular$ node scripts/circular.mjs
+packages/std circular$ node scripts/circular.mjs
+packages/mcp circular: Done
+packages/testing circular$ node scripts/circular.mjs
+packages/gateway circular: Done
+packages/triggers circular$ node scripts/circular.mjs
+packages/integrations circular: Done
+packages/std circular: Done
+packages/triggers circular: Done
+packages/testing circular: Done
+packages/agent circular$ node scripts/circular.mjs
+packages/chain circular$ node scripts/circular.mjs
+packages/evals circular$ node scripts/circular.mjs
+packages/evals circular: Done
+packages/chain circular: Done
+packages/agent circular: Done
+packages/migrate circular$ node scripts/circular.mjs
+packages/create-app circular$ node scripts/circular.mjs
+packages/create-app circular: Done
+packages/migrate circular: Done
+packages/build-cli circular$ node scripts/circular.mjs
+packages/cli circular$ node scripts/circular.mjs
 packages/cli circular: Done
 packages/build-cli circular: Done
+circular exit=0
 ```
 
-12 of the 63 recursive projects have no `circular` script and are skipped by
-`--if-present`: `apps/bug-worker`, `apps/review`, `apps/server`, `apps/shared`,
-`apps/status-site`, `apps/tui`, `apps/ui`, `e2e`, `examples`,
-`packages/build/infra`, `packages/ui`, `packages/ui-styleguide`. These are the
-private apps, the e2e and examples projects, the build-cache Worker, and the two
-retained 0.x UI kits. None is a publishable rc.0 library, and the skip matches
-the checked-in scripts at the gated revision.
+## 3. Package-name uniqueness
 
-### 1.1 Graph sizes (proof the check parsed real graphs)
+Method: enumerate every `package.json` under the `pnpm-workspace.yaml` globs (`packages/*`, `packages/build/infra`, `e2e`, `examples`, `apps/*`) plus the root manifest, read `name`, and count duplicates. Cross-check with `corepack pnpm -r ls --depth -1 --json`.
 
-The same madge options were run once more per package, printing
-`Object.keys(result.obj()).length` (modules), the summed adjacency length
-(edges), and `result.circular().length`. Full table:
-`dependency-cycles-names-logs/madge-module-counts.txt`.
-
-| Metric | Value |
+| Measure | Value |
 | --- | --- |
-| Packages measured | 51 |
-| Total modules | 888 |
-| Total edges | 1,613 |
-| Packages with `cycles=0` | 51 of 51 |
-| Largest graphs | `packages/targets` 82 modules / 351 edges, `packages/flow` 47 / 105, `packages/std` 44 / 138, `packages/build-cli` 42 / 87, `packages/engine-store` 40 / 86 |
-| Smallest graphs | `packages/smthrs-deprecation` 1 / 0, `packages/crypto` 2 / 1, `packages/keys` 2 / 1, `packages/canonical` 3 / 2, `packages/capability` 3 / 3 |
+| Workspace projects (manifests under the globs + root) | 64 |
+| `corepack pnpm -r ls --depth -1 --json` projects | 64 |
+| Distinct names | 64 |
+| Duplicate names | 0 |
+| pnpm-reported duplicate names | `[]` |
+| Manifests without a `name` | 0 |
+| Non-workspace `package.json` files (fixtures, templates; outside `node_modules`, `dist`, `vendor`, `legacy`) | 17 |
+| Non-workspace manifests whose name equals a workspace name | 0 |
+| `legacy/` present | no |
 
-### 1.2 Positive control (proof the check is not tautological)
+Duplicates list: none.
 
-A byte-identical copy of `packages/flow/scripts/circular.mjs` (verified with
-`cmp`) was run outside the checkout, in the scratchpad, against two two-file
-fixtures with `madge` resolved through a symlink to `packages/flow/node_modules`:
-
-| Fixture | Content | Output | Exit |
-| --- | --- | --- | --- |
-| `value` | `a.ts` value-imports `b.ts`, `b.ts` value-imports `a.ts` | `Circular dependencies found` then `[ [ 'a.ts', 'b.ts' ] ]` | 1 |
-| `typeonly` | the same pair joined only by `import type` | nothing | 0 |
-
-The `value` result shows the script fails on a real cycle. The `typeonly` result
-documents the check's scope: `skipTypeImports: true` ignores type-only cycles by
-design, because they erase at compile time and cannot cause a runtime
-initialization order defect. Output: `dependency-cycles-names-logs/positive-control.txt`.
-
-## 2. Package-name uniqueness
-
-Command, from the checkout root:
-
-```sh
-env -u SMITHERS_HOME corepack pnpm m ls --json --depth -1
-node dependency-cycles-names-logs/check-unique-names.mjs pnpm-m-ls.json <checkout>
-```
-
-The script groups every project path by its manifest `name`, prints the
-duplicates, and exits 1 on any duplicate or unnamed project. Exit code: 0.
-First output line:
+Name table (name, version, visibility, directory):
 
 ```
-projects=64 named=64 unnamed=0 duplicates=0
+  smithers	0.0.0	private	.
+  @smthrs/bug-worker	0.0.1	private	apps/bug-worker
+  @smthrs/review	1.0.0-rc.0	private	apps/review
+  smithers-server	1.0.0	private	apps/server
+  smithers-shared	0.0.0	private	apps/shared
+  @smthrs/status-site	0.0.1	private	apps/status-site
+  smithers-tui	0.0.0	private	apps/tui
+  smithers-ui	1.0.0	private	apps/ui
+  @smthrs/e2e	0.0.0	private	e2e
+  @smthrs/examples	0.0.0	private	examples
+  @smthrs/agent	1.0.0-rc.0	public	packages/agent
+  @smthrs/artifacts	1.0.0-rc.0	public	packages/artifacts
+  @smthrs/build	0.1.0	private	packages/build
+  @smthrs/build-cli	0.1.0	private	packages/build-cli
+  @smthrs/build-infra	undefined	private	packages/build/infra
+  @smthrs/canonical	1.0.0-rc.0	public	packages/canonical
+  @smthrs/capability	1.0.0-rc.0	public	packages/capability
+  @smthrs/chain	0.1.0	private	packages/chain
+  @smthrs/cli	1.0.0-rc.0	public	packages/cli
+  @smthrs/control	1.0.0-rc.0	public	packages/control
+  @smthrs/core	1.0.0-rc.0	public	packages/core
+  @smthrs/create-app	0.1.0	private	packages/create-app
+  @smthrs/crypto	1.0.0-rc.0	public	packages/crypto
+  @smthrs/database	1.0.0-rc.0	public	packages/database
+  @smthrs/engine	1.0.0-rc.0	public	packages/engine
+  @smthrs/engine-store	1.0.0-rc.0	public	packages/engine-store
+  @smthrs/errors	1.0.0-rc.0	private	packages/errors
+  @smthrs/evals	1.0.0-rc.0	private	packages/evals
+  @smthrs/flow	1.0.0-rc.0	public	packages/flow
+  @smthrs/flows	1.0.0-rc.0	public	packages/flows
+  @smthrs/fs	0.1.0	private	packages/fs
+  @smthrs/gateway	1.0.0-rc.0	public	packages/gateway
+  @smthrs/harness	1.0.0-rc.0	public	packages/harness
+  @smthrs/integrations	1.0.0-rc.0	private	packages/integrations
+  @smthrs/jj	1.0.0-rc.0	public	packages/jj
+  @smthrs/journal	1.0.0-rc.0	public	packages/journal
+  @smthrs/kernel	1.0.0-rc.0	public	packages/kernel
+  @smthrs/keys	1.0.0-rc.0	public	packages/keys
+  @smthrs/mcp	1.0.0-rc.0	public	packages/mcp
+  @smthrs/memory	1.0.0-rc.0	public	packages/memory
+  @smthrs/migrate	1.0.0-rc.0	public	packages/migrate
+  @smthrs/model	1.0.0-rc.0	public	packages/model
+  @smthrs/notifications	1.0.0-rc.0	public	packages/notifications
+  @smthrs/observability	1.0.0-rc.0	public	packages/observability
+  @smthrs/patterns	1.0.0-rc.0	public	packages/patterns
+  @smthrs/plan	1.0.0-rc.0	public	packages/plan
+  @smthrs/platform-browser	1.0.0-rc.0	public	packages/platform-browser
+  @smthrs/platform-bun	1.0.0-rc.0	public	packages/platform-bun
+  @smthrs/platform-node	1.0.0-rc.0	public	packages/platform-node
+  @smthrs/plugin	1.0.0-rc.0	public	packages/plugin
+  @smthrs/registry	1.0.0-rc.0	public	packages/registry
+  @smthrs/run-store	1.0.0-rc.0	public	packages/run-store
+  @smthrs/sandbox	1.0.0-rc.0	public	packages/sandbox
+  @smthrs/scorers	0.1.0	private	packages/scorers
+  smthrs	1.0.0-rc.0	public	packages/smthrs-deprecation
+  @smthrs/std	1.0.0-rc.0	public	packages/std
+  @smthrs/step-cache	1.0.0-rc.0	public	packages/step-cache
+  @smthrs/sync	1.0.0-rc.0	public	packages/sync
+  @smthrs/targets	0.1.0	private	packages/targets
+  @smthrs/testing	1.0.0-rc.0	public	packages/testing
+  @smthrs/time-travel	1.0.0-rc.0	public	packages/time-travel
+  @smthrs/triggers	0.1.0	private	packages/triggers
+  @smthrs/ui	1.0.0-rc.0	private	packages/ui
+  @smthrs/ui-styleguide	1.0.0-rc.0	private	packages/ui-styleguide
 ```
 
-Every one of the 64 names maps to exactly one path (`unique-names.txt` lists the
-full mapping). Composition: 58 `@smthrs/*` names (`packages/*` including
-`@smthrs/build-infra` at `packages/build/infra`, plus `@smthrs/bug-worker`,
-`@smthrs/review`, `@smthrs/status-site`, `@smthrs/e2e`, and `@smthrs/examples`),
-the private root `smithers`, `smithers-server`, `smithers-shared`,
-`smithers-tui`, `smithers-ui` (`apps/*`), and `smthrs`
-(`packages/smthrs-deprecation`). The workspace globs are `packages/*`,
-`packages/build/infra`, `e2e`, `examples`, and `apps/*`. The count is 64 rather
-than the 63 in the superseded evidence because `e2e` joined the workspace
-between `9c464343f0` and `20b32c6316`.
+Scanner: `/private/tmp/claude-501/-Users-williamcory-smithers/b0a4ab15-ceef-429c-8898-089a3db0bc0d/scratchpad/names-and-cycles.mjs` (run as `node names-and-cycles.mjs <checkout>` from the checkout root; exit 0). Its full output is in section 6.
 
-### 2.1 Tree-wide cross-check
+## 4. Workspace-graph cycle scan
 
-`find . -name package.json` outside `node_modules`, `dist`, and `.git` returns
-85 manifests: the 64 workspace projects plus 21 non-workspace manifests (test
-fixtures under `packages/build-cli`, `packages/migrate`, `packages/harness`,
-`apps/ui/e2e`, and `flows/migrate-smithers-v1`; the two `packages/create-app`
-templates; `codex-plugin`; `vendor/jj/web/docs`). No non-workspace manifest
-reuses a workspace name. Three names are shared only among fixtures and
-templates, none of which pnpm or Bun treats as a package:
+The scanner also builds the package-level graph from `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` edges that point at workspace names (64 nodes, 349 internal edges) and runs Tarjan's algorithm.
 
-| Shared name | Paths | Why it is not a defect |
-| --- | --- | --- |
-| `__APP_NAME__` | `packages/create-app/template/aomi`, `packages/create-app/template/default` | scaffold placeholder that `create-app` rewrites |
-| `jsx-single-example` | `packages/migrate/test/fixtures/jsx-single`, `.../jsx-single.migrated`, `.../persisted-db` | migration test fixtures, `.migrated` is the expected output of `jsx-single` |
-| `smithers-workflows` | `packages/migrate/test/fixtures/mixed-api/.smithers`, `.../plue-pack/.smithers` | 0.x `.smithers` project fixtures the migrator reads |
+Result: one strongly connected component with a cycle, `@smthrs/platform-browser -> @smthrs/kernel -> @smthrs/platform-browser`. Both edges are runtime `dependencies` at `1.0.0-rc.0`.
 
-`legacy/` does not exist at `20b32c6316` (`git ls-files legacy` returns 0
-paths), so the Phase 7 `check:legacy-absent` precondition for this gate holds.
+This cycle is intentional, documented, and imported unchanged from the flows reference:
+
+- `packages/kernel/src/test/TestHost.ts:16-17` imports `@smthrs/platform-browser/BrowserChildProcessSpawner` and `@smthrs/platform-browser/BrowserFileSystem`; `@smthrs/kernel` publishes `./test/contract` (rc-contract section 3.5, line 162), so the manifest edge is a runtime dependency. No other `packages/kernel/src` module imports the platform bundle. `packages/platform-browser/src/{BrowserHost.ts,BrowserChildProcessSpawner/make.ts,BrowserFileSystem/layer.ts}` import `@smthrs/kernel`.
+- `docs/pages/architecture/package-map.md:9` documents it: "The one dotted edge is a test-only seam: `@smthrs/kernel`'s `test/TestHost` composes `@smthrs/platform-browser`'s in-tab `FileSystem` and `ChildProcessSpawner` ... No production module in `@smthrs/kernel` imports a platform bundle."
+- `docs/migration/disposition-ledger.md:592` and `:626` record it ("documented cycle kernel/test/TestHost -> platform-browser -> kernel").
+- `scripts/pack-release.mjs:157-183` `dependencyOrder` states "The graph is not acyclic" for exactly this pair and enters the cycle at its alphabetically first member, so release ordering handles it (PLAN Phase 3, "release ordering handles internal dependencies correctly").
+- `git log -S'"@smthrs/platform-browser"' -- packages/kernel/package.json` resolves to `378c182a75`, the Phase 2 wholesale import of `smithersai/flows@393253c2b`.
+- `corepack pnpm -r exec true` prints no cyclic-workspace warning; pnpm orders the two without complaint.
+
+The gate's cycle check is file-level madge inside each package, which passes. The manifest-level cycle is a recorded design decision with release-tooling support, not a defect this gate reports.
+
+## 5. Informational: madge over projects the repository check skips
+
+Run from `packages/engine` (where madge resolves) with `ROOT=<checkout>`, extensions `ts,tsx,mts,mjs,js`, each project's `tsconfig.json` when present, `skipTypeImports: true`, excluding `node_modules`, `dist/`, and `.d.ts`. Not a Phase 7 criterion; recorded for coverage.
+
+```
+packages/ui	files=132	cycles=0
+packages/ui-styleguide	files=21	cycles=0
+packages/build/infra	files=13	cycles=0
+apps/bug-worker	files=4	cycles=0
+apps/review	files=94	cycles=1	[["cli/main.ts","cli/runReview.ts"]]
+apps/server	files=14	cycles=0
+apps/shared	files=27	cycles=0
+apps/status-site	files=1	cycles=0
+apps/tui	files=22	cycles=0
+apps/ui	files=343	cycles=3	[["../.hutch/devkit/api/sdks/main/proc/native.ts","../.hutch/devkit/api/sdks/main/core/BrowserView.ts","../.hutch/devkit/api/sdks/main/core/Socket.ts"],["../.hutch/devkit/api/sdks/main/proc/native.ts","../.hutch/devkit/api/sdks/main/core/BrowserView.ts"],["../.hutch/devkit/api/sdks/main/proc/native.ts","../.hutch/devkit/api/sdks/main/core/WGPUView.ts"]]
+e2e	files=54	cycles=0
+examples	files=40	cycles=0
+projects with cycles: 2
+```
+
+- `apps/review` (private app): `cli/main.ts:191` lazy-loads `runReview.ts` through `await import("./runReview.ts")` (the header comment at `main.ts:8` names this as the deliberate split that keeps the heavy half out of startup), and `runReview.ts:28` imports `buildRunSummaryLine` from `main.ts`. madge counts the dynamic import as an edge. `apps/review` declares no `circular` script or target.
+- `apps/ui`: all three cycles are inside `apps/ui/.hutch/devkit/api/sdks/main/**`, the generated electrobun devkit. `apps/ui/.gitignore:35` ignores `.hutch/`; `git ls-files apps/ui/.hutch` lists 0 tracked files. Not repository source.
+- `packages/ui`, `packages/ui-styleguide`, `packages/build/infra`, `apps/bug-worker`, `apps/server`, `apps/shared`, `apps/status-site`, `apps/tui`, `e2e`, `examples`: 0 cycles.
+
+## 6. Scanner output (names and workspace graph)
+
+```
+workspace globs from pnpm-workspace.yaml: ["packages/*","packages/build/infra","e2e","examples","apps/*"]
+
+workspace projects (manifests under the globs + root): 64
+distinct names: 64
+duplicate names: 0
+
+name table:
+  smithers	0.0.0	private	.
+  @smthrs/bug-worker	0.0.1	private	apps/bug-worker
+  @smthrs/review	1.0.0-rc.0	private	apps/review
+  smithers-server	1.0.0	private	apps/server
+  smithers-shared	0.0.0	private	apps/shared
+  @smthrs/status-site	0.0.1	private	apps/status-site
+  smithers-tui	0.0.0	private	apps/tui
+  smithers-ui	1.0.0	private	apps/ui
+  @smthrs/e2e	0.0.0	private	e2e
+  @smthrs/examples	0.0.0	private	examples
+  @smthrs/agent	1.0.0-rc.0	public	packages/agent
+  @smthrs/artifacts	1.0.0-rc.0	public	packages/artifacts
+  @smthrs/build	0.1.0	private	packages/build
+  @smthrs/build-cli	0.1.0	private	packages/build-cli
+  @smthrs/build-infra	undefined	private	packages/build/infra
+  @smthrs/canonical	1.0.0-rc.0	public	packages/canonical
+  @smthrs/capability	1.0.0-rc.0	public	packages/capability
+  @smthrs/chain	0.1.0	private	packages/chain
+  @smthrs/cli	1.0.0-rc.0	public	packages/cli
+  @smthrs/control	1.0.0-rc.0	public	packages/control
+  @smthrs/core	1.0.0-rc.0	public	packages/core
+  @smthrs/create-app	0.1.0	private	packages/create-app
+  @smthrs/crypto	1.0.0-rc.0	public	packages/crypto
+  @smthrs/database	1.0.0-rc.0	public	packages/database
+  @smthrs/engine	1.0.0-rc.0	public	packages/engine
+  @smthrs/engine-store	1.0.0-rc.0	public	packages/engine-store
+  @smthrs/errors	1.0.0-rc.0	private	packages/errors
+  @smthrs/evals	1.0.0-rc.0	private	packages/evals
+  @smthrs/flow	1.0.0-rc.0	public	packages/flow
+  @smthrs/flows	1.0.0-rc.0	public	packages/flows
+  @smthrs/fs	0.1.0	private	packages/fs
+  @smthrs/gateway	1.0.0-rc.0	public	packages/gateway
+  @smthrs/harness	1.0.0-rc.0	public	packages/harness
+  @smthrs/integrations	1.0.0-rc.0	private	packages/integrations
+  @smthrs/jj	1.0.0-rc.0	public	packages/jj
+  @smthrs/journal	1.0.0-rc.0	public	packages/journal
+  @smthrs/kernel	1.0.0-rc.0	public	packages/kernel
+  @smthrs/keys	1.0.0-rc.0	public	packages/keys
+  @smthrs/mcp	1.0.0-rc.0	public	packages/mcp
+  @smthrs/memory	1.0.0-rc.0	public	packages/memory
+  @smthrs/migrate	1.0.0-rc.0	public	packages/migrate
+  @smthrs/model	1.0.0-rc.0	public	packages/model
+  @smthrs/notifications	1.0.0-rc.0	public	packages/notifications
+  @smthrs/observability	1.0.0-rc.0	public	packages/observability
+  @smthrs/patterns	1.0.0-rc.0	public	packages/patterns
+  @smthrs/plan	1.0.0-rc.0	public	packages/plan
+  @smthrs/platform-browser	1.0.0-rc.0	public	packages/platform-browser
+  @smthrs/platform-bun	1.0.0-rc.0	public	packages/platform-bun
+  @smthrs/platform-node	1.0.0-rc.0	public	packages/platform-node
+  @smthrs/plugin	1.0.0-rc.0	public	packages/plugin
+  @smthrs/registry	1.0.0-rc.0	public	packages/registry
+  @smthrs/run-store	1.0.0-rc.0	public	packages/run-store
+  @smthrs/sandbox	1.0.0-rc.0	public	packages/sandbox
+  @smthrs/scorers	0.1.0	private	packages/scorers
+  smthrs	1.0.0-rc.0	public	packages/smthrs-deprecation
+  @smthrs/std	1.0.0-rc.0	public	packages/std
+  @smthrs/step-cache	1.0.0-rc.0	public	packages/step-cache
+  @smthrs/sync	1.0.0-rc.0	public	packages/sync
+  @smthrs/targets	0.1.0	private	packages/targets
+  @smthrs/testing	1.0.0-rc.0	public	packages/testing
+  @smthrs/time-travel	1.0.0-rc.0	public	packages/time-travel
+  @smthrs/triggers	0.1.0	private	packages/triggers
+  @smthrs/ui	1.0.0-rc.0	private	packages/ui
+  @smthrs/ui-styleguide	1.0.0-rc.0	private	packages/ui-styleguide
+
+workspace dependency graph: 64 nodes, 349 internal edges (dependencies+devDependencies+peerDependencies+optionalDependencies)
+strongly connected components with a cycle: 1
+  CYCLE: @smthrs/platform-browser -> @smthrs/kernel
+
+informational: 17 non-workspace package.json files (fixtures, templates) outside node_modules/dist/legacy/vendor
+non-workspace manifests whose name equals a workspace package name: 0
+
+legacy/ present: false (excluded from the workspace by pnpm-workspace.yaml; Phase 7 gate check:legacy-absent owns it)
+```
+
+## Observations for the orchestrator (non-blocking)
+
+1. Manifest-level cycle `@smthrs/kernel <-> @smthrs/platform-browser` is documented in three places and handled by `pack-release.mjs`; the npm pack/dry-run and release-order gates should confirm `dependencyOrder` emits both packages.
+2. `apps/review` carries one dynamic-import cycle (`cli/main.ts <-> cli/runReview.ts`) that no repository check covers. It is a private app and outside this gate.
+3. `packages/build/infra` (`@smthrs/build-infra`, private) declares no `version` field. Names stay unique; noted for the manifest gates.
 
 ## Verdict
 
-PASS. Zero import cycles across every workspace project that declares the check
-(51 of 51, 888 modules), the check demonstrably fails on a real cycle, and all
-64 workspace package names are unique with zero duplicates. No fix lane is
-needed.
+PASS. `corepack pnpm run circular` exits 0 with 0 cycles across 51 packages, and the 64 workspace package names are unique with 0 duplicates.
