@@ -78,7 +78,10 @@ const builtInName = (value: object): string | undefined => {
   if (value instanceof ArrayBuffer) return "ArrayBuffer"
   if (ArrayBuffer.isView(value)) return value.constructor.name
   if (value instanceof RegExp) return "RegExp"
-  if (value instanceof Error) return "Error"
+  // An Error subclass reports its concrete constructor so the message names
+  // the actual leaked value ("TypeError at $.x"), falling back to "Error" for
+  // a subclass whose constructor name was erased.
+  if (value instanceof Error) return value.constructor?.name || "Error"
   return undefined
 }
 
@@ -123,6 +126,12 @@ const caused = (
  * non-finite numbers, BigInt, lone surrogates, cycles, and non-plain built-ins
  * whose lossy stringify forms could collide in a digest. The iterative walk
  * supports 10,000 nested levels below the root.
+ *
+ * Two deliberate divergences favor digest determinism over byte parity: a
+ * `toJSON` result is canonicalized recursively (stringify serializes it
+ * as-is, so a chained `toJSON` stops after one level there), and a boxed
+ * primitive unboxes from its internal slot (stringify consults overridden
+ * `toString`/`valueOf`, letting a mutated wrapper change the bytes).
  *
  * @category constructors
  * @since 0.1.0
@@ -225,9 +234,17 @@ export const canonicalize = (input: unknown): string => {
       continue
     }
     if (Array.isArray(value)) {
-      const slots = Array.from({ length: value.length }, (): Slot => ({}))
+      // `value.length` on a proxy runs its get trap; a throwing trap is a
+      // getter failure like any other and must not escape as the raw error.
+      let length: number
+      try {
+        length = value.length
+      } catch (cause) {
+        throw caused("canonical_getter_threw", cause, path)
+      }
+      const slots = Array.from({ length }, (): Slot => ({}))
       tasks.push({ kind: "finishArray", slots, slot })
-      for (let index = value.length - 1; index >= 0; index--) {
+      for (let index = length - 1; index >= 0; index--) {
         tasks.push({
           kind: "read",
           parent: value as unknown as Record<string, unknown>,

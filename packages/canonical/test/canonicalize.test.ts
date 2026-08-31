@@ -125,8 +125,28 @@ describe("digest-unsafe built-ins", () => {
     ["ArrayBuffer", new ArrayBuffer(2)],
     ["Uint8Array", new Uint8Array([1])],
     ["RegExp", /x/],
-    ["Error", new Error("x")]
+    ["Error", new Error("x")],
+    // An Error subclass is named by its concrete constructor, not the base
+    // class: "TypeError at $.x" tells the caller which value leaked in.
+    ["TypeError", new TypeError("x")],
+    ["RangeError", new RangeError("x")]
   ])("rejects %s", (name, value) => rejects(value, "canonical_unsupported_value", "$", name))
+
+  it("falls back to \"Error\" when the instance erased its constructor", () => {
+    const erased = new Error("x")
+    Object.defineProperty(erased, "constructor", { value: undefined })
+    rejects(erased, "canonical_unsupported_value", "$", "Error")
+  })
+
+  it("wraps a proxy whose length trap throws as canonical_getter_threw", () => {
+    const trapped = new Proxy([1], {
+      get(target, key, receiver) {
+        if (key === "length") throw new Error("len")
+        return Reflect.get(target, key, receiver)
+      }
+    })
+    rejects({ xs: trapped }, "canonical_getter_threw", "$.xs")
+  })
 
   it("keeps Date governed by toJSON", () => {
     expect(canonicalize(new Date(0))).toBe("\"1970-01-01T00:00:00.000Z\"")
@@ -211,6 +231,25 @@ describe("observable object semantics", () => {
     expect(() => canonicalize(value)).toThrow(
       expect.objectContaining({ code: "canonical_getter_threw", path: "$", cause })
     )
+  })
+})
+
+describe("documented divergences from JSON.stringify", () => {
+  // Two corners where the docblock chooses digest determinism over byte-for-
+  // byte stringify parity, pinned so the divergence stays deliberate.
+  it("canonicalizes a chained toJSON result instead of stopping at one level", () => {
+    // JSON.stringify serializes the first toJSON result as-is ("{}" here);
+    // canonicalize keeps applying its own rules to the result.
+    expect(canonicalize({ toJSON: (): unknown => ({ toJSON: (): number => 42 }) })).toBe("42")
+  })
+
+  it("unboxes wrappers from the internal slot, ignoring overridden coercers", () => {
+    // JSON.stringify consults toString/valueOf overrides; canonicalize reads
+    // the primitive the wrapper was constructed with, so a mutated wrapper
+    // cannot change the digest of the value it boxes.
+    const s = Object.assign(new String("ab"), { toString: (): string => "xy" })
+    const n = Object.assign(new Number(1), { valueOf: (): number => 7 })
+    expect(canonicalize({ s, n })).toBe("{\"n\":1,\"s\":\"ab\"}")
   })
 })
 
