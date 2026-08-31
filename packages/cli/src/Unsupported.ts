@@ -265,6 +265,57 @@ export const verbError = (verb: RemovedVerb, subcommand?: string | undefined): C
   })
 
 /**
+ * Removed verbs whose bare spelling still runs something, so a refusal has to
+ * read the form rather than the name.
+ *
+ * `gateway` is the `serve` alias and only `gateway status|stop` are removed.
+ * `workflow list` is the `ls` alias and every other `workflow` form is gone,
+ * the bare parent included. `Command.ts` registers both by hand for the same
+ * reason.
+ */
+const survivingParents = new Set(["gateway", "workflow"])
+
+/**
+ * The refusal an argument vector earns before anything boots, or `undefined`.
+ *
+ * A removed verb is a sentence, not work. Answering it from the command tree
+ * meant answering it from inside `NodeControl.layer`, so the process created
+ * `<cwd>/.flows/` and opened `engine.db` and `control.db` before it printed:
+ * an operator who typed a 0.x verb got a project state directory as the side
+ * effect of being told the verb is gone, and the eight-at-a-time spawns in
+ * `scripts/docs-removals.test.mjs` contended on those two SQLite files.
+ *
+ * The scan is deliberately narrow, the way `bin.ts` reads `--help` and
+ * `--version`: it fires only for `smithers <verb> [<positional>...]`, and any
+ * flag anywhere in the vector sends the invocation down the ordinary path.
+ * A flag can take a value, a value can be spelled like a verb, and the
+ * registered hidden commands in `Command.ts` are still the authority for every
+ * shape this one declines to read. Missing a refusal here costs the old
+ * startup; misreading one would print the wrong sentence.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const refusal = (args: ReadonlyArray<string>): CliError.UnsupportedError | undefined => {
+  const [name, ...rest] = args
+  if (name === undefined || name.startsWith("-")) return undefined
+  if (rest.some((argument) => argument.startsWith("-"))) return undefined
+  const verb = removedVerbs.find((entry) => entry.name === name)
+  if (verb === undefined) return undefined
+  const form = rest[0]
+  if (!survivingParents.has(name)) {
+    return verbError(verb, verb.subcommands === undefined ? undefined : form)
+  }
+  // `gateway` runs `serve`, so only the two named subcommands refuse.
+  if (name === "gateway") {
+    return form !== undefined && verb.subcommands!.includes(form) ? verbError(verb, form) : undefined
+  }
+  // `workflow` refuses every form but the surviving `list` alias, bare
+  // `workflow` included, which is what `Command.ts` does with `rest[0]`.
+  return form === "list" ? undefined : verbError(verb, form)
+}
+
+/**
  * Whether a flow id belongs to the control plane's reserved catalog.
  *
  * `@smthrs/control`'s `SystemFlows.catalog` reserves one `system/*` id per
