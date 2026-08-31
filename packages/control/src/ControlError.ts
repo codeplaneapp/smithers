@@ -175,6 +175,13 @@ export class LaunchFailed extends Schema.TaggedError<LaunchFailed>()("/control/L
  * it anyway would leave an operator watching a delivery that never lands, so it
  * is refused where it arrives.
  *
+ * The signal's name is `waitName`, not `name`. A field spelled `name` on an
+ * `Error` subclass shadows `Error.prototype.name`, which every renderer in the
+ * tree reads: `smithers signal run-3 '{"name":"go"}'` against a timer-parked
+ * run printed `go: ` to stderr and exited 1, because `bin.ts` reports
+ * `${error.name}: ${error.message}` and this class had overwritten one and
+ * defined neither (Phase 7 smoke, defect D3).
+ *
  * @category errors
  * @since 0.1.0
  * @slop
@@ -182,8 +189,17 @@ export class LaunchFailed extends Schema.TaggedError<LaunchFailed>()("/control/L
 export class NoMatchingWait extends Schema.TaggedError<NoMatchingWait>()("/control/NoMatchingWait", {
   code: constantCode("no_matching_wait"),
   runId: RunId,
-  name: Schema.String
-}) {}
+  waitName: Schema.String
+}) {
+  /**
+   * The sentence an operator reads. Every other renderer in the tree prints
+   * `message`, so a refusal with none is a refusal with no reason.
+   */
+  override get message(): string {
+    return `no wait point named "${this.waitName}" is open on run ${this.runId}. ` +
+      `Read \`smithers status ${this.runId}\` to see what that run is waiting for.`
+  }
+}
 
 /**
  * A credential write lost a race: the record moved on before this writer
