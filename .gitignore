@@ -107,3 +107,6 @@ reference/*
 # origin, so they are never evidence and never belong in the tracked report
 # trail under apps/reports/launch-checklist/.
 apps/reports/launch-checklist/*-dry-run/
+
+# Crush agent local session database
+.crush/
