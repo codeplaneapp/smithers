@@ -10,7 +10,7 @@
  *
  * Two roles:
  *
- * - `setup` plans, approves, launches, and then pauses a run, leaving it
+ * - `setup` plans, approves, launches, and then parks a run, leaving it
  *   suspended and unowned — the state a swept run is in — and prints
  *   `RUN=<runId>`.
  * - `resume <runId> <barrier>` waits for the barrier file to appear, then asks
@@ -23,7 +23,7 @@
  *   node claimChild.ts <controlDbFile> <hostId> <pid> resume <runId> <barrier>
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
-import { Control, ControlExecutor, ControlLive, SqlControlRuntime } from "@smthrs/control"
+import { Control, ControlExecutor, ControlLive, ControlRuntime, SqlControlRuntime } from "@smthrs/control"
 import * as DurableWriter from "@smthrs/database/DurableWriter"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import { Migrations as JournalMigrations, SqlJournal } from "@smthrs/journal"
@@ -87,7 +87,17 @@ const setup = Effect.gen(function*() {
     return yield* Effect.die(new Error(`expected an accepted run, got ${receipt._tag}`))
   }
   // Parked and unowned: the state a run is left in when its driver is gone.
-  yield* control.pause({ runId: receipt.runId, idempotencyKey: `pause:${receipt.runId}` })
+  //
+  // `Control.pause` is gone at rc.0 (rc-contract sections 4.2 and 5.2), so the
+  // park is written through the runtime the way a driver writes its own: take
+  // the fence this process holds because it launched the run, then move the
+  // row to `parked`, which `SqlControlRuntime`'s `storeStatus` projects onto
+  // the store's `suspended`. The `flows_runs` CHECK constraint clears the
+  // owner columns for every status but `running`, so that one write both
+  // parks the run and releases it, which is the state a swept run is in.
+  const runtime = yield* ControlRuntime.ControlRuntime
+  const fence = yield* runtime.claimFence(receipt.runId)
+  yield* runtime.writeStatus(receipt.runId, fence, "parked")
   return receipt.runId
 })
 
