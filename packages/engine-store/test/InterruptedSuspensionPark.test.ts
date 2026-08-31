@@ -22,6 +22,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { DurableClock, DurableDeferred, Flow, FlowRuntime } from "@smthrs/flow"
 import { Jj } from "@smthrs/kernel"
 import { RunStore } from "@smthrs/run-store"
+import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -50,6 +51,26 @@ const jj = Jj.make({
   status: () => Effect.succeed("")
 })
 
+/** A wait that suspends the round it runs in, in the engine's own vocabulary. */
+type DurableWait = Effect.Effect<
+  unknown,
+  unknown,
+  FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance | Crypto.Crypto
+>
+
+/** Everything the interrupted park left on disk. */
+interface Park {
+  readonly row: RunStore.RunRow
+  readonly waiting: Option.Option<{
+    readonly reason: string
+    readonly wakeAt: number | null
+    readonly token: string | null
+  }>
+  readonly clocks: ReadonlyArray<{ readonly dueAtMs: number }>
+  readonly approvalSweep: ReadonlyArray<{ readonly runId: string }>
+  readonly releasedSweep: ReadonlyArray<{ readonly runId: string }>
+}
+
 /** The `Flow.Result` the park recorded on the run row, if it recorded one. */
 const recordedResult = (stateJson: string): { readonly _tag?: string } | undefined =>
   (JSON.parse(stateJson) as { readonly result?: { readonly _tag?: string } }).result
@@ -59,7 +80,7 @@ const recordedResult = (stateJson: string): { readonly _tag?: string } | undefin
  * engine's scope the way process shutdown closes it, and reads the durable
  * row the interruption left behind.
  */
-const parkByShutdown = (executionId: string, wait: Effect.Effect<unknown, unknown, never>) => {
+const parkByShutdown = (executionId: string, wait: DurableWait) => {
   const state = DurableEngineState.makeMemory()
   return withCrypto(
     Effect.scoped(
@@ -104,14 +125,9 @@ const parkByShutdown = (executionId: string, wait: Effect.Effect<unknown, unknow
       )
     ).pipe(
       Effect.provide(StepBoundary.layerTest()),
-      Effect.provide(TestStores.layer())
-    ) as Effect.Effect<{
-      readonly row: RunStore.RunRow
-      readonly waiting: Option.Option<DurableEngineState.Waiting>
-      readonly clocks: ReadonlyArray<{ readonly dueAtMs: number }>
-      readonly approvalSweep: ReadonlyArray<{ readonly runId: string }>
-      readonly releasedSweep: ReadonlyArray<{ readonly runId: string }>
-    }>
+      Effect.provide(TestStores.layer()),
+      Effect.orDie
+    ) as unknown as Effect.Effect<Park>
   )
 }
 
@@ -124,7 +140,7 @@ describe("a shutdown that interrupts a suspended round parks it, and says what f
         Effect.andThen(
           FlowRuntime.annotateWaiting({ reason: "approval", token: "request-9" }),
           DurableDeferred.await(gate)
-        ) as Effect.Effect<unknown, unknown, never>
+        )
       )
 
       expect(result.row.status).toBe("suspended")
@@ -147,7 +163,7 @@ describe("a shutdown that interrupts a suspended round parks it, and says what f
           name: "interrupted-park-clock",
           duration: "5 minutes",
           inMemoryThreshold: "1 second"
-        }) as Effect.Effect<unknown, unknown, never>
+        })
       )
 
       expect(result.row.status).toBe("suspended")
@@ -163,7 +179,7 @@ describe("a shutdown that interrupts a suspended round parks it, and says what f
       const gate = DurableDeferred.make("interrupted-park-event", { success: Schema.String })
       const result = yield* parkByShutdown(
         "interrupted-park-event",
-        DurableDeferred.await(gate) as Effect.Effect<unknown, unknown, never>
+        DurableDeferred.await(gate)
       )
 
       expect(result.row.status).toBe("suspended")

@@ -922,86 +922,86 @@ export const make = (
     const authorize =
       (runId: string, instance: FlowRuntime.FlowInstance["Service"]) =>
       (call: Cell.Call): Effect.Effect<void, HarnessError.HarnessError> =>
-      Effect.gen(function*() {
-        if (call.flowName !== StandardFlows.askFlow.name) return
-        const input = call.input as unknown as AskInput
-        const identity = askIdentity(runId, call.input)
-        const target = {
-          _tag: "Node" as const,
-          runId,
-          requestId: identity.requestId,
-          digest: identity.digest,
-          envelope: askEnvelope
-        }
-        const token = yield* runtime.registerApproval(target).pipe(
-          Effect.mapError(
-            (cause) =>
-              new HarnessError.HarnessError({
-                code: "engine_failed",
-                message: "The approval request could not be registered with the control plane",
-                cause
-              })
-          )
-        )
-        if (token.resolved) return
-        const payload: ApprovalPayload = {
-          target,
-          scope: "run",
-          idempotencyKey: `approve:${identity.requestId}`
-        }
-        yield* emit(runId, "control.approval.requested", {
-          runId,
-          requestId: identity.requestId,
-          question: input.question,
-          payload
-        }).pipe(
-          Effect.mapError(
-            (cause) =>
-              new HarnessError.HarnessError({
-                code: "engine_failed",
-                message: "The approval request could not be journaled",
-                cause
-              })
-          )
-        )
-        // Classify the park before taking it. Without this the engine derived
-        // the reason from durable state and an in-run `ask` — which arms no
-        // clock — parked under `event`, the reason `Control.steer` treats as
-        // "waiting for something to arrive" and therefore wakes on a message.
-        // `approval` is what the run is actually waiting for, and the request
-        // id is the token a wake handler matches (engine-store issue #31).
-        // The annotation cannot go stale: a round that parks here ends, and
-        // the resumed round runs under an instance of its own. The instance
-        // travels down from the registered handler rather than through a map
-        // the handler writes: the body is forked with `startImmediately`, so a
-        // map written after the fork is not yet written when the body's first
-        // ask reaches this line, and the park then took the derived `event`
-        // reason instead of `approval`.
-        yield* Effect.provideService(
-          FlowRuntime.annotateWaiting({ reason: "approval", token: identity.requestId }),
-          FlowRuntime.FlowInstance,
-          instance
-        )
-        return yield* Effect.fail(
-          new HarnessError.HarnessError({
-            code: "engine_failed",
-            message: `Approval required: ${input.question}`,
-            cause: Schema.encodeUnknownSync(Permission.PermissionRequired)(
-              new Permission.PermissionRequired({
-                code: "permission_required",
-                requestId: identity.requestId,
-                runId,
-                // No action in the capability vocabulary names a human
-                // decision; the request carries the question in `meta` and
-                // the model seat's own action as the closest formal claim.
-                capability: Capability.make("model:call", `ask/${identity.digest}`),
-                tier: "irreversible",
-                meta: { question: input.question }
-              })
+        Effect.gen(function*() {
+          if (call.flowName !== StandardFlows.askFlow.name) return
+          const input = call.input as unknown as AskInput
+          const identity = askIdentity(runId, call.input)
+          const target = {
+            _tag: "Node" as const,
+            runId,
+            requestId: identity.requestId,
+            digest: identity.digest,
+            envelope: askEnvelope
+          }
+          const token = yield* runtime.registerApproval(target).pipe(
+            Effect.mapError(
+              (cause) =>
+                new HarnessError.HarnessError({
+                  code: "engine_failed",
+                  message: "The approval request could not be registered with the control plane",
+                  cause
+                })
             )
-          })
-        )
-      })
+          )
+          if (token.resolved) return
+          const payload: ApprovalPayload = {
+            target,
+            scope: "run",
+            idempotencyKey: `approve:${identity.requestId}`
+          }
+          yield* emit(runId, "control.approval.requested", {
+            runId,
+            requestId: identity.requestId,
+            question: input.question,
+            payload
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new HarnessError.HarnessError({
+                  code: "engine_failed",
+                  message: "The approval request could not be journaled",
+                  cause
+                })
+            )
+          )
+          // Classify the park before taking it. Without this the engine derived
+          // the reason from durable state and an in-run `ask` — which arms no
+          // clock — parked under `event`, the reason `Control.steer` treats as
+          // "waiting for something to arrive" and therefore wakes on a message.
+          // `approval` is what the run is actually waiting for, and the request
+          // id is the token a wake handler matches (engine-store issue #31).
+          // The annotation cannot go stale: a round that parks here ends, and
+          // the resumed round runs under an instance of its own. The instance
+          // travels down from the registered handler rather than through a map
+          // the handler writes: the body is forked with `startImmediately`, so a
+          // map written after the fork is not yet written when the body's first
+          // ask reaches this line, and the park then took the derived `event`
+          // reason instead of `approval`.
+          yield* Effect.provideService(
+            FlowRuntime.annotateWaiting({ reason: "approval", token: identity.requestId }),
+            FlowRuntime.FlowInstance,
+            instance
+          )
+          return yield* Effect.fail(
+            new HarnessError.HarnessError({
+              code: "engine_failed",
+              message: `Approval required: ${input.question}`,
+              cause: Schema.encodeUnknownSync(Permission.PermissionRequired)(
+                new Permission.PermissionRequired({
+                  code: "permission_required",
+                  requestId: identity.requestId,
+                  runId,
+                  // No action in the capability vocabulary names a human
+                  // decision; the request carries the question in `meta` and
+                  // the model seat's own action as the closest formal claim.
+                  capability: Capability.make("model:call", `ask/${identity.digest}`),
+                  tier: "irreversible",
+                  meta: { question: input.question }
+                })
+              )
+            })
+          )
+        })
 
     /**
      * Answers a decided ask from the grant store. The activity only runs once
@@ -1612,9 +1612,7 @@ export const make = (
           _tag: "delegated"
         })
       ),
-      settleCancelledPark: Effect.fn("AgentSession.settleCancelledPark")((input) =>
-        settleCancelledPark(input.runId)
-      )
+      settleCancelledPark: Effect.fn("AgentSession.settleCancelledPark")((input) => settleCancelledPark(input.runId))
     })
   })
 
