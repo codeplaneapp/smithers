@@ -131,6 +131,11 @@ const absentExit = 9
  * temp directory) answers with the platform's own refusal rather than a
  * plausible lie, the same stance the workspace transaction's filesystem takes.
  *
+ * Relative paths resolve against {@link Session.workdir} before they reach the
+ * session or an override, so a body that writes `report.txt` lands in the
+ * machine's workspace on every backend; the session contract itself stays
+ * absolute-only.
+ *
  * Honest limits of the probe dialect: `stat` reports no mode, no times, and no
  * owner (the portable shell cannot name them; its `size` is exact); a
  * directory entry whose name contains a newline is misread, because probe
@@ -142,7 +147,14 @@ const absentExit = 9
  */
 export const fileSystem = (session: Session): FileSystem.FileSystem => {
   const quote = CommandLine.quote
-  const statOf = Effect.fn("Sandbox.fileSystem.stat")(function*(path: string) {
+  const workdir = session.workdir.replace(/\/+$/, "")
+  const resolve = (path: string): string => {
+    if (path.startsWith("/")) return path
+    const trimmed = path.replace(/^(\.\/)+/, "")
+    return trimmed === "" || trimmed === "." ? workdir : `${workdir}/${trimmed}`
+  }
+  const statOf = Effect.fn("Sandbox.fileSystem.stat")(function*(raw: string) {
+    const path = resolve(raw)
     const target = quote(path)
     const result = yield* probe(
       session,

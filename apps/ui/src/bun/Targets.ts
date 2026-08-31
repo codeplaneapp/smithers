@@ -65,7 +65,7 @@ export const buildCliNodePath = (
   return inherited === undefined || inherited.trim() === "" ? nodeModules : `${nodeModules}${delimiter}${inherited}`
 }
 
-const buildCliEnvironment = (cli: string): NodeJS.ProcessEnv | undefined => {
+export const buildCliEnvironment = (cli: string): NodeJS.ProcessEnv | undefined => {
   const nodePath = buildCliNodePath(cli)
   return nodePath === undefined ? undefined : { ...process.env, NODE_PATH: nodePath }
 }

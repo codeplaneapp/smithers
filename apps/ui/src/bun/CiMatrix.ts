@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join, relative, resolve } from "node:path"
 import type { CiMatrixResponse } from "smithers-shared/TargetGraph"
 import type { NodeSidecar } from "./Node"
-import { resolveBuildCli } from "./Targets"
+import { buildCliEnvironment, resolveBuildCli } from "./Targets"
 
 export type CiWorkflow = CiMatrixResponse["workflows"][number]
 
@@ -109,8 +109,15 @@ export const renderCiMatrix = async (options: {
       await child.exited
     }
     const cli = options.cli ?? resolveBuildCli()
+    const environment = buildCliEnvironment(cli)
     for (const label of options.labels) {
-      const child = Bun.spawn([options.node.path, cli, label, "--write"], { cwd: scratch, stdout: "pipe", stderr: "pipe", stdin: "ignore" })
+      const child = Bun.spawn([options.node.path, cli, label, "--write"], {
+        cwd: scratch,
+        ...(environment === undefined ? {} : { env: environment }),
+        stdout: "pipe",
+        stderr: "pipe",
+        stdin: "ignore"
+      })
       const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
       if (code !== 0) warnings.push(`${label} scratch render exited ${code}: ${(stderr || stdout).trim().slice(0, 1000)}`)
     }

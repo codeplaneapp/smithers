@@ -7,7 +7,14 @@ import { splitLabel } from "smithers-shared/LocalApp"
 import type { NodeSidecar } from "./Node"
 import { currentSandboxHost, loaderPolicy, wrapSandbox } from "./Sandbox"
 import type { SandboxHost } from "./Sandbox"
-import { planArgv, QUERY_TIMEOUT_MS, queryTargets, resolveBuildCli, sandboxPathsFor } from "./Targets"
+import {
+  buildCliEnvironment,
+  planArgv,
+  QUERY_TIMEOUT_MS,
+  queryTargets,
+  resolveBuildCli,
+  sandboxPathsFor
+} from "./Targets"
 
 type JsonObject = Record<string, unknown>
 
@@ -240,7 +247,14 @@ const runJson = async (options: TargetGraphOptions, args: ReadonlyArray<string>)
     loaderPolicy(sandboxPathsFor(options.repo)),
     options.sandboxHost ?? currentSandboxHost()
   )
-  const child = Bun.spawn([...wrapped.argv], { cwd: options.repo, stdout: "pipe", stderr: "pipe", stdin: "ignore" })
+  const environment = buildCliEnvironment(cli)
+  const child = Bun.spawn([...wrapped.argv], {
+    cwd: options.repo,
+    ...(environment === undefined ? {} : { env: environment }),
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore"
+  })
   const timer = setTimeout(() => child.kill(), options.timeoutMs ?? QUERY_TIMEOUT_MS)
   const [code, stdout, stderr] = await Promise.all([
     child.exited,
