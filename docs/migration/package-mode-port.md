@@ -67,3 +67,25 @@ both lockfiles.
 Nested `PACKAGE.ts`/`WORKSPACE.ts` trees (build-cli fixtures, create-app
 template, examples) must be declared via `repos`/discovery ignores or the
 walk throws `nested_workspace_undeclared` (`PackageDiscovery.ts:232`).
+
+## Nested-workspace answer
+
+`repos: { name: S.LocalRepository(path) }` on the Workspace declaration is
+the pruning mechanism: a declared repository path is skipped by the walk
+unconditionally (`PackageDiscovery.ts:209`), whether or not it holds a
+`WORKSPACE.ts`. `WORKSPACE.staged.ts` declares the five build-cli fixture
+workspaces, the two create-app templates, the apps/ui e2e fixture, and two
+pure prunes (`vendor/jj`, `legacy`) that exist only to keep the walk inside
+its directory/entry limits. `.git` and `node_modules` are always skipped.
+
+## Wave-2 fanout contract
+
+One `PACKAGE.ts` per remaining directory, produced by parallel lanes with
+disjoint path sets; none edits root `PACKAGE.ts`. Integration then wires
+root: import each new `Package`, append `<dir>.ci` to `gates`, cheap checks
+to `preCommit`, agent lanes into their own labels, and the bun-matrix and
+rust jobs into the `S.Github.Workflow` list. The flip commit renames
+`WORKSPACE.staged.ts`, deletes the BUILD-owned workflow from `preserve`,
+regenerates the workflows, and updates: rc-contract §9 (two rows),
+`CONTRIBUTING.md`, `CLAUDE.md`, the `vitestCoverageIsolation.test.ts` pins,
+`known-files.d.ts`, both lockfiles.
