@@ -83,6 +83,24 @@ const client = (url: string, credential?: string | undefined) =>
     ])
   )
 
+describe("the RPC body a mount will act on", () => {
+  it("accepts a framed request message and refuses a body that carries none", () => {
+    const ndjson = RpcSerialization.ndjson
+    const request = `${JSON.stringify({ _tag: "Request", id: 1, tag: "List", payload: {}, headers: [] })}\n`
+
+    expect(GatewayServer.carriesRpcRequest(ndjson, request)).toBe(true)
+    expect(GatewayServer.carriesRpcRequest(ndjson, "{}")).toBe(false)
+    expect(GatewayServer.carriesRpcRequest(ndjson, "")).toBe(false)
+    // A complete line that is not JSON is what makes the parser throw; an
+    // unterminated one is buffered and simply yields no message.
+    expect(GatewayServer.carriesRpcRequest(ndjson, "not json\n")).toBe(false)
+  })
+
+  it("leaves a binary framing to the mount, since its body is not text", () => {
+    expect(GatewayServer.carriesRpcRequest(RpcSerialization.msgPack, "{}")).toBe(true)
+  })
+})
+
 describe("the assembled gateway over a real loopback bind", () => {
   test("answers GET /health with the workspace identity and the package version", () =>
     Effect.gen(function*() {
@@ -97,6 +115,73 @@ describe("the assembled gateway over a real loopback bind", () => {
       const url = yield* baseUrl
       const response = yield* Effect.promise(() => fetch(`${url}/nope`))
       expect(response.status).toBe(404)
+    }).pipe(Effect.provide(served())))
+
+  /**
+   * A malformed request is the caller's mistake, and the status code is how a
+   * caller learns that. In the Phase 7 smoke `POST /rpc` with body `{}`
+   * answered 500 with an empty body, which tells an operator the gateway
+   * broke and tells a client to retry a request that can never succeed.
+   */
+  for (
+    const [name, body] of [
+      ["an empty JSON object", "{}"],
+      ["an array", "[]"],
+      ["text that is not JSON at all", "not json"],
+      ["nothing at all", ""]
+    ] as const
+  ) {
+    test(`answers POST /rpc carrying ${name} with 400 and a typed error body`, () =>
+      Effect.gen(function*() {
+        const url = yield* baseUrl
+        const response = yield* Effect.promise(() =>
+          fetch(`${url}/rpc`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body
+          })
+        )
+
+        expect(response.status).toBe(400)
+        expect(yield* Effect.promise(() => response.json() as Promise<unknown>)).toEqual({
+          _tag: "flows/gateway/GatewayError",
+          code: "malformed_request",
+          message: "POST /rpc carries no RPC request message",
+          cause: null
+        })
+      }).pipe(Effect.provide(served())))
+  }
+
+  test("refuses a malformed body on every RPC mount, not only /rpc", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      for (const path of GatewayServer.rpcPaths) {
+        const response = yield* Effect.promise(() =>
+          fetch(`${url}${path}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: "{}"
+          })
+        )
+        expect([path, response.status]).toEqual([path, 400])
+      }
+    }).pipe(Effect.provide(served())))
+
+  test("passes a well-formed request message through to the server it names", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const response = yield* Effect.promise(() =>
+        fetch(`${url}/rpc`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: `${JSON.stringify({ _tag: "Request", id: 1, tag: "NoSuchProcedure", payload: {}, headers: [] })}\n`
+        })
+      )
+
+      // The procedure does not exist, so the server answers an RPC-level
+      // defect. What matters here is that the guard did not answer for it.
+      expect(response.status).toBe(200)
+      expect(yield* Effect.promise(() => response.text())).toContain("NoSuchProcedure")
     }).pipe(Effect.provide(served())))
 
   test("plans, approves, runs, and reads a run back through the served control plane", () =>

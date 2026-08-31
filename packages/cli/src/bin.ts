@@ -5,7 +5,7 @@
  *
  * @since 0.1.0
  */
-import { NodeRuntime } from "@effect/platform-node"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import { Cause, Effect, Exit, Runtime } from "effect"
 import { CliError as EffectCliError, Command } from "effect/unstable/cli"
@@ -88,9 +88,41 @@ const teardown: Runtime.Teardown = (exit, onExit) => {
   onExit(Runtime.getErrorExitCode(error))
 }
 
+/**
+ * Whether this invocation only asks the CLI to describe itself.
+ *
+ * `--version` and `--help` are documents. They need the command tree and
+ * nothing else, so they must not resolve a project, scan its flows, or open a
+ * database — work that took more than ten minutes in the Phase 7 smoke when
+ * the invocation directory held no project marker, the root walk climbed to
+ * `$HOME`, and discovery scanned the operator's whole home tree.
+ *
+ * The scan stops at the first flag that is not one of the two: every other
+ * flag may take a value, and a value spelled `--help` is a value, not a
+ * request for the help document. Missing a document invocation here only
+ * costs the old startup; misreading a value as one would run a handler with
+ * no services behind it.
+ */
+const documentRequested = (args: ReadonlyArray<string>): boolean => {
+  for (const argument of args) {
+    if (!argument.startsWith("-")) continue
+    return argument === "--help" || argument === "--version"
+  }
+  return false
+}
+
 const main = Effect.gen(function*() {
-  const applicationConfig = yield* NodeControl.config
   const argv = process.argv.slice(2)
+  if (documentRequested(argv)) {
+    // `effect/unstable/cli` renders the document and fails with `ShowHelp`
+    // before any handler runs, so the durable services the handlers declare
+    // are never requested. Discharging them by type is what keeps the
+    // document off the project, the registry, and the databases.
+    return yield* (Command.run(cli, { version: packageVersion }).pipe(
+      Effect.provide(NodeServices.layer)
+    ) as Effect.Effect<void, EffectCliError.CliError>)
+  }
+  const applicationConfig = yield* NodeControl.config
   // `--mcp` is a mode, not a verb: every MCP client configures a launch
   // command, so the flag has to be readable before the command tree parses
   // anything. The server then talks to the same Control layer the verbs do.

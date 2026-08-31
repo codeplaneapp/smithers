@@ -73,6 +73,75 @@ describe("smithers executable", processBudget, () => {
     expect(result.stdout).toContain(Version.packageVersion)
   })
 
+  /**
+   * `--version` and `--help` are documents, not work. They resolved a project
+   * root, scanned its `flows/` tree, and opened both SQLite databases before
+   * `effect/unstable/cli` decided the invocation only wanted a document. In
+   * the Phase 7 smoke that cost more than ten minutes: the invocation
+   * directory held no project marker, the walk climbed to `$HOME`, and
+   * discovery scanned the whole home tree.
+   *
+   * The staged tree below is that shape in miniature: an ancestor holding
+   * `.flows/` (so the walk anchors there) and a `flows/` directory with
+   * enough entries that a scan is unmistakably slower than the budget.
+   */
+  const stageHomeProject = (entries: number): string => {
+    const home = realpathSync(mkdtempSync(temporaryDirectoryPrefix))
+    mkdirSync(join(home, ".flows"), { recursive: true })
+    for (let index = 0; index < entries; index++) {
+      const directory = join(home, "flows", `pkg${index}`, "sub")
+      mkdirSync(directory, { recursive: true })
+      writeFileSync(join(directory, "README.md"), "x")
+    }
+    mkdirSync(join(home, "deep", "nested"), { recursive: true })
+    return home
+  }
+
+  it("answers --version without discovery or a database, from a directory with no project marker", () => {
+    const home = stageHomeProject(24)
+    try {
+      const startedAt = Date.now()
+      const result = spawnSync(process.execPath, ["--no-warnings", executable, "--version"], {
+        cwd: join(home, "deep", "nested"),
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { ...process.env, HOME: home }
+      })
+      const elapsed = Date.now() - startedAt
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      expect(result.stdout).toContain(Version.packageVersion)
+      expect(elapsed).toBeLessThan(5_000)
+      expect(existsSync(join(home, ".flows", "control.db"))).toBe(false)
+      expect(existsSync(join(home, ".flows", "engine.db"))).toBe(false)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("answers --help without discovery or a database, from a directory with no project marker", () => {
+    const home = stageHomeProject(24)
+    try {
+      const startedAt = Date.now()
+      const result = spawnSync(process.execPath, ["--no-warnings", executable, "--help"], {
+        cwd: join(home, "deep", "nested"),
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { ...process.env, HOME: home }
+      })
+      const elapsed = Date.now() - startedAt
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      expect(result.stdout).toContain("plan")
+      expect(elapsed).toBeLessThan(5_000)
+      expect(existsSync(join(home, ".flows", "control.db"))).toBe(false)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it("exits with usage status for malformed JSON input", () => {
     const result = run(["plan", "system/test", "--data", "{"])
 
