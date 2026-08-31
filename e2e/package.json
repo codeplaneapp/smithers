@@ -6,7 +6,7 @@
   "description": "Fault-injection end-to-end matrix for the Smithers 1.0 runtime, gateway, and time-travel surfaces",
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run ci/ harness/",
     "test:faults": "node ci/runFaultSuite.ts --suite pr",
     "test:soak": "node ci/runFaultSuite.ts --suite nightly"
   },

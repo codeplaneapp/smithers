@@ -129,6 +129,19 @@ Two steps in `.github/workflows/ci.yml`, generated from the root `BUILD.ts`:
   `e2e-faults` to `requiredJobs` when the redacting logger lands and the park
   defect closes.
 
+Membership has a second edge. Root `pnpm test` is
+`pnpm --recursive --if-present run test`, the pre-PR gate `CONTRIBUTING.md`
+names, so it runs this directory's `scripts.test` on every commit. That script
+is `vitest run ci/ harness/`: the eight deterministic suites, 40 tests in about
+6 s. The cases themselves stay behind `//e2e:faults` and the `test:faults` script,
+because they kill process groups and bind ports for about 95 s and because case
+22 is required to be red. Putting them in the recursive fan-out would make the
+documented pre-PR gate red on every commit for the same defects that keep the
+CI job advisory. `ci/matrixIsWired.test.ts` pins both halves: it asks vitest
+which files each argv selects, and fails if a case reaches `scripts.test` or if
+a case leaves `//e2e:faults`. Root `pnpm run check` runs this directory's
+`tsc -p tsconfig.json --noEmit` in about 4 s, and that one is green.
+
 ## Required gates that are red
 
 One test in this matrix is expected to fail, and the suite is expected to be red

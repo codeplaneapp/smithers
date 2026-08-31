@@ -13,12 +13,44 @@
  * generated root files: dropping the workspace entry or the CI step has to
  * fail a test, not go quiet.
  */
-import { existsSync, readFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { readdirSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
 const root = resolve(import.meta.dirname, "..", "..")
+const e2e = join(root, "e2e")
 const read = (...parts: ReadonlyArray<string>) => readFileSync(join(root, ...parts), "utf8")
+
+/**
+ * The test files an argv selects, asked of vitest instead of guessed.
+ *
+ * `list --filesOnly` resolves the config and the positional filters and prints
+ * the files without importing them, so it answers "what would this command
+ * run" in about a second.
+ */
+const selects = (argv: ReadonlyArray<string>): ReadonlyArray<string> =>
+  execFileSync(join(e2e, "node_modules", ".bin", "vitest"), [
+    "list",
+    "--filesOnly",
+    "--config",
+    "vitest.config.ts",
+    ...argv
+  ], { cwd: e2e, encoding: "utf8" })
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.endsWith(".test.ts"))
+    .sort()
+
+/** The argv `pnpm --recursive run test` hands vitest in this directory. */
+const testScriptArgv = (): ReadonlyArray<string> => {
+  const manifest = JSON.parse(read("e2e", "package.json")) as { readonly scripts: Record<string, string | undefined> }
+  const script = manifest.scripts.test
+  expect(script).toBeTypeOf("string")
+  const parts = (script ?? "").split(/\s+/)
+  expect(parts.slice(0, 2)).toEqual(["vitest", "run"])
+  return parts.slice(2)
+}
 
 describe("the fault matrix is wired to a gate", () => {
   it("makes e2e a pnpm workspace member", () => {
@@ -44,9 +76,32 @@ describe("the fault matrix is wired to a gate", () => {
     expect(manifest.workspaces).toContain("e2e")
   })
 
-  it("gives the matrix its own vitest binary", () => {
-    // The literal thing B6 reported missing. Membership is what installs it.
-    expect(existsSync(join(root, "e2e", "node_modules", ".bin", "vitest"))).toBe(true)
+  it("keeps the fault cases out of the root test fan-out", () => {
+    // Membership has a second edge. Root `pnpm test` is
+    // `pnpm --recursive --if-present run test`, the pre-PR gate
+    // `CONTRIBUTING.md` names, so it now runs this directory's `scripts.test`.
+    // The cases kill process groups and bind ports for about 95 s, and case 22
+    // is a required red gate rc.0 cannot pass, so a `scripts.test` that
+    // selected them would make that gate red on every commit. `scripts.test`
+    // takes the deterministic suites; the matrix stays behind `//e2e:faults`
+    // and the `test:faults` script.
+    const selected = selects(testScriptArgv())
+    expect(selected.filter((file) => file.startsWith("faults/"))).toEqual([])
+    expect(selected).toContain("ci/faultMatrix.test.ts")
+    expect(selected).toContain("ci/matrixIsWired.test.ts")
+    expect(selected).toContain("harness/killProcess.test.ts")
+  })
+
+  it("keeps every fault case selected by //e2e:faults", () => {
+    // The other side of the split: narrowing `scripts.test` must not narrow the
+    // matrix. `//e2e:faults` passes no filter, so it selects the config's whole
+    // `include`, and every file in `faults/` has to be in it.
+    const onDisk = readdirSync(join(e2e, "faults"))
+      .filter((name) => name.endsWith(".test.ts"))
+      .map((name) => `faults/${name}`)
+      .sort()
+    expect(onDisk.length).toBe(18)
+    expect(selects([]).filter((file) => file.startsWith("faults/"))).toEqual(onDisk)
   })
 
   it("selects the matrix from the generated CI workflow", () => {
