@@ -343,6 +343,38 @@ const causeOf = (record: Recorder): string => {
 }
 
 describe("the executor's control-store seam", () => {
+  /**
+   * The settled-run guard reads the control row before every round, so a
+   * control database that cannot answer must not stop a live run from being
+   * driven. A composition with no evidence drives; only a row that says the
+   * run is over stops it.
+   */
+  it("drives a run whose control row cannot be read once the round starts", async () => {
+    const record = recorder()
+    let reads = 0
+    const result = await launched(record, {
+      runtime: {
+        getRun: () =>
+          Effect.suspend(() => {
+            reads = reads + 1
+            // The admission read is answered; every read after it is refused.
+            return reads === 1
+              ? Effect.succeed(launchInput.run)
+              : Effect.fail(
+                new PersistenceError({
+                  operation: "ControlRuntime.getRun",
+                  message: "the control database is unreadable"
+                })
+              )
+          })
+      }
+    })
+
+    expect(result.acceptance).toBe("accepted")
+    expect(result.status).toBe("completed")
+    expect(reads).toBeGreaterThan(1)
+  })
+
   it("reports a control store that cannot register the approval as a typed harness failure", async () => {
     const record = recorder()
     const result = await launched(record, {
