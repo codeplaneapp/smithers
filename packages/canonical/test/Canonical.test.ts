@@ -63,18 +63,18 @@ describe("primitive values", () => {
     ["undefined", undefined],
     ["symbol", Symbol("hello world")]
   ])("rejects a top-level %s because the wrapper requires string output", (_name, input) => {
-    expect(failureMessage(input)).toContain("The value is not valid JSON")
+    expect(failureMessage(input)).toContain("canonical_unsupported_value:")
   })
 })
 
 describe("non-finite numbers", () => {
   it.each([
-    ["NaN in an array", [Number.NaN], "NaN is not allowed"],
-    ["NaN in an object", { key: Number.NaN }, "NaN is not allowed"],
-    ["top-level NaN", Number.NaN, "NaN is not allowed"],
-    ["Infinity in an array", [Number.POSITIVE_INFINITY], "Infinity is not allowed"],
-    ["Infinity in an object", { key: Number.POSITIVE_INFINITY }, "Infinity is not allowed"],
-    ["top-level -Infinity", Number.NEGATIVE_INFINITY, "Infinity is not allowed"]
+    ["NaN in an array", [Number.NaN], "canonical_nan: NaN at $[0]"],
+    ["NaN in an object", { key: Number.NaN }, "canonical_nan: NaN at $.key"],
+    ["top-level NaN", Number.NaN, "canonical_nan: NaN at $"],
+    ["Infinity in an array", [Number.POSITIVE_INFINITY], "canonical_non_finite: Infinity at $[0]"],
+    ["Infinity in an object", { key: Number.POSITIVE_INFINITY }, "canonical_non_finite: Infinity at $.key"],
+    ["top-level -Infinity", Number.NEGATIVE_INFINITY, "canonical_non_finite: -Infinity at $"]
   ])("rejects %s", (_name, input, message) => {
     expect(failureMessage(input)).toContain(message)
   })
@@ -112,7 +112,7 @@ describe("toJSON", () => {
   })
 
   it("rejects NaN returned by toJSON", () => {
-    expect(failureMessage({ toJSON: () => Number.NaN })).toContain("NaN is not allowed")
+    expect(failureMessage({ toJSON: () => Number.NaN })).toContain("canonical_nan: NaN at $.toJSON()")
   })
 
   it("reports a non-Error thrown by toJSON", () => {
@@ -126,7 +126,7 @@ describe("toJSON", () => {
   it("rejects toJSON returning its object", () => {
     const input: { toJSON?: () => unknown } = {}
     input.toJSON = () => input
-    expect(failureMessage(input)).toContain("Circular reference detected")
+    expect(failureMessage(input)).toContain("canonical_circular: circular reference at $.toJSON()")
   })
 })
 
@@ -157,7 +157,7 @@ describe("values JSON.stringify coerces", () => {
   it("rejects a function whose toJSON returns itself", () => {
     const fn: { (): number; toJSON?: () => unknown } = (): number => 1
     fn.toJSON = (): unknown => fn
-    expect(failureMessage({ x: fn })).toContain("Circular reference detected")
+    expect(failureMessage({ x: fn })).toContain("canonical_circular: circular reference at $.x.toJSON()")
   })
 })
 
@@ -178,15 +178,11 @@ describe("toJSON well-formedness", () => {
 })
 
 describe("boxed primitives", () => {
-  // RFC 8785 defers number and string serialization to ECMAScript, and
-  // `JSON.stringify` unwraps a wrapper object through `valueOf`
-  // (`JSON.stringify(new Number(1))` is `"1"`). This serializer has no
-  // unwrapping step: it sees an object with no `toJSON` and walks its own
-  // enumerable keys. The results below therefore diverge from both RFC 8785
-  // and `JSON.stringify`. Pinned as current behavior, not endorsed.
+  // Restated 2026-08-31: the old `{}` / index-keyed pins contradicted the
+  // promised JSON.stringify parity. Wrapper internal slots now win.
   it.each([
-    ["new Number(1) loses its value entirely", new Number(1), "{}"],
-    ["new String(\"ab\") becomes an index-keyed object", new String("ab"), "{\"0\":\"a\",\"1\":\"b\"}"]
+    ["new Number(1)", new Number(1), "1"],
+    ["new String(\"ab\")", new String("ab"), "\"ab\""]
   ])("serializes %s", (_name, input, expected) => {
     expect(serialize(input)).toBe(expected)
   })
@@ -197,18 +193,19 @@ describe("host object shapes", () => {
     expect(serialize(new Date(0))).toBe("\"1970-01-01T00:00:00.000Z\"")
   })
 
-  it("serializes a Uint8Array as an index-keyed object, not an array", () => {
-    expect(serialize(new Uint8Array([1, 2, 255]))).toBe("{\"0\":1,\"1\":2,\"2\":255}")
+  it("rejects a Uint8Array because its stringify form is digest-unsafe", () => {
+    // Restated 2026-08-31: the old index-keyed output exposed a host-object
+    // representation and could collide with a plain object.
+    expect(failureMessage(new Uint8Array([1, 2, 255]))).toContain("canonical_unsupported_value: Uint8Array at $")
   })
 
   it.each([
     ["Map", new Map([["a", 1]])],
     ["Set", new Set([1, 2])]
-  ])("silently loses every entry of a %s", (_name, input) => {
-    // Entries live in internal slots, not own enumerable properties, so a
-    // populated collection and an empty one produce the same document and the
-    // same digest. Callers must convert to a plain value before keying.
-    expect(serialize(input)).toBe("{}")
+  ])("rejects a %s instead of losing its entries", (name, input) => {
+    // Restated 2026-08-31: the old `{}` pin created populated/empty digest
+    // collisions. Callers must convert collections to plain JSON values.
+    expect(failureMessage(input)).toContain(`canonical_unsupported_value: ${name} at $`)
   })
 
   it("walks a null-prototype object and honors only an own toJSON", () => {
@@ -251,16 +248,10 @@ describe("prototype-pollution property names", () => {
 })
 
 describe("recursion depth", () => {
-  it("surfaces stack exhaustion as a schema error rather than a raw RangeError", () => {
-    // Open contract question: the docblock names lone surrogates, non-finite
-    // numbers and cycles as the values with no canonical form. Nesting depth is
-    // not on that list, yet `canonicalize` recurses once per level and a deep
-    // enough document exhausts the host stack. `Effect.try` catches the
-    // RangeError, so the failure is at least typed - but its message is a host
-    // stack-size artifact and the depth at which it starts is unspecified, so
-    // two hosts can disagree on whether a document is representable.
+  it("reports the deterministic 10,000-level bound", () => {
+    // Restated 2026-08-31: the old host RangeError pin was nondeterministic.
     let input: unknown = "leaf"
-    for (let index = 0; index < 100_000; index++) input = { child: input }
+    for (let index = 0; index < 10_001; index++) input = { child: input }
 
     let thrown: unknown
     try {
@@ -269,12 +260,10 @@ describe("recursion depth", () => {
       thrown = error
     }
 
-    // Assert on the class and the message only: the offending value is 100k
-    // levels deep and must never reach a diff.
     expect(thrown).toBeInstanceOf(Error)
     expect(thrown).not.toBeInstanceOf(RangeError)
     expect((thrown as { readonly _tag?: string })._tag).toBe("SchemaError")
-    expect((thrown as Error).message).toContain("Maximum call stack size exceeded")
+    expect((thrown as Error).message).toContain("canonical_depth_exceeded: depth 10,001 exceeds 10,000")
   })
 })
 
@@ -298,20 +287,20 @@ describe("circular references", () => {
   it("rejects an object referencing itself", () => {
     const input: Record<string, unknown> = {}
     input.self = input
-    expect(failureMessage(input)).toContain("Circular reference detected")
+    expect(failureMessage(input)).toContain("canonical_circular: circular reference at $.self")
   })
 
   it("rejects an array referencing itself", () => {
     const input: Array<unknown> = []
     input.push(input)
-    expect(failureMessage(input)).toContain("Circular reference detected")
+    expect(failureMessage(input)).toContain("canonical_circular: circular reference at $[0]")
   })
 
   it("rejects a nested circular reference", () => {
     const a: Record<string, unknown> = {}
     const b = { a }
     a.b = b
-    expect(failureMessage(a)).toContain("Circular reference detected")
+    expect(failureMessage(a)).toContain("canonical_circular: circular reference at $.b.a")
   })
 
   it("allows the same non-circular object twice", () => {
@@ -432,10 +421,12 @@ describe("collection boundaries", () => {
     expect(serialize([3, 1, 3, 2])).toBe("[3,1,3,2]")
   })
 
-  it("rejects a sparse array rather than returning invalid JSON", () => {
+  it("renders sparse array holes as null", () => {
+    // Restated 2026-08-31: the old failure pinned invalid `[,]` output rather
+    // than the documented JSON.stringify parity.
     const sparse = new Array<unknown>(3)
     sparse[2] = "end"
-    expect(failure(sparse)).toEqual(expect.objectContaining({ _tag: "SchemaError" }))
+    expect(serialize(sparse)).toBe("[null,null,\"end\"]")
   })
 
   it("serializes ten thousand array elements", () => {
@@ -468,7 +459,7 @@ describe("unsupported value boundaries", () => {
     ["symbol at the top level", Symbol("value")],
     ["undefined at the top level", undefined]
   ])("fails for %s", (_name, input) => {
-    expect(failureMessage(input)).toContain("The value is not valid JSON")
+    expect(failureMessage(input)).toContain("canonical_unsupported_value:")
   })
 
   // Restated 2026-08-31. These two cells used to pin the pre-fix behavior (a
