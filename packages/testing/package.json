@@ -80,7 +80,6 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@effect/vitest": "4.0.0-rc.108",
     "@smthrs/core": "1.0.0-rc.0",
     "@smthrs/engine": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
@@ -92,7 +91,16 @@
     "effect": "4.0.0-rc.108"
   },
   "peerDependencies": {
+    "@effect/vitest": "4.0.0-rc.108",
     "vitest": "^4.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@effect/vitest": {
+      "optional": true
+    },
+    "vitest": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@effect/language-service": "0.87.1",

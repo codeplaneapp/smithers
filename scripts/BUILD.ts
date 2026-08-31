@@ -182,6 +182,45 @@ export const effectVersion = Smithers.NodeTest({
 })
 
 /**
+ * What an npm consumer of the published set actually resolves.
+ *
+ * pnpm settles every internal edge from one workspace-wide pin, so
+ * {@link effectVersion} stays green while an npm install of the same tarballs
+ * duplicates Effect or drags a test runner into a production dependency tree.
+ * This packs the release manifests, resolves them with npm's own arborist, and
+ * asserts a single `effect` copy and no optional peer in the default install.
+ *
+ * The resolution reads registry metadata, so this target needs the network and
+ * is not cacheable. It re-runs regardless, which is what a gate over an
+ * external resolver has to do.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const npmDedupe = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.entrypoint(Smithers.file("//scripts/check-npm-dedupe.mjs")),
+  srcs: sources,
+  deps: []
+})
+
+/**
+ * The gate's own two claims, named one per cell.
+ *
+ * The script reports both through one exit code, so a regression reads as an
+ * opaque failure. This suite says which claim broke and which package broke it.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const npmDedupeUnit = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.testRunner([Smithers.file("//scripts/check-npm-dedupe.test.mjs")]),
+  srcs: sources,
+  deps: []
+})
+
+/**
  * Every import a workspace source makes is declared by that workspace.
  *
  * pnpm links the whole workspace under one `node_modules`, so an undeclared

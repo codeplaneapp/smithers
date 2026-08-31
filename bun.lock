@@ -1815,7 +1815,6 @@
       "name": "@smthrs/testing",
       "version": "1.0.0-rc.0",
       "dependencies": {
-        "@effect/vitest": "4.0.0-rc.108",
         "@smthrs/core": "1.0.0-rc.0",
         "@smthrs/engine": "1.0.0-rc.0",
         "@smthrs/flow": "1.0.0-rc.0",
@@ -1846,8 +1845,13 @@
         "vitest": "4.1.9",
       },
       "peerDependencies": {
+        "@effect/vitest": "4.0.0-rc.108",
         "vitest": "^4.1.0",
       },
+      "optionalPeers": [
+        "@effect/vitest",
+        "vitest",
+      ],
     },
     "packages/time-travel": {
       "name": "@smthrs/time-travel",

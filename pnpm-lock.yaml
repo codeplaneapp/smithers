@@ -4129,9 +4129,6 @@ importers:
 
   packages/testing:
     dependencies:
-      '@effect/vitest':
-        specifier: 4.0.0-rc.108
-        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.9)
       '@smthrs/core':
         specifier: 1.0.0-rc.0
         version: link:../core
@@ -4163,6 +4160,9 @@ importers:
       '@effect/language-service':
         specifier: 0.87.1
         version: 0.87.1
+      '@effect/vitest':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.9)
       '@eslint/js':
         specifier: 9.39.1
         version: 9.39.1

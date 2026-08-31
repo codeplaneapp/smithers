@@ -416,11 +416,12 @@ describe("vitest coverage isolation conformance", () => {
     // the length of the migration, so the Phase 7 gate stays a root script
     // that a person and the Phase 7 checklist invoke by name.
     //
-    // `check:npm-dedupe` resolves the release set with npm's own arborist and
-    // therefore needs registry metadata, which no target in this graph is
-    // allowed to require. It also currently fails on a pre-existing Effect
-    // duplication that Phase 3's version rewrite fixes
-    // (docs/migration/phase2-baseline.md).
+    // `check:npm-dedupe` is the operator alias for `//scripts:npmDedupe`, the
+    // same shape as `browser` and `//scripts:browserContract`. R-35 requires
+    // the gate to be a target, and Phase 7 made it one: the resolution reads
+    // registry metadata, so the target is uncacheable and re-runs regardless,
+    // which is the only concession the network costs. The alias is pinned so
+    // the roster stays exact, not because it is a second enforcement path.
     //
     // Widened once more when the documentation site landed, for the two
     // generators and not for their gates. `scripts/generate-docs-pages.mjs`
