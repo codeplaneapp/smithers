@@ -39,6 +39,7 @@
     "dist/**/*.js.map",
     "dist/**/*.d.ts",
     "dist/**/*.d.ts.map",
+    "dist/**/package.json",
     "LICENSE",
     "README.md",
     "CHANGELOG.md"

@@ -41,6 +41,7 @@
   },
   "files": [
     "src/**/*.ts",
+    "src/**/*.sql",
     "dist/**/*.js",
     "dist/**/*.js.map",
     "dist/**/*.d.ts",

@@ -152,10 +152,16 @@ Three suites talk to the live APIs and skip, naming the credential, when it is
 absent:
 
 ```sh
-GITHUB_TOKEN=…  pnpm --filter @smthrs/integrations exec vitest run test/GitHubLive.test.ts
-LINEAR_API_KEY=…  pnpm --filter @smthrs/integrations exec vitest run test/LinearLive.test.ts
-TELEGRAM_BOT_TOKEN=…  pnpm --filter @smthrs/integrations exec vitest run test/TelegramLive.test.ts
+GITHUB_TOKEN=…  pnpm --filter @smthrs/integrations exec vitest run test/GitHubLive.test.ts --coverage.enabled=false
+LINEAR_API_KEY=…  pnpm --filter @smthrs/integrations exec vitest run test/LinearLive.test.ts --coverage.enabled=false
+TELEGRAM_BOT_TOKEN=…  pnpm --filter @smthrs/integrations exec vitest run test/TelegramLive.test.ts --coverage.enabled=false
 ```
+
+`--coverage.enabled=false` is required. `vitest.config.ts` turns v8 coverage on
+with global thresholds, and one file covers a few percent of `src`, so without
+the flag every one of these commands exits 1 after its tests pass. Coverage is
+measured over the whole suite instead:
+`GITHUB_TOKEN=…  pnpm --filter @smthrs/integrations test -- --run`.
 
 All three are read-only. The Telegram poll passes no offset, so it confirms
 nothing and a running bot keeps its backlog.

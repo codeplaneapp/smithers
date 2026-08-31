@@ -225,14 +225,17 @@ A package root exports contracts. A platform implementation lives under a subpat
 | `@smthrs/time-travel` | yes | yes | frames, replay, fork, rewind, compensation, recovery |
 | `@smthrs/observability` | yes | yes | OTLP logs, metrics, and traces layers over Effect's `HttpClient`; the fetch variant binds the host's global `fetch` |
 | `@smthrs/flows` | yes | yes | re-exports every engine package |
+| `@smthrs/chain` | yes | yes | the chain contracts and their in-memory journal stand-in |
+| `@smthrs/std/Grep`, `@smthrs/std/Glob` | yes | yes | search and glob contracts over the injected `FileSystem`, with no adapter bound |
+| `@smthrs/std/Search`, `@smthrs/std/PortableSearch` | yes | yes | the search contract and its in-process implementation |
 
-Twenty-three entry points bundle for the browser.
+28 entry points bundle for the browser, and 7 are documented Node-only.
 
 :::warning[Bundling is a weaker claim than running]
 `@smthrs/journal`, `@smthrs/run-store`, `@smthrs/step-cache`, and `@smthrs/plan` bundle because they depend on the `DurableWriter` contract. A browser application still has to supply a browser SQL client, such as Effect's sqlite-wasm OPFS worker, to that contract. No such layer ships here.
 :::
 
-The accurate sentence is that canonical JSON, crypto, the host contracts, `BrowserHost`, keys, plan, artifacts, capability, kernel, sandbox, database, journal, run store, step cache, flow, engine, engine-store, the barrel, sync, time travel, and the OTLP exporter bundle for the browser, and the durable engine composition is still SQLite-on-Node first because no browser SQL client layer ships here. `@smthrs/engine-store`'s last two `node:`-flavoured reads (`process.pid` and `node:crypto` `randomUUID`) moved behind the `OwnerIdentity` service, which closed issue #114.
+The accurate sentence is that canonical JSON, crypto, the host contracts, `BrowserHost`, keys, plan, artifacts, capability, kernel, sandbox, database, journal, run store, step cache, flow, engine, engine-store, the barrel, sync, time travel, the chain contracts, the four `@smthrs/std` search subpaths, and the OTLP exporter bundle for the browser, and the durable engine composition is still SQLite-on-Node first because no browser SQL client layer ships here. `@smthrs/engine-store`'s last two `node:`-flavoured reads (`process.pid` and `node:crypto` `randomUUID`) moved behind the `OwnerIdentity` service, which closed issue #114.
 
 ## Build shape
 

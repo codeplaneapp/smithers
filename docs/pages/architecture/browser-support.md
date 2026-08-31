@@ -38,6 +38,10 @@ These bundle for the browser. A resolution error in any of them fails the build.
 | `@smthrs/chain` | The chain contracts and their in-memory journal stand-in |
 | `@smthrs/observability` | Structured logging and metrics over Effect's own tags, with no exporter wired |
 | `@smthrs/time-travel` | Frames, replay, fork, rewind, compensation, and recovery |
+| `@smthrs/std/Grep` | The ripgrep search contract and its result schemas, with no adapter bound |
+| `@smthrs/std/Glob` | Glob matching over the injected `FileSystem` |
+| `@smthrs/std/Search` | The search contract shared by the two implementations |
+| `@smthrs/std/PortableSearch` | The in-process search implementation, over the injected `FileSystem` alone |
 
 Bundling is not running: `@smthrs/journal` bundles because it depends on the `DurableWriter` *contract* and Effect's `SqlClient`, and a browser application still has to supply a browser SQL client (for example Effect's sqlite-wasm OPFS worker) to that contract. Bundling is the property that makes such a composition possible; the sqlite-wasm layer itself is not shipped here: see [implementation status](/release/support-matrix).
 

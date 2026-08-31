@@ -6,9 +6,10 @@ description: "@smthrs/patterns: higher-order flow patterns and the decorators th
 
 This page is the public API reference for the higher-order flow patterns:
 decorators that wrap one flow, and containers that compose several. The package
-depends on `@smthrs/core` alone, so every export here is browser safe and
-builds plan-time topology out of `Flow` and `Node`. Nothing in it reaches the
-engine, the journal, or a host capability.
+depends on `@smthrs/core` alone and builds plan-time topology out of `Flow` and
+`Node`. Nothing in it reaches the engine, the journal, or a host capability.
+Neither package has an entry in the browser gate, so this page makes no claim
+about bundling it for a browser.
 
 ## The two halves of a pattern
 
