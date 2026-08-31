@@ -479,6 +479,51 @@ describe("generate script form", () => {
     expect(await read("generated.txt")).toBe("hand edited\n")
   })
 
+  it("reports drift through the target's declared error schema", async () => {
+    await generatorWorkspace()
+    await write("generated.txt", "hand edited\n")
+    const result = await invoke(["lint", "//:generated"])
+
+    expect(result.code).not.toBe(0)
+    expect(result.output).toContain("generated.txt drifted from its generated form")
+    expect(result.output).not.toContain("outside its declared error schema")
+  })
+
+  it("refuses a process generator that declares no write set", async () => {
+    await write(
+      "BUILD.ts",
+      `import { file, Generate } from "${rulesModule}"\n` +
+        `export const generated = Generate({\n` +
+        `  script: file("//gen.mjs")\n` +
+        `})\n`
+    )
+    await write(
+      "gen.mjs",
+      `import { writeFileSync } from "node:fs"\nwriteFileSync("generated.txt", "generated\\n")\n`
+    )
+    await write("generated.txt", "hand edited\n")
+
+    await expect(run("lint", "//:generated")).rejects.toThrow(/changes or stdout/)
+    expect(await read("generated.txt")).toBe("hand edited\n")
+  })
+
+  it("refuses the lint verb on a stdout generator a BUILD.ts workspace cannot confine", async () => {
+    await write(
+      "BUILD.ts",
+      `import { Generate } from "${rulesModule}"\n` +
+        `export const generated = Generate({\n` +
+        `  command: "printf generated",\n` +
+        `  stdout: "generated.txt"\n` +
+        `})\n`
+    )
+    await write("generated.txt", "hand edited\n")
+    const refused = await run("lint", "//:generated")
+
+    expect(refused.ok).toBe(false)
+    expect(JSON.stringify(refused.results)).toContain("Generate check without declared changes")
+    expect(await read("generated.txt")).toBe("hand edited\n")
+  })
+
   it("passes the lint verb when the checked-in file matches its generator", async () => {
     await generatorWorkspace()
     await write("generated.txt", "generated\n")

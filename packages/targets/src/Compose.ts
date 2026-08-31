@@ -407,6 +407,11 @@ const generatePayload = (attrs: typeof GenerateAttrs.Type): Exec.CallPayload | u
 const generateDefinition = Target.make("Generate", {
   attrs: GenerateAttrs,
   kinds: ["run", "lint"],
+  // The three failures this target reports: the generator exited non-zero, a
+  // declared output drifted, or the declaration is one no BUILD.ts workspace
+  // can run. Declaring them keeps a drift report a target failure rather than
+  // a flow body failing outside its schema.
+  error: Schema.Union([Exec.ExecError, GeneratedFile.DriftError, Target.NotImplemented]),
   // The script and bin forms plan the shared exec node: the generator runs
   // under the workspace runtime (script) or the referenced tool (bin), and
   // the package executor brackets the spawn with write-set enforcement in
@@ -422,11 +427,36 @@ const generateDefinition = Target.make("Generate", {
   implementation: (attrs): Node.Node<unknown, unknown, GenerateRequires> => {
     const payload = generatePayload(attrs)
     if (payload === undefined) return Target.notImplemented("Generate")
-    return attrs.mode === "check"
-      ? GenerateCheck.call({ run: payload, changes: attrs.changes ?? [] })
-      : Target.runTool(payload)
+    if (attrs.mode !== "check") return Target.runTool(payload)
+    // A check with no declared outputs snapshots nothing, so the generator
+    // would rewrite the real tree and the verb would report success. The
+    // stdout form declares its output that way and a BUILD.ts workspace does
+    // not capture it, so the check is refused rather than run unconfined.
+    const changes = attrs.changes ?? []
+    return changes.length === 0
+      ? Target.notImplemented("Generate check without declared changes")
+      : GenerateCheck.call({ run: payload, changes })
   }
 })
+
+/**
+ * Refuses a process form that names none of the paths it writes.
+ *
+ * `changes` and `stdout` are the write set: package mode confines the spawn to
+ * it and reverts everything else, and a BUILD.ts workspace compares and
+ * restores exactly the `changes` paths under the `lint` verb. A script, bin,
+ * or command form that declares neither is confined by nothing, so it is
+ * rejected where it is written rather than checked against an empty set. The
+ * emit form names its outputs as the map keys and needs no separate write set.
+ */
+const requireWriteSet = (attrs: Record<string, unknown>): void => {
+  if (attrs["emit"] !== undefined) return
+  const changes = attrs["changes"]
+  if ((Array.isArray(changes) && changes.length > 0) || attrs["stdout"] !== undefined) return
+  throw new Error(
+    "Generate requires changes or stdout: a script, bin, or command form declares the paths it writes"
+  )
+}
 
 /**
  * A generated-output target: check by default, `--write` applies.
@@ -437,6 +467,7 @@ const generateDefinition = Target.make("Generate", {
 export const Generate = (attrs: (typeof GenerateAttrs)["~type.make.in"]): Target.AnyTarget => {
   if (typeof attrs !== "object" || attrs === null) throw new TypeError("Generate attrs must be an object")
   Attr.requireOneExecutable("Generate", attrs, ["emit", "script", "bin", "command"])
+  requireWriteSet(attrs)
   return generateDefinition(attrs)
 }
 

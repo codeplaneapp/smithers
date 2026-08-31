@@ -13,6 +13,8 @@ import {
   resolveOutputPath,
   writeGeneratedFile
 } from "../src/GeneratedFile.ts"
+import * as Input from "../src/Input.ts"
+import * as Target from "../src/Target.ts"
 
 let root: string
 const outside: Array<string> = []
@@ -266,5 +268,36 @@ describe("checkGenerator", () => {
     expect(reported.tag).toBe("smithers-build/ExecError")
     expect(reported.text).toContain("\"exitCode\":3")
     expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("generated\n")
+  })
+})
+
+/**
+ * What a `S.Generate` declaration has to say about the paths it writes.
+ *
+ * `changes` and `stdout` are the write set: package mode confines the spawn to
+ * it, and a BUILD.ts workspace compares and restores exactly those paths under
+ * the `lint` verb. A process form that declares neither is unconfined, so the
+ * declaration is refused rather than checked against nothing.
+ */
+describe("Generate declarations", () => {
+  it("refuses a script form that declares neither changes nor stdout", () => {
+    expect(() => Compose.Generate({ script: Input.file("//gen.mjs") }))
+      .toThrow(/changes or stdout/)
+  })
+
+  it("refuses a command form whose changes list is empty", () => {
+    expect(() => Compose.Generate({ command: "printf ok", changes: [] }))
+      .toThrow(/changes or stdout/)
+  })
+
+  it("accepts the emit form, which names its outputs as the map keys", () => {
+    expect(() => Compose.Generate({ emit: { "CLAUDE.md": "AGENTS.md" } })).not.toThrow()
+  })
+
+  it("declares the drift failure the lint verb reports", () => {
+    const target = Compose.Generate({ script: Input.file("//gen.mjs"), changes: ["out.txt"] })
+
+    expect(JSON.stringify(Target.metadata(target).schemaIdentity))
+      .toContain("smithers-build/DriftError")
   })
 })
