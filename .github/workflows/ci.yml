@@ -76,6 +76,11 @@ jobs:
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Fault matrix typecheck
+        run: pnpm exec smithers-build build '//e2e:check'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Generated workflow drift
         run: pnpm exec smithers-build lint '//:ci'
         env:
@@ -168,6 +173,30 @@ jobs:
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Rebuild and byte-compare flows_jj.wasm
         run: pnpm exec smithers-build test '//crates/flows-jj:wasmReproducibility'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+  e2e-faults:
+    name: "fault-injection matrix (advisory)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install jj
+        uses: taiki-e/install-action@v2
+        with:
+          tool: jj-cli@0.39.0
+      - name: Initialize colocated jj repository
+        run: jj git init --colocate
+      - name: Fault matrix
+        run: pnpm exec smithers-build test '//e2e:faults'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"

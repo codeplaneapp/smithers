@@ -132,6 +132,12 @@ export const ci = Smithers.GithubCiGen({
         // links it, and this step is the second of the two targets that
         // typecheck there.
         { name: "Review eval typecheck", verb: Smithers.Verb.Build, pattern: "//evals/review-seeded-bugs:types" },
+        // The fault matrix typechecks here, in the required job, while the
+        // matrix itself runs advisory below. A stale fixture is deterministic
+        // and cheap to catch: `fixtures/claimChild.ts` called the removed
+        // `Control.pause` and died at runtime in every case that spawned it,
+        // and no gate saw either the type error or the death.
+        { name: "Fault matrix typecheck", verb: Smithers.Verb.Build, pattern: "//e2e:check" },
         { name: "Generated workflow drift", verb: Smithers.Verb.Lint, pattern: "//:ci" }
       ]
     },
@@ -186,6 +192,35 @@ export const ci = Smithers.GithubCiGen({
           pattern: "//crates/flows-jj:wasmReproducibility"
         }
       ]
+    },
+    {
+      // The fault-injection matrix: 18 crash, restart, gateway, time-travel,
+      // provider, and safety cases that each inject a real fault into a real
+      // process. Until this job existed the matrix ran under no gate at all
+      // (Phase 7 blocker B6): `//packages/...` does not reach `e2e/`, and
+      // `e2e` was not a workspace member, so the target failed in 262 ms with
+      // `Command "vitest" not found`.
+      //
+      // Advisory, and dated. Two known-red gates live in the matrix by design,
+      // both owned elsewhere: `case22 ... redacts the credential out of the
+      // operator's terminal` (rc-contract R-12; rc.0 ships no redacting
+      // logger, and `scripts/repo-contract/fault-skips.test.mjs` refuses every
+      // way of making it green), and the durable-park cases that the Phase 7
+      // smoke gate records. A required job would be red on every commit for a
+      // defect no commit introduced. It becomes required — drop
+      // `continueOnError` and add `e2e-faults` to `requiredJobs` — when the
+      // Phase 5 redaction deliverable lands and the park defect closes.
+      //
+      // `jj` is a real requirement here, not a convenience: cases 12 and 21
+      // drive a real Jujutsu workspace and are written to throw rather than
+      // skip on CI.
+      id: "e2e-faults",
+      name: "fault-injection matrix (advisory)",
+      runsOn: ubuntu,
+      continueOnError: true,
+      timeoutMinutes: 30,
+      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node], jj }),
+      steps: [{ name: "Fault matrix", verb: Smithers.Verb.Test, pattern: "//e2e:faults" }]
     },
     {
       id: "bun",

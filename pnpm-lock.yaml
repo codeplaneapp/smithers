@@ -402,6 +402,85 @@ importers:
         specifier: 8.2.1
         version: 8.2.1(@types/node@25.9.5)(esbuild@0.28.1)(jiti@1.21.7)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)
 
+  e2e:
+    dependencies:
+      '@smthrs/agent':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/agent
+      '@smthrs/capability':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/capability
+      '@smthrs/cli':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/cli
+      '@smthrs/control':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/control
+      '@smthrs/database':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/database
+      '@smthrs/engine-store':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/engine-store
+      '@smthrs/flow':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/flow
+      '@smthrs/flows':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/flows
+      '@smthrs/jj':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/jj
+      '@smthrs/journal':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/journal
+      '@smthrs/kernel':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/kernel
+      '@smthrs/notifications':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/notifications
+      '@smthrs/platform-node':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/platform-node
+      '@smthrs/registry':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/registry
+      '@smthrs/run-store':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/run-store
+      '@smthrs/sandbox':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/sandbox
+      '@smthrs/std':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/std
+      '@smthrs/time-travel':
+        specifier: 1.0.0-rc.0
+        version: link:../packages/time-travel
+      effect:
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
+    devDependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1(supports-color@10.2.2))
+      '@effect/sql-sqlite-node':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
+      '@effect/vitest':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.9)
+      '@types/node':
+        specifier: 25.9.5
+        version: 25.9.5
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@25.9.5)(@vitest/coverage-v8@4.1.9)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))
+
   examples:
     dependencies:
       '@smthrs/agent':
