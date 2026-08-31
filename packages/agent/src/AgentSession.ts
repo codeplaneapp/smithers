@@ -1653,9 +1653,10 @@ export const make = (
       Effect.gen(function*() {
         const flowId = input.plan.card.flowId
         const descriptor = yield* registry.getOption(flowId)
-        if (Option.isNone(descriptor) || Option.isNone(descriptor.value.model)) {
-          // Not an agent flow — a system flow, or a flow this composition
-          // cannot execute. Pending is the honest acceptance: nothing runs.
+        if (Option.isNone(descriptor)) {
+          // Not a flow this composition knows — a system flow, or one whose
+          // registry another host holds. Pending is the honest acceptance:
+          // nothing here runs it, and something else still might.
           return "pending" as const
         }
         const flowBody = yield* registry.loadBody(flowId).pipe(
@@ -1670,6 +1671,19 @@ export const make = (
         )
         if (flowBody._tag !== "Prompt") {
           return "pending" as const
+        }
+        // A prompt flow with no seat is refused, not left pending. No agent
+        // host can ever run one, so `pending` promised a driver that was never
+        // coming: `smithers init hello && smithers up hello` exited 1 and left
+        // `run-1` at `accepted` under an owner with pid 0, which only
+        // `smithers cancel` could end (Phase 7 verdict cd14388ed7, D1).
+        if (Option.isNone(descriptor.value.model)) {
+          return yield* new LaunchFailed({
+            runId: input.run.runId,
+            message: `Flow ${flowId} declares no model seat: add a \`model:\` line to ` +
+              `its frontmatter, then run \`smithers doctor\` to see which provider keys this project has`,
+            cause: { flowId }
+          })
         }
         // Resolve the seat now, so a missing key refuses the launch as a
         // typed failure instead of failing the run after it was accepted.

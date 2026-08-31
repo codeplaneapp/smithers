@@ -37,7 +37,7 @@ import * as Registry from "@smthrs/registry/Registry"
 import type * as Fixture from "@smthrs/testing/Fixture"
 import type * as ModelLike from "@smthrs/testing/ModelLike"
 import * as RecordedModel from "@smthrs/testing/RecordedModel"
-import { Cause, Deferred, Duration, Effect, Layer, Option, Schema, Stream } from "effect"
+import { Cause, Deferred, Duration, Effect, Exit, Layer, Option, Schema, Stream } from "effect"
 import { mkdtempSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -93,14 +93,29 @@ const moduleDescriptor = new Descriptor.FlowDescriptor({
   path: "/flows/agents/module"
 })
 
+/**
+ * A prompt flow that declares no seat.
+ *
+ * This is the `smithers init` scaffold as rc.0 first shipped it: a markdown
+ * body with no `model:` line. No agent host can ever run it, so the launch
+ * refuses rather than answering `pending` and leaving the run accepted.
+ */
+const seatlessDescriptor = new Descriptor.FlowDescriptor({
+  ...agentDescriptor,
+  name: "agents/seatless",
+  model: Option.none(),
+  path: "/flows/agents/seatless"
+})
+
 const descriptors = new Map([
   [agentDescriptor.name, agentDescriptor],
   [effortDescriptor.name, effortDescriptor],
-  [moduleDescriptor.name, moduleDescriptor]
+  [moduleDescriptor.name, moduleDescriptor],
+  [seatlessDescriptor.name, seatlessDescriptor]
 ])
 
 const registryService = Registry.makeNoop({
-  list: () => Effect.succeed([agentDescriptor, effortDescriptor, moduleDescriptor]),
+  list: () => Effect.succeed([agentDescriptor, effortDescriptor, moduleDescriptor, seatlessDescriptor]),
   visible: () => Effect.succeed([]),
   get: (name) =>
     descriptors.has(name)
@@ -138,6 +153,12 @@ const memoryFlows: ReadonlyArray<ControlRuntime.MemoryFlow> = [
   {
     flowId: "agents/module",
     description: "An agent seat over a module body, which the harness refuses.",
+    deployClass: false,
+    envelope: { capabilities: [], flows: [], budget: {} }
+  },
+  {
+    flowId: "agents/seatless",
+    description: "A prompt flow with no model seat.",
     deployClass: false,
     envelope: { capabilities: [], flows: [], budget: {} }
   },
@@ -675,6 +696,43 @@ describe("AgentSession", () => {
 
     expect(status).toBe("cancelled")
     expect(notes).toEqual([])
+  })
+
+  it("refuses a prompt flow that declares no seat, instead of leaving the run accepted", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const gate = yield* Deferred.make<void>()
+        const notes: Array<string> = []
+        return yield* Effect.gen(function*() {
+          const control = yield* Control.Control
+          const runtime = yield* ControlRuntime.ControlRuntime
+          const card = yield* control.plan({ flowId: "agents/seatless", input: {} })
+          yield* control.approve(card.approval)
+          const outcome = yield* Effect.exit(control.run({
+            _tag: "Plan",
+            planId: card.planId,
+            digest: card.digest,
+            envelope: card.envelope,
+            idempotencyKey: "run:seatless"
+          }))
+          const listed = yield* control.list({ _tag: "runs" })
+          const runId = listed._tag === "runs" ? listed.items[0]?.runId : undefined
+          return {
+            refusal: Exit.isFailure(outcome)
+              ? String(Cause.squash(outcome.cause))
+              : "the launch was accepted",
+            status: runId === undefined ? "no run" : (yield* runtime.getRun(runId)).status
+          }
+        }).pipe(Effect.provide(stack({ resolve: seat(capturing([])), notes, gate })))
+      }).pipe(Effect.scoped) as Effect.Effect<{ refusal: string; status: string }, unknown>
+    )
+
+    // A flow with no seat can never run on any agent host, so the refusal
+    // names the line to add rather than parking the run at `accepted` under an
+    // owner nobody is running (Phase 7 verdict cd14388ed7, D1).
+    expect(result.refusal).toContain("agents/seatless declares no model seat")
+    expect(result.refusal).toContain("model:")
+    expect(result.status).toBe("failed")
   })
 
   it("leaves a seated flow with a module body pending: only prompt flows run on the cell harness", async () => {

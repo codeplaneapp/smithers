@@ -13,7 +13,14 @@ import { NotificationQueue } from "@smthrs/notifications"
 import { Cause, Effect, Exit, Fiber, type Layer, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import { type ApprovalInput, Control } from "../src/Control.ts"
-import { AlreadyResolved, ClaimLost, EnvelopeMismatch, PlanDigestMismatch, RunNotFound } from "../src/ControlError.ts"
+import {
+  AlreadyResolved,
+  ClaimLost,
+  EnvelopeMismatch,
+  LaunchFailed,
+  PlanDigestMismatch,
+  RunNotFound
+} from "../src/ControlError.ts"
 import * as ControlExecutor from "../src/ControlExecutor.ts"
 import { ControlRuntime } from "../src/ControlRuntime.ts"
 import type { Envelope, PlanCard, Principal } from "../src/ControlSchema.ts"
@@ -331,6 +338,62 @@ export const contract = (name: string, harness: Harness): void => {
         }))
         expect(missing).toBeInstanceOf(RunNotFound)
       }))
+
+    /**
+     * A launch the executor could not take must leave no run to chase.
+     *
+     * The run row is created before the executor is consulted, and the
+     * executor's refusal fails the mutation. Where the run row and the control
+     * journal share one database the whole mutation rolls back and no run
+     * survives, which is the answer this contract wants. Where they do not —
+     * the CLI keeps runs in `control.db` and journals control events into
+     * `engine.db` — the row outlived the rollback, and rc.0 left it `accepted`
+     * under an owner with pid 0: `smithers status` answered "unlaunched"
+     * forever and only `smithers cancel` could end it (Phase 7 verdict
+     * cd14388ed7; plue-cutover S3). So the contract is stated over what
+     * survives: whatever run the refusal leaves behind is terminal, carries
+     * the cause, and is `failed`.
+     */
+    it("leaves no run behind that its refusal did not settle", async () => {
+      const refusal = "Set ANTHROPIC_API_KEY to run the anthropic:claude-sonnet-4-5 seat"
+      const executor = ControlExecutor.makeNoop({
+        launch: Effect.fn("ContractExecutor.launch")(({ run }) =>
+          Effect.fail(new LaunchFailed({ runId: run.runId, message: refusal }))
+        )
+      })
+      await Effect.runPromise(
+        Effect.gen(function*() {
+          const control = yield* Control
+          const runtime = yield* ControlRuntime
+          const card = yield* control.plan({ flowId: "system/test", input: { unlaunchable: true } })
+          yield* control.approve(approval(card, "approve:unlaunchable"))
+          const failure = yield* Effect.flip(control.run({
+            _tag: "Plan",
+            planId: card.planId,
+            digest: card.digest,
+            envelope: card.envelope,
+            idempotencyKey: "run:unlaunchable"
+          }))
+          // The caller still reads the refusal it can act on.
+          expect(failure).toBeInstanceOf(LaunchFailed)
+          expect((failure as LaunchFailed).message).toBe(refusal)
+
+          const listed = yield* control.list({ _tag: "runs" })
+          const runs = listed._tag === "runs" ? listed.items : []
+          expect(runs.filter((run) => run.status !== "failed")).toEqual([])
+          if (runs.length === 0) return
+          const runId = runs[0]!.runId
+          expect((yield* runtime.getRun(runId)).status).toBe("failed")
+          // Why it failed is in the journal, which is what a diagnosis reads.
+          const events = yield* Stream.runCollect(control.watch({ runId, follow: false }))
+          expect(events.at(-1)?.kind).toBe("control.run.failed")
+          expect(events.at(-1)?.payload).toMatchObject({ runId, status: "failed", cause: refusal })
+        }).pipe(
+          Effect.provide(harness(executor)),
+          Effect.scoped
+        )
+      )
+    })
 
     it("reports running only after a real executor accepts the launch", async () => {
       const invoked: Array<string> = []

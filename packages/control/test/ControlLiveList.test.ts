@@ -308,7 +308,7 @@ describe("ControlLive mutations", () => {
 })
 
 describe("ControlLive executor acceptance", () => {
-  it("surfaces an executor's refusal as a launch failure after the run was recorded", async () => {
+  it("surfaces an executor's refusal as a launch failure, and settles the run it recorded", async () => {
     const observed = await run(
       Effect.gen(function*() {
         const control = yield* Control
@@ -328,9 +328,12 @@ describe("ControlLive executor acceptance", () => {
 
     expect(observed.failure).toBeInstanceOf(LaunchFailed)
     expect((observed.failure as LaunchFailed).message).toBe("no capacity")
-    // The run row survives the refusal: the acceptance decision is separate
-    // from the record of the run having been accepted.
-    expect(observed.listed).toMatchObject({ items: [{ status: "accepted" }] })
+    // The run row survives the refusal, because the acceptance decision is
+    // separate from the record of the run having been accepted — but it
+    // survives settled. Left `accepted`, it was a run nothing would ever drive
+    // and nothing but `smithers cancel` could end (Phase 7 verdict
+    // cd14388ed7).
+    expect(observed.listed).toMatchObject({ items: [{ status: "failed" }] })
   })
 
   it("marks a run running only once the executor takes it, under its own fence", async () => {

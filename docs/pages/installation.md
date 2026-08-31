@@ -127,6 +127,13 @@ smithers init my-project
 run state lives in `.flows/`. `smithers init --global` is not supported and
 exits 1: seats resolve from environment keys, not from a global pack.
 
+The scaffold carries a `model:` line, because `smithers up` cannot run a prompt
+flow that declares no seat. `init` picks it from the provider keys below, in the
+order `doctor` reports them, and says in the file which key it used. With no key
+set it writes the `anthropic:claude-sonnet-4-5` seat, and `smithers up` then
+refuses by naming `ANTHROPIC_API_KEY` instead of starting a run nothing will
+drive. Edit the line to run somewhere else.
+
 [Writing a flow](/guides/writing-a-flow) is the next page.
 
 ## Provider keys

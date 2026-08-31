@@ -117,3 +117,77 @@ describe("the scaffold", () => {
     expect(Init.defaultName("/work/___")).toBe("flow")
   })
 })
+
+describe("the seat the scaffold writes", () => {
+  it("chooses the first provider key the environment sets, in the order doctor lists them", () => {
+    expect(Init.defaultSeat({ ANTHROPIC_API_KEY: "k" })).toEqual({
+      seat: "anthropic:claude-sonnet-4-5",
+      variable: "ANTHROPIC_API_KEY",
+      resolved: true
+    })
+    expect(Init.defaultSeat({ OPENAI_API_KEY: "k" })).toEqual({
+      seat: "openai:gpt-5.6-sol",
+      variable: "OPENAI_API_KEY",
+      resolved: true
+    })
+    expect(Init.defaultSeat({ OPENROUTER_API_KEY: "k" })).toEqual({
+      seat: "openrouter:anthropic/claude-sonnet-4.5",
+      variable: "OPENROUTER_API_KEY",
+      resolved: true
+    })
+    // Doctor's order decides when more than one key is present.
+    expect(Init.defaultSeat({ OPENROUTER_API_KEY: "k", OPENAI_API_KEY: "k", ANTHROPIC_API_KEY: "k" }).seat)
+      .toBe("anthropic:claude-sonnet-4-5")
+  })
+
+  it("counts the ChatGPT session as the openai credential, and an exported empty key as unset", () => {
+    expect(Init.defaultSeat({ SMITHERS_OPENAI_AUTH: "chatgpt" })).toEqual({
+      seat: "openai:gpt-5.6-sol",
+      variable: "SMITHERS_OPENAI_AUTH",
+      resolved: true
+    })
+    expect(Init.defaultSeat({ FLOWS_OPENAI_AUTH: "chatgpt" }).variable).toBe("SMITHERS_OPENAI_AUTH")
+    expect(Init.defaultSeat({ ANTHROPIC_API_KEY: "" }).resolved).toBe(false)
+  })
+
+  it("names a seat even when nothing resolves, so the launch refuses by naming its key", () => {
+    // `smithers up` on this scaffold answers `Set ANTHROPIC_API_KEY to run the
+    // anthropic:claude-sonnet-4-5 seat`. A scaffold with no `model:` line
+    // answers nothing an operator can act on.
+    expect(Init.defaultSeat({})).toEqual({
+      seat: "anthropic:claude-sonnet-4-5",
+      variable: "ANTHROPIC_API_KEY",
+      resolved: false
+    })
+  })
+
+  it("skips a provider doctor lists and this host cannot route", () => {
+    // `Doctor` names CEREBRAS_API_KEY a provider key and
+    // `NodeControl.seatResolver` has no route for the provider, so a scaffold
+    // that chose it would write a flow that cannot launch (Phase 7 S3).
+    expect(Init.defaultSeat({ CEREBRAS_API_KEY: "k" }).seat).toBe("anthropic:claude-sonnet-4-5")
+    expect(Init.defaultSeat({ CEREBRAS_API_KEY: "k" }).resolved).toBe(false)
+  })
+
+  it("writes the seat, and the sentence that says how to change it, into the frontmatter", () => {
+    const body = Init.template("review", Init.defaultSeat({ OPENAI_API_KEY: "k" }))
+
+    expect(body).toContain("\nmodel: openai:gpt-5.6-sol\n")
+    expect(body).toContain("OPENAI_API_KEY")
+    expect(body).toContain("smithers doctor")
+    // The explanation is a YAML comment, not prose: every line of the body is
+    // an instruction the agent is handed.
+    const frontmatter = body.split("---")[1] ?? ""
+    expect(frontmatter).toContain("# ")
+    expect(body.slice(body.indexOf("# review"))).not.toContain("doctor")
+  })
+
+  it("scaffolds the flow the environment can launch", () => {
+    const root = directory(".git")
+
+    const result = Init.scaffold(root, "review", { OPENAI_API_KEY: "k" })
+
+    expect(result.seat).toBe("openai:gpt-5.6-sol")
+    expect(readFileSync(result.flowFile, "utf8")).toContain("model: openai:gpt-5.6-sol")
+  })
+})
