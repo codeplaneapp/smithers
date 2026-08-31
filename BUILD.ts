@@ -132,7 +132,12 @@ export const ci = Smithers.GithubCiGen({
         // links it, and this step is the second of the two targets that
         // typecheck there.
         { name: "Review eval typecheck", verb: Smithers.Verb.Build, pattern: "//evals/review-seeded-bugs:types" },
-        { name: "Generated workflow drift", verb: Smithers.Verb.Lint, pattern: "//:ci" }
+        { name: "Generated workflow drift", verb: Smithers.Verb.Lint, pattern: "//:ci" },
+        // The known-file registry is generated from a workspace scan, so a new
+        // or removed file drifts it. The job checks out without submodules and
+        // a maintainer's checkout has them initialized; the scan stops at every
+        // nested repository, so both produce the same file.
+        { name: "Known-file registry drift", verb: Smithers.Verb.Lint, pattern: "//:knownFiles" }
       ]
     },
     {
