@@ -29,9 +29,10 @@ import type * as ControlSchema from "@smthrs/control/ControlSchema"
 import * as ControlServer from "@smthrs/control/ControlServer"
 import { SyncRpcs } from "@smthrs/sync/SyncRpcs"
 import * as SyncServer from "@smthrs/sync/SyncServer"
-import { Effect, Layer, Schema, Stream } from "effect"
-import { HttpRouter, HttpServerResponse } from "effect/unstable/http"
-import { RpcServer } from "effect/unstable/rpc"
+import { Effect, Layer, Schema, Stream, type Types } from "effect"
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { RpcSerialization, RpcServer } from "effect/unstable/rpc"
+import { GatewayError } from "./GatewayError.ts"
 import { GatewayRpcs } from "./GatewayRpcs.ts"
 import * as GatewaySchema from "./GatewaySchema.ts"
 import { heartbeatIntervalMillis, Projections } from "./Projections.ts"
@@ -245,6 +246,93 @@ export const layerSyncHttp = Layer.mergeAll(
 )
 
 /**
+ * The POST mounts that carry RPC request messages and nothing else.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const rpcPaths: ReadonlyArray<string> = ["/rpc", "/projections", "/sync"]
+
+const encodeGatewayError = Schema.encodeUnknownSync(GatewayError)
+
+const malformedRequest = (path: string) =>
+  HttpServerResponse.jsonUnsafe(
+    encodeGatewayError(
+      new GatewayError({
+        code: "malformed_request",
+        message: `POST ${path} carries no RPC request message`,
+        cause: null
+      })
+    ),
+    { status: 400 }
+  )
+
+/**
+ * Whether a request body carries at least one RPC message the server can act
+ * on.
+ *
+ * The transport's own parser answers, not a second reading of the wire
+ * format: whatever `RpcSerialization` the host composed decodes the body, and
+ * the answer is no only when that decode throws or yields no tagged message.
+ * A body naming a procedure that does not exist is a yes — that is an
+ * RPC-level defect the protocol itself reports.
+ *
+ * A binary framing is always a yes. Its body is not text, so there is nothing
+ * to read here, and the mount owns it.
+ *
+ * @since 1.0.0
+ * @category predicates
+ */
+export const carriesRpcRequest = (
+  serialization: RpcSerialization.RpcSerialization["Service"],
+  body: string
+): boolean => {
+  if (!serialization.contentType.includes("json")) return true
+  try {
+    const decoded = serialization.makeUnsafe().decode(body)
+    return decoded.length > 0 && decoded.every((message: unknown) =>
+      typeof message === "object" && message !== null &&
+      typeof (message as { readonly _tag?: unknown })._tag === "string"
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Refuses a body that carries no RPC request message with 400.
+ *
+ * `effect/unstable/rpc` hands every decoded message to the server loop, and a
+ * body that decodes to something else — `{}`, `[]`, prose, nothing at all —
+ * reached it as a message with no tag and died there, so the gateway answered
+ * `500 Internal Server Error` with an empty body (Phase 7 smoke). That is the
+ * wrong half of the contract twice over: it tells an operator the gateway
+ * broke, and it tells a client to retry a request that can never succeed.
+ *
+ * `HttpServerRequest.text` is cached per request, so reading the body here
+ * does not consume the body the mount reads.
+ *
+ * @since 1.0.0
+ * @category layers
+ */
+export const layerRefuseMalformedRpc = HttpRouter.middleware(
+  Effect.gen(function*() {
+    const serialization = yield* RpcSerialization.RpcSerialization
+    return (httpEffect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
+      Effect.gen(function*() {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const path = new URL(request.url, "http://gateway.invalid").pathname
+        if (request.method !== "POST" || !rpcPaths.includes(path)) return yield* httpEffect
+        // The mount itself dies on an unreadable body; this reads the same
+        // cached effect, so a read failure is still the mount's to report.
+        const body = yield* Effect.orDie(request.text)
+        return carriesRpcRequest(serialization, body) ? yield* httpEffect : malformedRequest(path)
+      })
+  }),
+  { global: true }
+)
+
+/**
  * The whole gateway surface, as one application layer a host serves.
  *
  * The caller supplies the transport serialization, the authentication
@@ -263,5 +351,6 @@ export const layer = (health: Health, heartbeatMillis?: number | undefined) =>
     layerControlHttp(heartbeatMillis),
     layerProjectionsHttp,
     layerSyncHttp,
-    layerHealth(health)
+    layerHealth(health),
+    layerRefuseMalformedRpc
   )

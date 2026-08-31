@@ -60,3 +60,59 @@ export const deadLinks = (pages, { assets, deferred = new Set(), routes }) => {
   }
   return { checked, dead }
 }
+
+/**
+ * The anchor a heading answers to.
+ *
+ * vocs slugs a heading the way GitHub does: lower case, punctuation dropped,
+ * spaces joined with hyphens. Inline code fences come off first, so a heading
+ * written as `` `smithers ls` `` answers to `smithers-ls`.
+ */
+export const headingAnchor = (heading) =>
+  heading
+    .replace(/`/g, "")
+    .toLowerCase()
+    .replace(/[^\da-z\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+
+/**
+ * Every anchor a page body answers to, one per heading.
+ *
+ * Headings inside a fenced block are code, not structure, so they are skipped.
+ */
+export const headingAnchors = (body) => {
+  const found = new Set()
+  let fenced = false
+  for (const line of body.split("\n")) {
+    if (/^\s*```/.test(line)) fenced = !fenced
+    else if (!fenced) {
+      const heading = /^#{1,6}\s+(.+?)\s*$/.exec(line)
+      if (heading !== null) found.add(headingAnchor(heading[1]))
+    }
+  }
+  return found
+}
+
+/**
+ * Every anchor a body of text links to on one page url.
+ *
+ * The text is what a reader gets: the sentences the CLI prints. Reading the
+ * anchors out of them, rather than out of the table they are built from,
+ * is what makes this check the same claim the operator is holding.
+ */
+export const anchorsLinkedTo = (url, texts) => {
+  const pattern = new RegExp(`${url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}#([\\w-]+)`, "g")
+  return new Set(texts.flatMap((text) => [...text.matchAll(pattern)].map((match) => match[1])))
+}
+
+/**
+ * The anchors a page has no heading for, sorted.
+ *
+ * A link to a missing anchor is not a dead link: the page loads and the reader
+ * lands at the top with no idea what they were sent to read.
+ */
+export const missingAnchors = (body, anchors) => {
+  const answered = headingAnchors(body)
+  return [...anchors].filter((anchor) => !answered.has(anchor)).sort()
+}

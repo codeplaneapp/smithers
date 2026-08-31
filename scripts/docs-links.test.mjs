@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import test from "node:test"
 import { repoRoot } from "./docs-contract.mjs"
-import { deadLinks, isInternal, linkTargets, resolveLink } from "./docs-links.mjs"
+import { anchorsLinkedTo, deadLinks, isInternal, linkTargets, missingAnchors, resolveLink } from "./docs-links.mjs"
 
 const site = {
   routes: new Set(["/installation", "/api/database", "/architecture/browser-support"]),
@@ -68,4 +68,52 @@ test("vocs still reports the dead links it finds", () => {
   // would drop the second opinion as well as the failure.
   const config = readFileSync(join(repoRoot, "vocs.config.ts"), "utf8")
   assert.match(config, /checkDeadlinks: "warn"/)
+})
+
+test("a heading answers the anchor a link points at, and one that is gone is named", () => {
+  const body = [
+    "# Migrating from Smithers 0.x",
+    "",
+    "## Removed flags",
+    "",
+    "#### supervision",
+    "",
+    "```",
+    "#### plan-admission",
+    "```"
+  ].join("\n")
+  const anchors = new Set(["removed-flags", "supervision", "plan-admission"])
+
+  // The heading inside the fence is code a page quotes, not structure a
+  // reader can land on, so the anchor it looks like is still missing.
+  assert.deepEqual(missingAnchors(body, anchors), ["plan-admission"])
+  assert.deepEqual(missingAnchors(body.replace("#### supervision", ""), anchors), [
+    "plan-admission",
+    "supervision"
+  ])
+})
+
+test("the anchors are read out of the sentences the CLI prints", () => {
+  const messages = [
+    "smithers rewind was removed in 1.0.0-rc.0: reason. See https://smithers.sh/migration/1.0#rewind",
+    "smithers up --force was removed in 1.0.0-rc.0: reason. See https://smithers.sh/migration/1.0#supervision"
+  ]
+  assert.deepEqual(
+    [...anchorsLinkedTo("https://smithers.sh/migration/1.0", messages)].sort(),
+    ["rewind", "supervision"]
+  )
+})
+
+test("every anchor the CLI sends an operator to resolves in the migration guide", async () => {
+  const unsupported = await import("../packages/cli/src/Unsupported.ts")
+  const sentences = [
+    ...unsupported.removedVerbs.map((verb) => unsupported.verbError(verb).message),
+    ...unsupported.removedFlags.map((flag) => unsupported.flagMessage(flag)),
+    unsupported.reservedFlowError("run", "system/plan").message
+  ]
+  const anchors = anchorsLinkedTo(unsupported.migrationUrl, sentences)
+  const body = readFileSync(join(repoRoot, "docs", "pages", "migration", "1.0.md"), "utf8")
+
+  assert.ok(anchors.size > 60, `expected the removal surface to link many anchors, got ${anchors.size}`)
+  assert.deepEqual(missingAnchors(body, anchors), [])
 })

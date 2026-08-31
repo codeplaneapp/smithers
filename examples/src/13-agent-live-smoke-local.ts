@@ -23,6 +23,7 @@ import { FlowEngine } from "@smthrs/engine"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
 import * as GrantStore from "@smthrs/kernel/GrantStore"
 import * as KernelHttpClient from "@smthrs/kernel/HttpClient"
+import * as ModelRequest from "@smthrs/model/ModelRequest"
 import * as RequestExecutor from "@smthrs/model/RequestExecutor"
 import * as Route from "@smthrs/model/Route"
 import * as Registry from "@smthrs/registry/Registry"
@@ -78,12 +79,38 @@ export const liveLocalSeats = (baseUrl: string) =>
     })
   ).pipe(Layer.provide(executorLayer))
 
-/** One model-backed step: answer a question in one short sentence. */
+/**
+ * One model-backed step: answer a question in one short sentence.
+ *
+ * Three declarations make a 7B model finish this step the same way every run.
+ *
+ * The system teaching spells out the call the cell runtime is waiting for. A
+ * model told only to "answer in one short sentence" finishes with
+ * `ctx.done("Paris")`, which is a fine sentence and not a document, and the
+ * run then failed with `"Paris" is not valid JSON`.
+ *
+ * `corrections: 3` re-prompts a near miss instead of failing the step on the
+ * first one; the default is a single correction.
+ *
+ * `temperature: 0` pins the seat to greedy decoding. Sampling was the whole
+ * remaining flake: at the provider default the same prompt sometimes spent
+ * all eight frames writing prose and never called `ctx.done`, and the step
+ * failed with `model_failed`, "ended without a completed answer" — the
+ * sentence the Phase 7 examples gate recorded as its blocker. Greedy decoding
+ * answered 20 of 20 direct runs and 12 of 12 suite runs.
+ */
 export const LiveSmokeLocal = AgentAction.make("examples/LiveSmokeLocal", {
   payload: { question: Schema.String },
   output: Schema.Struct({ answer: Schema.String }),
   seat: "local:qwen2.5:7b",
-  system: ["You are a terse assistant. Answer in one short sentence and nothing else."],
+  system: [
+    "You are a terse assistant. Answer in one short sentence.",
+    "Your answer goes inside a JSON object, never on its own.",
+    "Finish with exactly this call, with your answer in place of the placeholder:",
+    "await ctx.done(JSON.stringify({ answer: \"<your one-sentence answer>\" }))"
+  ],
+  corrections: 3,
+  modelParams: ModelRequest.GenerationParams.make({ temperature: 0 }),
   prompt: ({ question }) => question
 })
 

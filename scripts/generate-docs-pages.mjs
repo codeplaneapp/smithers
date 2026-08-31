@@ -428,6 +428,41 @@ for (const [name, rpc] of rpcEntries) {
     lines.push(`| \`${cell(flag.parent)}\` | \`${cell(flag.flag)}\` | ${cell(contractProse(reason))} |`)
   }
   lines.push("")
+  // A flag refusal links to an anchor of its own when the flag is not attached
+  // to a removed verb, and an anchor with no heading drops the reader at the
+  // top of the guide with no sentence to read. Each one gets a section here,
+  // and a new anchor with no prose is a generator failure rather than a silent
+  // hole in the page.
+  const flagAnchorProse = new Map([
+    [
+      "supervision",
+      "`up --force`, `up --steal-ownership`, `up --resume-claim-owner`, `up --resume-claim-heartbeat`, " +
+      "`up --resume-restore-owner`, and `up --resume-restore-heartbeat` are removed. Ownership recovery is not " +
+      "an operator decision in 1.0.0-rc.0: the run driver's heartbeat sweep reclaims a run whose owner stopped " +
+      "renewing its lease, and a second process that tries to drive the same run is refused rather than allowed " +
+      "to steal it. Run `smithers up` again and let the sweep do it."
+    ],
+    [
+      "plan-admission",
+      "`up --max-concurrency <n>` is removed. Parallelism is declared by the flow, and the plan the control " +
+      "plane admits carries the bound. A flow that should run fewer steps at once says so in its own body."
+    ],
+    [
+      "init",
+      "`init --global` is removed. 1.0.0-rc.0 has no global pack and reads no `~/.smithers`: state is the " +
+      "project's `.flows/` directory and nothing else, and seats resolve from environment keys. Run " +
+      "`smithers init` in the project."
+    ]
+  ])
+  const headedElsewhere = new Set([...names, ...survivingParents.map((verb) => verb.name), "databases"])
+  for (const anchor of [...new Set(Unsupported.removedFlags.map((flag) => flag.anchor))].sort()) {
+    if (headedElsewhere.has(anchor)) continue
+    const prose = flagAnchorProse.get(anchor)
+    if (prose === undefined) {
+      throw new Error(`generate-docs-pages: no migration-guide section for the flag anchor #${anchor}`)
+    }
+    lines.push(`#### ${anchor}`, "", prose, "")
+  }
   for (const name of [...names, ...survivingParents.map((verb) => verb.name)].sort()) {
     const parent = survivingParents.find((verb) => verb.name === name)
     if (parent !== undefined) {

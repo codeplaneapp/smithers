@@ -2,7 +2,7 @@
 /**
  * The documentation gate.
  *
- * Thirteen checks over the vocs page tree, each one a claim the documentation
+ * Fourteen checks over the vocs page tree, each one a claim the documentation
  * makes that can be verified against something else in the repository:
  *
  *   1. house style: no em-dash anywhere in the prose
@@ -21,6 +21,8 @@
  *      the count section 3.1 spells
  *  13. no page sits in a tree vocs stopped publishing, and every route linked
  *      before its page exists is still waiting for it
+ *  14. every anchor a removal message sends an operator to has a heading in
+ *      the migration guide
  *
  * The two normalizers run in `--check` mode first, so their rules stay one
  * implementation rather than a detector and a fixer that can disagree.
@@ -43,7 +45,7 @@ import {
   removedZeroXPackages,
   repoRoot
 } from "./docs-contract.mjs"
-import { deadLinks } from "./docs-links.mjs"
+import { anchorsLinkedTo, deadLinks, missingAnchors } from "./docs-links.mjs"
 import { assets, isHistorical, pages } from "./docs-pages.mjs"
 import { sidebarRoutes } from "./docs-sidebar.mjs"
 import { deferredRouteProblems, deferredRoutes, movedTreeProblems, movedTrees, routePlan } from "./docs-routes.mjs"
@@ -358,6 +360,31 @@ for (const [title, argv] of [
       `no page sits in one of the ${movedTrees.length} moved trees, and ${deferredRoutes.length} deferred route is still waiting for its page`
     )
   }
+}
+
+// -----------------------------------------------------------------------------
+// 14. Migration guide anchors
+// -----------------------------------------------------------------------------
+
+{
+  // Every refusal the CLI prints ends in a link to one anchor of the migration
+  // guide. An anchor with no heading is worse than a dead link: the page loads,
+  // the reader lands at the top, and the sentence that was supposed to explain
+  // the removal is not there. The anchors are read out of the sentences
+  // themselves, so the guide is checked against what an operator is holding.
+  const unsupported = await import("../packages/cli/src/Unsupported.ts")
+  const sentences = [
+    ...unsupported.removedVerbs.map((verb) => unsupported.verbError(verb).message),
+    ...unsupported.removedFlags.map((flag) => unsupported.flagMessage(flag)),
+    unsupported.reservedFlowError("run", "system/plan").message
+  ]
+  const anchors = anchorsLinkedTo(unsupported.migrationUrl, sentences)
+  const guide = allPages.find((page) => page.route === "/migration/1.0")
+  const missing = guide === undefined
+    ? ["docs/pages/migration/1.0.md: the migration guide is not published"]
+    : missingAnchors(guide.body, anchors).map((anchor) => `docs/pages/migration/1.0.md: #${anchor}`)
+  if (missing.length > 0) fail("a removal message links to an anchor the migration guide has no heading for", missing)
+  else pass(`all ${anchors.size} anchors the removal messages link to have a heading in the migration guide`)
 }
 
 process.exit(failed ? 1 : 0)
