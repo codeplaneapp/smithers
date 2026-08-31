@@ -53,6 +53,9 @@ const parentOf = (path: string): string | undefined => {
 /** The session-private guest directory spawned commands record their pids in. */
 const pidDirectory = "/tmp/.smthrs-sbx"
 
+/** How long the kill script waits for a just-spawned command to record its pid. */
+const pidfileWaitSeconds = 5
+
 /**
  * The guest script that signals one recorded pid and every descendant.
  *
@@ -60,9 +63,19 @@ const pidDirectory = "/tmp/.smthrs-sbx"
  * walk; the recursion runs in subshells because POSIX `sh` has no local
  * variables. `kill -s` takes the un-prefixed POSIX signal name, the one form
  * busybox and dash agree on.
+ *
+ * It waits for the pidfile rather than treating an absent one as "nothing to
+ * do". `spawn` returns once the LOCAL `docker exec` client has started, which
+ * is before the guest shell has run its first line, so a caller that kills
+ * immediately can arrive first. Exiting 0 there would report a delivered
+ * signal while leaving the command running, which is the silent no-op kill the
+ * conformance suite exists to catch. A pidfile still absent after the wait
+ * means the command never started, and that is the one case where there is
+ * genuinely nothing to signal.
  */
 const killScript = (pidfile: string, signal: string): string =>
-  `p=$(cat ${pidfile}) || exit 0; ` +
+  `n=0; while [ ! -s ${pidfile} ] && [ "$n" -lt ${pidfileWaitSeconds} ]; do sleep 1; n=$((n+1)); done; ` +
+  `p=$(cat ${pidfile} 2>/dev/null) || exit 0; [ -n "$p" ] || exit 0; ` +
   `kids() { for d in /proc/[0-9]*; do read -r _ _ _ pp _ < "$d/stat" 2>/dev/null || continue; ` +
   `[ "$pp" = "$1" ] || continue; c=\${d#/proc/}; ( kids "$c" ); echo "$c"; done; }; ` +
   `for k in $(kids "$p"); do kill -s ${signal} "$k" 2>/dev/null; done; ` +
@@ -121,6 +134,13 @@ export const make = (options: ContainerSandboxOptions): Provider => {
     acquire: (sessionKey) =>
       Effect.gen(function*() {
         const name = `${prefix}${sessionSlug(sessionKey)}`
+        // CREATION IS ITS OWN RESOURCE, and starting and preparing come after
+        // it rather than inside it. `acquireRelease` registers a finalizer only
+        // once its acquire SUCCEEDS, so folding `start` and the workspace
+        // preparation into the acquire meant a container that was created and
+        // then failed to start was never removed: the run reported an honest
+        // failure and left a machine behind on the engine, which the next
+        // acquire of that key would silently reattach to.
         yield* Effect.acquireRelease(
           Effect.gen(function*() {
             const created = yield* run([
@@ -144,17 +164,17 @@ export const make = (options: ContainerSandboxOptions): Provider => {
                 })
               )
             }
-            yield* step(`the container ${name} could not be started`, ["start", name])
-            yield* step(`the workspace ${workdir} could not be prepared in ${name}`, [
-              "exec",
-              name,
-              "sh",
-              "-c",
-              `mkdir -p ${CommandLine.quote(workdir)} && rm -rf ${pidDirectory} && mkdir -p ${pidDirectory}`
-            ])
           }),
           () => Effect.ignore(run(["rm", "--force", name]))
         )
+        yield* step(`the container ${name} could not be started`, ["start", name])
+        yield* step(`the workspace ${workdir} could not be prepared in ${name}`, [
+          "exec",
+          name,
+          "sh",
+          "-c",
+          `mkdir -p ${CommandLine.quote(workdir)} && rm -rf ${pidDirectory} && mkdir -p ${pidDirectory}`
+        ])
         // Pidfiles are numbered per acquire; the wipe above means a reattached
         // container starts from a clean directory, so the counter cannot
         // collide with a previous incarnation's files.

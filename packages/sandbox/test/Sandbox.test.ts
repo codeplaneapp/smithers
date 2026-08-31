@@ -306,7 +306,12 @@ describe("Sandbox.fileSystem", () => {
   it.effect("shapes directory making, removal, and renames as their POSIX lines", () =>
     Effect.gen(function*() {
       const provider = Sandbox.TestSession.make({
-        script: (command) => command.includes("refused") ? { exitCode: 1, stderr: "refused" } : { exitCode: 0 }
+        script: (command) =>
+          command.includes("refused")
+            ? { exitCode: 1, stderr: "refused" }
+            : command.includes("/absent") && command.startsWith("if [ -e")
+            ? { exitCode: 9 }
+            : { exitCode: 0 }
       })
       yield* Effect.scoped(
         Effect.gen(function*() {
@@ -318,6 +323,12 @@ describe("Sandbox.fileSystem", () => {
           yield* files.rename("/from", "/to")
           const failed = yield* Effect.flip(files.makeDirectory("/refused"))
           const unremoved = yield* Effect.flip(files.remove("/refused"))
+          // An unforced removal of a missing path is NotFound, the reason the
+          // platform implementations report and an idempotent caller catches;
+          // a forced one is a success, as it is on every other host.
+          const absent = yield* Effect.flip(files.remove("/absent"))
+          expect(platformReason(absent)).toBe("NotFound")
+          yield* files.remove("/absent", { force: true })
           const unrenamed = yield* Effect.flip(files.rename("/refused", "/nowhere"))
           expect(platformReason(failed)).toBe("Unknown")
           expect(platformReason(unremoved)).toBe("Unknown")
@@ -328,7 +339,7 @@ describe("Sandbox.fileSystem", () => {
         "mkdir -p /deep/tree",
         "mkdir /flat",
         "rm -r -f /old",
-        "rm /single",
+        "if [ -e /single ] || [ -h /single ]; then rm /single; else exit 9; fi",
         "mv /from /to"
       ])
     }))
@@ -382,6 +393,33 @@ describe("Sandbox.fileSystem", () => {
       expect(outcome).toEqual({ probed: true, written: "rooted" })
       expect(provider.state.files.has("/work/rel.txt")).toBe(true)
       expect(provider.state.files.has("/work/dotted.txt")).toBe(true)
+    }))
+
+  it.effect("reports a silent probe failure by its exit code and survives garbled stat output", () =>
+    Effect.gen(function*() {
+      const provider = Sandbox.TestSession.make({
+        script: (command) =>
+          command.startsWith("test -e")
+            ? { exitCode: 2 }
+            : command.includes("'/garbled'") || command.includes(" /garbled ")
+            ? { stdout: "" }
+            : { exitCode: 0 }
+      })
+      const outcome = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const files = yield* probeSession(provider)
+          const silent = yield* Effect.flip(files.exists("/broken"))
+          const garbled = yield* files.stat("/garbled")
+          // "" and "." both resolve to the workdir itself.
+          yield* files.makeDirectory(".")
+          yield* files.makeDirectory("")
+          return { silent, garbled }
+        })
+      )
+      expect(String(outcome.silent)).toContain("probe exited 2")
+      expect(outcome.garbled.type).toBe("Unknown")
+      expect(outcome.garbled.size).toBe(0n)
+      expect(provider.state.commands).toContain("mkdir /sandbox")
     }))
 
   it.effect("prefers a session's native override to the probe", () =>

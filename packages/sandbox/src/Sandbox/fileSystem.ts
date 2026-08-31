@@ -171,6 +171,7 @@ export const fileSystem = (session: Session): FileSystem.FileSystem => {
     const [type, size] = result.stdout.trim().split(/\s+/)
     return {
       ...emptyInfo,
+      /* v8 ignore next -- `split` always yields a first field, so the `type` nullish arm only discharges the indexed-access optional */
       type: fileTypes[type ?? ""] ?? "Unknown",
       size: FileSystem.Size(BigInt(size ?? "0"))
     } satisfies FileSystem.File.Info
@@ -220,8 +221,19 @@ export const fileSystem = (session: Session): FileSystem.FileSystem => {
     }),
     remove: Effect.fn("Sandbox.fileSystem.remove")(function*(raw, options) {
       const path = resolve(raw)
-      const flags = `${options?.recursive === true ? "-r " : ""}${options?.force === true ? "-f " : ""}`
-      const result = yield* probe(session, "remove", path, `rm ${flags}${quote(path)}`)
+      const target = quote(path)
+      const forced = options?.force === true
+      const flags = `${options?.recursive === true ? "-r " : ""}${forced ? "-f " : ""}`
+      // `rm` answers 1 for everything, so an unforced removal checks presence
+      // itself: the platform implementations report a missing path as
+      // `NotFound`, and a caller removing idempotently catches exactly that
+      // reason. `-h` is part of the question because a dangling symlink is
+      // absent to `-e` and still a thing `rm` deletes.
+      const script = forced
+        ? `rm ${flags}${target}`
+        : `if [ -e ${target} ] || [ -h ${target} ]; then rm ${flags}${target}; else exit ${absentExit}; fi`
+      const result = yield* probe(session, "remove", path, script)
+      if (result.code === absentExit) return yield* Effect.fail(notFound("remove", path))
       if (result.code !== 0) return yield* Effect.fail(probeFailed("remove", path)(result))
     }),
     rename: Effect.fn("Sandbox.fileSystem.rename")(function*(rawOld, rawNew) {

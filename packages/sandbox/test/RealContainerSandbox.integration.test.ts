@@ -42,10 +42,17 @@ const provider = Effect.gen(function*() {
   return ContainerSandbox.make({ spawner, image })
 }).pipe(Effect.provide(platform))
 
-// Every check provisions its own container; a cold engine also pulls the
-// image once, so the ceilings are generous rather than optimistic.
-const conformanceBudget = 300_000
-const budget = 120_000
+// The conformance suite gives every check its own session so a check that
+// leaves one unusable cannot decide the next, which costs this backend eleven
+// container starts. Container start is the one expensive step and its cost is
+// the engine's, not the provider's: measured on the development machine
+// (OrbStack, many containers resident) `create`, `exec`, and `rm` each take
+// about 50ms while `start` takes 30 SECONDS, so the same suite that runs in
+// well under a minute against a responsive engine needs minutes here. The
+// ceiling is sized for the slow engine rather than the fast one, because a
+// timeout on a loaded machine would report a conforming provider as broken.
+const conformanceBudget = 900_000
+const budget = 180_000
 
 describe.skipIf(!engineAvailable)("ContainerSandbox against a real engine", () => {
   it.effect(
@@ -78,8 +85,12 @@ describe.skipIf(!engineAvailable)("ContainerSandbox against a real engine", () =
           const bytes = new Uint8Array([0, 1, 2, 253, 254, 255, 10, 13, 0])
           yield* session.writeFile(`${session.workdir}/in.bin`, bytes)
           const copied = yield* Effect.scoped(
-            Effect.flatMap(session.spawn("cp in.bin out.bin && wc -c < out.bin", {}), (process) =>
-              Effect.zipLeft(Stream.mkString(Stream.decodeText(process.stdout)), process.exitCode))
+            Effect.gen(function*() {
+              const process = yield* session.spawn("cp in.bin out.bin && wc -c < out.bin", {})
+              const stdout = yield* Stream.mkString(Stream.decodeText(process.stdout))
+              yield* process.exitCode
+              return stdout
+            })
           )
           expect(copied.trim()).toBe(String(bytes.length))
           expect(Array.from(yield* session.readFile(`${session.workdir}/out.bin`))).toEqual(Array.from(bytes))
@@ -96,8 +107,7 @@ describe.skipIf(!engineAvailable)("ContainerSandbox against a real engine", () =
           expect(stat.type).toBe("File")
           expect(stat.size).toBe(BigInt(bytes.length))
           yield* Effect.scoped(
-            Effect.flatMap(session.spawn("ln -s nested/deep/out.bin link.bin", {}), (process) =>
-              process.exitCode)
+            Effect.flatMap(session.spawn("ln -s nested/deep/out.bin link.bin", {}), (process) => process.exitCode)
           )
           expect(yield* files.readLink(`${session.workdir}/link.bin`)).toBe("nested/deep/out.bin")
           expect(yield* files.realPath(`${session.workdir}/link.bin`)).toBe(
@@ -140,7 +150,7 @@ describe.skipIf(!engineAvailable)("ContainerSandbox against a real engine", () =
         const files = yield* FileSystem.FileSystem
         yield* files.writeFileString("/workspace/tool-input.txt", "for the guest tool")
         const answer = yield* spawner.string(
-          ChildProcess.make("tr a-z A-Z < /workspace/tool-input.txt && uname -s", { shell: true })
+          ChildProcess.make("tr a-z A-Z < /workspace/tool-input.txt && echo && uname -s", { shell: true })
         )
         return answer
       }).pipe(Effect.provide(Sandbox.layerHost(container, { session: keys[3]! })))

@@ -28,6 +28,12 @@ import type { Session } from "./Session.ts"
  * session it wants, so a crash-interrupted run that acquires the same key
  * again lands on the same machine wherever the provider can arrange it.
  *
+ * That reattachment is what makes the session key **an exclusive claim, not a
+ * shared handle**. Two live holders of one key are served the same machine,
+ * and the first of them to close its scope tears that machine down under the
+ * other. Give concurrent work distinct keys; reuse a key to resume, which is
+ * the case reattachment exists for.
+ *
  * @category services
  * @since 0.1.0
  */

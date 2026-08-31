@@ -171,6 +171,16 @@ describe("ContainerSandbox", () => {
         acquired(ContainerSandbox.make({ spawner: unpreparable.spawner, image: "img" }), Effect.succeed)
       )
       expect((prepareFailure as ProviderError).message).toContain("could not be prepared")
+
+      // A container that was created and then failed to start or prepare must
+      // still be removed. Folding those steps into the acquire left them
+      // outside the finalizer's protection and leaked a machine per failure.
+      for (const failed of [unstartable, unpreparable]) {
+        const created = failed.calls.find((call) => call.args[0] === "create")
+        const removed = failed.calls.find((call) => call.args[0] === "rm")
+        expect(created).toBeDefined()
+        expect(removed?.args).toEqual(["rm", "--force", created!.args[2]!])
+      }
     }))
 
   it.effect("spawns through exec in the right directory with only defined environment", () =>
@@ -270,6 +280,9 @@ describe("ContainerSandbox", () => {
       const killCall = calls.find((call) => call.args.at(-1)?.includes("kids()"))
       expect(killCall).toBeDefined()
       expect(killCall!.args.at(-1)).toContain("cat /tmp/.smthrs-sbx/0.pid")
+      // The script waits for a pid a just-started command has not written yet,
+      // instead of reporting a delivered signal it never sent.
+      expect(killCall!.args.at(-1)).toContain("while [ ! -s /tmp/.smthrs-sbx/0.pid ]")
       expect(killCall!.args.at(-1)).toContain("kill -s TERM")
 
       const refusing = engine((args) =>

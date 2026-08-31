@@ -14,13 +14,13 @@
  * operation naming a provider or a remote path.
  *
  * `DirectorySandbox` makes the provisioned machine a real scratch directory
- * for this runnable example. The scope around flow execution owns the host
- * layer; closing that scope releases the session and removes its workspace.
- * The engine and its journal close independently over the local database.
+ * for this runnable example. The action execution scope owns the host layer;
+ * completing the action closes that scope, releases the session, and removes
+ * its workspace. The engine and journal remain open over the local database.
  */
+import { Action, Flow, Interpreter } from "@smthrs/flow"
 import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import { DirectorySandbox, Sandbox } from "@smthrs/sandbox"
-import { Action, Flow, Interpreter } from "@smthrs/flow"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
@@ -50,8 +50,8 @@ const writeAndCount = ({ contents }: { readonly contents: string }) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const spawner = yield* ChildProcessSpawner
-    yield* fs.writeFileString("placed.txt", contents)
-    const printed = yield* spawner.string(ChildProcess.make("wc", ["-c", "placed.txt"]))
+    yield* fs.writeFileString("example-40/placed.txt", contents)
+    const printed = yield* spawner.string(ChildProcess.make("wc", ["-c", "example-40/placed.txt"]))
     const count = Number.parseInt(printed.trim(), 10)
     if (!Number.isSafeInteger(count)) {
       return yield* Effect.die(new Error(`wc printed an invalid byte count: ${printed}`))
@@ -77,7 +77,12 @@ export const main = (options: MainOptions): Promise<number> =>
         { session: "examples/sandbox-placement" }
       )
       const stack = Layer.mergeAll(
-        CountBytes.toLayer(writeAndCount).pipe(Layer.provide(placedHost)),
+        CountBytes.toLayer((payload) =>
+          writeAndCount(payload).pipe(
+            Effect.provide(placedHost),
+            Effect.orDie
+          )
+        ),
         Interpreter.layer(SandboxPlacement)
       ).pipe(
         Layer.provideMerge(Action.layerImplementations),

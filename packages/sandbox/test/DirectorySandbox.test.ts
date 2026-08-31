@@ -91,6 +91,24 @@ describe("DirectorySandbox", () => {
             expect(yield* probed.readFileString("relative.txt")).toBe("rooted")
             expect(yield* native.exists("relative.txt")).toBe(true)
             expect(yield* fs.exists(`${session.workdir}/relative.txt`)).toBe(true)
+            // The native overrides serve the rest of the surface with the
+            // same rooting, dot prefixes included.
+            expect((yield* native.stat("./relative.txt")).type).toBe("File")
+            yield* native.makeDirectory("native/dir", { recursive: true })
+            yield* native.rename("relative.txt", "native/dir/moved.txt")
+            expect(yield* native.readDirectory(".")).toContain("native")
+            expect(yield* fs.exists(`${session.workdir}/native/dir/moved.txt`)).toBe(true)
+            yield* fs.symlink(`${session.workdir}/native/dir/moved.txt`, `${session.workdir}/native.link`)
+            expect(yield* native.readLink("native.link")).toBe(`${session.workdir}/native/dir/moved.txt`)
+            expect(yield* native.realPath("native.link")).toBe(`${session.workdir}/native/dir/moved.txt`)
+            yield* native.remove("native", { recursive: true })
+            expect(yield* native.exists("native")).toBe(false)
+            // Against a real tree, an unforced removal of a missing path is
+            // NotFound and a forced one succeeds, matching the host.
+            expect(
+              String(yield* Effect.flip(probed.remove("gone.txt")))
+            ).toContain("NotFound")
+            yield* probed.remove("gone.txt", { force: true })
           })
         )
       }),

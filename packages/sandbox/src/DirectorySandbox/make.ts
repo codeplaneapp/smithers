@@ -93,6 +93,7 @@ export const make = (options: DirectorySandboxOptions): Provider => ({
         writeFile: (path, content) =>
           Effect.gen(function*() {
             const separator = path.lastIndexOf("/")
+            /* v8 ignore next 3 -- session paths are absolute under an absolute root, so only a write to the filesystem root itself could skip parent creation */
             if (separator > 0) {
               yield* options.fs.makeDirectory(path.slice(0, separator), { recursive: true })
             }
