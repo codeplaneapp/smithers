@@ -123,7 +123,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/apps-e2e-artifacts"
           for f in '/tmp/smithers-'*'.png'; do if [ -e "$f" ]; then cp -R -- "$f" "$RUNNER_TEMP/apps-e2e-artifacts"; fi; done
-          for f in 'apps/reports'; do if [ -e "$f" ]; then cp -R -- "$f" "$RUNNER_TEMP/apps-e2e-artifacts/reports"; fi; done
+          if [ -e 'apps/reports' ]; then cp -R -- 'apps/reports' "$RUNNER_TEMP/apps-e2e-artifacts/reports"; fi
       - name: Upload apps-e2e-artifacts
         uses: actions/upload-artifact@v4
         with:

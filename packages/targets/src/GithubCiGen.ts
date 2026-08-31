@@ -755,6 +755,13 @@ export const artifactSteps = (upload: CiToolchain.ArtifactUpload): ReadonlyArray
     // fail the job (PR #1631: the e2e suites passed and the bare `cp` of
     // /tmp/smithers-*.png exited 1). Guard each source on existence; a source
     // that exists but fails to copy still fails the step loudly.
+    //
+    // The loop is what a GLOB needs, and only a glob. `for f in 'apps/reports'`
+    // iterates one quoted literal, which shellcheck reports as SC2041 through
+    // the actionlint the workflow-lint step runs, so the required job goes red
+    // over a fixed path that needs no expansion at all. A fixed source renders
+    // the existence guard on its own.
+    if (!source.from.includes("*")) return `if [ -e ${from} ]; then cp -R -- ${from} ${destination}; fi`
     return `for f in ${from}; do if [ -e "$f" ]; then cp -R -- "$f" ${destination}; fi; done`
   })
   return [

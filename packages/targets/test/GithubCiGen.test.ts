@@ -587,8 +587,11 @@ describe("render", () => {
     expect(rendered).toContain(
       "          for f in '/tmp/shot-'*'.png'; do if [ -e \"$f\" ]; then cp -R -- \"$f\" \"$RUNNER_TEMP/e2e-artifacts\"; fi; done\n"
     )
+    // A fixed source needs the existence guard alone. Looping over one quoted
+    // literal is SC2041 to the shellcheck actionlint runs, which failed the
+    // required job on run 33442975322 at `.github/workflows/ci.yml:123:9`.
     expect(rendered).toContain(
-      "          for f in 'apps/reports'; do if [ -e \"$f\" ]; then cp -R -- \"$f\" \"$RUNNER_TEMP/e2e-artifacts/reports\"; fi; done\n"
+      "          if [ -e 'apps/reports' ]; then cp -R -- 'apps/reports' \"$RUNNER_TEMP/e2e-artifacts/reports\"; fi\n"
     )
     expect(rendered).not.toContain("cp -R -- '/tmp/shot-'*'.png'")
     expect(rendered).not.toContain("2>/dev/null || true")
@@ -617,6 +620,35 @@ describe("render", () => {
         }]
       }))
     ).toThrow(/not usable as a generated diagnostic/)
+  })
+
+  /**
+   * The workflow-lint step runs actionlint, and actionlint runs shellcheck over
+   * every generated script. A source with no glob rendered
+   * `for f in 'apps/reports'; do ...`, one quoted literal as the whole list,
+   * which shellcheck reports as SC2041 ("This is a literal string. To run as a
+   * command, use $(..) instead of '..'"). That finding failed the required
+   * `test` job on run 33442975322 at `.github/workflows/ci.yml:123:9` while the
+   * pipeline it lints was otherwise fine.
+   *
+   * A loop is what a GLOB needs. A fixed path needs the existence guard alone,
+   * and gets it.
+   */
+  it("collects a fixed artifact source without looping over one literal", () => {
+    const steps = artifactSteps({
+      artifact: "e2e-artifacts",
+      sources: [{ from: "/tmp/shot-*.png" }, { from: "apps/reports", as: "reports" }]
+    })
+    const script = steps[0]!.run!
+    expect(script).toContain(
+      "if [ -e 'apps/reports' ]; then cp -R -- 'apps/reports' \"$RUNNER_TEMP/e2e-artifacts/reports\"; fi"
+    )
+    // The glob still needs the loop: `cp` on an unexpanded pattern exits 1.
+    expect(script).toContain(
+      "for f in '/tmp/shot-'*'.png'; do if [ -e \"$f\" ]; then cp -R -- \"$f\" \"$RUNNER_TEMP/e2e-artifacts\"; fi; done"
+    )
+    // No `for` loop anywhere whose whole list is a single quoted literal.
+    expect(script.split("\n").filter((line) => /^\s*for \w+ in '[^'*]*';/.test(line))).toEqual([])
   })
 
   it("validates artifact values again at the rendering boundary", () => {
