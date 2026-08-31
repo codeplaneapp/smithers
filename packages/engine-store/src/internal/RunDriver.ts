@@ -1088,9 +1088,45 @@ export const make = (
      * semantics). On genuine fence loss the owned transition fails
      * harmlessly.
      */
+    /**
+     * The waiting reason an interrupted round parks under.
+     *
+     * A flow that has ALREADY asked to suspend is parked, not released. The
+     * round's own settlement derives the same three answers a few statements
+     * later ({@link drive}'s `settleRound`), and losing the race to a
+     * shutdown must not lose the classification with it: a `released` row
+     * carries no wake time and no token, so a run that suspended on a
+     * 150-second clock came back as a run whose owner merely went away, and
+     * the sweeper had to re-drive it blind instead of waking it when its
+     * deadline fell due (Phase 7 smoke, section 2b).
+     *
+     * A flow that has NOT asked to suspend is a genuine shutdown or heartbeat
+     * self-interrupt, and `released` is exactly what it is (issue #39).
+     */
+    const interruptedWaiting = (
+      runId: string,
+      instance: FlowRuntime.FlowInstance["Service"] | undefined
+    ): Effect.Effect<DurableEngineState.Waiting> =>
+      Effect.gen(function*() {
+        if (instance === undefined || !instance.suspended) return { reason: "released" } as const
+        const declared = instance.waiting
+        if (declared !== undefined) return declared
+        const pendingClocks = yield* engineState.pendingClocks({ executionId: runId })
+        return pendingClocks.length > 0
+          ? {
+            reason: "timer",
+            wakeAt: Math.min(...pendingClocks.map((clock) => clock.dueAtMs))
+          } as const
+          : { reason: "event" } as const
+      })
+
     const releaseOwned = (
       runId: string,
-      state: RunState
+      state: RunState,
+      round?: {
+        readonly flow: Flow.Any
+        readonly instance: FlowRuntime.FlowInstance["Service"]
+      } | undefined
     ): Effect.Effect<void> =>
       Effect.gen(function*() {
         // Park before releasing ownership (`park` is owner-fenced). The
@@ -1099,11 +1135,30 @@ export const make = (
         // a durable `requestCancel` against it is write-only forever
         // (issue #39). On genuine fence loss the park reports NotFound
         // harmlessly, exactly like the transition below.
-        const parked = yield* engineState.park(runId, { reason: "released" }, dependencies.owner)
+        const waiting = yield* interruptedWaiting(runId, round?.instance)
+        // A run whose flow asked to suspend carries the suspension on its row,
+        // exactly as the round's own settlement writes it. `poll` publishes a
+        // state with no `result` as "not settled yet", so a park recorded
+        // without one was invisible to every resumer: `AgentSession`'s
+        // `awaitParked` polls `poll` and answers `unknown` for anything but a
+        // published `Suspended`, so `smithers approve` and `smithers run
+        // --resume` accepted the request and then drove nothing (Phase 7
+        // smoke, section 3).
+        const suspension = round !== undefined && waiting.reason !== "released"
+          ? yield* encodeResult(
+            round.flow,
+            new Flow.Suspended({ cause: round.instance.cause })
+          )
+          : undefined
+        const parked = yield* engineState.park(runId, waiting, dependencies.owner)
         const transitioned = yield* transitionAndRecord(
           runId,
           "suspended",
-          yield* encodeState(withoutResult(state)),
+          yield* encodeState(
+            suspension === undefined
+              ? withoutResult(state)
+              : { ...withoutResult(state), result: suspension }
+          ),
           { decision: "interrupt-released", owner: dependencies.owner }
         )
         // The successful arm is the generator's terminal fallthrough; V8 emits
@@ -1111,12 +1166,12 @@ export const make = (
         /* v8 ignore else */
         if (transitioned._tag !== "Transitioned") {
           // Fence lost between park and release: the run is someone else's
-          // (or already settled), so our reclaim marker is bogus. Clear it
-          // only if it is still ours — a new owner may have parked a real
-          // waiting reason in between.
+          // (or already settled), so our marker is bogus. Clear it only if it
+          // is still the one we just wrote — a new owner may have parked a
+          // real waiting reason in between.
           if (parked._tag === "Parked") {
             const current = yield* engineState.waiting(runId)
-            if (Option.isSome(current) && current.value.reason === "released") {
+            if (Option.isSome(current) && current.value.reason === waiting.reason) {
               yield* engineState.wake(runId)
             }
           }
@@ -1127,16 +1182,21 @@ export const make = (
     /**
      * Discriminates an interruption cause by durable state: only an
      * interruption backed by a recorded cancel request closes the run;
-     * anything else releases it for reclaim (issue #26).
+     * anything else releases it for reclaim (issue #26), under the waiting
+     * reason the flow had already declared for itself when it has one.
      */
     const settleInterrupted = (
       runId: string,
-      state: RunState
+      state: RunState,
+      round?: {
+        readonly flow: Flow.Any
+        readonly instance: FlowRuntime.FlowInstance["Service"]
+      } | undefined
     ): Effect.Effect<void> =>
       store.get(runId).pipe(
         Effect.map((row) => row.cancelRequestedAtMs !== null),
         Effect.catch(() => Effect.succeed(false)),
-        Effect.flatMap((requested) => requested ? cancelOwned(runId, state) : releaseOwned(runId, state))
+        Effect.flatMap((requested) => requested ? cancelOwned(runId, state) : releaseOwned(runId, state, round))
       )
 
     const encodeResult = (
@@ -1593,7 +1653,9 @@ export const make = (
               cancelPollLoop(executionId)
             )
           ).pipe(
-            Effect.onInterrupt(() => settleInterrupted(executionId, activeState)),
+            Effect.onInterrupt(() =>
+              settleInterrupted(executionId, activeState, { flow: registration.flow, instance })
+            ),
             Effect.ensuring(Effect.sync(() => liveInstances.delete(executionId))),
             // A suspension is the ONE settlement `Flow.intoResult` leaves the
             // flow scope open for, so from the instant it surfaces the scope

@@ -257,3 +257,56 @@ describe("deciding an in-run approval in the composition hosting the run", () =>
     expect(observed.after.pendingResume).toBeUndefined()
   })
 })
+
+describe("deciding an in-run approval on a run that has already settled", () => {
+  it("answers Terminal instead of delegating a resume nothing can take up", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runtime = yield* ControlRuntime
+      const { runId, target } = yield* parkedOnAsk("cancelled-before-decision")
+      // The operator cancelled the parked run before answering its ask. This
+      // is the Phase 7 smoke's own sequence: `cancel run-4`, then `approve`
+      // with the ask payload, which hung for 120 s and printed nothing.
+      yield* control.cancel({ runId, idempotencyKey: `cli:cancel:${runId}` })
+
+      const receipt = yield* control.approve({ target, scope: "run", idempotencyKey: "approve:settled" })
+      return {
+        runId,
+        receipt,
+        after: yield* runtime.getRun(runId),
+        pending: yield* runtime.pendingResumes,
+        kinds: yield* kinds(runId)
+      }
+    }))
+
+    // A decision on a settled run decides nothing. `smithers approve` prints
+    // this receipt and returns; the `Accepted` it used to print sent the CLI
+    // into `awaitRun` for a settlement that had already happened.
+    expect(observed.receipt).toEqual({ _tag: "Terminal", runId: observed.runId, status: "cancelled" })
+    expect(observed.after.status).toBe("cancelled")
+    // No delegation either: a standing resume for a cancelled run is a
+    // restart every host poll re-reads and no host may take up.
+    expect(observed.pending).toEqual([])
+    expect(observed.kinds).not.toContain("control.approval.approved")
+    expect(observed.kinds).not.toContain("control.run.resumed")
+  })
+
+  it("answers Terminal for a repeat rather than replaying the decision's receipt", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runtime = yield* ControlRuntime
+      const { runId, target } = yield* parkedOnAsk("settled-after-decision")
+      const key = "approve:settled-repeat"
+      const first = yield* control.approve({ target, scope: "run", idempotencyKey: key })
+      // The host took the delegation up and ran the flow to its end.
+      yield* runtime.resume(runId)
+      const fence = yield* runtime.claimFence(runId)
+      yield* runtime.writeStatus(runId, fence, "completed")
+      const again = yield* control.approve({ target, scope: "run", idempotencyKey: key })
+      return { runId, first, again }
+    }))
+
+    expect(observed.first._tag).toBe("Accepted")
+    expect(observed.again).toEqual({ _tag: "Terminal", runId: observed.runId, status: "completed" })
+  })
+})

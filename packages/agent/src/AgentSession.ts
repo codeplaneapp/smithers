@@ -725,7 +725,13 @@ export const requestCancel = (
     }
     const outcome = yield* runs.requestCancel(input.runId, at).pipe(Effect.mapError(failure(input.runId)))
     if (outcome._tag === "Terminal") return { _tag: "Terminal", status: outcome.status } as const
-    return outcome._tag === "NotFound" ? "unknown" : "recorded"
+    if (outcome._tag === "NotFound") return "unknown"
+    // The store already distinguishes the write that recorded the request from
+    // the one that found it recorded, and the control plane needs that
+    // difference: `Control.cancel` runs with `replay: false`, so every repeat
+    // re-executes, and attributing each one journals a fresh
+    // `control.run.cancel-requested` for a cancellation that happened once.
+    return outcome._tag === "AlreadyRequested" ? "already-requested" : "recorded"
   })
 
 /** The deferred name a `WaitFor` wait point is recorded under. */
@@ -913,69 +919,89 @@ export const make = (
      * `PermissionRequired`; a resolved one lets the activity run and read the
      * decision.
      */
-    const authorize = (runId: string) => (call: Cell.Call): Effect.Effect<void, HarnessError.HarnessError> =>
-      Effect.gen(function*() {
-        if (call.flowName !== StandardFlows.askFlow.name) return
-        const input = call.input as unknown as AskInput
-        const identity = askIdentity(runId, call.input)
-        const target = {
-          _tag: "Node" as const,
-          runId,
-          requestId: identity.requestId,
-          digest: identity.digest,
-          envelope: askEnvelope
-        }
-        const token = yield* runtime.registerApproval(target).pipe(
-          Effect.mapError(
-            (cause) =>
-              new HarnessError.HarnessError({
-                code: "engine_failed",
-                message: "The approval request could not be registered with the control plane",
-                cause
-              })
-          )
-        )
-        if (token.resolved) return
-        const payload: ApprovalPayload = {
-          target,
-          scope: "run",
-          idempotencyKey: `approve:${identity.requestId}`
-        }
-        yield* emit(runId, "control.approval.requested", {
-          runId,
-          requestId: identity.requestId,
-          question: input.question,
-          payload
-        }).pipe(
-          Effect.mapError(
-            (cause) =>
-              new HarnessError.HarnessError({
-                code: "engine_failed",
-                message: "The approval request could not be journaled",
-                cause
-              })
-          )
-        )
-        return yield* Effect.fail(
-          new HarnessError.HarnessError({
-            code: "engine_failed",
-            message: `Approval required: ${input.question}`,
-            cause: Schema.encodeUnknownSync(Permission.PermissionRequired)(
-              new Permission.PermissionRequired({
-                code: "permission_required",
-                requestId: identity.requestId,
-                runId,
-                // No action in the capability vocabulary names a human
-                // decision; the request carries the question in `meta` and
-                // the model seat's own action as the closest formal claim.
-                capability: Capability.make("model:call", `ask/${identity.digest}`),
-                tier: "irreversible",
-                meta: { question: input.question }
-              })
+    const authorize =
+      (runId: string, instance: FlowRuntime.FlowInstance["Service"]) =>
+      (call: Cell.Call): Effect.Effect<void, HarnessError.HarnessError> =>
+        Effect.gen(function*() {
+          if (call.flowName !== StandardFlows.askFlow.name) return
+          const input = call.input as unknown as AskInput
+          const identity = askIdentity(runId, call.input)
+          const target = {
+            _tag: "Node" as const,
+            runId,
+            requestId: identity.requestId,
+            digest: identity.digest,
+            envelope: askEnvelope
+          }
+          const token = yield* runtime.registerApproval(target).pipe(
+            Effect.mapError(
+              (cause) =>
+                new HarnessError.HarnessError({
+                  code: "engine_failed",
+                  message: "The approval request could not be registered with the control plane",
+                  cause
+                })
             )
-          })
-        )
-      })
+          )
+          if (token.resolved) return
+          const payload: ApprovalPayload = {
+            target,
+            scope: "run",
+            idempotencyKey: `approve:${identity.requestId}`
+          }
+          yield* emit(runId, "control.approval.requested", {
+            runId,
+            requestId: identity.requestId,
+            question: input.question,
+            payload
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new HarnessError.HarnessError({
+                  code: "engine_failed",
+                  message: "The approval request could not be journaled",
+                  cause
+                })
+            )
+          )
+          // Classify the park before taking it. Without this the engine derived
+          // the reason from durable state and an in-run `ask` — which arms no
+          // clock — parked under `event`, the reason `Control.steer` treats as
+          // "waiting for something to arrive" and therefore wakes on a message.
+          // `approval` is what the run is actually waiting for, and the request
+          // id is the token a wake handler matches (engine-store issue #31).
+          // The annotation cannot go stale: a round that parks here ends, and
+          // the resumed round runs under an instance of its own. The instance
+          // travels down from the registered handler rather than through a map
+          // the handler writes: the body is forked with `startImmediately`, so a
+          // map written after the fork is not yet written when the body's first
+          // ask reaches this line, and the park then took the derived `event`
+          // reason instead of `approval`.
+          yield* Effect.provideService(
+            FlowRuntime.annotateWaiting({ reason: "approval", token: identity.requestId }),
+            FlowRuntime.FlowInstance,
+            instance
+          )
+          return yield* Effect.fail(
+            new HarnessError.HarnessError({
+              code: "engine_failed",
+              message: `Approval required: ${input.question}`,
+              cause: Schema.encodeUnknownSync(Permission.PermissionRequired)(
+                new Permission.PermissionRequired({
+                  code: "permission_required",
+                  requestId: identity.requestId,
+                  runId,
+                  // No action in the capability vocabulary names a human
+                  // decision; the request carries the question in `meta` and
+                  // the model seat's own action as the closest formal claim.
+                  capability: Capability.make("model:call", `ask/${identity.digest}`),
+                  tier: "irreversible",
+                  meta: { question: input.question }
+                })
+              )
+            })
+          )
+        })
 
     /**
      * Answers a decided ask from the grant store. The activity only runs once
@@ -1080,7 +1106,10 @@ export const make = (
         )
 
     /** One agent run, executed as the whole of one durable flow execution. */
-    const body = (payload: { readonly runId: string; readonly planId: string }) =>
+    const body = (
+      payload: { readonly runId: string; readonly planId: string },
+      instance: FlowRuntime.FlowInstance["Service"]
+    ) =>
       Effect.gen(function*() {
         const plan = yield* runtime.getPlan(payload.planId)
         const card = plan.card
@@ -1165,7 +1194,7 @@ export const make = (
             StandardFlows.clock(engineServices),
             StandardFlows.approval(asker(payload.runId))
           ],
-          authorize: authorize(payload.runId),
+          authorize: authorize(payload.runId, instance),
           capabilityEnvelope: patterns(card.envelope.capabilities),
           limits: options.limits,
           maxFrames: options.maxFrames,
@@ -1211,9 +1240,31 @@ export const make = (
           discard: true
         }).pipe(
           // ControlRuntime awaits this driver while it owns the control
-          // transaction. Interrupt the active flow body synchronously so no
-          // tool can escape cancellation, then let the engine's durable
-          // cancellation finish after the control transaction commits.
+          // transaction, so the active flow body is interrupted synchronously
+          // here: no tool escapes a cancellation that has already committed.
+          //
+          // And that is ALL this handler does. It used to call
+          // `engine.interrupt` — the DURABLE cancel, which writes
+          // `cancel_requested_at_ms` — for every interruption of this fiber,
+          // and a park interrupts it as surely as a cancel does. A flow that
+          // suspended on a durable clock or an in-run `ask` was therefore
+          // recorded as cancelled at the parking process's exit: the guarded
+          // suspended transition in `RunDriver.settleRound` read the request
+          // and answered `GuardFailed`, `cancelOwned` completed the run's
+          // clock rows 150 seconds before they fell due, and the journal
+          // gained `flows.engine.interrupted {"outcome":"cancelled"}` for a
+          // run nobody had cancelled (Phase 7 smoke, sections 2b and 3).
+          //
+          // The durable half of a cancellation belongs to the caller that
+          // meant one. `Control.cancel` writes it through
+          // `ControlExecutor.requestCancel` INSIDE its own mutation
+          // transaction, before it interrupts anything, and rolls the whole
+          // cancel back if the engine refuses. `RunDriver.settleInterrupted`
+          // then reads that record and discriminates on it: an interruption
+          // backed by a request closes the run, and every other one releases
+          // it for reclaim (engine-store issue #26). Recording the request
+          // here as well made this fiber's interruption its own evidence,
+          // which is the one thing it can never be.
           Effect.onInterrupt(() =>
             Effect.gen(function*() {
               const bodyFiber = activeBodies.get(runId)
@@ -1222,9 +1273,6 @@ export const make = (
                   Effect.forkDetach({ startImmediately: true })
                 )
               }
-              yield* preserveDriverInterrupt(() => engine.interrupt(agentFlow, runId)).pipe(
-                Effect.forkDetach({ startImmediately: true })
-              )
             })
           )
         )
@@ -1233,6 +1281,14 @@ export const make = (
           settleDriverFailure(cause, runId, (detail) => writeStatus(runId, "failed", detail))
         )
       )
+
+    /**
+     * Whether this engine publishes the execution as parked, treating a store
+     * that cannot answer as "not parked": a composition with no evidence
+     * leaves the run to the host that has some.
+     */
+    const parkedHere = (runId: string, attempts: number): Effect.Effect<boolean> =>
+      awaitParked(runId, attempts).pipe(Effect.catchCause(() => Effect.succeed(false)))
 
     const awaitParked = (runId: string, attempts: number): Effect.Effect<boolean, unknown> =>
       waitForParked(
@@ -1266,6 +1322,39 @@ export const make = (
               { runId, cause: Cause.pretty(cause) }
             )
         )
+      )
+
+    /**
+     * Closes a parked run whose cancellation this process has just recorded.
+     *
+     * A park has no owner, which is what makes it resumable — so nothing is
+     * driving the run and nothing reads the request the CONTROL plane just
+     * wrote on the engine row. The engine's own parked-run sweep ticks once
+     * per `Ownership.heartbeatInterval`, but a `smithers cancel` process
+     * writes the request at the very end of its life and exits before that
+     * tick lands: the Phase 7 smoke watched an engine row stay `suspended`
+     * with `cancel_requested_at_ms` set through six more commands and 15
+     * seconds, so `gc` skipped the run in `engine.db` while collecting it in
+     * `control.db`, and only a 20-second `smithers serve` finalized it.
+     *
+     * Driving the run settles it inside the cancelling call, after the
+     * mutation that recorded the request has committed — inside it the
+     * engine's writes would wait on the writer that transaction holds, and
+     * the cancel deadlocked until its timeout. It cannot
+     * re-execute the flow: the request is durable BEFORE this runs, and the
+     * engine's re-activation guard closes a run with a recorded cancellation
+     * instead of entering its body (engine-store issue #39, pinned by
+     * `InterruptReleaseReclaim`). A run this engine does not host is not
+     * parked as far as `poll` is concerned, or refuses the claim, and either
+     * way this is a no-op — the durable request stays for the host that does.
+     */
+    const settleCancelledPark = (runId: string): Effect.Effect<void> =>
+      Effect.flatMap(
+        // No retries: a run this engine is not hosting must cost a cancel
+        // nothing, and one it is hosting is already parked by the time the
+        // request is durable.
+        parkedHere(runId, 0),
+        (parked) => parked ? resumeExecution(runId) : Effect.void
       )
 
     /**
@@ -1343,7 +1432,7 @@ export const make = (
       uptake: Uptake
     ): Effect.Effect<ControlExecutor.ResumeUptake, never> =>
       Effect.gen(function*() {
-        const parked = yield* awaitParked(runId, 500).pipe(Effect.catchCause(() => Effect.succeed(false)))
+        const parked = yield* parkedHere(runId, 500)
         if (!parked) return "unknown" as const
         const hosted = yield* hostsPark(runId, uptake)
         if (!hosted) return "unknown" as const
@@ -1397,7 +1486,7 @@ export const make = (
       Effect.gen(function*() {
         const instance = yield* FlowRuntime.FlowInstance
         const fiber = yield* Effect.forkChild(
-          body(payload).pipe(
+          body(payload, instance).pipe(
             Effect.onExit((exit) => settle(payload.runId, instance.suspended, exit)),
             Effect.provide(services)
           ),
@@ -1522,7 +1611,8 @@ export const make = (
         takeUpResume(input.runId, (runId) => Effect.asVoid(Effect.forkIn(resumeExecution(runId), scope)), {
           _tag: "delegated"
         })
-      )
+      ),
+      settleCancelledPark: Effect.fn("AgentSession.settleCancelledPark")((input) => settleCancelledPark(input.runId))
     })
   })
 

@@ -62,21 +62,28 @@ export interface CancelTerminal {
 /**
  * What the executor did with a cancel request.
  *
- * `recorded` means `cancel_requested_at_ms` is set on the engine row — by this
- * call or by an earlier one — so the owning process stops the run at its next
- * cancel poll whichever process asked. `unknown` means this executor's engine
- * has no row for the run at all, which is the honest answer for a run another
- * composition launched into a database this one does not share. A
- * {@link CancelTerminal} means the engine row has already settled, so there is
- * nothing left to stop: recording intent on it would be a request no process
- * can ever act on, and answering `recorded` let `Control.cancel` write a
- * terminal control status the engine row does not have (triage B-11).
+ * `recorded` means THIS call set `cancel_requested_at_ms` on the engine row, so
+ * the owning process stops the run at its next cancel poll whichever process
+ * asked. `already-requested` means the column was already set when this call
+ * arrived: the request is just as durable, and the cancellation it belongs to
+ * was somebody else's. `Control.cancel` keys its attribution event on that
+ * difference — the write is first-writer-wins and every repeat re-runs the
+ * whole mutation, so answering `recorded` to all of them left one journaled
+ * `control.run.cancel-requested` per ask for a single cancellation (Phase 7
+ * smoke: three `cancel` calls and one `down` against one parked run left four).
+ * `unknown` means this executor's engine has no row for the run at all, which
+ * is the honest answer for a run another composition launched into a database
+ * this one does not share. A {@link CancelTerminal} means the engine row has
+ * already settled, so there is nothing left to stop: recording intent on it
+ * would be a request no process can ever act on, and answering `recorded` let
+ * `Control.cancel` write a terminal control status the engine row does not have
+ * (triage B-11).
  *
  * @category models
  * @since 0.1.0
  * @slop
  */
-export type CancelRecord = "recorded" | "unknown" | CancelTerminal
+export type CancelRecord = "recorded" | "already-requested" | "unknown" | CancelTerminal
 
 /**
  * One parked run that has been told to resume.
@@ -168,6 +175,25 @@ export interface Service {
    * when this executor is the one hosting it.
    */
   readonly resumeRun: (input: ResumeRequest) => Effect.Effect<ResumeUptake, PersistenceError>
+  /**
+   * Finishes a PARKED execution whose cancellation is already durable.
+   *
+   * A park has no owner — that is what makes it resumable — so nothing is
+   * driving the run and nothing reads the request {@link requestCancel} wrote.
+   * The engine's parked-run sweep does, once per heartbeat, but a `smithers
+   * cancel` process writes the request at the very end of its life and exits
+   * before that tick: the Phase 7 smoke watched an engine row stay
+   * `suspended` with `cancel_requested_at_ms` set through six more commands
+   * and fifteen seconds, so `gc` collected the run in `control.db` and
+   * skipped it in `engine.db`.
+   *
+   * Called AFTER the cancel mutation commits, never inside it: driving a run
+   * re-enters the engine, whose writes would wait on the writer the
+   * mutation's transaction holds. An executor that does not host the run, or
+   * one whose run is not parked, does nothing and leaves the durable request
+   * standing for the host that does.
+   */
+  readonly settleCancelledPark: (input: CancelRequest) => Effect.Effect<void, PersistenceError>
 }
 
 /**
@@ -208,6 +234,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service =>
     requestCancel: Effect.fn("ControlExecutor.requestCancel")(() => Effect.succeed("unknown" as const)),
     deliverSignal: Effect.fn("ControlExecutor.deliverSignal")(() => Effect.succeed("unknown" as const)),
     resumeRun: Effect.fn("ControlExecutor.resumeRun")(() => Effect.succeed("unknown" as const)),
+    settleCancelledPark: Effect.fn("ControlExecutor.settleCancelledPark")(() => Effect.void),
     ...overrides
   })
 

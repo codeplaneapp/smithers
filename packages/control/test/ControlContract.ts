@@ -402,7 +402,14 @@ export const contract = (name: string, harness: Harness): void => {
         const exit = yield* Fiber.await(owner)
 
         expect(receipt).toEqual({ _tag: "Terminal", runId, status: "cancelled" })
-        expect(replay).toEqual({ _tag: "AlreadyApplied", receiptId: "cancel:key", runId })
+        // Retargeted: a second cancel answers from the RUN, not from the
+        // recorded receipt. rc-contract section 7 says a cancel against a
+        // terminal run returns the `Terminal` receipt, and the old
+        // `AlreadyApplied` replay hid it — which is how the Phase 7 smoke's
+        // two non-terminal runs became unreachable by `cancel` and `down`
+        // alike. Cancellation is idempotent through the run's terminality,
+        // which is the stronger fact.
+        expect(replay).toEqual({ _tag: "Terminal", runId, status: "cancelled" })
         expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
       }))
 
