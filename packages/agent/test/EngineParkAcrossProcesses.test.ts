@@ -447,7 +447,12 @@ describe("a parked run resumed by a later process", () => {
         const control = yield* Control.Control
         const runtime = yield* ControlRuntime.ControlRuntime
         yield* control.approve(parked.approval)
-        yield* awaitStatus(runtime, parked.runId, "completed")
+        // The bound is `Ownership.heartbeatStaleAfter` (30 s) plus one
+        // delegation poll: a composition that did not park the run may only
+        // adopt a delegation that has stood unanswered that long
+        // (`AgentSession.hostsPark`). 90 s of headroom, so a slow machine is
+        // not read as a wedge.
+        yield* awaitStatus(runtime, parked.runId, "completed", 9_000)
         return yield* runtime.getRun(parked.runId)
       }).pipe(
         Effect.provide(host(root, secondOwner, "engine-park-second")),

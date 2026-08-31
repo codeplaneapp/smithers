@@ -907,13 +907,23 @@ export const make = (
       )
 
     /**
+     * The flow instance each in-flight run's round is executing under.
+     *
+     * The ask gate needs it to classify the park it is about to take, and the
+     * gate is a plain `Cell.Call` handler with no flow context of its own.
+     * Written and cleared by the registered handler, beside `activeBodies`.
+     */
+    const activeInstances = new Map<string, FlowRuntime.FlowInstance["Service"]>()
+
+    /**
      * Decides one ask before its durable boundary opens. An unresolved ask
      * registers its token, publishes the exact approval payload an operator
      * replays through `smithers approve`, and parks the run with an encoded
      * `PermissionRequired`; a resolved one lets the activity run and read the
      * decision.
      */
-    const authorize = (runId: string) => (call: Cell.Call): Effect.Effect<void, HarnessError.HarnessError> =>
+    const authorize =
+      (runId: string) => (call: Cell.Call): Effect.Effect<void, HarnessError.HarnessError> =>
       Effect.gen(function*() {
         if (call.flowName !== StandardFlows.askFlow.name) return
         const input = call.input as unknown as AskInput
@@ -956,6 +966,22 @@ export const make = (
               })
           )
         )
+        // Classify the park before taking it. Without this the engine derived
+        // the reason from durable state and an in-run `ask` — which arms no
+        // clock — parked under `event`, the reason `Control.steer` treats as
+        // "waiting for something to arrive" and therefore wakes on a message.
+        // `approval` is what the run is actually waiting for, and the request
+        // id is the token a wake handler matches (engine-store issue #31).
+        // The annotation cannot go stale: a round that parks here ends, and
+        // the resumed round runs under an instance of its own.
+        const instance = activeInstances.get(runId)
+        if (instance !== undefined) {
+          yield* Effect.provideService(
+            FlowRuntime.annotateWaiting({ reason: "approval", token: identity.requestId }),
+            FlowRuntime.FlowInstance,
+            instance
+          )
+        }
         return yield* Effect.fail(
           new HarnessError.HarnessError({
             code: "engine_failed",
@@ -1211,9 +1237,31 @@ export const make = (
           discard: true
         }).pipe(
           // ControlRuntime awaits this driver while it owns the control
-          // transaction. Interrupt the active flow body synchronously so no
-          // tool can escape cancellation, then let the engine's durable
-          // cancellation finish after the control transaction commits.
+          // transaction, so the active flow body is interrupted synchronously
+          // here: no tool escapes a cancellation that has already committed.
+          //
+          // And that is ALL this handler does. It used to call
+          // `engine.interrupt` — the DURABLE cancel, which writes
+          // `cancel_requested_at_ms` — for every interruption of this fiber,
+          // and a park interrupts it as surely as a cancel does. A flow that
+          // suspended on a durable clock or an in-run `ask` was therefore
+          // recorded as cancelled at the parking process's exit: the guarded
+          // suspended transition in `RunDriver.settleRound` read the request
+          // and answered `GuardFailed`, `cancelOwned` completed the run's
+          // clock rows 150 seconds before they fell due, and the journal
+          // gained `flows.engine.interrupted {"outcome":"cancelled"}` for a
+          // run nobody had cancelled (Phase 7 smoke, sections 2b and 3).
+          //
+          // The durable half of a cancellation belongs to the caller that
+          // meant one. `Control.cancel` writes it through
+          // `ControlExecutor.requestCancel` INSIDE its own mutation
+          // transaction, before it interrupts anything, and rolls the whole
+          // cancel back if the engine refuses. `RunDriver.settleInterrupted`
+          // then reads that record and discriminates on it: an interruption
+          // backed by a request closes the run, and every other one releases
+          // it for reclaim (engine-store issue #26). Recording the request
+          // here as well made this fiber's interruption its own evidence,
+          // which is the one thing it can never be.
           Effect.onInterrupt(() =>
             Effect.gen(function*() {
               const bodyFiber = activeBodies.get(runId)
@@ -1222,9 +1270,6 @@ export const make = (
                   Effect.forkDetach({ startImmediately: true })
                 )
               }
-              yield* preserveDriverInterrupt(() => engine.interrupt(agentFlow, runId)).pipe(
-                Effect.forkDetach({ startImmediately: true })
-              )
             })
           )
         )
@@ -1404,8 +1449,14 @@ export const make = (
           { startImmediately: true }
         )
         activeBodies.set(payload.runId, fiber)
+        activeInstances.set(payload.runId, instance)
         return yield* Fiber.join(fiber).pipe(
-          Effect.ensuring(Effect.sync(() => activeBodies.delete(payload.runId)))
+          Effect.ensuring(
+            Effect.sync(() => {
+              activeBodies.delete(payload.runId)
+              activeInstances.delete(payload.runId)
+            })
+          )
         )
       })).pipe(Scope.provide(scope))
 
