@@ -389,10 +389,11 @@ describe("launch-law parity: every affordance is a command", () => {
   /*
    * The two look-and-feel axes, at their binding sites: the corner button IS
    * the light/dark toggle (/dark-mode), and /theme is the palette command
-   * that takes its key as an argument. Both stay user-only browser
-   * mechanics — the trigger axis this suite guards for every other control.
+   * that takes its key as an argument. Both are model-invocable now — every
+   * listed flow is a tool call (flows/invocable.test.ts) — so this test
+   * guards the binding sites and the args hint, not the trigger axis.
    */
-  test("the light/dark toggle and the color theme are separate user-only commands", () => {
+  test("the light/dark toggle and the color theme are separate commands the model can call", () => {
     // The toggle lives in the sidebar's bottom chrome, so it is on screen in every tab.
     const chrome = files["../tabs/ChromeBar.tsx"] ?? ""
     expect(chrome).toContain("runCommand(\"appearance.dark-mode\")")
@@ -406,12 +407,12 @@ describe("launch-law parity: every affordance is a command", () => {
       expect(start).toBeGreaterThan(-1)
       return registrySource.slice(start, registrySource.indexOf("\n  }\n", start))
     }
-    // The trigger axis is the declaration's own `userOnly`, which the binding
-    // projects as `modelInvocable: false`; the args hint is what makes
+    // Listed flows are model-invocable (Will's rule; flows/invocable.test.ts
+    // pins the invariant); the args hint is what makes
     // `/appearance.theme <palette>` parse as an invocation.
-    expect(entry("appearance.theme")).toContain("userOnly: true")
+    expect(entry("appearance.theme")).not.toContain("userOnly")
     expect(entry("appearance.theme")).toContain("args:")
-    expect(entry("appearance.dark-mode")).toContain("userOnly: true")
+    expect(entry("appearance.dark-mode")).not.toContain("userOnly")
     // The toggle is its own flow, not a hidden alias of the palette flow; the
     // bare `/dark-mode` is the alias, declared beside it.
     expect(entry("appearance.dark-mode")).not.toContain("aliasOf")

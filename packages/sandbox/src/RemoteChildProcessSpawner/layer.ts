@@ -37,6 +37,7 @@ const REASON: Record<ProviderErrorCode, PlatformError.SystemErrorTag> = {
   aborted: "Unknown",
   timeout: "TimedOut",
   unavailable: "NotFound",
+  not_found: "NotFound",
   spawn_error: "Unknown",
   unknown: "Unknown"
 }

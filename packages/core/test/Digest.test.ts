@@ -61,6 +61,6 @@ describe("Digest", () => {
 
   it.effect("refuses to invent randomness", () =>
     Effect.sync(() => {
-      expect(() => Digest.crypto.nextIntUnsafe()).toThrow(/hashing only/)
+      expect(() => Digest.crypto.nextIntUnsafe()).toThrow(/SHA-256 only/)
     }))
 })

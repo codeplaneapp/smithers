@@ -67,7 +67,8 @@
     "incur": "0.5.1",
     "minimatch": "10.2.6",
     "@smthrs/targets": "workspace:*",
-    "tsx": "4.23.12"
+    "tsx": "4.23.12",
+    "typescript": "6.0.3"
   },
   "devDependencies": {
     "@effect/language-service": "0.87.1",
@@ -81,7 +82,6 @@
     "eslint-plugin-jsdoc": "64.1.0",
     "eslint-plugin-unicorn": "61.0.2",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
     "typescript-eslint": "8.65.0",
     "vitest": "4.1.9"
   }

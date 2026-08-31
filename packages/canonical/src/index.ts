@@ -1,8 +1,8 @@
 // Deep reviewed and polished by a human on 2026-08-10.
 
 /**
- * RFC 8785 canonical JSON, the serialization every digest in `flows` is taken
- * over.
+ * RFC 8785 canonical JSON, the serialization every digest in `@smthrs/flows`
+ * is taken over.
  *
  * ```ts
  * import { Canonical } from "@smthrs/canonical"

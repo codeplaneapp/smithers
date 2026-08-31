@@ -107,7 +107,12 @@ describe("PlanStore", () => {
   it.effect("refuses a value that is not a plan", () =>
     Effect.gen(function*() {
       const failure = yield* withStore((store) =>
-        Effect.flip(store.record({ planId: "", flow: "f", generation: 0, baseDigest: "x", digest: "x", nodes: [] }, 1))
+        Effect.flip(
+          store.record(
+            { planId: "", flow: "f", generation: 0, baseDigest: "x", digest: "x", nodes: [] } as unknown as Plan.Plan,
+            1
+          )
+        )
       )
       expect(failure).toMatchObject({ code: "invalid_plan" })
     }))

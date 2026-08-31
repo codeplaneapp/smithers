@@ -166,7 +166,7 @@ and the browser example is bundled by a real bundler.
 | `@smthrs/database` | Driver-neutral SQL contract with transactional write retry |
 | `@smthrs/capability` | Capability vocabulary and typed permission failures, shared by the kernel and `@smthrs/jj` |
 | `@smthrs/kernel` | The closed host service list, capability sets, grants, and permission-decorated host services |
-| `@smthrs/crypto` | Injected cryptographic schema transformations |
+| `@smthrs/crypto` | Strict injected and synchronous SHA-256 |
 | `@smthrs/keys` | Canonical flow keys |
 | `@smthrs/plan` | The persisted plan: a keyed action graph, its append-only store, and its diff |
 | `@smthrs/flow` | Flow definitions, actions, durable primitives, retry policy, and the `FlowRuntime` port |

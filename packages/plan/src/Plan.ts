@@ -19,6 +19,7 @@
  *
  * @since 0.1.0
  */
+import { StoredKey } from "@smthrs/keys"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
@@ -27,14 +28,15 @@ import * as KeyMaterial from "./KeyMaterial.ts"
 import * as StepKey from "./StepKey.ts"
 
 /**
- * The storage-facing form of a computed key. `StepKey.content` produces the
- * branded `Key`; a persisted plan carries the same string, validated.
+ * Compatibility name for the storage-facing key schema owned by
+ * `@smthrs/keys`. `StepKey.content` produces this branded value and a
+ * persisted plan validates it without re-hashing it.
  *
  * @since 0.1.0
  * @category schemas
  * @slop
  */
-export const KeyDigest = Schema.String.check(Schema.isPattern(/^key1_[0-9a-f]{64}$/))
+export const KeyDigest = StoredKey
 
 /**
  * What a node does to the world, declared. Paths only — measuring them is
@@ -483,7 +485,7 @@ const digestOf = (
   planId: string,
   flow: string,
   nodes: ReadonlyArray<PlanNode>
-): Effect.Effect<string, Schema.SchemaError, Crypto.Crypto> =>
+): Effect.Effect<StepKey.StepKey, Schema.SchemaError, Crypto.Crypto> =>
   StepKey.content({
     body: { kind: "plan", planId, flow },
     inputs: {

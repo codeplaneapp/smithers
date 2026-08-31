@@ -6,7 +6,7 @@
   "smthrs": {
     "group": "engine"
   },
-  "description": "Effect schemas for injected cryptographic operations",
+  "description": "Strict SHA-256 hashing with injected and synchronous Effect entry points",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",

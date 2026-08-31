@@ -24,13 +24,13 @@
  *
  * @since 0.1.0
  */
+import { digestSync } from "@smthrs/crypto"
 import { identity } from "effect/Function"
 import type * as Pipeable from "effect/Pipeable"
 import { pipeArguments } from "effect/Pipeable"
 import * as Schema from "effect/Schema"
 import type * as Types from "effect/Types"
 import * as Planned from "../Planned.ts"
-import { sha256 } from "./sha256.ts"
 
 /**
  * The runtime type identifier every node carries.
@@ -522,7 +522,7 @@ export const functionIdentity = (operation: unknown): FunctionIdentity => {
   return {
     _tag: "FunctionIdentity",
     algorithm: metadata === undefined ? "sha256-source-ephemeral/v4" : "sha256-source-captures/v3",
-    digest: sha256(metadata === undefined ? `${source}\0${ephemeral}` : `${source}\0${metadata.captures}`)
+    digest: digestSync(metadata === undefined ? `${source}\0${ephemeral}` : `${source}\0${metadata.captures}`)
   }
 }
 
@@ -632,7 +632,7 @@ export const andThen = (first: NodeAst, operation: Operation, source: unknown): 
 export const andThenNode = (first: NodeAst, next: NodeAst): AndThen => ({
   _tag: "AndThen",
   first,
-  continuation: { _tag: "FunctionIdentity", algorithm: "static-node/v1", digest: sha256("static-node") },
+  continuation: { _tag: "FunctionIdentity", algorithm: "static-node/v1", digest: digestSync("static-node") },
   next
 })
 

@@ -269,7 +269,10 @@ const deferred = new Set(deferredRoutes.map((entry) => entry.route))
 for (const [title, argv] of [
   ["the CLI invocations are the 1.0 command", ["scripts/normalize-bunx.ts", "--check"]],
   ["the argument placeholders are normalized", ["scripts/normalize-placeholders.ts", "--check"]],
-  ["the generated pages are current", ["scripts/generate-docs-pages.mjs", "--check"]]
+  ["the generated pages are current", ["scripts/generate-docs-pages.mjs", "--check"]],
+  ["the canonical package documentation is current", ["packages/canonical/scripts/docs.mjs", "--check"]],
+  ["the crypto package documentation is current", ["packages/crypto/scripts/docs.mjs", "--check"]],
+  ["the keys package documentation is current", ["packages/keys/scripts/docs.mjs", "--check"]]
 ]) {
   const result = spawnSync(process.execPath, argv.map((entry) => (entry.startsWith("-") ? entry : join(repoRoot, entry))), {
     cwd: repoRoot,

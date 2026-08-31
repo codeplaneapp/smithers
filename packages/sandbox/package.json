@@ -35,10 +35,18 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
+    "./ContainerSandbox": "./src/ContainerSandbox/index.ts",
+    "./ContainerSandbox/*": null,
+    "./DirectorySandbox": "./src/DirectorySandbox/index.ts",
+    "./DirectorySandbox/*": null,
     "./ProviderConformance": "./src/ProviderConformance/index.ts",
     "./ProviderConformance/*": null,
     "./RemoteChildProcessSpawner": "./src/RemoteChildProcessSpawner/index.ts",
     "./RemoteChildProcessSpawner/*": null,
+    "./Sandbox": "./src/Sandbox/index.ts",
+    "./Sandbox/*": null,
+    "./SandboxConformance": "./src/SandboxConformance/index.ts",
+    "./SandboxConformance/*": null,
     "./SandboxHealth": "./src/SandboxHealth/index.ts",
     "./SandboxHealth/*": null,
     "./SandboxSupervision": "./src/SandboxSupervision/index.ts",
@@ -69,6 +77,18 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
+      "./ContainerSandbox": {
+        "types": "./dist/esm/ContainerSandbox/index.d.ts",
+        "import": "./dist/esm/ContainerSandbox/index.js",
+        "require": "./dist/cjs/ContainerSandbox/index.js"
+      },
+      "./ContainerSandbox/*": null,
+      "./DirectorySandbox": {
+        "types": "./dist/esm/DirectorySandbox/index.d.ts",
+        "import": "./dist/esm/DirectorySandbox/index.js",
+        "require": "./dist/cjs/DirectorySandbox/index.js"
+      },
+      "./DirectorySandbox/*": null,
       "./ProviderConformance": {
         "types": "./dist/esm/ProviderConformance/index.d.ts",
         "import": "./dist/esm/ProviderConformance/index.js",
@@ -81,6 +101,18 @@
         "require": "./dist/cjs/RemoteChildProcessSpawner/index.js"
       },
       "./RemoteChildProcessSpawner/*": null,
+      "./Sandbox": {
+        "types": "./dist/esm/Sandbox/index.d.ts",
+        "import": "./dist/esm/Sandbox/index.js",
+        "require": "./dist/cjs/Sandbox/index.js"
+      },
+      "./Sandbox/*": null,
+      "./SandboxConformance": {
+        "types": "./dist/esm/SandboxConformance/index.d.ts",
+        "import": "./dist/esm/SandboxConformance/index.js",
+        "require": "./dist/cjs/SandboxConformance/index.js"
+      },
+      "./SandboxConformance/*": null,
       "./SandboxHealth": {
         "types": "./dist/esm/SandboxHealth/index.d.ts",
         "import": "./dist/esm/SandboxHealth/index.js",
@@ -117,6 +149,7 @@
   },
   "devDependencies": {
     "@effect/language-service": "0.87.1",
+    "@effect/platform-node": "4.0.0-rc.108",
     "@effect/vitest": "4.0.0-rc.108",
     "@eslint/js": "9.39.1",
     "@types/node": "25.9.5",

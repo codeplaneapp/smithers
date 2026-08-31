@@ -35,6 +35,7 @@ const server = await startLocalServer({
 
 let mainWindow: BrowserWindow | undefined
 let bridge: ReturnType<typeof startPackagedE2EBridge>
+const queuedRepositorySelections: Array<{ readonly path: string | null }> = []
 let shuttingDown = false
 const shutdown = async (): Promise<void> => {
   if (shuttingDown) return
@@ -51,12 +52,14 @@ if (headless) {
     handlers: {
       requests: {
         pickLocalRepository: async ({ access }) => {
-          const selectedPaths = await Utils.openFileDialog({
-            canChooseFiles: false,
-            canChooseDirectory: true,
-            allowsMultipleSelection: false
-          })
-          const selectedPath = selectedPaths.find((path) => path.trim() !== "")
+          const queued = queuedRepositorySelections.shift()
+          const selectedPath = queued === undefined
+            ? (await Utils.openFileDialog({
+                canChooseFiles: false,
+                canChooseDirectory: true,
+                allowsMultipleSelection: false
+              })).find((path) => path.trim() !== "")
+            : queued.path ?? undefined
           if (selectedPath === undefined) return { status: "cancelled" } as const
           return server.authorizeRepository(selectedPath, access)
         },
@@ -149,6 +152,12 @@ bridge = startPackagedE2EBridge({
     }
   },
   evaluate: evaluateInMainWindow,
+  queueRepositorySelection: (path) => {
+    if (queuedRepositorySelections.length > 0) {
+      throw new Error("A repository picker answer is already queued.")
+    }
+    queuedRepositorySelections.push({ path })
+  },
   screenshot: () => {
     const frame = mainWindow?.getFrame()
     if (frame === undefined) return null

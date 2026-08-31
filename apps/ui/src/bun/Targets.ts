@@ -34,6 +34,8 @@ export const resolveBuildCli = (
 ): string => {
   const explicit = env.SMITHERS_BUILD_CLI?.trim()
   if (explicit !== undefined && explicit !== "") return resolve(explicit)
+  const packaged = resolve(fromDir, "..", "build-cli", "launcher.mjs")
+  if (exists(packaged)) return packaged
   const fallback = resolve(fromDir, "..", "..", "..", "..", "packages", "build-cli", "src", "main.js")
   let dir = resolve(fromDir)
   while (true) {

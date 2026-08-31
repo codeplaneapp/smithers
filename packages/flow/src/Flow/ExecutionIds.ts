@@ -19,7 +19,7 @@
  * @since 0.1.0
  */
 import { Sha256 } from "@smthrs/crypto"
-import { Key } from "@smthrs/keys/Key"
+import { Key } from "@smthrs/keys"
 import * as Context from "effect/Context"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"

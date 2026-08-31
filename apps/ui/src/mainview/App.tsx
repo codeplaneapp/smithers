@@ -570,7 +570,11 @@ function App() {
                           className="message-cta"
                           data-flow={entry.message.action.flow}
                           autoFocus={entry.message.id === "auth-state"}
-                          onClick={() => controller.runCommand(entry.message.action?.flow ?? "")}
+                          onClick={() =>
+                            // A confirm flow's button carries the agent's argument text.
+                            entry.message.action?.args === undefined
+                              ? controller.runCommand(entry.message.action?.flow ?? "")
+                              : controller.runCommandArgs(entry.message.action.flow, entry.message.action.args)}
                         >
                           {entry.message.action.label}
                         </Button>

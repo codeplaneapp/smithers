@@ -1,23 +1,15 @@
 /**
- * FIPS 180-4 SHA-256, implemented with no dependency and no host primitive.
+ * FIPS 180-4 SHA-256 for the package's explicit synchronous entry point.
  *
- * The main tree hashes through `@smthrs/crypto`'s `Sha256`, which reads the
- * injected Effect `Crypto` service. That service is asynchronous everywhere it
- * is real: WebCrypto's `subtle.digest` returns a promise, and `node:crypto` is
- * not browser-safe. The agent-side harness computes content fingerprints inside
- * pure, synchronous constructors — a prompt section, a context-window segment,
- * a cell's source identity — so it needs a synchronous digest that produces the
- * *same bytes* the injected service would.
+ * This module owns the only handwritten SHA-256 implementation in Smithers.
+ * It accepts an immutable byte snapshot and returns a fresh 32-byte digest.
+ * Public input policy and hexadecimal representation live in `Sha256.ts`.
  *
- * This is that digest, and only that: `Digest.test.ts` asserts it agrees with
- * `@smthrs/crypto`'s `Sha256` under the platform Crypto layer for every vector
- * it checks, so the two hashing paths cannot silently diverge.
- *
- * @since 0.1.0
+ * @since 1.0.0
+ * @private
  */
 
-/** The FIPS 180-4 round constants: cube roots of the first 64 primes. */
-const K = new Uint32Array([
+const rounds = new Uint32Array([
   0x428a2f98,
   0x71374491,
   0xb5c0fbcf,
@@ -84,8 +76,7 @@ const K = new Uint32Array([
   0xc67178f2
 ])
 
-/** The initial hash value: square roots of the first eight primes. */
-const INITIAL = new Uint32Array([
+const initial = new Uint32Array([
   0x6a09e667,
   0xbb67ae85,
   0x3c6ef372,
@@ -96,32 +87,24 @@ const INITIAL = new Uint32Array([
   0x5be0cd19
 ])
 
-const rotr = (value: number, bits: number): number => (value >>> bits) | (value << (32 - bits))
-
-const encoder = new TextEncoder()
+const rotateRight = (value: number, bits: number): number => (value >>> bits) | (value << (32 - bits))
 
 /**
- * Returns the 32-byte SHA-256 digest of UTF-8 text or raw bytes.
+ * Returns a fresh 32-byte SHA-256 digest.
  *
- * @since 0.1.0
- * @category hashing
- * @slop
+ * @since 1.0.0
+ * @private
  */
-export const sha256 = (input: Uint8Array | string): Uint8Array => {
-  const message = typeof input === "string" ? encoder.encode(input) : input
-  // One padded buffer: the message, the 0x80 terminator, zero padding, and the
-  // 64-bit big-endian bit length, rounded up to whole 64-byte blocks.
+export const sha256 = (message: Uint8Array): Uint8Array => {
   const blocks = Math.floor((message.length + 8) / 64) + 1
   const padded = new Uint8Array(blocks * 64)
   padded.set(message)
   padded[message.length] = 0x80
   const view = new DataView(padded.buffer)
-  // Lengths beyond 2^53 bits cannot be reached from a JS byte array, so the
-  // high word is only ever the top bits of the byte length.
   view.setUint32(padded.length - 8, Math.floor(message.length / 0x20000000), false)
   view.setUint32(padded.length - 4, (message.length << 3) >>> 0, false)
 
-  const hash = INITIAL.slice()
+  const hash = initial.slice()
   const schedule = new Uint32Array(64)
   for (let block = 0; block < blocks; block++) {
     const offset = block * 64
@@ -129,9 +112,9 @@ export const sha256 = (input: Uint8Array | string): Uint8Array => {
     for (let index = 16; index < 64; index++) {
       const previous = schedule[index - 15]!
       const recent = schedule[index - 2]!
-      const s0 = rotr(previous, 7) ^ rotr(previous, 18) ^ (previous >>> 3)
-      const s1 = rotr(recent, 17) ^ rotr(recent, 19) ^ (recent >>> 10)
-      schedule[index] = (schedule[index - 16]! + s0 + schedule[index - 7]! + s1) >>> 0
+      const sigma0 = rotateRight(previous, 7) ^ rotateRight(previous, 18) ^ (previous >>> 3)
+      const sigma1 = rotateRight(recent, 17) ^ rotateRight(recent, 19) ^ (recent >>> 10)
+      schedule[index] = (schedule[index - 16]! + sigma0 + schedule[index - 7]! + sigma1) >>> 0
     }
 
     let a = hash[0]!
@@ -143,20 +126,20 @@ export const sha256 = (input: Uint8Array | string): Uint8Array => {
     let g = hash[6]!
     let h = hash[7]!
     for (let index = 0; index < 64; index++) {
-      const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)
+      const sigma1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25)
       const choose = (e & f) ^ (~e & g)
-      const temp1 = (h + s1 + choose + K[index]! + schedule[index]!) >>> 0
-      const s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)
+      const temporary1 = (h + sigma1 + choose + rounds[index]! + schedule[index]!) >>> 0
+      const sigma0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22)
       const majority = (a & b) ^ (a & c) ^ (b & c)
-      const temp2 = (s0 + majority) >>> 0
+      const temporary2 = (sigma0 + majority) >>> 0
       h = g
       g = f
       f = e
-      e = (d + temp1) >>> 0
+      e = (d + temporary1) >>> 0
       d = c
       c = b
       b = a
-      a = (temp1 + temp2) >>> 0
+      a = (temporary1 + temporary2) >>> 0
     }
     hash[0] = (hash[0]! + a) >>> 0
     hash[1] = (hash[1]! + b) >>> 0

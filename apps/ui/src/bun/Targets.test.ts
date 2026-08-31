@@ -64,6 +64,9 @@ describe("mapTargets", () => {
 describe("resolveBuildCli and sandbox paths", () => {
   test("SMITHERS_BUILD_CLI wins, else packages/build-cli/src/main.js from the checkout", () => {
     expect(resolveBuildCli({ SMITHERS_BUILD_CLI: "/x/main.js" }, "/ignored")).toBe("/x/main.js")
+    const packaged = "/Applications/Smithers.app/Contents/Resources/app/build-cli/launcher.mjs"
+    expect(resolveBuildCli({}, "/Applications/Smithers.app/Contents/Resources/app/bun", (path) => path === packaged))
+      .toBe(packaged)
     expect(resolveBuildCli({}, "/repo/apps/ui/src/bun", () => false)).toBe("/repo/packages/build-cli/src/main.js")
   })
 

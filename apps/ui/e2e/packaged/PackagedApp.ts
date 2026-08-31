@@ -2,13 +2,17 @@ import { spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { constants, existsSync } from "node:fs"
-import { access, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { access, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 90_000
 const REQUEST_TIMEOUT_MS = 5_000
+// The packaged backend gives Electrobun's WebView RPC 30 seconds. Keep the
+// HTTP client alive slightly longer so a slow native renderer request can
+// finish (or report its own timeout) instead of being abandoned in flight.
+const EVAL_REQUEST_TIMEOUT_MS = 35_000
 const EXIT_TIMEOUT_MS = 8_000
 const MAX_LOG_CHARACTERS = 512_000
 
@@ -45,6 +49,11 @@ interface BridgeEvalResponse<T> {
 interface ProcessExit {
   readonly code: number | null
   readonly signal: NodeJS.Signals | null
+}
+
+interface ExecutableProcess {
+  readonly pid: number
+  readonly group: number
 }
 
 const delay = (milliseconds: number): Promise<void> =>
@@ -149,8 +158,17 @@ export class PackagedApp {
       artifactsDirectory,
       await availableLoopbackPort()
     )
-    await app.startProcess()
-    return app
+    try {
+      await app.startProcess()
+      return app
+    } catch (error) {
+      try {
+        await app.cleanup()
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], "Packaged app launch and cleanup both failed.")
+      }
+      throw error
+    }
   }
 
   get bridgeOrigin(): string {
@@ -229,13 +247,18 @@ export class PackagedApp {
         },
         signal: controller.signal
       })
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(`${init.method ?? "GET"} ${path} timed out after ${timeoutMs}ms.`)
+      }
+      throw error
     } finally {
       clearTimeout(timeout)
     }
   }
 
-  private async json<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const response = await this.request(path, init)
+  private async json<T>(path: string, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+    const response = await this.request(path, init, timeoutMs)
     if (!response.ok) {
       throw new Error(`${init.method ?? "GET"} ${path} returned ${response.status}: ${await responseText(response)}`)
     }
@@ -284,8 +307,17 @@ export class PackagedApp {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ script: normalizeEvalScript(script) })
-    })
+    }, EVAL_REQUEST_TIMEOUT_MS)
     return (response.valueUndefined === true ? undefined : response.result) as T
+  }
+
+  /** Answers the next real native folder-picker RPC; null exercises cancel. */
+  async queueRepositorySelection(path: string | null): Promise<void> {
+    await this.json<{ readonly ok: true }>("/window/repository-picker", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: path === null ? null : resolve(path) })
+    })
   }
 
   async waitFor<T>(
@@ -341,6 +373,22 @@ export class PackagedApp {
         writeFile(join(this.artifactsDirectory, `${stem}-state.json`), `${JSON.stringify(value, null, 2)}\n`)
       )
       .catch(() => undefined)
+    await this.eval(`
+      ({
+        title: document.title,
+        url: location.href,
+        bodyText: document.body?.innerText ?? '',
+        testIds: Array.from(document.querySelectorAll('[data-testid]'), (node) => node.getAttribute('data-testid')),
+        cards: Array.from(document.querySelectorAll('.smithers-card'), (node) => ({
+          kind: node.getAttribute('data-kind'),
+          text: node.textContent
+        }))
+      })
+    `)
+      .then((value) =>
+        writeFile(join(this.artifactsDirectory, `${stem}-renderer.json`), `${JSON.stringify(value, null, 2)}\n`)
+      )
+      .catch(() => undefined)
     await this.screenshot(`${stem}.png`).catch(() => undefined)
   }
 
@@ -368,16 +416,80 @@ export class PackagedApp {
     }
   }
 
-  async quit(): Promise<void> {
-    if (this.child === undefined || processExited(this.child)) return
-    await this.request("/app/quit", { method: "POST" }).catch(() => undefined)
-    if (await this.waitForExit(EXIT_TIMEOUT_MS)) return
-    this.signalProcess("SIGTERM")
-    if (await this.waitForExit(EXIT_TIMEOUT_MS)) return
-    this.signalProcess("SIGKILL")
-    if (!await this.waitForExit(EXIT_TIMEOUT_MS)) {
-      throw new Error(`Packaged app process group did not terminate.\n${this.logs()}`)
+  private async executableProcesses(): Promise<Array<ExecutableProcess>> {
+    if (process.platform === "win32") return []
+    const identities = new Set([this.executable, await realpath(this.executable).catch(() => this.executable)])
+    const child = Bun.spawn(["/bin/ps", "-axo", "pid=,pgid=,command="], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe"
+    })
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text()
+    ])
+    if (exitCode !== 0) throw new Error(`Could not inspect packaged app processes: ${stderr.trim()}`)
+    return stdout.split("\n").flatMap((line) => {
+      const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(line)
+      if (match === null) return []
+      const command = match[3]!
+      if (![...identities].some((identity) => command === identity || command.startsWith(`${identity} `))) return []
+      const pid = Number(match[1])
+      const group = Number(match[2])
+      return pid === process.pid || !Number.isSafeInteger(pid) || !Number.isSafeInteger(group) ? [] : [{ pid, group }]
+    })
+  }
+
+  private signalExecutableProcesses(processes: ReadonlyArray<ExecutableProcess>, signal: NodeJS.Signals): void {
+    const groups = new Set<number>()
+    for (const candidate of processes) {
+      try {
+        if (candidate.group > 1 && !groups.has(candidate.group)) {
+          groups.add(candidate.group)
+          process.kill(-candidate.group, signal)
+        } else {
+          process.kill(candidate.pid, signal)
+        }
+      } catch {
+        // It exited between inspection and the signal.
+      }
     }
+  }
+
+  private async terminateExecutableProcesses(): Promise<void> {
+    let remaining = await this.executableProcesses()
+    if (remaining.length === 0) return
+    this.appendLog("runner", `terminating residual launcher pid(s): ${remaining.map(({ pid }) => pid).join(", ")}\n`)
+    this.signalExecutableProcesses(remaining, "SIGTERM")
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await delay(100)
+      remaining = await this.executableProcesses()
+      if (remaining.length === 0) return
+    }
+    this.signalExecutableProcesses(remaining, "SIGKILL")
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await delay(100)
+      remaining = await this.executableProcesses()
+      if (remaining.length === 0) return
+    }
+    throw new Error(`Packaged app launcher process(es) survived cleanup: ${remaining.map(({ pid }) => pid).join(", ")}`)
+  }
+
+  async quit(): Promise<void> {
+    if (this.child !== undefined && !processExited(this.child)) {
+      await this.request("/app/quit", { method: "POST" }).catch(() => undefined)
+      if (!await this.waitForExit(EXIT_TIMEOUT_MS)) {
+        this.signalProcess("SIGTERM")
+        if (!await this.waitForExit(EXIT_TIMEOUT_MS)) {
+          this.signalProcess("SIGKILL")
+          if (!await this.waitForExit(EXIT_TIMEOUT_MS)) {
+            throw new Error(`Packaged app process group did not terminate.\n${this.logs()}`)
+          }
+        }
+      }
+    }
+    await this.terminateExecutableProcesses()
   }
 
   async relaunch(): Promise<void> {
@@ -405,7 +517,44 @@ interface ProductionCandidate {
   readonly modifiedAt: number
 }
 
-/** Finds only stable, native-renderer macOS bundles produced by Electrobun. */
+const productionCandidate = async (bundle: string): Promise<ProductionCandidate | undefined> => {
+  const resources = join(bundle, "Contents", "Resources")
+  try {
+    const metadata = JSON.parse(await readFile(join(resources, "metadata.json"), "utf8")) as {
+      readonly channel?: unknown
+      readonly hash?: unknown
+      readonly identifier?: unknown
+    }
+    if (metadata.channel !== "stable" || metadata.identifier !== "sh.smithers.app" ||
+        typeof metadata.hash !== "string" || !/^[a-z0-9]+$/.test(metadata.hash)) {
+      return undefined
+    }
+    await access(join(resources, `${metadata.hash}.tar.zst`), constants.R_OK)
+    const executable = join(bundle, "Contents", "MacOS", "launcher")
+    await access(executable, constants.X_OK)
+    return { executable, modifiedAt: (await stat(executable)).mtimeMs }
+  } catch {
+    return undefined
+  }
+}
+
+/** Finds the validated production bundle at the root of a mounted stable DMG. */
+export const findMountedProductionAppExecutable = async (mountDirectory: string): Promise<string> => {
+  const candidates: Array<ProductionCandidate> = []
+  for (const entry of await readdir(mountDirectory, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.endsWith(".app")) continue
+    const candidate = await productionCandidate(join(mountDirectory, entry.name))
+    if (candidate !== undefined) candidates.push(candidate)
+  }
+  candidates.sort((left, right) => right.modifiedAt - left.modifiedAt)
+  const candidate = candidates[0]
+  if (candidate === undefined) {
+    throw new Error(`No stable packaged Electrobun launcher found on ${mountDirectory}.`)
+  }
+  return candidate.executable
+}
+
+/** Finds only stable macOS launcher bundles produced by Electrobun. */
 export const findProductionAppExecutable = async (uiDirectory: string): Promise<string> => {
   const buildDirectory = join(uiDirectory, "build")
   if (!existsSync(buildDirectory)) throw new Error(`${buildDirectory} does not exist; package the app first.`)
@@ -418,27 +567,15 @@ export const findProductionAppExecutable = async (uiDirectory: string): Promise<
     for (const entry of await readdir(platformDirectory, { withFileTypes: true })) {
       if (!entry.isDirectory() || !entry.name.endsWith(".app")) continue
       const bundle = join(platformDirectory, entry.name)
-      const resources = join(bundle, "Contents", "Resources")
-      const version = JSON.parse(await readFile(join(resources, "version.json"), "utf8")) as {
-        readonly channel?: unknown
-      }
-      const build = JSON.parse(await readFile(join(resources, "build.json"), "utf8")) as {
-        readonly defaultRenderer?: unknown
-        readonly buildEnvironment?: unknown
-      }
-      if (version.channel !== "stable" || build.buildEnvironment !== "stable" || build.defaultRenderer !== "native") {
-        continue
-      }
-      const executable = join(bundle, "Contents", "MacOS", "launcher")
-      await access(executable, constants.X_OK)
-      candidates.push({ executable, modifiedAt: (await stat(executable)).mtimeMs })
+      const candidate = await productionCandidate(bundle)
+      if (candidate !== undefined) candidates.push(candidate)
     }
   }
 
   candidates.sort((left, right) => right.modifiedAt - left.modifiedAt)
   const candidate = candidates[0]
   if (candidate === undefined) {
-    throw new Error(`No stable native-renderer Electrobun launcher found under ${buildDirectory}.`)
+    throw new Error(`No stable packaged Electrobun launcher found under ${buildDirectory}.`)
   }
   return candidate.executable
 }

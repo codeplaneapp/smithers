@@ -118,8 +118,8 @@ const decodeNode = Schema.decodeUnknownEffect(Schema.fromJsonString(Plan.PlanNod
 const PlanRow = Schema.Struct({
   plan_id: Schema.NonEmptyString,
   flow: Schema.NonEmptyString,
-  base_digest: Schema.NonEmptyString,
-  digest: Schema.NonEmptyString,
+  base_digest: Plan.KeyDigest,
+  digest: Plan.KeyDigest,
   generation: Schema.Int
 })
 

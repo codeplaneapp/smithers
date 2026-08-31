@@ -6,7 +6,7 @@
   "smthrs": {
     "group": "engine"
   },
-  "description": "Effect wrapper for RFC 8785 JSON canonicalization",
+  "description": "RFC 8785 canonical JSON as an Effect Schema",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",

@@ -4,7 +4,7 @@ description: "The content-addressed artifact store: bytes addressed by their own
 
 # @smthrs/artifacts
 
-The content-addressed artifact store: bytes addressed by their own SHA-256 digest. It is the other half of the cache: [`@smthrs/step-cache`](/api/step-cache) maps a step key to a recorded result, and a recorded result references its large outputs by digest. It depends on `effect` and `@smthrs/crypto` and nothing else, so the package root bundles for the browser.
+The content-addressed artifact store: bytes addressed by their own SHA-256 digest. It is the other half of the cache: [`@smthrs/step-cache`](/api/step-cache) maps a step key to a recorded result, and a recorded result references its large outputs by digest. It depends on `effect` and [`@smthrs/crypto`](/api/crypto) and nothing else, so the package root bundles for the browser.
 
 ```ts
 import { ArtifactStore, CombinedArtifacts, RemoteArtifacts } from "@smthrs/artifacts"

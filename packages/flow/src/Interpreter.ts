@@ -41,7 +41,7 @@
  *
  * @since 0.1.0
  */
-import { Key } from "@smthrs/keys/Key"
+import { Key } from "@smthrs/keys"
 import * as KeyMaterial from "@smthrs/plan/KeyMaterial"
 import * as Node from "@smthrs/plan/Node"
 import * as Planned from "@smthrs/plan/Planned"

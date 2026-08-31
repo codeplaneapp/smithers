@@ -33,6 +33,15 @@ export interface Commands {
    * calls the kill a no-op. Default {@link defaultStopsWithin}.
    */
   readonly stopsWithin?: Duration.Input | undefined
+  /**
+   * Whether the three commands are shell lines rather than a single program
+   * token. A rendered single token is POSIX-quoted whole, so a fixture like
+   * `printf 'hi'` reaches a shell-running session as one garbled word; a
+   * fixture that declares `shell` renders verbatim, which is what a session
+   * whose contract is "a POSIX line" has to be handed. Default `false`, the
+   * rendering every existing scripted fixture is keyed under.
+   */
+  readonly shell?: boolean | undefined
 }
 
 /**

@@ -15,24 +15,24 @@ Everything durable in Smithers is one of a small number of shapes. This page nam
 
 ### Where the shapes live
 
-| Shape | Table | Migration | Package |
-| --- | --- | --- | --- |
-| Journal entry | `flows_journal_events` | `0001_initial` | `@smthrs/journal` |
-| Journal checkpoint | `flows_journal_checkpoints` | `0002_checkpoints` | `@smthrs/journal` |
-| Run row | `flows_runs` | `0001_initial` | `@smthrs/run-store` |
-| Attempt row | `flows_attempts` | `0001_initial` | `@smthrs/run-store` |
-| Cache row | `flows_step_cache` | `0001_initial` | `@smthrs/step-cache` |
-| Deferred completion | `flows_deferred_completions` | `0001_initial` | `@smthrs/engine-store` |
-| Clock deadline | `flows_clock_deadlines` | `0001_initial` | `@smthrs/engine-store` |
-| Run-parent edge | `flows_run_parents` | created by `DurableEngineState.make` | `@smthrs/engine-store` |
-| Plan row | `flows_plans` | `0001_initial` | `@smthrs/plan` |
-| Plan node | `flows_plan_nodes` | `0001_initial` | `@smthrs/plan` |
-| Plan edge | `flows_plan_edges` | `0001_initial` | `@smthrs/plan` |
-| Frame snapshot | `flows_time_travel_snapshots` | `SqlTimeTravelStore.migrate` | `@smthrs/time-travel` |
-| Lineage edge | `flows_time_travel_edges` | `SqlTimeTravelStore.migrate` | `@smthrs/time-travel` |
-| Rewind audit | `flows_time_travel_audits` | `SqlTimeTravelStore.migrate` | `@smthrs/time-travel` |
-| Compensation receipt | `flows_time_travel_receipts` | `SqlTimeTravelStore.migrate` | `@smthrs/time-travel` |
-| Archived entry | `flows_time_travel_archive` | `SqlTimeTravelStore.migrate` | `@smthrs/time-travel` |
+| Shape                | Table                         | Migration                            | Package                |
+| -------------------- | ----------------------------- | ------------------------------------ | ---------------------- |
+| Journal entry        | `flows_journal_events`        | `0001_initial`                       | `@smthrs/journal`      |
+| Journal checkpoint   | `flows_journal_checkpoints`   | `0002_checkpoints`                   | `@smthrs/journal`      |
+| Run row              | `flows_runs`                  | `0001_initial`                       | `@smthrs/run-store`    |
+| Attempt row          | `flows_attempts`              | `0001_initial`                       | `@smthrs/run-store`    |
+| Cache row            | `flows_step_cache`            | `0001_initial`                       | `@smthrs/step-cache`   |
+| Deferred completion  | `flows_deferred_completions`  | `0001_initial`                       | `@smthrs/engine-store` |
+| Clock deadline       | `flows_clock_deadlines`       | `0001_initial`                       | `@smthrs/engine-store` |
+| Run-parent edge      | `flows_run_parents`           | created by `DurableEngineState.make` | `@smthrs/engine-store` |
+| Plan row             | `flows_plans`                 | `0001_initial`                       | `@smthrs/plan`         |
+| Plan node            | `flows_plan_nodes`            | `0001_initial`                       | `@smthrs/plan`         |
+| Plan edge            | `flows_plan_edges`            | `0001_initial`                       | `@smthrs/plan`         |
+| Frame snapshot       | `flows_time_travel_snapshots` | `SqlTimeTravelStore.migrate`         | `@smthrs/time-travel`  |
+| Lineage edge         | `flows_time_travel_edges`     | `SqlTimeTravelStore.migrate`         | `@smthrs/time-travel`  |
+| Rewind audit         | `flows_time_travel_audits`    | `SqlTimeTravelStore.migrate`         | `@smthrs/time-travel`  |
+| Compensation receipt | `flows_time_travel_receipts`  | `SqlTimeTravelStore.migrate`         | `@smthrs/time-travel`  |
+| Archived entry       | `flows_time_travel_archive`   | `SqlTimeTravelStore.migrate`         | `@smthrs/time-travel`  |
 
 Two shapes are in-memory only: the action step keys the engine derives, which are recomputed on every replay, and sync frames, which exist on the wire. A compiled plan's node keys are different: they are computed once at plan time and persisted in `flows_plan_nodes`.
 
@@ -51,17 +51,17 @@ new JournalEvent.Input({
 })
 ```
 
-| Field | Column | Meaning |
-| --- | --- | --- |
-| `runId` | `run_id` | which run this entry orders under |
-| `seq` | `seq` | canonical order within one run, assigned at commit |
-| `eventId` | `event_id` | `makeEventId(runId, sourceId, sourceSeq)`, unique across the table |
-| `sourceId` | `source_id` | producer identity |
-| `sourceSeq` | `source_seq` | producer-local order, unique per `(runId, sourceId)` |
-| `emittedAtMs` | `emitted_at_ms` | writer clock |
-| `eventType` | `event_type` | open string, indexed |
-| `payload` | `payload_json` | application-defined |
-| `meta` | `meta_json` | application-defined |
+| Field         | Column          | Meaning                                                            |
+| ------------- | --------------- | ------------------------------------------------------------------ |
+| `runId`       | `run_id`        | which run this entry orders under                                  |
+| `seq`         | `seq`           | canonical order within one run, assigned at commit                 |
+| `eventId`     | `event_id`      | `makeEventId(runId, sourceId, sourceSeq)`, unique across the table |
+| `sourceId`    | `source_id`     | producer identity                                                  |
+| `sourceSeq`   | `source_seq`    | producer-local order, unique per `(runId, sourceId)`               |
+| `emittedAtMs` | `emitted_at_ms` | writer clock                                                       |
+| `eventType`   | `event_type`    | open string, indexed                                               |
+| `payload`     | `payload_json`  | application-defined                                                |
+| `meta`        | `meta_json`     | application-defined                                                |
 
 Invariants:
 
@@ -73,10 +73,10 @@ Invariants:
 
 #### The two channels
 
-| Channel | Entry point | Durability | Use it for |
-| --- | --- | --- | --- |
+| Channel | Entry point   | Durability                                                               | Use it for                                             |
+| ------- | ------------- | ------------------------------------------------------------------------ | ------------------------------------------------------ |
 | durable | `emitDurable` | allocates and commits inside the write transaction; returns after COMMIT | lifecycle evidence, anything a recovery argument cites |
-| lossy | `emitLossy` | bounded non-blocking queue; returns before COMMIT | telemetry where a drop is acceptable |
+| lossy   | `emitLossy`   | bounded non-blocking queue; returns before COMMIT                        | telemetry where a drop is acceptable                   |
 
 :::warning
 An `Accepted` receipt from the lossy queue means the event entered the writer queue. A crash can still lose it.
@@ -84,10 +84,10 @@ An `Accepted` receipt from the lossy queue means the event entered the writer qu
 
 Overflow behavior is explicit:
 
-| Policy | Full queue |
-| --- | --- |
-| `reject` | fail with `queue_overflow` |
-| `drop-newest` | return `Dropped` |
+| Policy        | Full queue                                                       |
+| ------------- | ---------------------------------------------------------------- |
+| `reject`      | fail with `queue_overflow`                                       |
+| `drop-newest` | return `Dropped`                                                 |
 | `drop-oldest` | evict one queued event, return `Accepted` with eviction evidence |
 
 #### Writers and readers
@@ -98,32 +98,32 @@ Readers: `Journal.entries` pages history, `Journal.stream` replays then follows,
 
 #### Event types the engine writes
 
-| Event type | Written by |
-| --- | --- |
-| `flows.engine.run-decision` | run-row transitions |
-| `flows.engine.attempt-started`, `flows.engine.attempt-finished` | attempt lifecycle |
-| `flows.engine.cache-provenance`, `flows.engine.cache-conflict`, `flows.engine.cache-corruption` | cache admission and its failures |
-| `flows.engine.snapshot-identified` | compensable pre-image capture |
-| `flows.engine.hard-violation`, `flows.engine.expected-set-deviation` | step-boundary settle |
-| `flows.engine.deferred-completed`, `flows.engine.clock-scheduled` | durable primitives |
-| `flows.engine.interrupted` | cancellation and interrupt release |
-| `flows.kernel.grant.once.v1`, `.run.v1`, `.remembered.v1`, `.denied.v1`, `.envelope.v1` | `JournalGrantStore` |
-| `flows.time-travel.effect-boundary` | `EffectBoundary.guard` |
+| Event type                                                                                      | Written by                         |
+| ----------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `flows.engine.run-decision`                                                                     | run-row transitions                |
+| `flows.engine.attempt-started`, `flows.engine.attempt-finished`                                 | attempt lifecycle                  |
+| `flows.engine.cache-provenance`, `flows.engine.cache-conflict`, `flows.engine.cache-corruption` | cache admission and its failures   |
+| `flows.engine.snapshot-identified`                                                              | compensable pre-image capture      |
+| `flows.engine.hard-violation`, `flows.engine.expected-set-deviation`                            | step-boundary settle               |
+| `flows.engine.deferred-completed`, `flows.engine.clock-scheduled`                               | durable primitives                 |
+| `flows.engine.interrupted`                                                                      | cancellation and interrupt release |
+| `flows.kernel.grant.once.v1`, `.run.v1`, `.remembered.v1`, `.denied.v1`, `.envelope.v1`         | `JournalGrantStore`                |
+| `flows.time-travel.effect-boundary`                                                             | `EffectBoundary.guard`             |
 
 ### Run rows
 
 `RunStore.RunRow` is control state, written directly by compare-and-swap. It is not derived from the journal.
 
-| Column | Meaning |
-| --- | --- |
-| `run_id` | primary key, the execution id |
-| `status` | `pending`, `running`, `suspended`, `completed`, `failed`, `cancelled` |
-| `created_at_ms`, `started_at_ms`, `finished_at_ms` | lifecycle stamps |
-| `owner_host_id`, `owner_pid`, `owner_nonce`, `heartbeat_at_ms` | the ownership fence |
-| `claim_host_id`, `claim_pid`, `claim_nonce`, `claimed_at_ms` | the claim generation |
-| `state_json` | encoded payload and, once terminal, the encoded `Flow.Result` |
-| `parent_run_id`, `cancel_requested_at_ms` | lineage and cancellation guards |
-| `waiting_reason`, `waiting_wake_at_ms`, `waiting_token` | parked-run query and wake data |
+| Column                                                         | Meaning                                                               |
+| -------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `run_id`                                                       | primary key, the execution id                                         |
+| `status`                                                       | `pending`, `running`, `suspended`, `completed`, `failed`, `cancelled` |
+| `created_at_ms`, `started_at_ms`, `finished_at_ms`             | lifecycle stamps                                                      |
+| `owner_host_id`, `owner_pid`, `owner_nonce`, `heartbeat_at_ms` | the ownership fence                                                   |
+| `claim_host_id`, `claim_pid`, `claim_nonce`, `claimed_at_ms`   | the claim generation                                                  |
+| `state_json`                                                   | encoded payload and, once terminal, the encoded `Flow.Result`         |
+| `parent_run_id`, `cancel_requested_at_ms`                      | lineage and cancellation guards                                       |
+| `waiting_reason`, `waiting_wake_at_ms`, `waiting_token`        | parked-run query and wake data                                        |
 
 Invariants, enforced by table `CHECK` constraints rather than by convention:
 
@@ -141,11 +141,11 @@ Takeover also requires `LivenessEvidence`. Elapsed time alone does not prove an 
 
 A parked run carries a reason. `DurableEngineState.park` writes it, `wake` clears it, and `waitingRuns` is what a sweeper enumerates.
 
-| Reason | Source |
-| --- | --- |
+| Reason                                      | Source                        |
+| ------------------------------------------- | ----------------------------- |
 | declared, for example `approval` or `quota` | `FlowRuntime.annotateWaiting` |
-| `timer` | the earliest clock deadline |
-| `event` | anything else |
+| `timer`                                     | the earliest clock deadline   |
+| `event`                                     | anything else                 |
 
 An annotation is consumed once its awaited deferred resolves, so a later suspension parks under its own reason rather than a replayed one.
 
@@ -153,13 +153,13 @@ An annotation is consumed once its awaited deferred resolves, so a later suspens
 
 An attempt is addressed by `(runId, stepKeyDigest, attempt)`, where `stepKeyDigest` is the result of decoding the step key through `Sha256`.
 
-| Column | Meaning |
-| --- | --- |
-| `state` | the configurable in-progress vocabulary, then a terminal state |
-| `started_at_ms`, `finished_at_ms`, `heartbeat_at_ms` | lifecycle stamps |
-| `checkpoint_json` | up to 1 MiB; omitting one preserves the previous checkpoint |
-| `error_json`, `outcome_json` | the encoded exit |
-| `meta_json` | opaque, and where the `FileBoundary` is carried |
+| Column                                               | Meaning                                                        |
+| ---------------------------------------------------- | -------------------------------------------------------------- |
+| `state`                                              | the configurable in-progress vocabulary, then a terminal state |
+| `started_at_ms`, `finished_at_ms`, `heartbeat_at_ms` | lifecycle stamps                                               |
+| `checkpoint_json`                                    | up to 1 MiB; omitting one preserves the previous checkpoint    |
+| `error_json`, `outcome_json`                         | the encoded exit                                               |
+| `meta_json`                                          | opaque, and where the `FileBoundary` is carried                |
 
 Invariants: mutations are fenced by the current run owner, and the first fenced terminal transition wins. A later `finish` observes `StateChanged`. A persisted `failed` row replays by rethrowing the persisted domain failure, so a non-retryable failure matches on resume without another dispatch.
 
@@ -167,34 +167,49 @@ Invariants: mutations are fenced by the current run owner, and the first fenced 
 
 `flows_step_cache` maps a digest to a result. Writes are first-writer-wins.
 
-| Column | Meaning |
-| --- | --- |
-| `key_digest` | primary key, the `Sha256` transformation of the step key |
-| `result_json` | the encoded action success |
-| `meta_json` | opaque metadata |
-| `created_at_ms` | creation stamp |
-| `recorded_run_id`, `recorded_event_seq` | journal provenance |
+| Column                                  | Meaning                                                  |
+| --------------------------------------- | -------------------------------------------------------- |
+| `key_digest`                            | primary key, the `Sha256` transformation of the step key |
+| `result_json`                           | the encoded action success                               |
+| `meta_json`                             | opaque metadata                                          |
+| `created_at_ms`                         | creation stamp                                           |
+| `recorded_run_id`, `recorded_event_seq` | journal provenance                                       |
 
-| Put outcome | When |
-| --- | --- |
-| `Inserted` | no row existed |
-| `ExistingSame` | a row existed with equal content |
-| `Conflict` | a row existed with different content |
+| Put outcome    | When                                 |
+| -------------- | ------------------------------------ |
+| `Inserted`     | no row existed                       |
+| `ExistingSame` | a row existed with equal content     |
+| `Conflict`     | a row existed with different content |
 
 A `Conflict` is journalled as `flows.engine.cache-conflict` and handed to `Inconsistency`. The unwired core default is strict: journal, then fail the run.
 
 ### Step keys
 
-A step key is `key1_` followed by a lowercase SHA-256 digest. It is computed in `@smthrs/engine` above the encoded storage seam, so the memory and durable engines receive the same identity.
+{/* generated:keys-contract start */}
+
+`@smthrs/keys` owns one current derivation and the exact stored
+representations this release can validate. `deriveKey` maps canonical key
+material to `key1_` plus a SHA-256 digest. `KeyV1` and `StoredKey` validate that
+wire value unchanged; they never hash it. The compatibility `Key` schema still
+derives, so key-shaped text decoded through `Key` becomes a different key.
+Unknown versions are rejected until their complete format is implemented.
+Canonical serialization belongs to `@smthrs/canonical`, hashing belongs to
+`@smthrs/crypto`, and domain-specific material belongs to each caller.
+
+{/* generated:keys-contract end */}
 
 #### Canonical serialization
 
-Decoding through `Canonical` produces RFC 8785 JSON. The wrapped `canonicalize` library sorts object keys, preserves array order, uses deterministic number formatting, and rejects inputs that cannot produce valid canonical JSON. The wrapper additionally rejects lone Unicode surrogates. `Key` hashes that canonical document through Effect Crypto.
+{/* generated:canonical-serialization start */}
+
+Decoding through `Canonical` produces RFC 8785 JSON. The wrapped `canonicalize` library sorts object keys, preserves array order, uses deterministic number formatting, and rejects inputs that cannot produce valid canonical JSON. The wrapper additionally rejects lone Unicode surrogates.
+
+{/* generated:canonical-serialization end */}
 
 #### Cache keys
 
 ```ts
-yield* Schema.decodeUnknownEffect(Key)({ operation: "compile", version: 3 })
+yield * Schema.decodeUnknownEffect(Key)({ operation: "compile", version: 3 })
 ```
 
 A sealed action key changes when its caller identity, complete cache environment, or filesystem boundary changes. The engine owns that combined input; `@smthrs/keys` only hashes it.
@@ -219,13 +234,13 @@ const frame: Frame.Frame = { lineageId: "build-42/root", seq: 17 }
 
 A frame names a durable point by lineage plus journal sequence. The stores hold:
 
-| Shape | Columns | Notes |
-| --- | --- | --- |
-| Snapshot | `run_id`, `lineage_id`, `seq`, `change_id` | the jj change a frame maps to |
-| Lineage edge | `parent_run_id`, `parent_seq`, `child_run_id` (unique), `kind`, `attached` | `kind` is `child`, `fork`, or `continuation` |
-| Audit | `id`, `run_id`, `lineage_id`, `seq`, `status`, `rate_limit_json`, `detail_json` | one rewind attempt |
-| Receipt | `id`, `audit_id`, `effect_id`, `receipt_json` | one compensation outcome |
-| Archive | the full journal-entry columns plus `archived_at_ms` | the truncated suffix, moved rather than deleted |
+| Shape        | Columns                                                                         | Notes                                           |
+| ------------ | ------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Snapshot     | `run_id`, `lineage_id`, `seq`, `change_id`                                      | the jj change a frame maps to                   |
+| Lineage edge | `parent_run_id`, `parent_seq`, `child_run_id` (unique), `kind`, `attached`      | `kind` is `child`, `fork`, or `continuation`    |
+| Audit        | `id`, `run_id`, `lineage_id`, `seq`, `status`, `rate_limit_json`, `detail_json` | one rewind attempt                              |
+| Receipt      | `id`, `audit_id`, `effect_id`, `receipt_json`                                   | one compensation outcome                        |
+| Archive      | the full journal-entry columns plus `archived_at_ms`                            | the truncated suffix, moved rather than deleted |
 
 Rewind archives and truncates the suffix in one transaction, so an interrupted rewind is recoverable at startup rather than leaving a half-erased history.
 
@@ -233,16 +248,16 @@ Rewind archives and truncates the suffix in one transaction, so an interrupted r
 
 Sync shapes are on the wire, never in a table.
 
-| Shape | Contents |
-| --- | --- |
-| `Scope` | `Run` with a `runId`, or `Workspace` |
-| `RunCursor` | `runId` plus `afterSeq` |
-| `WorkspaceCursor` | an array of run cursors |
+| Shape                          | Contents                                           |
+| ------------------------------ | -------------------------------------------------- |
+| `Scope`                        | `Run` with a `runId`, or `Workspace`               |
+| `RunCursor`                    | `runId` plus `afterSeq`                            |
+| `WorkspaceCursor`              | an array of run cursors                            |
 | `ReadRequest` / `ReadResponse` | scope, cursor, limit; entries plus the next cursor |
-| `SubscribeRequest` | scope, cursors, and a credit count |
-| `EntriesFrame` | entries plus the next cursor |
-| `HeartbeatFrame` | emitted when no entries arrive |
-| `ClosedFrame` | the single terminal frame |
+| `SubscribeRequest`             | scope, cursors, and a credit count                 |
+| `EntriesFrame`                 | entries plus the next cursor                       |
+| `HeartbeatFrame`               | emitted when no entries arrive                     |
+| `ClosedFrame`                  | the single terminal frame                          |
 
 Because journal sequences may have holes, `afterSeq` means entries after this number. Credit bounds the frames one subscription emits. There is no acknowledgement RPC, so a client that needs more opens another subscription from its last durable cursor.
 
@@ -270,77 +285,98 @@ Every package runs `vitest` under v8 coverage with 100% thresholds on branches, 
 
 `packages/flows/test/vitestCoverageIsolation.test.ts` is the conformance suite over that arrangement. It pins each package's vitest config, each package's `scripts.test`, the root workspace globs and aggregator scripts, the CI steps that invoke them, the release workflow's pack-and-smoke ordering, and an allowlist of every coverage-ignore directive in any `src` tree with its count.
 
-| Gate | Command |
-| --- | --- |
-| typecheck | `pnpm run check` |
-| unit and integration tests | `pnpm test` |
-| lint and formatting | `pnpm run lint` |
-| import cycles | `pnpm run circular` |
-| browser and Node entry contract | `pnpm run browser` |
-| runnable examples | `pnpm run test:examples` |
+| Gate                            | Command                  |
+| ------------------------------- | ------------------------ |
+| typecheck                       | `pnpm run check`         |
+| unit and integration tests      | `pnpm test`              |
+| lint and formatting             | `pnpm run lint`          |
+| import cycles                   | `pnpm run circular`      |
+| browser and Node entry contract | `pnpm run browser`       |
+| runnable examples               | `pnpm run test:examples` |
 
 ### Required non-mocked cases
 
 These are the behaviors that have to be exercised against real implementations, because a double would prove nothing about them.
 
-| Behavior | Why a mock cannot prove it | Where it runs |
-| --- | --- | --- |
-| Transactional commit of state plus lifecycle entry | the guarantee is a property of the SQL transaction | `engine-store/test/WalAtomicity.test.ts` over real SQLite |
-| Crash at an interstitial, then restart | a double cannot lose a partial write | `WalAtomicity.test.ts`, `journal/test/Notifying.test.ts` |
-| Claim, activate, heartbeat, steal | the compare-and-swap is the database's | `run-store/test/RunStore.test.ts`, `engine-store/test/Ownership.test.ts` |
-| Hard-killed owner reclaim | needs the real stale-running sweep | `engine-store/test/HardKillReclaim.test.ts`, `StaleRunningAttempt.test.ts` |
-| Cross-connection write races | a single in-process double serializes by accident | `database/test/DatabaseWriteContract.test.ts`, `NodeDatabaseConcurrentOpen.test.ts`, `engine-store/test/CycleDetectionSql.test.ts` |
-| Durable schema | DDL and database invariants | `journal/test/Migrations.test.ts` |
-| Retry budget across process death | needs persisted attempt rows | `engine-store/test/RetryOrigin.test.ts`, `RetryExpiration.test.ts` |
-| Cache admission gating | needs real boundary evidence | `engine-store/test/CacheRecordGating.test.ts`, `CacheAdmissionSerialization.test.ts`, `CacheHitReadSetVerification.test.ts` |
-| Replay from persisted attempts | the point is that nothing is in memory | `engine-store/test/Replay.test.ts`, `engine/test/DurableAttemptResume.test.ts` |
-| Host adapters against the real machine | a stubbed spawner proves nothing about spawning | `platform-node/test/contract/NodeHost.contract.test.ts`, `jj/test/NodeJj.test.ts` |
-| Sync catch-up and follow | needs a real server, client, and journal | `sync/test/Server.test.ts`, `Client.test.ts`, `TransportFaults.test.ts` |
-| Rewind archive and truncate | atomicity again | `time-travel/test/Truncation.test.ts`, `Rewind.test.ts`, `RewindRollback.test.ts` |
-| Browser entry resolution | only a bundler can answer it | `scripts/browser-check.mjs`, `kernel/test/BrowserBundle.test.ts`, `time-travel/test/BrowserBundle.test.ts` |
-| Every documented example program | a doc sample that never runs drifts | `examples/test/*.test.ts` |
+| Behavior                                           | Why a mock cannot prove it                         | Where it runs                                                                                                                      |
+| -------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Transactional commit of state plus lifecycle entry | the guarantee is a property of the SQL transaction | `engine-store/test/WalAtomicity.test.ts` over real SQLite                                                                          |
+| Crash at an interstitial, then restart             | a double cannot lose a partial write               | `WalAtomicity.test.ts`, `journal/test/Notifying.test.ts`                                                                           |
+| Claim, activate, heartbeat, steal                  | the compare-and-swap is the database's             | `run-store/test/RunStore.test.ts`, `engine-store/test/Ownership.test.ts`                                                           |
+| Hard-killed owner reclaim                          | needs the real stale-running sweep                 | `engine-store/test/HardKillReclaim.test.ts`, `StaleRunningAttempt.test.ts`                                                         |
+| Cross-connection write races                       | a single in-process double serializes by accident  | `database/test/DatabaseWriteContract.test.ts`, `NodeDatabaseConcurrentOpen.test.ts`, `engine-store/test/CycleDetectionSql.test.ts` |
+| Durable schema                                     | DDL and database invariants                        | `journal/test/Migrations.test.ts`                                                                                                  |
+| Retry budget across process death                  | needs persisted attempt rows                       | `engine-store/test/RetryOrigin.test.ts`, `RetryExpiration.test.ts`                                                                 |
+| Cache admission gating                             | needs real boundary evidence                       | `engine-store/test/CacheRecordGating.test.ts`, `CacheAdmissionSerialization.test.ts`, `CacheHitReadSetVerification.test.ts`        |
+| Replay from persisted attempts                     | the point is that nothing is in memory             | `engine-store/test/Replay.test.ts`, `engine/test/DurableAttemptResume.test.ts`                                                     |
+| Host adapters against the real machine             | a stubbed spawner proves nothing about spawning    | `platform-node/test/contract/NodeHost.contract.test.ts`, `jj/test/NodeJj.test.ts`                                                  |
+| Sync catch-up and follow                           | needs a real server, client, and journal           | `sync/test/Server.test.ts`, `Client.test.ts`, `TransportFaults.test.ts`                                                            |
+| Rewind archive and truncate                        | atomicity again                                    | `time-travel/test/Truncation.test.ts`, `Rewind.test.ts`, `RewindRollback.test.ts`                                                  |
+| Browser entry resolution                           | only a bundler can answer it                       | `scripts/browser-check.mjs`, `kernel/test/BrowserBundle.test.ts`, `time-travel/test/BrowserBundle.test.ts`                         |
+| Every documented example program                   | a doc sample that never runs drifts                | `examples/test/*.test.ts`                                                                                                          |
 
 ### Inventory
 
-| Package | Suites | Notable coverage |
-| --- | --- | --- |
-| `@smthrs/platform-node` | 2 | the shared contract suite (`@smthrs/kernel/test/contract`) against the Node bundle, once with explicit expectations and once taking every default |
-| `@smthrs/platform-bun` | 1 | the same suite against the Bun bundle, which runs the Node fallback under vitest |
-| `@smthrs/platform-browser` | 5 | the same suite against `BrowserHost`, plus the ZenFS filesystem adapter and the just-bash spawner |
-| `@smthrs/jj` | 4 | the contract and its no-op, the jj CLI against a real repository, error classification against a scripted binary, and the Bun and browser layers |
-| `@smthrs/sandbox` | 3 | provider adaptation and cancellation, the scripted test provider, and the deadline-bounded health probe |
-| `@smthrs/platform-browser` | 4 | the filesystem adapter's operations and bounded streaming against a real directory, the spawner's command rendering, rejected inputs, handle capabilities, and its serialized uninterruptible boundary, and the aggregate layer |
-| `@smthrs/journal` | 12 | durable and lossy admission, fencing, transactions, retention, redaction, projections, migrations |
-| `@smthrs/run-store` | 9 | run and attempt stores, ownership arbitration, run metadata, migrations |
-| `@smthrs/step-cache` | 6 | cache admission, eviction, provenance, migrations |
-| `@smthrs/database` | 4 | the write-serialization contract, concurrent open, artifact shape |
-| `@smthrs/kernel` | 23 | capability parsing, matching, subsumption, tiers, ambient sets, grants and their journal persistence, every decorated service |
-| `@smthrs/canonical` | 1 | RFC 8785 vectors, malformed Unicode, boundary values, and large values |
-| `@smthrs/crypto` | 1 | injected SHA-256, digest validation, platform failures, and irreversibility |
-| `@smthrs/keys` | 2 | canonical flow keys and rejected inputs |
-| `@smthrs/plan` | 6 | the step-key compiler and its collision cases, plan compilation, conflict annotation and append, the append-only store, the node AST, planned-value refusals, build refusals |
-| `@smthrs/artifacts` | 5 | the store contract, the memory and filesystem implementations, the combined tier, and the remote client |
-| `@smthrs/flow` | 12 | flow definitions, execution ids, results, suspension, action combinators and retry pinning, deferreds, clocks, queues, retry policy data, step identity |
-| `@smthrs/engine` | 18 | action identity and keys, ordinal stability, keyless concurrency, tiers, durable attempt resume, the memory engine, retry decisions, proxies |
-| `@smthrs/engine-store` | 61 | the durability matrix: ownership, adoption, sweeps, parking, cancellation, cycles, attempt persistence, cache admission, boundaries, WAL atomicity, fault matrix |
-| `@smthrs/sync` | 20 | protocol, server paging and workspace merge, client cursors and gaps, transport faults, branch commands, presence, share, projection, convergence |
-| `@smthrs/time-travel` | 21 | the `TimeTravel` service surface, replay, fork and its lineage, rewind with claims, concurrency and rollback, truncation, compensation, recovery, both stores |
-| `@smthrs/flows` | 2 | the barrel namespace list against the derived package universe, and the coverage-isolation conformance suite |
-| `@smthrs/examples` | 11 | every documentation example, run end to end against the real packages |
+| Package                         | Suites | Notable coverage                                                                                                                                                                                                                |
+| ------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@smthrs/platform-node`         | 2      | the shared contract suite (`@smthrs/kernel/test/contract`) against the Node bundle, once with explicit expectations and once taking every default                                                                               |
+| `@smthrs/platform-bun`          | 1      | the same suite against the Bun bundle, which runs the Node fallback under vitest                                                                                                                                                |
+| `@smthrs/platform-browser`      | 5      | the same suite against `BrowserHost`, plus the ZenFS filesystem adapter and the just-bash spawner                                                                                                                               |
+| `@smthrs/jj`                    | 4      | the contract and its no-op, the jj CLI against a real repository, error classification against a scripted binary, and the Bun and browser layers                                                                                |
+| `@smthrs/sandbox`               | 3      | provider adaptation and cancellation, the scripted test provider, and the deadline-bounded health probe                                                                                                                         |
+| `@smthrs/platform-browser`      | 4      | the filesystem adapter's operations and bounded streaming against a real directory, the spawner's command rendering, rejected inputs, handle capabilities, and its serialized uninterruptible boundary, and the aggregate layer |
+| `@smthrs/journal`               | 12     | durable and lossy admission, fencing, transactions, retention, redaction, projections, migrations                                                                                                                               |
+| `@smthrs/run-store`             | 9      | run and attempt stores, ownership arbitration, run metadata, migrations                                                                                                                                                         |
+| `@smthrs/step-cache`            | 6      | cache admission, eviction, provenance, migrations                                                                                                                                                                               |
+| `@smthrs/database`              | 4      | the write-serialization contract, concurrent open, artifact shape                                                                                                                                                               |
+| `@smthrs/kernel`                | 23     | capability parsing, matching, subsumption, tiers, ambient sets, grants and their journal persistence, every decorated service                                                                                                   |
+| `@smthrs/canonical`             | 1      | RFC 8785 vectors, malformed Unicode, boundary values, and large values                                                                                                                                                          |
+| `@smthrs/crypto` | 3      | package-owned vector, property, host-adversary, error, redaction, and parity coverage                                                                                                                                           |
+| `@smthrs/keys`     | 3      | frozen `key1_` vectors, stored-key identity and version rejection, canonical equality properties, typed host failures, diagnostic redaction, irreversibility, and browser-safe source imports                                   |
+| `@smthrs/plan`                  | 6      | the step-key compiler and its collision cases, plan compilation, conflict annotation and append, the append-only store, the node AST, planned-value refusals, build refusals                                                    |
+| `@smthrs/artifacts`             | 5      | the store contract, the memory and filesystem implementations, the combined tier, and the remote client                                                                                                                         |
+| `@smthrs/flow`                  | 12     | flow definitions, execution ids, results, suspension, action combinators and retry pinning, deferreds, clocks, queues, retry policy data, step identity                                                                         |
+| `@smthrs/engine`                | 18     | action identity and keys, ordinal stability, keyless concurrency, tiers, durable attempt resume, the memory engine, retry decisions, proxies                                                                                    |
+| `@smthrs/engine-store`          | 61     | the durability matrix: ownership, adoption, sweeps, parking, cancellation, cycles, attempt persistence, cache admission, boundaries, WAL atomicity, fault matrix                                                                |
+| `@smthrs/sync`                  | 20     | protocol, server paging and workspace merge, client cursors and gaps, transport faults, branch commands, presence, share, projection, convergence                                                                               |
+| `@smthrs/time-travel`           | 21     | the `TimeTravel` service surface, replay, fork and its lineage, rewind with claims, concurrency and rollback, truncation, compensation, recovery, both stores                                                                   |
+| `@smthrs/flows`                 | 2      | the barrel namespace list against the derived package universe, and the coverage-isolation conformance suite                                                                                                                    |
+| `@smthrs/examples`              | 11     | every documentation example, run end to end against the real packages                                                                                                                                                           |
+
+{/* generated:keys-testing start */}
+
+The `@smthrs/keys` suite freezes `key1_` wire vectors, stored-key
+identity and version rejection, canonical equality properties, typed host
+failures, diagnostic redaction, irreversibility, and browser-safe source
+imports. The repository browser and Bun gates run the same public package and
+wire format.
+
+{/* generated:keys-testing end */}
+
+{/* generated:crypto-testing start */}
+
+The package-owned Crypto suite pins published SHA-256 and UTF-8 vectors, a
+million-byte vector, malformed Unicode, direct and schema APIs, and
+synchronous, injected, and Web Crypto parity. Property tests compare both entry
+points over arbitrary valid text and byte views. Adversarial service tests cover
+input snapshots, malformed or mutable output, missing services, exact stable
+failures with preserved causes, diagnostic redaction, and irreversibility.
+
+{/* generated:crypto-testing end */}
 
 ### Explicit gaps
 
 These are known and unclosed. None of them is covered by an existing suite.
 
-| Gap | Consequence |
-| --- | --- |
-| No Postgres or PGlite backend, so the write contract runs on SQLite only | dialect parity is asserted by classification code, not by execution |
-| No production whole-tree `StepBoundary`, so no suite exercises a genuine cross-run cache hit | admission is proven to be refused, and never proven to be correct when granted |
-| No automatic time-travel record creation from ordinary execution | the protocols are tested against records the suites write by hand |
-| No cross-process event-driven wake | `EventDrivenWake.test.ts` proves the in-process `WakeBus` resumes a waiting caller without a poll tick; wake across processes is still covered through polling and sweeps only |
-| No multi-process ownership test spanning real operating-system processes | takeover is covered in-process with injected liveness evidence |
-| No Cloudflare or Vercel engine-store deployment | the hosted adapters live in a separate repository and are not gated here |
-| No compaction under a live cross-process follower | `JournalCompaction.test.ts` proves checkpoint/compact atomicity, the reader gate, and the typed `compacted` resync signal in-process; a follower in another OS process is not exercised |
+| Gap                                                                                          | Consequence                                                                                                                                                                             |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No Postgres or PGlite backend, so the write contract runs on SQLite only                     | dialect parity is asserted by classification code, not by execution                                                                                                                     |
+| No production whole-tree `StepBoundary`, so no suite exercises a genuine cross-run cache hit | admission is proven to be refused, and never proven to be correct when granted                                                                                                          |
+| No automatic time-travel record creation from ordinary execution                             | the protocols are tested against records the suites write by hand                                                                                                                       |
+| No cross-process event-driven wake                                                           | `EventDrivenWake.test.ts` proves the in-process `WakeBus` resumes a waiting caller without a poll tick; wake across processes is still covered through polling and sweeps only          |
+| No multi-process ownership test spanning real operating-system processes                     | takeover is covered in-process with injected liveness evidence                                                                                                                          |
+| No Cloudflare or Vercel engine-store deployment                                              | the hosted adapters live in a separate repository and are not gated here                                                                                                                |
+| No compaction under a live cross-process follower                                            | `JournalCompaction.test.ts` proves checkpoint/compact atomicity, the reader gate, and the typed `compacted` resync signal in-process; a follower in another OS process is not exercised |
 
 ### Adding a test
 

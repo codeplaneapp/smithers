@@ -54,12 +54,12 @@ afterEach(() => {
 })
 
 describe("/verbose", () => {
-  test("registers for every session as a listed, user-only flow", async () => {
+  test("registers for every session as a listed, model-invocable flow", async () => {
     const { controller } = await fresh()
     const entry = controller.commands.find("debug.verbose")
     expect(entry).toBeDefined()
     expect(entry?.metadata.hidden).not.toBe(true)
-    expect(entry?.binding.descriptor.modelInvocable).toBe(false)
+    expect(entry?.binding.descriptor.modelInvocable).toBe(true)
     expect(controller.slashItems("verb").map((item) => item.flow.name)).toContain("debug.verbose")
   })
 

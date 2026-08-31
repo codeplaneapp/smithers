@@ -120,11 +120,13 @@ describe("source purity", () => {
       moduleSpecifiers(source).map((specifier) => `${relative(sourceRoot, file)} -> ${specifier}`)
     )
     expect(found.sort()).toEqual([
-      "Key.ts -> @smthrs/canonical/Canonical",
+      "Key.ts -> @smthrs/canonical",
       "Key.ts -> @smthrs/crypto",
+      "Key.ts -> effect/Crypto",
       "Key.ts -> effect/Effect",
       "Key.ts -> effect/Schema",
       "Key.ts -> effect/SchemaGetter",
+      "Key.ts -> effect/SchemaIssue",
       "index.ts -> ./Key.ts"
     ])
   })

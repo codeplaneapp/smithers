@@ -238,6 +238,11 @@ export interface AppController {
   readonly toggleVerbose: () => void
   /** Record one settled flow invocation (every trigger) — the verbose trace's source. */
   readonly traceFlow: (record: Extract<AppTransition, { type: "flow.invoked" }>) => void
+  /**
+   * A `confirm` flow asked for by the MODEL: post the confirmation message
+   * whose action button runs the flow as the user (Commands.ts runAs).
+   */
+  readonly requestFlowConfirmation: (name: string, args: string | null, label: string) => void
   /** The `recommend` flow: regenerate the next-step pills for the current state (Recommend.ts). */
   readonly recommend: () => Promise<void>
   /** The `explain` flow: one side turn on the explainer role, answered as an embedded card (controller/explain.ts). */
@@ -586,6 +591,26 @@ export const createAppController = (
   }
 
   /*
+   * A `confirm` flow the MODEL asked for: the act is consequential (land a
+   * PR, remove a credential), so the agent's invocation never runs the
+   * handler — it posts this message, and the button runs the flow as the
+   * user. The honest middle between "user-only" (the agent cannot even ask,
+   * the refusal Will read as a bug) and silent execution.
+   */
+  const requestFlowConfirmation = (name: string, args: string | null, label: string): void => {
+    store.dispatch({
+      type: "message.appended",
+      actor: "system",
+      text: `Smithers wants to ${label}${args === null ? "" : ` (${args})`}. It runs when you confirm.`,
+      action: {
+        flow: name,
+        ...(args === null ? {} : { args }),
+        label: `Confirm: ${label}`
+      }
+    })
+  }
+
+  /*
    * The next-step recommender: the registry does not exist yet at this point,
    * so every dependency is a closure read at regeneration time.
    */
@@ -833,6 +858,7 @@ export const createAppController = (
     noteCommandRun,
     toggleVerbose,
     traceFlow,
+    requestFlowConfirmation,
     recommend,
     explain,
     showCommandCatalog,
@@ -1044,6 +1070,7 @@ export const createAppController = (
     noteCommandRun,
     toggleVerbose,
     traceFlow,
+    requestFlowConfirmation,
     recommend,
     explain,
     showCommandCatalog,

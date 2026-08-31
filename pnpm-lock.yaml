@@ -901,6 +901,9 @@ importers:
       tsx:
         specifier: 4.23.12
         version: 4.23.12
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
     devDependencies:
       '@effect/language-service':
         specifier: 0.87.1
@@ -935,9 +938,6 @@ importers:
       madge:
         specifier: 8.0.0
         version: 8.0.0(supports-color@10.2.2)(typescript@6.0.3)
-      typescript:
-        specifier: 6.0.3
-        version: 6.0.3
       typescript-eslint:
         specifier: 8.65.0
         version: 8.65.0(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3)
@@ -3225,6 +3225,9 @@ importers:
 
   packages/plan:
     dependencies:
+      '@smthrs/crypto':
+        specifier: 1.0.0-rc.0
+        version: link:../crypto
       '@smthrs/database':
         specifier: 1.0.0-rc.0
         version: link:../database
@@ -3707,6 +3710,9 @@ importers:
       '@effect/language-service':
         specifier: 0.87.1
         version: 0.87.1
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1(supports-color@10.2.2))
       '@effect/vitest':
         specifier: 4.0.0-rc.108
         version: 4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.9)

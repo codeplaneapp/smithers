@@ -48,6 +48,14 @@ export interface FlowMetadata {
   readonly requires?: ReadonlyArray<string>
   /** Host services this flow needs; unavailable flows do not register. */
   readonly runtime?: ReadonlyArray<RuntimeCapability>
+  /**
+   * A consequential act the MODEL may ask for but never perform: an
+   * agent invocation does not run the handler — it posts a confirmation
+   * message whose action button runs the flow as the user. The string is
+   * the human-readable label of the act ("land pull request #12").
+   * User invocations are unaffected.
+   */
+  readonly confirm?: string
 }
 
 /**

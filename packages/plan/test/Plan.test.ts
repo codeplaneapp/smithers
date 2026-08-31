@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import * as KeyMaterial from "../src/KeyMaterial.ts"
 import * as Plan from "../src/Plan.ts"
 import * as PlanDiff from "../src/PlanDiff.ts"
@@ -479,7 +480,7 @@ describe("PlanDiff.diff", () => {
         ...before,
         nodes: [{
           ...before.nodes[0]!,
-          key: `key1_${"0".repeat(64)}`,
+          key: Schema.decodeUnknownSync(Plan.KeyDigest)(`key1_${"0".repeat(64)}`),
           material: {
             ...before.nodes[0]!.material,
             version: "flows/key-material/v2" as KeyMaterial.KeyMaterial["version"]

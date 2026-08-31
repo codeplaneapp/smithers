@@ -1,77 +1,195 @@
-// Deep reviewed and polished by a human on 2026-08-10.
+// Deep reviewed and polished by a human on 2026-08-31.
 
 /**
- * The canonical flow key: `key1_` followed by a SHA-256 digest.
+ * Canonical flow-key derivation and stored-key validation.
  *
- * A key is how Smithers names work — the step cache, the attempt rows, and the
- * plan all address by it — so it must be derivable from the value alone and
- * identical on every host. That is why it is a digest of the value's
- * {@link Canonical} RFC 8785 form rather than of whatever `JSON.stringify`
- * happened to produce.
- *
- * The `key1_` prefix is a version marker. A future derivation gets `key2_`,
- * and both remain decodable, so a stored key never becomes ambiguous about
- * which scheme produced it.
+ * Deriving a key and parsing one from storage are deliberately separate
+ * operations. {@link deriveKey} canonicalizes structured input and hashes it;
+ * {@link StoredKey} validates an already-derived wire value without changing
+ * it. The legacy {@link Key} schema remains the derivation transformation.
  *
  * @since 0.1.0
  */
-import { Canonical } from "@smthrs/canonical/Canonical"
-import { Sha256 } from "@smthrs/crypto"
+import { Canonical } from "@smthrs/canonical"
+import { digest } from "@smthrs/crypto"
+import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as SchemaGetter from "effect/SchemaGetter"
+import * as SchemaIssue from "effect/SchemaIssue"
+
+const keyV1Pattern = /^key1_[0-9a-f]{64}$/
 
 /**
- * Validated storage representation of a key.
+ * The exact persisted representation produced by the version-one derivation.
  *
- * The pattern accepts any version marker, not just `key1_`: the marker exists
- * so a stored key from a future derivation scheme stays readable, and a
- * pattern anchored to one version would refuse exactly the keys the marker
- * promises to keep decodable. Only decoding — deriving a fresh key from a
- * value — is pinned to the current scheme.
+ * Decoding validates and returns the input unchanged. It performs no hashing
+ * and requires no `Crypto` service.
  *
- * @private
- * @since 0.1.0
+ * @category schemas
+ * @since 1.0.0
  */
-const KeyValue = Schema.String.check(Schema.isPattern(/^key[1-9][0-9]*_[0-9a-f]{64}$/)).pipe(
-  Schema.brand("@smthrs/keys/Key")
-)
+export const KeyV1 = Schema.String.check(
+  Schema.isPattern(keyV1Pattern, {
+    expected: "key1_ followed by a 64-character lowercase hexadecimal SHA-256 digest"
+  })
+).pipe(Schema.brand("@smthrs/keys/Key"))
 
 /**
- * A versioned key: a `key<n>_` version marker followed by a lowercase
- * hexadecimal SHA-256 digest. The current derivation produces `key1_`;
- * validation accepts every version so stored keys stay readable.
+ * A validated version-one stored key.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type KeyV1 = typeof KeyV1.Type
+
+/**
+ * Every stored-key representation this release understands.
+ *
+ * This is intentionally equal to {@link KeyV1}. A future format joins this
+ * schema only when its complete representation and derivation are supported;
+ * unknown `key<n>_` prefixes are rejected instead of guessed.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const StoredKey = KeyV1
+
+/**
+ * A stored key supported by this release.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type StoredKey = typeof StoredKey.Type
+
+/**
+ * Compatibility name for the validated key value produced by {@link Key}.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
-export type Key = typeof Key.Type
+export type Key = StoredKey
 
 /**
- * One-way schema transformation from any canonical JSON value to a `Key`.
+ * Stable failure codes returned by {@link deriveKey}.
  *
- * The input is serialized with RFC 8785 canonical JSON and hashed through
- * the injected Effect `Crypto` service. Decoding therefore requires `Crypto`.
- * The key cannot be encoded back into the value that produced it.
+ * @category schemas
+ * @since 1.0.0
+ */
+export const KeyDerivationErrorCode = Schema.Literals([
+  "canonicalization_failed",
+  "digest_failed"
+])
+
+/**
+ * Stable failure codes returned by {@link deriveKey}.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type KeyDerivationErrorCode = typeof KeyDerivationErrorCode.Type
+
+/**
+ * A safe, typed failure from canonicalization or injected hashing.
+ *
+ * `message` never contains the input. `cause` retains the original schema or
+ * crypto failure for diagnostics.
+ *
+ * @category errors
+ * @since 1.0.0
+ */
+export class KeyDerivationError extends Schema.TaggedError<KeyDerivationError>()(
+  "@smthrs/keys/KeyDerivationError",
+  {
+    code: KeyDerivationErrorCode,
+    message: Schema.String,
+    cause: Schema.Unknown
+  }
+) {}
+
+const derivationFailure = (
+  code: KeyDerivationErrorCode,
+  message: string,
+  cause: unknown
+): KeyDerivationError => new KeyDerivationError({ code, message, cause })
+
+/**
+ * Derives the current flow-key format from structured input.
+ *
+ * The input is serialized with {@link Canonical}, hashed as UTF-8 SHA-256
+ * through the injected Effect `Crypto` service, and prefixed with `key1_`.
+ * Callers should include a stable domain and version in structured key
+ * material when identities from different protocols must not overlap.
+ *
+ * @category derivation
+ * @since 1.0.0
+ */
+export const deriveKey = (
+  input: unknown
+): Effect.Effect<KeyV1, KeyDerivationError, Crypto.Crypto> =>
+  Effect.gen(function*() {
+    const serialized = yield* Schema.decodeUnknownEffect(Canonical)(input, {
+      reportInput: false
+    }).pipe(
+      Effect.mapError((cause) =>
+        derivationFailure(
+          "canonicalization_failed",
+          "Key input could not be canonicalized",
+          cause
+        )
+      )
+    )
+    const hash = yield* digest(serialized).pipe(
+      Effect.mapError((cause) =>
+        derivationFailure(
+          "digest_failed",
+          "Canonical key material could not be hashed",
+          cause
+        )
+      )
+    )
+
+    return `key1_${hash}` as KeyV1
+  })
+
+const schemaIssue = (error: KeyDerivationError): SchemaIssue.InvalidValue =>
+  new SchemaIssue.InvalidValue({
+    message: `[${error.code}] ${error.message}`,
+    code: error.code,
+    cause: error
+  })
+
+const KeySchema = Schema.Unknown.pipe(
+  Schema.decodeTo(KeyV1, {
+    decode: SchemaGetter.transformOrFail((input) => deriveKey(input).pipe(Effect.mapError(schemaIssue))),
+    encode: SchemaGetter.forbidden(
+      () => "A key cannot be converted back into its input"
+    )
+  })
+).annotate({
+  identifier: "@smthrs/keys/Key",
+  // Key material may contain secrets or large payloads. Never retain it in a
+  // schema issue, even when an enclosing caller requests input reporting.
+  parseOptions: { reportInput: false }
+})
+
+/**
+ * Compatibility schema that derives a fresh key from its decoded input.
+ *
+ * This does not parse stored keys: decoding the text `key1_…` derives a new
+ * key from that text. Use {@link StoredKey} to validate persisted or received
+ * key values. Prefer {@link deriveKey} when typed operational failures are
+ * useful; this schema maps them to redacted schema issues for composition.
+ *
+ * `Key.derive`, `Key.StoredKey`, and `Key.KeyV1` mirror the named exports for
+ * discoverability.
  *
  * @category transformations
  * @since 0.1.0
- * @slop
  */
-export const Key = Schema.Unknown.pipe(
-  Schema.decodeTo(KeyValue, {
-    decode: SchemaGetter.transformOrFail((input) =>
-      Effect.gen(function*() {
-        const serialized = yield* Schema.decodeUnknownEffect(Canonical)(input).pipe(
-          Effect.mapError((error) => error.issue)
-        )
-        const digest = yield* Schema.decodeUnknownEffect(Sha256)(serialized).pipe(
-          Effect.mapError((error) => error.issue)
-        )
-        return `key1_${digest}`
-      })
-    ),
-    encode: SchemaGetter.forbidden(() => "A key cannot be converted back into its input")
-  })
-)
+export const Key = Object.assign(KeySchema, {
+  derive: deriveKey,
+  StoredKey,
+  KeyV1
+})
