@@ -26,7 +26,22 @@ interface HarnessRow {
   launch: { argv: Array<string> }
 }
 
-const HARNESS_IDS = ["claude", "codex", "gemini", "kimi", "opencode", "crush", "amp", "cursor-agent", "hermes", "pi"]
+const HARNESS_IDS = [
+  "claude",
+  "codex",
+  "gemini",
+  "kimi",
+  "opencode",
+  "opencode-kimi",
+  "crush",
+  "amp",
+  "cursor-agent",
+  "hermes",
+  "pi"
+]
+
+/** The binary a harness launches: its own id, except variants that share one (OpenCode · Kimi runs `opencode`). */
+const launchBinary = (id: string): string => (id === "opencode-kimi" ? "opencode" : id)
 
 /** The email `~/.claude.json` says Claude Code is signed in as, or undefined. */
 const claudeEmail = (): string | undefined => {
@@ -78,7 +93,7 @@ test("GET /api/harnesses lists every contract id; claude and codex are signed in
   expect(harnesses.map((harness) => harness.id)).toEqual(HARNESS_IDS)
   for (const harness of harnesses) {
     expect(["signed-in", "api-key", "binary-only", "unavailable"]).toContain(harness.status)
-    expect(harness.launch.argv[0]).toBe(harness.id)
+    expect(harness.launch.argv[0]).toBe(launchBinary(harness.id))
     expect(harness.launch.argv).not.toContain("--dangerously-skip-permissions")
     if (harness.status === "unavailable") expect(harness.binary).toBeNull()
     else expect(harness.binary?.startsWith("/")).toBe(true)

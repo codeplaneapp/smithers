@@ -147,6 +147,9 @@ interface Signal {
 
 const binaryOnly: Signal = { status: "binary-only", account: null }
 
+/** The Kimi model OpenCode's "Kimi For Coding" provider serves (`opencode models kimi-for-coding`). */
+export const OPENCODE_KIMI_MODEL = "kimi-for-coding/k3"
+
 const apiKey = (name: string): Signal => ({ status: "api-key", account: { label: name } })
 
 /** `~/x` for a path below home, so a label stays short. */
@@ -243,7 +246,36 @@ export const DETECTORS: ReadonlyArray<Detector> = [
       const auth = readJson(host, join(host.home, ".local", "share", "opencode", "auth.json"))
       const providers = auth === null ? [] : Object.keys(auth).filter((id) => hasNonEmptyStringDeep(auth[id]))
       if (providers.length > 0) return { status: "signed-in", account: { label: providers.join(", ") } }
-      const key = firstEnv(host.env, ["OPENCODE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"])
+      const key = firstEnv(host.env, [
+        "OPENCODE_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "KIMI_API_KEY"
+      ])
+      return key === undefined ? binaryOnly : apiKey(key)
+    }
+  },
+  /*
+   * OpenCode on the Kimi credential. `opencode providers list` (1.18.22)
+   * names the provider "Kimi For Coding", read from KIMI_API_KEY, and
+   * `opencode models kimi-for-coding` lists k3 as its model; `-m` takes
+   * provider/model. Same binary as `opencode`, so an absent binary reads
+   * unavailable exactly like the plain entry, and a present binary with no
+   * Kimi credential is binary-only rather than a launch that fails inside.
+   */
+  {
+    id: "opencode-kimi",
+    displayName: "OpenCode · Kimi",
+    binary: "opencode",
+    launch: ["opencode", "--model", OPENCODE_KIMI_MODEL],
+    signal: (host) => {
+      const auth = readJson(host, join(host.home, ".local", "share", "opencode", "auth.json"))
+      if (auth !== null && hasNonEmptyStringDeep(auth["kimi-for-coding"])) {
+        return { status: "signed-in", account: { label: "kimi-for-coding" } }
+      }
+      const key = firstEnv(host.env, ["KIMI_API_KEY"])
       return key === undefined ? binaryOnly : apiKey(key)
     }
   },

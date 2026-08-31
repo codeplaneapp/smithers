@@ -148,8 +148,33 @@ describe("the table", () => {
     expect(byId.gemini).toMatchObject({ status: "signed-in", account: { email: "me@gmail.com" } })
     expect(byId.kimi).toMatchObject({ status: "signed-in", account: { label: "kimi-code" } })
     expect(byId.opencode).toMatchObject({ status: "signed-in", account: { label: "anthropic" } })
+    // The same binary with no Kimi credential: installed, not launchable on Kimi.
+    expect(byId["opencode-kimi"]).toMatchObject({
+      status: "binary-only",
+      binary: "/Users/u/.opencode/bin/opencode",
+      launch: { argv: ["opencode", "--model", "kimi-for-coding/k3"] }
+    })
     expect(byId.hermes).toMatchObject({ status: "signed-in", account: { label: "~/.hermes/auth.json" } })
     expect(byId.pi).toMatchObject({ status: "binary-only", binary: "/usr/local/bin/pi" })
+  })
+
+  test("opencode-kimi: the kimi-for-coding credential in auth.json, else KIMI_API_KEY", async () => {
+    const withAuth = await detectHarnessesWith(host({
+      binaries: ["/Users/u/.opencode/bin/opencode"],
+      files: { "/Users/u/.local/share/opencode/auth.json": JSON.stringify({ "kimi-for-coding": { type: "api", key: "k" } }) }
+    }))
+    expect(withAuth.find((harness) => harness.id === "opencode-kimi")).toMatchObject({
+      status: "signed-in",
+      account: { label: "kimi-for-coding" }
+    })
+    const withEnv = await detectHarnessesWith(host({
+      binaries: ["/Users/u/.opencode/bin/opencode"],
+      env: { KIMI_API_KEY: "sk-kimi" }
+    }))
+    const byId = Object.fromEntries(withEnv.map((harness) => [harness.id, harness]))
+    expect(byId["opencode-kimi"]).toMatchObject({ status: "api-key", account: { label: "KIMI_API_KEY" } })
+    // The plain OpenCode entry counts the Kimi key as a credential too.
+    expect(byId.opencode).toMatchObject({ status: "api-key", account: { label: "KIMI_API_KEY" } })
   })
 
   test("versions are probed in parallel for installed binaries only, null when the probe fails", async () => {
