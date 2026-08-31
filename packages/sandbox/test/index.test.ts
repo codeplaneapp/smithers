@@ -9,8 +9,12 @@ import * as Sandbox from "../src/index.ts"
 describe("@smthrs/sandbox barrel", () => {
   it("re-exports every module as its own namespace", () => {
     expect(Object.keys(Sandbox).sort()).toEqual([
+      "ContainerSandbox",
+      "DirectorySandbox",
       "ProviderConformance",
       "RemoteChildProcessSpawner",
+      "Sandbox",
+      "SandboxConformance",
       "SandboxHealth",
       "SandboxSupervision"
     ])
@@ -30,5 +34,6 @@ describe("@smthrs/sandbox barrel", () => {
     expect(
       new Sandbox.SandboxSupervision.SandboxUnhealthy({ session: "s", reason: "ping_failed", probes: 1 })._tag
     ).toBe("sandbox-unhealthy")
+    expect(Sandbox.Sandbox.Provider.key).toBe("@smthrs/sandbox/Sandbox/Provider")
   })
 })

@@ -1,0 +1,163 @@
+import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
+import * as CommandLine from "@smthrs/kernel/CommandLine"
+import { ContainerSandbox, DirectorySandbox, Sandbox } from "@smthrs/sandbox"
+import { Bash, Edit, Read, Write } from "@smthrs/std"
+import { Effect, FileSystem, Layer, Path } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { spawnSync } from "node:child_process"
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterAll, describe, expect, it } from "vitest"
+
+const root = realpathSync(mkdtempSync(join(tmpdir(), "smthrs-sandbox-tool-placement-")))
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true })
+})
+
+const platform = Layer.provideMerge(
+  NodeChildProcessSpawner.layer,
+  Layer.merge(NodeFileSystem.layer, Path.layer)
+)
+
+const original = ["alpha=one", "payload=written unchanged", "omega=three"].join("\n")
+const oldString = "payload=written unchanged"
+const newString = "payload=edited unchanged"
+const edited = original.replace(oldString, newString)
+
+interface ToolPlacementOptions {
+  readonly session: string
+  readonly input: string
+  readonly output: string
+  readonly probeAlpine?: boolean
+}
+
+const placeTools = (provider: Sandbox.Provider, options: ToolPlacementOptions) =>
+  Effect.scoped(
+    Effect.gen(function*() {
+      const services = yield* Layer.build(Sandbox.layerHost(provider, { session: options.session }))
+
+      const write = yield* Write.run({ path: options.input, content: original }).pipe(
+        Effect.provide(services)
+      )
+      const hostInputExistsAfterWrite = existsSync(options.input)
+      const read = yield* Read.run({ path: options.input }).pipe(Effect.provide(services))
+      const edit = yield* Edit.run({
+        path: options.input,
+        oldString,
+        newString
+      }).pipe(Effect.provide(services))
+      const bash = yield* Bash.run({
+        mode: "hermetic",
+        command: `cat ${CommandLine.quote(options.input)} | tee ${CommandLine.quote(options.output)}`,
+        reads: [options.input],
+        writes: [options.output]
+      }).pipe(Effect.provide(services))
+      const product = yield* Read.run({ path: options.output }).pipe(Effect.provide(services))
+
+      let osRelease: Bash.Output | undefined
+      if (options.probeAlpine === true) {
+        osRelease = yield* Bash.run({
+          mode: "hermetic",
+          command: "cat /etc/os-release",
+          reads: ["/etc/os-release"],
+          writes: []
+        }).pipe(Effect.provide(services))
+      }
+
+      return { write, read, edit, bash, product, hostInputExistsAfterWrite, osRelease }
+    })
+  )
+
+type ToolPlacement = Effect.Success<ReturnType<typeof placeTools>>
+
+const expectRoundTrip = (result: ToolPlacement, input: string, output: string) => {
+  expect(result.write).toEqual({
+    path: input,
+    bytesWritten: new TextEncoder().encode(original).byteLength,
+    created: true
+  })
+  expect(result.read).toEqual({
+    content: original,
+    startLine: 1,
+    endLine: 3,
+    totalLines: 3,
+    truncated: false
+  })
+  expect(result.edit).toEqual({
+    path: input,
+    replacements: 1,
+    startLine: 1,
+    endLine: 3,
+    hunk: edited
+  })
+  expect(result.bash).toEqual({
+    exitCode: 0,
+    stdout: edited,
+    stderr: "",
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    stdoutDroppedBytes: 0,
+    stderrDroppedBytes: 0
+  })
+  expect(result.product).toEqual({
+    content: edited,
+    startLine: 1,
+    endLine: 3,
+    totalLines: 3,
+    truncated: false
+  })
+  expect(result.write.path).toBe(input)
+  expect(result.product.content).toBe(edited)
+  expect(output).not.toBe(input)
+}
+
+const identity = `${process.pid}-${Date.now()}`
+
+describe("standard tool placement on DirectorySandbox", () => {
+  it("runs the unchanged std handlers against real files and processes", async () => {
+    const input = join(root, `tool-input-${identity}.txt`)
+    const output = join(root, `tool-output-${identity}.txt`)
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const spawner = yield* ChildProcessSpawner
+        const provider = DirectorySandbox.make({ fs, spawner, root })
+        return yield* placeTools(provider, {
+          session: `directory-tool-placement-${identity}`,
+          input,
+          output
+        })
+      }).pipe(Effect.provide(platform))
+    )
+
+    expectRoundTrip(result, input, output)
+    expect(result.hostInputExistsAfterWrite).toBe(true)
+  }, 30_000)
+})
+
+const dockerAvailable = spawnSync("docker", ["info"], { stdio: "ignore" }).status === 0
+
+describe.skipIf(!dockerAvailable)("standard tool placement on ContainerSandbox", () => {
+  it("runs the unchanged std handlers inside a real Alpine machine", async () => {
+    const input = `/workspace/tool-input-${identity}.txt`
+    const output = `/workspace/tool-output-${identity}.txt`
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner
+        const provider = ContainerSandbox.make({ spawner, image: "alpine:3.20" })
+        return yield* placeTools(provider, {
+          session: `container-tool-placement-${identity}`,
+          input,
+          output,
+          probeAlpine: true
+        })
+      }).pipe(Effect.provide(platform))
+    )
+
+    expectRoundTrip(result, input, output)
+    expect(result.hostInputExistsAfterWrite).toBe(false)
+    expect(result.osRelease).toMatchObject({ exitCode: 0, stderr: "" })
+    expect(result.osRelease?.stdout).toContain("Alpine Linux")
+  }, 180_000)
+})

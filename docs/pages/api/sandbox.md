@@ -22,7 +22,7 @@ const program = Effect.gen(function*() {
 }).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
 ```
 
-The package depends on `@smthrs/kernel`, for `CommandLine.render` alone, and on nothing else in the workspace: a sandbox is one way to satisfy `ChildProcessSpawner`, so it sits above the closed host list rather than inside it. It bundles for the browser because host access arrives through a provider or injected host services.
+The package depends on `@smthrs/kernel`, for `CommandLine` rendering and quoting alone, and on nothing else in the workspace: a sandbox is one way to satisfy `ChildProcessSpawner`, so it sits above the closed host list rather than inside it. It bundles for the browser because host access arrives through a provider or injected host services.
 
 ## Entry points
 
@@ -83,7 +83,7 @@ rather than when the remote process ends. Both are stated in the module header.
 
 This page is the public API reference for the package's eight namespace exports: `RemoteChildProcessSpawner`, `ProviderConformance`, `Sandbox`, `SandboxConformance`, `DirectorySandbox`, `ContainerSandbox`, `SandboxHealth`, and `SandboxSupervision`. Provider packages adapt their SDK sessions to the spawn-only `RemoteChildProcessSpawner.Provider` or lifecycle-owning `Sandbox.Provider`; this package derives Effect host services, conformance checks, health, and supervision from those seams.
 
-It depends on `@smthrs/kernel`, for `CommandLine.render` alone, and nothing else in the workspace. That direction is deliberate: a sandbox is one way to satisfy `ChildProcessSpawner`, so it sits above the closed host list rather than inside it.
+It depends on `@smthrs/kernel`, for `CommandLine` rendering and quoting alone, and nothing else in the workspace. That direction is deliberate: a sandbox is one way to satisfy `ChildProcessSpawner`, so it sits above the closed host list rather than inside it.
 
 ### RemoteChildProcessSpawner
 
@@ -214,7 +214,8 @@ const useMachine = Effect.scoped(
   Effect.gen(function*() {
     const session = yield* provider.acquire("run:01J...")
     yield* session.writeFile(`${session.workdir}/src/input.bin`, bytes)
-    return yield* session.spawn("pnpm test", {})
+    const process = yield* session.spawn("test -f src/input.bin", {})
+    return yield* process.exitCode
   })
 )
 ```
@@ -231,7 +232,7 @@ The probe surface is intentionally honest. `stat` reports exact file size, but m
 const machineHost = Sandbox.layerHost(provider, { session: "run:01J..." })
 ```
 
-`layerHost` acquires one session for the layer scope and derives `ChildProcessSpawner`, `FileSystem`, and `Path` from it. This layer context is what a caller hands to an agent's standard filesystem and shell tools to place both on the same machine. The machine boundary, not a path guard, denies ambient host access; closing the layer scope runs provider teardown.
+`layerHost` acquires one session for the layer scope and derives `ChildProcessSpawner`, `FileSystem`, and `Path` from it. This layer context is what a caller hands to an agent's standard filesystem and shell tools to place both on the same machine. When the provider supplies isolation, the machine boundary, not a path guard, denies ambient host access. Closing the layer scope runs provider teardown.
 
 ### SandboxConformance
 
