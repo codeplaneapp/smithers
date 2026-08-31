@@ -386,12 +386,13 @@ export const runtimes = (source = readFileSync(contractPath, "utf8")) =>
 /**
  * Every place a document states the size of the published set.
  *
- * Three spellings appear in this tree: `N names frozen in` cites section 3.1
+ * Four spellings appear in this tree: `N names frozen in` cites section 3.1
  * directly, "the N packages `node scripts/pack-release.mjs --names` prints"
- * cites the roster the contract freezes, and the Phase 3 validation record
- * states it as a table cell. A number written by hand goes stale the moment a
- * package joins the release, and these are the documents a maintainer reads
- * before publishing.
+ * cites the roster the contract freezes, the Phase 3 validation record states
+ * it as a table cell, and the contract's own cross-references write the
+ * shortest form, `N names in §3.1`. A number written by hand goes stale the
+ * moment a package joins the release, and these are the documents a maintainer
+ * reads before publishing.
  *
  * @example
  * ```ts
@@ -401,6 +402,7 @@ export const runtimes = (source = readFileSync(contractPath, "utf8")) =>
 export const citedPackageCounts = (body) =>
   [
     ...body.matchAll(/(\d+) names frozen in/g),
+    ...body.matchAll(/(\d+) names in (?:§|section )3\.1/g),
     ...body.matchAll(/the (\d+) packages `node scripts\/pack-release\.mjs --names` prints/g),
     ...body.matchAll(/^\| Published packages \| (\d+) \|/gm)
   ].map((match) => Number(match[1]))
