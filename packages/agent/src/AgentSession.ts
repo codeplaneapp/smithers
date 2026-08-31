@@ -725,7 +725,13 @@ export const requestCancel = (
     }
     const outcome = yield* runs.requestCancel(input.runId, at).pipe(Effect.mapError(failure(input.runId)))
     if (outcome._tag === "Terminal") return { _tag: "Terminal", status: outcome.status } as const
-    return outcome._tag === "NotFound" ? "unknown" : "recorded"
+    if (outcome._tag === "NotFound") return "unknown"
+    // The store already distinguishes the write that recorded the request from
+    // the one that found it recorded, and the control plane needs that
+    // difference: `Control.cancel` runs with `replay: false`, so every repeat
+    // re-executes, and attributing each one journals a fresh
+    // `control.run.cancel-requested` for a cancellation that happened once.
+    return outcome._tag === "AlreadyRequested" ? "already-requested" : "recorded"
   })
 
 /** The deferred name a `WaitFor` wait point is recorded under. */

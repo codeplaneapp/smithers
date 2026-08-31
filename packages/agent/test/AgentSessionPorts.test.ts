@@ -141,7 +141,10 @@ describe("AgentSession.requestCancel", () => {
     expect(observed.before.cancelRequestedAtMs).toBeNull()
     expect(observed.first).toBe("recorded")
     expect(observed.after.cancelRequestedAtMs).not.toBeNull()
-    expect(observed.again).toBe("recorded")
+    // The repeat is accepted and changes nothing, and it says so: the port
+    // reports which ask recorded the request, because `Control.cancel` keys its
+    // attribution event on that and every repeat re-runs the whole mutation.
+    expect(observed.again).toBe("already-requested")
     expect(observed.repeated.cancelRequestedAtMs).toBe(observed.after.cancelRequestedAtMs)
   })
 

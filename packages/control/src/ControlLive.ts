@@ -831,26 +831,51 @@ export const layer: Layer.Layer<
             if (typeof record !== "string") {
               return { _tag: "Terminal", runId: input.runId, status: record.status }
             }
-            const principal = yield* runtime.stampPrincipal(input.principal)
-            // Attribution before the interrupt, and in the mutation's own
-            // transaction. A cancellation that committed without it would be
-            // durable and anonymous, and nothing afterwards could say who asked.
-            yield* emit(
-              input.runId,
-              Cancellation.requestedEventType,
-              json({
-                runId: input.runId,
-                source: "control",
-                principal,
-                ...(input.reason === undefined ? {} : { reason: input.reason })
-              })
-            )
+            // Attribution is keyed on the request being NEWLY recorded. A
+            // cancel that committed without it would be durable and anonymous,
+            // and nothing afterwards could say who asked — but this mutation
+            // runs with `replay: false`, so an operator asking a second time
+            // re-executes it, and attributing every ask journaled one
+            // `control.run.cancel-requested` per ask for one cancellation.
+            // `already-requested` is the engine saying the column was set
+            // before this call arrived, so the record already exists.
+            //
+            // It stays BEFORE the interrupt, and in the mutation's own
+            // transaction.
+            if (record !== "already-requested") {
+              const principal = yield* runtime.stampPrincipal(input.principal)
+              yield* emit(
+                input.runId,
+                Cancellation.requestedEventType,
+                json({
+                  runId: input.runId,
+                  source: "control",
+                  principal,
+                  ...(input.reason === undefined ? {} : { reason: input.reason })
+                })
+              )
+            }
             const run = yield* runtime.interrupt(input.runId).pipe(
-              // Another live process owns the run. The request is durable and
-              // that process will act on it, so the honest receipt is
-              // `Accepted` — the cancel was taken — rather than `ClaimLost`,
-              // which reads as a refusal.
-              Effect.catchTag("/control/ClaimLost", () => Effect.succeed(undefined))
+              Effect.catchTag("/control/ClaimLost", () =>
+                // Another LIVE process owns the run. The request is durable and
+                // that process will act on it, so the honest receipt is
+                // `Accepted` — the cancel was taken — rather than `ClaimLost`,
+                // which reads as a refusal.
+                live(current.status)
+                  ? Effect.succeed(undefined)
+                  // A PARKED run has no owner: that is what a park is. Nothing
+                  // is going to read the request and finish the run, so the
+                  // process that asked is the only one that can, and it takes
+                  // the park to do it. Answering `Accepted` here left the row
+                  // parked forever — `ps` still showed it waiting, `gc` skipped
+                  // it, and a later `approve` blocked on a settlement no writer
+                  // was going to produce (Phase 7 smoke section 3, "the parked
+                  // rows cannot be terminated"). A claim that loses the race is
+                  // a peer that just took the park, which is the case above.
+                  : runtime.resume(input.runId).pipe(
+                    Effect.andThen(runtime.interrupt(input.runId)),
+                    Effect.catchTag("/control/ClaimLost", () => Effect.succeed(undefined))
+                  ))
             )
             // The terminal status, in the run's own journal, because this is
             // the only writer of it. `AgentSession.settle` deliberately writes

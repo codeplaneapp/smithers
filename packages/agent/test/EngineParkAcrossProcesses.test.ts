@@ -514,3 +514,76 @@ describe("a parked run resumed by a later process", () => {
     expect(notes).toContain("engine-park-second:decision=true")
   }, 180_000)
 })
+
+/**
+ * Reads the engine row until it settles, or gives up.
+ *
+ * A cancel against a parked run is durable on the engine row the moment the
+ * control mutation commits; the row itself is finalized by the engine's own
+ * parked-run sweep, which every composition holding `engine.db` ticks once per
+ * `Ownership.heartbeatInterval`. So the bound is one tick of whatever engine is
+ * alive, not an unbounded wait, and this reads for thirty of them.
+ */
+const awaitEngineStatus = (
+  root: string,
+  runId: string,
+  status: string,
+  attempts = 300
+): Effect.Effect<EngineRow | undefined> =>
+  Effect.gen(function*() {
+    const row = readEngineRun(root, runId)
+    if (row?.status === status || attempts <= 0) return row
+    yield* Effect.sleep("100 millis")
+    return yield* awaitEngineStatus(root, runId, status, attempts - 1)
+  })
+
+describe("a run parked on an in-run ask that a later process cancels", () => {
+  it("settles both rows and answers the ask with the run's terminal status", async () => {
+    frame = askFrame
+    const root = makeRoot()
+    // One process's worth of lifetime: launch, park on the ask, exit.
+    const parked = await Effect.runPromise(
+      Effect.gen(function*() {
+        const id = yield* launch
+        const approval = yield* askPayload(id)
+        yield* awaitParkEvent(id)
+        return { runId: id, approval }
+      }).pipe(Effect.provide(host(root, hostOwner)), Effect.scoped, Effect.orDie)
+    )
+
+    // A second process over the same two files, which is what `smithers
+    // cancel` and `smithers approve` are to the run they name.
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const control = yield* Control.Control
+        const runtime = yield* ControlRuntime.ControlRuntime
+        const cancelled = yield* control.cancel({
+          runId: parked.runId,
+          idempotencyKey: `cli:cancel:${parked.runId}`
+        })
+        const engineRow = yield* awaitEngineStatus(root, parked.runId, "cancelled")
+        const events = yield* Stream.runCollect(control.watch({ runId: parked.runId, follow: false }))
+        return {
+          cancelled,
+          engineRow,
+          summary: yield* runtime.getRun(parked.runId),
+          kinds: events.map((event) => event.kind)
+        }
+      }).pipe(
+        Effect.provide(host(root, secondOwner, "engine-park-canceller")),
+        Effect.scoped,
+        Effect.orDie
+      )
+    )
+
+    // rc-contract 5.1: a cancel reaches a terminal state, and both
+    // `flows_runs` tables agree about which one.
+    expect(observed.cancelled).toEqual({ _tag: "Terminal", runId: parked.runId, status: "cancelled" })
+    expect(observed.summary.status).toBe("cancelled")
+    expect(observed.engineRow?.status).toBe("cancelled")
+    expect(observed.engineRow?.cancel_requested_at_ms).not.toBeNull()
+    // The event `smithers run` waits on, and the one `gc` needs to collect the
+    // run: without it the smoke left two permanently non-terminal rows.
+    expect(observed.kinds.filter(settledKind)).toContain("control.run.cancelled")
+  }, 180_000)
+})

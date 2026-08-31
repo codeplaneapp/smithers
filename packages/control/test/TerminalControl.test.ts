@@ -145,7 +145,10 @@ const engineCancel = (recorded: Array<string>) =>
               )
             )
             recorded.push(`${runId}:${outcome._tag}`)
-            return outcome._tag === "NotFound" ? "unknown" as const : "recorded" as const
+            if (outcome._tag === "NotFound") return "unknown" as const
+            // The same three answers `AgentSession.requestCancel` gives, so a
+            // repeat reaches `Control.cancel` as the repeat it is.
+            return outcome._tag === "AlreadyRequested" ? "already-requested" as const : "recorded" as const
           })
         )
       })
@@ -368,5 +371,85 @@ describe("resuming a run another process owns", () => {
 
     expect(observed.receipt._tag).toBe("Accepted")
     expect(observed.after.status).toBe("accepted")
+  })
+})
+
+describe("cancelling a run nobody is driving", () => {
+  it("settles the parked control row instead of accepting a request no owner will act on", async () => {
+    const recorded: Array<string> = []
+    const observed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const runtime = yield* ControlRuntime
+        const store = yield* RunStore.RunStore
+        const runId = yield* start("parked-unowned")
+        // The state a detached `smithers up -d` leaves behind when it parks on
+        // an `ask` and exits: the row keeps its waiting reason, has released
+        // its owner, and the process that wrote it is gone.
+        yield* park(runtime, runId)
+
+        const receipt = yield* control.cancel({ runId, idempotencyKey: `cli:cancel:${runId}` })
+        return {
+          runId,
+          receipt,
+          summary: yield* runtime.getRun(runId),
+          row: yield* store.get(runId).pipe(Effect.orDie),
+          kinds: yield* kinds(runId)
+        }
+      }),
+      engineCancel(recorded)
+    )
+
+    // A parked run has no owner, so no owner is ever going to act on the
+    // durable request: the cancelling process is the only one that can finish
+    // it. Answering `Accepted` and leaving the row parked is what left the
+    // Phase 7 smoke two runs that `cancel`, `down`, and `gc` could none of
+    // them reach (smoke section 3, "the parked rows cannot be terminated").
+    expect(observed.receipt).toEqual({ _tag: "Terminal", runId: observed.runId, status: "cancelled" })
+    expect(observed.summary.status).toBe("cancelled")
+    // Both halves, as rc-contract 5.1 requires: the engine row carries the
+    // request the engine settles on, and the control row is terminal now.
+    expect(observed.row.cancelRequestedAtMs).not.toBeNull()
+    expect(observed.kinds).toContain(Cancellation.requestedEventType)
+    // `smithers run` waits on exactly this event to learn it has nothing left
+    // to drive, and `gc` skips a run whose control row never went terminal.
+    expect(observed.kinds).toContain("control.run.cancelled")
+  })
+})
+
+describe("a cancel repeated against a run it cannot finish", () => {
+  it("attributes the request once, however many times it is asked", async () => {
+    const recorded: Array<string> = []
+    const observed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const runId = yield* start("repeat-attribution")
+        yield* handOverToPeer(runId)
+        const key = `cli:cancel:${runId}`
+        const first = yield* control.cancel({ runId, idempotencyKey: key })
+        const second = yield* control.cancel({ runId, idempotencyKey: key })
+        const third = yield* control.cancel({ runId, idempotencyKey: key })
+        return { runId, first, second, third, kinds: yield* kinds(runId) }
+      }),
+      engineCancel(recorded)
+    )
+
+    // Each ask still answers from the run rather than from a receipt.
+    expect(observed.first._tag).toBe("Accepted")
+    expect(observed.second._tag).toBe("Accepted")
+    expect(observed.third._tag).toBe("Accepted")
+    // One operator, one cancellation, one attribution record. `cancel` runs
+    // with `replay: false`, so every repeat re-executes the whole effect, and
+    // the Phase 7 smoke's three `cancel` calls plus one `down` left four
+    // `control.run.cancel-requested` events for one cancellation.
+    expect(observed.kinds.filter((kind) => kind === Cancellation.requestedEventType)).toHaveLength(1)
+    // The engine row is asked every time — first-writer-wins keeps the
+    // timestamp — and it is the store's own answer that says which ask was
+    // the one that recorded it.
+    expect(recorded).toEqual([
+      `${observed.runId}:CancelRequested`,
+      `${observed.runId}:AlreadyRequested`,
+      `${observed.runId}:AlreadyRequested`
+    ])
   })
 })
