@@ -4,6 +4,137 @@ This is the complete, commit-level changelog. For the guided tour of each
 release (what changed and why it matters, with screenshots and examples), see
 the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
+## 1.0.0-rc.0 (2026-08-30)
+
+The first release candidate of Smithers 1.0. 297 commits since
+[cfb570f193](https://github.com/smithersai/smithers/commit/cfb570f193), the
+0.x tree: 13,031 files changed, +1,014,566 / -1,601,511 lines. Release notes:
+`docs/releases/1.0.0-rc.0.md`.
+
+This is not an increment on 0.x. The 0.x JSX workflow engine is replaced
+wholesale by a durable Effect engine. A flow is a typed Effect program whose
+side effects are journaled as they happen, and the next process reads the
+journal and continues from the record. No JSX authoring API, no React
+reconciler, no old graph, scheduler, driver, or execution loop, and no
+dual-engine runtime survive.
+
+Read `docs/releases/1.0.0-rc.0.md` before upgrading, and
+`docs/migration/removed-apis.md` for the complete inventory of what is gone
+and what replaces it. The compatibility promise is quoted verbatim in the
+release notes, the README, and the migration guide.
+
+### The new architecture
+
+- Authoring is `Flow.make`, `Action.make`, `Node.andThen`, `Node.all`, and
+  `Node.branch` from `@smthrs/flow`, with `effect/Schema` on every step
+  boundary. Model-backed steps are `AgentAction`.
+- Execution is `@smthrs/engine` over the durable stores: `@smthrs/journal`,
+  `@smthrs/run-store`, `@smthrs/step-cache`, `@smthrs/engine-store`,
+  `@smthrs/plan`, and `@smthrs/artifacts` on local SQLite.
+- Control is `@smthrs/control`: typed RPC for plan, run, approve, deny,
+  steer, signal, cancel, resume, list, and watch, with the acting principal
+  stamped server-side and journaled inside the mutation's own transaction.
+- Host access goes through `@smthrs/capability` and `@smthrs/kernel`, so a
+  flow's reach is declared rather than ambient.
+- `smithers serve` hosts control RPC at `/rpc` and `/rpc/ws`, journal sync at
+  `/sync` and `/sync/ws`, projections at `/projections/ws`, and `GET /health`.
+- The product UI is the Electrobun application in `apps/ui`.
+
+### Packages
+
+- 40 packages publish at `1.0.0-rc.0` under the `rc` dist-tag, in the
+  dependency order `node scripts/pack-release.mjs --names` prints.
+  `@smthrs/flows` is the curated aggregate and `@smthrs/cli` owns the
+  `smithers` binary.
+- The unscoped `smthrs` package becomes a migration notice whose only module
+  throws on import. `smthrs@0.35.0` keeps the `latest` dist-tag until 1.0.0
+  is final.
+- Deleted with no replacement package: `@smthrs/graph`, `@smthrs/scheduler`,
+  `@smthrs/driver`, `@smthrs/react-reconciler`, `@smthrs/components`,
+  `@smthrs/xstate`, `@smthrs/protocol`, `@smthrs/control-plane`,
+  `@smthrs/db`, `@smthrs/server`, `@smthrs/devtools`,
+  `@smthrs/electric-proxy`, `@smthrs/gateway-react`, `@smthrs/gateway-ui`,
+  `@smthrs/gateway-client`, `@smthrs/ui-core`, `@smthrs/tui`,
+  `@smthrs/tui-ui`, `@smthrs/accounts`, `@smthrs/usage`, `@smthrs/vcs`, the
+  five `@smthrs/jj-<platform>` binary packages, and the 0.x `apps/cli`.
+- `@smthrs/engine`, `@smthrs/gateway`, `@smthrs/testing`,
+  `@smthrs/time-travel`, `@smthrs/memory`, `@smthrs/scorers`,
+  `@smthrs/sandbox`, and `@smthrs/observability` keep their names and are new
+  implementations. Treat them as new packages.
+- Every published package pins `effect` and the `@effect/*` packages to
+  exactly `4.0.0-rc.108`.
+
+### CLI
+
+- 28 commands ship. Six 0.x names survive as aliases: `inspect`, `why`,
+  `events`, `resume`, `gateway`, and `workflow list`.
+- 67 verbs are removed, and every 0.x flag release contract section 4.2 lists
+  is declared hidden on the command that used to carry it. Each exits 1 with
+  `smithers <verb> was removed in 1.0.0-rc.0: <reason>. See
+  https://smithers.sh/migration/1.0#<verb>`, so a stale script gets the
+  migration sentence rather than a usage error.
+- Exit codes are 0 success, 1 unsupported or generic error, 2 usage, 3 parked
+  on an approval, 130 SIGINT, 143 SIGTERM. The 0.x usage code 4 and the
+  devtools codes are gone.
+- `jj` is a documented system requirement rather than a bundled binary.
+
+### Migration
+
+- `@smthrs/migrate` ships the `migrate-smithers-v1` flow and the
+  `smithers-migrate` bin. It plans, applies unit by unit with a checkpoint
+  per unit, verifies with the project's own commands, and reports every
+  construct it refused to translate.
+- It refuses to transform a project that still holds non-terminal 0.x run
+  state, and it never writes to `smithers.db`.
+
+### Known limitations
+
+The paragraphs below are the release contract's own wording
+(`docs/migration/rc-contract.md` section 7), quoted verbatim.
+
+> **Databases.** Smithers 1.0.0-rc.0 stores run state in local SQLite only (`@effect/sql-sqlite-node` over Node.js `node:sqlite`). PostgreSQL and PGlite are not supported: no client layer or migration ladder ships, `SMITHERS_BACKEND=pglite|postgres` and `--backend pglite|postgres` exit with `unsupported_database`, and the 0.x `smithers migrate --to` database move is removed. Projects that ran 0.x on PGlite or PostgreSQL must finish or discard their runs on 0.x; there is no import path.
+
+> **0.x run data.** 1.0.0-rc.0 does not load, resume, or migrate 0.x run databases (`smithers.db`) or `.smithers/executions` state; `smithers migrate` opens `smithers.db` read-only only to list non-terminal runs before refusing. Finish, archive, or discard 0.x runs with the 0.x CLI, then run `smithers migrate` to convert the project's source. A 0.x database is an archive-only file; no read-only history importer ships in this candidate.
+
+> **Hijack.** `smithers hijack`, `smithers steer --takeover`, the `/v1/pty/hijack` gateway endpoint, and the `hijackRun` RPC are removed. Runs are controlled through `steer`, `signal`, `approve`, `deny`, and `cancel`.
+
+> **Pause.** `smithers pause` and the `Pause` control RPC are not available in 1.0.0-rc.0. A run stops on `cancel` or parks on an approval request (`waiting-approval`) and resumes with `smithers run --resume`. Control requests record the acting principal in the control-plane event journaled inside the mutation's own transaction (`control.approval.*`, `control.run.cancel-requested`), and `RunSummary.cancellation` reports who asked, when, and whether the source was control, the engine, or a cascade. The engine run row itself records no actor.
+
+> **Continue-as-new.** Continue-as-new is expressed as trampoline handoff rounds (`Flow.Handoff`, `maxRounds`); each round settles `completed` with `lineage_id` and `round_ordinal`. There is no `Continued` terminal status, and the 0.x `<ContinueAsNew>` component has no replacement.
+
+> **Checkpoints and worktree lanes.** In 1.0.0-rc.0 a checkpoint is a pinned git tree taken by a cell call (`ctx.checkpoint()`, `ctx.base`). Worktree lanes, snapshot hooks, and the `replay`, `snapshots`, `restore`, `snapshot-hook`, `revert`, `rewind`, `retry-task`, `timetravel`, `fork`, `tree`, `graph`, `timeline`, `diff`, and `worktrees` commands are removed. Time-travel replay, fork, and rewind exist as the `@smthrs/time-travel` library API and are not composed into the CLI.
+
+> **Declared runbook skips.** `Runbook.run` supports both denial policies. `Runbook.make` supports `onDeny: "fail"` only and refuses `onDeny: "skip"` with a `PatternError`: an approval denial and a step's own failure share one error channel, so the recovery arm that would express a declared skip would also declare that the runbook continues past a failed critical step. Declare the runbook with `onDeny: "fail"` and call `Runbook.run` to skip a denied step at run time.
+
+> **Provider quota.** A provider refusal that names a reset instant, a retry-after delay, or a delay in its message text parks the run under the `quota` waiting reason until that instant and resumes it there. The park is a sealed durable step (`agent/quota-park`), it journals `flows.agent.quota-parked.v1` with the wake time and where the deadline came from, and waiting does not consume the action's retry budget. The classifier is injected rather than assumed: a composition opts in with `QuotaPolicy.layerDefault()`, and the default `QuotaPolicy.layerNoop()` keeps a refusal a failure. A refusal that names no deadline, or one past the configured ceiling, still fails the call with `quota_exceeded`. Waking a quota park is bound to the process that owns the run: the driver's sweep wakes released and cancel-requested rows only, so a run parked for quota by a process that then died waits for its lease to expire before another process takes it over. The 0.x multi-account fallback seat pool (`smithers agents`, `fallbackAgents`) moved to the plugins repository; core resolves seats from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, and `SMITHERS_OPENAI_AUTH=chatgpt`.
+
+> **Wake and supervision.** Wakes published from another process land through the 1-second heartbeat sweep and cancel poll, not an event bus; in-process wakes use `WakeBus`. No supervisor process launches or resumes an abandoned run. Recovery is a reclaim rather than a supervisor: a run becomes reclaimable once the heartbeat its owner stopped renewing is older than 30 seconds, and any running `smithers` process with the flow registered takes it over. On a Node host the takeover asks the operating system first: the default liveness check probes the recorded process id on this machine and refuses the reclaim while that process still exists, so a stalled but living owner keeps its runs, and an owner recorded on another host is left to the expired lease, which the run store verifies for itself. A host with no process table to ask, such as a browser composition, answers from that lease alone. Nothing outside such a process watches for dead owners. The 0.x `smithers supervise` command is removed.
+
+> **Gateway.** The 0.x gateway (`POST /v1/rpc/<method>`, WebSocket `/`, SSE `/v1/api/stream`, 44 methods) is replaced by `smithers serve`: control RPC at `/rpc` and `/rpc/ws`, journal sync at `/sync` and `/sync/ws`, UI projections at `/projections/ws`, and `GET /health`. No 0.x method name or path is served, and there is no compatibility projection. Bearer-token authentication binds one principal; there are no users, roles, or per-run ownership.
+
+> **UI.** The product UI is the Electrobun application in `apps/ui`. The 0.x web monitor (`smithers monitor`, `smithers ui --app`), workflow `<UI>` dashboards, and the terminal monitor (`smithers up --interactive`, `smithers-mon`) are not part of 1.0.0-rc.0; the 0.x UI packages (`gateway-react`, `gateway-ui`, `ui-core`, `tui`, `tui-ui`) are deleted and `@smthrs/gateway-client` is superseded by the `@smthrs/control` and `@smthrs/sync` clients, and a run monitor on the new projections is new work.
+
+> **Runtimes.** The durable engine runs on Node.js 22.19.0 or later with local SQLite. Bun 1.3.0 or later (CI runs 1.3.14) is supported for the non-durable packages and the applications; opening a durable database under Bun fails with `unsupported_runtime`. Browser entry points bundle but do not execute durable flows; no Cloudflare or Vercel engine deployment ships. Windows is unsupported.
+
+> **Triggers, evaluation, and integrations.** `smithers cron`, `smithers listeners`, `smithers eval`, `smithers optimize`, `smithers scores`, `smithers observability`, and `smithers openapi` are removed from the CLI. `@smthrs/triggers`, `@smthrs/evals`, and `@smthrs/scorers` are not published. The GitHub, Linear, and Telegram clients, OAuth PKCE helpers, webhook verification, cursor handling, and error classification are rebuilt as the private workspace package `@smthrs/integrations` on the action, notification, and trigger APIs; GitHub and Linear are the real integrations the release smoke exercises; webhook ingress ships as library code only (the GitHub and Linear webhook sources and the GitHub listener registry bind to `@smthrs/control` `WebhookChannel` with the constant-time signature check; no `smithers listeners` verb and no gateway-level webhook configuration exists, and the old gateway HMAC e2e binding is re-pinned as a `WebhookChannel` test); the JSX integration components are gone. Vendor adapters (Hermes, OpenClaw, herdr, Claude Code and Codex subprocess agents, cloud hosts) live in the plugins repository; the cloud-host adapters there are re-ported onto the current kernel seams before they are usable.
+
+> **Diff review.** Settled diff bundles are applied to the host without a human review gate; the 0.x `smithers diff` and review-mode commands are removed.
+
+> **Durable interruptUnsafe.** The durable engine has one cancellation path, `interrupt`, which is durable and cascades to linked children. `FlowRuntime.interruptUnsafe` on the durable engine fails with `unsafe_interrupt_unsupported` instead of forcing cancellation without cleanup.
+
+> **Detached child flows.** A host that composes `EngineChildren` runs detached children as real runs: `agent/spawn` starts a separate run with its own row, claim, and journal, linked to the caller through the engine's parent-edge table and recorded as detaching on parent exit, so it outlives the run that started it; `agent/send` steers it through the control plane; `agent/await` reads its settled result from the run store, from a different process or a later incarnation. A composition that supplies no child port refuses all three with `ChildError` code `unsupported`. `agent/await` polls the child's run row on an interval rather than parking the caller, so a cell that awaits a long child holds its round open for the length of the wait.
+
+> **Plan admission and repair.** A model-authored plan is admitted against a declared envelope: a plan past its depth, fanout, or fuel budget is refused with `depth_exceeded`, `fanout_exceeded`, or `fuel_exhausted` before anything runs. Linked child runs are not counted against those caps, so a plan that spawns children can exceed an envelope its own steps stayed inside. Failure handling is retry; there is no self-healing repair primitive.
+
+> **Hard-killed engine processes.** Cooperative cancellation (`smithers cancel`) kills the process group of every child the engine spawned. If the engine process itself is hard-killed, the groups it spawned keep running until the next incarnation of the same host starts: every spawn is journaled as an ownerless durable record, and on start the reaper signals each group a previous incarnation abandoned. It refuses any record whose number the operating system has moved on from, so only a process that answers `ESRCH` counts as dead and the recorded start time must still match. A host that never restarts reaps nothing, and reaping a remote sandbox's processes requires that provider's optional `kill`.
+
+> **Effect.** Every published package pins `effect` and the `@effect/*` packages to exactly `4.0.0-rc.108`. Install the same exact version; two Effect instances in one process are not interoperable. Each candidate declares one exact Effect version; a changed pin is a breaking change listed in that candidate's notes.
+
+> **Source migration.** See §11 for the compatibility promise paragraph.
+
+Release contract section 11 is the compatibility promise. It is quoted in full
+in `docs/releases/1.0.0-rc.0.md`, the README, and the migration guide.
+
 ## 0.34.0 (2026-08-12)
 
 254 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.34.0): 901 files changed, +127655 / -6718 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those, the lockfiles, and declaration bundles it is 839 files, +91632 / -3524). 0.33.1 was tagged but never published to npm; its changes ship here. Release notes: [smithers.sh/changelogs/0.34.0](https://smithers.sh/changelogs/0.34.0).
