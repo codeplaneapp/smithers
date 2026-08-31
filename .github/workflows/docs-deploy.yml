@@ -50,6 +50,21 @@ jobs:
       - run: node scripts/check-docs.mjs
       - run: node scripts/check-llms.mjs
       - run: pnpm exec vocs build
+      # `vocs build` runs vocs' own llms plugin, which writes its own llms.txt
+      # and llms-full.txt into the directory this job uploads. That bundle
+      # carries the 0.x changelog bodies, the JSX `<Task` tags, and the
+      # `smithers oneshot` invocations generate-llms.ts excludes, and it carries
+      # no version stamp. claude-plugin/skills/smithers/SKILL.md tells every
+      # agent to read https://smithers.sh/llms-full.txt first, so the site has
+      # to serve the same bundles `smithers docs --full` and the installed skill
+      # embed.
+      - name: Serve the curated llms bundles, not vocs' own
+        run: cp docs/llms.txt docs/llms-full.txt docs/dist/public/
+      # The second run is the proof. check-llms compares the served copies
+      # against the curated bundles once the site exists, so a build that stops
+      # writing them, or a copy step that is dropped, fails here rather than on
+      # smithers.sh.
+      - run: node scripts/check-llms.mjs
       - uses: actions/configure-pages@v5
       # `renderStrategy: full-static` writes the site under `<outDir>/public`,
       # beside the server bundle rather than in place of it, so the artifact is
