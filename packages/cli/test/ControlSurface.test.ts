@@ -139,6 +139,30 @@ const streamingControl = Layer.effect(
     })
   })
 ).pipe(Layer.provide(testControl))
+/**
+ * A control plane whose runs settle with one named lifecycle event.
+ *
+ * The launch spine is the real one — `TestControl` plans, decides, and
+ * launches — and only the run's own settlement is scripted, because reaching
+ * a terminal status for real needs a live model seat. `Bin.test.ts` proves the
+ * `failed` half of the same mapping through a real process against real
+ * SQLite; every settlement a provider-free host cannot reach is pinned here.
+ */
+const settlingControl = (kind: string) =>
+  Layer.effect(
+    ControlService.Control,
+    Effect.gen(function*() {
+      const control = yield* ControlService.Control
+      return ControlService.make({
+        ...control,
+        watch: (filter) =>
+          filter.runId === undefined
+            ? control.watch(filter)
+            : Stream.succeed({ sequence: 1, kind, runId: filter.runId, occurredAt: 0, payload: null })
+      })
+    })
+  ).pipe(Layer.provide(testControl))
+
 const nonTerminalControl = Layer.effect(
   ControlService.Control,
   Effect.gen(function*() {
@@ -297,6 +321,50 @@ describe("Control surface", () => {
     expect(message).toContain("the executor did not take it")
     expect(message).toContain("smithers ps")
     expect(CliError.exitCode(error as CliError.UnsupportedError)).toBe(1)
+  })
+
+  it.each(
+    [
+      ["completed", "control.run.completed", 0],
+      ["failed", "control.run.failed", 1],
+      ["cancelled", "control.run.cancelled", 130],
+      ["parked for approval", "control.run.waiting-approval", 3]
+    ] as const
+  )("exits with the terminal status of a run that settled %s", async (_label, kind, expected) => {
+    // rc-contract section 4's `up` row and section 10 both say an attached
+    // launch exits with the terminal status code. Before this, `runLaunch`
+    // failed only on `control.run.pending`: a run that settled `failed`
+    // rendered its receipt and exited 0, so no caller of `smithers up` could
+    // read a red run from the exit code (plue-cutover finding S1).
+    const previous = process.exitCode
+    try {
+      const receipt = await Effect.runPromise(
+        Effect.gen(function*() {
+          const planned = yield* invoke(["--json", "plan", "demo/ship"])
+          const card = planned.value as { readonly approval: unknown }
+          const approval = JSON.stringify(card.approval)
+          yield* invoke(["--json", "approve", approval])
+          // A sentinel, so the zero this case expects for a completed run is
+          // an answer the command wrote rather than the status it inherited.
+          yield* Effect.sync(() => {
+            process.exitCode = 7
+          })
+          return yield* invoke(["--json", "run", approval]).pipe(Effect.timeout("5 seconds"))
+        }).pipe(
+          Effect.provide(ExecutorOwnership.layer(true)),
+          Effect.provide(settlingControl(kind)),
+          Effect.provide(scenarioServices),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+
+      expect(process.exitCode).toBe(expected)
+      // The `--json` document is the launch receipt whatever the run then did:
+      // a caller reads `runId` from it.
+      expect(receipt.value).toMatchObject({ _tag: "Accepted", runId: expect.any(String) })
+    } finally {
+      process.exitCode = previous
+    }
   })
 
   it("waits for a fresh park after resuming an owned run", async () => {

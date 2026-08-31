@@ -7,7 +7,7 @@
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
-import { Cause, Effect, Exit, Runtime } from "effect"
+import { Cause, Effect, Exit, Logger, Runtime } from "effect"
 import { CliError as EffectCliError, Command } from "effect/unstable/cli"
 import * as CliError from "./CliError.ts"
 import { cli } from "./Command.ts"
@@ -138,4 +138,20 @@ const main = Effect.gen(function*() {
   )
 })
 
-NodeRuntime.runMain(main, { teardown, disableErrorReporting: true })
+/**
+ * Diagnostics go to stderr, so stdout carries only the document.
+ *
+ * `report` above already keeps CLI failures off stdout, but the runtime logger
+ * is the other writer. A run's own lifecycle warnings, `An agent run failed`
+ * and its rendered cause, are logged by `@smthrs/agent` through the default
+ * logger, which calls `console.log`. Under `--json` that put forty lines of
+ * warning inside the one document an attached launch prints, so a pipeline
+ * step parsing `smithers up <flow> --json` read a syntax error instead of the
+ * receipt it was promised (rc-contract section 4, the `up` row). `LogToStderr`
+ * is the reference Effect provides for exactly this: keep stdout for protocol
+ * output and send every built-in logger to `console.error`.
+ */
+NodeRuntime.runMain(Effect.provideService(main, Logger.LogToStderr, true), {
+  teardown,
+  disableErrorReporting: true
+})

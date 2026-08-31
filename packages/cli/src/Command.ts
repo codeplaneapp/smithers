@@ -301,6 +301,54 @@ const declinedLaunch = (control: ControlService.Service, runId: string) =>
 /** Whether the settlement this process waited for was the executor declining. */
 const wasDeclined = (settlement: string | undefined): boolean => settlement === "control.run.pending"
 
+/**
+ * The process status one settlement reports, or nothing when the settlement
+ * says nothing about how the run ended.
+ *
+ * rc-contract section 4's `up` row and section 10 both promise that an
+ * attached launch exits with the terminal status code. Section 4's opening
+ * paragraph is the vocabulary that code is spelled in: 0 success, 1 error, 2
+ * usage, 3 parked, 130 SIGINT, 143 SIGTERM. A cancel reports the interrupt
+ * status because a cancel is an interruption: `Control.cancel` settles the run
+ * through `ControlRuntime.interrupt`, and reporting it separately keeps a
+ * cancelled run distinguishable from a failed one.
+ *
+ * Until this existed, `runLaunch` failed only on `control.run.pending`, so a
+ * `control.run.failed` settlement rendered the launch receipt and exited 0.
+ * No caller of `smithers up` could read a red run from the exit code: the
+ * Phase 7 Plue cutover measured `smithers up ci-fast --json` returning 0 in
+ * three seconds while `smithers ps` reported `failed` (finding S1).
+ */
+const settlementStatus = (settlement: string | undefined): number | undefined => {
+  switch (settlement) {
+    case "control.run.completed":
+      return 0
+    case "control.run.failed":
+      return 1
+    case "control.run.cancelled":
+      return 130
+    case "control.run.waiting-approval":
+      return 3
+    default:
+      return undefined
+  }
+}
+
+/**
+ * Reports a settled run's terminal status as this process's exit status.
+ *
+ * Written after the receipt is rendered, never instead of it: the `--json`
+ * contract is that an attached launch prints its receipt, and a caller reads
+ * `runId` from that document whatever the run then did. `bin.ts` hands a
+ * successful exit whatever `process.exitCode` holds, which is how
+ * `smithers migrate` reports its own status too.
+ */
+const reportSettlement = (settlement: string | undefined) =>
+  Effect.sync(() => {
+    const status = settlementStatus(settlement)
+    if (status !== undefined) process.exitCode = status
+  })
+
 /** Every event of one run, oldest first. */
 const eventsOf = (control: ControlService.Service, runId: string) =>
   Stream.runCollect(control.watch({ runId, follow: false })).pipe(
@@ -354,7 +402,8 @@ const runResume = (planOrRunId: string) =>
     if (wasDeclined(settlement) && receipt._tag === "Accepted" && receipt.runId !== undefined) {
       return yield* Effect.fail(yield* declinedLaunch(control, receipt.runId))
     }
-    return yield* render(receipt)
+    yield* render(receipt)
+    return yield* reportSettlement(settlement)
   })
 
 /**
@@ -389,6 +438,7 @@ const runLaunch = (payload: ControlService.ApprovalInput) =>
       return yield* Effect.fail(yield* declinedLaunch(control, receipt.runId))
     }
     yield* render(receipt)
+    yield* reportSettlement(settlement)
   })
 
 const run = Command.make("run", {

@@ -1007,3 +1007,110 @@ describe("smithers skills add", processBudget, () => {
     })
   })
 })
+
+/**
+ * What an attached launch reports to the shell that started it.
+ *
+ * rc-contract section 4's `up` row and section 10 both promise "exit code
+ * follows the terminal status", and that promise only exists at the process
+ * boundary: a script, a `pipeline-*.yml` step, or a sandbox `run-workflow.sh`
+ * reads `$?`, not a receipt. The Phase 7 Plue cutover measured the opposite —
+ * `smithers up ci-fast --json` returned 0 in three seconds while `smithers ps`
+ * reported `failed` (plue-cutover finding S1).
+ *
+ * The run below fails for real, with no provider and no network. The flow
+ * declares an `openai` seat, `SMITHERS_OPENAI_AUTH=chatgpt` routes that seat
+ * to the codex CLI's credential store, and the store this project points at
+ * holds a file with no token set. The seat resolves — the file exists, so the
+ * launch is accepted and the driver starts — and the turn then fails locally
+ * reading it. That is a real `control.run.failed` settlement, written by the
+ * real agent session into the project's own `.flows/control.db`.
+ */
+describe("an attached launch's exit status", processBudget, () => {
+  /** A project whose one flow's seat resolves and whose turns cannot. */
+  const stageUnservableSeat = (): string => {
+    const cwd = realpathSync(mkdtempSync(temporaryDirectoryPrefix))
+    mkdirSync(join(cwd, "flows", "failing"), { recursive: true })
+    writeFileSync(
+      join(cwd, "flows", "failing", "flow.mdx"),
+      [
+        "---",
+        "name: failing",
+        "description: A flow whose seat resolves and whose first turn cannot.",
+        "model: openai:gpt-5-mini",
+        "---",
+        "",
+        "# failing",
+        "",
+        "Report the repository state.",
+        ""
+      ].join("\n")
+    )
+    mkdirSync(join(cwd, "codex"), { recursive: true })
+    // A store the resolver accepts and the turn cannot use: `CodexAuth.locate`
+    // only asks whether the file is there.
+    writeFileSync(join(cwd, "codex", "auth.json"), "{}")
+    return cwd
+  }
+
+  const launch = (cwd: string, args: ReadonlyArray<string>) =>
+    spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
+      cwd,
+      encoding: "utf8",
+      timeout: 180_000,
+      env: {
+        ...process.env,
+        SMITHERS_OPENAI_AUTH: "chatgpt",
+        CODEX_HOME: join(cwd, "codex")
+      }
+    })
+
+  it("exits 1 for a run that settled failed, and still prints the receipt", () => {
+    const cwd = stageUnservableSeat()
+    try {
+      const launched = launch(cwd, ["up", "failing", "--json"])
+
+      expect(launched.error).toBeUndefined()
+      expect(launched.status).toBe(1)
+      // The `--json` contract does not move: stdout is one document, the
+      // launch receipt, and `runId` is the only place a caller learns the run.
+      // The run's own lifecycle warnings are diagnostics and belong on stderr;
+      // written to stdout they land inside the document a pipeline parses.
+      expect(launched.stdout.trimEnd().split("\n")).toHaveLength(1)
+      const receipt = JSON.parse(launched.stdout) as { readonly runId?: unknown }
+      expect(receipt.runId).toMatch(/^run-/)
+      expect(launched.stderr).toContain("An agent run failed")
+
+      // And the status the exit code claims is the status the control plane
+      // recorded, read back by a second process.
+      const listed = launch(cwd, ["ps", "--json"])
+      expect(listed.status).toBe(0)
+      const runs = (JSON.parse(listed.stdout) as {
+        readonly items: ReadonlyArray<{ readonly runId: string; readonly status: string }>
+      }).items
+      expect(runs.find((entry) => entry.runId === receipt.runId)?.status).toBe("failed")
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("exits 1 from `run` too, which is the same attached launch", () => {
+    const cwd = stageUnservableSeat()
+    try {
+      const planned = launch(cwd, ["plan", "failing", "--json"])
+      expect(planned.status).toBe(0)
+      const approval = JSON.stringify(
+        (JSON.parse(planned.stdout) as { readonly approval: unknown }).approval
+      )
+      expect(launch(cwd, ["approve", approval, "--scope", "run", "--json"]).status).toBe(0)
+
+      const launched = launch(cwd, ["run", approval, "--json"])
+
+      expect(launched.status).toBe(1)
+      expect(launched.stdout.trimEnd().split("\n")).toHaveLength(1)
+      expect((JSON.parse(launched.stdout) as { readonly runId?: unknown }).runId).toMatch(/^run-/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+})
