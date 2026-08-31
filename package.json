@@ -18,6 +18,7 @@
   "workspaces": [
     "packages/*",
     "packages/build/infra",
+    "e2e",
     "examples",
     "apps/*"
   ],

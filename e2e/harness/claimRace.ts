@@ -60,7 +60,7 @@ const spawnChild = (args: ReadonlyArray<string>): {
 }
 
 /**
- * Plans, approves, launches, and pauses a run, leaving it suspended and
+ * Plans, approves, launches, and parks a run, leaving it suspended and
  * unowned. Returns its id.
  *
  * @since 1.0.0

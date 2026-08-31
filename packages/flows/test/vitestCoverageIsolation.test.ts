@@ -317,6 +317,13 @@ describe("vitest coverage isolation conformance", () => {
     // reads top-level directories only — is unaffected and no top-level
     // publishable surface escapes the gate. `sharp` and `workerd` are its
     // wrangler toolchain's postinstall builds, denied like every other.
+    // Widened a fourth time (Phase 7 blocker B6): `e2e` is the fault-injection
+    // matrix. It was not a member, so it had no `node_modules` and
+    // `//e2e:faults` failed in 262 ms with `Command "vitest" not found` —
+    // eighteen crash, restart, gateway, time-travel, provider, and safety
+    // cases that had never run under any gate. It is private and
+    // unpublished, ships no `src` tree, and sits outside the `packages/`
+    // universe derivation above, so it adds no ungated publishable surface.
     // Widened a third time for the deployable applications. `apps/*` contains
     // private entry points rather than published library packages; each app's
     // own test/build scripts participate in the root recursive gates, while
@@ -329,6 +336,7 @@ describe("vitest coverage isolation conformance", () => {
         "packages:",
         "  - \"packages/*\"",
         "  - \"packages/build/infra\"",
+        "  - \"e2e\"",
         "  - \"examples\"",
         "  - \"apps/*\"",
         ""
@@ -464,6 +472,14 @@ describe("vitest coverage isolation conformance", () => {
     // drift check runs nowhere else, so dropping this step would let a stale
     // registry ship with every other cell green.
     expect(ci).toMatch(/^\s*run: pnpm exec smithers-build lint '\/\/:knownFiles'$/m)
+    // The fault matrix. Until Phase 7 blocker B6 it ran under no gate at all:
+    // `//packages/...` does not reach `e2e/`, `e2e` was not a workspace member,
+    // and `//e2e:faults` failed in 262 ms with `Command "vitest" not found`.
+    // The typecheck is a required step and the matrix itself is the advisory
+    // `e2e-faults` job, because two gates in it are red by design and owned
+    // elsewhere (case 22's redaction requirement, and the durable park).
+    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build build '\/\/e2e:check'$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/e2e:faults'$/m)
     expect(ci).toMatch(/tool: jj-cli@\d+\.\d+\.\d+/)
     expect(ci).toMatch(/^\s*run: jj git init --colocate$/m)
   })

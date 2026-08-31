@@ -44,6 +44,12 @@ Concretely:
 
 ## Running
 
+The target CI runs, and the one to reproduce a CI failure with:
+
+```sh
+pnpm exec smithers-build test '//e2e:faults'
+```
+
 The whole matrix, under its wall-time budget:
 
 ```sh
@@ -98,6 +104,43 @@ widen the number.
 Memory budgets are stated as growth over the suite's own baseline. The matrix
 shares one process, so an absolute resident-set ceiling would measure the suite
 rather than the path under test.
+
+## What gates this directory
+
+`e2e` is a member of `pnpm-workspace.yaml` and of the root manifest's
+`workspaces`, which is what gives it a `node_modules` and therefore a `vitest`
+binary. Until that landed, `pnpm exec smithers-build test '//e2e:faults'` failed
+in 262 ms with `Command "vitest" not found` and every case below had never run
+under any gate (Phase 7 blocker B6). `ci/matrixIsWired.test.ts` pins the
+membership and both CI steps.
+
+Two steps in `.github/workflows/ci.yml`, generated from the root `BUILD.ts`:
+
+- `smithers-build build '//e2e:check'`, in the required `test` job. A stale
+  fixture is how this directory rots without anybody noticing:
+  `fixtures/claimChild.ts` called `Control.pause`, which rc.0 removed, and died
+  at runtime in every case that spawned it. The typecheck catches that in
+  seconds.
+- `smithers-build test '//e2e:faults'`, in the advisory `e2e-faults` job. It is
+  advisory because case 22 below is required to be red at rc.0 and the graceful
+  park it cannot reach is broken in the product (`fault-gaps.md`, row
+  `03, 05, 31`). A required job would be red on every commit for defects no
+  commit introduced. Drop `continueOnError` in the root `BUILD.ts` and add
+  `e2e-faults` to `requiredJobs` when the redacting logger lands and the park
+  defect closes.
+
+Membership has a second edge. Root `pnpm test` is
+`pnpm --recursive --if-present run test`, the pre-PR gate `CONTRIBUTING.md`
+names, so it runs this directory's `scripts.test` on every commit. That script
+is `vitest run ci/ harness/`: the eight deterministic suites, 40 tests in about
+6 s. The cases themselves stay behind `//e2e:faults` and the `test:faults` script,
+because they kill process groups and bind ports for about 95 s and because case
+22 is required to be red. Putting them in the recursive fan-out would make the
+documented pre-PR gate red on every commit for the same defects that keep the
+CI job advisory. `ci/matrixIsWired.test.ts` pins both halves: it asks vitest
+which files each argv selects, and fails if a case reaches `scripts.test` or if
+a case leaves `//e2e:faults`. Root `pnpm run check` runs this directory's
+`tsc -p tsconfig.json --noEmit` in about 4 s, and that one is green.
 
 ## Required gates that are red
 
