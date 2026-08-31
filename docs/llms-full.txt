@@ -11103,6 +11103,10 @@ Exclusions: X-16 (defer).
 
 Exclusions: X-17 (defer).
 
+#### Credential redaction in logs
+
+> **Credential redaction in logs.** The journal redacts credentials on the way in: a value a cell logs or returns is rewritten by field name and inside the text of the value before any row is committed, and `e2e/faults/case22-secret-never-in-journal.test.ts` proves it by reading the SQLite file rather than an API that could redact on the way out. The operator's terminal is not covered. 1.0.0-rc.0 ships no redacting logger, so an action that passes a credential to `Effect.logInfo` writes it to the child's stderr in full and it reaches whatever collects that stream. R-12 requires case 22 to cover the log as well as the journal, so the log half stays in the fault matrix as a plain failing test rather than a skip or an inverted expectation, and the `e2e-faults` CI job is advisory for that reason. It becomes required, with `continueOnError` dropped and `e2e-faults` added to `requiredJobs`, when the redaction deliverable in section 5.2 of this contract lands and the durable-park defect recorded in `e2e/fault-gaps.md` closes. Until then keep credentials out of log calls: the journal protects a value that reaches it, the terminal does not.
+
 #### Effect
 
 > **Effect.** Every published package pins `effect` and the `@effect/*` packages to exactly `4.0.0-rc.108`. Install the same exact version; two Effect instances in one process are not interoperable. Each candidate declares one exact Effect version; a changed pin is a breaking change listed in that candidate's notes.

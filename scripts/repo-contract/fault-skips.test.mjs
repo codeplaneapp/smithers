@@ -22,6 +22,13 @@
  * requirement as a plain failing test and record the shipped limitation in
  * `e2e/fault-gaps.md` beside it.
  *
+ * A required red gate is also a shipped limitation, and a shipped limitation
+ * that is only written down in `e2e/fault-gaps.md` is written down where no
+ * reader of the release looks. Each entry in `requiredRedGates` therefore names
+ * the section of `docs/pages/release/known-limitations.md` that states the
+ * limitation, and this suite checks both that the section exists and that the
+ * fault-gaps row points at it.
+ *
  * A conditional skip is legitimate — cases 12 and 21 need the `jj` binary —
  * but every one has to be listed here with the condition it skips on, so "this
  * case has not run in six months" is a fact somebody chose rather than one
@@ -54,10 +61,22 @@ const requiredRedGates = new Map([
       why: "rc-contract R-12 requires case 22 to cover the logs as well as the journal. rc.0 ships no "
         + "redacting logger, so this gate is red until the Phase 5 redaction deliverable (rc-contract "
         + "§5.2) lands. Deleting it, or marking it `.fails`, makes the matrix green over a live "
-        + "credential leak."
+        + "credential leak.",
+      // The release-facing record of the same limitation. `heading` is the
+      // section on the known-limitations page, generated from rc-contract §7;
+      // `anchor` is what e2e/fault-gaps.md has to link to so a reader of the
+      // row can reach it.
+      limitation: {
+        heading: "Credential redaction in logs",
+        anchor: "docs/pages/release/known-limitations.md#credential-redaction-in-logs",
+        row: "| 22 |"
+      }
     }
   ]
 ])
+
+const knownLimitations = join(root, "docs", "pages", "release", "known-limitations.md")
+const faultGaps = join(root, "e2e", "fault-gaps.md")
 
 /**
  * The conditional skips the matrix is allowed to carry, and what each skips on.
@@ -139,6 +158,32 @@ describe("the fault-suite skip audit", () => {
       assert.ok(
         text.includes(gate.title),
         `${relative} no longer contains the required test "${gate.title}". ${gate.why}`
+      )
+    }
+  })
+
+  it("states every required red gate as a shipped limitation on the release page", () => {
+    const page = readFileSync(knownLimitations, "utf8")
+    for (const [relative, gate] of requiredRedGates) {
+      assert.ok(
+        page.includes(`### ${gate.limitation.heading}`),
+        `${relative} is red by design, so rc.0 ships the limitation it names. `
+          + `docs/pages/release/known-limitations.md has no "${gate.limitation.heading}" section, so a reader of `
+          + "the release learns about it only from a failing CI job. Add the paragraph to rc-contract §7 and "
+          + "regenerate the page."
+      )
+    }
+  })
+
+  it("points the fault-gaps row at that limitation instead of describing it", () => {
+    const gaps = readFileSync(faultGaps, "utf8")
+    for (const [relative, gate] of requiredRedGates) {
+      const row = gaps.split("\n").find((line) => line.startsWith(gate.limitation.row))
+      assert.ok(row !== undefined, `e2e/fault-gaps.md has no ${gate.limitation.row} row for ${relative}`)
+      assert.ok(
+        row.includes(gate.limitation.anchor),
+        `the ${gate.limitation.row} row claims the limitation is recorded on the known-limitations page and does `
+          + `not link to it. Link ${gate.limitation.anchor}.`
       )
     }
   })
