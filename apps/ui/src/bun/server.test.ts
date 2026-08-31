@@ -189,6 +189,17 @@ describe("the local origin", () => {
       await Bun.sleep(25)
     }
 
+    // tab.read's seam: the tail of the session's scrollback as plain text.
+    const read = await apiFetch(`/api/pty/${sessionId}/output?tail=4096`)
+    expect(read.status).toBe(200)
+    const tail = (await read.json()) as { sessionId: string; alive: boolean; output: string; truncated: boolean }
+    expect(tail.sessionId).toBe(sessionId)
+    expect(tail.alive).toBe(true)
+    expect(tail.output).toContain("hi-from-pty")
+    expect(tail.output).not.toContain("\u001b")
+    expect((await apiFetch(`/api/pty/${sessionId}/output?tail=-1`)).status).toBe(400)
+    expect((await apiFetch("/api/pty/nope/output")).status).toBe(404)
+
     const resized = await apiFetch(`/api/pty/${sessionId}/resize`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -212,6 +223,20 @@ describe("the local origin", () => {
     expect(((await (await apiFetch("/api/pty")).json()) as { sessions: Array<unknown> }).sessions).toEqual([])
     expect((await apiFetch(`/api/pty/${sessionId}`, { method: "DELETE" })).status).toBe(404)
     socket.close()
+  })
+
+  test("the OAuth legs are navigations: no session header, yet never 401", async () => {
+    // A top-level navigation (window.location, the system browser from the
+    // native handoff) cannot carry the local-session header; gating these
+    // two on it answered 401 to every sign-in attempt from this origin.
+    for (const path of ["/api/auth/github/start?handoff=abc", "/api/auth/github/callback?code=1&state=2"]) {
+      const response = await fetch(`${server.origin}${path}`, { redirect: "manual" })
+      expect(response.status).not.toBe(401)
+      expect(response.status).toBe(501) // the stub seam: reached, and honest about being stubbed
+    }
+    // Everything else under /api/ still needs the capability.
+    expect((await fetch(`${server.origin}/api/auth/session`)).status).toBe(401)
+    expect((await fetch(`${server.origin}/api/auth/github/start`, { method: "POST" })).status).toBe(401)
   })
 
   test("the stub identity seam answers signed-out and nothing else", async () => {

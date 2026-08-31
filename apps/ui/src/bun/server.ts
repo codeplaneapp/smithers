@@ -11,8 +11,10 @@ import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, normalize, resolve } from "node:path"
 import {
+  AUTH_CALLBACK_PATH,
   AUTH_ROUTE_PREFIX,
   AUTH_SESSION_PATH,
+  AUTH_SIGN_IN_PATH,
   CANCEL_PATH,
   CHAT_CANCEL_PATH,
   CHAT_TURN_PATH,
@@ -440,8 +442,18 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
         return upgraded ? undefined : jsonError(400, "upgrade_failed", "Expected a WebSocket upgrade.")
       }
       if (pathname.startsWith("/api/")) {
-        /* Health remains public for process-supervisor readiness probes. */
-        if (pathname !== HEALTH_PATH) {
+        /*
+         * Health remains public for process-supervisor readiness probes. The
+         * two OAuth legs are top-level NAVIGATIONS (window.location or the
+         * system browser opened by the native handoff) and a navigation can
+         * carry no custom header, so gating them on the session header made
+         * every GitHub sign-in from this origin answer 401 before the
+         * identity seam ever saw it. They carry no local privilege — the
+         * proxy forwards them to the identity upstream and back.
+         */
+        const oauthNavigation = request.method === "GET" &&
+          (pathname === AUTH_SIGN_IN_PATH || pathname === AUTH_CALLBACK_PATH)
+        if (pathname !== HEALTH_PATH && !oauthNavigation) {
           if (request.headers.get(LOCAL_SESSION_HEADER) !== sessionToken) {
             return jsonError(401, "local_session_required", "The local session capability is required.")
           }
