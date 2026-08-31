@@ -78,12 +78,28 @@ export const liveLocalSeats = (baseUrl: string) =>
     })
   ).pipe(Layer.provide(executorLayer))
 
-/** One model-backed step: answer a question in one short sentence. */
+/**
+ * One model-backed step: answer a question in one short sentence.
+ *
+ * The step's answer is decoded by its declared output schema, so the system
+ * teaching spells that schema out in the vocabulary the cell runtime uses. A
+ * 7B model told only to "answer in one short sentence" finishes with
+ * `ctx.done("Paris")`, which is a fine sentence and not a document, and the
+ * run then failed with `"Paris" is not valid JSON` on one of three runs.
+ * Showing the exact call, and giving the step three corrections instead of
+ * the default one, is what turns a bare-text reply into a repaired run.
+ */
 export const LiveSmokeLocal = AgentAction.make("examples/LiveSmokeLocal", {
   payload: { question: Schema.String },
   output: Schema.Struct({ answer: Schema.String }),
   seat: "local:qwen2.5:7b",
-  system: ["You are a terse assistant. Answer in one short sentence and nothing else."],
+  system: [
+    "You are a terse assistant. Answer in one short sentence.",
+    "Your answer goes inside a JSON object, never on its own.",
+    "Finish with exactly this call, with your answer in place of the placeholder:",
+    "await ctx.done(JSON.stringify({ answer: \"<your one-sentence answer>\" }))"
+  ],
+  corrections: 3,
   prompt: ({ question }) => question
 })
 
