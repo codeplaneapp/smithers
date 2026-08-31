@@ -268,31 +268,6 @@ const malformedRequest = (path: string) =>
   )
 
 /**
- * Refuses a body that carries no RPC request message with 400.
- *
- * `effect/unstable/rpc` hands every decoded message to the server loop, and a
- * body that decodes to something else — `{}`, `[]`, prose, nothing at all —
- * reached it as a message with no tag and died there, so the gateway answered
- * `500 Internal Server Error` with an empty body (Phase 7 smoke). That is the
- * wrong half of the contract twice over: it tells an operator the gateway
- * broke, and it tells a client to retry a request that can never succeed.
- *
- * The check is the transport's own parser, not a second reading of the wire
- * format: whatever `RpcSerialization` the host composed decodes the body, and
- * the request is refused only when that decode throws or yields no tagged
- * message. Anything the parser accepts is passed through untouched, so a
- * request the server would answer — including one naming a procedure that
- * does not exist, which is an RPC-level defect the protocol reports — is
- * still the server's to answer. `HttpServerRequest.text` is cached per
- * request, so reading it here does not consume the body the mount reads.
- *
- * Binary serializations are left alone: their bodies are not text, and the
- * gateway's own hosts compose a JSON framing.
- *
- * @since 1.0.0
- * @category layers
- */
-/**
  * Whether a request body carries at least one RPC message the server can act
  * on.
  *
