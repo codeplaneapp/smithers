@@ -161,6 +161,7 @@ describe("wave 10 — the derived pill row (§2a/§2f)", () => {
   test("needsSelection, the one pill opens the chooser as the gold binding", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(store, unavailableRepositories, silentAgent, {
+      features: { suggestionPills: true },
       ...backend({
         "/api/identity/watched": json(200, { selected: null, selectedAt: null, via: null }),
         "/api/identity/repos": json(200, { candidates: CANDIDATES, cached: false })
@@ -302,7 +303,10 @@ describe("wave 10 — admin-only affordances are absent, not hidden (§2/§2b)",
     const manifest = host.querySelector(".app-shell")?.getAttribute("data-flows") ?? ""
     expect(manifest).not.toContain("admin.")
     expect(manifest).not.toContain("reset")
-    expect(manifest).not.toContain("debug.")
+    // The admin plugin's debug flows; `debug.verbose` is every session's own switch.
+    expect(manifest).not.toContain("debug.snapshot")
+    expect(manifest).not.toContain("debug.events")
+    expect(manifest).not.toContain("debug.seams")
   })
 
   test("admin: the reset button renders and admin.devtools toggles the panel", async () => {

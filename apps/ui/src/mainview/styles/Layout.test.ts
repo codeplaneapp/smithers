@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 
 /*
- * Source-level pins for three layout defects, in the Contrast.test idiom (the
+ * Source-level pins for layout defects, in the Contrast.test idiom (the
  * unit lane has no layout engine):
  *
  *  - base.css: a fixed 100vh shell with hidden overflow strands the composer
@@ -72,5 +72,19 @@ describe("the devtools panel fits the 320px minimum shell", () => {
     expect(chat).toContain("@media (max-width: 900px)")
     expect(chat).toContain(".chat-frame:has(> .devtools-panel)")
     expect(chat).toMatch(/@media \(max-width: 900px\)[\s\S]*\.devtools-panel\s*\{[^}]*width:\s*100%;/)
+  })
+  test("suggestion pills wrap beside an open pane instead of scrolling out of view", () => {
+    expect(chat).toMatch(/\.app-shell \.smithers-suggestions\s*\{[^}]*flex-wrap:\s*wrap;/)
+  })
+})
+
+describe("the slash menu overlays instead of displacing the transcript", () => {
+  test("the composer anchors an absolutely positioned menu above its box", () => {
+    const composer = /\.composer-wrap\s*\{[^}]*\}/.exec(chat)?.[0] ?? ""
+    expect(composer).toContain("position: relative;")
+
+    const slashMenu = /\.composer-wrap\s*>\s*\.slash-menu\s*\{[^}]*\}/.exec(chat)?.[0] ?? ""
+    expect(slashMenu).toContain("position: absolute;")
+    expect(slashMenu).toMatch(/z-index:\s*\d+;/)
   })
 })

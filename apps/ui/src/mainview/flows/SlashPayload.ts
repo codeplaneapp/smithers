@@ -86,11 +86,11 @@ const targetRef = (name: string, args: string | undefined): Parsed => {
  * agent as a prompt rather than to the flow.
  */
 const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = {
-  theme: (args) => ok({ palette: args ?? "" }),
-  send: (args) => required("text", args, "send needs the text to submit"),
+  "appearance.theme": (args) => ok({ palette: args ?? "" }),
+  "chat.send": (args) => required("text", args, "send needs the text to submit"),
   "repos.watch": (args) => optional("repo", args),
   "repos.watch.toggle": (args) => required("fullName", args, "repos.watch.toggle needs a repository name"),
-  browser: (args) => required("url", args, "browser needs a URL: /browser https://example.com"),
+  "browser.open": (args) => required("url", args, "browser needs a URL: /browser.open https://example.com"),
   /*
    * The description keeps the trailing `owner/repo` token: createWorkflow
    * applies its OWN split, which (unlike splitTrailingRepo) leaves a lone
@@ -113,7 +113,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "card.maximize": (args) => required("cardId", args, "card.maximize needs the card id"),
   // The clipboard text is taken verbatim: trimming would silently rewrite what
   // the human asked to copy.
-  "copy-message": (args) => (args ?? "") === "" ? no("copy-message needs the text to copy") : ok({ text: args ?? "" }),
+  "chat.copy-message": (args) => (args ?? "") === "" ? no("copy-message needs the text to copy") : ok({ text: args ?? "" }),
   "approval.approve": (args) => required("cardId", args, "approval.approve needs the card id"),
   "approval.deny": (args) => required("cardId", args, "approval.deny needs the card id"),
   "connector.add": (args) => {
@@ -242,7 +242,11 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "tab.harness": (args) => required("harnessId", args, "tab.harness needs a harness id"),
   "tab.card": (args) => required("cardId", args, "tab.card needs the card id"),
   "tab.select": (args) => required("tab", args, "tab.select needs a tab id or a position 1-9"),
+  "tab.read": (args) => required("tab", args, "tab.read needs a tab id"),
   "tab.close": (args) => optional("tabId", args),
+  "tab.menu": (args) => optional("repo", args),
+  "repo.select": (args) => required("repo", args, "repo.select needs a pinned repository key"),
+  "repo.unpin": (args) => required("repo", args, "repo.unpin needs a pinned repository key"),
   "target.run": (args) => targetRef("target.run", args),
   "target.open": (args) => targetRef("target.open", args),
   /*

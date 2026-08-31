@@ -148,6 +148,67 @@ describe("the tabs collection", () => {
     expect(store.collections.tabs.get("tab-a")).toMatchObject({ exitCode: 0 })
   })
 
+  test("an agent launched from + is a subagent card that follows its process", async () => {
+    const store = await boot()
+    await persisted(store, {
+      type: "tab.opened",
+      actor: "user",
+      tab: { id: "b", kind: "harness", title: "Claude Code", sessionId: "b", harnessId: "claude", cwd: "~" }
+    })
+    await persisted(store, {
+      type: "card.upsert",
+      actor: "user",
+      card: {
+        id: "agent-b",
+        kind: "agent",
+        title: "Claude Code",
+        status: "active",
+        createdAt: 1,
+        ordinal: 0,
+        payload: {
+          harnessId: "claude",
+          displayName: "Claude Code",
+          tabId: "b",
+          sessionId: "b",
+          cwd: "~",
+          phase: "running",
+          exitCode: null
+        }
+      }
+    })
+    // The card belongs to main, the conversation the launch was made from.
+    expect(store.collections.cards.get("agent-b")).not.toHaveProperty("tabId")
+    await persisted(store, { type: "pty.exited", actor: "system", sessionId: "b", code: 2 })
+    expect(store.collections.cards.get("agent-b")).toMatchObject({
+      status: "error",
+      payload: { phase: "exited", exitCode: 2 }
+    })
+  })
+
+  test("closing a running subagent's tab records the stop on its card", async () => {
+    const store = await boot()
+    await persisted(store, {
+      type: "tab.opened",
+      actor: "user",
+      tab: { id: "c", kind: "harness", title: "Codex", sessionId: "c", harnessId: "codex", cwd: "~" }
+    })
+    await persisted(store, {
+      type: "card.upsert",
+      actor: "user",
+      card: {
+        id: "agent-c",
+        kind: "agent",
+        title: "Codex",
+        status: "active",
+        createdAt: 1,
+        ordinal: 0,
+        payload: { harnessId: "codex", displayName: "Codex", tabId: "c", sessionId: "c", cwd: "~", phase: "running", exitCode: null }
+      }
+    })
+    await persisted(store, { type: "tab.closed", actor: "user", id: "c" })
+    expect(store.collections.cards.get("agent-c")).toMatchObject({ status: "acted", payload: { phase: "exited", exitCode: null } })
+  })
+
   test("closing a card tab keeps the card in the transcript", async () => {
     const store = await boot()
     await persisted(store, { type: "card.upsert", actor: "user", card: themeCard })
@@ -224,6 +285,69 @@ describe("the tabs collection", () => {
       ]
     })
     expect(store.collections.repos.get("force")).toMatchObject({ name: "artsy/force" })
+  })
+
+  test("opening a repository pins it by path, names it active, and a reload keeps the pin", async () => {
+    const storage = memoryStorage()
+    const store = await boot(storage)
+    const repo = (id: string, name: string, path: string) => ({
+      id,
+      path,
+      name,
+      git: { branch: "main", remote: null },
+      smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts", workspaces: [] },
+      warnings: []
+    })
+    await persisted(store, { type: "repos.loaded", actor: "system", repos: [repo("r1", "smithers", "/Users/will/smithers")] })
+    expect([...store.collections.pinnedRepos.keys()]).toEqual(["local:/Users/will/smithers"])
+    expect(store.session().activeRepoKey).toBe("local:/Users/will/smithers")
+    // A second open joins the pins and, being the one just opened, becomes the active repository.
+    await persisted(store, {
+      type: "repos.loaded",
+      actor: "system",
+      repos: [repo("r1", "smithers", "/Users/will/smithers"), repo("r2", "force", "/Users/will/force")]
+    })
+    expect([...store.collections.pinnedRepos.keys()].sort()).toEqual(["local:/Users/will/force", "local:/Users/will/smithers"])
+    expect(store.session().activeRepoKey).toBe("local:/Users/will/force")
+    // A re-read of the same list (nothing new) keeps the named one.
+    await persisted(store, { type: "repo.selected", actor: "user", id: "local:/Users/will/smithers" })
+    await persisted(store, {
+      type: "repos.loaded",
+      actor: "system",
+      repos: [repo("r1", "smithers", "/Users/will/smithers"), repo("r2", "force", "/Users/will/force")]
+    })
+    expect(store.session().activeRepoKey).toBe("local:/Users/will/smithers")
+    await persisted(store, { type: "repo.selected", actor: "user", id: "local:/Users/will/force" })
+    expect(store.session().activeRepoKey).toBe("local:/Users/will/force")
+    // The server forgets an open repository (a reopen mints a new id): the pin outlives it, and the active one falls back to what is open.
+    await persisted(store, { type: "repos.loaded", actor: "system", repos: [repo("r3", "smithers", "/Users/will/smithers")] })
+    expect([...store.collections.pinnedRepos.keys()].sort()).toEqual(["local:/Users/will/force", "local:/Users/will/smithers"])
+    expect(store.session().activeRepoKey).toBe("local:/Users/will/smithers")
+    // Unpinning forgets the row; a reload reads the surviving pin back.
+    await persisted(store, { type: "repo.unpinned", actor: "user", id: "local:/Users/will/force" })
+    expect([...store.collections.pinnedRepos.keys()]).toEqual(["local:/Users/will/smithers"])
+    const again = await boot(storage)
+    expect([...again.collections.pinnedRepos.keys()]).toEqual(["local:/Users/will/smithers"])
+    expect(again.session().activeRepoKey).toBe("local:/Users/will/smithers")
+    // A pin the store does not hold cannot be selected.
+    await persisted(again, { type: "repo.selected", actor: "user", id: "local:/nowhere" })
+    expect(again.session().activeRepoKey).toBe("local:/Users/will/smithers")
+  })
+
+  test("a tab records the repository it was opened in, so the sidebar can nest it", async () => {
+    const store = await boot()
+    await persisted(store, {
+      type: "tab.opened",
+      actor: "user",
+      tab: { id: "t1", kind: "terminal", title: "Terminal · smithers", sessionId: "t1", cwd: "/Users/will/smithers", repoKey: "local:/Users/will/smithers" }
+    })
+    await persisted(store, {
+      type: "tab.opened",
+      actor: "user",
+      tab: { id: "t2", kind: "terminal", title: "Terminal · ~", sessionId: "t2", cwd: "~" }
+    })
+    expect(store.collections.tabs.get("t1")?.repoKey).toBe("local:/Users/will/smithers")
+    expect(store.collections.tabs.get("t2")?.repoKey).toBeUndefined()
   })
 
   test("boot drops process tabs and orphaned card tabs, and returns to main", async () => {

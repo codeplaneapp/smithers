@@ -1,7 +1,13 @@
-import { HarnessesResponseSchema, PtyCreateResponseSchema, ReposResponseSchema } from "smithers-shared/LocalApp"
+import {
+  HarnessesResponseSchema,
+  PtyCreateResponseSchema,
+  PtyOutputResponseSchema,
+  ReposResponseSchema
+} from "smithers-shared/LocalApp"
 import { hasCapability } from "smithers-shared/AppBootstrap"
-import { MAIN_TAB_ID } from "../AppState"
-import type { Repo, TabRow } from "../AppState"
+import { activeRepoOf, MAIN_TAB_ID, repoKeyOf } from "../AppState"
+import type { PinnedRepo, Repo, TabRow } from "../AppState"
+import type { CommandResult } from "../../flows/Flows"
 import type { ControllerContext } from "./context"
 
 /*
@@ -17,6 +23,8 @@ export interface TabsController {
   readonly openTerminalTab: () => Promise<string | void>
   /** A `+` menu harness row: `POST /api/pty { kind: "harness", harnessId }` then a harness tab. */
   readonly openHarnessTab: (harnessId: string) => Promise<string | void>
+  /** `tab.read <tabId>`: another tab's recent output as text, for the agent. */
+  readonly readTab: (tabId: string) => Promise<CommandResult>
   /** A maximized card's "Open in tab": one tab per card, rendering the same store record. */
   readonly openCardTab: (cardId: string) => string | void
   /** A tab id, or a 1-based position (Cmd+1..9; 1 is always main). */
@@ -29,7 +37,15 @@ export interface TabsController {
   readonly closeTab: (tabId?: string) => Promise<string | void>
   readonly confirmTabClose: () => Promise<string | void>
   readonly cancelTabClose: () => void
-  readonly toggleTabMenu: () => void
+  /** The `+` menu; with a pin key, that repository becomes the active one first (a repo row's own `+`). */
+  readonly toggleTabMenu: (repoKey?: string) => Promise<string | void>
+  /**
+   * A sidebar repo row: the active repository, reopened first when its pin
+   * is closed (a typed path where the host allows one, else the picker).
+   */
+  readonly selectRepo: (repoKey: string) => Promise<string | void>
+  /** Forget a pinned repository; its open session and tabs stay until closed. */
+  readonly unpinRepo: (repoKey: string) => string | void
   /** The chrome's "Open repository": the native picker when there is one, else a typed path. */
   readonly openLocalRepo: () => Promise<string | void>
   readonly loadHarnesses: () => Promise<void>
@@ -52,6 +68,9 @@ const HOME_CWD = "~"
 const DEFAULT_COLS = 80
 const DEFAULT_ROWS = 24
 
+/** How much of a tab's output `tab.read` hands the model: the last 16 KiB. */
+export const TAB_READ_TAIL_BYTES = 16 * 1024
+
 export const createTabsController = (ctx: ControllerContext): TabsController => {
   const { store, baseUrl } = ctx
   const { collections } = store
@@ -61,9 +80,21 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
 
   const activeTab = (): TabRow | undefined => collections.tabs.get(store.session().activeTabId ?? MAIN_TAB_ID)
 
-  const activeRepo = (): Repo | undefined => [...collections.repos.values()][0]
+  const activeRepo = (): Repo | undefined => activeRepoOf(store.session(), collections.repos.values())
+  /** The pin the active repository nests new tabs under (docs/LOCAL-APP.md "Tabs"). */
+  const activeRepoKey = (): { readonly repoKey: string } | Record<never, never> => {
+    const repo = activeRepo()
+    return repo === undefined ? {} : { repoKey: repoKeyOf(repo.path) }
+  }
 
   const cwd = (): string => activeRepo()?.path ?? HOME_CWD
+  /*
+   * The tab names where its process runs. A process started with no
+   * repository open lands in the home directory, and a tab that hid that
+   * read as "Claude Code in the repo" while the agent sat in `~`. The
+   * title says which: the repository's name, or `~`.
+   */
+  const tabTitle = (base: string): string => `${base} · ${activeRepo()?.name ?? HOME_CWD}`
   const sessionRepository = (): { readonly repoId: string } | Record<never, never> => {
     const repo = activeRepo()
     return repo === undefined ? {} : { repoId: repo.id }
@@ -93,7 +124,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
       type: "tab.opened",
       actor: "user",
       // The session id is the tab id: unique per process, and `tab-<id>` stays a readable test id.
-      tab: { id: sessionId, kind: "terminal", title: "Terminal", sessionId, cwd: directory }
+      tab: { id: sessionId, kind: "terminal", title: tabTitle("Terminal"), sessionId, cwd: directory, ...activeRepoKey() }
     })
   }
 
@@ -121,12 +152,79 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
       tab: {
         id: sessionId,
         kind: "harness",
-        title: harness.displayName,
+        title: tabTitle(harness.displayName),
         sessionId,
         harnessId: harness.id,
-        cwd: directory
+        cwd: directory,
+        ...activeRepoKey()
       }
     })
+    /*
+     * The agent is a subagent of the conversation it was launched from
+     * (docs/LOCAL-APP.md "Tabs"): the tab is where it runs, and this card is
+     * the conversation's record of it — embedded, never a takeover — with the
+     * way back to the tab. The store scopes the card to the conversation
+     * that was active at the launch.
+     */
+    store.dispatch({
+      type: "card.upsert",
+      actor: "user",
+      card: {
+        id: `agent-${sessionId}`,
+        kind: "agent",
+        title: harness.displayName,
+        status: "active",
+        createdAt: Date.now(),
+        ordinal: 0,
+        payload: {
+          harnessId: harness.id,
+          displayName: harness.displayName,
+          tabId: sessionId,
+          sessionId,
+          cwd: directory,
+          phase: "running",
+          exitCode: null
+        }
+      }
+    })
+  }
+
+  /*
+   * `tab.read` (docs/LOCAL-APP.md "Tabs"): Smithers is the first tab and can
+   * read every other one. A process tab answers with the tail of its
+   * scrollback from the server (`GET /api/pty/:id/output`), plain text,
+   * bounded; a card tab answers with its payload; main is the conversation
+   * the model is already in.
+   */
+  const readTab: TabsController["readTab"] = async (tabId) => {
+    const tab = collections.tabs.get(tabId)
+    if (tab === undefined) {
+      const known = orderedTabs().map((candidate) => `${candidate.id} (${candidate.kind} "${candidate.title}")`)
+      return `There is no tab with id ${tabId}. Open tabs: ${known.join(", ")}.`
+    }
+    if (tab.kind === "main") return { value: "That is this conversation — its transcript is already in your context." }
+    if (tab.kind === "card") {
+      const card = collections.cards.get(tab.cardId)
+      if (card === undefined) return `The card behind tab ${tabId} is no longer in the conversation.`
+      return { value: JSON.stringify({ kind: card.kind, title: card.title, status: card.status, payload: card.payload }) }
+    }
+    let response: Response
+    try {
+      response = await ctx.boundedFetch(
+        `${baseUrl}/api/pty/${encodeURIComponent(tab.sessionId)}/output?tail=${TAB_READ_TAIL_BYTES}`
+      )
+    } catch (error) {
+      return `Could not read ${tab.title}: ${error instanceof Error ? error.message : String(error)}`
+    }
+    if (!response.ok) {
+      return `Could not read ${tab.title}: ${await ctx.errorMessageOf(response, `the server answered ${response.status}`)}`
+    }
+    const parsed = PtyOutputResponseSchema.safeParse(await response.json())
+    if (!parsed.success) return `Could not read ${tab.title}: the server's answer had no output.`
+    const header = `${tab.kind} "${tab.title}" (${parsed.data.alive ? "running" : "exited"}${
+      tab.exitCode === undefined || tab.exitCode === null ? "" : `, code ${tab.exitCode}`
+    }) in ${tab.cwd}${parsed.data.truncated ? " — older output not shown" : ""}`
+    return { value: parsed.data.output.trim() === "" ? `${header}\n(no output yet)` : `${header}\n${parsed.data.output}` }
   }
 
   const openCardTab: TabsController["openCardTab"] = (cardId) => {
@@ -139,11 +237,15 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
       store.dispatch({
         type: "tab.opened",
         actor: "user",
-        tab: { id: `card-${cardId}`, kind: "card", title: card.title, cardId }
+        tab: { id: `card-${cardId}`, kind: "card", title: card.title, cardId, ...activeRepoKey() }
       })
     }
-    // The tab now shows the card; the transcript's copy returns to its embedded form.
-    if (store.session().maximizedCardId === cardId) store.dispatch({ type: "card.minimized", actor: "user" })
+    /*
+     * The transcript's copy returns to its embedded form, but that is the
+     * frames controller's act (AppController composes the two): minimizing
+     * here by dispatch alone left the address bar at the maximized frame,
+     * so a reload restored the card maximized in the transcript AND the tab.
+     */
   }
 
   const selectTab: TabsController["selectTab"] = (target) => {
@@ -224,10 +326,37 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
     }
   }
 
-  const toggleTabMenu: TabsController["toggleTabMenu"] = () => {
+  const toggleTabMenu: TabsController["toggleTabMenu"] = async (repoKey) => {
+    if (repoKey !== undefined) {
+      const refusal = await selectRepo(repoKey)
+      if (refusal !== undefined) return refusal
+      if (store.session().tabMenuOpen === true) return
+    }
     const open = store.session().tabMenuOpen !== true
     store.dispatch({ type: "tab.menu.toggled", actor: "user", open })
     if (open) void loadHarnesses()
+  }
+
+  const selectRepo: TabsController["selectRepo"] = async (repoKey) => {
+    const pin: PinnedRepo | undefined = collections.pinnedRepos.get(repoKey)
+    if (pin === undefined) return `There is no pinned repository with key ${repoKey}.`
+    const open = [...collections.repos.values()].some((repo) => repoKeyOf(repo.path) === repoKey)
+    if (!open) {
+      // A pinned repository the server no longer holds: open it again, by path where the host allows one.
+      const pathEntry = ctx.services.bootstrap !== undefined &&
+        hasCapability(ctx.services.bootstrap, "local.repository-path-entry")
+      const refusal = pathEntry ? await ctx.openRepo({ path: pin.path }) : await openLocalRepo()
+      if (refusal !== undefined) return refusal
+      if (![...collections.repos.values()].some((repo) => repoKeyOf(repo.path) === repoKey)) {
+        return `${pin.name} was not reopened.`
+      }
+    }
+    store.dispatch({ type: "repo.selected", actor: "user", id: repoKey })
+  }
+
+  const unpinRepo: TabsController["unpinRepo"] = (repoKey) => {
+    if (collections.pinnedRepos.get(repoKey) === undefined) return `There is no pinned repository with key ${repoKey}.`
+    store.dispatch({ type: "repo.unpinned", actor: "user", id: repoKey })
   }
 
   const openLocalRepo: TabsController["openLocalRepo"] = async () => {
@@ -295,12 +424,15 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
   return {
     openTerminalTab,
     openHarnessTab,
+    readTab,
     openCardTab,
     selectTab,
     closeTab,
     confirmTabClose,
     cancelTabClose,
     toggleTabMenu,
+    selectRepo,
+    unpinRepo,
     openLocalRepo,
     loadHarnesses,
     loadRepos,

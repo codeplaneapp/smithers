@@ -70,6 +70,7 @@ test("the whole target-graph flow against the real backend", async ({ page }) =>
 
   await page.goto("/")
   page.once("dialog", (dialog) => void dialog.accept(FORCE_E2E))
+  await page.getByTestId("composer-repo-trigger").click()
   await page.getByTestId("chrome-open-repo").click()
   await expect(card(page, "repo")).toBeVisible({ timeout: SLOW })
   /*

@@ -29,6 +29,7 @@ const temporary: Array<string> = []
 /** The chrome's Open repository, answered through the window.prompt fallback. */
 const openRepo = async (page: Page, path: string): Promise<void> => {
   page.once("dialog", (dialog) => void dialog.accept(path))
+  await page.getByTestId("composer-repo-trigger").click()
   await page.getByTestId("chrome-open-repo").click()
 }
 
@@ -65,7 +66,9 @@ test("opening the demo repository loads its trusted target card", async ({ page 
   await page.goto("/")
   await openRepo(page, FORCE)
   opened.push(realpathSync(FORCE))
-  await expect(page.getByTestId("repo-chip")).toHaveText("artsy/force")
+  // The selector names the repo; the origin chip shows WHERE it is (the ~-abbreviated path), never the name again.
+  await expect(page.getByTestId("composer-repo-trigger")).toContainText("artsy/force")
+  await expect(page.getByTestId("repo-chip")).toContainText("~/artsy/force")
   await expect(repoCard(page)).toBeVisible()
 
   const targets = targetsCard(page)

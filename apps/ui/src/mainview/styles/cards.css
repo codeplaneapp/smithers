@@ -152,6 +152,18 @@
 	color: var(--text-muted);
 }
 
+/* A namespace row: the branch the user opens (Enter / ArrowRight → `/ns.`). */
+.slash-menu-namespace .slash-menu-name {
+	color: var(--text);
+}
+
+.slash-menu-count {
+	margin-left: auto;
+	color: var(--text-muted);
+	font-family: var(--font-mono);
+	font-size: 11px;
+}
+
 /* Message chrome: Smithers avatar + per-row hover actions. */
 
 .app-shell .smithers-chat-message .message-author {

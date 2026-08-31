@@ -131,6 +131,17 @@ describe("/retry re-runs the last turn", () => {
     ).toEqual(["what is my balance?"])
   })
 
+  test("retry with nothing to retry refuses by name instead of executing silently", async () => {
+    const store = await signedInStore()
+    const { agent, launches } = recordingAgent()
+    const controller = createAppController(store, unavailableRepositories, agent, {
+      fetchImpl: async () => new Response("{}", { status: 200 })
+    })
+    const outcome = await controller.commands.run("retry")
+    expect(outcome).toEqual({ status: "failed", error: "Nothing to retry yet — send a message first." })
+    expect(launches.length).toBe(0)
+  })
+
   test("retry mid-turn does nothing — there is nothing settled to re-run", async () => {
     const store = await signedInStore()
     const { agent, launches } = recordingAgent()
@@ -140,8 +151,9 @@ describe("/retry re-runs the last turn", () => {
     controller.send("still running")
     await settled()
     expect(store.session().phase).toBe("responding")
-    await controller.commands.run("retry")
+    const outcome = await controller.commands.run("retry")
     await settled()
     expect(launches.length).toBe(1)
+    expect(outcome.status).toBe("failed")
   })
 })

@@ -54,10 +54,14 @@ const USER_ONLY_ALTERNATIVES: Readonly<Record<string, string>> = {
   "auth.sign-in":
     "sign-in is a button the human clicks — invoke auth.prompt instead, which renders that button in the chat",
   "auth.sign-out": "sign-out is a control the human clicks — it lives in their slash menu",
-  reset: "resetting the conversation is the human's dev affordance — suggest /clear if they want a fresh chat",
-  theme: "the color theme is the human's own choice — they set it with /theme",
+  "admin.reset": "resetting the conversation is the human's dev affordance — suggest /chat.clear if they want a fresh chat",
+  reset: "resetting the conversation is the human's dev affordance — suggest /chat.clear if they want a fresh chat",
+  "appearance.theme": "the color theme is the human's own choice — they set it with /appearance.theme",
+  theme: "the color theme is the human's own choice — they set it with /appearance.theme",
+  "appearance.dark-mode": "the light/dark toggle is a button the human clicks",
   "dark-mode": "the light/dark toggle is a button the human clicks",
   "chat.stop": "stopping a response is the human's Escape key / stop button",
+  "chat.send": "the composer belongs to the human — answer with text instead",
   send: "the composer belongs to the human — answer with text instead",
   "card.maximize": "maximizing a card is the human's explicit act — your invocation renders the embedded card",
   "card.minimize": "minimizing a card is the human's explicit act"

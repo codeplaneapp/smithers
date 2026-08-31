@@ -7,7 +7,18 @@ import { PALETTES } from "../state/AppState"
 import { createAppStore } from "../state/AppStore"
 import { executeAgentToolCall } from "./agentTools"
 import { visibleItems } from "./Commands"
-import { canonical, matches, parseSubmit, recommendedNames, SLASH_MENU_CAP, slashItems } from "./registry"
+import {
+  canonical,
+  matches,
+  namespaceOf,
+  namespacesOf,
+  parseSubmit,
+  recommendedNames,
+  SLASH_MENU_CAP,
+  slashItems,
+  slashTree,
+  SURFACE_FLOWS
+} from "./registry"
 import type { CommandState } from "./registry"
 
 const memoryStorage = (): StorageApi => {
@@ -208,6 +219,113 @@ describe("command registry pure model", () => {
    * catalog is not a secret — while `/flows` is what a person can ask for.
    * The two lists differ by exactly the hidden set and by nothing else.
    */
+  /*
+   * The namespace tree. A flow's namespace is its dotted head; the only bare
+   * names are the three surface switches. Every other old bare spelling is a
+   * hidden alias, so `/dark-mode` still runs while the menu shows
+   * `/appearance ›` instead of a loose toggle at the top.
+   */
+  test("every visible flow lives in a namespace, except the surface switches", async () => {
+    const { controller } = await freshController()
+    const orphans = visibleItems(controller.commands)
+      .map((command) => command.name)
+      .filter((name) => namespaceOf(name) === undefined && !SURFACE_FLOWS.includes(name))
+    expect(orphans).toEqual([])
+  })
+
+  test("the old bare spellings are hidden aliases of their namespaced flows", async () => {
+    const { controller } = await freshController()
+    const registered = controller.commands.all()
+    for (
+      const [bare, home] of [
+        ["dark-mode", "appearance.dark-mode"],
+        ["theme", "appearance.theme"],
+        ["surfaces", "chat.surfaces"],
+        ["retry", "chat.retry"],
+        ["send", "chat.send"],
+        ["clear", "chat.clear"],
+        ["copy-message", "chat.copy-message"],
+        ["reload", "chat.reload"],
+        ["flows", "chat.commands"],
+        ["verbose", "debug.verbose"],
+        ["browser", "browser.open"],
+        ["balance", "billing.balance"],
+        ["stop", "chat.stop"]
+      ] as const
+    ) {
+      expect(canonical(bare, registered)).toBe(home)
+      expect(controller.commands.find(bare)?.metadata.hidden).toBe(true)
+      expect(controller.commands.find(home)?.metadata.aliasOf).toBeUndefined()
+    }
+    // The alias runs the canonical flow and records the canonical name.
+    expect((await controller.commands.run("dark-mode")).status).toBe("executed")
+    expect(controller.store.session().recentCommands?.[0]).toBe("appearance.dark-mode")
+  })
+
+  test("namespaces list only where a visible flow lives, in display order", () => {
+    const commands = [
+      { name: "chat", summary: "" },
+      { name: "tab.terminal", summary: "" },
+      { name: "appearance.theme", summary: "" },
+      { name: "appearance.dark-mode", summary: "" },
+      { name: "toast.dismiss", summary: "", hidden: true },
+      { name: "zeta.one", summary: "" }
+    ]
+    expect(namespacesOf(commands).map((row) => [row.id, row.count])).toEqual([
+      ["appearance", 2],
+      ["tab", 1],
+      ["zeta", 1]
+    ])
+    expect(namespacesOf(commands).find((row) => row.id === "appearance")?.label).toBe("Appearance")
+  })
+
+  test("a bare / is the tree's top level: recommendations, surfaces, then namespace rows", () => {
+    const commands = [
+      { name: "connect", summary: "Connect" },
+      { name: "world", summary: "World" },
+      { name: "chat", summary: "Chat" },
+      { name: "appearance.dark-mode", summary: "Toggle" },
+      { name: "appearance.theme", summary: "Theme" },
+      { name: "tab.terminal", summary: "Terminal" },
+      { name: "chat.clear", summary: "Clear" }
+    ]
+    const rows = slashTree(chatState, "", commands)
+    expect(rows.map((row) => (row.kind === "flow" ? row.flow.name : `${row.namespace.id}/`))).toEqual([
+      "connect",
+      "world",
+      "chat",
+      "chat/",
+      "appearance/",
+      "tab/"
+    ])
+    expect(rows[0]?.kind === "flow" && rows[0].recommended).toBe(true)
+    // No loose leaf at the top: the toggle is reachable through its namespace.
+    expect(rows.some((row) => row.kind === "flow" && row.flow.name === "appearance.dark-mode")).toBe(false)
+  })
+
+  test("a namespace head with the dot lists that branch, uncapped; any other text is the flat filter", () => {
+    const many = Array.from({ length: SLASH_MENU_CAP + 4 }, (_, index) => ({
+      name: `tab.flow-${index}`,
+      summary: `Tab flow ${index}`
+    }))
+    const commands = [{ name: "chat", summary: "Chat" }, { name: "appearance.dark-mode", summary: "Toggle" }, ...many]
+    const branch = slashTree(chatState, "tab.", commands)
+    expect(branch).toHaveLength(many.length)
+    expect(branch.every((row) => row.kind === "flow" && row.flow.name.startsWith("tab."))).toBe(true)
+    // Typing part of a namespace offers it as a row above the flat matches.
+    const partial = slashTree(chatState, "app", commands)
+    expect(partial[0]).toEqual({
+      kind: "namespace",
+      namespace: { id: "appearance", label: "Appearance", summary: "Theme and colors" },
+      count: 1
+    })
+    // A name known by heart still leads, exactly as the flat filter ranks it.
+    const exact = slashTree(chatState, "appearance.dark-mode", commands)
+    expect(exact[0]?.kind === "flow" && exact[0].flow.name).toBe("appearance.dark-mode")
+    const fuzzy = slashTree(chatState, "dark", commands)
+    expect(fuzzy.map((row) => (row.kind === "flow" ? row.flow.name : ""))).toEqual(["appearance.dark-mode"])
+  })
+
   test("/flows and the data-flows manifest differ by exactly the hidden set", async () => {
     const { controller } = await freshController()
     const manifest = controller.commands.all().map((command) => command.name)
@@ -389,20 +507,30 @@ describe("command registry bindings", () => {
     expect(names).toEqual([
       "connect",
       "world",
+      "appearance.theme",
       "theme",
-      "surfaces",
+      "appearance.dark-mode",
       "dark-mode",
+      "chat.surfaces",
+      "surfaces",
+      "debug.verbose",
+      "verbose",
+      "system.recommend",
       "chat",
+      "chat.retry",
       "retry",
       "chat.stop",
       "stop",
+      "chat.send",
       "send",
       "repos.watch",
       "repos.watch.toggle",
       "repos.watch.all",
       "repos.watch.none",
       "repos.watch.confirm",
+      "chat.clear",
       "clear",
+      "browser.open",
       "browser",
       "flow.create",
       "flow.repo.choose",
@@ -415,6 +543,7 @@ describe("command registry bindings", () => {
       "frame.back",
       "frame.forward",
       "frame.fork",
+      "chat.copy-message",
       "copy-message",
       "approval.approve",
       "approval.deny",
@@ -434,6 +563,7 @@ describe("command registry bindings", () => {
       "auth.request-access",
       "toast.dismiss",
       "billing.balance",
+      "balance",
       "repos.import",
       "issues.list",
       "issues.view",
@@ -458,9 +588,12 @@ describe("command registry bindings", () => {
       "files.list",
       "files.read",
       "repos.app",
+      "chat.reload",
       "reload",
+      "chat.commands",
       "flows",
       "tab.terminal",
+      "tab.read",
       "tab.harness",
       "tab.card",
       "tab.select",
@@ -468,6 +601,10 @@ describe("command registry bindings", () => {
       "tab.close.confirm",
       "tab.close.cancel",
       "tab.menu",
+      "repo.select",
+      "repo.unpin",
+      "composer.add",
+      "files.add",
       "repo.open",
       "target.run",
       "target.open",
@@ -587,10 +724,10 @@ describe("command registry bindings", () => {
       const userOnly of [
         "auth.sign-in",
         "auth.sign-out",
-        "theme",
-        "dark-mode",
+        "appearance.theme",
+        "appearance.dark-mode",
         "chat.stop",
-        "send",
+        "chat.send",
         "card.maximize"
       ]
     ) {
@@ -598,7 +735,7 @@ describe("command registry bindings", () => {
     }
     expect(agentNames).toContain("connect")
     expect(agentNames).toContain("repos.watch")
-    expect(agentNames).toContain("browser")
+    expect(agentNames).toContain("browser.open")
 
     // Asking for one anyway gets an honest tool-result error naming the
     // visible alternative — never a silent refusal, never an execution.
@@ -629,15 +766,18 @@ describe("command registry bindings", () => {
   test("the color theme and the light/dark toggle are independent commands", async () => {
     const { store, controller } = await freshController()
     const registered = controller.commands.all()
-    expect(canonical("theme", registered)).toBe("theme")
-    expect(canonical("dark-mode", registered)).toBe("dark-mode")
-    const toggle = controller.commands.find("dark-mode")
+    // Both live in `appearance`; the bare spellings are hidden aliases of them.
+    expect(canonical("theme", registered)).toBe("appearance.theme")
+    expect(canonical("dark-mode", registered)).toBe("appearance.dark-mode")
+    expect(canonical("appearance.dark-mode", registered)).toBe("appearance.dark-mode")
+    const toggle = controller.commands.find("appearance.dark-mode")
     expect(toggle?.metadata.aliasOf).toBeUndefined()
     expect(toggle?.metadata.hidden).toBeUndefined()
-    // Listed, so the human can find the toggle in the slash menu.
-    expect(controller.slashItems("dark-mode").map((item) => item.flow.name)).toContain("dark-mode")
-    // The args hint is what makes `/theme <palette>` parse as an invocation.
-    expect(controller.commands.find("theme")?.metadata.args).toBeDefined()
+    expect(controller.commands.find("dark-mode")?.metadata.aliasOf).toBe("appearance.dark-mode")
+    // Listed, so the human can find the toggle in the slash menu by either spelling.
+    expect(controller.slashItems("dark-mode").map((item) => item.flow.name)).toContain("appearance.dark-mode")
+    // The args hint is what makes `/appearance.theme <palette>` parse as an invocation.
+    expect(controller.commands.find("appearance.theme")?.metadata.args).toBeDefined()
 
     // The default palette is night-owl, and every key round-trips.
     expect(store.session().palette).toBe("night-owl")

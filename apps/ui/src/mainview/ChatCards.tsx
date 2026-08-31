@@ -15,7 +15,7 @@ import {
 } from "@smthrs/ui"
 import type { ApprovalState } from "@smthrs/ui"
 import { ArrowLeft, ArrowRight, GitFork, Maximize2, Minimize2, PanelTop } from "lucide-react"
-import { lazy, Suspense, useState } from "react"
+import { lazy, Suspense, useRef, useState } from "react"
 import type { KeyboardEvent } from "react"
 import { BranchesCardBody } from "./cards/BranchesCard"
 import { AffectedCardBody } from "./cards/AffectedCard"
@@ -145,6 +145,11 @@ const pillStatus = (card: Card): string => {
   }
   if (card.kind === "run-timeline") return card.payload.status
   if (card.kind === "html" || card.kind === "repo" || card.kind === "repo-plugin") return "done"
+  /* A subagent's pill is its process: running, done on a clean exit, failed otherwise. */
+  if (card.kind === "agent") {
+    if (card.payload.phase === "running") return "running"
+    return card.payload.exitCode === 0 || card.payload.exitCode === null ? "done" : "failed"
+  }
   if (card.status === "acted") return "done"
   if (card.kind !== "status") return "pending"
   const progress = card.payload.progress
@@ -534,6 +539,46 @@ const WorkflowRepoCardBody = ({
   )
 }
 
+/*
+ * A subagent launched from the `+` menu (docs/LOCAL-APP.md "Tabs"): which
+ * harness, where it runs, whether it is still running, and the way back to
+ * its tab — a registered flow (tab.select), so the card never owns the tab.
+ */
+const AgentCardBody = ({
+  card,
+  onRunCommand
+}: {
+  readonly card: Extract<Card, { kind: "agent" }>
+  readonly onRunCommand: (name: string, args?: string) => void
+}) => {
+  const { displayName, cwd, phase, exitCode, tabId } = card.payload
+  const state = phase === "running"
+    ? `${displayName} is running in ${cwd}.`
+    : exitCode === null
+    ? `${displayName} stopped.`
+    : `${displayName} exited (${exitCode}).`
+  return (
+    <div className="agent-card" data-phase={phase}>
+      <p className="smithers-card-note">{state}</p>
+      {phase === "running" ?
+        (
+          <div className="flow-run-actions">
+            <Button
+              size="sm"
+              variant="outline"
+              data-flow="tab.select"
+              data-testid={`agent-open-tab-${tabId}`}
+              onClick={() => onRunCommand("tab.select", tabId)}
+            >
+              Open tab
+            </Button>
+          </div>
+        ) :
+        null}
+    </div>
+  )
+}
+
 /* The workspace's workflows (flow.list) — each row's Run is a command binding. */
 const WorkflowListCardBody = ({
   card,
@@ -595,6 +640,22 @@ export function CardView({
   onChangeWorldDocument,
   onRunCommand
 }: CardViewProps) {
+  /*
+   * Maximize and minimize replace each other in the header, so the button
+   * the pointer just pressed unmounts and focus falls to <body> — outside
+   * the shell whose onKeyDown owns Escape. Each act hands focus to the
+   * button that took its place, so Escape (and the Tab ring) keep working.
+   */
+  const maximizeRef = useRef<HTMLButtonElement>(null)
+  const minimizeRef = useRef<HTMLButtonElement>(null)
+  const maximizeThenFocus = (): void => {
+    onMaximize(card.id)
+    requestAnimationFrame(() => minimizeRef.current?.focus())
+  }
+  const minimizeThenFocus = (): void => {
+    onMinimize()
+    requestAnimationFrame(() => maximizeRef.current?.focus())
+  }
   return (
     <>
       {maximized ?
@@ -602,7 +663,7 @@ export function CardView({
           <div
             className="card-maximize-backdrop"
             aria-hidden="true"
-            onClick={() => onMinimize()}
+            onClick={minimizeThenFocus}
           />
         ) :
         null}
@@ -671,6 +732,7 @@ export function CardView({
                   <PanelTop size={13} />
                 </Button>
                 <Button
+                  ref={minimizeRef}
                   variant="ghost"
                   size="icon"
                   className="card-minimize-btn"
@@ -678,7 +740,7 @@ export function CardView({
                   data-testid={`card-minimize-${card.id}`}
                   aria-label="Minimize card"
                   title="Minimize card"
-                  onClick={() => onMinimize()}
+                  onClick={minimizeThenFocus}
                 >
                   <Minimize2 size={13} />
                 </Button>
@@ -686,6 +748,7 @@ export function CardView({
             ) :
             (
               <Button
+                ref={maximizeRef}
                 variant="ghost"
                 size="icon"
                 className="card-maximize-btn"
@@ -693,7 +756,7 @@ export function CardView({
                 data-testid={`card-maximize-${card.id}`}
                 aria-label="Maximize card"
                 title="Maximize card"
-                onClick={() => onMaximize(card.id)}
+                onClick={maximizeThenFocus}
               >
                 <Maximize2 size={13} />
               </Button>
@@ -775,6 +838,7 @@ export function CardView({
           {card.kind === "run-history" ? <RunHistoryCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "affected" ? <AffectedCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "ci-matrix" ? <CiMatrixCardBody card={card} /> : null}
+          {card.kind === "agent" ? <AgentCardBody card={card} onRunCommand={onRunCommand} /> : null}
         </div>
       </section>
     </>

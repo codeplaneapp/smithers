@@ -27,6 +27,7 @@ test("frame URLs survive reload, traverse history, preserve the card node, and f
   await page.goto("/")
 
   page.once("dialog", (dialog) => void dialog.accept(repository))
+  await page.getByTestId("composer-repo-trigger").click()
   await page.getByTestId("chrome-open-repo").click()
 
   const card = page.locator('.smithers-card[data-kind="repo"]')
@@ -71,4 +72,36 @@ test("frame URLs survive reload, traverse history, preserve the card node, and f
   await page.goBack()
   await expect(page).toHaveURL(maximizedUrl)
   await expect(card).toHaveAttribute("data-maximized", "true")
+})
+
+test("open-in-tab returns the address bar to the root frame and Escape minimizes a pointer-maximized card", async ({ page }) => {
+  const repository = mkdtempSync(join(tmpdir(), "smithers-frame-repo-"))
+  await page.goto("/")
+  page.once("dialog", (dialog) => void dialog.accept(repository))
+  await page.getByTestId("composer-repo-trigger").click()
+  await page.getByTestId("chrome-open-repo").click()
+
+  const card = page.getByTestId("transcript").locator('.smithers-card[data-kind="repo"]')
+  await expect(card).toBeVisible()
+  const cardId = (await card.getAttribute("data-testid"))?.replace(/^card-/, "")
+  expect(cardId).toBeTruthy()
+
+  // Escape after a pointer maximize: the pressed button unmounted, but focus followed to its replacement.
+  await card.getByTestId(`card-maximize-${cardId}`).click()
+  await expect(card).toHaveAttribute("data-maximized", "true")
+  await page.keyboard.press("Escape")
+  await expect(card).toHaveAttribute("data-maximized", "false")
+  await expect.poll(() => decodeURIComponent(new URL(page.url()).pathname))
+    .toBe("/w/workspace-main/b/branch-main/f/frame-root:branch-main")
+
+  // Open in tab embeds the transcript's copy AND moves the address bar back to root, so reload keeps it embedded.
+  await card.getByTestId(`card-maximize-${cardId}`).click()
+  await page.getByTestId(`card-open-in-tab-${cardId}`).click()
+  await expect(page.locator(".card-tab .smithers-card")).toBeVisible()
+  await expect(card).toHaveAttribute("data-maximized", "false")
+  await expect.poll(() => decodeURIComponent(new URL(page.url()).pathname))
+    .toBe("/w/workspace-main/b/branch-main/f/frame-root:branch-main")
+  await page.reload()
+  await expect(page.locator('.smithers-card[data-kind="repo"][data-maximized="true"]')).toHaveCount(0)
+  await expect(page.locator(".card-maximize-backdrop")).toHaveCount(0)
 })

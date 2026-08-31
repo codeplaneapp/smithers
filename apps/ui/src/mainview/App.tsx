@@ -14,12 +14,11 @@ import {
 import { useLiveQuery } from "@tanstack/react-db"
 import {
   BookOpen,
+  CheckCircle2,
   Copy,
-  Moon,
   Plus,
   RotateCcw,
   Sparkles,
-  Sun,
   Trash2
 } from "lucide-react"
 import { lazy, Suspense, useRef, useState } from "react"
@@ -31,11 +30,13 @@ import { useController } from "./ControllerContext"
 import { DevtoolsPanel } from "./DevtoolsPanel"
 import { stampFlows } from "./FlowStamp"
 import { tabOutOf } from "./FocusRing"
+import { INIT_TITLE, initMessage, repoStep, repoSuggestion } from "./Onboarding"
+import type { InitMessage } from "./Onboarding"
 import { RichMarkdown } from "./RichMarkdown"
 import type { Card, Message, Suggestion as SuggestionBinding } from "./state/AppState"
 import { WORLD_DISPLAY_NAME } from "./state/AppState"
 import { scrubToolEcho } from "./state/MessageScrub"
-import { MAIN_TAB_ID } from "./state/AppState"
+import { conversationTabIdOf, inConversation, MAIN_TAB_ID } from "./state/AppState"
 import { ConfirmDialog, SurfaceHeader } from "./SurfaceChrome"
 import { ChromeBar } from "./tabs/ChromeBar"
 import { TabBodies } from "./tabs/TabBodies"
@@ -54,13 +55,14 @@ const systemNoteLabel = (message: Message): string => {
 
 type TranscriptEntry =
   | { readonly kind: "message"; readonly message: Message }
+  | { readonly kind: "init"; readonly message: InitMessage }
   | { readonly kind: "card"; readonly card: Card }
 
 const entryOrdinal = (entry: TranscriptEntry): number =>
-  entry.kind === "message" ? entry.message.ordinal : entry.card.ordinal
+  entry.kind === "card" ? entry.card.ordinal : entry.message.ordinal
 
 const entryCreatedAt = (entry: TranscriptEntry): number =>
-  entry.kind === "message" ? entry.message.createdAt : entry.card.createdAt
+  entry.kind === "card" ? entry.card.createdAt : entry.message.createdAt
 
 function CopyMessageButton({
   text,
@@ -75,7 +77,7 @@ function CopyMessageButton({
       variant="ghost"
       size="icon"
       className="message-action"
-      data-flow="copy-message"
+      data-flow="chat.copy-message"
       aria-label={copied ? "Copied" : "Copy message"}
       title={copied ? "Copied" : "Copy message"}
       onClick={() => {
@@ -129,17 +131,22 @@ function App() {
       pendingWorldDeleteId: session.pendingWorldDeleteId,
       activeTabId: session.activeTabId,
       tabMenuOpen: session.tabMenuOpen,
+      addMenuOpen: session.addMenuOpen,
       resetConfirmOpen: session.resetConfirmOpen
     }))
   )
   const { data: worldDocumentRows } = useLiveQuery(collections.worldDocuments)
   const cardRows = useCardRows(collections.cards)
+  const { data: tabRows } = useLiveQuery(collections.tabs)
   const { data: identityRows } = useLiveQuery(collections.identitySessions)
-  const { data: billingRows } = useLiveQuery(collections.billingAccounts)
   const { data: toastRows } = useLiveQuery((q) =>
     q.from({ toast: collections.toasts }).orderBy(({ toast }) => toast.createdAt)
   )
   const { data: watchedRows } = useLiveQuery(collections.watchedRepos)
+  const { data: harnessRows } = useLiveQuery(collections.harnesses)
+  const { data: connectorRows } = useLiveQuery(collections.connectors)
+  const { data: repoRows } = useLiveQuery(collections.repos)
+  const { data: recommendationRows } = useLiveQuery(collections.recommendations)
   /*
    * §10.6: the delete question lives in the store, not here — a component is
    * a projection, never an authority, and the local-state version was
@@ -149,20 +156,28 @@ function App() {
   const surfacesTriggerRef = useRef<HTMLButtonElement>(null)
   /* The connect trigger has the same shell-level Escape exit as surfaces. */
   const connectTriggerRef = useRef<HTMLButtonElement>(null)
-  const messages = messageRows
-  const worldDocuments = [...worldDocumentRows].sort((left, right) => left.path.localeCompare(right.path))
+  /* The composer's `+` menu is the third session menu the shell closes the same way. */
+  const addTriggerRef = useRef<HTMLButtonElement>(null)
   const session = sessionRows[0] ?? controller.store.session()
+  /*
+   * The conversation on screen (docs/LOCAL-APP.md "Tabs"): there is ONE
+   * Smithers, the first tab, aware of every other one — so the conversation is
+   * always main's. Rows keep their conversation stamp (a turn in flight writes
+   * where it started), and this filter reads it.
+   */
+  const conversationTabId = conversationTabIdOf(session, (id) => tabRows.find((tab) => tab.id === id))
+  const messages = messageRows.filter((message) => inConversation(message, conversationTabId))
+  const conversationCards = cardRows.filter((card) => inConversation(card, conversationTabId))
+  const worldDocuments = [...worldDocumentRows].sort((left, right) => left.path.localeCompare(right.path))
   const pendingWorldDelete = worldDocuments.find(
     (document) => document.id === (session.pendingWorldDeleteId ?? null)
   )
   const selectedWorldDocument = worldDocuments.find((document) => document.id === session.selectedWorldDocumentId) ??
     worldDocuments[0]
   const typing = session.phase === "responding"
-  const dark = session.theme === "dark"
   const activeTabId = session.activeTabId ?? MAIN_TAB_ID
   const streamingMessageId = typing ? messages[messages.length - 1]?.id : undefined
   const identity = identityRows[0]
-  const billing = billingRows[0]
   const toasts = toastRows
 
   /*
@@ -176,11 +191,14 @@ function App() {
     if (!(target instanceof Element)) return
     if (session.surfacesMenuOpen && target.closest(".composer-surfaces") === null) {
       const heldFocus = document.activeElement?.closest(".composer-surfaces") !== null
-      controller.runCommand("surfaces")
+      controller.runCommand("chat.surfaces")
       if (heldFocus) requestAnimationFrame(() => surfacesTriggerRef.current?.focus())
     }
     if (session.connectMenuOpen === true && target.closest(".composer-connect") === null) {
       controller.closeConnectMenu()
+    }
+    if (session.addMenuOpen === true && target.closest(".composer-add") === null) {
+      controller.closeAddMenu()
     }
   }
   /*
@@ -242,9 +260,46 @@ function App() {
   const needsSelection = identity?.state === "signed-in" && identity.allowlisted &&
     (watched === undefined || watched.selected === null) &&
     controller.commands.find("repos.watch") !== undefined
-  const suggestions: ReadonlyArray<SuggestionBinding> = needsSelection
-    ? [{ id: "choose-repos", label: "Choose repos to watch", flow: "repos.watch", emphasis: "primary" }]
-    : []
+  /*
+   * Selecting a repository is the one next step, and locally it is the native
+   * folder picker (repo.open) — the IDE's open-folder — never a sign-in.
+   */
+  const step = repoStep({
+    localPickerAvailable: controller.nativeRepositoriesAvailable && controller.commands.find("repo.open") !== undefined,
+    connectors: connectorRows,
+    repos: repoRows,
+    needsSelection
+  })
+  /*
+   * The pills are the recommendation row's projection (state/Recommend.ts):
+   * regenerated by the `recommend` flow after every material change — a cheap
+   * agent's pick, or the rule's. Before the first regeneration lands the rule
+   * answers inline; a pill whose flow this host does not register is dropped.
+   */
+  const recommended = recommendationRows[0]?.suggestions
+  const suggestions: ReadonlyArray<SuggestionBinding> = (recommended ?? repoSuggestion(step))
+    .filter((suggestion) => controller.commands.find(suggestion.flow) !== undefined)
+  /*
+   * The opening entry: what the host registered, derived from the live
+   * collections (never stored), with the repo step riding it as its action.
+   * A gated auth state (signed out, not allowlisted) still shows only itself.
+   */
+  /*
+   * On the local host sign-in is an option, never a gate (docs/LOCAL-APP.md):
+   * repositories, terminals, and harnesses all work signed out, so the
+   * opening read shows. Signed out on Cloud, sign-in is the whole transcript.
+   */
+  const gatedByAuth = (identity?.state === "signed-out" && controller.bootstrap?.host !== "local") ||
+    (identity?.state === "signed-in" && !identity.allowlisted)
+  // A new conversation opens empty; the host's opening read belongs to main alone.
+  const openingMessage: InitMessage | undefined = gatedByAuth || conversationTabId !== undefined ? undefined : initMessage({
+    bootstrap: controller.bootstrap,
+    flowCount: controller.commands.all().length,
+    harnesses: harnessRows,
+    connectors: connectorRows,
+    repos: repoRows,
+    repoStep: step
+  })
   // Admin chrome follows the same capability-filtered registry as every act.
   const isAdmin = controller.commands.find("admin.devtools") !== undefined
 
@@ -256,9 +311,10 @@ function App() {
    * what the session actually said.
    */
   const entries: ReadonlyArray<TranscriptEntry> = [
+    ...(openingMessage === undefined ? [] : [{ kind: "init", message: openingMessage } as const]),
     ...(authMessage === undefined ? [] : [{ kind: "message", message: authMessage } as const]),
     ...messages.map((message): TranscriptEntry => ({ kind: "message", message })),
-    ...[...cardRows].map((card): TranscriptEntry => ({ kind: "card", card }))
+    ...conversationCards.map((card): TranscriptEntry => ({ kind: "card", card }))
   ].sort((left, right) => {
     if (entryOrdinal(left) !== entryOrdinal(right)) return entryOrdinal(left) - entryOrdinal(right)
     return entryCreatedAt(left) - entryCreatedAt(right)
@@ -289,7 +345,7 @@ function App() {
         // §21.4 — an open menu closes before anything else the shell owns.
         if (event.key === "Escape" && session.surfacesMenuOpen) {
           event.preventDefault()
-          controller.runCommand("surfaces")
+          controller.runCommand("chat.surfaces")
           requestAnimationFrame(() => {
             surfacesTriggerRef.current?.focus()
           })
@@ -301,6 +357,14 @@ function App() {
           controller.closeConnectMenu()
           requestAnimationFrame(() => {
             connectTriggerRef.current?.focus()
+          })
+          return
+        }
+        if (event.key === "Escape" && session.addMenuOpen === true) {
+          event.preventDefault()
+          controller.closeAddMenu()
+          requestAnimationFrame(() => {
+            addTriggerRef.current?.focus()
           })
           return
         }
@@ -316,13 +380,21 @@ function App() {
       {/* The chrome bar: the tab strip upper-left, the repo chip and chrome actions right. */}
       <ChromeBar />
 
+      <div className="app-main">
+
       {
         /*
          * The main tab's body IS the chat. Every tab body stays mounted; an
          * inactive one is hidden, never unmounted (docs/LOCAL-APP.md "Tabs").
          */
       }
-      <div className="tab-body" data-kind="main" data-testid="tab-body-main" hidden={activeTabId !== MAIN_TAB_ID}>
+      <div
+        className="tab-body"
+        data-kind="main"
+        data-conversation={conversationTabId}
+        data-testid="tab-body-main"
+        hidden={activeTabId !== MAIN_TAB_ID && conversationTabId === undefined}
+      >
       <div className="chat-frame" data-pane={session.surface === "chat" ? undefined : session.surface}>
         <div className="chat-column">
           {
@@ -442,7 +514,34 @@ function App() {
                         </Reasoning>
                       ) :
                       null}
-                    {entry.message.text !== "" ?
+                    {entry.kind === "init" ?
+                      (
+                        <div className="message-init" data-testid="init-message">
+                          <CheckCircle2 size={16} className="message-init-check" aria-label="Initialized" />
+                          <div className="message-init-body">
+                            <RichMarkdown
+                              className="message-markdown message-init-title"
+                              content={`**${INIT_TITLE}**`}
+                            />
+                            <details className="message-init-details">
+                              <summary>Details</summary>
+                              <RichMarkdown
+                                className="message-markdown message-init-details-content"
+                                content={entry.message.details}
+                              />
+                            </details>
+                            {entry.message.prompt === undefined ?
+                              null :
+                              (
+                                <RichMarkdown
+                                  className="message-markdown message-init-prompt"
+                                  content={entry.message.prompt}
+                                />
+                              )}
+                          </div>
+                        </div>
+                      ) :
+                      entry.message.text !== "" ?
                       (
                         // scrubToolEcho: a weak model's tool call written into prose
                         // is wire debris, never content — stripped at render only;
@@ -479,7 +578,7 @@ function App() {
                     <span className="message-actions">
                       <CopyMessageButton
                         text={entry.message.text}
-                        onCopy={(text) => controller.runCommandArgs("copy-message", text)}
+                        onCopy={(text) => controller.runCommandArgs("chat.copy-message", text)}
                       />
                       {entry.message.status === "failed" ?
                         (
@@ -489,7 +588,7 @@ function App() {
                             className="message-action"
                             aria-label="Retry turn"
                             title="Retry turn"
-                            onClick={() => controller.runCommand("retry")}
+                            onClick={() => controller.runCommand("chat.retry")}
                           >
                             <RotateCcw size={12} />
                           </Button>
@@ -502,7 +601,20 @@ function App() {
           </ChatTranscript>
 
           <div className="composer-wrap">
-            <SuggestionGroup className="smithers-suggestions">
+            <Composer
+              typing={typing}
+              surface={session.surface}
+              surfacesMenuOpen={session.surfacesMenuOpen}
+              connectMenuOpen={session.connectMenuOpen === true}
+              addMenuOpen={session.addMenuOpen === true}
+              surfacesTriggerRef={surfacesTriggerRef}
+              connectTriggerRef={connectTriggerRef}
+              addTriggerRef={addTriggerRef}
+              autoFocus={authMessage === undefined}
+              placeholder="Ask Smithers to work on something…"
+            />
+            {/* The next-step pills sit UNDER the chat box; DOM order is focus order: composer, then pills. Feature-flagged (features.suggestionPills), off by default. */}
+            {controller.features.suggestionPills ? <SuggestionGroup className="smithers-suggestions">
               {suggestions.map((suggestion) => (
                 <Suggestion
                   className="smithers-suggestion"
@@ -510,6 +622,7 @@ function App() {
                   data-flow={suggestion.flow}
                   key={suggestion.id}
                   suggestion={suggestion.label}
+                  title={suggestion.why}
                   disabled={typing}
                   onClick={() =>
                     suggestion.args === undefined
@@ -520,81 +633,9 @@ function App() {
                   {suggestion.label}
                 </Suggestion>
               ))}
-            </SuggestionGroup>
-            <Composer
-              typing={typing}
-              surface={session.surface}
-              surfacesMenuOpen={session.surfacesMenuOpen}
-              connectMenuOpen={session.connectMenuOpen === true}
-              surfacesTriggerRef={surfacesTriggerRef}
-              connectTriggerRef={connectTriggerRef}
-              autoFocus={authMessage === undefined}
-              placeholder="Ask Smithers to work on something…"
-            />
+            </SuggestionGroup> : null}
           </div>
 
-          {
-            /*
-             * The corner chrome is chat chrome (balance, reset the conversation,
-             * theme), so it lives with the conversation rather than floating over
-             * the whole window. Anchored to the viewport it sat on top of an open
-             * pane's own header and made the pane's back-to-conversation button
-             * unclickable; anchored to the chat column it stays exactly where it
-             * was whenever the chat is alone, and clears the pane when one is open.
-             *
-             * It renders LAST because DOM order is focus order and these three
-             * controls are chrome, not the conversation. Rendered first they put
-             * the theme toggle ahead of the only action a signed-out visitor has.
-             * `.corner-chrome` is absolutely positioned, so where it sits in the
-             * column changes the tab ring and nothing else.
-             */
-          }
-          <div className="corner-chrome">
-            {billing !== undefined && billing.state !== "unknown" &&
-                controller.commands.find("billing.balance") !== undefined ?
-              (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="corner-balance-chip"
-                  data-flow="billing.balance"
-                  data-empty={billing.state === "empty"}
-                  aria-label="Show your balance"
-                  title="Show your balance"
-                  onClick={() => controller.runCommand("billing.balance")}
-                >
-                  {billing.state === "unavailable" ? "Balance unavailable" : `$${billing.totalUsd ?? "0"}`}
-                </Button>
-              ) :
-              null}
-            {/* The bare reset is admin-only dev tooling (§2); users get /clear. */}
-            {isAdmin ?
-              (
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="corner-reset-btn"
-                  data-flow="admin.reset.ask"
-                  aria-label="Reset conversation"
-                  title="Reset conversation"
-                  onClick={() => controller.runCommand("admin.reset.ask")}
-                >
-                  <RotateCcw size={14} />
-                </Button>
-              ) :
-              null}
-            <Button
-              variant="outline"
-              size="icon"
-              className="corner-theme-btn"
-              data-flow="dark-mode"
-              aria-label="Toggle light and dark mode"
-              title="Toggle light and dark mode"
-              onClick={() => controller.runCommand("dark-mode")}
-            >
-              {dark ? <Sun size={14} /> : <Moon size={14} />}
-            </Button>
-          </div>
         </div>
 
         {session.surface === "world" ?
@@ -722,6 +763,7 @@ function App() {
 
       {/* Terminal, harness, and card tabs; hidden while inactive, never unmounted. */}
       <TabBodies />
+      </div>
 
       {
         /*
@@ -739,7 +781,7 @@ function App() {
         confirmLabel="Discard and start fresh"
         destructive
         onConfirm={() => {
-          controller.runCommand("reset")
+          controller.runCommand("admin.reset")
         }}
         onCancel={() => controller.runCommand("admin.reset.cancel")}
       />

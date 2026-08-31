@@ -188,6 +188,136 @@ export const recommendedNames = (state: CommandState): ReadonlyArray<string> => 
   return state.surface === "chat" ? [...withSelection] : ["chat", ...withSelection]
 }
 
+/*
+ * ── The namespace tree ─────────────────────────────────────────────────
+ *
+ * A flow's namespace is its dotted head (`auth.sign-in` → `auth`). Every
+ * canonical flow lives in one; the only bare names are the three surface
+ * switches (`chat`, `world`, `connect`), which ARE the top level of the app
+ * and read wrong under any prefix, and the hidden bare aliases that keep old
+ * spellings (`/dark-mode`, `/clear`, `/reset`) working. Aliases never show.
+ */
+
+/** The surface switches: the one legitimate top-level leaves. */
+export const SURFACE_FLOWS: ReadonlyArray<string> = ["chat", "world", "connect"]
+
+export interface Namespace {
+  readonly id: string
+  readonly label: string
+  readonly summary: string
+}
+
+/** The namespaces in display order; one the table lacks lists last, by id. */
+export const NAMESPACES: ReadonlyArray<Namespace> = [
+  { id: "chat", label: "Chat", summary: "The conversation: send, stop, retry, clear" },
+  { id: "appearance", label: "Appearance", summary: "Theme and colors" },
+  { id: "repo", label: "Repository", summary: "Open and inspect local repositories" },
+  { id: "repos", label: "Repositories", summary: "GitHub and Smithers Cloud repositories" },
+  { id: "connector", label: "Connectors", summary: "Local repository connections" },
+  { id: "world", label: "World", summary: "What Smithers understands" },
+  { id: "tab", label: "Tabs", summary: "Terminals, agents, and card tabs" },
+  { id: "target", label: "Targets", summary: "Build targets, runs, graph, CI" },
+  { id: "flow", label: "Workflows", summary: "Create, list, and run workflows" },
+  { id: "issues", label: "Issues", summary: "GitHub issues" },
+  { id: "prs", label: "Pull requests", summary: "GitHub pull requests" },
+  { id: "files", label: "Files", summary: "Read repository files" },
+  { id: "branches", label: "Branches", summary: "Repository branches" },
+  { id: "env", label: "Environment", summary: "Workspace environment variables" },
+  { id: "keys", label: "Keys", summary: "Provider API keys" },
+  { id: "notifications", label: "Notifications", summary: "GitHub notifications" },
+  { id: "browser", label: "Browser", summary: "Read web pages" },
+  { id: "auth", label: "Account", summary: "Sign in and out" },
+  { id: "billing", label: "Billing", summary: "Balance and plan" },
+  { id: "card", label: "Cards", summary: "Maximize and minimize cards" },
+  { id: "frame", label: "Frames", summary: "Navigate and fork frames" },
+  { id: "approval", label: "Approvals", summary: "Approve or deny requests" },
+  { id: "debug", label: "Debug", summary: "Observability and dev tooling" },
+  { id: "admin", label: "Admin", summary: "Operator tooling" },
+  { id: "system", label: "System", summary: "Background flows" },
+  { id: "toast", label: "Toasts", summary: "Notifications on screen" }
+]
+
+/** The namespace a flow name belongs to; a bare name has none. */
+export const namespaceOf = (name: string): string | undefined => {
+  const dot = name.indexOf(".")
+  return dot === -1 ? undefined : name.slice(0, dot)
+}
+
+const namespaceRank = (id: string): number => {
+  const index = NAMESPACES.findIndex((namespace) => namespace.id === id)
+  return index === -1 ? NAMESPACES.length : index
+}
+
+/** The namespace record for an id, synthesized for one the table lacks. */
+export const namespace = (id: string): Namespace =>
+  NAMESPACES.find((candidate) => candidate.id === id) ?? { id, label: id, summary: "" }
+
+/**
+ * The namespaces that have at least one visible flow, in display order —
+ * an empty namespace never shows, and neither does a hidden flow's.
+ */
+export const namespacesOf = <C extends CatalogItem>(
+  commands: ReadonlyArray<C>
+): Array<Namespace & { readonly count: number }> => {
+  const counts = new Map<string, number>()
+  for (const command of visible(commands)) {
+    const id = namespaceOf(command.name)
+    if (id !== undefined) counts.set(id, (counts.get(id) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort(([left], [right]) => namespaceRank(left) - namespaceRank(right) || left.localeCompare(right))
+    .map(([id, count]) => ({ ...namespace(id), count }))
+}
+
+/** One row of the slash menu: a flow to run, or a namespace to open. */
+export type SlashRow<C extends CatalogItem> =
+  | { readonly kind: "flow"; readonly flow: C; readonly recommended: boolean }
+  | { readonly kind: "namespace"; readonly namespace: Namespace; readonly count: number }
+
+/**
+ * The slash menu as a tree.
+ *
+ *  - a bare "/" lists the top level: the recommendations (gold) and the
+ *    surface switches as leaves, then every non-empty namespace as a row the
+ *    user opens (Enter / ArrowRight → the draft becomes `/ns.`);
+ *  - `/ns.` (a namespace head with the dot, nothing more) lists that
+ *    namespace's visible flows, uncapped — the branch IS the listing;
+ *  - anything else is the flat fuzzy filter `slashItems` already does, so a
+ *    user who knows a name loses nothing, plus the namespaces whose id the
+ *    query starts (`/app` offers `appearance ›` above the leaves).
+ */
+export const slashTree = <C extends CatalogItem>(
+  state: CommandState,
+  needle: string,
+  commands: ReadonlyArray<C>
+): Array<SlashRow<C>> => {
+  const query = needle.trim().toLowerCase()
+  const namespaces = namespacesOf(commands)
+  const asNamespace = (row: Namespace & { readonly count: number }): SlashRow<C> => ({
+    kind: "namespace",
+    namespace: { id: row.id, label: row.label, summary: row.summary },
+    count: row.count
+  })
+  const asFlow = (item: SlashItem<C>): SlashRow<C> => ({ kind: "flow", flow: item.flow, recommended: item.recommended })
+  if (query === "") {
+    const leaves = slashItems(state, "", commands).filter(
+      (item) => item.recommended || namespaceOf(item.flow.name) === undefined
+    )
+    return [...leaves.map(asFlow), ...namespaces.map(asNamespace)]
+  }
+  const branch = query.endsWith(".") ? query.slice(0, -1) : undefined
+  if (branch !== undefined && namespaces.some((row) => row.id === branch)) {
+    const names = recommendedNames(state)
+    return visible(commands)
+      .filter((command) => namespaceOf(command.name) === branch)
+      .map((flow) => ({ kind: "flow", flow, recommended: names.includes(flow.name) }))
+  }
+  const heads = query.includes(".")
+    ? []
+    : namespaces.filter((row) => row.id.startsWith(query) && row.id !== query).map(asNamespace)
+  return [...heads, ...slashItems(state, needle, commands).map(asFlow)]
+}
+
 /** The flows listed to the user: hidden id-scoped actions never show. */
 export const visible = <C extends CatalogItem>(
   commands: ReadonlyArray<C>

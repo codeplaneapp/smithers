@@ -119,10 +119,10 @@ export const ThemePickerCardBody = ({
           type="button"
           role="option"
           aria-selected={selected}
-          data-flow="theme"
+          data-flow="appearance.theme"
           aria-label={`Switch to the ${swatch.label} color theme`}
           style={swatchStyle(swatch, selected)}
-          onClick={() => onRunCommand("theme", swatch.key)}
+          onClick={() => onRunCommand("appearance.theme", swatch.key)}
         >
           <span style={{ display: "flex", gap: "4px" }} aria-hidden="true">
             <span style={dotStyle(swatch.light.brand, swatch.dark.brand)} />

@@ -111,6 +111,12 @@ const SMITHERS_MESSAGES =
 const openingMessage = (host: HTMLElement): string =>
   (host.querySelector(SMITHERS_MESSAGES)?.textContent ?? "").replace(/\s+/g, " ").trim()
 
+/** Every rendered Smithers message, in transcript order. */
+const smithersMessages = (host: HTMLElement): Array<string> =>
+  [...host.querySelectorAll(SMITHERS_MESSAGES)].map((node) =>
+    (node.textContent ?? "").replace(/\s+/g, " ").trim()
+  )
+
 const FILLER = /Tell me what you[’']re working on/
 
 const CANDIDATES = [
@@ -152,7 +158,10 @@ describe("wave 14 §1 — the opening message is never filler", () => {
     await settled()
 
     const { host, markup } = mount(controller)
-    expect(openingMessage(host)).toContain("choose which repositories")
+    // The opening entry is the initialization read; the chooser's welcome follows it.
+    const messages = smithersMessages(host)
+    expect(messages[0]).toContain("Smithers initialized successfully")
+    expect(messages[1]).toContain("choose which repositories")
     expect(openingMessage(host)).not.toMatch(/^Hey/)
     expect(FILLER.test(markup())).toBe(false)
   })
@@ -171,11 +180,11 @@ describe("wave 14 §1 — the opening message is never filler", () => {
     await settled()
 
     const { host, markup } = mount(controller)
-    expect(openingMessage(host)).toContain("couldn't read your repositories")
+    expect(smithersMessages(host)[1]).toContain("couldn't read your repositories")
     expect(FILLER.test(markup())).toBe(false)
   })
 
-  test("signed in, still loading: the transcript is empty — the toast carries the wait, not a filler line", async () => {
+  test("signed in, still loading: only the initialization read shows — the toast carries the wait, not a filler line", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     // The watched read is genuinely in flight: this route never answers, so
     // the boot is observed mid-wait rather than after it.
@@ -193,9 +202,11 @@ describe("wave 14 §1 — the opening message is never filler", () => {
     await settled()
 
     const { host, markup } = mount(controller)
-    // Empty-while-loading is a valid state: nothing is claimed before the
-    // watched read answers. The 300ms toast law (AppController) is what speaks.
-    expect(host.querySelectorAll(SMITHERS_MESSAGES)).toHaveLength(0)
+    // Nothing about the wait is claimed before the watched read answers: the
+    // opening read states only what the host registered. The 300ms toast law
+    // (AppController) is what speaks about the wait.
+    expect(smithersMessages(host)).toHaveLength(1)
+    expect(openingMessage(host)).toContain("Smithers initialized successfully")
     expect(FILLER.test(markup())).toBe(false)
   })
 })

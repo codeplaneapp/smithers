@@ -50,10 +50,13 @@ export type CommandActions =
     | "nativeRepositoriesAvailable"
     | "slashCommands"
     | "slashItems"
+    | "slashTree"
     | "runCommand"
     | "runCommandArgs"
     | "commands"
     | "tappedFetch"
+    // Feature flags are the composition root's configuration, never an action.
+    | "features"
     // The scope close is the composition root's act, never a flow's.
     | "dispose"
   >
@@ -148,6 +151,16 @@ const flow = <I extends Payload>(declaration: Declaration<I>): FlowEntry => {
   }
 }
 
+/**
+ * A hidden bare alias of a namespaced flow: the old spelling keeps working
+ * (typed, stamped, persisted in recentCommands / pendingCommand) while the
+ * canonical name lives in its namespace. Execution resolves to the target
+ * through `canonical()`, so the alias never ranks, lists, or reaches the
+ * model's catalog.
+ */
+const alias = <I extends Payload>(name: string, target: Declaration<I>): FlowEntry =>
+  flow({ ...target, name, aliasOf: target.name, hidden: true })
+
 /** The payload of a flow that takes nothing. */
 const NoPayload = Schema.Struct({})
 /** An optional trailing `owner/repo` target. */
@@ -167,7 +180,132 @@ const NumberedTarget = Schema.Struct({
  *
  * @category constructors
  */
-export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
+export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => {
+  /*
+   * The canonical declarations that also keep a bare alias: declared once so
+   * the alias cannot drift from the flow it spells.
+   */
+  const THEME = {
+    name: "appearance.theme",
+    summary: "Set the color theme",
+    userOnly: true,
+    args: PALETTES.join(" | "),
+    input: Schema.Struct({ palette: Schema.String }),
+    handler: ({ palette }: { readonly palette: string }) => actions.setPalette(palette)
+  }
+  const DARK_MODE = {
+    name: "appearance.dark-mode",
+    summary: "Toggle light and dark mode",
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.toggleTheme()
+  }
+  const SURFACES = {
+    name: "chat.surfaces",
+    summary: "Open the surfaces menu",
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.toggleSurfacesMenu()
+  }
+  /*
+   * The maintainer's switch: every flow invocation (hidden, aliased,
+   * agent-driven, deferred) and every background or system transition
+   * renders as a trace line, and the transition logger writes to the
+   * console. Registered for every session rather than the admin plugin:
+   * the local host has no identity seam, so an admin gate would make the
+   * switch unreachable exactly where the maintainer runs the app.
+   */
+  const VERBOSE = {
+    name: "debug.verbose",
+    summary: "Show everything Smithers is doing",
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.toggleVerbose()
+  }
+  const RETRY = {
+    name: "chat.retry",
+    summary: "Retry the last turn",
+    input: NoPayload,
+    handler: () => actions.retryLastTurn()
+  }
+  const SEND = {
+    name: "chat.send",
+    summary: "Submit the composer",
+    userOnly: true,
+    args: "<text>",
+    input: Schema.Struct({ text: Schema.String }),
+    handler: ({ text }: { readonly text: string }) => {
+      actions.send(text)
+    }
+  }
+  /*
+   * /chat.clear (§2h): sweep the outgoing transcript for what belongs in
+   * world, keep it, THEN clear — a failed sweep clears nothing.
+   */
+  const CLEAR = {
+    name: "chat.clear",
+    summary: "Clear the chat, keeping anything worth remembering",
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.clearConversation()
+  }
+  /* The browser tool + surface (§2d/§2d′): read a page; embed its card. */
+  const BROWSER = {
+    name: "browser.open",
+    summary: "Open a web page as a card Smithers can read",
+    runtime: ["agent"] as const,
+    args: "<url>",
+    capabilities: ["session:net-read"],
+    input: Schema.Struct({ url: Schema.String }),
+    handler: ({ url }: { readonly url: string }) => actions.openBrowser(url)
+  }
+  const COPY_MESSAGE = {
+    name: "chat.copy-message",
+    summary: "Copy a message to the clipboard",
+    hidden: true,
+    userOnly: true,
+    args: "<text>",
+    input: Schema.Struct({ text: Schema.String }),
+    /*
+     * A.26: `void navigator.clipboard.writeText(...)` let the browser's
+     * NotAllowedError escape as an unhandled rejection — the only trace was
+     * a POST to /api/client-errors, and the human who pressed Copy was told
+     * nothing at all. The refusal is awaited and answered.
+     */
+    handler: async ({ text }: { readonly text: string }) => {
+      const clipboard = navigator.clipboard
+      if (clipboard === undefined) {
+        return "This browser won't give Smithers the clipboard — select the text and copy it yourself."
+      }
+      try {
+        await clipboard.writeText(text)
+      } catch (cause) {
+        return cause instanceof Error && cause.name === "NotAllowedError"
+          ? "The browser refused the clipboard — it only allows a copy while the page has focus."
+          : "The copy didn't go through — select the text and copy it yourself."
+      }
+    }
+  }
+  /* The one-keystroke recovery: reload the window (dev loop, stuck states). */
+  const RELOAD = {
+    name: "chat.reload",
+    summary: "Reload the app",
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.reloadApp()
+  }
+  /*
+   * The full catalog as a chat message: the slash menu caps at 8 for calm,
+   * so THIS is where "show me everything" lives — for the user typed, and
+   * for the agent answering "what can you do".
+   */
+  const COMMANDS = {
+    name: "chat.commands",
+    summary: "List everything Smithers can do",
+    input: NoPayload,
+    handler: () => actions.showCommandCatalog()
+  }
+  return [
   flow({
     name: "connect",
     summary: "Connect work to Smithers",
@@ -180,56 +318,49 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     input: NoPayload,
     handler: () => actions.showWorld()
   }),
+  /*
+   * `appearance.*` — look and feel. The color theme is the axis orthogonal to
+   * light/dark: `/appearance.theme <key>` wears a palette, bare answers with
+   * the list and where the human already is. User-only browser chrome.
+   */
+  flow(THEME),
+  alias("theme", THEME),
+  flow(DARK_MODE),
+  alias("dark-mode", DARK_MODE),
+  /*
+   * `chat.*` — the conversation's own controls. C-1 (wave 13): the composer's
+   * surfaces-menu trigger is a flow like every other affordance — the button
+   * dispatches /chat.surfaces, and the name typed opens the same menu.
+   */
+  flow(SURFACES),
+  alias("surfaces", SURFACES),
+  flow(VERBOSE),
+  alias("verbose", VERBOSE),
   flow({
     /*
-     * The color theme, the axis orthogonal to light/dark (dark-mode below):
-     * `/theme <key>` wears a palette, bare `/theme` answers with the list and
-     * where the human already is. User-only browser chrome, like every other
-     * look-and-feel control.
+     * The next-step recommender (state/Recommend.ts): system-invoked after
+     * every material transition, never listed, never the model's to call —
+     * a model must not steer what the human is offered next.
      */
-    name: "theme",
-    summary: "Set the color theme",
-    userOnly: true,
-    args: PALETTES.join(" | "),
-    input: Schema.Struct({ palette: Schema.String }),
-    handler: ({ palette }) => actions.setPalette(palette)
-  }),
-  flow({
-    /*
-     * C-1 (wave 13): the composer's surfaces-menu trigger is a flow like every
-     * other affordance — the button dispatches /surfaces, and /surfaces typed
-     * opens the same menu.
-     */
-    name: "surfaces",
-    summary: "Open the surfaces menu",
-    userOnly: true,
-    input: NoPayload,
-    handler: () => actions.toggleSurfacesMenu()
-  }),
-  flow({
-    /*
-     * The light/dark toggle, canonical under its own name since /theme became
-     * the palette flow. Listed, because it is the one control the corner
-     * button dispatches.
-     */
-    name: "dark-mode",
-    summary: "Toggle light and dark mode",
+    name: "system.recommend",
+    summary: "Refresh the next-step suggestions",
+    hidden: true,
     userOnly: true,
     input: NoPayload,
-    handler: () => actions.toggleTheme()
+    handler: () => actions.recommend()
   }),
   flow({
+    /*
+     * The three surface switches (chat, world, connect) are the app's own top
+     * level, so they alone stay bare: `/chat` under any prefix reads wrong.
+     */
     name: "chat",
     summary: "Back to the conversation",
     input: NoPayload,
     handler: () => actions.showChat()
   }),
-  flow({
-    name: "retry",
-    summary: "Retry the last turn",
-    input: NoPayload,
-    handler: () => actions.retryLastTurn()
-  }),
+  flow(RETRY),
+  alias("retry", RETRY),
   flow({
     name: "chat.stop",
     summary: "Stop the current response",
@@ -246,16 +377,8 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     input: NoPayload,
     handler: () => actions.stop()
   }),
-  flow({
-    name: "send",
-    summary: "Submit the composer",
-    userOnly: true,
-    args: "<text>",
-    input: Schema.Struct({ text: Schema.String }),
-    handler: ({ text }) => {
-      actions.send(text)
-    }
-  }),
+  flow(SEND),
+  alias("send", SEND),
   flow({
     /*
      * Wave 10 onboarding — the repo chooser, one flow three ways: the card's
@@ -308,27 +431,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     input: NoPayload,
     handler: () => actions.confirmWatchedRepos()
   }),
-  flow({
-    /*
-     * /clear (§2h): sweep the outgoing transcript for what belongs in world,
-     * keep it, THEN clear — a failed sweep clears nothing.
-     */
-    name: "clear",
-    summary: "Clear the chat, keeping anything worth remembering",
-    userOnly: true,
-    input: NoPayload,
-    handler: () => actions.clearConversation()
-  }),
-  flow({
-    /* The browser tool + surface (§2d/§2d′): read a page; embed its card. */
-    name: "browser",
-    summary: "Open a web page as a card Smithers can read",
-    runtime: ["agent"],
-    args: "<url>",
-    capabilities: ["session:net-read"],
-    input: Schema.Struct({ url: Schema.String }),
-    handler: ({ url }) => actions.openBrowser(url)
-  }),
+  flow(CLEAR),
+  alias("clear", CLEAR),
+  flow(BROWSER),
+  alias("browser", BROWSER),
   flow({
     /*
      * Wave 11 — "make me a workflow". The agent invokes this with the user's
@@ -459,33 +565,8 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     input: NoPayload,
     handler: () => actions.forkFrame()
   }),
-  flow({
-    name: "copy-message",
-    summary: "Copy a message to the clipboard",
-    hidden: true,
-    userOnly: true,
-    args: "<text>",
-    input: Schema.Struct({ text: Schema.String }),
-    /*
-     * A.26: `void navigator.clipboard.writeText(...)` let the browser's
-     * NotAllowedError escape as an unhandled rejection — the only trace was
-     * a POST to /api/client-errors, and the human who pressed Copy was told
-     * nothing at all. The refusal is awaited and answered.
-     */
-    handler: async ({ text }) => {
-      const clipboard = navigator.clipboard
-      if (clipboard === undefined) {
-        return "This browser won't give Smithers the clipboard — select the text and copy it yourself."
-      }
-      try {
-        await clipboard.writeText(text)
-      } catch (cause) {
-        return cause instanceof Error && cause.name === "NotAllowedError"
-          ? "The browser refused the clipboard — it only allows a copy while the page has focus."
-          : "The copy didn't go through — select the text and copy it yourself."
-      }
-    }
-  }),
+  flow(COPY_MESSAGE),
+  alias("copy-message", COPY_MESSAGE),
   flow({
     name: "approval.approve",
     summary: "Approve a pending approval card",
@@ -658,6 +739,17 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "billing.balance",
     summary: "Show your balance",
+    runtime: ["identity"],
+    requires: ["signed-in"],
+    input: NoPayload,
+    handler: () => actions.showBalance()
+  }),
+  flow({
+    /* The one-click path to the balance: it is never main-page chrome. */
+    name: "balance",
+    summary: "Show your balance",
+    aliasOf: "billing.balance",
+    hidden: true,
     runtime: ["identity"],
     requires: ["signed-in"],
     input: NoPayload,
@@ -896,25 +988,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     input: RepoTarget,
     handler: ({ repo }) => actions.checkGitHubApp(repo)
   }),
-  flow({
-    /* The one-keystroke recovery: reload the window (dev loop, stuck states). */
-    name: "reload",
-    summary: "Reload the app",
-    userOnly: true,
-    input: NoPayload,
-    handler: () => actions.reloadApp()
-  }),
-  flow({
-    /*
-     * The full catalog as a chat message: the slash menu caps at 8 for calm,
-     * so THIS is where "show me everything" lives — for the user typed, and
-     * for the agent answering "what can you do".
-     */
-    name: "flows",
-    summary: "List everything Smithers can do",
-    input: NoPayload,
-    handler: () => actions.showCommandCatalog()
-  }),
+  flow(RELOAD),
+  alias("reload", RELOAD),
+  flow(COMMANDS),
+  alias("flows", COMMANDS),
   /*
    * The local-app tabs (docs/LOCAL-APP.md "Tabs"): the strip, the `+` menu,
    * a maximized card's "Open in tab", and Cmd+T / Cmd+W / Cmd+1..9 all
@@ -929,6 +1006,19 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     userOnly: true,
     input: NoPayload,
     handler: () => actions.openTerminalTab()
+  }),
+  flow({
+    /*
+     * Smithers is the first tab and reads every other one: the model (and a
+     * human, via slash) gets a terminal or agent tab's recent output as text,
+     * or a card tab's payload. The tab list itself rides every turn's runtime
+     * context, so the model already knows the ids.
+     */
+    name: "tab.read",
+    summary: "Read another tab's recent output",
+    args: "<tabId>",
+    input: Schema.Struct({ tab: Schema.String }),
+    handler: ({ tab }) => actions.readTab(tab)
   }),
   flow({
     name: "tab.harness",
@@ -988,8 +1078,46 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Open the new tab menu",
     hidden: true,
     userOnly: true,
+    args: "[repoKey]",
+    input: Schema.Struct({ repo: Schema.optional(Schema.String) }),
+    handler: ({ repo }) => actions.toggleTabMenu(repo)
+  }),
+  /* The sidebar's pinned repositories (docs/LOCAL-APP.md "Tabs"): rows the human clicks. */
+  flow({
+    name: "repo.select",
+    summary: "Make a pinned repository the active one",
+    runtime: ["local.repositories"],
+    hidden: true,
+    userOnly: true,
+    args: "<repoKey>",
+    input: Schema.Struct({ repo: Schema.String }),
+    handler: ({ repo }) => actions.selectRepo(repo)
+  }),
+  flow({
+    name: "repo.unpin",
+    summary: "Unpin a repository from the sidebar",
+    runtime: ["local.repositories"],
+    hidden: true,
+    userOnly: true,
+    args: "<repoKey>",
+    input: Schema.Struct({ repo: Schema.String }),
+    handler: ({ repo }) => actions.unpinRepo(repo)
+  }),
+  flow({
+    /* The composer's `+`: add files, a connector, a flow, an agent. */
+    name: "composer.add",
+    summary: "Open the composer's add menu",
+    hidden: true,
+    userOnly: true,
     input: NoPayload,
-    handler: () => actions.toggleTabMenu()
+    handler: () => actions.toggleAddMenu()
+  }),
+  flow({
+    name: "files.add",
+    summary: "Add files to the conversation",
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.addFiles()
   }),
   flow({
     /* The chrome's "Open repository": the native folder dialog, or a typed path. */
@@ -1117,7 +1245,8 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
         : actions.openTargetSource(repoId, split[1] ?? file, Number(split[2]))
     }
   })
-]
+  ]
+}
 
 /*
  * The admin plugin (Launch Checklist §E — non-enumerable): these flows REGISTER
@@ -1127,7 +1256,15 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
  * contains no trace of them, and a direct /name invocation resolves exactly
  * like any typo.
  */
-export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
+export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => {
+  const RESET = {
+    name: "admin.reset",
+    summary: "Start a fresh conversation (dev tooling — nothing is kept)",
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.reset()
+  }
+  return [
   flow({
     name: "admin.reset.ask",
     summary: "Ask before discarding the conversation",
@@ -1171,17 +1308,12 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     input: NoPayload,
     handler: () => actions.openBillingPortal()
   }),
-  flow({
-    /*
-     * The bare reset is admin-only dev tooling (§2): no sweep, nothing kept.
-     * Users get /clear instead.
-     */
-    name: "reset",
-    summary: "Start a fresh conversation (dev tooling — nothing is kept)",
-    userOnly: true,
-    input: NoPayload,
-    handler: () => actions.reset()
-  }),
+  /*
+   * The bare reset is admin-only dev tooling (§2): no sweep, nothing kept.
+   * Users get /chat.clear instead.
+   */
+  flow(RESET),
+  alias("reset", RESET),
   flow({
     /* The admin dev-tools panel (§2b/§2d): the machinery, visible. */
     name: "admin.devtools",
@@ -1313,4 +1445,5 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     input: NoPayload,
     handler: () => actions.adminHealth()
   })
-]
+  ]
+}

@@ -62,13 +62,19 @@ const PRESENTATION_ONLY = [
   "onDismissDrawer(", // graph card detail drawer close: local presentation state (which node is focused)
   "setOpenLog(", // run timeline log panel: which row's log is open — local presentation state
   "onRunCommand(", // delegated: App.tsx binds it to the registry's runCommand/runCommandArgs
+  // Card maximize/minimize: each calls the delegated onMaximize/onMinimize (bound to card.maximize /
+  // card.minimize at the App.tsx and CardTabBody binding sites) and then hands focus to the button
+  // that replaces the one pressed, so Escape keeps a shell to land on.
+  "maximizeThenFocus",
+  "minimizeThenFocus",
   // C-1 (wave 13): these two are NOT local state — calling either dispatches
   // runCommand("surfaces"). The old "local presentation state" reason here is
   // what let a command-less affordance ship; the wrappers stay listed only
   // because the registry call is one indirection away from the onClick.
-  "openMenu", // dispatches runCommand("surfaces") — the /surfaces command
+  "openNamespace", // slash-menu tree: opening a namespace rewrites the draft to `/ns.` — a draft edit, never a command
+  "openMenu", // dispatches runCommand("chat.surfaces") — the /chat.surfaces command
   "closeMenu", // dispatches runCommand("surfaces"); the entry itself runs its own command
-  "onCopy(", // delegated: App.tsx binds it to runCommandArgs("copy-message", ...)
+  "onCopy(", // delegated: App.tsx binds it to runCommandArgs("chat.copy-message", ...)
   "onDecideApproval(", // delegated: App.tsx binds it to approval.approve / approval.deny
   "onRecoAction(", // delegated: App.tsx binds it to reco.accept / reco.edit / reco.dismiss
   "onGrantConfirm(", // delegated: App.tsx binds it to admin.grant.confirm
@@ -151,15 +157,16 @@ describe("launch-law parity: every affordance is a command", () => {
        * Shell bindings stay here; composer bindings are pinned independently
        * now that the hot path is its own module.
        */
-      "../App.tsx": 15,
-      "../Composer.tsx": 7,
+      // 15 − the corner balance chip: the balance is one act away (/balance), never main-page chrome.
+      "../App.tsx": 12,
+      "../Composer.tsx": 10,
       // 6 = 5 + the empty state's own import affordance (§11.6): with nothing
       // connected the pane stated a fact and offered no move.
       "../ConnectorsSurface.tsx": 6,
       // 23 − the three recommendation-card affordances the deleted reco
       // feature carried (accept / edit / dismiss), + the maximized card's
       // "Open in tab" (docs/LOCAL-APP.md "Cards").
-      "../ChatCards.tsx": 16,
+      "../ChatCards.tsx": 17,
       "../DevtoolsPanel.tsx": 1,
       "../SurfaceChrome.tsx": 3,
       "../ToastStack.tsx": 1,
@@ -193,11 +200,14 @@ describe("launch-law parity: every affordance is a command", () => {
       "../cards/RepoPluginCard.tsx": 1,
       "../cards/TargetCards.tsx": 1,
       /*
-       * The local-app chrome (docs/LOCAL-APP.md "Tabs"): the strip's select
-       * and close per tab, the `+` trigger, its backdrop, the Terminal row,
-       * the available and unavailable harness rows, Open repository, Sign in.
+       * The sidebar (docs/LOCAL-APP.md "Tabs"): the list's select and close
+       * per tab, the Repos section's empty "Select a repo" row, each repo
+       * row's select, `+`, and unpin, the `+` trigger, its backdrop, the
+       * Terminal row, the available and unavailable harness rows, Sign in,
+       * the admin reset, and the theme toggle (chrome that stays visible on
+       * every tab).
        */
-      "../tabs/ChromeBar.tsx": 9,
+      "../tabs/ChromeBar.tsx": 14,
       /* The live-process close question: confirm through tab.close.confirm. */
       "../tabs/TabBodies.tsx": 1
     })
@@ -205,7 +215,7 @@ describe("launch-law parity: every affordance is a command", () => {
 
   test("delegated props are bound to commands at their call sites", () => {
     const app = files["../App.tsx"]
-    expect(app).toContain("runCommandArgs(\"copy-message\"")
+    expect(app).toContain("runCommandArgs(\"chat.copy-message\"")
     expect(app).toContain("runCommandArgs(\"toast.dismiss\"")
     expect(app).toContain("runCommandArgs(\n")
     expect(app).toContain("\"approval.approve\"")
@@ -376,24 +386,30 @@ describe("launch-law parity: every affordance is a command", () => {
    * mechanics — the trigger axis this suite guards for every other control.
    */
   test("the light/dark toggle and the color theme are separate user-only commands", () => {
-    const app = files["../App.tsx"] ?? ""
-    expect(app).toContain("runCommand(\"dark-mode\")")
-    expect(app).not.toContain("runCommand(\"theme\")")
+    // The toggle lives in the sidebar's bottom chrome, so it is on screen in every tab.
+    const chrome = files["../tabs/ChromeBar.tsx"] ?? ""
+    expect(chrome).toContain("runCommand(\"appearance.dark-mode\")")
+    expect(chrome).not.toContain("runCommand(\"appearance.theme\")")
+    expect(files["../App.tsx"] ?? "").not.toContain("runCommand(\"appearance.dark-mode\")")
     const registrySource = read("./Flows.ts")
+    // A canonical declaration is a const literal (`const THEME = { ... }`) so its
+    // bare alias cannot drift from it; the slice ends at the literal's close.
     const entry = (name: string): string => {
       const start = registrySource.indexOf(`name: "${name}"`)
       expect(start).toBeGreaterThan(-1)
-      return registrySource.slice(start, registrySource.indexOf("}),", start))
+      return registrySource.slice(start, registrySource.indexOf("\n  }\n", start))
     }
     // The trigger axis is the declaration's own `userOnly`, which the binding
     // projects as `modelInvocable: false`; the args hint is what makes
-    // `/theme <palette>` parse as an invocation.
-    expect(entry("theme")).toContain("userOnly: true")
-    expect(entry("theme")).toContain("args:")
-    expect(entry("dark-mode")).toContain("userOnly: true")
-    // The toggle is its own flow now, not a hidden alias of /theme.
-    expect(entry("dark-mode")).not.toContain("aliasOf")
-    expect(entry("dark-mode")).not.toContain("hidden")
+    // `/appearance.theme <palette>` parse as an invocation.
+    expect(entry("appearance.theme")).toContain("userOnly: true")
+    expect(entry("appearance.theme")).toContain("args:")
+    expect(entry("appearance.dark-mode")).toContain("userOnly: true")
+    // The toggle is its own flow, not a hidden alias of the palette flow; the
+    // bare `/dark-mode` is the alias, declared beside it.
+    expect(entry("appearance.dark-mode")).not.toContain("aliasOf")
+    expect(entry("appearance.dark-mode")).not.toContain("hidden")
+    expect(registrySource).toContain('alias("dark-mode", DARK_MODE)')
   })
 
   test("the slash menu wrapper dispatches through the registry", () => {

@@ -29,9 +29,10 @@ test("the offline local app boots without advertising unavailable cloud identity
   await expect(page.getByTestId("transcript")).toBeVisible()
   await expect(page.getByTestId("composer-input")).toBeVisible()
   await expect(page.getByTestId("chrome-sign-in")).toHaveCount(0)
-  await expect(page.locator('.smithers-chat-message[data-role="assistant"]')).toContainText(
-    "doesn't provide Smithers identity"
-  )
+  // The opening read ("Smithers initialized successfully") sits above it; the identity state is its own message.
+  await expect(
+    page.locator('.smithers-chat-message[data-role="assistant"]').filter({ hasText: "Smithers identity" })
+  ).toContainText("doesn't provide Smithers identity")
   // Anonymous is the open state: the composer invites, nothing gates.
   await expect(page.getByTestId("composer-input")).toBeEnabled()
 })

@@ -33,9 +33,15 @@ import {
   initialSession,
   initialWorldDocuments,
   LocalRepositoryConnectorSchema,
+  conversationTabIdOf,
+  inConversation,
   MAIN_TAB_ID,
   mainTab,
   MessageSchema,
+  PinnedRepoSchema,
+  RECOMMENDATION_ID,
+  RecommendationSchema,
+  repoKeyOf,
   RepoSchema,
   rootFrameId,
   SessionSchema,
@@ -61,6 +67,8 @@ import type {
   LocalRepositoryConnector,
   Message,
   Palette,
+  PinnedRepo,
+  Recommendation,
   Repo,
   RepositoryCapabilityPattern,
   Session,
@@ -134,6 +142,49 @@ const applyPalette = (palette: Palette): void => {
 const transitionPayload = (transition: AppTransition): string => {
   const { actor: _actor, type: _type, ...payload } = transition
   return JSON.stringify(payload)
+}
+
+/** The id prefix of every verbose trace line, so switching off can remove them all. */
+export const TRACE_MESSAGE_PREFIX = "message-trace-"
+export const VERBOSE_ON_TEXT = "Verbose on — showing every flow, including hidden and background ones"
+export const VERBOSE_OFF_TEXT = "Verbose off"
+
+/*
+ * Transitions verbose never traces: the per-keystroke and per-token streams
+ * would bury everything else, and a user's own flow acts are already traced
+ * as the `flow.invoked` record that settles them.
+ */
+const UNTRACED_TRANSITIONS: ReadonlySet<string> = new Set([
+  "composer.changed",
+  "message.response.delta",
+  // Already a visible marker line in every transcript.
+  "message.tool.executed",
+  "verbose.toggled"
+])
+
+const TRACE_PAYLOAD_MAX = 160
+
+/**
+ * The one-line trace a transition renders under /verbose, or undefined when it
+ * is not traced. Every flow invocation is traced (user, agent, hidden, alias,
+ * deferred); beyond that, every transition an actor other than the user
+ * dispatched — the background, system, and agent work a normal transcript
+ * never shows.
+ */
+export const verboseTrace = (transition: AppTransition): string | undefined => {
+  if (transition.type === "flow.invoked") {
+    const who = transition.actor === "smithers" ? "Smithers" : "You"
+    const args = transition.args === null ? "" : ` ${transition.args}`
+    const detail = transition.detail === null ? "" : ` (${transition.detail})`
+    const hidden = transition.hidden ? " [hidden]" : ""
+    return `${who} ran /${transition.name}${args}${hidden} → ${transition.outcome}${detail} · ${transition.durationMs}ms`
+  }
+  if (transition.actor === "user" || UNTRACED_TRANSITIONS.has(transition.type)) return undefined
+  const payload = transitionPayload(transition)
+  const shown = payload === "{}"
+    ? ""
+    : ` ${payload.length > TRACE_PAYLOAD_MAX ? `${payload.slice(0, TRACE_PAYLOAD_MAX)}…` : payload}`
+  return `${transition.actor}: ${transition.type}${shown}`
 }
 
 type ApprovalCard = Extract<Card, { kind: "approval" }>
@@ -217,9 +268,11 @@ const PERSISTED_COLLECTION_SPECS: ReadonlyArray<LegacyCollectionSpec> = [
   { id: "app-tabs", schema: TabSchema },
   { id: "app-harnesses", schema: HarnessSchema },
   { id: "app-repos", schema: RepoSchema },
+  { id: "app-pinned-repos", schema: PinnedRepoSchema },
   { id: "app-workspaces", schema: WorkspaceSchema },
   { id: "app-branches", schema: BranchSchema },
-  { id: "app-frames", schema: FrameSchema }
+  { id: "app-frames", schema: FrameSchema },
+  { id: "app-recommendations", schema: RecommendationSchema }
 ]
 /** Attempts spent waiting out a locked access-handle pool. See `openOpfsDatabase`. */
 const OPFS_OPEN_ATTEMPTS = 5
@@ -444,9 +497,13 @@ export interface AppCollections {
   readonly tabs: ReturnType<typeof createTabCollection>
   readonly harnesses: ReturnType<typeof createHarnessCollection>
   readonly repos: ReturnType<typeof createRepoCollection>
+  /** The sidebar's pinned repositories; tabs nest under them (docs/LOCAL-APP.md "Tabs"). */
+  readonly pinnedRepos: ReturnType<typeof createPinnedRepoCollection>
   readonly workspaces: ReturnType<typeof createWorkspaceCollection>
   readonly branches: ReturnType<typeof createBranchCollection>
   readonly frames: ReturnType<typeof createFrameCollection>
+  /* The one next-step recommendation row the pills project (Recommend.ts). */
+  readonly recommendations: ReturnType<typeof createRecommendationCollection>
 }
 
 export interface WorldStateSnapshot {
@@ -461,6 +518,8 @@ export interface AgentContextSnapshot {
   readonly revision: number
   readonly messages: ReadonlyArray<Message>
   readonly connectors: ReadonlyArray<LocalRepositoryConnector>
+  /** Every open tab in strip order: Smithers is the first and knows the rest. */
+  readonly tabs: ReadonlyArray<TabRow>
   readonly worldState: WorldStateSnapshot
 }
 
@@ -593,6 +652,13 @@ const createRepoCollection = (backend: PersistenceBackend) =>
     schema: RepoSchema
   })
 
+const createPinnedRepoCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-pinned-repos",
+    getKey: (pin: PinnedRepo) => pin.id,
+    schema: PinnedRepoSchema
+  })
+
 const createWorkspaceCollection = (backend: PersistenceBackend) =>
   createPersistedCollection(backend, {
     id: "app-workspaces",
@@ -605,6 +671,13 @@ const createBranchCollection = (backend: PersistenceBackend) =>
     id: "app-branches",
     getKey: (branch: Branch) => branch.id,
     schema: BranchSchema
+  })
+
+const createRecommendationCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-recommendations",
+    getKey: (recommendation: Recommendation) => recommendation.id,
+    schema: RecommendationSchema
   })
 
 const createFrameCollection = (backend: PersistenceBackend) =>
@@ -636,9 +709,11 @@ const seed = async (collections: AppCollections): Promise<void> => {
     collections.tabs.preload(),
     collections.harnesses.preload(),
     collections.repos.preload(),
+    collections.pinnedRepos.preload(),
     collections.workspaces.preload(),
     collections.branches.preload(),
-    collections.frames.preload()
+    collections.frames.preload(),
+    collections.recommendations.preload()
   ])
 
   if (collections.sessions.get(SESSION_ID) === undefined) {
@@ -868,9 +943,11 @@ export const createAppStore = async (
     tabs: createTabCollection(resolvedBackend),
     harnesses: createHarnessCollection(resolvedBackend),
     repos: createRepoCollection(resolvedBackend),
+    pinnedRepos: createPinnedRepoCollection(resolvedBackend),
     workspaces: createWorkspaceCollection(resolvedBackend),
     branches: createBranchCollection(resolvedBackend),
-    frames: createFrameCollection(resolvedBackend)
+    frames: createFrameCollection(resolvedBackend),
+    recommendations: createRecommendationCollection(resolvedBackend)
   }
 
   await seed(collections)
@@ -906,10 +983,12 @@ export const createAppStore = async (
     return {
       capturedAt,
       revision: session().revision,
-      messages: [...collections.messages.values()].sort(
-        (left, right) => left.ordinal - right.ordinal
-      ),
+      // The model sees the conversation it is answering in, never another tab's.
+      messages: [...collections.messages.values()]
+        .filter((message) => inConversation(message, conversationTabIdOf(session(), (id) => collections.tabs.get(id))))
+        .sort((left, right) => left.ordinal - right.ordinal),
       connectors: [...collections.connectors.values()].sort((left, right) => left.name.localeCompare(right.name)),
+      tabs: orderedTabs(collections),
       worldState: worldStateSnapshot()
     }
   }
@@ -933,9 +1012,11 @@ export const createAppStore = async (
         collections.tabs.utils.acceptMutations(transaction),
         collections.harnesses.utils.acceptMutations(transaction),
         collections.repos.utils.acceptMutations(transaction),
+        collections.pinnedRepos.utils.acceptMutations(transaction),
         collections.workspaces.utils.acceptMutations(transaction),
         collections.branches.utils.acceptMutations(transaction),
-        collections.frames.utils.acceptMutations(transaction)
+        collections.frames.utils.acceptMutations(transaction),
+        collections.recommendations.utils.acceptMutations(transaction)
       ])
     /*
      * One atomic commit per logical transition: SQLite batches row changes in
@@ -979,6 +1060,20 @@ export const createAppStore = async (
     transaction.mutate(() => {
       const activeWorkspaceId = current.activeWorkspaceId ?? DEFAULT_WORKSPACE_ID
       const activeBranchId = current.activeBranchId ?? DEFAULT_BRANCH_ID
+      /*
+       * The conversation every row written by this dispatch belongs to
+       * (docs/LOCAL-APP.md "Tabs"): undefined, the one Smithers conversation.
+       * Read from `current` so a turn's replies land where the turn started;
+       * the two helpers are the only way a message or a card enters its
+       * collection here.
+       */
+      const conversationTabId = conversationTabIdOf(current, (id) => collections.tabs.get(id))
+      const insertMessage = (row: Message): void => {
+        collections.messages.insert(conversationTabId === undefined ? row : { ...row, tabId: conversationTabId })
+      }
+      const insertCard = (row: Card): void => {
+        collections.cards.insert(conversationTabId === undefined ? row : { ...row, tabId: conversationTabId })
+      }
       const ensureCardFrame = (cardId: string): Frame => {
         const id = cardFrameId(activeBranchId, cardId)
         const existing = collections.frames.get(id)
@@ -1010,7 +1105,7 @@ export const createAppStore = async (
         case "message.submitted": {
           const text = transition.text.trim()
           if (text === "" || current.phase !== "idle") return
-          collections.messages.insert({
+          insertMessage({
             id: `message-${transition.turnId}-user`,
             role: "user",
             text,
@@ -1021,6 +1116,8 @@ export const createAppStore = async (
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.draft = ""
             draft.phase = "responding"
+            // The turn belongs to the conversation it was asked in, whatever tab is active later.
+            draft.turnTabId = conversationTabId ?? null
             draft.revision = revision
           })
           break
@@ -1030,7 +1127,7 @@ export const createAppStore = async (
           if (transition.delta === "" || current.phase !== "responding") return
           const messageId = `message-${transition.turnId}-smithers`
           if (collections.messages.get(messageId) === undefined) {
-            collections.messages.insert({
+            insertMessage({
               id: messageId,
               role: "smithers",
               text: transition.channel === "text" ? transition.delta : "",
@@ -1067,7 +1164,7 @@ export const createAppStore = async (
         case "message.response.failed": {
           const messageId = `message-${transition.turnId}-smithers`
           if (collections.messages.get(messageId) === undefined) {
-            collections.messages.insert({
+            insertMessage({
               id: messageId,
               role: "smithers",
               text: `I couldn't complete that turn. ${transition.message}`,
@@ -1118,7 +1215,7 @@ export const createAppStore = async (
             // up, so say what happened on that turn rather than leaving the
             // user's message hanging with nothing after it — same discipline
             // as `session.turn.orphaned`. A kill must never read as silence.
-            collections.messages.insert({
+            insertMessage({
               id: messageId,
               role: "smithers",
               text: detail,
@@ -1165,7 +1262,7 @@ export const createAppStore = async (
             // Say so on that turn rather than leaving the user's message
             // hanging with nothing after it (Launch Checklist B-1 asks for
             // restored work to be *correctly described*, not merely unstuck).
-            collections.messages.insert({
+            insertMessage({
               id: `message-${turnId}-smithers`,
               role: "smithers",
               text: "That turn was interrupted when the app closed.",
@@ -1182,12 +1279,20 @@ export const createAppStore = async (
         }
 
         case "conversation.reset": {
-          const keys = [...collections.messages.keys()]
+          // A reset clears the conversation it was asked in: a chat tab's own rows, or all of main's.
+          const keys = [...collections.messages.values()]
+            .filter((message) => inConversation(message, conversationTabId))
+            .map((message) => message.id)
           if (keys.length > 0) collections.messages.delete(keys)
           // A reset conversation is empty — it does not re-seed a welcome.
-          const cardKeys = [...collections.cards.keys()]
+          const cardKeys = [...collections.cards.values()]
+            .filter((card) => inConversation(card, conversationTabId))
+            .map((card) => card.id)
           if (cardKeys.length > 0) collections.cards.delete(cardKeys)
-          const cardFrameKeys = [...collections.frames.values()].filter((frame) => frame.kind === "card").map((frame) => frame.id)
+          const removedCards = new Set(cardKeys)
+          const cardFrameKeys = [...collections.frames.values()]
+            .filter((frame) => frame.kind === "card" && frame.cardId !== null && removedCards.has(frame.cardId))
+            .map((frame) => frame.id)
           if (cardFrameKeys.length > 0) collections.frames.delete(cardFrameKeys)
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.draft = ""
@@ -1217,7 +1322,7 @@ export const createAppStore = async (
           if (cardKeys.length > 0) collections.cards.delete(cardKeys)
           const cardFrameKeys = [...collections.frames.values()].filter((frame) => frame.kind === "card").map((frame) => frame.id)
           if (cardFrameKeys.length > 0) collections.frames.delete(cardFrameKeys)
-          collections.messages.insert({
+          insertMessage({
             id: `message-${revision}-cleared`,
             role: "smithers",
             text: transition.kept === 0
@@ -1345,6 +1450,36 @@ export const createAppStore = async (
           })
           break
 
+        case "verbose.toggled": {
+          // Off removes every trace line: the transcript reads exactly as it
+          // would have without verbose. The transition log keeps the records.
+          if (!transition.on) {
+            const traceKeys = [...collections.messages.keys()].filter((key) => key.startsWith(TRACE_MESSAGE_PREFIX))
+            if (traceKeys.length > 0) collections.messages.delete(traceKeys)
+          }
+          insertMessage({
+            id: `message-verbose-${revision}`,
+            role: "smithers",
+            text: transition.on ? VERBOSE_ON_TEXT : VERBOSE_OFF_TEXT,
+            status: "complete",
+            createdAt,
+            ordinal: nextOrdinal(collections)
+          })
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.verbose = transition.on
+            draft.revision = revision
+          })
+          break
+        }
+
+        case "flow.invoked":
+          // Recorded by the transition insert below; rendered by the verbose
+          // trace after the switch. The session row moves like every dispatch.
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+
         case "surfaces-menu.toggled":
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.surfacesMenuOpen = transition.open
@@ -1355,6 +1490,13 @@ export const createAppStore = async (
         case "connect-menu.toggled":
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.connectMenuOpen = transition.open
+            draft.revision = revision
+          })
+          break
+
+        case "add-menu.toggled":
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.addMenuOpen = transition.open
             draft.revision = revision
           })
           break
@@ -1433,7 +1575,7 @@ export const createAppStore = async (
             if (seedKey !== undefined) collections.messages.delete(seedKey)
           }
           if (collections.messages.get(ONBOARDING_MESSAGE_ID) === undefined) {
-            collections.messages.insert({
+            insertMessage({
               id: ONBOARDING_MESSAGE_ID,
               role: "smithers",
               text:
@@ -1462,7 +1604,7 @@ export const createAppStore = async (
             }
           }
           if (existingChooser === undefined) {
-            collections.cards.insert(chooser)
+            insertCard(chooser)
           } else {
             collections.cards.update(REPO_CHOOSER_CARD_ID, (draft) => {
               Object.assign(draft, chooser)
@@ -1711,7 +1853,7 @@ export const createAppStore = async (
             if (incoming === undefined || approvalGateKey(incoming) === approvalGateKey(decided)) return
           }
           if (existing === undefined) {
-            collections.cards.insert(transition.card)
+            insertCard(transition.card)
           } else {
             collections.cards.update(transition.card.id, (draft) => {
               Object.assign(draft, transition.card)
@@ -1974,7 +2116,7 @@ export const createAppStore = async (
         case "message.steered": {
           const steered = transition.text.trim()
           if (steered === "" || current.phase !== "responding") return
-          collections.messages.insert({
+          insertMessage({
             id: `message-steer-${revision}`,
             role: "user",
             text: steered,
@@ -1998,7 +2140,7 @@ export const createAppStore = async (
         }
 
         case "message.tool.executed": {
-          collections.messages.insert({
+          insertMessage({
             id: `message-act-${revision}`,
             role: "smithers",
             text: transition.text,
@@ -2018,7 +2160,7 @@ export const createAppStore = async (
           // partially-suppressed claim is still a claim on screen.
           const messageId = `message-${transition.turnId}-smithers`
           if (collections.messages.get(messageId) === undefined) {
-            collections.messages.insert({
+            insertMessage({
               id: messageId,
               role: "smithers",
               text: transition.text,
@@ -2038,7 +2180,7 @@ export const createAppStore = async (
         }
 
         case "message.appended": {
-          collections.messages.insert({
+          insertMessage({
             id: `message-appended-${revision}`,
             role: "smithers",
             text: transition.text,
@@ -2097,6 +2239,19 @@ export const createAppStore = async (
           const index = ordered.findIndex((candidate) => candidate.id === closing.id)
           const fallback = ordered[index - 1]?.id ?? MAIN_TAB_ID
           collections.tabs.delete(closing.id)
+          if (closing.kind === "harness") {
+            // Closing a subagent's tab stops its process; its card says so with no exit code to claim.
+            for (const card of collections.cards.values()) {
+              if (card.kind === "agent" && card.payload.tabId === closing.id && card.payload.phase === "running") {
+                collections.cards.update(card.id, (draft) => {
+                  if (draft.kind !== "agent") return
+                  draft.payload.phase = "exited"
+                  draft.payload.exitCode = null
+                  draft.status = "acted"
+                })
+              }
+            }
+          }
           collections.sessions.update(SESSION_ID, (draft) => {
             if ((draft.activeTabId ?? MAIN_TAB_ID) === closing.id) draft.activeTabId = fallback
             if (draft.pendingTabCloseId === closing.id) draft.pendingTabCloseId = null
@@ -2117,6 +2272,17 @@ export const createAppStore = async (
             if ((tab.kind === "terminal" || tab.kind === "harness") && tab.sessionId === transition.sessionId) {
               collections.tabs.update(tab.id, (draft) => {
                 if (draft.kind === "terminal" || draft.kind === "harness") draft.exitCode = transition.code
+              })
+            }
+          }
+          // The subagent card follows its process: exited, with the code the PTY reported.
+          for (const card of collections.cards.values()) {
+            if (card.kind === "agent" && card.payload.sessionId === transition.sessionId) {
+              collections.cards.update(card.id, (draft) => {
+                if (draft.kind !== "agent") return
+                draft.payload.phase = "exited"
+                draft.payload.exitCode = transition.code
+                draft.status = transition.code === 0 || transition.code === null ? "acted" : "error"
               })
             }
           }
@@ -2154,6 +2320,7 @@ export const createAppStore = async (
 
         case "repos.loaded": {
           const next = new Set(transition.repos.map((repo) => repo.id))
+          const before = new Set([...collections.repos.values()].map((repo) => repoKeyOf(repo.path)))
           const stale = [...collections.repos.keys()].filter((id) => !next.has(id))
           if (stale.length > 0) collections.repos.delete(stale)
           for (const repo of transition.repos) {
@@ -2164,11 +2331,120 @@ export const createAppStore = async (
               })
             }
           }
+          /*
+           * Opening pins (docs/LOCAL-APP.md "Tabs"): every open repository is
+           * a pinned row, keyed by path so it survives the server's fresh id
+           * on a reopen. The active repository stays the one named when it
+           * is still open; otherwise the first open one takes over.
+           */
+          const now = Date.now()
+          for (const repo of transition.repos) {
+            const id = repoKeyOf(repo.path)
+            const pin = { id, name: repo.name, path: repo.path, branch: repo.git?.branch ?? null, origin: "local" as const }
+            if (collections.pinnedRepos.get(id) === undefined) collections.pinnedRepos.insert({ ...pin, pinnedAt: now })
+            else {
+              collections.pinnedRepos.update(id, (draft) => {
+                Object.assign(draft, pin)
+              })
+            }
+          }
+          const openKeys = new Set(transition.repos.map((repo) => repoKeyOf(repo.path)))
+          const byName = [...transition.repos].sort((left, right) => left.name.localeCompare(right.name))
+          // A repository that just opened is the one the human asked for: it becomes the active one.
+          const opened = byName.find((repo) => !before.has(repoKeyOf(repo.path)))
+          collections.sessions.update(SESSION_ID, (draft) => {
+            const named = draft.activeRepoKey ?? null
+            if (opened !== undefined) draft.activeRepoKey = repoKeyOf(opened.path)
+            else if (named === null || !openKeys.has(named)) {
+              draft.activeRepoKey = byName[0] === undefined ? named : repoKeyOf(byName[0].path)
+            }
+            draft.revision = revision
+          })
+          break
+        }
+        case "repo.pinned": {
+          if (collections.pinnedRepos.get(transition.pin.id) === undefined) {
+            collections.pinnedRepos.insert({ ...transition.pin })
+          } else {
+            collections.pinnedRepos.update(transition.pin.id, (draft) => {
+              Object.assign(draft, transition.pin)
+            })
+          }
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.revision = revision
           })
           break
         }
+        case "repo.unpinned": {
+          if (collections.pinnedRepos.get(transition.id) === undefined) return
+          collections.pinnedRepos.delete(transition.id)
+          collections.sessions.update(SESSION_ID, (draft) => {
+            if (draft.activeRepoKey === transition.id) draft.activeRepoKey = null
+            draft.revision = revision
+          })
+          break
+        }
+        case "repo.selected": {
+          if (collections.pinnedRepos.get(transition.id) === undefined) return
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.activeRepoKey = transition.id
+            draft.revision = revision
+          })
+          break
+        }
+        case "recommendations.updated": {
+          /*
+           * Latest state wins: a read made against an older revision than the
+           * row already holds is stale (a slower agent answer landing after
+           * the rule already answered the newer state) and is dropped.
+           */
+          const existing = collections.recommendations.get(RECOMMENDATION_ID)
+          if (existing !== undefined && existing.revision > transition.revision) {
+            collections.sessions.update(SESSION_ID, (draft) => {
+              draft.revision = revision
+            })
+            break
+          }
+          const row: Recommendation = {
+            id: RECOMMENDATION_ID,
+            suggestions: transition.suggestions.map((suggestion) => ({ ...suggestion })),
+            source: transition.source,
+            revision: transition.revision,
+            createdAt
+          }
+          if (existing === undefined) collections.recommendations.insert(row)
+          else {
+            collections.recommendations.update(RECOMMENDATION_ID, (draft) => {
+              Object.assign(draft, row)
+            })
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+      }
+
+      /*
+       * /verbose: the maintainer's view of everything. A traced transition
+       * becomes one marker line in the transcript, and the logger writes the
+       * same record to the console. Read from `current` (the session before
+       * this dispatch) so the switch-off dispatch itself is not traced.
+       */
+      const traced = current.verbose === true && (transition.type === "verbose.toggled" ? transition.on : true)
+        ? verboseTrace(transition)
+        : undefined
+      if (traced !== undefined) {
+        insertMessage({
+          id: `${TRACE_MESSAGE_PREFIX}${revision}`,
+          role: "smithers",
+          text: traced,
+          act: traced,
+          status: "complete",
+          createdAt,
+          ordinal: nextOrdinal(collections)
+        })
+        console.debug(`[smithers ${revision}] ${traced}`, transitionPayload(transition))
       }
 
       collections.transitions.insert({

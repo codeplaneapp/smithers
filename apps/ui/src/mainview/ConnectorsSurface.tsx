@@ -43,7 +43,7 @@ export function ConnectorsSurface() {
     : localAvailable
     ? "Choose Local repository above to connect work from this machine."
     : controller.commands.find("repo.open") !== undefined
-    ? "Use Open repository in the top bar to inspect work on this machine."
+    ? "Choose Open local repository… from the repository menu above the composer to inspect work on this machine."
     : "No repository service is available in this runtime."
   const pendingRemovalId = sessionRows[0]?.pendingConnectorRemovalId ?? null
   const pendingRemoval = connectors.find((candidate) => candidate.id === pendingRemovalId)

@@ -78,7 +78,7 @@ describe("commandEntries — the callable projection", () => {
   test("projects every non-user command, hidden id-scoped actions included", async () => {
     const { commands } = await harness()
     const names = commandEntries(commands).map((entry) => entry.name)
-    expect(names).toContain("browser")
+    expect(names).toContain("browser.open")
     expect(names).toContain("world.new-note")
     expect(names).toContain("approval.approve")
     // User-only chrome stays structurally unreachable.
@@ -93,7 +93,7 @@ describe("commandEntries — the callable projection", () => {
   test("disclosedEntries is the unhidden subset the list action returns today", async () => {
     const { commands } = await harness()
     const disclosed = disclosedEntries(commands).map((entry) => entry.name)
-    expect(disclosed).toContain("browser")
+    expect(disclosed).toContain("browser.open")
     expect(disclosed).not.toContain("world.new-note")
     const callable = new Set(commandEntries(commands).map((entry) => entry.name))
     for (const name of disclosed) expect(callable.has(name)).toBe(true)

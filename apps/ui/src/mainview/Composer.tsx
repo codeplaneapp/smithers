@@ -2,21 +2,45 @@ import { Button, ChatComposer } from "@smthrs/ui"
 import { useLiveQuery } from "@tanstack/react-db"
 import {
   BookOpen,
+  Bot,
   ChevronDown,
   FolderGit2,
   GitPullRequest,
   HardDrive,
+  Laptop,
+  MessageSquare,
+  Paperclip,
   Plug,
-  Server
+  Plus,
+  Server,
+  Workflow
 } from "lucide-react"
 import { useRef, useState } from "react"
 import type { KeyboardEvent, ReactNode, RefObject } from "react"
 import { useController } from "./ControllerContext"
 import { composeRefs, stampFlows, stampTestIds } from "./FlowStamp"
-import { WORLD_DISPLAY_NAME } from "./state/AppState"
+import { SELECT_REPO_LABEL } from "./Onboarding"
+import { activeRepoOf, repoKeyOf, WORLD_DISPLAY_NAME } from "./state/AppState"
 
 /** Stable Playwright handle; spread past ChatComposer's excess-property check. */
 const COMPOSER_INPUT_TEST_ID: Record<string, string> = { "data-testid": "composer-input" }
+
+type Surface = "chat" | "world" | "connectors"
+
+/* The surface pill's label: what the composer is currently pointed at. */
+const SURFACE_LABELS: Readonly<Record<Surface, string>> = {
+  chat: "Chat",
+  world: WORLD_DISPLAY_NAME,
+  connectors: "Connect"
+}
+
+/** Shorten the local host's conventional home-directory roots for display. */
+const abbreviateHomePath = (path: string): string => {
+  const normalized = path.replaceAll("\\", "/")
+  const home = /^(?:\/Users\/[^/]+|\/home\/[^/]+|\/root|[A-Za-z]:\/Users\/[^/]+)(?=\/|$)/i
+    .exec(normalized)?.[0]
+  return home === undefined ? path : `~${normalized.slice(home.length)}`
+}
 
 /*
  * The composer's surface menu (§2c′): the surface buttons collapse into ONE
@@ -28,13 +52,16 @@ const COMPOSER_INPUT_TEST_ID: Record<string, string> = { "data-testid": "compose
  * C-1 (wave 13): the trigger itself is the /surfaces command — the open state
  * lives in the session collection and the button dispatches through the
  * registry, so the affordance and the command are the same act.
+ *
+ * It sits beside the `+` as the main selection pill, and its label names the
+ * surface the composer is on right now.
  */
 function ComposerMenu({
   surface,
   open,
   triggerRef
 }: {
-  readonly surface: "chat" | "world" | "connectors"
+  readonly surface: Surface
   readonly open: boolean
   /*
    * The trigger is owned here but refocused from two places — this menu's own
@@ -51,14 +78,20 @@ function ComposerMenu({
 
   const entries = [
     {
+      flow: "chat",
+      label: SURFACE_LABELS.chat,
+      icon: <MessageSquare size={14} aria-hidden="true" />,
+      active: surface === "chat"
+    },
+    {
       flow: "connect",
-      label: "Connect",
+      label: SURFACE_LABELS.connectors,
       icon: <Plug size={14} aria-hidden="true" />,
       active: surface === "connectors"
     },
     {
       flow: "world",
-      label: WORLD_DISPLAY_NAME,
+      label: SURFACE_LABELS.world,
       icon: <BookOpen size={14} aria-hidden="true" />,
       active: surface === "world"
     }
@@ -66,14 +99,14 @@ function ComposerMenu({
 
   const openMenu = (): void => {
     setHighlighted(0)
-    controller.runCommand("surfaces")
+    controller.runCommand("chat.surfaces")
     requestAnimationFrame(() => {
       itemRefs.current[0]?.focus()
     })
   }
 
   const closeMenu = (): void => {
-    controller.runCommand("surfaces")
+    controller.runCommand("chat.surfaces")
     requestAnimationFrame(() => {
       triggerRef.current?.focus()
     })
@@ -112,16 +145,17 @@ function ComposerMenu({
         ref={triggerRef}
         variant="ghost"
         size="sm"
-        className="composer-action composer-menu-trigger"
-        data-flow="surfaces"
+        className="composer-action composer-menu-trigger composer-pill"
+        data-flow="chat.surfaces"
+        data-testid="composer-surface-trigger"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Surfaces"
+        aria-label={`Surface: ${SURFACE_LABELS[surface]}`}
         title="Surfaces"
         onClick={() => (open ? closeMenu() : openMenu())}
         onKeyDown={onTriggerKeyDown}
       >
-        <Plug size={14} aria-hidden="true" />
+        <span className="composer-pill-label">{SURFACE_LABELS[surface]}</span>
         <ChevronDown size={12} aria-hidden="true" />
       </Button>
       {open ?
@@ -142,7 +176,7 @@ function ComposerMenu({
                 tabIndex={index === highlighted ? 0 : -1}
                 onFocus={() => setHighlighted(index)}
                 onClick={() => {
-                  if (open) controller.runCommand("surfaces")
+                  if (open) controller.runCommand("chat.surfaces")
                   controller.runCommand(entry.flow)
                 }}
               >
@@ -157,13 +191,215 @@ function ComposerMenu({
   )
 }
 
+/* One store-owned menu's entry, built as data so index refs stay aligned with the DOM. */
+interface MenuEntry {
+  readonly key: string
+  readonly flow: string
+  readonly active?: boolean
+  readonly disabled?: boolean
+  readonly content: ReactNode
+  readonly testId?: string
+  /** What the entry does when chosen; defaults to running `flow` (with `args` when given). */
+  readonly args?: string
+  readonly onChoose?: () => void
+}
+
 /*
- * The composer's connect corner (bottom-left): the connection state as a chip,
- * the repository origins as a menu. Disconnected it reads "Connect";
- * connected it names the repository (`+N` for the rest) or the GitHub login.
- * Every entry is a command binding: local repositories pick through
- * connector.add, GitHub through auth.sign-in / repos.watch, cloud import
- * through repos.import, and full management through /connect.
+ * The composer's `+` (bottom-left): add files first, then a connector, a flow,
+ * an agent. The open state is the session's (/composer.add), reached through
+ * the dispatcher like the connect and surfaces menus.
+ */
+function ComposerAdd({
+  open,
+  triggerRef
+}: {
+  readonly open: boolean
+  readonly triggerRef: RefObject<HTMLButtonElement | null>
+}) {
+  const controller = useController()
+  const { collections } = controller.store
+  const { data: harnessRows } = useLiveQuery(collections.harnesses)
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const canAddFiles = controller.commands.find("files.add") !== undefined
+  const canAddConnector = controller.nativeRepositoriesAvailable &&
+    controller.commands.find("connector.add") !== undefined
+  const canCreateFlow = controller.commands.find("flow.create") !== undefined
+  const canOpenHarness = controller.commands.find("tab.harness") !== undefined
+  const availableHarness = harnessRows.find((harness) => harness.status !== "unavailable")
+  const firstHarness = harnessRows[0]
+
+  const entries: ReadonlyArray<MenuEntry> = [
+    ...(canAddFiles
+      ? [{
+        key: "files.add",
+        flow: "files.add",
+        testId: "composer-add-files",
+        content: (
+          <>
+            <Paperclip size={14} aria-hidden="true" />
+            Add files…
+          </>
+        )
+      }]
+      : []),
+    ...(canAddConnector
+      ? [{
+        key: "connector.add",
+        flow: "connector.add",
+        args: "read",
+        testId: "composer-add-connector",
+        content: (
+          <>
+            <HardDrive size={14} aria-hidden="true" />
+            New connector…
+          </>
+        )
+      }]
+      : []),
+    ...(canCreateFlow
+      ? [{
+        key: "flow.create",
+        flow: "flow.create",
+        testId: "composer-add-flow",
+        content: (
+          <>
+            <Workflow size={14} aria-hidden="true" />
+            New flow…
+          </>
+        ),
+        /* flow.create needs a description: the entry starts the invocation in the composer. */
+        onChoose: () => controller.changeDraft("/flow.create ")
+      }]
+      : []),
+    ...(canOpenHarness
+      ? [{
+        key: "tab.harness",
+        flow: "tab.harness",
+        testId: "composer-add-agent",
+        disabled: availableHarness === undefined,
+        ...(availableHarness === undefined ? {} : { args: availableHarness.id }),
+        content: (
+          <>
+            <Bot size={14} aria-hidden="true" />
+            New agent…
+            {availableHarness === undefined
+              ? (
+                <span className="composer-connect-branch">
+                  {firstHarness === undefined ? "no harness detected" : firstHarness.status}
+                </span>
+              )
+              : <span className="composer-connect-branch">{availableHarness.displayName}</span>}
+          </>
+        )
+      }]
+      : [])
+  ]
+
+  if (entries.length === 0) return null
+
+  const enabledEntries = entries.flatMap((entry, index) => (entry.disabled === true ? [] : [index]))
+
+  /* Opening lands focus on the first enabled entry; the open state itself is /composer.add's. */
+  const focusFirstEntry = (): void => {
+    if (open) return
+    requestAnimationFrame(() => {
+      itemRefs.current[enabledEntries[0] ?? -1]?.focus()
+    })
+  }
+
+  const onTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
+    if (event.key === "ArrowDown" && !open) {
+      event.preventDefault()
+      controller.runCommand("composer.add")
+      focusFirstEntry()
+    }
+  }
+
+
+  const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === "Escape") {
+      event.preventDefault()
+      controller.closeAddMenu()
+      triggerRef.current?.focus()
+      return
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault()
+      if (enabledEntries.length === 0) return
+      const current = enabledEntries.findIndex((index) => itemRefs.current[index] === document.activeElement)
+      const next = event.key === "ArrowDown"
+        ? (current + 1) % enabledEntries.length
+        : (current - 1 + enabledEntries.length) % enabledEntries.length
+      itemRefs.current[enabledEntries[next] ?? -1]?.focus()
+    }
+  }
+
+  return (
+    <div className="composer-menu composer-add">
+      <Button
+        ref={triggerRef}
+        variant="ghost"
+        size="icon"
+        className="composer-action composer-add-trigger"
+        data-flow="composer.add"
+        data-testid="composer-add"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Add"
+        title="Add files, a connector, a flow, or an agent"
+        onClick={() => {
+          controller.runCommand("composer.add")
+          focusFirstEntry()
+        }}
+        onKeyDown={onTriggerKeyDown}
+      >
+        <Plus size={16} aria-hidden="true" />
+      </Button>
+      {open ?
+        (
+          <div
+            className="composer-menu-list composer-add-list"
+            role="menu"
+            aria-label="Add"
+            data-testid="composer-add-menu"
+            onKeyDown={onMenuKeyDown}
+          >
+            {entries.map((entry, index) => (
+              <button
+                type="button"
+                key={entry.key}
+                ref={(node) => {
+                  itemRefs.current[index] = node
+                }}
+                role="menuitem"
+                className="composer-menu-item"
+                data-flow={entry.flow}
+                data-testid={entry.testId}
+                disabled={entry.disabled}
+                onClick={() => {
+                  controller.closeAddMenu()
+                  if (entry.onChoose !== undefined) return entry.onChoose()
+                  return entry.args === undefined ? controller.runCommand(entry.flow) : controller.runCommandArgs(entry.flow, entry.args)
+                }}
+              >
+                {entry.content}
+              </button>
+            ))}
+          </div>
+        ) :
+        null}
+    </div>
+  )
+}
+
+/*
+ * The repository selector, at the top of the composer: the selected
+ * repository's name as the trigger ("Select a repo" until there is one), the
+ * repository origins as its menu. Every entry is a command binding: the
+ * native folder dialog through repo.open, capability-scoped local
+ * repositories through connector.add, GitHub through auth.sign-in /
+ * repos.watch, cloud import through repos.import, and full management
+ * through /connect.
  */
 function ComposerConnect({
   open,
@@ -177,8 +413,17 @@ function ComposerConnect({
   const controller = useController()
   const { collections } = controller.store
   const { data: connectorRows } = useLiveQuery(collections.connectors)
+  const { data: repoRows } = useLiveQuery(collections.repos)
   const { data: operationRows } = useLiveQuery(collections.connectorOperations)
   const { data: identityRows } = useLiveQuery(collections.identitySessions)
+  const { data: watchedRows } = useLiveQuery(collections.watchedRepos)
+  /* The active repository is session state (activeRepoKey): one rule with the sidebar and the tabs. */
+  const { data: activeRows } = useLiveQuery((q) =>
+    q.from({ session: collections.sessions }).select(({ session }) => ({
+      id: session.id,
+      activeRepoKey: session.activeRepoKey
+    }))
+  )
   /*
    * The entries are built as DATA below so index-assigned refs stay aligned
    * with the DOM through every conditional entry. Arrow keys, Escape, and
@@ -188,27 +433,35 @@ function ComposerConnect({
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
 
   const connectors = [...connectorRows].sort((left, right) => left.name.localeCompare(right.name))
+  const repos = [...repoRows].sort((left, right) => left.name.localeCompare(right.name))
   const operation = operationRows.find((candidate) => candidate.id === "connector-operation") ??
     collections.connectorOperations.get("connector-operation")
   const selecting = operation?.phase === "selecting-local-repository"
   const identity = identityRows[0]
   const signedIn = identity?.state === "signed-in"
-  const connected = signedIn || connectors.length > 0
-  const label = connectors.length > 0
-    ? `${connectors[0].name}${connectors.length > 1 ? ` +${connectors.length - 1}` : ""}`
-    : signedIn
-    ? `GitHub · ${identity?.login ?? "connected"}`
-    : "Connect"
+  const watched = watchedRows[0]?.selected ?? []
+  const activeRepo = activeRepoOf(activeRows[0] ?? { activeRepoKey: null }, repos)
+  const selected = activeRepo?.name ?? connectors[0]?.name ?? (signedIn ? watched[0] : undefined)
+  const connected = selected !== undefined
+  const canOpenRepo = controller.commands.find("repo.open") !== undefined
+  const canAddConnector = controller.nativeRepositoriesAvailable &&
+    controller.commands.find("connector.add") !== undefined
 
-  const entries: ReadonlyArray<{
-    readonly key: string
-    readonly flow: string
-    readonly active?: boolean
-    readonly disabled?: boolean
-    readonly content: ReactNode
-    /* The command the entry invokes, and its argument when it takes one. */
-    readonly args?: string
-  }> = [
+  const entries: ReadonlyArray<MenuEntry> = [
+    ...repos.map((repo) => ({
+      key: `repo:${repo.id}`,
+      // Choosing an open repository makes it the active one: the sidebar row, the origin, and where tabs start.
+      flow: "repo.select",
+      args: repoKeyOf(repo.path),
+      active: repo.id === activeRepo?.id,
+      content: (
+        <>
+          <FolderGit2 size={14} aria-hidden="true" />
+          <span className="composer-connect-name">{repo.name}</span>
+          <span className="composer-connect-branch">{repo.git?.branch ?? "detached"}</span>
+        </>
+      )
+    })),
     ...connectors.map((connector) => ({
       key: connector.id,
       flow: "connect",
@@ -221,21 +474,32 @@ function ComposerConnect({
         </>
       )
     })),
-    ...(controller.nativeRepositoriesAvailable && controller.commands.find("connector.add") !== undefined
-      ? [
-        {
-          key: "connector.add",
-          flow: "connector.add",
-          disabled: selecting,
-          content: (
-            <>
-              <HardDrive size={14} aria-hidden="true" />
-              {selecting ? "Choosing a repository…" : "Add local repository…"}
-            </>
-          ),
-          args: "read"
-        }
-      ]
+    ...(canOpenRepo
+      ? [{
+        key: "repo.open",
+        flow: "repo.open",
+        testId: "chrome-open-repo",
+        content: (
+          <>
+            <Laptop size={14} aria-hidden="true" />
+            Open local repository…
+          </>
+        )
+      }]
+      : []),
+    ...(canAddConnector
+      ? [{
+        key: "connector.add",
+        flow: "connector.add",
+        disabled: selecting,
+        content: (
+          <>
+            <HardDrive size={14} aria-hidden="true" />
+            {selecting ? "Choosing a repository…" : "Add local repository…"}
+          </>
+        ),
+        args: "read"
+      }]
       : []),
     ...(signedIn && controller.commands.find("repos.watch") !== undefined
       ? [{
@@ -248,7 +512,8 @@ function ComposerConnect({
           </>
         )
       }]
-      : !signedIn && controller.commands.find("auth.sign-in") !== undefined ? [{
+      : !signedIn && controller.commands.find("auth.sign-in") !== undefined
+      ? [{
         key: "auth.sign-in",
         flow: "auth.sign-in",
         content: (
@@ -257,7 +522,8 @@ function ComposerConnect({
             Connect GitHub…
           </>
         )
-      }] : []),
+      }]
+      : []),
     /*
      * §1.1: signed out, sign-in is the ONE offered next step. Both of
      * these need a session — clicking either only defers into the
@@ -333,14 +599,14 @@ function ComposerConnect({
         className="composer-action composer-connect-trigger"
         data-flow="connect"
         data-connected={connected}
+        data-testid="composer-repo-trigger"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={connected ? `Connected: ${label}` : "Connect a repository"}
-        title={connected ? "Connected repositories" : "Connect a repository"}
+        aria-label={connected ? `Repository: ${selected}` : SELECT_REPO_LABEL}
+        title={connected ? "Repositories" : SELECT_REPO_LABEL}
         onClick={toggleConnectMenu}
       >
-        {connectors.length > 0 ? <FolderGit2 size={14} aria-hidden="true" /> : <Plug size={14} aria-hidden="true" />}
-        <span className="composer-connect-label">{label}</span>
+        <span className="composer-connect-label">{selected ?? SELECT_REPO_LABEL}</span>
         <ChevronDown size={12} aria-hidden="true" />
       </Button>
       {open ?
@@ -361,6 +627,7 @@ function ComposerConnect({
                 role="menuitem"
                 className="composer-menu-item"
                 data-flow={entry.flow}
+                data-testid={entry.testId}
                 data-active={entry.active === true ? "true" : undefined}
                 disabled={entry.disabled}
                 onClick={() => {
@@ -380,6 +647,60 @@ function ComposerConnect({
 }
 
 /*
+ * Where the selected repository lives, beside the selector: a local path for
+ * a repository this machine opened or connected. A watched GitHub repository
+ * adds nothing when the selector already names the same owner/repo. A
+ * projection of the same rows the selector reads; it never stores a choice of
+ * its own.
+ */
+function ComposerOrigin() {
+  const controller = useController()
+  const { collections } = controller.store
+  const { data: repoRows } = useLiveQuery(collections.repos)
+  const { data: connectorRows } = useLiveQuery(collections.connectors)
+  const { data: identityRows } = useLiveQuery(collections.identitySessions)
+  const { data: watchedRows } = useLiveQuery(collections.watchedRepos)
+  const { data: activeRows } = useLiveQuery((q) =>
+    q.from({ session: collections.sessions }).select(({ session }) => ({
+      id: session.id,
+      activeRepoKey: session.activeRepoKey
+    }))
+  )
+  const repo = activeRepoOf(activeRows[0] ?? { activeRepoKey: null }, repoRows)
+  const connector = [...connectorRows].sort((left, right) => left.name.localeCompare(right.name))[0]
+  const signedIn = identityRows[0]?.state === "signed-in"
+  const watched = signedIn ? watchedRows[0]?.selected?.[0] : undefined
+
+  if (repo !== undefined) {
+    return (
+      <span className="composer-origin" data-origin="local" data-testid="repo-chip" title={repo.path}>
+        <Laptop size={14} aria-hidden="true" />
+        <span className="composer-origin-name">{abbreviateHomePath(repo.path)}</span>
+        {repo.git?.branch !== undefined && repo.git?.branch !== null
+          ? <span className="composer-origin-branch">{` · ${repo.git.branch}`}</span>
+          : null}
+      </span>
+    )
+  }
+  if (connector !== undefined) {
+    return (
+      <span className="composer-origin" data-origin="local" data-testid="repo-chip" title={connector.root}>
+        <Laptop size={14} aria-hidden="true" />
+        <span className="composer-origin-name">{abbreviateHomePath(connector.root)}</span>
+        {connector.branch !== null
+          ? <span className="composer-origin-branch">{` · ${connector.branch}`}</span>
+          : null}
+      </span>
+    )
+  }
+  if (watched !== undefined) {
+    // The selector already names this watched repository; repeating it is not an origin.
+    return null
+  }
+  return null
+}
+
+/*
  * The composer, and everything a keystroke touches.
  *
  * §hot path: the draft is the ONE piece of session state that changes per
@@ -388,23 +709,31 @@ function ComposerConnect({
  * subscription lives HERE instead, behind the shell's draft-less projection,
  * so typing re-renders this subtree and nothing above it. The slash menu is
  * part of the same hot path (it is a function of the draft) and moved with it.
+ *
+ * Layout: a header row (the repository selector, then where it lives) above
+ * the box; inside the box the `+` and the surface pill bottom-left, send on
+ * the right; the next-step pills render under the box, in App.tsx.
  */
 export function Composer({
   typing,
   surface,
   surfacesMenuOpen,
   connectMenuOpen,
+  addMenuOpen,
   surfacesTriggerRef,
   connectTriggerRef,
+  addTriggerRef,
   autoFocus,
   placeholder
 }: {
   readonly typing: boolean
-  readonly surface: "chat" | "world" | "connectors"
+  readonly surface: Surface
   readonly surfacesMenuOpen: boolean
   readonly connectMenuOpen: boolean
+  readonly addMenuOpen: boolean
   readonly surfacesTriggerRef: RefObject<HTMLButtonElement | null>
   readonly connectTriggerRef: RefObject<HTMLButtonElement | null>
+  readonly addTriggerRef: RefObject<HTMLButtonElement | null>
   readonly autoFocus: boolean
   readonly placeholder: string
 }) {
@@ -432,15 +761,38 @@ export function Composer({
    * to invoke any flow mid-turn (the component blocks submit while busy, so
    * Enter only reaches a flow through this menu).
    */
-  const slashMatches = slashQuery === undefined ? [] : controller.slashItems(slashQuery)
+  /*
+   * The menu is a TREE (registry.slashTree): a bare "/" lists the surface
+   * switches, the recommendations, and one row per namespace; opening a
+   * namespace rewrites the draft to `/ns.` so the branch is the listing and
+   * Backspace / ArrowLeft walk back up. Typing anything else is the flat fuzzy
+   * filter, so a name known by heart still lands on Enter.
+   */
+  const slashRows = slashQuery === undefined ? [] : controller.slashTree(slashQuery)
   const slashMenuLive = slashMenu.draft === draft ? slashMenu : { draft, index: 0, dismissed: false }
-  const slashOpen = slashMatches.length > 0 && !slashMenuLive.dismissed
-  const slashHighlighted = Math.min(slashMenuLive.index, slashMatches.length - 1)
+  const slashOpen = slashRows.length > 0 && !slashMenuLive.dismissed
+  const slashHighlighted = Math.min(slashMenuLive.index, slashRows.length - 1)
+  /* The branch the draft is inside (`/tab.` → "tab"), when it is exactly one. */
+  const slashBranch = slashQuery !== undefined && /^[a-z0-9_-]+\.$/.test(slashQuery)
+    ? slashQuery.slice(0, -1)
+    : undefined
 
   const runSlashCommand = (name: string): void => {
     setSlashMenu({ draft: "", index: 0, dismissed: false })
     controller.changeDraft("")
     controller.runCommand(name)
+  }
+
+  /* Opening a namespace is a draft edit, never a command: the branch is the listing. */
+  const openNamespace = (id: string): void => {
+    setSlashMenu({ draft: `/${id}.`, index: 0, dismissed: false })
+    controller.changeDraft(`/${id}.`)
+  }
+
+  const chooseSlashRow = (row: (typeof slashRows)[number] | undefined): void => {
+    if (row === undefined) return
+    if (row.kind === "namespace") openNamespace(row.namespace.id)
+    else runSlashCommand(row.flow.name)
   }
 
   const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -454,7 +806,7 @@ export function Composer({
       event.preventDefault()
       setSlashMenu({
         draft,
-        index: (slashHighlighted + 1) % slashMatches.length,
+        index: (slashHighlighted + 1) % slashRows.length,
         dismissed: false
       })
       return
@@ -463,15 +815,28 @@ export function Composer({
       event.preventDefault()
       setSlashMenu({
         draft,
-        index: (slashHighlighted + slashMatches.length - 1) % slashMatches.length,
+        index: (slashHighlighted + slashRows.length - 1) % slashRows.length,
         dismissed: false
       })
       return
     }
+    if (event.key === "ArrowRight") {
+      const row = slashRows[slashHighlighted]
+      if (row?.kind === "namespace") {
+        event.preventDefault()
+        openNamespace(row.namespace.id)
+      }
+      return
+    }
+    if (event.key === "ArrowLeft" && slashBranch !== undefined) {
+      event.preventDefault()
+      setSlashMenu({ draft: "/", index: 0, dismissed: false })
+      controller.changeDraft("/")
+      return
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault()
-      const command = slashMatches.length === 1 ? slashMatches[0] : slashMatches[slashHighlighted]
-      if (command !== undefined) runSlashCommand(command.flow.name)
+      chooseSlashRow(slashRows.length === 1 ? slashRows[0] : slashRows[slashHighlighted])
       return
     }
     if (event.key === "Escape") {
@@ -484,27 +849,54 @@ export function Composer({
     <>
       {slashOpen ?
         (
-          <div className="slash-menu" role="listbox" aria-label="Slash commands">
-            {slashMatches.map((item, index) => (
-              <button
-                type="button"
-                key={item.flow.name}
-                role="option"
-                aria-selected={index === slashHighlighted}
-                data-highlighted={index === slashHighlighted ? "true" : "false"}
-                data-gold={item.recommended}
-                data-flow={item.flow.name}
-                className="slash-menu-item"
-                onMouseEnter={() => setSlashMenu({ draft, index, dismissed: false })}
-                onClick={() => runSlashCommand(item.flow.name)}
-              >
-                <span className="slash-menu-name">/{item.flow.name}</span>
-                <span className="slash-menu-description">{item.flow.summary}</span>
-              </button>
-            ))}
+          <div className="slash-menu" role="listbox" aria-label="Slash commands" data-branch={slashBranch}>
+            {slashRows.map((row, index) =>
+              row.kind === "namespace" ?
+                (
+                  <button
+                    type="button"
+                    key={`ns:${row.namespace.id}`}
+                    role="option"
+                    aria-selected={index === slashHighlighted}
+                    data-highlighted={index === slashHighlighted ? "true" : "false"}
+                    data-namespace={row.namespace.id}
+                    className="slash-menu-item slash-menu-namespace"
+                    onMouseEnter={() => setSlashMenu({ draft, index, dismissed: false })}
+                    onClick={() => openNamespace(row.namespace.id)}
+                  >
+                    <span className="slash-menu-name">/{row.namespace.id} ›</span>
+                    <span className="slash-menu-description">
+                      {row.namespace.label}
+                      {row.namespace.summary === "" ? "" : ` — ${row.namespace.summary}`}
+                    </span>
+                    <span className="slash-menu-count">{row.count}</span>
+                  </button>
+                ) :
+                (
+                  <button
+                    type="button"
+                    key={row.flow.name}
+                    role="option"
+                    aria-selected={index === slashHighlighted}
+                    data-highlighted={index === slashHighlighted ? "true" : "false"}
+                    data-gold={row.recommended}
+                    data-flow={row.flow.name}
+                    className="slash-menu-item"
+                    onMouseEnter={() => setSlashMenu({ draft, index, dismissed: false })}
+                    onClick={() => runSlashCommand(row.flow.name)}
+                  >
+                    <span className="slash-menu-name">/{row.flow.name}</span>
+                    <span className="slash-menu-description">{row.flow.summary}</span>
+                  </button>
+                )
+            )}
           </div>
         ) :
         null}
+      <div className="composer-header" data-testid="composer-header">
+        <ComposerConnect open={connectMenuOpen} triggerRef={connectTriggerRef} />
+        <ComposerOrigin />
+      </div>
       {
         /*
          * §6.1: Send and Stop are rendered by the composer component,
@@ -516,7 +908,7 @@ export function Composer({
         className="composer-flow-stamp"
         ref={composeRefs(
           stampFlows([
-            [".sui-chat-composer-send", "send"],
+            [".sui-chat-composer-send", "chat.send"],
             [".sui-chat-composer-stop", "chat.stop"]
           ]),
           stampTestIds([
@@ -530,7 +922,7 @@ export function Composer({
           value={draft}
           onValueChange={controller.changeDraft}
           onSubmit={(text) => {
-            controller.runCommandArgs("send", text)
+            controller.runCommandArgs("chat.send", text)
           }}
           onStop={() => controller.runCommand("chat.stop")}
           placeholder={placeholder}
@@ -538,10 +930,7 @@ export function Composer({
           textareaProps={{ autoFocus, onKeyDown: onComposerKeyDown, ...COMPOSER_INPUT_TEST_ID }}
           actions={
             <div className="composer-actions">
-              <ComposerConnect
-                open={connectMenuOpen}
-                triggerRef={connectTriggerRef}
-              />
+              <ComposerAdd open={addMenuOpen} triggerRef={addTriggerRef} />
               <ComposerMenu
                 surface={surface}
                 open={surfacesMenuOpen}

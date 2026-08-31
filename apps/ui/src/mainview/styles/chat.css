@@ -3,7 +3,8 @@
 	display: flex;
 	min-height: 0;
 	flex: 1;
-	flex-direction: column;
+	/* The sidebar on the left, everything else (.app-main) to its right. */
+	flex-direction: row;
 }
 
 /*
@@ -256,6 +257,7 @@
 }
 
 .composer-wrap {
+	position: relative;
 	z-index: 25;
 	width: min(100%, 760px);
 	margin: 0 auto;
@@ -263,10 +265,24 @@
 	background: linear-gradient(to top, var(--bg) 60%, transparent);
 }
 
+.composer-wrap > .slash-menu {
+	position: absolute;
+	right: 24px;
+	bottom: calc(100% + 6px);
+	left: 24px;
+	z-index: 50;
+	max-height: 40vh;
+	overflow-y: auto;
+	margin-bottom: 0;
+}
+
 .app-shell .smithers-suggestions {
-	margin-bottom: 8px;
+	margin-top: 8px;
 	padding: 0;
 	gap: 8px;
+	/* Beside an open pane the column is narrow; pills wrap rather than scroll out of view. */
+	flex-wrap: wrap;
+	overflow: visible;
 }
 
 .app-shell .smithers-suggestion {
@@ -336,10 +352,80 @@
 	color: var(--text);
 }
 
+/*
+ * The `+` and the surface pill sit bottom-LEFT of the box (the kit's actions
+ * slot is right-aligned beside Send), over the empty status region, via
+ * absolute positioning — the same seat the connect chip used to take.
+ */
 .composer-actions {
+	position: absolute;
+	left: 10px;
+	bottom: 8px;
 	display: flex;
 	align-items: center;
-	gap: 2px;
+	gap: 6px;
+}
+
+.app-shell .composer-add-trigger {
+	width: 30px;
+	height: 30px;
+	border-radius: 50%;
+	background: var(--surface-2);
+	color: var(--text-muted);
+}
+.app-shell .composer-add-trigger:hover,
+.app-shell .composer-add-trigger:focus-visible,
+.app-shell .composer-add-trigger[aria-expanded="true"] {
+	color: var(--text);
+}
+.composer-add-list {
+	min-width: 13rem;
+	font-family: var(--font-ui);
+	font-size: var(--fs-small);
+	color: var(--text);
+}
+
+/* The surface pill: the current surface's name, a chevron, a rounded chip. */
+.app-shell .composer-pill {
+	height: 30px;
+	padding: 0 10px 0 12px;
+	border-radius: 999px;
+	background: var(--surface-2);
+	color: var(--text);
+	font-family: var(--font-ui);
+	font-size: var(--fs-small);
+	font-weight: 500;
+}
+
+/*
+ * The header row above the box: the repository selector, then where the
+ * repository lives (a local path, or owner/repo on GitHub).
+ */
+.composer-header {
+	display: flex;
+	min-height: 24px;
+	margin: 0 6px 6px;
+	align-items: center;
+	gap: 10px;
+}
+.composer-origin {
+	display: inline-flex;
+	min-width: 0;
+	align-items: center;
+	gap: 6px;
+	color: var(--text-muted);
+	font-family: var(--font-ui);
+	font-size: var(--fs-small);
+}
+.composer-origin-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.composer-origin-branch {
+	color: var(--text-faint);
+	font-family: var(--font-mono);
+	font-size: 10px;
 }
 
 /*
@@ -368,78 +454,49 @@
 	pointer-events: auto;
 }
 
-/*
- * Anchored to the chat column, not the viewport: with the chat alone the column
- * is the window, so this is the same top-right corner it has always been, and
- * with a pane open it stops overlapping the pane's own header (which owns the
- * back-to-conversation button).
- */
-.corner-chrome {
-	position: absolute;
-	z-index: 50;
-	top: 12px;
-	right: 14px;
-	display: flex;
-	align-items: center;
-	gap: 8px;
-}
-
-/*
- * §21.7 — at 200% zoom (a 640px CSS viewport) the chat column is the full
- * width, so the transcript runs under the pinned corner chrome and whatever
- * happens to sit at y 12–42 is unreadable. The transcript's own top padding
- * scrolls away with the content, so the room has to come from the column: the
- * scroller starts below the chrome, and nothing can scroll beneath it.
- * `.corner-chrome` is absolutely positioned against the column's padding box,
- * so the padding moves the scroller and leaves the chrome where it was.
- */
-@media (max-width: 860px) {
-	.chat-column {
-		padding-top: 48px;
-	}
-
-	.app-shell .smithers-transcript .sui-chat-messages {
-		padding-top: 8px;
-	}
-}
-
-.app-shell .corner-theme-btn,
-.app-shell .corner-reset-btn {
-	width: 30px;
-	height: 30px;
-	min-height: 30px;
-	border-color: var(--border);
-	background: var(--surface-glass-strong);
-	box-shadow: var(--shadow-1);
-	color: var(--text-muted);
-}
-
-.app-shell .corner-balance-chip {
-	height: 30px;
-	min-height: 30px;
-	padding: 0 10px;
-	border-color: var(--border);
-	background: var(--surface-glass-strong);
-	box-shadow: var(--shadow-1);
-	font-family: var(--font-mono);
-	font-size: 10px;
-	color: var(--text-muted);
-}
-
-.app-shell .corner-balance-chip[data-empty="true"] {
-	color: var(--ember-600, var(--text));
-	border-color: var(--ember-400, var(--border));
-}
-
 .message-cta {
 	display: inline-flex;
 	margin-top: 8px;
 }
 
+.message-init {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+}
+
+.message-init-check {
+	flex: none;
+	margin-top: 2px;
+	color: var(--success, currentColor);
+}
+
+.message-init-body {
+	min-width: 0;
+}
+
+.message-init-details {
+	margin: 4px 0;
+}
+
+.message-init-details > summary {
+	cursor: pointer;
+}
+
+/*
+ * Top-right, never bottom-right: anchored at the bottom the stack sat on the
+ * composer's send button, and a failure toast (which stays until dismissed
+ * by design) then swallowed every click on Send — one failed request made
+ * the whole conversation unsendable until the human found the tiny dismiss.
+ */
 .toast-stack {
 	position: fixed;
 	right: 16px;
-	bottom: 16px;
+	top: 16px;
+	/* Several failures stack; the column stops well above the composer and scrolls instead of covering it. */
+	max-height: calc(100vh - 240px);
+	overflow-y: auto;
+	pointer-events: none;
 	z-index: 40;
 	display: flex;
 	flex-direction: column;
@@ -448,6 +505,7 @@
 }
 
 .toast-stack .toast {
+	pointer-events: auto;
 	display: flex;
 	align-items: flex-start;
 	gap: 8px;
@@ -784,6 +842,11 @@
 		padding-left: 14px;
 	}
 
+	.composer-wrap > .slash-menu {
+		right: 14px;
+		left: 14px;
+	}
+
 	.app-shell .smithers-chat-message .sui-chat-bubble {
 		max-width: 86%;
 	}
@@ -880,23 +943,21 @@
 	background: transparent;
 }
 
-/*
- * The composer's connect corner: the chip renders in the actions slot (the
- * status line stays empty — §2g calm) but sits on the toolbar's LEFT edge,
- * over the empty status region, via absolute positioning.
- */
+/* The repository selector, in the header row above the box. */
 .app-shell .smithers-composer {
 	position: relative;
 }
-.composer-connect {
-	position: absolute;
-	left: 10px;
-	bottom: 7px;
-}
 .composer-connect .composer-connect-trigger {
+	padding-left: 6px;
 	color: var(--text-muted);
 	font-family: var(--font-ui);
-	font-size: var(--fs-small);
+	font-size: var(--fs-md);
+	font-weight: 500;
+}
+/* The header's menus open DOWN over the box, not up into the transcript. */
+.composer-header .composer-menu-list {
+	top: calc(100% + 4px);
+	bottom: auto;
 }
 .composer-connect .composer-connect-trigger[data-connected="true"] {
 	color: var(--text);

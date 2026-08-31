@@ -5,7 +5,7 @@ import { agentVisibleCatalog } from "../../flows/agentTools"
 import type { CommandOutcome } from "../../flows/Commands"
 import { parseSubmit } from "../../flows/registry"
 import { boundTurnRequest } from "../AgentTurnPolicy"
-import { CardPatchSchema, CardSchema } from "../AppState"
+import { CardPatchSchema, CardSchema, MAIN_TAB_ID } from "../AppState"
 import type { Card } from "../AppState"
 import type { ImpossibleAskClass } from "../Instructions"
 import { smithersInstructions } from "../Instructions"
@@ -48,7 +48,7 @@ export interface TurnController {
   readonly reset: () => void
   readonly stop: () => void
   readonly decideApproval: (id: string, decision: "approved" | "denied") => void
-  readonly retryLastTurn: () => void
+  readonly retryLastTurn: () => string | void
 }
 
 export const createTurnController = (
@@ -168,8 +168,35 @@ export const createTurnController = (
           current.selectedWorldDocumentId
         )
       },
+      /*
+       * Smithers is the first tab and knows every other one (docs/LOCAL-APP.md
+       * "Tabs"): the model sees the strip as the human does, and reads a
+       * tab's output with tab.read.
+       */
+      tabs: snapshot.tabs.map((tab) => {
+        const harness = tab.kind === "harness"
+          ? [...store.collections.harnesses.values()].find((candidate) => candidate.id === tab.harnessId)
+          : undefined
+        const account = harness?.account?.email ?? harness?.account?.label
+        return {
+          id: tab.id,
+          kind: tab.kind,
+          title: tab.title,
+          ...(tab.kind === "harness" ? { harnessId: tab.harnessId } : {}),
+          ...(account === undefined ? {} : { account }),
+          ...(tab.kind === "terminal" || tab.kind === "harness" ? { cwd: tab.cwd } : {}),
+          status: tab.kind === "terminal" || tab.kind === "harness"
+            ? tab.exitCode === undefined ? ("running" as const) : ("exited" as const)
+            : ("open" as const),
+          ...(tab.kind === "terminal" || tab.kind === "harness" ? { exitCode: tab.exitCode ?? null } : {}),
+          active: tab.id === (current.activeTabId ?? MAIN_TAB_ID)
+        }
+      }),
       capabilities: [
         "Hold a streaming conversation in this chat and read its visible transcript.",
+        ...(snapshot.tabs.length > 1
+          ? ["Read any other open tab's recent output (a terminal, a running agent, a card) with the tab.read <tabId> command — the tab ids are listed above."]
+          : []),
         "Run app commands through the \"commands\" tool — the same code path as the UI buttons and slash commands.",
         "Render structured cards (plans, approvals, statuses, recommendations) in the transcript.",
         "Create, list, and run Smithers workflows on the user's watched repositories (flow.create, flow.list, flow.run) — runs report live as embedded cards in this chat.",
@@ -296,7 +323,7 @@ export const createTurnController = (
     }
     if (call.name === "commands" && action === "list") return "Smithers checked what it can do here"
     if (
-      call.name === "commands" && inner === "browser" && !result.startsWith("failed:") && !result.startsWith("unknown-")
+      call.name === "commands" && (inner === "browser" || inner === "browser.open") && !result.startsWith("failed:") && !result.startsWith("unknown-")
     ) {
       let host = args ?? ""
       try {
@@ -849,13 +876,20 @@ export const createTurnController = (
    * it produced is dropped and the same leg launches again over the context
    * that produced it.
    */
-  const retryLastTurn = (): void => {
-    if (store.session().phase !== "idle" || ctx.activeTurn !== undefined) return
+  /*
+   * A refusal is returned as its reason so the run path can state it as a
+   * toast: typed with nothing settled to re-run, `/retry` used to "execute"
+   * and change nothing on screen, which reads as a dead command.
+   */
+  const retryLastTurn = (): string | void => {
+    if (store.session().phase !== "idle" || ctx.activeTurn !== undefined) {
+      return "A response is still in progress — stop it first, then retry."
+    }
     const last = [...store.collections.messages.values()]
       .filter((message) => message.role === "user")
       .sort((left, right) => right.ordinal - left.ordinal)[0]
     const turnId = last?.id.match(/^message-(.+)-user$/)?.[1]
-    if (turnId === undefined) return
+    if (turnId === undefined) return "Nothing to retry yet — send a message first."
     store.dispatch({ type: "message.retried", actor: "user", turnId })
     if (store.session().phase !== "responding") return
     ctx.activeTurn = {

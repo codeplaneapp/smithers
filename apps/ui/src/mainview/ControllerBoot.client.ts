@@ -45,6 +45,8 @@ const bootProgram = (session: BootSession | undefined) =>
           fetchImpl: runtime.http,
           bootstrap: runtime.bootstrap,
           frameHistory: createBrowserFrameHistory(window),
+          // The next-step recommender (state/Recommend.ts) is opt-in here, the one real composition root.
+          recommender: { enabled: true },
           ...(runtime.shell.kind === "native" ? { openExternal: runtime.shell.openExternal } : {})
         }
       )

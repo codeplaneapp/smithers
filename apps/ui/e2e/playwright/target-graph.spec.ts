@@ -53,6 +53,7 @@ test("every target-graph card renders against the fixture stream", async ({ page
 
   /* A repository has to be open: the commands resolve the single open repo. */
   page.once("dialog", (dialog) => void dialog.accept(FIXTURE_REPO))
+  await page.getByTestId("composer-repo-trigger").click()
   await page.getByTestId("chrome-open-repo").click()
   await expect(card(page, "repo")).toBeVisible({ timeout: 60_000 })
 

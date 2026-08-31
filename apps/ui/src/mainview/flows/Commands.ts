@@ -17,9 +17,10 @@ import { Effect } from "effect"
 import { hasCapability } from "smithers-shared/AppBootstrap"
 import type { AgentToolCall, AgentToolSpec } from "./agentTools"
 import { agentToolSpecs, executeAgentToolCall, userOnlyError } from "./agentTools"
+import type { AppTransition } from "../state/AppState"
 import type { CommandActions } from "./Flows"
 import { adminFlows, baseFlows } from "./Flows"
-import type { CatalogItem, CommandState, FlowEntry, SlashItem } from "./registry"
+import type { CatalogItem, CommandState, FlowEntry, SlashItem, SlashRow } from "./registry"
 import {
   canonical,
   flowRequirements,
@@ -28,6 +29,7 @@ import {
   nameOf,
   recommendedNames,
   slashItems,
+  slashTree,
   unmetRequirements,
   visible
 } from "./registry"
@@ -48,6 +50,8 @@ export interface CommandRegistry {
   readonly find: (name: string) => FlowEntry | undefined
   readonly state: () => CommandState
   readonly slashItems: (needle: string) => Array<SlashItem<CatalogItem>>
+  /** The slash menu as a tree: leaves and namespace rows (registry.slashTree). */
+  readonly slashTree: (needle: string) => Array<SlashRow<CatalogItem>>
   readonly recommended: () => CatalogItem
   readonly run: (name: string, args?: string) => Promise<CommandOutcome>
   /**
@@ -168,11 +172,57 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
    * steps through both. `seen` guards a misconfigured requirement table (a
    * fulfill cycle) with an honest failure instead of recursion.
    */
+  /*
+   * The /verbose trace: every invocation that passes this door is recorded
+   * as one `flow.invoked` transition — actor, name, args, outcome, duration —
+   * whichever trigger sent it and whether or not the flow is listed. The
+   * store renders the record only while verbose is on.
+   */
+  const trace = (
+    invoker: "user" | "agent",
+    name: string,
+    args: string | undefined,
+    startedAt: number,
+    outcome: Extract<AppTransition, { type: "flow.invoked" }>["outcome"],
+    detail: string | null
+  ): void => {
+    actions.traceFlow({
+      type: "flow.invoked",
+      actor: invoker === "agent" ? "smithers" : "user",
+      name,
+      args: args ?? null,
+      hidden: find(name)?.metadata.hidden === true,
+      outcome,
+      detail,
+      durationMs: Math.max(0, Math.round(Date.now() - startedAt))
+    })
+  }
+
   const runAs = async (
     invoker: "user" | "agent",
     name: string,
     args?: string,
     seen: ReadonlySet<string> = new Set()
+  ): Promise<CommandOutcome> => {
+    const startedAt = Date.now()
+    const outcome = await settle(invoker, name, args, seen, startedAt)
+    trace(
+      invoker,
+      name,
+      args,
+      startedAt,
+      outcome.status,
+      outcome.status === "failed" ? outcome.error : outcome.status === "executed" ? outcome.value ?? null : null
+    )
+    return outcome
+  }
+
+  const settle = async (
+    invoker: "user" | "agent",
+    name: string,
+    args: string | undefined,
+    seen: ReadonlySet<string>,
+    startedAt: number
   ): Promise<CommandOutcome> => {
     const entry = find(name)
     if (entry === undefined) return { status: "unknown-command" }
@@ -202,6 +252,8 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
         }
       }
       actions.deferCommand(nameOf(target), args ?? null, unmet.id)
+      // The deferral is its own trace; the fulfilling flow traces itself below.
+      trace(invoker, name, args, startedAt, "deferred", `waits on ${unmet.id}`)
       return runAs("user", unmet.fulfill, undefined, new Set([...seen, unmet.fulfill]))
     }
     /*
@@ -230,6 +282,7 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
     find,
     state: actions.snapshot,
     slashItems: (needle) => slashItems(actions.snapshot(), needle, items()),
+    slashTree: (needle) => slashTree(actions.snapshot(), needle, items()),
     recommended: () => {
       const name = recommendedNames(actions.snapshot())[0]
       const command = name === undefined ? undefined : items().find((item) => item.name === name)

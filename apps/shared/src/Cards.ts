@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { RepoPluginSchema, RepoSchema, TargetSchema } from "./LocalApp"
+import { HARNESS_IDS, RepoPluginSchema, RepoSchema, TargetSchema } from "./LocalApp"
 import {
   AffectedCardPayloadSchema,
   CiMatrixCardPayloadSchema,
@@ -28,7 +28,13 @@ const cardBaseShape = {
   body: z.string().optional(),
   status: z.enum(["active", "acted", "error"]),
   createdAt: z.number(),
-  ordinal: z.number().int().nonnegative()
+  ordinal: z.number().int().nonnegative(),
+  /**
+   * The conversation this card belongs to (LOCAL-APP.md "Tabs"). There is
+   * one Smithers, so live cards carry no id; the field stays so cards
+   * persisted by a build that had conversation tabs parse unchanged.
+   */
+  tabId: z.string().optional()
 }
 
 export const CardSchema = z.discriminatedUnion("kind", [
@@ -523,6 +529,27 @@ export const CardSchema = z.discriminatedUnion("kind", [
     ...cardBaseShape,
     kind: z.literal("repo-plugin"),
     payload: z.object({ repoId: z.string(), manifest: RepoPluginSchema })
+  }),
+  /*
+   * An agent launched from the `+` menu as a subagent of the conversation
+   * (LOCAL-APP.md "Tabs"): the harness runs in its own tab, and this card is
+   * the conversation's record of it — which harness, where, whether it is
+   * still running, and the way back to its tab.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("agent"),
+    payload: z.object({
+      harnessId: z.enum(HARNESS_IDS),
+      displayName: z.string(),
+      /** The tab the agent runs in; the tab id is the PTY session id. */
+      tabId: z.string(),
+      sessionId: z.string(),
+      cwd: z.string(),
+      phase: z.enum(["running", "exited"]),
+      /** The process exit code once it has exited; null when unknown (the tab was closed). */
+      exitCode: z.number().nullable()
+    })
   })
 ])
 export type Card = z.infer<typeof CardSchema>

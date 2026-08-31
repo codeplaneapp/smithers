@@ -28,6 +28,7 @@ const runCard = (page: Page) => page.locator(".smithers-card[data-kind=\"target-
 /** The chrome's Open repository, answered through the window.prompt fallback. */
 const openRepo = async (page: Page, path: string): Promise<void> => {
   page.once("dialog", (dialog) => void dialog.accept(path))
+  await page.getByTestId("composer-repo-trigger").click()
   await page.getByTestId("chrome-open-repo").click()
 }
 

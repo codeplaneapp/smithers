@@ -13,6 +13,9 @@ export interface PresentationController {
   readonly toggleSurfacesMenu: () => void
   readonly toggleConnectMenu: () => void
   readonly closeConnectMenu: () => void
+  readonly toggleAddMenu: () => void
+  readonly closeAddMenu: () => void
+  readonly addFiles: () => void
   readonly askReset: () => void
   readonly cancelReset: () => void
   readonly describeAgentBackend: (backend: string) => string | { readonly value: string }
@@ -136,6 +139,33 @@ export const createPresentationController = (
   const closeConnectMenu = (): void => {
     if (ctx.store.session().connectMenuOpen !== true) return
     ctx.store.dispatch({ type: "connect-menu.toggled", actor: "user", open: false })
+  }
+
+  /* The composer `+` menu: same store-owned open state, same close-is-not-a-toggle rule. */
+  const toggleAddMenu = (): void => {
+    ctx.store.dispatch({
+      type: "add-menu.toggled",
+      actor: "user",
+      open: ctx.store.session().addMenuOpen !== true
+    })
+  }
+
+  const closeAddMenu = (): void => {
+    if (ctx.store.session().addMenuOpen !== true) return
+    ctx.store.dispatch({ type: "add-menu.toggled", actor: "user", open: false })
+  }
+
+  /*
+   * The `+` menu's first entry. No host exposes a file-attach seam yet (the
+   * native RPC surface is exactly pickLocalRepository and openExternal), so
+   * the flow answers with the truth instead of a dead picker.
+   */
+  const addFiles = (): void => {
+    ctx.store.dispatch({
+      type: "message.appended",
+      actor: "system",
+      text: "Attachments aren't available on this host yet. Connect a repository and Smithers can read its files."
+    })
   }
 
   const askReset = (): void => {
@@ -468,6 +498,9 @@ export const createPresentationController = (
     toggleSurfacesMenu,
     toggleConnectMenu,
     closeConnectMenu,
+    toggleAddMenu,
+    closeAddMenu,
+    addFiles,
     askReset,
     cancelReset,
     describeAgentBackend,

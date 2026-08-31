@@ -157,25 +157,65 @@ test("the strip boots with the main tab and the + button alone", async ({ page }
   await expect(page.getByTestId("tab-body-main")).toBeVisible()
   await expect(page.getByTestId("transcript")).toBeVisible()
   await expect(page.getByTestId("composer-input")).toBeVisible()
-  // No repository: no chip.
+  // No repository: no origin chip; the selector reads "Select a repo" and opens the local picker entry.
   await expect(page.getByTestId("repo-chip")).toHaveCount(0)
+  await expect(page.getByTestId("composer-repo-trigger")).toHaveText("Select a repo")
+  await page.getByTestId("composer-repo-trigger").click()
   await expect(page.getByTestId("chrome-open-repo")).toBeVisible()
+  await page.keyboard.press("Escape")
   await expect(page.getByTestId("chrome-sign-in")).toBeVisible()
 })
 
-test("the repo chip names the active repository", async ({ page }) => {
+test("the sidebar pins the open repository as the active row and nests a new terminal under it", async ({ page }) => {
   await serve(page, [FORCE_REPO])
   await page.goto("/")
-  await expect(page.getByTestId("repo-chip")).toHaveText("artsy/force")
+  const section = page.getByTestId("repo-section")
+  await expect(section).toBeVisible()
+  await expect(page.getByTestId("repo-empty")).toHaveCount(0)
+  const row = section.locator(".repo-group[data-active=\"true\"]")
+  await expect(row).toHaveCount(1)
+  await expect(row.locator(".repo-name")).toHaveText("artsy/force")
+  // Smithers stays the first tab, above the Repos section.
+  const [main, repo] = await Promise.all([page.getByTestId("tab-main").boundingBox(), row.boundingBox()])
+  expect((repo?.y ?? 0) > (main?.y ?? 0)).toBe(true)
+  await openTerminal(page)
+  // The terminal nests under its repository, indented to its right.
+  await expect(row.locator(`.repo-tabs [data-testid=tab-${SESSION_ID}]`)).toBeVisible()
+  const tab = await page.getByTestId(`tab-${SESSION_ID}`).boundingBox()
+  expect((tab?.x ?? 0) > (repo?.x ?? 0)).toBe(true)
+  await expect(page.getByTestId("repo-none")).toHaveCount(0)
 })
 
-test("the + menu lists Terminal, then the detected harnesses with their accounts", async ({ page }) => {
+test("the composer header names the active repository and its local path", async ({ page }) => {
+  await serve(page, [FORCE_REPO])
+  await page.goto("/")
+  await expect(page.getByTestId("composer-repo-trigger")).toHaveText("artsy/force")
+  await expect(page.getByTestId("repo-chip")).toContainText("artsy/force")
+  await expect(page.getByTestId("repo-chip")).toHaveAttribute("data-origin", "local")
+})
+
+test("the + menu paints beside the sidebar: Terminal, then the agents with their accounts", async ({ page }) => {
   await serve(page)
   await page.goto("/")
   await page.getByTestId("tab-add").click()
   const menu = page.getByTestId("tab-add-menu")
   await expect(menu).toBeVisible()
+  /*
+   * Regression: the menu used to live inside the scrolling strip, whose
+   * overflow clipped it to 28px — `toBeVisible` still passed (a box exists)
+   * and `click()` still landed (Playwright scrolls the clipped strip to the
+   * item, which a human never does). Hit-testing the item's own centre is
+   * what a pointer does, so that is the pin.
+   */
+  const painted = await page.getByTestId("tab-add-terminal").evaluate((item) => {
+    const rect = item.getBoundingClientRect()
+    return item.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))
+  })
+  expect(painted).toBe(true)
+  // One Smithers: no second conversation is offered.
+  await expect(page.getByTestId("tab-add-chat")).toHaveCount(0)
   await expect(page.getByTestId("tab-add-terminal")).toHaveText("Terminal")
+  await expect(page.getByTestId("tab-add-agents")).toHaveText("Agents")
   const claude = page.getByTestId("tab-add-harness-claude")
   await expect(claude).toContainText("Claude Code")
   await expect(claude).toContainText("will@codeplane.app")
@@ -190,6 +230,44 @@ test("the + menu lists Terminal, then the detected harnesses with their accounts
   const items = menu.locator("[role=menuitem]")
   await expect(items.first()).toHaveText("Terminal")
   await expect(items.last()).toContainText("Gemini")
+})
+
+test("the sidebar is vertical and its chrome stays visible inside a terminal tab", async ({ page }) => {
+  await serve(page)
+  await page.goto("/")
+  const strip = page.getByTestId("tab-strip")
+  await expect(strip).toHaveAttribute("aria-orientation", "vertical")
+  const theme = page.locator('[data-flow="appearance.dark-mode"]')
+  await expect(theme).toBeVisible()
+  await openTerminal(page)
+  // Main is hidden, the terminal shows, and the sidebar's theme toggle is still on screen.
+  await expect(page.getByTestId("tab-body-main")).toBeHidden()
+  await expect(theme).toBeVisible()
+  const [main, terminal] = await Promise.all([
+    page.getByTestId("tab-main").boundingBox(),
+    page.getByTestId(`tab-${SESSION_ID}`).boundingBox()
+  ])
+  // Stacked: the terminal tab sits BELOW main, nested (indented) under its repository row.
+  expect((terminal?.y ?? 0) > (main?.y ?? 0)).toBe(true)
+  expect((terminal?.x ?? 0) > (main?.x ?? 0)).toBe(true)
+})
+
+test("an agent from + runs in its own tab and is a subagent card in the conversation", async ({ page }) => {
+  await serve(page)
+  await page.goto("/")
+  await page.getByTestId("tab-add").click()
+  const creating = page.waitForRequest(isPtyCreate)
+  await page.getByTestId("tab-add-harness-claude").click()
+  await creating
+  await expect(page.getByTestId(`tab-${SESSION_ID}`)).toHaveAttribute("data-active", "true")
+  await expect(page.getByTestId(`terminal-${SESSION_ID}`)).toBeVisible()
+  // Back in the conversation, the launch is a card — embedded, with the way back to the tab.
+  await page.getByTestId("tab-main").locator(".tab-select").click()
+  const card = page.locator(".smithers-card[data-kind=agent]")
+  await expect(card).toBeVisible()
+  await expect(card).toContainText("Claude Code is running")
+  await page.getByTestId(`agent-open-tab-${SESSION_ID}`).click()
+  await expect(page.getByTestId(`tab-${SESSION_ID}`)).toHaveAttribute("data-active", "true")
 })
 
 test("a terminal tab creates a PTY session, renders its output, and sends keystrokes", async ({ page }) => {

@@ -154,4 +154,73 @@ describe("per-turn runtime context", () => {
     const limitations = requests[0]?.context?.limitations ?? []
     expect(limitations.some((line) => line.includes("pure-web client cannot connect"))).toBe(true)
   })
+
+  test("Smithers is the first tab and sees every other one: the context lists the tabs and their status", async () => {
+    const store = await webStore()
+    const requests: StartAgentTurnRequest[] = []
+    const controller = createAppController(store, unavailableRepositories, recordingAgent(requests), {
+      bootstrap: {
+        apiVersion: 1,
+        host: "local",
+        version: "test",
+        buildSha: "test",
+        capabilities: ["local.terminal", "local.harnesses"],
+        authFlow: "none",
+        sandbox: { platform: "darwin", mode: "enforced" }
+      }
+    })
+    await store.dispatch({
+      type: "harnesses.loaded",
+      actor: "system",
+      harnesses: [{
+        id: "claude",
+        displayName: "Claude Code",
+        binary: "/opt/homebrew/bin/claude",
+        version: "2.1.0",
+        status: "signed-in",
+        account: { email: "will@codeplane.app" },
+        launch: { argv: ["claude"] }
+      }]
+    }).isPersisted.promise
+    await store.dispatch({
+      type: "tab.opened",
+      actor: "user",
+      tab: { id: "h1", kind: "harness", title: "Claude Code · ~", sessionId: "h1", harnessId: "claude", cwd: "~" }
+    }).isPersisted.promise
+    await store.dispatch({ type: "tab.selected", actor: "user", id: "main" }).isPersisted.promise
+
+    controller.send("what is the agent doing")
+    await settled()
+    const tabs = requests[0]?.context?.tabs ?? []
+    expect(tabs).toEqual([
+      { id: "main", kind: "main", title: "Smithers", status: "open", active: true },
+      {
+        id: "h1",
+        kind: "harness",
+        title: "Claude Code · ~",
+        harnessId: "claude",
+        account: "will@codeplane.app",
+        cwd: "~",
+        status: "running",
+        exitCode: null,
+        active: false
+      }
+    ])
+    expect(requests[0]?.context?.capabilities.some((line) => line.includes("tab.read"))).toBe(true)
+
+    await store.dispatch({ type: "pty.exited", actor: "system", sessionId: "h1", code: 0 }).isPersisted.promise
+    controller.send("and now?")
+    await settled()
+    expect(requests[1]?.context?.tabs?.[1]).toMatchObject({ status: "exited", exitCode: 0 })
+  })
+
+  test("alone, the context says so and offers no tab.read", async () => {
+    const store = await webStore()
+    const requests: StartAgentTurnRequest[] = []
+    const controller = createAppController(store, unavailableRepositories, recordingAgent(requests))
+    controller.send("hi")
+    await settled()
+    expect(requests[0]?.context?.tabs).toEqual([{ id: "main", kind: "main", title: "Smithers", status: "open", active: true }])
+    expect(requests[0]?.context?.capabilities.some((line) => line.includes("tab.read"))).toBe(false)
+  })
 })

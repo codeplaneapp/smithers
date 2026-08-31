@@ -149,6 +149,7 @@ describe("auth is a conversation state — the chat is the only page", () => {
   test("signed-out: a send reaches the agent; the chat is not gated on identity", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(store, unavailableRepositories, silentAgent, {
+      features: { suggestionPills: true },
       ...backend({
         "/api/auth/session": json(401, { status: "error" }),
         "/api/auth/scopes": json(200, { scopes: [] })
@@ -229,8 +230,12 @@ describe("auth is a conversation state — the chat is the only page", () => {
     await settled()
 
     const { host, markup } = mount(controller)
-    // The dollar chip stays; the composer is NOT paused.
-    expect(markup()).toContain("$0")
+    // No balance chrome on the main page (the balance is one act away:
+    // /balance); the composer is NOT paused.
+    expect(host.querySelector(".corner-balance-chip")).toBeNull()
+    expect(markup()).not.toContain("Balance unavailable")
+    expect(markup()).not.toContain("$0")
+    expect(controller.commands.find("balance")?.metadata.aliasOf).toBe("billing.balance")
     expect(host.querySelector("textarea")?.placeholder).toBe("Ask Smithers to work on something…")
     // Calm is the budget (§2g): the persistent status line is gone — no
     // "live" chrome when healthy, no standing free-chat sentence.

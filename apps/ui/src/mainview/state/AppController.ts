@@ -4,11 +4,13 @@ import type { RepositoryAccess } from "smithers-shared/NativeRepository"
 import { createCommandRegistry } from "../flows/Commands"
 import type { CommandRegistry } from "../flows/Commands"
 import type { CatalogItem } from "../flows/Commands"
-import type { SlashItem } from "../flows/registry"
+import type { SlashItem, SlashRow } from "../flows/registry"
 import { flowRequirements } from "../flows/registry"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import { repoStep } from "../Onboarding"
 import { localSocketProtocols } from "../runtime/LocalSession"
 import type { FrameHistoryPort } from "../runtime/FrameHistory"
+import type { AppTransition } from "./AppState"
 import type { AppStore } from "./AppStore"
 import { createPtyClient, pageSocketUrl } from "./PtyClient"
 import type { PtyClient } from "./PtyClient"
@@ -19,6 +21,8 @@ import { createControllerContext } from "./controller/context"
 import { createFailureController } from "./controller/failures"
 import { createFramesController } from "./controller/frames"
 import { createPresentationController } from "./controller/presentation"
+import { createRecommendController } from "./controller/recommend"
+import type { RecommenderConfig } from "./controller/recommend"
 import { createTabsController } from "./controller/tabs"
 import type { TabsController } from "./controller/tabs"
 import { createTargetsController } from "./controller/targets"
@@ -55,11 +59,14 @@ import type { SeamContext } from "./seams/SeamContext"
 export interface AppController {
   readonly store: AppStore
   readonly bootstrap: AppBootstrap | undefined
+  /** The resolved feature flags (every flag defaults off). */
+  readonly features: Required<AppFeatures>
   readonly nativeAgentAvailable: boolean
   readonly nativeRepositoriesAvailable: boolean
   /** The command registry: every interactive affordance routes through it. */
   readonly commands: CommandRegistry
   readonly slashItems: (needle: string) => Array<SlashItem<CatalogItem>>
+  readonly slashTree: (needle: string) => Array<SlashRow<CatalogItem>>
   readonly changeDraft: (draft: string) => void
   readonly reset: () => void
   readonly stop: () => void
@@ -84,7 +91,7 @@ export interface AppController {
   readonly confirmWorldDelete: () => string | void
   readonly cancelWorldDelete: () => void
   readonly decideApproval: (id: string, decision: "approved" | "denied") => void
-  readonly retryLastTurn: () => void
+  readonly retryLastTurn: () => string | void
   readonly toggleTheme: () => void
   /** Wear a color theme (/theme) — the axis orthogonal to light/dark. */
   readonly setPalette: (args: string) => string | void
@@ -124,12 +131,15 @@ export interface AppController {
   /* The local-app tabs (docs/LOCAL-APP.md "Tabs"); see controller/tabs.ts. */
   readonly openTerminalTab: TabsController["openTerminalTab"]
   readonly openHarnessTab: TabsController["openHarnessTab"]
+  readonly readTab: TabsController["readTab"]
   readonly openCardTab: TabsController["openCardTab"]
   readonly selectTab: TabsController["selectTab"]
   readonly closeTab: TabsController["closeTab"]
   readonly confirmTabClose: TabsController["confirmTabClose"]
   readonly cancelTabClose: TabsController["cancelTabClose"]
   readonly toggleTabMenu: TabsController["toggleTabMenu"]
+  readonly selectRepo: TabsController["selectRepo"]
+  readonly unpinRepo: TabsController["unpinRepo"]
   readonly openLocalRepo: TabsController["openLocalRepo"]
   readonly loadHarnesses: TabsController["loadHarnesses"]
   readonly loadRepos: TabsController["loadRepos"]
@@ -163,6 +173,11 @@ export interface AppController {
    */
   readonly toggleConnectMenu: () => void
   readonly closeConnectMenu: () => void
+  /* The composer `+` menu — the /composer.add command's open state. */
+  readonly toggleAddMenu: () => void
+  readonly closeAddMenu: () => void
+  /** /files.add — attachments, or the honest answer that this host has none. */
+  readonly addFiles: () => void
   readonly debugSnapshot: () => { readonly value: string }
   readonly debugEvents: () => { readonly value: string }
   readonly debugSeams: () => Promise<string | void | { readonly value: string }>
@@ -210,7 +225,13 @@ export interface AppController {
   readonly resumeDeferredCommand: () => void
   /** Record a visible command run for the slash menu's recency ranking. */
   readonly noteCommandRun: (name: string) => void
-  /** Render the full visible-flow catalog into the chat (the /flows answer). */
+  /** The /verbose switch: trace every flow and background transition in the transcript. */
+  readonly toggleVerbose: () => void
+  /** Record one settled flow invocation (every trigger) — the verbose trace's source. */
+  readonly traceFlow: (record: Extract<AppTransition, { type: "flow.invoked" }>) => void
+  /** The `recommend` flow: regenerate the next-step pills for the current state (Recommend.ts). */
+  readonly recommend: () => Promise<void>
+  /** Render the full visible-flow catalog into the chat (the /chat.commands answer). */
   readonly showCommandCatalog: () => void
   /** Render the sign-in step into the chat (auth.prompt — the agent's door to login). */
   readonly promptSignIn: () => void
@@ -275,6 +296,12 @@ export interface AppController {
  */
 export interface AppServices {
   readonly fetchImpl?: FetchLike
+  /**
+   * The `/ws` URL the PTY and target-run clients open; default the page's
+   * own origin. A test binds `() => undefined` so no real socket is opened
+   * against an origin that is not listening.
+   */
+  readonly socketUrl?: () => string | undefined
   readonly bootstrap?: AppBootstrap
   readonly frameHistory?: FrameHistoryPort
   readonly baseUrl?: string
@@ -306,6 +333,23 @@ export interface AppServices {
    * (§22.6). Streaming paths carry no deadline; tests shorten this one.
    */
   readonly seamTimeoutMs?: number
+  /**
+   * The next-step recommender (Recommend.ts): the model tier its side turn
+   * asks for (`cheap` by default), the debounce, the timeout, or off.
+   */
+  readonly recommender?: RecommenderConfig
+  /**
+   * Feature flags. `suggestionPills` (default OFF): the next-action pills
+   * under the composer and the recommender's cheap-agent side turns behind
+   * them. Off, the pill row is absent from the DOM and no side turn launches;
+   * the `recommend` flow still writes its rule row so turning the flag on
+   * later works without a schema change.
+   */
+  readonly features?: AppFeatures
+}
+
+export interface AppFeatures {
+  readonly suggestionPills?: boolean
 }
 
 /**
@@ -321,6 +365,7 @@ export const createAppController = (
   const ctx = createControllerContext(store, repositories, agent, services)
   if (store.dispose !== undefined) ctx.onDispose(store.dispose)
   const { baseUrl, http } = ctx
+  const features: Required<AppFeatures> = { suggestionPills: services.features?.suggestionPills === true }
   const { withToast, dismissToast, surfaceCommandFailure } = createFailureController(ctx)
   ctx.withToast = withToast
 
@@ -388,6 +433,9 @@ export const createAppController = (
     toggleSurfacesMenu,
     toggleConnectMenu,
     closeConnectMenu,
+    toggleAddMenu,
+    closeAddMenu,
+    addFiles,
     askReset,
     cancelReset,
     describeAgentBackend,
@@ -414,21 +462,38 @@ export const createAppController = (
   const {
     openTerminalTab,
     openHarnessTab,
-    openCardTab,
+    readTab,
+    openCardTab: openCardTabOnly,
     selectTab,
     closeTab,
     confirmTabClose,
     cancelTabClose,
     toggleTabMenu,
+    selectRepo,
+    unpinRepo,
     openLocalRepo,
     loadHarnesses,
     loadRepos,
     notePtyExit,
     installKeyboard
   } = createTabsController(ctx)
-  const pty = createPtyClient({ http, baseUrl, socketUrl: pageSocketUrl, socketProtocols: localSocketProtocols })
+  /*
+   * "Open in tab" is offered on the maximized card, so opening the tab also
+   * returns the transcript's copy to its embedded form — through the frames
+   * controller, which moves the address bar back to the root frame. A bare
+   * `card.minimized` dispatch left the URL at the maximized frame and a
+   * reload restored the card maximized twice over.
+   */
+  const openCardTab: TabsController["openCardTab"] = (cardId) => {
+    const wasMaximized = store.session().maximizedCardId === cardId
+    const refusal = openCardTabOnly(cardId)
+    if (refusal !== undefined) return refusal
+    if (wasMaximized) minimizeCard()
+  }
+  const socketUrl = services.socketUrl ?? pageSocketUrl
+  const pty = createPtyClient({ http, baseUrl, socketUrl, socketProtocols: localSocketProtocols })
   ctx.onDispose(pty.dispose)
-  const targetRuns = createTargetRunClient({ socketUrl: pageSocketUrl, socketProtocols: localSocketProtocols })
+  const targetRuns = createTargetRunClient({ socketUrl, socketProtocols: localSocketProtocols })
   ctx.onDispose(targetRuns.dispose)
   const targetGraph = createTargetGraphController(ctx, {
     nextOrdinal: nextTranscriptOrdinal,
@@ -498,6 +563,38 @@ export const createAppController = (
     store.dispatch({ type: "command.ran", actor: "user", name })
   }
 
+  const toggleVerbose = (): void => {
+    store.dispatch({ type: "verbose.toggled", actor: "user", on: store.session().verbose !== true })
+  }
+
+  const traceFlow = (record: Extract<AppTransition, { type: "flow.invoked" }>): void => {
+    store.dispatch(record)
+  }
+
+  /*
+   * The next-step recommender: the registry does not exist yet at this point,
+   * so every dependency is a closure read at regeneration time.
+   */
+  const recommender = createRecommendController(ctx, {
+    catalog: () => ctx.commands.all(),
+    state: () => ctx.commands.state(),
+    repoStep: () => {
+      const identity = store.collections.identitySessions.get("identity")
+      const watched = store.collections.watchedRepos.get("watched")
+      return repoStep({
+        localPickerAvailable: repositories.available && ctx.commands.find("repo.open") !== undefined,
+        connectors: [...store.collections.connectors.values()],
+        repos: [...store.collections.repos.values()],
+        needsSelection: identity?.state === "signed-in" && identity.allowlisted &&
+          (watched === undefined || watched.selected === null) &&
+          ctx.commands.find("repos.watch") !== undefined
+      })
+    },
+    // Without the pills there is nowhere for an agent answer to show, so no side turn launches.
+    config: { ...services.recommender, enabled: (services.recommender?.enabled ?? false) && features.suggestionPills }
+  })
+  const recommend = recommender.recommend
+
   /*
    * auth.prompt: the agent cannot navigate the user to OAuth (auth.sign-in
    * is user-only — a model must not yank the page mid-turn), but it CAN
@@ -532,7 +629,7 @@ export const createAppController = (
   }
 
   /*
-   * The /flows answer: the LIVE visible catalog as one chat message —
+   * The /chat.commands answer: the LIVE visible catalog as one chat message —
    * the slash menu caps at 8 for calm, so this is where "all of it" lives.
    * Referenced before `commands` initializes; only ever called after.
    */
@@ -660,12 +757,15 @@ export const createAppController = (
     forkFrame,
     openTerminalTab,
     openHarnessTab,
+    readTab,
     openCardTab,
     selectTab,
     closeTab,
     confirmTabClose,
     cancelTabClose,
     toggleTabMenu,
+    selectRepo,
+    unpinRepo,
     openLocalRepo,
     loadHarnesses,
     loadRepos,
@@ -687,6 +787,9 @@ export const createAppController = (
     toggleSurfacesMenu,
     toggleConnectMenu,
     closeConnectMenu,
+    toggleAddMenu,
+    closeAddMenu,
+    addFiles,
     describeAgentBackend,
     debugSnapshot,
     debugEvents,
@@ -706,6 +809,9 @@ export const createAppController = (
     deferCommand,
     resumeDeferredCommand,
     noteCommandRun,
+    toggleVerbose,
+    traceFlow,
+    recommend,
     showCommandCatalog,
     promptSignIn,
     reloadApp,
@@ -774,6 +880,8 @@ export const createAppController = (
   ctx.commands = commands
 
   subscribeToAgent()
+  // Material transitions regenerate the next-step pills through the `recommend` flow.
+  recommender.subscribe()
   watchIdentityAcrossTabs()
   // Cmd+T / Cmd+W / Cmd+1..9 on the document, released with the controller.
   if (typeof document !== "undefined") ctx.onDispose(installKeyboard(document))
@@ -800,11 +908,13 @@ export const createAppController = (
   return {
     store,
     bootstrap: services.bootstrap,
+    features,
     nativeAgentAvailable: agent.available,
     nativeRepositoriesAvailable: repositories.available,
     tappedFetch: http,
     commands,
     slashItems: (needle) => commands.slashItems(needle),
+    slashTree: (needle) => commands.slashTree(needle),
     changeDraft,
     reset,
     askReset,
@@ -850,12 +960,15 @@ export const createAppController = (
     forkFrame,
     openTerminalTab,
     openHarnessTab,
+    readTab,
     openCardTab,
     selectTab,
     closeTab,
     confirmTabClose,
     cancelTabClose,
     toggleTabMenu,
+    selectRepo,
+    unpinRepo,
     openLocalRepo,
     loadHarnesses,
     loadRepos,
@@ -877,6 +990,9 @@ export const createAppController = (
     toggleSurfacesMenu,
     toggleConnectMenu,
     closeConnectMenu,
+    toggleAddMenu,
+    closeAddMenu,
+    addFiles,
     describeAgentBackend,
     debugSnapshot,
     debugEvents,
@@ -896,6 +1012,9 @@ export const createAppController = (
     deferCommand,
     resumeDeferredCommand,
     noteCommandRun,
+    toggleVerbose,
+    traceFlow,
+    recommend,
     showCommandCatalog,
     promptSignIn,
     reloadApp,

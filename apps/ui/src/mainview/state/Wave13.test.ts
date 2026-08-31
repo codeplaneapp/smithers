@@ -422,10 +422,10 @@ describe("wave 13 C-1 — the surfaces menu is a command", () => {
     const { agent } = scriptedToolAgent([() => []])
     const controller = createAppController(store, unavailableRepositories, agent)
     expect(store.session().surfacesMenuOpen).toBe(false)
-    expect(controller.runCommand("surfaces")).toBe(true)
+    expect(controller.runCommand("chat.surfaces")).toBe(true)
     await settle(2)
     expect(store.session().surfacesMenuOpen).toBe(true)
-    expect(controller.runCommand("surfaces")).toBe(true)
+    expect(controller.runCommand("chat.surfaces")).toBe(true)
     await settle(2)
     expect(store.session().surfacesMenuOpen).toBe(false)
   })
@@ -436,7 +436,7 @@ describe("wave 13 C-1 — the surfaces menu is a command", () => {
     const controller = createAppController(store, unavailableRepositories, agent)
     const result = await controller.commands.executeForAgent({
       name: "commands",
-      arguments: JSON.stringify({ action: "execute", name: "surfaces" })
+      arguments: JSON.stringify({ action: "execute", name: "chat.surfaces" })
     })
     expect(result.startsWith("failed:")).toBe(true)
     expect(store.session().surfacesMenuOpen).toBe(false)
