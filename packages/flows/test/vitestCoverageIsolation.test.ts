@@ -402,6 +402,10 @@ describe("vitest coverage isolation conformance", () => {
     // JSDoc rule harness; pinning it here keeps that non-workspace gate from
     // appearing or disappearing without conformance review.
     //
+    // `test:e2e` is the macOS developer entry point for the packaged
+    // Electrobun lane. It builds a stable bundle and drives that bundle with
+    // Bun; CI does not invoke it because the package graph has no macOS host.
+    //
     // Widened twice by the 1.0 migration, deliberately. Every other retained
     // 0.x gate became a `//scripts/...` target instead of a root script
     // (rc-contract.md section 9, exception 3); these two cannot:
@@ -441,6 +445,7 @@ describe("vitest coverage isolation conformance", () => {
       "docs:pages": "node scripts/generate-docs-pages.mjs",
       lint: "pnpm --recursive --if-present run lint",
       test: "pnpm --recursive --if-present run test",
+      "test:e2e": "bun apps/ui/e2e/packaged/run.ts",
       "test:examples": "pnpm --filter @smthrs/examples run test",
       "test:jsdoc": "node --test scripts/eslint-jsdoc.test.mjs"
     })

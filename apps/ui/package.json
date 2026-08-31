@@ -15,7 +15,8 @@
     "check": "node scripts/ensure-devkit.mjs && tsc --noEmit",
     "test": "bun test src",
     "test:e2e": "playwright test",
-    "test:e2e:native": "bun e2e/playwright/native/run.ts",
+    "test:e2e:native": "bun e2e/packaged/run.ts",
+    "test:e2e:packaged": "bun e2e/packaged/run.ts",
     "proof:gateway": "tsx scripts/gateway-run-proof.ts"
   },
   "dependencies": {

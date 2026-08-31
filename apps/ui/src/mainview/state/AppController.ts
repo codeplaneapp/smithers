@@ -21,6 +21,8 @@ import { createControllerContext } from "./controller/context"
 import { createFailureController } from "./controller/failures"
 import { createFramesController } from "./controller/frames"
 import { createPresentationController } from "./controller/presentation"
+import { createExplainController } from "./controller/explain"
+import type { ExplainConfig, ExplainController } from "./controller/explain"
 import { createRecommendController } from "./controller/recommend"
 import type { RecommenderConfig } from "./controller/recommend"
 import { createTabsController } from "./controller/tabs"
@@ -149,7 +151,14 @@ export interface AppController {
   /* Lane L3 (docs/LOCAL-APP.md "Auto-load flow"); see controller/targets.ts. */
   readonly openRepo: TargetsController["openRepo"]
   readonly runTarget: TargetsController["runTarget"]
+  readonly runPattern: TargetsController["runPattern"]
   readonly openTarget: TargetsController["openTarget"]
+  readonly filterTargets: TargetsController["filterTargets"]
+  readonly selectTarget: TargetsController["selectTarget"]
+  readonly starTarget: TargetsController["starTarget"]
+  readonly expandTargetGroup: TargetsController["expandTargetGroup"]
+  readonly pickTargets: TargetsController["pickTargets"]
+  readonly runTargetSet: TargetsController["runTargetSet"]
   /* The target-graph cards (docs/LOCAL-APP.md "Cards: target graph"); see controller/targetGraph.ts. */
   readonly showGraph: TargetGraphController["showGraph"]
   readonly focusGraphNode: TargetGraphController["focusGraph"]
@@ -231,6 +240,8 @@ export interface AppController {
   readonly traceFlow: (record: Extract<AppTransition, { type: "flow.invoked" }>) => void
   /** The `recommend` flow: regenerate the next-step pills for the current state (Recommend.ts). */
   readonly recommend: () => Promise<void>
+  /** The `explain` flow: one side turn on the explainer role, answered as an embedded card (controller/explain.ts). */
+  readonly explain: ExplainController["explain"]
   /** Render the full visible-flow catalog into the chat (the /chat.commands answer). */
   readonly showCommandCatalog: () => void
   /** Render the sign-in step into the chat (auth.prompt — the agent's door to login). */
@@ -338,6 +349,8 @@ export interface AppServices {
    * asks for (`cheap` by default), the debounce, the timeout, or off.
    */
   readonly recommender?: RecommenderConfig
+  /** The explainer side turn's timeout (controller/explain.ts). */
+  readonly explainer?: ExplainConfig
   /**
    * Feature flags. `suggestionPills` (default OFF): the next-action pills
    * under the composer and the recommender's cheap-agent side turns behind
@@ -500,7 +513,8 @@ export const createAppController = (
     runs: targetRuns,
     devFixtures: createTargetGraphDevFixtures()
   })
-  const { openRepo, runTarget, openTarget } = createTargetsController(ctx, {
+  const { openRepo, runTarget, runPattern, openTarget, filterTargets, selectTarget, starTarget, expandTargetGroup, pickTargets, runTargetSet } =
+    createTargetsController(ctx, {
     nextOrdinal: nextTranscriptOrdinal,
     loadRepos,
     runs: targetRuns,
@@ -594,6 +608,7 @@ export const createAppController = (
     config: { ...services.recommender, enabled: (services.recommender?.enabled ?? false) && features.suggestionPills }
   })
   const recommend = recommender.recommend
+  const { explain } = createExplainController(ctx, services.explainer ?? {})
 
   /*
    * auth.prompt: the agent cannot navigate the user to OAuth (auth.sign-in
@@ -773,7 +788,14 @@ export const createAppController = (
     pty,
     openRepo,
     runTarget,
+    runPattern,
     openTarget,
+    filterTargets,
+    selectTarget,
+    starTarget,
+    expandTargetGroup,
+    pickTargets,
+    runTargetSet,
     showGraph: targetGraph.showGraph,
     focusGraphNode: targetGraph.focusGraph,
     showRunTimeline: targetGraph.showTimeline,
@@ -812,6 +834,7 @@ export const createAppController = (
     toggleVerbose,
     traceFlow,
     recommend,
+    explain,
     showCommandCatalog,
     promptSignIn,
     reloadApp,
@@ -976,7 +999,14 @@ export const createAppController = (
     pty,
     openRepo,
     runTarget,
+    runPattern,
     openTarget,
+    filterTargets,
+    selectTarget,
+    starTarget,
+    expandTargetGroup,
+    pickTargets,
+    runTargetSet,
     showGraph: targetGraph.showGraph,
     focusGraphNode: targetGraph.focusGraph,
     showRunTimeline: targetGraph.showTimeline,
@@ -1015,6 +1045,7 @@ export const createAppController = (
     toggleVerbose,
     traceFlow,
     recommend,
+    explain,
     showCommandCatalog,
     promptSignIn,
     reloadApp,

@@ -5,8 +5,9 @@
  * and this process; RPC carries just the two native doors (the folder dialog
  * and the system browser). Neither privileged operation has an HTTP fallback.
  */
-import { BrowserView, BrowserWindow, Utils } from "electrobun/main"
+import { BrowserView, BrowserWindow, BuildConfig, Screen, Utils } from "electrobun/main"
 import type { SmithersNativeRPC } from "smithers-shared/NativeRPC"
+import { encodeRgbaPng, startPackagedE2EBridge } from "./PackagedE2EBridge"
 import { defaultDistDir, startLocalServer } from "./server"
 
 const headless = Bun.env.SMITHERS_LOCAL_HEADLESS === "1"
@@ -32,6 +33,17 @@ const server = await startLocalServer({
   allowManualRepositoryPaths: headless
 })
 
+let mainWindow: BrowserWindow | undefined
+let bridge: ReturnType<typeof startPackagedE2EBridge>
+let shuttingDown = false
+const shutdown = async (): Promise<void> => {
+  if (shuttingDown) return
+  shuttingDown = true
+  bridge?.stop()
+  await server.stop()
+  process.exit(0)
+}
+
 if (headless) {
   console.log("SMITHERS_LOCAL_HEADLESS=1: serving without a window")
 } else {
@@ -55,7 +67,7 @@ if (headless) {
   })
 
   // The local origin, never views:// and never a Vite dev server.
-  new BrowserWindow({
+  mainWindow = new BrowserWindow({
     title: "Smithers",
     url: `${server.origin}/`,
     rpc,
@@ -68,13 +80,86 @@ if (headless) {
   })
 }
 
-let shuttingDown = false
-const shutdown = async (): Promise<void> => {
-  if (shuttingDown) return
-  shuttingDown = true
-  await server.stop()
-  process.exit(0)
+interface RendererEvalResponse {
+  readonly ok: boolean
+  readonly json?: string
+  readonly valueUndefined?: boolean
+  readonly error?: string
 }
+
+interface RendererEvalRPC {
+  readonly request: {
+    readonly evaluateJavascriptWithResponse: (
+      params: { readonly script: string },
+      options?: { readonly maxRequestTime?: number }
+    ) => Promise<unknown>
+  }
+}
+
+const evaluateInMainWindow = async (script: string): Promise<unknown> => {
+  const rpc = mainWindow?.webview.rpc as RendererEvalRPC | undefined
+  if (rpc === undefined) throw new Error("The main WebView is not available.")
+  const response = await rpc.request.evaluateJavascriptWithResponse({
+    script: `
+return (async () => {
+  try {
+    const value = await (async () => {
+${script}
+    })()
+    const serialized = JSON.stringify(value)
+    if (serialized === undefined && value !== undefined) {
+      throw new Error("The evaluation result is not JSON-serializable.")
+    }
+    return { ok: true, json: serialized ?? "null", valueUndefined: value === undefined }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})()
+`
+  }, { maxRequestTime: 30_000 })
+  if (typeof response !== "object" || response === null || !("ok" in response)) {
+    throw new Error(`Renderer evaluation failed: ${String(response)}`)
+  }
+  const result = response as RendererEvalResponse
+  if (!result.ok) throw new Error(result.error ?? "Renderer evaluation failed.")
+  if (result.valueUndefined === true) return undefined
+  if (typeof result.json !== "string") throw new Error("Renderer evaluation returned no serialized value.")
+  return JSON.parse(result.json)
+}
+
+bridge = startPackagedE2EBridge({
+  state: () => {
+    const build = BuildConfig.getSync()
+    const window = mainWindow
+    return {
+      app: {
+        pid: process.pid,
+        origin: server.origin,
+        packaged: build.isPackaged,
+        channel: build.channel,
+        defaultRenderer: build.defaultRenderer
+      },
+      window: window === undefined ? null : {
+        id: window.id,
+        webviewId: window.webviewId,
+        renderer: window.renderer,
+        url: window.url,
+        frame: window.getFrame()
+      }
+    }
+  },
+  evaluate: evaluateInMainWindow,
+  screenshot: () => {
+    const frame = mainWindow?.getFrame()
+    if (frame === undefined) return null
+    const width = Math.round(frame.width)
+    const height = Math.round(frame.height)
+    const pixels = Screen.captureRegion({ x: frame.x, y: frame.y, width, height })
+    return pixels === null ? null : encodeRgbaPng(width, height, pixels)
+  },
+  quit: shutdown
+})
+
 process.on("SIGINT", () => void shutdown())
 process.on("SIGTERM", () => void shutdown())
 

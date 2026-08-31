@@ -2,10 +2,10 @@
 > (`web-chat-*.ts`, `worker-e2e.ts`, `e2e-harness.ts`, `stub-backends.ts`,
 > `launch-gateway-double.ts`, `live-check.ts`) and the `wrangler dev` stack
 > they booted were removed with the web build path. End-to-end coverage is
-> the Playwright tiers: `pnpm --filter smithers-ui test:e2e` (T1, local
-> origin in headless Chromium) and `test:e2e:native` (T2, the Electrobun
-> window over CDP). The sections below that describe those runners are
-> historical.
+> `pnpm --filter smithers-ui test:e2e` (T1, local origin in headless Chromium)
+> and root `bun run test:e2e` (T2, the stable packaged Electrobun app through
+> its authenticated native-renderer bridge). The sections below that describe
+> the removed runners are historical.
 
 # apps/ui/scripts
 

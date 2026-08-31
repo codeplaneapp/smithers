@@ -250,7 +250,8 @@ describe("command registry pure model", () => {
         ["verbose", "debug.verbose"],
         ["browser", "browser.open"],
         ["balance", "billing.balance"],
-        ["stop", "chat.stop"]
+        ["stop", "chat.stop"],
+        ["explain", "agent.explain"]
       ] as const
     ) {
       expect(canonical(bare, registered)).toBe(home)
@@ -595,6 +596,10 @@ describe("command registry bindings", () => {
       "tab.terminal",
       "tab.read",
       "tab.harness",
+      "agent.role",
+      "agent.delegate",
+      "agent.explain",
+      "explain",
       "tab.card",
       "tab.select",
       "tab.close",
@@ -607,7 +612,15 @@ describe("command registry bindings", () => {
       "files.add",
       "repo.open",
       "target.run",
+      "target.run.pattern",
       "target.open",
+      "target.filter",
+      "target.select",
+      "target.star",
+      "target.unstar",
+      "target.expand",
+      "target.pick",
+      "target.run.set",
       // The target-graph cards (docs/LOCAL-APP.md "Cards: target graph").
       "target.graph",
       "target.graph.focus",

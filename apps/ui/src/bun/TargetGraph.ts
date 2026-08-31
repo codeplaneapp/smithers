@@ -7,7 +7,7 @@ import { splitLabel } from "smithers-shared/LocalApp"
 import type { NodeSidecar } from "./Node"
 import { currentSandboxHost, loaderPolicy, wrapSandbox } from "./Sandbox"
 import type { SandboxHost } from "./Sandbox"
-import { QUERY_TIMEOUT_MS, queryTargets, resolveBuildCli, sandboxPathsFor } from "./Targets"
+import { planArgv, QUERY_TIMEOUT_MS, queryTargets, resolveBuildCli, sandboxPathsFor } from "./Targets"
 
 type JsonObject = Record<string, unknown>
 
@@ -24,20 +24,52 @@ export const parseTextGraph = (
   const rowByLabel = new Map(rows.map((row) => [row.label, row]))
   const labels = new Set<string>()
   const edges: Array<GraphEdge> = []
+  const ruleOf = new Map<string, string>()
+  const seen = new Set<string>()
+  const addEdge = (from: string, to: string, kind: GraphEdge["kind"]): void => {
+    const key = `${from} ${to} ${kind}`
+    if (seen.has(key)) return
+    seen.add(key)
+    edges.push({ from, to, kind })
+  }
   let from: string | undefined
+  /*
+   * Two text forms. The whole graph (`graph //...`) lists each label on its
+   * own line with `  - <kind> -> //dep` edge lines under it. A scoped graph
+   * (`graph <label>`) is a TREE: `//root (Rule)` then `├─ //dep (Rule)` /
+   * `└─ //dep (Rule)` rows whose depth is the glyph's column (three columns
+   * per level), every row a `deps` edge from the nearest shallower row.
+   */
+  const stack: Array<string> = []
   for (const line of text.split(/\r?\n/)) {
     if (line.trim() === "") continue
     const edge = /^\s+-\s*(data|gates|services|deps)\s*->\s*(\/\/\S+)\s*$/.exec(line)
     if (edge !== null && from !== undefined) {
       const to = edge[2]!
       labels.add(to)
-      edges.push({ from, to, kind: edge[1] as GraphEdge["kind"] })
+      addEdge(from, to, edge[1] as GraphEdge["kind"])
       continue
     }
-    const label = /^(\/\/\S+)\s*$/.exec(line)?.[1]
-    if (label !== undefined) {
+    const branch = /^([\s│|]*)[├└]─+\s*(\/\/\S+)(?:\s+\(([^)]*)\))?(?:\s+\[[^\]]*\])?\s*$/.exec(line)
+    if (branch !== null) {
+      const depth = Math.floor((branch[1] ?? "").length / 3) + 1
+      const label = branch[2]!
+      labels.add(label)
+      if (branch[3] !== undefined) ruleOf.set(label, branch[3])
+      stack.length = Math.min(stack.length, depth)
+      const parent = stack[depth - 1]
+      if (parent !== undefined) addEdge(parent, label, "deps")
+      stack[depth] = label
+      continue
+    }
+    const root = /^(\/\/\S+)(?:\s+\(([^)]*)\))?(?:\s+\[[^\]]*\])?\s*$/.exec(line)
+    if (root !== null) {
+      const label = root[1]!
       from = label
       labels.add(label)
+      if (root[2] !== undefined) ruleOf.set(label, root[2])
+      stack.length = 0
+      stack[0] = label
     }
   }
   for (const row of rows) labels.add(row.label)
@@ -47,7 +79,7 @@ export const parseTextGraph = (
     return {
       label,
       ...parts,
-      rule: row?.rule ?? row?.target ?? "",
+      rule: row?.rule ?? row?.target ?? ruleOf.get(label) ?? "",
       kinds: [...(row?.kinds ?? [])],
       private: parts.name.startsWith("__private_")
     }
@@ -147,7 +179,18 @@ const declarationSet = async (repo: string): Promise<DeclarationSet> => {
 
 interface CachedGraph { readonly digest: string; readonly response: TargetGraphResponse }
 const graphCache = new Map<string, CachedGraph>()
-export const clearTargetGraphCache = (): void => graphCache.clear()
+/*
+ * The whole-graph refusal, remembered per declaration digest: a checkout
+ * whose `graph //...` fails takes seconds to say so, and every scoped read
+ * (one drawer open) would otherwise pay that again before falling back. An
+ * edit to any declaration re-keys the digest and the whole graph is tried
+ * again.
+ */
+const wholeGraphFailures = new Map<string, { readonly digest: string; readonly error: Error }>()
+export const clearTargetGraphCache = (): void => {
+  graphCache.clear()
+  wholeGraphFailures.clear()
+}
 
 export interface TargetGraphOptions {
   readonly repoId: string
@@ -205,7 +248,8 @@ const runJson = async (options: TargetGraphOptions, args: ReadonlyArray<string>)
     new Response(child.stderr as ReadableStream).text()
   ])
   clearTimeout(timer)
-  if (code !== 0) throw new Error(`The loader exited ${code}: ${loaderFailureText(stdout, stderr)}`)
+  /* Name the invocation: `graph //...` and `graph <label>` fail for different reasons on the same checkout. */
+  if (code !== 0) throw new Error(`The loader exited ${code} (${args.slice(0, 2).join(" ")}): ${loaderFailureText(stdout, stderr)}`)
   try { return JSON.parse(stdout) } catch { throw new Error(`The loader did not answer JSON: ${stdout.trim().slice(0, 200)}`) }
 }
 
@@ -238,35 +282,78 @@ export const queryTargetGraph = async (options: TargetGraphOptions): Promise<Tar
   const digest = declarations.digest
   let base = graphCache.get(options.repo)
   if (base === undefined || base.digest !== digest) {
-    const [envelope, targetResult] = await Promise.all([
-      runJson(options, ["graph", "//...", "--format", "json"]),
-      queryTargets({ repo: options.repo, node: options.node, ...(options.cli === undefined ? {} : { cli: options.cli }), ...(options.sandboxHost === undefined ? {} : { sandboxHost: options.sandboxHost }), ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }) })
-    ])
-    const body = object(envelope)
-    if (typeof body?.graph !== "string") throw new Error("The graph envelope has no text graph field.")
-    const rows = Array.isArray(body.targets)
-      ? body.targets.map(object).filter((row): row is JsonObject => row !== undefined).filter((row) => typeof row.label === "string").map((row) => ({ label: row.label as string, target: typeof row.target === "string" ? row.target : "", kinds: strings(row.kinds) ?? [] }))
-      : []
-    const merged = new Map(rows.map((row) => [row.label, row]))
-    for (const target of targetResult.targets) merged.set(target.label, { label: target.label, target: target.target, kinds: target.kinds })
-    const parsed = parseTextGraph(body.graph, [...merged.values()])
-    const nodes = parsed.nodes.map((node) => {
-      const source = declarations.sources.get(node.label)
-      return source === undefined ? node : { ...node, source }
-    })
+    const targetsPending = queryTargets({ repo: options.repo, node: options.node, ...(options.cli === undefined ? {} : { cli: options.cli }), ...(options.sandboxHost === undefined ? {} : { sandboxHost: options.sandboxHost }), ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }) })
+    /*
+     * The whole graph first. When it cannot load and the caller named
+     * labels, each label's own subgraph (`graph <label>`, the same scoped
+     * read the run route revalidates with) answers instead: a targets-card
+     * drawer asking about one target must not die because a declaration
+     * elsewhere in the checkout (this repository's `vendor/jj` input) is
+     * broken. A scoped answer is never cached as the repository's graph.
+     */
+    let envelopes: Array<JsonObject>
+    let scoped = false
+    try {
+      const remembered = wholeGraphFailures.get(options.repo)
+      if (remembered !== undefined && remembered.digest === digest) throw remembered.error
+      const whole = object(await runJson(options, ["graph", "//...", "--format", "json"]))
+      if (typeof whole?.graph !== "string") throw new Error("The graph envelope has no text graph field.")
+      envelopes = [whole]
+    } catch (error) {
+      wholeGraphFailures.set(options.repo, { digest, error: error instanceof Error ? error : new Error(String(error)) })
+      if (!options.labels?.length) throw error
+      scoped = true
+      envelopes = await Promise.all(options.labels.map(async (label) => {
+        const body = object(await runJson(options, ["graph", label, "--format", "json"]))
+        if (typeof body?.graph !== "string") throw new Error("The graph envelope has no text graph field.")
+        return body
+      }))
+    }
+    const targetResult = await targetsPending
+    const nodesByLabel = new Map<string, GraphNode>()
+    const edges: Array<GraphEdge> = []
+    const seenEdges = new Set<string>()
+    for (const body of envelopes) {
+      const rows = Array.isArray(body.targets)
+        ? body.targets.map(object).filter((row): row is JsonObject => row !== undefined).filter((row) => typeof row.label === "string").map((row) => ({ label: row.label as string, target: typeof row.target === "string" ? row.target : "", kinds: strings(row.kinds) ?? [] }))
+        : []
+      const merged = new Map(rows.map((row) => [row.label, row]))
+      for (const target of targetResult.targets) merged.set(target.label, { label: target.label, target: target.target, kinds: target.kinds })
+      const parsed = parseTextGraph(body.graph as string, [...merged.values()])
+      for (const node of parsed.nodes) {
+        const source = declarations.sources.get(node.label)
+        nodesByLabel.set(node.label, source === undefined ? node : { ...node, source })
+      }
+      for (const edge of parsed.edges) {
+        const key = `${edge.from} ${edge.to} ${edge.kind}`
+        if (seenEdges.has(key)) continue
+        seenEdges.add(key)
+        edges.push(edge)
+      }
+    }
+    const nodes = [...nodesByLabel.values()]
     const generatedAt = new Date().toISOString()
     /*
      * `digest` is the field a card compares to decide whether its cached
      * graph went stale after a declaration edit; it has to reach the UI, not
      * just this cache, or the documented staleness check can never fire.
      */
-    base = { digest, response: { repoId: options.repoId, nodes, edges: parsed.edges, warnings: targetResult.warnings, generatedAt, digest, durationMs: Date.now() - started } }
-    graphCache.set(options.repo, base)
+    base = { digest, response: { repoId: options.repoId, nodes, edges, warnings: targetResult.warnings, generatedAt, digest, durationMs: Date.now() - started } }
+    if (!scoped) graphCache.set(options.repo, base)
   }
   let nodes = base.response.nodes.map((node) => ({ ...node, kinds: [...node.kinds], ...(node.plan === undefined ? {} : { plan: { ...node.plan } }) }))
   if (options.plan === true) {
-    const labels = options.labels?.length ? options.labels : ["//..."]
-    const envelopes = await Promise.all(labels.map((label) => runJson(options, [label, "--plan", "--format", "json"])))
+    /*
+     * Named labels plan in the workspace's own form (`planArgv`: verb-led on
+     * a BUILD.ts checkout, bare on a WORKSPACE.ts one); the whole `//...`
+     * keeps the bare form, which is the only one the CLI plans a pattern in.
+     */
+    const kindsOf = new Map(nodes.map((entry) => [entry.label, entry.kinds]))
+    const envelopes = await Promise.all(
+      options.labels?.length
+        ? options.labels.map((label) => runJson(options, planArgv(options.repo, label, kindsOf.get(label) ?? [])))
+        : [runJson(options, ["//...", "--plan", "--format", "json"])]
+    )
     nodes = foldPlan(nodes, envelopes)
   }
   return { ...base.response, repoId: options.repoId, nodes, edges: base.response.edges.map((edge) => ({ ...edge })), durationMs: Date.now() - started }

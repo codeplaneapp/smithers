@@ -7,7 +7,8 @@ import { parseSubmit } from "../../flows/registry"
 import { boundTurnRequest } from "../AgentTurnPolicy"
 import { CardPatchSchema, CardSchema, MAIN_TAB_ID } from "../AppState"
 import type { Card } from "../AppState"
-import type { ImpossibleAskClass } from "../Instructions"
+import { roleMenuEntries } from "../../AgentRoleMenu"
+import type { ImpossibleAskClass, InstructionRole } from "../Instructions"
 import { smithersInstructions } from "../Instructions"
 import {
   impossibleAskOf,
@@ -236,8 +237,25 @@ export const createTurnController = (
       },
       localRepositories: [...store.collections.connectors.values()].map((connector) => connector.name),
       localRepositoriesAvailable: repositories.available
-    })
+    }, instructionRoles())
   }
+
+  /*
+   * The named roles the orchestrator may delegate to, with THIS host's
+   * availability: only where local harnesses exist (agent.delegate registers
+   * on local.harnesses), so a Cloud session is not told about tabs it lacks.
+   */
+  const instructionRoles = (): ReadonlyArray<InstructionRole> =>
+    ctx.commands.find("agent.delegate") === undefined
+      ? []
+      : roleMenuEntries([...store.collections.harnesses.values()]).map((entry) => ({
+        id: entry.role.id,
+        label: entry.role.label,
+        purpose: entry.role.purpose,
+        model: entry.role.model.label,
+        available: entry.available,
+        reason: entry.reason
+      }))
 
   const launchLeg = (
     turnId: string,

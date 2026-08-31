@@ -238,12 +238,49 @@ export const createAuthBillingController = (
    * cookie lands in the app's own jar. One toast narrates the whole arc.
    */
   const handoffPollMs = services.handoffPollMs ?? 2000
+  /*
+   * ONE handoff at a time. The live failure (2026-08-30): two "Sign in"
+   * clicks twelve seconds apart minted two handoffs. The first finished in
+   * the browser and its loop toasted "Signed in"; the second was never
+   * completed, polled for its full five minutes, and then wrote "Sign-in
+   * timed out" over the SAME toast — so the app announced a timeout for a
+   * sign-in that had succeeded. A second click while a handoff is pending now
+   * reopens the pending handoff's browser page instead of minting another,
+   * and a loop that has been superseded (or whose session already arrived)
+   * exits without touching the toast.
+   */
+  let pendingHandoff: { readonly generation: number; readonly url: string } | undefined
+  let handoffGeneration = 0
   const nativeSignIn = async (openExternal: (url: string) => Promise<boolean>): Promise<void> => {
     const key = "auth.sign-in.handoff"
-    const fail = (detail: string): void => {
-      store.dispatch({ type: "toast.resolved", actor: "system", key, status: "failed", detail })
+    if (pendingHandoff !== undefined) {
+      const reopened = await openExternal(pendingHandoff.url)
+      store.dispatch({ type: "toast.shown", actor: "system", key, title: "Finishing sign-in in your browser…" })
+      store.dispatch({
+        type: "toast.resolved",
+        actor: "system",
+        key,
+        status: "ok",
+        title: "Finishing sign-in in your browser…",
+        detail: reopened
+          ? "That sign-in is still open in your browser — finish it there."
+          : "That sign-in is still open in your browser, but the page couldn't be reopened."
+      })
+      return
     }
+    const generation = ++handoffGeneration
+    // A superseded loop never writes: only the newest handoff's outcome is the truth.
+    const current = (): boolean => pendingHandoff?.generation === generation
+    const settle = (status: "ok" | "failed", title: string, detail: string): void => {
+      if (!current()) return
+      pendingHandoff = undefined
+      store.dispatch({ type: "toast.resolved", actor: "system", key, status, title, detail })
+    }
+    const fail = (detail: string): void => settle("failed", "Sign-in didn't finish", detail)
     store.dispatch({ type: "toast.shown", actor: "system", key, title: "Finishing sign-in in your browser…" })
+    // Reserve the slot before the first await so a second click during the
+    // start request joins this handoff instead of racing it.
+    pendingHandoff = { generation, url: "" }
     let start: { handoffId?: unknown; pollSecret?: unknown } | undefined
     try {
       const response = await http(`${baseUrl}${AUTH_NATIVE_START_PATH}`, { method: "POST" })
@@ -261,19 +298,27 @@ export const createAuthBillingController = (
       return
     }
     const origin = baseUrl !== "" ? baseUrl : typeof window === "undefined" ? "" : window.location.origin
-    const opened = await openExternal(
-      `${origin}${AUTH_SIGN_IN_PATH}?handoff=${encodeURIComponent(start.handoffId)}`
-    )
+    const url = `${origin}${AUTH_SIGN_IN_PATH}?handoff=${encodeURIComponent(start.handoffId)}`
+    if (current()) pendingHandoff = { generation, url }
+    const opened = await openExternal(url)
     if (!opened) {
       fail("Your browser couldn't be opened. Try again.")
       return
     }
     // ~5 minutes of patience: OAuth in another app takes as long as it takes.
-    for (let attempt = 0; attempt < 150; attempt += 1) {
+    let consecutiveErrors = 0
+    for (let attempt = 0; attempt < 150 && current(); attempt += 1) {
       await new Promise((resolve) => {
         const timer = setTimeout(resolve, handoffPollMs)
         unref(timer)
       })
+      if (!current()) return
+      // The session may arrive by another door (a sibling tab, a focus
+      // re-read): a signed-in identity ends the wait as success, not timeout.
+      if (store.collections.identitySessions.get("identity")?.state === "signed-in") {
+        settle("ok", "Signed in", `Connected as ${store.collections.identitySessions.get("identity")?.login ?? "you"}.`)
+        return
+      }
       let claim: Response
       try {
         claim = await http(`${baseUrl}${AUTH_NATIVE_CLAIM_PATH}`, {
@@ -291,27 +336,44 @@ export const createAuthBillingController = (
       const body = (await claim.json().catch(() => undefined)) as
         | { status?: unknown; message?: unknown }
         | undefined
+      if (!claim.ok) {
+        /*
+         * An erroring claim used to read as "pending" and poll for the full
+         * five minutes. Three in a row is an answer: the seam is refusing,
+         * and the toast says what it said.
+         */
+        consecutiveErrors += 1
+        if (consecutiveErrors >= 3) {
+          fail(
+            typeof body?.message === "string"
+              ? `Sign-in couldn't be confirmed: ${body.message}`
+              : `Sign-in couldn't be confirmed — the identity service answered ${claim.status}.`
+          )
+          return
+        }
+        continue
+      }
+      consecutiveErrors = 0
       if (body?.status === "pending") continue
       if (body?.status === "ready") {
-        // The claim's Set-Cookie is in the jar; the session probe states it.
+        // The claim's Set-Cookie should now be in the jar; only the session probe can say so.
         await loadSession()
         const identity = store.collections.identitySessions.get("identity")
-        store.dispatch({
-          type: "toast.resolved",
-          actor: "system",
-          key,
-          status: "ok",
-          title: "Signed in",
-          detail: identity?.state === "signed-in"
-            ? `Connected as ${identity.login ?? "you"}.`
-            : "Signed in — loading your session…"
-        })
+        if (identity?.state === "signed-in") {
+          settle("ok", "Signed in", `Connected as ${identity.login ?? "you"}.`)
+        } else {
+          fail(
+            "Your browser finished the GitHub sign-in, but this app didn't receive the session — the sign-in cookie never reached it. Try again; if it repeats, that is a bug to report."
+          )
+        }
         return
       }
       if (body?.status === "failed") {
         fail(typeof body.message === "string" ? body.message : "Sign-in didn't finish. Try again.")
         return
       }
+      fail("Sign-in couldn't be confirmed — the identity service answered in an unexpected shape.")
+      return
     }
     fail("Sign-in timed out — try again whenever you're ready.")
   }

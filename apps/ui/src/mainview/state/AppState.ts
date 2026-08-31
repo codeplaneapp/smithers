@@ -1,4 +1,6 @@
 import { CardPatchSchema, CardPlanItemSchema, CardSchema } from "smithers-shared/Cards"
+import { AgentRoleIdSchema } from "smithers-shared/AgentRoles"
+import type { AgentRoleId } from "smithers-shared/AgentRoles"
 import { HARNESS_IDS, HarnessSchema, RepoSchema } from "smithers-shared/LocalApp"
 import type { Harness, Repo } from "smithers-shared/LocalApp"
 import { REPOSITORY_ACCESS_VALUES } from "smithers-shared/NativeRepository"
@@ -28,6 +30,23 @@ export const PinnedRepoSchema = z.object({
   pinnedAt: z.number()
 })
 export type PinnedRepo = z.infer<typeof PinnedRepoSchema>
+
+/*
+ * A target this user starred (target.star): the targets card's Featured
+ * view leads with the repository's manifest-featured labels plus these.
+ * Keyed by the repo's pin key and the label so a star survives the server's
+ * fresh repo id on a reopen.
+ */
+export const StarredTargetSchema = z.object({
+  /** `${repoKey}::${label}`. */
+  id: z.string(),
+  repoKey: z.string(),
+  label: z.string(),
+  starredAt: z.number()
+})
+export type StarredTarget = z.infer<typeof StarredTargetSchema>
+
+export const starredTargetId = (repoKey: string, label: string): string => `${repoKey}::${label}`
 
 /** The pin key for a local path: the same key for an open repo and its connector. */
 export const repoKeyOf = (path: string): string => `local:${path}`
@@ -347,6 +366,8 @@ export type Tab =
     title: string
     sessionId: string
     harnessId: Harness["id"]
+    /** The named role it was launched as (AgentRoles.ts); absent for a raw harness. */
+    roleId?: AgentRoleId
     cwd: string
     repoKey?: string
   }
@@ -372,7 +393,8 @@ export const TabSchema = z.discriminatedUnion("kind", [
     id: z.string(),
     kind: z.literal("harness"),
     title: z.string(),
-    harnessId: z.enum(HARNESS_IDS)
+    harnessId: z.enum(HARNESS_IDS),
+    roleId: AgentRoleIdSchema.optional()
   }),
   z.object({ ...tabRowShape, id: z.string(), kind: z.literal("card"), title: z.string(), cardId: z.string() })
 ])
@@ -944,6 +966,9 @@ export type AppTransition =
   | { type: "repo.pinned"; actor: Actor; pin: PinnedRepo }
   | { type: "repo.unpinned"; actor: "user"; id: string }
   | { type: "repo.selected"; actor: Actor; id: string }
+  /* A user's star on a target (targets card Featured view); `repoId` names the open card the mirror lands on. */
+  | { type: "target.starred"; actor: "user"; repoId: string; star: StarredTarget }
+  | { type: "target.unstarred"; actor: "user"; repoId: string; id: string }
   | {
     /*
      * The next-step pills were regenerated (Recommend.ts): by the cheap-agent

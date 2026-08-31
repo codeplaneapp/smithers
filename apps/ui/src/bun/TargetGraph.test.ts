@@ -25,6 +25,32 @@ describe("parseTextGraph", () => {
     expect(parsed.nodes.find((node) => node.label === "//src:typeCheck")).toMatchObject({ rule: "Shell.Test", package: "//src", name: "typeCheck" })
   })
 
+  test("parses a scoped `graph <label>` tree: depth by glyph column, rule from the parens, [seen] repeats folded", () => {
+    /* Verbatim from `smithers-build graph //packages/engine:check --format json` on this checkout. */
+    const tree = [
+      "//packages/engine:check (Typecheck)",
+      "├─ //packages/engine:lib (TsBuild)",
+      "│  └─ //packages/flow:lib (TsBuild)",
+      "│     └─ //packages/plan:lib (TsBuild)",
+      "└─ //packages/flow:lib (TsBuild) [seen]"
+    ].join("\n")
+    const parsed = parseTextGraph(tree)
+    expect(parsed.nodes.map((node) => node.label).sort()).toEqual([
+      "//packages/engine:check",
+      "//packages/engine:lib",
+      "//packages/flow:lib",
+      "//packages/plan:lib"
+    ])
+    expect(parsed.edges).toEqual([
+      { from: "//packages/engine:check", to: "//packages/engine:lib", kind: "deps" },
+      { from: "//packages/engine:lib", to: "//packages/flow:lib", kind: "deps" },
+      { from: "//packages/flow:lib", to: "//packages/plan:lib", kind: "deps" },
+      { from: "//packages/engine:check", to: "//packages/flow:lib", kind: "deps" }
+    ])
+    expect(parsed.nodes.find((node) => node.label === "//packages/engine:check")?.rule).toBe("Typecheck")
+    expect(parsed.nodes.find((node) => node.label === "//packages/plan:lib")?.rule).toBe("TsBuild")
+  })
+
   test("keeps private dependencies and the plain deps kind", () => {
     const parsed = parseTextGraph("//src:public\n  -deps-> //src:__private_Overlay_4")
     expect(parsed.edges).toEqual([{ from: "//src:public", to: "//src:__private_Overlay_4", kind: "deps" }])

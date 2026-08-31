@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { parseRepoPlugin, RepoPluginSchema, RepoSchema, TargetSchema } from "./LocalApp"
+import { featuredLabels, featuredPatternRuns, parseRepoPlugin, RepoPluginSchema, RepoSchema, TARGET_PATTERN, TargetSchema } from "./LocalApp"
 
 /*
  * The repo plugin manifest (apps/ui/docs/LOCAL-APP.md "Plugin manifest"):
@@ -90,6 +90,20 @@ describe("RepoPluginSchema", () => {
   })
 })
 
+describe("featured entries and groups", () => {
+  test("featured is optional on a group and an entry, and featuredLabels reads both", () => {
+    const value = manifest()
+    ;(value.groups[1] as { featured?: boolean }).featured = true
+    ;(value.entries[0] as { featured?: boolean }).featured = true
+    const parsed = RepoPluginSchema.parse(value)
+    expect(featuredLabels(parsed)).toEqual(["//:versionParity", "//:clippyFix"])
+    expect(featuredLabels(RepoPluginSchema.parse(manifest()))).toEqual([])
+    // The file parse accepts it too, with the flag defaults untouched.
+    const file = parseRepoPlugin(value, [".", "aomi-sdk"])
+    expect("plugin" in file && featuredLabels(file.plugin)).toEqual(["//:versionParity", "//:clippyFix"])
+  })
+})
+
 describe("parseRepoPlugin", () => {
   const workspaces = [".", "aomi", "aomi-sdk"]
 
@@ -154,5 +168,66 @@ describe("multi-workspace repo wire model", () => {
       workspace: "aomi-sdk"
     })
     expect(target.workspace).toBe("aomi-sdk")
+  })
+})
+
+/*
+ * Pattern entries: a manifest entry may run a verb over a pattern
+ * (`ci //packages/...`, how CI runs everything) instead of one label. Exactly
+ * one form per entry; the verb is one of the CLI's; the pattern is a label
+ * or a `//dir/...` subtree.
+ */
+describe("pattern entries", () => {
+  const withPattern = () => {
+    const value = manifest()
+    value.entries.push({
+      id: "everything",
+      group: "checks",
+      workspace: ".",
+      verb: "ci",
+      pattern: "//packages/...",
+      title: "Run everything",
+      summary: "The CI step.",
+      approval: false,
+      agentic: false
+    } as never)
+    return value
+  }
+
+  test("a verb over a pattern parses, and featuredPatternRuns lists it when featured", () => {
+    const value = withPattern()
+    ;(value.groups[0] as { featured?: boolean }).featured = true
+    const parsed = parseRepoPlugin(value, [".", "aomi-sdk"])
+    expect("plugin" in parsed).toBe(true)
+    if (!("plugin" in parsed)) return
+    expect(featuredLabels(parsed.plugin)).toEqual(["//:versionParity"])
+    expect(featuredPatternRuns(parsed.plugin)).toEqual([
+      { id: "everything", title: "Run everything", summary: "The CI step.", workspace: ".", verb: "ci", pattern: "//packages/..." }
+    ])
+    expect(featuredPatternRuns(RepoPluginSchema.parse(withPattern()))).toEqual([])
+  })
+
+  test("an entry needs exactly one of a label or a verb and pattern, a CLI verb, and a pattern in the grammar", () => {
+    const both = withPattern()
+    ;(both.entries[2] as { label?: string }).label = "//:ci"
+    expect("issues" in parseRepoPlugin(both, ["."]) && parseRepoPlugin(both, ["."])).toMatchObject({ issues: [expect.stringContaining("either a label or a verb and a pattern")] })
+    const neither = manifest()
+    delete (neither.entries[0] as { label?: string }).label
+    expect("issues" in parseRepoPlugin(neither, ["."])).toBe(true)
+    const half = withPattern()
+    delete (half.entries[2] as { pattern?: string }).pattern
+    expect("issues" in parseRepoPlugin(half, ["."]) && parseRepoPlugin(half, ["."])).toMatchObject({ issues: [expect.stringContaining("both a verb and a pattern")] })
+    const badVerb = withPattern()
+    ;(badVerb.entries[2] as { verb?: string }).verb = "rm"
+    expect("issues" in parseRepoPlugin(badVerb, ["."])).toBe(true)
+    const badPattern = withPattern()
+    ;(badPattern.entries[2] as { pattern?: string }).pattern = "packages/..."
+    expect("issues" in parseRepoPlugin(badPattern, ["."])).toBe(true)
+    for (const pattern of ["//...", "//packages/...", "//:ci", "//packages/canonical:check"]) {
+      expect(TARGET_PATTERN.test(pattern)).toBe(true)
+    }
+    for (const pattern of ["//packages", "//packages/...:lint", "//a b/...", "packages/..."]) {
+      expect(TARGET_PATTERN.test(pattern)).toBe(false)
+    }
   })
 })

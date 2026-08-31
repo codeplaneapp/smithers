@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { useRef, useState } from "react"
 import type { KeyboardEvent, ReactNode, RefObject } from "react"
+import { roleMenuEntries } from "./AgentRoleMenu"
 import { useController } from "./ControllerContext"
 import { composeRefs, stampFlows, stampTestIds } from "./FlowStamp"
 import { SELECT_REPO_LABEL } from "./Onboarding"
@@ -270,6 +271,23 @@ function ComposerAdd({
         /* flow.create needs a description: the entry starts the invocation in the composer. */
         onChoose: () => controller.changeDraft("/flow.create ")
       }]
+      : []),
+    /* The named roles (AgentRoles.ts), one model each; a raw harness follows for everything else. */
+    ...(canOpenHarness
+      ? roleMenuEntries(harnessRows).map((entry): MenuEntry => ({
+        key: `agent.role:${entry.role.id}`,
+        flow: "agent.role",
+        args: entry.role.id,
+        testId: `composer-add-role-${entry.role.id}`,
+        disabled: !entry.available,
+        content: (
+          <>
+            <Bot size={14} aria-hidden="true" />
+            {entry.title}
+            <span className="composer-connect-branch">{entry.available ? entry.account : entry.reason}</span>
+          </>
+        )
+      }))
       : []),
     ...(canOpenHarness
       ? [{

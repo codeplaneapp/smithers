@@ -15,6 +15,8 @@ import { randomBytes } from "node:crypto"
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { delimiter, dirname, resolve } from "node:path"
+import { agentRole, roleLaunchArgv } from "smithers-shared/AgentRoles"
+import type { AgentRoleId } from "smithers-shared/AgentRoles"
 import type { Harness, PtySession } from "smithers-shared/LocalApp"
 import { harnessCandidateDirs } from "./Harnesses"
 import { currentSandboxHost, harnessPolicy, terminalPolicy, wrapSandbox } from "./Sandbox"
@@ -27,6 +29,13 @@ export interface PtyCreateInput {
   readonly cols: number
   readonly rows: number
   readonly harnessId?: Harness["id"]
+  /**
+   * A named role (AgentRoles.ts): the server resolves it to the role's
+   * harness and launch argv, so the renderer never supplies argv.
+   */
+  readonly roleId?: AgentRoleId
+  /** The delegated task, handed to the role's CLI as its first prompt. */
+  readonly task?: string
 }
 
 export type PtyCreateResult =
@@ -236,16 +245,20 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
     let argv: Array<string>
     let harnessId: Harness["id"] | undefined
     if (input.kind === "harness") {
-      const harness = (await options.harnesses()).find((candidate) => candidate.id === input.harnessId)
+      // A role names its harness; the launch argv is the role's, never the renderer's.
+      const role = input.roleId === undefined ? undefined : agentRole(input.roleId)
+      const wantedHarness = role?.harness ?? input.harnessId
+      const harness = (await options.harnesses()).find((candidate) => candidate.id === wantedHarness)
       if (harness === undefined) {
-        return { status: "error", code: "unknown_harness", message: `There is no harness with id ${String(input.harnessId)}.` }
+        return { status: "error", code: "unknown_harness", message: `There is no harness with id ${String(wantedHarness)}.` }
       }
       if (harness.status === "unavailable" || harness.binary === null) {
         return { status: "error", code: "harness_unavailable", message: `${harness.displayName} is not installed here.` }
       }
       harnessId = harness.id
+      const launch = role === undefined ? harness.launch.argv : roleLaunchArgv(role, input.task)
       // The resolved binary, so a Finder launch's PATH cannot lose it.
-      argv = [harness.binary, ...harness.launch.argv.slice(1)]
+      argv = [harness.binary, ...launch.slice(1)]
     } else {
       argv = [shell, "-il"]
     }

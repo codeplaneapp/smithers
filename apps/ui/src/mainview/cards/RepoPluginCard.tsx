@@ -58,17 +58,38 @@ export const RepoPluginCardBody = ({
                             data-badge="agentic"
                           />
                         </span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          data-flow="target.run"
-                          data-testid={`plugin-run-${entry.id}`}
-                          onClick={() => onRunCommand("target.run", `${repoId} ${entry.workspace} ${entry.label}`)}
-                        >
-                          Run
-                        </Button>
+                        {/* A label entry runs one target; a pattern entry runs a verb over a pattern (`ci //packages/...`). */}
+                        {entry.label !== undefined ?
+                          (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              data-flow="target.run"
+                              data-testid={`plugin-run-${entry.id}`}
+                              onClick={() => onRunCommand("target.run", `${repoId} ${entry.workspace} ${entry.label}`)}
+                            >
+                              Run
+                            </Button>
+                          ) :
+                          (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              data-flow="target.run.pattern"
+                              data-testid={`plugin-run-${entry.id}`}
+                              onClick={() =>
+                                onRunCommand("target.run.pattern", `${repoId} ${entry.workspace} ${entry.verb} ${entry.pattern}`)}
+                            >
+                              Run
+                            </Button>
+                          )}
                       </div>
-                      <p className="repo-plugin-row-summary">{entry.summary}</p>
+                      <p className="repo-plugin-row-summary">
+                        <span className="targets-card-label">
+                          {entry.label ?? `${entry.verb} ${entry.pattern}`}
+                        </span>{" "}
+                        {entry.summary}
+                      </p>
                     </li>
                   ))}
                 </ul>

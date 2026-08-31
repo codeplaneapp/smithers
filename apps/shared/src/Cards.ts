@@ -1,12 +1,72 @@
 import { z } from "zod"
+import { AgentRoleIdSchema } from "./AgentRoles"
 import { HARNESS_IDS, RepoPluginSchema, RepoSchema, TargetSchema } from "./LocalApp"
 import {
   AffectedCardPayloadSchema,
   CiMatrixCardPayloadSchema,
   GraphCardPayloadSchema,
+  GraphNodeSchema,
+  NodeTimingSchema,
   RunHistoryCardPayloadSchema,
+  RunRecordSchema,
+  RunSummarySchema,
   RunTimelineCardPayloadSchema
 } from "./TargetGraph"
+
+/*
+ * The targets card's table state (apps/ui cards/TargetsTable.ts): the filter
+ * the user set, the row they selected, and what the card has read about
+ * individual targets. All optional: cards persisted before the table parse.
+ */
+export const TARGET_RUN_STATES = ["never", "passed", "failed", "running"] as const
+export const TargetRunStateSchema = z.enum(TARGET_RUN_STATES)
+export type TargetRunState = z.infer<typeof TargetRunStateSchema>
+
+/** The table's views: the repository's essentials, everything, or what ran most recently. */
+export const TARGETS_VIEW_MODES = ["featured", "all", "recent"] as const
+export const TargetsViewModeSchema = z.enum(TARGETS_VIEW_MODES)
+export type TargetsViewMode = z.infer<typeof TargetsViewModeSchema>
+
+/** One pattern run a manifest features (LocalApp featuredPatternRuns): a verb over a pattern. */
+export const PatternRunEntrySchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  summary: z.string(),
+  workspace: z.string(),
+  verb: z.string(),
+  pattern: z.string()
+})
+export type PatternRunEntry = z.infer<typeof PatternRunEntrySchema>
+
+export const TargetsViewSchema = z.object({
+  /** Featured / All / Recent; absent = Featured when the repo has featured or starred targets, else All. */
+  mode: TargetsViewModeSchema.optional(),
+  /** Substring match on the label or the workspace. */
+  query: z.string().optional(),
+  /** Kind chips that are ON; absent or empty = every kind. */
+  kinds: z.array(z.string()).optional(),
+  /** Last-run state chips that are ON; absent or empty = every state. */
+  states: z.array(TargetRunStateSchema).optional(),
+  /** One workspace, or absent for all. */
+  workspace: z.string().optional(),
+  /** The row whose detail drawer is open. */
+  selected: z.string().optional(),
+  /** Grouped rows (same name across packages, `//...:name`) the user expanded, by group label. */
+  expanded: z.array(z.string()).optional(),
+  /** Per group label, the member labels picked to run; absent = every member. */
+  picked: z.record(z.string(), z.array(z.string())).optional()
+})
+export type TargetsView = z.infer<typeof TargetsViewSchema>
+
+/** What the card has read about one target through `graph <label> --plan`. */
+export const TargetDetailSchema = z.object({
+  status: z.enum(["pending", "done", "failed"]),
+  node: GraphNodeSchema.optional(),
+  deps: z.array(z.string()).optional(),
+  rdeps: z.array(z.string()).optional(),
+  error: z.string().optional()
+})
+export type TargetDetail = z.infer<typeof TargetDetailSchema>
 
 /*
  * The card wire model, shared by the server boundary (which validates frames off
@@ -479,7 +539,19 @@ export const CardSchema = z.discriminatedUnion("kind", [
       targets: z.array(TargetSchema),
       warnings: z.array(z.string()),
       /** The row an explicit target.open flow pointed at; the list highlights it. */
-      highlighted: z.string().optional()
+      highlighted: z.string().optional(),
+      /** The table's filter and selection (TargetsViewSchema). */
+      view: TargetsViewSchema.optional(),
+      /** The repository's recorded runs, read from /api/targets/runs; the table derives each row's last run. */
+      runs: z.array(RunRecordSchema).optional(),
+      /** Per-label facts the drawer read (declaration site, plan, deps/rdeps), keyed by label. */
+      details: z.record(z.string(), TargetDetailSchema).optional(),
+      /** The labels the repository's `.smithers/UI.json` marks featured (LocalApp featuredLabels). */
+      featured: z.array(z.string()).optional(),
+      /** The labels this user starred for the repository (target.star), mirrored from app-starred-targets. */
+      starred: z.array(z.string()).optional(),
+      /** The manifest's featured pattern runs (`ci //packages/...`): the Featured view's run strip. */
+      patternRuns: z.array(PatternRunEntrySchema).optional()
     })
   }),
   z.object({
@@ -495,13 +567,27 @@ export const CardSchema = z.discriminatedUnion("kind", [
   z.object({
     ...cardBaseShape,
     kind: z.literal("target-run"),
+    /*
+     * One execution: a single target (`label`) or a pattern run (`verb` +
+     * `pattern`, e.g. `ci //packages/...`, the way "run everything" runs).
+     * `nodes` fills as the executor reports each target, `summary` lands at
+     * the end; `output` is the raw stream for the Raw output accordion, and
+     * `nodeOutput` the chunks the backend attributed to one target.
+     */
     payload: z.object({
       runId: z.string(),
       repoId: z.string(),
       label: z.string(),
+      verb: z.string().optional(),
+      pattern: z.string().optional(),
       status: z.enum(["running", "done", "failed"]),
       exitCode: z.number().nullable(),
-      output: z.string()
+      output: z.string(),
+      startedAt: z.number().optional(),
+      endedAt: z.number().optional(),
+      nodes: z.array(NodeTimingSchema).optional(),
+      summary: RunSummarySchema.optional(),
+      nodeOutput: z.record(z.string(), z.string()).optional()
     })
   }),
   z.object({
@@ -542,6 +628,10 @@ export const CardSchema = z.discriminatedUnion("kind", [
     payload: z.object({
       harnessId: z.enum(HARNESS_IDS),
       displayName: z.string(),
+      /** The named role the agent was launched as (AgentRoles.ts); absent for a raw harness. */
+      roleId: AgentRoleIdSchema.optional(),
+      /** The task it was delegated, when it was launched with one. */
+      task: z.string().optional(),
       /** The tab the agent runs in; the tab id is the PTY session id. */
       tabId: z.string(),
       sessionId: z.string(),
@@ -549,6 +639,27 @@ export const CardSchema = z.discriminatedUnion("kind", [
       phase: z.enum(["running", "exited"]),
       /** The process exit code once it has exited; null when unknown (the tab was closed). */
       exitCode: z.number().nullable()
+    })
+  }),
+  /*
+   * The explainer's answer (AgentRoles.ts "explainer"): `explain <what>` runs
+   * a side turn that asks for the explainer role, and this card is where the
+   * answer streams in — embedded in the conversation, never a takeover.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("explain"),
+    payload: z.object({
+      question: z.string(),
+      answer: z.string(),
+      phase: z.enum(["asking", "answered", "failed"]),
+      /**
+       * What the serving side told us about who answered. The request names
+       * the explainer role; a server that ignores the hint answers on its
+       * default model, and the card says so rather than claiming Kimi.
+       */
+      answeredBy: z.string(),
+      error: z.string().optional()
     })
   })
 ])

@@ -167,6 +167,28 @@ describe("sessions", () => {
     expect(exitOf(created.session.sessionId)?.message.code).toBe(3)
   })
 
+  test("a role session launches the role's harness with the role's argv and the task as its first prompt", async () => {
+    // The "implementation" role runs codex `-m gpt-5.6-sol <task>`; the harness table only supplies the binary.
+    const codex: Harness = {
+      id: "codex",
+      displayName: "Codex",
+      binary: "/bin/echo",
+      version: "0",
+      status: "signed-in",
+      account: { email: "will@example.com" },
+      launch: { argv: ["codex"] }
+    }
+    const m = manager({ harnesses: async () => [codex] })
+    const created = await m.create({ kind: "harness", cwd: tmpdir(), cols: 80, rows: 24, roleId: "implementation", task: "add a retry" })
+    if (created.status !== "ok") throw new Error(created.message)
+    expect(created.session).toMatchObject({ kind: "harness", harnessId: "codex" })
+    await until(() => exitOf(created.session.sessionId) !== undefined)
+    expect(outputOf(created.session.sessionId)).toContain("-m gpt-5.6-sol add a retry")
+    // A role whose harness is not installed is refused like any other harness.
+    const refused = await m.create({ kind: "harness", cwd: "~", cols: 80, rows: 24, roleId: "explainer" })
+    expect(refused).toMatchObject({ status: "error", code: "unknown_harness" })
+  })
+
   test("read serves the scrollback as plain text: escapes stripped, bounded, tail-cut on request", async () => {
     const created = manager()
     const result = await created.create({ kind: "terminal", cwd: "~", cols: 80, rows: 24 })

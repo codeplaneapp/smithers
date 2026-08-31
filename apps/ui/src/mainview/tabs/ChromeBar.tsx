@@ -1,5 +1,6 @@
 import { useLiveQuery } from "@tanstack/react-db"
 import { FolderGit2, Moon, Plus, RotateCcw, Sun, X } from "lucide-react"
+import { roleMenuEntries } from "../AgentRoleMenu"
 import { useController } from "../ControllerContext"
 import { activeRepoOf, MAIN_TAB_ID, repoKeyOf } from "../state/AppState"
 import type { PinnedRepo, TabRow } from "../state/AppState"
@@ -40,6 +41,7 @@ export function ChromeBar() {
   const menuOpen = session?.tabMenuOpen === true
   const available = harnessRows.filter((harness) => harness.status !== "unavailable")
   const unavailable = harnessRows.filter((harness) => harness.status === "unavailable")
+  const roleEntries = roleMenuEntries(harnessRows)
   const canOpenTerminal = controller.commands.find("tab.terminal") !== undefined
   const canOpenHarnesses = controller.commands.find("tab.harness") !== undefined
   const canSignIn = controller.commands.find("auth.sign-in") !== undefined
@@ -287,6 +289,24 @@ export function ChromeBar() {
                   {canOpenHarnesses && harnessRows.length > 0 ?
                     <div className="tab-add-group" role="presentation" data-testid="tab-add-agents">Agents</div> :
                     null}
+                  {/* The named roles first (AgentRoles.ts): one model each, disabled with the reason when their harness cannot run it. */}
+                  {canOpenHarnesses && harnessRows.length > 0 ? roleEntries.map((entry) => (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      key={entry.role.id}
+                      className="tab-add-item"
+                      disabled={!entry.available}
+                      title={entry.available ? entry.role.purpose : entry.reason}
+                      data-flow="agent.role"
+                      data-role={entry.role.id}
+                      data-testid={`tab-add-role-${entry.role.id}`}
+                      onClick={() => controller.runCommandArgs("agent.role", entry.role.id)}
+                    >
+                      <span>{entry.title}</span>
+                      <span className="tab-add-account">{entry.available ? entry.account : entry.reason}</span>
+                    </button>
+                  )) : null}
                   {canOpenHarnesses ? available.map((harness) => (
                     <button
                       type="button"

@@ -33,6 +33,7 @@ const HARNESS_IDS = [
   "kimi",
   "opencode",
   "opencode-kimi",
+  "opencode-cerebras",
   "crush",
   "amp",
   "cursor-agent",
@@ -41,7 +42,7 @@ const HARNESS_IDS = [
 ]
 
 /** The binary a harness launches: its own id, except variants that share one (OpenCode · Kimi runs `opencode`). */
-const launchBinary = (id: string): string => (id === "opencode-kimi" ? "opencode" : id)
+const launchBinary = (id: string): string => (id === "opencode-kimi" || id === "opencode-cerebras" ? "opencode" : id)
 
 /** The email `~/.claude.json` says Claude Code is signed in as, or undefined. */
 const claudeEmail = (): string | undefined => {

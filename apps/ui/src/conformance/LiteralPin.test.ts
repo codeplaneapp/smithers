@@ -77,9 +77,9 @@ interface Excuse {
  */
 const RESOLVES_ELSEWHERE: ReadonlyArray<Excuse> = [
   {
-    literal: "dev-",
-    file: "e2e/playwright/native/run.ts",
-    reason: "the Electrobun dev build directory prefix under build/ (dev-macos-arm64), not an app id"
+    literal: "stable-macos-",
+    file: "e2e/packaged/PackagedApp.ts",
+    reason: "the Electrobun stable package directory prefix under build/, not an application card id"
   },
   {
     literal: "flow.ghost",

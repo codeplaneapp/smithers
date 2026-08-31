@@ -73,11 +73,14 @@ const harness = async (options: {
   readonly claims: ReadonlyArray<{ readonly status: number; readonly body: unknown }>
   readonly openResult?: boolean
   readonly startAnswer?: { readonly status: number; readonly body: unknown }
+  /** What the session probe answers after a ready claim; default signed-in as will. */
+  readonly sessionAnswer?: { readonly status: number; readonly body: unknown }
 }): Promise<Harness> => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
   const opened: string[] = []
   const requests: string[] = []
   const claims = [...options.claims]
+  let handoffs = 0
   const services: AppServices = {
     baseUrl: "https://app.test",
     handoffPollMs: 1,
@@ -90,9 +93,10 @@ const harness = async (options: {
       const path = new URL(url).pathname
       requests.push(`${init?.method ?? "GET"} ${path}`)
       if (path === "/api/auth/native/start") {
+        handoffs += 1
         const answer = options.startAnswer ?? {
           status: 200,
-          body: { handoffId: "handoff-1", pollSecret: "secret-1", expiresAt: Date.now() + 600_000 }
+          body: { handoffId: `handoff-${handoffs}`, pollSecret: `secret-${handoffs}`, expiresAt: Date.now() + 600_000 }
         }
         return json(answer.status, answer.body)
       }
@@ -102,7 +106,8 @@ const harness = async (options: {
       }
       if (path === "/api/auth/session") {
         // After a ready claim the cookie is in the jar: the probe answers signed-in.
-        return json(200, { login: "will", allowlisted: true, admin: false })
+        const answer = options.sessionAnswer ?? { status: 200, body: { login: "will", allowlisted: true, admin: false } }
+        return json(answer.status, answer.body)
       }
       return json(404, { status: "error", message: `no stub for ${path}` })
     }
@@ -147,6 +152,66 @@ describe("the native sign-in handoff", () => {
     await until(() =>
       [...h.store.collections.toasts.values()].some((toast) => (toast.detail ?? "").includes("expired"))
     )
+    expect(h.store.collections.identitySessions.get("identity")?.state).toBe("signed-out")
+  })
+
+  /*
+   * The live failure (2026-08-30): two clicks minted two handoffs; the first
+   * signed in, the second timed out five minutes later and overwrote the
+   * "Signed in" toast with "Sign-in timed out".
+   */
+  test("a second sign-in while a handoff is pending reopens it instead of minting another", async () => {
+    const h = await harness({
+      claims: [
+        { status: 200, body: { status: "pending" } },
+        { status: 200, body: { status: "pending" } },
+        { status: 200, body: { status: "pending" } },
+        { status: 200, body: { status: "ready" } }
+      ]
+    })
+    await h.signIn()
+    await until(() => h.opened.length === 1)
+    await h.signIn()
+    await until(() => h.opened.length === 2)
+    // Same handoff, same browser page — never a second start.
+    expect(h.opened).toEqual([
+      "https://app.test/api/auth/github/start?handoff=handoff-1",
+      "https://app.test/api/auth/github/start?handoff=handoff-1"
+    ])
+    expect(h.requests.filter((line) => line === "POST /api/auth/native/start")).toHaveLength(1)
+    await until(() => h.store.collections.identitySessions.get("identity")?.state === "signed-in")
+    await settled()
+    const toast = [...h.store.collections.toasts.values()].find((entry) => entry.id === "toast-auth.sign-in.handoff")
+    expect(toast?.status).toBe("ok")
+    expect(toast?.title).toBe("Signed in")
+    // A third click after success is the "already connected" answer, not a new handoff.
+    await h.signIn()
+    await settled()
+    expect(h.requests.filter((line) => line === "POST /api/auth/native/start")).toHaveLength(1)
+  })
+
+  test("a ready claim whose session never lands says so instead of 'Signed in'", async () => {
+    const h = await harness({
+      claims: [{ status: 200, body: { status: "ready" } }],
+      sessionAnswer: { status: 200, body: { status: "signed-out" } }
+    })
+    await h.signIn()
+    await until(() =>
+      [...h.store.collections.toasts.values()].some((toast) => (toast.detail ?? "").includes("didn't receive the session"))
+    )
+    const toast = [...h.store.collections.toasts.values()].find((entry) => entry.id === "toast-auth.sign-in.handoff")
+    expect(toast?.status).toBe("failed")
+    expect(toast?.title).not.toBe("Signed in")
+    expect(h.store.collections.identitySessions.get("identity")?.state).toBe("signed-out")
+  })
+
+  test("a claim that keeps erroring fails within three polls instead of reading as pending", async () => {
+    const h = await harness({ claims: [{ status: 502, body: { status: "error", message: "identity upstream unreachable" } }] })
+    await h.signIn()
+    await until(() =>
+      [...h.store.collections.toasts.values()].some((toast) => (toast.detail ?? "").includes("identity upstream unreachable"))
+    )
+    expect(h.requests.filter((line) => line === "POST /api/auth/native/claim")).toHaveLength(3)
     expect(h.store.collections.identitySessions.get("identity")?.state).toBe("signed-out")
   })
 

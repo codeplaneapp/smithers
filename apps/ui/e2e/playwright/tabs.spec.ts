@@ -216,6 +216,14 @@ test("the + menu paints beside the sidebar: Terminal, then the agents with their
   await expect(page.getByTestId("tab-add-chat")).toHaveCount(0)
   await expect(page.getByTestId("tab-add-terminal")).toHaveText("Terminal")
   await expect(page.getByTestId("tab-add-agents")).toHaveText("Agents")
+  // The named roles lead the section: the orchestrator's harness (Claude Code) is signed in here,
+  // the explainer's (OpenCode · Kimi) is absent from this double, so its row is disabled with the reason.
+  const orchestrator = page.getByTestId("tab-add-role-orchestrator")
+  await expect(orchestrator).toContainText("Orchestrator · Fable 5")
+  await expect(orchestrator).toBeEnabled()
+  const explainer = page.getByTestId("tab-add-role-explainer")
+  await expect(explainer).toBeDisabled()
+  await expect(explainer).toContainText("not installed")
   const claude = page.getByTestId("tab-add-harness-claude")
   await expect(claude).toContainText("Claude Code")
   await expect(claude).toContainText("will@codeplane.app")

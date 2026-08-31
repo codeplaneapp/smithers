@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import type { Page } from "@playwright/test"
-import { cpSync, existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { localApiGet, localApiPost } from "./localApi"
@@ -75,11 +76,70 @@ test("opening the demo repository loads its trusted target card", async ({ page 
   await expect(targets).toBeVisible()
   await expect(targets.getByTestId("card-kind-targets")).toBeVisible()
   // The loader answers in a few seconds on force; the row count is the whole workspace.
-  await expect.poll(() => targets.locator("[data-target-row]").count(), { timeout: 60_000 }).toBeGreaterThanOrEqual(82)
+  // Rows are fewer than targets: names shared across packages read as one grouped row; the count is in targets.
+  await expect(targets.getByTestId("targets-count")).toHaveText("82 of 82", { timeout: 60_000 })
+  expect(await targets.locator("[data-target-row]").count()).toBeGreaterThanOrEqual(1)
   await expect(targets.locator("[data-target-row=\"//:detectSecrets\"]")).toBeVisible()
 
   await expect(page.locator(".smithers-chat-message[data-role=\"assistant\"]").last()).toContainText("Loaded 82 targets for artsy/force")
   await expect(page.locator(".smithers-card[data-kind=\"html\"]")).toHaveCount(0)
+
+  // The table scrolls inside the card, never the transcript: a bounded, overflow-auto container.
+  const scroll = targets.getByTestId("targets-scroll")
+  const overflow = await scroll.evaluate((node) => {
+    const style = getComputedStyle(node)
+    return { overflowY: style.overflowY, bounded: node.scrollHeight > node.clientHeight }
+  })
+  expect(overflow.overflowY).toBe("auto")
+  expect(overflow.bounded).toBe(true)
+  await expect(targets.getByTestId("targets-count")).toHaveText("82 of 82")
+
+  // Filtering narrows the rows and the count; clearing restores them.
+  await targets.getByTestId("targets-filter-query").fill("detectSecrets")
+  await expect(targets.getByTestId("targets-count")).toHaveText(/^[1-9] of 82$/)
+  const narrowed = await targets.locator("[data-target-row]").count()
+  expect(narrowed).toBeGreaterThanOrEqual(1)
+  expect(narrowed).toBeLessThan(10)
+  await expect(targets.locator("[data-target-row=\"//:detectSecrets\"]")).toBeVisible()
+  await targets.getByTestId("targets-filter-query").fill("")
+  await expect(targets.getByTestId("targets-count")).toHaveText("82 of 82")
+
+  // A kind chip is a filter too, and reads as pressed while it is on.
+  const chip = targets.locator('[data-testid^="targets-chip-kind-"]').first()
+  const kind = (await chip.textContent()) ?? ""
+  await chip.click()
+  await expect(chip).toHaveAttribute("aria-pressed", "true")
+  const kept = await targets.locator("[data-target-row]").count()
+  expect(kept).toBeGreaterThan(0)
+  expect(kept).toBeLessThan(82)
+  await expect(targets.locator("[data-target-row]").first().locator("[data-slot=badge]").filter({ hasText: kind }).first()).toBeVisible()
+  await chip.click()
+  await expect(chip).toHaveAttribute("aria-pressed", "false")
+
+  // Selecting a row opens its drawer beside the table, with the facts the server read for it.
+  await targets.getByTestId("targets-select-//:detectSecrets").click()
+  const drawer = targets.getByTestId("targets-drawer-//:detectSecrets")
+  await expect(drawer).toBeVisible()
+  await expect(drawer).toContainText("Runs")
+  await expect(drawer).toContainText("rule")
+  // The plan read lands within the graph budget; the drawer then names deps and the cache stance.
+  await expect(drawer).toContainText(/deps/, { timeout: 60_000 })
+  await expect(drawer).toContainText(/cache/)
+  await drawer.getByRole("button", { name: "Close details" }).click()
+  await expect(drawer).toHaveCount(0)
+
+  // No manifest and no stars: the card opens on All. A star moves the row into Featured, which then leads.
+  await expect(targets.getByTestId("targets-mode-all")).toHaveAttribute("aria-pressed", "true")
+  await targets.getByTestId("targets-star-//:detectSecrets").click()
+  await expect(targets.getByTestId("targets-star-//:detectSecrets")).toHaveAttribute("aria-pressed", "true")
+  await targets.getByTestId("targets-mode-featured").click()
+  await expect(targets.getByTestId("targets-mode-featured")).toHaveAttribute("aria-pressed", "true")
+  await expect(targets.getByTestId("targets-count")).toHaveText("1 of 82")
+  await expect(targets.locator("[data-target-row=\"//:detectSecrets\"]")).toBeVisible()
+  await targets.getByTestId("targets-star-//:detectSecrets").click()
+  await expect(targets.getByTestId("targets-count")).toHaveText("0 of 82")
+  await targets.getByTestId("targets-mode-all").click()
+  await expect(targets.getByTestId("targets-count")).toHaveText("82 of 82")
 })
 
 test("a trusted Run button streams a target run to completion", async ({ page, request }) => {
@@ -92,7 +152,7 @@ test("a trusted Run button streams a target run to completion", async ({ page, r
   const copyPath = realpathSync(copy)
   opened.push(copyPath)
   await expect(repoCard(page)).toBeVisible()
-  await expect.poll(() => targetsCard(page).locator("[data-target-row]").count(), { timeout: 60_000 }).toBeGreaterThanOrEqual(81)
+  await expect(targetsCard(page).getByTestId("targets-count")).toHaveText(/^8[12] of 8[12]$/, { timeout: 60_000 })
   // //.github:dangerCi renders a workflow file and exits 0 with no network.
   const danger = targetsCard(page).locator('[data-target-row="//.github:dangerCi"]')
   await expect(danger).toBeVisible()
@@ -108,6 +168,15 @@ test("a trusted Run button streams a target run to completion", async ({ page, r
   await expect(output).toContainText("dangerCi")
   await expect(run.locator("[data-run-status]")).toHaveAttribute("data-run-status", "done")
   await expect(run).toContainText("exit 0")
+
+  // The table's last-run column follows the recording: the row now reads passed and offers its timeline.
+  await expect(danger).toHaveAttribute("data-state", "passed", { timeout: 30_000 })
+  await expect(danger.getByRole("button", { name: /Timeline of the last run/ })).toBeVisible()
+
+  // Recent lists what ran, so the one run leads it alone.
+  await targetsCard(page).getByTestId("targets-mode-recent").click()
+  await expect(targetsCard(page).locator("[data-target-row]").first()).toHaveAttribute("data-target-row", "//.github:dangerCi")
+  await expect(targetsCard(page).getByTestId("targets-count")).toHaveText(/^1 of 8[12]$/)
 
   // The maximized targets card offers Open in tab; the tab renders the same trusted card.
   const targetsId = (await targetsCard(page).getAttribute("data-testid"))?.replace(/^card-/, "") ?? ""
@@ -145,4 +214,72 @@ test("a directory without Smithers files opens as a repo card and loads no targe
   // Nothing else follows: no targets card or run.
   await page.waitForTimeout(1500)
   await expect(targetsCard(page)).toHaveCount(0)
+})
+
+/*
+ * A pattern run (`lint //.github/...`): the manifest's featured "run
+ * everything" form. The card renders one row per target the CLI resolved
+ * with failures first, the totals, and the raw stream folded away. The copy
+ * is git-initialised because the lint verb diffs against HEAD, and the
+ * generated GitHub files are absent from the fixture, so `//.github:github`
+ * fails on drift — a real failure the row expands to.
+ */
+test("a featured pattern run renders one row per resolved target, failures first, with the totals", async ({ page }) => {
+  const copy = mkdtempSync(join(tmpdir(), "smithers-force-pattern-"))
+  temporary.push(copy)
+  cpSync(FIXTURE, copy, { recursive: true })
+  execFileSync("git", ["init", "-q"], { cwd: copy })
+  execFileSync("git", ["add", "-A"], { cwd: copy })
+  execFileSync("git", ["-c", "user.email=e2e@smithers.sh", "-c", "user.name=e2e", "commit", "-qm", "fixture"], { cwd: copy })
+  mkdirSync(join(copy, ".smithers"), { recursive: true })
+  writeFileSync(
+    join(copy, ".smithers", "UI.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      name: "force",
+      title: "Force",
+      summary: "The fixture's essentials.",
+      groups: [{ id: "everything", title: "Everything", kind: "check", featured: true }],
+      entries: [{
+        id: "github-lint",
+        group: "everything",
+        workspace: ".",
+        verb: "lint",
+        pattern: "//.github/...",
+        title: "Lint the GitHub files",
+        summary: "Every lint target under .github."
+      }]
+    })
+  )
+
+  await page.goto("/")
+  await openRepo(page, copy)
+  opened.push(realpathSync(copy))
+  const targets = targetsCard(page)
+  await expect(targets.getByTestId("targets-count")).toHaveText(/of 8[12]$/, { timeout: 60_000 })
+  // Featured is the default when the manifest features anything; the strip lists the pattern run.
+  await expect(targets.getByTestId("targets-mode-featured")).toHaveAttribute("aria-pressed", "true")
+  const strip = targets.getByTestId("targets-pattern-runs")
+  await expect(strip).toContainText("lint //.github/...")
+  await strip.getByRole("button", { name: "Run lint //.github/..." }).click()
+
+  const run = runCard(page)
+  await expect(run).toBeVisible()
+  await expect(run).toContainText("lint //.github/...")
+  await expect.poll(() => run.locator("[data-run-status]").getAttribute("data-run-status"), { timeout: 90_000 })
+    .toMatch(/^(done|failed)$/)
+  await expect.poll(() => run.locator("[data-run-row]").count()).toBeGreaterThanOrEqual(2)
+  const kpis = run.locator("[data-testid^=\"target-run-kpis-\"]")
+  await expect(kpis.locator("[data-kpi=\"ran\"]")).toContainText("3")
+  await expect(kpis.locator("[data-kpi=\"failed\"]")).toContainText("1")
+  // Failures lead once the run settled; the failed row expands to its own reason.
+  await expect(run.locator("[data-run-row]").first()).toHaveAttribute("data-run-row", "//.github:github")
+  await expect(run.locator("[data-run-row=\"//.github:github\"]")).toHaveAttribute("data-node-status", "failed")
+  await run.locator("[data-run-row=\"//.github:github\"] summary").click()
+  await expect(run.locator("[data-run-row=\"//.github:github\"] .target-run-failure-output")).toContainText("drift")
+  // The raw stream is folded away, not gone.
+  const raw = run.locator("[data-testid^=\"target-run-raw-\"]")
+  await expect(raw).toHaveJSProperty("open", false)
+  await raw.locator("summary").click()
+  await expect(raw.locator("pre")).toContainText("4 targets")
 })

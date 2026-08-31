@@ -93,6 +93,10 @@ worktrees/
 # migration workflow reads in a consumer project; nothing in this repository
 # tracks one except the Phase 6 migration fixtures.
 .smithers/
+# The repository's own UI plugin manifest (apps/ui/docs/LOCAL-APP.md "Plugin manifest") is source, not run state.
+!/.smithers/
+/.smithers/*
+!/.smithers/UI.json
 !packages/build-cli/test/fixtures/force-spec/.smithers/
 packages/*/.smithers/
 smithers.db

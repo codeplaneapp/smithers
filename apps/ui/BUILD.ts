@@ -1,9 +1,8 @@
 /**
  * Targets for the UI application: the typecheck and the unit suite.
  *
- * The Playwright tiers (`pnpm --filter smithers-ui test:e2e`, `test:e2e:native`)
- * boot the local Bun server and a real Chromium, so they stay out of the
- * per-push graph; see docs/LOCAL-APP.md "Test tiers".
+ * The Playwright browser tier and packaged Electrobun E2E tier stay out of
+ * the per-push graph; see docs/LOCAL-APP.md "Test tiers".
  *
  * Everything runs under Bun, which is what the app's own scripts use, so the
  * runtime is the root Bun declaration and nothing here spells `bun` into an

@@ -177,6 +177,28 @@ describe("the table", () => {
     expect(byId.opencode).toMatchObject({ status: "api-key", account: { label: "KIMI_API_KEY" } })
   })
 
+  test("opencode-cerebras (the fast-ui role): the cerebras credential in auth.json, else CEREBRAS_API_KEY", async () => {
+    const withAuth = await detectHarnessesWith(host({
+      binaries: ["/Users/u/.opencode/bin/opencode"],
+      files: { "/Users/u/.local/share/opencode/auth.json": JSON.stringify({ cerebras: { type: "api", key: "c" } }) }
+    }))
+    expect(withAuth.find((harness) => harness.id === "opencode-cerebras")).toMatchObject({
+      status: "signed-in",
+      account: { label: "cerebras" },
+      launch: { argv: ["opencode", "--model", "cerebras/gpt-oss-120b"] }
+    })
+    const withEnv = await detectHarnessesWith(host({
+      binaries: ["/Users/u/.opencode/bin/opencode"],
+      env: { CEREBRAS_API_KEY: "csk" }
+    }))
+    expect(withEnv.find((harness) => harness.id === "opencode-cerebras")).toMatchObject({
+      status: "api-key",
+      account: { label: "CEREBRAS_API_KEY" }
+    })
+    const bare = await detectHarnessesWith(host({ binaries: ["/Users/u/.opencode/bin/opencode"] }))
+    expect(bare.find((harness) => harness.id === "opencode-cerebras")).toMatchObject({ status: "binary-only" })
+  })
+
   test("versions are probed in parallel for installed binaries only, null when the probe fails", async () => {
     const h = host({
       binaries: ["/opt/homebrew/bin/claude", "/opt/homebrew/bin/hermes"],

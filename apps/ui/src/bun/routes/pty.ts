@@ -5,6 +5,7 @@
  * `{ type: "pty.input", sessionId, data }`. Output leaves through the
  * manager's publish on `pty:<sessionId>`.
  */
+import { AgentRoleIdSchema } from "smithers-shared/AgentRoles"
 import { HARNESS_IDS } from "smithers-shared/LocalApp"
 import { z } from "zod"
 import type { PtyManager } from "../Pty"
@@ -22,7 +23,11 @@ export const PtyCreateRequestSchema = z.object({
   repoId: z.string().min(1).optional(),
   cols: geometry,
   rows: geometry,
-  harnessId: z.enum(HARNESS_IDS).optional()
+  harnessId: z.enum(HARNESS_IDS).optional(),
+  /** A named role (AgentRoles.ts) instead of a raw harness; the server picks the harness and argv. */
+  roleId: AgentRoleIdSchema.optional(),
+  /** The delegated task, bounded: it becomes one CLI argument. */
+  task: z.string().max(8_000).optional()
 }).strict()
 
 export const PtyResizeRequestSchema = z.object({ cols: geometry, rows: geometry })
@@ -54,8 +59,8 @@ export const registerPtyRoutes = (
     if (!body.success) {
       return jsonError(400, "invalid_request", "Body must be { kind, cols, rows } with optional repoId and harnessId.")
     }
-    if (body.data.kind === "harness" && body.data.harnessId === undefined) {
-      return jsonError(400, "invalid_request", "A harness session needs a harnessId.")
+    if (body.data.kind === "harness" && body.data.harnessId === undefined && body.data.roleId === undefined) {
+      return jsonError(400, "invalid_request", "A harness session needs a harnessId or a roleId.")
     }
     const resolved = body.data.repoId === undefined
       ? ({ status: "ok", path: "~" } as const)

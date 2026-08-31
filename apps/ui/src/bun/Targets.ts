@@ -194,8 +194,12 @@ export interface TargetRun {
   readonly repo: string
   /** The detected workspace the run executes in ("." for the repo root). */
   readonly workspace: string
+  /** The target label, or `<verb> <pattern>` for a pattern run. */
   readonly label: string
   readonly labels: ReadonlyArray<string>
+  /** Set on a pattern run (`ci //packages/...`): the CLI resolves the pattern to its targets. */
+  readonly verb?: string
+  readonly pattern?: string
   readonly startedAt: number
   status: TargetRunStatus
   exitCode: number | null
@@ -227,6 +231,9 @@ export interface TargetRunner {
     readonly label: string
     /** The target's kinds from the snapshot; the first one is the verb a BUILD.ts workspace runs it with. */
     readonly kinds?: ReadonlyArray<string>
+    /** A pattern run: `<verb> <pattern> --ui plain`; `label` is then ignored for argv and reads `<verb> <pattern>`. */
+    readonly verb?: string
+    readonly pattern?: string
     readonly node: NodeSidecar; readonly edges?: ReadonlyArray<GraphEdge> }) => TargetRun
   /** A subscriber is listening: spawn now if not yet started. */
   readonly attach: (runId: string) => boolean
@@ -266,8 +273,11 @@ const VERB_BY_KIND: Readonly<Record<string, string>> = { build: "build", test: "
  * flavor implies. A BUILD.ts-rooted workspace has no WORKSPACE.ts and the CLI
  * refuses that form there ("the bare-label form executes PACKAGE.ts targets;
  * this workspace has no WORKSPACE.ts"), so it runs `smithers-build <verb>
- * <label>` with the verb from the target's first kind. `--ui plain` keeps the
- * status lines the parser reads in both forms.
+ * <label>` with the verb from the target's first kind. `--ui plain` goes on
+ * BOTH forms: the parser reads the plain renderer's `//label  status  ms`
+ * lines, and the CLI's `auto` renderer picks `stream` (ANSI, no status
+ * lines) whenever FORCE_COLOR reaches the child — which a Playwright
+ * webserver, and any coloured terminal that launched the app, hands down.
  */
 export const runArgv = (
   cwd: string,
@@ -276,9 +286,33 @@ export const runArgv = (
   exists: (path: string) => boolean = existsSync
 ): Array<string> => {
   const packageMode = exists(join(cwd, "WORKSPACE.ts")) || exists(join(cwd, ".smithers", "WORKSPACE.ts"))
-  if (packageMode) return [label]
+  if (packageMode) return [label, "--ui", "plain"]
   const verb = kinds.map((kind) => VERB_BY_KIND[kind]).find((candidate) => candidate !== undefined) ?? "build"
   return [verb, label, "--ui", "plain"]
+}
+
+/**
+ * The argv of a pattern run: the verb over the pattern, on either authoring
+ * surface (`smithers-build ci '//packages/...'` is how CI runs everything).
+ */
+export const patternRunArgv = (verb: string, pattern: string): Array<string> => [verb, pattern, "--ui", "plain"]
+
+/**
+ * The argv that PLANS one target (`--plan --format json`), under the same
+ * two-form rule as `runArgv`: the bare label in a WORKSPACE.ts workspace, the
+ * verb-led form in a BUILD.ts one — where the bare form is refused with the
+ * same "no WORKSPACE.ts" answer the runner used to get.
+ */
+export const planArgv = (
+  cwd: string,
+  label: string,
+  kinds: ReadonlyArray<string>,
+  exists: (path: string) => boolean = existsSync
+): Array<string> => {
+  const packageMode = exists(join(cwd, "WORKSPACE.ts")) || exists(join(cwd, ".smithers", "WORKSPACE.ts"))
+  if (packageMode) return [label, "--plan", "--format", "json"]
+  const verb = kinds.map((kind) => VERB_BY_KIND[kind]).find((candidate) => candidate !== undefined) ?? "build"
+  return [verb, label, "--plan", "--format", "json"]
 }
 
 /** Incrementally parses stable executor status/summary lines and JSON envelopes. */
@@ -359,7 +393,57 @@ export const createRunStdoutParser = (options: {
     }
     return events
   }
+  /*
+   * The executor's trailing results block (its default TOON envelope):
+   *   results[7]{label,target,status,durationMs,key}:
+   *     "//packages/canonical:fmt",Dprint,ran,393.87,ce0698…
+   * It is the one place the RULE of each target is printed, so its rows
+   * re-emit the node with `rule` set; status/duration/key agree with the
+   * status lines already parsed.
+   */
+  let resultColumns: ReadonlyArray<string> | undefined
+  const parseResults = (line: string, at: number): Array<TargetRunEvent> | undefined => {
+    const head = /^\s*results\[\d+\]\{([^}]*)\}:\s*$/.exec(line)
+    if (head !== null) {
+      resultColumns = head[1]!.split(",").map((column) => column.trim())
+      return []
+    }
+    if (resultColumns === undefined) return undefined
+    const row = /^\s+"([^"]+)",(.*)$/.exec(line)
+    if (row === null) {
+      if (line.trim() !== "" && !/^\s/.test(line)) resultColumns = undefined
+      return undefined
+    }
+    const cells = [row[1]!, ...row[2]!.split(",")]
+    const record: Record<string, string> = {}
+    resultColumns.forEach((column, index) => {
+      record[column] = (cells[index] ?? "").trim()
+    })
+    const label = record.label
+    const status = record.status
+    if (label === undefined || !label.startsWith("//") || status === undefined) return []
+    if (!["pending", "running", "hit", "ran", "failed", "skipped", "refused", "cancelled"].includes(status)) return []
+    const ms = Number(record.durationMs)
+    const prior = nodes.get(label)
+    const node: NodeTiming = {
+      ...timing({
+        label,
+        status: status as NodeTiming["status"],
+        at,
+        ...(prior?.startedAt === undefined ? {} : { startedAt: prior.startedAt }),
+        ...(prior?.endedAt === undefined ? {} : { endedAt: prior.endedAt }),
+        ...(Number.isFinite(ms) ? { durationMs: Math.round(ms) } : {}),
+        ...(record.key === undefined || record.key === "" ? {} : { key: record.key }),
+        ...(prior?.reason === undefined ? {} : { reason: prior.reason })
+      }),
+      ...(record.target === undefined || record.target === "" ? {} : { rule: record.target })
+    }
+    nodes.set(label, node)
+    return [{ type: "node", node, at }]
+  }
   const parseLine = (line: string, at: number): Array<TargetRunEvent> => {
+    const fromResults = parseResults(line, at)
+    if (fromResults !== undefined) return fromResults
     const fromJson = parseObject(line, at)
     if (fromJson.length > 0) return fromJson
     const summary = parseSummary(line, at)
@@ -467,7 +551,10 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
     const cwd = workspaceCwd(live.run.repo, live.run.workspace)
     let child: ReturnType<typeof Bun.spawn>
     try {
-      child = Bun.spawn([live.node.path, cli, ...runArgv(cwd, live.run.label, live.kinds)], {
+      const argv = live.run.verb !== undefined && live.run.pattern !== undefined
+        ? patternRunArgv(live.run.verb, live.run.pattern)
+        : runArgv(cwd, live.run.label, live.kinds)
+      child = Bun.spawn([live.node.path, cli, ...argv], {
         cwd,
         stdout: "pipe",
         stderr: "pipe",
@@ -506,7 +593,7 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
   }
 
   return {
-    start: ({ repoId, repo, workspace, label, node, edges = [], kinds = [] }) => {
+    start: ({ repoId, repo, workspace, label, node, edges = [], kinds = [], verb, pattern }) => {
       const active = [...runs.values()].filter((live) => live.run.status === "pending" || live.run.status === "running")
       if (active.length >= maxActiveRuns) {
         throw new TargetRunCapacityError(`At most ${maxActiveRuns} target runs may execute at once.`)
@@ -519,8 +606,13 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
         runs.delete(settled[0])
       }
       const startedAt = Date.now()
-      const labels = label.split(/\s+/).filter((part) => part.startsWith("//"))
-      const run: TargetRun = { runId: crypto.randomUUID(), repoId, repo, workspace, label, labels, startedAt, status: "pending", exitCode: null }
+      const isPattern = verb !== undefined && pattern !== undefined
+      const title = isPattern ? `${verb} ${pattern}` : label
+      const labels = title.split(/\s+/).filter((part) => part.startsWith("//"))
+      const run: TargetRun = {
+        runId: crypto.randomUUID(), repoId, repo, workspace, label: title, labels, startedAt, status: "pending", exitCode: null,
+        ...(isPattern ? { verb, pattern } : {})
+      }
       const live: Live = { run, node, edges, kinds, parser: createRunStdoutParser({ edges, startedAt }), child: undefined, timer: undefined, summaryEmitted: false, nextSeq: 0 }
       runs.set(run.runId, live)
       live.timer = setTimeout(() => spawn(live), options.autoStartMs ?? 1000)

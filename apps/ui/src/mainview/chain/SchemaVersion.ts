@@ -107,6 +107,7 @@ export const PERSISTED_COLLECTION_IDS: ReadonlyArray<string> = [
   "app-harnesses",
   "app-repos",
   "app-pinned-repos",
+  "app-starred-targets",
   "app-workspaces",
   "app-branches",
   "app-frames",

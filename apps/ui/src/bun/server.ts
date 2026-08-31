@@ -12,6 +12,7 @@ import { homedir } from "node:os"
 import { join, normalize, resolve } from "node:path"
 import {
   AUTH_CALLBACK_PATH,
+  AUTH_NATIVE_CLAIM_PATH,
   AUTH_ROUTE_PREFIX,
   AUTH_SESSION_PATH,
   AUTH_SIGN_IN_PATH,
@@ -176,7 +177,12 @@ const stubIdentity = (pathname: string): Response =>
  * rewrite the old Vite dev proxy did), and a session cookie it sets is
  * re-scoped to this origin by dropping its Domain attribute.
  */
-const proxyIdentity = async (request: Request, url: URL, upstream: string): Promise<Response> => {
+const proxyIdentity = async (
+  request: Request,
+  url: URL,
+  upstream: string,
+  log?: (line: string) => void
+): Promise<Response> => {
   const target = new URL(url.pathname + url.search, upstream)
   const headers = new Headers(request.headers)
   headers.set("host", target.host)
@@ -200,6 +206,14 @@ const proxyIdentity = async (request: Request, url: URL, upstream: string): Prom
   if (cookies.length > 0) {
     out.delete("set-cookie")
     for (const cookie of cookies) out.append("set-cookie", cookie.replace(/;\s*domain=[^;]*/i, ""))
+  }
+  /*
+   * The native handoff's session travels ONLY as the claim's Set-Cookie. A
+   * ready claim without one is the exact failure the app cannot see from
+   * JavaScript, so the trail states it here, where the header is visible.
+   */
+  if (url.pathname === AUTH_NATIVE_CLAIM_PATH && log !== undefined) {
+    log(`${AUTH_NATIVE_CLAIM_PATH} -> ${response.status}, set-cookie ${cookies.length > 0 ? "present" : "absent"}`)
   }
   return new Response(response.body, { status: response.status, headers: out })
 }
@@ -473,7 +487,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
         }
         if (router.knows(pathname)) return jsonError(405, "method_not_allowed", `${request.method} is not allowed on ${pathname}.`)
         if (pathname.startsWith(AUTH_ROUTE_PREFIX) || pathname.startsWith(IDENTITY_ROUTE_PREFIX)) {
-          return identityUpstream === null ? stubIdentity(pathname) : proxyIdentity(request, url, identityUpstream)
+          return identityUpstream === null ? stubIdentity(pathname) : proxyIdentity(request, url, identityUpstream, log)
         }
         return jsonError(404, "not_found", `No route for ${request.method} ${pathname}.`)
       }

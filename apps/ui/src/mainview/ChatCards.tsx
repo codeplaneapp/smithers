@@ -14,6 +14,7 @@ import {
   StatusPill
 } from "@smthrs/ui"
 import type { ApprovalState } from "@smthrs/ui"
+import { agentRole } from "smithers-shared/AgentRoles"
 import { ArrowLeft, ArrowRight, GitFork, Maximize2, Minimize2, PanelTop } from "lucide-react"
 import { lazy, Suspense, useRef, useState } from "react"
 import type { KeyboardEvent } from "react"
@@ -149,6 +150,10 @@ const pillStatus = (card: Card): string => {
   if (card.kind === "agent") {
     if (card.payload.phase === "running") return "running"
     return card.payload.exitCode === 0 || card.payload.exitCode === null ? "done" : "failed"
+  }
+  if (card.kind === "explain") {
+    if (card.payload.phase === "asking") return "running"
+    return card.payload.phase === "answered" ? "done" : "failed"
   }
   if (card.status === "acted") return "done"
   if (card.kind !== "status") return "pending"
@@ -551,14 +556,17 @@ const AgentCardBody = ({
   readonly card: Extract<Card, { kind: "agent" }>
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {
-  const { displayName, cwd, phase, exitCode, tabId } = card.payload
+  const { displayName, cwd, phase, exitCode, tabId, roleId, task } = card.payload
+  const role = roleId === undefined ? undefined : agentRole(roleId)
   const state = phase === "running"
     ? `${displayName} is running in ${cwd}.`
     : exitCode === null
     ? `${displayName} stopped.`
     : `${displayName} exited (${exitCode}).`
   return (
-    <div className="agent-card" data-phase={phase}>
+    <div className="agent-card" data-phase={phase} data-role={roleId}>
+      {role !== undefined ? <p className="smithers-card-note agent-card-role">{role.purpose}</p> : null}
+      {task !== undefined ? <p className="smithers-card-note agent-card-task">Task: {task}</p> : null}
       <p className="smithers-card-note">{state}</p>
       {phase === "running" ?
         (
@@ -575,6 +583,26 @@ const AgentCardBody = ({
           </div>
         ) :
         null}
+    </div>
+  )
+}
+
+/* The explainer's answer (AgentRoles.ts): streams in place; says who was asked, never who answered. */
+const ExplainCardBody = ({ card }: { readonly card: Extract<Card, { kind: "explain" }> }) => {
+  const { question, answer, phase, answeredBy, error } = card.payload
+  return (
+    <div className="explain-card" data-phase={phase}>
+      <p className="smithers-card-note explain-card-question">{question}</p>
+      {answer !== "" ? <Markdown className="smithers-card-markdown" content={answer} /> : null}
+      {phase === "asking" ? <p className="sui-approval-pending">Explaining…</p> : null}
+      {phase === "failed" && error !== undefined ?
+        (
+          <p className="sui-approval-error" role="alert">
+            {error}
+          </p>
+        ) :
+        null}
+      <p className="smithers-card-note explain-card-by">{answeredBy}</p>
     </div>
   )
 }
@@ -826,7 +854,7 @@ export function CardView({
           {card.kind === "repo-plugin" ? <RepoPluginCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "targets" ? <TargetsCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "html" ? <HtmlCardBody card={card} /> : null}
-          {card.kind === "target-run" ? <TargetRunCardBody card={card} /> : null}
+          {card.kind === "target-run" ? <TargetRunCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "graph" ?
             (
               <Suspense fallback={<p className="smithers-card-note">Loading graph…</p>}>
@@ -839,6 +867,7 @@ export function CardView({
           {card.kind === "affected" ? <AffectedCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "ci-matrix" ? <CiMatrixCardBody card={card} /> : null}
           {card.kind === "agent" ? <AgentCardBody card={card} onRunCommand={onRunCommand} /> : null}
+          {card.kind === "explain" ? <ExplainCardBody card={card} /> : null}
         </div>
       </section>
     </>

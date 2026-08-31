@@ -4,6 +4,7 @@
  */
 import type { NodeSidecar } from "../Node"
 import type { Target } from "smithers-shared/LocalApp"
+import { TARGET_PATTERN, TargetRunVerbSchema } from "smithers-shared/LocalApp"
 import type { RepositoryAccess } from "smithers-shared/NativeRepository"
 import { z } from "zod"
 import { createRepoStore } from "../Repos"
@@ -44,6 +45,21 @@ interface TargetGrant {
   /** The snapshot's kinds: a BUILD.ts workspace runs the target with the verb its first kind names. */
   readonly kinds: ReadonlyArray<string>
 }
+
+/*
+ * A pattern run request: the verb is one of the CLI's, the pattern is an
+ * exact label or a `//dir/...` subtree, and the workspace must be one the
+ * repository detected. Nothing else reaches argv — the grammar IS the grant,
+ * so no opaque id is minted for it.
+ */
+const PatternRunRequestSchema = z
+  .object({
+    repoId: z.string().min(1),
+    workspace: z.string().min(1).optional(),
+    verb: TargetRunVerbSchema,
+    pattern: z.string().regex(TARGET_PATTERN)
+  })
+  .strict()
 
 const RepoOpenRequestSchema = z.union([
   z.object({ authorizationId: z.string().min(1) }).strict(),
@@ -157,8 +173,42 @@ export const registerRepoTargetRoutes = (
     if ("error" in parsed) return parsed.error
     const repoId = stringField(parsed.body, "repoId")
     const targetId = stringField(parsed.body, "targetId")
+    if (repoId !== undefined && targetId === undefined && stringField(parsed.body, "verb") !== undefined) {
+      const pattern = PatternRunRequestSchema.safeParse(parsed.body)
+      if (!pattern.success) {
+        return jsonError(400, "invalid_request", "A pattern run is { repoId, verb, pattern, workspace? } with a CLI verb and a `//dir/...` pattern or label.")
+      }
+      const repo = repos.get(repoId)
+      if (repo === undefined) return jsonError(404, "repo_not_found", `No open repository with id ${repoId}.`)
+      if (resolveRepo(repoId, "read-write").status !== "ok") {
+        return jsonError(403, "repository_read_only", "Running a target requires read-write repository access.")
+      }
+      const workspace = pattern.data.workspace ?? "."
+      if (!repo.smithers.workspaces.some((entry) => entry.path === workspace)) {
+        return jsonError(409, "target_stale", "That target workspace is not open.")
+      }
+      const node = await options.node
+      if (node === null) return jsonError(503, "node_missing", "No Node.js >= 22.19 was found for the smithers-build CLI.")
+      let run
+      try {
+        run = runner.start({
+          repoId,
+          repo: repo.path,
+          workspace,
+          label: `${pattern.data.verb} ${pattern.data.pattern}`,
+          verb: pattern.data.verb,
+          pattern: pattern.data.pattern,
+          node
+        })
+      } catch (error) {
+        if (error instanceof TargetRunCapacityError) return jsonError(429, error.code, error.message)
+        throw error
+      }
+      await history.start(run)
+      return json({ runId: run.runId })
+    }
     if (repoId === undefined || targetId === undefined) {
-      return jsonError(400, "invalid_request", "Body must be { repoId, targetId }.")
+      return jsonError(400, "invalid_request", "Body must be { repoId, targetId } or { repoId, verb, pattern }.")
     }
     const repo = repos.get(repoId)
     if (repo === undefined) return jsonError(404, "repo_not_found", `No open repository with id ${repoId}.`)

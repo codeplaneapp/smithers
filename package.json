@@ -34,6 +34,7 @@
     "docs:pages": "node scripts/generate-docs-pages.mjs",
     "lint": "pnpm --recursive --if-present run lint",
     "test": "pnpm --recursive --if-present run test",
+    "test:e2e": "bun apps/ui/e2e/packaged/run.ts",
     "test:jsdoc": "node --test scripts/eslint-jsdoc.test.mjs",
     "test:examples": "pnpm --filter @smthrs/examples run test"
   },

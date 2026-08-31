@@ -1,5 +1,6 @@
 import { z } from "zod"
 import type { AgentRuntimeContext } from "./AgentContext"
+import type { AgentRoleId } from "./AgentRoles"
 import { CardPatchSchema, CardSchema } from "./Cards"
 
 export type FetchLike = (
@@ -59,7 +60,14 @@ export interface StartAgentTurnRequest {
    * turn; "recommend" is the background next-step read, which a scripted or
    * stub seam must not treat as the conversation's next leg.
    */
-  readonly purpose?: "conversation" | "recommend"
+  readonly purpose?: "conversation" | "recommend" | "explain"
+  /**
+   * The named role this turn asks to be answered by (AgentRoles.ts): the
+   * conversation's own turns are the orchestrator's; `explain` asks for the
+   * explainer. A hint like `tier`: the serving side maps it to a model or
+   * ignores it, and the client never claims a model it was not told about.
+   */
+  readonly role?: AgentRoleId
 }
 
 export type StartAgentTurnResult =

@@ -88,7 +88,11 @@ const streamTurn = (
             // model is never offered a command and the loop can never start.
             ...(request.tools === undefined ? {} : { tools: request.tools }),
             // The model-tier hint (the recommender's `cheap`); the serving side maps it.
-            ...(request.tier === undefined ? {} : { tier: request.tier })
+            ...(request.tier === undefined ? {} : { tier: request.tier }),
+            // The purpose and the named role (AgentRoles.ts) ride the wire as
+            // hints too; a server that ignores them answers on its default model.
+            ...(request.purpose === undefined ? {} : { purpose: request.purpose }),
+            ...(request.role === undefined ? {} : { role: request.role })
           })
         }),
       catch: asError

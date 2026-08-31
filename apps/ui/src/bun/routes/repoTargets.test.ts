@@ -333,3 +333,53 @@ describe("/api/targets/run revalidates against the target's own graph when the w
     expect(body.error.message).toContain("graph_failed: no closure for //:doomed")
   })
 })
+
+/*
+ * Pattern runs: `{ repoId, verb, pattern, workspace? }` runs the verb over
+ * the pattern (`ci //packages/...`, how CI runs everything). The grammar is
+ * the grant — a CLI verb and a `//dir/...` or label pattern — so no opaque
+ * id is minted, and anything outside it is refused before argv exists.
+ */
+describe("/api/targets/run pattern runs", () => {
+  test("a verb over a pattern spawns `<verb> <pattern> --ui plain` in the named workspace", async () => {
+    const opened = (await (await post("/api/repo/open", { path: repoDir })).json()) as { repo: { id: string } }
+    const started = await post("/api/targets/run", { repoId: opened.repo.id, workspace: "aomi-sdk", verb: "ci", pattern: "//src/..." })
+    expect(started.status).toBe(200)
+    const { runId } = (await started.json()) as { runId: string }
+    const socket = new WebSocket(`${server.origin.replace("http", "ws")}/ws`, server.websocketProtocol)
+    const frames: Array<{ type: string; data?: string; label?: string; code?: number | null }> = []
+    const finished = new Promise<void>((resolve) => {
+      socket.onmessage = (event) => {
+        const parsed = TargetRunMessageSchema.safeParse(JSON.parse(String(event.data)))
+        if (!parsed.success || parsed.data.runId !== runId) return
+        frames.push(parsed.data.frame)
+        if (parsed.data.frame.type === "exit") resolve()
+      }
+    })
+    await new Promise<void>((resolve) => {
+      socket.onopen = () => resolve()
+    })
+    socket.send(JSON.stringify({ type: "subscribe", topic: `target-run:${runId}` }))
+    socket.send(JSON.stringify({ type: "target-run.attach", runId }))
+    await finished
+    socket.close()
+    expect(frames.find((frame) => frame.type === "started")).toMatchObject({ label: "ci //src/...", labels: ["//src/..."] })
+    expect(frames.filter((frame) => frame.type === "stdout").map((frame) => frame.data).join("")).toBe(
+      `ran ci in ${join(repoDir, "aomi-sdk")}\n`
+    )
+    expect(frames[frames.length - 1]).toMatchObject({ type: "exit", code: 0 })
+    // The recording carries the pattern run under its `<verb> <pattern>` label.
+    const runs = (await (await post("/api/targets/runs", { repoId: opened.repo.id })).json()) as { runs: Array<{ runId: string; label: string }> }
+    expect(runs.runs.find((run) => run.runId === runId)?.label).toBe("ci //src/...")
+  })
+
+  test("a verb the CLI lacks, a pattern outside the grammar, or an unopened workspace is refused", async () => {
+    const opened = (await (await post("/api/repo/open", { path: repoDir })).json()) as { repo: { id: string } }
+    expect((await post("/api/targets/run", { repoId: opened.repo.id, verb: "rm", pattern: "//..." })).status).toBe(400)
+    expect((await post("/api/targets/run", { repoId: opened.repo.id, verb: "ci", pattern: "//packages; rm -rf /" })).status).toBe(400)
+    expect((await post("/api/targets/run", { repoId: opened.repo.id, verb: "ci", pattern: "packages/..." })).status).toBe(400)
+    expect((await post("/api/targets/run", { repoId: opened.repo.id, verb: "ci", pattern: "//...", extra: 1 })).status).toBe(400)
+    expect((await post("/api/targets/run", { repoId: opened.repo.id, verb: "ci", pattern: "//...", workspace: "elsewhere" })).status).toBe(409)
+    expect((await post("/api/targets/run", { repoId: "nope", verb: "ci", pattern: "//..." })).status).toBe(404)
+  })
+})

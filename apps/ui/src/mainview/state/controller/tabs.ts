@@ -4,6 +4,8 @@ import {
   PtyOutputResponseSchema,
   ReposResponseSchema
 } from "smithers-shared/LocalApp"
+import { agentRole, agentRoleTitle } from "smithers-shared/AgentRoles"
+import type { AgentRoleId } from "smithers-shared/AgentRoles"
 import { hasCapability } from "smithers-shared/AppBootstrap"
 import { activeRepoOf, MAIN_TAB_ID, repoKeyOf } from "../AppState"
 import type { PinnedRepo, Repo, TabRow } from "../AppState"
@@ -21,8 +23,16 @@ import type { ControllerContext } from "./context"
 export interface TabsController {
   /** Cmd+T / the `+` menu's Terminal row: `POST /api/pty` then a terminal tab. */
   readonly openTerminalTab: () => Promise<string | void>
-  /** A `+` menu harness row: `POST /api/pty { kind: "harness", harnessId }` then a harness tab. */
-  readonly openHarnessTab: (harnessId: string) => Promise<string | void>
+  /**
+   * A `+` menu harness row: `POST /api/pty { kind: "harness", harnessId }`
+   * then a harness tab. With a role (AgentRoles.ts) the role's harness and
+   * model launch instead, with the task as the CLI's first prompt; the
+   * result is the same tab plus the conversation's subagent card.
+   */
+  readonly openHarnessTab: (
+    harnessId: string,
+    launch?: { readonly roleId?: AgentRoleId; readonly task?: string }
+  ) => Promise<string | void>
   /** `tab.read <tabId>`: another tab's recent output as text, for the agent. */
   readonly readTab: (tabId: string) => Promise<CommandResult>
   /** A maximized card's "Open in tab": one tab per card, rendering the same store record. */
@@ -128,23 +138,37 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
     })
   }
 
-  const openHarnessTab: TabsController["openHarnessTab"] = async (harnessId) => {
+  const openHarnessTab: TabsController["openHarnessTab"] = async (harnessId, launch) => {
     if (collections.harnesses.size === 0) await loadHarnesses()
-    const harness = [...collections.harnesses.values()].find((candidate) => candidate.id === harnessId)
-    if (harness === undefined) return `There is no harness with id ${harnessId}.`
-    if (harness.status === "unavailable") return `${harness.displayName} is not installed here.`
+    /*
+     * A role (AgentRoles.ts) names its harness and its model; the server
+     * resolves the role to the launch argv, so the renderer sends the role id
+     * and the task, never argv. Its availability is the harness's.
+     */
+    const role = launch?.roleId === undefined ? undefined : agentRole(launch.roleId)
+    const wanted = role?.harness ?? harnessId
+    const harness = [...collections.harnesses.values()].find((candidate) => candidate.id === wanted)
+    if (harness === undefined) return `There is no harness with id ${wanted}.`
+    const displayName = role === undefined ? harness.displayName : agentRoleTitle(role)
+    if (harness.status === "unavailable") return `${displayName} is not available: ${harness.displayName} is not installed here.`
+    if (role !== undefined && harness.status === "binary-only") {
+      return `${displayName} is not available: ${harness.displayName} has no credential for ${role.model.label}.`
+    }
     let sessionId: string
     const directory = cwd()
+    const task = launch?.task?.trim() ?? ""
     try {
       sessionId = await createSession({
         kind: "harness",
         ...sessionRepository(),
         cols: DEFAULT_COLS,
         rows: DEFAULT_ROWS,
-        harnessId: harness.id
+        harnessId: harness.id,
+        ...(role === undefined ? {} : { roleId: role.id }),
+        ...(task === "" ? {} : { task })
       })
     } catch (error) {
-      return `Could not start ${harness.displayName}: ${error instanceof Error ? error.message : String(error)}`
+      return `Could not start ${displayName}: ${error instanceof Error ? error.message : String(error)}`
     }
     store.dispatch({
       type: "tab.opened",
@@ -152,9 +176,10 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
       tab: {
         id: sessionId,
         kind: "harness",
-        title: tabTitle(harness.displayName),
+        title: tabTitle(displayName),
         sessionId,
         harnessId: harness.id,
+        ...(role === undefined ? {} : { roleId: role.id }),
         cwd: directory,
         ...activeRepoKey()
       }
@@ -172,13 +197,15 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
       card: {
         id: `agent-${sessionId}`,
         kind: "agent",
-        title: harness.displayName,
+        title: displayName,
         status: "active",
         createdAt: Date.now(),
         ordinal: 0,
         payload: {
           harnessId: harness.id,
-          displayName: harness.displayName,
+          displayName,
+          ...(role === undefined ? {} : { roleId: role.id }),
+          ...(task === "" ? {} : { task }),
           tabId: sessionId,
           sessionId,
           cwd: directory,

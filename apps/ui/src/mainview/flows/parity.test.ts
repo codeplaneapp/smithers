@@ -158,7 +158,7 @@ describe("launch-law parity: every affordance is a command", () => {
        * now that the hot path is its own module.
        */
       // 15 − the corner balance chip: the balance is one act away (/balance), never main-page chrome.
-      "../App.tsx": 12,
+      "../App.tsx": 13,
       "../Composer.tsx": 10,
       // 6 = 5 + the empty state's own import affordance (§11.6): with nothing
       // connected the pane stated a fact and offered no move.
@@ -197,8 +197,15 @@ describe("launch-law parity: every affordance is a command", () => {
        * Run handler per file through onRunCommand — the plugin card's per-entry
        * Run and the targets card's per-row Run both ride target.run.
        */
-      "../cards/RepoPluginCard.tsx": 1,
-      "../cards/TargetCards.tsx": 1,
+      "../cards/RepoPluginCard.tsx": 2,
+      /*
+       * The targets table: History in the toolbar, the view, kind and state
+       * chips (target.filter), each row's star (target.star / unstar),
+       * select / Run / Timeline, the drawer's
+       * close, Open source, Replay, Run, Graph, Explain, and the target-run
+       * card's Explain — all through onRunCommand.
+       */
+      "../cards/TargetCards.tsx": 26,
       /*
        * The sidebar (docs/LOCAL-APP.md "Tabs"): the list's select and close
        * per tab, the Repos section's empty "Select a repo" row, each repo
@@ -207,7 +214,7 @@ describe("launch-law parity: every affordance is a command", () => {
        * the admin reset, and the theme toggle (chrome that stays visible on
        * every tab).
        */
-      "../tabs/ChromeBar.tsx": 14,
+      "../tabs/ChromeBar.tsx": 15,
       /* The live-process close question: confirm through tab.close.confirm. */
       "../tabs/TabBodies.tsx": 1
     })

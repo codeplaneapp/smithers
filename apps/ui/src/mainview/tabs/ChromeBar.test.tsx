@@ -151,13 +151,26 @@ describe("the + menu", () => {
     const items = [...(menu?.querySelectorAll<HTMLButtonElement>("[role=menuitem]") ?? [])]
     expect(items.map((item) => item.getAttribute("data-flow"))).toEqual([
       "tab.terminal",
+      // The six named roles (AgentRoles.ts) lead the Agents section, then the raw harnesses.
+      "agent.role",
+      "agent.role",
+      "agent.role",
+      "agent.role",
+      "agent.role",
+      "agent.role",
       "tab.harness",
       "tab.harness"
     ])
     expect(items[0]?.textContent).toBe("Terminal")
     expect(host.querySelector("[data-testid=tab-add-agents]")?.textContent).toBe("Agents")
-    expect(items[1]?.textContent).toContain("Claude Code")
+    // Six role rows sit between Terminal and the first raw harness.
+    expect(items[1]?.textContent).toContain("Orchestrator · Fable 5")
+    expect(items[7]?.textContent).toContain("Claude Code")
+    // The explainer's harness (OpenCode · Kimi) is absent from this fixture: disabled, with the reason.
     expect(items[2]?.disabled).toBe(true)
+    expect(items[2]?.textContent).toContain("not installed")
+    // The unavailable raw harness stays last and disabled.
+    expect(items[8]?.disabled).toBe(true)
     // One Smithers: the menu offers no second conversation, and no tab.chat flow exists to open one.
     expect(host.querySelector("[data-testid=tab-add-chat]")).toBeNull()
     expect(controller.commands.find("tab.chat")).toBeUndefined()

@@ -24,6 +24,7 @@ import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import { Effect, Schema } from "effect"
 import type { RepositoryAccess } from "smithers-shared/NativeRepository"
 import type { RuntimeCapability } from "smithers-shared/AppBootstrap"
+import { AGENT_ROLE_IDS, isAgentRoleId } from "smithers-shared/AgentRoles"
 import type { AppController } from "../state/AppController"
 import { PALETTES, WORLD_DISPLAY_NAME } from "../state/AppState"
 import type { CommandState, FlowEntry, FlowMetadata } from "./registry"
@@ -258,6 +259,19 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     capabilities: ["session:net-read"],
     input: Schema.Struct({ url: Schema.String }),
     handler: ({ url }: { readonly url: string }) => actions.openBrowser(url)
+  }
+  /*
+   * The explainer inside the app (AgentRoles.ts): one side turn on the
+   * explainer role, answered as an embedded card. Callable by the model and
+   * by a human; `/explain` stays as the bare spelling.
+   */
+  const EXPLAIN = {
+    name: "agent.explain",
+    summary: "Ask the Explainer to explain something",
+    runtime: ["agent"] as const,
+    args: "<what>",
+    input: Schema.Struct({ what: Schema.String }),
+    handler: ({ what }: { readonly what: string }) => actions.explain(what)
   }
   const COPY_MESSAGE = {
     name: "chat.copy-message",
@@ -1031,6 +1045,41 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: ({ harnessId }) => actions.openHarnessTab(harnessId)
   }),
   flow({
+    /*
+     * A named role (AgentRoles.ts) from the `+` menus: the role's harness and
+     * model launch in a tab, and the conversation gets the subagent card.
+     */
+    name: "agent.role",
+    summary: "Launch a named agent role in a tab",
+    runtime: ["local.harnesses"],
+    hidden: true,
+    userOnly: true,
+    args: "<roleId>",
+    input: Schema.Struct({ roleId: Schema.String }),
+    handler: ({ roleId }) =>
+      isAgentRoleId(roleId)
+        ? actions.openHarnessTab("", { roleId })
+        : `There is no agent role named ${roleId}. Roles: ${AGENT_ROLE_IDS.join(", ")}.`
+  }),
+  flow({
+    /*
+     * The orchestrator's delegation: a role launches in its own tab with the
+     * task as its first prompt, recorded as a subagent card here. The model
+     * reads the result back with tab.read.
+     */
+    name: "agent.delegate",
+    summary: "Delegate a task to an agent role (explainer, implementation, trivial-implementation, ui, fast-ui)",
+    runtime: ["local.harnesses"],
+    args: "<role> <task>",
+    input: Schema.Struct({ roleId: Schema.String, task: Schema.String }),
+    handler: ({ roleId, task }) =>
+      isAgentRoleId(roleId)
+        ? actions.openHarnessTab("", { roleId, task })
+        : `There is no agent role named ${roleId}. Roles: ${AGENT_ROLE_IDS.join(", ")}.`
+  }),
+  flow(EXPLAIN),
+  alias("explain", EXPLAIN),
+  flow({
     name: "tab.card",
     summary: "Open a card in a tab",
     hidden: true,
@@ -1141,6 +1190,21 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: ({ repoId, label, workspace }) => actions.runTarget(repoId, workspace ?? ".", label)
   }),
   flow({
+    name: "target.run.pattern",
+    summary: "Run a Smithers verb over a pattern (`ci //packages/...`)",
+    runtime: ["local.targets"],
+    hidden: true,
+    userOnly: true,
+    args: "<repoId> [workspace] <verb> <pattern>",
+    input: Schema.Struct({
+      repoId: Schema.String,
+      verb: Schema.String,
+      pattern: Schema.String,
+      workspace: Schema.optional(Schema.String)
+    }),
+    handler: ({ repoId, workspace, verb, pattern }) => actions.runPattern(repoId, workspace ?? ".", verb, pattern)
+  }),
+  flow({
     name: "target.open",
     summary: "Show a Smithers target in its targets card",
     runtime: ["local.targets"],
@@ -1149,6 +1213,105 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     args: "<repoId> <label>",
     input: TargetRef,
     handler: ({ repoId, label }) => actions.openTarget(repoId, label)
+  }),
+  /*
+   * The targets table (docs/LOCAL-APP.md "Cards"): its filter chips and text,
+   * and the row whose drawer is open. Both are the card's own affordances;
+   * the state they change lives in the card payload, never in a component.
+   */
+  flow({
+    name: "target.filter",
+    summary: "Filter the targets table",
+    runtime: ["local.targets"],
+    hidden: true,
+    userOnly: true,
+    args: "<repoId> [mode=<featured|all|recent>] [query=<text>] [kind=<kind>] [state=<never|passed|failed|running>] [workspace=<path>]",
+    input: Schema.Struct({
+      repoId: Schema.String,
+      mode: Schema.optional(Schema.String),
+      query: Schema.optional(Schema.String),
+      kind: Schema.optional(Schema.String),
+      state: Schema.optional(Schema.String),
+      workspace: Schema.optional(Schema.String)
+    }),
+    handler: ({ repoId, mode, query, kind, state, workspace }) =>
+      actions.filterTargets(repoId, {
+        ...(mode === undefined ? {} : { mode }),
+        ...(query === undefined ? {} : { query }),
+        ...(kind === undefined ? {} : { kind }),
+        ...(state === undefined ? {} : { state }),
+        ...(workspace === undefined ? {} : { workspace })
+      })
+  }),
+  flow({
+    name: "target.select",
+    summary: "Open a target's details in the targets table, or close them",
+    runtime: ["local.targets"],
+    hidden: true,
+    userOnly: true,
+    args: "<repoId> [label]",
+    input: Schema.Struct({ repoId: Schema.String, label: Schema.optional(Schema.String) }),
+    handler: ({ repoId, label }) => actions.selectTarget(repoId, label)
+  }),
+  /*
+   * The user's stars: the Featured view leads with the manifest's featured
+   * labels and these. Persisted by repository path (app-starred-targets), so
+   * a star outlives the server's fresh repo id on a reopen.
+   */
+  flow({
+    name: "target.star",
+    summary: "Star a target so it leads the targets table's Featured view",
+    runtime: ["local.targets"],
+    hidden: true,
+    userOnly: true,
+    args: "<repoId> <label>",
+    input: Schema.Struct({ repoId: Schema.String, label: Schema.String }),
+    handler: ({ repoId, label }) => actions.starTarget(repoId, label, true)
+  }),
+  flow({
+    name: "target.unstar",
+    summary: "Take a star back from a target",
+    runtime: ["local.targets"],
+    hidden: true,
+    userOnly: true,
+    args: "<repoId> <label>",
+    input: Schema.Struct({ repoId: Schema.String, label: Schema.String }),
+    handler: ({ repoId, label }) => actions.starTarget(repoId, label, false)
+  }),
+  /*
+   * Name groups (cards/TargetsTable.ts groupRows): targets sharing a name
+   * across packages read as one `//...:name` row. The build CLI has no
+   * `:name` wildcard, so "run the set" is one target.run per picked member.
+   */
+  flow({
+    name: "target.expand",
+    summary: "Expand or collapse a grouped row in the targets table",
+    runtime: ["local.targets"],
+    hidden: true,
+    userOnly: true,
+    args: "<repoId> <//...:name>",
+    input: Schema.Struct({ repoId: Schema.String, group: Schema.String }),
+    handler: ({ repoId, group }) => actions.expandTargetGroup(repoId, group)
+  }),
+  flow({
+    name: "target.pick",
+    summary: "Pick which members of a grouped row run (a label toggles; all / none)",
+    runtime: ["local.targets"],
+    hidden: true,
+    userOnly: true,
+    args: "<repoId> <//...:name> <label|all|none>",
+    input: Schema.Struct({ repoId: Schema.String, group: Schema.String, member: Schema.String }),
+    handler: ({ repoId, group, member }) => actions.pickTargets(repoId, group, member)
+  }),
+  flow({
+    name: "target.run.set",
+    summary: "Run every picked member of a grouped row",
+    runtime: ["local.targets"],
+    hidden: true,
+    userOnly: true,
+    args: "<repoId> <//...:name>",
+    input: Schema.Struct({ repoId: Schema.String, group: Schema.String }),
+    handler: ({ repoId, group }) => actions.runTargetSet(repoId, group)
   }),
   /*
    * The target-graph cards (docs/LOCAL-APP.md "Cards: target graph"): "show

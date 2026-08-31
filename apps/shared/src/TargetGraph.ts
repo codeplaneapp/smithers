@@ -100,7 +100,9 @@ export const NodeTimingSchema = z.object({
   key: z.string().optional(),
   /** Refusal or failure text, first line. */
   reason: z.string().optional(),
-  exitCode: z.number().nullable().optional()
+  exitCode: z.number().nullable().optional(),
+  /** The target's rule (`Vitest`, `EsLint`), from the executor's results block when it prints one. */
+  rule: z.string().optional()
 })
 export type NodeTiming = z.infer<typeof NodeTimingSchema>
 

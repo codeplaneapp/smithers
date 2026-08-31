@@ -1,0 +1,229 @@
+{
+  "schemaVersion": 1,
+  "name": "smithers",
+  "title": "Smithers",
+  "summary": "The essential targets of this repository: the whole CI graph, build and check, tests, lint, docs, and the LLM code-review lints.",
+  "groups": [
+    {
+      "id": "everything",
+      "title": "Everything",
+      "kind": "check",
+      "featured": true
+    },
+    {
+      "id": "build",
+      "title": "Build & check",
+      "kind": "check",
+      "featured": true
+    },
+    {
+      "id": "test",
+      "title": "Test",
+      "kind": "check",
+      "featured": true
+    },
+    {
+      "id": "lint",
+      "title": "Lint",
+      "kind": "lint",
+      "featured": true
+    },
+    {
+      "id": "docs",
+      "title": "Docs",
+      "kind": "check",
+      "featured": true
+    },
+    {
+      "id": "review",
+      "title": "Review",
+      "kind": "lint",
+      "featured": true
+    }
+  ],
+  "entries": [
+    {
+      "id": "everything",
+      "group": "everything",
+      "workspace": ".",
+      "title": "Run everything",
+      "summary": "Build, check, test, lint and docs over every package: the CI job's own step (smithers-build ci '//packages/...').",
+      "verb": "ci",
+      "pattern": "//packages/..."
+    },
+    {
+      "id": "ci-workflow",
+      "group": "everything",
+      "workspace": ".",
+      "label": "//:ci",
+      "title": "CI workflow file",
+      "summary": "Regenerate and drift-check .github/workflows/ci.yml, the pipeline definition (not the run itself)."
+    },
+    {
+      "id": "check-all",
+      "group": "build",
+      "workspace": ".",
+      "verb": "build",
+      "pattern": "//packages/...",
+      "title": "Build every package",
+      "summary": "Build targets over every package (smithers-build build '//packages/...')."
+    },
+    {
+      "id": "tsconfig",
+      "group": "build",
+      "workspace": ".",
+      "label": "//:tsconfig",
+      "title": "Root tsconfig",
+      "summary": "Regenerate and check the workspace tsconfig.json from BUILD.ts."
+    },
+    {
+      "id": "known-files",
+      "group": "build",
+      "workspace": ".",
+      "label": "//:knownFiles",
+      "title": "known-files.d.ts",
+      "summary": "Regenerate the known-files declaration from the target graph."
+    },
+    {
+      "id": "flows-check",
+      "group": "build",
+      "workspace": ".",
+      "label": "//packages/flows:check",
+      "title": "Typecheck @smthrs/flows",
+      "summary": "tsc over the aggregate barrel and everything it re-exports."
+    },
+    {
+      "id": "flows-lib",
+      "group": "build",
+      "workspace": ".",
+      "label": "//packages/flows:lib",
+      "title": "Build @smthrs/flows",
+      "summary": "Emit the aggregate barrel's dist."
+    },
+    {
+      "id": "cli-check",
+      "group": "build",
+      "workspace": ".",
+      "label": "//packages/cli:check",
+      "title": "Typecheck the smithers CLI",
+      "summary": "tsc over packages/cli."
+    },
+    {
+      "id": "test-all",
+      "group": "test",
+      "workspace": ".",
+      "verb": "test",
+      "pattern": "//packages/...",
+      "title": "Test every package",
+      "summary": "Test targets over every package (smithers-build test '//packages/...')."
+    },
+    {
+      "id": "flows-test",
+      "group": "test",
+      "workspace": ".",
+      "label": "//packages/flows:test",
+      "title": "Test @smthrs/flows",
+      "summary": "The aggregate barrel's vitest suite, coverage gates enforced."
+    },
+    {
+      "id": "cli-test",
+      "group": "test",
+      "workspace": ".",
+      "label": "//packages/cli:test",
+      "title": "Test the smithers CLI",
+      "summary": "packages/cli vitest suite."
+    },
+    {
+      "id": "browser-contract",
+      "group": "test",
+      "workspace": ".",
+      "label": "//scripts:browserContract",
+      "title": "Browser bundle contract",
+      "summary": "The browser bundle builds and exposes the contract surface."
+    },
+    {
+      "id": "effect-version",
+      "group": "test",
+      "workspace": ".",
+      "label": "//scripts:effectVersion",
+      "title": "Single effect version",
+      "summary": "Exactly one effect version resolves across every manifest and both lockfiles."
+    },
+    {
+      "id": "dependency-boundaries",
+      "group": "test",
+      "workspace": ".",
+      "label": "//scripts:dependencyBoundaries",
+      "title": "Dependency boundaries",
+      "summary": "No package imports across the boundaries the contract forbids (legacy/ included)."
+    },
+    {
+      "id": "lint-all",
+      "group": "lint",
+      "workspace": ".",
+      "verb": "lint",
+      "pattern": "//packages/...",
+      "title": "Lint every package",
+      "summary": "Lint targets over every package (smithers-build lint '//packages/...')."
+    },
+    {
+      "id": "flows-lint",
+      "group": "lint",
+      "workspace": ".",
+      "label": "//packages/flows:lint",
+      "title": "ESLint @smthrs/flows",
+      "summary": "eslint --max-warnings=0 over the aggregate barrel."
+    },
+    {
+      "id": "flows-fmt",
+      "group": "lint",
+      "workspace": ".",
+      "label": "//packages/flows:fmt",
+      "title": "dprint check @smthrs/flows",
+      "summary": "Formatting check; every package declares its own lint and fmt targets."
+    },
+    {
+      "id": "docs-check",
+      "group": "docs",
+      "workspace": ".",
+      "label": "//scripts:docs",
+      "title": "Docs check",
+      "summary": "The documentation site's pages and generator agree with the tree."
+    },
+    {
+      "id": "llms",
+      "group": "docs",
+      "workspace": ".",
+      "label": "//scripts:llms",
+      "title": "llms.txt bundles",
+      "summary": "docs/llms-full.txt and friends are regenerated and in sync."
+    },
+    {
+      "id": "review-durable-identity",
+      "group": "review",
+      "workspace": ".",
+      "label": "//lint:durableIdentityGuard",
+      "title": "Review: durable identity",
+      "summary": "A cheap Codex review of the diff against origin/main for identity strings, migrations, persisted schemas and durable keys.",
+      "agentic": true
+    },
+    {
+      "id": "review-docs-reference",
+      "group": "review",
+      "workspace": ".",
+      "label": "//lint:docsReferenceSync",
+      "title": "Review: docs reference sync",
+      "summary": "A cheap Codex review of changed public APIs against the hand-written reference and concept pages.",
+      "agentic": true
+    },
+    {
+      "id": "review-jsdoc",
+      "group": "review",
+      "workspace": ".",
+      "label": "//lint:jsdocTruthfulness",
+      "title": "Review: JSDoc truthfulness",
+      "summary": "A cheap Codex review of changed exports against their JSDoc.",
+      "agentic": true
+    }
+  ]
+}

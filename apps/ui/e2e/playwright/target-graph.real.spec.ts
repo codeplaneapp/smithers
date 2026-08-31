@@ -17,7 +17,7 @@ import { join } from "node:path"
  *   the scrubber → touch a file and show affected → show ci.
  *
  * Tier T1: the local origin in headless Chromium. The Electrobun shell is
- * NOT exercised — see e2e/playwright/native for that tier; what this spec
+ * NOT exercised — see e2e/packaged for that tier; what this spec
  * cannot cover is the native window chrome and the OS folder picker, which
  * is why the repository is opened through the window.prompt fallback.
  *

@@ -15,13 +15,12 @@ subprocess against a recording host fake:
 The local server the entrypoint starts is the real one; only the host is
 faked.
 
-The real window is covered by tier T2 (`e2e/playwright/native/`,
-`pnpm --filter smithers-ui test:e2e:native`): the dev build bundles CEF, the
-launcher starts the built `.app` with `ELECTROBUN_CEF_REMOTE_DEBUGGING_PORT`,
-and Playwright attaches over CDP. See `docs/LOCAL-APP.md`, "Test tiers".
+The real window is covered by tier T2 (`e2e/packaged/`, `bun run test:e2e`):
+the runner builds a stable `.app`, launches its native renderer, and drives it
+through the authenticated test bridge. See `docs/LOCAL-APP.md`, "Test tiers".
 
 ```sh
-cd apps/ui
-bun test src/bun                              # no window needed, runs anywhere
-pnpm --filter smithers-ui test:e2e:native    # macOS, builds and launches the app
+# From the repository root:
+bun test apps/ui/src/bun       # no window needed, runs anywhere
+bun run test:e2e               # macOS packaged app
 ```

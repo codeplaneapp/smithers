@@ -139,12 +139,11 @@ describe("the repo-plugin card", () => {
 })
 
 describe("the targets card", () => {
-  test("groups workspace then package and runs a row with its workspace", () => {
+  test("every row carries its workspace and runs with it", () => {
     const ran: Array<string> = []
     const host = render(<TargetsCardBody card={targetsCard()} onRunCommand={(name, args) => ran.push(`${name} ${args ?? ""}`)} />)
-    expect(host.querySelector("[data-workspace=\".\"]")).not.toBeNull()
-    const sdk = host.querySelector("[data-workspace=\"aomi-sdk\"]")
-    expect(sdk?.querySelector("[data-package=\"//\"]")).not.toBeNull()
+    expect(host.querySelector("[data-target-row][data-workspace=\".\"]")).not.toBeNull()
+    const sdk = host.querySelector("[data-target-row=\"//:clippyFix\"][data-workspace=\"aomi-sdk\"]")
     expect(sdk?.textContent).toContain("//:clippyFix")
     const button = sdk?.querySelector("[data-testid=\"targets-run-//:clippyFix\"]") as HTMLElement | null
     expect(button).not.toBeNull()
@@ -155,19 +154,22 @@ describe("the targets card", () => {
   test("names the root workspace by the repository, never by the raw \".\" path token", () => {
     // Copy rule (apps/DESIGN.md §9): no internal path tokens in user-facing copy.
     const host = render(<TargetsCardBody card={targetsCard()} onRunCommand={() => {}} />)
-    const root = host.querySelector("[data-workspace=\".\"] .targets-card-workspace-name")
+    const root = host.querySelector("[data-target-row][data-workspace=\".\"] .targets-table-workspace")
     expect(root?.textContent).toBe("aomi")
+    const option = host.querySelector("[data-testid=\"targets-filter-workspace\"] option[value=\".\"]")
+    expect(option?.textContent).toBe("aomi")
   })
 
-  test("a single-workspace repo keeps its packages unheaded", () => {
+  test("a single-workspace repo shows no workspace column or select", () => {
     const card = targetsCard()
     const single = {
       ...card,
       payload: { ...card.payload, targets: card.payload.targets.filter((target) => target.workspace === ".") }
     }
     const host = render(<TargetsCardBody card={single} onRunCommand={() => {}} />)
-    expect(host.querySelector("[data-workspace=\".\"]")).not.toBeNull()
-    expect(host.querySelector(".targets-card-workspace-name")).toBeNull()
+    expect(host.querySelector("[data-target-row][data-workspace=\".\"]")).not.toBeNull()
+    expect(host.querySelector(".targets-table-workspace")).toBeNull()
+    expect(host.querySelector("[data-testid=\"targets-filter-workspace\"]")).toBeNull()
   })
 })
 
@@ -213,4 +215,35 @@ describe("the repo card", () => {
     const host = render(<RepoCardBody card={repo([])} />)
     expect(host.querySelector("[role=\"alert\"]")).toBeNull()
   })
+})
+
+/* A pattern entry (`ci //packages/...`) runs through target.run.pattern; a label entry through target.run. */
+test("a pattern entry's Run dispatches target.run.pattern with the workspace, verb and pattern", () => {
+  const calls: Array<[string, string | undefined]> = []
+  const host = document.createElement("div")
+  document.body.append(host)
+  const card = pluginCard()
+  const manifestWithPattern = {
+    ...card.payload.manifest,
+    entries: [
+      ...card.payload.manifest.entries,
+      { id: "everything", group: "checks", workspace: ".", verb: "ci" as const, pattern: "//packages/...", title: "Run everything", summary: "The CI step.", approval: false, agentic: false }
+    ]
+  }
+  flushSync(() => {
+    createRoot(host).render(
+      <RepoPluginCardBody
+        card={{ ...card, payload: { ...card.payload, manifest: manifestWithPattern } }}
+        onRunCommand={(name, args) => calls.push([name, args])}
+      />
+    )
+  })
+  const row = host.querySelector('[data-plugin-entry="everything"]')!
+  expect(row.textContent).toContain("ci //packages/...")
+  flushSync(() => (host.querySelector('[data-testid="plugin-run-everything"]') as HTMLButtonElement).click())
+  flushSync(() => (host.querySelector('[data-testid="plugin-run-check"]') as HTMLButtonElement).click())
+  expect(calls).toEqual([
+    ["target.run.pattern", "r1 . ci //packages/..."],
+    ["target.run", "r1 . //:check"]
+  ])
 })

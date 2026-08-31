@@ -239,6 +239,54 @@ describe("the local origin", () => {
     expect((await fetch(`${server.origin}/api/auth/github/start`, { method: "POST" })).status).toBe(401)
   })
 
+  test("a proxied ready claim re-scopes the session cookie and the trail says the cookie was there", async () => {
+    // A fake identity upstream: the claim answers ready with a Domain-scoped session cookie.
+    const upstream = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) =>
+        new URL(request.url).pathname === "/api/auth/native/claim"
+          ? new Response(JSON.stringify({ status: "ready" }), {
+            headers: {
+              "content-type": "application/json",
+              "set-cookie": "smithers_session=sealed; Domain=identity.test; Path=/; HttpOnly; Secure; SameSite=Lax"
+            }
+          })
+          : new Response("{}", { status: 404, headers: { "content-type": "application/json" } })
+    })
+    const proxyLogs: Array<string> = []
+    const proxied = await startLocalServer({
+      port: 0,
+      distDir: dist,
+      cloudMode: "hybrid",
+      identityUpstream: `http://127.0.0.1:${upstream.port}`,
+      node: { path: "/fake/node", version: "v22.19.0" },
+      home: "/fake/home",
+      harnesses: async () => [],
+      log: (line) => proxyLogs.push(line)
+    })
+    try {
+      const response = await fetch(`${proxied.origin}/api/auth/native/claim`, {
+        method: "POST",
+        headers: {
+          [LOCAL_SESSION_HEADER]: proxied.sessionToken,
+          origin: proxied.origin,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ handoffId: "h", pollSecret: "s" })
+      })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ status: "ready" })
+      const cookie = response.headers.getSetCookie()[0] ?? ""
+      expect(cookie.startsWith("smithers_session=sealed")).toBe(true)
+      expect(cookie.toLowerCase()).not.toContain("domain=")
+      expect(proxyLogs).toContain("/api/auth/native/claim -> 200, set-cookie present")
+    } finally {
+      await proxied.stop()
+      upstream.stop(true)
+    }
+  })
+
   test("the stub identity seam answers signed-out and nothing else", async () => {
     const session = await apiFetch("/api/auth/session")
     expect(await session.json()).toEqual({ status: "signed-out" })

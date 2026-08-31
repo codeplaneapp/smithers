@@ -15,6 +15,7 @@ export const HARNESS_IDS = [
   "kimi",
   "opencode",
   "opencode-kimi",
+  "opencode-cerebras",
   "crush",
   "amp",
   "cursor-agent",
@@ -44,22 +45,62 @@ export const REPO_PLUGIN_GROUP_KINDS = ["recipe", "lint", "workflow", "check"] a
 /** A target label: `//pkg:name` (`//:name` for the root package). */
 export const TARGET_LABEL = /^\/\/[^\s:]*:[^\s:]+$/
 
+/**
+ * The verbs `smithers-build` executes over a pattern (`smithers-build
+ * --help`). A pattern run is `<verb> <pattern>`: the CLI resolves the
+ * pattern to its targets and runs every one, which is what "run everything"
+ * is (`ci '//packages/...'`); no single target does that.
+ */
+export const TARGET_RUN_VERBS = ["build", "ci", "docs", "lint", "run", "test"] as const
+export const TargetRunVerbSchema = z.enum(TARGET_RUN_VERBS)
+export type TargetRunVerb = z.infer<typeof TargetRunVerbSchema>
+
+/** A pattern the CLI accepts: an exact label or a `//dir/...` subtree (`//...` for the whole workspace). */
+export const TARGET_PATTERN = /^\/\/(?:(?:(?!\.\.\.\/)[^\s:/]+\/)*\.\.\.|(?!.*\.\.\.)[^\s:]*:[^\s:]+)$/
+
+/** The verb and pattern of one pattern run; `title` reads `ci //packages/...`. */
+export const patternRunTitle = (verb: string, pattern: string): string => `${verb} ${pattern}`
+
 export const RepoPluginGroupSchema = z
   .object({
     id: z.string(),
     title: z.string(),
-    kind: z.enum(REPO_PLUGIN_GROUP_KINDS)
+    kind: z.enum(REPO_PLUGIN_GROUP_KINDS),
+    /** Every entry of a featured group leads the targets card's Featured view. */
+    featured: z.boolean().optional()
   })
   .strict()
 export type RepoPluginGroup = z.infer<typeof RepoPluginGroupSchema>
 
+/*
+ * An entry runs ONE target (`label`) or a whole pattern (`verb` + `pattern`,
+ * e.g. `ci //packages/...`); `entryRun` refines that exactly one form is
+ * present. The pattern form is how a manifest declares "run everything".
+ */
 const entryShape = {
   id: z.string(),
   group: z.string(),
   workspace: z.string(),
-  label: z.string().regex(TARGET_LABEL, "a label is `//pkg:name`"),
+  label: z.string().regex(TARGET_LABEL, "a label is `//pkg:name`").optional(),
+  verb: TargetRunVerbSchema.optional(),
+  pattern: z.string().regex(TARGET_PATTERN, "a pattern is `//dir/...` or a label").optional(),
   title: z.string(),
-  summary: z.string()
+  summary: z.string(),
+  /** A featured entry leads the targets card's Featured view (the repository's essentials). */
+  featured: z.boolean().optional()
+}
+
+const entryRun = (
+  entry: { readonly id: string; readonly label?: string; readonly verb?: string; readonly pattern?: string },
+  ctx: z.RefinementCtx
+): void => {
+  const asLabel = entry.label !== undefined
+  const asPattern = entry.verb !== undefined || entry.pattern !== undefined
+  if (asLabel === asPattern) {
+    ctx.addIssue({ code: "custom", message: `entry ${entry.id} needs either a label or a verb and a pattern` })
+  } else if (asPattern && (entry.verb === undefined || entry.pattern === undefined)) {
+    ctx.addIssue({ code: "custom", message: `entry ${entry.id} needs both a verb and a pattern` })
+  }
 }
 
 /*
@@ -70,12 +111,14 @@ const entryShape = {
 export const RepoPluginEntrySchema = z
   .object({ ...entryShape, approval: z.boolean(), agentic: z.boolean() })
   .strict()
+  .superRefine(entryRun)
 export type RepoPluginEntry = z.infer<typeof RepoPluginEntrySchema>
 
 /* The manifest file's entry: approval/agentic optional, defaulting to false. */
 const RepoPluginEntryFileSchema = z
   .object({ ...entryShape, approval: z.boolean().optional(), agentic: z.boolean().optional() })
   .strict()
+  .superRefine(entryRun)
 
 /** `path: message`, or just the message for a root-level issue. */
 const issueText = (issue: { readonly path: ReadonlyArray<PropertyKey>; readonly message: string }): string =>
@@ -148,6 +191,43 @@ export const parseRepoPlugin = (
     }
   }
   return { plugin: parsed.data }
+}
+
+/**
+ * The labels a manifest marks featured (LOCAL-APP.md "Plugin manifest"): an
+ * entry with `featured: true`, or any entry of a group with `featured: true`.
+ * The targets card's Featured view leads with these.
+ */
+export const featuredLabels = (plugin: RepoPlugin): ReadonlyArray<string> => {
+  const groups = new Set(plugin.groups.filter((group) => group.featured === true).map((group) => group.id))
+  const labels: Array<string> = []
+  for (const entry of plugin.entries) {
+    if (entry.label === undefined) continue
+    if ((entry.featured === true || groups.has(entry.group)) && !labels.includes(entry.label)) labels.push(entry.label)
+  }
+  return labels
+}
+
+/** One featured pattern run of a manifest (`ci //packages/...`), in manifest order. */
+export interface FeaturedPatternRun {
+  readonly id: string
+  readonly title: string
+  readonly summary: string
+  readonly workspace: string
+  readonly verb: TargetRunVerb
+  readonly pattern: string
+}
+
+/** The pattern entries a manifest marks featured, by entry flag or featured group. */
+export const featuredPatternRuns = (plugin: RepoPlugin): ReadonlyArray<FeaturedPatternRun> => {
+  const groups = new Set(plugin.groups.filter((group) => group.featured === true).map((group) => group.id))
+  const runs: Array<FeaturedPatternRun> = []
+  for (const entry of plugin.entries) {
+    if (entry.verb === undefined || entry.pattern === undefined) continue
+    if (entry.featured !== true && !groups.has(entry.group)) continue
+    runs.push({ id: entry.id, title: entry.title, summary: entry.summary, workspace: entry.workspace, verb: entry.verb, pattern: entry.pattern })
+  }
+  return runs
 }
 
 export const RepoWorkspaceSchema = z.object({

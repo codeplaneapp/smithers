@@ -49,6 +49,13 @@ interface RpcConfig {
 }
 
 const fakeSdk = {
+  BuildConfig: {
+    getSync: () => ({
+      isPackaged: false,
+      channel: "dev",
+      defaultRenderer: "native"
+    })
+  },
   BrowserView: {
     defineRPC: (config: RpcConfig) => {
       requestNames = Object.keys(config.handlers.requests)
@@ -66,6 +73,9 @@ const fakeSdk = {
         rpcBound: options.rpc === fakeRpc
       })
     }
+  },
+  Screen: {
+    captureRegion: () => null
   },
   Utils: {
     openFileDialog: async (options: unknown): Promise<ReadonlyArray<string>> => {

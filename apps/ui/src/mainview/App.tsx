@@ -16,6 +16,7 @@ import {
   BookOpen,
   CheckCircle2,
   Copy,
+  HelpCircle,
   Plus,
   RotateCcw,
   Sparkles,
@@ -591,6 +592,26 @@ function App() {
                             onClick={() => controller.runCommand("chat.retry")}
                           >
                             <RotateCcw size={12} />
+                          </Button>
+                        ) :
+                        null}
+                      {/* The Explainer (AgentRoles.ts) on a failed turn: an embedded answer, only where the explain flow registers. */}
+                      {entry.message.status === "failed" && controller.commands.find("agent.explain") !== undefined ?
+                        (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="message-action"
+                            data-flow="agent.explain"
+                            aria-label="Explain this"
+                            title="Explain this"
+                            onClick={() =>
+                              controller.runCommandArgs(
+                                "agent.explain",
+                                `This turn failed: ${systemNoteLabel(entry.message)}. ${entry.message.text}`.trim()
+                              )}
+                          >
+                            <HelpCircle size={12} />
                           </Button>
                         ) :
                         null}

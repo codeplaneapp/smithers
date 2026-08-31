@@ -23,13 +23,8 @@ export default {
     },
     watchIgnore: ["dist/**"],
     mac: {
-      /*
-       * CEF so a dev build exposes a loopback CDP port (9222-9232, or
-       * ELECTROBUN_CEF_REMOTE_DEBUGGING_PORT) and Playwright can attach to
-       * the real window (LOCAL-APP.md, test tier T2).
-       */
-      bundleCEF: true,
-      defaultRenderer: "cef",
+      bundleCEF: false,
+      defaultRenderer: "native",
       /*
        * §27.2: the bundle's Info.plist declared CFBundleIconFile "AppIcon"
        * and shipped no icon, so macOS drew the generic application icon in

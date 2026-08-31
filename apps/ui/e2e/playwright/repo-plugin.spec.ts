@@ -99,13 +99,13 @@ test("a repo with .smithers/UI.json opens with the plugin card, no panel, and Ru
   await expect(polish.locator("[data-badge=\"approval\"]")).toContainText("approval")
   await expect(polish.locator("[data-badge=\"agentic\"]")).toContainText("agentic")
 
-  // The targets card still loads, grouped workspace then package; the panel is skipped.
+  // The targets card still loads, every row stamped with its workspace; the panel is skipped.
   const targets = targetsCard(page)
   await expect(targets).toBeVisible()
   await expect.poll(() => targets.locator("[data-target-row]").count(), { timeout: 60_000 }).toBeGreaterThanOrEqual(2)
-  await expect(targets.locator("[data-workspace=\".\"]")).toBeVisible()
-  await expect(targets.locator("[data-workspace=\"tools\"]")).toBeVisible()
-  await expect(targets.locator("[data-workspace=\"tools\"] [data-target-row=\"//:polish\"]")).toBeVisible()
+  await expect(targets.locator("[data-target-row][data-workspace=\".\"]").first()).toBeVisible()
+  await expect(targets.locator("[data-target-row][data-workspace=\"tools\"]").first()).toBeVisible()
+  await expect(targets.locator("[data-target-row=\"//:polish\"][data-workspace=\"tools\"]")).toBeVisible()
   await expect(htmlCard(page)).toHaveCount(0)
 
   // Run the tools entry: the run streams from join(repo, "tools") to a target-run card.

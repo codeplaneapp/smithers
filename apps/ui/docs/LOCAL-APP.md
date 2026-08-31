@@ -133,10 +133,16 @@ pnpm --filter smithers-ui typecheck
 pnpm --filter smithers-ui test
 pnpm --filter smithers-ui build:web
 pnpm --filter smithers-ui test:e2e
-pnpm --filter smithers-ui test:e2e:native
+bun run test:e2e
 ```
 
 The web build is the Cloud Worker asset and the local server asset. Heavy graph
 and markdown-editor modules are dynamic chunks, so they are absent from the
 initial application chunk.
 
+The root `test:e2e` command packages the stable macOS app with Electrobun's
+native renderer, launches the actual bundle, and drives it through a loopback
+bridge that exists only when `SMITHERS_E2E_BRIDGE=1` and requires a random
+bearer token. The runner redirects application state to a temporary home,
+keeps the local origin fixed across relaunch, and preserves failure artifacts
+under `apps/ui/test-results/electrobun-packaged/`.

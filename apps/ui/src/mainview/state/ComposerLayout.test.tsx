@@ -248,9 +248,28 @@ describe("the composer's + menu and surface pill", () => {
     await view.act(() => add?.click())
     expect(store.session().addMenuOpen).toBe(true)
     const items = [...view.host.querySelectorAll<HTMLElement>("[data-testid=\"composer-add-menu\"] [role=\"menuitem\"]")]
-    expect(items.map((item) => text(item))).toEqual(["Add files…", "New connector…", "New agent…Claude Code"])
+    expect(items.map((item) => text(item))).toEqual([
+      "Add files…",
+      "New connector…",
+      // The named roles (AgentRoles.ts): only the orchestrator's harness is installed in this fixture.
+      "Orchestrator · Fable 5will@example.com",
+      "Explainer · Kimi K3opencode-kimi is not installed",
+      "Implementation · GPT-5.6 Solcodex is not installed",
+      "Trivial implementation · GPT-5.6 Lunacodex is not installed",
+      "UI · Kimi K3opencode-kimi is not installed",
+      "Fast UI · Cerebras gpt-oss-120bopencode-cerebras is not installed",
+      "New agent…Claude Code"
+    ])
+    // The orchestrator's harness is installed, so its role row is enabled; the explainer's is not.
     expect(items[2]?.hasAttribute("disabled")).toBe(false)
-    expect(items.map((item) => item.dataset.flow)).toEqual(["files.add", "connector.add", "tab.harness"])
+    expect(items[3]?.hasAttribute("disabled")).toBe(true)
+    expect(items[8]?.hasAttribute("disabled")).toBe(false)
+    expect(items.map((item) => item.dataset.flow)).toEqual([
+      "files.add",
+      "connector.add",
+      ...Array<string>(6).fill("agent.role"),
+      "tab.harness"
+    ])
     // No jjhub on the local host: no flow.create, so no "New flow…" is offered.
     expect(controller.commands.find("flow.create")).toBeUndefined()
 

@@ -264,14 +264,80 @@ describe("createTargetRunner", () => {
 
 describe("runArgv picks the CLI form the workspace's authoring surface accepts", () => {
   const { runArgv } = require("./Targets") as typeof import("./Targets")
-  test("a WORKSPACE.ts workspace runs the bare-label form", () => {
+  test("a WORKSPACE.ts workspace runs the bare-label form, still with --ui plain so FORCE_COLOR cannot hide the status lines", () => {
     const exists = (path: string) => path.endsWith("/WORKSPACE.ts")
-    expect(runArgv("/w", "//src:lint", ["lint"], exists)).toEqual(["//src:lint"])
+    expect(runArgv("/w", "//src:lint", ["lint"], exists)).toEqual(["//src:lint", "--ui", "plain"])
   })
   test("a BUILD.ts-rooted workspace runs `<verb> <label> --ui plain` with the verb from the first kind", () => {
     const exists = () => false
     expect(runArgv("/w", "//packages/canonical:check", ["build"], exists)).toEqual(["build", "//packages/canonical:check", "--ui", "plain"])
     expect(runArgv("/w", "//:knownFiles", ["run", "lint"], exists)).toEqual(["run", "//:knownFiles", "--ui", "plain"])
     expect(runArgv("/w", "//x:y", [], exists)).toEqual(["build", "//x:y", "--ui", "plain"])
+  })
+})
+
+/*
+ * Pattern runs (LOCAL-APP.md "Targets: load and run"): `<verb> <pattern>`
+ * is how CI runs everything (`smithers-build ci '//packages/...'`), and the
+ * executor's trailing results block is the one place each target's RULE is
+ * printed. The fixture is the real output of
+ * `smithers-build ci '//packages/canonical/...' --ui plain` on this checkout.
+ */
+describe("pattern runs and the results block", () => {
+  const { createRunStdoutParser, patternRunArgv } = require("./Targets") as typeof import("./Targets")
+  const REAL_CI_OUTPUT = [
+    "//packages/canonical:docs  ran  13ms",
+    "//packages/canonical:fmt  ran  394ms",
+    "//packages/canonical:check  ran  836ms",
+    "3 targets: 0 hit, 3 ran, 0 failed, 0 skipped (2.6s)",
+    "verb: ci",
+    "pattern: //packages/canonical/...",
+    "jobs: 16",
+    "durationMs: 2551.275042",
+    "counts:",
+    "  hit: 0",
+    "  ran: 3",
+    "  failed: 0",
+    "  skipped: 0",
+    "ok: true",
+    "results[3]{label,target,status,durationMs,key}:",
+    "  \"//packages/canonical:fmt\",Dprint,ran,393.87254099999996,ce06981499a592588e6fcb4c617f00351198489566c0d07eec3b1db441f5d1b6",
+    "  \"//packages/canonical:check\",Typecheck,ran,835.5130409999997,d88ca8e8c34b996daad7b47c8bd24046963f957e141c3649facc216d875b56d9",
+    "  \"//packages/canonical:docs\",DocsParity,ran,12.953042000000096,9c99919d39ddfd9e1cc850480c9913756eb82ce6cd51f3d7e70666ce5800951c",
+    ""
+  ].join("\n")
+
+  test("patternRunArgv is the verb over the pattern with the plain renderer, on either authoring surface", () => {
+    expect(patternRunArgv("ci", "//packages/...")).toEqual(["ci", "//packages/...", "--ui", "plain"])
+  })
+
+  test("the status lines fill the rows, the summary lands, and the results block names each target's rule", () => {
+    const parser = createRunStdoutParser({ startedAt: 1_000 })
+    const events = parser.push("stdout", REAL_CI_OUTPUT, 4_000)
+    const nodes = events.filter((event) => event.type === "node")
+    expect(nodes.map((event) => event.type === "node" ? `${event.node.label} ${event.node.status}` : "")).toEqual([
+      "//packages/canonical:docs ran",
+      "//packages/canonical:fmt ran",
+      "//packages/canonical:check ran",
+      "//packages/canonical:fmt ran",
+      "//packages/canonical:check ran",
+      "//packages/canonical:docs ran"
+    ])
+    const summary = events.find((event) => event.type === "summary")
+    expect(summary?.type === "summary" ? summary.summary : undefined).toMatchObject({ total: 3, hit: 0, ran: 3, failed: 0, skipped: 0, durationMs: 2600, ok: true })
+    const timings = parser.timings()
+    expect(timings.map((node) => [node.label, node.rule, node.key?.slice(0, 8)])).toEqual([
+      ["//packages/canonical:docs", "DocsParity", "9c99919d"],
+      ["//packages/canonical:fmt", "Dprint", "ce069814"],
+      ["//packages/canonical:check", "Typecheck", "d88ca8e8"]
+    ])
+    // The `verb:` / `counts:` envelope lines are not targets and never become rows.
+    expect(timings).toHaveLength(3)
+  })
+
+  test("a results row for a target the status lines never named still becomes a row with its rule", () => {
+    const parser = createRunStdoutParser({ startedAt: 0 })
+    parser.push("stdout", "results[1]{label,target,status,durationMs,key}:\n  \"//x:y\",Vitest,failed,12.5,abc\nok: false\n", 50)
+    expect(parser.timings()).toEqual([{ label: "//x:y", status: "failed", rule: "Vitest", key: "abc", startedAt: 37, endedAt: 50, durationMs: 13 }])
   })
 })

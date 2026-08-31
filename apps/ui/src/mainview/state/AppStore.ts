@@ -40,6 +40,7 @@ import {
   MessageSchema,
   PinnedRepoSchema,
   RECOMMENDATION_ID,
+  StarredTargetSchema,
   RecommendationSchema,
   repoKeyOf,
   RepoSchema,
@@ -69,6 +70,7 @@ import type {
   Palette,
   PinnedRepo,
   Recommendation,
+  StarredTarget,
   Repo,
   RepositoryCapabilityPattern,
   Session,
@@ -269,6 +271,7 @@ const PERSISTED_COLLECTION_SPECS: ReadonlyArray<LegacyCollectionSpec> = [
   { id: "app-harnesses", schema: HarnessSchema },
   { id: "app-repos", schema: RepoSchema },
   { id: "app-pinned-repos", schema: PinnedRepoSchema },
+  { id: "app-starred-targets", schema: StarredTargetSchema },
   { id: "app-workspaces", schema: WorkspaceSchema },
   { id: "app-branches", schema: BranchSchema },
   { id: "app-frames", schema: FrameSchema },
@@ -499,6 +502,7 @@ export interface AppCollections {
   readonly repos: ReturnType<typeof createRepoCollection>
   /** The sidebar's pinned repositories; tabs nest under them (docs/LOCAL-APP.md "Tabs"). */
   readonly pinnedRepos: ReturnType<typeof createPinnedRepoCollection>
+  readonly starredTargets: ReturnType<typeof createStarredTargetCollection>
   readonly workspaces: ReturnType<typeof createWorkspaceCollection>
   readonly branches: ReturnType<typeof createBranchCollection>
   readonly frames: ReturnType<typeof createFrameCollection>
@@ -659,6 +663,13 @@ const createPinnedRepoCollection = (backend: PersistenceBackend) =>
     schema: PinnedRepoSchema
   })
 
+const createStarredTargetCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-starred-targets",
+    getKey: (star: StarredTarget) => star.id,
+    schema: StarredTargetSchema
+  })
+
 const createWorkspaceCollection = (backend: PersistenceBackend) =>
   createPersistedCollection(backend, {
     id: "app-workspaces",
@@ -710,6 +721,7 @@ const seed = async (collections: AppCollections): Promise<void> => {
     collections.harnesses.preload(),
     collections.repos.preload(),
     collections.pinnedRepos.preload(),
+    collections.starredTargets.preload(),
     collections.workspaces.preload(),
     collections.branches.preload(),
     collections.frames.preload(),
@@ -944,6 +956,7 @@ export const createAppStore = async (
     harnesses: createHarnessCollection(resolvedBackend),
     repos: createRepoCollection(resolvedBackend),
     pinnedRepos: createPinnedRepoCollection(resolvedBackend),
+    starredTargets: createStarredTargetCollection(resolvedBackend),
     workspaces: createWorkspaceCollection(resolvedBackend),
     branches: createBranchCollection(resolvedBackend),
     frames: createFrameCollection(resolvedBackend),
@@ -1013,6 +1026,7 @@ export const createAppStore = async (
         collections.harnesses.utils.acceptMutations(transaction),
         collections.repos.utils.acceptMutations(transaction),
         collections.pinnedRepos.utils.acceptMutations(transaction),
+        collections.starredTargets.utils.acceptMutations(transaction),
         collections.workspaces.utils.acceptMutations(transaction),
         collections.branches.utils.acceptMutations(transaction),
         collections.frames.utils.acceptMutations(transaction),
@@ -2388,6 +2402,38 @@ export const createAppStore = async (
           if (collections.pinnedRepos.get(transition.id) === undefined) return
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.activeRepoKey = transition.id
+            draft.revision = revision
+          })
+          break
+        }
+        case "target.starred":
+        case "target.unstarred": {
+          /*
+           * The collection is the authority; the open targets card mirrors
+           * the repository's stars in its payload so the table stays a
+           * projection of one record and survives a reload the same way.
+           */
+          if (transition.type === "target.starred") {
+            if (collections.starredTargets.get(transition.star.id) === undefined) {
+              collections.starredTargets.insert({ ...transition.star })
+            }
+          } else if (collections.starredTargets.get(transition.id) !== undefined) {
+            collections.starredTargets.delete(transition.id)
+          }
+          const repoKey = transition.type === "target.starred" ? transition.star.repoKey : transition.id.split("::")[0]
+          const starred = [...collections.starredTargets.values()]
+            .filter((star) => star.repoKey === repoKey)
+            .map((star) => star.label)
+            .sort()
+          for (const card of collections.cards.values()) {
+            if (card.kind !== "targets" || card.payload.repoId !== transition.repoId) continue
+            /* Spread the stored value, not the draft: a drafted nested record fails zod's plain-object check. */
+            const payload = { ...card.payload, starred }
+            collections.cards.update(card.id, (draft) => {
+              if (draft.kind === "targets") draft.payload = payload
+            })
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
             draft.revision = revision
           })
           break

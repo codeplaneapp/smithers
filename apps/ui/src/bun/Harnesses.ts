@@ -149,6 +149,8 @@ const binaryOnly: Signal = { status: "binary-only", account: null }
 
 /** The Kimi model OpenCode's "Kimi For Coding" provider serves (`opencode models kimi-for-coding`). */
 export const OPENCODE_KIMI_MODEL = "kimi-for-coding/k3"
+/** The Cerebras model OpenCode serves for the fast-ui role (`opencode models cerebras`). */
+export const OPENCODE_CEREBRAS_MODEL = "cerebras/gpt-oss-120b"
 
 const apiKey = (name: string): Signal => ({ status: "api-key", account: { label: name } })
 
@@ -276,6 +278,25 @@ export const DETECTORS: ReadonlyArray<Detector> = [
         return { status: "signed-in", account: { label: "kimi-for-coding" } }
       }
       const key = firstEnv(host.env, ["KIMI_API_KEY"])
+      return key === undefined ? binaryOnly : apiKey(key)
+    }
+  },
+  /*
+   * OpenCode on the Cerebras credential (the "fast-ui" role): `opencode
+   * providers list` (1.18.22) names "Cerebras", read from CEREBRAS_API_KEY,
+   * and `opencode models cerebras` lists gpt-oss-120b and gemma-4-31b.
+   */
+  {
+    id: "opencode-cerebras",
+    displayName: "OpenCode · Cerebras",
+    binary: "opencode",
+    launch: ["opencode", "--model", OPENCODE_CEREBRAS_MODEL],
+    signal: (host) => {
+      const auth = readJson(host, join(host.home, ".local", "share", "opencode", "auth.json"))
+      if (auth !== null && hasNonEmptyStringDeep(auth["cerebras"])) {
+        return { status: "signed-in", account: { label: "cerebras" } }
+      }
+      const key = firstEnv(host.env, ["CEREBRAS_API_KEY"])
       return key === undefined ? binaryOnly : apiKey(key)
     }
   },
