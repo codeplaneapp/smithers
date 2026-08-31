@@ -12718,6 +12718,23 @@ A 0.x database is an archive-only file. No read-only history importer ships in
 this candidate. Project conventions in 1.0 are `flows/**/{flow.ts,flow.mdx,SKILL.md}`
 for flows and `.flows/` for state; `~/.smithers` is not read at all.
 
+### Flows
+
+A flow lives at `flows/<name>/flow.ts`, `flow.mdx`, or `SKILL.md`, and
+`smithers ls` lists the ones a project publishes.
+
+The control plane reserves one `system/*` flow id per command-line verb so a
+projection has a row to hang off, and 1.0.0-rc.0 ships a body for none of them.
+Every verb that takes a flow id refuses a reserved id outright:
+
+```
+smithers run system/plan: system/plan is a reserved system flow id and carries no body in 1.0.0-rc.0, so a launch would park with nothing to run. Name a flow from `smithers ls`. See https://smithers.sh/migration/1.0#flows
+```
+
+A bodiless flow plans and launches perfectly well: the run row is durable and
+the receipt says `Accepted`, and then nothing runs. Naming a flow from
+`smithers ls` is the fix.
+
 ### Removed commands
 
 Every verb below exits 1 and prints the sentence under its heading. The
@@ -12819,6 +12836,18 @@ CLI reference lists the commands that ship.
 | `global` | `--backend pglite\|postgres` | SQLite only (`--backend sqlite` is accepted as a no-op) |
 | `global` | `--backend sqlite` | SQLite only (`--backend sqlite` is accepted as a no-op) |
 | `init` | `--global` | rc.0 has no global pack; seats resolve from environment keys |
+
+##### init
+
+`init --global` is removed. 1.0.0-rc.0 has no global pack and reads no `~/.smithers`: state is the project's `.flows/` directory and nothing else, and seats resolve from environment keys. Run `smithers init` in the project.
+
+##### plan-admission
+
+`up --max-concurrency <n>` is removed. Parallelism is declared by the flow, and the plan the control plane admits carries the bound. A flow that should run fewer steps at once says so in its own body.
+
+##### supervision
+
+`up --force`, `up --steal-ownership`, `up --resume-claim-owner`, `up --resume-claim-heartbeat`, `up --resume-restore-owner`, and `up --resume-restore-heartbeat` are removed. Ownership recovery is not an operator decision in 1.0.0-rc.0: the run driver's heartbeat sweep reclaims a run whose owner stopped renewing its lease, and a second process that tries to drive the same run is refused rather than allowed to steal it. Run `smithers up` again and let the sweep do it.
 
 #### add
 
