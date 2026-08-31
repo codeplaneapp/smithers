@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync, readdirSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { dirname, join, resolve, sep } from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
 import {
@@ -288,4 +288,59 @@ test("the install docs pin the drifted @effect/platform-node-shared to the packe
     )
     assert.match(source, /overrides/, `${relative} must name the overrides field`)
   }
+})
+
+test("the overrides recipe names the npm ls form that fails and the reinstall it needs", () => {
+  // Two measured facts about npm 11.16.0 that the recipe has to carry, or a
+  // reader follows it and sees nothing change.
+  //
+  // Bare `npm ls` prints direct dependencies only. The drifted copy nests
+  // below that depth, so the bare form exits 0 with the drift in place; the
+  // forms that walk the tree, `npm ls --all` and `npm ls <name>`, are the ones
+  // that exit 1. An unqualified "npm ls exits 1" sends a reader to the one
+  // command that reports the problem as absent.
+  //
+  // And npm does not reconcile an installed tree when `overrides` is edited
+  // afterward. With `node_modules` and `package-lock.json` on disk, the
+  // install answers `up to date` and leaves the drifted copy nested, so the
+  // pin only takes effect on a clean install.
+  for (const relative of ["README.md", join("docs", "pages", "installation.md")]) {
+    const source = readFileSync(join(repoRoot, relative), "utf8")
+    assert.match(
+      source,
+      /npm ls --all/,
+      `${relative} must attach the exit-1 claim to a form that walks the tree`
+    )
+    assert.match(
+      source,
+      /package-lock\.json/,
+      `${relative} must tell an already-installed project to drop its lockfile and reinstall`
+    )
+    assert.match(
+      source,
+      /node_modules/,
+      `${relative} must tell an already-installed project to drop node_modules and reinstall`
+    )
+  }
+})
+
+test("every published package packs the markdown inside the source tree it ships", () => {
+  // The `@smthrs/memory` rule stated once for every package instead of once per
+  // file: a package that ships `src/**/*.ts` ships its source as the thing a
+  // reader reads, so the prose filed beside that source belongs in the same
+  // tarball. `packages/keys/src/README.md` is the file that named the gap.
+  const manifests = readWorkspaceManifests()
+  const unpacked = []
+  for (const directory of workspaces) {
+    const source = join(repoRoot, "packages", directory, "src")
+    if (!existsSync(source)) continue
+    const files = manifests.get(directory).files ?? []
+    for (const entry of readdirSync(source, { recursive: true })) {
+      const relative = `src/${String(entry).split(sep).join("/")}`
+      if (!relative.endsWith(".md")) continue
+      if (!files.some((pattern) => packsPath(pattern, relative))) unpacked.push(`${directory}/${relative}`)
+    }
+  }
+
+  assert.deepEqual(unpacked, [], "these markdown files sit in a packed source tree and no files glob packs them")
 })

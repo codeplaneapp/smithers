@@ -150,8 +150,10 @@ unsupported, because schema internals are not interoperable between instances.
 Pin one transitive package as well. `@effect/platform-node@4.0.0-rc.108` asks
 for `@effect/platform-node-shared` `^4.0.0-rc.108`, the registry answers
 `4.0.0-rc.112`, and that version's own peer range demands Effect
-`4.0.0-rc.112`. Your project still runs on a single Effect copy, and `npm ls`
-exits 1 with `invalid: "^4.0.0-rc.112"` until you override the range.
+`4.0.0-rc.112`. Your project still runs on a single Effect copy, and
+`npm ls --all` exits 1 with `invalid: "^4.0.0-rc.112"` until you override the
+range. Bare `npm ls` prints direct dependencies only, so it exits 0 with the
+drifted copy nested below that depth.
 
 :::code-group
 
@@ -172,8 +174,14 @@ overrides:
 
 pnpm 11 no longer reads a `pnpm` field from `package.json`, so a
 `pnpm.overrides` block there is ignored with a warning and the drifted version
-is installed anyway. With the pin applied, `npm ls` exits 0 and the tree holds
-one `@effect/platform-node-shared@4.0.0-rc.108`.
+is installed anyway. With the pin applied on a clean install, every `npm ls`
+form exits 0 and the tree holds one `@effect/platform-node-shared@4.0.0-rc.108`.
+
+Add the pin before the first install. npm does not reconcile a tree that is
+already on disk: with `node_modules` and `package-lock.json` present it answers
+`up to date` and leaves the drifted copy nested. In a project that is already
+installed, delete `node_modules` and the lockfile (`package-lock.json` or
+`bun.lock`) and install again.
 
 ### Install the command
 
