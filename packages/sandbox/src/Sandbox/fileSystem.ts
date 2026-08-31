@@ -193,10 +193,11 @@ export const fileSystem = (session: Session): FileSystem.FileSystem => {
       const result = yield* probe(session, "readDirectory", path, script)
       if (result.code === absentExit) return yield* Effect.fail(notFound("readDirectory", path))
       if (result.code !== 0) return yield* Effect.fail(probeFailed("readDirectory", path)(result))
+      // Sorted for determinism: `ls` and `find` order differ by platform.
       const lines = result.stdout.split("\n").filter((line) => line !== "")
-      if (!recursive) return lines
+      if (!recursive) return lines.sort()
       const prefix = `${path.replace(/\/+$/, "")}/`
-      return lines.map((line) => line.startsWith(prefix) ? line.slice(prefix.length) : line)
+      return lines.map((line) => line.startsWith(prefix) ? line.slice(prefix.length) : line).sort()
     }),
     remove: Effect.fn("Sandbox.fileSystem.remove")(function*(path, options) {
       const flags = `${options?.recursive === true ? "-r " : ""}${options?.force === true ? "-f " : ""}`

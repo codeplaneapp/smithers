@@ -298,7 +298,7 @@ describe("Sandbox.fileSystem", () => {
         })
       )
       expect(outcome.flat).toEqual(["a", "z.txt"])
-      expect(outcome.deep).toEqual(["a", "a/b.txt", "/elsewhere/x"])
+      expect(outcome.deep).toEqual(["/elsewhere/x", "a", "a/b.txt"])
       expect(outcome.gone).toBe("NotFound")
       expect(outcome.broken).toBe("Unknown")
     }))

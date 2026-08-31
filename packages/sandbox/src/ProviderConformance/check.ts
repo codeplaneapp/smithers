@@ -31,7 +31,8 @@ const writesItsOutput = (provider: Provider, commands: Commands): Effect.Effect<
   Effect.map(
     inSession(
       provider,
-      Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.string(ChildProcess.make(commands.writes)))
+      Effect.flatMap(ChildProcessSpawner, (spawner) =>
+        spawner.string(ChildProcess.make(commands.writes, { shell: commands.shell ?? false })))
     ),
     (exit) =>
       Exit.isSuccess(exit) && exit.value === commands.output ? undefined : {
@@ -45,7 +46,8 @@ const reportsANonzeroExit = (provider: Provider, commands: Commands): Effect.Eff
   Effect.map(
     inSession(
       provider,
-      Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.exitCode(ChildProcess.make(commands.fails)))
+      Effect.flatMap(ChildProcessSpawner, (spawner) =>
+        spawner.exitCode(ChildProcess.make(commands.fails, { shell: commands.shell ?? false })))
     ),
     (exit) =>
       Exit.isSuccess(exit) && exit.value === commands.failureCode ? undefined : {
@@ -72,7 +74,7 @@ const signalsARunningCommand = (provider: Provider, commands: Commands): Effect.
       provider,
       Effect.scoped(Effect.gen(function*() {
         const spawner = yield* ChildProcessSpawner
-        const handle = yield* spawner.spawn(ChildProcess.make(commands.runs))
+        const handle = yield* spawner.spawn(ChildProcess.make(commands.runs, { shell: commands.shell ?? false }))
         yield* handle.kill()
         // A `kill` that RETURNS is not a `kill` that happened. An adapter whose
         // signal goes nowhere satisfies the type and leaves every cancelled

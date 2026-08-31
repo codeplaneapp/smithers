@@ -20,5 +20,6 @@ export const posixCommands: Commands = {
   output: "sandbox conformance",
   fails: "exit 23",
   failureCode: 23,
-  runs: "sleep 60"
+  runs: "sleep 60",
+  shell: true
 }
