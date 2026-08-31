@@ -233,7 +233,7 @@ green:
 | `flow`       | rejects a very deep unknown payload with a typed error instead of overflowing the stack     | `test/Graph.test.ts`                   |
 | `kernel`     | rejects an envelope carrying request-only payload fields                                    | `test/GrantEvent.test.ts`              |
 | `kernel`     | fails closed when a page repeats its last sequence with `hasMore`                           | `test/JournalGrantStoreReplay.test.ts` |
-| `keys`       | decodes a `key2_` key, which the version marker promises stays readable                     | `test/Key.test.ts`                     |
+| `keys`       | rejects an unsupported `key2_` key until its complete format is implemented                  | `test/Key.test.ts`                     |
 
 Agent-group packages are outside this register and outside the guard; F4's
 `harness` entry belongs to that group.

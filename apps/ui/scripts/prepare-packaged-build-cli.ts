@@ -75,6 +75,7 @@ const prepare = async (): Promise<void> => {
   )
   await Promise.all([
     access(resolve(destination, "src", "main.js"), constants.R_OK),
+    access(resolve(destination, "node_modules", "@smthrs", "targets", "package.json"), constants.R_OK),
     access(resolve(destination, "node_modules", "tsx", "dist", "loader.mjs"), constants.R_OK),
     access(resolve(destination, "node_modules", "typescript", "package.json"), constants.R_OK)
   ])

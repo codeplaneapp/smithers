@@ -1629,6 +1629,7 @@
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
+        "@effect/platform-node": "4.0.0-rc.108",
         "@effect/vitest": "4.0.0-rc.108",
         "@eslint/js": "9.39.1",
         "@types/node": "25.9.5",

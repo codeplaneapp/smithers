@@ -1,7 +1,7 @@
 // Deep reviewed and polished by a human on 2026-08-31.
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
-import { Crypto, Effect, Layer, PlatformError, Schema } from "effect"
+import { Cause, Crypto, Effect, Exit, Layer, PlatformError, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Keys from "../src/index.ts"
 
@@ -54,7 +54,10 @@ describe("stored key validation", () => {
         `key1_${"a".repeat(63)}`,
         `key1_${"a".repeat(65)}`,
         "key1_invalid",
-        ""
+        "",
+        null,
+        1,
+        {}
       ]
     ) {
       expect(() => Schema.decodeUnknownSync(Keys.StoredKey)(value)).toThrow()
@@ -134,6 +137,37 @@ describe("key derivation", () => {
         }
       }
     })
+  })
+
+  it("redacts non-canonical key material even when input reporting is requested", () => {
+    const secret = "canonical-secret-that-must-not-appear"
+    const error = Effect.runSync(Effect.flip(
+      provideCrypto(
+        Schema.decodeUnknownEffect(Keys.Key)({ [secret]: 1n }, { reportInput: true })
+      )
+    ))
+    expect(error.message).toContain("[canonicalization_failed] Key input could not be canonicalized")
+    expect(error.message).not.toContain(secret)
+    expect(error.issue).not.toHaveProperty("actual")
+    expect(error.issue).toMatchObject({
+      issue: {
+        annotations: {
+          code: "canonicalization_failed",
+          cause: expect.objectContaining({
+            _tag: "@smthrs/keys/KeyDerivationError",
+            cause: expect.objectContaining({ _tag: "SchemaError" })
+          })
+        }
+      }
+    })
+  })
+
+  it("reports a missing Crypto service as an Effect configuration defect", () => {
+    const exit = Effect.runSyncExit(Keys.deriveKey({ operation: "compile" }) as Effect.Effect<never, never>)
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(Cause.pretty(exit.cause)).toContain("Service not found: effect/Crypto")
+    }
   })
 
   it("cannot reconstruct its input", () => {

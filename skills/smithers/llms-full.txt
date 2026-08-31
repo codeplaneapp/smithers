@@ -5465,11 +5465,11 @@ collisions. `TextEncoder` is an explicit host prerequisite available in every
 supported Smithers runtime. No normalization is performed, so NFC and NFD text
 remain distinct inputs.
 
-Byte input is copied when the returned Effect begins and before the host is
-called. Host output is copied and must contain exactly 32 bytes. `Buffer` is a
-`Uint8Array` and is accepted; other buffer and view types are not. The API is
-one-shot and requires the complete input plus its snapshot in memory. There is
-no incremental or streaming entry point.
+`digest` copies byte input when its Effect begins and before the host is called;
+`digestSync` copies during the call. Host output is copied and must contain
+exactly 32 bytes. `Buffer` is a `Uint8Array` and is accepted; other buffer and
+view types are not. The API is one-shot and requires the complete input plus
+its snapshot in memory. There is no incremental or streaming entry point.
 
 ### Failure policy
 
@@ -8809,7 +8809,7 @@ The brand behind `digestInput` is private, so a plain object that merely has a `
 | `Plan` | schema + type | `planId`, `flow`, `generation`, `baseDigest`, `digest`, `nodes` |
 | `PlanNode` | schema + type | `id`, `kind`, `key`, `material`, `effects`, `dependsOn`, `conflicts`, `strategy`, `runtime`, `priority`, `generation` |
 | `NodeDraft` | interface | a node without its key, plus optional `kind`, `priority`, `conflictStrategy`, `runtimeStrategy` |
-| `KeyDigest` | schema | `key1_` plus 64 hex characters |
+| `KeyDigest` | schema | compatibility alias of `@smthrs/keys` `StoredKey`; currently `key1_` plus 64 hex characters |
 | `NodeEffects` | schema + type | `reads`, `writes`, and a `boundaryMode` of `hard` or `expected` |
 | `ConflictAnnotation` | schema + type | `with`, `paths`, `strategy`, `runtime` |
 | `PairStrategy` | schema + type | `serialize`, `lane`, `fail` |

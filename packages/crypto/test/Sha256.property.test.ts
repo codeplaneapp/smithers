@@ -13,6 +13,9 @@ const params = {
 
 const runDigest = (input: string | Uint8Array) => Effect.runSync(digest(input).pipe(Effect.provide(NodeCrypto.layer)))
 
+const runSynchronousService = (input: string | Uint8Array) =>
+  Effect.runSync(Effect.provideService(digest(input), Crypto.Crypto, syncCrypto))
+
 const isWellFormed = (value: string): boolean => {
   for (let index = 0; index < value.length; index++) {
     const code = value.charCodeAt(index)
@@ -41,7 +44,7 @@ describe("SHA-256 properties", () => {
         expect(expected).toMatch(/^[0-9a-f]{64}$/)
         expect(digestSync(encoder.encode(text))).toBe(expected)
         expect(runDigest(text)).toBe(expected)
-        expect(runDigest(text)).toBe(expected)
+        expect(runSynchronousService(text)).toBe(expected)
       }),
       { ...params, examples: [[""], ["\ud800"], ["\ud83d\ude00"], ["\ufffd"], ["\0"]] }
     )

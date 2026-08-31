@@ -10,6 +10,7 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { gather, type GatheredRun, providerFailure, remoteProcessOf } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
+import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
 import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
 import type { Provider } from "../Sandbox/Provider.ts"
 import type { Session } from "../Sandbox/Session.ts"
@@ -49,6 +50,24 @@ const parentOf = (path: string): string | undefined => {
   return separator > 0 ? path.slice(0, separator) : undefined
 }
 
+/** The session-private guest directory spawned commands record their pids in. */
+const pidDirectory = "/tmp/.smthrs-sbx"
+
+/**
+ * The guest script that signals one recorded pid and every descendant.
+ *
+ * Children first, depth-first, so a parent cannot reap or respawn under the
+ * walk; the recursion runs in subshells because POSIX `sh` has no local
+ * variables. `kill -s` takes the un-prefixed POSIX signal name, the one form
+ * busybox and dash agree on.
+ */
+const killScript = (pidfile: string, signal: string): string =>
+  `p=$(cat ${pidfile}) || exit 0; ` +
+  `kids() { for d in /proc/[0-9]*; do read -r _ _ _ pp _ < "$d/stat" 2>/dev/null || continue; ` +
+  `[ "$pp" = "$1" ] || continue; c=\${d#/proc/}; ( kids "$c" ); echo "$c"; done; }; ` +
+  `for k in $(kids "$p"); do kill -s ${signal} "$k" 2>/dev/null; done; ` +
+  `kill -s ${signal} "$p" 2>/dev/null; exit 0`
+
 /**
  * Builds a sandbox provider whose machines are containers this host's
  * container engine runs.
@@ -62,9 +81,14 @@ const parentOf = (path: string): string | undefined => {
  * holds — a crashed run's leftover — is reattached rather than refused, so
  * resuming a session key lands in the machine it had.
  *
- * Per-command `kill` is deliberately absent: signalling the local CLI client
- * does not reliably reach the guest process, and pretending otherwise is the
- * failure the conformance suite exists to catch. Teardown is the kill.
+ * Per-command `kill` is real, and it has to be indirect: signalling the local
+ * CLI client does not reach the guest process (Docker's exec client detaches
+ * from it), which is exactly the silent-no-op kill the conformance suite
+ * exists to catch. So every spawned command records its own pid in a
+ * session-private guest directory first, and `kill` execs a second command
+ * that signals that pid and every descendant found under `/proc`. The pidfile
+ * directory is wiped on acquire, so a reattached container cannot mis-target
+ * a previous incarnation's pids.
  *
  * @category constructors
  * @since 0.1.0
@@ -126,18 +150,24 @@ export const make = (options: ContainerSandboxOptions): Provider => {
             yield* step(`the workspace ${workdir} could not be prepared in ${name}`, [
               "exec",
               name,
-              "mkdir",
-              "-p",
-              workdir
+              "sh",
+              "-c",
+              `mkdir -p ${CommandLine.quote(workdir)} && rm -rf ${pidDirectory} && mkdir -p ${pidDirectory}`
             ])
           }),
           () => Effect.ignore(run(["rm", "--force", name]))
         )
+        // Pidfiles are numbered per acquire; the wipe above means a reattached
+        // container starts from a clean directory, so the counter cannot
+        // collide with a previous incarnation's files.
+        let nextPidfile = 0
+        const pidfiles = new WeakMap<RemoteProcess, string>()
         const session: Session = {
           id: sessionKey,
           remoteId: name,
           workdir,
           spawn: Effect.fnUntraced(function*(command, spawnOptions) {
+            const pidfile = `${pidDirectory}/${nextPidfile++}.pid`
             const args = [
               "exec",
               "--workdir",
@@ -148,13 +178,33 @@ export const make = (options: ContainerSandboxOptions): Provider => {
               name,
               "sh",
               "-c",
-              command
+              `echo $$ > ${pidfile}; exec sh -c ${CommandLine.quote(command)}`
             ]
             const handle = yield* options.spawner.spawn(ChildProcess.make(program, args)).pipe(
               Effect.mapError(providerFailure("spawn_error", `\`${command}\` could not start in ${name}`))
             )
-            return remoteProcessOf(handle, command)
+            const process = remoteProcessOf(handle, command)
+            pidfiles.set(process, pidfile)
+            return process
           }),
+          kill: (process, signal) =>
+            Effect.suspend(() => {
+              const pidfile = pidfiles.get(process)
+              /* v8 ignore next 3 -- `spawn` records every process it returns and a `RemoteProcess` has no other source, so the guard only discharges the optional a map read carries */
+              if (pidfile === undefined) {
+                return Effect.fail(new ProviderError({ code: "unknown", message: "unrecognized process" }))
+              }
+              return Effect.flatMap(
+                run(["exec", name, "sh", "-c", killScript(pidfile, signal.replace(/^SIG/, ""))]),
+                (result) =>
+                  result.code === 0 ? Effect.void : Effect.fail(
+                    new ProviderError({
+                      code: "unknown",
+                      message: `the signal ${signal} could not be delivered in ${name}: ${result.stderr.trim()}`
+                    })
+                  )
+              )
+            }),
           readFile: (path) =>
             Effect.flatMap(
               run([

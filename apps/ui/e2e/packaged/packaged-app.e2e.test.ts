@@ -219,30 +219,25 @@ const cloneGitHubFixture = async (fixture: PackagedTestFixture): Promise<string>
   return realpath(destination)
 }
 
-const sendPtyInput = async (app: PackagedApp, sessionId: string, data: string): Promise<void> => {
+const typeInTerminal = async (app: PackagedApp, sessionId: string, data: string): Promise<void> => {
+  await app.waitFor<boolean>(`
+    document.querySelector('[data-testid="terminal-${sessionId}"] .xterm-helper-textarea') instanceof HTMLTextAreaElement
+  `)
   await app.eval<boolean>(`
-    new Promise((resolve, reject) => {
-      const token = document.querySelector('meta[name="smithers-local-session"]')?.getAttribute('content')
-      if (token === null || token === undefined) return reject(new Error('local session token is missing'))
-      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const socket = new WebSocket(protocol + '//' + location.host + '/ws', 'smithers.local.' + token)
-      const timeout = setTimeout(() => {
-        socket.close()
-        reject(new Error('PTY input socket timed out'))
-      }, 5000)
-      socket.onerror = () => {
-        clearTimeout(timeout)
-        reject(new Error('PTY input socket failed'))
-      }
-      socket.onopen = () => {
-        socket.send(JSON.stringify({ type: 'pty.input', sessionId: ${JSON.stringify(sessionId)}, data: ${JSON.stringify(data)} }))
-        setTimeout(() => {
-          clearTimeout(timeout)
-          socket.close()
-          resolve(true)
-        }, 50)
-      }
-    })
+    (() => {
+      const textarea = document.querySelector('[data-testid="terminal-${sessionId}"] .xterm-helper-textarea')
+      if (!(textarea instanceof HTMLTextAreaElement)) throw new Error('Terminal input is not mounted')
+      textarea.focus()
+      textarea.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        data: ${JSON.stringify(data)},
+        inputType: 'insertText'
+      }))
+      const key = { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 }
+      textarea.dispatchEvent(new KeyboardEvent('keydown', key))
+      textarea.dispatchEvent(new KeyboardEvent('keyup', key))
+      return true
+    })()
   `)
 }
 
@@ -475,7 +470,7 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
       ])
 
       const marker = `PACKAGED_PTY_${crypto.randomUUID().replaceAll("-", "")}`
-      await sendPtyInput(app, sessionId, `printf '${marker}\\n'\n`)
+      await typeInTerminal(app, sessionId, `printf '${marker}\\n'`)
       const output = await app.waitFor<string>(`
         (async () => {
           const token = document.querySelector('meta[name="smithers-local-session"]')?.getAttribute('content') ?? ''

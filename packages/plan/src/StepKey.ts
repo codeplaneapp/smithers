@@ -4,8 +4,8 @@
  * Revived from the module deleted at `f5f3dda` (then
  * `packages/keys/src/StepKey.ts`). Two deliberate deviations from the original:
  *
- * 1. **It lives here, not in `@smthrs/keys`.** That package was reduced to the
- *    single `Key` transformation on purpose; a compiler that understands plan
+ * 1. **It lives here, not in `@smthrs/keys`.** That package owns generic
+ *    derivation and stored-key validation; a compiler that understands plan
  *    material belongs above it.
  * 2. **It produces `@smthrs/keys` `Key` values, not a second `sk1_` digest
  *    format.** The original minted its own prefix over a private `Digest`

@@ -110,7 +110,7 @@ The brand behind `digestInput` is private, so a plain object that merely has a `
 | `Plan` | schema + type | `planId`, `flow`, `generation`, `baseDigest`, `digest`, `nodes` |
 | `PlanNode` | schema + type | `id`, `kind`, `key`, `material`, `effects`, `dependsOn`, `conflicts`, `strategy`, `runtime`, `priority`, `generation` |
 | `NodeDraft` | interface | a node without its key, plus optional `kind`, `priority`, `conflictStrategy`, `runtimeStrategy` |
-| `KeyDigest` | schema | `key1_` plus 64 hex characters |
+| `KeyDigest` | schema | compatibility alias of `@smthrs/keys` `StoredKey`; currently `key1_` plus 64 hex characters |
 | `NodeEffects` | schema + type | `reads`, `writes`, and a `boundaryMode` of `hard` or `expected` |
 | `ConflictAnnotation` | schema + type | `with`, `paths`, `strategy`, `runtime` |
 | `PairStrategy` | schema + type | `serialize`, `lane`, `fail` |

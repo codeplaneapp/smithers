@@ -6,7 +6,7 @@
  */
 import { existsSync, realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { delimiter, dirname, join, resolve } from "node:path"
 import type { RepoWorkspace, TargetDefinition } from "smithers-shared/LocalApp"
 import { splitLabel } from "smithers-shared/LocalApp"
 import { criticalPath } from "smithers-shared/TargetGraph"
@@ -45,6 +45,29 @@ export const resolveBuildCli = (
     if (parent === dir) return fallback
     dir = parent
   }
+}
+
+/**
+ * Makes the authoring surface shipped beside a packaged CLI the final
+ * Node-resolution fallback. A repository's own node_modules still wins, but
+ * a standalone checkout can execute against the exact @smthrs/targets bits
+ * carried by the app instead of accidentally depending on this monorepo's
+ * ancestor node_modules.
+ */
+export const buildCliNodePath = (
+  cli: string,
+  inherited: string | undefined = Bun.env.NODE_PATH,
+  exists: (path: string) => boolean = existsSync
+): string | undefined => {
+  const nodeModules = resolve(dirname(cli), "node_modules")
+  const authoringManifest = join(nodeModules, "@smthrs", "targets", "package.json")
+  if (!exists(authoringManifest)) return inherited
+  return inherited === undefined || inherited.trim() === "" ? nodeModules : `${nodeModules}${delimiter}${inherited}`
+}
+
+const buildCliEnvironment = (cli: string): NodeJS.ProcessEnv | undefined => {
+  const nodePath = buildCliNodePath(cli)
+  return nodePath === undefined ? undefined : { ...process.env, NODE_PATH: nodePath }
 }
 
 /**
@@ -132,7 +155,14 @@ const queryWorkspace = async (
   )
   let child: ReturnType<typeof Bun.spawn>
   try {
-    child = Bun.spawn([...wrapped.argv], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore" })
+    const environment = buildCliEnvironment(options.cli)
+    child = Bun.spawn([...wrapped.argv], {
+      cwd,
+      ...(environment === undefined ? {} : { env: environment }),
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: "ignore"
+    })
   } catch (error) {
     return { targets: [], warnings: [`The loader could not start: ${error instanceof Error ? error.message : String(error)}`] }
   }
@@ -556,8 +586,10 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
       const argv = live.run.verb !== undefined && live.run.pattern !== undefined
         ? patternRunArgv(live.run.verb, live.run.pattern)
         : runArgv(cwd, live.run.label, live.kinds)
+      const environment = buildCliEnvironment(cli)
       child = Bun.spawn([live.node.path, cli, ...argv], {
         cwd,
+        ...(environment === undefined ? {} : { env: environment }),
         stdout: "pipe",
         stderr: "pipe",
         stdin: "ignore"

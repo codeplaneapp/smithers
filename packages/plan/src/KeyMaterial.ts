@@ -2,10 +2,10 @@
  * The key-material contract: what a planner hands the step-key compiler.
  *
  * Revived from the module deleted at `f5f3dda` (then
- * `packages/keys/src/KeyMaterial.ts`). It does NOT return to `@smthrs/keys` —
- * that package's reduction to the single `Key` transformation was deliberate,
- * and material is a *plan-shaped* concept, not a hashing primitive. It lives
- * here, above `@smthrs/keys`, so the hashing package stays a leaf.
+ * `packages/keys/src/KeyMaterial.ts`). It does NOT return to `@smthrs/keys`:
+ * that package owns generic derivation and stored-key validation, while
+ * material is a *plan-shaped* concept. It lives here, above `@smthrs/keys`,
+ * so the key package stays a leaf.
  *
  * Governing contracts: `docs/specs/Concepts/Step Keys.md`,
  * `docs/specs/Concepts/Build Phases.md` (material is computed with no I/O),

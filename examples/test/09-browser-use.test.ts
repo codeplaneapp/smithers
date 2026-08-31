@@ -11,7 +11,9 @@ it.effect("runs on the in-memory engine", () =>
   Effect.gen(function*() {
     const summary = yield* (Effect.provide(main, NodeCrypto.layer))
     expect(summary.result).toBe("built web")
-    expect(summary.stepKey).toMatch(/^key1_[0-9a-f]{64}$/)
+    expect(summary.stepKey).toBe(
+      "key1_40330b52aa0c6d60b97d0bed12083cbc4a21fe7427873983ea5288d5db0f7b00"
+    )
   }))
 
 it("bundles for the browser with no node: imports", async () => {

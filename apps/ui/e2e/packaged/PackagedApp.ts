@@ -9,10 +9,7 @@ import { dirname, join, resolve } from "node:path"
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 90_000
 const REQUEST_TIMEOUT_MS = 5_000
-// The packaged backend gives Electrobun's WebView RPC 30 seconds. Keep the
-// HTTP client alive slightly longer so a slow native renderer request can
-// finish (or report its own timeout) instead of being abandoned in flight.
-const EVAL_REQUEST_TIMEOUT_MS = 35_000
+const EVAL_RETRY_TIMEOUT_MS = 30_000
 const EXIT_TIMEOUT_MS = 8_000
 const MAX_LOG_CHARACTERS = 512_000
 
@@ -303,12 +300,29 @@ export class PackagedApp {
   }
 
   async eval<T = unknown>(script: string): Promise<T> {
-    const response = await this.json<BridgeEvalResponse<T>>("/window/eval", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ script: normalizeEvalScript(script) })
-    }, EVAL_REQUEST_TIMEOUT_MS)
-    return (response.valueUndefined === true ? undefined : response.result) as T
+    const deadline = Date.now() + EVAL_RETRY_TIMEOUT_MS
+    let lastError: unknown
+    while (Date.now() < deadline) {
+      try {
+        const response = await this.json<BridgeEvalResponse<T>>("/window/eval", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ script: normalizeEvalScript(script) })
+        })
+        return (response.valueUndefined === true ? undefined : response.result) as T
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        // Native WKWebView evaluation occasionally misses one RPC response.
+        // ElizaOS's packaged harness treats only this transport timeout as
+        // transient; renderer-thrown errors remain immediate test failures.
+        const transient = message.includes("POST /window/eval timed out") ||
+          message.includes('"message":"RPC request timed out.')
+        if (!transient) throw error
+        lastError = error
+        await delay(250)
+      }
+    }
+    throw new Error(`Renderer evaluation did not recover within ${EVAL_RETRY_TIMEOUT_MS}ms: ${String(lastError)}`)
   }
 
   /** Answers the next real native folder-picker RPC; null exercises cancel. */

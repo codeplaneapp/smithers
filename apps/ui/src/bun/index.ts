@@ -91,18 +91,18 @@ interface RendererEvalResponse {
 }
 
 interface RendererEvalRPC {
-  readonly request: {
+  readonly requestProxy?: {
     readonly evaluateJavascriptWithResponse: (
-      params: { readonly script: string },
-      options?: { readonly maxRequestTime?: number }
+      params: { readonly script: string }
     ) => Promise<unknown>
   }
 }
 
 const evaluateInMainWindow = async (script: string): Promise<unknown> => {
   const rpc = mainWindow?.webview.rpc as RendererEvalRPC | undefined
-  if (rpc === undefined) throw new Error("The main WebView is not available.")
-  const response = await rpc.request.evaluateJavascriptWithResponse({
+  const evaluator = rpc?.requestProxy?.evaluateJavascriptWithResponse
+  if (evaluator === undefined) throw new Error("The main WebView is not available.")
+  const response = await evaluator({
     script: `
 return (async () => {
   try {
@@ -119,7 +119,7 @@ ${script}
   }
 })()
 `
-  }, { maxRequestTime: 30_000 })
+  })
   if (typeof response !== "object" || response === null || !("ok" in response)) {
     throw new Error(`Renderer evaluation failed: ${String(response)}`)
   }
