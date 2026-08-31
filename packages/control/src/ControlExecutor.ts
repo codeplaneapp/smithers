@@ -175,6 +175,25 @@ export interface Service {
    * when this executor is the one hosting it.
    */
   readonly resumeRun: (input: ResumeRequest) => Effect.Effect<ResumeUptake, PersistenceError>
+  /**
+   * Finishes a PARKED execution whose cancellation is already durable.
+   *
+   * A park has no owner — that is what makes it resumable — so nothing is
+   * driving the run and nothing reads the request {@link requestCancel} wrote.
+   * The engine's parked-run sweep does, once per heartbeat, but a `smithers
+   * cancel` process writes the request at the very end of its life and exits
+   * before that tick: the Phase 7 smoke watched an engine row stay
+   * `suspended` with `cancel_requested_at_ms` set through six more commands
+   * and fifteen seconds, so `gc` collected the run in `control.db` and
+   * skipped it in `engine.db`.
+   *
+   * Called AFTER the cancel mutation commits, never inside it: driving a run
+   * re-enters the engine, whose writes would wait on the writer the
+   * mutation's transaction holds. An executor that does not host the run, or
+   * one whose run is not parked, does nothing and leaves the durable request
+   * standing for the host that does.
+   */
+  readonly settleCancelledPark: (input: CancelRequest) => Effect.Effect<void, PersistenceError>
 }
 
 /**
@@ -215,6 +234,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service =>
     requestCancel: Effect.fn("ControlExecutor.requestCancel")(() => Effect.succeed("unknown" as const)),
     deliverSignal: Effect.fn("ControlExecutor.deliverSignal")(() => Effect.succeed("unknown" as const)),
     resumeRun: Effect.fn("ControlExecutor.resumeRun")(() => Effect.succeed("unknown" as const)),
+    settleCancelledPark: Effect.fn("ControlExecutor.settleCancelledPark")(() => Effect.void),
     ...overrides
   })
 

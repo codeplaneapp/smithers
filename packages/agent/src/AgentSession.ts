@@ -1282,6 +1282,14 @@ export const make = (
         )
       )
 
+    /**
+     * Whether this engine publishes the execution as parked, treating a store
+     * that cannot answer as "not parked": a composition with no evidence
+     * leaves the run to the host that has some.
+     */
+    const parkedHere = (runId: string, attempts: number): Effect.Effect<boolean> =>
+      awaitParked(runId, attempts).pipe(Effect.catchCause(() => Effect.succeed(false)))
+
     const awaitParked = (runId: string, attempts: number): Effect.Effect<boolean, unknown> =>
       waitForParked(
         () =>
@@ -1314,6 +1322,39 @@ export const make = (
               { runId, cause: Cause.pretty(cause) }
             )
         )
+      )
+
+    /**
+     * Closes a parked run whose cancellation this process has just recorded.
+     *
+     * A park has no owner, which is what makes it resumable — so nothing is
+     * driving the run and nothing reads the request the CONTROL plane just
+     * wrote on the engine row. The engine's own parked-run sweep ticks once
+     * per `Ownership.heartbeatInterval`, but a `smithers cancel` process
+     * writes the request at the very end of its life and exits before that
+     * tick lands: the Phase 7 smoke watched an engine row stay `suspended`
+     * with `cancel_requested_at_ms` set through six more commands and 15
+     * seconds, so `gc` skipped the run in `engine.db` while collecting it in
+     * `control.db`, and only a 20-second `smithers serve` finalized it.
+     *
+     * Driving the run settles it inside the cancelling call, after the
+     * mutation that recorded the request has committed — inside it the
+     * engine's writes would wait on the writer that transaction holds, and
+     * the cancel deadlocked until its timeout. It cannot
+     * re-execute the flow: the request is durable BEFORE this runs, and the
+     * engine's re-activation guard closes a run with a recorded cancellation
+     * instead of entering its body (engine-store issue #39, pinned by
+     * `InterruptReleaseReclaim`). A run this engine does not host is not
+     * parked as far as `poll` is concerned, or refuses the claim, and either
+     * way this is a no-op — the durable request stays for the host that does.
+     */
+    const settleCancelledPark = (runId: string): Effect.Effect<void> =>
+      Effect.flatMap(
+        // No retries: a run this engine is not hosting must cost a cancel
+        // nothing, and one it is hosting is already parked by the time the
+        // request is durable.
+        parkedHere(runId, 0),
+        (parked) => parked ? resumeExecution(runId) : Effect.void
       )
 
     /**
@@ -1391,7 +1432,7 @@ export const make = (
       uptake: Uptake
     ): Effect.Effect<ControlExecutor.ResumeUptake, never> =>
       Effect.gen(function*() {
-        const parked = yield* awaitParked(runId, 500).pipe(Effect.catchCause(() => Effect.succeed(false)))
+        const parked = yield* parkedHere(runId, 500)
         if (!parked) return "unknown" as const
         const hosted = yield* hostsPark(runId, uptake)
         if (!hosted) return "unknown" as const
@@ -1570,6 +1611,9 @@ export const make = (
         takeUpResume(input.runId, (runId) => Effect.asVoid(Effect.forkIn(resumeExecution(runId), scope)), {
           _tag: "delegated"
         })
+      ),
+      settleCancelledPark: Effect.fn("AgentSession.settleCancelledPark")((input) =>
+        settleCancelledPark(input.runId)
       )
     })
   })

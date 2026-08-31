@@ -407,6 +407,22 @@ export const layer: Layer.Layer<
         ? Effect.succeed("unknown" as const)
         : executor.value.requestCancel({ runId })
 
+    /**
+     * Finishes the parked execution the cancel just recorded a request on.
+     *
+     * Outside the mutation's write transaction, for `takeUpResume`'s reason:
+     * settling a park re-enters the engine, and the engine's writes would wait
+     * on the writer the transaction holds — which deadlocks the cancel rather
+     * than slowing it. So this runs on the way out, once the request and the
+     * terminal control status are both committed.
+     */
+    const executorSettleCancelledPark = (
+      runId: RunId
+    ): Effect.Effect<void, PersistenceError> =>
+      Option.isNone(executor)
+        ? Effect.void
+        : executor.value.settleCancelledPark({ runId })
+
     const wake = (
       run: RunSummary,
       messageId: string
@@ -927,6 +943,14 @@ export const layer: Layer.Layer<
               : terminalOrAccepted(input.idempotencyKey, run)
           }),
           false
+        ).pipe(
+          // Both rows, before the process that asked goes away. The engine row
+          // carries the request the moment the mutation commits, but nothing
+          // drives a parked run, so the row stayed `suspended` until some
+          // later long-lived engine happened to sweep it: `gc` collected the
+          // run in `control.db` and skipped it in `engine.db` for fifteen
+          // seconds and six commands in the Phase 7 smoke.
+          Effect.tap(() => executorSettleCancelledPark(input.runId))
         )
       ),
       resume: Effect.fn("Control.resume")((input) => runMutation(input)),

@@ -561,7 +561,12 @@ describe("a run parked on an in-run ask that a later process cancels", () => {
           runId: parked.runId,
           idempotencyKey: `cli:cancel:${parked.runId}`
         })
-        const engineRow = yield* awaitEngineStatus(root, parked.runId, "cancelled")
+        // Read at once, not polled: the cancelling process drives the park it
+        // just recorded a cancellation for, so both rows are settled by the
+        // time the call returns. The smoke's engine row was still `suspended`
+        // fifteen seconds and six commands later, which is what let `gc` skip
+        // the run in `engine.db` while collecting it in `control.db`.
+        const engineRow = readEngineRun(root, parked.runId)
         // The operator answers the ask afterwards, which is the Phase 7
         // smoke's own sequence. It hung for 120 s and printed nothing.
         const decided = yield* control.approve(parked.approval).pipe(Effect.timeout("15 seconds"))
