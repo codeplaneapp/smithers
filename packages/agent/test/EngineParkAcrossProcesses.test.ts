@@ -38,7 +38,7 @@ import { NotificationQueue } from "@smthrs/notifications"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
 import { Migrations as RunStoreMigrations, type Ownership, RunStore } from "@smthrs/run-store"
-import { Deferred, Effect, Layer, Option, Schema, Stream } from "effect"
+import { Deferred, Duration, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
 import { mkdtempSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -425,6 +425,55 @@ describe("a run still executing when its process shuts down", () => {
     expect(row?.cancel_requested_at_ms).toBeNull()
     expect(row?.waiting_reason).toBe("released")
     expect(readInterruptOutcomes(root, runId)).not.toContain("cancelled")
+  }, 120_000)
+})
+
+/** The exit condition `packages/cli/src/Command.ts` `settled` waits on. */
+const settledKind = (kind: string): boolean =>
+  kind === "control.run.waiting-approval" ||
+  kind === "control.run.pending" ||
+  kind === "control.run.completed" ||
+  kind === "control.run.failed" ||
+  kind === "control.run.cancelled"
+
+describe("a running process whose run is cancelled from another one", () => {
+  it("is told the run settled, so it has something to stop waiting for", async () => {
+    frame = busyFrame
+    const root = makeRoot()
+    const kinds = await Effect.runPromise(
+      Effect.gen(function*() {
+        const control = yield* Control.Control
+        const entered = yield* Deferred.make<void>()
+        const held = yield* Deferred.make<void>()
+        noteEntered = entered
+        holdNote = held
+        const runId = yield* launch
+        // Mid-execution: the detached `smithers run` process is holding its
+        // executor open and waiting for this run's journal to say it has
+        // nothing left to drive.
+        yield* Deferred.await(entered)
+        // A second process over the same two files cancels it. One host id and
+        // one pid, which is what two local `smithers` processes are to the
+        // store (`SqlControlRuntime` compares host and pid).
+        yield* Effect.promise(() =>
+          Effect.runPromise(
+            Effect.gen(function*() {
+              const peer = yield* Control.Control
+              yield* peer.cancel({ runId, idempotencyKey: `cli:cancel:${runId}` })
+            }).pipe(
+              Effect.provide(host(root, hostOwner, "engine-park-canceller")),
+              Effect.scoped,
+              Effect.orDie
+            )
+          )
+        )
+        yield* Deferred.succeed(held, void 0)
+        const events = yield* Stream.runCollect(control.watch({ runId, follow: false }))
+        return events.map((event) => event.kind)
+      }).pipe(Effect.provide(host(root, hostOwner)), Effect.scoped, Effect.orDie)
+    )
+
+    expect(kinds.filter(settledKind)).toContain("control.run.cancelled")
   }, 120_000)
 })
 
