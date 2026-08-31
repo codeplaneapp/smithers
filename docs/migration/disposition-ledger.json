@@ -51,14 +51,14 @@
    "id": "D4",
    "decision": "Versioning model",
    "recommendedDefault": "Give all public first-party packages one synchronized RC version.",
-   "recordedAnswer": "One synchronized version for all 39 public names; private apps and private packages keep their own versions (`smithers-ui 1.0.0`, `smithers-server 1.0.0`, `smithers-shared 0.0.0`, `smithers-tui 0.0.0`).",
+   "recordedAnswer": "One synchronized version for all 40 public names; private apps and private packages keep their own versions (`smithers-ui 1.0.0`, `smithers-server 1.0.0`, `smithers-shared 0.0.0`, `smithers-tui 0.0.0`).",
    "consequenceAccepted": "Every candidate republishes every public package even when unchanged. `set-release-version.mjs` rewrites private-to-private exact ranges, so `build-cli -> targets` and root `-> build-cli/targets` change to `workspace:*` first."
   },
   {
    "id": "D5",
    "decision": "Public package set",
    "recommendedDefault": "Publish only packages required by supported consumers; keep build helpers, targets, fixtures, and internal composition packages private.",
-   "recordedAnswer": "§3.1 (39 public), §3.2 (private), §3.5 (exports).",
+   "recordedAnswer": "§3.1 (40 public), §3.2 (private), §3.5 (exports).",
    "consequenceAccepted": "Custom run-UI authors have no `gateway-react`/`gateway-ui` at rc.0 (deleted, §3.2); the 0.x terminal monitor is deleted."
   },
   {

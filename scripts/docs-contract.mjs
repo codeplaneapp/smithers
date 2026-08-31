@@ -403,6 +403,8 @@ export const citedPackageCounts = (body) =>
   [
     ...body.matchAll(/(\d+) names frozen in/g),
     ...body.matchAll(/(\d+) names in (?:§|section )3\.1/g),
+    ...body.matchAll(/(\d+) public names/g),
+    ...body.matchAll(/(?:§|section )3\.1 \((\d+) public\)/g),
     ...body.matchAll(/the (\d+) packages `node scripts\/pack-release\.mjs --names` prints/g),
     ...body.matchAll(/^\| Published packages \| (\d+) \|/gm)
   ].map((match) => Number(match[1]))

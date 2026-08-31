@@ -204,9 +204,13 @@ test("finds the count the contract cites in its own cross-references", () => {
   const body = [
     "with a check that the non-private set equals the 39 names in §3.1 (update the roster test)",
     "the 41 names in section 3.1 are what the smoke installs",
+    "One synchronized version for all 42 public names; private apps keep their own.",
+    "| D5 | Public package set | Publish only what consumers need. | §3.1 (43 public), §3.2 (private). |",
     "39 packages of prose that cite nothing"
   ].join("\n")
-  assert.deepEqual(citedPackageCounts(body), [39, 41])
+  // D4 and D5 in section 8 cite the count in two more spellings that stayed at
+  // 39 after section 3.1 froze 40, because neither matched the reader.
+  assert.deepEqual(citedPackageCounts(body), [39, 41, 42, 43])
 })
 
 test("finds no citation in a document that states no count", () => {
