@@ -8,6 +8,12 @@
  * resolve from environment keys, and every side effect a command performs
  * without being asked is a side effect an operator has to undo.
  *
+ * The one thing the scaffold reads from the host is its seat. `smithers up`
+ * cannot run a prompt flow that declares none, so a scaffold without a
+ * `model:` line is a scaffold that is not launchable, which is what rc.0 first
+ * shipped (Phase 7 verdict cd14388ed7). {@link defaultSeat} chooses it from
+ * the same environment keys `smithers doctor` reports.
+ *
  * The ignore edit is idempotent and repository-scoped, carried over from the
  * 0.x `ensureRootGitignore` requirement: append once, never inside a
  * non-repository directory, and never a second time when a rule already
@@ -17,6 +23,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import * as Environment from "./Environment.ts"
 
 /**
  * The ignore rule rc.0 state needs.
@@ -75,19 +82,97 @@ export const ensureIgnored = (root: string): IgnoreStatus => {
 }
 
 /**
+ * The seat `init` writes for each provider credential, in the order
+ * `smithers doctor` reports them.
+ *
+ * `CEREBRAS_API_KEY` is missing on purpose. `Doctor` names it a provider key
+ * and `NodeControl.seatResolver` has no route for the provider, so a scaffold
+ * that chose it would write a flow whose launch answers `No route is
+ * configured for the cerebras provider` (Phase 7 plue-cutover, S3).
+ */
+const providerSeats: ReadonlyArray<readonly [variable: string, seat: string]> = [
+  ["ANTHROPIC_API_KEY", "anthropic:claude-sonnet-4-5"],
+  ["OPENAI_API_KEY", "openai:gpt-5.6-sol"],
+  ["OPENROUTER_API_KEY", "openrouter:anthropic/claude-sonnet-4.5"]
+]
+
+/**
+ * The seat a scaffold declares, and the credential that chose it.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface Seat {
+  /** The `model:` line's value. */
+  readonly seat: string
+  /** The environment variable that resolves it. */
+  readonly variable: string
+  /** Whether that variable is set in the environment `init` read. */
+  readonly resolved: boolean
+}
+
+/**
+ * The seat `smithers init` writes into the scaffold.
+ *
+ * rc.0 resolves seats from environment keys, so the scaffold's seat is chosen
+ * from the same keys `smithers doctor` reports, in doctor's order. An `openai`
+ * seat is credentialed by `OPENAI_API_KEY` or by the ChatGPT session
+ * `SMITHERS_OPENAI_AUTH=chatgpt` selects, exactly as `NodeControl.seatResolver`
+ * reads them.
+ *
+ * A directory with no provider key still gets a `model:` line. A scaffold
+ * without one is not launchable at all: `smithers up` on it answered `Run
+ * run-1 was accepted but the executor did not take it` and left a run nothing
+ * would ever drive (Phase 7 verdict cd14388ed7). With the line, the same
+ * launch refuses by naming the key to set.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const defaultSeat = (
+  environment: Environment.Source = process.env
+): Seat => {
+  const chatgpt = Environment.read(environment, "SMITHERS_OPENAI_AUTH") === "chatgpt"
+  for (const [variable, seat] of providerSeats) {
+    if ((environment[variable] ?? "") !== "") return { seat, variable, resolved: true }
+    if (variable === "OPENAI_API_KEY" && chatgpt) {
+      return { seat, variable: "SMITHERS_OPENAI_AUTH", resolved: true }
+    }
+  }
+  const [variable, seat] = providerSeats[0]!
+  return { seat, variable, resolved: false }
+}
+
+/** The YAML comment that says where the seat came from and how to replace it. */
+const seatNote = (seat: Seat): string =>
+  seat.resolved
+    ? `# The model seat this flow runs on. \`smithers init\` chose it from
+# ${seat.variable}, the first provider credential this environment sets. Change
+# the line to run somewhere else; \`smithers doctor\` lists the keys it reads.`
+    : `# The model seat this flow runs on. No provider credential was set when
+# \`smithers init\` ran, so this is the default: set ${seat.variable}, or change
+# the line to a seat you have a key for. \`smithers doctor\` lists them.`
+
+/**
  * The scaffolded flow body.
  *
  * Markdown, not TypeScript: `flow.mdx` needs no build step, no import
  * resolution, and no dependency on the package layout of the project it lands
  * in, so `smithers up <name>` works in the directory `init` just created.
  *
+ * The seat is a frontmatter comment rather than prose, because every line of
+ * the markdown body below the frontmatter is an instruction the agent is
+ * handed.
+ *
  * @category constructors
  * @since 1.0.0
  */
-export const template = (name: string): string =>
+export const template = (name: string, seat: Seat = defaultSeat()): string =>
   `---
 name: ${name}
 description: A starter Smithers flow.
+${seatNote(seat)}
+model: ${seat.seat}
 ---
 
 # ${name}
@@ -121,6 +206,8 @@ export interface Scaffolded {
   readonly gitignore: IgnoreStatus
   /** The state directory this project's runs will use. */
   readonly stateDirectory: string
+  /** The model seat the scaffolded flow declares. */
+  readonly seat: string
 }
 
 /**
@@ -133,13 +220,18 @@ export interface Scaffolded {
  * @category constructors
  * @since 1.0.0
  */
-export const scaffold = (root: string, name: string): Scaffolded => {
+export const scaffold = (
+  root: string,
+  name: string,
+  environment: Environment.Source = process.env
+): Scaffolded => {
   const directory = join(root, "flows", name)
   const flowFile = join(directory, "flow.mdx")
+  const seat = defaultSeat(environment)
   const exists = existsSync(flowFile)
   if (!exists) {
     mkdirSync(directory, { recursive: true })
-    writeFileSync(flowFile, template(name), "utf8")
+    writeFileSync(flowFile, template(name, seat), "utf8")
   }
   // The empty state directory is the project's anchor. `Project.root` treats
   // `.flows/` as proof on its own and a bare `flows/` only beside a project
@@ -148,7 +240,7 @@ export const scaffold = (root: string, name: string): Scaffolded => {
   // subdirectory, which is the one failure `init` exists to prevent.
   const stateDirectory = join(root, ".flows")
   mkdirSync(stateDirectory, { recursive: true })
-  return { name, flowFile, created: !exists, gitignore: ensureIgnored(root), stateDirectory }
+  return { name, flowFile, created: !exists, gitignore: ensureIgnored(root), stateDirectory, seat: seat.seat }
 }
 
 /**
