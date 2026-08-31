@@ -362,6 +362,28 @@ describe("Sandbox.fileSystem", () => {
       })
     }))
 
+  it.effect("roots relative paths at the session workdir", () =>
+    Effect.gen(function*() {
+      const provider = Sandbox.TestSession.make({
+        workdir: "/work",
+        script: (command) => command === "test -e /work/probed.txt" ? { exitCode: 0 } : { exitCode: 1 }
+      })
+      const outcome = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const files = yield* probeSession(provider)
+          yield* files.writeFileString("rel.txt", "rooted")
+          yield* files.writeFileString("./dotted.txt", "rooted too")
+          return {
+            probed: yield* files.exists("probed.txt"),
+            written: yield* files.readFileString("rel.txt")
+          }
+        })
+      )
+      expect(outcome).toEqual({ probed: true, written: "rooted" })
+      expect(provider.state.files.has("/work/rel.txt")).toBe(true)
+      expect(provider.state.files.has("/work/dotted.txt")).toBe(true)
+    }))
+
   it.effect("prefers a session's native override to the probe", () =>
     Effect.gen(function*() {
       const provider = Sandbox.TestSession.make()

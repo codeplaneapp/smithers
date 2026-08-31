@@ -79,6 +79,12 @@ describe("DirectorySandbox", () => {
           yield* probed.remove(`${session.workdir}/notes`, { recursive: true, force: true })
           expect(yield* probed.exists(`${session.workdir}/notes`)).toBe(false)
           expect(yield* native.readDirectory(`${session.workdir}/build/out`)).toEqual(["agenda.txt"])
+          // Relative paths are the workspace's on both the probe and the
+          // native surface, never the host process's cwd.
+          yield* native.writeFileString("relative.txt", "rooted")
+          expect(yield* probed.readFileString("relative.txt")).toBe("rooted")
+          expect(yield* native.exists("relative.txt")).toBe(true)
+          expect(yield* fs.exists(`${session.workdir}/relative.txt`)).toBe(true)
         })
       )
     }), budget)
