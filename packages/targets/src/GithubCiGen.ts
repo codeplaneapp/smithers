@@ -163,6 +163,49 @@ export const minimumTimeoutMinutes = 1
 export const maximumTimeoutMinutes = 360
 
 /**
+ * One row of a job's platform matrix.
+ *
+ * A row is DATA, not a condition. GitHub offers two ways to let one platform be
+ * red without failing the pipeline: a literal `continue-on-error: true` on the
+ * whole job, which makes every platform advisory at once, and an expression
+ * reading the matrix context, whose value each row supplies for itself. This
+ * generator emits no `if:` key, so a per-platform allowance has to be the
+ * second one: the advisory bit is carried in an `include:` row beside the
+ * runner label, and the job renders `continue-on-error: ${{ matrix.advisory }}`
+ * once. Promoting a platform from advisory to required is then one boolean in
+ * BUILD.ts, and {@link validateJobs} checks the promotion rather than trusting
+ * it.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const MatrixRow = Schema.Struct({
+  /**
+   * The runner this row runs on. Exactly ONE runner label, not the label set
+   * {@link Job.runsOn} accepts: a row's value is also its `include:` key, and
+   * GitHub matches an include row against the base combination by value, so a
+   * sequence there is a row whose advisory bit may or may not attach.
+   */
+  os: Schema.NonEmptyString,
+  /**
+   * Whether a red run of THIS row leaves the pipeline green.
+   *
+   * A platform is advisory exactly until it is proven green, and no longer.
+   *
+   * @default false
+   */
+  advisory: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false)))
+})
+
+/**
+ * One row of a job's platform matrix.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type MatrixRow = typeof MatrixRow.Type
+
+/**
  * One declared job.
  *
  * @category schemas
@@ -171,7 +214,18 @@ export const maximumTimeoutMinutes = 360
 export const Job = Schema.Struct({
   id: Schema.NonEmptyString,
   name: Schema.optional(Schema.NonEmptyString),
-  runsOn: Schema.NonEmptyString,
+  /**
+   * The runner, for a job that runs on one. A job declares this or
+   * {@link Job.matrix}, never both and never neither.
+   */
+  runsOn: Schema.optional(Schema.NonEmptyString),
+  /**
+   * The platforms this job runs on, one row each, rendered as a build matrix.
+   *
+   * One declaration instead of a copy-pasted job per platform: the steps, the
+   * toolchain, and the timeout are written once and every platform runs them.
+   */
+  matrix: Schema.optional(Schema.Array(MatrixRow)),
   /**
    * `timeout-minutes`, in the range GitHub Actions supports. Zero and negative
    * values are rejected by the runner, and anything above 360 is silently
@@ -183,6 +237,10 @@ export const Job = Schema.Struct({
       Schema.isLessThanOrEqualTo(maximumTimeoutMinutes)
     )
   ),
+  /**
+   * Whether a red run of this job leaves the pipeline green. A matrix job
+   * carries the bit per row instead, in {@link MatrixRow.advisory}.
+   */
   continueOnError: Schema.optional(Schema.Boolean),
   /** What the runner must provide before the first target runs. */
   toolchain: CiToolchain.Toolchain,
@@ -394,6 +452,45 @@ const runner = (value: string): string => {
   }
   return scalar(value)
 }
+
+/**
+ * The only GitHub expressions this generator emits, and the only ones it needs.
+ *
+ * They are constants of the implementation, exactly like {@link actions}: a
+ * matrix job's `runs-on` and `continue-on-error` read the row GitHub is
+ * currently running, and nothing in {@link Attrs} can put an expression here.
+ * They are rendered PLAIN rather than through `scalar`, because a quoted
+ * `continue-on-error` value is a string GitHub coerces rather than the boolean
+ * the row declares, and the plain form is the one GitHub documents.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const matrixExpressions = {
+  os: "${{ matrix.os }}",
+  advisory: "${{ matrix.advisory }}"
+} as const
+
+/**
+ * Whether a matrix's rows keep running after one of them goes red.
+ *
+ * A constant, and `false`. A platform matrix asks which platforms are green;
+ * cancelling the remaining rows the moment one fails throws away the answer,
+ * which is the whole reason the matrix exists.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const matrixFailFast = false
+
+/**
+ * One runner label, the only `os` a matrix row may carry.
+ *
+ * The same character set {@link runnerSequence} allows inside a label set,
+ * which excludes whitespace, quotes, and `$`, so a row can carry no GitHub
+ * expression and no YAML collection.
+ */
+const runnerLabel = /^[A-Za-z0-9_.-]+$/
 
 /**
  * Renders a `with:` or `env:` map.
@@ -678,6 +775,59 @@ export const artifactSteps = (upload: CiToolchain.ArtifactUpload): ReadonlyArray
 const jobIdShape = /^[A-Za-z_][A-Za-z0-9_-]*$/
 
 /**
+ * Rejects a job whose runner declaration this generator cannot render.
+ *
+ * A job runs on ONE runner or over a matrix of them, never both and never
+ * neither: `runs-on` and the matrix are two descriptions of the same thing, and
+ * a job with neither is one GitHub refuses to schedule. The rows themselves are
+ * checked the way every other rendered value is — a row carries one runner
+ * label, so a matrix cannot smuggle in a YAML collection or a GitHub expression
+ * — and a repeated platform is refused because GitHub would run the row twice
+ * while its two `include:` rows disagree about the advisory bit.
+ */
+const validateJobRunners = (job: Job): void => {
+  if (job.matrix === undefined) {
+    if (job.runsOn === undefined) {
+      throw new Error(`GithubCiGen: job ${JSON.stringify(job.id)} declares no runs-on and no matrix`)
+    }
+    return
+  }
+  if (job.runsOn !== undefined) {
+    throw new Error(
+      `GithubCiGen: job ${JSON.stringify(job.id)} declares both runs-on and a matrix; declare one`
+    )
+  }
+  if (job.continueOnError !== undefined) {
+    throw new Error(
+      `GithubCiGen: job ${
+        JSON.stringify(job.id)
+      } declares continue-on-error beside a matrix; the advisory bit belongs to the row`
+    )
+  }
+  if (job.matrix.length === 0) {
+    throw new Error(`GithubCiGen: job ${JSON.stringify(job.id)} declares an empty matrix`)
+  }
+  const platforms = new Set<string>()
+  for (const row of job.matrix) {
+    if (!runnerLabel.test(row.os) || resolvesToNonString(row.os)) {
+      throw new Error(
+        `GithubCiGen: ${JSON.stringify(row.os)} is not a runner label; use one label per matrix row`
+      )
+    }
+    if (platforms.has(row.os)) {
+      throw new Error(
+        `GithubCiGen: job ${JSON.stringify(job.id)} repeats the matrix platform ${JSON.stringify(row.os)}`
+      )
+    }
+    platforms.add(row.os)
+  }
+}
+
+/** Whether every lane of a job is allowed to be red. */
+const isWhollyAdvisory = (job: Job): boolean =>
+  job.matrix === undefined ? job.continueOnError === true : job.matrix.every((row) => row.advisory)
+
+/**
  * Rejects declared jobs GitHub Actions would refuse, shadow, or run empty, and
  * declarations this generator cannot render.
  *
@@ -690,7 +840,20 @@ const jobIdShape = /^[A-Za-z_][A-Za-z0-9_-]*$/
  */
 const validateJobs = (attrs: Attrs): void => {
   const ids = new Set<string>()
+  const required = new Set(attrs.requiredJobs)
   for (const job of attrs.jobs) {
+    validateJobRunners(job)
+    // A lane named in `requiredJobs` is a lane the pipeline promises to run.
+    // One that is advisory everywhere fails nothing, so naming it required
+    // states a guarantee the rendered workflow does not carry — the same
+    // silent downgrade `requiredJobs` exists to catch when a job disappears.
+    if (required.has(job.id) && isWhollyAdvisory(job)) {
+      throw new Error(
+        `GithubCiGen: required job ${
+          JSON.stringify(job.id)
+        } is advisory on every platform; drop it from requiredJobs or make a lane required`
+      )
+    }
     if (!jobIdShape.test(job.id)) {
       throw new Error(
         `GithubCiGen: ${JSON.stringify(job.id)} is not a valid job id; use letters, digits, "-", and "_"`
@@ -854,9 +1017,31 @@ export const render = (attrs: Attrs): string => {
     // boolean just as it does a value, so an id that reads as one is quoted.
     lines.push(`  ${scalar(job.id)}:`)
     if (job.name !== undefined) lines.push(`    name: ${scalar(job.name)}`)
-    lines.push(`    runs-on: ${runner(job.runsOn)}`)
+    // The matrix comes before `runs-on`, because `runs-on` reads it. The rows
+    // are emitted in declaration order, twice: once as the platform list the
+    // matrix expands, and once as the `include:` rows that attach each
+    // platform's advisory bit.
+    if (job.matrix !== undefined) {
+      lines.push(
+        "    strategy:",
+        `      fail-fast: ${matrixFailFast}`,
+        "      matrix:",
+        `        os: [${job.matrix.map((row) => scalar(row.os)).join(", ")}]`,
+        "        include:"
+      )
+      for (const row of job.matrix) {
+        lines.push(`          - os: ${scalar(row.os)}`, `            advisory: ${row.advisory}`)
+      }
+      lines.push(`    runs-on: ${matrixExpressions.os}`)
+    } else {
+      lines.push(`    runs-on: ${runner(job.runsOn!)}`)
+    }
     if (job.timeoutMinutes !== undefined) lines.push(`    timeout-minutes: ${job.timeoutMinutes}`)
-    if (job.continueOnError !== undefined) lines.push(`    continue-on-error: ${job.continueOnError}`)
+    if (job.matrix !== undefined) {
+      lines.push(`    continue-on-error: ${matrixExpressions.advisory}`)
+    } else if (job.continueOnError !== undefined) {
+      lines.push(`    continue-on-error: ${job.continueOnError}`)
+    }
     lines.push("    steps:")
     const rendered: Array<RenderedStep> = [...toolchainSteps(attrs, job)]
     for (const step of job.steps) {
