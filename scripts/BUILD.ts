@@ -182,6 +182,39 @@ export const effectVersion = Smithers.NodeTest({
 })
 
 /**
+ * Both lockfiles current with every workspace manifest.
+ *
+ * pnpm and Bun each install from their own lockfile, and the invariant that a
+ * manifest change refreshes `pnpm-lock.yaml` and `bun.lock` in the same commit
+ * had no enforcer. This target compares every workspace manifest's declared
+ * ranges against both files and names the drifted packages with the
+ * regeneration command for the stale side.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const lockfilePair = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.entrypoint(Smithers.file("//scripts/check-lockfile-pair.mjs")),
+  srcs: [...sources, Smithers.file("//pnpm-lock.yaml"), Smithers.file("//bun.lock")],
+  deps: []
+})
+
+/**
+ * The gate's own unit suite: the workspace scan, the importers parser, and
+ * the no-drift claim, named one per cell.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const lockfilePairUnit = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.testRunner([Smithers.file("//scripts/check-lockfile-pair.test.mjs")]),
+  srcs: [...sources, Smithers.file("//pnpm-lock.yaml"), Smithers.file("//bun.lock")],
+  deps: []
+})
+
+/**
  * What an npm consumer of the published set actually resolves.
  *
  * pnpm settles every internal edge from one workspace-wide pin, so

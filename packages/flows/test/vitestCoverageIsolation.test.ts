@@ -478,6 +478,10 @@ describe("vitest coverage isolation conformance", () => {
     // drift check runs nowhere else, so dropping this step would let a stale
     // registry ship with every other cell green.
     expect(ci).toMatch(/^\s*run: pnpm exec smithers-build lint '\/\/:knownFiles'$/m)
+    // `tsconfig.json` is the committed generated root program. Its drift
+    // check runs nowhere else, so dropping this step would let a stale
+    // tsconfig ship with every other cell green.
+    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build lint '\/\/:tsconfig'$/m)
     // The fault matrix. Until Phase 7 blocker B6 it ran under no gate at all:
     // `//packages/...` does not reach `e2e/`, `e2e` was not a workspace member,
     // and `//e2e:faults` failed in 262 ms with `Command "vitest" not found`.

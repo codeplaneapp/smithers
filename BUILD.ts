@@ -143,7 +143,12 @@ export const ci = Smithers.GithubCiGen({
         // or removed file drifts it. The job checks out without submodules and
         // a maintainer's checkout has them initialized; the scan stops at every
         // nested repository, so both produce the same file.
-        { name: "Known-file registry drift", verb: Smithers.Verb.Lint, pattern: "//:knownFiles" }
+        { name: "Known-file registry drift", verb: Smithers.Verb.Lint, pattern: "//:knownFiles" },
+        // `tsconfig.json` is generated from the `tsconfig` declaration above
+        // and committed. No other job checks it, so an edit to the declaration
+        // without a regeneration (or a hand edit to the file) would ship
+        // silently with every other cell green.
+        { name: "Generated tsconfig drift", verb: Smithers.Verb.Lint, pattern: "//:tsconfig" }
       ]
     },
     {
