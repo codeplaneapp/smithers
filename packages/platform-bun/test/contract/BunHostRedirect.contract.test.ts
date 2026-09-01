@@ -1,8 +1,10 @@
 /**
  * Redirect fail-closed contract for BunHost's HttpClient.
  *
- * Vitest runs this file under Node, so it covers the Node-resolved Bun modules.
- * Native Bun-runtime execution of the same contract is tracked separately.
+ * Both interpreters run this file: the package's own vitest lane under Node,
+ * which carries the coverage gate, and the `//ci:platformBun` target, which
+ * re-runs it under Bun. `redirect: "manual"` is the whole subject, so the
+ * assertion is that the second origin is never reached on either runtime.
  */
 import { afterAll, beforeAll, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
