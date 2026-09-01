@@ -798,20 +798,17 @@ describe("Scheduler.layerControlRunner", () => {
   // `store`, which is the one code a caller reads as "persistence is broken".
   it("reports every Control failure as a runner failure", async () => {
     const planning = controlFixture({ plan: () => Effect.die("boom") })
-    const listing = controlFixture({ list: () => Effect.fail(new Error("list down") as never) })
-    const cancelling = controlFixture({ cancel: () => Effect.fail(new Error("cancel down") as never) })
+    const listing = controlFixture({ list: () => Effect.die("list down") })
+    const cancelling = controlFixture({ cancel: () => Effect.die("cancel down") })
 
     const planFailure = await withRunner(
       Effect.flip(
-        Effect.flatMap(Scheduler.Runner, (runner) =>
-          Effect.catchCause(
-            runner.start({ flowId: "flow", input: {}, idempotencyKey: "key" }),
-            () => Effect.fail(new TriggerError({ code: "runner", message: "planning died" }))
-          ))
+        Effect.flatMap(Scheduler.Runner, (runner) => runner.start({ flowId: "flow", input: {}, idempotencyKey: "key" }))
       ),
       planning
     )
-    expect(planFailure.code).toBe("runner")
+    expect(planFailure).toMatchObject({ code: "runner" })
+    expect(planFailure.message).toBe("Control could not launch the scheduled run")
 
     const listFailure = await withRunner(
       Effect.flip(Effect.flatMap(Scheduler.Runner, (runner) => runner.isActive("run-1"))),

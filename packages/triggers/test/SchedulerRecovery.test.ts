@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { TestClock } from "effect/testing"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { describe, expect, it } from "vitest"
 import * as Scheduler from "../src/Scheduler.ts"
 import * as SqlTriggerStore from "../src/SqlTriggerStore.ts"
@@ -129,44 +130,49 @@ describe("Scheduler recovery", () => {
     ])
   })
 
-  // The buffered occurrence is taken out of the row before it can be claimed.
-  // A failure in between leaves nothing to re-derive it from, so the take is
-  // re-armed on failure.
-  it("re-arms a buffered occurrence when the claim after the take fails", async () => {
-    const runner = runnerFixture()
-    let resumes = 0
-    const outcome = await inMemory(
+  it("re-arms committed buffered work when its launch fails", async () => {
+    const starts: Array<Scheduler.StartInput> = []
+    let failures = 1
+    const runner = runnerFixture({
+      start: (input) =>
+        Effect.suspend(() => {
+          starts.push(input)
+          if (failures > 0) {
+            failures--
+            return Effect.fail(new TriggerError({ code: "runner", message: "launch failed" }))
+          }
+          return Effect.succeed("run-1")
+        })
+    })
+    await inMemory(
       Effect.scoped(
         Effect.gen(function*() {
           const store = yield* TriggerStore.TriggerStore
-          const registered = yield* seedFired(store, trigger("buffer-one", "none"))
-          yield* store.setPending({ triggerId: "hourly", occurrence: hour })
-          const flaky = TriggerStore.TriggerStore.of({
-            ...store,
-            claimFire: (fire) =>
-              fire.resumeBuffered === true && resumes++ === 0
-                ? Effect.fail(new TriggerError({ code: "store", message: "claim write failed" }))
-                : store.claimFire(fire)
+          const registered = yield* store.register(trigger("buffer-one", "none"))
+          yield* TestClock.setTime(hour)
+          yield* store.claimFire({
+            triggerId: "hourly",
+            occurrence: 0,
+            expectedRevision: registered.revision
           })
+          yield* store.claimFire({
+            triggerId: "hourly",
+            occurrence: hour,
+            expectedRevision: registered.revision
+          })
+          yield* store.recordResult({ triggerId: "hourly", occurrence: 0, outcome: "completed" })
           const scheduler = yield* Scheduler.make().pipe(
-            Effect.provideService(TriggerStore.TriggerStore, flaky),
             Effect.provideService(Scheduler.Runner, runner.service)
           )
-          yield* TestClock.setTime(hour)
+          yield* scheduler.runOnce
+          expect(starts).toHaveLength(1)
           yield* scheduler.runOnce
           yield* Effect.yieldNow
-          expect(runner.starts).toHaveLength(0)
-          const rearmed = yield* store.takePending("hourly")
-          yield* store.setPending({ triggerId: "hourly", occurrence: hour })
-
-          yield* scheduler.runOnce
-          yield* Effect.yieldNow
-          return { rearmed, starts: runner.starts, revision: registered.revision }
         })
       )
     )
-    expect(outcome.rearmed).toMatchObject({ _tag: "Some", value: hour })
-    expect(outcome.starts.map((input) => input.idempotencyKey)).toEqual([
+    expect(starts.map((input) => input.idempotencyKey)).toEqual([
+      `hourly:${new Date(hour).toISOString()}`,
       `hourly:${new Date(hour).toISOString()}`
     ])
   })
@@ -181,6 +187,7 @@ describe("Scheduler recovery", () => {
         Effect.gen(function*() {
           const store = yield* TriggerStore.TriggerStore
           const registered = yield* store.register(trigger("skip", "one"))
+          yield* TestClock.setTime(hour)
           // The reservation another incarnation wrote while it was inside
           // `runner.start`.
           yield* store.claimFire({
@@ -191,7 +198,6 @@ describe("Scheduler recovery", () => {
           const scheduler = yield* Scheduler.make().pipe(
             Effect.provideService(Scheduler.Runner, runner.service)
           )
-          yield* TestClock.setTime(hour)
           yield* scheduler.runOnce
           yield* Effect.yieldNow
           const afterFirst = yield* store.activeRun("hourly")
@@ -373,7 +379,7 @@ describe("Scheduler revision fencing", () => {
       listEnabled: () => Effect.succeed([registered(1)]),
       get: () => Effect.succeed(stored),
       activeRun: () => Effect.succeed(Option.none()),
-      takePending: () => Effect.succeed(Option.none()),
+      claimPending: () => Effect.succeed(Option.none()),
       recordResult: () => Effect.void,
       clearActive: () => Effect.void,
       claimFire: (fire) =>
@@ -437,6 +443,7 @@ describe("Scheduler over real SQLite", () => {
   const declaration = trigger("skip", "one")
   const database = TestDatabase.layer
   const store = SqlTriggerStore.layer.pipe(Layer.provide(database))
+  const storeWithSql = SqlTriggerStore.layer.pipe(Layer.provideMerge(database))
 
   // A restart is two schedulers over one database. The second one has no
   // in-process state at all, so everything it knows about the run in flight it
@@ -493,6 +500,42 @@ describe("Scheduler over real SQLite", () => {
       outcome.cursor._tag === "Some" ? outcome.cursor.value.lastFiredAt : undefined
     ).toBe(4 * hour)
   })
+
+  it("records a recovered run as completed when it has settled", async () => {
+    const outcome = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        const triggers = yield* TriggerStore.TriggerStore
+        const registered = yield* triggers.register(trigger("skip", "none"))
+        yield* triggers.claimFire({
+          triggerId: registered.id,
+          occurrence: hour,
+          expectedRevision: registered.revision
+        })
+        yield* triggers.recordResult({
+          triggerId: registered.id,
+          occurrence: hour,
+          outcome: "launched",
+          runId: "settled-run"
+        })
+        const scheduler = yield* Scheduler.make().pipe(
+          Effect.provideService(Scheduler.Runner, runnerFixture().service)
+        )
+        yield* TestClock.setTime(hour)
+        yield* scheduler.runOnce
+        const rows = yield* sql<{ readonly outcome: string; readonly run_id: string | null }>`
+          SELECT outcome, run_id FROM flows_trigger_fires
+          WHERE trigger_id = ${registered.id} AND occurrence_at_ms = ${hour}
+        `
+        return rows[0]
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(storeWithSql),
+        Effect.provide(TestClock.layer())
+      )
+    )
+    expect(outcome).toEqual({ outcome: "completed", run_id: "settled-run" })
+  })
 })
 
 describe("Scheduler dispatch edges", () => {
@@ -506,7 +549,7 @@ describe("Scheduler dispatch edges", () => {
       listEnabled: () => Effect.succeed([stored]),
       get: () => Effect.succeed(Option.some(stored)),
       activeRun: () => Effect.succeed(Option.none()),
-      takePending: () => Effect.succeed(Option.none()),
+      claimPending: () => Effect.succeed(Option.none()),
       recordResult: () => Effect.void,
       clearActive: () => Effect.void,
       setPending: () => Effect.void,
@@ -553,6 +596,57 @@ describe("Scheduler dispatch edges", () => {
     )
     expect(results.map((result) => result.outcome)).toEqual(["launched", "completed"])
     expect(results[1]).toMatchObject({ runId: "run-1", occurrence: hour })
+  })
+
+  it("re-arms a committed pending claim when dispatch fails", async () => {
+    const runner = runnerFixture({
+      cancel: () => Effect.fail(new TriggerError({ code: "runner", message: "cancel failed" }))
+    })
+    let pendingClaims = 0
+    let rearmed = 0
+    const occurrence = hour
+    const store = scripted({
+      claimPending: () =>
+        Effect.sync(() => {
+          pendingClaims++
+          return Option.some({
+            occurrence,
+            claim: pendingClaims === 1
+              ? {
+                claimed: true as const,
+                action: "supersede" as const,
+                reservationId: TriggerStore.reservationId("hourly", occurrence),
+                activeRunId: "foreign-run"
+              }
+              : {
+                claimed: true as const,
+                action: "fire" as const,
+                reservationId: TriggerStore.reservationId("hourly", occurrence)
+              }
+          })
+        }),
+      setPending: () =>
+        Effect.sync(() => {
+          rearmed++
+        })
+    }, { ...trigger("supersede", "none"), revision: 1, lastFiredAt: 0 })
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function*() {
+          const scheduler = yield* Scheduler.make({ runPollInterval: "1 hour" }).pipe(
+            Effect.provideService(TriggerStore.TriggerStore, store),
+            Effect.provideService(Scheduler.Runner, runner.service)
+          )
+          yield* TestClock.setTime(0)
+          yield* scheduler.runOnce
+          yield* scheduler.runOnce
+          yield* Effect.yieldNow
+        })
+      ).pipe(Effect.provide(TestClock.layer()))
+    )
+    expect(pendingClaims).toBe(2)
+    expect(rearmed).toBe(1)
+    expect(runner.starts).toHaveLength(1)
   })
 
   it("does nothing when another worker already holds the occurrence", async () => {
@@ -615,6 +709,28 @@ describe("Scheduler dispatch edges", () => {
       runner
     )
     expect(runner.inspected).toContain("foreign-run")
+    expect(runner.starts).toHaveLength(0)
+  })
+
+  it("clears a recovered settled run when no fire occurrence is known", async () => {
+    const runner = runnerFixture()
+    let stored = true
+    let clears = 0
+    await tick(
+      scripted({
+        activeRun: () => Effect.succeed(stored ? Option.some("settled-run") : Option.none()),
+        clearActive: () =>
+          Effect.sync(() => {
+            stored = false
+            clears++
+          })
+      }, {
+        ...base,
+        lastFiredAt: undefined
+      }),
+      runner
+    )
+    expect(clears).toBe(1)
     expect(runner.starts).toHaveLength(0)
   })
 

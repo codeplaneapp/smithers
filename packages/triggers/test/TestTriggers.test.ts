@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import * as TestTriggers from "../src/test/TestTriggers.ts"
 import type { Trigger } from "../src/Trigger.ts"
 import * as TriggerStore from "../src/TriggerStore.ts"
+import { storeConformance } from "./StoreConformance.ts"
 
 const trigger: Trigger = {
   id: "daily",
@@ -18,78 +19,9 @@ const trigger: Trigger = {
 const run = <A, E>(effect: Effect.Effect<A, E, TriggerStore.TriggerStore>) =>
   Effect.runPromise(effect.pipe(Effect.provide(TestTriggers.layer)))
 
-// The exported test layer stands in for `SqlTriggerStore` in other packages'
-// suites, so it owes the same refusals in the same order. A kinder set of rules
-// here would make it an unreliable oracle for the store it replaces.
+storeConformance("TestTriggers", TestTriggers.layer)
+
 describe("TestTriggers", () => {
-  it("refuses a claim exactly as the SQL store does", async () => {
-    const refusals = await run(
-      Effect.gen(function*() {
-        const store = yield* TriggerStore.TriggerStore
-        const missing = yield* Effect.flip(
-          store.claimFire({ triggerId: "absent", occurrence: 1, expectedRevision: 1 })
-        )
-        const registered = yield* store.register(trigger)
-        const stale = yield* Effect.flip(
-          store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: registered.revision + 1 })
-        )
-        const off = yield* store.register({ ...trigger, enabled: false })
-        const disabled = yield* Effect.flip(
-          store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: off.revision })
-        )
-        return { missing, stale, disabled }
-      })
-    )
-    expect(refusals.missing).toMatchObject({ code: "unknown_trigger", message: "unknown trigger absent" })
-    expect(refusals.stale).toMatchObject({ code: "revision_mismatch" })
-    expect(refusals.stale.message).toBe("trigger daily is at revision 1, not the claimed 2")
-    expect(refusals.disabled).toMatchObject({ code: "trigger_disabled" })
-  })
-
-  it("fails every other single-trigger method with unknown_trigger", async () => {
-    const codes = await run(
-      Effect.gen(function*() {
-        const store = yield* TriggerStore.TriggerStore
-        return yield* Effect.all([
-          Effect.flip(store.recordResult({ triggerId: "absent", occurrence: 1, outcome: "completed" })),
-          Effect.flip(store.setPending({ triggerId: "absent", occurrence: 1 })),
-          Effect.flip(store.takePending("absent")),
-          Effect.flip(store.activeRun("absent"))
-        ])
-      })
-    )
-    for (const error of codes) expect(error.code).toBe("unknown_trigger")
-  })
-
-  it("claims one occurrence once and only resumes a buffered one on request", async () => {
-    const claims = await run(
-      Effect.gen(function*() {
-        const store = yield* TriggerStore.TriggerStore
-        const registered = yield* store.register(trigger)
-        const first = yield* store.claimFire({
-          triggerId: trigger.id,
-          occurrence: 1,
-          expectedRevision: registered.revision
-        })
-        const second = yield* store.claimFire({
-          triggerId: trigger.id,
-          occurrence: 1,
-          expectedRevision: registered.revision
-        })
-        const resumed = yield* store.claimFire({
-          triggerId: trigger.id,
-          occurrence: 1,
-          expectedRevision: registered.revision,
-          resumeBuffered: true
-        })
-        return { first, second, resumed }
-      })
-    )
-    expect(claims.first).toMatchObject({ claimed: true, action: "fire" })
-    expect(claims.second).toMatchObject({ claimed: false })
-    expect(claims.resumed).toMatchObject({ claimed: true, action: "skip" })
-  })
-
   it("lists every trigger and keeps the fire cursor across a re-registration", async () => {
     const state = await run(
       Effect.gen(function*() {

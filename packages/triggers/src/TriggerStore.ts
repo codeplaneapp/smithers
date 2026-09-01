@@ -76,6 +76,18 @@ export type Claim =
     readonly reservationId: string
     readonly activeRunId?: string | undefined
   }
+
+/**
+ * Time after which an uncommitted launch reservation may be reclaimed.
+ *
+ * Both store implementations use this value so swapping the test store for
+ * the SQL store cannot change recovery timing.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const reservationLeaseMs = 5 * 60 * 1000
+
 /**
  * The prefix marking an `active_run_id` that is a launch reservation rather
  * than a run the runtime knows about.
@@ -150,6 +162,20 @@ export interface Service {
   readonly list: () => Effect.Effect<ReadonlyArray<Registered>, TriggerError>
   readonly listEnabled: () => Effect.Effect<ReadonlyArray<Registered>, TriggerError>
   readonly claimFire: (fire: ClaimFire) => Effect.Effect<Claim, TriggerError>
+  /**
+   * Claims the buffered occurrence, when one exists.
+   *
+   * One transaction reads the occurrence, applies the same claim protocol as
+   * {@link Service.claimFire}, and clears the buffer only after a successful
+   * claim. No failure can land between reading the buffer and claiming it.
+   */
+  readonly claimPending: (fire: {
+    readonly triggerId: string
+    readonly expectedRevision: number
+  }) => Effect.Effect<
+    Option.Option<{ readonly occurrence: number; readonly claim: Claim }>,
+    TriggerError
+  >
   readonly recordResult: (result: Result) => Effect.Effect<void, TriggerError>
   readonly setPending: (fire: Fire) => Effect.Effect<void, TriggerError>
   readonly takePending: (triggerId: string) => Effect.Effect<Option.Option<number>, TriggerError>
@@ -181,6 +207,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => ({
   list: () => unavailable("list"),
   listEnabled: () => unavailable("listEnabled"),
   claimFire: () => unavailable("claimFire"),
+  claimPending: () => unavailable("claimPending"),
   recordResult: () => unavailable("recordResult"),
   setPending: () => unavailable("setPending"),
   takePending: () => unavailable("takePending"),

@@ -44,6 +44,8 @@ const call = (store: TriggerStore.Service, method: keyof TriggerStore.Service) =
       return store.takePending("daily")
     case "activeRun":
       return store.activeRun("daily")
+    case "claimPending":
+      return store.claimPending({ triggerId: "daily", expectedRevision: 1 })
     case "clearActive":
       return store.clearActive("daily", "run-1")
   }
@@ -59,6 +61,7 @@ const methods: ReadonlyArray<keyof TriggerStore.Service> = [
   "setPending",
   "takePending",
   "activeRun",
+  "claimPending",
   "clearActive"
 ]
 

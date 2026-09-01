@@ -13,7 +13,8 @@
  * A satisfiable expression carries the opposite hazard: `* * * * *` across a
  * year is 525,600 occurrences, and materializing them costs seconds and
  * hundreds of megabytes. {@link occurrencesBetween} therefore always searches
- * under a finite cap, {@link maxOccurrences} when the caller states none.
+ * under a finite cap and reports when an unstated limit would exceed
+ * {@link maxOccurrences}.
  *
  * @since 0.1.0
  */
@@ -80,13 +81,13 @@ export const previousAtOrBefore = (cron: Cron, at: Date): Effect.Effect<Date, Tr
 export const maxOccurrences = 1000
 
 /**
- * The occurrences in `(from, to]`, in order, at most `limit` of them.
+ * The occurrences in `(from, to]`, in order.
  *
- * `limit` must be a non-negative safe integer; anything else is
- * `invalid_options` rather than a silently disabled cap, which is what
- * `NaN` used to be. A caller that needs to know the interval held more than it
- * asked for passes one more than its own bound and compares the length, the
- * way `CatchUp.occurrences` does.
+ * A stated `limit` caps the result silently and must be a non-negative safe
+ * integer. With no stated limit, the search fails with
+ * `catch_up_bound_exceeded` when the interval holds more than
+ * {@link maxOccurrences}. A caller with its own bound can pass one more than
+ * that bound and compare the length, the way `CatchUp.occurrences` does.
  *
  * @category sequencing
  * @since 0.1.0
@@ -95,9 +96,9 @@ export const occurrencesBetween = (
   cron: Cron,
   from: Date,
   to: Date,
-  limit: number = maxOccurrences
+  limit?: number | undefined
 ): Effect.Effect<ReadonlyArray<Date>, TriggerError> => {
-  if (!Number.isSafeInteger(limit) || limit < 0) {
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0)) {
     return Effect.fail(
       new TriggerError({
         code: "invalid_options",
@@ -106,16 +107,30 @@ export const occurrencesBetween = (
       })
     )
   }
-  if (limit === 0) return Effect.succeed([])
-  return attempt(cron, "interval", () => {
+  const searchLimit = limit ?? maxOccurrences + 1
+  if (searchLimit === 0) return Effect.succeed([])
+  const search = attempt(cron, "interval", () => {
     const occurrences: Array<Date> = []
     for (const occurrence of EffectCron.sequence(cron.value, from)) {
       if (occurrence.getTime() > to.getTime()) break
-      if (occurrences.length >= limit) break
+      if (occurrences.length >= searchLimit) break
       occurrences.push(occurrence)
     }
     return occurrences
   })
+  if (limit !== undefined) return search
+  return search.pipe(
+    Effect.flatMap((occurrences) =>
+      occurrences.length > maxOccurrences
+        ? Effect.fail(
+          new TriggerError({
+            code: "catch_up_bound_exceeded",
+            message: `interval contains more than ${maxOccurrences} occurrences; maxOccurrences is ${maxOccurrences}`
+          })
+        )
+        : Effect.succeed(occurrences)
+    )
+  )
 }
 
 /**

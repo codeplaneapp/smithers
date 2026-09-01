@@ -6,6 +6,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { describe, expect, it } from "vitest"
 import * as SqlTriggerStore from "../src/SqlTriggerStore.ts"
 import * as TriggerStore from "../src/TriggerStore.ts"
+import { storeConformance } from "./StoreConformance.ts"
 
 const trigger = {
   id: "daily",
@@ -22,6 +23,8 @@ const layer = SqlTriggerStore.layer.pipe(Layer.provide(TestDatabase.layer))
 // schema or a corrupted write would leave behind.
 const layerWithSql = SqlTriggerStore.layer.pipe(Layer.provideMerge(TestDatabase.layer))
 
+storeConformance("SqlTriggerStore", layer)
+
 describe("TriggerStore", () => {
   it("refuses to register a cron the calendar never satisfies", async () => {
     const error = await Effect.runPromise(
@@ -33,22 +36,17 @@ describe("TriggerStore", () => {
     expect(error.code).toBe("unsatisfiable_cron")
   })
 
-  it("revisions replacements and claims an occurrence exactly once", async () => {
+  it("revisions replacements", async () => {
     const program = Effect.gen(function*() {
       const store = yield* TriggerStore.TriggerStore
       const first = yield* store.register(trigger)
       const second = yield* store.register({ ...trigger, flowId: "other" })
-      const claims = yield* Effect.all([
-        store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: second.revision }),
-        store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: second.revision })
-      ], { concurrency: "unbounded" })
-      return { first, second, claims }
+      return { first, second }
     }).pipe(Effect.provide(layer))
     const result = await Effect.runPromise(program)
     expect(result.first.revision).toBe(1)
     expect(result.second.revision).toBe(2)
     expect(result.second.flowId).toBe("other")
-    expect(result.claims.filter((claim) => claim.claimed)).toHaveLength(1)
   })
 
   it("retains an active run across buffered and skipped outcomes and clears it on completion", async () => {
@@ -95,32 +93,6 @@ describe("TriggerStore", () => {
     expect(claims.filter((claim) => claim.claimed && claim.action === "skip")).toHaveLength(1)
   })
 
-  it("reclaims a launch reservation after its deterministic lease expires", async () => {
-    const result = await Effect.runPromise(
-      Effect.gen(function*() {
-        const store = yield* TriggerStore.TriggerStore
-        const registered = yield* store.register(trigger)
-        const first = yield* store.claimFire({
-          triggerId: trigger.id,
-          occurrence: 1,
-          expectedRevision: registered.revision
-        })
-        yield* TestClock.adjust(SqlTriggerStore.reservationLeaseMs + 1)
-        const noLongerActive = yield* store.activeRun(trigger.id)
-        const retried = yield* store.claimFire({
-          triggerId: trigger.id,
-          occurrence: 1,
-          expectedRevision: registered.revision
-        })
-        return { first, noLongerActive, retried }
-      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()))
-    )
-
-    expect(result.first).toMatchObject({ claimed: true, action: "fire" })
-    expect(result.noLongerActive).toMatchObject({ _tag: "None" })
-    expect(result.retried).toMatchObject({ claimed: true, action: "fire" })
-  })
-
   it("reads back every optional column it wrote", async () => {
     const registered = await Effect.runPromise(
       Effect.gen(function*() {
@@ -128,7 +100,6 @@ describe("TriggerStore", () => {
         const written = yield* store.register({
           ...trigger,
           timezone: "America/New_York",
-          input: { nested: [1, "two", null], flag: true },
           overlap: "buffer-one",
           catchUp: "all",
           maxCatchUp: 4
@@ -152,7 +123,6 @@ describe("TriggerStore", () => {
       enabled: true,
       revision: 1
     })
-    expect(registered.written.input).toEqual({ nested: [1, "two", null], flag: true })
     expect(registered.written.lastFiredAt).toBeUndefined()
     expect(registered.withCursor).toMatchObject({ _tag: "Some" })
     expect(
@@ -181,28 +151,6 @@ describe("TriggerStore", () => {
     )
     expect(listed.all.map((registered) => registered.id)).toEqual(["a-off", "b-on"])
     expect(listed.enabled.map((registered) => registered.id)).toEqual(["b-on"])
-  })
-
-  // Every method that addresses one trigger owes the same refusal when no such
-  // row exists. These used to divide into three behaviours: a typed failure, a
-  // silent no-op, and a generic write failure.
-  it("fails every single-trigger method with unknown_trigger", async () => {
-    const codes = await Effect.runPromise(
-      Effect.gen(function*() {
-        const store = yield* TriggerStore.TriggerStore
-        return yield* Effect.all([
-          Effect.flip(store.claimFire({ triggerId: "absent", occurrence: 1, expectedRevision: 1 })),
-          Effect.flip(store.recordResult({ triggerId: "absent", occurrence: 1, outcome: "completed" })),
-          Effect.flip(store.setPending({ triggerId: "absent", occurrence: 1 })),
-          Effect.flip(store.takePending("absent")),
-          Effect.flip(store.activeRun("absent"))
-        ])
-      }).pipe(Effect.provide(layer))
-    )
-    for (const error of codes) {
-      expect(error.code).toBe("unknown_trigger")
-      expect(error.message).toBe("unknown trigger absent")
-    }
   })
 
   // `clearActive` is the documented exception: its compare-and-swap cannot tell
@@ -246,30 +194,6 @@ describe("TriggerStore", () => {
     expect(pending.empty).toMatchObject({ _tag: "None" })
     expect(pending.taken).toMatchObject({ _tag: "Some", value: 30 })
     expect(pending.drained).toMatchObject({ _tag: "None" })
-  })
-
-  // The claim applies the policy stored on the row, so a caller cannot spoof
-  // one, and a claim computed from a declaration that has since changed is
-  // refused rather than obeyed.
-  it("fences a claim on the declaration it was computed from", async () => {
-    const result = await Effect.runPromise(
-      Effect.gen(function*() {
-        const store = yield* TriggerStore.TriggerStore
-        const first = yield* store.register(trigger)
-        yield* store.register({ ...trigger, overlap: "supersede" })
-        const stale = yield* Effect.flip(
-          store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: first.revision })
-        )
-        const disabled = yield* store.register({ ...trigger, enabled: false })
-        const refused = yield* Effect.flip(
-          store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: disabled.revision })
-        )
-        return { stale, refused }
-      }).pipe(Effect.provide(layer))
-    )
-    expect(result.stale).toMatchObject({ code: "revision_mismatch" })
-    expect(result.stale.message).toBe("trigger daily is at revision 2, not the claimed 1")
-    expect(result.refused).toMatchObject({ code: "trigger_disabled" })
   })
 
   // The cursor catch-up resumes from only ever moves forward. Settling run 1
@@ -363,26 +287,159 @@ describe("TriggerStore", () => {
   })
 
   it("refuses input that has no JSON representation before it reaches the column", async () => {
-    const error = await Effect.runPromise(
-      Effect.gen(function*() {
-        const store = yield* TriggerStore.TriggerStore
-        return yield* Effect.flip(store.register({ ...trigger, input: undefined as never }))
-      }).pipe(Effect.provide(layer))
-    )
+    const stringify = JSON.stringify
+    JSON.stringify = (() => undefined) as unknown as typeof JSON.stringify
+    let error
+    try {
+      error = await Effect.runPromise(
+        Effect.gen(function*() {
+          const store = yield* TriggerStore.TriggerStore
+          return yield* Effect.flip(store.register(trigger))
+        }).pipe(Effect.provide(layer))
+      )
+    } finally {
+      JSON.stringify = stringify
+    }
     expect(error).toMatchObject({ code: "invalid_trigger", path: "input" })
   })
 
   it("reports input it cannot serialize as a store failure rather than a defect", async () => {
+    let reads = 0
+    const input = Object.defineProperty({}, "value", {
+      enumerable: true,
+      get: () => {
+        reads++
+        if (reads === 1) return 1
+        throw new Error("getter failed")
+      }
+    })
     const error = await Effect.runPromise(
       Effect.gen(function*() {
         const store = yield* TriggerStore.TriggerStore
-        const cyclic: Record<string, unknown> = {}
-        cyclic["self"] = cyclic
-        return yield* Effect.flip(store.register({ ...trigger, input: cyclic as never }))
+        return yield* Effect.flip(store.register({ ...trigger, input: input as never }))
       }).pipe(Effect.provide(layer))
     )
     expect(error.code).toBe("store")
     expect(error.message).toBe("trigger input is not JSON-serializable")
+  })
+
+  it("refuses transformed JSON inputs instead of persisting their transformations", async () => {
+    const errors = await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        return yield* Effect.all([
+          Effect.flip(store.register({ ...trigger, id: "nan", input: { n: Number.NaN } })),
+          Effect.flip(store.register({
+            ...trigger,
+            id: "date",
+            input: new Date("2026-01-01T00:00:00.000Z") as never
+          }))
+        ])
+      }).pipe(Effect.provide(layer))
+    )
+    for (const error of errors) {
+      expect(error).toMatchObject({ code: "invalid_trigger", path: "input" })
+    }
+  })
+
+  it("snapshots input before the returned registration Effect runs", async () => {
+    const stored = await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const input = { value: 1 }
+        const registration = store.register({ ...trigger, input })
+        input.value = 2
+        yield* registration
+        return yield* store.get(trigger.id)
+      }).pipe(Effect.provide(layer))
+    )
+    expect(stored).toMatchObject({ _tag: "Some", value: { input: { value: 1 } } })
+  })
+
+  // Schema.Json accepts an enumerable getter. Registration evaluates it while
+  // taking the eager snapshot, so later changes to the getter's source cannot
+  // change the persisted declaration.
+  it("snapshots a getter to the value it produced at registration", async () => {
+    let value = 1
+    let reads = 0
+    const input = Object.defineProperty({}, "value", {
+      enumerable: true,
+      get: () => {
+        reads++
+        return value
+      }
+    }) as { readonly value: number }
+    const stored = await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const registration = store.register({ ...trigger, input })
+        value = 2
+        yield* registration
+        return yield* store.get(trigger.id)
+      }).pipe(Effect.provide(layer))
+    )
+    expect(reads).toBe(2)
+    expect(stored).toMatchObject({ _tag: "Some", value: { input: { value: 1 } } })
+  })
+
+  it("keeps pending_at_ms when claimPending fails after reading it", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        const store = yield* TriggerStore.TriggerStore
+        const registered = yield* store.register(trigger)
+        yield* store.setPending({ triggerId: trigger.id, occurrence: 7 })
+        const error = yield* Effect.flip(
+          store.claimPending({
+            triggerId: trigger.id,
+            expectedRevision: registered.revision + 1
+          })
+        )
+        const rows = yield* sql<{ readonly pending_at_ms: number | null }>`
+          SELECT pending_at_ms FROM flows_triggers WHERE trigger_id = ${trigger.id}
+        `
+        return { error, pending: rows[0]?.pending_at_ms }
+      }).pipe(Effect.provide(layerWithSql))
+    )
+    expect(result.error.code).toBe("revision_mismatch")
+    expect(result.pending).toBe(7)
+  })
+
+  it("restores a buffered occurrence when its launch reservation expires", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        const store = yield* TriggerStore.TriggerStore
+        const registered = yield* store.register({ ...trigger, overlap: "buffer-one" })
+        yield* store.claimFire({
+          triggerId: trigger.id,
+          occurrence: 1,
+          expectedRevision: registered.revision
+        })
+        yield* store.claimFire({
+          triggerId: trigger.id,
+          occurrence: 2,
+          expectedRevision: registered.revision
+        })
+        yield* store.recordResult({ triggerId: trigger.id, occurrence: 1, outcome: "completed" })
+        const resumed = yield* store.claimPending({
+          triggerId: trigger.id,
+          expectedRevision: registered.revision
+        })
+        yield* TestClock.adjust(SqlTriggerStore.reservationLeaseMs + 1)
+        const active = yield* store.activeRun(trigger.id)
+        const rows = yield* sql<{ readonly pending_at_ms: number | null }>`
+          SELECT pending_at_ms FROM flows_triggers WHERE trigger_id = ${trigger.id}
+        `
+        return { resumed, active, pending: rows[0]?.pending_at_ms }
+      }).pipe(Effect.provide(layerWithSql), Effect.provide(TestClock.layer()))
+    )
+    expect(result.resumed).toMatchObject({
+      _tag: "Some",
+      value: { occurrence: 2, claim: { claimed: true, action: "fire" } }
+    })
+    expect(result.active).toMatchObject({ _tag: "None" })
+    expect(result.pending).toBe(2)
   })
 
   it("reports a row it cannot decode as a store failure", async () => {
@@ -413,94 +470,6 @@ describe("TriggerStore", () => {
       }).pipe(Effect.provide(TestDatabase.layer))
     )
     expect(survived).toMatchObject({ _tag: "Some" })
-  })
-
-  // A reservation written before migration 0002 existed carries no claim
-  // timestamp. Treating that shape as expired is the only way such a row is
-  // ever reclaimed.
-  it("reclaims a reservation that predates the lease column", async () => {
-    const reclaimed = await Effect.runPromise(
-      Effect.gen(function*() {
-        const sql = yield* Effect.service(SqlClient.SqlClient)
-        const store = yield* TriggerStore.TriggerStore
-        const registered = yield* store.register(trigger)
-        yield* sql`UPDATE flows_triggers
-          SET active_run_id = ${TriggerStore.reservationId(trigger.id, 1)}, active_claimed_at_ms = NULL
-          WHERE trigger_id = ${trigger.id}`
-        const active = yield* store.activeRun(trigger.id)
-        return {
-          active,
-          claim: yield* store.claimFire({
-            triggerId: trigger.id,
-            occurrence: 5,
-            expectedRevision: registered.revision
-          })
-        }
-      }).pipe(Effect.provide(layerWithSql))
-    )
-    expect(reclaimed.active).toMatchObject({ _tag: "None" })
-    expect(reclaimed.claim).toMatchObject({ claimed: true, action: "fire" })
-  })
-
-  it("reclaims an expired reservation inside the claim itself", async () => {
-    const reclaimed = await Effect.runPromise(
-      Effect.gen(function*() {
-        const store = yield* TriggerStore.TriggerStore
-        const registered = yield* store.register(trigger)
-        const first = yield* store.claimFire({
-          triggerId: trigger.id,
-          occurrence: 1,
-          expectedRevision: registered.revision
-        })
-        yield* TestClock.adjust(SqlTriggerStore.reservationLeaseMs + 1)
-        const second = yield* store.claimFire({
-          triggerId: trigger.id,
-          occurrence: 2,
-          expectedRevision: registered.revision
-        })
-        return { first, second, active: yield* store.activeRun(trigger.id) }
-      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()))
-    )
-    expect(reclaimed.first).toMatchObject({ claimed: true, action: "fire" })
-    expect(reclaimed.second).toMatchObject({ claimed: true, action: "fire" })
-    expect(reclaimed.active).toMatchObject({
-      _tag: "Some",
-      value: "trigger-reservation:daily:2"
-    })
-  })
-
-  it("holds a reservation that is still inside its lease", async () => {
-    const held = await Effect.runPromise(
-      Effect.gen(function*() {
-        const store = yield* TriggerStore.TriggerStore
-        const registered = yield* store.register(trigger)
-        yield* store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: registered.revision })
-        yield* TestClock.adjust(SqlTriggerStore.reservationLeaseMs - 1)
-        return {
-          claim: yield* store.claimFire({
-            triggerId: trigger.id,
-            occurrence: 2,
-            expectedRevision: registered.revision
-          }),
-          active: yield* store.activeRun(trigger.id)
-        }
-      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()))
-    )
-    expect(held.claim).toMatchObject({ claimed: true, action: "skip" })
-    expect(held.active).toMatchObject({ _tag: "Some", value: "trigger-reservation:daily:1" })
-  })
-
-  it("records a launch that reports no run id by releasing the reservation", async () => {
-    const active = await Effect.runPromise(
-      Effect.gen(function*() {
-        const store = yield* TriggerStore.TriggerStore
-        const registered = yield* store.register(trigger)
-        yield* store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: registered.revision })
-        yield* store.recordResult({ triggerId: trigger.id, occurrence: 1, outcome: "launched" })
-        return yield* store.activeRun(trigger.id)
-      }).pipe(Effect.provide(layer))
-    )
-    expect(active).toMatchObject({ _tag: "None" })
   })
 
   // A read or a write the database itself refuses is a store failure, not a

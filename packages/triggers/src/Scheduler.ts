@@ -7,7 +7,7 @@
  */
 import * as Control from "@smthrs/control/Control"
 import type { PlanCard, Receipt, RunStatus } from "@smthrs/control/ControlSchema"
-import { Cause, Clock, Context, Duration, Effect, Fiber, Layer, Option, Ref, Semaphore } from "effect"
+import { Cause, Clock, Context, Deferred, Duration, Effect, Fiber, Layer, Option, Ref, Semaphore } from "effect"
 import type * as Scope from "effect/Scope"
 import * as CatchUp from "./CatchUp.ts"
 import * as Cron from "./Cron.ts"
@@ -89,6 +89,15 @@ const runnerError = (message: string, cause?: unknown): TriggerError =>
     message,
     ...(cause === undefined ? {} : { cause })
   })
+
+const translateRunnerFailure = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  message: string
+): Effect.Effect<A, TriggerError, R> =>
+  effect.pipe(
+    Effect.mapError((error) => error instanceof TriggerError ? error : runnerError(message, error)),
+    Effect.catchDefect((defect) => Effect.fail(runnerError(message, defect)))
+  )
 
 const invalidOption = (field: string, requirement: string): TriggerError =>
   new TriggerError({
@@ -196,30 +205,30 @@ export const layerControlRunner: Layer.Layer<Runner, never, Control.Control> = L
     const control = yield* Control.Control
     return makeRunner({
       start: (input) =>
-        control.plan(input).pipe(
-          Effect.flatMap((plan) => runApprovedPlan(control, plan, input.idempotencyKey, 1)),
-          Effect.mapError((error) =>
-            error instanceof TriggerError
-              ? error
-              : runnerError("Control could not launch the scheduled run", error)
-          )
+        translateRunnerFailure(
+          control.plan(input).pipe(
+            Effect.flatMap((plan) => runApprovedPlan(control, plan, input.idempotencyKey, 1))
+          ),
+          "Control could not launch the scheduled run"
         ),
       isActive: (runId) =>
-        control.list({ _tag: "runs", filters: { runId }, limit: 1 }).pipe(
-          Effect.map((response) => {
-            if (response._tag !== "runs") return false
-            const run = response.items.find((candidate) => candidate.runId === runId)
-            return run !== undefined && !settled.has(run.status)
-          }),
-          Effect.mapError((error) => runnerError(`Control could not inspect run ${runId}`, error))
+        translateRunnerFailure(
+          control.list({ _tag: "runs", filters: { runId }, limit: 1 }).pipe(
+            Effect.map((response) => {
+              if (response._tag !== "runs") return false
+              const run = response.items.find((candidate) => candidate.runId === runId)
+              return run !== undefined && !settled.has(run.status)
+            })
+          ),
+          `Control could not inspect run ${runId}`
         ),
       cancel: (runId) =>
-        control.cancel({
-          runId,
-          idempotencyKey: `trigger-cancel:${runId}`
-        }).pipe(
-          Effect.asVoid,
-          Effect.mapError((error) => runnerError(`Control could not cancel run ${runId}`, error))
+        translateRunnerFailure(
+          control.cancel({
+            runId,
+            idempotencyKey: `trigger-cancel:${runId}`
+          }).pipe(Effect.asVoid),
+          `Control could not cancel run ${runId}`
         )
     })
   })
@@ -362,6 +371,18 @@ export const make = (
     const stillRunning = (runId: string): Effect.Effect<boolean, TriggerError> =>
       isReservation(runId) ? Effect.succeed(true) : runner.isActive(runId)
 
+    // A recovered monitor cannot report the runtime's detailed terminal
+    // status, but the same poll ending in this process records `completed`.
+    // Recording that result also clears the matching active run atomically.
+    const settleRecovered = (
+      triggerId: string,
+      occurrence: number,
+      runId: string
+    ): Effect.Effect<void, TriggerError> =>
+      Number.isFinite(occurrence)
+        ? store.recordResult({ triggerId, occurrence, outcome: "completed", runId })
+        : store.clearActive(triggerId, runId)
+
     const resolveActive = (
       trigger: Registered
     ): Effect.Effect<Active | undefined, TriggerError> =>
@@ -374,13 +395,17 @@ export const make = (
           // one was recovered from the store, and only the runtime can say
           // whether that run is still going.
           if (local.fiber !== undefined || (yield* stillRunning(local.runId))) return local
-          yield* store.clearActive(trigger.id, local.runId)
+          yield* settleRecovered(trigger.id, local.occurrence, local.runId)
           yield* removeActive(trigger.id, local.occurrence)
         }
         const stored = yield* store.activeRun(trigger.id)
         if (Option.isNone(stored)) return undefined
         if (!(yield* stillRunning(stored.value))) {
-          yield* store.clearActive(trigger.id, stored.value)
+          yield* settleRecovered(
+            trigger.id,
+            trigger.lastFiredAt ?? Number.NEGATIVE_INFINITY,
+            stored.value
+          )
           return undefined
         }
         const recovered: Active = {
@@ -407,10 +432,14 @@ export const make = (
 
     const launch = (
       trigger: Registered,
-      occurrence: number
+      occurrence: number,
+      reservation: string,
+      preserveBuffered: boolean
     ): Effect.Effect<void, TriggerError> =>
       Effect.gen(function*() {
         let runId: string | undefined
+        let launchRecorded = false
+        const started = yield* Deferred.make<void, TriggerError>()
         const lifecycle = Effect.gen(function*() {
           runId = yield* runner.start({
             flowId: trigger.flowId,
@@ -425,6 +454,8 @@ export const make = (
             outcome: "launched",
             runId
           })
+          launchRecorded = true
+          yield* Deferred.succeed(started, undefined)
           while (yield* runner.isActive(runId)) {
             yield* Effect.sleep(runPollInterval)
           }
@@ -435,7 +466,19 @@ export const make = (
             runId
           })
         }).pipe(
-          Effect.catch((error) => recordFailed(trigger, occurrence, error, runId).pipe(Effect.ignore)),
+          Effect.catch((error) =>
+            Effect.gen(function*() {
+              if (launchRecorded) {
+                yield* recordFailed(trigger, occurrence, error, runId).pipe(Effect.ignore)
+                return
+              }
+              if (preserveBuffered) {
+                yield* store.clearActive(trigger.id, reservation).pipe(Effect.ignore)
+              } else {
+                yield* recordFailed(trigger, occurrence, error, runId).pipe(Effect.ignore)
+              }
+              yield* Deferred.fail(started, error)
+            })),
           // Interrupting this fiber detaches the monitor; it never cancels the
           // run. The run is durable and outlives this process, so a deploy or
           // any other scope closure must leave it alone: the next incarnation
@@ -453,6 +496,7 @@ export const make = (
         // already removed that entry by the time this runs, and a fiber with
         // nothing left to interrupt is not worth putting back.
         yield* updateActive(trigger.id, occurrence, (entry) => ({ ...entry, fiber }))
+        yield* Deferred.await(started)
       })
 
     // Only a claim that named the run it is superseding gets here, so the run
@@ -482,7 +526,8 @@ export const make = (
     const dispatchClaimed = (
       trigger: Registered,
       occurrence: number,
-      claim: Exclude<Claim, { readonly claimed: false }>
+      claim: Exclude<Claim, { readonly claimed: false }>,
+      resumeBuffered = false
     ): Effect.Effect<void, TriggerError> =>
       Effect.gen(function*() {
         switch (claim.action) {
@@ -495,7 +540,7 @@ export const make = (
                   runId: claim.reservationId
                 })
             )
-            yield* launch(trigger, occurrence)
+            yield* launch(trigger, occurrence, claim.reservationId, resumeBuffered)
             return
           case "skip":
             yield* store.recordResult({
@@ -533,7 +578,7 @@ export const make = (
                   runId: claim.reservationId
                 })
             )
-            yield* launch(trigger, occurrence)
+            yield* launch(trigger, occurrence, claim.reservationId, resumeBuffered)
             return
           }
         }
@@ -541,28 +586,23 @@ export const make = (
 
     const claimOnce = (
       trigger: Registered,
-      occurrence: number,
-      resumeBuffered: boolean
+      occurrence: number
     ): Effect.Effect<void, TriggerError> =>
       store.claimFire({
         triggerId: trigger.id,
         occurrence,
-        expectedRevision: trigger.revision,
-        ...(resumeBuffered ? { resumeBuffered: true } : {})
+        expectedRevision: trigger.revision
       }).pipe(
         Effect.flatMap((claim) => claim.claimed ? dispatchClaimed(trigger, occurrence, claim) : Effect.void)
       )
 
-    // The claim is fenced on the revision the occurrence was computed from, so
-    // an edit that landed mid-tick refuses the claim instead of firing a
-    // declaration this tick never read. One refresh and one retry is enough:
-    // the next tick re-reads the declaration anyway.
-    const claimAndDispatch = (
+    // A claim is fenced on the revision its occurrence was computed from. One
+    // refresh and one retry is enough because the next tick reads again.
+    const withRevisionRefresh = <A>(
       trigger: Registered,
-      occurrence: number,
-      resumeBuffered = false
-    ): Effect.Effect<void, TriggerError> =>
-      claimOnce(trigger, occurrence, resumeBuffered).pipe(
+      claim: (current: Registered) => Effect.Effect<A, TriggerError>
+    ): Effect.Effect<A, TriggerError> =>
+      claim(trigger).pipe(
         Effect.catch((error) =>
           error.code !== "revision_mismatch"
             ? Effect.fail(error)
@@ -570,25 +610,53 @@ export const make = (
               Effect.flatMap((refreshed) =>
                 Option.isNone(refreshed) || refreshed.value.revision === trigger.revision
                   ? Effect.fail(error)
-                  : claimOnce(refreshed.value, occurrence, resumeBuffered)
+                  : claim(refreshed.value)
               )
             )
         )
       )
 
-    // A buffered occurrence is taken out of the row before it can be claimed,
-    // so a failure between the two would drop it with nothing left to
-    // re-derive it from. Re-arming restores the buffer the take emptied.
+    const claimAndDispatch = (
+      trigger: Registered,
+      occurrence: number
+    ): Effect.Effect<void, TriggerError> => withRevisionRefresh(trigger, (current) => claimOnce(current, occurrence))
+
+    // The store reads, claims, and clears a buffer in one transaction. A
+    // dispatch failure happens after that commit, so this process can safely
+    // re-arm the occurrence before it reports the failure.
     const resumePending = (trigger: Registered): Effect.Effect<void, TriggerError> =>
-      Effect.gen(function*() {
-        const pending = yield* store.takePending(trigger.id)
-        if (Option.isNone(pending)) return
-        yield* claimAndDispatch(trigger, pending.value, true).pipe(
-          Effect.onError(() =>
-            store.setPending({ triggerId: trigger.id, occurrence: pending.value }).pipe(Effect.ignore)
+      withRevisionRefresh(trigger, (current) =>
+        store.claimPending({
+          triggerId: current.id,
+          expectedRevision: current.revision
+        }).pipe(
+          Effect.flatMap((pending) =>
+            Option.isNone(pending) || !pending.value.claim.claimed
+              ? Effect.void
+              : dispatchClaimed(
+                current,
+                pending.value.occurrence,
+                pending.value.claim,
+                true
+              ).pipe(
+                Effect.onError(() =>
+                  (
+                    pending.value.claim.action === "fire" || pending.value.claim.action === "supersede"
+                      ? store.clearActive(current.id, pending.value.claim.reservationId)
+                      : Effect.void
+                  ).pipe(
+                    Effect.andThen(
+                      store.setPending({
+                        triggerId: current.id,
+                        occurrence: pending.value.occurrence
+                      })
+                    ),
+                    Effect.ignore
+                  )
+                )
+              )
           )
-        )
-      })
+        ))
 
     // A bound the declaration cannot honour is a statement about how much
     // history to replay, not a reason to stop scheduling: the backlog beyond

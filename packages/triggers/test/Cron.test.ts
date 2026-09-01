@@ -84,10 +84,19 @@ describe("Cron", () => {
     }
   })
 
-  it("caps an unstated limit at maxOccurrences instead of searching unbounded", async () => {
+  it("fails when an unstated limit would exceed maxOccurrences", async () => {
     const cron = await Effect.runPromise(Cron.parse("* * * * *", "UTC"))
     const from = new Date("2026-01-01T00:00:00.000Z")
     const to = new Date("2026-01-03T00:00:00.000Z")
+    const error = await Effect.runPromise(Effect.flip(Cron.occurrencesBetween(cron, from, to)))
+    expect(error).toMatchObject({ code: "catch_up_bound_exceeded" })
+    expect(error.message).toContain(String(Cron.maxOccurrences))
+  })
+
+  it("returns an interval holding exactly maxOccurrences", async () => {
+    const cron = await Effect.runPromise(Cron.parse("* * * * *", "UTC"))
+    const from = new Date("2026-01-01T00:00:00.000Z")
+    const to = new Date(from.getTime() + Cron.maxOccurrences * 60_000)
     const occurrences = await Effect.runPromise(Cron.occurrencesBetween(cron, from, to))
     expect(occurrences).toHaveLength(Cron.maxOccurrences)
   })

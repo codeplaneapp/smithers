@@ -5,6 +5,15 @@ import * as Schedule from "../src/Schedule.ts"
 import * as Trigger from "../src/Trigger.ts"
 
 describe("Trigger", () => {
+  const declaration = (input: unknown) => ({
+    id: "daily",
+    flowId: "flow",
+    input,
+    cron: "0 0 * * *",
+    maxCatchUp: 0,
+    enabled: true
+  })
+
   it("decodes policy defaults", () => {
     const trigger = Schema.decodeUnknownSync(Trigger.Trigger)({
       id: "nightly",
@@ -31,6 +40,21 @@ describe("Trigger", () => {
     const trigger = await Effect.runPromise(Effect.flip(Trigger.make({})))
     expect(schedule.code).toBe("invalid_schedule")
     expect(trigger.code).toBe("invalid_trigger")
+  })
+
+  it("refuses every non-JSON input at the declaration boundary", async () => {
+    for (
+      const input of [
+        undefined,
+        { n: Number.NaN },
+        new Date("2026-01-01T00:00:00.000Z"),
+        () => undefined,
+        { nested: { value: undefined } }
+      ]
+    ) {
+      const error = await Effect.runPromise(Effect.flip(Trigger.make(declaration(input))))
+      expect(error).toMatchObject({ code: "invalid_trigger", path: "input" })
+    }
   })
 
   // February 30 passes every field range check and never arrives. Refusing it
