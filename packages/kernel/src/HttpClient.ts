@@ -217,6 +217,11 @@ export const makeNoop = (): EffectHttpClient.HttpClient =>
 export const layerNoop = (): Layer.Layer<EffectHttpClient.HttpClient> =>
   Layer.succeed(EffectHttpClient.HttpClient)(makeNoop())
 
+/**
+ * Keeps HTTPS resources host-only so existing grants remain valid. Every
+ * other scheme is explicit, which prevents an HTTPS grant from authorizing a
+ * cleartext or otherwise different transport.
+ */
 const capabilityFor = (
   request: HttpClientRequest.HttpClientRequest,
   modelId: string | undefined
@@ -238,13 +243,15 @@ const capabilityFor = (
       })
     )
   }
+  const host = url.host.toLowerCase()
+  const resource = url.protocol === "https:" ? host : `${url.protocol}//${host}`
   return Effect.succeed(
     modelId === undefined
       ? makeCapability(
         request.method === "GET" || request.method === "HEAD" ? "net:get" : "net:post",
-        url.host.toLowerCase()
+        resource
       )
-      : makeCapability("model:call", `${url.host.toLowerCase()}/${modelId}`)
+      : makeCapability("model:call", `${resource}/${modelId}`)
   )
 }
 

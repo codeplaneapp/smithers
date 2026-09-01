@@ -124,21 +124,21 @@ describe("HttpClient real redirect isolation", () => {
         })
       )
 
-      const denied = yield* runGuarded(requestOutcome(`${first.url}/start`), [allow("net:get", first.host)])
+      const denied = yield* runGuarded(requestOutcome(`${first.url}/start`), [allow("net:get", first.url)])
       expect(denied._tag).toBe("Failure")
       if (denied._tag !== "Failure") throw new Error("expected redirect denial")
       const permission = Option.getOrThrow(HttpClient.fromHttpClientError(denied.failure))
       expect(permission).toBeInstanceOf(PermissionRequired)
       expect(permission).toMatchObject({
         code: "permission_required",
-        capability: { action: "net:get", resource: second.host }
+        capability: { action: "net:get", resource: second.url }
       })
       expect(firstHits).toHaveLength(1)
       expect(secondHits).toHaveLength(0)
 
       const allowed = yield* runGuarded(requestOutcome(`${first.url}/start`), [
-        allow("net:get", first.host),
-        allow("net:get", second.host)
+        allow("net:get", first.url),
+        allow("net:get", second.url)
       ])
       expect(allowed._tag).toBe("Success")
       expect(firstHits).toHaveLength(2)
@@ -167,7 +167,7 @@ describe("HttpClient real redirect isolation", () => {
           const client = yield* EffectHttpClient.HttpClient
           return yield* client.execute(request)
         }),
-        [allow("net:post", server.host), allow("net:get", server.host)]
+        [allow("net:post", server.url), allow("net:get", server.url)]
       )
 
       expect(response.status).toBe(200)
@@ -201,7 +201,7 @@ describe("HttpClient real redirect isolation", () => {
             const client = yield* EffectHttpClient.HttpClient
             return yield* client.execute(request)
           }),
-          [allow("net:post", server.host)]
+          [allow("net:post", server.url)]
         )
 
         expect(response.status).toBe(200)
@@ -228,7 +228,7 @@ describe("HttpClient real redirect isolation", () => {
 
       const outcome = yield* runGuarded(
         requestOutcome(`${server.url}/directory/start`),
-        [allow("net:get", server.host)]
+        [allow("net:get", server.url)]
       )
 
       expect(outcome._tag).toBe("Success")
@@ -245,7 +245,7 @@ describe("HttpClient real redirect isolation", () => {
         })
       )
 
-      const outcome = yield* runGuarded(requestOutcome(`${server.url}/loop`), [allow("net:get", server.host)])
+      const outcome = yield* runGuarded(requestOutcome(`${server.url}/loop`), [allow("net:get", server.url)])
 
       expect(outcome._tag).toBe("Success")
       if (outcome._tag !== "Success") throw new Error("expected bounded redirect response")
@@ -272,13 +272,13 @@ describe("HttpClient real redirect isolation", () => {
       const assertRedirectIsolation = Effect.gen(function*() {
         const outcome = yield* runGuarded(
           requestOutcome(`${first.url}/start`),
-          [allow("net:get", first.host)],
+          [allow("net:get", first.url)],
           FetchHttpClient.layer
         )
         expect(outcome._tag).toBe("Failure")
         if (outcome._tag !== "Failure") throw new Error("auto-follow bypassed the redirect guard")
         expect(Option.getOrThrow(HttpClient.fromHttpClientError(outcome.failure))).toMatchObject({
-          capability: { resource: second.host }
+          capability: { resource: second.url }
         })
         expect(secondHits).toHaveLength(0)
       })

@@ -1,14 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Capability from "@smthrs/capability/Capability"
-import { PermissionDenied } from "@smthrs/capability/Permission"
+import { PermissionDenied, PermissionRequired, Rule } from "@smthrs/capability/Permission"
 import { Effect, Fiber, Option, Stream } from "effect"
 import * as HttpBody from "effect/unstable/http/HttpBody"
 import * as EffectHttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientErrorModule from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
-import { GrantStore, type Service } from "../src/GrantStore.ts"
+import { GrantStore, make as makeGrantStore, type Service } from "../src/GrantStore.ts"
 import * as HttpClient from "../src/HttpClient.ts"
+import * as Workspace from "../src/Workspace.ts"
 
 const itEffect = <E>(name: string, effect: () => Effect.Effect<void, E>) => it.effect(name, () => effect())
 
@@ -98,6 +99,32 @@ describe("HttpClient", () => {
     }).pipe((effect) => protectedClient(effect, host(calls), store(checks)))
   })
 
+  itEffect("does not let an HTTPS network grant authorize an HTTP downgrade", () =>
+    Effect.gen(function*() {
+      const calls: Array<string> = []
+      const grants = yield* makeGrantStore({
+        attended: false,
+        rules: [
+          new Rule({
+            effect: "allow",
+            pattern: new Capability.CapabilityPattern({ action: "net:get", resource: "api.example.com" })
+          })
+        ]
+      }).pipe(Effect.provide(Workspace.layer("/workspace")))
+
+      const failure = yield* Effect.gen(function*() {
+        const client = yield* EffectHttpClient.HttpClient
+        yield* client.get("https://api.example.com/x")
+        return yield* Effect.flip(client.get("http://API.Example.COM/x"))
+      }).pipe((effect) => protectedClient(effect, host(calls), grants))
+
+      expect(denial(failure)).toBeInstanceOf(PermissionRequired)
+      expect(denial(failure)).toMatchObject({
+        capability: { action: "net:get", resource: "http://api.example.com" }
+      })
+      expect(calls).toEqual(["https://api.example.com/x"])
+    }))
+
   itEffect("maps a model call to model:call without granting general net:post", () => {
     const checks: Array<Capability.Capability> = []
     const calls: Array<string> = []
@@ -112,6 +139,37 @@ describe("HttpClient", () => {
       expect(calls).toEqual(["https://API.Example.Test/v1/messages"])
     }).pipe((effect) => protectedClient(effect, host(calls), store(checks)))
   })
+
+  itEffect("does not let an HTTPS model grant authorize an HTTP downgrade", () =>
+    Effect.gen(function*() {
+      const calls: Array<string> = []
+      const grants = yield* makeGrantStore({
+        attended: false,
+        rules: [
+          new Rule({
+            effect: "allow",
+            pattern: new Capability.CapabilityPattern({
+              action: "model:call",
+              resource: "api.example.com/model-x"
+            })
+          })
+        ]
+      }).pipe(Effect.provide(Workspace.layer("/workspace")))
+
+      const failure = yield* Effect.gen(function*() {
+        const client = yield* EffectHttpClient.HttpClient
+        yield* client.post("https://api.example.com/models").pipe(HttpClient.withModelCall("model-x"))
+        return yield* Effect.flip(
+          client.post("http://API.Example.COM/models").pipe(HttpClient.withModelCall("model-x"))
+        )
+      }).pipe((effect) => protectedClient(effect, host(calls), grants))
+
+      expect(denial(failure)).toBeInstanceOf(PermissionRequired)
+      expect(denial(failure)).toMatchObject({
+        capability: { action: "model:call", resource: "http://api.example.com/model-x" }
+      })
+      expect(calls).toEqual(["https://api.example.com/models"])
+    }))
 
   itEffect("fails a relative or unparsable URL with a typed denial before the host client", () => {
     const checks: Array<Capability.Capability> = []
