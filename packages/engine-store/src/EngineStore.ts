@@ -407,11 +407,7 @@ const layerBase = (
 export const layer = (
   options: Options
 ): Layer.Layer<FlowEngine.SnapshotBoundary | FlowRuntime.FlowRuntime, never, PublicRequirements> =>
-  layerBase(options).pipe(Layer.provide(EngineJj.layerFromJj)) as Layer.Layer<
-    FlowEngine.SnapshotBoundary | FlowRuntime.FlowRuntime,
-    never,
-    PublicRequirements
-  >
+  layerBase(options).pipe(Layer.provide(EngineJj.layerFromJj))
 
 /**
  * Provides the durable engine with a private repository implementation for
@@ -430,8 +426,4 @@ export const layerWithPrivilegedJj = <E, R>(
 > =>
   layerBase(options).pipe(
     Layer.provide(EngineJj.layerFromJj.pipe(Layer.provide(privilegedJj)))
-  ) as Layer.Layer<
-    FlowEngine.SnapshotBoundary | FlowRuntime.FlowRuntime,
-    E,
-    PublicRequirements | R
-  >
+  )
