@@ -76,5 +76,6 @@ export const make = (input: unknown): Effect.Effect<Trigger, TriggerError> =>
         message: "Trigger declaration is invalid",
         cause
       })
-    )
+    ),
+    Effect.flatMap(Schedule.validate)
   )

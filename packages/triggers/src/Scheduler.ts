@@ -7,7 +7,7 @@
  */
 import * as Control from "@smthrs/control/Control"
 import type { PlanCard, Receipt } from "@smthrs/control/ControlSchema"
-import { Clock, Context, Duration, Effect, Fiber, Layer, Option, Ref, Semaphore } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Fiber, Layer, Option, Ref, Semaphore } from "effect"
 import type * as Scope from "effect/Scope"
 import * as CatchUp from "./CatchUp.ts"
 import * as Cron from "./Cron.ts"
@@ -255,6 +255,25 @@ const idempotencyKey = (triggerId: string, occurrence: number): string =>
   `${triggerId}:${new Date(occurrence).toISOString()}`
 
 /**
+ * Confines one trigger's failure to that trigger.
+ *
+ * A tick walks the due triggers in id order, so an aborting trigger used to
+ * take every trigger after it alphabetically down with it, and the supervisor
+ * above discarded the error unread. The cause is logged where the trigger it
+ * belongs to is still known. Interruption is re-raised: it is the scope
+ * closing, not a trigger failing.
+ */
+const isolate = (
+  triggerId: string,
+  work: string,
+  effect: Effect.Effect<void, TriggerError>
+): Effect.Effect<void, TriggerError> =>
+  Effect.catchCause(effect, (cause) =>
+    Cause.hasInterrupts(cause)
+      ? Effect.failCause(cause)
+      : Effect.annotateLogs(Effect.logWarning(`A trigger ${work} failed`, cause), { triggerId }))
+
+/**
  * Constructs a scheduler service in the current Scope.
  *
  * @category constructors
@@ -475,7 +494,7 @@ export const make = (
         yield* Ref.update(observedAt, (current) => new Map(current).set(trigger.id, now))
         if (observed === undefined) {
           if (trigger.lastFiredAt === undefined) {
-            return [Cron.previousAtOrBefore(cron, new Date(now)).getTime()]
+            return [(yield* Cron.previousAtOrBefore(cron, new Date(now))).getTime()]
           }
           return (yield* CatchUp.occurrences(
             trigger.catchUp,
@@ -486,7 +505,7 @@ export const make = (
           )).map((occurrence) => occurrence.getTime())
         }
 
-        const current = Cron.previousAtOrBefore(cron, new Date(now))
+        const current = yield* Cron.previousAtOrBefore(cron, new Date(now))
         if (current.getTime() <= observed) return []
         const backlog = yield* CatchUp.occurrences(
           trigger.catchUp,
@@ -519,7 +538,8 @@ export const make = (
         const occurrences = yield* dueOccurrences(trigger, now)
         yield* Effect.forEach(
           occurrences,
-          (occurrence) => claimAndDispatch(trigger, occurrence),
+          (occurrence) =>
+            isolate(trigger.id, `dispatch of occurrence ${occurrence}`, claimAndDispatch(trigger, occurrence)),
           { discard: true }
         )
       })
@@ -530,7 +550,7 @@ export const make = (
         const triggers = yield* store.due(now)
         yield* Effect.forEach(
           triggers,
-          (trigger) => processTrigger(trigger, now),
+          (trigger) => isolate(trigger.id, "tick", processTrigger(trigger, now)),
           { discard: true }
         )
       })
@@ -551,6 +571,11 @@ export const makeNoop = (): Service => Scheduler.of({ runOnce: Effect.void })
  * Scoped scheduler layer. Its supervisor sleeps only through the Effect Clock,
  * so scope closure interrupts both the loop and all child run fibers.
  *
+ * The loop recovers from the whole cause rather than the typed error alone. A
+ * defect raised anywhere under a tick, which `Effect.catch` by contract leaves
+ * alone, would otherwise kill this fiber and stop every trigger in the process
+ * with nothing written down.
+ *
  * @category layers
  * @since 0.1.0
  */
@@ -565,7 +590,11 @@ export const layer = (
       yield* Effect.forkScoped(
         Effect.forever(
           scheduler.runOnce.pipe(
-            Effect.catch(() => Effect.void),
+            Effect.catchCause((cause) =>
+              Cause.hasInterrupts(cause)
+                ? Effect.failCause(cause)
+                : Effect.logWarning("A trigger scheduler tick failed", cause)
+            ),
             Effect.andThen(Effect.sleep(pollInterval))
           )
         )

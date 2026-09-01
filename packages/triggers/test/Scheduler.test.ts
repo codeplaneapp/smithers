@@ -460,6 +460,72 @@ describe("Scheduler", () => {
     expect(calls).not.toContain("approve")
   })
 
+  // The store orders due triggers by id, so an aborting trigger takes every
+  // trigger after it alphabetically down with it. The in-memory store is used
+  // as the durable store's stand-in for a row written before registration
+  // refused an unsatisfiable expression.
+  it("keeps one failing trigger from silencing the triggers after it", async () => {
+    const results: Array<TriggerStore.Result> = []
+    const runner = runnerFixture()
+    await Effect.runPromise(
+      provideTest(
+        Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* TriggerStore.TriggerStore
+            yield* store.register({ ...trigger("skip", "none"), id: "a-february-30", cron: "0 0 30 2 *" })
+            yield* store.register({ ...trigger("skip", "none"), id: "b-hourly" })
+            yield* TestClock.setTime(hour)
+            const scheduler = yield* Scheduler.make().pipe(
+              Effect.provideService(Scheduler.Runner, runner.service)
+            )
+            yield* scheduler.runOnce
+            yield* Effect.yieldNow
+          })
+        ),
+        results
+      )
+    )
+
+    expect(runner.starts.map((input) => input.idempotencyKey)).toEqual([
+      `b-hourly:${new Date(hour).toISOString()}`
+    ])
+  })
+
+  it("keeps the supervisor polling after a tick fails", async () => {
+    const results: Array<TriggerStore.Result> = []
+    const runner = runnerFixture()
+    let dueCalls = 0
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function*() {
+          const store = yield* TriggerStore.TriggerStore
+          yield* store.register(trigger("skip", "none"))
+          const failing = TriggerStore.TriggerStore.of({
+            ...store,
+            // The first tick dies the way an exhausted occurrence search used
+            // to: a defect, which `Effect.catch` does not handle.
+            due: (now) => dueCalls++ === 0 ? Effect.die(new Error("Unable to find cron date")) : store.due(now)
+          })
+          yield* TestClock.setTime(hour)
+          yield* Effect.provide(
+            TestClock.adjust("2 minutes").pipe(Effect.andThen(Effect.yieldNow)),
+            Scheduler.layer({ pollInterval: "1 minute" }).pipe(
+              Layer.provide(Layer.succeed(TriggerStore.TriggerStore)(failing)),
+              Layer.provide(Layer.succeed(Scheduler.Runner)(runner.service))
+            )
+          )
+        })
+      ).pipe(
+        Effect.provide(TestTriggers.layer),
+        Effect.provide(TestClock.layer())
+      )
+    )
+
+    expect(dueCalls).toBeGreaterThan(1)
+    expect(runner.starts).toHaveLength(1)
+    expect(results).toHaveLength(0)
+  })
+
   it("fires the current occurrence on a newly registered trigger's first poll", async () => {
     const results: Array<TriggerStore.Result> = []
     const runner = runnerFixture()

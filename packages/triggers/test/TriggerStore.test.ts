@@ -19,6 +19,16 @@ const trigger = {
 const layer = SqlTriggerStore.layer.pipe(Layer.provide(TestDatabase.layer))
 
 describe("TriggerStore", () => {
+  it("refuses to register a cron the calendar never satisfies", async () => {
+    const error = await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        return yield* Effect.flip(store.register({ ...trigger, cron: "0 0 30 2 *" }))
+      }).pipe(Effect.provide(layer))
+    )
+    expect(error.code).toBe("unsatisfiable_cron")
+  })
+
   it("revisions replacements and claims an occurrence exactly once", async () => {
     const program = Effect.gen(function*() {
       const store = yield* TriggerStore.TriggerStore

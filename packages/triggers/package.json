@@ -81,7 +81,6 @@
   },
   "dependencies": {
     "@smthrs/control": "1.0.0-rc.0",
-    "@smthrs/core": "1.0.0-rc.0",
     "@smthrs/database": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
   },

@@ -19,6 +19,7 @@ export const TriggerErrorCode = Schema.Literals([
   "invalid_schedule",
   "invalid_trigger",
   "invalid_cron",
+  "unsatisfiable_cron",
   "verification_failed",
   "catch_up_bound_exceeded",
   "store"

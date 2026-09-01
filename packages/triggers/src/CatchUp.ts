@@ -35,16 +35,20 @@ export const occurrences = (
     )
   }
   if (policy === "one") {
-    const latest = CronSchedule.previousAtOrBefore(cron, now)
-    return Effect.succeed(latest.getTime() <= lastFiredAt.getTime() ? [] : [latest])
-  }
-  const missed = CronSchedule.occurrencesBetween(cron, lastFiredAt, now, maxCatchUp + 1)
-  return missed.length > maxCatchUp
-    ? Effect.fail(
-      new TriggerError({
-        code: "catch_up_bound_exceeded",
-        message: `missed ${missed.length} occurrences; maxCatchUp is ${maxCatchUp}`
-      })
+    return CronSchedule.previousAtOrBefore(cron, now).pipe(
+      Effect.map((latest) => latest.getTime() <= lastFiredAt.getTime() ? [] : [latest])
     )
-    : Effect.succeed(missed)
+  }
+  return CronSchedule.occurrencesBetween(cron, lastFiredAt, now, maxCatchUp + 1).pipe(
+    Effect.flatMap((missed) =>
+      missed.length > maxCatchUp
+        ? Effect.fail(
+          new TriggerError({
+            code: "catch_up_bound_exceeded",
+            message: `missed ${missed.length} occurrences; maxCatchUp is ${maxCatchUp}`
+          })
+        )
+        : Effect.succeed(missed)
+    )
+  )
 }

@@ -7,6 +7,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as Cron from "./Cron.ts"
 import { TriggerError } from "./TriggerError.ts"
 
 /**
@@ -64,6 +65,22 @@ export const Schedule = Schema.Struct({
 export type Schedule = typeof Schedule.Type
 
 /**
+ * Refuses a declaration whose cron expression is malformed or which the
+ * calendar never satisfies.
+ *
+ * The schema types `cron` as a non-empty string, which is as much as a field
+ * schema can say: `0 0 30 2 *` passes every range check and matches no date.
+ * Only the occurrence search knows that, so every declaration path runs it
+ * here rather than leaving it to the tick that would have fired the trigger.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const validate = <A extends { readonly cron: string; readonly timezone?: string | undefined }>(
+  declaration: A
+): Effect.Effect<A, TriggerError> => Effect.as(Cron.parse(declaration.cron, declaration.timezone), declaration)
+
+/**
  * Decodes and validates a schedule declaration.
  *
  * @category constructors
@@ -77,5 +94,6 @@ export const make = (input: unknown): Effect.Effect<Schedule, TriggerError> =>
         message: "Schedule declaration is invalid",
         cause
       })
-    )
+    ),
+    Effect.flatMap(validate)
   )
