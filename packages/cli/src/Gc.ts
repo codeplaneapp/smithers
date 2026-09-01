@@ -46,7 +46,13 @@ export const duration = (value: string): number | undefined => {
   const match = /^(\d+)\s*(s|m|h|d|w)$/.exec(value.trim())
   if (match === null) return undefined
   const scale = units[match[2]!]
-  return scale === undefined ? undefined : Number.parseInt(match[1]!, 10) * scale
+  if (scale === undefined) return undefined
+  const window = Number.parseInt(match[1]!, 10) * scale
+  // A zero window makes every terminal run older than the threshold, so
+  // `gc --older-than 0s` is "delete all history" wearing the spelling of a
+  // retention policy. Refusing it costs an operator who meant it one explicit
+  // `1s`, and saves the one who typed it by accident their whole journal.
+  return window === 0 ? undefined : window
 }
 
 /**
@@ -95,8 +101,12 @@ export interface Sweep {
  * name exactly what a real pass would delete, and a locked or corrupt file
  * rendered as `{ runs: [] }` reads as "there is nothing to collect".
  *
- * The other databases are still swept, so one unreadable file does not stop
- * the command. The caller decides the exit status from `failures`.
+ * Every database is PROBED before any of them is written to, and a probe that
+ * fails abandons the whole pass. A run owns rows in both files, so sweeping
+ * them independently and continuing past a failure could delete a run's
+ * control rows and leave its engine rows behind, which no verb afterwards
+ * converges. Refusing to start costs the operator a retry; a half-swept run
+ * costs them the run. The caller decides the exit status from `failures`.
  *
  * @category constructors
  * @since 1.0.0
@@ -115,18 +125,33 @@ export const sweep = (
       )
     }
     const olderThanMs = (options.now ?? Date.now()) - window
-    const swept = yield* Effect.forEach(databases(root), (file) =>
-      Retention.collect({ olderThanMs, dryRun: options.dryRun, database: file }).pipe(
+    const files = databases(root)
+    const pass = (file: string, dryRun: boolean) =>
+      Retention.collect({ olderThanMs, dryRun, database: file }).pipe(
         Effect.provide(NodeDatabase.layer({ filename: file })),
-        Effect.map((report): Retention.Report | Failure =>
-          report
-        ),
+        Effect.map((report): Retention.Report | Failure => report),
         Effect.catchCause((cause) => Effect.succeed<Failure>({ database: file, reason: reasonOf(cause) })),
         Effect.provide(Layer.empty)
-      ))
+      )
+    // The probe is a dry-run collect, so it opens, migrates, and reads exactly
+    // what the real pass would and writes nothing.
+    const probed = yield* Effect.forEach(files, (file) => pass(file, true))
+    const failures = probed.filter(isFailure)
+    if (failures.length > 0) {
+      return { olderThan: options.olderThan, dryRun: options.dryRun, reports: [], failures }
+    }
+    if (options.dryRun) {
+      return {
+        olderThan: options.olderThan,
+        dryRun: true,
+        reports: probed.filter((entry): entry is Retention.Report => !isFailure(entry)),
+        failures: []
+      }
+    }
+    const swept = yield* Effect.forEach(files, (file) => pass(file, false))
     return {
       olderThan: options.olderThan,
-      dryRun: options.dryRun,
+      dryRun: false,
       reports: swept.filter((entry): entry is Retention.Report => !isFailure(entry)),
       failures: swept.filter(isFailure)
     }
