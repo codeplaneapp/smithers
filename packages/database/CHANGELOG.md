@@ -15,6 +15,10 @@
   provides both the client and the writer.
 - Removed the `unsupportedSql` proxy from `makeNoop`; the noop writer only
   fails `write` with `unsupported`.
+- Removed the provisional Cloudflare Durable Object adapter and its Node fake.
+  Real workerd rejects `SAVEPOINT`, so it cannot satisfy `DurableWriter`'s
+  nested-write contract for arbitrary suspending Effects. Cloudflare engine and
+  storage hosting remain outside 1.0.0-rc.0 core.
 
 ### Added
 
@@ -32,11 +36,6 @@
   `run`, and `layer`.
 - `DatabaseMetrics.writeRetries` counts write transaction replays as
   `flows_db_write_retries`.
-- A Cloudflare Durable Object SQLite driver under
-  `cloudflare/DurableObjectDatabase`, its structural `cloudflare/SqlStorageLike`
-  types, and the `test/DurableObjectStorageFake` in-process fake. The rc.0
-  contract places Cloudflare engine composition outside core, so treat the
-  subpath as provisional.
 - `WriteRetryOptions` is re-exported from `DurableWriter`, so the options type
   the public constructors accept has a public name.
 - Package-owned documentation: `Package.ts`, `docs/`, and
@@ -67,11 +66,6 @@
   returns under `SqlClient.SafeIntegers`, reads only own data properties, and
   reports the shape of an unreadable result rather than attaching the result
   itself to the error.
-- The Durable Object driver executes a `.raw` statement with result columns once
-  rather than twice, and a streamed statement's platform failure arrives as a
-  typed `SqlError` instead of an unclassified defect. A platform transaction
-  that rejects after the body ran now fails the write instead of reporting
-  success.
 - The open guard inspects a SQLite `file:` URI filename, which previously
   bypassed the 0.x `smithers.db` refusal, and probes it by path alone so a URI
   carrying `mode=rw` cannot slip past the read-only probe.
@@ -89,12 +83,6 @@
   `Readonly`, and the loader snapshots the plan when it is built, so mutating
   the record after `run` returned its Effect cannot change which migrations
   execute.
-- The Durable Object driver serializes sibling nested transactions on the
-  enclosing transaction's permit, mirroring `SqlClient.makeWithTransaction`,
-  so concurrent siblings can no longer collide on one savepoint name and roll
-  back each other's committed work. Cursor rows define each column label as an
-  own property, so a column aliased `__proto__` can no longer mutate a row's
-  prototype.
 - An I/O failure anywhere in a parallel `Cause` now vetoes the replay
   cause-wide, so a write that raced an I/O failure against a busy conflict is
   never replayed, in either arrival order. Retry classification no longer
@@ -105,8 +93,7 @@
   names a pure in-memory database, so a memory-mode name that collides with an
   on-disk 0.x file is no longer refused.
 - README links to repository documentation are absolute, so they resolve on
-  npm, and the Cloudflare section no longer advertises an engine composition
-  that does not ship in 1.0.0-rc.0.
+  npm.
 - The generated entry-point table lists the root-module subpaths
   (`DurableWriter`, `DatabaseMetrics`, `Migrations`), and `docs.mjs --check`
   fails when a module the `./*` export map publishes is missing from

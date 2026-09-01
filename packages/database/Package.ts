@@ -45,23 +45,8 @@ export const Package = {
       platform: "Node"
     },
     {
-      specifier: "@smthrs/database/cloudflare/DurableObjectDatabase",
-      source: "src/cloudflare/DurableObjectDatabase.ts",
-      platform: "Cloudflare Workers"
-    },
-    {
-      specifier: "@smthrs/database/cloudflare/SqlStorageLike",
-      source: "src/cloudflare/SqlStorageLike.ts",
-      platform: "Cloudflare Workers"
-    },
-    {
       specifier: "@smthrs/database/test/TestDatabase",
       source: "src/test/TestDatabase.ts",
-      platform: "Node"
-    },
-    {
-      specifier: "@smthrs/database/test/DurableObjectStorageFake",
-      source: "src/test/DurableObjectStorageFake.ts",
       platform: "Node"
     }
   ],
@@ -71,10 +56,7 @@ export const Package = {
     { title: "Migrations", source: "src/Migrations.ts" },
     { title: "UnsupportedBackend", source: "src/UnsupportedBackend.ts" },
     { title: "NodeDatabase", source: "src/node/NodeDatabase.ts" },
-    { title: "DurableObjectDatabase", source: "src/cloudflare/DurableObjectDatabase.ts" },
-    { title: "SqlStorageLike", source: "src/cloudflare/SqlStorageLike.ts" },
-    { title: "TestDatabase", source: "src/test/TestDatabase.ts" },
-    { title: "DurableObjectStorageFake", source: "src/test/DurableObjectStorageFake.ts" }
+    { title: "TestDatabase", source: "src/test/TestDatabase.ts" }
   ],
   references: [
     "docs/pages/api/engine-store.md",

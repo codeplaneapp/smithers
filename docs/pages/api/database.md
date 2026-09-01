@@ -6,12 +6,11 @@ description: "A driver-neutral SQL contract with a bounded write-retry seam, plu
 
 # @smthrs/database
 
-This entry point is the driver-neutral write boundary, so it stays browser-bundleable. Each driver is platform-specific and lives under an explicit subpath, the way `effect` keeps platform packages out of its own root: the Node driver is `node:sqlite` through `@effect/sql-sqlite-node`, and the Cloudflare driver runs on a Durable Object's own SQLite storage.
+This entry point is the driver-neutral write boundary, so it stays browser-bundleable. Each driver is platform-specific and lives under an explicit subpath, the way `effect` keeps platform packages out of its own root: the Node driver is `node:sqlite` through `@effect/sql-sqlite-node`.
 
 ```ts
 import { DurableWriter } from "@smthrs/database"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
-import * as DurableObjectDatabase from "@smthrs/database/cloudflare/DurableObjectDatabase"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 ```
 
@@ -25,10 +24,7 @@ import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 | `@smthrs/database/Migrations` | [src/Migrations.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/Migrations.ts) | any |
 | `@smthrs/database/UnsupportedBackend` | [src/UnsupportedBackend.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/UnsupportedBackend.ts) | any |
 | `@smthrs/database/node/NodeDatabase` | [src/node/NodeDatabase.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/node/NodeDatabase.ts) | Node |
-| `@smthrs/database/cloudflare/DurableObjectDatabase` | [src/cloudflare/DurableObjectDatabase.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/cloudflare/DurableObjectDatabase.ts) | Cloudflare Workers |
-| `@smthrs/database/cloudflare/SqlStorageLike` | [src/cloudflare/SqlStorageLike.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/cloudflare/SqlStorageLike.ts) | Cloudflare Workers |
 | `@smthrs/database/test/TestDatabase` | [src/test/TestDatabase.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/test/TestDatabase.ts) | Node |
-| `@smthrs/database/test/DurableObjectStorageFake` | [src/test/DurableObjectStorageFake.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/test/DurableObjectStorageFake.ts) | Node |
 
 ## What this package owns
 
@@ -240,36 +236,6 @@ at `idBlock * 2`, `engine-store` at `idBlock * 3`, `plan` at `idBlock * 4`,
 `@smthrs/engine-store/Migrations` is the composed list a durable engine
 installs.
 
-## Cloudflare Durable Objects
-
-`DurableObjectDatabase.layer({ storage: ctx.storage })` satisfies the same
-`DurableWriter` contract, and `test/contract/DatabaseWriteContract.ts` runs
-against it. Three platform facts shape it:
-
-- `ctx.storage.sql.exec` is synchronous, so the connection is built out of
-  `Effect.try` with no promise and no statement cache.
-- The platform reserves `BEGIN`, `COMMIT`, and `ROLLBACK`, so the outermost
-  transaction is `ctx.storage.transaction`. `transactionSync` is not usable: it
-  commits when its closure returns, and a `write` body is an arbitrary `Effect`
-  that may suspend.
-- An object owns one database on one thread, so write transactions are
-  serialized by the client's connection semaphore rather than by a
-  database-level lock.
-
-Rows are read positionally and rebuilt against `columnNames`, so a trailing
-duplicate column label deterministically overwrites, matching `node:sqlite`
-object rows, instead of inheriting the platform cursor's own collapsing rule.
-Use `.values` when both columns are needed. `test/workerd/` runs the
-platform-specific claims against real workerd behind `FLOWS_WORKERD_BIN`.
-Everywhere else the driver runs against `test/DurableObjectStorageFake`, which
-mirrors the platform over `node:sqlite`.
-
-:::warning
-The Durable Object driver ships as a published subpath, but rc-contract section
-1 and the exclusion table place Cloudflare engine composition outside rc.0 core.
-Treat the subpath as provisional until that row is resolved.
-:::
-
 ## Dialect status
 
 SQLite is the shipped backend, in both the Node file form and the in-memory test
@@ -348,33 +314,11 @@ stores. See [Assembling a durable engine](/guides/durable-engine) and the
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `NodeDatabaseOptions` (interface) | models | Configuration for a Node SQLite connection. |
-| `UnsupportedDatabaseCode` (const) | models | The three stable codes covering the two rc.0 exclusions this driver enforces. |
+| `UnsupportedDatabaseCode` (const) | models | The three stable codes covering the rc.0 exclusions this driver enforces. |
 | `UnsupportedDatabaseCode` (type) | models | Stable code for an rc.0 refusal to open a durable database. |
 | `UnsupportedDatabase` (class) | errors | Refusal to open a durable database in 1.0.0-rc.0. |
 | `isUnsupportedDatabase` (const) | refinements | Narrows an unknown defect to this driver's refusal. |
 | `layer` (const) | layers | Provides the node:sqlite SQL client. |
-
-### DurableObjectDatabase
-
-[src/cloudflare/DurableObjectDatabase.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/cloudflare/DurableObjectDatabase.ts). Cloudflare Durable Object SQLite driver layer.
-
-| Export | Kind | Summary |
-| --- | --- | --- |
-| `DurableObjectDatabaseOptions` (interface) | models | Configuration for a Durable Object SQLite connection. |
-| `make` (const) | constructors | Builds the Durable Object SQL client around a storage handle. |
-| `layer` (const) | layers | Provides the Durable Object SQLite client. |
-
-### SqlStorageLike
-
-[src/cloudflare/SqlStorageLike.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/cloudflare/SqlStorageLike.ts). Structural view of the Cloudflare Durable Object storage API.
-
-| Export | Kind | Summary |
-| --- | --- | --- |
-| `SqlStorageValue` (type) | models | The value types Durable Object SQLite reads out of a column. |
-| `SqlStorageCursorLike` (interface) | models | The cursor `SqlStorage.exec` returns. |
-| `SqlStorageLike` (interface) | models | The Durable Object SQLite handle, `ctx.storage.sql`. |
-| `DurableObjectTransactionLike` (interface) | models | The transaction handle passed to `DurableObjectStorage.transaction`. |
-| `DurableObjectStorageLike` (interface) | models | The Durable Object storage handle, `ctx.storage`. |
 
 ### TestDatabase
 
@@ -383,12 +327,3 @@ stores. See [Assembling a durable engine](/guides/durable-engine) and the
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `layer` (const) | layers | Provides the production Node SQLite client and durable writer over a fresh in-memory database. |
-
-### DurableObjectStorageFake
-
-[src/test/DurableObjectStorageFake.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/test/DurableObjectStorageFake.ts). In-process fake of the Cloudflare Durable Object storage API.
-
-| Export | Kind | Summary |
-| --- | --- | --- |
-| `DurableObjectStorageFake` (interface) | models | A fake storage handle over a private in-memory SQLite database. |
-| `make` (const) | constructors | Builds a fake storage handle. |

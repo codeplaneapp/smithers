@@ -29,7 +29,7 @@ export interface NodeDatabaseOptions {
 }
 
 /**
- * The three stable codes covering the two rc.0 exclusions this driver enforces.
+ * The three stable codes covering the rc.0 exclusions this driver enforces.
  *
  * `unsupported_runtime` refuses the durable engine under Bun (rc-contract
  * §1 and §7 "Runtimes", exclusion X-18). `unsupported_database_file` refuses a

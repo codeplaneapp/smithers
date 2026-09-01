@@ -2,7 +2,7 @@
 
 Durable write boundary for the Smithers persistence packages. It provides the
 shared write policy (`DurableWriter`), normalized database failures, and
-Node, Cloudflare Durable Object, and in-memory SQLite client layers; queries go
+Node and in-memory SQLite client layers; queries go
 through Effect's own `SqlClient` service, and journal schema and queries stay
 in `@smthrs/journal`.
 
@@ -15,15 +15,12 @@ pnpm add @smthrs/database
 The root is the driver-neutral contract and bundles for the browser. Each
 driver is platform-specific, so they live under explicit subpaths.
 
-| Import                                              | Public exports                                                                                                                                                                                                                                                                                                                                                                                |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@smthrs/database`                                  | Four namespaces. `DurableWriter` exposes transaction-scoped `write(effect)` plus `DatabaseError`, `fromSqlError`, `affectedRows`, `WriteRetryOptions`, and the `make`/`layer`/`makeNoop`/`layerNoop` constructors. `Migrations` composes per-package migration sets over one table. `DatabaseMetrics` declares `writeRetries`. `UnsupportedBackend` is a root namespace as well as a subpath. |
-| `@smthrs/database/node/NodeDatabase`                | **Node only.** `NodeDatabaseOptions` configures the SQLite connection; `layer(options)` provides Effect's `SqlClient`. `UnsupportedDatabase`, `UnsupportedDatabaseCode`, and `isUnsupportedDatabase` describe the three opens 1.0.0-rc.0 refuses.                                                                                                                                             |
-| `@smthrs/database/UnsupportedBackend`               | `ignoredNames(environment)` lists the `SMITHERS_TEST_PG_URL` and `SMITHERS_POSTGRES*` names 1.0.0-rc.0 ignores; `ignoredNotice(name)` is the one line each of them gets. Browser-safe: strings only.                                                                                                                                                                                          |
-| `@smthrs/database/cloudflare/DurableObjectDatabase` | **Cloudflare Workers only.** `DurableObjectDatabaseOptions` takes the object's `ctx.storage`; `make` and `layer(options)` provide Effect's `SqlClient` over its SQLite storage.                                                                                                                                                                                                               |
-| `@smthrs/database/cloudflare/SqlStorageLike`        | The structural view of `ctx.storage` the driver is typed against, so no consumer needs `@cloudflare/workers-types` to satisfy it.                                                                                                                                                                                                                                                             |
-| `@smthrs/database/test/TestDatabase`                | **Node only.** `layer` provides the production Node client and the writer over a fresh `:memory:` database.                                                                                                                                                                                                                                                                                   |
-| `@smthrs/database/test/DurableObjectStorageFake`    | **Node only.** `make()` returns an in-process fake of `ctx.storage` over `node:sqlite`, so Durable Object code is testable without workerd.                                                                                                                                                                                                                                                   |
+| Import                                | Public exports                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@smthrs/database`                    | Four namespaces. `DurableWriter` exposes transaction-scoped `write(effect)` plus `DatabaseError`, `fromSqlError`, `affectedRows`, `WriteRetryOptions`, and the `make`/`layer`/`makeNoop`/`layerNoop` constructors. `Migrations` composes per-package migration sets over one table. `DatabaseMetrics` declares `writeRetries`. `UnsupportedBackend` is a root namespace as well as a subpath. |
+| `@smthrs/database/node/NodeDatabase`  | **Node only.** `NodeDatabaseOptions` configures the SQLite connection; `layer(options)` provides Effect's `SqlClient`. `UnsupportedDatabase`, `UnsupportedDatabaseCode`, and `isUnsupportedDatabase` describe the three opens 1.0.0-rc.0 refuses.                                                                                                                                             |
+| `@smthrs/database/UnsupportedBackend` | `ignoredNames(environment)` lists the `SMITHERS_TEST_PG_URL` and `SMITHERS_POSTGRES*` names 1.0.0-rc.0 ignores; `ignoredNotice(name)` is the one line each of them gets. Browser-safe: strings only.                                                                                                                                                                                          |
+| `@smthrs/database/test/TestDatabase`  | **Node only.** `layer` provides the production Node client and the writer over a fresh `:memory:` database.                                                                                                                                                                                                                                                                                   |
 
 Any Effect `SqlClient` works underneath `DurableWriter.layer()`, so a browser or
 Postgres client gets the same normalized errors and write retry. See
@@ -130,39 +127,6 @@ beside the `_smithers_*` ones and silently mix two schemas. See
 [the rc.0 contract](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md)
 sections 2 and 6 and
 [known limitations](https://smithers.sh/release/known-limitations).
-
-## Cloudflare Durable Objects
-
-`DurableObjectDatabase.layer({ storage: ctx.storage })` satisfies the same
-`DurableWriter` contract, and `test/contract/DatabaseWriteContract.ts` runs
-against it. Three platform facts shape it:
-
-- `ctx.storage.sql.exec` is synchronous, so the connection is built out of
-  `Effect.try` with no promise and no statement cache.
-- The platform reserves `BEGIN`, `COMMIT`, and `ROLLBACK`, so the outermost
-  transaction is `ctx.storage.transaction`. `transactionSync` is not usable:
-  it commits when its closure _returns_, and a `write` body is an arbitrary
-  `Effect` that may suspend.
-- An object owns one database on one thread, so write transactions are
-  serialized by the client's connection semaphore rather than by a
-  database-level lock.
-
-Rows are read positionally and rebuilt against `columnNames`, so a trailing
-duplicate column label deterministically overwrites, matching `node:sqlite`
-object rows, instead of inheriting the platform cursor's own collapsing rule.
-Use `.values` when both columns are needed.
-
-`test/workerd/` runs the platform-specific claims against real workerd behind
-`FLOWS_WORKERD_BIN`; see the README there. Everywhere else the driver runs
-against `test/DurableObjectStorageFake`, which mirrors the platform over
-`node:sqlite`. No engine composition for Cloudflare ships in 1.0.0-rc.0; the
-driver satisfies the `DurableWriter` contract standalone.
-
-**The subpath is provisional.** rc-contract section 1 and the exclusion table
-place Cloudflare engine composition outside rc.0 core, and no disposition row
-covers this driver. Until that is resolved, treat
-`@smthrs/database/cloudflare/*` as unsupported published surface rather than
-part of the frozen contract.
 
 ## Why `DurableWriter.write` instead of bare `sql.withTransaction`
 

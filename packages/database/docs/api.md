@@ -208,36 +208,6 @@ at `idBlock * 2`, `engine-store` at `idBlock * 3`, `plan` at `idBlock * 4`,
 `@smthrs/engine-store/Migrations` is the composed list a durable engine
 installs.
 
-## Cloudflare Durable Objects
-
-`DurableObjectDatabase.layer({ storage: ctx.storage })` satisfies the same
-`DurableWriter` contract, and `test/contract/DatabaseWriteContract.ts` runs
-against it. Three platform facts shape it:
-
-- `ctx.storage.sql.exec` is synchronous, so the connection is built out of
-  `Effect.try` with no promise and no statement cache.
-- The platform reserves `BEGIN`, `COMMIT`, and `ROLLBACK`, so the outermost
-  transaction is `ctx.storage.transaction`. `transactionSync` is not usable: it
-  commits when its closure returns, and a `write` body is an arbitrary `Effect`
-  that may suspend.
-- An object owns one database on one thread, so write transactions are
-  serialized by the client's connection semaphore rather than by a
-  database-level lock.
-
-Rows are read positionally and rebuilt against `columnNames`, so a trailing
-duplicate column label deterministically overwrites, matching `node:sqlite`
-object rows, instead of inheriting the platform cursor's own collapsing rule.
-Use `.values` when both columns are needed. `test/workerd/` runs the
-platform-specific claims against real workerd behind `FLOWS_WORKERD_BIN`.
-Everywhere else the driver runs against `test/DurableObjectStorageFake`, which
-mirrors the platform over `node:sqlite`.
-
-:::warning
-The Durable Object driver ships as a published subpath, but rc-contract section
-1 and the exclusion table place Cloudflare engine composition outside rc.0 core.
-Treat the subpath as provisional until that row is resolved.
-:::
-
 ## Dialect status
 
 SQLite is the shipped backend, in both the Node file form and the in-memory test
