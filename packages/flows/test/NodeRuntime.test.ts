@@ -41,6 +41,7 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { execFileSync } from "node:child_process"
 import { createHash, webcrypto } from "node:crypto"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -664,29 +665,77 @@ describe("the Node host composition", () => {
     expect(groupIsAlive(spawned[0]!)).toBe(false)
   }, 60_000)
 
-  it("lets the engine take a compensable action's pre-image with no jj rule configured", async () => {
+  /**
+   * Runs `body` with the process cwd inside a jj repository of this test's own.
+   *
+   * `layerHost` builds `NodeJj`, which runs `jj` in the process working
+   * directory, so the engine's pre-image path only reaches jj's answer when
+   * there is a repository above that directory. Reading the case's verdict out
+   * of whatever the checkout happened to be made the machine part of the test:
+   * a plain directory produced a jj failure and the case passed, and a checkout
+   * that IS a jj repository -- the `jj git init --colocate` CI performs, and
+   * what anyone developing this repository in jj already has -- ran the pre-image
+   * to completion and reached the POST-image, which `engineRules` did not grant.
+   * Creating the repository here makes the whole path run the same way
+   * everywhere.
+   *
+   * The identity comes from the repository's own config rather than the
+   * ambient one, because `jj describe` refuses without a name and an email and
+   * neither a fresh CI runner nor a developer's machine is required to have
+   * them.
+   */
+  const inOwnJjRepository = async <A>(body: () => Promise<A>): Promise<A> => {
+    const repository = mkdtempSync(join(tmpdir(), "flows-node-runtime-jj-"))
+    const entered = process.cwd()
+    try {
+      execFileSync("jj", ["git", "init", repository], { stdio: "ignore" })
+      execFileSync("jj", ["config", "set", "--repo", "user.name", "flows test"], {
+        cwd: repository,
+        stdio: "ignore"
+      })
+      execFileSync("jj", ["config", "set", "--repo", "user.email", "test@flows.invalid"], {
+        cwd: repository,
+        stdio: "ignore"
+      })
+      process.chdir(repository)
+      return await body()
+    } finally {
+      process.chdir(entered)
+      rmSync(repository, { recursive: true, force: true })
+    }
+  }
+
+  it("lets the engine take a compensable action's pre-image and post-image with no jj rule configured", async () => {
     // The engine's own `SnapshotBoundary` and `ActionPersistence` resolve the
     // GUARDED `Jj`, so before `engineRules` existed this composition could not
     // run a compensable action at all: the refusal arrived before the body,
     // aimed at the engine rather than at anything the flow asked for.
-    const outcome = await Effect.runPromise(
-      Effect.exit(Host.execute({ what: "mutate" }, { executionId: "host-mutate" })).pipe(
-        Effect.provide(
-          NodeRuntime.layerHost(
-            { filename: hostFile, owner: { hostId: "host-m" }, signals: [] },
-            hostFlows
-          )
-        ),
-        Effect.scoped
+    //
+    // The boundary is TWO capabilities, not one. `snapshot` opens the action's
+    // pre-image, and `Effect.ensuring` closes every compensable action with
+    // `diff`, which snapshots again and then asks jj what changed. A grant
+    // covering only the pre-image let the action start and refused it on the
+    // way out, which is the worst of both: the working copy was already moved.
+    const value = await inOwnJjRepository(() =>
+      Effect.runPromise(
+        Host.execute({ what: "mutate" }, { executionId: "host-mutate" }).pipe(
+          Effect.provide(
+            NodeRuntime.layerHost(
+              { filename: hostFile, owner: { hostId: "host-m" }, signals: [] },
+              hostFlows
+            )
+          ),
+          Effect.scoped
+        )
       )
     )
 
-    // This machine has no jj repository under the temp directory, so jj itself
-    // says no. What matters is WHICH no: a jj failure means the capability
-    // check let the engine through, a permission failure means it did not.
-    const reported = Exit.isFailure(outcome) ? String(outcome.cause) : "succeeded"
-    expect(reported).not.toMatch(/Permission/)
-    expect(NodeRuntime.engineRules.map((rule) => rule.pattern.action)).toEqual(["jj:snapshot", "jj:restore"])
+    expect(value).toBe("mutated")
+    expect(NodeRuntime.engineRules.map((rule) => rule.pattern.action)).toEqual([
+      "jj:snapshot",
+      "jj:restore",
+      "jj:diff"
+    ])
   }, 60_000)
 
   it("still refuses the engine's pre-image when the program denies it", async () => {

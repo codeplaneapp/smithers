@@ -325,10 +325,19 @@ export const signalExitCode = (signal: NodeJS.Signals): number =>
  * own pre-image would be refused before the body ever started, which is a
  * refusal aimed at the engine rather than at anything a flow asked for.
  *
+ * The boundary is three capabilities because it has two ends. `snapshot` opens
+ * the pre-image; `diff` closes every compensable action from
+ * `Effect.ensuring`, taking a second snapshot and asking jj what the attempt
+ * changed. Granting only the pre-image let an action START and refused it on
+ * the way out, after the working copy had already moved -- and only on a host
+ * with a real jj repository, since elsewhere jj failed before the refusal
+ * could happen.
+ *
  * They are merged UNDER a program's own {@link HostOptions.rules}, so a policy
  * that denies `jj:snapshot` still denies it. The snapshot pattern is the
- * message the engine writes and nothing else; `jj:restore` names a change id,
- * which is opaque, so it cannot be narrowed further.
+ * message the engine writes and nothing else; `jj:restore` names a change id
+ * and `jj:diff` names a pair of them, which are opaque, so neither can be
+ * narrowed further.
  *
  * @since 0.1.0
  * @category models
@@ -341,6 +350,10 @@ export const engineRules: ReadonlyArray<Permission.Rule> = [
   new Permission.Rule({
     effect: "allow",
     pattern: new Capability.CapabilityPattern({ action: "jj:restore", resource: "*" })
+  }),
+  new Permission.Rule({
+    effect: "allow",
+    pattern: new Capability.CapabilityPattern({ action: "jj:diff", resource: "*" })
   })
 ]
 

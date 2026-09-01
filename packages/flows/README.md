@@ -84,9 +84,10 @@ host owns before it shuts down.
 
 Two details of that composition are decisions rather than defaults.
 `NodeRuntime.engineRules` is merged underneath `HostOptions.rules`, allowing the
-`jj:snapshot` and `jj:restore` the ENGINE takes for a compensable action's
-pre-image; without them a host with no jj policy could not run a compensable
-action at all, and a program that denies `jj:snapshot` still denies it. And the
+`jj:snapshot`, `jj:restore`, and `jj:diff` the ENGINE takes for a compensable
+action's pre-image and post-image; without them a host with no jj policy could
+not run a compensable action at all, and a program that denies `jj:snapshot`
+still denies it. And the
 signal handler keeps two escapes, because installing it removes Node's default
 disposition: a second signal leaves immediately, and a shutdown that outlasts
 `HostOptions.shutdownTimeoutMs` leaves anyway, both with the status the default
