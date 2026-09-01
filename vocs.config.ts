@@ -149,6 +149,7 @@ export default defineConfig({
         { text: "@smthrs/engine-store", link: "/api/engine-store" },
         { text: "@smthrs/control", link: "/api/control" },
         { text: "@smthrs/gateway", link: "/api/gateway" },
+        { text: "@smthrs/cli", link: "/api/cli" },
         { text: "@smthrs/agent", link: "/api/agent" },
         { text: "@smthrs/integrations", link: "/api/integrations" },
         { text: "@smthrs/triggers", link: "/api/triggers" },
