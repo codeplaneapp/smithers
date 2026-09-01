@@ -11,7 +11,7 @@
  * @since 0.1.0
  */
 import { Canonical } from "@smthrs/canonical"
-import { digest } from "@smthrs/crypto"
+import { digest as sha256, type Digest as Sha256Digest } from "@smthrs/crypto"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
@@ -62,6 +62,17 @@ export const StoredKey = KeyV1
  * @since 1.0.0
  */
 export type StoredKey = typeof StoredKey.Type
+
+/**
+ * Returns the validated SHA-256 payload of a stored key.
+ *
+ * Keeping prefix knowledge here prevents consumers from guessing at the wire
+ * format with `slice` or delimiter searches.
+ *
+ * @category accessors
+ * @since 1.0.0
+ */
+export const digest = (key: StoredKey): Sha256Digest => key.slice("key1_".length) as Sha256Digest
 
 /**
  * Compatibility name for the validated key value produced by {@link Key}.
@@ -140,7 +151,7 @@ export const deriveKey = (
         )
       )
     )
-    const hash = yield* digest(serialized).pipe(
+    const hash = yield* sha256(serialized).pipe(
       Effect.mapError((cause) =>
         derivationFailure(
           "digest_failed",
@@ -190,6 +201,7 @@ const KeySchema = Schema.Unknown.pipe(
  */
 export const Key = Object.assign(KeySchema, {
   derive: deriveKey,
+  digest,
   StoredKey,
   KeyV1
 })

@@ -46,7 +46,7 @@ encodings: `key2_` is invalid until a complete version-two contract is added.
 `Key` remains the one-way schema transformation used by existing callers.
 Decoding through it always derives a fresh key. Passing `key1_...` as its input
 hashes that text; it does not validate and return it. Its attached
-`Key.derive`, `Key.StoredKey`, and `Key.KeyV1` properties mirror the named
+`Key.derive`, `Key.digest`, `Key.StoredKey`, and `Key.KeyV1` properties mirror the named
 exports.
 
 Prefer `deriveKey` for ordinary Effect code because it exposes typed failures.

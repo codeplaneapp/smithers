@@ -35,6 +35,8 @@ describe("stored key validation", () => {
     expect(Schema.decodeUnknownSync(Keys.KeyV1)(stored)).toBe(stored)
     expect(Schema.decodeUnknownSync(Keys.Key.StoredKey)(stored)).toBe(stored)
     expect(Schema.decodeUnknownSync(Keys.Key.KeyV1)(stored)).toBe(stored)
+    expect(Keys.digest(Schema.decodeUnknownSync(Keys.StoredKey)(stored))).toBe("a".repeat(64))
+    expect(Keys.Key.digest(Schema.decodeUnknownSync(Keys.StoredKey)(stored))).toBe("a".repeat(64))
   })
 
   it("keeps parsing separate from deriving a key from key-shaped text", () => {
