@@ -9,6 +9,7 @@ import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { decodeBase64Bytes, encodeBase64Bytes } from "../internal/base64.ts"
+import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure, remoteProcessOf } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
@@ -110,9 +111,11 @@ const overrideArgs = (name: string, options: Options): ReadonlyArray<string> => 
  * `spawn` honors the whole session contract. A command's `stdin` bytes travel
  * on the exec's own input channel (`--stdin`), a relative `cwd` is rooted at
  * {@link Session.workdir} before the script's `cd`, and the environment is
- * applied with `env(1)` rather than `export`, because `export` refuses any
- * key that is not a shell identifier and would abort the whole command for an
- * env Node accepts. Closing a spawn's scope is the process's lifetime ending:
+ * applied with `env(1)` rather than `export`, because `export` is a special
+ * builtin and a name it refuses would abort the whole script instead of one
+ * assignment. Names that are not shell identifiers never reach either form:
+ * `spawn` refuses them, because the guest `sh -c` that runs the command
+ * would drop them. Closing a spawn's scope is the process's lifetime ending:
  * unless the command was already observed to end, the guest process is
  * signalled through the same pid-walk `kill` uses, so a scope cannot close on
  * a still-running guest.
@@ -244,14 +247,19 @@ export const make = (options: Options): Provider => {
           remoteId: name,
           workdir,
           spawn: Effect.fnUntraced(function*(command, spawnOptions) {
+            yield* checkEnvironmentNames(spawnOptions.env)
             const pidfile = `${pidDirectory}/${nextPidfile++}.pid`
             const stdin = spawnOptions.stdin
             const environment = Object.entries(spawnOptions.env ?? {}).flatMap(([key, value]) =>
               value === undefined ? [] : [CommandLine.quote(`${key}=${value}`)]
             )
-            // `env(1)`, not `export`: export requires a shell identifier and
-            // aborts the whole chain for a key Node accepts (`a-b=1`), while
-            // env passes any name through. The pid survives the whole chain:
+            // `env(1)`, not `export`: `export` is a special builtin, so a
+            // name it refuses ends the whole script rather than one
+            // assignment. env carries any name to the process it starts, but
+            // the `sh -c` after it keeps only shell identifiers, which is why
+            // `checkEnvironmentNames` refuses the rest up front rather than
+            // letting the guest shell drop them unseen.
+            // The pid survives the whole chain:
             // `exec` replaces the recorded shell with env, env replaces
             // itself with `sh`, and `sh -c` execs a lone simple command.
             const script = [

@@ -5,6 +5,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
+import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
 import type { ProviderErrorCode } from "../RemoteChildProcessSpawner/ProviderError.ts"
@@ -249,18 +250,21 @@ export const make = (options: Options): Provider => ({
         remoteId: opened.sandbox.name,
         workdir,
         spawn: (command, spawnOptions) =>
-          Effect.map(
-            execute(
-              opened.sandbox,
-              shell,
-              command,
-              resolveCwd(spawnOptions.cwd),
-              environment(options.env, spawnOptions.env),
-              spawnOptions.stdin,
-              "spawn_error",
-              `\`${command}\` could not run in ${name}`
-            ),
-            processOf
+          Effect.andThen(
+            checkEnvironmentNames(spawnOptions.env),
+            Effect.map(
+              execute(
+                opened.sandbox,
+                shell,
+                command,
+                resolveCwd(spawnOptions.cwd),
+                environment(options.env, spawnOptions.env),
+                spawnOptions.stdin,
+                "spawn_error",
+                `\`${command}\` could not run in ${name}`
+              ),
+              processOf
+            )
           ),
         readFile: (path) =>
           Effect.tryPromise({

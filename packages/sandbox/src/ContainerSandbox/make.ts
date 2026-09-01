@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure, remoteProcessOf } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
@@ -185,6 +186,7 @@ export const make = (options: ContainerSandboxOptions): Provider => {
           remoteId: name,
           workdir,
           spawn: Effect.fnUntraced(function*(command, spawnOptions) {
+            yield* checkEnvironmentNames(spawnOptions.env)
             const pidfile = `${pidDirectory}/${nextPidfile++}.pid`
             const stdin = spawnOptions.stdin
             const args = [

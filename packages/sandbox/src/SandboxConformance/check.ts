@@ -143,8 +143,9 @@ export interface CheckOptions {
  * The file checks state the contract's own obligations: byte round-trips of
  * a small binary payload, an empty file, and a 64 KiB one; `not_found` for
  * absence; parent creation; the workdir default and a relative `cwd`;
- * environment delivery; standard input delivery; standard error delivery; and
- * a working session after release and reacquire. Two checks look across
+ * environment delivery; refusal of an environment name a guest shell would
+ * drop; standard input delivery; standard error delivery; and a working
+ * session after release and reacquire. Two checks look across
  * surfaces on purpose. A session that served `readFile` from somewhere other
  * than the machine its processes run on would pass every file check and
  * every process check separately, so one check writes through `writeFile`
@@ -200,6 +201,8 @@ export const check = (
       }))
     const environment = yield* inSession(provider, session, deadline, (live) =>
       run(live, `printf '%s' "$SANDBOX_CONFORMANCE"`, { env: { SANDBOX_CONFORMANCE: "delivered" } }))
+    const unusableEnvironment = yield* inSession(provider, session, deadline, (live) =>
+      Effect.flip(run(live, "true", { env: { "not-a-shell-name": "x" } })))
     const stdin = yield* inSession(provider, session, deadline, (live) =>
       Effect.gen(function*() {
         // Compared through a file, not through stdout: a transport whose
@@ -283,6 +286,13 @@ export const check = (
         expected: `stdout "delivered" from the spawn's env`,
         actual: shown(environment)
       },
+      Exit.isSuccess(unusableEnvironment) && unusableEnvironment.value instanceof ProviderError
+        ? undefined
+        : {
+          check: "refuses-an-unusable-environment-name",
+          expected: "a ProviderError for an env name the guest shell would drop",
+          actual: shown(unusableEnvironment)
+        },
       Exit.isSuccess(stdin) && stdin.value.status === "#0" && sameBytes(stdin.value.copied, conformanceBytes)
         ? undefined
         : {

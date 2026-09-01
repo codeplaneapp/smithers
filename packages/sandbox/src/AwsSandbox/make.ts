@@ -10,6 +10,7 @@ import type { Scope } from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { decodeBase64, encodeBase64 } from "../internal/base64.ts"
+import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
@@ -337,6 +338,14 @@ const unframe = (run: GatheredRun, nonce: number): Unframed => {
   }
 }
 
+/**
+ * Renders the spawn environment as shell assignments.
+ *
+ * `export` is a POSIX special builtin: a name it refuses ends the whole
+ * non-interactive script, taking the sentinel this transport frames its exit
+ * status with. `spawn` refuses such a name before building the script, so
+ * every name that reaches here is one `export` accepts.
+ */
 const exportsOf = (env: Readonly<Record<string, string | undefined>> | undefined): string =>
   Object.entries(env ?? {})
     .flatMap(([name, value]) => value === undefined ? [] : [`export ${CommandLine.quote(`${name}=${value}`)}; `])
@@ -541,6 +550,7 @@ export const make = (options: Options): Provider => ({
         remoteId: taskArn,
         workdir,
         spawn: Effect.fnUntraced(function*(command, spawnOptions) {
+          yield* checkEnvironmentNames(spawnOptions.env)
           const nonce = nextNonce++
           const pidfile = `${pidDirectory}/${nonce}.pid`
           const fed = yield* redirect(command, spawnOptions.stdin)
