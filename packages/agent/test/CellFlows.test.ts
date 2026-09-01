@@ -19,7 +19,7 @@ import * as CoreFlow from "@smthrs/core/Flow"
 import { FlowEngine } from "@smthrs/engine"
 import { Flow as EngineFlow, FlowRuntime } from "@smthrs/flow"
 import type * as AgentEvent from "@smthrs/harness/AgentEvent"
-import type * as Cell from "@smthrs/harness/Cell"
+import * as Cell from "@smthrs/harness/Cell"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import { HarnessError } from "@smthrs/harness/HarnessError"
 import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
@@ -588,9 +588,7 @@ ctx.done(String(waited.waitedSeconds))`
           flows: [StandardFlows.clock(clockServices, { maxSeconds: 61 })],
           cells: [
             `const refused = []
-for (const seconds of [62, 1 / 0]) {
-  try { await ctx.call("wait", { seconds }) } catch (error) { refused.push(String(error.message)) }
-}
+try { await ctx.call("wait", { seconds: 62 }) } catch (error) { refused.push(String(error.message)) }
 const exact = await ctx.call("wait", { seconds: 61 })
 ctx.done(refused.length + ":" + exact.waitedSeconds)`
           ]
@@ -600,11 +598,49 @@ ctx.done(refused.length + ":" + exact.waitedSeconds)`
 
     expect(outcome._tag).toBe("completed")
     const settled = settledCalls(eventsOf(outcome))
-    expect(settled.map((event) => event.result.outcome)).toEqual(["failure", "failure", "success"])
+    expect(settled.map((event) => event.result.outcome)).toEqual(["failure", "success"])
     expect(settled[0]?.result.message).toContain("61")
-    expect(settled[1]?.result.message).toContain("finite")
     expect(scheduled).toHaveLength(1)
-    expect(scheduled[0]?.split("/").at(-1)).toBe("2")
+    expect(scheduled[0]?.split("/").at(-1)).toBe("1")
+
+    const source = StandardFlows.clock(
+      Context.empty() as Context.Context<
+        Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance
+      >,
+      { maxSeconds: 61 }
+    )
+    const bindings = await Effect.runPromise(source.bindings())
+    const nonFinite = await Effect.runPromise(
+      bindings[0]!.run(
+        ({
+          flowName: "wait",
+          input: { seconds: Number.POSITIVE_INFINITY },
+          capabilities: [],
+          effects: {
+            reads: [],
+            writes: [],
+            mode: "expected",
+            onConflict: "serialize",
+            tier: "irreversible"
+          },
+          placement: Option.none(),
+          identity: {
+            session: "session-1",
+            frame: 0,
+            cell: "cell-digest",
+            ordinal: 0,
+            declaration: "wait-declaration",
+            layers: []
+          }
+        }) as unknown as Cell.Call
+      )
+    )
+
+    expect(nonFinite).toMatchObject({
+      outcome: "failure",
+      message: expect.stringContaining("finite")
+    })
+    expect(scheduled).toHaveLength(1)
   })
 
   it("keeps two waits of the same duration apart, because a durable clock is named", async () => {

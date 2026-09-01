@@ -56,9 +56,24 @@ import * as Search from "@smthrs/std/Search"
 import * as TestRun from "@smthrs/std/TestRun"
 import type * as TestRunner from "@smthrs/std/TestRunner"
 import * as Write from "@smthrs/std/Write"
-import { Context, Duration, Effect, Schema } from "effect"
+import * as Context from "effect/Context"
 import type * as Crypto from "effect/Crypto"
+import * as Duration from "effect/Duration"
+import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
+import * as Schema from "effect/Schema"
+
+/**
+ * The default longest wait a cell may request, in seconds.
+ *
+ * One hour is long enough for an intentional backoff but short enough that a
+ * parked run remains distinguishable from one that hung. Hosts may lower this
+ * ceiling when they construct {@link clock}.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const defaultMaxWaitSeconds = 3_600
 
 /**
  * The standard filesystem capabilities, as ordinary flows.
@@ -132,7 +147,7 @@ export const shell = (
  * `Container` to the same context, which is also what `bash` reads it from.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const tests = (
   services: Context.Context<ChildProcessSpawner.ChildProcessSpawner | TestRunner.TestRunner>
@@ -169,7 +184,7 @@ export const memory = (
  */
 export const WaitInput = Schema.Struct({
   seconds: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)).annotate({
-    description: "How long to wait, in seconds"
+    description: "How long to wait, in finite seconds, up to the host ceiling (one hour by default)"
   }),
   reason: Schema.optional(Schema.String).annotate({ description: "Why the run is waiting" })
 })
@@ -195,11 +210,17 @@ export const WaitOutput = Schema.Struct({ waitedSeconds: Schema.Number })
 export const waitFlow = Flow.make({
   name: "wait",
   description:
-    "Wait for a number of seconds before the cell continues. The wait is durable: a replay does not re-wait.",
+    "Wait for a finite number of seconds up to the host ceiling (one hour by default). The wait is durable: a replay does not re-wait.",
   input: WaitInput,
   output: WaitOutput,
   effects: { reads: [], writes: [], mode: "expected", onConflict: "serialize", tier: "irreversible" }
 })
+
+/** A wait refusal the binding turns into a catchable call result. */
+class WaitRefused extends Schema.TaggedError<WaitRefused>()(
+  "@smthrs/agent/StandardFlows/WaitRefused",
+  { message: Schema.String }
+) {}
 
 /**
  * A durable wait, as one ordinary flow.
@@ -220,14 +241,29 @@ export const waitFlow = Flow.make({
  * @since 0.1.0
  */
 export const clock = (
-  services: Context.Context<Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance>
-): FlowBinding.Source =>
-  FlowBinding.source("engine/clock", [
+  services: Context.Context<Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance>,
+  options: { readonly maxSeconds?: number | undefined } = {}
+): FlowBinding.Source => {
+  const maxSeconds = options.maxSeconds ?? defaultMaxWaitSeconds
+  return FlowBinding.source("engine/clock", [
     FlowBinding.provide(
       FlowBinding.make({
         flow: waitFlow,
-        handler: (input, call) =>
-          Effect.as(
+        handler: (input, call) => {
+          if (!Number.isFinite(input.seconds)) {
+            return Effect.fail(
+              new WaitRefused({ message: `wait requires finite seconds no greater than ${maxSeconds}.` })
+            )
+          }
+          if (input.seconds > maxSeconds) {
+            return Effect.fail(
+              new WaitRefused({
+                message:
+                  `wait refuses ${input.seconds} seconds; this host's ceiling is ${maxSeconds} seconds. Retry with a smaller value.`
+              })
+            )
+          }
+          return Effect.as(
             DurableClock.sleep({
               name:
                 `harness/wait/${call.identity.session}/${call.identity.frame}/${call.identity.cell}/${call.identity.ordinal}`,
@@ -235,10 +271,12 @@ export const clock = (
             }),
             { waitedSeconds: input.seconds }
           )
+        }
       }),
       services
     )
   ])
+}
 
 /**
  * Input for the approval flow.
