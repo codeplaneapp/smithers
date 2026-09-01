@@ -50,15 +50,15 @@ export function detectBinary(file: DiffFile): boolean {
 }
 
 /**
- * Group a file's flat line list into hunks. A line whose text starts with `@@`
- * opens a new hunk and supplies its header; any lines before the first header
- * land in a synthetic hunk with an empty header so nothing is dropped.
+ * Group a file's flat line list into hunks. Parsed header tags open hunks;
+ * lines before the first header land in a synthetic hunk with an empty header
+ * so nothing is dropped.
  */
 export function groupHunks(file: DiffFile): Hunk[] {
   const hunks: Hunk[] = [];
   let current: Hunk | null = null;
   for (const line of file.lines) {
-    if (line.kind === "context" && line.text.startsWith("@@")) {
+    if (line.header === true) {
       current = { header: line.text, lines: [] };
       hunks.push(current);
       continue;
@@ -172,8 +172,9 @@ const HUNK_RE = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 /**
  * Parse the hunk body of a unified patch into flat `DiffLine`s, counting
  * additions and deletions and numbering each side. `@@ … @@` headers ride along
- * as `context` lines so {@link groupHunks} can re-split later. `partial` is true
- * when the text looks like it has hunks but none parsed (a truncated patch).
+ * as tagged `context` lines so {@link groupHunks} can re-split later. `partial`
+ * is true when the text looks like it has hunks but none parsed (a truncated
+ * patch).
  */
 export function parseHunks(diffText: string): {
   lines: DiffLine[];
@@ -196,7 +197,7 @@ export function parseHunks(diffText: string): {
       inHunk = true;
       oldLine = Number(hunk[1]);
       newLine = Number(hunk[2]);
-      lines.push({ kind: "context", text: raw });
+      lines.push({ kind: "context", header: true, text: raw });
       continue;
     }
     if (!inHunk) continue;
@@ -207,13 +208,13 @@ export function parseHunks(diffText: string): {
       continue;
     }
     if (raw.startsWith("\\ No newline")) continue;
-    if (raw.startsWith("+") && !raw.startsWith("+++")) {
+    if (raw.startsWith("+")) {
       lines.push({ kind: "add", ln: newLine, text: raw.slice(1) });
       newLine += 1;
       add += 1;
       continue;
     }
-    if (raw.startsWith("-") && !raw.startsWith("---")) {
+    if (raw.startsWith("-")) {
       lines.push({ kind: "del", lnOld: oldLine, text: raw.slice(1) });
       oldLine += 1;
       del += 1;

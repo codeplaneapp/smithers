@@ -3,9 +3,9 @@
  *
  * A `DiffFile` is one file's unified diff, already parsed into a flat list of
  * `DiffLine`s (context / add / del). `@@ … @@` hunk headers ride along as
- * `context` lines whose text starts with `@@`, so {@link file://./diff-paginate.ts groupHunks}
- * can split a file back into hunks without a second parser. All types are pure
- * data with zero third-party imports.
+ * tagged `context` lines, so {@link file://./diff-paginate.ts groupHunks} can
+ * split a file back into hunks without guessing from file content. All types
+ * are pure data with zero third-party imports.
  */
 
 /** The three roles a rendered diff line can play. */
@@ -13,6 +13,8 @@ export type DiffLineKind = "context" | "add" | "del";
 
 export type DiffLine = {
   kind: DiffLineKind;
+  /** True only for a parsed `@@ … @@` hunk header. */
+  header?: true;
   /** Line number in the OLD file (omitted for additions). */
   lnOld?: number;
   /** Line number in the new file (omitted for deletions). */
