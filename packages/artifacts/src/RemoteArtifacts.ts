@@ -114,6 +114,17 @@ export interface Options {
   /**
    * The cache root, e.g. `https://cache.example.com`. `/cas/{digest}` and
    * `/cas/findMissing` are resolved beneath it. A trailing slash is ignored.
+   *
+   * Four shapes are refused at construction as `invalid_configuration`, before
+   * any request leaves and therefore before `headers` can reach a wire: a value
+   * that is not a string, one no `URL` parser accepts, a scheme other than
+   * `https:`, and an endpoint carrying userinfo, a query, or a fragment. The
+   * last rule keeps a credential out of a place nothing here would redact: an
+   * endpoint is interpolated into every request path and into span attributes.
+   *
+   * The refusal message names only the violated rule and never echoes the
+   * endpoint, so a rejected `https://user:secret@host` cannot leak its
+   * credential into a log line or a durable error.
    */
   readonly endpoint: string
   /**

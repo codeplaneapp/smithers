@@ -92,8 +92,8 @@ endpoint.
 
 The three remote deadlines have separate purposes and default to 60 seconds:
 
-| Option            | Scope                                                     |
-| ----------------- | --------------------------------------------------------- |
+| Option                                    | Scope                                                     |
+| ----------------------------------------- | --------------------------------------------------------- |
 | `RemoteArtifacts.Options.downloadTimeout` | One download, including the complete response body.       |
 | `RemoteArtifacts.Options.uploadTimeout`   | One upload, including all resume probes and chunks.       |
 | `RemoteArtifacts.Options.requestTimeout`  | One `HEAD` probe or one `findMissing` batch and response. |
@@ -109,8 +109,8 @@ response back to requested digests.
 ### Chunked uploads
 
 `RemoteArtifacts.Options.chunkBytes` sends a larger blob as `Content-Range`
-requests. The client first uses `HEAD` to detect a complete blob, then sends an empty
-`Content-Range: bytes */{total}` probe to discover a retained prefix.
+requests. The client first uses `HEAD` to detect a complete blob, then sends
+an empty `Content-Range: bytes */{total}` probe to discover a retained prefix.
 
 | Response                      | Client action                                               |
 | ----------------------------- | ----------------------------------------------------------- |

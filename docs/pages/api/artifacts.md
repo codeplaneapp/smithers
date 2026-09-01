@@ -115,24 +115,25 @@ endpoint.
 
 The three remote deadlines have separate purposes and default to 60 seconds:
 
-| Option            | Scope                                                     |
-| ----------------- | --------------------------------------------------------- |
-| `downloadTimeout` | One download, including the complete response body.       |
-| `uploadTimeout`   | One upload, including all resume probes and chunks.       |
-| `requestTimeout`  | One `HEAD` probe or one `findMissing` batch and response. |
+| Option                                    | Scope                                                     |
+| ----------------------------------------- | --------------------------------------------------------- |
+| `RemoteArtifacts.Options.downloadTimeout` | One download, including the complete response body.       |
+| `RemoteArtifacts.Options.uploadTimeout`   | One upload, including all resume probes and chunks.       |
+| `RemoteArtifacts.Options.requestTimeout`  | One `HEAD` probe or one `findMissing` batch and response. |
 
-`maxDownloadBytes` defaults to 256 MiB. The client rejects an excessive
-`Content-Length` before reading the body and stops an incremental read as soon
-as it crosses the bound. `maxFindMissingResponseBytes` defaults to 256 KiB and
+`RemoteArtifacts.Options.maxDownloadBytes` defaults to 256 MiB. The client
+rejects an excessive `Content-Length` before reading the body and stops an
+incremental read as soon as it crosses the bound.
+`RemoteArtifacts.Options.maxFindMissingResponseBytes` defaults to 256 KiB and
 may only lower that protocol bound. `findMissing` validates input before
 sending requests, sends at most 1,000 digests per batch, and filters the server
 response back to requested digests.
 
 ### Chunked uploads
 
-`chunkBytes` sends a larger blob as `Content-Range` requests. The client first
-uses `HEAD` to detect a complete blob, then sends an empty
-`Content-Range: bytes */{total}` probe to discover a retained prefix.
+`RemoteArtifacts.Options.chunkBytes` sends a larger blob as `Content-Range`
+requests. The client first uses `HEAD` to detect a complete blob, then sends
+an empty `Content-Range: bytes */{total}` probe to discover a retained prefix.
 
 | Response                      | Client action                                               |
 | ----------------------------- | ----------------------------------------------------------- |
@@ -144,7 +145,7 @@ uses `HEAD` to detect a complete blob, then sends an empty
 
 The offset never moves backward. If a server ignores ranges, omits a confirming
 length, or stores a partial body, the whole-blob `PUT` overwrites the partial
-result. `chunkBytes` is absent by default.
+result. `RemoteArtifacts.Options.chunkBytes` is absent by default.
 
 ## CombinedArtifacts
 
