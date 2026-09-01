@@ -6,6 +6,7 @@ import { Effect, Layer } from "effect"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "../state/AppController"
 import { createAppStore } from "../state/AppStore"
+import { USER_ONLY_VISIBLE } from "../flows/Flows"
 import type { AppStore } from "../state/AppStore"
 import { commandEntries, disclosedEntries } from "./FlowCatalog"
 
@@ -81,8 +82,14 @@ describe("commandEntries — the callable projection", () => {
     expect(names).toContain("browser.open")
     expect(names).toContain("world.new-note")
     expect(names).toContain("approval.approve")
-    // User-only chrome stays structurally unreachable.
-    expect(names).not.toContain("theme")
+    // Re-pinned 2026-09-01. This asserted that `theme` was unreachable until
+    // 1e18cb3339 narrowed the user-only set to USER_ONLY_VISIBLE, so that every
+    // flow the slash menu lists is also a tool call. Appearance, surfaces and
+    // verbose became callable then; the enumerated set is what still is not, so
+    // the assertion now reads that list rather than restating three names.
+    expect(names).toContain("appearance.theme")
+    expect(names).toContain("chat.surfaces")
+    for (const { name } of USER_ONLY_VISIBLE) expect(names).not.toContain(name)
     expect(names).not.toContain("send")
     expect(names).not.toContain("chat.stop")
     // Admin commands are absent for a non-admin session (non-enumerable).
@@ -140,7 +147,9 @@ describe("commandEntries — execution through the one door", () => {
       store,
       entries: commandEntries(commands),
       scripts: [
-        flow(`await ctx.call("theme", {})`, `return done({})`),
+        // Re-pinned 2026-09-01: `theme` entered the catalog with 1e18cb3339, so
+        // the name outside it is now a user-only one, `chat.send`.
+        flow(`await ctx.call("chat.send", {})`, `return done({})`),
         flow(`return done({ recovered: true })`)
       ]
     })
