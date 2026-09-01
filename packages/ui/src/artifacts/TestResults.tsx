@@ -86,7 +86,7 @@ type TestSuiteContextValue = { suite: TestSuiteModel; counts: TestCounts };
 const TestSuiteContext = createContext<TestSuiteContextValue | null>(null);
 
 export type TestResultsProps = Omit<ComponentProps<"div">, "children"> & { running?: boolean } & (
-  | { suites: readonly TestSuiteModel[]; children?: never }
+  | { suites: readonly TestSuiteModel[]; children?: ReactNode }
   | { children: ReactNode; suites?: never }
 );
 
@@ -130,8 +130,9 @@ export function TestResults(props: TestResultsProps) {
         {...divProps}
       >
         <div className="sui-sr-only" aria-live="polite">{announcement}</div>
-        {suites ? suites.map((suite) => <TestSuite key={suite.id} suite={suite} />) : null}
-        {children}
+        {children !== undefined
+          ? children
+          : suites?.map((suite) => <TestSuite key={suite.id} suite={suite} />) ?? null}
       </div>
     </TestResultsContext.Provider>
   );
@@ -227,13 +228,25 @@ export function TestSuite({
   const triggerId = useId();
   const contentId = useId();
   const suiteCounts = useMemo(() => (suite ? summarizeSuite(suite) : null), [suite]);
-  const resolvedDefaultOpen = defaultOpen ?? (suiteCounts !== null && suiteCounts.failed > 0);
+  const failed = suiteCounts !== null && suiteCounts.failed > 0;
+  const resolvedDefaultOpen = defaultOpen ?? failed;
   const [uncontrolledOpen, setUncontrolledOpen] = useState(resolvedDefaultOpen);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const previousFailed = useRef(failed);
+  const userToggled = useRef(false);
+
+  useEffect(() => {
+    const becameFailed = !previousFailed.current && failed;
+    previousFailed.current = failed;
+    if (!becameFailed || isControlled || userToggled.current) return;
+    setUncontrolledOpen(true);
+    onOpenChange?.(true);
+  }, [failed, isControlled, onOpenChange]);
 
   function toggle() {
     const next = !open;
+    userToggled.current = true;
     if (!isControlled) setUncontrolledOpen(next);
     onOpenChange?.(next);
   }
