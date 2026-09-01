@@ -322,22 +322,14 @@ export const nextDelay = (
   if (delay < policy.initialMs) {
     return Option.none()
   }
-  // Checked BEFORE jitter, not after: the un-jittered delay is the value the
-  // policy declared, and a corrupt row reaches here as a non-finite one. After
-  // jitter the same test would mean something else, because a full-jitter
-  // sample of zero is a legitimate delay of zero rather than a give-up.
-  if (!Number.isFinite(delay)) {
-    return Option.none()
-  }
+  // `validationIssue` established finite `maxMs`, so `Math.min` made the
+  // un-jittered delay finite even when the exponential itself overflowed.
+  // This check belongs before jitter conceptually: a full-jitter sample of
+  // zero is a legitimate immediate retry rather than a give-up.
   if (policy.jitterRatio !== undefined && policy.jitterRatio > 0) {
     // Both jitter inputs are bounded to [0, 1] where they are accepted --
     // `make` for `jitterRatio` and this function's contract for `random` --
-    // and both can still arrive out of range: a persisted policy bypasses
-    // `make`, and `random` is a public option. Either one would move the delay
-    // outside the window the policy declared, so the sequence ends here.
-    if (policy.jitterRatio > 1) {
-      return Option.none()
-    }
+    // while `random` is a public option that still needs checking here.
     const random = options?.random ?? 1
     if (!(random >= 0 && random <= 1)) {
       return Option.none()
