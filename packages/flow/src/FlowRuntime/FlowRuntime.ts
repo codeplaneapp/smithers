@@ -39,13 +39,20 @@ import type { FlowExecutionNotFound } from "./FlowExecutionNotFound.ts"
 import type { FlowInstance } from "./FlowInstance.ts"
 
 /**
+ * Result of atomically completing a deferred only while its run is parked.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type DeferredDoneIfWaitingOutcome = "Completed" | "Existing" | "NotWaiting"
+
+/**
  * Service that represents a flow runtime, responsible for registering and
  * executing flows and coordinating actions, durable deferreds,
  * interrupts, resumes, and clocks.
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export class FlowRuntime extends Context.Service<
   FlowRuntime,
@@ -224,6 +231,31 @@ export class FlowRuntime extends Context.Service<
       }
     ) => Effect.Effect<
       void,
+      never,
+      Success["EncodingServices"] | Error["EncodingServices"]
+    >
+
+    /**
+     * Completes a deferred only when the addressed execution is currently
+     * parked on the exact reason and token supplied. The check and the
+     * first-writer completion are one runtime mutation, preventing guessed,
+     * stale, or already-advanced approval tokens from pre-answering a run.
+     */
+    readonly deferredDoneIfWaiting: <
+      Success extends Schema.Constraint,
+      Error extends Schema.Constraint
+    >(
+      deferred: DurableDeferred.DurableDeferred<Success, Error>,
+      options: {
+        readonly flowName: string
+        readonly executionId: string
+        readonly deferredName: string
+        readonly reason: string
+        readonly token: string
+        readonly exit: Exit.Exit<Success["Type"], Error["Type"]>
+      }
+    ) => Effect.Effect<
+      DeferredDoneIfWaitingOutcome,
       never,
       Success["EncodingServices"] | Error["EncodingServices"]
     >

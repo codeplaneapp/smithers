@@ -41,14 +41,16 @@ import * as Node from "@smthrs/plan/Node"
 import type * as Crypto from "effect/Crypto"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import type * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Action from "./Action/index.ts"
 import * as DurableClock from "./DurableClock.ts"
 import * as DurableDeferred from "./DurableDeferred.ts"
 import { FlowInstance } from "./FlowRuntime/FlowInstance.ts"
-import type { FlowRuntime } from "./FlowRuntime/FlowRuntime.ts"
+import { FlowRuntime } from "./FlowRuntime/FlowRuntime.ts"
 import { annotateWaiting } from "./FlowRuntime/WaitingAnnotation.ts"
+import * as BoundedJson from "./internal/BoundedJson.ts"
 import * as WaitFor from "./WaitFor.ts"
 
 /**
@@ -107,6 +109,22 @@ export class HumanTaskFailed extends Schema.TaggedError<HumanTaskFailed>()(
 ) {}
 
 /**
+ * An answer refused before it could consume durable storage.
+ *
+ * @category errors
+ * @since 1.0.0
+ */
+export class HumanAnswerInvalid extends Schema.TaggedError<HumanAnswerInvalid>()(
+  "@smthrs/flow/HumanAnswerInvalid",
+  {
+    code: Schema.Literals(["answer_invalid", "answer_not_open"]).pipe(
+      Schema.withConstructorDefault(Effect.succeed("answer_invalid"))
+    ),
+    message: Schema.String
+  }
+) {}
+
+/**
  * The tag the human-task declaration is catalogued and resolved under.
  *
  * @category constructors
@@ -139,12 +157,108 @@ export const maxSchemaDepth = 32
 export const maxSchemaNodes = 512
 
 /**
+ * The most JSON values embedded across schema keywords such as `enum`.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const maxSchemaValueNodes = 10_000
+
+/**
+ * The deepest JSON value embedded in a schema, including enum members.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const maxSchemaValueDepth = 64
+
+/**
  * The most JSON values one answer validation may visit.
  *
  * @category constructors
  * @since 0.1.0
  */
 export const maxAnswerNodes = 10_000
+
+/**
+ * The largest encoded JSON answer that can enter the durable store.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const maxAnswerBytes = 256 * 1024
+
+/**
+ * The largest encoded JSON Schema carried by one question.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const maxSchemaBytes = 256 * 1024
+
+/**
+ * The deepest admitted answer tree.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const maxAnswerDepth = 64
+
+/**
+ * The largest encoded string value admitted in a request or answer.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const maxJsonStringBytes = 128 * 1024
+
+/**
+ * The largest encoded object key admitted in a request or answer.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const maxJsonKeyBytes = 4 * 1024
+
+/**
+ * The most members admitted in one JSON array or object.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const maxJsonMembers = 10_000
+
+/**
+ * The largest encoded task name.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const maxTaskNameBytes = 1_024
+
+/**
+ * The largest encoded prompt.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const maxPromptBytes = 64 * 1024
+
+/**
+ * The largest option list on one select question.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const maxOptions = 256
+
+/**
+ * The largest encoded select option.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const maxOptionBytes = 4 * 1024
 
 /**
  * The largest attempt budget one human task may declare.
@@ -291,17 +405,21 @@ const supportedKeywords = [
 ]
 
 /** Truncates a caller-supplied diagnostic while stating exactly what was dropped. */
-const truncateDiagnostic = (rendered: string): string =>
-  rendered.length <= maxDiagnosticChars
-    ? rendered
-    : `${rendered.slice(0, maxDiagnosticChars)} [${rendered.length - maxDiagnosticChars} characters dropped]`
+const truncateDiagnostic = (rendered: string): string => {
+  const prefix = BoundedJson.scalarPrefix(rendered, maxDiagnosticChars)
+  return prefix.length === rendered.length
+    ? prefix
+    : `${prefix} [${rendered.length - prefix.length} characters dropped]`
+}
 
 /** Renders one JSON value for a bounded rejection message. */
-const renderDiagnostic = (value: unknown): string => truncateDiagnostic(String(JSON.stringify(value)))
+const renderDiagnostic = (value: unknown): string => BoundedJson.render(value, maxDiagnosticChars)
 
 /** Renders an option list in its existing comma-separated diagnostic shape. */
 const renderDiagnosticList = (values: ReadonlyArray<unknown>): string =>
-  truncateDiagnostic(values.map((value) => String(JSON.stringify(value))).join(", "))
+  truncateDiagnostic(
+    values.slice(0, maxOptions).map((value) => BoundedJson.render(value, maxDiagnosticChars)).join(", ")
+  )
 
 /** Renders a JSON pointer-ish path for a rejection message. */
 const at = (path: ReadonlyArray<string>): string =>
@@ -336,33 +454,22 @@ const jsonEquals = (left: unknown, right: unknown): boolean => {
   return true
 }
 
-/** Refuses an answer whose JSON tree exceeds the validation node budget. */
-const answerSizeComplaint = (answer: unknown): string | undefined => {
-  const pending: Array<{ readonly value: unknown; readonly path: ReadonlyArray<string> }> = [{
-    value: answer,
-    path: []
-  }]
-  let visited = 0
-  while (pending.length > 0) {
-    const current = pending.pop()!
-    visited++
-    if (visited > maxAnswerNodes) {
-      return `${at(current.path)} makes the answer too large to check: it contains more than ` +
-        `${maxAnswerNodes} JSON values.`
-    }
-    if (Array.isArray(current.value)) {
-      for (let index = current.value.length - 1; index >= 0; index--) {
-        pending.push({ value: current.value[index], path: [...current.path, String(index)] })
-      }
-    } else if (isObject(current.value)) {
-      const keys = Object.keys(current.value).sort()
-      for (let index = keys.length - 1; index >= 0; index--) {
-        const key = keys[index]!
-        pending.push({ value: current.value[key], path: [...current.path, key] })
-      }
-    }
-  }
-  return undefined
+const answerLimits: BoundedJson.Limits = {
+  maxNodes: maxAnswerNodes,
+  maxDepth: maxAnswerDepth,
+  maxBytes: maxAnswerBytes,
+  maxStringBytes: maxJsonStringBytes,
+  maxKeyBytes: maxJsonKeyBytes,
+  maxMembers: maxJsonMembers
+}
+
+const schemaLimits: BoundedJson.Limits = {
+  maxNodes: maxSchemaValueNodes,
+  maxDepth: maxSchemaValueDepth,
+  maxBytes: maxSchemaBytes,
+  maxStringBytes: maxJsonStringBytes,
+  maxKeyBytes: maxJsonKeyBytes,
+  maxMembers: maxJsonMembers
 }
 
 /**
@@ -391,65 +498,72 @@ const checkAt = (
   path: ReadonlyArray<string>
 ): string | undefined => {
   const nullable = schema["nullable"] === true
-  if (nullable && value === null) return undefined
   const enumeration = schema["enum"]
-  // Enum membership is exhaustive, so sibling shape constraints cannot admit an answer outside the listed members.
   if (enumeration !== undefined) {
-    return (enumeration as ReadonlyArray<unknown>).some((allowed) => jsonEquals(allowed, value))
-      ? undefined
-      : `${at(path)} must be one of ${renderDiagnosticList(enumeration as ReadonlyArray<unknown>)}.`
+    const matches = (enumeration as ReadonlyArray<unknown>).some((allowed) => jsonEquals(allowed, value))
+    if (!matches) return `${at(path)} must be one of ${renderDiagnosticList(enumeration as ReadonlyArray<unknown>)}.`
   }
   const type = schema["type"]
-  if (type === undefined) return undefined
-  switch (type) {
-    case "object": {
-      if (!isObject(value)) return `${at(path)} must be an object.`
-      const required = schema["required"]
-      if (Array.isArray(required)) {
-        const missing = required.find((key) => !Object.hasOwn(value, key as string))
-        if (missing !== undefined) {
-          return `${at(path)} is missing the required property "${truncateDiagnostic(String(missing))}".`
-        }
+  if (!(nullable && value === null) && type !== undefined) {
+    const typeComplaint = type === "object"
+      ? isObject(value) ? undefined : `${at(path)} must be an object.`
+      : type === "array"
+      ? Array.isArray(value) ? undefined : `${at(path)} must be an array.`
+      : type === "integer"
+      ? Number.isInteger(value) ? undefined : `${at(path)} must be an integer.`
+      : type === "number"
+      ? typeof value === "number" && Number.isFinite(value) ? undefined : `${at(path)} must be a number.`
+      : type === "string"
+      ? typeof value === "string" ? undefined : `${at(path)} must be a string.`
+      : type === "boolean"
+      ? typeof value === "boolean" ? undefined : `${at(path)} must be a boolean.`
+      : value === null
+      ? undefined
+      : `${at(path)} must be null.`
+    if (typeComplaint !== undefined) return typeComplaint
+  }
+
+  // Object and array keywords are independent constraints. JSON Schema does
+  // not require a sibling `type`; they apply whenever the instance has the
+  // relevant shape and are otherwise ignored.
+  if (isObject(value)) {
+    const required = schema["required"]
+    if (Array.isArray(required)) {
+      const missing = required.find((key) => !Object.hasOwn(value, key as string))
+      if (missing !== undefined) {
+        return `${at(path)} is missing the required property "${truncateDiagnostic(String(missing))}".`
       }
-      const properties = schema["properties"]
-      if (isObject(properties)) {
-        for (const [key, property] of Object.entries(properties)) {
-          if (!Object.hasOwn(value, key)) continue
-          const rejection = checkAt(value[key], property as Record<string, unknown>, [...path, key])
-          if (rejection !== undefined) return rejection
-        }
-      }
-      return undefined
     }
-    case "array": {
-      if (!Array.isArray(value)) return `${at(path)} must be an array.`
-      const items = schema["items"]
-      if (items === undefined) return undefined
+    const properties = schema["properties"]
+    if (isObject(properties)) {
+      for (const [key, property] of Object.entries(properties)) {
+        if (!Object.hasOwn(value, key)) continue
+        const rejection = checkAt(value[key], property as Record<string, unknown>, [...path, key])
+        if (rejection !== undefined) return rejection
+      }
+    }
+  }
+  if (Array.isArray(value)) {
+    const items = schema["items"]
+    if (items !== undefined) {
       for (const [index, element] of value.entries()) {
         const rejection = checkAt(element, items as Record<string, unknown>, [...path, String(index)])
         if (rejection !== undefined) return rejection
       }
-      return undefined
     }
-    case "integer":
-      return Number.isInteger(value) ? undefined : `${at(path)} must be an integer.`
-    case "number":
-      return typeof value === "number" && Number.isFinite(value) ? undefined : `${at(path)} must be a number.`
-    case "string":
-      return typeof value === "string" ? undefined : `${at(path)} must be a string.`
-    case "boolean":
-      return typeof value === "boolean" ? undefined : `${at(path)} must be a boolean.`
-    default:
-      return value === null ? undefined : `${at(path)} must be null.`
   }
+  return undefined
 }
 
-/** Checks schema validity and answer size before walking their shapes together. */
+/** Checks schema validity and snapshots both inputs before walking them together. */
 const check = (value: unknown, schema: unknown): string | undefined => {
-  const schemaComplaint = validateSchema(schema)
+  const admittedSchema = BoundedJson.admit(schema, schemaLimits)
+  if (!admittedSchema.ok) return admittedSchema.complaint
+  const schemaComplaint = validateSchemaAt(admittedSchema.value, [], 0, { visited: 0 })
   if (schemaComplaint !== undefined) return schemaComplaint
-  const sizeComplaint = answerSizeComplaint(value)
-  return sizeComplaint ?? checkAt(value, schema as Record<string, unknown>, [])
+  const admittedAnswer = BoundedJson.admit(value, answerLimits)
+  if (!admittedAnswer.ok) return admittedAnswer.complaint
+  return checkAt(admittedAnswer.value, admittedSchema.value as Record<string, unknown>, [])
 }
 
 interface SchemaBudget {
@@ -479,11 +593,17 @@ const validateSchemaAt = (
   if (enumeration !== undefined && !Array.isArray(enumeration)) {
     return `${at(path)} declares an "enum" that is not an array.`
   }
+  if (Array.isArray(enumeration) && enumeration.length === 0) {
+    return `${at(path)} declares an empty "enum".`
+  }
   if (Object.hasOwn(schema, "required")) {
     const required = schema["required"]
     if (!Array.isArray(required)) return `${at([...path, "required"])} is not an array.`
     const invalid = required.findIndex((key) => typeof key !== "string")
     if (invalid !== -1) return `${at([...path, "required", String(invalid)])} is not a string.`
+    if (new Set(required).size !== required.length) {
+      return `${at([...path, "required"])} contains a duplicate property name.`
+    }
   }
   if (Object.hasOwn(schema, "nullable") && typeof schema["nullable"] !== "boolean") {
     return `${at([...path, "nullable"])} is not a boolean.`
@@ -491,6 +611,11 @@ const validateSchemaAt = (
   const type = schema["type"]
   if (type !== undefined && (typeof type !== "string" || !supportedTypes.has(type))) {
     return `${at(path)} declares the unsupported JSON Schema type ${renderDiagnostic(type)}.`
+  }
+  for (const keyword of ["description", "title"] as const) {
+    if (Object.hasOwn(schema, keyword) && typeof schema[keyword] !== "string") {
+      return `${at([...path, keyword])} is not a string.`
+    }
   }
   const properties = schema["properties"]
   if (properties !== undefined) {
@@ -522,7 +647,12 @@ const validateSchemaAt = (
 export const validateSchema = (
   schema: unknown,
   path: ReadonlyArray<string> = []
-): string | undefined => validateSchemaAt(schema, path, 0, { visited: 0 })
+): string | undefined => {
+  const admitted = BoundedJson.admit(schema, schemaLimits)
+  return admitted.ok
+    ? validateSchemaAt(admitted.value, path, 0, { visited: 0 })
+    : admitted.complaint
+}
 
 /**
  * Checks one answer against the question that was asked.
@@ -543,19 +673,31 @@ export const validateSchema = (
 export const validate = (value: unknown, request: Request): string | undefined => {
   switch (request.kind) {
     case "ask":
-      return typeof value === "string" ? undefined : "The answer must be a string."
+      if (typeof value !== "string") return "The answer must be a string."
+      return BoundedJson.textFits(value, maxJsonStringBytes)
+        ? undefined
+        : `The answer must fit within ${maxJsonStringBytes} encoded bytes of well-formed text.`
     case "confirm":
       return typeof value === "boolean" ? undefined : "The answer must be a boolean."
     case "select": {
       if (request.options === undefined || request.options.length === 0) {
         return "The question declares no options to choose from."
       }
+      if (
+        request.options.length > maxOptions ||
+        request.options.some((option) => typeof option !== "string" || !BoundedJson.textFits(option, maxOptionBytes))
+      ) {
+        return `The question's options exceed the ${maxOptions}-member or ${maxOptionBytes}-byte limits.`
+      }
       return request.options.some((option) => option === value)
         ? undefined
         : `The answer ${renderDiagnostic(value)} is not one of ${truncateDiagnostic(request.options.join(", "))}.`
     }
-    default:
-      return request.schema === undefined ? undefined : check(value, request.schema)
+    default: {
+      if (request.schema !== undefined) return check(value, request.schema)
+      const admitted = BoundedJson.admit(value, answerLimits)
+      return admitted.ok ? undefined : admitted.complaint
+    }
   }
 }
 
@@ -564,12 +706,36 @@ export const validate = (value: unknown, request: Request): string | undefined =
  *
  * @private
  */
+const boundedText = (label: string, maximumBytes: number) =>
+  Schema.String.check(
+    Schema.makeFilter(
+      (value) =>
+        BoundedJson.textFits(value, maximumBytes) ||
+        `${label} must be well-formed text within ${maximumBytes} encoded bytes`,
+      { title: `bounded${label.replaceAll(" ", "")}` }
+    )
+  )
+
+const boundedSchema = Schema.Json.check(
+  Schema.makeFilter(
+    (value) => {
+      const admitted = BoundedJson.admit(value, schemaLimits)
+      return admitted.ok || admitted.complaint
+    },
+    { title: "boundedHumanTaskSchema" }
+  )
+)
+
+const option = boundedText("option", maxOptionBytes)
+
 const payloadFields = {
-  name: Schema.String,
+  name: boundedText("task name", maxTaskNameBytes),
   kind: Kind,
-  prompt: Schema.String,
-  options: Schema.optional(Schema.Array(Schema.String)),
-  schema: Schema.optional(Schema.Json),
+  prompt: boundedText("prompt", maxPromptBytes),
+  options: Schema.optional(
+    Schema.Array(option).check(Schema.isMaxLength(maxOptions))
+  ),
+  schema: Schema.optional(boundedSchema),
   timeoutMs: Schema.optional(Schema.Number),
   maxAttempts: Schema.optional(Schema.Number)
 }
@@ -915,20 +1081,23 @@ export const layer: Layer.Layer<never, never, Crypto.Crypto | FlowRuntime> = act
  * Records one answer to a human task.
  *
  * `token` is the value the run parked with — the `token` of the waiting
- * annotation, which is the wait point the current attempt is open on. The value
- * is completed through the ordinary durable deferred path, so an answer
- * recorded here is indistinguishable from any other durable completion and
- * resumes the run the same way.
+ * annotation, which is the wait point the current attempt is open on. The
+ * runtime checks that exact approval wait and records the completion as one
+ * mutation, so guessed, unopened, or stale attempt tokens cannot pre-answer a
+ * run. An admitted answer then resumes the run through the ordinary durable
+ * deferred path.
  *
  * ```ts
  * yield* HumanTask.answer({ token: waiting.token, value: { decision: "ship" } })
  * ```
  *
- * The answer is NOT validated here. Whether it fits is the task's own judgment,
- * made where the question's kind and schema are known, and a refused answer
- * stays recorded so the record shows what was actually said. Call
- * {@link validate} first when the interface can refuse it while the person is
- * still looking at it.
+ * The durable JSON boundary is validated here: the value must be inert,
+ * detached, and within the exported depth, node, member, string, key, and byte
+ * limits. Whether that JSON fits the question is the task's own judgment, made
+ * where its kind and schema are known; a semantically refused answer stays
+ * recorded so the record shows what was actually said. Call {@link validate}
+ * first when the interface can refuse it while the person is still looking at
+ * it.
  *
  * The TOKEN is checked. This entry point completes an arbitrary caller-supplied
  * address under `Schema.Json`, so it accepts only a token whose deferred name
@@ -937,15 +1106,27 @@ export const layer: Layer.Layer<never, never, Crypto.Crypto | FlowRuntime> = act
  * `TokenInvalid` carrying `deferred_mismatch` rather than writing a JSON exit
  * into a row another schema will decode.
  *
+ * A syntactically valid HumanTask token can still fail with
+ * `HumanAnswerInvalid` carrying `answer_not_open` when the addressed run is not
+ * currently parked on that exact approval token.
+ *
  * @category combinators
  * @since 0.1.0
  */
 export const answer = (options: {
   readonly token: DurableDeferred.Token
   readonly value: typeof Schema.Json.Type
-}): Effect.Effect<void, DurableDeferred.TokenInvalid, FlowRuntime> =>
+}): Effect.Effect<void, DurableDeferred.TokenInvalid | HumanAnswerInvalid, FlowRuntime> =>
   Effect.gen(function*() {
-    const parsed = yield* DurableDeferred.parseToken(options.token)
+    const admitted = BoundedJson.admit(options.value, answerLimits)
+    if (!admitted.ok) {
+      return yield* Effect.fail(
+        new HumanAnswerInvalid({
+          message: `The human-task answer was not recorded: ${truncateDiagnostic(admitted.complaint)}`
+        })
+      )
+    }
+    const parsed = yield* DurableDeferred.TokenParsed.parse(options.token)
     const target = answerableDeferred(parsed.deferredName)
     if (target === undefined) {
       return yield* Effect.fail(
@@ -956,7 +1137,23 @@ export const answer = (options: {
         })
       )
     }
-    yield* DurableDeferred.succeed(target, { token: options.token, value: options.value })
+    const runtime = yield* FlowRuntime
+    const outcome = yield* runtime.deferredDoneIfWaiting(target, {
+      flowName: parsed.flowName,
+      executionId: parsed.executionId,
+      deferredName: parsed.deferredName,
+      reason: "approval",
+      token: options.token,
+      exit: Exit.succeed(admitted.value)
+    })
+    if (outcome === "NotWaiting") {
+      return yield* Effect.fail(
+        new HumanAnswerInvalid({
+          code: "answer_not_open",
+          message: "The human-task answer was not recorded because the run is not parked on this approval token."
+        })
+      )
+    }
   })
 
 /**
