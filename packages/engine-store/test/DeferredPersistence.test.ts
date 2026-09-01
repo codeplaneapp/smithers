@@ -585,47 +585,49 @@ describe("active-wait deferred admission on SQLite", () => {
 
   it.effect("commits only the exact parked token across fresh persistence instances", () =>
     Effect.gen(function*() {
-      const result = yield* withCrypto(Effect.scoped(Effect.gen(function*() {
-        const sql = yield* Effect.service(SqlClient.SqlClient)
-        const state = yield* DurableEngineState.make
-        const events: Array<string> = []
-        const resumes: Array<string> = []
-        const service = yield* build(state, makeJournal(events), resumes)
-        const runId = "sql-approval-cas"
-        const unopenedRunId = "sql-unopened-cas"
-        yield* seedRun(sql, runId)
-        yield* seedRun(sql, unopenedRunId)
-        yield* state.park(runId, { reason: "approval", token: "attempt-1" }, owner)
+      const result = yield* withCrypto(Effect.scoped(
+        Effect.gen(function*() {
+          const sql = yield* Effect.service(SqlClient.SqlClient)
+          const state = yield* DurableEngineState.make
+          const events: Array<string> = []
+          const resumes: Array<string> = []
+          const service = yield* build(state, makeJournal(events), resumes)
+          const runId = "sql-approval-cas"
+          const unopenedRunId = "sql-unopened-cas"
+          yield* seedRun(sql, runId)
+          yield* seedRun(sql, unopenedRunId)
+          yield* state.park(runId, { reason: "approval", token: "attempt-1" }, owner)
 
-        const base = {
-          flowName: TestFlow._tag,
-          executionId: runId,
-          deferredName: "answer",
-          reason: "approval",
-          token: "attempt-1",
-          exit: Exit.succeed("accepted")
-        }
-        const wrong = yield* service.deferredDoneIfWaiting({ ...base, token: "other" })
-        const duplicates = yield* Effect.all([
-          service.deferredDoneIfWaiting(base),
-          service.deferredDoneIfWaiting({ ...base, exit: Exit.succeed("duplicate") })
-        ], { concurrency: "unbounded" })
-        const unopened = yield* service.deferredDoneIfWaiting({
-          ...base,
-          executionId: unopenedRunId
-        })
+          const base = {
+            flowName: TestFlow._tag,
+            executionId: runId,
+            deferredName: "answer",
+            reason: "approval",
+            token: "attempt-1",
+            exit: Exit.succeed("accepted")
+          }
+          const wrong = yield* service.deferredDoneIfWaiting({ ...base, token: "other" })
+          const duplicates = yield* Effect.all([
+            service.deferredDoneIfWaiting(base),
+            service.deferredDoneIfWaiting({ ...base, exit: Exit.succeed("duplicate") })
+          ], { concurrency: "unbounded" })
+          const unopened = yield* service.deferredDoneIfWaiting({
+            ...base,
+            executionId: unopenedRunId
+          })
 
-        const restarted = yield* DurableEngineState.make
-        return {
-          wrong,
-          duplicates,
-          unopened,
-          row: Option.getOrThrow(yield* restarted.deferred(base)),
-          unopenedRow: yield* restarted.deferred({ ...base, executionId: unopenedRunId }),
-          events,
-          resumes
-        }
-      }).pipe(Effect.provide(migratedDatabase))))
+          const restarted = yield* DurableEngineState.make
+          return {
+            wrong,
+            duplicates,
+            unopened,
+            row: Option.getOrThrow(yield* restarted.deferred(base)),
+            unopenedRow: yield* restarted.deferred({ ...base, executionId: unopenedRunId }),
+            events,
+            resumes
+          }
+        }).pipe(Effect.provide(migratedDatabase))
+      ))
 
       expect(result.wrong).toBe("NotWaiting")
       expect([...result.duplicates].sort()).toEqual(["Completed", "Existing"])

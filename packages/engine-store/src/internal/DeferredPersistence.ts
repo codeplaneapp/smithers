@@ -86,10 +86,12 @@ export interface Service {
     FlowRuntime.FlowInstance
   >
   readonly deferredDone: (options: DeferredDoneOptions) => Effect.Effect<void>
-  readonly deferredDoneIfWaiting: (options: DeferredDoneOptions & {
-    readonly reason: string
-    readonly token: string
-  }) => Effect.Effect<FlowRuntime.DeferredDoneIfWaitingOutcome>
+  readonly deferredDoneIfWaiting: (
+    options: DeferredDoneOptions & {
+      readonly reason: string
+      readonly token: string
+    }
+  ) => Effect.Effect<FlowRuntime.DeferredDoneIfWaitingOutcome>
   readonly scheduleClock: (
     flow: Flow.Any,
     options: {
@@ -386,7 +388,8 @@ export const make = (
         persistDeferred(options, "deferred", {
           reason: options.reason,
           token: options.token
-        })),
+        })
+      ),
       scheduleClock,
       sweepDue
     }
