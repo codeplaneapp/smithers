@@ -301,6 +301,23 @@ describe("verify", () => {
       expect(failure(exit).code).toBe("missing_file")
     }))
 
+  it.effect("refuses a file above the configured size ceiling and admits the boundary", () =>
+    Effect.gen(function*() {
+      const { backupDirectory, manifest } = yield* captured()
+      const limit = manifest.database.sizeBytes
+
+      expect(yield* run(DisasterRecovery.verify(backupDirectory, { maxFileSizeBytes: limit }))).toEqual(manifest)
+      const exit = yield* run(
+        DisasterRecovery.verify(backupDirectory, { maxFileSizeBytes: limit - 1 }).pipe(Effect.exit)
+      )
+      const error = failure(exit)
+      expect(error).toBeInstanceOf(DisasterRecovery.DisasterRecoveryError)
+      expect(error.code).toBe("io")
+      expect(error.message).toContain(join(backupDirectory, DisasterRecovery.databaseFileName))
+      expect(error.message).toContain(`${limit} bytes`)
+      expect(error.message).toContain(`${limit - 1}`)
+    }))
+
   it.effect("refuses a manifest that does not decode", () =>
     Effect.gen(function*() {
       const { backupDirectory } = yield* captured()
@@ -346,6 +363,32 @@ describe("verify", () => {
 })
 
 describe("restore", () => {
+  it.effect("refuses a file above the configured size ceiling and restores at the boundary", () =>
+    Effect.gen(function*() {
+      const base = root()
+      const backupDirectory = join(base, "backup")
+      const manifest = yield* run(backup({ directory: backupDirectory }))
+      const limit = manifest.database.sizeBytes
+
+      const restored = yield* run(DisasterRecovery.restore({
+        backupDirectory,
+        targetDirectory: join(base, "at-limit"),
+        maxFileSizeBytes: limit
+      }))
+      expect(restored.manifest).toEqual(manifest)
+
+      const exit = yield* run(
+        DisasterRecovery.restore({
+          backupDirectory,
+          targetDirectory: join(base, "above-limit"),
+          maxFileSizeBytes: limit - 1
+        }).pipe(Effect.exit)
+      )
+      const error = failure(exit)
+      expect(error).toBeInstanceOf(DisasterRecovery.DisasterRecoveryError)
+      expect(error.code).toBe("io")
+    }))
+
   it.effect("lands the verified store, the blobs, and the restored marker", () =>
     Effect.gen(function*() {
       const base = root()

@@ -27,7 +27,10 @@
  * Host access arrives through Effect's `FileSystem` and `SqlClient` tags and
  * hashing through the injected `Crypto` service, so the module carries no
  * platform binding. The SQL dialect is SQLite — a non-SQLite backend fails
- * with the `sql` code rather than pretending to snapshot.
+ * with the `sql` code rather than pretending to snapshot. Every file is
+ * stat-checked before it is buffered for hashing or copying. The configurable
+ * ceiling defaults to {@link defaultMaxFileSizeBytes}; an oversized file fails
+ * with the typed `io` code instead of reaching the host's allocation limit.
  *
  * @since 0.1.0
  */
@@ -82,6 +85,14 @@ export const objectsDirectoryName = "objects"
  * @slop
  */
 export const restoredMarkerFileName = "restored.json"
+
+/**
+ * Default ceiling for one backup file read into memory: 512 MiB.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const defaultMaxFileSizeBytes = 512 * 1024 * 1024
 
 /**
  * One applied row of the shared `flows_migrations` table, recorded at backup
@@ -207,13 +218,28 @@ export class DisasterRecoveryError extends Schema.TaggedError<DisasterRecoveryEr
 ) {}
 
 /**
+ * Shared buffering limit for backup, verification, and restore operations.
+ *
+ * @since 1.0.0
+ * @category models
+ * @slop
+ */
+export interface FileSizeOptions {
+  /**
+   * Largest file, in bytes, that backup, verification, or restore may buffer.
+   * Defaults to {@link defaultMaxFileSizeBytes}.
+   */
+  readonly maxFileSizeBytes?: number | undefined
+}
+
+/**
  * Where a backup is written and which artifact store it captures.
  *
  * @since 0.1.0
  * @category models
  * @slop
  */
-export interface BackupOptions<R = never, E = never> {
+export interface BackupOptions<R = never, E = never> extends FileSizeOptions {
   /** The directory the backup is written into. Created when absent; must be empty when present. */
   readonly directory: string
   /**
@@ -237,7 +263,7 @@ export interface BackupOptions<R = never, E = never> {
  * @category models
  * @slop
  */
-export interface RestoreOptions {
+export interface RestoreOptions extends FileSizeOptions {
   /** The directory a previous {@link backup} wrote. */
   readonly backupDirectory: string
   /** The fresh directory the restored store is written into. Created when absent; must be empty when present. */
@@ -327,6 +353,23 @@ const sqlFailure = (method: string, subject: string) => (cause: unknown): Disast
 /** Hashes bytes with the injected crypto service; a broken host is a defect. */
 const measure = (bytes: Uint8Array): Effect.Effect<typeof Sha256.Digest.Type, never, Crypto.Crypto> =>
   Schema.decodeUnknownEffect(Sha256)(bytes).pipe(Effect.orDie)
+
+/** Resolves the shared whole-file buffering ceiling. */
+const fileSizeLimit = (options: FileSizeOptions): number => options.maxFileSizeBytes ?? defaultMaxFileSizeBytes
+
+/** Refuses an oversized file before a whole-file read allocates its buffer. */
+const checkFileSize = (
+  fs: FileSystem.FileSystem,
+  method: string,
+  path: string,
+  limit: number
+): Effect.Effect<void, DisasterRecoveryError> =>
+  Effect.gen(function*() {
+    const info = yield* fs.stat(path).pipe(Effect.mapError(ioFailure(method, `stating ${path}`)))
+    if (info.size <= BigInt(limit)) return
+    const message = `${path} is ${info.size} bytes, which exceeds the ${limit}-byte file limit`
+    return yield* Effect.fail(error(method, "io", message, new RangeError(message)))
+  })
 
 /**
  * Admits a target directory that does not exist yet — created recursively —
@@ -433,7 +476,8 @@ const inspectSnapshot = (
 const readManifest = (
   fs: FileSystem.FileSystem,
   method: string,
-  backupDirectory: string
+  backupDirectory: string,
+  maxFileSizeBytes: number
 ): Effect.Effect<BackupManifest, DisasterRecoveryError, Crypto.Crypto> =>
   Effect.gen(function*() {
     const path = `${backupDirectory}/${manifestFileName}`
@@ -443,6 +487,7 @@ const readManifest = (
         error(method, "missing_file", `${path} does not exist — the backup is incomplete or not a backup`, path)
       )
     }
+    yield* checkFileSize(fs, method, path, maxFileSizeBytes)
     const text = yield* fs.readFileString(path).pipe(Effect.mapError(ioFailure(method, `reading ${path}`)))
     return yield* Schema.decodeUnknownEffect(ManifestFromJsonString)(text).pipe(
       Effect.mapError((cause) =>
@@ -456,13 +501,15 @@ const checkedFile = (
   fs: FileSystem.FileSystem,
   method: string,
   path: string,
-  expected: string
+  expected: string,
+  maxFileSizeBytes: number
 ): Effect.Effect<Uint8Array, DisasterRecoveryError, Crypto.Crypto> =>
   Effect.gen(function*() {
     const present = yield* fs.exists(path).pipe(Effect.mapError(ioFailure(method, `probing ${path}`)))
     if (!present) {
       return yield* Effect.fail(error(method, "missing_file", `${path} does not exist`, path))
     }
+    yield* checkFileSize(fs, method, path, maxFileSizeBytes)
     const bytes = yield* fs.readFile(path).pipe(Effect.mapError(ioFailure(method, `reading ${path}`)))
     const measured = yield* measure(bytes)
     if (measured !== expected) {
@@ -499,6 +546,7 @@ export const backup = <R = never, E = never>(
     const sql = yield* Effect.service(SqlClient.SqlClient)
     const fs = yield* FileSystem.FileSystem
     const createdAtMs = yield* Clock.currentTimeMillis
+    const maxFileSizeBytes = fileSizeLimit(options)
     yield* ensureEmptyDirectory(fs, "backup", options.directory)
 
     const capture = Effect.gen(function*() {
@@ -512,6 +560,7 @@ export const backup = <R = never, E = never>(
       ).pipe(Effect.provide(options.snapshotDatabaseLayer(databasePath)))
       // Opening the frozen file may normalize SQLite journal metadata, so its
       // manifest digest is measured only after the inspection connection closes.
+      yield* checkFileSize(fs, "backup", databasePath, maxFileSizeBytes)
       const databaseBytes = yield* fs.readFile(databasePath).pipe(
         Effect.mapError(ioFailure("backup", `reading ${databasePath} back`))
       )
@@ -528,6 +577,7 @@ export const backup = <R = never, E = never>(
           const digest = blobEntry(entry)
           if (digest === undefined) continue
           const source = blobPath(objectsDirectory, digest)
+          yield* checkFileSize(fs, "backup", source, maxFileSizeBytes)
           const bytes = yield* fs.readFile(source).pipe(
             Effect.mapError(ioFailure("backup", `reading ${source}`))
           )
@@ -601,16 +651,27 @@ export const backup = <R = never, E = never>(
  * @category operations
  * @slop
  */
-export const verify = Effect.fn("DisasterRecovery.verify")(function*(backupDirectory: string) {
+export const verify = Effect.fn("DisasterRecovery.verify")(function*(
+  backupDirectory: string,
+  options: FileSizeOptions = {}
+) {
   const fs = yield* FileSystem.FileSystem
-  const manifest = yield* readManifest(fs, "verify", backupDirectory)
-  yield* checkedFile(fs, "verify", `${backupDirectory}/${manifest.database.file}`, manifest.database.sha256)
+  const maxFileSizeBytes = fileSizeLimit(options)
+  const manifest = yield* readManifest(fs, "verify", backupDirectory, maxFileSizeBytes)
+  yield* checkedFile(
+    fs,
+    "verify",
+    `${backupDirectory}/${manifest.database.file}`,
+    manifest.database.sha256,
+    maxFileSizeBytes
+  )
   for (const entry of manifest.artifacts) {
     yield* checkedFile(
       fs,
       "verify",
       blobPath(`${backupDirectory}/${objectsDirectoryName}`, entry.digest),
-      entry.digest
+      entry.digest,
+      maxFileSizeBytes
     )
   }
   return manifest
@@ -633,14 +694,16 @@ export const verify = Effect.fn("DisasterRecovery.verify")(function*(backupDirec
  */
 export const restore = Effect.fn("DisasterRecovery.restore")(function*(options: RestoreOptions) {
   const fs = yield* FileSystem.FileSystem
-  const manifest = yield* readManifest(fs, "restore", options.backupDirectory)
+  const maxFileSizeBytes = fileSizeLimit(options)
+  const manifest = yield* readManifest(fs, "restore", options.backupDirectory, maxFileSizeBytes)
   yield* ensureEmptyDirectory(fs, "restore", options.targetDirectory)
 
   const databaseBytes = yield* checkedFile(
     fs,
     "restore",
     `${options.backupDirectory}/${manifest.database.file}`,
-    manifest.database.sha256
+    manifest.database.sha256,
+    maxFileSizeBytes
   )
   const databaseFile = `${options.targetDirectory}/${databaseFileName}`
   yield* fs.writeFile(databaseFile, databaseBytes).pipe(
@@ -653,7 +716,8 @@ export const restore = Effect.fn("DisasterRecovery.restore")(function*(options: 
       fs,
       "restore",
       blobPath(`${options.backupDirectory}/${objectsDirectoryName}`, entry.digest),
-      entry.digest
+      entry.digest,
+      maxFileSizeBytes
     )
     yield* fs.makeDirectory(`${objectsDirectory}/${entry.digest.slice(0, 2)}`, { recursive: true }).pipe(
       Effect.mapError(ioFailure("restore", `creating the objects directory for ${entry.digest}`))
