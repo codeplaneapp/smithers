@@ -285,7 +285,16 @@ const racedDuplicateDatabase = (
     })
   )
 
-const preflightDuplicateDatabase = (
+/**
+ * Commits one row from "another writer" while this journal reads its
+ * allocation floor, so the identity the caller is admitting is already durable
+ * by the time the queued insert reaches the unique index.
+ *
+ * The floor read is the injection point because admission itself no longer
+ * reads: an explicit producer sequence is answered from the in-process index
+ * or admitted optimistically, and the constraint settles it at the insert.
+ */
+const externalCommitDatabase = (
   duplicateRunId: RunId,
   duplicateSourceId: SourceId,
   duplicateSourceSeq: SourceSeq,
@@ -300,7 +309,7 @@ const preflightDuplicateDatabase = (
         apply(target, thisArgument, argumentsList) {
           const statement = Reflect.apply(target, thisArgument, argumentsList) as Statement.Statement<unknown>
           const [query] = statement.compile()
-          if (armed && query.includes("WHERE event_id")) {
+          if (armed && query.includes("MAX(seq) + 1")) {
             armed = false
             return base`
               INSERT INTO flows_journal_events (
@@ -831,7 +840,7 @@ describe("Journal", () => {
     )
   })
 
-  effect("rechecks an explicit identity after preflight races a durable commit", () => {
+  effect("collapses an explicit identity raced by a durable commit onto the committed row", () => {
     const run = runId("concurrent-retry")
     const source = sourceId("producer")
     const candidate = input(run, source, "concurrent.event", { value: 1 }, sourceSeq(0))
@@ -851,7 +860,13 @@ describe("Journal", () => {
         yield* Deferred.succeed(gate.release, undefined)
         const retried = yield* Fiber.join(lossy)
         expect(durable).toMatchObject({ _tag: "Accepted", seq: 0, sourceSeq: 0 })
-        expect(retried).toEqual({ _tag: "Duplicate", seq: 0, sourceSeq: 0, status: "committed" })
+        // The queued emit admits without consulting the dedup index, so it
+        // cannot see the durable commit that landed while it was parked on the
+        // floor read: its receipt is an admission, not a commit, and the
+        // canonical sequence it reserved is simply left unused. The unique
+        // index is what settles the race, at the insert, and one row is the
+        // whole guarantee that matters.
+        expect(retried).toMatchObject({ _tag: "Accepted", seq: 1, sourceSeq: 0 })
 
         yield* journal.flush
         const page = yield* journal.entries({ runId: run, limit: 10 })
@@ -1613,8 +1628,8 @@ describe("Journal", () => {
     )
   })
 
-  effect("recognizes a matching external commit during the writer preflight", () => {
-    const duplicateRunId = runId("preflight-dedupe")
+  effect("collapses onto a matching external commit at the insert", () => {
+    const duplicateRunId = runId("external-dedupe")
     const duplicateSourceId = sourceId("producer")
     const duplicateSourceSeq = sourceSeq(5)
     return Effect.gen(function*() {
@@ -1626,20 +1641,17 @@ describe("Journal", () => {
         { value: 1 },
         duplicateSourceSeq
       )
-      yield* journal.emitLossy(event)
+      // Admission cannot know about the external row: it reads nothing.
+      expect(yield* journal.emitLossy(event)).toMatchObject({ _tag: "Accepted", sourceSeq: 5 })
       yield* journal.flush
-      expect(yield* journal.emitLossy(event)).toEqual({
-        _tag: "Duplicate",
-        seq: 0,
-        sourceSeq: 5,
-        status: "committed"
-      })
+      const page = yield* journal.entries({ runId: duplicateRunId, limit: 10 })
+      expect(page.entries.map((entry) => [entry.seq, entry.sourceSeq])).toEqual([[0, 5]])
     }).pipe(
       Effect.provide(
         SqlJournal.layer({ capacity: 4, overflow: "reject" }).pipe(
           Layer.provide(
             Layer.provideMerge(
-              preflightDuplicateDatabase(
+              externalCommitDatabase(
                 duplicateRunId,
                 duplicateSourceId,
                 duplicateSourceSeq,
@@ -1654,29 +1666,74 @@ describe("Journal", () => {
     )
   })
 
-  effect("rejects a divergent external commit during admission preflight", () => {
-    const duplicateRunId = runId("preflight-conflict")
+  effect("refuses a divergent external commit at the insert, and reports it through flush", () => {
+    const duplicateRunId = runId("external-conflict")
     const duplicateSourceId = sourceId("producer")
     const duplicateSourceSeq = sourceSeq(5)
     return Effect.gen(function*() {
       const journal = yield* Journal
-      const failure = yield* Effect.flip(journal.emitLossy(
-        input(
-          duplicateRunId,
-          duplicateSourceId,
-          "event",
-          { value: 1 },
-          duplicateSourceSeq
+      // The conflict is now the insert's answer rather than a preflight read's,
+      // so it reaches the caller through the flush barrier instead of the emit.
+      // The evidence already in the table is what survives either way.
+      expect(
+        yield* journal.emitLossy(
+          input(duplicateRunId, duplicateSourceId, "event", { value: 1 }, duplicateSourceSeq)
         )
-      ))
+      ).toMatchObject({ _tag: "Accepted", sourceSeq: 5 })
+      const failure = yield* Effect.flip(journal.flush)
       expect(failure.code).toBe("idempotency_conflict")
-      yield* journal.flush
+      const page = yield* journal.entries({ runId: duplicateRunId, limit: 10 })
+      expect(page.entries.map((entry) => entry.payload)).toEqual([{ value: 2 }])
     }).pipe(
       Effect.provide(
         SqlJournal.layer({ capacity: 4, overflow: "reject" }).pipe(
           Layer.provide(
             Layer.provideMerge(
-              preflightDuplicateDatabase(
+              externalCommitDatabase(
+                duplicateRunId,
+                duplicateSourceId,
+                duplicateSourceSeq,
+                "{\"value\":2}"
+              ),
+              migratedDatabase()
+            )
+          )
+        )
+      ),
+      Effect.scoped
+    )
+  })
+
+  effect("settles a divergent external commit as a duplicate when the producer owns the identity", () => {
+    const duplicateRunId = runId("external-identity")
+    const duplicateSourceId = sourceId("producer")
+    const duplicateSourceSeq = sourceSeq(5)
+    return Effect.gen(function*() {
+      const journal = yield* Journal
+      // `dedupe: "identity"` is the producer saying the sequence is derived
+      // from the event, so bytes that differ are metadata about the
+      // observation. The committed row stands and the flush stays clean.
+      expect(
+        yield* journal.emitLossy(
+          new Input({
+            runId: duplicateRunId,
+            sourceId: duplicateSourceId,
+            sourceSeq: duplicateSourceSeq,
+            dedupe: "identity",
+            eventType: "event",
+            payload: { value: 1 }
+          }, { disableChecks: true })
+        )
+      ).toMatchObject({ _tag: "Accepted", sourceSeq: 5 })
+      yield* journal.flush
+      const page = yield* journal.entries({ runId: duplicateRunId, limit: 10 })
+      expect(page.entries.map((entry) => entry.payload)).toEqual([{ value: 2 }])
+    }).pipe(
+      Effect.provide(
+        SqlJournal.layer({ capacity: 4, overflow: "reject" }).pipe(
+          Layer.provide(
+            Layer.provideMerge(
+              externalCommitDatabase(
                 duplicateRunId,
                 duplicateSourceId,
                 duplicateSourceSeq,
