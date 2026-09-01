@@ -26,6 +26,10 @@ Platform bundles are deliberately absent. A program chooses
 `@smthrs/platform-node`, `@smthrs/platform-bun`, or
 `@smthrs/platform-browser` directly.
 
+The `Capability` namespace re-exports `@smthrs/capability`; its exact-resource
+bounds, pattern grammar, and permission failures are documented in the
+[capability API](/api/capability).
+
 ## NodeRuntime
 
 `@smthrs/flows/NodeRuntime` is the only supported durable-runtime subpath in

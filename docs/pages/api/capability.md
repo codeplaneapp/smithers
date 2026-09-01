@@ -88,15 +88,13 @@ UTF-16 code units. It performs no path normalization and no case folding, so
 `\` is an ordinary character that never matches `/`, and `A:/x` never matches
 `a:/X`.
 
-Matching costs O(pattern length times resource length) in the worst case.
-Pattern resources are bounded at `Capability.maxResourceLength` UTF-16 code
-units and reject anything longer at construction and decode. Exact capabilities
-are deliberately unbounded because they carry caller text on the authorization
-path. `Capability.maxMatchWork` bounds the product of the pattern and exact
-resource lengths. `Capability.matches` returns `false` when that product exceeds
-the budget, and `Capability.withinMatchBudget` reports the case.
-`Permission.evaluate` returns `deny` when any rule cannot be decided, so an
-undecidable deny is never skipped.
+Matching costs O(pattern length times resource length) in the worst case. Exact
+and pattern resources are both bounded at `Capability.maxResourceLength`
+UTF-16 code units and reject anything longer at construction, parsing, and
+decode. Adapters reject or summarize larger host values before authorization.
+`Capability.maxMatchWork` remains a fail-closed guard for unchecked structural
+inputs. `Capability.withinMatchBudget` reports that case and
+`Permission.evaluate` denies it.
 
 `Capability.format` renders a capability or a pattern as `action:resource`, and
 it is the durable identity a grant envelope is deduplicated and sorted by.
@@ -110,18 +108,20 @@ default.
 `Permission.PermissionRequired`, `Permission.PermissionDenied`, and
 `Permission.GrantStoreError` are the three failures a guarded Host call can add,
 and `Permission.PermissionError` is exported as both their union type and a
-schema value. `Permission.isPermissionError` validates the whole shape rather
-than the `_tag` alone, because the package ships dual cjs and esm and class
-identity is not stable for a dual-package consumer.
+schema value. `Permission.isPermissionError` validates the exact enumerable
+shape rather than the `_tag` alone, because the package ships dual cjs and esm
+and class identity is not stable for a dual-package consumer. Unknown fields
+and overlong nested capabilities are rejected.
 
 `Permission.PermissionRequired.meta` is journal-safe context: only
 JSON-representable values are accepted, undefined-valued object properties are
-dropped, construction takes a deep-frozen snapshot, and the caller's object is
-never retained. Undefined array elements remain invalid because serializing
-them would change them to null. Permission failures defensively copy caller
-capabilities, and their `capability` and `meta` data slots are non-writable. A
-value the journal could not encode fails at the construction site with a decode
-error naming the key, not later at the persistence boundary.
+dropped, construction takes a cycle-safe deep-frozen snapshot, and the caller's
+object is never retained. Undefined array elements remain invalid because
+serializing them would change them to null. Permission failures defensively copy
+caller capabilities; the copied action and resource and the outer `capability`
+and `meta` slots are non-writable. A value the journal could not encode fails at
+the construction site with a decode error naming the key, not later at the
+persistence boundary.
 
 `Permission.formatError` renders one line for a log or an unattended report. It
 escapes C0 and C1 controls and caps each field at
@@ -148,7 +148,7 @@ handling.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
-| `Capability.maxResourceLength` (const) | constants | The maximum UTF-16 length of a capability-pattern resource. |
+| `Capability.maxResourceLength` (const) | constants | The maximum UTF-16 length of an exact or patterned capability resource. |
 | `Capability.maxMatchWork` (const) | constants | The maximum pattern-length times resource-length work a match may perform. |
 | `Capability.Action` (const) | schemas | Schema for host operations that the permission kernel can authorize. |
 | `Capability.Action` (type) | models | A host operation that the permission kernel can authorize. |

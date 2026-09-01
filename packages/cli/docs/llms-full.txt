@@ -3557,33 +3557,36 @@ Every durable program provides four things:
    `Inconsistency` for cache-conflict verdicts, `OwnerIdentity`, and the
    boundary and sandbox implementations.
 
-`@smthrs/flows/NodeRuntime` packages the first two on Node. The last two stay
-yours by design: a host bundle that installed itself would decide your
-capability policy for you.
+`@smthrs/flows/NodeRuntime` packages the first two on
+Node. Its lower-level `layer` constructor leaves the host composition to the
+application; `layerHost` supplies the contained, capability-guarded Node host
+for applications that want the batteries-included composition.
 
 ### Node
 
 ```ts
-import { NodeRuntime } from "@smthrs/flows/NodeRuntime"
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 
 const runtime = NodeRuntime.layer({
   filename: ".flows/engine.db",
-  boundary,
-  sandbox
-})
+  workspaceRoot: process.cwd(),
+  owner: { hostId: "example" },
+  isAlive
+}, boundary, sandbox, registerFlows)
 ```
 
 `NodeRuntime.storage` opens the SQLite database, runs the migrations, and
 provides the stores, `OwnerIdentity`, `Workspace`, and a filesystem artifact
 store. `layer` and `make` add `EngineStore` over that and run `registerFlows`
-as the final startup phase. Shutdown is scope closure, and nothing installs a
-process or signal handler.
+as the final startup phase. `layerHost` additionally installs the contained
+Node host and signal-driven graceful shutdown. Engine checkpoint operations use
+a private repository-bound `Jj`; flow actions see only the guarded host service.
 
-What it does not install: `NodeHost.layer` and the guarded `HostServices`
-kernel. `Jj`, Effect's `FileSystem`, and Effect's `Crypto` stay requirements of
-the returned layer, and `StepBoundary` and `WorkspaceSandbox` are arguments. Add
-`@smthrs/platform-node` for the host services and `@smthrs/kernel` for the
-capability decoration.
+The lower-level `layer` does not install `NodeHost.layer` or the guarded
+`HostServices` kernel. `Jj`, Effect's `FileSystem`, and Effect's `Crypto` stay
+requirements of that returned layer, and `StepBoundary` and `WorkspaceSandbox`
+are arguments. Use `layerHost` when the standard contained Node composition and
+its capability policy are appropriate.
 
 The durable engine is Node-only. Opening a durable database under Bun fails with
 `unsupported_runtime`; Bun runs the applications and the non-durable packages.
@@ -3592,7 +3595,7 @@ Worked example: [`examples/src/durable-layer.ts`](https://github.com/smithersai/
 
 ### Browser
 
-Browser support is a bundling claim, not a deployment claim. Twenty-four entry
+Browser support is a bundling claim, not a deployment claim. Twenty-eight entry
 points bundle under esbuild's browser platform, and
 [`scripts/browser-check.mjs`](https://github.com/smithersai/smithers/blob/main/scripts/browser-check.mjs)
 executes that claim on every build. Browser support
@@ -3609,12 +3612,11 @@ ZenFS-shaped promises API and Effect's `ChildProcessSpawner` over an in-page
 bash interpreter. `@smthrs/jj/browser/BrowserJj` runs jj-lib compiled to
 `wasm32-wasip1` over an injected virtual filesystem.
 
-What a browser deployment still needs, and what this release does not ship, is a
-SQL client behind the `DurableWriter` contract. `@smthrs/journal` bundles
-because it depends on the contract rather than on a driver; a browser
-application supplies its own client, for example Effect's sqlite-wasm OPFS
-worker. Until it does, a browser bundle can author and inspect but not durably
-execute.
+`@smthrs/journal` bundles because it depends on the `DurableWriter` contract
+rather than on a driver. Durable execution itself is unsupported in browsers
+and edge workers in rc.0, even if an application supplies a SQL client. A
+browser bundle can author and inspect flows, but the supported durable host is
+Node.js with local SQLite.
 
 ### Capability decoration
 
@@ -3628,8 +3630,9 @@ engine. See hosts and capabilities.
 
 - A supervisor process. Recovery is a running engine with the flow registered.
 - A cross-process event bus. Wakes land through the heartbeat sweep.
-- A durable process registry. Cancelling a run kills the process groups it
-  spawned; hard-killing the engine does not.
+- A multi-node lease service or an external process supervisor. Same-host child
+  processes are tracked by the contained host's `ProcessLedger`; abandoned runs
+  still require another registered engine process to reclaim them.
 
 See known limitations.
 
@@ -4698,175 +4701,102 @@ See Getting started, Writing a flow, and Determinism and replay.
 
 Route: /api/flows
 
-> The umbrella barrel: every engine package re-exported as a namespace, in one dependency.
+> Barrel package re-exporting the whole @smthrs durable flow engine.
 
-The umbrella barrel. It re-exports the engine packages as namespaces, so one dependency gives you the whole surface without collapsing each package's `make` / `makeNoop` / `layerNoop` trio into a shared namespace. There are two exceptions: `@smthrs/flow`'s authoring model is re-exported flat, so `Flow`, `Action`, and their siblings sit at the top level, and `@smthrs/time-travel` contributes the `TimeTravel` *service key* flat rather than a namespace, so `yield* TimeTravel` is the whole onboarding and `TimeTravel.layer` provides it.
+{/* Generated by `node packages/flows/scripts/docs.mjs`. Edit packages/flows sources. */}
 
-The `@smthrs/platform-*` bundles are deliberately absent, for the same reason `effect`'s index does not re-export `@effect/platform-node`: a platform bundle is chosen by the program that runs, not by the library it depends on. Import `@smthrs/platform-node`, `@smthrs/platform-bun`, or `@smthrs/platform-browser` directly.
+## @smthrs/flows
+
+The aggregate entry point re-exports every durable-engine package without
+flattening neighboring constructors. `@smthrs/flow` authoring names are flat,
+and `TimeTravel` is a flat service key; infrastructure packages remain
+namespaces.
+
+```sh
+pnpm add @smthrs/flows@rc
+```
 
 ```ts
 import { Action, Flow, Kernel, RunStore } from "@smthrs/flows"
-import * as Schema from "effect/Schema"
-
-const jj = Kernel.Jj.layerNoop({})
-const runs = RunStore.RunStore.layer
-const Compile = Action.make("example/Compile", {
-  payload: { target: Schema.String },
-  success: Schema.String
-})
-const Build = Flow.make("example/Build", {
-  payload: { target: Schema.String },
-  success: Schema.String,
-  body: (payload) => Compile.call(payload)
-})
 ```
 
-This entry point bundles for the browser: it re-exports only package roots, each of which is itself browser-safe, and `pnpm run browser` gates all of them.
-:::warning[Bundling is not running]
-The durable composition still needs a SQL client behind the `DurableWriter` contract, and the only ones shipped here are `node:sqlite`-backed.
-:::
+The root entry point bundles for browsers, but rc.0 durable execution is
+supported only on Node.js >= 22.19.0 with local SQLite. Browser and edge
+runtimes may author and inspect declarations; supplying another SQL client does
+not make them supported durable hosts.
 
-### Entry point
+### Aggregate exports
 
-| Import | Source | Platform |
+| Export | Source | Shape |
 | --- | --- | --- |
-| `@smthrs/flows` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/flows/src/index.ts) | Node and browser |
+| `Artifacts` | `@smthrs/artifacts` | namespace |
+| `Canonical` | `@smthrs/canonical` | namespace |
+| `Capability` | `@smthrs/capability` | namespace |
+| `Crypto` | `@smthrs/crypto` | namespace |
+| `Database` | `@smthrs/database` | namespace |
+| `Engine` | `@smthrs/engine` | namespace |
+| `EngineStore` | `@smthrs/engine-store` | namespace |
+| `Jj` | `@smthrs/jj` | namespace |
+| `Journal` | `@smthrs/journal` | namespace |
+| `Kernel` | `@smthrs/kernel` | namespace |
+| `Keys` | `@smthrs/keys` | namespace |
+| `Observability` | `@smthrs/observability` | namespace |
+| `Plan` | `@smthrs/plan` | namespace |
+| `RunStore` | `@smthrs/run-store` | namespace |
+| `Sandbox` | `@smthrs/sandbox` | namespace |
+| `StepCache` | `@smthrs/step-cache` | namespace |
+| `Sync` | `@smthrs/sync` | namespace |
+| `Action`, `DurableClock`, `DurableDeferred`, `DurableQueue`, `Flow`, `FlowRuntime`, `Graph`, `HumanTask`, `Interpreter`, `Poll`, `RetryPolicy`, `Sleep`, `StepIdentity`, `TimeTravel`, `WaitFor` | `@smthrs/flow` and `@smthrs/time-travel` | flat |
 
-### Namespaces
+Platform bundles are deliberately absent. A program chooses
+`@smthrs/platform-node`, `@smthrs/platform-bun`, or
+`@smthrs/platform-browser` directly.
 
-| Namespace | Package | Reference |
-| --- | --- | --- |
-| `Canonical` | `@smthrs/canonical` | Canonical |
-| `Capability` | `@smthrs/capability` | Capability |
-| `Crypto` | `@smthrs/crypto` | Crypto |
-| `Database` | `@smthrs/database` | Database |
-| `Engine` | `@smthrs/engine` | Engine |
-| `Action`, `DurableClock`, `DurableDeferred`, `DurableQueue`, `Flow`, `FlowRuntime`, `RetryPolicy`, `StepIdentity` | `@smthrs/flow` (re-exported flat) | Flow |
-| `EngineStore` | `@smthrs/engine-store` | EngineStore |
-| `Jj` | `@smthrs/jj` | Jj |
-| `Journal` | `@smthrs/journal` | Journal |
-| `RunStore` | `@smthrs/run-store` | RunStore |
-| `StepCache` | `@smthrs/step-cache` | StepCache |
-| `Kernel` | `@smthrs/kernel` | Kernel |
-| `Keys` | `@smthrs/keys` | Keys |
-| `Plan` | `@smthrs/plan` | Plan |
-| `Artifacts` | `@smthrs/artifacts` | Artifacts |
-| `Sandbox` | `@smthrs/sandbox` | Sandbox |
-| `Sync` | `@smthrs/sync` | Sync |
-| `TimeTravel` | `@smthrs/time-travel` (the service key, re-exported flat) | TimeTravel |
+The `Capability` namespace re-exports `@smthrs/capability`; its exact-resource
+bounds, pattern grammar, and permission failures are documented in the
+capability API.
 
-The rest of `@smthrs/time-travel` (`Frame`, `TimeTravelStore`, its two store layers, and `EffectBoundary`) is reached through that package directly, not through the barrel.
+### NodeRuntime
 
-### Own exports
-
-| Export | Kind | Notes |
-| --- | --- | --- |
-| `namespaces` | const | the namespace names above, sorted |
-
-`namespaces` is the barrel's one runtime value. A pure re-export module carries no executable statements, so the package's 100% coverage gate had an empty denominator and could never go red. This constant gives the gate a real denominator, and the barrel test pins it against the derived `packages/*` universe so it cannot drift from the re-exports.
-
-### When to use the barrel
-
-Take the barrel when you want the whole engine in one dependency. Take the individual packages when you want a narrower dependency footprint.
-
-### API reference
-
-The barrel package. It re-exports every engine package as a namespace so one
-dependency yields the whole engine surface. Its only API of its own is
-`namespaces`, the runtime list of the re-exported namespace names: also the
-barrel's one executable statement, so the package's 100% coverage gate has a
-real denominator instead of an empty one (issue #169).
+`@smthrs/flows/NodeRuntime` is the only supported durable-runtime subpath in
+rc.0. `layer` leaves host services, the step boundary, and workspace sandbox to
+the caller. `layerHost` supplies the contained Node host, guarded action
+surface, storage, engine, liveness probe, and bounded signal shutdown.
 
 ```ts
-import { Engine, Kernel, Journal } from "@smthrs/flows"
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+
+const runtime = NodeRuntime.layerHost(
+  {
+    filename: ".flows/engine.db",
+    workspaceRoot: ".",
+    owner: { hostId: "local-worker" }
+  },
+  registerFlows
+)
 ```
 
-| Namespace     | Package                  | Reference                              |
-| ------------- | ------------------------ | -------------------------------------- |
-| `Canonical`   | `@smthrs/canonical`     | canonical              |
-| `Capability`  | `@smthrs/capability`    | capability            |
-| `Crypto`      | `@smthrs/crypto`        | crypto                    |
-| `Database`    | `@smthrs/database`     | database                |
-| `Engine`      | `@smthrs/engine`       | engine                    |
-| `Flow`, `Action`, `RetryPolicy`, `DurableDeferred`, `DurableClock`, `DurableQueue`, `FlowRuntime`, `StepIdentity` | `@smthrs/flow` (flat) | flow |
-| `EngineStore` | `@smthrs/engine-store` | engine-store        |
-| `Jj`          | `@smthrs/jj`           | jj                            |
-| `Journal`     | `@smthrs/journal`      | journal                  |
-| `RunStore`    | `@smthrs/run-store`    | run-store              |
-| `StepCache`   | `@smthrs/step-cache`   | step-cache            |
-| `Kernel`      | `@smthrs/kernel`       | kernel                    |
-| `Keys`        | `@smthrs/keys`         | keys                        |
-| `Sandbox`     | `@smthrs/sandbox`      | sandbox                  |
-| `Sync`        | `@smthrs/sync`         | sync                        |
-| `TimeTravel`  | `@smthrs/time-travel` (service key, flat) | time-travel |
+The journal queue has capacity 1,024 and rejects overflow. Artifacts live next
+to the database under `.flows/objects`. Engine snapshot bookkeeping uses a
+private Jj service; `HostOptions.rules` controls only action-facing authority.
+Signals are validated and deduplicated before installation, and
+`shutdownTimeoutMs` must be an integer from 0 through 2,147,483,647.
 
-Each package is exported as a namespace rather than flattened, so every
-package keeps its own `make` / `makeNoop` / `layerNoop` trio without colliding
-with its neighbours: `Kernel.ChildProcessSpawner.layerNoop`, `RunStore.RunStore.layer`.
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `Options` | interface | models | Configuration for the supported Node SQLite runtime. |
+| `RuntimeConfigurationError` | class | errors | Stable failure raised synchronously for invalid runtime construction input. |
+| `storage` | const | layers | Provides the migrated database, durable stores, owner minter, workspace, and local artifact store without constructing an engine. |
+| `make` | const | constructors | Builds the production service context in the current scope. |
+| `layer` | const | layers | Provides the supported scoped Node SQLite runtime. |
+| `HostOptions` | interface | models | Configuration for the batteries-included Node host composition. |
+| `defaultShutdownTimeoutMs` | const | models | How long a graceful shutdown may take before the host leaves anyway. |
+| `maximumShutdownTimeoutMs` | const | models | Largest delay Node accepts without truncating it to a one-millisecond timer. |
+| `signalExitCode` | const | constructors | The status a process that was ended by `signal` exits with. |
+| `layerHost` | const | layers | Provides the whole Node host, storage, kernel, and engine from one call. |
 
-The `@smthrs/platform-*` bundles are deliberately not among them, for the same
-reason `effect`'s index does not re-export `@effect/platform-node`: a platform
-bundle is chosen by the program that runs, not by the library it depends on.
-
-#### `NodeRuntime`
-
-`@smthrs/flows/NodeRuntime` is a subpath export, not part of the barrel:
-importing it opens a `node:sqlite` database, so the browser-safe root must not
-reach it.
-
-| Export | Kind | Notes |
-| --- | --- | --- |
-| `Options`, `HostOptions` | interfaces | configuration for `layer` and for `layerHost` |
-| `storage` | layer constructor | the migrated database, stores, owner minter, workspace, and artifact store, without an engine |
-| `make`, `layer` | constructor and layer | storage plus the engine; the host, the step boundary, and the workspace sandbox are the caller's |
-| `layerHost` | layer | the whole Node host, kernel, storage, and engine from one call |
-| `engineRules` | rule list | the `jj:snapshot` / `jj:restore` the ENGINE takes for a compensable action's pre-image, merged under `HostOptions.rules` |
-| `defaultShutdownTimeoutMs`, `signalExitCode` | constant and function | the graceful-shutdown deadline, and the status a signalled host leaves with |
-
-`layerHost` is `layer` with every remaining decision defaulted: the contained
-Node host, the kernel's guarded surface over an unattended `GrantStore`, the
-default step boundary and workspace sandbox, `HostLiveness.isAlive`, and
-`SIGINT`/`SIGTERM` handling that releases the runs this host owns. Its options
-add `rules` (the capabilities the host grants without asking), `signals` (an
-empty list installs none), `shutdownTimeoutMs` (how long a graceful shutdown may
-take before the host leaves anyway), and `containment` (process-group and reaper
-options).
-
-Two of its defaults are decisions rather than conveniences. `engineRules` is
-merged underneath `rules`, because the engine takes a compensable action's jj
-pre-image through the same guarded `Jj` the body sees and a host with no jj
-policy could otherwise not run a compensable action at all; a program that
-denies `jj:snapshot` still denies it. And the signal handler keeps two escapes,
-because installing it removes Node's default disposition: a second signal leaves
-immediately, and a shutdown that outlasts `shutdownTimeoutMs` leaves anyway,
-both with `signalExitCode` (130 for `SIGINT`, 143 for `SIGTERM`).
-
-See the durable engine guide.
-
-#### When not to use it
-
-Depend on the individual `@smthrs/*` packages when you want a narrower
-dependency footprint, or when a runtime target cannot carry every engine
-package. The barrel pulls in every one of them.
-
-**A browser is not one of those targets.** Every package root the barrel
-re-exports bundles for a browser, and `pnpm run browser` gates `@smthrs/flows`
-itself alongside them: see browser support.
-Bundling is still weaker than running: the durable composition needs a SQL
-client behind the `DurableWriter` contract, and the only ones shipped here are
-`node:sqlite`-backed. The namespaces here also carry contracts only ,
-`Journal.TestJournal` does not exist; it lives at
-`@smthrs/journal/test/TestJournal`, and the host bundles live at
-`@smthrs/platform-node`, `@smthrs/platform-bun`, and
-`@smthrs/platform-browser`.
-
-The barrel deliberately excludes the agent-layer packages, which sit above the
-engine, and the vendor host adapters `@smthrs/host-cloudflare` and
-`@smthrs/host-vercel`, which live in the
-[plugins repository](https://github.com/smithersai/plugins).
-
-See the package map for the dependency
-direction between the packages this barrel re-exports.
+Use individual `@smthrs/*` packages when a smaller dependency surface is
+preferable.
 
 ---
 
@@ -5487,15 +5417,13 @@ UTF-16 code units. It performs no path normalization and no case folding, so
 `\` is an ordinary character that never matches `/`, and `A:/x` never matches
 `a:/X`.
 
-Matching costs O(pattern length times resource length) in the worst case.
-Pattern resources are bounded at `Capability.maxResourceLength` UTF-16 code
-units and reject anything longer at construction and decode. Exact capabilities
-are deliberately unbounded because they carry caller text on the authorization
-path. `Capability.maxMatchWork` bounds the product of the pattern and exact
-resource lengths. `Capability.matches` returns `false` when that product exceeds
-the budget, and `Capability.withinMatchBudget` reports the case.
-`Permission.evaluate` returns `deny` when any rule cannot be decided, so an
-undecidable deny is never skipped.
+Matching costs O(pattern length times resource length) in the worst case. Exact
+and pattern resources are both bounded at `Capability.maxResourceLength`
+UTF-16 code units and reject anything longer at construction, parsing, and
+decode. Adapters reject or summarize larger host values before authorization.
+`Capability.maxMatchWork` remains a fail-closed guard for unchecked structural
+inputs. `Capability.withinMatchBudget` reports that case and
+`Permission.evaluate` denies it.
 
 `Capability.format` renders a capability or a pattern as `action:resource`, and
 it is the durable identity a grant envelope is deduplicated and sorted by.
@@ -5509,18 +5437,20 @@ default.
 `Permission.PermissionRequired`, `Permission.PermissionDenied`, and
 `Permission.GrantStoreError` are the three failures a guarded Host call can add,
 and `Permission.PermissionError` is exported as both their union type and a
-schema value. `Permission.isPermissionError` validates the whole shape rather
-than the `_tag` alone, because the package ships dual cjs and esm and class
-identity is not stable for a dual-package consumer.
+schema value. `Permission.isPermissionError` validates the exact enumerable
+shape rather than the `_tag` alone, because the package ships dual cjs and esm
+and class identity is not stable for a dual-package consumer. Unknown fields
+and overlong nested capabilities are rejected.
 
 `Permission.PermissionRequired.meta` is journal-safe context: only
 JSON-representable values are accepted, undefined-valued object properties are
-dropped, construction takes a deep-frozen snapshot, and the caller's object is
-never retained. Undefined array elements remain invalid because serializing
-them would change them to null. Permission failures defensively copy caller
-capabilities, and their `capability` and `meta` data slots are non-writable. A
-value the journal could not encode fails at the construction site with a decode
-error naming the key, not later at the persistence boundary.
+dropped, construction takes a cycle-safe deep-frozen snapshot, and the caller's
+object is never retained. Undefined array elements remain invalid because
+serializing them would change them to null. Permission failures defensively copy
+caller capabilities; the copied action and resource and the outer `capability`
+and `meta` slots are non-writable. A value the journal could not encode fails at
+the construction site with a decode error naming the key, not later at the
+persistence boundary.
 
 `Permission.formatError` renders one line for a log or an unattended report. It
 escapes C0 and C1 controls and caps each field at
@@ -5547,7 +5477,7 @@ handling.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
-| `Capability.maxResourceLength` (const) | constants | The maximum UTF-16 length of a capability-pattern resource. |
+| `Capability.maxResourceLength` (const) | constants | The maximum UTF-16 length of an exact or patterned capability resource. |
 | `Capability.maxMatchWork` (const) | constants | The maximum pattern-length times resource-length work a match may perform. |
 | `Capability.Action` (const) | schemas | Schema for host operations that the permission kernel can authorize. |
 | `Capability.Action` (type) | models | A host operation that the permission kernel can authorize. |
@@ -10239,7 +10169,7 @@ Every module is browser-bundleable; the root barrel is one of the entry points `
 | `BrowserFileSystem.ZenFsPromisesLike` | interface | the structural slice of a ZenFS `fs.promises`; Node's own `node:fs/promises` satisfies it |
 | `BrowserFileSystem.ZenFsFileHandleLike`, `ZenFsStatsLike` | interfaces | the bounded-read handle and the `Stats` subset `stat` needs |
 | `BrowserFileSystem.make`, `BrowserFileSystem.layer` | constructor + layer | effect's `FileSystem` over that slice |
-| `BrowserChildProcessSpawner.JustBashLike` | interface | the structural slice of a just-bash interpreter: one `run(command, { cwd, env })` |
+| `BrowserChildProcessSpawner.JustBashLike` | interface | the structural slice of a just-bash interpreter: one `exec(commandLine, { cwd, env })`, matching the real `Bash.exec` |
 | `BrowserChildProcessSpawner.layer` | layer | effect's `ChildProcessSpawner` over that interpreter; requires `FileSystem` and `Path` |
 | `BrowserServices.BrowserServices` | type | `ChildProcessSpawner \| FileSystem \| Path` |
 | `BrowserServices.layer` | layer | the aggregate, mirroring `NodeServices.layer`; a function, because the page owns both backends |
@@ -10366,10 +10296,11 @@ module and covered by a test:
 | `stdout`/`stderr` dispositions | kept at their Node meaning: `"inherit"` and `"ignore"` yield an empty stream, a `Sink` is transduced through, even though the interpreter captured the text either way |
 
 Runs are serialized behind a semaphore and executed inside an uninterruptible
-boundary because just-bash cannot abort an in-flight call. Interruption is still
-scope closure and fiber interruption, never an `AbortSignal`; it simply cannot
-take effect until the interpreter returns, and a caller never observes
-completion while hidden mutation of the virtual filesystem is still running.
+boundary: the adapter does not use the abort signal `exec` accepts, so an
+in-flight call runs to completion. Interruption is still scope closure and
+fiber interruption, never an `AbortSignal`; it simply cannot take effect until
+the interpreter returns, and a caller never observes completion while hidden
+mutation of the virtual filesystem is still running.
 
 A `StandardCommand` is rendered to a command line before it reaches the
 interpreter. Without `shell`, the command and its arguments are POSIX
@@ -10925,7 +10856,7 @@ The package depends on `@smthrs/kernel`, for `CommandLine` rendering and quoting
 | `TestScript`, `TestRemoteState`, `TestRemoteProvider` | interfaces | scripted provider fixtures |
 | `TestRemote` | const | `make(options?)`, a deterministic scripted provider |
 
-`layer` rejects command-supplied stdin streams, additional file descriptors,
+`layer` delivers a command-supplied stdin stream only to a provider that declares `stdin: true`, collected whole and bounded at 16 MiB; for any other provider it rejects the command instead of dropping its input. It also rejects additional file descriptors,
 custom shell paths, detached processes, and non-default pipeline routing with a
 `BadArgument` `PlatformError`. Those options cannot be represented by the
 provider contract and are never silently dropped. Output dispositions and
@@ -10982,7 +10913,7 @@ A provider may add SDK details to `ProviderError.cause`, but it cannot create ne
 
 The codes are this seam's own. They used to borrow the deleted `Shell` service's set; a remote session goes wrong in its own ways, so the seam now declares them.
 
-The command reaches the provider as the string `CommandLine.render` produces: the same string `@smthrs/kernel`'s `proc:spawn` check is written against, so a grant and the thing it authorizes cannot drift apart. Unsupported semantics are declared rather than dropped: command-supplied stdin streams, additional file descriptors, custom shell paths, detached processes, non-default pipeline routing, and delivering a signal to `kill` fail with a `BadArgument` `PlatformError`. The adapter honors output `pipe` / `ignore` / `inherit` dispositions and output sinks. A remote process ends by closing its scope. Two divergences cannot be reported as a failure and are stated in the module header instead: `extendEnv` is ignored, because the remote session's ambient environment never crosses the seam, and `isRunning` turns `false` when a caller observes `exitCode` rather than when the remote process ends.
+The command reaches the provider as the string `CommandLine.render` produces: the same string `@smthrs/kernel`'s `proc:spawn` check is written against, so a grant and the thing it authorizes cannot drift apart. Unsupported semantics are declared rather than dropped: a stdin stream for a provider that does not declare `stdin: true` (or on any stage of a pipeline but the first), additional file descriptors, custom shell paths, detached processes, non-default pipeline routing, and delivering a signal to `kill` fail with a `BadArgument` `PlatformError`. A declared provider receives stdin as one complete byte blob in `RemoteOptions.stdin`, never as a live pipe. The adapter honors output `pipe` / `ignore` / `inherit` dispositions and output sinks. A remote process ends by closing its scope. Two divergences cannot be reported as a failure and are stated in the module header instead: `extendEnv` is ignored, because the remote session's ambient environment never crosses the seam, and `isRunning` turns `false` when a caller observes `exitCode` rather than when the remote process ends.
 
 #### SandboxHealth
 
@@ -11076,10 +11007,12 @@ The checks run through `RemoteChildProcessSpawner.layer`, because a provider tha
 | Obligation | Required behavior |
 | --- | --- |
 | default directory | `spawn(command, {})` runs in `Session.workdir` |
+| relative cwd | a relative `cwd` is taken under `workdir`, never under the transport's own directory |
+| standard input | `spawn` delivers `options.stdin` bytes as the command's complete input; a transport with no input channel stages a workspace file and redirects |
 | parent creation | `writeFile` creates missing parent directories |
 | absence | `readFile` fails with `ProviderError.code === "not_found"` when the path is absent |
 | contents | file contents cross as bytes and round-trip unchanged |
-| optional control | `kill` and `ping` keep the spawner-level meanings |
+| optional control | `ping` keeps the spawner-level meaning; a declared `kill` ends the command and everything it started, not only the shell that wrapped it |
 
 ```ts
 import { Sandbox } from "@smthrs/sandbox"
@@ -11132,7 +11065,7 @@ const violations = yield* SandboxConformance.check(provider, {
 })
 ```
 
-Each check acquires a fresh session. The suite verifies byte round-trips, `not_found`, parent creation, the default workdir, environment delivery, and a working release-then-reacquire cycle. It projects the provider through `Sandbox.commandProvider` and delegates spawn, exit, ping, and real process-stop checks to `ProviderConformance`. A provider package asserts that the returned array is empty.
+Each check acquires a fresh session. The file checks verify binary, empty, and 64 KiB byte round-trips, `not_found`, parent creation, the default workdir and a relative `cwd`, environment delivery, standard input delivery (verified through `readFile`, so a pseudo-terminal transport is not penalized for its output), standard error arriving on one of the two streams, and a working release-then-reacquire cycle. Two checks deliberately cross surfaces: `files-reach-processes` writes through `writeFile` and measures the file with `wc -c` in a process, and `processes-reach-files` has a process produce a file that `readFile` must return, so a session serving files from anywhere but the machine its processes run on cannot pass. The suite then projects the provider through `Sandbox.commandProvider` and delegates spawn, exit, ping, and process-stop checks to `ProviderConformance`, whose kill check now also runs the fixture's `survivor` probe: after a kill, a command that can still be found running on the machine is a violation even though its wrapper exited. A provider package asserts that the returned array is empty.
 
 #### Providers
 
@@ -11147,7 +11080,7 @@ One row per bundled provider. Every cell is read from the provider's source and 
 | `MicrosandboxSandbox` | one local microVM from an image or a snapshot | injected SDK slice (`Sdk`) | yes, `sandboxAlreadyExists` connects to or restarts it; `persistence: "sticky"` keeps it running for that purpose | no | Microsandbox microVM (`RealMicrosandbox.integration.test.ts`, skipped without the `microsandbox` binary) |
 | `VercelSandbox` | one named persistent Vercel sandbox | injected SDK slice (`Sdk`) plus caller-supplied credentials | yes, `getOrCreate` with `persistent: true` and `resume: true` | no | none, fake only |
 | `DaytonaSandbox` | one named Daytona sandbox | injected SDK slice: a configured `Daytona` client | yes, `get(name)` first, `create` on a 404, `start` when attached | no | none, fake only |
-| `AwsSandbox` | one Fargate task from `RunTask` | injected SDK slice: the ECS aggregate client | no, every acquire runs a new task | no | none, fake only |
+| `AwsSandbox` | one Fargate task from `RunTask` | injected SDK slice for the lifecycle, the AWS CLI over an injected spawner for commands | yes, `ListTasks` by the `startedBy` tag adopts a ready leftover | yes, a pidfile plus the descendant walk through a second session | none live; the fake reproduces the Session Manager framing over a real local shell |
 | `CloudflareSandbox` | one Sandbox Durable Object behind a Worker binding | caller-supplied binding, through an injected `getSandbox` slice | yes, the Durable Object id is derived from the key, so the same object answers | no | none, fake only |
 
 #### DirectorySandbox
@@ -11319,8 +11252,9 @@ Teardown deletes the sandbox, so nothing survives a normal release; only a crash
 
 | Export | Kind | Notes |
 | --- | --- | --- |
-| `Sdk` | interface | the structural slice of the AWS SDK v3 `ECS` aggregate client: `runTask`, `describeTasks`, `executeCommand`, `stopTask`, `registerTaskDefinition`, `deregisterTaskDefinition` |
-| `make` | constructor | builds a `Sandbox.Provider` over Fargate tasks; `region`, `cluster`, `subnets`, and either `taskDefinition` or `image` with `taskRoleArn` are required, and `securityGroups`, `assignPublicIp`, `container`, `workdir`, `platformVersion`, `executionRoleArn`, `env`, `pollIntervalMs`, `maxPollAttempts`, and for an image `cpu` and `memory` shape the task |
+| `Sdk` | interface | the structural slice of the AWS SDK v3 `ECS` aggregate client: `runTask`, `describeTasks`, `listTasks`, `stopTask`, `registerTaskDefinition`, `deregisterTaskDefinition` |
+| `ExecTransport` | interface | how commands reach the task: the AWS CLI and its Session Manager plugin over an injected spawner, with `program`, `globalArgs`, and `chunkBytes` knobs |
+| `make` | constructor | builds a `Sandbox.Provider` over Fargate tasks; `region`, `cluster`, `subnets`, and either `taskDefinition` or `image` with `taskRoleArn` are required; `exec` supplies the command transport; `securityGroups`, `assignPublicIp`, `container`, `workdir`, `platformVersion`, `executionRoleArn`, `env`, `pollIntervalMs`, `maxPollAttempts`, and for an image `cpu` and `memory` shape the task |
 
 ```ts
 import { ECS } from "@aws-sdk/client-ecs"
@@ -11328,6 +11262,7 @@ import { AwsSandbox } from "@smthrs/sandbox"
 
 const provider = AwsSandbox.make({
   sdk: new ECS({ region: "us-west-2" }),
+  exec: { spawner },
   region: "us-west-2",
   cluster: "smithers",
   subnets: ["subnet-0abc"],
@@ -11338,9 +11273,11 @@ const provider = AwsSandbox.make({
 })
 ```
 
-`acquire` calls `RunTask` with `enableExecuteCommand: true`, `launchType: "FARGATE"`, and a `startedBy` derived from the session key, polls `DescribeTasks` with exponential backoff (capped at 10 seconds, `maxPollAttempts` default 60) until the task is `RUNNING` and its `ExecuteCommandAgent` reports `RUNNING`, and registers `StopTask` on the scope. A task that reaches `STOPPED` first fails with `unavailable`; an exhausted poll budget fails with `timeout`. "Supplying an image registers a minimal Fargate task definition and deregisters it after the task finalizer runs": family `smthrs-<startedBy>`, `sleep infinity`, `initProcessEnabled`, `cpu` 256 and `memory` 512 by default, container `sandbox`. `env` reaches the task as container overrides, which needs a `container` name or an image-generated definition. `ping` describes the task again and requires the same readiness.
+`acquire` first looks for the machine a previous acquire of the same key left running: `ListTasks` filtered by the `startedBy` tag derived from the key, adopted only when `DescribeTasks` shows its `ExecuteCommandAgent` already `RUNNING`, so a crash-interrupted run resumes its task instead of starting a second one beside it. Otherwise it calls `RunTask` with `enableExecuteCommand: true`, `launchType: "FARGATE"`, and that `startedBy`, polls `DescribeTasks` with exponential backoff (capped at 10 seconds, `maxPollAttempts` default 60) until the task is `RUNNING` and its agent is, and registers `StopTask` on the scope; an adopted task is released the same way, so closing the scope always leaves nothing behind. A task that reaches `STOPPED` first fails with `unavailable`; an exhausted poll budget fails with `timeout`. Supplying an image registers a minimal Fargate task definition and deregisters it after the task finalizer runs: family `smthrs-<startedBy>`, `sleep infinity`, `initProcessEnabled`, `cpu` 256 and `memory` 512 by default, container `sandbox`. `env` reaches the task as container overrides, which needs a `container` name or an image-generated definition. `ping` describes the task again and requires the same readiness.
 
-AwsSandbox cannot transfer files at all. `readFile` and `writeFile` fail with `unavailable` and the reason "reading `<path>` requires the ECS Exec SSM data channel, which @aws-sdk/client-ecs does not implement" (or "writing"). `spawn` calls `ExecuteCommand`, which "returns SSM session metadata only", and then fails with "ExecuteCommand opened an SSM session, but the ECS client exposes no process data channel"; the failure carries the region and the session id and never the stream URL or token. The conformance suite records exactly eight violations for this provider: `round-trips-binary-bytes`, `reports-an-absent-file`, `creates-parent-directories`, `runs-in-its-workdir`, `delivers-the-environment`, `reacquires-its-session`, `writes-its-output`, `reports-a-nonzero-exit`. Every acquire runs a new task and nothing looks a task up by `startedBy`, so the provider cannot resume across a crash: the previous task keeps running and the next acquire starts another. There is no `kill` and no real-backend suite. "A future provider can add a separately injected, browser-safe SSM stream transport."
+Commands, reads, and writes travel through `ExecTransport`: `aws ecs execute-command --interactive`, driven through the injected spawner, because ECS Exec is two halves and the ECS API implements only one. `ExecuteCommand` opens an SSM session and returns its metadata; the data channel that carries output and status is the Session Manager protocol, which the AWS CLI speaks by delegating to `session-manager-plugin`. The session is a pseudo-terminal, so standard error arrives interleaved on standard output and line endings are normalized; the plugin exits zero whatever the remote command did, so every command is wrapped to print its own status line, and a session that ends without one is `aborted`, never a success. Reads come back as guest `base64` and writes go in as base64 slices bounded by `chunkBytes` (default 3072 bytes before encoding), so file contents are byte-exact despite the terminal. Standard input is staged as a workspace file and redirected. `kill` records each command's guest pid in a session-private pidfile and signals it and its descendants through a second session; closing a spawn's scope does the same for a command not yet seen to end.
+
+Without an `exec` transport the session still provisions and tears down tasks but refuses `spawn`, `readFile`, and `writeFile` with `unavailable`, naming the missing transport, and the conformance suite records fifteen violations for it; with the transport it passes the suite in full. Honest limits: the host running the provider needs the `aws` CLI and `session-manager-plugin` installed; a command's standard error cannot be separated from its output; and no live cluster is driven from this repository, so the transport is proven against a fake that reproduces the plugin's banner, footer, carriage returns, and zero exit over a real local shell, while the exact command length the SSM document accepts is the service's to enforce, which is what `chunkBytes` is for.
 
 #### CloudflareSandbox
 
@@ -13647,11 +13584,11 @@ separated by whitespace, so the suffix is never appended twice.
 
 The table above is generated from `smithersErrorDefinitions` in
 `packages/errors/src/ErrorCode.ts` by
-`packages/errors/scripts/docs.mjs`. `KnownSmithersErrorCode` is derived from
-the keys of `smithersErrorDefinitions`, and `SmithersErrorCode` is an alias of
-it, so the set of codes is closed. Adding a code means adding a row to
-`smithersErrorDefinitions` and regenerating this page in the same change.
-The `//packages/errors:docsPages` target fails on drift.
+`packages/errors/scripts/docs.mjs`. `SmithersErrorCode` is derived from the
+keys of `smithersErrorDefinitions`, so the set of codes is closed. Adding a
+code means adding a row to `smithersErrorDefinitions` and regenerating this
+page in the same change. The `//packages/errors:docsPages` target fails on
+drift.
 
 ### Reading a failure
 
@@ -13661,7 +13598,8 @@ Classify by `code`, never by matching message text.
 import { isSmithersError } from "@smthrs/errors"
 
 if (isSmithersError(error) && error.code === "TELEGRAM_API_ERROR") {
-  // error.details.errorCode is Telegram's own numeric code
+  // error.details?.["errorCode"] is Telegram's own numeric code.
+  // TelegramApiError exposes it typed as `errorCode: number | null`.
 }
 ```
 
@@ -13708,12 +13646,10 @@ a message already safe to persist, and `retryable`. `fromIntegrationError` and
 | `ERROR_REFERENCE_URL` (const)         | constants   | The documentation page every code points at.                                |
 | `SmithersErrorDefinition` (interface) | models      | What a code means and when it is raised.                                    |
 | `smithersErrorDefinitions` (const)    | models      | Every known code, with the condition that raises it.                        |
-| `KnownSmithersErrorCode` (type)       | models      | A code this package documents.                                              |
 | `SmithersErrorCode` (type)            | models      | A code carried by a `SmithersError`.                                        |
-| `knownSmithersErrorCodes` (const)     | models      | Every documented code, in declaration order.                                |
-| `isKnownSmithersErrorCode` (const)    | refinements | Whether `code` is one this package documents.                               |
+| `smithersErrorCodes` (const)          | models      | Every documented code, in declaration order.                                |
+| `isSmithersErrorCode` (const)         | refinements | Whether `code` is one this package documents.                               |
 | `getSmithersErrorDefinition` (const)  | getters     | The definition for `code`, or `undefined` when it is not a documented code. |
-| `getSmithersErrorDocsUrl` (const)     | getters     | The documentation URL shared by every code.                                 |
 | `SmithersErrorOptions` (interface)    | models      | Construction options for a `SmithersError`.                                 |
 | `SmithersError` (class)               | errors      | A Smithers integration failure.                                             |
 | `isSmithersError` (const)             | refinements | Whether `value` is a `SmithersError`.                                       |
@@ -17451,7 +17387,7 @@ Everything below is stated against `packages/*/src`. Behavior with a test in sou
 
 Comparisons expands the Bazel row: the caching model against TurboRepo, Nx, and Bazel.
 
-The honest positioning is an embeddable, Effect-native durable-execution toolkit for applications that want durability as layers and typed services rather than a separate hosted control plane. Its differentiated combination is Effect schemas, errors and fibers; capability-checked host layers; declaration-aware and environment-aware cross-run content addressing; and explicit time-travel and compensation protocols. The operational surface an embedding deployment needs now ships: journal checkpointing and compaction, artifact-store garbage collection, backup/verify/restore tooling with an operator runbook (disaster recovery), metric defaults with OTLP export layers (telemetry), event-driven in-process wake with polling and sweeps as the cross-process fallback, and a documented SQLite operating envelope. A packaged SQLite storage-and-engine composition also ships now, as the `@smthrs/flows/NodeRuntime` subpath; the host and kernel half of that composition is still assembled by the application. What still does not ship is a multi-node service, an operational control plane, an ecosystem, automatic resume of abandoned runs, or a hosted deployment.
+The honest positioning is an embeddable, Effect-native durable-execution toolkit for applications that want durability as layers and typed services rather than a separate hosted control plane. Its differentiated combination is Effect schemas, errors and fibers; capability-checked host layers; declaration-aware and environment-aware cross-run content addressing; and explicit time-travel and compensation protocols. The operational surface an embedding deployment needs now ships: journal checkpointing and compaction, artifact-store garbage collection, backup/verify/restore tooling with an operator runbook (disaster recovery), metric defaults with OTLP export layers (telemetry), event-driven in-process wake with polling and sweeps as the cross-process fallback, and a documented SQLite operating envelope. A packaged SQLite storage-and-engine composition also ships now, as the `@smthrs/flows/NodeRuntime` subpath. Its lower-level `layer` leaves host and kernel composition to the application, while `layerHost` installs the contained, capability-guarded Node host and keeps engine checkpoint `Jj` authority private. What still does not ship is a multi-node service, an operational control plane, an ecosystem, automatic resume of abandoned runs, or a hosted deployment.
 
 ### Implementation status
 
@@ -17501,7 +17437,7 @@ The honest positioning is an embeddable, Effect-native durable-execution toolkit
 #### Planned
 
 - Production hermetic action execution and output materialization for cross-run caching.
-- A packaged production layer composing database, migrations, journal stores, durable deferred and clock state, kernel, host, and engine. Partly shipped: the `@smthrs/flows/NodeRuntime` subpath packages the SQLite storage and engine composition, with `registerFlows` as its final startup phase. It stops at the host boundary: it installs neither `NodeHost.layer` nor the guarded `HostServices` kernel, so `Jj`, Effect `FileSystem`, and Effect `Crypto` stay requirements the host supplies, and `StepBoundary` and `WorkspaceSandbox` are caller arguments. It installs no process or signal handlers. Its application-source consumers in the repository are `examples/src/durable-layer.ts` and the production control executor in `packages/cli/src/NodeControl.ts`; the composition itself has a direct real-SQLite package gate at `packages/flows/test/NodeRuntime.test.ts`.
+- A packaged production layer composing database, migrations, journal stores, durable deferred and clock state, kernel, host, and engine. Shipped for Node: the `@smthrs/flows/NodeRuntime` subpath packages SQLite storage and engine composition, with `registerFlows` as its final startup phase. `layer` keeps the host as an application requirement; `layerHost` installs the contained, guarded Node host, owns signal cleanup, and gives engine checkpointing a private repository-bound `Jj`. `StepBoundary` and `WorkspaceSandbox` remain explicit arguments. Its application-source consumers in the repository are `examples/src/durable-layer.ts` and the production control executor in `packages/cli/src/NodeControl.ts`; the composition itself has a direct real-SQLite package gate at `packages/flows/test/NodeRuntime.test.ts`.
 - Automatic resume of abandoned runs: a gateway-level supervisor that notices a run whose owner died and *launches a process* for it. The supervision runtime in `@smthrs/gateway` is a noop, so a run whose owner died advances only once a process running the engine with that flow registered comes up; that process's own sweep then reclaims the row. See implementation status.
 - Injectable seams for retry classification, shareability, and wait/wake. Cache-conflict verdicts and owner identity already have services; retry classification and shareability are still fixed engine behavior.
 - Graph-level failure policies such as quarantine or continue-on-failure.
@@ -17517,7 +17453,7 @@ The honest positioning is an embeddable, Effect-native durable-execution toolkit
 | --- | --- |
 | SQLite only | the shipped production SQL backend is `@effect/sql-sqlite-node` on Node, with an in-memory SQLite test layer. No browser SQL client layer ships here, and the journal migration ladder is SQLite-flavoured DDL. Postgres and PGlite parity is an accepted gap, issue #78 |
 | No browser SQL layer | the journal bundles for the browser against the `DurableWriter` contract, and no browser SQL client layer ships here |
-| Durable engine bundles, does not yet run, in a browser | `@smthrs/engine-store` and the `@smthrs/flows` barrel are browser entry points, because owner identity moved behind the `OwnerIdentity` service and closed issue #114. Running the composition still needs a browser SQL client behind `DurableWriter`, which is the row above |
+| Durable engine bundles, does not run in a browser | `@smthrs/engine-store` and the `@smthrs/flows` barrel are browser entry points for authoring and inspection. Durable execution is unsupported in browsers and edge workers in rc.0 even when an application supplies a SQL client; the supported durable host is Node.js with local SQLite |
 | Registration before resume | flow registrations and active fibers are in-memory, so a restarted process must re-register handlers before driving stored runs |
 | Single-writer serialization | `DurableWriter.write` requires serialized write transactions, and a Postgres backend must run them `SERIALIZABLE` |
 | No hosted deployment | a fully runnable engine-store on Cloudflare Workers and fully durable serverless deferreds and clocks on Vercel do not exist. Platform host adapters live in [smithersai/plugins](https://github.com/smithersai/plugins) |
