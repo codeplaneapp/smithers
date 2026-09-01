@@ -31,6 +31,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import type * as Schema from "effect/Schema"
+import * as SchemaIssue from "effect/SchemaIssue"
 import * as Os from "node:os"
 import { performance } from "node:perf_hooks"
 import * as NodeUtil from "node:util/types"
@@ -511,8 +512,22 @@ export const schedule = (
   })
 }
 
+/** Effect's own rendering of a schema issue tree, built once. */
+const formatSchemaIssue = SchemaIssue.makeFormatterDefault()
+
 /** Renders a failure value compactly for a status line. */
 const describeFailure = (value: unknown): string => {
+  if (typeof value === "object" && value !== null && !NodeUtil.isProxy(value)) {
+    // A schema refusal reaches here as the bare issue tree as often as it
+    // reaches here wrapped in a SchemaError, and the tree carries no `message`
+    // of any kind. Effect's own formatter is what turns it back into the
+    // sentence naming the path and the expectation.
+    try {
+      if (SchemaIssue.isIssue(value)) return Diagnostic.message(formatSchemaIssue(value), "target failed")
+    } catch {
+      // Fall through to the generic renderings.
+    }
+  }
   if (typeof value === "object" && value !== null) {
     try {
       const cloned = cloneCacheJson(
@@ -528,7 +543,11 @@ const describeFailure = (value: unknown): string => {
       // Fall through to the generic renderings.
     }
   }
-  return Diagnostic.message(value, "target failed")
+  // Every Error reaches this line: the clone above refuses any prototype that
+  // is not a plain object. `Diagnostic.describe` is what makes the reason
+  // survive that refusal, including for the Effect errors whose message is a
+  // prototype accessor.
+  return Diagnostic.describe(value, "target failed")
 }
 
 /**
