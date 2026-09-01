@@ -7807,15 +7807,23 @@ Route: /api/time-travel
 Frame-addressed history behind ONE injectable service: inspect, fork, rewind. It reads and writes through public journal, cache, host, and time-travel store contracts.
 
 ```ts
+import { Engine } from "@smthrs/flows"
 import { TimeTravel } from "@smthrs/time-travel"
 import * as Effect from "effect/Effect"
 
 const program = Effect.gen(function*() {
   const timeTravel = yield* TimeTravel
-  const position = { runId: "build-42", frame: { lineageId: "build-42/root", seq: 17 } }
+  const lineageId = Engine.FlowEngine.Lineage.root("build-42")
+  const position = { runId: "build-42", frame: { lineageId, seq: 17 } }
   return yield* timeTravel.inspect(position, { initial: 0, reduce: (state) => state + 1 })
 })
 ```
+
+A lineage id is minted, never spelled. `FlowEngine.Lineage` is the one
+constructor for it, and the engine stamps its result on every record a run
+writes. This package only stores and compares the value, so it takes no
+dependency on the engine; the example reaches the constructor through
+`@smthrs/flows`, the barrel a caller already installs.
 
 ### Entry point
 

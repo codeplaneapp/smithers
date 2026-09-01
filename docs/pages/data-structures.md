@@ -222,10 +222,14 @@ The engine hashes this private shape through `Key`. Ordinals are allocated per d
 ## Frames and time-travel shapes
 
 ```ts
-const frame: Frame.Frame = { lineageId: "build-42/root", seq: 17 }
+const frame: Frame.Frame = { lineageId: Engine.FlowEngine.Lineage.root("build-42"), seq: 17 }
 ```
 
-A frame names a durable point by lineage plus journal sequence. The stores hold:
+A frame names a durable point by lineage plus journal sequence. The lineage half
+is minted by `FlowEngine.Lineage`, reached as `Engine.FlowEngine` from
+`@smthrs/flows`, and the engine stamps it on every record a run writes. It is a
+versioned encoding rather than a path, so a hand-written address names no
+record. The stores hold:
 
 | Shape        | Columns                                                                         | Notes                                           |
 | ------------ | ------------------------------------------------------------------------------- | ----------------------------------------------- |

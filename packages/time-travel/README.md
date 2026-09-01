@@ -29,7 +29,14 @@ also available from matching `@smthrs/time-travel/*` subpaths.
 the package `exports` map. Recovery is never a call: building `TimeTravel.layer`
 finishes or rolls back any rewind a crash interrupted.
 
+A lineage id is minted, never spelled. `FlowEngine.Lineage` is the one
+constructor for it, the engine stamps its result on every record a run writes,
+and the encoding is versioned. This package only stores and compares the value,
+so it takes no dependency on the engine; the example reaches the constructor
+through `@smthrs/flows`, the barrel a caller already installs.
+
 ```ts
+import { Engine } from "@smthrs/flows"
 import { TimeTravel } from "@smthrs/time-travel"
 import { Effect } from "effect"
 
@@ -37,7 +44,7 @@ const rewound = Effect.gen(function*() {
   const timeTravel = yield* TimeTravel
   return yield* timeTravel.rewind({
     runId: "build-42",
-    frame: { lineageId: "build-42/root", seq: 17 }
+    frame: { lineageId: Engine.FlowEngine.Lineage.root("build-42"), seq: 17 }
   })
 })
 ```

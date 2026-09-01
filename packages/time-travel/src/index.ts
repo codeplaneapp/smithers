@@ -8,14 +8,25 @@
  * blocks `@smthrs/time-travel/internal/*` at its `exports` map.
  *
  * ```ts
+ * import { Engine } from "@smthrs/flows"
  * import { MemoryTimeTravelStore, TimeTravel } from "@smthrs/time-travel"
  * import * as Effect from "effect/Effect"
  *
  * const program = Effect.gen(function*() {
  *   const timeTravel = yield* TimeTravel
- *   return yield* timeTravel.fork({ runId: "analyse-1", frame: { lineageId: "analyse-1/root", seq: 4 } })
+ *   const lineageId = Engine.FlowEngine.Lineage.root("analyse-1")
+ *   return yield* timeTravel.fork({ runId: "analyse-1", frame: { lineageId, seq: 4 } })
  * })
  * ```
+ *
+ * A lineage id is MINTED, never spelled. `FlowEngine.Lineage` is the one
+ * constructor for it, the engine stamps its result on every record a run
+ * writes, and the encoding is versioned and has already changed once. This
+ * package only ever stores and compares the value, so it takes no dependency on
+ * the engine; the example above reaches the constructor through `@smthrs/flows`,
+ * the barrel a caller already installs. Reading `meta.lineageId` off any entry
+ * the run committed is the other route, and the one a viewer takes when it
+ * holds records rather than a run id.
  *
  * `TimeTravel` is exported FLAT rather than as a namespace, the way
  * `@smthrs/jj` exports its service module: the service key is the door, so

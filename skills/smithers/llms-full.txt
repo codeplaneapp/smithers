@@ -3171,13 +3171,21 @@ durable engine does not yet perform automatically.
 A `Frame` identifies a durable point by lineage and journal sequence:
 
 ```ts
+import { Engine } from "@smthrs/flows"
 import { Frame } from "@smthrs/time-travel"
 
 const frame: Frame.Frame = {
-  lineageId: "build-42/root",
+  lineageId: Engine.FlowEngine.Lineage.root("build-42"),
   seq: 17
 }
 ```
+
+The lineage half of that address is minted, never spelled. `FlowEngine.Lineage`
+is the one constructor for it, the engine stamps its result on every record a
+run writes, and the encoding is versioned: a hand-written `<runId>/root` names
+no record, and every operation refuses it as `not_found`. Reading
+`meta.lineageId` off any entry the run committed is the other route, and the one
+a viewer takes when it holds records rather than a run id.
 
 A `Position` pairs that frame with the run it addresses: `{ runId, frame }` ,
 and is the only argument every operation takes. A frame is an address into
@@ -11807,15 +11815,23 @@ Route: /api/time-travel
 Frame-addressed history behind ONE injectable service: inspect, fork, rewind. It reads and writes through public journal, cache, host, and time-travel store contracts.
 
 ```ts
+import { Engine } from "@smthrs/flows"
 import { TimeTravel } from "@smthrs/time-travel"
 import * as Effect from "effect/Effect"
 
 const program = Effect.gen(function*() {
   const timeTravel = yield* TimeTravel
-  const position = { runId: "build-42", frame: { lineageId: "build-42/root", seq: 17 } }
+  const lineageId = Engine.FlowEngine.Lineage.root("build-42")
+  const position = { runId: "build-42", frame: { lineageId, seq: 17 } }
   return yield* timeTravel.inspect(position, { initial: 0, reduce: (state) => state + 1 })
 })
 ```
+
+A lineage id is minted, never spelled. `FlowEngine.Lineage` is the one
+constructor for it, and the engine stamps its result on every record a run
+writes. This package only stores and compares the value, so it takes no
+dependency on the engine; the example reaches the constructor through
+`@smthrs/flows`, the barrel a caller already installs.
 
 ### Entry point
 
@@ -16377,10 +16393,14 @@ The engine hashes this private shape through `Key`. Ordinals are allocated per d
 ### Frames and time-travel shapes
 
 ```ts
-const frame: Frame.Frame = { lineageId: "build-42/root", seq: 17 }
+const frame: Frame.Frame = { lineageId: Engine.FlowEngine.Lineage.root("build-42"), seq: 17 }
 ```
 
-A frame names a durable point by lineage plus journal sequence. The stores hold:
+A frame names a durable point by lineage plus journal sequence. The lineage half
+is minted by `FlowEngine.Lineage`, reached as `Engine.FlowEngine` from
+`@smthrs/flows`, and the engine stamps it on every record a run writes. It is a
+versioned encoding rather than a path, so a hand-written address names no
+record. The stores hold:
 
 | Shape        | Columns                                                                         | Notes                                           |
 | ------------ | ------------------------------------------------------------------------------- | ----------------------------------------------- |
