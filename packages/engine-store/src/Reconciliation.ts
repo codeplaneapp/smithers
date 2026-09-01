@@ -182,14 +182,21 @@ export const layer = (service: Service): Layer.Layer<Reconciliation> => Layer.su
  */
 export const makeDefault = (): Service => ({
   onDeviation: Effect.fn("Reconciliation.onDeviation")((deviation) => {
+    const paths = [...new Set(deviation.paths)]
     const discovered = [
       ...new Set(
-        deviation.paths
+        paths
           .map((path) => deviation.declaredBy[path])
           .filter((owner): owner is string => owner !== undefined && owner !== deviation.nodeId)
       )
     ]
-    if (discovered.length > 0 && discovered.length === new Set(deviation.paths).size) {
+    if (
+      discovered.length > 0 &&
+      paths.every((path) => {
+        const owner = deviation.declaredBy[path]
+        return owner !== undefined && owner !== deviation.nodeId
+      })
+    ) {
       return Effect.succeed<Verdict>({
         _tag: "Reorder",
         dependsOn: discovered,
