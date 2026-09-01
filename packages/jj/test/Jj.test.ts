@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { PlatformError } from "effect/PlatformError"
+import * as Schema from "effect/Schema"
 import * as Jj from "../src/Jj.ts"
 
 describe("jjError", () => {
@@ -23,6 +24,53 @@ describe("jjError", () => {
   it("omits the description clause when none is given and honors a module override", () => {
     expect(Jj.jjError({ code: "unknown", module: "NodeJj", method: "status" }).message)
       .toBe("unknown: NodeJj.status")
+  })
+})
+
+describe("JjError durability", () => {
+  /**
+   * The module header promises `JjError` round-trips through the journal, and a
+   * journal round-trip is `JSON.stringify` somewhere along the way. An `Error`
+   * stringifies to `{}` because its `message` and `stack` are non-enumerable,
+   * so a `cause` holding the live host failure arrived on the other side of a
+   * replay with the diagnosis gone. `jjErrorCause` copies the three fields out
+   * instead, and this drives the whole trip to prove they survive it.
+   */
+  it("survives encode, JSON, and decode with its cause intact", () => {
+    const spawnFailure = Object.assign(new Error("spawn jj ENOENT"), { code: "ENOENT", syscall: "spawn jj" })
+    const error = new Jj.JjError({
+      code: "not_installed",
+      module: "NodeJj",
+      method: "snapshot",
+      message: "jj: command not found on PATH",
+      command: "jj log -r @",
+      cause: Jj.jjErrorCause(spawnFailure)
+    })
+
+    const journaled = JSON.parse(JSON.stringify(Schema.encodeUnknownSync(Jj.JjError)(error))) as unknown
+    const restored = Schema.decodeUnknownSync(Jj.JjError)(journaled)
+
+    expect(restored._tag).toBe("@smthrs/jj/JjError")
+    expect(restored.code).toBe("not_installed")
+    expect(restored.module).toBe("NodeJj")
+    expect(restored.method).toBe("snapshot")
+    expect(restored.message).toBe("jj: command not found on PATH")
+    expect(restored.command).toBe("jj log -r @")
+    expect(restored.cause).toEqual({ name: "Error", code: "ENOENT", message: "spawn jj ENOENT" })
+  })
+
+  it("projects a tagged failure and a non-object onto the same three fields", () => {
+    expect(Jj.jjErrorCause({ _tag: "SystemError", message: "denied" }))
+      .toEqual({ name: "SystemError", message: "denied" })
+    expect(Jj.jjErrorCause("plain string")).toEqual({ message: "plain string" })
+    expect(Jj.jjErrorCause({ code: 7 })).toEqual({ message: "[object Object]" })
+  })
+
+  it("bounds the cause message so a host failure cannot drag a payload into the journal", () => {
+    const long = Jj.jjErrorCause(new Error("x".repeat(Jj.causeMessageLimit + 500)))
+
+    expect(long.message).toHaveLength(Jj.causeMessageLimit + 1)
+    expect(long.message.endsWith("…")).toBe(true)
   })
 })
 

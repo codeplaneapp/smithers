@@ -1,6 +1,6 @@
 /**
  * The package barrel plus the two layers that exist only as an answer: Bun's
- * reuse of the Node adapter, and the browser's ticket-failing stub. Neither has
+ * reuse of the Node adapter, and the browser's no-module fallback. Neither has
  * behaviour of its own, so the assertions are that they are wired to the thing
  * they claim to be wired to and that they keep the stable identity strings.
  */
@@ -16,7 +16,19 @@ import * as NodeJj from "../src/node/NodeJj.ts"
 describe("@smthrs/jj barrel", () => {
   it("re-exports the contract flat", () => {
     expect(Object.keys(Index).sort()).toEqual(
-      ["Jj", "JjError", "JjErrorCode", "isJjError", "jjError", "layerNoop", "make", "makeNoop"].sort()
+      [
+        "Jj",
+        "JjError",
+        "JjErrorCause",
+        "JjErrorCode",
+        "causeMessageLimit",
+        "isJjError",
+        "jjError",
+        "jjErrorCause",
+        "layerNoop",
+        "make",
+        "makeNoop"
+      ].sort()
     )
   })
 
@@ -42,20 +54,28 @@ describe("BrowserJj", () => {
   it.effect("reports `not_installed` for every operation, naming the jj command", () =>
     Effect.gen(function*() {
       const jj = yield* (Effect.provide(Jj, BrowserJj.layerUnsupported))
-      const calls: ReadonlyArray<readonly [Effect.Effect<unknown, Index.JjFailure | PlatformError>, string]> = [
-        [jj.snapshot("msg"), "jj commit"],
-        [jj.restore("abc"), "jj edit"],
-        [jj.diff("a", "b"), "jj diff"],
-        [jj.workspaceAdd("lane", "/tmp/lane"), "jj workspace add"],
-        [jj.workspaceForget("lane"), "jj workspace forget"],
-        [jj.status(), "jj status"],
-        [jj.root!("/tmp"), "jj root"],
-        [jj.revert!("abc"), "jj revert"]
+      // The command is the one `NodeJj` would have run for that operation:
+      // `snapshot` is a `jj describe`, and `restore` is `jj restore`. The old
+      // table named `jj commit` and `jj edit`, subcommands this package never
+      // invokes for either.
+      const calls: ReadonlyArray<
+        readonly [string, Effect.Effect<unknown, Index.JjFailure | PlatformError>, string]
+      > = [
+        ["snapshot", jj.snapshot("msg"), "jj describe"],
+        ["restore", jj.restore("abc"), "jj restore"],
+        ["diff", jj.diff("a", "b"), "jj diff"],
+        ["workspaceAdd", jj.workspaceAdd("lane", "/tmp/lane"), "jj workspace add"],
+        ["workspaceForget", jj.workspaceForget("lane"), "jj workspace forget"],
+        ["status", jj.status(), "jj status"],
+        ["root", jj.root!("/tmp"), "jj root"],
+        ["revert", jj.revert!("abc"), "jj revert"]
       ]
 
-      for (const [effect, command] of calls) {
+      for (const [method, effect, command] of calls) {
         expect(yield* (Effect.flip(effect))).toMatchObject({
           code: "not_installed",
+          module: "BrowserJj",
+          method,
           message: "jj is not available in the browser",
           command
         })

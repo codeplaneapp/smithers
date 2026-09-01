@@ -108,6 +108,39 @@ describe.skipIf(wasmBytes === undefined)("BrowserJj over flows_jj.wasm", () => {
       yield* (jj.workspaceForget("lane"))
     }), { timeout })
 
+  it.effect("pins a new lane at an earlier change and materializes that tree", () =>
+    Effect.gen(function*() {
+      // The frozen ABI has no revision field on `workspaceAdd`, so the pin is a
+      // second call. Reading the lane's own file back is what proves the pin
+      // landed, mirroring the NodeJj real-binary case.
+      write("pinned.txt", "first\n")
+      const { changeId } = yield* (jj.snapshot("pinned base"))
+      write("pinned.txt", "second\n")
+      yield* (jj.snapshot("after base"))
+
+      yield* (jj.workspaceAdd("pinned", "/lane2", changeId))
+
+      expect(fsModule.readFileSync(join(host, "lane2", "pinned.txt"), "utf8")).toBe("first\n")
+      yield* (jj.workspaceForget("pinned"))
+    }), { timeout })
+
+  it.effect("undoes the lane when the pin fails, and names workspaceAdd", () =>
+    Effect.gen(function*() {
+      const error = yield* (Effect.flip(jj.workspaceAdd("rollback", "/lane3", "nosuchchangeid")))
+
+      expect(error).toMatchObject({
+        code: "invalid_ref",
+        module: "BrowserJj",
+        method: "workspaceAdd",
+        command: "jj workspace add"
+      })
+      expect(error.message).toContain("pinning the new lane failed")
+      // The name is free again, which it would not be if the failed add had
+      // left the lane registered in the repository.
+      yield* (jj.workspaceAdd("rollback", "/lane4"))
+      yield* (jj.workspaceForget("rollback"))
+    }), { timeout })
+
   it.effect("classifies an unknown revision as invalid_ref", () =>
     Effect.gen(function*() {
       const error = yield* (Effect.flip(jj.restore("nosuchchangeid")))

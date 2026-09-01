@@ -39,9 +39,23 @@ case "$1" in
 esac
 `
 
+/** A second binary, reachable only by name, for the override case. */
+const overrideScript = `#!/bin/sh
+echo "answered by the override"
+exit 0
+`
+
 const directory = mkdtempSync(join(tmpdir(), "flows-jj-spawner-"))
 writeFileSync(join(directory, "jj"), script)
 chmodSync(join(directory, "jj"), 0o755)
+const overrideBinary = join(directory, "override-jj")
+writeFileSync(overrideBinary, overrideScript)
+chmodSync(overrideBinary, 0o755)
+
+// The adapter honours SMITHERS_JJ_PATH, so a developer who has one set would
+// otherwise change which binary these cases spawn.
+delete process.env.SMITHERS_JJ_PATH
+delete process.env.FLOWS_JJ_PATH
 
 const encode = (text: string) => Stream.make(new TextEncoder().encode(text))
 
@@ -137,6 +151,34 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
       const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.status())), missingBinary)
       expect(error.code).toBe("not_installed")
       expect(error.message).toBe("jj: command not found on PATH")
+    }))
+
+  it.live("spawns the binary SMITHERS_JJ_PATH names, through the spawner too", () =>
+    Effect.gen(function*() {
+      // The spawner hands the child `PATH=directory`, where the scripted `jj`
+      // lives, so the only way this answer can come back is the override being
+      // the command that was spawned.
+      process.env.SMITHERS_JJ_PATH = overrideBinary
+      try {
+        expect(yield* run(Effect.flatMap(Jj, (jj) => jj.status()), realSpawner))
+          .toBe("answered by the override\n")
+      } finally {
+        delete process.env.SMITHERS_JJ_PATH
+      }
+    }))
+
+  it.effect("names a bound repository root that is not a directory", () =>
+    Effect.gen(function*() {
+      // A spawner reports a missing binary and an unusable working directory
+      // the same way, so without the directory probe a bound layer pointed at a
+      // directory that is gone answers `not_installed` with jj on PATH.
+      const missing = join(directory, "absent-root")
+      const error = yield* Effect.flip(Effect.flatMap(Jj, (jj) => jj.status())).pipe(
+        Effect.provide(Layer.provide(NodeJj.layerSpawnerAt(missing), missingBinary))
+      )
+
+      expect(error.code).toBe("unknown")
+      expect(error.message).toBe(`jj status: cannot run in ${missing}: not a directory`)
     }))
 
   it.effect("reports any other spawn failure as `unknown`", () =>

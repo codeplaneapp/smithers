@@ -53,6 +53,13 @@ export interface Resolved {
   readonly source: Source
   readonly executable: boolean
   readonly hint?: string | undefined
+  /**
+   * An override variable that was set to a path nothing exists at, and was
+   * therefore skipped. The resolution is unaffected, but an operator whose
+   * typo'd `SMITHERS_JJ_PATH` was disregarded otherwise gets a healthy report
+   * for a jj they did not choose.
+   */
+  readonly ignored?: { readonly variable: string; readonly path: string } | undefined
 }
 
 /**
@@ -93,6 +100,19 @@ export const isExecutable = (
 }
 
 /**
+ * A path rendered as one POSIX shell word.
+ *
+ * The permission hint is remediation an operator is expected to paste into a
+ * shell, and the path in it is whatever they put in `SMITHERS_JJ_PATH`. Unquoted,
+ * a space makes the advice silently wrong and a `;` or `$(...)` makes the paste
+ * run commands the hint never named.
+ *
+ * @category conversions
+ * @since 1.0.0
+ */
+export const shellQuote = (value: string): string => `'${value.split("'").join(`'\\''`)}'`
+
+/**
  * The guidance printed when a named `jj` cannot be executed.
  *
  * The macOS quarantine tip appears only on darwin, where a downloaded binary
@@ -103,8 +123,9 @@ export const isExecutable = (
  * @since 1.0.0
  */
 export const permissionHint = (file: string, platform: NodeJS.Platform = process.platform): string => {
-  const quarantine = platform === "darwin" ? ` xattr -d com.apple.quarantine ${file};` : ""
-  return `Cannot execute the jj binary at ${file}. Run: chmod +x ${file};${quarantine}` +
+  const quoted = shellQuote(file)
+  const quarantine = platform === "darwin" ? ` xattr -d com.apple.quarantine ${quoted};` : ""
+  return `Cannot execute the jj binary at ${file}. Run: chmod +x ${quoted};${quarantine}` +
     ` or point SMITHERS_JJ_PATH at a working jj.`
 }
 
@@ -159,25 +180,34 @@ export const resolveJjBinary = (options: Options = {}): Resolved => {
   const exists = options.exists ?? existsSync
   const executable = options.executable ?? ((file: string) => isExecutable(file, { platform }))
 
+  let ignored: { readonly variable: string; readonly path: string } | undefined
   for (const variable of overrideVariables) {
     const override = environment[variable]
     if (override === undefined || override === "") continue
     // An override that names a real file wins even when it cannot run: an
     // operator who set the variable deserves to hear that their file is
     // broken, not to have a different binary quietly substituted.
-    if (!exists(override)) continue
+    //
+    // One that names nothing falls through to PATH, which is the behavior 0.x
+    // recorded, but the fall-through is REPORTED rather than silent.
+    if (!exists(override)) {
+      ignored ??= { variable, path: override }
+      continue
+    }
     const usable = executable(override)
     return {
       path: override,
       source: "env",
       executable: usable,
-      ...(usable ? {} : { hint: permissionHint(override, platform) })
+      ...(usable ? {} : { hint: permissionHint(override, platform) }),
+      ...(ignored === undefined ? {} : { ignored })
     }
   }
 
+  const noted = ignored === undefined ? {} : { ignored }
   const found = searchPath(environment, platform, executable)
-  if (found !== undefined) return { path: found, source: "path", executable: true }
-  return { path: "jj", source: "path", executable: false, hint: missingHint }
+  if (found !== undefined) return { path: found, source: "path", executable: true, ...noted }
+  return { path: "jj", source: "path", executable: false, hint: missingHint, ...noted }
 }
 
 /**
@@ -192,5 +222,11 @@ export const describe = (resolved: Resolved): string => {
     : resolved.executable
     ? resolved.path
     : "not found"
-  return resolved.hint === undefined ? `jj: ${where}` : `jj: ${where} - ${resolved.hint}`
+  const notes = [
+    resolved.hint,
+    resolved.ignored === undefined
+      ? undefined
+      : `${resolved.ignored.variable} names ${resolved.ignored.path}, which does not exist, and was ignored`
+  ].filter((note): note is string => note !== undefined)
+  return notes.length === 0 ? `jj: ${where}` : `jj: ${where} - ${notes.join("; ")}`
 }

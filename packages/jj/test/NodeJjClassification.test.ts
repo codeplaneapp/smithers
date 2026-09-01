@@ -18,16 +18,20 @@ import { existsSync, readFileSync } from "node:fs"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Jj } from "../src/Jj.ts"
+import { isJjError, Jj, type JjError } from "../src/Jj.ts"
 import * as NodeJj from "../src/node/NodeJj.ts"
 
 const script = `#!/bin/sh
 case "$FLOWS_FAKE_JJ" in
   conflict) echo "Error: would leave conflicts in note.txt" 1>&2; exit 1 ;;
   revision-not-found) echo "Error: Revision not found" 1>&2; exit 1 ;;
-  doesnt-exist) echo "Error: Path doesn't exist" 1>&2; exit 1 ;;
+  path-doesnt-exist) echo "Error: Path doesn't exist" 1>&2; exit 1 ;;
+  revision-doesnt-exist) echo 'Error: Revision "conflict-fix" doesn'"'"'t exist' 1>&2; exit 1 ;;
+  conflict-named-path) echo "Error: Path doesn't exist: docs/conflict-resolution.md" 1>&2; exit 1 ;;
+  chained-conflict) printf 'Error: Failed to update the working copy\nCaused by: The merge would leave conflicts\n' 1>&2; exit 1 ;;
   revset-parse) echo "Error: Failed to parse revset: Syntax error" 1>&2; exit 1 ;;
   stdout-only) echo "Error: reported on stdout"; exit 1 ;;
+  utf8-split) printf 'caf\\303'; /bin/sleep 0.2; printf '\\251 au lait\\n'; exit 0 ;;
   signal) kill -9 $$ ;;
   slow) echo $$ > "$FLOWS_FAKE_JJ_MARKER.pid"; : > "$FLOWS_FAKE_JJ_MARKER.started"; /bin/sleep 1; : > "$FLOWS_FAKE_JJ_MARKER" ;;
   orphan) echo $$ > "$FLOWS_FAKE_JJ_MARKER.pid"
@@ -69,6 +73,12 @@ const waitForExit = (pid: number) =>
 
 const run = <A, E>(effect: Effect.Effect<A, E, Jj>) => Effect.provide(effect, NodeJj.layer)
 
+/** `Jj`'s channel names the kernel's failures too; an undecorated layer produces only jj's own. */
+const asJjError = (error: unknown): JjError => {
+  if (!isJjError(error)) throw new Error(`expected a JjError from an undecorated host layer, got ${String(error)}`)
+  return error
+}
+
 const status = (mode: string) => {
   process.env.FLOWS_FAKE_JJ = mode
   return run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.status())))
@@ -85,12 +95,17 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
 
     previousPath = process.env.PATH
     process.env.PATH = directory
+    // The adapter honours SMITHERS_JJ_PATH, so a developer who has one set
+    // would otherwise run their own jj instead of the scripted fake.
+    delete process.env.SMITHERS_JJ_PATH
+    delete process.env.FLOWS_JJ_PATH
   })
 
   afterAll(async () => {
     process.env.PATH = previousPath
     delete process.env.FLOWS_FAKE_JJ
     delete process.env.FLOWS_FAKE_JJ_MARKER
+    delete process.env.SMITHERS_JJ_PATH
     await rm(directory, { recursive: true, force: true })
   })
 
@@ -107,9 +122,35 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
       expect((yield* status("revision-not-found")).code).toBe("invalid_ref")
     }))
 
-  it.live("classifies `doesn't exist` as `invalid_ref`", () =>
+  it.live("classifies a REVISION that doesn't exist as `invalid_ref`, ahead of the conflict vocabulary", () =>
     Effect.gen(function*() {
-      expect((yield* status("doesnt-exist")).code).toBe("invalid_ref")
+      // `Error: Revision "conflict-fix" doesn't exist` is the case a bare
+      // `includes("conflict")`, tested first, read as a conflicted repository.
+      // `invalid_ref` is the durable code a journal has to carry for it.
+      const error = yield* status("revision-doesnt-exist")
+
+      expect(error.code).toBe("invalid_ref")
+      expect(error.message).toContain("conflict-fix")
+    }))
+
+  it.live("does not read a PATH diagnostic as a missing revision", () =>
+    Effect.gen(function*() {
+      // `Jj.ts` defines `invalid_ref` as "the change id or revision does not
+      // resolve". A missing path is not one, so it stays `unknown`.
+      expect((yield* status("path-doesnt-exist")).code).toBe("unknown")
+    }))
+
+  it.live("does not read a path that merely contains the word conflict as a conflict", () =>
+    Effect.gen(function*() {
+      expect((yield* status("conflict-named-path")).code).toBe("unknown")
+    }))
+
+  it.live("reads the conflict half of an error chain, not only its first line", () =>
+    Effect.gen(function*() {
+      // jj prints `Error: <top>` then `Caused by: <inner>`, and the conflict
+      // wording is usually the inner line, so anchoring only on `Error:` would
+      // journal a real conflict as `unknown`.
+      expect((yield* status("chained-conflict")).code).toBe("conflict")
     }))
 
   it.live("classifies `failed to parse revset` as `invalid_ref`, agreeing with the wasm layer", () =>
@@ -149,6 +190,91 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
       process.env.FLOWS_FAKE_JJ = "ok"
 
       expect(yield* run(Effect.flatMap(Jj, (jj) => jj.status()))).toBe("")
+    }))
+
+  it.live("decodes a code point split across two chunks instead of corrupting it", () =>
+    Effect.gen(function*() {
+      // The fake writes `caf` plus the FIRST byte of `é`, waits, then writes the
+      // second byte. Decoding each chunk on its own turns one code point into
+      // two replacement characters, in a diff or a status a run then journals.
+      // `layerSpawner` never had the bug because `Stream.decodeText` carries
+      // partial sequences across chunks, and the two layers must not disagree.
+      process.env.FLOWS_FAKE_JJ = "utf8-split"
+
+      expect(yield* run(Effect.flatMap(Jj, (jj) => jj.status()))).toBe("café au lait\n")
+    }))
+
+  it.live("spawns the binary SMITHERS_JJ_PATH names rather than searching PATH", () =>
+    Effect.gen(function*() {
+      // `smithers doctor` prints the override as the jj this host runs, so it
+      // has to be the file that actually runs: PATH holds no jj at all here.
+      const path = process.env.PATH
+      process.env.PATH = join(directory, "empty-bin")
+      process.env.SMITHERS_JJ_PATH = join(directory, "jj")
+      process.env.FLOWS_FAKE_JJ = "stdout-only"
+      try {
+        const error = yield* status("stdout-only")
+
+        expect(error.code).toBe("unknown")
+        expect(error.message).toBe("jj status: Error: reported on stdout")
+      } finally {
+        process.env.PATH = path
+        delete process.env.SMITHERS_JJ_PATH
+      }
+    }))
+
+  it.live("names the working directory rather than blaming a missing jj", () =>
+    Effect.gen(function*() {
+      // `spawn(jj, { cwd })` reports a MISSING cwd as ENOENT, exactly as it
+      // reports a missing binary, so a bound layer pointed at a directory that
+      // is gone used to answer `not_installed` with jj sitting on PATH.
+      const missing = join(directory, "gone")
+      const error = yield* Effect.flip(Effect.flatMap(Jj, (jj) => jj.status())).pipe(
+        Effect.provide(NodeJj.layerAt(missing))
+      )
+
+      expect(error.code).toBe("unknown")
+      expect(error.message).toBe(`jj status: cannot run in ${missing}: not a directory`)
+    }))
+
+  it.live("bounds the command it records so a caller's message cannot ride into the journal", () =>
+    Effect.gen(function*() {
+      // `command` is journaled with the error and the argv holds whatever the
+      // caller passed as a snapshot message.
+      process.env.FLOWS_FAKE_JJ = "stdout-only"
+      const error = asJjError(yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.snapshot("m".repeat(2000))))))
+
+      expect(error.command!.length).toBeLessThan(600)
+      expect(error.command!.endsWith("…")).toBe(true)
+      expect(error.command!.startsWith("jj describe -m mmm")).toBe(true)
+    }))
+
+  it.live("names a starting path that is not there when asked for its root", () =>
+    Effect.gen(function*() {
+      // `root` resolves a FILE to its directory, and a path that is not there
+      // at all is passed through so the spawn failure names it rather than
+      // reporting a missing jj.
+      const missing = join(directory, "no-such-tree")
+      const error = asJjError(yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.root!(missing)))))
+
+      expect(error.code).toBe("unknown")
+      expect(error.message).toBe(`jj root: cannot run in ${missing}: not a directory`)
+    }))
+
+  it.live("keeps a synchronous spawn refusal in the typed channel", () =>
+    Effect.gen(function*() {
+      // `node:child_process` THROWS for an argument carrying a NUL byte rather
+      // than emitting an `error` event, so an unguarded spawn turned a caller's
+      // `snapshot` message into a defect no `Jj` caller can catch.
+      process.env.FLOWS_FAKE_JJ = "ok"
+      const nul = String.fromCharCode(0)
+      const error = yield* run(
+        Effect.flip(Effect.flatMap(Jj, (jj) => jj.snapshot(`held${nul}message`)))
+      )
+
+      expect(error.code).toBe("unknown")
+      expect(error.message).toContain("null bytes")
+      expect(error).toMatchObject({ module: "NodeJj", method: "snapshot" })
     }))
 
   it.live("kills a still-running `jj` when the fiber is interrupted", () =>

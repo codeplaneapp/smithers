@@ -81,9 +81,59 @@ describe("resolveJjBinary", () => {
 
       const resolved = Resolve.resolveJjBinary({ environment, platform: "linux" })
 
-      expect(resolved).toEqual({ path: binary, source: "path", executable: true })
-      expect(Resolve.describe(resolved)).toBe(`jj: ${binary}`)
+      // The fall-through itself is the recorded 0.x behaviour and is unchanged.
+      // What is new is that it is REPORTED: an operator whose override was a
+      // typo otherwise reads a clean `doctor` line for a jj they did not pick.
+      expect(resolved).toEqual({
+        path: binary,
+        source: "path",
+        executable: true,
+        ignored: { variable: "FLOWS_JJ_PATH", path: join(directory, "absent") }
+      })
+      expect(Resolve.describe(resolved)).toBe(
+        `jj: ${binary} - FLOWS_JJ_PATH names ${join(directory, "absent")}, which does not exist, and was ignored`
+      )
     }))
+
+  it("keeps a later usable override authoritative and still reports the skipped one", () =>
+    staged((directory) => {
+      const alias = write(join(directory, "alias"), 0o755)
+      const resolved = Resolve.resolveJjBinary({
+        environment: { SMITHERS_JJ_PATH: join(directory, "absent"), FLOWS_JJ_PATH: alias },
+        platform: "linux"
+      })
+
+      expect(resolved.path).toBe(alias)
+      expect(resolved.source).toBe("env")
+      expect(resolved.ignored).toEqual({ variable: "SMITHERS_JJ_PATH", path: join(directory, "absent") })
+      expect(Resolve.describe(resolved)).toContain("was ignored")
+    }))
+
+  it("reports a skipped override alongside the no-jj-anywhere hint", () =>
+    staged((directory) => {
+      const resolved = Resolve.resolveJjBinary({
+        environment: { SMITHERS_JJ_PATH: join(directory, "absent") },
+        platform: "linux"
+      })
+
+      expect(resolved).toMatchObject({ path: "jj", source: "path", executable: false })
+      expect(Resolve.describe(resolved)).toBe(
+        `jj: not found - ${Resolve.resolveJjBinary({ environment: {}, platform: "linux" }).hint}`
+          + `; SMITHERS_JJ_PATH names ${join(directory, "absent")}, which does not exist, and was ignored`
+      )
+    }))
+
+  it("renders a pasteable path in the permission hint, whatever the path contains", () => {
+    // The hint is remediation an operator pastes into a shell, and the path is
+    // whatever they put in SMITHERS_JJ_PATH.
+    expect(Resolve.shellQuote("/opt/my jj/jj")).toBe("'/opt/my jj/jj'")
+    expect(Resolve.shellQuote("/opt/it's/jj")).toBe(`'/opt/it'\\''s/jj'`)
+    expect(Resolve.permissionHint("/opt/jj; rm -rf /", "linux"))
+      .toContain("chmod +x '/opt/jj; rm -rf /';")
+    expect(Resolve.permissionHint("/opt/$(whoami)/jj", "darwin"))
+      .toContain("xattr -d com.apple.quarantine '/opt/$(whoami)/jj';")
+    expect(Resolve.permissionHint("/opt/a\nb/jj", "linux")).toContain("chmod +x '/opt/a\nb/jj';")
+  })
 
   it("skips empty PATH entries and looks for jj.exe on Windows", () =>
     staged((directory) => {

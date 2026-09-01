@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 1.0.0-rc.0
+
 ### Changed
 
 - `Jj`'s error channel is now honest about the capability kernel: every method
@@ -14,6 +16,71 @@
   package stays browser-bundleable.
 - Added `isJjError`, so a caller can tell "jj said no" from "the capability
   kernel said no" without matching on `_tag` by hand.
+- **The tag key and the error `_tag` were RENAMED during the import**, from
+  `flows/host/Jj` and `flows/host/JjError` to `@smthrs/jj/Jj` and
+  `@smthrs/jj/JjError`. Both are durable identity: step keys digest the resolved
+  service set, and `JjError` round-trips through the journal, so a 0.x run
+  recorded against the old strings does not replay against rc.0 and a recorded
+  step key does not match. rc.0 never loads a 0.x run database, so nothing
+  silently half-resumes. `packages/jj/test/index.test.ts` pins both strings.
+- `JjError.cause` is a bounded projection (`JjErrorCause`: `name`, `code`, and a
+  `message` capped at `causeMessageLimit`) rather than the live host failure.
+  An `Error` serializes to `{}` because its `message` and `stack` are not
+  enumerable, so the previous `unknown` cause arrived at the far side of a
+  journal round-trip with the diagnosis gone, and an unbounded object could drag
+  a whole command line into the record.
+- Every `JjError` the Node and browser adapters produce now names its `module`,
+  `method`, and the `command` that produced it. `@smthrs/kernel` reads `.method`,
+  and a caller that wants to branch on which operation failed no longer has to
+  parse the message.
+- Error classification is anchored to jj's own sentences. A ref or a path merely
+  containing the word `conflict` is no longer read as a conflicted repository,
+  and `Path doesn't exist` is no longer read as a missing revision: `invalid_ref`
+  is decided before `conflict`, and both match jj's phrasing rather than a bare
+  substring.
+- `SMITHERS_JJ_PATH` (and its `FLOWS_JJ_PATH` alias) now names the binary the
+  Node and Bun layers actually spawn. It was resolved and printed by
+  `smithers doctor` while every operation ran whatever `PATH` produced. A
+  resolution that came from `PATH` is still spawned as the bare name `jj`, so a
+  host spawner that hands the child a different `PATH` still decides for itself.
+- Spawn failures that never produced a process stay in the typed channel.
+  `node:child_process` throws rather than emitting an `error` event for most of
+  them, so an argument carrying a NUL byte, or a working directory that is a
+  file, escaped as an Effect defect. A working directory that is missing or is
+  not a directory is now reported as such instead of as `not_installed`, which
+  is what `spawn` reports it as.
+- The direct Node runner decodes child output with a streaming decoder, so a
+  multibyte code point split across two chunks is no longer two replacement
+  characters. `layerSpawner` already behaved this way, and the two layers are
+  required to agree.
+- `workspaceAdd` and `workspaceForget` pass the caller's name and path as
+  `--name=` and after a `--` terminator, so a value that begins with `-` is the
+  positional it is meant to be rather than a jj flag.
+- `revert` reports the paths it undid byte for byte, and `root` strips only the
+  terminal line ending, so a path with leading or trailing spaces is reported as
+  it exists on disk.
+- `root(from)` resolves a file to the directory that holds it, which the
+  contract has always described as an accepted argument and which `spawn`
+  rejected with a synchronous `ENOTDIR`.
+- The browser layer's WASI shim confines symlinks to the preopened slice. Paths
+  are now resolved component by component in namespace coordinates rather than
+  handed to the backend with links intact: an absolute link target is re-rooted
+  at the preopen instead of being read as host-absolute, a relative one is
+  clamped against the link's own directory, intermediate components are resolved
+  as well so a link naming a directory cannot smuggle the rest of a path out of
+  the slice, and an existing file outside the slice reached through a link is
+  not opened or stat'd.
+- Every WASI `u64` offset, size, and directory cookie is range-checked before it
+  narrows to a JavaScript number, so a value above `Number.MAX_SAFE_INTEGER` is
+  refused instead of silently addressing a different byte.
+- `BrowserJj.workspaceAdd` with a revision rolls the lane back when the pin
+  fails, and reports the failure against `workspaceAdd`, so the lane name is
+  free again and no workspace stays registered at a tree that was never pinned.
+  `BrowserJj.root(from)` fails for a path outside its slice instead of answering
+  for an unrelated tree.
+- `BrowserJj.layerUnsupported` names the commands `NodeJj` would have run
+  (`jj describe`, `jj restore`) rather than `jj commit` and `jj edit`, which this
+  package never invokes.
 
 ### Added
 
@@ -24,12 +91,25 @@
   syscalls (plus `random_get` for change-id entropy and `clock_time_get` for
   timestamps) to the same synchronous virtual-FS slice `BrowserFileSystem`
   uses — ZenFS in production, `node:fs` in tests. All six contract operations
-  work against jj's Simple backend; git interop is out of scope (separate
-  ticket). The wasm artifact ships at `wasm/flows_jj.wasm` and rebuilds via
+  work against jj's Simple backend; git interop is out of scope for rc.0. The
+  wasm artifact ships at `wasm/flows_jj.wasm` and rebuilds via
   `pnpm run build:wasm`. `layerUnsupported` remains exported for hosts without
   a wasm module, and `not_installed` is now produced only on the TS side.
   Hosts own durability: call `fs.sync()` after operations (see README).
+- `NodeJj.layerAt` and `NodeJj.layerSpawnerAt`, re-exported as `BunJj.layerAt`
+  and `BunJj.layerSpawnerAt`, bind jj to one absolute repository root so a later
+  change to `process.cwd()` cannot redirect snapshots, restores, or diffs into
+  another checkout. A relative root is a wiring mistake and throws a `TypeError`
+  at construction. A relative `workspaceAdd` path then resolves against the
+  bound root, and `root(from)` is exempt from the binding by design.
+- `@smthrs/jj/node/resolveJjBinary`: the resolution order `smithers doctor`
+  reports on, and `shellQuote`, so the remediation it prints is safe to paste
+  even when the operator's path contains a space or a semicolon. `describe()`
+  now also reports an override variable that was set to a path nothing exists
+  at, instead of silently reporting the jj that `PATH` produced.
+- Package-owned documentation. `packages/jj/docs/` holds the prose, and
+  `packages/jj/scripts/docs.mjs` generates `docs/pages/api/jj.mdx` from that
+  prose plus the JSDoc of every entry point declared in `packages/jj/Package.ts`,
+  so the published export tables cannot drift from `src/` again.
 - Split the `Jj` contract, `JjError`, and the Node, Bun, and browser adapters
-  out of `@smthrs/host` into their own package. The tag key `flows/host/Jj` and
-  the error `_tag` `flows/host/JjError` are unchanged: they are durable
-  identity, not source location.
+  out of `@smthrs/host` into their own package.

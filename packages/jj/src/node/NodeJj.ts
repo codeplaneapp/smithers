@@ -29,8 +29,13 @@ import * as Stream from "effect/Stream"
 import * as EffectChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as ChildProcess from "node:child_process"
-import { isAbsolute } from "node:path"
-import { Jj, JjError } from "../Jj.ts"
+import { statSync } from "node:fs"
+import { dirname, isAbsolute } from "node:path"
+import { Jj, JjError, jjErrorCause } from "../Jj.ts"
+import { resolveJjBinary } from "./resolveJjBinary.ts"
+
+/** The `module` every failure this adapter produces names. */
+const MODULE = "NodeJj"
 
 interface Output {
   readonly stdout: string
@@ -38,18 +43,69 @@ interface Output {
   readonly exitCode: number
 }
 
-const classify = (method: string, output: Output): JjError => {
-  const text = `${output.stderr}\n${output.stdout}`.toLowerCase()
-  const code: JjError["code"] = text.includes("conflict")
-    ? "conflict"
-    : text.includes("no such revision") || text.includes("revision not found") || text.includes("doesn't exist")
-        // A malformed revision ("Failed to parse revset: Syntax error") is an
-        // invalid ref, exactly as the wasm layer classifies it — the code is
-        // durable identity in journals, so the two layers must agree.
-        || text.includes("failed to parse revset")
+/**
+ * The argv rendered back as the command a human would have typed, bounded so a
+ * caller-supplied `snapshot` message cannot drag an arbitrary payload into a
+ * journaled error.
+ */
+const commandLimit = 512
+
+const commandOf = (args: ReadonlyArray<string>): string => {
+  const command = `jj ${args.join(" ")}`
+  return command.length > commandLimit ? `${command.slice(0, commandLimit)}…` : command
+}
+
+/**
+ * jj's revision vocabulary, anchored so a diagnostic about a PATH rather than a
+ * revision is not read as one.
+ *
+ * `Path doesn't exist` and `Revision "x" doesn't exist` are both jj sentences;
+ * only the second is `invalid_ref`, which `Jj.ts` defines as "the change id or
+ * revision does not resolve". The wasm layer's own wording is
+ * `revision "x" doesn't exist` (`crates/flows-jj/src/ops.rs`), and the codes are
+ * durable identity in journals, so the two layers must agree.
+ */
+const REVISION_VOCABULARY = [
+  /no such revision/,
+  /revision not found/,
+  /failed to parse revset/,
+  /\b(?:revision|change)\b[^\n]*doesn't exist/
+]
+
+/**
+ * jj's conflict vocabulary, matched only on a line jj itself opened as a
+ * diagnostic and only where `conflict` is a whole word.
+ *
+ * A bare `text.includes("conflict")` reads a ref named `conflict-fix` or a path
+ * named `docs/conflict-resolution.md` as a conflicted repository, and it did so
+ * ahead of the revision vocabulary, so a genuinely invalid ref was journaled
+ * under the wrong durable code. The trailing guard is what excludes those: a
+ * path or ref continues into `-`, `.`, `/`, or another word character, while a
+ * sentence about conflicts does not.
+ *
+ * `Caused by:` is anchored as well as `Error:` because jj prints an error chain
+ * and the conflict half is often the inner line.
+ */
+const CONFLICT_VOCABULARY = /^(?:error|caused by):[^\n]*conflict(?:s|ed|ing)?(?![\w./-])/m
+
+const classify = (method: string, args: ReadonlyArray<string>, output: Output): JjError => {
+  // jj reports on stderr; the stdout fallback is for a build that reports there
+  // instead. Concatenating both let one stream's incidental wording outrank the
+  // other's diagnosis.
+  const reported = output.stderr.trim() || output.stdout.trim()
+  const text = reported.toLowerCase()
+  const code: JjError["code"] = REVISION_VOCABULARY.some((pattern) => pattern.test(text))
     ? "invalid_ref"
+    : CONFLICT_VOCABULARY.test(text)
+    ? "conflict"
     : "unknown"
-  return new JjError({ code, message: `jj ${method}: ${output.stderr.trim() || output.stdout.trim()}` })
+  return new JjError({
+    code,
+    module: MODULE,
+    method,
+    command: commandOf(args),
+    message: `jj ${method}: ${reported}`
+  })
 }
 
 /**
@@ -60,39 +116,137 @@ const classify = (method: string, output: Output): JjError => {
  */
 const requireRevision = (method: string, revision: string): Effect.Effect<string, JjError> =>
   revision.length === 0
-    ? Effect.fail(new JjError({ code: "invalid_ref", message: `jj ${method}: empty revision string` }))
+    ? Effect.fail(
+      new JjError({
+        code: "invalid_ref",
+        module: MODULE,
+        method,
+        message: `jj ${method}: empty revision string`
+      })
+    )
     : Effect.succeed(revision)
+
+/**
+ * The `jj` to spawn.
+ *
+ * `SMITHERS_JJ_PATH` (and its `FLOWS_JJ_PATH` alias) is an operator saying
+ * "run THIS jj", and `smithers doctor` already prints the file it names, so the
+ * override has to be the file that actually runs. A resolution that came from
+ * `PATH` stays the bare name: the operating system searches the same `PATH` a
+ * moment later, and a host spawner that hands the child a different `PATH` —
+ * the contained bundles do — must keep deciding for itself.
+ *
+ * The `hint` travels with it so a failed spawn can say which file was tried
+ * rather than only that none was found.
+ */
+const resolveCommand = (): { readonly command: string; readonly hint?: string } => {
+  const resolved = resolveJjBinary()
+  return {
+    command: resolved.source === "env" ? resolved.path : "jj",
+    ...(resolved.hint === undefined ? {} : { hint: resolved.hint })
+  }
+}
+
+const notInstalledMessage = (hint: string | undefined): string =>
+  hint === undefined ? "jj: command not found on PATH" : `jj: ${hint}`
+
+/** Whether a directory a child would be started in can actually be used. */
+const isDirectory = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/** The directory a command should run in for a path that may name a file. */
+const directoryOf = (from: string): string => {
+  try {
+    return statSync(from).isDirectory() ? from : dirname(from)
+  } catch {
+    // Nothing is there. Pass it through so the spawn failure names it.
+    return from
+  }
+}
+
+/** Strips the terminal line ending a command prints, and nothing else. */
+const stripLineEnding = (output: string): string => output.replace(/\r?\n$/, "")
+
+/**
+ * A spawn that never produced a process, as a typed failure.
+ *
+ * A bad working directory is reported ahead of everything else because it makes
+ * every other diagnosis unreliable: `spawn(jj, { cwd })` reports a MISSING
+ * directory as `ENOENT` — indistinguishable from a missing binary — and a cwd
+ * that is a file as a synchronous `ENOTDIR` throw, so `layerAt` pointed at a
+ * directory that is gone would otherwise report that jj is not installed while
+ * jj sits on `PATH`.
+ */
+const spawnFailure = (
+  method: string,
+  args: ReadonlyArray<string>,
+  cwd: string | undefined,
+  hint: string | undefined,
+  cause: unknown,
+  missingBinary: boolean
+): JjError => {
+  const shared = { module: MODULE, method, command: commandOf(args), cause: jjErrorCause(cause) }
+  if (cwd !== undefined && !isDirectory(cwd)) {
+    return new JjError({ ...shared, code: "unknown", message: `jj ${method}: cannot run in ${cwd}: not a directory` })
+  }
+  return missingBinary
+    ? new JjError({ ...shared, code: "not_installed", message: notInstalledMessage(hint) })
+    : new JjError({ ...shared, code: "unknown", message: `jj ${method}: ${shared.cause.message}` })
+}
 
 /** How one `jj` invocation reaches the operating system. */
 type Run = (method: string, args: ReadonlyArray<string>, cwd?: string) => Effect.Effect<string, JjError>
 
 /** Turns a finished invocation into either its stdout or a classified failure. */
-const settle = (method: string, output: Output): Effect.Effect<string, JjError> =>
-  output.exitCode === 0 ? Effect.succeed(output.stdout) : Effect.fail(classify(method, output))
+const settle = (method: string, args: ReadonlyArray<string>, output: Output): Effect.Effect<string, JjError> =>
+  output.exitCode === 0 ? Effect.succeed(output.stdout) : Effect.fail(classify(method, args, output))
 
 /** Runs `jj` with argv (never a shell string) in `cwd`. */
 const jj: Run = (method, args, cwd) =>
   Effect.callback<Output, JjError>((resume) => {
-    const child = ChildProcess.spawn("jj", [...args], { cwd, stdio: ["ignore", "pipe", "pipe"] })
+    const { command, hint } = resolveCommand()
+    let child: ChildProcess.ChildProcess
+    try {
+      // `node:child_process` delivers only EACCES, EAGAIN, EMFILE, ENFILE, and
+      // ENOENT as an `error` event and THROWS every other spawn failure, so an
+      // argument carrying a NUL byte or a `cwd` that is a file would leave the
+      // typed channel as a defect no caller of `Jj` can catch.
+      child = ChildProcess.spawn(command, [...args], { cwd, stdio: ["ignore", "pipe", "pipe"] })
+    } catch (cause) {
+      resume(Effect.fail(spawnFailure(method, args, cwd, hint, cause, false)))
+      return Effect.void
+    }
     let stdout = ""
     let stderr = ""
-    child.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8")
+    // `setEncoding` puts Node's own `StringDecoder` on the stream, so a
+    // multibyte code point split across two chunks decodes once rather than
+    // becoming two replacement characters. `layerSpawner` gets that property
+    // from `Stream.decodeText`, and the two layers must not disagree.
+    child.stdout?.setEncoding("utf8")
+    child.stderr?.setEncoding("utf8")
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk
     })
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8")
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk
     })
     child.on("error", (error: NodeJS.ErrnoException) =>
-      resume(Effect.fail(
-        error.code === "ENOENT"
-          ? new JjError({ code: "not_installed", message: "jj: command not found on PATH", cause: error })
-          : new JjError({ code: "unknown", message: `jj ${method}: ${error.message}`, cause: error })
-      )))
-    child.on("close", (exitCode: number | null) => resume(Effect.succeed({ stdout, stderr, exitCode: exitCode ?? 1 })))
+      resume(Effect.fail(spawnFailure(method, args, cwd, hint, error, error.code === "ENOENT"))))
+    child.on("close", (exitCode: number | null) =>
+      resume(Effect.succeed({ stdout, stderr, exitCode: exitCode ?? 1 })))
     return Effect.sync(() => {
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL")
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL")
+      }
     })
-  }).pipe(Effect.flatMap((output) => settle(method, output)))
+  }).pipe(Effect.flatMap((output) =>
+    settle(method, args, output)
+  ))
 
 /**
  * Runs `jj` through a `ChildProcessSpawner`.
@@ -102,31 +256,30 @@ const jj: Run = (method, args, cwd) =>
  * which is `ENOENT` with a different name on it.
  */
 const viaSpawner = (spawner: ChildProcessSpawner["Service"]): Run => (method, args, cwd) =>
-  Effect.scoped(
-    Effect.gen(function*() {
-      const handle = yield* spawner.spawn(
-        EffectChildProcess.make("jj", [...args], cwd === undefined ? {} : { cwd })
-      )
-      const [stdout, stderr, exitCode] = yield* Effect.all(
-        [
-          Stream.mkString(Stream.decodeText(handle.stdout)),
-          Stream.mkString(Stream.decodeText(handle.stderr)),
-          handle.exitCode
-        ],
-        { concurrency: 3 }
-      )
-      return { stdout, stderr, exitCode }
-    })
-  ).pipe(
-    Effect.catch((error: PlatformError.PlatformError) =>
-      Effect.fail(
-        error.reason._tag === "NotFound"
-          ? new JjError({ code: "not_installed", message: "jj: command not found on PATH", cause: error })
-          : new JjError({ code: "unknown", message: `jj ${method}: ${error.message}`, cause: error })
-      )
-    ),
-    Effect.flatMap((output) => settle(method, output))
-  )
+  Effect.suspend(() => {
+    const { command, hint } = resolveCommand()
+    return Effect.scoped(
+      Effect.gen(function*() {
+        const handle = yield* spawner.spawn(
+          EffectChildProcess.make(command, [...args], cwd === undefined ? {} : { cwd })
+        )
+        const [stdout, stderr, exitCode] = yield* Effect.all(
+          [
+            Stream.mkString(Stream.decodeText(handle.stdout)),
+            Stream.mkString(Stream.decodeText(handle.stderr)),
+            handle.exitCode
+          ],
+          { concurrency: 3 }
+        )
+        return { stdout, stderr, exitCode }
+      })
+    ).pipe(
+      Effect.catch((error: PlatformError.PlatformError) =>
+        Effect.fail(spawnFailure(method, args, cwd, hint, error, error.reason._tag === "NotFound"))
+      ),
+      Effect.flatMap((output) => settle(method, args, output))
+    )
+  })
 
 // == operations
 
@@ -179,16 +332,23 @@ const operations = (run: Run, repositoryRoot?: string) => {
         inRepository("diff", ["diff", "--from", fromRevision, "--to", toRevision, "--git"])
     )
 
+  /**
+   * `--name=` and the `--` terminator are what make the claim "a workspace name
+   * is opaque argv" true for a value that starts with `-`. Without them clap
+   * reads a lane named `-dash-lane` as a bundle of short flags and a lane path
+   * of `--config-file=/tmp/x.toml` as a jj global option, rather than as the
+   * value and the positional they are meant to be.
+   */
   const workspaceAdd = (name: string, path: string, revision?: string) =>
     Effect.asVoid(
       revision === undefined
-        ? inRepository("workspaceAdd", ["workspace", "add", "--name", name, path])
+        ? inRepository("workspaceAdd", ["workspace", "add", `--name=${name}`, "--", path])
         : Effect.flatMap(requireRevision("workspaceAdd", revision), (pinned) =>
-          inRepository("workspaceAdd", ["workspace", "add", "--name", name, "--revision", pinned, path]))
+          inRepository("workspaceAdd", ["workspace", "add", `--name=${name}`, `--revision=${pinned}`, "--", path]))
     )
 
   const workspaceForget = (name: string) =>
-    Effect.asVoid(inRepository("workspaceForget", ["workspace", "forget", name]))
+    Effect.asVoid(inRepository("workspaceForget", ["workspace", "forget", "--", name]))
 
   const status = () => inRepository("status", ["status"])
 
@@ -196,8 +356,22 @@ const operations = (run: Run, repositoryRoot?: string) => {
    * `jj root` prints the workspace root for whatever directory it runs in,
    * which is the same answer walking up looking for `.jj` would give and one jj
    * is allowed to change its mind about (colocated repositories, workspaces).
+   *
+   * The contract's `from` is "a lane directory or a file an agent named", so a
+   * file is resolved to the directory that holds it: handing a file to `spawn`
+   * as a `cwd` throws `ENOTDIR` synchronously. Only the terminal line ending is
+   * stripped, never surrounding whitespace, because a repository root may end
+   * in a space and `trim()` would report a path that does not exist.
+   *
+   * `from` is passed directly rather than through `inRepository`: the argument
+   * names the directory jj must run in, so a bound layer deliberately does not
+   * redirect it.
    */
-  const root = (from: string) => Effect.map(run("root", ["root"], from), (output) => output.trim())
+  const root = (from: string) =>
+    Effect.flatMap(
+      Effect.sync(() => directoryOf(from)),
+      (directory) => Effect.map(run("root", ["root"], directory), stripLineEnding)
+    )
 
   /**
    * A revert is `jj revert --insert-before @`: the reverse of the change is
@@ -218,7 +392,11 @@ const operations = (run: Run, repositoryRoot?: string) => {
             Effect.as(
               inRepository("revert", ["revert", "-r", revision, "--insert-before", "@"]),
               {
-                reverted: names.split("\n").map((line) => line.trim()).filter((line) => line.length > 0)
+                // Split on line endings only. `jj diff --name-only` emits raw
+                // unquoted bytes, so a tracked file named " lead.txt" or
+                // "trail .txt" comes back with its spaces, and trimming each
+                // line would report paths that do not exist.
+                reverted: names.split(/\r?\n/).filter((line) => line.length > 0)
               }
             )
           )
@@ -263,6 +441,12 @@ export const layer: Layer.Layer<Jj> = Layer.succeed(Jj)(operations(jj))
  * `process.cwd()` cannot redirect snapshots, restores, or diffs into another
  * checkout.
  *
+ * Two consequences a caller has to know. A RELATIVE `path` handed to
+ * `workspaceAdd` resolves against `repositoryRoot` here and against the
+ * caller's working directory under {@link layer}, so pass absolute lane paths.
+ * And `root(from)` is exempt from the binding by design: its argument names the
+ * directory jj must run in, which is the whole question it answers.
+ *
  * @category layers
  * @since 1.0.0
  */
@@ -293,6 +477,9 @@ export const layerSpawner: Layer.Layer<Jj, never, ChildProcessSpawner> = Layer.e
 
 /**
  * Provides repository-bound `Jj` through the host's process spawner.
+ *
+ * The binding behaves exactly as {@link layerAt}'s, including how a relative
+ * `workspaceAdd` path resolves and `root`'s exemption from it.
  *
  * @category layers
  * @since 1.0.0

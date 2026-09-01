@@ -47,6 +47,77 @@ export const JjErrorCode = Schema.Literals(["not_installed", "conflict", "invali
 export type JjErrorCode = typeof JjErrorCode.Type
 
 /**
+ * The plain-data projection of an underlying host failure.
+ *
+ * `JjError` is journaled, and a journal round-trip is `JSON.stringify` at some
+ * point: an `Error` stringifies to `{}` because `name`, `message`, and `stack`
+ * are non-enumerable, so a `cause` that held the live object would arrive at
+ * the other side of a replay with its message gone. The three fields that
+ * survive are named here and copied out at construction instead, which also
+ * bounds what a failure can drag into the journal — a live `PlatformError`
+ * carries argv, and an arbitrary object can be cyclic or mutable.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export const JjErrorCause = Schema.Struct({
+  /** The failure's constructor or tag name, when it had one. */
+  name: Schema.optional(Schema.String),
+  /** The errno-style code, such as `ENOENT`. */
+  code: Schema.optional(Schema.String),
+  /** The failure's own message, truncated to {@link causeMessageLimit}. */
+  message: Schema.String
+})
+
+/**
+ * The value form of {@link JjErrorCause}.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type JjErrorCause = typeof JjErrorCause.Type
+
+/**
+ * How much of an underlying failure's message a {@link JjErrorCause} keeps.
+ *
+ * A cause is a diagnostic, not a payload: the bound stops a host failure that
+ * embeds a whole command line, or a whole file, from being journaled with the
+ * error.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const causeMessageLimit = 1024
+
+/**
+ * Projects an arbitrary host failure onto the plain data {@link JjErrorCause}
+ * keeps, so the value survives the journal round-trip the module header
+ * promises.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const jjErrorCause = (cause: unknown): JjErrorCause => {
+  const record = typeof cause === "object" && cause !== null ? cause as Record<string, unknown> : undefined
+  const name = typeof record?.["name"] === "string"
+    ? record["name"]
+    : typeof record?.["_tag"] === "string"
+    ? record["_tag"]
+    : undefined
+  const code = typeof record?.["code"] === "string" ? record["code"] : undefined
+  const message = cause instanceof Error
+    ? cause.message
+    : typeof record?.["message"] === "string"
+    ? record["message"]
+    : String(cause)
+  return {
+    ...(name === undefined ? {} : { name }),
+    ...(code === undefined ? {} : { code }),
+    message: message.length > causeMessageLimit ? `${message.slice(0, causeMessageLimit)}…` : message
+  }
+}
+
+/**
  * A jj failure, shaped after `effect/PlatformError`: a stable `code` reason,
  * the `module` and `method` that failed, and a human `message`.
  *
@@ -64,8 +135,8 @@ export class JjError extends Schema.TaggedError<JjError>()("@smthrs/jj/JjError",
   message: Schema.String,
   /** The jj command that produced the failure, when one was run. */
   command: Schema.optional(Schema.String),
-  /** The underlying host failure, carried whole rather than flattened away. */
-  cause: Schema.optional(Schema.Unknown)
+  /** The underlying host failure, projected onto data that survives a journal. */
+  cause: Schema.optional(JjErrorCause)
 }) {}
 
 /**
@@ -106,7 +177,7 @@ export const isJjError = (error: unknown): error is JjError =>
   typeof error === "object" && error !== null && "_tag" in error && error._tag === "@smthrs/jj/JjError"
 
 /**
- * A jj change id — the durable handle a run uses to name workspace state.
+ * A jj change id: the durable handle a run uses to name workspace state.
  *
  * It is a bare string alias rather than a branded type because it crosses the
  * journal and the process boundary as one, and the value jj prints is the

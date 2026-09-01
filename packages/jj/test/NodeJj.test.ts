@@ -157,6 +157,34 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
       (target) => Effect.promise(() => rm(target, { recursive: true, force: true }))
     ))
 
+  it.effect("resolves a relative lane path against the bound root, not the caller's directory", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(async () => {
+        const target = await mkdtemp(join(tmpdir(), "flows-node-jj-relative-"))
+        execFileSync("jj", ["git", "init", target], { stdio: "ignore" })
+        return target
+      }),
+      (target) =>
+        Effect.gen(function*() {
+          // Binding moves what a relative path means. `layer` would create the
+          // lane under `process.cwd()`, which is `repository` here, so the same
+          // call builds the lane in two different places depending on the layer.
+          const lane = `relative-lane-${process.pid}`
+
+          yield* Effect.flatMap(Jj, (jj) => jj.workspaceAdd("relative", lane)).pipe(
+            Effect.provide(NodeJj.layerAt(target))
+          )
+
+          expect(existsSync(join(target, lane))).toBe(true)
+          expect(existsSync(join(repository, lane))).toBe(false)
+
+          yield* Effect.flatMap(Jj, (jj) => jj.workspaceForget("relative")).pipe(
+            Effect.provide(NodeJj.layerAt(target))
+          )
+        }),
+      (target) => Effect.promise(() => rm(target, { recursive: true, force: true }))
+    ))
+
   it.effect("adds and forgets a named workspace lane", () =>
     Effect.gen(function*() {
       const lane = join(repository, "..", `lane-${process.pid}`)
@@ -281,18 +309,77 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
       expect(error.message).toContain("jj revert")
     }))
 
-  it.effect("reports `not_installed` when `jj` is not on PATH", () =>
+  it.effect("reports `not_installed` when `jj` is not on PATH, and says how to fix it", () =>
     Effect.gen(function*() {
       const path = process.env.PATH
+      const override = process.env.SMITHERS_JJ_PATH
       process.env.PATH = join(repository, "empty-bin")
+      delete process.env.SMITHERS_JJ_PATH
       try {
         const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.status())))
         expect(error.code).toBe("not_installed")
-        expect(error.message).toBe("jj: command not found on PATH")
-        // The spawn failure travels whole on `cause` rather than flattened away.
-        expect((error.cause as NodeJS.ErrnoException).code).toBe("ENOENT")
+        // The resolver already knows why nothing was found, so the failure says
+        // it rather than leaving an operator to run `doctor` for the same fact.
+        expect(error.message).toBe(
+          "jj: No jj on PATH. Install jj (https://jj-vcs.github.io) or set SMITHERS_JJ_PATH."
+        )
+        expect(error).toMatchObject({ module: "NodeJj", method: "status", command: "jj status" })
+        // The spawn failure travels on `cause` as data that survives a journal
+        // round-trip, rather than as a live `Error` that stringifies to `{}`.
+        expect(error.cause).toMatchObject({ code: "ENOENT" })
       } finally {
         process.env.PATH = path
+        if (override !== undefined) process.env.SMITHERS_JJ_PATH = override
       }
+    }))
+
+  it.effect("answers the repository root for a FILE inside it, not only a directory", () =>
+    Effect.gen(function*() {
+      // The contract calls `from` "a lane directory or a file an agent named",
+      // and `spawn` throws ENOTDIR synchronously for a file `cwd` — a defect
+      // rather than a `JjError` — so the file is resolved to its directory.
+      const file = join(repository, "named-by-an-agent.txt")
+      yield* Effect.promise(() => writeFile(file, "x\n"))
+
+      expect(yield* run(Effect.flatMap(Jj, (jj) => jj.root!(file)))).toBe(realpathSync(repository))
+    }))
+
+  it.effect("forwards a lane name and path that begin with a hyphen as positionals", () =>
+    Effect.gen(function*() {
+      // Without the `--` terminator clap reads `-dash-lane` as a jj flag, so
+      // "a workspace name is opaque argv" was only true for names that do not
+      // look like options.
+      const name = "-dash-lane"
+      const lane = join(repository, "..", `-dash-${process.pid}`)
+
+      yield* run(Effect.flatMap(Jj, (jj) => jj.workspaceAdd(name, lane)))
+      expect(existsSync(lane)).toBe(true)
+      expect(execFileSync("jj", ["workspace", "list"], { cwd: repository, encoding: "utf8" })).toContain(name)
+
+      yield* run(Effect.flatMap(Jj, (jj) => jj.workspaceForget(name)))
+      expect(execFileSync("jj", ["workspace", "list"], { cwd: repository, encoding: "utf8" })).not.toContain(name)
+      yield* Effect.promise(() => rm(lane, { recursive: true, force: true }))
+    }))
+
+  it.effect("reports reverted paths byte for byte, including leading and trailing spaces", () =>
+    Effect.gen(function*() {
+      // `jj diff --name-only` emits raw unquoted bytes, so trimming each line
+      // reported paths that do not exist on disk.
+      const lead = join(repository, " lead.txt")
+      const trail = join(repository, "trail .txt")
+      // Close whatever earlier cases left in the working copy, so the change
+      // under test touches exactly the two spacey names.
+      yield* run(Effect.flatMap(Jj, (jj) => jj.snapshot("before spacey")))
+      yield* Effect.promise(() => writeFile(lead, "a\n"))
+      yield* Effect.promise(() => writeFile(trail, "b\n"))
+      const { changeId } = yield* run(Effect.flatMap(Jj, (jj) => jj.snapshot("spacey names")))
+      yield* Effect.promise(() => writeFile(join(repository, "after-spacey.txt"), "c\n"))
+      yield* run(Effect.flatMap(Jj, (jj) => jj.snapshot("after spacey")))
+
+      const result = yield* run(Effect.flatMap(Jj, (jj) => jj.revert!(changeId)))
+
+      expect([...result.reverted].sort()).toEqual([" lead.txt", "trail .txt"])
+      expect(existsSync(lead)).toBe(false)
+      expect(existsSync(trail)).toBe(false)
     }))
 })

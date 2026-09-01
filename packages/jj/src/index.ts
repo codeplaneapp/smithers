@@ -1,12 +1,10 @@
 /**
- * @since 0.1.0
- *
- * `@smthrs/jj` — jujutsu as a Host service.
+ * Jujutsu as a host service: `@smthrs/jj`.
  *
  * This entry point is **platform-neutral and browser-bundleable**: the
  * contract, its error, and the no-op layer only. Implementations live under
  * explicit subpaths, the way `effect` keeps `@effect/platform-node` out of
- * `effect`, so importing the contract never resolves a `node:` built-in:
+ * `effect`, so importing the contract never resolves a `node:` built-in.
  *
  * ```ts
  * import { Jj } from "@smthrs/jj"
@@ -16,6 +14,8 @@
  * ```
  *
  * `scripts/browser-check.mjs` at the repository root pins that property.
+ *
+ * @since 0.1.0
  */
 
 export * from "./Jj.ts"

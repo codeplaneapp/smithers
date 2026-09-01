@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import type { PlatformError } from "effect/PlatformError"
 import * as fs from "node:fs"
 import * as BrowserJj from "../src/browser/BrowserJj.ts"
 import { isJjError, Jj, type JjError, type JjFailure } from "../src/Jj.ts"
@@ -24,7 +25,7 @@ const slice = fs
  * the very same tag; an undecorated host layer can only ever produce the
  * `JjError` half, so narrow rather than widen every assertion.
  */
-const jjError = (error: JjFailure): JjError => {
+const jjError = (error: JjFailure | PlatformError): JjError => {
   if (!isJjError(error)) throw new Error(`expected a JjError from an undecorated host layer, got ${error._tag}`)
   return error
 }
@@ -289,6 +290,111 @@ describe("BrowserJj over the fake ABI module", () => {
       const second = yield* (Effect.map(Effect.flip(jj.diff("a", "b")), jjError))
       expect(second.code).toBe("unknown")
       expect(second.command).toBe("jj diff")
+    }))
+
+  it.effect("answers the repository root only for a path inside the slice", () =>
+    Effect.gen(function*() {
+      const options: BrowserJj.BrowserJjOptions = {
+        wasm: fakeFlowsJjWasm({ response: OK_ALL }),
+        fs: slice,
+        root: "/repo"
+      }
+      const jj = yield* (Effect.provide(Jj, BrowserJj.layer(options)))
+
+      expect(yield* (jj.root!("/repo"))).toBe("/repo")
+      expect(yield* (jj.root!("/repo/deep/nest"))).toBe("/repo")
+      // "The repository root that CONTAINS `from`" has no answer for a path in
+      // an unrelated tree, and `/repository-elsewhere` is not inside `/repo`
+      // however much of the prefix it shares.
+      const outside = yield* (Effect.map(Effect.flip(jj.root!("/elsewhere")), jjError))
+      expect(outside).toMatchObject({ code: "unknown", module: "BrowserJj", method: "root", command: "jj root" })
+      expect(outside.message).toContain("is not inside the workspace root /repo")
+      expect((yield* (Effect.map(Effect.flip(jj.root!("/repository-elsewhere")), jjError))).code).toBe("unknown")
+    }))
+
+  it.effect("answers any absolute path when the slice root is the whole namespace", () =>
+    Effect.gen(function*() {
+      const jj = yield* (
+        Effect.provide(Jj, BrowserJj.layer({ wasm: fakeFlowsJjWasm({ response: OK_ALL }), fs: slice }))
+      )
+
+      expect(yield* (jj.root!("/anything/at/all"))).toBe("/")
+    }))
+
+  it.effect("refuses to write a request at address zero when the guest cannot allocate", () =>
+    Effect.gen(function*() {
+      // `flows_jj_alloc` answers 0 on failure; writing there would scribble
+      // over the module's own low memory and then call with a bogus pointer.
+      const starved = fakeFlowsJjWasm({ response: OK_ALL, allocResult: 0, logAllocs: true })
+      const stderr: Array<string> = []
+      const error = yield* flip(
+        { wasm: starved, fs: slice, onStderr: (text) => stderr.push(text) },
+        (jj) => jj.status()
+      )
+
+      expect(error.code).toBe("unknown")
+      expect(error.message).toBe("jj status: the wasm module could not allocate a request buffer")
+      // Nothing was allocated, so nothing is freed on a pointer that never was.
+      expect(stderr.filter((entry) => entry === "FREE")).toHaveLength(0)
+    }))
+
+  it.effect("reads a zero packed answer as the guest's response allocation failing", () =>
+    Effect.gen(function*() {
+      // (0 << 32) | 0 is what `flows_jj_call` returns when it cannot allocate
+      // the RESPONSE buffer. Decoding it blamed a "malformed ABI response".
+      const starved = fakeFlowsJjWasm({ packedResult: { ptr: 0, len: 0 } })
+      const error = yield* flip({ wasm: starved, fs: slice }, (jj) => jj.status())
+
+      expect(error.code).toBe("unknown")
+      expect(error.message).toBe("jj status: the wasm module could not allocate a response buffer")
+      expect(error.command).toBe("jj status")
+    }))
+
+  it.effect("bounds the response it quotes back in an error message", () =>
+    Effect.gen(function*() {
+      // The response is guest-supplied and the error is journaled, so the
+      // diagnosis carries a prefix rather than the whole payload.
+      const noisy = fakeFlowsJjWasm({ response: `"${"n".repeat(600)}"` })
+      const error = yield* flip({ wasm: noisy, fs: slice }, (jj) => jj.status())
+
+      expect(error.message).toContain("malformed ABI response")
+      expect(error.message.length).toBeLessThan(340)
+      expect(error.message.endsWith("…")).toBe(true)
+    }))
+
+  it.effect("names the module and the method on every failure it produces", () =>
+    Effect.gen(function*() {
+      // `@smthrs/kernel` reads `.method` off a `JjError`, and a UI that maps a
+      // failure to remediation cannot parse English for the operation.
+      const failing = fakeFlowsJjWasm({ response: "{\"err\":{\"code\":\"conflict\",\"message\":\"m\"}}" })
+      expect(yield* flip({ wasm: failing, fs: slice }, (jj) => jj.snapshot("x")))
+        .toMatchObject({ module: "BrowserJj", method: "snapshot" })
+      expect(yield* flip({ wasm: fakeFlowsJjWasm({ response: "{\"ok\":{}}" }), fs: slice }, (jj) => jj.diff("a", "b")))
+        .toMatchObject({ module: "BrowserJj", method: "diff" })
+      expect(yield* flip({ wasm: fakeFlowsJjWasm({ response: "nope" }), fs: slice }, (jj) => jj.status()))
+        .toMatchObject({ module: "BrowserJj", method: "status" })
+      expect(yield* flip({ wasm: fakeFlowsJjWasm({ trap: true }), fs: slice }, (jj) => jj.workspaceForget("l")))
+        .toMatchObject({ module: "BrowserJj", method: "workspaceForget" })
+    }))
+
+  it.effect("keeps the filesystem and the stdio sinks it was given at construction", () =>
+    Effect.gen(function*() {
+      // The options object has one owner, but nothing should be re-read after
+      // `make` returns: swapping `fs` between construction and the first
+      // operation would change which authority crosses the wasm boundary.
+      const stderr: Array<string> = []
+      const options = {
+        wasm: fakeFlowsJjWasm({ response: "{\"ok\":{\"status\":\"clean\"}}" }),
+        fs: slice,
+        onStderr: (text: string) => stderr.push(text)
+      }
+      const jj = yield* (Effect.provide(Jj, BrowserJj.layer(options)))
+      const swapped: Array<string> = []
+      options.onStderr = (text: string) => swapped.push(text)
+
+      expect(yield* (jj.status())).toBe("clean")
+      expect(stderr).toHaveLength(2) // INIT plus the echoed request
+      expect(swapped).toEqual([])
     }))
 
   it.effect("survives a corrupt packed answer whose length overruns wasm memory", () =>

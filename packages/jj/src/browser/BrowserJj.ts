@@ -32,6 +32,19 @@ import * as WasiPreview1 from "./WasiPreview1.ts"
 const decoder = new TextDecoder()
 const encoder = new TextEncoder()
 
+/** The `module` every failure this adapter produces names. */
+const MODULE = "BrowserJj"
+
+/**
+ * How much of an unusable ABI response an error message quotes.
+ *
+ * The response is guest-supplied and unbounded, and the resulting `JjError` is
+ * journaled, so the diagnosis carries a prefix rather than the whole payload.
+ */
+const excerptLimit = 256
+
+const excerpt = (text: string): string => text.length > excerptLimit ? `${text.slice(0, excerptLimit)}…` : text
+
 /**
  * The exports the frozen `flows_jj.wasm` ABI guarantees: a reactor
  * initializer, an allocator pair, and one call entrypoint taking UTF-8 JSON
@@ -54,6 +67,13 @@ const REQUIRED_EXPORTS = ["memory", "_initialize", "flows_jj_alloc", "flows_jj_f
  * The layer never fetches the module itself — a page decides when and how to
  * load bytes, and passing an already-compiled `WebAssembly.Module` lets it
  * share one across layers.
+ *
+ * Read semantics, so a caller knows what it still owns: `root`, `fs`,
+ * `onStdout`, and `onStderr` are read once, when `make` is called, and
+ * replacing them on the options object afterwards changes nothing. `wasm` is
+ * read once too, but LATER — at the first operation, which is what lets a page
+ * hand over bytes it is still loading. `fs` itself stays a live service the
+ * page continues to own.
  *
  * @category models
  * @since 0.1.0
@@ -100,9 +120,20 @@ type OkPayload = Record<string, unknown>
 const exchange = (abi: AbiExports, request: Record<string, unknown>): string => {
   const req = encoder.encode(JSON.stringify(request))
   const reqPtr = abi.flows_jj_alloc(req.length)
+  // `flows_jj_alloc` answers 0 when the guest cannot allocate
+  // (`crates/flows-jj/src/abi.rs`). Writing the request there would overwrite
+  // the module's own low linear memory and then call with a bogus pointer, so
+  // the exchange refuses before touching memory — and frees nothing, because
+  // nothing was allocated.
+  if (reqPtr === 0) throw new Error("the wasm module could not allocate a request buffer")
   try {
     new Uint8Array(abi.memory.buffer, reqPtr, req.length).set(req)
     const packed = BigInt.asUintN(64, abi.flows_jj_call(reqPtr, req.length))
+    // A packed answer of exactly 0 is the same allocator failure on the
+    // RESPONSE side, which the module reports as a null pointer and a zero
+    // length. Decoding it would blame a "malformed response" for an
+    // out-of-memory guest.
+    if (packed === 0n) throw new Error("the wasm module could not allocate a response buffer")
     const resPtr = Number(packed >> 32n)
     const resLen = Number(packed & 0xFFFF_FFFFn)
     const response = new Uint8Array(abi.memory.buffer, resPtr, resLen).slice()
@@ -127,23 +158,34 @@ const exchange = (abi: AbiExports, request: Record<string, unknown>): string => 
  * surfacing, not worth crashing over.
  */
 const decodeResponse = (method: string, text: string): Effect.Effect<OkPayload, JjError> => {
+  const malformed = () =>
+    Effect.fail(
+      new JjError({
+        code: "unknown",
+        module: MODULE,
+        method,
+        message: `jj ${method}: malformed ABI response: ${excerpt(text)}`
+      })
+    )
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
   } catch {
-    return Effect.fail(new JjError({ code: "unknown", message: `jj ${method}: malformed ABI response: ${text}` }))
+    return malformed()
   }
   if (isRecord(parsed) && "err" in parsed) {
     const err: unknown = parsed.err
     const code = isRecord(err) && isJjErrorCode(err.code) ? err.code : "unknown"
     const message = isRecord(err) && typeof err.message === "string" ? err.message : JSON.stringify(err)
     const command = isRecord(err) && typeof err.command === "string" ? { command: err.command } : {}
-    return Effect.fail(new JjError({ code, message: `jj ${method}: ${message}`, ...command }))
+    return Effect.fail(
+      new JjError({ code, module: MODULE, method, message: `jj ${method}: ${excerpt(message)}`, ...command })
+    )
   }
   if (isRecord(parsed) && isRecord(parsed.ok)) {
     return Effect.succeed(parsed.ok)
   }
-  return Effect.fail(new JjError({ code: "unknown", message: `jj ${method}: malformed ABI response: ${text}` }))
+  return malformed()
 }
 
 /** A string the operation's response payload is required to carry. */
@@ -152,7 +194,12 @@ const stringField = (method: string, payload: OkPayload, field: string): Effect.
   return typeof value === "string"
     ? Effect.succeed(value)
     : Effect.fail(
-      new JjError({ code: "unknown", message: `jj ${method}: ABI response is missing the "${field}" field` })
+      new JjError({
+        code: "unknown",
+        module: MODULE,
+        method,
+        message: `jj ${method}: ABI response is missing the "${field}" field`
+      })
     )
 }
 
@@ -162,18 +209,25 @@ const stringField = (method: string, payload: OkPayload, field: string): Effect.
  * memory must be bound first because `_initialize` may already issue
  * syscalls.
  */
-const instantiate = async (options: BrowserJjOptions): Promise<AbiExports> => {
+const instantiate = async (
+  host: {
+    readonly fs: SyncFsLike
+    readonly onStdout?: ((text: string) => void) | undefined
+    readonly onStderr?: ((text: string) => void) | undefined
+  },
+  wasm: WebAssembly.Module | BufferSource
+): Promise<AbiExports> => {
   const wasi = WasiPreview1.make({
-    fs: options.fs,
-    ...(options.onStdout === undefined ? {} : { onStdout: options.onStdout }),
-    ...(options.onStderr === undefined ? {} : { onStderr: options.onStderr })
+    fs: host.fs,
+    ...(host.onStdout === undefined ? {} : { onStdout: host.onStdout }),
+    ...(host.onStderr === undefined ? {} : { onStderr: host.onStderr })
   })
   const imports: WebAssembly.Imports = { wasi_snapshot_preview1: { ...wasi.imports } }
   // The two `instantiate` overloads return different shapes, and the lib
   // definitions disagree across type environments (lib.dom returns a
   // `WebAssemblyInstantiatedSource` for bytes; workers-types returns the
   // instance for both). Discriminate the value, not the overload.
-  const instantiated: unknown = await WebAssembly.instantiate(options.wasm as never, imports)
+  const instantiated: unknown = await WebAssembly.instantiate(wasm as never, imports)
   const instance = instantiated instanceof WebAssembly.Instance
     ? instantiated
     : (instantiated as { readonly instance: WebAssembly.Instance }).instance
@@ -204,7 +258,17 @@ const instantiate = async (options: BrowserJjOptions): Promise<AbiExports> => {
  * @slop
  */
 export const make = (options: BrowserJjOptions): Jj => {
+  // The host surface is snapshotted here rather than re-read per operation, so
+  // replacing `options.fs` or a stdio sink after `make` returns cannot change
+  // which authority crosses the wasm boundary. `wasm` stays a single lazy read
+  // at first instantiation, which is what makes a page able to hand over bytes
+  // it is still fetching; see `BrowserJjOptions`.
   const root = options.root ?? "/"
+  const host = {
+    fs: options.fs,
+    ...(options.onStdout === undefined ? {} : { onStdout: options.onStdout }),
+    ...(options.onStderr === undefined ? {} : { onStderr: options.onStderr })
+  }
   const gate = Semaphore.makeUnsafe(1)
   let ready: AbiExports | undefined
 
@@ -212,9 +276,13 @@ export const make = (options: BrowserJjOptions): Jj => {
     ready === undefined
       ? Effect.map(
         Effect.tryPromise({
-          try: () => instantiate(options),
+          try: () => instantiate(host, options.wasm),
           catch: (cause) =>
-            new JjError({ code: "unknown", message: `jj: failed to instantiate flows_jj.wasm: ${messageOf(cause)}` })
+            new JjError({
+              code: "unknown",
+              module: MODULE,
+              message: `jj: failed to instantiate flows_jj.wasm: ${messageOf(cause)}`
+            })
         }),
         (abi) => {
           ready = abi
@@ -238,7 +306,15 @@ export const make = (options: BrowserJjOptions): Jj => {
           } catch (cause) {
             // A trap (proc_exit, a Rust panic, an out-of-range response) is a
             // failed operation, never a failed fiber.
-            return Effect.fail(new JjError({ code: "unknown", message: `jj ${method}: ${messageOf(cause)}`, command }))
+            return Effect.fail(
+              new JjError({
+                code: "unknown",
+                module: MODULE,
+                method,
+                message: `jj ${method}: ${excerpt(messageOf(cause))}`,
+                command
+              })
+            )
           }
           return decodeResponse(method, text)
         }))
@@ -268,7 +344,32 @@ export const make = (options: BrowserJjOptions): Jj => {
           () =>
             revision === undefined
               ? Effect.void
-              : Effect.asVoid(invoke("restore", "jj restore", { op: "restore", root: path, changeId: revision }))
+              : Effect.asVoid(
+                invoke("restore", "jj restore", { op: "restore", root: path, changeId: revision })
+              ).pipe(
+                // The two calls are not one transaction, so a failed pin has
+                // to undo the add: the lane is already registered, and `NodeJj`
+                // promises a failed `workspaceAdd` leaves no lane behind. The
+                // directory stays, as it does after any forget. Forgetting an
+                // absent lane is a no-op, so a failed rollback cannot turn one
+                // error into two.
+                Effect.catch((failure) =>
+                  Effect.andThen(
+                    Effect.ignore(
+                      invoke("workspaceForget", "jj workspace forget", { op: "workspaceForget", root, name })
+                    ),
+                    Effect.fail(
+                      new JjError({
+                        code: failure.code,
+                        module: MODULE,
+                        method: "workspaceAdd",
+                        command: "jj workspace add",
+                        message: `jj workspaceAdd: pinning the new lane failed: ${failure.message}`
+                      })
+                    )
+                  )
+                )
+              )
         )
       ),
     workspaceForget: (name) =>
@@ -278,11 +379,26 @@ export const make = (options: BrowserJjOptions): Jj => {
         invoke("status", "jj status", { op: "status", root }),
         (ok) => stringField("status", ok, "status")
       ),
-    root: () => Effect.succeed(root),
+    // The layer owns exactly one workspace slice, so the repository root that
+    // contains `from` is the configured root — but only when `from` is actually
+    // inside it. Answering for a path in an unrelated tree would be a wrong
+    // answer rather than a missing one, so it fails instead.
+    root: (from) =>
+      contains(root, from)
+        ? Effect.succeed(root)
+        : Effect.fail(
+          new JjError({
+            code: "unknown",
+            module: MODULE,
+            method: "root",
+            command: "jj root",
+            message: `jj root: ${from} is not inside the workspace root ${root}`
+          })
+        ),
     // The frozen rc.0 wasm ABI has no revert operation. The method remains
     // present and fails explicitly so feature detection never depends on an
     // optional property disappearing.
-    revert: () => fail("jj revert")
+    revert: () => fail("revert", "jj revert")
   })
 }
 
@@ -295,17 +411,26 @@ export const make = (options: BrowserJjOptions): Jj => {
  */
 export const layer = (options: BrowserJjOptions): Layer.Layer<Jj> => Layer.succeed(Jj)(make(options))
 
-const fail = (command: string) =>
+/** Whether a namespace path lies inside the slice the layer was given. */
+const contains = (root: string, from: string): boolean => {
+  if (root === "/") return from.startsWith("/")
+  const base = root.replace(/\/+$/, "")
+  return from === base || from.startsWith(`${base}/`)
+}
+
+const fail = (method: string, command: string) =>
   Effect.fail(
     new JjError({
       code: "not_installed",
+      module: MODULE,
+      method,
       message: "jj is not available in the browser",
       command
     })
   )
 
 /**
- * Provides a `Jj` service whose every operation fails with `not_installed` —
+ * Provides a `Jj` service whose every operation fails with `not_installed`:
  * the layer for hosts that have no `flows_jj.wasm` to hand to {@link layer}.
  * It is the same code the node implementation reports when the binary is
  * absent, which keeps callers from needing a browser-specific branch.
@@ -315,12 +440,15 @@ const fail = (command: string) =>
  * @slop
  */
 export const layerUnsupported: Layer.Layer<Jj> = Layer.succeed(Jj)({
-  snapshot: () => fail("jj commit"),
-  restore: () => fail("jj edit"),
-  diff: () => fail("jj diff"),
-  workspaceAdd: () => fail("jj workspace add"),
-  workspaceForget: () => fail("jj workspace forget"),
-  status: () => fail("jj status"),
-  root: () => fail("jj root"),
-  revert: () => fail("jj revert")
+  // The commands named are the ones `NodeJj` would have run, so a reader of the
+  // failure sees the operation that was refused rather than a jj subcommand
+  // this package never invokes.
+  snapshot: () => fail("snapshot", "jj describe"),
+  restore: () => fail("restore", "jj restore"),
+  diff: () => fail("diff", "jj diff"),
+  workspaceAdd: () => fail("workspaceAdd", "jj workspace add"),
+  workspaceForget: () => fail("workspaceForget", "jj workspace forget"),
+  status: () => fail("status", "jj status"),
+  root: () => fail("root", "jj root"),
+  revert: () => fail("revert", "jj revert")
 })

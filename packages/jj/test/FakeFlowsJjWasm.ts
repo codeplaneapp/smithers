@@ -108,6 +108,12 @@ export interface FakeFlowsJjWasmOptions {
    * including on the trap path, where the request buffer must still be freed.
    */
   readonly logAllocs?: boolean
+  /**
+   * What `flows_jj_alloc` answers, defaulting to the fixed allocation at 4096.
+   * `0` is what the real module returns when the guest is out of memory
+   * (`crates/flows-jj/src/abi.rs`), which the host must refuse to write at.
+   */
+  readonly allocResult?: number
 }
 
 /** A syntactically valid module exporting nothing — for missing-export tests. */
@@ -186,8 +192,8 @@ export const fakeFlowsJjWasm = (options: FakeFlowsJjWasmOptions = {}): Uint8Arra
         body(writeStderr(i32c(1024), i32c(4))),
         body(
           options.logAllocs === true
-            ? [...writeStderr(i32c(1032), i32c(4)), ...i32c(4096)]
-            : i32c(4096)
+            ? [...writeStderr(i32c(1032), i32c(4)), ...i32c(options.allocResult ?? 4096)]
+            : i32c(options.allocResult ?? 4096)
         ),
         body(options.logAllocs === true ? writeStderr(i32c(1040), i32c(4)) : []),
         body(callBody)
