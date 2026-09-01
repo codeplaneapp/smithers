@@ -869,12 +869,13 @@ export const layerExecutor = (
   const memory = MemoryStore.layer.pipe(Layer.provide(engine.stores), Layer.orDie)
   // AgentSession installs the effective budget from the approved card around
   // each `agent.run`. No card exists while this executor layer is built, so
-  // unbounded is the only honest construction-time budget; it is not captured
-  // in `AgentSession.Services`, and every run replaces it with
-  // `Budget.layerFromEnvelope`. The quota layer is the same policy the session
-  // installs for the run.
+  // unbounded is the only honest construction-time budget. The provider is
+  // discarded after it closes `Agent.layer`; every run installs
+  // `Budget.layerFromEnvelope` directly around the call. The quota layer is
+  // the same policy the session installs for the run.
   const sessionAgent = Agent.layer.pipe(
-    Layer.provideMerge(Layer.mergeAll(quotaPolicy, Budget.layerUnbounded()))
+    // eslint-disable-next-line no-restricted-syntax -- no envelope exists until AgentSession starts a run
+    Layer.provide(Layer.mergeAll(quotaPolicy, Budget.layerUnbounded()))
   )
   // The dispatcher must live as long as the executor. A model captures this
   // service and uses it after seat resolution has returned.
