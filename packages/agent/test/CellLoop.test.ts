@@ -336,7 +336,8 @@ describe("the cell loop on the durable engine", () => {
           seatChanges: [],
           activatedToolNames: [],
           remaining: Steering.empty(),
-          queued: false
+          queued: false,
+          duplicate: false
         }).pipe(Effect.tap(() => Effect.sync(() => drains.push(input.boundary))))
     })
     const executed: Array<string> = []
