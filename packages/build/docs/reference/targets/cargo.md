@@ -60,11 +60,11 @@ pins, components and targets included. The pin is an `Input.File`, so its
 content digest is key material and a channel change cannot reuse Cargo results
 from the previous compiler.
 
-| Name     | Type         | Default                       | Description                                                        |
-| -------- | ------------ | ----------------------------- | ------------------------------------------------------------------ |
-| `pin`    | `Input.File` | `file("//rust-toolchain.toml")` | The file `rustup` reads. Its content digest is key material.       |
-| `rustup` | `string`     | `"rustup"`                      | The installer executable.                                          |
-| `cargo`  | `string`     | `"cargo"`                       | The build-tool executable.                                         |
+| Name     | Type         | Default                         | Description                                                  |
+| -------- | ------------ | ------------------------------- | ------------------------------------------------------------ |
+| `pin`    | `Input.File` | `file("//rust-toolchain.toml")` | The file `rustup` reads. Its content digest is key material. |
+| `rustup` | `string`     | `"rustup"`                      | The installer executable.                                    |
+| `cargo`  | `string`     | `"cargo"`                       | The build-tool executable.                                   |
 
 The declaration is inert data. `RustToolchain.install(toolchain)` renders
 `rustup toolchain install`, which is what [GithubCiGen](github-ci-gen.md)
@@ -87,13 +87,13 @@ be either would make every declaration a question about which one it is.
 
 ## Attributes
 
-| Name        | Type                          | Default  | Description                                                         |
-| ----------- | ----------------------------- | -------- | ------------------------------------------------------------------- |
-| `toolchain` | `RustToolchain.RustToolchain` | required | The declared toolchain, including the pin content digest.           |
-| `check`     | `LintCheck` / `TestCheck`     | required | Which gate this target runs.                                        |
-| `srcs`      | `Array<Input.Declared>`       | required | Crate sources, manifests, and the lockfile.                         |
-| `deps`      | `Array<Target.Target>`        | required | Dependency targets.                                                 |
-| `cwd`       | `string`                      | `"."`    | Where cargo runs. Defaults to the root that owns `Cargo.lock`.      |
+| Name        | Type                          | Default  | Description                                                    |
+| ----------- | ----------------------------- | -------- | -------------------------------------------------------------- |
+| `toolchain` | `RustToolchain.RustToolchain` | required | The declared toolchain, including the pin content digest.      |
+| `check`     | `LintCheck` / `TestCheck`     | required | Which gate this target runs.                                   |
+| `srcs`      | `Array<Input.Declared>`       | required | Crate sources, manifests, and the lockfile.                    |
+| `deps`      | `Array<Target.Target>`        | required | Dependency targets.                                            |
+| `cwd`       | `string`                      | `"."`    | Where cargo runs. Defaults to the root that owns `Cargo.lock`. |
 
 ## Outputs
 

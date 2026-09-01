@@ -185,23 +185,23 @@ explicit `smithers-build build` of a `mode: "write"` target generates a file.
 
 ### Job
 
-| Name              | Type                    | Default  | Description                                                                                 |
-| ----------------- | ----------------------- | -------- | ------------------------------------------------------------------------------------------- |
-| `id`              | `string`                | required | GitHub job id: a letter or `_`, then letters, digits, `-`, `_`.                             |
-| `name`            | `string`                | optional | Operator-facing job name.                                                                   |
-| `runsOn`          | `string`                | required unless `matrix` | One runner label, or a label set `[a, b]`. A job declares `runsOn` or `matrix`, never both and never neither. |
-| `matrix`          | `Array<MatrixRow>`      | optional | A platform matrix. The job renders once and runs per row, with `runs-on: ${{ matrix.os }}`. See [MatrixRow](#matrixrow). |
-| `timeoutMinutes`  | `number`                | optional | A whole number from 1 to 360.                                                               |
-| `continueOnError` | `boolean`               | optional | Advisory lane.                                                                              |
-| `toolchain`       | `CiToolchain.Toolchain` | required | What the runner must provide before the first target runs. See [CiToolchain](#citoolchain). |
-| `steps`           | `Array<TargetStep>`     | required | The target invocations this job performs. A job with none is refused.                       |
+| Name              | Type                    | Default                  | Description                                                                                                              |
+| ----------------- | ----------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `id`              | `string`                | required                 | GitHub job id: a letter or `_`, then letters, digits, `-`, `_`.                                                          |
+| `name`            | `string`                | optional                 | Operator-facing job name.                                                                                                |
+| `runsOn`          | `string`                | required unless `matrix` | One runner label, or a label set `[a, b]`. A job declares `runsOn` or `matrix`, never both and never neither.            |
+| `matrix`          | `Array<MatrixRow>`      | optional                 | A platform matrix. The job renders once and runs per row, with `runs-on: ${{ matrix.os }}`. See [MatrixRow](#matrixrow). |
+| `timeoutMinutes`  | `number`                | optional                 | A whole number from 1 to 360.                                                                                            |
+| `continueOnError` | `boolean`               | optional                 | Advisory lane.                                                                                                           |
+| `toolchain`       | `CiToolchain.Toolchain` | required                 | What the runner must provide before the first target runs. See [CiToolchain](#citoolchain).                              |
+| `steps`           | `Array<TargetStep>`     | required                 | The target invocations this job performs. A job with none is refused.                                                    |
 
 ### MatrixRow
 
-| Name       | Type      | Default | Description                                                                              |
-| ---------- | --------- | ------- | ---------------------------------------------------------------------------------------- |
+| Name       | Type      | Default  | Description                                                                                                                                         |
+| ---------- | --------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `os`       | `string`  | required | Exactly ONE runner label, not the label set `runsOn` accepts: a row's value is also its `include:` key, and GitHub matches an include row by value. |
-| `advisory` | `boolean` | `false`  | Whether a red run of THIS row leaves the pipeline green. A platform is advisory exactly until it is proven green. |
+| `advisory` | `boolean` | `false`  | Whether a red run of THIS row leaves the pipeline green. A platform is advisory exactly until it is proven green.                                   |
 
 A matrix job renders `strategy.matrix.os` from the rows, an `include:` entry per
 row carrying that row's `advisory` bit, and `continue-on-error:
