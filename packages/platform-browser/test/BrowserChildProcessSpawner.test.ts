@@ -506,6 +506,27 @@ describe("BrowserChildProcessSpawner rejected inputs", () => {
       expect(calls).toHaveLength(1)
     }))
 
+  /**
+   * `CommandOptions` inherits `forceKillAfter`; dropping it at spawn runs a
+   * command whose requested hard-stop guarantee this backend cannot provide.
+   */
+  it.effect("rejects command-level `forceKillAfter` before invoking the interpreter", () =>
+    Effect.gen(function*() {
+      const { bash, calls } = stub(ok())
+
+      const error = yield* run(
+        bash,
+        Effect.flip(Effect.flatMap(
+          ChildProcessSpawner,
+          (spawner) => spawner.exitCode(ChildProcess.make("thing", [], { forceKillAfter: 1 }))
+        ))
+      )
+
+      expect(error.reason).toMatchObject({ _tag: "BadArgument", module: "ChildProcess", method: "spawn" })
+      expect(error.message).toContain("forceKillAfter")
+      expect(calls).toEqual([])
+    }))
+
   it.effect.each<[string, ChildProcess.Command, string]>([
     [
       "additional file descriptors",
