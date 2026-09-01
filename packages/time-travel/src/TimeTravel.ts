@@ -376,13 +376,18 @@ export const make: Effect.Effect<Service, TimeTravelError, Requirements | Scope.
 /**
  * The one injectable time-travel surface.
  *
+ * The frame's lineage comes from `FlowEngine.Lineage`, the one place a journal
+ * lineage id is minted. It is a versioned encoding rather than a path, so a
+ * hand-spelled address names no record and `rewind` refuses it as `not_found`.
+ *
  * ```ts
- * import { TimeTravel } from "@smthrs/flows"
+ * import { Engine, TimeTravel } from "@smthrs/flows"
  * import * as Effect from "effect/Effect"
  *
  * const program = Effect.gen(function*() {
  *   const timeTravel = yield* TimeTravel
- *   return yield* timeTravel.rewind({ runId: "ledger-1", frame: { lineageId: "ledger-1/root", seq: 2 } })
+ *   const lineageId = Engine.FlowEngine.Lineage.root("ledger-1")
+ *   return yield* timeTravel.rewind({ runId: "ledger-1", frame: { lineageId, seq: 2 } })
  * })
  * ```
  *

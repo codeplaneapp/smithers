@@ -15,6 +15,7 @@
  */
 import { Capability, Permission } from "@smthrs/capability"
 import { Action, DurableDeferred, Flow, Interpreter } from "@smthrs/flow"
+import { Engine } from "@smthrs/flows"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 import { SqlTimeTravelStore, TimeTravel } from "@smthrs/time-travel"
 import * as Effect from "effect/Effect"
@@ -28,8 +29,20 @@ import { join } from "node:path"
 /** The file the run writes, tracked by jj. */
 export const ledgerFile = "ledger.txt"
 
-/** The run's own lineage, exactly as the engine mints it. */
-export const lineageOf = (executionId: string): string => `${executionId}/root`
+/**
+ * The run's own lineage, built by the constructor that mints it.
+ *
+ * Re-derived on 2026-09-01. `FlowEngine.Lineage` moved the root address from
+ * `<runId>/root` to a versioned encoded tuple so no two runs and node paths can
+ * name one durable record, and this helper still spelled the old form. Every
+ * frame the time-travel cases built therefore named a lineage the engine never
+ * wrote, and `inspect` and `rewind` both refused with `not_found`.
+ *
+ * The engine is reached through `@smthrs/flows`, the barrel this package
+ * already depends on, so nothing here takes a new dependency to mint an
+ * address the engine owns.
+ */
+export const lineageOf = (executionId: string): string => Engine.FlowEngine.Lineage.root(executionId)
 
 /** The wait the run parks on, so time travel finds it suspended. */
 export const Settlement: DurableDeferred.DurableDeferred<typeof Schema.String> = DurableDeferred.make(

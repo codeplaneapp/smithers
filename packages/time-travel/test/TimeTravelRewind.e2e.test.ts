@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { FlowEngine } from "@smthrs/engine"
 import * as Effect from "effect/Effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { readFile, writeFile } from "node:fs/promises"
@@ -55,12 +56,16 @@ describe.skipIf(!jjInstalled)("real file-backed rewind", () => {
                 const beforeTail = yield* Effect.promise(() => readFile(note, "utf8"))
                 const tail = yield* timeTravel.rewind({
                   runId: "tail-run",
-                  frame: { lineageId: "tail-run/root", seq: tailSeq }
+                  // The frame's lineage comes from the constructor that mints it. Re-derived on
+                  // 2026-09-01: `FlowEngine.Lineage` moved the root address from `<runId>/root`
+                  // to a versioned encoded tuple, so the old literal named a lineage the engine
+                  // no longer writes.
+                  frame: { lineageId: FlowEngine.Lineage.root("tail-run"), seq: tailSeq }
                 })
                 const afterTail = yield* Effect.promise(() => readFile(note, "utf8"))
                 const zero = yield* timeTravel.rewind({
                   runId: "zero-run",
-                  frame: { lineageId: "zero-run/root", seq: 0 }
+                  frame: { lineageId: FlowEngine.Lineage.root("zero-run"), seq: 0 }
                 })
                 const afterZero = yield* Effect.promise(() => readFile(note, "utf8"))
                 return { afterTail, afterZero, beforeTail, tail, tailSeq, zero, zeroTailSeq }
@@ -166,7 +171,7 @@ describe.skipIf(!jjInstalled)("real file-backed rewind", () => {
                 const timeTravel = yield* TimeTravel
                 const rewind = yield* timeTravel.rewind({
                   runId: "tree-run",
-                  frame: { lineageId: "tree-run/root", seq: anchor.seq }
+                  frame: { lineageId: FlowEngine.Lineage.root("tree-run"), seq: anchor.seq }
                 })
                 return { restored: yield* Effect.promise(() => readFile(note, "utf8")), rewind }
               })
