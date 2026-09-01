@@ -189,8 +189,19 @@ export type PayloadSchema<Input extends Schema.Struct.Fields> = Schema.Struct<
  *
  * @private
  */
-const payloadSchema = <Input extends Schema.Struct.Fields>(input: Input): PayloadSchema<Input> =>
-  Schema.Struct({ ...input, attempt: Schema.optional(Schema.Number) })
+const payloadSchema = <Input extends Schema.Struct.Fields>(
+  input: Input,
+  maxAttempts: number
+): PayloadSchema<Input> =>
+  Schema.Struct({
+    ...input,
+    attempt: Schema.optional(
+      Schema.Int.check(
+        Schema.isGreaterThanOrEqualTo(1),
+        Schema.isLessThanOrEqualTo(maxAttempts)
+      )
+    )
+  })
 
 /**
  * The attempt a round payload carries, defaulting to the first.
@@ -286,17 +297,28 @@ export const make = <
 ): Flow.Flow<Tag, PayloadSchema<Input>, Result, typeof Failure, R> => {
   type Round = Flow.Flow<Tag, PayloadSchema<Input>, Result, typeof Failure, R>
   type RoundPayload = PayloadSchema<Input>["Type"]
-  if (!Number.isFinite(options.intervalMs) || options.intervalMs < 0) {
+  if (Object.prototype.hasOwnProperty.call(options.input, "attempt")) {
+    throw new TypeError(
+      `Poll.make: "${tag}" input cannot declare the reserved "attempt" field. ` +
+        "Poll owns that counter across durable rounds."
+    )
+  }
+  const input = Object.freeze({ ...options.input }) as Input
+  const result = options.result
+  const check = options.check
+  const intervalMs = options.intervalMs
+  const maxAttempts = options.maxAttempts
+  if (!Number.isFinite(intervalMs) || intervalMs < 0) {
     throw new RangeError(
       `Poll.make: "${tag}" intervalMs must be a finite number of milliseconds that is not negative, ` +
-        `and was ${options.intervalMs}. The interval is the length of a durable wait, and a wait of ` +
+        `and was ${intervalMs}. The interval is the length of a durable wait, and a wait of ` +
         "that length never ends."
     )
   }
-  if (!Number.isSafeInteger(options.maxAttempts) || options.maxAttempts < 1) {
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) {
     throw new RangeError(
       `Poll.make: "${tag}" maxAttempts must be a whole number of attempts of at least one, and was ` +
-        `${options.maxAttempts}. A poll checks at least once.`
+        `${maxAttempts}. A poll checks at least once.`
     )
   }
   const backoff = options.backoff ?? "fixed"
@@ -307,14 +329,14 @@ export const make = <
   // one before the final attempt, because the attempt at the budget gives up
   // rather than sleeps, and the schedule never shrinks, so the last wait is
   // also the longest: checking it checks all of them.
-  const longestWaitMs = options.maxAttempts > 1
-    ? delayMillis({ intervalMs: options.intervalMs, backoff, attempt: options.maxAttempts - 1 })
+  const longestWaitMs = maxAttempts > 1
+    ? delayMillis({ intervalMs, backoff, attempt: maxAttempts - 1 })
     : 0
   if (!Number.isFinite(longestWaitMs)) {
     throw new RangeError(
       `Poll.make: "${tag}" asks for a wait of ${longestWaitMs} ms before its last attempt. An ` +
-        `intervalMs of ${options.intervalMs} under the "${backoff}" backoff reaches a length no clock ` +
-        `can be armed with by attempt ${options.maxAttempts - 1} of ${options.maxAttempts}. Lower ` +
+        `intervalMs of ${intervalMs} under the "${backoff}" backoff reaches a length no clock ` +
+        `can be armed with by attempt ${maxAttempts - 1} of ${maxAttempts}. Lower ` +
         "maxAttempts, shorten the interval, or slow the backoff."
     )
   }
@@ -323,8 +345,8 @@ export const make = <
     payload: RoundPayload
   ): Node.Node<Flow.BodySuccess<Result["Type"]>, typeof Failure.Type, R> => {
     const attempt = attemptOf(payload)
-    const last = attempt >= options.maxAttempts
-    return options.check(withAttempt(payload, attempt)).pipe(
+    const last = attempt >= maxAttempts
+    return check(withAttempt(payload, attempt)).pipe(
       Node.branch({
         if: (checked) => checked.satisfied,
         then: (checked) => Flow.done(checked.output),
@@ -334,7 +356,7 @@ export const make = <
               ? Flow.done(checked.output)
               : exhausted.call({ poll: tag, attempts: attempt })
             : Sleep.action.call({
-              millis: delayMillis({ intervalMs: options.intervalMs, backoff, attempt })
+              millis: delayMillis({ intervalMs, backoff, attempt })
             }).pipe(
               Node.andThen(
                 self.to(withAttempt<Parameters<Round["to"]>[0]>(payload, attempt + 1))
@@ -347,10 +369,10 @@ export const make = <
   // open the next. It is read when a round is planned, long after `Flow.make`
   // has returned, so the binding is initialized by then.
   const self: Round = Flow.make(tag, {
-    payload: payloadSchema(options.input),
-    success: options.result,
+    payload: payloadSchema(input, maxAttempts),
+    success: result,
     error: Failure,
-    maxRounds: options.maxAttempts,
+    maxRounds: maxAttempts,
     body
   })
   return self

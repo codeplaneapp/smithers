@@ -72,6 +72,14 @@ describe("make", () => {
     expect(policy.nonRetryable).toEqual(["Fatal"])
     expect(Object.isFrozen(policy.nonRetryable)).toBe(true)
   })
+
+  it("enforces the constructor contract when decoding persisted policies", () => {
+    const decode = Schema.decodeUnknownSync(RetryPolicy.RetryPolicy)
+    expect(() => decode({ ...base, maxMs: 99 })).toThrow(/maxMs/)
+    expect(() => decode({ ...base, maxAttempts: 1.5 })).toThrow(/maxAttempts/)
+    expect(() => decode({ ...base, jitterRatio: 2 })).toThrow(/jitterRatio/)
+    expect(decode({ ...base, maxAttempts: 3 })).toMatchObject({ maxAttempts: 3 })
+  })
 })
 
 describe("nextDelay", () => {
@@ -363,6 +371,25 @@ describe("decide", () => {
     expect(
       RetryPolicy.decide(policy, { attempt: 1, error: new TypeError("boom") })
     ).toEqual(RetryPolicy.giveUp("nonRetryable"))
+  })
+
+  it("never invokes accessors or proxy traps while classifying an error", () => {
+    let getters = 0
+    const accessor = Object.defineProperty({}, "_tag", {
+      get() {
+        getters += 1
+        return "FatalError"
+      }
+    })
+    const hostile = new Proxy({}, {
+      getOwnPropertyDescriptor() {
+        throw new Error("trap")
+      }
+    })
+
+    expect(RetryPolicy.errorTag(accessor)).toBeUndefined()
+    expect(RetryPolicy.errorTag(hostile)).toBeUndefined()
+    expect(getters).toBe(0)
   })
 
   it("returns exhausted when the policy runs out of attempts", () => {

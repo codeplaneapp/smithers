@@ -47,9 +47,8 @@ import * as Schema from "effect/Schema"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
-export const RetryPolicy = Schema.Struct({
+const RetryPolicyFields = Schema.Struct({
   initialMs: Schema.Number,
   factor: Schema.Number,
   maxMs: Schema.Number,
@@ -59,12 +58,59 @@ export const RetryPolicy = Schema.Struct({
   nonRetryable: Schema.optional(Schema.Array(Schema.String))
 })
 
+type RetryPolicyFields = typeof RetryPolicyFields.Type
+
+/** Returns the first contract violation shared by decoding and construction. */
+const validationIssue = (policy: RetryPolicyFields): string | undefined => {
+  if (!Number.isFinite(policy.initialMs) || policy.initialMs < 0) {
+    return `"initialMs" must be a finite number of milliseconds that is not negative, and was ${policy.initialMs}.`
+  }
+  if (!Number.isFinite(policy.factor) || policy.factor <= 0) {
+    return `"factor" must be a finite number greater than zero, and was ${policy.factor}.`
+  }
+  if (!Number.isFinite(policy.maxMs) || policy.maxMs < policy.initialMs) {
+    return `"maxMs" must be a finite number of milliseconds at least as large as initialMs, and was ${policy.maxMs}.`
+  }
+  if (
+    policy.maxAttempts !== undefined &&
+    (!Number.isSafeInteger(policy.maxAttempts) || policy.maxAttempts < 1)
+  ) {
+    return `"maxAttempts" must be a safe integer of at least one, and was ${policy.maxAttempts}.`
+  }
+  if (
+    policy.expirationMs !== undefined &&
+    (!Number.isFinite(policy.expirationMs) || policy.expirationMs <= 0)
+  ) {
+    return `"expirationMs" must be a finite number of milliseconds greater than zero, and was ${policy.expirationMs}.`
+  }
+  if (
+    policy.jitterRatio !== undefined &&
+    (!Number.isFinite(policy.jitterRatio) || policy.jitterRatio < 0 || policy.jitterRatio > 1)
+  ) {
+    return `"jitterRatio" must be a finite number between zero and one, inclusive, and was ${policy.jitterRatio}.`
+  }
+  return undefined
+}
+
+/**
+ * Data-shaped retry policy schema. Decoding enforces the same relational
+ * contract as {@link make}; persisted data cannot bypass constructor checks.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const RetryPolicy = RetryPolicyFields.check(
+  Schema.makeFilter(
+    (policy) => validationIssue(policy) ?? true,
+    { title: "validRetryPolicy" }
+  )
+)
+
 /**
  * The value form of a {@link RetryPolicy}.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type RetryPolicy = typeof RetryPolicy.Type
 
@@ -75,7 +121,6 @@ export type RetryPolicy = typeof RetryPolicy.Type
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: {
   readonly initialMs: number
@@ -86,50 +131,9 @@ export const make = (options: {
   readonly jitterRatio?: number | undefined
   readonly nonRetryable?: ReadonlyArray<string> | undefined
 }): RetryPolicy => {
-  if (!Number.isFinite(options.initialMs) || options.initialMs < 0) {
-    throw new RangeError(
-      `RetryPolicy.make: "initialMs" must be a finite number of milliseconds that is not negative, ` +
-        `and was ${options.initialMs}.`
-    )
-  }
-  if (!Number.isFinite(options.factor) || options.factor <= 0) {
-    throw new RangeError(
-      `RetryPolicy.make: "factor" must be a finite number greater than zero, and was ${options.factor}.`
-    )
-  }
-  if (!Number.isFinite(options.maxMs) || options.maxMs < options.initialMs) {
-    throw new RangeError(
-      `RetryPolicy.make: "maxMs" must be a finite number of milliseconds at least as large as initialMs, ` +
-        `and was ${options.maxMs}.`
-    )
-  }
-  if (
-    options.maxAttempts !== undefined &&
-    (!Number.isSafeInteger(options.maxAttempts) || options.maxAttempts < 1)
-  ) {
-    throw new RangeError(
-      `RetryPolicy.make: "maxAttempts" must be a safe integer of at least one, and was ${options.maxAttempts}.`
-    )
-  }
-  if (
-    options.expirationMs !== undefined &&
-    (!Number.isFinite(options.expirationMs) || options.expirationMs <= 0)
-  ) {
-    throw new RangeError(
-      `RetryPolicy.make: "expirationMs" must be a finite number of milliseconds greater than zero, ` +
-        `and was ${options.expirationMs}.`
-    )
-  }
-  if (
-    options.jitterRatio !== undefined &&
-    (!Number.isFinite(options.jitterRatio) || options.jitterRatio < 0 || options.jitterRatio > 1)
-  ) {
-    throw new RangeError(
-      `RetryPolicy.make: "jitterRatio" must be a finite number between zero and one, inclusive, ` +
-        `and was ${options.jitterRatio}.`
-    )
-  }
-  return {
+  const issue = validationIssue(options)
+  if (issue !== undefined) throw new RangeError(`RetryPolicy.make: ${issue}`)
+  return Object.freeze({
     initialMs: options.initialMs,
     factor: options.factor,
     maxMs: options.maxMs,
@@ -139,7 +143,7 @@ export const make = (options: {
     ...(options.nonRetryable !== undefined
       ? { nonRetryable: Object.freeze([...options.nonRetryable]) }
       : {})
-  }
+  })
 }
 
 /**
@@ -152,7 +156,6 @@ export const make = (options: {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const defaultRetryPolicy: RetryPolicy = Object.freeze(
   make({
@@ -167,7 +170,6 @@ export const defaultRetryPolicy: RetryPolicy = Object.freeze(
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RetryAfter {
   readonly _tag: "RetryAfter"
@@ -179,7 +181,6 @@ export interface RetryAfter {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface GiveUp {
   readonly _tag: "GiveUp"
@@ -191,7 +192,6 @@ export interface GiveUp {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type RetryDecision = RetryAfter | GiveUp
 
@@ -200,7 +200,6 @@ export type RetryDecision = RetryAfter | GiveUp
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const retryAfter = (delayMs: number): RetryDecision => ({
   _tag: "RetryAfter",
@@ -212,7 +211,6 @@ export const retryAfter = (delayMs: number): RetryDecision => ({
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const giveUp = (reason: GiveUp["reason"]): RetryDecision => ({
   _tag: "GiveUp",
@@ -224,7 +222,6 @@ export const giveUp = (reason: GiveUp["reason"]): RetryDecision => ({
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class RetryPolicyExpired extends Schema.TaggedError<RetryPolicyExpired>()(
   "@smthrs/flow/RetryPolicyExpired",
@@ -244,7 +241,6 @@ export class RetryPolicyExpired extends Schema.TaggedError<RetryPolicyExpired>()
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class RetryAttemptsExhausted extends Schema.TaggedError<RetryAttemptsExhausted>()(
   "@smthrs/flow/RetryAttemptsExhausted",
@@ -282,7 +278,6 @@ export class RetryAttemptsExhausted extends Schema.TaggedError<RetryAttemptsExha
  *
  * @category attempts
  * @since 0.1.0
- * @slop
  */
 export const nextDelay = (
   policy: RetryPolicy,
@@ -294,19 +289,16 @@ export const nextDelay = (
 ): Option.Option<number> => {
   // Persisted policies can be decoded without `make`, so these guards treat a
   // corrupt row as terminal instead of sending an invalid delay to the engine.
-  if (!Number.isFinite(attempt)) {
-    return Option.none()
-  }
-  if (options?.elapsedMs !== undefined && !Number.isFinite(options.elapsedMs)) {
+  if (validationIssue(policy) !== undefined || !Number.isSafeInteger(attempt) || attempt < 1) {
     return Option.none()
   }
   if (
-    policy.maxAttempts !== undefined &&
-    (!Number.isFinite(policy.maxAttempts) || attempt >= policy.maxAttempts)
+    options?.elapsedMs !== undefined &&
+    (!Number.isFinite(options.elapsedMs) || options.elapsedMs < 0)
   ) {
     return Option.none()
   }
-  if (policy.expirationMs !== undefined && !Number.isFinite(policy.expirationMs)) {
+  if (policy.maxAttempts !== undefined && attempt >= policy.maxAttempts) {
     return Option.none()
   }
   if (
@@ -366,7 +358,6 @@ export const nextDelay = (
  *
  * @category attempts
  * @since 0.1.0
- * @slop
  */
 export const nextDelayEffect = (
   policy: RetryPolicy,
@@ -383,14 +374,27 @@ export const nextDelayEffect = (
  *
  * @category attempts
  * @since 0.1.0
- * @slop
  */
 export const errorTag = (error: unknown): string | undefined => {
-  if (typeof error === "object" && error !== null && "_tag" in error && typeof error._tag === "string") {
-    return error._tag
-  }
-  if (error instanceof Error) {
-    return error.name
+  if (typeof error !== "object" || error === null) return undefined
+  try {
+    const tag = Object.getOwnPropertyDescriptor(error, "_tag")
+    if (tag !== undefined && "value" in tag && typeof tag.value === "string") return tag.value
+
+    const name = Object.getOwnPropertyDescriptor(error, "name")
+    if (name !== undefined && "value" in name && typeof name.value === "string") return name.value
+
+    if (error instanceof EvalError) return "EvalError"
+    if (error instanceof RangeError) return "RangeError"
+    if (error instanceof ReferenceError) return "ReferenceError"
+    if (error instanceof SyntaxError) return "SyntaxError"
+    if (error instanceof TypeError) return "TypeError"
+    if (error instanceof URIError) return "URIError"
+    if (error instanceof AggregateError) return "AggregateError"
+    if (error instanceof Error) return "Error"
+  } catch {
+    // Proxies and hostile accessors are untrusted failure payloads. An error
+    // that cannot be inspected inertly simply has no stable retry tag.
   }
   return undefined
 }
@@ -413,7 +417,6 @@ export const errorTag = (error: unknown): string | undefined => {
  *
  * @category attempts
  * @since 0.1.0
- * @slop
  */
 export const defaultNonRetryable: ReadonlyArray<string> = [
   "@smthrs/engine-store/CacheCorruptionDetected",
@@ -426,7 +429,6 @@ export const defaultNonRetryable: ReadonlyArray<string> = [
  *
  * @category attempts
  * @since 0.1.0
- * @slop
  */
 export const isNonRetryable = (policy: RetryPolicy, error: unknown): boolean => {
   const tag = errorTag(error)
@@ -448,7 +450,6 @@ export const isNonRetryable = (policy: RetryPolicy, error: unknown): boolean => 
  *
  * @category attempts
  * @since 0.1.0
- * @slop
  */
 export const decide = (
   policy: RetryPolicy,
@@ -486,7 +487,6 @@ export const decide = (
  *
  * @category attempts
  * @since 0.1.0
- * @slop
  */
 export const decideEffect = (
   policy: RetryPolicy,

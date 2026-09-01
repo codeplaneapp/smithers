@@ -339,23 +339,17 @@ describe("Poll as a plan", () => {
 })
 
 describe("Poll rounds", () => {
-  effect("fails when a caller-visible attempt produces a non-finite wait", () => {
+  effect("rejects an invalid caller-visible attempt before running the round", () => {
     probes.length = 0
     return Effect.gen(function*() {
-      const round = yield* openRound(Rising, { until: 3, attempt: Number.NaN }, "poll-invalid-attempt/1")
+      const result = yield* Rising.execute(
+        { until: 3, attempt: Number.NaN },
+        { executionId: "poll-invalid-attempt/1" }
+      ).pipe(Effect.exit)
 
-      expect(round._tag).toBe("Complete")
-      if (round._tag === "Complete") {
-        expect(Exit.isFailure(round.exit)).toBe(true)
-        if (Exit.isFailure(round.exit)) {
-          expect(round.exit.cause.reasons[0]).toMatchObject({
-            error: {
-              _tag: "@smthrs/flow/SleepRequestInvalid",
-              code: "invalid_deadline"
-            }
-          })
-        }
-      }
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(String(result)).toContain("attempt")
+      expect(probes).toEqual([])
     }).pipe(
       Effect.provide(wired(Layer.mergeAll(probeLayer, Sleep.layer, Poll.layer, Interpreter.layer(Rising))))
     )

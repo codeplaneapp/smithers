@@ -38,7 +38,6 @@ const TypeId = "@smthrs/flow/DurableDeferred"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface DurableDeferred<
   Success extends Schema.Constraint,
@@ -58,7 +57,6 @@ export interface DurableDeferred<
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Any {
   readonly [TypeId]: typeof TypeId
@@ -71,7 +69,6 @@ export interface Any {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface AnyWithProps {
   readonly [TypeId]: typeof TypeId
@@ -87,7 +84,6 @@ export interface AnyWithProps {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = <
   Success extends Schema.Constraint = Schema.Void,
@@ -181,7 +177,6 @@ export {
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const into: {
   <Success extends Schema.Constraint, Error extends Schema.Constraint>(
@@ -276,7 +271,6 @@ export const into: {
  *
  * @category racing
  * @since 0.1.0
- * @slop
  */
 export const raceAll = <
   const Effects extends NonEmptyReadonlyArray<Effect.Effect<any, any, any>>,
@@ -320,7 +314,6 @@ export const raceAll = <
  *
  * @category type IDs
  * @since 0.1.0
- * @slop
  */
 export const TokenTypeId = "@smthrs/flow/DurableDeferred/Token"
 
@@ -329,7 +322,6 @@ export const TokenTypeId = "@smthrs/flow/DurableDeferred/Token"
  *
  * @category type IDs
  * @since 0.1.0
- * @slop
  */
 export type TokenTypeId = typeof TokenTypeId
 
@@ -339,7 +331,6 @@ export type TokenTypeId = typeof TokenTypeId
  *
  * @category token
  * @since 0.1.0
- * @slop
  */
 export type Token = Brand.Branded<string, TokenTypeId>
 
@@ -348,7 +339,6 @@ export type Token = Brand.Branded<string, TokenTypeId>
  *
  * @category token
  * @since 0.1.0
- * @slop
  */
 export const Token: Schema.brand<Schema.String, TokenTypeId> = Schema.String.pipe(Schema.brand(TokenTypeId))
 
@@ -357,7 +347,6 @@ export const Token: Schema.brand<Schema.String, TokenTypeId> = Schema.String.pip
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class TokenInvalid extends Schema.TaggedError<TokenInvalid>()("@smthrs/flow/DurableDeferred/TokenInvalid", {
   code: Schema.Literals(["malformed_token", "deferred_mismatch"]).pipe(
@@ -372,7 +361,6 @@ export class TokenInvalid extends Schema.TaggedError<TokenInvalid>()("@smthrs/fl
  *
  * @category token
  * @since 0.1.0
- * @slop
  */
 export class TokenParsed extends Schema.Class<TokenParsed>(
   "@smthrs/flow/DurableDeferred/TokenParsed"
@@ -440,6 +428,22 @@ export class TokenParsed extends Schema.Class<TokenParsed>(
    * @since 0.1.0
    */
   static readonly encode = Schema.encodeSync(TokenParsed.FromString)
+
+  /**
+   * Parses an untrusted token into its durable address with a typed,
+   * bounded diagnostic on failure.
+   *
+   * @category token
+   * @since 1.0.0
+   */
+  static readonly parse = (token: string): Effect.Effect<TokenParsed, TokenInvalid> =>
+    Effect.mapError(
+      Schema.decodeEffect(TokenParsed.FromString)(token),
+      (issue) =>
+        new TokenInvalid({
+          message: `The supplied token "${tokenExcerpt(token)}" is not a durable deferred token: ${issue.message}`
+        })
+    )
 }
 
 const maxTokenExcerptChars = 64
@@ -451,32 +455,11 @@ const tokenExcerpt = (token: string): string =>
     : `${token.slice(0, maxTokenExcerptChars)} [${token.length - maxTokenExcerptChars} characters dropped]`
 
 /**
- * Decodes a durable deferred token while preserving its schema failure.
- *
- * Exported so `HumanTask.answer` completes through the same decode rather than
- * a second copy of it. It carries no `@category`, so it stays out of the
- * published API tables: the supported way to parse a token is
- * `TokenParsed.FromString`.
- *
- * @since 0.1.0
- * @private
- */
-export const parseToken = (token: string): Effect.Effect<TokenParsed, TokenInvalid> =>
-  Effect.mapError(
-    Schema.decodeEffect(TokenParsed.FromString)(token),
-    (issue) =>
-      new TokenInvalid({
-        message: `The supplied token "${tokenExcerpt(token)}" is not a durable deferred token: ${issue.message}`
-      })
-  )
-
-/**
  * Creates a token for a durable deferred using the current flow instance's
  * flow name and execution ID.
  *
  * @category token
  * @since 0.1.0
- * @slop
  */
 export const token: <Success extends Schema.Constraint, Error extends Schema.Constraint>(
   self: DurableDeferred<Success, Error>
@@ -497,7 +480,6 @@ export const token: <Success extends Schema.Constraint, Error extends Schema.Con
  *
  * @category token
  * @since 0.1.0
- * @slop
  */
 export const tokenFromExecutionId: {
   (options: {
@@ -532,7 +514,6 @@ export const tokenFromExecutionId: {
  *
  * @category token
  * @since 0.1.0
- * @slop
  */
 export const tokenFromPayload: {
   <W extends Flow.Any>(options: {
@@ -578,7 +559,6 @@ export const tokenFromPayload: {
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const done: {
   <Success extends Schema.Constraint, Error extends Schema.Constraint>(options: {
@@ -615,7 +595,7 @@ export const done: {
       readonly exit: Exit.Exit<Success["Type"], Error["Type"]>
     }
   ) {
-    const token = yield* parseToken(options.token)
+    const token = yield* TokenParsed.parse(options.token)
     if (token.deferredName !== self.name) {
       return yield* Effect.fail(
         new TokenInvalid({
@@ -641,7 +621,6 @@ export const done: {
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const succeed: {
   <Success extends Schema.Constraint, Error extends Schema.Constraint>(options: {
@@ -677,7 +656,6 @@ export const succeed: {
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const fail: {
   <Success extends Schema.Constraint, Error extends Schema.Constraint>(options: {
@@ -713,7 +691,6 @@ export const fail: {
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const failCause: {
   <Success extends Schema.Constraint, Error extends Schema.Constraint>(options: {

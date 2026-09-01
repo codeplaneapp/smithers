@@ -88,6 +88,22 @@ describe("DurableDeferred", () => {
       expect(DurableDeferred.TokenParsed.encode(parsed)).toBe(token)
     }))
 
+  effect("the public parser returns a typed failure for untrusted strings", () =>
+    Effect.gen(function*() {
+      const token = new DurableDeferred.TokenParsed({
+        flowName: "Some/Flow",
+        executionId: "exec-1",
+        deferredName: "Gate"
+      }).asToken
+      expect(yield* DurableDeferred.TokenParsed.parse(token)).toMatchObject({
+        flowName: "Some/Flow",
+        executionId: "exec-1",
+        deferredName: "Gate"
+      })
+      const failure = yield* DurableDeferred.TokenParsed.parse("not-a-token").pipe(Effect.flip)
+      expect(failure).toBeInstanceOf(DurableDeferred.TokenInvalid)
+    }))
+
   effect("freezes the token wire format as base64url of a three-string tuple", () =>
     Effect.sync(() => {
       // External approvers, persisted waiting rows, and `HumanTask.answer` all

@@ -13,6 +13,7 @@
 import type * as Crypto from "effect/Crypto"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import type * as Schema from "effect/Schema"
 import * as Action from "./Action/index.ts"
 import * as DurableDeferred from "./DurableDeferred.ts"
@@ -27,7 +28,6 @@ const TypeId = "@smthrs/flow/DurableClock"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface DurableClock {
   readonly [TypeId]: typeof TypeId
@@ -42,17 +42,36 @@ export interface DurableClock {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
+ */
+const durationFromInput = (input: Duration.Input, field: string): Duration.Duration => {
+  const parsed = Duration.fromInput(input)
+  if (Option.isNone(parsed)) {
+    throw new RangeError(`DurableClock: "${field}" must be a valid finite duration that is not negative.`)
+  }
+  const millis = Duration.toMillis(parsed.value)
+  if (!Duration.isFinite(parsed.value) || !Number.isFinite(millis) || millis < 0) {
+    throw new RangeError(`DurableClock: "${field}" must be a valid finite duration that is not negative.`)
+  }
+  return parsed.value
+}
+
+const makeClock = (name: string, duration: Duration.Duration): DurableClock => ({
+  [TypeId]: TypeId,
+  name,
+  duration,
+  deferred: DurableDeferred.make(`DurableClock/${name}`)
+})
+
+/**
+ * Declares one durable clock after validating its finite nonnegative duration.
+ *
+ * @category constructors
+ * @since 0.1.0
  */
 export const make = (options: {
   readonly name: string
   readonly duration: Duration.Input
-}): DurableClock => ({
-  [TypeId]: TypeId,
-  name: options.name,
-  duration: Duration.fromInputUnsafe(options.duration),
-  deferred: DurableDeferred.make(`DurableClock/${options.name}`)
-})
+}): DurableClock => makeClock(options.name, durationFromInput(options.duration, "duration"))
 
 /**
  * Waits inside a flow, using an in-memory action for durations at or
@@ -60,9 +79,8 @@ export const make = (options: {
  *
  * @category sleeping
  * @since 0.1.0
- * @slop
  */
-export const sleep: (
+export const sleep = (
   options: {
     readonly name: string
     readonly duration: Duration.Input
@@ -74,29 +92,27 @@ export const sleep: (
      */
     readonly inMemoryThreshold?: Duration.Input | undefined
   }
-) => Effect.Effect<
+): Effect.Effect<
   void,
   never,
   Crypto.Crypto | FlowRuntime | FlowInstance
-> =
+> => {
+  const name = options.name
+  const duration = durationFromInput(options.duration, "duration")
+  const inMemoryThreshold = durationFromInput(
+    options.inMemoryThreshold ?? defaultInMemoryThreshold,
+    "inMemoryThreshold"
+  )
+
   // Untraced because durable sleeps are recursively resumed by the engine.
-  Effect.fnUntraced(function*(options: {
-    readonly name: string
-    readonly duration: Duration.Input
-    readonly inMemoryThreshold?: Duration.Input | undefined
-  }) {
-    const duration = Duration.fromInputUnsafe(options.duration)
+  return Effect.fnUntraced(function*() {
     if (Duration.isZero(duration)) {
       return
     }
 
-    const inMemoryThreshold = Duration.fromInputUnsafe(
-      options.inMemoryThreshold ?? defaultInMemoryThreshold
-    )
-
     if (Duration.isLessThanOrEqualTo(duration, inMemoryThreshold)) {
       return yield* Action.make({
-        name: `DurableClock/${options.name}`,
+        name: `DurableClock/${name}`,
         tier: "sealed",
         execute: Effect.sleep(duration)
       })
@@ -104,12 +120,13 @@ export const sleep: (
 
     const engine = yield* FlowRuntime
     const instance = yield* FlowInstance
-    const clock = make(options)
+    const clock = makeClock(name, duration)
     yield* engine.scheduleClock(instance.flow, {
       executionId: instance.executionId,
       clock
     })
     return yield* DurableDeferred.await(clock.deferred)
-  })
+  })()
+}
 
 const defaultInMemoryThreshold = Duration.seconds(60)

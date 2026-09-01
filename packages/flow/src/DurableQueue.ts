@@ -27,7 +27,6 @@ import type { FlowInstance, FlowRuntime } from "./FlowRuntime/index.ts"
  *
  * @category type IDs
  * @since 0.1.0
- * @slop
  */
 export type TypeId = "@smthrs/flow/DurableQueue"
 
@@ -36,7 +35,6 @@ export type TypeId = "@smthrs/flow/DurableQueue"
  *
  * @category type IDs
  * @since 0.1.0
- * @slop
  */
 export const TypeId: TypeId = "@smthrs/flow/DurableQueue"
 
@@ -46,7 +44,6 @@ export const TypeId: TypeId = "@smthrs/flow/DurableQueue"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface DurableQueue<
   Payload extends Schema.Top,
@@ -130,7 +127,6 @@ export interface DurableQueue<
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = <
   Payload extends Schema.Top | Schema.Struct.Fields,
@@ -202,7 +198,6 @@ const getQueueSchema = <Payload extends Schema.Top>(
  *
  * @category processing
  * @since 0.1.0
- * @slop
  */
 export const process: <
   Payload extends Schema.Top,
@@ -306,7 +301,7 @@ const makeWorkerEffect = Effect.fnUntraced(function*<
       Effect.gen(function*() {
         // Parse before running the handler. A malformed completion address
         // cannot strand a handler result that was already produced.
-        const parsed = yield* DurableDeferred.parseToken(item.token)
+        const parsed = yield* DurableDeferred.TokenParsed.parse(item.token)
         const deferred = DurableDeferred.make(parsed.deferredName, {
           success: self.deferred.successSchema,
           error: self.deferred.errorSchema
@@ -363,7 +358,6 @@ const makeWorkerEffect = Effect.fnUntraced(function*<
  * @throws A `RangeError` when `concurrency` is not a positive safe integer.
  * @category worker
  * @since 0.1.0
- * @slop
  */
 export const makeWorker: <
   Payload extends Schema.Top,
@@ -410,7 +404,6 @@ export const makeWorker: <
  *
  * @category worker
  * @since 0.1.0
- * @slop
  */
 export const worker: <
   Payload extends Schema.Top,
