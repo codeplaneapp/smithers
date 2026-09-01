@@ -23,7 +23,7 @@ import * as EngineStore from "@smthrs/engine-store/EngineStore"
 import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
 import * as TestStores from "@smthrs/engine-store/test/TestStores"
 import { Action, DurableClock, Flow, FlowRuntime, Interpreter, RetryPolicy } from "@smthrs/flow"
-import { Journal, JournalEvent } from "@smthrs/journal"
+import { Journal, JournalEvent, Redaction } from "@smthrs/journal"
 import * as Jj from "@smthrs/kernel/Jj"
 import * as Model from "@smthrs/model/Model"
 import { ModelError } from "@smthrs/model/ModelError"
@@ -31,7 +31,7 @@ import * as ModelEvent from "@smthrs/model/ModelEvent"
 import type * as Route from "@smthrs/model/Route"
 import { Node } from "@smthrs/plan"
 import * as Registry from "@smthrs/registry/Registry"
-import { Cause, Effect, Exit, Fiber, Latch, Layer, Option, Schedule, Schema, Stream } from "effect"
+import { Cause, Clock, Effect, Exit, Fiber, Latch, Layer, Option, Schedule, Schema, Stream } from "effect"
 import type * as Crypto from "effect/Crypto"
 import * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
@@ -241,11 +241,31 @@ describe("the accumulator", () => {
   })
 
   it("keeps the durable usage payload wire-compatible", () => {
-    const encoded = Schema.encodeSync(Budget.UsageRecord)({ stepKey: "step-a", tokens: 640 })
+    const encoded = Schema.encodeSync(Budget.UsageRecord)({ stepKey: "step-a", spent: 640 })
 
     // Changing this literal is a durable wire-format change to record in
     // CHANGELOG.md, because resumed runs read payloads written by older hosts.
-    expect(encoded).toEqual({ stepKey: "step-a", tokens: 640 })
+    expect(encoded).toEqual({ stepKey: "step-a", spent: 640 })
+  })
+
+  it("survives the journal's own redactor, which the field name `tokens` did not", () => {
+    const redact = Redaction.make()
+    const encoded = Schema.encodeSync(Budget.UsageRecord)({ stepKey: "step-a", spent: 640 })
+
+    // The real reason the cost field is not called `tokens`. The journal's
+    // redactor strips one trailing plural and tests the suffix, so `tokens`
+    // reads as a credential and the production `SqlJournal` persists
+    // `"[REDACTED]"` where the number was. A record written that way decodes
+    // for nobody, so recovery would fail closed on every resumed run.
+    expect(redact(encoded)).toEqual(encoded)
+    expect(redact({ stepKey: "step-a", tokens: 640 })).toEqual({
+      stepKey: "step-a",
+      tokens: Redaction.placeholder
+    })
+    // The latency zero travels the same channel and is checked with it.
+    expect(redact(Schema.encodeSync(Budget.BudgetStartedRecord)({ startedAt: 1_700 }))).toEqual({
+      startedAt: 1_700
+    })
   })
 })
 
@@ -968,8 +988,8 @@ describe("recovering a run's earlier spend", () => {
         Effect.provide(
           Layer.merge(
             pagedJournal([
-              [usageEntry(1, { stepKey: "step-a", tokens: 300 })],
-              [usageEntry(2, { stepKey: "step-b", tokens: 250 })]
+              [usageEntry(1, { stepKey: "step-a", spent: 300 })],
+              [usageEntry(2, { stepKey: "step-b", spent: 250 })]
             ]),
             Layer.succeed(FlowRuntime.FlowInstance)(instanceFor("usage-pages"))
           )
@@ -991,10 +1011,10 @@ describe("recovering a run's earlier spend", () => {
           Effect.provide(
             Layer.merge(
               pagedJournal([[
-                usageEntry(1, { stepKey: "step-a", tokens: 300 }),
+                usageEntry(1, { stepKey: "step-a", spent: 300 }),
                 usageEntry(2, {
                   stepKey: "private-model-step",
-                  tokens: "private malformed payload"
+                  spent: "private malformed payload"
                 })
               ]]),
               Layer.succeed(FlowRuntime.FlowInstance)(instanceFor("usage-pages"))
@@ -1059,8 +1079,8 @@ describe("recovering a run's earlier spend", () => {
           Effect.provide(
             Layer.merge(
               pagedJournal([
-                [usageEntry(1, { stepKey: "step-a", tokens: 300 })],
-                [usageEntry(2, { stepKey: "step-b", tokens: 250 })]
+                [usageEntry(1, { stepKey: "step-a", spent: 300 })],
+                [usageEntry(2, { stepKey: "step-b", spent: 250 })]
               ]),
               Layer.succeed(FlowRuntime.FlowInstance)(instanceFor("usage-pages"))
             )
@@ -1146,6 +1166,38 @@ describe("recovering a run's earlier spend", () => {
         cause: { storageCode: "ELEDGER" }
       }
     })
+  })
+
+  it("fails closed when a counted call's cost has no durable form", async () => {
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        Effect.gen(function*() {
+          const budget = yield* Budget.make({})
+          // `UsageRecord.spent` is `Schema.Finite`, so a provider total this
+          // far out has no wire form at all. Encoding is the same boundary as
+          // writing: the accumulator already took the call, and a cost no
+          // successor of this run can read back is the allowance handed out a
+          // second time.
+          yield* budget.record("step-a", { totalTokens: Number.POSITIVE_INFINITY })
+        }).pipe(
+          Effect.provide(
+            Layer.merge(
+              pagedJournal([]),
+              Layer.succeed(FlowRuntime.FlowInstance)(instanceFor("usage-encode"))
+            )
+          )
+        )
+      )
+    )
+
+    const failure = failureOf(exit) as Budget.AccountingUnavailable
+    expect(failure).toMatchObject({
+      _tag: "flows/agent/BudgetAccountingUnavailable",
+      phase: "record",
+      runId: "usage-encode"
+    })
+    expect(failure.message).toContain("its usage record does not encode")
+    expect(failure.cause).toBeDefined()
   })
 })
 
@@ -1251,6 +1303,46 @@ describe("a durable latency clock", () => {
     expect(failure.message).toContain("seq 7")
     expect(failure.message).toContain("/agent/private-budget")
     expect(failure.message).not.toContain("private malformed clock origin")
+  })
+
+  it("fails closed when the host clock's reading has no durable form", async () => {
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        Effect.gen(function*() {
+          const clock = yield* Clock.Clock
+          // A host whose wall clock answers past the finite range. The zero
+          // would be written, read back by the next incarnation, and used as
+          // the subtrahend of every later latency check, so a reading the
+          // record cannot carry is not a reading this budget may keep to
+          // itself: an unwritten zero re-arms the whole allowance on resume.
+          const unwritable: Clock.Clock = {
+            ...clock,
+            currentTimeMillisUnsafe: () => Number.POSITIVE_INFINITY,
+            currentTimeMillis: Effect.succeed(Number.POSITIVE_INFINITY)
+          }
+          const budget = yield* Budget.make({ latency: { maxMillis: 1_000 } }).pipe(
+            Effect.provideService(Clock.Clock, unwritable)
+          )
+          return yield* budget.check("step-a").pipe(Effect.provideService(Clock.Clock, unwritable))
+        }).pipe(
+          Effect.provide(
+            Layer.merge(
+              pagedJournal([]),
+              Layer.succeed(FlowRuntime.FlowInstance)(instanceFor("clock-zero-encode"))
+            )
+          )
+        )
+      )
+    )
+
+    const failure = failureOf(exit) as Budget.AccountingUnavailable
+    expect(failure).toMatchObject({
+      _tag: "flows/agent/BudgetAccountingUnavailable",
+      phase: "record",
+      runId: "clock-zero-encode"
+    })
+    expect(failure.message).toContain("its latency clock zero does not encode")
+    expect(failure.cause).toBeDefined()
   })
 })
 

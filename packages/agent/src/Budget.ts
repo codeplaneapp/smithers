@@ -388,12 +388,23 @@ export const usageEvent = "flows.agent.usage.v1"
  * ledger this budget cannot read rather than a call that never happened, and
  * recovery fails closed instead of handing the run that allowance again.
  *
+ * The cost field is `spent` and not `tokens` because the journal REDACTS a
+ * field whose name reads as a credential: `@smthrs/journal`'s
+ * `Redaction.isSensitiveKey` strips one trailing plural and tests the suffix,
+ * so `tokens` canonicalizes to `token` and the production `SqlJournal` writes
+ * `"[REDACTED]"` in place of the number. Under the old field name every usage
+ * record this module wrote came back unreadable, and the read side dropped it
+ * silently, so the durable projection was a no-op wherever a real journal was
+ * composed. `spent` names the same number and names no credential. Records
+ * written under the old name do not decode; they never carried a readable
+ * number either, so nothing is lost by refusing them.
+ *
  * @category records
  * @since 1.0.0-rc.0
  */
 export const UsageRecord = Schema.Struct({
   stepKey: Schema.String,
-  tokens: Schema.Finite
+  spent: Schema.Finite
 })
 
 /**
@@ -657,7 +668,7 @@ const recoverUsage = (
           const payload = yield* Schema.decodeUnknownEffect(UsageRecord)(entry.payload).pipe(
             Effect.mapError(() => undecodable(entry, "usage"))
           )
-          recovered.set(payload.stepKey, payload.tokens)
+          recovered.set(payload.stepKey, payload.spent)
         } else if (entry.eventType === budgetStartedEvent) {
           const payload = yield* Schema.decodeUnknownEffect(BudgetStartedRecord)(entry.payload).pipe(
             Effect.mapError(() => undecodable(entry, "budget-started"))
@@ -972,7 +983,7 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
           // record exists to be read back by the NEXT incarnation of this run,
           // and a record whose call the live budget never counted would make
           // the resumed run count it twice.
-          const payload = yield* Schema.encodeEffect(UsageRecord)({ stepKey, tokens: spent }).pipe(
+          const payload = yield* Schema.encodeEffect(UsageRecord)({ stepKey, spent }).pipe(
             Effect.mapError((cause) => unavailable("record", runId, "its usage record does not encode", cause))
           )
           yield* journalUsage(runId, payload)
