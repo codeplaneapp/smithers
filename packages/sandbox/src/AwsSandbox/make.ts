@@ -10,7 +10,7 @@ import type { Scope } from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { decodeBase64, encodeBase64 } from "../internal/base64.ts"
-import { killScript } from "../internal/killScript.ts"
+import { cancelledStatus, cancelMarker, killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import { stdinRedirect } from "../internal/stdinRedirect.ts"
@@ -99,35 +99,89 @@ const stopTasks = (options: Options, taskArns: ReadonlyArray<string>): Effect.Ef
     { log: "Warn" }
   )
 
+/** A machine a previous acquire of this session key left behind. */
+interface Leftover {
+  readonly taskArn: string
+  /** Whether its ECS Exec agent already answers, or the adopter must wait for it. */
+  readonly ready: boolean
+}
+
 /**
- * The task a previous acquire of this session key left running, if any.
+ * The task a previous acquire of this session key left behind, if any, plus
+ * every duplicate beside it.
  *
  * `RunTask` tags every task with `startedBy`, which is derived from the key,
  * so a crash-interrupted run can find its machine again instead of starting a
- * second one beside it. Only a task whose ECS Exec agent is already ready is
- * adopted: a task still provisioning belongs to whatever is still driving it,
- * and a stopped one is not a machine.
+ * second one beside it. PENDING counts, not only RUNNING: a host that died
+ * between `RunTask` and the acquire's finalizer left a task that had not
+ * reached readiness yet, and skipping it — on the theory that a provisioning
+ * task belongs to whatever is still driving it — is exactly the assumption a
+ * crash falsifies. That task then reached RUNNING on `sleep infinity` with no
+ * owner, no finalizer, and nothing to stop it.
+ *
+ * The list is ordered by ARN so two racing acquires adopt the same one, and
+ * everything after the first is `stale`: a duplicate the caller stops before
+ * provisioning, so a key never accumulates machines.
  */
-const leftoverTask = (
+const leftoverTasks = (
   options: Options,
   startedBy: string,
   container: string | undefined
-): Effect.Effect<string | undefined, ProviderError> =>
+): Effect.Effect<{ readonly adopt: Leftover | undefined; readonly stale: ReadonlyArray<string> }, ProviderError> =>
   Effect.gen(function*() {
-    const listed = yield* attempt(
-      () => options.sdk.listTasks({ cluster: options.cluster, startedBy, desiredStatus: "RUNNING" }),
-      "unavailable",
-      `could not list tasks started by ${startedBy}`
-    )
-    const arns = listed.taskArns ?? []
-    if (arns.length === 0) return undefined
+    const arns: Array<string> = []
+    for (const desiredStatus of ["RUNNING", "PENDING"] as const) {
+      const listed = yield* attempt(
+        () => options.sdk.listTasks({ cluster: options.cluster, startedBy, desiredStatus }),
+        "unavailable",
+        `could not list tasks started by ${startedBy}`
+      )
+      arns.push(...listed.taskArns ?? [])
+    }
+    const unique = [...new Set(arns)].sort()
+    if (unique.length === 0) return { adopt: undefined, stale: [] }
     const described = yield* attempt(
-      () => options.sdk.describeTasks({ cluster: options.cluster, tasks: [...arns] }),
+      () => options.sdk.describeTasks({ cluster: options.cluster, tasks: unique }),
       "unavailable",
       `could not describe the tasks started by ${startedBy}`
     )
-    return described.tasks?.find((task) => agentReady(task, container))?.taskArn
+    const live = (described.tasks ?? []).flatMap((task) =>
+      task.taskArn === undefined || task.lastStatus === "STOPPED"
+        ? []
+        : [{ taskArn: task.taskArn, ready: agentReady(task, container) }]
+    ).sort((left, right) => left.taskArn.localeCompare(right.taskArn))
+    const [first, ...rest] = live
+    if (first === undefined) return { adopt: undefined, stale: [] }
+    return { adopt: first, stale: rest.map((task) => task.taskArn) }
   })
+
+/** The write-slice size a transport uses when it names none. */
+const defaultChunkBytes = 3072
+
+/**
+ * The validated write-slice size.
+ *
+ * `chunkBytes` is the increment of the loop that splits a file into commands,
+ * so an unchecked value is not a bad setting but a broken write: `0` or a
+ * negative number never advances the offset and spins forever on empty slices,
+ * and `NaN` makes the offset `NaN` after one iteration, ending the loop having
+ * emitted a single empty slice — a silently truncated file rather than an
+ * error. The upper end is left to the service: the SSM document bounds the
+ * command length, and a slice too large for it fails the write with the
+ * service's own message rather than a limit invented here.
+ */
+const chunkBytesOf = (transport: ExecTransport): Effect.Effect<number, ProviderError> => {
+  const chunkBytes = transport.chunkBytes ?? defaultChunkBytes
+  return Number.isSafeInteger(chunkBytes) && chunkBytes >= 1
+    ? Effect.succeed(chunkBytes)
+    : Effect.fail(
+      new ProviderError({
+        code: "spawn_error",
+        message:
+          `ExecTransport.chunkBytes must be a whole number of bytes of at least 1, not ${chunkBytes}`
+      })
+    )
+}
 
 const registeredArnOf = (output: RegisterTaskDefinitionOutput): string | undefined =>
   output.taskDefinition?.taskDefinitionArn
@@ -337,10 +391,21 @@ const unframe = (run: GatheredRun, nonce: number): Unframed => {
   }
 }
 
-const exportsOf = (env: Readonly<Record<string, string | undefined>> | undefined): string =>
-  Object.entries(env ?? {})
-    .flatMap(([name, value]) => value === undefined ? [] : [`export ${CommandLine.quote(`${name}=${value}`)}; `])
-    .join("")
+/**
+ * The caller's environment as an `env(1)` prefix.
+ *
+ * `env`, not `export`: `export` requires a shell identifier and aborts the
+ * whole script for a name Node and the session contract both accept
+ * (`WITH-DASH=1`), while `env` passes any name through. The program after the
+ * prefix is absolute, because `env` resolves it through the environment it has
+ * just built and a caller's `PATH` override would otherwise keep a bare `sh`
+ * from ever starting.
+ */
+const envPrefix = (env: Readonly<Record<string, string | undefined>> | undefined): string => {
+  const assignments = Object.entries(env ?? {})
+    .flatMap(([name, value]) => value === undefined ? [] : [CommandLine.quote(`${name}=${value}`)])
+  return assignments.length === 0 ? "" : `env ${assignments.join(" ")} `
+}
 
 /**
  * Wraps a one-shot guest script so its status comes back in-band. The
@@ -367,7 +432,11 @@ const spawnScript = (
 ): string =>
   `sh -c ${
     CommandLine.quote(
-      `if cd ${CommandLine.quote(cwd)}; then ${exportsOf(env)}sh -c ${CommandLine.quote(command)} & p=$!; ` +
+      // The cancellation marker is read BEFORE the command starts, because the
+      // pid is only recorded after it does: a kill delivered in that window
+      // has nothing to signal and leaves the marker instead.
+      `if [ -e ${cancelMarker(pidfile)} ]; then c=${cancelledStatus}; ` +
+        `elif cd ${CommandLine.quote(cwd)}; then ${envPrefix(env)}/bin/sh -c ${CommandLine.quote(command)} & p=$!; ` +
         `echo "$p" > ${pidfile}; wait "$p"; c=$?; else c=127; fi; printf '\\n${sentinel(nonce)}%s__\\n' "$c"`
     )
   }`
@@ -411,9 +480,22 @@ export const make = (options: Options): Provider => ({
       // Reattach before provisioning: the same key names the same machine
       // wherever one is still running. An adopted task is released the same
       // way a fresh one is, so closing the scope always leaves nothing behind.
-      const leftover = yield* leftoverTask(options, startedBy, container)
-      const taskArn = leftover !== undefined
-        ? yield* Effect.acquireRelease(Effect.succeed(leftover), (arn) => stopTasks(options, [arn]))
+      const leftover = yield* leftoverTasks(options, startedBy, container)
+      // Duplicates go before anything else: an adopter that provisioned beside
+      // them would leave the key owning more machines every incarnation.
+      if (leftover.stale.length > 0) yield* stopTasks(options, leftover.stale)
+      const adopt = leftover.adopt
+      const taskArn = adopt !== undefined
+        ? yield* Effect.gen(function*() {
+          const arn = yield* Effect.acquireRelease(
+            Effect.succeed(adopt.taskArn),
+            (task) => stopTasks(options, [task])
+          )
+          // A task adopted while still provisioning is released by the same
+          // finalizer whether or not it ever becomes ready.
+          if (!adopt.ready) yield* awaitReady(options, arn, container)
+          return arn
+        })
         : yield* Effect.gen(function*() {
           const output = yield* Effect.acquireRelease(
             runTask(options, taskDefinition, startedBy, container),
@@ -448,7 +530,7 @@ export const make = (options: Options): Provider => ({
       }
 
       const program = transport.program ?? "aws"
-      const chunkBytes = transport.chunkBytes ?? 3072
+      const chunkBytes = yield* chunkBytesOf(transport)
       const cli = (remote: string): ChildProcess.Command =>
         ChildProcess.make(program, [
           ...transport.globalArgs ?? [],
@@ -522,7 +604,11 @@ export const make = (options: Options): Provider => ({
         })
       // The session is a pseudo-terminal with no input channel of its own, so
       // standard input is staged as a workspace file and redirected.
-      const redirect = stdinRedirect({ workdir, writeFile })
+      const redirect = stdinRedirect({
+        workdir,
+        writeFile,
+        remove: (path) => Effect.asVoid(run(`rm -f ${CommandLine.quote(path)}`))
+      })
       const resolveCwd = (cwd: string | undefined): string =>
         cwd === undefined || cwd.startsWith("/")
           ? cwd ?? workdir

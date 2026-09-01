@@ -3,7 +3,9 @@
  *
  * @since 0.1.0
  */
+import * as CommandLine from "@smthrs/kernel/CommandLine"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as PlatformError from "effect/PlatformError"
@@ -18,7 +20,9 @@ import {
   make as makeSpawner,
   makeHandle
 } from "effect/unstable/process/ChildProcessSpawner"
-import { make as makeRemote } from "../RemoteChildProcessSpawner/layer.ts"
+import { elapsed } from "../internal/deadline.ts"
+import { platformFailure } from "../internal/platformReason.ts"
+import { makeOpened } from "../RemoteChildProcessSpawner/layer.ts"
 import type { Provider } from "../RemoteChildProcessSpawner/Provider.ts"
 import { fromProvider } from "../SandboxHealth/fromProvider.ts"
 import type { HealthState } from "../SandboxHealth/HealthState.ts"
@@ -27,6 +31,9 @@ import { loggingReporter } from "./Reporter.ts"
 import { SandboxUnhealthy } from "./SandboxUnhealthy.ts"
 
 const MODULE = "ChildProcess"
+
+/** How long a caller-supplied reporter may take before retirement moves on without it. */
+const reportWithin = Duration.seconds(30)
 
 /**
  * The failure a retired session hands to everything still running in it.
@@ -124,6 +131,15 @@ export const make = (
     const probe: Effect.Effect<HealthState> = options.probe ??
       fromProvider(provider, options.deadline === undefined ? undefined : { deadline: options.deadline }).check
     const held = yield* Ref.make<Session | undefined>(undefined)
+    // Bounded on the platform timer, and its outcome discarded whatever it is:
+    // a reporter is an observer, and an observer must not be able to hold the
+    // one permit every future spawn waits on. The bound is deliberately not an
+    // option — a caller who wants a different one wraps their own reporter.
+    const report = (event: SandboxUnhealthy) =>
+      Effect.catchCause(
+        Effect.raceFirst(reporter.unhealthy(event), elapsed(reportWithin)),
+        (cause) => Effect.logWarning("the sandbox supervision reporter failed", cause)
+      )
     // One session at a time: opening and retiring both rewrite the same cell,
     // and a burst of concurrent spawns must not open a session each.
     const turn = yield* Semaphore.make(1)
@@ -131,12 +147,22 @@ export const make = (
     // The heartbeat is the only fiber that clears the held session, and a spawn
     // fills the cell only when it is empty, so the session a verdict retires is
     // the one the probe that produced it ran against.
+    //
+    // Order and interruptibility are the contract here. Retiring HAS to fail
+    // the in-flight commands and close the provider scope: skipping the first
+    // leaves every waiter hanging, which is the failure `guarded` exists to
+    // prevent, and skipping the second leaks the remote machine. Reporting is
+    // observational and is caller-supplied, so it can defect, be interrupted,
+    // or never return; sequencing it first put both mandatory operations
+    // behind it, and behind the permit every future spawn needs.
     const retire = (session: Session, event: SandboxUnhealthy) =>
       turn.withPermit(Effect.gen(function*() {
-        yield* Ref.set(held, undefined)
-        yield* reporter.unhealthy(event)
-        yield* Deferred.fail(session.failed, retired(event.session, event.reason))
-        yield* Scope.close(session.scope, Exit.void)
+        yield* Effect.uninterruptible(Effect.gen(function*() {
+          yield* Ref.set(held, undefined)
+          yield* Deferred.fail(session.failed, retired(event.session, event.reason))
+          yield* Scope.close(session.scope, Exit.void)
+        }))
+        yield* report(event)
       }))
 
     const heartbeat = Effect.gen(function*() {
@@ -171,9 +197,20 @@ export const make = (
       )
     })
 
+    // `makeOpened`, not `make`: `make` answers with a spawner whose every
+    // command fails when the provider refused to open, which is right for a
+    // caller holding one session and wrong for a supervisor. Cached as a
+    // generation, that spawner replayed the one open failure for the life of
+    // the layer, and only a `ping` verdict could ever have cleared it — so a
+    // provider without `ping` never opened again at all. A failed open now
+    // leaves the cell empty and closes its own scope, and the next command
+    // opens a fresh generation.
     const openSession = Effect.gen(function*() {
       const scope = yield* Scope.fork(parent)
-      const spawner = yield* Effect.provideService(makeRemote(provider), Scope.Scope, scope)
+      const spawner = yield* Effect.onError(
+        Effect.provideService(makeOpened(provider), Scope.Scope, scope),
+        () => Scope.close(scope, Exit.void)
+      )
       const failed = yield* Deferred.make<never, PlatformError.PlatformError>()
       const session: Session = { scope, spawner, failed }
       yield* Ref.set(held, session)
@@ -193,7 +230,7 @@ export const make = (
         // Acquiring the session and retiring one both hold the permit, so the
         // session handed out here is never one that has already been retired.
         // Everything after that is the guard's job.
-        const open = yield* session
+        const open = yield* Effect.mapError(session, platformFailure("open", CommandLine.render(command)))
         const handle = yield* open.spawner.spawn(command)
         return yield* guarded(handle, open.failed)
       })

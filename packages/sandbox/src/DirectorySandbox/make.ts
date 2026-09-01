@@ -77,6 +77,32 @@ export const make = (options: DirectorySandboxOptions): Provider => ({
         return trimmed === "" || trimmed === "." ? workdir : `${workdir}/${trimmed}`
       }
       const started = new WeakMap<RemoteProcess, ChildProcessHandle>()
+      // Commands run as `sh -c <line>`, so the handle's own kill reaches
+      // only that shell — and a shell that forked the work (dash does, and
+      // any pipeline or background job everywhere) leaves it running, the
+      // exact silent no-op kill the conformance suite exists to catch. The
+      // handle's pid is the real OS pid, so a walk through the injected
+      // spawner collects the whole descendant set first and signals it and
+      // the root in one `kill` invocation.
+      const deliver = (handle: ChildProcessHandle, signal: string): Effect.Effect<void, ProviderError> => {
+        const walk = ChildProcess.make(hostKillScript(handle.pid, signal.replace(/^SIG/, "")), { shell: true })
+        return Effect.scoped(
+          Effect.gen(function*() {
+            const running = yield* options.spawner.spawn(walk).pipe(
+              Effect.mapError(failure("unknown", `the signal ${signal} could not be delivered`))
+            )
+            const result = yield* gather(running, `kill -s ${signal}`)
+            if (result.code !== 0) {
+              return yield* Effect.fail(
+                new ProviderError({
+                  code: "unknown",
+                  message: `the signal ${signal} could not be delivered: ${result.stderr.trim()}`
+                })
+              )
+            }
+          })
+        )
+      }
       const session: Session = {
         id: sessionKey,
         remoteId: workdir,
@@ -94,7 +120,24 @@ export const make = (options: DirectorySandboxOptions): Provider => ({
           const handle = yield* options.spawner.spawn(ChildProcess.make(command, settings)).pipe(
             Effect.mapError(failure("spawn_error", `\`${command}\` could not start`))
           )
-          const process = remoteProcessOf(handle, command)
+          const raw = remoteProcessOf(handle, command)
+          let ended = false
+          const process: RemoteProcess = {
+            ...raw,
+            exitCode: Effect.tap(raw.exitCode, () =>
+              Effect.sync(() => {
+                ended = true
+              }))
+          }
+          // The contract says a spawn's scope IS the process's lifetime.
+          // Closing the scope tears down only the handle the host spawner
+          // owns, which reaches the `sh -c` wrapper and nothing it forked, so
+          // the finalizer runs the same whole-tree walk `kill` runs — unless
+          // the command has already been seen to end, because the pid it named
+          // may belong to someone else by now.
+          yield* Effect.addFinalizer(() =>
+            ended ? Effect.void : Effect.ignore(deliver(handle, "SIGTERM"), { log: "Warn" })
+          )
           started.set(process, handle)
           return process
         }),
@@ -115,13 +158,6 @@ export const make = (options: DirectorySandboxOptions): Provider => ({
             }
             yield* options.fs.writeFile(path, content)
           }).pipe(Effect.mapError(failure("unknown", `the sandbox could not write ${path}`))),
-        // Commands run as `sh -c <line>`, so the handle's own kill reaches
-        // only that shell — and a shell that forked the work (dash does, and
-        // any pipeline or background job everywhere) leaves it running, the
-        // exact silent no-op kill the conformance suite exists to catch. The
-        // handle's pid is the real OS pid, so a walk through the injected
-        // spawner collects the whole descendant set first and signals it and
-        // the root in one `kill` invocation.
         kill: (process, signal) =>
           Effect.suspend(() => {
             const handle = started.get(process)
@@ -129,36 +165,22 @@ export const make = (options: DirectorySandboxOptions): Provider => ({
             if (handle === undefined) {
               return Effect.fail(new ProviderError({ code: "unknown", message: "unrecognized process" }))
             }
-            const walk = ChildProcess.make(hostKillScript(handle.pid, signal.replace(/^SIG/, "")), { shell: true })
-            return Effect.scoped(
-              Effect.gen(function*() {
-                const running = yield* options.spawner.spawn(walk).pipe(
-                  Effect.mapError(failure("unknown", `the signal ${signal} could not be delivered`))
-                )
-                const result = yield* gather(running, `kill -s ${signal}`)
-                if (result.code !== 0) {
-                  return yield* Effect.fail(
-                    new ProviderError({
-                      code: "unknown",
-                      message: `the signal ${signal} could not be delivered: ${result.stderr.trim()}`
-                    })
-                  )
-                }
-              })
-            )
+            return deliver(handle, signal)
           }),
         ping: Effect.void,
-        // Native overrides serve the derived filesystem with the same
-        // rooting rule the probe surface has.
+        // Native overrides for the derived filesystem. They take the path
+        // they are handed: `Sandbox.fileSystem` installs an override THROUGH
+        // its workdir resolver, so the rooting rule lives in one place rather
+        // than being restated by every adapter that supplies overrides.
         files: {
-          exists: (path) => options.fs.exists(resolve(path)),
-          stat: (path) => options.fs.stat(resolve(path)),
-          readDirectory: (path, directoryOptions) => options.fs.readDirectory(resolve(path), directoryOptions),
-          makeDirectory: (path, directoryOptions) => options.fs.makeDirectory(resolve(path), directoryOptions),
-          remove: (path, removeOptions) => options.fs.remove(resolve(path), removeOptions),
-          rename: (oldPath, newPath) => options.fs.rename(resolve(oldPath), resolve(newPath)),
-          realPath: (path) => options.fs.realPath(resolve(path)),
-          readLink: (path) => options.fs.readLink(resolve(path))
+          exists: options.fs.exists,
+          stat: options.fs.stat,
+          readDirectory: options.fs.readDirectory,
+          makeDirectory: options.fs.makeDirectory,
+          remove: options.fs.remove,
+          rename: options.fs.rename,
+          realPath: options.fs.realPath,
+          readLink: options.fs.readLink
         } satisfies Partial<FileSystem.FileSystem>
       }
       return session

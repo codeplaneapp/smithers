@@ -4,6 +4,8 @@
  * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
+import * as Encoding from "effect/Encoding"
+import * as Result from "effect/Result"
 import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
 
 const decoder = new TextDecoder()
@@ -18,18 +20,15 @@ const encoder = new TextEncoder()
  * byte path through this pair, so "the session promises bytes" stays true
  * whatever the transport underneath is willing to carry.
  *
- * `btoa` needs a binary string, which is why the bytes are widened one at a
- * time instead of being handed to `TextDecoder`: decoding as UTF-8 is exactly
- * the corruption this exists to avoid.
+ * The transform itself is `effect/Encoding`, which the workspace already uses
+ * for exactly this job in `@smthrs/kernel`. The pair here exists for the
+ * provider-shaped error surface and the wrapped-payload tolerance below, not
+ * for a second base64 implementation.
  *
  * @category constructors
  * @since 0.1.0
  */
-export const encodeBase64 = (content: Uint8Array): string => {
-  let binary = ""
-  for (const byte of content) binary += String.fromCharCode(byte)
-  return btoa(binary)
-}
+export const encodeBase64 = (content: Uint8Array): string => Encoding.encodeBase64(content)
 
 /**
  * Encodes bytes as base64 and returns the text as bytes, ready to be written
@@ -45,7 +44,7 @@ export const encodeBase64Bytes = (content: Uint8Array): Uint8Array => encoder.en
  * rather than throwing.
  *
  * Whitespace is stripped first because guest tools line-wrap their base64
- * output at various widths, and `atob` refuses a wrapped payload.
+ * output at various widths, and a decoder refuses a wrapped payload.
  *
  * @category constructors
  * @since 0.1.0
@@ -54,19 +53,17 @@ export const decodeBase64 = (
   encoded: string,
   what: string
 ): Effect.Effect<Uint8Array, ProviderError> =>
-  Effect.try({
-    try: () => {
-      const binary = atob(encoded.replaceAll(/\s/g, ""))
-      const bytes = new Uint8Array(binary.length)
-      for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index)
-      return bytes
-    },
-    catch: (cause) =>
-      new ProviderError({
-        code: "unknown",
-        message: `the sandbox returned invalid base64 ${what}`,
-        cause
-      })
+  Effect.suspend(() => {
+    const decoded = Encoding.decodeBase64(encoded.replaceAll(/\s/g, ""))
+    return Result.isFailure(decoded)
+      ? Effect.fail(
+        new ProviderError({
+          code: "unknown",
+          message: `the sandbox returned invalid base64 ${what}`,
+          cause: decoded.failure
+        })
+      )
+      : Effect.succeed(decoded.success)
   })
 
 /**

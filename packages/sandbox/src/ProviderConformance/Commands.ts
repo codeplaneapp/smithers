@@ -47,6 +47,18 @@ export interface Commands {
    */
   readonly survivor?: string | undefined
   /**
+   * A command that copies its standard input to its standard output.
+   *
+   * Only ever run against a provider that declares `stdin`, and the only
+   * thing that proves the declaration. `Provider.stdin` exists so a transport
+   * that cannot deliver input refuses the command instead of dropping it, and
+   * a suite that took the flag at its word would pass an adapter that sets it
+   * and then ignores `RemoteOptions.stdin` — the exact silent input loss the
+   * flag was added to close. Default {@link defaultCopiesStdin}, which any
+   * mainstream userland ships; a machine without it names its own.
+   */
+  readonly copiesStdin?: string | undefined
+  /**
    * Whether the three commands are shell lines rather than a single program
    * token. A rendered single token is POSIX-quoted whole, so a fixture like
    * `printf 'hi'` reaches a shell-running session as one garbled word; a
@@ -64,3 +76,12 @@ export interface Commands {
  * @since 0.1.0
  */
 export const defaultStopsWithin: Duration.Input = "5 seconds"
+
+/**
+ * The command a stdin-declaring provider copies input with when the fixture
+ * names none.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const defaultCopiesStdin = "cat"

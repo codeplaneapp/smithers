@@ -113,7 +113,7 @@ const machineName = (prefix: string, session: string): string =>
 /**
  * Builds a provider backed by named, persistent Vercel sandboxes.
  *
- * A session key becomes a collision-proof sandbox name and
+ * A session key becomes a sandbox name carrying a 64-bit digest of the key, and
  * `Sandbox.getOrCreate` resumes that machine when it already exists. Closing
  * the acquisition scope stops the current session; a stop that fails is
  * logged at Warn rather than swallowed, because teardown runs for its side
@@ -215,7 +215,11 @@ export const make = (options: Options): Provider => ({
       // `runCommand` takes no standard input (verified against the
       // `@vercel/sandbox` 3.2.1 typings), so a command's input is staged as
       // a workspace file and the command line is rewritten to read from it.
-      const redirect = stdinRedirect({ workdir, writeFile })
+      const redirect = stdinRedirect({
+        workdir,
+        writeFile,
+        remove: (path) => Effect.asVoid(run({ cmd: "rm", args: ["-f", path] }))
+      })
       const resolveCwd = (cwd: string | undefined): string =>
         cwd === undefined || cwd.startsWith("/")
           ? cwd ?? workdir

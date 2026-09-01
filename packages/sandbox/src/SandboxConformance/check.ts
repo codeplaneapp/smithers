@@ -3,10 +3,11 @@
  *
  * @since 0.1.0
  */
-import * as Duration from "effect/Duration"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Stream from "effect/Stream"
+import { defaultCheckTimeout, expired } from "../internal/deadline.ts"
 import * as check_ from "../ProviderConformance/check.ts"
 import type { Commands } from "../ProviderConformance/Commands.ts"
 import type { Violation } from "../ProviderConformance/Violation.ts"
@@ -20,31 +21,6 @@ import { uniquePosixCommands } from "./posixCommands.ts"
 /** Describes an unexpected outcome without leaking a stack into the report. */
 const shown = (exit: Exit.Exit<unknown, unknown>): string =>
   Exit.isSuccess(exit) ? JSON.stringify(exit.value) : `a failure: ${String(exit.cause)}`
-
-/**
- * A deadline on the wall clock, not the ambient `Clock`.
- *
- * Provider test suites commonly run under a frozen test clock (`it.effect`
- * provides one), where a clock-based timeout never fires; a conformance suite
- * whose hang protection depends on the very layer a host may freeze would
- * hang exactly when it is needed. The timer here is the platform's own, so a
- * stuck check is convicted under any clock, and losing the race interrupts
- * the check, which closes its scope and ends whatever it spawned.
- */
-const expired = (deadline: Duration.Input): Effect.Effect<never, ProviderError> =>
-  Effect.flatMap(
-    Effect.callback<void>((resume) => {
-      const timer = setTimeout(() => resume(Effect.void), Duration.toMillis(deadline))
-      return Effect.sync(() => clearTimeout(timer))
-    }),
-    () =>
-      Effect.fail(
-        new ProviderError({
-          code: "timeout",
-          message: `the check did not finish within ${Duration.toMillis(deadline)} milliseconds`
-        })
-      )
-  )
 
 /**
  * Runs one check against a fresh session, so a check that leaves a session
@@ -163,7 +139,7 @@ export const check = (
 ): Effect.Effect<ReadonlyArray<Violation>> =>
   Effect.gen(function*() {
     const session = options.session ?? "sandbox-conformance"
-    const deadline = options.checkTimeout ?? Duration.seconds(240)
+    const deadline = options.checkTimeout ?? defaultCheckTimeout
     const roundTrips = yield* inSession(provider, session, deadline, (live) =>
       Effect.gen(function*() {
         const path = `${live.workdir}/conformance-bytes.bin`
@@ -233,12 +209,16 @@ export const check = (
         expired(deadline)
       )
     )
+    // The delegated suite gets the same deadline. It used to be called outside
+    // every race this generator sets up, so a provider that hung on spawn hung
+    // both public entry points despite `checkTimeout` promising otherwise.
     const spawnChecks = yield* check_.check(
       commandProvider(provider, {
         session,
         ...options.provides === undefined ? {} : { provides: options.provides }
       }),
-      options.commands ?? uniquePosixCommands()
+      options.commands ?? uniquePosixCommands(),
+      { checkTimeout: deadline }
     )
     const found: Array<Violation | undefined> = [
       Exit.isSuccess(roundTrips) && sameBytes(roundTrips.value, conformanceBytes) ? undefined : {

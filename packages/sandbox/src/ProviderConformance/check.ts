@@ -3,15 +3,18 @@
  *
  * @since 0.1.0
  */
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as Stream from "effect/Stream"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { defaultCheckTimeout, expired } from "../internal/deadline.ts"
 import { layer } from "../RemoteChildProcessSpawner/layer.ts"
 import type { Provider } from "../RemoteChildProcessSpawner/Provider.ts"
 import { fromProvider } from "../SandboxHealth/fromProvider.ts"
-import { type Commands, defaultStopsWithin } from "./Commands.ts"
+import { type Commands, defaultCopiesStdin, defaultStopsWithin } from "./Commands.ts"
 import type { Violation } from "./Violation.ts"
 
 /** Describes an unexpected outcome without leaking a stack into the report. */
@@ -20,17 +23,30 @@ const shown = (exit: Exit.Exit<unknown, unknown>): string =>
 
 /**
  * Runs one check against a fresh session, so a check that leaves a session
- * unusable cannot decide the next one.
+ * unusable cannot decide the next one, and under a deadline, so an adapter
+ * that never answers is convicted instead of hanging the suite with it.
+ *
+ * The deadline covers the whole check, session acquisition and stream
+ * consumption included: every one of `open`, `spawn`, a stdout stream that
+ * never ends, `ping`, and `kill` can hang, and only the wait after a
+ * successful kill was ever bounded.
  */
 const inSession = <A>(
   provider: Provider,
+  deadline: Duration.Input,
   effect: Effect.Effect<A, unknown, ChildProcessSpawner>
-): Effect.Effect<Exit.Exit<A, unknown>> => Effect.exit(Effect.provide(effect, layer(provider)))
+): Effect.Effect<Exit.Exit<A, unknown>> =>
+  Effect.exit(Effect.raceFirst(Effect.provide(effect, layer(provider)), expired(deadline)))
 
-const writesItsOutput = (provider: Provider, commands: Commands): Effect.Effect<Violation | undefined> =>
+const writesItsOutput = (
+  provider: Provider,
+  commands: Commands,
+  deadline: Duration.Input
+): Effect.Effect<Violation | undefined> =>
   Effect.map(
     inSession(
       provider,
+      deadline,
       Effect.flatMap(ChildProcessSpawner, (spawner) =>
         spawner.string(ChildProcess.make(commands.writes, { shell: commands.shell ?? false })))
     ),
@@ -42,10 +58,15 @@ const writesItsOutput = (provider: Provider, commands: Commands): Effect.Effect<
       }
   )
 
-const reportsANonzeroExit = (provider: Provider, commands: Commands): Effect.Effect<Violation | undefined> =>
+const reportsANonzeroExit = (
+  provider: Provider,
+  commands: Commands,
+  deadline: Duration.Input
+): Effect.Effect<Violation | undefined> =>
   Effect.map(
     inSession(
       provider,
+      deadline,
       Effect.flatMap(
         ChildProcessSpawner,
         (spawner) => spawner.exitCode(ChildProcess.make(commands.fails, { shell: commands.shell ?? false }))
@@ -59,9 +80,12 @@ const reportsANonzeroExit = (provider: Provider, commands: Commands): Effect.Eff
       }
   )
 
-const answersAPing = (provider: Provider): Effect.Effect<Violation | undefined> =>
+const answersAPing = (
+  provider: Provider,
+  deadline: Duration.Input
+): Effect.Effect<Violation | undefined> =>
   Effect.map(
-    Effect.exit(Effect.provide(fromProvider(provider).check, layer(provider))),
+    inSession(provider, deadline, fromProvider(provider).check),
     (exit) =>
       Exit.isSuccess(exit) && exit.value._tag === "Healthy" ? undefined : {
         check: "answers-a-ping",
@@ -70,10 +94,15 @@ const answersAPing = (provider: Provider): Effect.Effect<Violation | undefined> 
       }
   )
 
-const signalsARunningCommand = (provider: Provider, commands: Commands): Effect.Effect<Violation | undefined> =>
+const signalsARunningCommand = (
+  provider: Provider,
+  commands: Commands,
+  deadline: Duration.Input
+): Effect.Effect<Violation | undefined> =>
   Effect.map(
     inSession(
       provider,
+      deadline,
       Effect.scoped(Effect.gen(function*() {
         const spawner = yield* ChildProcessSpawner
         const handle = yield* spawner.spawn(ChildProcess.make(commands.runs, { shell: commands.shell ?? false }))
@@ -113,6 +142,51 @@ const signalsARunningCommand = (provider: Provider, commands: Commands): Effect.
       }
   )
 
+/** The text the stdin check sends and expects back, newline-free so a pty transport cannot reframe it. */
+const stdinFixture = "sandbox-conformance-stdin"
+
+const deliversStandardInput = (
+  provider: Provider,
+  commands: Commands,
+  deadline: Duration.Input
+): Effect.Effect<Violation | undefined> =>
+  Effect.map(
+    inSession(
+      provider,
+      deadline,
+      Effect.flatMap(ChildProcessSpawner, (spawner) =>
+        spawner.string(
+          ChildProcess.make(commands.copiesStdin ?? defaultCopiesStdin, {
+            shell: commands.shell ?? false,
+            stdin: Stream.make(new TextEncoder().encode(stdinFixture))
+          })
+        ))
+    ),
+    (exit) =>
+      // `includes`, not equality: a transport whose channel is a pseudo-terminal
+      // echoes the input alongside the command's own output, which is a
+      // documented property of that channel rather than a lost input.
+      Exit.isSuccess(exit) && exit.value.includes(stdinFixture) ? undefined : {
+        check: "delivers-standard-input",
+        expected: `stdout containing ${JSON.stringify(stdinFixture)}, the bytes given as stdin`,
+        actual: shown(exit)
+      }
+  )
+
+/**
+ * Bounds how long the suite waits on a provider that does not answer.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface CheckOptions {
+  /**
+   * How long any single check may take, session acquisition included, before
+   * it is convicted as hung. Default 240 seconds.
+   */
+  readonly checkTimeout?: Duration.Input | undefined
+}
+
 /**
  * Checks one provider against the `Provider` contract.
  *
@@ -124,22 +198,33 @@ const signalsARunningCommand = (provider: Provider, commands: Commands): Effect.
  * use to a caller.
  *
  * The optional capabilities are checked only when the provider declares them.
- * A provider without `ping` is not asked to answer one, and a provider without
- * `kill` is not asked to signal: those are documented absences, not defects.
+ * A provider without `ping` is not asked to answer one, a provider without
+ * `kill` is not asked to signal, and a provider that does not declare `stdin`
+ * is not asked to deliver any: those are documented absences, not defects. A
+ * provider that DOES declare one is held to it, `stdin` included — the flag is
+ * what makes the adapter hand the bytes over, so a suite that took it at its
+ * word would pass an adapter that sets it and drops them.
+ *
+ * Every check runs under {@link CheckOptions.checkTimeout} on the platform
+ * timer rather than the ambient `Clock`, so an adapter that never answers
+ * yields a named violation instead of a hang, under a frozen test clock too.
  *
  * @category constructors
  * @since 0.1.0
  */
 export const check = (
   provider: Provider,
-  commands: Commands
+  commands: Commands,
+  options: CheckOptions = {}
 ): Effect.Effect<ReadonlyArray<Violation>> =>
   Effect.gen(function*() {
+    const deadline = options.checkTimeout ?? defaultCheckTimeout
     const found: Array<Violation | undefined> = [
-      yield* writesItsOutput(provider, commands),
-      yield* reportsANonzeroExit(provider, commands),
-      ...provider.ping === undefined ? [] : [yield* answersAPing(provider)],
-      ...provider.kill === undefined ? [] : [yield* signalsARunningCommand(provider, commands)]
+      yield* writesItsOutput(provider, commands, deadline),
+      yield* reportsANonzeroExit(provider, commands, deadline),
+      ...provider.stdin === true ? [yield* deliversStandardInput(provider, commands, deadline)] : [],
+      ...provider.ping === undefined ? [] : [yield* answersAPing(provider, deadline)],
+      ...provider.kill === undefined ? [] : [yield* signalsARunningCommand(provider, commands, deadline)]
     ]
     return found.filter((violation): violation is Violation => violation !== undefined)
   })

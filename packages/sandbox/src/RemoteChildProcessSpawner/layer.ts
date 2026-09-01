@@ -27,32 +27,13 @@ import {
   makeHandle,
   ProcessId
 } from "effect/unstable/process/ChildProcessSpawner"
+import { platformFailure } from "../internal/platformReason.ts"
 import type { Provider, RemoteProcess } from "./Provider.ts"
-import type { ProviderError, ProviderErrorCode } from "./ProviderError.ts"
+import type { ProviderError } from "./ProviderError.ts"
 
 const MODULE = "ChildProcess"
 
-/** Provider codes map onto the normalized reasons `PlatformError` already has. */
-const REASON: Record<ProviderErrorCode, PlatformError.SystemErrorTag> = {
-  aborted: "Unknown",
-  timeout: "TimedOut",
-  unavailable: "NotFound",
-  not_found: "NotFound",
-  spawn_error: "Unknown",
-  unknown: "Unknown"
-}
-
-const platformError = (method: string, command: string) =>
-(
-  error: ProviderError
-): PlatformError.PlatformError =>
-  PlatformError.systemError({
-    _tag: REASON[error.code],
-    module: MODULE,
-    method,
-    description: `\`${command}\`: ${error.message}`,
-    cause: error.cause
-  })
+const platformError = platformFailure
 
 const noStdin = (command: string): PlatformError.PlatformError =>
   PlatformError.badArgument({
@@ -95,35 +76,72 @@ const stdinStream = (
  */
 const maxStdinBytes = 16 * 1024 * 1024
 
+/** The one copy of a chunked input, made once the whole of it is accepted. */
+const joined = (chunks: ReadonlyArray<Uint8Array>, length: number): Uint8Array => {
+  const whole = new Uint8Array(length)
+  let offset = 0
+  for (const chunk of chunks) {
+    whole.set(chunk, offset)
+    offset += chunk.length
+  }
+  return whole
+}
+
+/**
+ * Reads a command's whole standard input, refusing it the moment it crosses
+ * the bound rather than once the producer is done.
+ *
+ * The order matters twice over. Folding the stream into a growing
+ * `Uint8Array` and comparing the length afterwards let an unbounded producer
+ * allocate without limit before the bound was ever evaluated — and never
+ * evaluated it at all for a stream that does not end — while copying the
+ * accumulator per chunk cost O(n^2) bytes moved, roughly 32 GiB for a 16 MiB
+ * input arriving in 4 KiB pieces. Counting as the chunks arrive fails the
+ * spawn on the first chunk that would cross the bound, which interrupts the
+ * producer, and the retained chunks are copied exactly once on success.
+ */
 const collectStdin = (
   command: string,
   stream: Stream.Stream<Uint8Array, unknown>
 ): Effect.Effect<Uint8Array, PlatformError.PlatformError> =>
-  Stream.runFold(stream, () => new Uint8Array(0), (whole, part) => {
-    const next = new Uint8Array(whole.length + part.length)
-    next.set(whole, 0)
-    next.set(part, whole.length)
-    return next
-  }).pipe(
-    Effect.mapError((cause) =>
-      PlatformError.systemError({
-        _tag: "Unknown",
-        module: MODULE,
-        method: "spawn",
-        description: `the standard input for \`${command}\` could not be read`,
-        cause
-      })
-    ),
-    Effect.flatMap((bytes) =>
-      bytes.length > maxStdinBytes
-        ? Effect.fail(
-          rejected(
-            `the standard input for \`${command}\` exceeds ${maxStdinBytes} bytes; have the command read a file instead`
-          )
-        )
-        : Effect.succeed(bytes)
-    )
-  )
+  Effect.suspend(() => {
+    const chunks: Array<Uint8Array> = []
+    let length = 0
+    return Stream.runForEach(
+      Stream.mapError(stream, (cause) =>
+        PlatformError.systemError({
+          _tag: "Unknown",
+          module: MODULE,
+          method: "spawn",
+          description: `the standard input for \`${command}\` could not be read`,
+          cause
+        })),
+      (part) =>
+        Effect.suspend(() => {
+          if (length + part.length > maxStdinBytes) {
+            return Effect.fail(
+              rejected(
+                `the standard input for \`${command}\` exceeds ${maxStdinBytes} bytes; have the command read a file instead`
+              )
+            )
+          }
+          chunks.push(part)
+          length += part.length
+          return Effect.void
+        })
+    ).pipe(Effect.map(() => joined(chunks, length)))
+  })
+
+/** The literal disposition a command names for its standard input, if it names one. */
+const stdinDisposition = (
+  options: ChildProcess.CommandOptions
+): ChildProcess.CommandInput | undefined => {
+  const stdin = options.stdin
+  if (stdin === undefined) return undefined
+  if (typeof stdin === "string") return stdin
+  if (Stream.isStream(stdin)) return undefined
+  return typeof stdin.stream === "string" ? stdin.stream : undefined
+}
 
 /** The leftmost stage's options: a pipeline reads its input where it starts. */
 const leftmostOptions = (command: ChildProcess.Command): ChildProcess.CommandOptions =>
@@ -145,6 +163,15 @@ const validateCommand = (
       validateCommand(command.left, acceptsStdin, leftmost),
       validateCommand(command.right, acceptsStdin, false)
     )
+  }
+  // `"inherit"` is the one input disposition the seam can neither honor nor
+  // report through the handle. `"pipe"` and `"ignore"` are honest here — the
+  // handle's `stdin` sink fails, and ignore genuinely means EOF — but a local
+  // spawner hands an inheriting child this process's own standard input, and
+  // a remote command would silently read EOF instead. The module's rule is
+  // that a divergence it cannot preserve is refused, not hidden.
+  if (stdinDisposition(command.options) === "inherit" && leftmost) {
+    return Effect.fail(rejected("a remote session cannot inherit this process's standard input"))
   }
   if (stdinStream(command.options) !== undefined && !(acceptsStdin && leftmost)) {
     return Effect.fail(
@@ -262,6 +289,41 @@ const handleOf = (
   })
 
 /**
+ * Opens one provider session and adapts it, reporting whether the open
+ * succeeded.
+ *
+ * The session is acquired in the caller's scope, so closing that scope runs
+ * the finalizer `Provider.open` installed. This is the constructor for a
+ * caller that has to TELL a session that opened from one that did not:
+ * {@link make} deliberately cannot, and a supervisor that cached its result
+ * as a live generation would replay one open failure for the life of the
+ * layer without ever calling `open` again.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const makeOpened = (
+  provider: Provider
+): Effect.Effect<ChildProcessSpawner["Service"], ProviderError, Scope.Scope> =>
+  Effect.map(provider.open(provider.session), () => {
+    const allocatePid = pidAllocator()
+    return makeSpawner(
+      Effect.fnUntraced(function*(command: ChildProcess.Command) {
+        yield* validateCommand(command, provider.stdin === true)
+        const rendered = CommandLine.render(command)
+        const input = stdinStream(leftmostOptions(command))
+        const stdin = input === undefined ? undefined : yield* collectStdin(rendered, input)
+        const started = yield* provider.spawn(rendered, {
+          cwd: CommandLine.cwd(command),
+          env: CommandLine.env(command),
+          ...stdin === undefined ? {} : { stdin }
+        }).pipe(Effect.mapError(platformError("spawn", rendered)))
+        return yield* handleOf(rendered, command, started, allocatePid, provider)
+      })
+    )
+  })
+
+/**
  * Opens one provider session and adapts it to Effect's `ChildProcessSpawner`.
  *
  * The session is acquired in the caller's scope, so closing that scope runs
@@ -270,38 +332,20 @@ const handleOf = (
  * which keeps the failure on the action that tried to run something rather
  * than on whatever was building the layer.
  *
- * `SandboxSupervision` uses this constructor to hold one session at a time.
- *
  * @category constructors
  * @since 0.1.0
  */
 export const make = (
   provider: Provider
 ): Effect.Effect<ChildProcessSpawner["Service"], never, Scope.Scope> =>
-  provider.open(provider.session).pipe(
-    Effect.match({
-      onFailure: (error) =>
+  Effect.catch(
+    makeOpened(provider),
+    (error) =>
+      Effect.succeed(
         makeSpawner((command: ChildProcess.Command) =>
           Effect.fail(platformError("open", CommandLine.render(command))(error))
-        ),
-      onSuccess: () => {
-        const allocatePid = pidAllocator()
-        return makeSpawner(
-          Effect.fnUntraced(function*(command: ChildProcess.Command) {
-            yield* validateCommand(command, provider.stdin === true)
-            const rendered = CommandLine.render(command)
-            const input = stdinStream(leftmostOptions(command))
-            const stdin = input === undefined ? undefined : yield* collectStdin(rendered, input)
-            const started = yield* provider.spawn(rendered, {
-              cwd: CommandLine.cwd(command),
-              env: CommandLine.env(command),
-              ...stdin === undefined ? {} : { stdin }
-            }).pipe(Effect.mapError(platformError("spawn", rendered)))
-            return yield* handleOf(rendered, command, started, allocatePid, provider)
-          })
         )
-      }
-    })
+      )
   )
 
 /**

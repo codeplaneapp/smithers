@@ -9,20 +9,26 @@ import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
 import * as Stream from "effect/Stream"
+import { platformReason } from "../internal/platformReason.ts"
 import type { ProviderError, ProviderErrorCode } from "../RemoteChildProcessSpawner/ProviderError.ts"
 import type { Session } from "./Session.ts"
 
 const decoder = new TextDecoder()
 const encoder = new TextEncoder()
 
-/** Provider codes map onto the normalized reasons `PlatformError` already has. */
+/**
+ * The shared provider-code mapping, with one deliberate exception.
+ *
+ * `internal/platformReason` reports `unavailable` as `NotFound`, which is what
+ * a spawner's caller needs: a session that cannot run a command is a session to
+ * retry elsewhere. A filesystem's `NotFound` means something narrower and
+ * load-bearing — `exists` converts it to `false`, and callers remove
+ * idempotently by catching it — so a broken session reported as `NotFound`
+ * here would read as "the path is not there". It stays `Unknown`.
+ */
 const REASON: Record<ProviderErrorCode, PlatformError.SystemErrorTag> = {
-  aborted: "Unknown",
-  timeout: "TimedOut",
-  unavailable: "Unknown",
-  not_found: "NotFound",
-  spawn_error: "Unknown",
-  unknown: "Unknown"
+  ...platformReason,
+  unavailable: "Unknown"
 }
 
 const providerFailure = (method: string, path: string) =>
@@ -60,6 +66,61 @@ interface ProbeResult {
   readonly code: number
   readonly stdout: string
   readonly stderr: string
+}
+
+/**
+ * Every `FileSystem` operation whose leading arguments are paths, and how many
+ * of them are. The table exists so an adapter's native overrides are installed
+ * THROUGH the workdir rooting rule rather than beside it: spreading them raw
+ * handed an override the caller's unresolved `report.txt`, which the platform
+ * then resolved against the host process's working directory instead of the
+ * machine's workspace, contradicting this module's own promise. `glob` is
+ * absent on purpose: its first argument is a pattern, not a path, and
+ * `makeTempDirectory` and its siblings take no path at all.
+ */
+const pathArity: Readonly<Record<string, 1 | 2>> = {
+  access: 1,
+  chmod: 1,
+  chown: 1,
+  copy: 2,
+  copyFile: 2,
+  exists: 1,
+  link: 2,
+  makeDirectory: 1,
+  open: 1,
+  readDirectory: 1,
+  readFile: 1,
+  readFileString: 1,
+  readLink: 1,
+  realPath: 1,
+  remove: 1,
+  rename: 2,
+  sink: 1,
+  stat: 1,
+  stream: 1,
+  symlink: 2,
+  truncate: 1,
+  utimes: 1,
+  watch: 1,
+  writeFile: 1,
+  writeFileString: 1
+}
+
+/** Installs an adapter's native overrides behind the workdir rooting rule. */
+const rooted = (
+  files: Partial<FileSystem.FileSystem>,
+  resolve: (path: string) => string
+): Partial<FileSystem.FileSystem> => {
+  const wrapped: Record<string, unknown> = { ...files }
+  for (const [name, paths] of Object.entries(pathArity)) {
+    const override = wrapped[name]
+    if (override === undefined) continue
+    const call = override as (...args: ReadonlyArray<unknown>) => unknown
+    wrapped[name] = paths === 1
+      ? (path: string, ...rest: ReadonlyArray<unknown>) => call(resolve(path), ...rest)
+      : (from: string, to: string, ...rest: ReadonlyArray<unknown>) => call(resolve(from), resolve(to), ...rest)
+  }
+  return wrapped as Partial<FileSystem.FileSystem>
 }
 
 const probeFailed = (method: string, path: string) =>
@@ -143,7 +204,7 @@ const deniedExit = 12
  *
  * `readFile` and `writeFile` ride the session's own byte-typed operations.
  * Everything else is derived through portable `sh` probes over
- * `Session.spawn`: POSIX `test`, `wc -c`, `ls -A`, `find`, `mkdir`, `rm`,
+ * `Session.spawn`: POSIX `test`, `wc -c`, `ls -1A`, `find`, `mkdir`, `rm`,
  * `mv`, and `dirname`, plus `readlink`/`readlink -f` and `find -mindepth`,
  * which POSIX omits but GNU, busybox, and the BSDs all ship — so any session
  * whose machine has a mainstream `sh` userland serves the whole surface with
@@ -167,7 +228,9 @@ const deniedExit = 12
  * Relative paths resolve against {@link Session.workdir} before they reach the
  * session or an override, so a body that writes `report.txt` lands in the
  * machine's workspace on every backend; the session contract itself stays
- * absolute-only.
+ * absolute-only. An override is installed through the resolver rather than
+ * beside it, so an adapter's native operation gets the rooted path without
+ * having to re-implement the rule.
  *
  * Honest limits of the probe dialect: `stat` reports no mode, no times, and no
  * owner (the portable shell cannot name them; its `size` is exact); a
@@ -285,7 +348,12 @@ export const fileSystem = (session: Session): FileSystem.FileSystem => {
       const script = recursive
         ? `if [ -d ${target} ]; then find ${target} -mindepth 1; ` +
           `elif [ -e ${target} ]; then exit ${badResourceExit}; else exit ${absentExit}; fi`
-        : `if [ -d ${target} ]; then ls -A ${target}; ` +
+        // `ls -1A`, never a bare `ls -A`: POSIX `ls` writes one entry per line
+        // only when its output is not a terminal, and a transport whose channel
+        // IS a pseudo-terminal (ECS Exec's Session Manager channel is one)
+        // would hand back space-padded columns that this line-framed parse
+        // reads as one bogus entry. `-1` forces the framing on every transport.
+        : `if [ -d ${target} ]; then ls -1A ${target}; ` +
           `elif [ -e ${target} ]; then exit ${badResourceExit}; else exit ${absentExit}; fi`
       const result = yield* probe(session, "readDirectory", path, script)
       if (result.code === absentExit) return yield* Effect.fail(notFound("readDirectory", path))
@@ -373,6 +441,6 @@ export const fileSystem = (session: Session): FileSystem.FileSystem => {
       }
       return result.stdout.replace(/\n$/, "")
     }),
-    ...session.files
+    ...session.files === undefined ? {} : rooted(session.files, resolve)
   })
 }

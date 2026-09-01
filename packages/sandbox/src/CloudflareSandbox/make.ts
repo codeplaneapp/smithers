@@ -3,6 +3,7 @@
  *
  * @since 0.1.0
  */
+import * as CommandLine from "@smthrs/kernel/CommandLine"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { decodeBase64, encodeBase64 } from "../internal/base64.ts"
@@ -59,7 +60,7 @@ const processOf = (stdout: string, stderr: string, exitCode: number): RemoteProc
  * Builds a provider backed by Cloudflare Sandbox Durable Objects.
  *
  * The Worker binding is the credential and infrastructure handle. Acquiring a
- * session resolves its collision-proof Durable Object id, disables the SDK's
+ * session resolves its key-derived Durable Object id, disables the SDK's
  * implicit default shell session, and registers `destroy()` on the acquiring
  * scope. `exec` mode uses the completed command result. `process` mode waits
  * for the detached handle and fetches its logs before it reports an outcome,
@@ -123,7 +124,14 @@ export const make = <Binding>(options: Options<Binding>): Provider => {
 
         // The SDK's exec and process options carry no standard input, so the
         // bytes are staged as a workspace file and the command reads from it.
-        const redirect = stdinRedirect({ workdir, writeFile })
+        const redirect = stdinRedirect({
+          workdir,
+          writeFile,
+          remove: (path) =>
+            Effect.asVoid(
+              attempt(() => sandbox.exec(`rm -f ${CommandLine.quote(path)}`), "unknown", `could not remove ${path}`)
+            )
+        })
         const resolveCwd = (cwd: string | undefined): string =>
           cwd === undefined || cwd.startsWith("/")
             ? cwd ?? workdir

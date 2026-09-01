@@ -151,15 +151,17 @@ export const make = (options: Options): Provider => {
               yield* options.fs.writeFile(path, content)
             }).pipe(Effect.mapError(failure("unknown", `the sandbox could not write ${path}`))),
           ping: Effect.void,
+          // Handed the already-rooted path: `Sandbox.fileSystem` installs an
+          // override through its own workdir resolver.
           files: {
-            exists: (path) => options.fs.exists(resolve(path)),
-            stat: (path) => options.fs.stat(resolve(path)),
-            readDirectory: (path, directoryOptions) => options.fs.readDirectory(resolve(path), directoryOptions),
-            makeDirectory: (path, directoryOptions) => options.fs.makeDirectory(resolve(path), directoryOptions),
-            remove: (path, removeOptions) => options.fs.remove(resolve(path), removeOptions),
-            rename: (oldPath, newPath) => options.fs.rename(resolve(oldPath), resolve(newPath)),
-            realPath: (path) => options.fs.realPath(resolve(path)),
-            readLink: (path) => options.fs.readLink(resolve(path))
+            exists: options.fs.exists,
+            stat: options.fs.stat,
+            readDirectory: options.fs.readDirectory,
+            makeDirectory: options.fs.makeDirectory,
+            remove: options.fs.remove,
+            rename: options.fs.rename,
+            realPath: options.fs.realPath,
+            readLink: options.fs.readLink
           } satisfies Partial<FileSystem.FileSystem>
         }
         return session

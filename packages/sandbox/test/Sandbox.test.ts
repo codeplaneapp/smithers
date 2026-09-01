@@ -333,7 +333,7 @@ describe("Sandbox.fileSystem", () => {
       expect(outcome.plain).toBe("BadResource")
       expect(outcome.broken).toBe("Unknown")
       expect(provider.state.commands[0]).toBe(
-        "if [ -d /tree/ ]; then ls -A /tree/; elif [ -e /tree/ ]; then exit 11; else exit 9; fi"
+        "if [ -d /tree/ ]; then ls -1A /tree/; elif [ -e /tree/ ]; then exit 11; else exit 9; fi"
       )
       expect(provider.state.commands[1]).toBe(
         "if [ -d /tree/ ]; then find /tree/ -mindepth 1; elif [ -e /tree/ ]; then exit 11; else exit 9; fi"

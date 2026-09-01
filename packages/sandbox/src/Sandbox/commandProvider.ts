@@ -88,6 +88,13 @@ export const commandProvider = (
     : undefined
   return {
     session: options.session,
+    // Unconditional, unlike `kill` and `ping`: the session contract obliges
+    // every provider to deliver `options.stdin`, so this is an obligation
+    // being restated rather than a capability being declared, and it must not
+    // become another `options.provides` flag. Leaving it unset made the
+    // adapter refuse every input-fed command with `BadArgument` — the exact
+    // silent input loss the flag exists to prevent, inverted.
+    stdin: true,
     open: (session) =>
       Effect.gen(function*() {
         const acquired = yield* provider.acquire(session)

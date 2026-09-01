@@ -157,7 +157,11 @@ const sdkOf = (fake: FakeEcs): AwsSandbox.Sdk => ({
     const step = fake.describeSteps.shift() ?? "ready"
     if (step === "missing") return { failures: [{ arn: input.tasks[0], reason: "MISSING" }] }
     if (step === "empty") return { tasks: [] }
-    return { tasks: [taskFor(input.tasks[0]!, fake.lastContainer, step)] }
+    // The step decides the first task; anything described beside it is a
+    // leftover duplicate, and a duplicate that is merely there is ready.
+    return {
+      tasks: input.tasks.map((task, index) => taskFor(task, fake.lastContainer, index === 0 ? step : "ready"))
+    }
   },
   async stopTask(input) {
     fake.stopInputs.push(input)
@@ -764,20 +768,42 @@ describe("AwsSandbox", () => {
       const second = yield* acquired(provider, (session) => Effect.succeed(session.remoteId), "aws/resume")
       expect(second).toBe(first.remoteId)
       expect(fake.runInputs).toHaveLength(1)
+      // Both desired statuses are asked for, because a task that has not
+      // reached RUNNING is exactly what a crash between RunTask and the
+      // finalizer leaves behind.
+      expect(fake.listInputs.slice(0, 2).map(({ desiredStatus }) => desiredStatus)).toEqual(["RUNNING", "PENDING"])
       expect(fake.listInputs[0]).toMatchObject({ cluster: "cluster-arn", desiredStatus: "RUNNING" })
       // Releasing the adopting scope stops the adopted task like any other.
       expect(fake.stopInputs).toHaveLength(1)
       yield* Scope.close(leaked, Exit.void)
 
-      // A leftover whose agent is not ready is not adopted: a new task starts.
+      // A crash-left task that is still PENDING is adopted and waited for, not
+      // abandoned beside a second one that nothing would ever stop.
       const notReady = fakeEcs()
       const notReadyProvider = transportProvider(notReady, fakeCli())
       const leakedToo = yield* Scope.make()
       yield* Effect.provideService(notReadyProvider.acquire("aws/pending"), Scope.Scope, leakedToo)
       notReady.describeSteps.push("pending")
+      const described = notReady.describeInputs.length
       yield* acquired(notReadyProvider, () => Effect.void, "aws/pending")
-      expect(notReady.runInputs).toHaveLength(2)
+      expect(notReady.runInputs).toHaveLength(1)
+      // The adopter waited for readiness rather than assuming it.
+      expect(notReady.describeInputs.length).toBeGreaterThan(described + 1)
+      expect(notReady.stopInputs).toHaveLength(1)
       yield* Scope.close(leakedToo, Exit.void)
+
+      // Two machines under one key collapse to one: the lowest ARN is adopted
+      // and the duplicate is stopped before anything else is provisioned.
+      const duplicated = fakeEcs()
+      const duplicatedProvider = transportProvider(duplicated, fakeCli())
+      const leakedTwice = yield* Scope.make()
+      yield* Effect.provideService(duplicatedProvider.acquire("aws/duplicate"), Scope.Scope, leakedTwice)
+      const orphan = "arn:aws:ecs:us-west-2:123456789012:task/cluster/task-99"
+      duplicated.running.push({ arn: orphan, startedBy: duplicated.runInputs[0]!.startedBy })
+      yield* acquired(duplicatedProvider, () => Effect.void, "aws/duplicate")
+      expect(duplicated.runInputs).toHaveLength(1)
+      expect(duplicated.stopInputs.map(({ task }) => task)).toContain(orphan)
+      yield* Scope.close(leakedTwice, Exit.void)
 
       // A listing with no ARNs field at all reads as nothing to adopt.
       const bare = fakeEcs()
@@ -848,7 +874,10 @@ describe("AwsSandbox", () => {
         "processes-reach-files",
         "reacquires-its-session",
         "writes-its-output",
-        "reports-a-nonzero-exit"
+        "reports-a-nonzero-exit",
+        // The session contract obliges every provider to deliver standard
+        // input, so a transport-less one is named for that too.
+        "delivers-standard-input"
       ])
     }))
 })

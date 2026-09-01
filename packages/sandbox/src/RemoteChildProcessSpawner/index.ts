@@ -20,6 +20,11 @@
  *   in `RemoteOptions.stdin`; for any other provider the command is rejected
  *   at spawn time rather than losing its input silently. The handle's own
  *   `stdin` sink always fails: there is no interactive channel either way.
+ *   `stdin: "inherit"` is rejected for the same reason a stream is: a local
+ *   spawner would hand the child this process's own standard input, and a
+ *   remote command reading EOF instead is a silent divergence. `"pipe"`,
+ *   `"ignore"`, and `"overlapped"` are accepted, and all three mean the
+ *   command reads no input.
  * - **No signals.** A remote process ends by closing its scope, which runs the
  *   provider's cancellation finalizer; there is no signal to deliver, so `kill`
  *   fails rather than pretending to have delivered one.

@@ -50,6 +50,14 @@ export interface ExecTransport {
    * before base64 encoding. File contents ride inside the command line, whose
    * length the SSM document bounds, so a write is split across as many
    * commands as it needs. Default 3072.
+   *
+   * A whole number of at least 1. It is the increment of the loop that slices
+   * a file, so `0`, a negative value, or `NaN` would spin forever or silently
+   * truncate the write; acquiring a session validates it and fails with
+   * `spawn_error` instead. The upper end belongs to the service: a slice too
+   * large for the SSM document's command length fails the write with AWS's own
+   * message, and every write costs one remote round trip per slice, so a small
+   * value buys nothing but round trips.
    */
   readonly chunkBytes?: number | undefined
 }

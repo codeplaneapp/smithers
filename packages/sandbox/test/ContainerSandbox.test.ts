@@ -348,13 +348,16 @@ describe("ContainerSandbox", () => {
         "exec",
         "--workdir",
         workdir,
-        "--env",
-        "WHO=guest",
-        spawns[0]!.args[5]!,
+        spawns[0]!.args[3]!,
         "/bin/sh",
         "-c",
-        `echo $$ > /tmp/.smthrs-sbx/0.pid; exec sh -c 'printf '\\''hello from %s'\\'' "$WHO"'`
+        "echo $$ > /tmp/.smthrs-sbx/0.pid; if [ -e /tmp/.smthrs-sbx/0.pid.cancel ]; then exit 143; fi; "
+          + `exec env WHO=guest /bin/sh -c 'printf '\\''hello from %s'\\'' "$WHO"'`
       ])
+      // The caller's variables never reach the exec environment, so they can
+      // never break the wrapper the exec starts.
+      expect(spawns[0]!.args).not.toContain("--env")
+      expect(spawns[0]!.args.at(-1)).not.toContain("DROPPED")
       expect(spawns[1]!.args.slice(0, 3)).toEqual(["exec", "--workdir", workdir])
       expect(spawns[3]!.args.slice(1, 3)).toEqual(["--workdir", `${workdir}/sub/nested`])
       const fed = spawns.find((call) => call.args.at(-1)?.includes("cat > stdin-copy.bin"))!
@@ -364,7 +367,7 @@ describe("ContainerSandbox", () => {
     }), 30_000)
 
   it.effect(
-    "starts the wrapper by absolute path so an env PATH override cannot break it",
+    "runs a command whose env overrides PATH, because no shell in the chain is bare",
     () =>
       Effect.gen(function*() {
         const fake = engine()
@@ -382,14 +385,29 @@ describe("ContainerSandbox", () => {
               )
             )
             expect(unresolved).toBe(126)
-            // The provider's wrapper still starts: the failure moves inside the
-            // guest, where the command's own PATH cannot find `sh`, which is
-            // the same honest 127 a local shell would report.
+            // A local spawner running `sh -c 'true'` under `PATH=/nowhere`
+            // exits 0: the host names the shell itself and `true` is a
+            // builtin. The provider must answer the same, which it can only do
+            // if the caller's PATH reaches the command and neither shell.
             const overridden = yield* output(session, "true", { env: { PATH: "/nowhere" } })
-            expect(overridden.code).toBe(127)
+            expect(overridden.code).toBe(0)
+            // A non-identifier name `export` would refuse, an empty value, and
+            // a Unicode value all survive; an undefined value is a deletion.
+            const delivered = yield* output(
+              session,
+              `printf '%s:%s:[%s]' "$(printenv WITH-DASH)" "$KEPT" "$EMPTY"`,
+              { env: { "WITH-DASH": "delivered", "KEPT": "\u00e9\u00e0 two words", "EMPTY": "", "DROPPED": undefined } }
+            )
+            expect(delivered).toEqual({ stdout: "delivered:\u00e9\u00e0 two words:[]", code: 0 })
+            expect((yield* output(session, `printf '%s' "\${DROPPED-unset}"`, { env: { DROPPED: undefined } })).stdout)
+              .toBe("unset")
           }))
-        const wrapped = fake.calls.filter((call) => call.args.at(-1)?.includes("exec sh -c") === true)
-        expect(wrapped.every((call) => call.args.includes("/bin/sh"))).toBe(true)
+        // Every wrapper in the chain names its shell absolutely, whether or
+        // not the caller supplied an environment for the command.
+        const wrapped = fake.calls.filter((call) => call.args.at(-1)?.includes("exec ") === true)
+        expect(wrapped.length).toBeGreaterThan(0)
+        expect(wrapped.every((call) => /exec (?:env .+ )?\/bin\/sh -c/.test(call.args.at(-1) ?? ""))).toBe(true)
+        expect(wrapped.some((call) => /exec (?:env .+ )?sh -c/.test(call.args.at(-1) ?? ""))).toBe(false)
       }),
     30_000
   )
@@ -540,7 +558,7 @@ describe("ContainerSandbox", () => {
       expect((writeFailure as ProviderError).code).toBe("spawn_error")
 
       const failingExec = engine((args) =>
-        args.at(-1)?.includes("exec sh -c") === true ? { failSpawn: true } : undefined
+        args.at(-1)?.includes("exec /bin/sh -c") === true ? { failSpawn: true } : undefined
       )
       const execFailure = yield* Effect.flip(
         acquired(ContainerSandbox.make({ spawner: failingExec.spawner, image: "img", workdir }), (session) =>

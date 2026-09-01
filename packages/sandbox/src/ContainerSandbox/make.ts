@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import { killScript } from "../internal/killScript.ts"
+import { cancelGuard, killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure, remoteProcessOf } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
@@ -70,10 +70,13 @@ const pidDirectory = "/tmp/.smthrs-sbx"
  * `spawn` honors the whole session contract, not just the command line. A
  * command's `stdin` bytes travel on the exec's own input channel
  * (`--interactive`), a relative `cwd` is resolved under {@link Session.workdir}
- * before it reaches `--workdir` (which requires an absolute path), and the
- * exec's argv names `/bin/sh` absolutely, because the engine resolves a bare
- * `sh` through the exec environment's `PATH` and a caller's `env` override
- * would otherwise break the wrapper before the command ever ran. Closing a
+ * before it reaches `--workdir` (which requires an absolute path), and both
+ * shells in the chain name `/bin/sh` absolutely, because the engine resolves a
+ * bare `sh` through the exec environment's `PATH` and a caller's `env`
+ * override would otherwise break the wrapper before the command ever ran. For
+ * the same reason the caller's variables travel as an `env(1)` prefix on the
+ * inner shell rather than as `--env` on the exec: they belong to the command,
+ * not to the plumbing that starts it. Closing a
  * spawn's scope is the process's lifetime ending: the local CLI client is torn
  * down and, unless the command was already observed to end, the guest process
  * is signalled through the same pid-walk `kill` uses, so a scope cannot close
@@ -187,6 +190,15 @@ export const make = (options: ContainerSandboxOptions): Provider => {
           spawn: Effect.fnUntraced(function*(command, spawnOptions) {
             const pidfile = `${pidDirectory}/${nextPidfile++}.pid`
             const stdin = spawnOptions.stdin
+            // The caller's variables reach the COMMAND, never the wrapper. As
+            // `--env` they were part of the exec environment, so a `PATH`
+            // override broke the wrapper's own `sh` one layer in — the same
+            // failure the absolute `/bin/sh` below exists to prevent, moved
+            // rather than fixed. `env(1)` also passes a name `export` would
+            // refuse (`a-b=1`), which is what the session contract accepts.
+            const environment = Object.entries(spawnOptions.env ?? {}).flatMap(([key, value]) =>
+              value === undefined ? [] : [CommandLine.quote(`${key}=${value}`)]
+            )
             const args = [
               "exec",
               // The exec has a real input channel; it is asked for only when
@@ -196,16 +208,18 @@ export const make = (options: ContainerSandboxOptions): Provider => {
               // cwd is rooted at the session workdir before it gets here.
               "--workdir",
               resolveCwd(spawnOptions.cwd),
-              ...Object.entries(spawnOptions.env ?? {}).flatMap(([key, value]) =>
-                value === undefined ? [] : ["--env", `${key}=${value}`]
-              ),
               name,
               // Absolute on purpose: the engine resolves the exec's argv
               // through the exec environment's PATH, so a caller's PATH
               // override would keep a bare `sh` from ever starting.
               "/bin/sh",
               "-c",
-              `echo $$ > ${pidfile}; exec sh -c ${CommandLine.quote(command)}`
+              // The pid survives the whole chain: `exec` replaces the recorded
+              // shell with env, env replaces itself with `/bin/sh`, and
+              // `sh -c` execs a lone simple command.
+              `echo $$ > ${pidfile}; ${cancelGuard(pidfile)}; exec ${
+                environment.length === 0 ? "" : `env ${environment.join(" ")} `
+              }/bin/sh -c ${CommandLine.quote(command)}`
             ]
             const handle = yield* options.spawner.spawn(
               ChildProcess.make(program, args, stdin === undefined ? {} : { stdin: Stream.make(stdin) })

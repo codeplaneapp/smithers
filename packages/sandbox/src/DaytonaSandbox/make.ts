@@ -75,7 +75,7 @@ const machineName = (prefix: string, session: string): string =>
 /**
  * Builds a provider backed by Daytona sandboxes.
  *
- * A collision-proof name derived from the session key is looked up first. A
+ * A name derived from the session key is looked up first. A
  * missing sandbox is created with that name, while an existing one is started
  * before use. Creation or attachment is registered as a scoped resource before
  * start and workspace preparation, so any later failure still runs the
@@ -181,7 +181,11 @@ export const make = (options: Options): Provider => ({
       // `executeCommand` takes a command line and nothing else, so a
       // command's standard input is staged as a workspace file and the line
       // is rewritten to read from it.
-      const redirect = stdinRedirect({ workdir, writeFile })
+      const redirect = stdinRedirect({
+        workdir,
+        writeFile,
+        remove: (path) => Effect.asVoid(execute(`rm -f ${CommandLine.quote(path)}`))
+      })
       const resolveCwd = (cwd: string | undefined): string =>
         cwd === undefined || cwd.startsWith("/")
           ? cwd ?? workdir

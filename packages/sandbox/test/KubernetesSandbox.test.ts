@@ -495,10 +495,12 @@ describe("KubernetesSandbox", () => {
           "--",
           "sh",
           "-c",
-          `cd ${workdir} && echo $$ > /tmp/.smthrs-sbx/0.pid && exec sh -c pwd`
+          `cd ${workdir} && echo $$ > /tmp/.smthrs-sbx/0.pid`
+            + " && if [ -e /tmp/.smthrs-sbx/0.pid.cancel ]; then exit 143; fi"
+            + " && exec /bin/sh -c pwd"
         ])
         const withEnv = spawns.find((call) => call.args.at(-1)?.includes("env ") === true)!
-        expect(withEnv.args.at(-1)).toContain(`exec env 'KEPT=two words' WITH-DASH=delivered sh -c`)
+        expect(withEnv.args.at(-1)).toContain(`exec env 'KEPT=two words' WITH-DASH=delivered /bin/sh -c`)
         expect(withEnv.args.at(-1)).not.toContain("DROPPED")
         expect(withEnv.args.at(-1)).not.toContain("export")
         const fed = spawns.find((call) => call.args.at(-1)?.includes("cat > stdin-copy.bin") === true)!
@@ -631,7 +633,7 @@ describe("KubernetesSandbox", () => {
       )
       expect((pingError as ProviderError).code).toBe("unavailable")
 
-      const noExec = cluster((args) => args.at(-1)?.includes("exec sh -c") === true ? { failSpawn: true } : undefined)
+      const noExec = cluster((args) => args.at(-1)?.includes("exec /bin/sh -c") === true ? { failSpawn: true } : undefined)
       const spawnError = yield* Effect.flip(
         acquired(KubernetesSandbox.make({ spawner: noExec.spawner, image: "img", workdir }), (session) =>
           Effect.scoped(Effect.asVoid(session.spawn("true", {}))))
