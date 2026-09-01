@@ -39,6 +39,29 @@ function rgbaOver(color: string, background: Rgb): Rgb {
   return channels.map((channel, index) => channel * alpha + background[index]! * (1 - alpha)) as unknown as Rgb;
 }
 
+/** The `saturate()` amount in the topbar's `backdrop-filter`. */
+const TOPBAR_SATURATION = 1.8;
+
+/** Foregrounds the topbar carries: the text ramp plus brand-colored pills. */
+const TOPBAR_FOREGROUNDS = ["text", "textMuted", "textFaint", "textPlaceholder", "brand"] as const;
+
+/**
+ * The Filter Effects `saturate(s)` color matrix, applied in sRGB.
+ *
+ * `backdrop-filter` filters the backdrop before the element's own translucent
+ * background composites over it, so a saturated backdrop is what the pixels
+ * under the topbar text actually are.
+ */
+function saturate(channels: Rgb, s: number): Rgb {
+  const [r, g, b] = channels;
+  const out = [
+    (0.213 + 0.787 * s) * r + (0.715 - 0.715 * s) * g + (0.072 - 0.072 * s) * b,
+    (0.213 - 0.213 * s) * r + (0.715 + 0.285 * s) * g + (0.072 - 0.072 * s) * b,
+    (0.213 - 0.213 * s) * r + (0.715 - 0.715 * s) * g + (0.072 + 0.928 * s) * b,
+  ];
+  return out.map((channel) => Math.min(255, Math.max(0, channel))) as unknown as Rgb;
+}
+
 /** One audited pair: a label a failure can be read from, and both resolved colors. */
 export type PaintedPair = {
   readonly label: string;
@@ -82,11 +105,24 @@ export const PAINTED_PAIRS: readonly PaintedPair[] = [
   // `.top,.topbar`: the one translucent background this sheet paints text on.
   // It sits directly on the shell, whose background is `--bg`, and carries the
   // title, meta text, and brand-colored pills.
-  ...(["text", "textMuted", "textFaint", "textPlaceholder", "brand"] as const).map((token): PaintedPair => ({
-    label: `${token} on the glass topbar over bg`,
-    foreground: (variant) => rgbChannels(variant[token]),
-    background: (variant) => rgbaOver(variant.surfaceGlassStrong, rgbChannels(variant.bg)),
-  })),
+  //
+  // Two rendering paths, both audited. Without `backdrop-filter` support the
+  // translucent fill composites straight onto `--bg`; with it, the backdrop is
+  // filtered first. `blur(18px)` is inert over a uniform background but
+  // `saturate(180%)` is not, so the live path is measured separately.
+  ...TOPBAR_FOREGROUNDS.flatMap((token) => [
+    {
+      label: `${token} on the glass topbar over bg`,
+      foreground: (variant: ThemeVariantTokens) => rgbChannels(variant[token]),
+      background: (variant: ThemeVariantTokens) => rgbaOver(variant.surfaceGlassStrong, rgbChannels(variant.bg)),
+    },
+    {
+      label: `${token} on the saturated glass topbar over bg`,
+      foreground: (variant: ThemeVariantTokens) => rgbChannels(variant[token]),
+      background: (variant: ThemeVariantTokens) =>
+        rgbaOver(variant.surfaceGlassStrong, saturate(rgbChannels(variant.bg), TOPBAR_SATURATION)),
+    },
+  ]),
   // .badge.ok/.warn/.running/.info/.bad and .pill, whose text is the semantic
   // color on the matching `*-soft` tint.
   ...SEMANTICS.map((semantic): PaintedPair => ({
@@ -118,9 +154,7 @@ export const PAINTED_PAIRS: readonly PaintedPair[] = [
     foreground: (variant) => rgbChannels(variant.warning),
     background: (variant) => rgbChannels(variant.codeBg),
   },
-  // Inverted chrome (`--ink`, tooltips, inverse buttons) and `::selection`,
-  // which inverts rather than tinting so the selected pair does not depend on
-  // which run of text the user dragged over.
+  // Inverted chrome: `--ink`, tooltips, inverse buttons.
   {
     label: "inverseText on inverseBg",
     foreground: (variant) => rgbChannels(variant.inverseText),
@@ -169,9 +203,13 @@ export const KNOWN_CONTRAST_GAPS: ReadonlyMap<string, number> = new Map([
   ["solarized/light/textMuted on hover", 4.1193],
   ["solarized/light/text on the neutral active fill", 3.8499],
   ["solarized/light/text on the glass topbar over bg", 4.3432],
+  ["solarized/light/text on the saturated glass topbar over bg", 4.3394],
   ["solarized/light/textMuted on the glass topbar over bg", 4.3432],
+  ["solarized/light/textMuted on the saturated glass topbar over bg", 4.3394],
   ["solarized/light/textFaint on the glass topbar over bg", 4.3432],
+  ["solarized/light/textFaint on the saturated glass topbar over bg", 4.3394],
   ["solarized/light/textPlaceholder on the glass topbar over bg", 4.3432],
+  ["solarized/light/textPlaceholder on the saturated glass topbar over bg", 4.3394],
   ["solarized/light/codeText on codeBg", 4.1296],
   ["solarized/light/inverseText on inverseBg", 4.1296],
   ["solarized/dark/text on surface", 4.3939],
@@ -190,9 +228,13 @@ export const KNOWN_CONTRAST_GAPS: ReadonlyMap<string, number> = new Map([
   ["solarized/dark/textMuted on hover", 4.1596],
   ["solarized/dark/text on the neutral active fill", 3.8358],
   ["solarized/dark/text on the glass topbar over bg", 4.4463],
+  ["solarized/dark/text on the saturated glass topbar over bg", 4.3832],
   ["solarized/dark/textMuted on the glass topbar over bg", 4.4463],
+  ["solarized/dark/textMuted on the saturated glass topbar over bg", 4.3832],
   ["solarized/dark/textFaint on the glass topbar over bg", 4.4463],
+  ["solarized/dark/textFaint on the saturated glass topbar over bg", 4.3832],
   ["solarized/dark/textPlaceholder on the glass topbar over bg", 4.4463],
+  ["solarized/dark/textPlaceholder on the saturated glass topbar over bg", 4.3832],
 ]);
 
 /**

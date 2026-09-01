@@ -56,7 +56,9 @@ Two rules follow from the table:
   inline code sit on the opaque `--surface-2` rather than the translucent
   `--hover-subtle` and `--inline-code-bg`, so their pair does not depend on the
   parent surface. `.top,.topbar` is the one translucent text background left,
-  and the table composites it over `--bg`.
+  and the table composites it over `--bg` twice: once plain, for browsers
+  without `backdrop-filter`, and once over a backdrop put through the rule's own
+  `saturate(180%)`, which is what supported browsers paint.
 - The sheet sets no `::selection` rule. A brand wash leaves the foreground
   inherited, so it lands under all nine foregrounds this sheet paints; even an
   8% wash misses 4.5:1 in 24 (foreground, palette, mode) combinations, and the

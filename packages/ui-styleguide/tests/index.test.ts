@@ -38,6 +38,26 @@ describe("ui styleguide", () => {
     }
   });
 
+  test("keeps the topbar backdrop filter tied to the saturation the audit models", () => {
+    // `tests/paintedPairs.ts` composites the topbar over a backdrop saturated
+    // by exactly this amount. A change here without a change there would audit
+    // a background the browser does not paint.
+    const rule = workflowUiThemeCss.split("\n").find((line) => line.startsWith(".top,.topbar {"));
+    expect(rule).toBeDefined();
+    expect(rule).toContain("background:var(--surface-glass-strong)");
+    expect(rule?.match(/backdrop-filter:blur\(18px\) saturate\(180%\)/g)).toHaveLength(2);
+  });
+
+  test("sets an explicit foreground on every surface that is not the page background", () => {
+    // `.livelog` painted `--code-bg` while letting its text inherit `--text`,
+    // an unaudited pair that is not an alias of `--code-text` in every palette.
+    for (const selector of [".livelog {", ".code,.source,pre.code {"]) {
+      const rule = workflowUiThemeCss.split("\n").find((line) => line.startsWith(selector));
+      expect(rule, selector).toBeDefined();
+      expect(rule, selector).toContain("color:var(--code-text)");
+    }
+  });
+
   test("ships one global reduced-motion policy after primitive transitions", () => {
     expect(workflowUiThemeCss.endsWith(reducedMotionCss)).toBe(true);
     expect(workflowUiThemeCss.match(/@media \(prefers-reduced-motion: reduce\)/g)).toHaveLength(1);

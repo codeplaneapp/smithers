@@ -105,7 +105,7 @@ export const workflowUiThemeCss = [
   ".table th { color:var(--muted); font-size:var(--fs-1); text-transform:uppercase; letter-spacing:.04em; font-weight:650; }",
   ".code,.source,pre.code { display:block; min-width:0; overflow:auto; white-space:pre-wrap; font-family:var(--font-mono); font-size:var(--fs-1); line-height:1.55; color:var(--code-text); background:var(--code-bg); border:1px solid var(--border); border-radius:var(--r-2); padding:10px; }",
   ".plus { color:var(--success); } .minus { color:var(--danger); }",
-  ".livelog { overflow:auto; background:var(--code-bg); border:1px solid var(--border); border-radius:var(--r-2); padding:var(--sp-2); font-family:var(--font-mono); font-size:var(--fs-1); line-height:1.55; }",
+  ".livelog { overflow:auto; background:var(--code-bg); color:var(--code-text); border:1px solid var(--border); border-radius:var(--r-2); padding:var(--sp-2); font-family:var(--font-mono); font-size:var(--fs-1); line-height:1.55; }",
   ".livelog-line { display:flex; gap:var(--sp-2); padding:2px 0; white-space:pre-wrap; word-break:break-word; }",
   ".livelog-event { color:var(--brand); flex:none; }",
   ".livelog-node { color:var(--warning); flex:none; }",
