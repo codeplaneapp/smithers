@@ -32,6 +32,50 @@ describe("install engine boundary", () => {
     expect(environment).toEqual({ Path: "C:\\Windows" })
   })
 
+  /**
+   * `layerPackageManager` hands this function the real `process.env`. A Windows
+   * runner's environment carries names the POSIX convention never produces:
+   * `ProgramFiles(x86)` and `CommonProgramFiles(x86)` are set by Windows itself
+   * on every 64-bit image. Refusing the whole environment because the operating
+   * system named a variable the way it always has is a build that cannot run.
+   */
+  it("forwards the environment a Windows host sets for itself", () => {
+    const environment = packageManagerEnvironment(
+      {
+        Path: "C:\\Windows",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "CommonProgramFiles(x86)": "C:\\Program Files (x86)\\Common Files",
+        SMITHERS_CACHE_TOKEN: "secret"
+      },
+      [],
+      true
+    )
+
+    expect(environment).toEqual({
+      Path: "C:\\Windows",
+      "ProgramFiles(x86)": "C:\\Program Files (x86)",
+      "CommonProgramFiles(x86)": "C:\\Program Files (x86)\\Common Files"
+    })
+  })
+
+  /**
+   * Windows still has a name rule, and it is the environment block's own: a
+   * name is non-empty and carries no `=`, because `NAME=VALUE` is the block's
+   * only separator. A name the block cannot represent would be mangled by the
+   * spawn rather than passed, so it fails here instead.
+   */
+  it("refuses a name a Windows environment block cannot carry", () => {
+    expect(() => packageManagerEnvironment({ "A=B": "x" }, [], true)).toThrow(/non-portable name/)
+    expect(() => packageManagerEnvironment({ "": "x" }, [], true)).toThrow(/non-portable name/)
+    expect(() => packageManagerEnvironment({ "A\u0007B": "x" }, [], true)).toThrow(/non-portable name/)
+  })
+
+  /** Off Windows the portable name rule is unchanged. */
+  it("keeps the portable name rule on a POSIX host", () => {
+    expect(() => packageManagerEnvironment({ "ProgramFiles(x86)": "x" }, [], false))
+      .toThrow(/non-portable name/)
+  })
+
   it("rejects malformed sensitive-name declarations", () => {
     expect(() => packageManagerEnvironment({}, ["BAD-NAME"])).toThrow("invalid environment name")
     expect(() => packageManagerEnvironment({}, Array.from({ length: 65 }, () => "TOKEN")))

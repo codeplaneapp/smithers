@@ -68,6 +68,26 @@ export interface InstallResult {
   readonly result: Install.LinkManifest
 }
 
+/**
+ * The POSIX convention for an environment name: what `export NAME=` accepts.
+ */
+const portableEnvironmentName = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/**
+ * The Windows environment block's own rule: `NAME=VALUE` entries separated by
+ * NUL, so a name is non-empty and carries neither `=` nor a control character.
+ *
+ * Windows itself sets names the POSIX convention never produces.
+ * `ProgramFiles(x86)` and `CommonProgramFiles(x86)` are on every 64-bit image,
+ * including the GitHub Actions `windows-latest` runner, so holding a Windows
+ * host to the POSIX rule refuses the whole environment before any command runs.
+ */
+const windowsEnvironmentName = /^[^=\u0000-\u001F\u007F]+$/
+
+/** Whether a name is one the host can carry into a child environment. */
+const usableEnvironmentName = (name: string, windows: boolean): boolean =>
+  windows ? windowsEnvironmentName.test(name) : portableEnvironmentName.test(name)
+
 const normalizeSensitiveEnvironment = (value: unknown): ReadonlyArray<string> => {
   let length: number
   try {
@@ -139,7 +159,7 @@ export const packageManagerEnvironment = (
   const seen = new Set<string>()
   let bytes = 0
   for (const key of keys) {
-    if (typeof key !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+    if (typeof key !== "string" || !usableEnvironmentName(key, windows)) {
       throw new TypeError("environment source contains a non-portable name")
     }
     let descriptor: PropertyDescriptor | undefined

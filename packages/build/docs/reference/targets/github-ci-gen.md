@@ -189,11 +189,32 @@ explicit `smithers-build build` of a `mode: "write"` target generates a file.
 | ----------------- | ----------------------- | -------- | ------------------------------------------------------------------------------------------- |
 | `id`              | `string`                | required | GitHub job id: a letter or `_`, then letters, digits, `-`, `_`.                             |
 | `name`            | `string`                | optional | Operator-facing job name.                                                                   |
-| `runsOn`          | `string`                | required | One runner label, or a label set `[a, b]`.                                                  |
+| `runsOn`          | `string`                | required unless `matrix` | One runner label, or a label set `[a, b]`. A job declares `runsOn` or `matrix`, never both and never neither. |
+| `matrix`          | `Array<MatrixRow>`      | optional | A platform matrix. The job renders once and runs per row, with `runs-on: ${{ matrix.os }}`. See [MatrixRow](#matrixrow). |
 | `timeoutMinutes`  | `number`                | optional | A whole number from 1 to 360.                                                               |
 | `continueOnError` | `boolean`               | optional | Advisory lane.                                                                              |
 | `toolchain`       | `CiToolchain.Toolchain` | required | What the runner must provide before the first target runs. See [CiToolchain](#citoolchain). |
 | `steps`           | `Array<TargetStep>`     | required | The target invocations this job performs. A job with none is refused.                       |
+
+### MatrixRow
+
+| Name       | Type      | Default | Description                                                                              |
+| ---------- | --------- | ------- | ---------------------------------------------------------------------------------------- |
+| `os`       | `string`  | required | Exactly ONE runner label, not the label set `runsOn` accepts: a row's value is also its `include:` key, and GitHub matches an include row by value. |
+| `advisory` | `boolean` | `false`  | Whether a red run of THIS row leaves the pipeline green. A platform is advisory exactly until it is proven green. |
+
+A matrix job renders `strategy.matrix.os` from the rows, an `include:` entry per
+row carrying that row's `advisory` bit, and `continue-on-error:
+${{ matrix.advisory }}`. The bit is data rather than a job-level
+`continue-on-error: true`, which would excuse every row, and rather than an
+`if:`, which this renderer never emits. `fail-fast` is the constant
+`matrixFailFast` (`false`): a platform matrix asks which platforms are green,
+and cancelling the remaining rows when one fails throws away the answer.
+
+A matrix job reports one GitHub check per row, named after the rendered job
+name, so `package suites (${{ matrix.os }})` over three rows becomes three
+checks: `package suites (ubuntu-latest)`, `(macos-latest)`, `(windows-latest)`.
+Branch protection lists them individually.
 
 ### TargetStep
 
@@ -295,8 +316,14 @@ its own terms, so `[self-hosted, null]` renders `[self-hosted, "null"]` rather
 than silently losing a label. A value that opens a flow collection without being
 that label set — `[self-hosted, my label]`, `{group: g, labels: [x]}`, `[]` — is
 **refused**, because quoting it would produce a single label no runner carries
-and a job that never picks up. An expression (`${{ matrix.os }}`) is a quoted
-scalar, which GitHub still evaluates.
+and a job that never picks up. An expression in a declared `runsOn` string
+(`${{ matrix.os }}`) is a quoted scalar, which GitHub still evaluates.
+
+A matrix job does not go through that path at all: the renderer emits
+`runs-on: ${{ matrix.os }}` unquoted from `matrixExpressions.os`, and
+`continue-on-error: ${{ matrix.advisory }}` from `matrixExpressions.advisory`.
+Both are generator-owned constants, never operator input, so neither is
+validated as a label.
 
 ### No step conditions
 

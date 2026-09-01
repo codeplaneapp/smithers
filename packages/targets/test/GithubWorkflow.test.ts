@@ -27,10 +27,23 @@ import {
  */
 const realWorkflowPath = NodePath.resolve(
   import.meta.dirname,
-  "../../.github/workflows/ci.yml"
+  "../../../.github/workflows/ci.yml"
 )
 
-const readReal = async (): Promise<string | undefined> => Fs.readFile(realWorkflowPath, "utf8").catch(() => undefined)
+/**
+ * The real pipeline, or a failure naming the path.
+ *
+ * It used to swallow the read error and return `undefined`, and every test
+ * below opened with `if (source === undefined) return`. The path was one `..`
+ * short of the repository root, so it resolved to `packages/.github/workflows/
+ * ci.yml`, which has never existed: three tests that claim to hold the
+ * repository's own pipeline to its required jobs passed by reading nothing.
+ * A missing workflow is now the failure it always was.
+ */
+const readReal = async (): Promise<string> =>
+  Fs.readFile(realWorkflowPath, "utf8").catch((cause: unknown) => {
+    throw new Error(`the repository pipeline is missing at ${realWorkflowPath}`, { cause })
+  })
 
 /** Most focused fixtures omit trigger prose; supply the smallest real trigger. */
 const parseWorkflow = (source: string): ReturnType<typeof parseStrictWorkflow> =>
@@ -427,18 +440,23 @@ describe("parseWorkflow", () => {
 
   it("parses the Smithers repository's own pipeline", async () => {
     const source = await readReal()
-    if (source === undefined) return
     const workflow = parseWorkflow(source)
     expect(workflow.name).toBe("CI")
     expect(workflow.jobs.map((job) => job.id)).toEqual([
       "test",
+      "apps-e2e",
       "rust",
       "wasm-repro",
+      "e2e-faults",
       "bun",
       "browser",
-      "node-macos",
-      "node-windows"
+      "packages"
     ])
+    // The platform matrix parses as ONE job whose runner is the matrix
+    // expression, not as three copy-pasted jobs.
+    const matrix = workflow.jobs.find((job) => job.id === "packages")!
+    expect(matrix.runsOn).toBe("${{ matrix.os }}")
+    expect(matrix.continueOnError).toBe("${{ matrix.advisory }}")
     // Every job has at least a checkout, so no job parsed as empty.
     for (const job of workflow.jobs) expect(job.steps.length).toBeGreaterThan(0)
   })
@@ -450,8 +468,7 @@ describe("parseWorkflow", () => {
    */
   it("holds the flows pipeline's required jobs to running unconditionally", async () => {
     const source = await readReal()
-    if (source === undefined) return
-    const required = ["test", "rust", "wasm-repro", "bun", "browser", "node-macos", "node-windows"]
+    const required = ["test", "apps-e2e", "rust", "wasm-repro", "bun", "browser", "packages"]
     expect(missingRequiredJobs(parseWorkflow(source), required)).toEqual([])
     const skipped = source.replace(/^ {2}bun:$/m, "  bun:\n    if: false")
     expect(skipped).not.toBe(source)
@@ -470,10 +487,16 @@ describe("parseWorkflow", () => {
    * contract in front of a red pipeline. This closes that gap for the real
    * repository: every `pnpm run <script>` a step invokes must be a script in
    * the root manifest, and every `node <file>` must be a file on disk.
+   *
+   * The generated pipeline invokes NEITHER. `GithubCiGen` renders a target
+   * invocation, an install, or a declared toolchain command and nothing else,
+   * so both sets are empty and the gap this test guards is closed by
+   * construction. The emptiness is asserted rather than assumed: a run line
+   * that names a script or a file again is a step that left the target graph,
+   * and the existence checks below engage the moment one appears.
    */
   it("runs only scripts and files the Smithers repository actually has", async () => {
     const source = await readReal()
-    if (source === undefined) return
     const manifest = JSON.parse(
       await Fs.readFile(NodePath.resolve(realWorkflowPath, "../../../package.json"), "utf8")
     ) as { readonly scripts?: Readonly<Record<string, string>> }
@@ -499,16 +522,24 @@ describe("parseWorkflow", () => {
       ...commands.matchAll(/\bpnpm ([^\n]*?)run ([\w:-]+)/g),
       ...commands.matchAll(/\bpnpm (--recursive |)(test)\b/g)
     ].map((match) => ({ recursive: /(^|\s)(-r|--recursive|--filter)(\s|=|$)/.test(match[1]!), script: match[2]! }))
-    expect(invocations.length).toBeGreaterThan(0)
     expect(
       invocations
         .filter(({ recursive, script }) => !(recursive ? workspaceScripts : scripts).has(script))
         .map(({ script }) => script)
     ).toEqual([])
+    // The generated pipeline runs no pnpm script at all, and the root manifest
+    // still has the scripts this check would resolve against, so an empty set
+    // here is the pipeline's shape rather than a manifest that failed to load.
+    expect(invocations).toEqual([])
+    expect(scripts.size).toBeGreaterThan(0)
+    expect(workspaceScripts.size).toBeGreaterThan(0)
 
     const invokedFiles = [...commands.matchAll(/\bnode (?:--test )?([\w./-]+\.(?:mjs|js|cjs))/g)]
       .map((match) => match[1]!)
-    expect(invokedFiles.length).toBeGreaterThan(0)
+    expect(invokedFiles).toEqual([])
+    // The run lines the pipeline DOES carry, so the two empty sets above are
+    // read against a workflow that was parsed, not an empty string.
+    expect(commands).toContain("pnpm exec smithers-build test '//packages/...'")
     const missing: Array<string> = []
     for (const file of [...new Set(invokedFiles)]) {
       const absolute = NodePath.resolve(realWorkflowPath, "../../..", file)

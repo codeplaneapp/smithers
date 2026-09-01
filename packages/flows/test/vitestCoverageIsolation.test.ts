@@ -490,6 +490,49 @@ describe("vitest coverage isolation conformance", () => {
     expect(ci).toMatch(/^\s*run: jj git init --colocate$/m)
   })
 
+  it("runs the package suites on every platform as one matrix, with the advisory bit as data", () => {
+    // The package suites used to be a required ubuntu job plus two
+    // copy-pasted advisory jobs, `node-macos` and `node-windows`, free to
+    // drift into running different steps. One matrix runs the same step
+    // everywhere. What is pinned is the shape that makes a platform's status
+    // legible without an `if:` key: the platform list, one `include:` row per
+    // platform carrying its own advisory bit, and a `continue-on-error` that
+    // reads that bit rather than excusing every row at once.
+    //
+    // macOS and Windows are advisory ONLY until the matrix proves them green.
+    // Promoting one flips its boolean in BUILD.ts and moves the `advisory:
+    // true` line below; leaving a promoted platform advisory here is the drift
+    // this cell exists to force into review.
+    const ci = readFileSync(join(packagesDir, "..", ".github", "workflows", "ci.yml"), "utf8")
+    expect(ci).toContain(
+      `  packages:
+    name: "package suites (\${{ matrix.os }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            advisory: false
+          - os: macos-latest
+            advisory: true
+          - os: windows-latest
+            advisory: true
+    runs-on: \${{ matrix.os }}
+    timeout-minutes: 60
+    continue-on-error: \${{ matrix.advisory }}
+`
+    )
+    // One rendering of the step, shared by every platform.
+    expect(ci.split("run: pnpm exec smithers-build test '//packages/...'").length - 1).toBe(1)
+    // The lanes the matrix replaced are gone, not renamed alongside it.
+    expect(ci).not.toContain("node-macos")
+    expect(ci).not.toContain("node-windows")
+    // A red platform must not cancel the platforms still running: the matrix
+    // exists to answer which platforms are green.
+    expect(ci).toMatch(/^ {6}fail-fast: false$/m)
+  })
+
   it("keeps every CI step a target invocation, never a hand-written command", () => {
     // The rule this pins: a BUILD.ts file declares targets, and the argv a
     // target runs is rendered inside its implementation. A `run:` line in the
