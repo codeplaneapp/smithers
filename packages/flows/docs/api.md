@@ -1,9 +1,9 @@
 # @smthrs/flows
 
 The aggregate entry point re-exports every durable-engine package without
-flattening neighboring constructors. `@smthrs/flow` authoring names are flat,
-and `TimeTravel` is a flat service key; infrastructure packages remain
-namespaces.
+flattening neighboring constructors. [`@smthrs/flow`](/api/flow) authoring
+names are flat, and `TimeTravel` is a flat service key; infrastructure packages
+remain namespaces.
 
 ```sh
 pnpm add @smthrs/flows@rc
