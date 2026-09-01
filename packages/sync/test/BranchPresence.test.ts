@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Duration, Effect, Fiber, Layer, Stream } from "effect"
+import { Duration, Effect, Fiber, Layer, Redacted, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import * as BranchPresence from "../src/BranchPresence.ts"
 import * as BranchProtocol from "../src/BranchProtocol.ts"
@@ -13,7 +13,7 @@ const participant = (id: string) => id as BranchProtocol.ParticipantId
 const leaseMs = 30_000
 
 const layer = BranchPresence.layer({ leaseMs }).pipe(
-  Layer.provideMerge(BranchShare.layerHmac({ secret: "presence-secret" }))
+  Layer.provideMerge(BranchShare.layerHmac({ secret: Redacted.make("presence-secret") }))
 )
 
 const run = <A, E>(effect: Effect.Effect<A, E, BranchPresence.BranchPresence | BranchShare.BranchShare>) =>

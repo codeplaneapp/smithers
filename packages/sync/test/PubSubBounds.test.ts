@@ -14,7 +14,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import type { JournalEvent } from "@smthrs/journal"
-import { Deferred, Effect, Fiber, Stream } from "effect"
+import { Deferred, Effect, Fiber, Redacted, Stream } from "effect"
 import * as BranchPresence from "../src/BranchPresence.ts"
 import type { BranchId, ParticipantId, ShareCapability } from "../src/BranchProtocol.ts"
 import * as BranchShare from "../src/BranchShare.ts"
@@ -107,5 +107,5 @@ describe("bounded change feeds", () => {
       // Dropping a notification never drops the roster it announced.
       const last = capabilities[overflow - 1]!
       expect(yield* presence.list({ capability: last, branchId: branchId(overflow - 1) })).toHaveLength(1)
-    }).pipe(Effect.provide(BranchShare.layerHmac({ secret: "bounded-presence-secret" }))))
+    }).pipe(Effect.provide(BranchShare.layerHmac({ secret: Redacted.make("bounded-presence-secret") }))))
 })

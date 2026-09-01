@@ -143,7 +143,11 @@ describe("SyncServer.read across a workspace", () => {
       expect(response.cursors).toEqual([{ runId: busy, afterSeq: 1 }])
     }))
 
-  it.effect("maps a journal read failure to a transport-neutral SyncError that keeps the cause", () =>
+  // The journal's own message is the SQLite driver's: it carries SQL text,
+  // table and column names, and constraint identifiers, and a follower may
+  // hold nothing but a branch share link. What crosses is the run the read was
+  // issued for and the journal's stable code, never the sentence it wrote.
+  it.effect("maps a journal read failure to a transport-neutral SyncError carrying no host detail", () =>
     Effect.gen(function*() {
       const cause = new Journal.JournalError({ code: "journal_closed", message: "journal offline" })
       const failure = yield* (
@@ -154,7 +158,10 @@ describe("SyncServer.read across a workspace", () => {
       )
       expect(failure).toBeInstanceOf(SyncError)
       expect(failure.code).toBe("unknown")
-      expect(failure.cause).toBe(cause)
+      expect(failure.message).toBe(`Journal read failed for run ${busy}`)
+      expect(failure.message).not.toContain("journal offline")
+      expect(failure.cause).toContain("journal_closed")
+      expect(failure.cause).not.toContain("journal offline")
     }))
 
   // Compaction is a recoverable refusal with a documented resume point, not an
@@ -176,7 +183,10 @@ describe("SyncServer.read across a workspace", () => {
 
       expect(failure.code).toBe("compacted")
       expect(failure.resync).toEqual({ runId: busy, checkpointSeq: 12 })
-      expect(failure.cause).toBe(cause)
+      // The resume point is the payload; the cause names the journal code and
+      // not the message the journal wrote around it.
+      expect(failure.cause).toContain(cause.code)
+      expect(failure.cause).not.toContain("resync from its checkpoint")
     }))
 
   // A compacted error the journal raised without a floor carries no resume

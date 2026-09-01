@@ -93,16 +93,29 @@ export type Access = typeof Access.Type
  * @category constructors
  * @since 0.1.0
  */
-export const branchRunId = (branchId: BranchId): JournalEvent.RunId => `flows/branch/${branchId}` as JournalEvent.RunId
+export const branchRunId = (branchId: BranchId): JournalEvent.RunId =>
+  `${branchRunPrefix}${branchId}` as JournalEvent.RunId
+
+/** The one prefix {@link branchRunId} writes and {@link branchOfRunId} reads. */
+const branchRunPrefix = "flows/branch/"
 
 /**
  * The branch a journal run belongs to, or `null` for a non-branch run.
  *
+ * The bare prefix is a non-branch run, not a branch with an empty id.
+ * `BranchId` is a branded `NonEmptyString`, so branding `""` would produce a
+ * value the brand forbids and hand it to `share.verify` as the branch under
+ * authorization. Refusing it here keeps the brand's promise true everywhere
+ * downstream of this function.
+ *
  * @category constructors
  * @since 0.1.0
  */
-export const branchOfRunId = (runId: JournalEvent.RunId): BranchId | null =>
-  runId.startsWith("flows/branch/") ? runId.slice("flows/branch/".length) as BranchId : null
+export const branchOfRunId = (runId: JournalEvent.RunId): BranchId | null => {
+  if (!runId.startsWith(branchRunPrefix)) return null
+  const rest = runId.slice(branchRunPrefix.length)
+  return rest.length === 0 ? null : rest as BranchId
+}
 
 /**
  * The journal producer identity of one admitted command.

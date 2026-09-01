@@ -5,6 +5,7 @@
  */
 import { Journal } from "@smthrs/journal"
 import type * as JournalEvent from "@smthrs/journal/JournalEvent"
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -13,8 +14,10 @@ import * as PubSub from "effect/PubSub"
 import * as Stream from "effect/Stream"
 import type * as Rpc from "effect/unstable/rpc/Rpc"
 import type * as RpcGroup from "effect/unstable/rpc/RpcGroup"
-import { type BranchId, branchOfRunId, type ShareCapability } from "./BranchProtocol.ts"
+import { type BranchId, branchOfRunId, type ShareCapability, type ShareClaims } from "./BranchProtocol.ts"
 import * as BranchShare from "./BranchShare.ts"
+import { causeCode } from "./internal/causeText.ts"
+import { positiveInt } from "./internal/options.ts"
 import * as RunCatalog from "./RunCatalog.ts"
 import { SyncError } from "./SyncError.ts"
 import * as SyncPrincipal from "./SyncPrincipal.ts"
@@ -90,14 +93,19 @@ const journalFailure = (runId: JournalEvent.RunId) => (cause: unknown): SyncErro
   cause instanceof Journal.JournalError && cause.code === "compacted" && cause.checkpointSeq !== undefined
     ? new SyncError({
       code: "compacted",
-      message: cause.message,
-      cause,
+      message: `Run ${runId} is compacted above the requested cursor`,
+      cause: causeCode(cause),
       resync: { runId, checkpointSeq: cause.checkpointSeq }
     })
     : new SyncError({
+      // Constant message, rendered cause. A follower may hold nothing but a
+      // branch share link, and the journal's message is the SQLite driver's:
+      // it routinely carries SQL text, table and column names, and constraint
+      // identifiers. `decodeCapability` already refuses to be a parsing
+      // oracle; this is the same rule for the read path.
       code: "unknown",
-      message: cause instanceof Error ? cause.message : "Journal read failed",
-      cause
+      message: `Journal read failed for run ${runId}`,
+      cause: causeCode(cause)
     })
 
 const cursorOf = (
@@ -147,10 +155,10 @@ export const defaultConcurrency = 64
 export const defaultTailIntervalMs = 1000
 
 /**
- * Entries one workspace tail read pulls per run per page. A round reads at
+ * Entries one workspace tail read pulls per run per round. A round reads at
  * most `concurrency` pages at once, so this is the page half of the memory one
- * follower costs; a run with more unserved entries than this is served over
- * consecutive pages inside the same round.
+ * follower costs; a run with more unserved entries than this wakes the next
+ * round and is served by it, rather than holding its slot until it catches up.
  */
 const tailBatchSize = 256
 
@@ -185,29 +193,32 @@ export interface Options {
 }
 
 /**
- * Constructs the workspace sync server over a journal and a run catalog,
- * under an explicit policy.
+ * The read path over an already-validated policy.
  *
- * Reads page one run at a time so a single large run cannot starve the rest of
- * the workspace, and `done` is reported only when every covered run has been
- * paged to its durable tail. The frame ceiling bounds the page: entries are
- * served until the next one would cross it, and the page then reports
- * `done: false` so the follower asks for the rest. Only a SINGLE entry whose
- * own encoded size exceeds the ceiling is refused with `frame_too_large`, so
- * one oversized journal payload cannot take down every follower that pulls it
- * while an ordinary run of large-but-legal entries still replicates.
+ * A read fills its page in run order and stops at the first of three bounds:
+ * the request's `limit`, the frame ceiling, or the durable tail of every
+ * covered run, which is the only case that reports `done: true`. It is a
+ * CATCH-UP api, not a fair scheduler: a run with a long backlog takes the
+ * page it is offered, and the runs behind it are served by the follower's
+ * next page, from the cursors this one returned. The frame ceiling is a page
+ * budget, not a verdict on the read: entries are served until the next one
+ * would cross it, and the page then reports `done: false` so the follower
+ * asks for the rest. Only a SINGLE entry whose own encoded size exceeds the
+ * ceiling is refused with `frame_too_large`, because no page can ever carry
+ * it.
  *
  * A workspace subscription's fan-out is bounded without bounding what it
- * serves. It reads every run it covers — the runs the request covers plus the
- * runs the catalog announces while it is live — in rounds, at most
- * `Options.concurrency` journal reads open at once, repeating each round on a
- * journal entry committed in this process, on a catalog announcement, or after
- * `Options.tailIntervalMs`. The memory one follower costs is a function of the
- * bound, not of the workspace's size, and no run is starved by the runs ahead
- * of it. The interval is therefore the freshness policy for the runs another
- * process owns, not for the runs written beside the follower. A run-scoped
- * subscription follows that one run's journal stream directly and keeps its
- * in-process wake.
+ * serves. Each round reconciles the runs it covers against `RunCatalog.list`,
+ * then reads ONE bounded page per run, at most `Options.concurrency` reads
+ * open at once. A run with more waiting wakes the next round rather than
+ * holding its slot, so no run is starved by a run that stays busy. A round
+ * repeats on a journal entry committed in this process, on a catalog
+ * announcement, on a run that reported more, or after
+ * `Options.tailIntervalMs`. The memory one follower costs is a function of
+ * the bound, not of the workspace's size; the interval is the freshness
+ * policy for the runs another process owns, not for the runs written beside
+ * the follower. A run-scoped subscription follows that one run's journal
+ * stream directly and keeps its in-process wake.
  *
  * Authorization is fail-closed along two boundaries, both consulted per
  * request:
@@ -224,19 +235,30 @@ export interface Options {
  *   for anonymous callers, so a connection with no credential — or with only
  *   a branch share link — can never read engine runs.
  *
- * @category constructors
- * @since 0.1.0
+ * A SUBSCRIPTION is additionally bounded in time: it ends with `unauthorized`
+ * when the credential that opened it expires, because a stream authorized
+ * once at open is otherwise the one thing a signed expiry cannot revoke.
  */
-export const makeLiveWith = (
-  options: Options = {}
+/** The resolved, already-validated read-path policy. */
+interface Resolved {
+  readonly maxFrameBytes: number
+  readonly concurrency: number
+  readonly tailIntervalMs: number
+}
+
+const defaults: Resolved = {
+  maxFrameBytes: SyncProtocol.defaultMaxFrameBytes,
+  concurrency: defaultConcurrency,
+  tailIntervalMs: defaultTailIntervalMs
+}
+
+const makeWith = (
+  { concurrency, maxFrameBytes, tailIntervalMs }: Resolved
 ): Effect.Effect<Service, never, Journal.Journal | RunCatalog.RunCatalog> =>
   Effect.gen(function*() {
     const journal = yield* Journal.Journal
     const catalog = yield* RunCatalog.RunCatalog
     const share = yield* Effect.serviceOption(BranchShare.BranchShare)
-    const maxFrameBytes = options.maxFrameBytes ?? SyncProtocol.defaultMaxFrameBytes
-    const concurrency = options.concurrency ?? defaultConcurrency
-    const tailIntervalMs = options.tailIntervalMs ?? defaultTailIntervalMs
 
     /**
      * Refuses ONE entry whose own encoded size outgrows the ceiling.
@@ -277,29 +299,45 @@ export const makeLiveWith = (
       SyncPrincipal.isWorkspace
     )
 
-    const requireWorkspace = Effect.flatMap(workspacePrincipal, (granted) =>
-      granted ? Effect.void : Effect.fail(
-        new SyncError({
-          code: "unauthorized",
-          message: "Reading workspace runs requires an authenticated workspace principal"
-        })
-      ))
+    /**
+     * The workspace principal's expiry, or a refusal.
+     *
+     * It answers with the expiry rather than with nothing because the two
+     * questions have one answer: a request that may read the workspace may
+     * read it until its credential stops authorizing. An in-process owner
+     * presented no credential and answers `Infinity`.
+     */
+    const requireWorkspace: Effect.Effect<number, SyncError> = Effect.flatMap(
+      Effect.service(SyncPrincipal.SyncPrincipal),
+      (principal) =>
+        SyncPrincipal.isWorkspace(principal) ? Effect.succeed(principal.expiresAtMs) : Effect.fail(
+          new SyncError({
+            code: "unauthorized",
+            message: "Reading workspace runs requires an authenticated workspace principal"
+          })
+        )
+    )
 
     /**
-     * A branch read is granted only by a capability that verifies for it. Only
-     * an `unauthorized` refusal folds to `false`; an infrastructure fault (Web
-     * Crypto rejecting the HMAC) propagates, so "the signer is broken" is never
-     * reported as "not authorized".
+     * The verified claims a branch read is granted by, or `null` when the
+     * request holds no capability for that branch. Only an `unauthorized`
+     * refusal folds to `null`; an infrastructure fault (Web Crypto rejecting
+     * the HMAC) propagates, so "the signer is broken" is never reported as
+     * "not authorized".
+     *
+     * The CLAIMS are returned, not a boolean: `expiresAtMs` is what bounds a
+     * subscription opened against this branch, and reducing the answer to
+     * "yes" threw it away.
      */
-    const canReadBranch = (
+    const branchClaims = (
       branchId: BranchId,
       capability: ShareCapability | undefined
-    ): Effect.Effect<boolean, SyncError> =>
+    ): Effect.Effect<ShareClaims | null, SyncError> =>
       Option.isNone(share) || capability === undefined
-        ? Effect.succeed(false)
+        ? Effect.succeed(null)
         : share.value.verify(capability, { branchId, access: "read" }).pipe(
-          Effect.as(true),
-          Effect.catch((error) => error.code === "unauthorized" ? Effect.succeed(false) : Effect.fail(error))
+          Effect.map((claims): ShareClaims | null => claims),
+          Effect.catch((error) => error.code === "unauthorized" ? Effect.succeed(null) : Effect.fail(error))
         )
 
     /** Whether one catalog-advertised run may be followed by this request. */
@@ -308,25 +346,30 @@ export const makeLiveWith = (
       capability: ShareCapability | undefined
     ): Effect.Effect<boolean, SyncError> => {
       const branchId = branchOfRunId(runId)
-      return branchId === null ? workspacePrincipal : canReadBranch(branchId, capability)
+      return branchId === null
+        ? workspacePrincipal
+        : Effect.map(branchClaims(branchId, capability), (claims) => claims !== null)
     }
 
     /**
-     * The runs a request may observe. A run-scoped request the caller is not
-     * authorized for fails outright — a scoped read must never silently answer
-     * with an empty or partial view — and a workspace-scoped request is only
-     * answered for the workspace principal at all.
+     * The runs a request may observe, and when the credential that admits them
+     * stops doing so. A run-scoped request the caller is not authorized for
+     * fails outright — a scoped read must never silently answer with an empty
+     * or partial view — and a workspace-scoped request is only answered for
+     * the workspace principal at all.
      */
     const runIdsFor = (
       scope: SyncProtocol.Scope,
       capability: ShareCapability | undefined
-    ): Effect.Effect<ReadonlyArray<JournalEvent.RunId>, SyncError> =>
+    ): Effect.Effect<{ readonly runIds: ReadonlyArray<JournalEvent.RunId>; readonly expiresAtMs: number }, SyncError> =>
       scope._tag === "Run"
         ? Effect.gen(function*() {
           const branchId = branchOfRunId(scope.runId)
           if (branchId === null) {
-            yield* requireWorkspace
-          } else if (!(yield* canReadBranch(branchId, capability))) {
+            return { runIds: [scope.runId], expiresAtMs: yield* requireWorkspace }
+          }
+          const claims = yield* branchClaims(branchId, capability)
+          if (claims === null) {
             return yield* Effect.fail(
               new SyncError({
                 code: "unauthorized",
@@ -334,21 +377,56 @@ export const makeLiveWith = (
               })
             )
           }
-          return [scope.runId]
+          return { runIds: [scope.runId], expiresAtMs: claims.expiresAtMs }
         })
         : Effect.gen(function*() {
-          yield* requireWorkspace
+          // The soonest expiry of every credential this view rests on: the
+          // workspace principal's, plus each branch capability that admitted
+          // a branch run into it.
+          let expiresAtMs = yield* requireWorkspace
           const runIds = yield* covered
           const visible: Array<JournalEvent.RunId> = []
           for (const runId of runIds) {
-            if (yield* canFollow(runId, capability)) visible.push(runId)
+            const branchId = branchOfRunId(runId)
+            if (branchId === null) {
+              visible.push(runId)
+              continue
+            }
+            const claims = yield* branchClaims(branchId, capability)
+            if (claims === null) continue
+            expiresAtMs = Math.min(expiresAtMs, claims.expiresAtMs)
+            visible.push(runId)
           }
-          return visible
+          return { runIds: visible, expiresAtMs }
         })
+
+    /**
+     * Refuses a cursor set that names one run twice.
+     *
+     * The read position came from the FIRST occurrence and the echoed response
+     * state from the LAST, so a request carrying `[{r,0},{r,2}]` read after 0
+     * and answered with 2: a follower that persisted the returned cursors, as
+     * the protocol tells it to, skipped entries the page never carried. There
+     * is no correct choice between the two readings, so neither is made.
+     */
+    const requireUniqueCursors = (cursors: SyncProtocol.WorkspaceCursor): Effect.Effect<void, SyncError> => {
+      const duplicate = SyncProtocol.duplicateCursorRunId(cursors)
+      return duplicate === undefined ? Effect.void : Effect.fail(
+        new SyncError({
+          code: "invalid_request",
+          message: `Cursors name run ${duplicate} more than once`
+        })
+      )
+    }
 
     const read = (request: SyncProtocol.ReadRequest): Effect.Effect<SyncProtocol.ReadResponse, SyncError> =>
       Effect.gen(function*() {
-        const runIds = yield* runIdsFor(request.scope, request.capability)
+        yield* requireUniqueCursors(request.cursors)
+        // The schema bounds `limit` at the wire; this bounds it again for an
+        // in-process caller that constructed the request directly, so no path
+        // reaches the journal with an unbounded page size.
+        const limit = Math.min(request.limit, SyncProtocol.maxReadLimit)
+        const { runIds } = yield* runIdsFor(request.scope, request.capability)
         const entries: Array<JournalEvent.Entry> = []
         const cursors = new Map(request.cursors.map((cursor) => [cursor.runId, cursor.afterSeq]))
         let done = true
@@ -363,7 +441,7 @@ export const makeLiveWith = (
         // reports `done: false`; only an entry that alone outgrows the
         // ceiling still refuses, because no page can ever carry it.
         for (const runId of runIds) {
-          if (entries.length >= request.limit) {
+          if (entries.length >= limit) {
             done = false
             break
           }
@@ -371,7 +449,7 @@ export const makeLiveWith = (
           const page = yield* journal.entries({
             runId,
             ...(after === undefined ? {} : { after }),
-            limit: request.limit - entries.length
+            limit: limit - entries.length
           }).pipe(Effect.mapError(journalFailure(runId)))
           let truncated = false
           for (const accepted of page.entries) {
@@ -455,11 +533,18 @@ export const makeLiveWith = (
     ): Stream.Stream<SyncProtocol.Frame, SyncError> =>
       Stream.unwrap(Effect.gen(function*() {
         // The runs this subscription serves, and how far each has been served.
-        // Both grow while it is live: the catalog announces the runs the
-        // workspace gains after the subscription attached.
+        // The set moves in both directions while the subscription is live, and
+        // `reconcile` is what moves it: the catalog's own list is the
+        // authority, and `catalog.changes` is only a low-latency wake.
         const served = new Map<JournalEvent.RunId, JournalEvent.Seq | undefined>()
+        // Runs the catalog names that this request may not read. Remembered so
+        // one refusal costs one signature check for the life of the
+        // subscription rather than one per round per run.
+        const excluded = new Set<JournalEvent.RunId>()
+        // Every caller establishes that the run is not served yet: `covering`
+        // is a deduplicated list, and `reconcile` skips what it already holds.
         const cover = (runId: JournalEvent.RunId): void => {
-          if (!served.has(runId)) served.set(runId, cursorOf(request.cursors, runId))
+          served.set(runId, cursorOf(request.cursors, runId))
         }
         for (const runId of covering) cover(runId)
 
@@ -468,7 +553,48 @@ export const makeLiveWith = (
         const wake = yield* PubSub.sliding<void>(1)
         const woken = yield* PubSub.subscribe(wake)
 
-        /** One run's unserved entries, as frames. Finite by construction. */
+        /**
+         * Re-reads the catalog and makes `served` agree with it.
+         *
+         * Trusting the announcement feed alone broke in both directions.
+         * A run created between `runIdsFor`'s list and the moment
+         * `catalog.changes` is actually pulled is announced to nobody and
+         * absent from the initial list, so it stayed invisible for the life
+         * of the subscription; both catalogs publish through a SLIDING
+         * PubSub, so a subscriber that fell behind lost an announcement
+         * permanently. In the other direction nothing published a removal at
+         * all, so a retention-collected run was queried once per interval
+         * forever. The README already promised the fix: `list` is the
+         * authoritative state and a subscriber that loses a notification
+         * re-lists.
+         */
+        const reconcile = Effect.gen(function*() {
+          const visible = new Set(yield* catalog.list)
+          for (const runId of served.keys()) {
+            if (!visible.has(runId)) served.delete(runId)
+          }
+          for (const runId of excluded) {
+            if (!visible.has(runId)) excluded.delete(runId)
+          }
+          for (const runId of visible) {
+            if (served.has(runId) || excluded.has(runId)) continue
+            // An `unauthorized` run is skipped; a signer fault propagates, so
+            // "the signer is broken" is never reported as "not authorized".
+            if (yield* canFollow(runId, request.capability)) cover(runId)
+            else excluded.add(runId)
+          }
+        })
+
+        /**
+         * One BOUNDED page of one run's unserved entries, as frames.
+         *
+         * A run with more waiting does not recurse here; it publishes a wake
+         * and returns, so its `flatMap` slot is released and the next round
+         * picks it up. Recursing held the slot for as long as the run stayed
+         * behind, which meant `concurrency` sustained-hot runs pinned every
+         * slot, the round never completed, and every run behind them was
+         * never attached at all rather than merely delayed.
+         */
         const tail = (runId: JournalEvent.RunId): Stream.Stream<SyncProtocol.Frame, SyncError> =>
           Stream.unwrap(Effect.gen(function*() {
             const after = served.get(runId)
@@ -495,27 +621,28 @@ export const makeLiveWith = (
             // journal that reports more without returning any cannot spin.
             if (last === undefined) return Stream.empty
             served.set(runId, last.seq)
-            return page.hasMore
-              ? Stream.concat(Stream.fromIterable(frames), Stream.suspend(() => tail(runId)))
-              : Stream.fromIterable(frames)
+            // A backlog costs another round, not another slot. The wake makes
+            // that round start at once rather than at the next interval.
+            if (page.hasMore) yield* PubSub.publish(wake, undefined)
+            return Stream.fromIterable(frames)
           }))
 
-        /** One pass over every covered run, `concurrency` reads open at most. */
-        const round = Stream.suspend(() =>
-          Stream.flatMap(Stream.fromIterable(Array.from(served.keys())), tail, { concurrency })
-        )
+        /**
+         * One pass over every covered run, `concurrency` reads open at most,
+         * against the run set the catalog names right now.
+         */
+        const round = Stream.unwrap(Effect.map(
+          reconcile,
+          () => Stream.flatMap(Stream.fromIterable(Array.from(served.keys())), tail, { concurrency })
+        ))
 
-        // Announcements cover the run and wake the tail. Draining keeps this a
-        // control path that emits nothing, while a refusal to authorize an
-        // announced run still fails the subscription rather than being lost in
-        // a forked fiber.
-        const announcements = Stream.filterEffect(
-          catalog.changes,
-          (runId) => canFollow(runId, request.capability)
-        ).pipe(
-          Stream.tap((runId) => Effect.andThen(Effect.sync(() => cover(runId)), PubSub.publish(wake, undefined))),
-          Stream.drain
-        )
+        // An announcement is a WAKE and nothing else: the round that follows
+        // reads the catalog itself and authorizes what it finds. Covering the
+        // announced run here as well made the notification feed a second,
+        // weaker source of truth — one that could never remove a run and that
+        // lost a run permanently whenever its sliding feed overflowed.
+        // Draining keeps this a control path that emits nothing.
+        const announcements = Stream.drain(Stream.tap(catalog.changes, () => PubSub.publish(wake, undefined)))
 
         // An entry committed in this process wakes the round it belongs to.
         // The interval is the freshness policy for the runs another engine
@@ -548,13 +675,58 @@ export const makeLiveWith = (
         )
       }))
 
+    /**
+     * Ends a subscription when the credential that opened it stops
+     * authorizing.
+     *
+     * Authorization is one-shot at open, and a journal follow never ends on
+     * its own, so without this a holder of an expired capability kept reading
+     * for as long as it declined to disconnect. The refusal is typed and
+     * carries the same `unauthorized` code a fresh request would be refused
+     * with. An in-process owner has no credential and therefore no deadline.
+     */
+    const untilExpiry = (
+      expiresAtMs: number,
+      stream: Stream.Stream<SyncProtocol.Frame, SyncError>
+    ): Stream.Stream<SyncProtocol.Frame, SyncError> =>
+      Number.isFinite(expiresAtMs)
+        ? Stream.interruptWhen(
+          stream,
+          Effect.flatMap(Clock.currentTimeMillis, (nowMs) =>
+            Effect.andThen(
+              Effect.sleep(Math.max(expiresAtMs - nowMs, 0)),
+              Effect.fail(
+                new SyncError({
+                  code: "unauthorized",
+                  message: "The capability authorizing this subscription has expired"
+                })
+              )
+            ))
+        )
+        : stream
+
     const subscribe = (request: SyncProtocol.SubscribeRequest): Stream.Stream<SyncProtocol.Frame, SyncError> =>
       Stream.unwrap(
-        Effect.map(runIdsFor(request.scope, request.capability), (runIds) =>
-          request.scope._tag === "Run"
+        Effect.gen(function*() {
+          yield* requireUniqueCursors(request.cursors)
+          // The schema bounds `credit` at the wire; this bounds it again for
+          // an in-process caller that constructed the request directly.
+          if (!Number.isSafeInteger(request.credit) || request.credit < 1) {
+            return yield* Effect.fail(
+              new SyncError({
+                code: "invalid_request",
+                message: `A subscription's credit must be a positive safe integer, not ${request.credit}`
+              })
+            )
+          }
+          const credit = Math.min(request.credit, SyncProtocol.maxSubscribeCredit)
+          const { expiresAtMs, runIds } = yield* runIdsFor(request.scope, request.capability)
+          const frames = request.scope._tag === "Run"
             ? runStream(request.scope.runId, request.cursors)
-            : workspaceStream(runIds, request))
-      ).pipe(Stream.take(request.credit))
+            : workspaceStream(runIds, request)
+          return Stream.take(untilExpiry(expiresAtMs, frames), credit)
+        })
+      )
 
     return make({ read, subscribe })
   })
@@ -565,7 +737,35 @@ export const makeLiveWith = (
  * @category constructors
  * @since 0.1.0
  */
-export const makeLive: Effect.Effect<Service, never, Journal.Journal | RunCatalog.RunCatalog> = makeLiveWith()
+export const makeLive: Effect.Effect<Service, never, Journal.Journal | RunCatalog.RunCatalog> = makeWith(defaults)
+
+/**
+ * Constructs the workspace sync server over a journal and a run catalog, under
+ * an explicit policy.
+ *
+ * Every option is validated as a positive safe integer at construction, so a
+ * policy fails loudly instead of quietly not existing: the TypeScript type
+ * says `number`, and `maxFrameBytes: NaN` made every `bytes > maxFrameBytes`
+ * comparison false, which disabled the ceiling it configured.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const makeLiveWith = (
+  options: Options = {}
+): Effect.Effect<Service, SyncError, Journal.Journal | RunCatalog.RunCatalog> =>
+  Effect.flatMap(
+    Effect.all({
+      maxFrameBytes: positiveInt("SyncServer.Options.maxFrameBytes", options.maxFrameBytes, defaults.maxFrameBytes),
+      concurrency: positiveInt("SyncServer.Options.concurrency", options.concurrency, defaults.concurrency),
+      tailIntervalMs: positiveInt(
+        "SyncServer.Options.tailIntervalMs",
+        options.tailIntervalMs,
+        defaults.tailIntervalMs
+      )
+    }),
+    makeWith
+  )
 
 /**
  * Provides the workspace sync server.
@@ -579,14 +779,15 @@ export const layer: Layer.Layer<SyncServer, never, Journal.Journal | RunCatalog.
 )
 
 /**
- * Provides the workspace sync server under an explicit policy.
+ * Provides the workspace sync server under an explicit policy. Fails with
+ * `invalid_request` when an option is not a positive safe integer.
  *
  * @category layers
  * @since 0.1.0
  */
 export const layerWith = (
   options: Options
-): Layer.Layer<SyncServer, never, Journal.Journal | RunCatalog.RunCatalog> =>
+): Layer.Layer<SyncServer, SyncError, Journal.Journal | RunCatalog.RunCatalog> =>
   Layer.effect(SyncServer, makeLiveWith(options))
 
 /**

@@ -41,6 +41,8 @@ import {
   ShareCapability
 } from "./BranchProtocol.ts"
 import * as BranchShare from "./BranchShare.ts"
+import { causeCode } from "./internal/causeText.ts"
+import { positiveInt } from "./internal/options.ts"
 import { SyncError } from "./SyncError.ts"
 import * as SyncProtocol from "./SyncProtocol.ts"
 
@@ -105,22 +107,45 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service =>
  */
 export const layerNoop: Layer.Layer<BranchCommands> = Layer.succeed(BranchCommands, makeNoop())
 
+/**
+ * Projects a journal write failure onto the sync boundary.
+ *
+ * The public `message` is a constant and the `cause` names the failure's type
+ * only. A branch writer may hold nothing but a share link, and the journal's
+ * own message is the SQLite driver's, which carries SQL text, table and column
+ * names, and constraint identifiers.
+ */
 const journalFailure = (cause: unknown): SyncError =>
   new SyncError({
     code: "unknown",
-    message: cause instanceof Error ? cause.message : "Branch journal write failed",
-    cause
+    message: "Branch journal write failed",
+    cause: causeCode(cause)
   })
-
-const ledgerKey = (branchId: BranchId, commandId: CommandId): string => `${branchId} ${commandId}`
 
 /** How many entries one rehydration page reads. */
 const pageSize = 256
 
 /**
+ * Receipts one branch keeps in memory before the oldest are evicted.
+ *
+ * The ledger is a fast path: it answers a known duplicate without a journal
+ * write, and losing an entry costs a round trip, never correctness, because
+ * the journal's own producer identity is the durable exactly-once constraint
+ * and returns a `Duplicate` receipt for a command already admitted. Retaining
+ * one receipt per command forever meant a process serving a hundred branches
+ * of a hundred thousand commands held ten million of them, so the fast path
+ * is bounded and the durable path is what makes it safe to bound.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const defaultLedgerCapacity = 4096
+
+/**
  * Admission policy.
  *
- * The default caps one encoded command submission at 1 MiB.
+ * The default caps one encoded command submission at 1 MiB and one branch's
+ * in-memory receipt ledger at {@link defaultLedgerCapacity} commands.
  *
  * @category models
  * @since 0.1.0
@@ -131,31 +156,59 @@ export interface Options {
    * {@link SyncProtocol.defaultMaxFrameBytes}.
    */
   readonly maxCommandBytes?: number | undefined
+  /**
+   * Receipts one branch keeps in memory before the oldest are evicted.
+   * Defaults to {@link defaultLedgerCapacity}.
+   */
+  readonly ledgerCapacity?: number | undefined
 }
 
-/**
- * Constructs the journal-backed branch command ledger under an explicit
- * policy.
- *
- * A submission whose encoded form exceeds the command ceiling is refused with
- * `frame_too_large` before anything is appended, so one oversized `args`
- * cannot enter the branch journal and poison every follower that replays it.
- *
- * @category constructors
- * @since 0.1.0
- */
-export const makeLiveWith = (
-  options: Options = {}
+/** The ledger over an already-validated policy. */
+const makeWith = (
+  resolved: { readonly maxCommandBytes: number; readonly ledgerCapacity: number }
 ): Effect.Effect<Service, never, Journal.Journal | BranchShare.BranchShare> =>
   Effect.gen(
     function*() {
       const journal = yield* Journal.Journal
       const share = yield* BranchShare.BranchShare
-      const permit = yield* Semaphore.make(1)
-      const ledger = new Map<string, CommandReceipt>()
+      // One permit PER BRANCH. A single process-wide permit serialized
+      // admission across every branch the process served, so one branch's
+      // first-touch history replay blocked every other branch's writes.
+      const permits = new Map<BranchId, Semaphore.Semaphore>()
+      const permitFor = (branchId: BranchId): Semaphore.Semaphore => {
+        const known = permits.get(branchId)
+        if (known !== undefined) return known
+        const fresh = Semaphore.makeUnsafe(1)
+        permits.set(branchId, fresh)
+        return fresh
+      }
+      // Nested, never a concatenated key: `${branchId} ${commandId}` collides
+      // for valid branded strings, so `("a", "b c")` and `("a b", "c")` shared
+      // a slot and one branch's receipt answered another branch's command.
+      const ledger = new Map<BranchId, Map<CommandId, CommandReceipt>>()
       const cursors = new Map<BranchId, JournalEvent.Seq>()
       const hydrated = new Set<BranchId>()
-      const maxCommandBytes = options.maxCommandBytes ?? SyncProtocol.defaultMaxFrameBytes
+      const { ledgerCapacity, maxCommandBytes } = resolved
+
+      const receiptOf = (branchId: BranchId, commandId: CommandId): CommandReceipt | undefined =>
+        ledger.get(branchId)?.get(commandId)
+
+      /**
+       * Records one receipt, evicting the branch's oldest once the branch is
+       * at capacity. `Map` iterates in insertion order, so the first key is
+       * the least recently recorded one; re-recording a known command
+       * refreshes it in place rather than growing the branch.
+       */
+      const record = (receipt: CommandReceipt): void => {
+        const branch = ledger.get(receipt.branchId) ?? new Map<CommandId, CommandReceipt>()
+        branch.delete(receipt.commandId)
+        branch.set(receipt.commandId, receipt)
+        for (const oldest of branch.keys()) {
+          if (branch.size <= ledgerCapacity) break
+          branch.delete(oldest)
+        }
+        ledger.set(receipt.branchId, branch)
+      }
 
       const duplicateOf = (known: CommandReceipt): CommandReceipt =>
         new CommandReceipt({
@@ -190,8 +243,7 @@ export const makeLiveWith = (
                 ? Schema.decodeUnknownOption(CommandIdentity)(entry.payload)
                 : Option.none()
               if (Option.isSome(submission)) {
-                ledger.set(
-                  ledgerKey(branchId, submission.value.commandId),
+                record(
                   new CommandReceipt({
                     branchId,
                     commandId: submission.value.commandId,
@@ -201,6 +253,11 @@ export const makeLiveWith = (
                 )
               }
             }
+            // An empty page ends the walk whatever the page claims, the same
+            // guard `SyncServer.tail` carries: `after` cannot move, so the
+            // next read is byte-identical and the loop would never terminate
+            // — while holding this branch's admission permit.
+            if (page.entries.length === 0) return
             hasMore = page.hasMore
           }
         })
@@ -227,7 +284,7 @@ export const makeLiveWith = (
       ): Effect.Effect<CommandReceipt, SyncError> =>
         Effect.gen(function*() {
           yield* replay(submission.branchId)
-          const known = ledger.get(ledgerKey(submission.branchId, submission.commandId))
+          const known = receiptOf(submission.branchId, submission.commandId)
           if (known === undefined) return yield* Effect.fail(journalFailure(cause))
           return duplicateOf(known)
         })
@@ -236,7 +293,7 @@ export const makeLiveWith = (
         Effect.gen(function*() {
           const submission = request.submission
           yield* hydrate(submission.branchId)
-          const known = ledger.get(ledgerKey(submission.branchId, submission.commandId))
+          const known = receiptOf(submission.branchId, submission.commandId)
           if (known !== undefined) return duplicateOf(known)
           // Unfenced: the sync command journal is a multi-writer admission
           // log — participants own no branch run, and command admissions are
@@ -275,8 +332,7 @@ export const makeLiveWith = (
                 : Effect.fail(journalFailure(cause))
             )
           )
-          ledger.set(
-            ledgerKey(submission.branchId, submission.commandId),
+          record(
             new CommandReceipt({
               branchId: submission.branchId,
               commandId: submission.commandId,
@@ -306,12 +362,52 @@ export const makeLiveWith = (
           )
         }
         // The permit is taken AFTER authorization so an unauthorized caller
-        // cannot serialize (and therefore stall) legitimate collaborators.
-        return yield* permit.withPermits(1)(admit(request))
+        // cannot serialize (and therefore stall) legitimate collaborators,
+        // and it is this BRANCH's permit so a slow branch stalls only itself.
+        return yield* permitFor(request.submission.branchId).withPermits(1)(admit(request))
       })
 
       return make({ submit })
     }
+  )
+
+const defaults = {
+  maxCommandBytes: SyncProtocol.defaultMaxFrameBytes,
+  ledgerCapacity: defaultLedgerCapacity
+}
+
+/**
+ * Constructs the journal-backed branch command ledger under an explicit
+ * policy.
+ *
+ * A submission whose encoded form exceeds the command ceiling is refused with
+ * `frame_too_large` before anything is appended, so one oversized `args`
+ * cannot enter the branch journal and poison every follower that replays it.
+ *
+ * Every option is validated as a positive safe integer at construction: the
+ * TypeScript type says `number`, and `NaN` silently disabled the ceiling it
+ * was compared against.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const makeLiveWith = (
+  options: Options = {}
+): Effect.Effect<Service, SyncError, Journal.Journal | BranchShare.BranchShare> =>
+  Effect.flatMap(
+    Effect.all({
+      maxCommandBytes: positiveInt(
+        "BranchCommands.Options.maxCommandBytes",
+        options.maxCommandBytes,
+        defaults.maxCommandBytes
+      ),
+      ledgerCapacity: positiveInt(
+        "BranchCommands.Options.ledgerCapacity",
+        options.ledgerCapacity,
+        defaults.ledgerCapacity
+      )
+    }),
+    makeWith
   )
 
 /**
@@ -320,7 +416,7 @@ export const makeLiveWith = (
  * @category constructors
  * @since 0.1.0
  */
-export const makeLive: Effect.Effect<Service, never, Journal.Journal | BranchShare.BranchShare> = makeLiveWith()
+export const makeLive: Effect.Effect<Service, never, Journal.Journal | BranchShare.BranchShare> = makeWith(defaults)
 
 /**
  * Provides the journal-backed branch command ledger.
@@ -335,13 +431,14 @@ export const layer: Layer.Layer<BranchCommands, never, Journal.Journal | BranchS
 
 /**
  * Provides the journal-backed branch command ledger under an explicit policy.
+ * Fails with `invalid_request` when an option is not a positive safe integer.
  *
  * @category layers
  * @since 0.1.0
  */
 export const layerWith = (
   options: Options
-): Layer.Layer<BranchCommands, never, Journal.Journal | BranchShare.BranchShare> =>
+): Layer.Layer<BranchCommands, SyncError, Journal.Journal | BranchShare.BranchShare> =>
   Layer.effect(BranchCommands, makeLiveWith(options))
 
 /**

@@ -26,6 +26,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Headers from "effect/unstable/http/Headers"
 import * as RpcMiddleware from "effect/unstable/rpc/RpcMiddleware"
+import { causeText } from "./internal/causeText.ts"
 import { SyncError } from "./SyncError.ts"
 import * as SyncPrincipal from "./SyncPrincipal.ts"
 import { SyncAuth } from "./SyncRpcs.ts"
@@ -57,7 +58,9 @@ export const encodeCapability = (
       new SyncError({
         code: "invalid_request",
         message: "The workspace capability does not encode",
-        cause: encoded.failure
+        // The rendering, never the parse failure itself: a schema issue
+        // carries the value it rejected, and the value here is a credential.
+        cause: causeText(encoded.failure)
       })
     )
     : Effect.succeed(Encoding.encodeBase64Url(JSON.stringify(encoded.success)))
@@ -112,7 +115,10 @@ export const layer: Layer.Layer<SyncAuth, never, WorkspaceShare.WorkspaceShare> 
           Effect.provideService(
             effect,
             SyncPrincipal.SyncPrincipal,
-            SyncPrincipal.workspace(claims.capabilityId)
+            // The signed expiry travels WITH the identity. A handler that
+            // opens a stream authorizes once; reducing the verified claims to
+            // a capability id here left the stream with nothing to expire on.
+            SyncPrincipal.workspace(claims.capabilityId, claims.expiresAtMs)
           )
         )
       )

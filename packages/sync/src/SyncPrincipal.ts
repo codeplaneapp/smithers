@@ -37,6 +37,19 @@ export interface Anonymous {
 export interface Workspace {
   readonly _tag: "Workspace"
   readonly capabilityId: string
+  /**
+   * When the credential that established this principal stops authorizing,
+   * in epoch milliseconds, or `Infinity` for an in-process owner that
+   * presented no credential at all.
+   *
+   * A signed expiry is this package's ONLY revocation mechanism, and an open
+   * subscription is not a sequence of requests: it is authorized once, at
+   * open, and then streams. Without the expiry on the identity itself,
+   * nothing downstream could tell a live subscription to stop, so a holder of
+   * an expired capability kept reading for as long as it declined to
+   * disconnect.
+   */
+  readonly expiresAtMs: number
 }
 
 /**
@@ -58,10 +71,17 @@ export const anonymous: Principal = { _tag: "Anonymous" }
 /**
  * Constructs the workspace principal for a named credential.
  *
+ * `expiresAtMs` defaults to `Infinity`, which is the honest answer for an
+ * in-process owner that already holds the journal: it presented no credential,
+ * so no credential can expire under it.
+ *
  * @category constructors
  * @since 0.1.0
  */
-export const workspace = (capabilityId: string): Principal => ({ _tag: "Workspace", capabilityId })
+export const workspace = (
+  capabilityId: string,
+  expiresAtMs: number = Number.POSITIVE_INFINITY
+): Principal => ({ _tag: "Workspace", capabilityId, expiresAtMs })
 
 /**
  * Returns `true` when a principal may read non-branch runs.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, Layer, Option, Queue, type Scope, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Option, Queue, Redacted, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import * as RpcClient from "effect/unstable/rpc/RpcClient"
 import type * as RpcClientError from "effect/unstable/rpc/RpcClientError"
@@ -28,7 +28,7 @@ type Requirements =
   | Scope.Scope
 
 const base = Layer.mergeAll(
-  BranchShare.layerHmac({ secret: "roster-watch-secret" }),
+  BranchShare.layerHmac({ secret: Redacted.make("roster-watch-secret") }),
   BranchCommands.layerNoop,
   BranchIds.layerSequential("roster"),
   Layer.succeed(SyncAuth)((effect) =>
@@ -140,11 +140,69 @@ describe("Branch.WatchRoster lease propagation", () => {
         })
       )
 
-      expect(rosters).toEqual([[alice, bob], [bob], [bob]])
+      // The lease tick fires at `leaseMs`, when BOTH announcements have run
+      // out, so the watch sees the empty roster before bob heartbeats back on.
+      // The third emission is suppressed: the watch emits when the roster
+      // changes, and a re-announcement that reproduces the same roster is not
+      // a change.
+      expect(rosters).toEqual([[alice, bob], [], [bob]])
       const removals = rosters.slice(1).filter((roster, index) =>
         rosters[index]?.includes(alice) === true && !roster.includes(alice)
       )
       expect(removals).toHaveLength(1)
+    }))
+
+  // Expiry used to be observable only as a side effect of somebody else
+  // announcing, so a watcher of a branch whose LAST participant vanished kept
+  // that participant on its roster forever. The watch re-lists on the lease
+  // cadence, which bounds how long a lapsed lease can stay visible.
+  it.effect("observes the last participant expiring with no survivor to report it", () =>
+    Effect.gen(function*() {
+      const rosters = yield* program(
+        Effect.gen(function*() {
+          const presence = yield* BranchPresence.makeMemory({ leaseMs })
+          const pair = yield* TestSocket.makePair()
+          const client = yield* connect(pair, presence)
+          const share = yield* BranchShare.BranchShare
+          const branchId = "last-participant" as BranchId
+          const capability = yield* share.mint({
+            branchId,
+            capabilityId: "last-participant-capability",
+            access: "write",
+            ttlMs: 600_000
+          })
+          yield* client["Branch.Announce"]({
+            capability,
+            branchId,
+            participantId: alice,
+            displayName: "Alice",
+            cursor: null
+          })
+
+          const initial = yield* Deferred.make<void>()
+          let emissions = 0
+          const watched = yield* Stream.runCollect(
+            Stream.take(
+              client["Branch.WatchRoster"]({ capability, branchId }).pipe(
+                Stream.tap(() => {
+                  emissions += 1
+                  return emissions === 1 ? Deferred.succeed(initial, undefined) : Effect.void
+                })
+              ),
+              2
+            )
+          ).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(initial)
+          // Nobody announces, nobody leaves: the lease simply runs out.
+          yield* TestClock.adjust(leaseMs)
+          return Array.from(
+            yield* Fiber.join(watched),
+            (frame) => frame.participants.map((participant) => participant.participantId)
+          )
+        })
+      )
+
+      expect(rosters).toEqual([[alice], []])
     }))
 
   it.effect("does not lose a roster change between the initial list and change subscription", () =>

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Journal, JournalEvent } from "@smthrs/journal"
-import { Effect, Layer, Stream } from "effect"
+import { Effect, Layer, Result, Schema, Stream } from "effect"
 import * as RunCatalog from "../src/RunCatalog.ts"
+import { SyncError } from "../src/SyncError.ts"
 import * as SyncPrincipal from "../src/SyncPrincipal.ts"
+import * as SyncProtocol from "../src/SyncProtocol.ts"
 import * as SyncServer from "../src/SyncServer.ts"
 
 const runId = "gapped-run" as JournalEvent.RunId
@@ -61,19 +63,65 @@ describe("SyncServer", () => {
       ])
     }))
 
-  it.effect("emits no frames when credit is zero", () =>
+  // A zero credit has two readings that are indistinguishable on the wire —
+  // "open a window of nothing" and "a caller computed its window wrong" — and
+  // the second busy-loops a follow that replenishes by resubscribing. It is
+  // refused rather than served as an immediately-empty stream.
+  it.effect("refuses a subscription whose credit is not a positive integer", () =>
     Effect.gen(function*() {
-      const frames = yield* asWorkspace(
+      const refusals = yield* asWorkspace(
         Effect.gen(function*() {
           const server = yield* makeServer([entry(0)])
-          return yield* server.subscribe({
-            scope: { _tag: "Run", runId },
-            cursors: [],
-            credit: 0
-          }).pipe(Stream.runCollect)
+          const attempt = (credit: number) =>
+            Effect.flip(
+              Stream.runCollect(server.subscribe({ scope: { _tag: "Run", runId }, cursors: [], credit }))
+            )
+          return [yield* attempt(0), yield* attempt(-1), yield* attempt(Number.NaN)] as const
         })
       )
 
-      expect(Array.from(frames)).toEqual([])
+      for (const refusal of refusals) {
+        expect(SyncError.is(refusal)).toBe(true)
+        expect(refusal.code).toBe("invalid_request")
+      }
+      expect(
+        Result.isFailure(
+          Schema.decodeUnknownResult(SyncProtocol.SubscribeRequest)({
+            scope: { _tag: "Run", runId },
+            cursors: [],
+            credit: 0
+          })
+        )
+      ).toBe(true)
+    }))
+
+  // The credit ceiling is enforced on both sides: the wire refuses an
+  // over-limit request outright, and an in-process caller is clamped, so no
+  // path can pin one server-side fan-out for an unbounded number of frames.
+  it.effect("bounds credit above as well as below", () =>
+    Effect.gen(function*() {
+      const frames = yield* asWorkspace(
+        Effect.gen(function*() {
+          const server = yield* makeServer([entry(0), entry(1)])
+          return yield* Stream.runCollect(
+            server.subscribe({
+              scope: { _tag: "Run", runId },
+              cursors: [],
+              credit: SyncProtocol.maxSubscribeCredit * 10
+            })
+          )
+        })
+      )
+
+      expect(Array.from(frames)).toHaveLength(2)
+      expect(
+        Result.isFailure(
+          Schema.decodeUnknownResult(SyncProtocol.SubscribeRequest)({
+            scope: { _tag: "Run", runId },
+            cursors: [],
+            credit: SyncProtocol.maxSubscribeCredit + 1
+          })
+        )
+      ).toBe(true)
     }))
 })

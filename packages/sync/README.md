@@ -10,7 +10,9 @@ so multiplayer reuses the canonical `seq`, cursors, gap detection, and resumable
 follow rather than introducing a second source of truth. Presence is a lease and
 is never journalled; commands are admitted through a client-minted idempotency
 key; every branch operation after `Branch.CreateBranch` authorizes through a
-signed, expiring, branch-scoped share capability.
+signed, expiring, branch-scoped share capability. Branch collaboration ships
+unserved at 1.0.0-rc.0: the gateway mounts `SyncRpcs`, and nothing mounts
+`BranchRpcs` yet.
 
 Authorization is fail-closed along two boundaries:
 
@@ -20,9 +22,14 @@ Authorization is fail-closed along two boundaries:
   authenticated workspace principal (`SyncPrincipal`, default anonymous). Over
   RPC, `SyncAuth.layer` establishes the principal by verifying the
   `WorkspaceShare` capability presented in the `flows-sync-workspace` request
-  header; secrets are provisioned as a `Redacted` keyring with rotation-ready
-  `kid`s (`WorkspaceShare.layerHmac`, `WorkspaceShare.layerConfig`). A
-  connection with no valid credential is refused every non-branch read.
+  header. A connection with no valid credential is refused every non-branch
+  read.
+
+Both authorities take `Redacted` secrets and lead their signed encoding with a
+scheme label; `WorkspaceShare` additionally carries a rotation-ready `kid`. An
+open subscription ends with `unauthorized` when the credential that opened it
+expires, because a stream authorized once at open is otherwise the one thing a
+signed expiry cannot revoke.
 
 ```sh
 pnpm add @smthrs/sync
@@ -31,25 +38,28 @@ pnpm add @smthrs/sync
 ## Public API
 
 The root exports these namespaces, also available from matching
-`@smthrs/sync/*` subpaths.
+`@smthrs/sync/*` subpaths. The per-export reference is generated from the
+source: see [smithers.sh/api/sync](https://smithers.sh/api/sync).
 
-| Namespace          | Public exports                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SyncError`        | `ErrorCode` schema/type, general `SyncError` with guard `SyncError.is`, and terminal `SyncGapError`.                                                                                                                                                                                                                                                                                                                                                |
-| `SyncProtocol`     | Scope schemas `WorkspaceScope`, `RunScope`, and `Scope`; cursor schemas/types `RunCursor` and `WorkspaceCursor`; `ReadRequest`, `ReadResponse`, and `SubscribeRequest`; `EntriesFrame`, `HeartbeatFrame`, `ClosedFrame`, and `Frame`; `covers(scope, runId)`.                                                                                                                                                                                       |
-| `SyncRpcs`         | `SyncRpcs` defines `Sync.Read` and streaming `Sync.Subscribe`; `SyncAuth` is the RPC middleware service every served group must implement.                                                                                                                                                                                                                                                                                                          |
-| `RunCatalog`       | `RunCatalog` / `Service` list runs and expose changes. `make`, `layerStatic`, `makeMemory` (`MemoryOptions`, `defaultChangesCapacity`), `makePolling` / `layerPolling` (`PollingOptions`, `defaultPollIntervalMs`), and `layerNoop` provide implementations. `makePolling` is the one a workspace follower learns from: it re-reads a durable source on an interval, so a run another engine created is announced within one interval of appearing. |
-| `SyncServer`       | `SyncServer` / `Service`, `make`, `makeNoop`, and `layerNoop`; `makeLive` / `layer` implement journal replay and follow using `Journal` and `RunCatalog`; `makeLiveWith` / `layerWith` take an explicit `Options` policy (`maxFrameBytes`, `concurrency` with `defaultConcurrency`, `tailIntervalMs` with `defaultTailIntervalMs`); `layerHandlers` projects the service onto `SyncRpcs`.                                                           |
-| `SyncClient`       | `Sync` / `Service` expose `subscribe` and materialized `cursors`; `SubscribeOptions` (`credit`, default `defaultCredit`), `make`, `makeNoop`, `layer`, and `layerNoop` construct the browser-safe client.                                                                                                                                                                                                                                           |
-| `BranchProtocol`   | `BranchId`, `ParticipantId`, `CommandId`, `Access`; `branchRunId` / `branchOfRunId` / `commandSourceId` / `commandSourceSeq`; `CommandEvent` and `SayCommand`; `ShareClaims`, `ShareCapability`, `Cursor`, `Participant`, `CommandSubmission`, `CommandReceipt`.                                                                                                                                                                                    |
-| `BranchShare`      | `BranchShare` / `Service` with `mint` and `verify`; `AuthorizeRequest`, `MintRequest`, `make`, `makeNoop`, `layerNoop`, `makeHmac`, `layerHmac`.                                                                                                                                                                                                                                                                                                    |
-| `WorkspaceShare`   | `WorkspaceShare` / `Service` with `mint` and `verify` over a `Redacted` `Keyring` with `kid` rotation; `WorkspaceClaims`, `WorkspaceCapability`, `AuthorizeRequest`, `MintRequest`, `make`, `makeNoop`, `layerNoop`, `makeHmac`, `layerHmac`, `layerConfig`.                                                                                                                                                                                        |
-| `SyncPrincipal`    | `Principal` (`Anonymous` / `Workspace`), `anonymous`, `workspace`, `isWorkspace`, the `SyncPrincipal` reference (default anonymous), and `layerWorkspace` for in-process owners.                                                                                                                                                                                                                                                                    |
-| `SyncAuth`         | Implementations of the `SyncRpcs.SyncAuth` middleware: `layer` verifies the `capabilityHeader` workspace capability, `layerClient` stamps it on outgoing requests, `encodeCapability` / `decodeCapability` are the header codec.                                                                                                                                                                                                                    |
-| `BranchPresence`   | `BranchPresence` / `Service` with `announce`, `leave`, `list`, `changes`; `Announcement`, `RosterRequest`, `LeaveRequest`, `PresenceOptions` (`changesCapacity`, default `defaultChangesCapacity`), `make`, `makeNoop`, `layerNoop`, `makeMemory`, `layer`.                                                                                                                                                                                         |
-| `BranchCommands`   | `BranchCommands` / `Service` with `submit`; `SubmitRequest`, `submission`, `make`, `makeNoop`, `layerNoop`, `makeLive`, `layer`.                                                                                                                                                                                                                                                                                                                    |
-| `BranchIds`        | `BranchIds` / `Service` with `fresh`, the port `BranchServer.layerHandlers` mints branch and capability ids through; `make`, `makeWebCrypto`, `layer` (Web Crypto UUIDs), and `layerSequential(prefix)` for deterministic tests.                                                                                                                                                                                                                    |
-| `BranchProjection` | `State`, `Message`, `AppliedCommand`, `Field`; `empty`, `apply`, `project`, and the explicit `resolveField` conflict policy.                                                                                                                                                                                                                                                                                                                        |
+| Namespace          | What it owns                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------- |
+| `SyncError`        | `ErrorCode`, `SyncError` with the structural guard `SyncError.is`, and terminal `SyncGapError`.   |
+| `SyncProtocol`     | Scopes, cursors, `Resync`, request and response schemas, frames, and the size and request limits. |
+| `SyncRpcs`         | The read-path RPC group (`Sync.Read`, `Sync.Subscribe`) and the `SyncAuth` middleware service.    |
+| `SyncAuth`         | Implementations of that middleware: `layer`, `layerClient`, and the header codec.                 |
+| `SyncPrincipal`    | The per-request identity reference, its constructors, and `layerWorkspace` for in-process owners. |
+| `WorkspaceShare`   | The workspace capability authority over a `Redacted` keyring with `kid` rotation.                 |
+| `RunCatalog`       | The workspace run set a subscription reconciles against, in-memory, polling, and static forms.    |
+| `SyncServer`       | The read-path implementation, its policy, and `layerHandlers`.                                    |
+| `SyncClient`       | The browser-safe replay-then-follow client and its subscription options.                          |
+| `BranchProtocol`   | The branch vocabulary: ids, claims, capabilities, submissions, receipts, and the run-id mapping.  |
+| `BranchShare`      | The branch capability authority.                                                                  |
+| `BranchIds`        | The port branch and capability ids are minted through.                                            |
+| `BranchCommands`   | Idempotent command admission onto a branch's journal run.                                         |
+| `BranchPresence`   | The ephemeral, lease-expiring roster.                                                             |
+| `BranchProjection` | The fold from branch commands to a document view.                                                 |
+| `BranchRpcs`       | The branch collaboration wire group.                                                              |
+| `BranchServer`     | The handler layer that projects the branch services onto that group.                              |
 
 Public test subpaths are `@smthrs/sync/test/TestSocket` (`FrameFilter`,
 `TestFaults`, `Pair`, `makePair`) and `@smthrs/sync/test/TestSync`
@@ -76,22 +86,16 @@ means the server skipped beyond the interval covered by the client's cursor.
 
 Every fan-out surface is bounded, so one follower's cost is a function of the
 configured bound rather than of the workspace's size or of how far behind that
-follower has fallen.
+follower has fallen. The table lives with the rest of the contract at
+[smithers.sh/api/sync](https://smithers.sh/api/sync#bounds), and every numeric
+option is validated where it enters: a value that is not a positive safe
+integer fails the constructor with `invalid_request` rather than quietly
+disabling the comparison it configures.
 
-| Bound                                            | Default                                       | What it caps                                                                                                                                                                                                                                                                                              |
-| ------------------------------------------------ | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SyncServer.Options.concurrency`                 | `SyncServer.defaultConcurrency` (64)          | Journal reads one workspace subscription holds open at once. Each round walks every covered run's unserved entries as a bounded page read, so the bound caps what one follower costs without capping what it sees.                                                                                        |
-| `SyncServer.Options.tailIntervalMs`              | `SyncServer.defaultTailIntervalMs` (1000)     | Milliseconds a workspace subscription waits before revisiting every covered run when nothing wakes it. A journal entry committed in this process for a covered run, or a catalog announcement, wakes the round at once, so the interval is the freshness policy for the runs another engine process owns. |
-| `SyncServer.Options.maxFrameBytes`               | `SyncProtocol.defaultMaxFrameBytes` (1 MiB)   | Summed encoded entries of one read page or subscription frame.                                                                                                                                                                                                                                            |
-| `SyncClient.SubscribeOptions.credit`             | `SyncClient.defaultCredit` (256)              | Frames one subscription round carries before the follow replenishes the window by resubscribing from its acknowledged cursors.                                                                                                                                                                            |
-| `RunCatalog.MemoryOptions.changesCapacity`       | `RunCatalog.defaultChangesCapacity` (1024)    | Announcements a stalled `changes` subscriber may fall behind by; the oldest slide out.                                                                                                                                                                                                                    |
-| `RunCatalog.PollingOptions.intervalMs`           | `RunCatalog.defaultPollIntervalMs` (1000)     | Milliseconds between reads of the durable run set: one bounded query per interval per composition, not per subscriber.                                                                                                                                                                                    |
-| `BranchPresence.PresenceOptions.changesCapacity` | `BranchPresence.defaultChangesCapacity` (256) | Roster notifications a stalled `changes` subscriber may fall behind by; the oldest slide out.                                                                                                                                                                                                             |
+Both change feeds slide rather than block, and neither is a source of truth.
+`RunCatalog.list` and `BranchPresence.list` are the authoritative state, and
+every reader re-lists on a cadence of its own, so a dropped notification costs
+latency and never state.
 
-Both change feeds slide rather than block: a publisher never waits on a stalled
-subscriber, and never grows the process on its behalf. A subscriber that loses
-a notification re-lists — `RunCatalog.list` and `BranchPresence.list` are the
-authoritative state — so a dropped notification never loses state.
-
-See the [sync reference](../../docs/pages/api/sync.md) and
-[sync concepts](../../docs/pages/concepts/sync.md).
+See [sync concepts](https://smithers.sh/concepts/sync) for the protocol, and
+`docs/README.md` in this package for where each published sentence lives.

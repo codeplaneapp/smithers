@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Journal, JournalEvent } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Effect, Exit, Layer, Stream } from "effect"
+import { Effect, Exit, Layer, Redacted, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import * as BranchCommands from "../src/BranchCommands.ts"
 import * as BranchProtocol from "../src/BranchProtocol.ts"
@@ -38,11 +38,11 @@ const entry = (sequence: number, payload: unknown) =>
 
 const branchLayers = Layer.mergeAll(
   TestJournal.layer(),
-  BranchShare.layerHmac({ secret: "payload-secret" })
+  BranchShare.layerHmac({ secret: Redacted.make("payload-secret") })
 )
 
 const submitOutcome = (
-  ledger: Layer.Layer<BranchCommands.BranchCommands, never, Journal.Journal | BranchShare.BranchShare>,
+  ledger: Layer.Layer<BranchCommands.BranchCommands, SyncError, Journal.Journal | BranchShare.BranchShare>,
   args: string
 ) =>
   Effect.gen(function*() {

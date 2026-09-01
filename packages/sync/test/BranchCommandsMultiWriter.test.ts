@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Journal } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Deferred, Effect, Layer } from "effect"
+import { Deferred, Effect, Layer, Redacted } from "effect"
 import { TestClock } from "effect/testing"
 import * as BranchCommands from "../src/BranchCommands.ts"
 import * as BranchProtocol from "../src/BranchProtocol.ts"
@@ -66,7 +66,7 @@ const runRace = (rightParticipant: BranchProtocol.ParticipantId) =>
     Effect.provide(
       Layer.mergeAll(
         TestJournal.layer(),
-        BranchShare.layerHmac({ secret: "multi-writer-secret" })
+        BranchShare.layerHmac({ secret: Redacted.make("multi-writer-secret") })
       )
     ),
     Effect.provide(TestClock.layer())

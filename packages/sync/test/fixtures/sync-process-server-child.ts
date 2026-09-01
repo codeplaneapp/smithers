@@ -4,7 +4,7 @@ import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import { Journal } from "@smthrs/journal"
 import * as JournalMigrations from "@smthrs/journal/Migrations"
 import * as SqlJournal from "@smthrs/journal/SqlJournal"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Redacted } from "effect"
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization"
 import * as RpcServer from "effect/unstable/rpc/RpcServer"
 import * as Net from "node:net"
@@ -34,7 +34,7 @@ const journal = SqlJournal.layer({ capacity: 512, overflow: "reject" }).pipe(
 )
 const stack = Layer.mergeAll(
   journal,
-  BranchShare.layerHmac({ secret: "process-recovery-secret" }),
+  BranchShare.layerHmac({ secret: Redacted.make("process-recovery-secret") }),
   RunCatalog.layerStatic([runId]),
   Layer.succeed(SyncRpcs.SyncAuth)((effect) => effect)
 )

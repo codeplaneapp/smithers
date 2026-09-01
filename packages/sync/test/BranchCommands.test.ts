@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Journal, JournalEvent } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Effect, Layer, Stream } from "effect"
+import { Effect, Layer, Redacted, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import * as BranchCommands from "../src/BranchCommands.ts"
 import * as BranchProtocol from "../src/BranchProtocol.ts"
@@ -15,7 +15,7 @@ const alice = "alice" as BranchProtocol.ParticipantId
 const bob = "bob" as BranchProtocol.ParticipantId
 const commandId = (id: string) => id as BranchProtocol.CommandId
 
-const shareLayer = BranchShare.layerHmac({ secret: "commands-secret" })
+const shareLayer = BranchShare.layerHmac({ secret: Redacted.make("commands-secret") })
 
 const capabilityFor = (target: BranchProtocol.BranchId, access: BranchProtocol.Access) =>
   Effect.flatMap(
@@ -249,7 +249,7 @@ describe("BranchCommands", () => {
       expect(fresh.seq).toBe(99)
     }))
 
-  it.effect("reports journal failures honestly, whether or not they are Errors", () =>
+  it.effect("keeps a journal failure's own message off the wire and renders it as a bounded cause", () =>
     Effect.gen(function*() {
       const failureOf = (cause: unknown) =>
         Effect.gen(function*() {
@@ -278,8 +278,17 @@ describe("BranchCommands", () => {
           Effect.provide(TestClock.layer())
         )
 
-      expect((yield* failureOf(new Error("disk is gone"))).message).toBe("disk is gone")
-      expect((yield* failureOf("nope")).message).toBe("Branch journal write failed")
+      // A branch writer may hold nothing but a share link, and the journal's
+      // message is the driver's: it carries SQL text, table and column names,
+      // and constraint identifiers. The public message is therefore constant,
+      // and `cause` names the failure's TYPE with no message at all.
+      const fromError = yield* failureOf(new Error("disk is gone"))
+      expect(fromError.message).toBe("Branch journal write failed")
+      expect(fromError.cause).toBe("Error")
+      const fromValue = yield* failureOf("nope")
+      expect(fromValue.message).toBe("Branch journal write failed")
+      // A non-Error cause is arbitrary host data, so only its type crosses.
+      expect(fromValue.cause).toBe("[object String]")
     }))
 
   it.effect("refuses to call a conflict a duplicate when the replay cannot find the winner", () =>
@@ -323,7 +332,10 @@ describe("BranchCommands", () => {
       )
 
       expect(failure.code).toBe("unknown")
-      expect(failure.message).toBe("source event reused with different content")
+      expect(failure.message).toBe("Branch journal write failed")
+      // The journal's stable code crosses; the sentence it wrote does not.
+      expect(failure.cause).toContain("idempotency_conflict")
+      expect(failure.cause).not.toContain("source event reused")
     }))
 
   it.effect("admits nothing through the noop layer, and honours overrides", () =>

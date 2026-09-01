@@ -167,7 +167,13 @@ describe("sync malformed and terminal boundaries", () => {
         )
       )
 
-      expect(failure).toMatchObject({ code: "unknown", message: "Journal read failed", cause: "offline" })
+      // The message names the run and nothing the journal wrote, and the
+      // cause names the failure's type rather than carrying host data.
+      expect(failure).toMatchObject({
+        code: "unknown",
+        message: `Journal read failed for run ${runId("boundary")}`,
+        cause: "[object String]"
+      })
     }))
 
   it.effect("passes a JSON null frame through range filtering without treating it as entries", () =>

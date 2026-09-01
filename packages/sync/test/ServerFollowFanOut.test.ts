@@ -373,12 +373,20 @@ describe("SyncServer bounded fan-out liveness", () => {
       const { record, seen } = recorder()
       const settled = yield* (
         Effect.gen(function*() {
+          // `list` is the authoritative run set and `changes` is a wake, so a
+          // catalog registers a run before it announces it. This stub models
+          // that ordering: the announcement is delivered only after the run is
+          // listable, exactly as `makeMemory` and `makePolling` publish.
+          const listed = new Set([runId("run-0")])
           const server = yield* SyncServer.makeLiveWith({ concurrency: 2, tailIntervalMs: 25 }).pipe(
             Effect.provideService(
               RunCatalog.RunCatalog,
               RunCatalog.make({
-                list: Effect.succeed([runId("run-0")]),
-                changes: Stream.make(runId("run-0"), runId("run-1"))
+                list: Effect.sync(() => Array.from(listed)),
+                changes: Stream.tap(
+                  Stream.make(runId("run-0"), runId("run-1")),
+                  (announced) => Effect.sync(() => listed.add(announced))
+                )
               })
             )
           )

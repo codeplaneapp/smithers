@@ -140,7 +140,10 @@ const denied = (message: string): SyncError => new SyncError({ code: "unauthoriz
  */
 export const makeNoop = (overrides: Partial<Service> = {}): Service =>
   make({
-    mint: () => Effect.die(denied("Workspace sharing is unavailable")),
+    // Both operations FAIL. `mint` used to die, and this is the authority the
+    // shipped CLI gateway wires, so a consumer handling `SyncError` on that
+    // composition got a crash where the type promised a refusal.
+    mint: () => Effect.fail(denied("Workspace sharing is unavailable")),
     verify: () => Effect.fail(denied("Workspace sharing is unavailable")),
     ...overrides
   })
@@ -196,6 +199,22 @@ const canonical = (claims: WorkspaceClaims): string =>
   ])
 
 /**
+ * The claim fields, copied out of the capability the caller owns.
+ *
+ * `Schema.Class` instances are not frozen, and `verify` awaits Web Crypto
+ * between signing the claims and authorizing them, so the checks must read a
+ * snapshot rather than an object the caller can still mutate.
+ */
+const snapshot = (claims: WorkspaceClaims): WorkspaceClaims =>
+  new WorkspaceClaims({
+    kid: claims.kid,
+    capabilityId: claims.capabilityId,
+    access: claims.access,
+    issuedAtMs: claims.issuedAtMs,
+    expiresAtMs: claims.expiresAtMs
+  })
+
+/**
  * Constructs the HMAC-SHA-256 workspace share authority over a keyring.
  *
  * Every key is imported up front, so a misconfigured keyring — an unknown
@@ -216,7 +235,10 @@ export const makeHmac = (keyring: Keyring): Effect.Effect<Service, SyncError> =>
       }
       imported.set(key.kid, yield* shareSigner.importHmacKey(Redacted.value(key.secret)))
     }
-    const active = imported.get(keyring.activeKid)
+    // Copied at construction: the keyring belongs to the caller, and the
+    // authority must keep signing under the kid it validated here.
+    const activeKid = keyring.activeKid
+    const active = imported.get(activeKid)
     if (active === undefined) {
       return yield* Effect.fail(
         new SyncError({
@@ -230,7 +252,7 @@ export const makeHmac = (keyring: Keyring): Effect.Effect<Service, SyncError> =>
       yield* Effect.annotateCurrentSpan({ access: request.access })
       const issuedAtMs = yield* Clock.currentTimeMillis
       const claims = new WorkspaceClaims({
-        kid: keyring.activeKid,
+        kid: activeKid,
         capabilityId: request.capabilityId,
         access: request.access,
         issuedAtMs,
@@ -244,20 +266,24 @@ export const makeHmac = (keyring: Keyring): Effect.Effect<Service, SyncError> =>
       request: AuthorizeRequest
     ) {
       yield* Effect.annotateCurrentSpan({ access: request.access })
-      const claims = capability.claims
+      // Everything authorized below is read from these locals, never from the
+      // caller's objects, which may change while Web Crypto is awaited.
+      const claims = snapshot(capability.claims)
+      const signature = capability.signature
+      const access = request.access
       const key = imported.get(claims.kid)
       if (key === undefined) {
         return yield* Effect.fail(denied("The workspace capability names an unknown signing key"))
       }
       const expected = yield* shareSigner.signHmac(key, canonical(claims))
-      if (!shareSigner.constantTimeEquals(expected, capability.signature)) {
+      if (!shareSigner.constantTimeEquals(expected, signature)) {
         return yield* Effect.fail(denied("The workspace capability signature is invalid"))
       }
       const nowMs = yield* Clock.currentTimeMillis
       if (nowMs >= claims.expiresAtMs) {
         return yield* Effect.fail(denied("The workspace capability has expired"))
       }
-      if (request.access === "write" && claims.access !== "write") {
+      if (access === "write" && claims.access !== "write") {
         return yield* Effect.fail(denied("The workspace capability is read-only"))
       }
       return claims

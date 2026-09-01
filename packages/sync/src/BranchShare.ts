@@ -7,10 +7,13 @@
  * `verify`, which is therefore the single place cross-branch access and
  * expired links are refused.
  *
- * The signature is HMAC-SHA-256 over a length-prefixed encoding of the claims.
- * Length prefixes matter: without them a branch id ending in the separator
- * could be re-cut into a different, still-validly-signed claim set. Web Crypto
- * is used directly so the same module runs in the browser and on node.
+ * The signature is HMAC-SHA-256 over a length-prefixed encoding of the claims,
+ * led by a scheme label. Length prefixes matter: without them a branch id
+ * ending in the separator could be re-cut into a different, still-validly-
+ * signed claim set. The label matters for the same reason across schemes: a
+ * branch capability can never verify as a workspace capability even if one
+ * secret is misconfigured into both authorities. Web Crypto is used directly
+ * so the same module runs in the browser and on node.
  *
  * @since 0.1.0
  */
@@ -18,6 +21,7 @@ import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import { Access, BranchId, ShareCapability, ShareClaims } from "./BranchProtocol.ts"
 import * as shareSigner from "./internal/shareSigner.ts"
@@ -104,7 +108,10 @@ const denied = (message: string): SyncError => new SyncError({ code: "unauthoriz
  */
 export const makeNoop = (overrides: Partial<Service> = {}): Service =>
   make({
-    mint: () => Effect.die(denied("Branch sharing is unavailable")),
+    // Both operations FAIL. `mint` used to die, which contradicted its own
+    // declared `Effect<ShareCapability, SyncError>` and left a consumer
+    // wired to this authority unable to tell "sharing is off" from a bug.
+    mint: () => Effect.fail(denied("Branch sharing is unavailable")),
     verify: () => Effect.fail(denied("Branch sharing is unavailable")),
     ...overrides
   })
@@ -117,14 +124,50 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service =>
  */
 export const layerNoop: Layer.Layer<BranchShare> = Layer.succeed(BranchShare, makeNoop())
 
+/**
+ * Domain separation: the label leads the signed encoding, so a branch
+ * signature can never be replayed as a workspace signature (or any later
+ * scheme's) under a shared secret. `WorkspaceShare` has always led with its
+ * own label; a one-sided label protects one direction, and the branch side is
+ * the one anonymous share-link holders reach.
+ */
+const schemeLabel = "@smthrs/sync/BranchShare/v1"
+
 /** Length-prefixed so no two distinct claim sets share an encoding. */
 const canonical = (claims: ShareClaims): string =>
-  shareSigner.lengthPrefixed(
-    [claims.branchId, claims.capabilityId, claims.access, String(claims.issuedAtMs), String(claims.expiresAtMs)]
-  )
+  shareSigner.lengthPrefixed([
+    schemeLabel,
+    claims.branchId,
+    claims.capabilityId,
+    claims.access,
+    String(claims.issuedAtMs),
+    String(claims.expiresAtMs)
+  ])
+
+/**
+ * The claim fields, copied out of the capability the caller owns.
+ *
+ * `Schema.Class` instances are not frozen, and `verify` awaits Web Crypto
+ * between signing the claims and authorizing them. Reading the caller's object
+ * again after the await let an in-process holder of the same instance widen
+ * `access` — or move `expiresAtMs` — between the signature that was checked
+ * and the checks that follow it.
+ */
+const snapshot = (claims: ShareClaims): ShareClaims =>
+  new ShareClaims({
+    branchId: claims.branchId,
+    capabilityId: claims.capabilityId,
+    access: claims.access,
+    issuedAtMs: claims.issuedAtMs,
+    expiresAtMs: claims.expiresAtMs
+  })
 
 /**
  * Constructs the HMAC-SHA-256 share authority over a shared secret.
+ *
+ * The secret is `Redacted`, matching {@link WorkspaceShare}: an authority
+ * never holds a plain string that a log, a span, or an inspection of the
+ * options object could render.
  *
  * Fails with a `SyncError` carrying the rejection as `cause` when Web Crypto
  * refuses to import the signing key.
@@ -132,9 +175,11 @@ const canonical = (claims: ShareClaims): string =>
  * @category constructors
  * @since 0.1.0
  */
-export const makeHmac = (options: { readonly secret: string }): Effect.Effect<Service, SyncError> =>
+export const makeHmac = (
+  options: { readonly secret: Redacted.Redacted<string> }
+): Effect.Effect<Service, SyncError> =>
   Effect.map(
-    shareSigner.importHmacKey(options.secret),
+    shareSigner.importHmacKey(Redacted.value(options.secret)),
     (key) => {
       const sign = (claims: ShareClaims): Effect.Effect<string, SyncError> =>
         shareSigner.signHmac(key, canonical(claims))
@@ -157,12 +202,17 @@ export const makeHmac = (options: { readonly secret: string }): Effect.Effect<Se
         request: AuthorizeRequest
       ) {
         yield* Effect.annotateCurrentSpan({ branchId: request.branchId, access: request.access })
-        const claims = capability.claims
+        // Everything authorized below is read from these locals, never from
+        // the caller's objects, which may change while Web Crypto is awaited.
+        const claims = snapshot(capability.claims)
+        const signature = capability.signature
+        const branchId = request.branchId
+        const access = request.access
         const expected = yield* sign(claims)
-        if (!shareSigner.constantTimeEquals(expected, capability.signature)) {
+        if (!shareSigner.constantTimeEquals(expected, signature)) {
           return yield* Effect.fail(denied("The share capability signature is invalid"))
         }
-        if (claims.branchId !== request.branchId) {
+        if (claims.branchId !== branchId) {
           return yield* Effect.fail(
             denied(`The share capability is scoped to branch ${claims.branchId}`)
           )
@@ -171,7 +221,7 @@ export const makeHmac = (options: { readonly secret: string }): Effect.Effect<Se
         if (nowMs >= claims.expiresAtMs) {
           return yield* Effect.fail(denied("The share capability has expired"))
         }
-        if (request.access === "write" && claims.access !== "write") {
+        if (access === "write" && claims.access !== "write") {
           return yield* Effect.fail(denied("The share capability is read-only"))
         }
         return claims
@@ -187,5 +237,6 @@ export const makeHmac = (options: { readonly secret: string }): Effect.Effect<Se
  * @category layers
  * @since 0.1.0
  */
-export const layerHmac = (options: { readonly secret: string }): Layer.Layer<BranchShare, SyncError> =>
-  Layer.effect(BranchShare, makeHmac(options))
+export const layerHmac = (
+  options: { readonly secret: Redacted.Redacted<string> }
+): Layer.Layer<BranchShare, SyncError> => Layer.effect(BranchShare, makeHmac(options))

@@ -12,7 +12,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Journal, JournalEvent } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Effect, Fiber, Layer, type Scope, Stream } from "effect"
+import { Effect, Fiber, Layer, Redacted, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { type BranchId, branchRunId, type ShareCapability } from "../src/BranchProtocol.ts"
 import * as BranchShare from "../src/BranchShare.ts"
@@ -25,7 +25,7 @@ const branchId = "guarded-branch" as BranchId
 const branchRun = branchRunId(branchId)
 const engineRun = "flows/engine/run-1" as JournalEvent.RunId
 
-const layer = Layer.mergeAll(TestJournal.layer(), BranchShare.layerHmac({ secret: "authz-secret" }))
+const layer = Layer.mergeAll(TestJournal.layer(), BranchShare.layerHmac({ secret: Redacted.make("authz-secret") }))
 
 const program = <A, E>(effect: Effect.Effect<A, E, Journal.Journal | BranchShare.BranchShare | Scope.Scope>) =>
   effect.pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped)

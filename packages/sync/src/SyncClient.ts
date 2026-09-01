@@ -15,11 +15,16 @@ import * as RpcClient from "effect/unstable/rpc/RpcClient"
 import type * as RpcClientError from "effect/unstable/rpc/RpcClientError"
 import type * as RpcGroup from "effect/unstable/rpc/RpcGroup"
 import type { ShareCapability } from "./BranchProtocol.ts"
+import { causeText } from "./internal/causeText.ts"
+import { positiveInt } from "./internal/options.ts"
 import { SyncError, SyncGapError } from "./SyncError.ts"
 import {
+  covers,
   defaultMaxFrameBytes,
+  duplicateCursorRunId,
   encodedByteLength,
   type EntriesFrame,
+  type ReadResponse,
   type Resync,
   type Scope,
   type WorkspaceCursor
@@ -45,6 +50,19 @@ import { SyncRpcs } from "./SyncRpcs.ts"
 export const defaultCredit = 256
 
 /**
+ * Entries one catch-up page asks for.
+ *
+ * Bootstrap is the replay half of replay-then-follow, so the page size is the
+ * memory one catch-up costs and the granularity at which its cursor advances.
+ * It matches {@link defaultCredit} and stays under
+ * `SyncProtocol.maxReadLimit`, which is the ceiling the server enforces.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const defaultBootstrapLimit = 256
+
+/**
  * Input accepted by a sync subscription.
  *
  * `capability` authorizes branch reads: following a shared branch's run
@@ -65,9 +83,36 @@ export interface SubscribeOptions {
   readonly capability?: ShareCapability
   /**
    * Frames one subscription round may carry before the follow replenishes the
-   * window. Defaults to {@link defaultCredit}.
+   * window. Defaults to {@link defaultCredit}, and must be a positive integer
+   * no greater than `SyncProtocol.maxSubscribeCredit`.
    */
   readonly credit?: number | undefined
+  /**
+   * Applies one entry, and DEFINES what this subscription's cursor means.
+   *
+   * Without it the cursor advances as each entry is handed to the consumer,
+   * so a consumer whose own application then fails has a cursor naming an
+   * entry it never materialized. With it the cursor advances only after this
+   * effect succeeds, which makes `RunCursor` mean what its schema says. A
+   * failure here fails the subscription with the entry unacknowledged, so the
+   * next subscription from `client.cursors` delivers it again; the effect must
+   * therefore be idempotent, because a redelivery is exactly what a retry is.
+   */
+  readonly apply?: ((entry: JournalEvent.Entry) => Effect.Effect<void, SyncError>) | undefined
+  /**
+   * Runs when the server refuses a cursor below a run's compaction floor,
+   * BEFORE the client moves that run's cursor to the checkpoint and restarts.
+   *
+   * The entries under the floor are deleted, and this wire carries no
+   * checkpoint state to stand in for them, so a consumer rebuilding a
+   * projection has a real hole to fill. This is the seam it fills it through:
+   * load `Journal.latestCheckpoint(runId)`, or discard the run's derived
+   * state, or refuse. A failure here fails the subscription with the cursor
+   * unmoved, so nothing is silently skipped. The default logs the skipped
+   * range and continues, which is what a follower with no derived state
+   * wants.
+   */
+  readonly onResync?: ((resync: Resync) => Effect.Effect<void, SyncError>) | undefined
 }
 
 /**
@@ -119,7 +164,7 @@ const transportError = (cause: unknown): SyncError =>
     : new SyncError({
       code: "transport_failed",
       message: cause instanceof Error ? cause.message : "Sync RPC transport failed",
-      cause
+      cause: causeText(cause)
     })
 
 type Cursors = Map<JournalEvent.RunId, JournalEvent.Seq>
@@ -216,19 +261,68 @@ const frameViolation = (frame: EntriesFrame): SyncError | undefined => {
 }
 
 /**
+ * The first semantic inconsistency of a catch-up page, or `undefined` for a
+ * consistent one.
+ *
+ * The live path has admitted, never trusted, its frames since it was written;
+ * the bootstrap path took every schema-valid page on faith, so a compromised
+ * or buggy server could hand a run-scoped subscription an entry for a
+ * different run and move that run's cursor in a client that never asked about
+ * it. These are the same four questions {@link frameViolation} asks, put to a
+ * page: is every entry inside the scope the caller asked for, does each run's
+ * sequence ascend strictly, is every entry above the cursor the request
+ * carried, and does the response echo one cursor per run.
+ *
+ * Strictly-above-the-cursor is also what makes an incomplete page CONVERGE: a
+ * page that carries entries but moves no cursor would be re-read forever.
+ */
+const pageViolation = (
+  scope: Scope,
+  requested: ReadonlyMap<JournalEvent.RunId, JournalEvent.Seq>,
+  response: ReadResponse
+): SyncError | undefined => {
+  const violation = (message: string): SyncError => new SyncError({ code: "protocol_violation", message })
+  const highest = new Map<JournalEvent.RunId, JournalEvent.Seq>()
+  for (const entry of response.entries) {
+    if (!covers(scope, entry.runId)) {
+      return violation(`Read page carried an entry for run ${entry.runId}, which the request's scope excludes`)
+    }
+    const floor = requested.get(entry.runId)
+    if (floor !== undefined && entry.seq <= floor) {
+      return violation(
+        `Read page carried sequence ${entry.seq} for run ${entry.runId}, at or below the requested cursor ${floor}`
+      )
+    }
+    const previous = highest.get(entry.runId)
+    if (previous !== undefined && entry.seq <= previous) {
+      return violation(
+        `Read page entries for run ${entry.runId} must ascend strictly: sequence ${entry.seq} arrived after ${previous}`
+      )
+    }
+    highest.set(entry.runId, entry.seq)
+  }
+  const duplicate = duplicateCursorRunId(response.cursors)
+  return duplicate === undefined ? undefined : violation(`Read page echoed run ${duplicate} more than once`)
+}
+
+/**
  * Projects a Sync RPC client into the local replication service.
  *
  * The acknowledged cursors are per-service state in a `Ref`: concurrent
  * subscriptions share the view, and each commit only ever advances it. A
  * cursor advances in the same stream pull that admits each entry to the
- * consumer. Interrupted partial pages therefore retain the last admitted
- * entry rather than incorrectly acknowledging the server's whole page.
+ * consumer, or — when the caller supplies `SubscribeOptions.apply` — only
+ * after that callback has applied the entry. Interrupted partial pages
+ * therefore retain the last admitted entry rather than incorrectly
+ * acknowledging the server's whole page.
  *
- * Server responses are admitted, never trusted: a frame or bootstrap page
- * whose encoded entries exceed `maxFrameBytes` is refused with
- * `frame_too_large`, an internally inconsistent frame is refused as a
- * protocol violation before any cursor moves, and an incomplete bootstrap
- * page that makes no progress fails typed instead of re-reading forever.
+ * Server responses are admitted, never trusted, on BOTH paths. A frame or
+ * bootstrap page whose encoded entries exceed `maxFrameBytes` is refused with
+ * `frame_too_large`; a frame or page that carries another run's entry,
+ * repeats or reorders a sequence, or serves an entry at or below the cursor
+ * the request carried is refused as a protocol violation before any cursor
+ * moves; and an incomplete bootstrap page that makes no progress fails typed
+ * instead of re-reading forever.
  *
  * A live follow that loses its transport reconnects under
  * {@link reconnectPolicy}, resuming from the acknowledged cursors; the failure
@@ -240,8 +334,11 @@ const frameViolation = (frame: EntriesFrame): SyncError | undefined => {
  * A `compacted` refusal is recoverable rather than terminal: the run's cursor
  * moves to the checkpoint the server named and the subscription restarts, so
  * one compacted run costs a reconnect instead of the whole subscription. The
- * entries below that checkpoint are gone from the journal and are logged as
- * skipped, because this wire carries no checkpoint state to stand in for them.
+ * entries below that checkpoint are gone from the journal, and this wire
+ * carries no checkpoint state to stand in for them, so the hole is real:
+ * `SubscribeOptions.onResync` is the seam a consumer fills it through, and it
+ * runs to success before the cursor moves. The default logs the skipped
+ * range, which is what a follower with no derived state wants.
  *
  * A subscription's effective cursor per run is the LATER of the caller's and
  * the acknowledged one: a caller that restored its own progress is never
@@ -252,13 +349,22 @@ const frameViolation = (frame: EntriesFrame): SyncError | undefined => {
  * @category constructors
  * @since 0.1.0
  */
-export const make = ({ client, maxFrameBytes = defaultMaxFrameBytes }: {
+export const make = ({
+  bootstrapLimit = defaultBootstrapLimit,
+  client,
+  maxFrameBytes = defaultMaxFrameBytes
+}: {
   readonly client: Client
   /**
    * Largest summed encoded-entry size one frame or bootstrap page may carry,
    * in bytes. Defaults to {@link defaultMaxFrameBytes}.
    */
   readonly maxFrameBytes?: number | undefined
+  /**
+   * Entries one catch-up page asks for. Defaults to
+   * {@link defaultBootstrapLimit}.
+   */
+  readonly bootstrapLimit?: number | undefined
 }): Effect.Effect<Service> =>
   Effect.sync(() => {
     const acknowledged = Ref.makeUnsafe<ReadonlyMap<JournalEvent.RunId, JournalEvent.Seq>>(new Map())
@@ -267,7 +373,12 @@ export const make = ({ client, maxFrameBytes = defaultMaxFrameBytes }: {
 
     const subscribe = (options: SubscribeOptions): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
       Stream.unwrap(Effect.gen(function*() {
-        const credit = options.credit ?? defaultCredit
+        // Every policy this subscription runs under is checked once, here.
+        // The declared types say `number`, and `NaN` disabled each comparison
+        // it appears in rather than tightening it.
+        const credit = yield* positiveInt("SyncClient.SubscribeOptions.credit", options.credit, defaultCredit)
+        yield* positiveInt("SyncClient.make.maxFrameBytes", maxFrameBytes, defaultMaxFrameBytes)
+        yield* positiveInt("SyncClient.make.bootstrapLimit", bootstrapLimit, defaultBootstrapLimit)
         const cursor = cursorMap(options.cursors)
         // The contract: the effective cursor is `max(caller, acknowledged)`
         // per run. The shared map used to win in BOTH directions, which broke
@@ -297,6 +408,30 @@ export const make = ({ client, maxFrameBytes = defaultMaxFrameBytes }: {
             Effect.andThen(Ref.update(acknowledged, (shared) => advance(shared, runId, throughSeq)))
           )
 
+        const applyEntry = options.apply
+
+        /**
+         * Hands one entry to the consumer and moves its cursor.
+         *
+         * With an `apply` callback the cursor moves only after the callback
+         * succeeds, so a cursor names what the consumer materialized. Without
+         * one it moves as the entry is admitted, which is the weaker promise
+         * this client has always made and the one `RunCursor`'s JSDoc now
+         * states.
+         */
+        const deliver = (
+          runId: JournalEvent.RunId,
+          entry: JournalEvent.Entry
+        ): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
+          Stream.concat(
+            Stream.drain(Stream.fromEffect(
+              applyEntry === undefined
+                ? commit(runId, entry.seq)
+                : Effect.andThen(applyEntry(entry), commit(runId, entry.seq))
+            )),
+            Stream.succeed(entry)
+          )
+
         const batch = (frame: EntriesFrame): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> => {
           const frameBytes = entriesByteLength(frame.entries)
           if (frameBytes > maxFrameBytes) return Stream.fail(oversized(frameBytes, maxFrameBytes))
@@ -318,14 +453,7 @@ export const make = ({ client, maxFrameBytes = defaultMaxFrameBytes }: {
           if (frame.toSeq <= afterSeq) return Stream.empty
 
           const entries = frame.entries.filter((entry) => entry.seq > afterSeq)
-          return Stream.flatMap(
-            Stream.fromIterable(entries),
-            (entry) =>
-              Stream.concat(
-                Stream.drain(Stream.fromEffect(commit(frame.runId, entry.seq))),
-                Stream.succeed(entry)
-              )
-          )
+          return Stream.flatMap(Stream.fromIterable(entries), (entry) => deliver(frame.runId, entry))
         }
 
         const livePage = (): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
@@ -373,39 +501,46 @@ export const make = ({ client, maxFrameBytes = defaultMaxFrameBytes }: {
 
         const bootstrap = (): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
           Stream.unwrap(
-            client["Sync.Read"]({
-              scope: options.scope,
-              cursors: snapshot(),
-              limit: 256,
-              ...(options.capability === undefined ? {} : { capability: options.capability })
-            }).pipe(
-              Effect.mapError(transportError),
-              Effect.map((response) => {
-                const pageBytes = entriesByteLength(response.entries)
-                if (pageBytes > maxFrameBytes) return Stream.fail(oversized(pageBytes, maxFrameBytes))
-                const page = Stream.flatMap(
-                  Stream.fromIterable(response.entries),
-                  (entry) =>
-                    Stream.concat(
-                      Stream.drain(Stream.fromEffect(commit(entry.runId, entry.seq))),
-                      Stream.succeed(entry)
-                    )
-                )
-                if (response.done) return Stream.concat(page, follow())
-                if (response.entries.length === 0) {
-                  // An incomplete page with no entries can never converge:
-                  // the next read would carry the same cursors and receive
-                  // the same page. Fail typed instead of spinning.
-                  return Stream.fail(
-                    new SyncError({
-                      code: "protocol_violation",
-                      message: "Bootstrap read reported more durable entries but returned an empty page"
-                    })
+            // SUSPENDED, exactly as `livePage` is. Building the payload where
+            // the recursive call is written snapshotted the cursors as page N
+            // was mapped, before a single one of its entries had reached
+            // `commit` — so read N+1 carried read N's request cursors and the
+            // server correctly re-served the page it had just served. Every
+            // catch-up page past the first arrived twice.
+            Effect.suspend(() => {
+              const requested = snapshot()
+              return client["Sync.Read"]({
+                scope: options.scope,
+                cursors: requested,
+                limit: bootstrapLimit,
+                ...(options.capability === undefined ? {} : { capability: options.capability })
+              }).pipe(
+                Effect.mapError(transportError),
+                Effect.map((response) => {
+                  const pageBytes = entriesByteLength(response.entries)
+                  if (pageBytes > maxFrameBytes) return Stream.fail(oversized(pageBytes, maxFrameBytes))
+                  const violation = pageViolation(options.scope, cursorMap(requested), response)
+                  if (violation !== undefined) return Stream.fail(violation)
+                  const page = Stream.flatMap(
+                    Stream.fromIterable(response.entries),
+                    (entry) => deliver(entry.runId, entry)
                   )
-                }
-                return Stream.concat(page, bootstrap())
-              })
-            )
+                  if (response.done) return Stream.concat(page, follow())
+                  if (response.entries.length === 0) {
+                    // An incomplete page with no entries can never converge:
+                    // the next read would carry the same cursors and receive
+                    // the same page. Fail typed instead of spinning.
+                    return Stream.fail(
+                      new SyncError({
+                        code: "protocol_violation",
+                        message: "Bootstrap read reported more durable entries but returned an empty page"
+                      })
+                    )
+                  }
+                  return Stream.concat(page, bootstrap())
+                })
+              )
+            })
           )
 
         /**
@@ -444,17 +579,24 @@ export const make = ({ client, maxFrameBytes = defaultMaxFrameBytes }: {
          * this wire, and a consumer rebuilding a projection has to read it
          * from the journal's own `latestCheckpoint`.
          */
+        const onResync = options.onResync ?? ((resync: Resync) =>
+          Effect.logWarning(
+            "sync follower resyncing a compacted run from its checkpoint; entries below it are gone"
+          ).pipe(Effect.annotateLogs({ runId: resync.runId, checkpointSeq: resync.checkpointSeq })))
+
         const resynced = (): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
           Stream.catch(bootstrap(), (failure) => {
             const resync = resyncTarget(failure)
             if (resync === undefined) return Stream.fail(failure)
             return Stream.unwrap(
-              Effect.logWarning(
-                "sync follower resyncing a compacted run from its checkpoint; entries below it are gone"
-              ).pipe(
-                Effect.annotateLogs({ runId: resync.runId, checkpointSeq: resync.checkpointSeq }),
+              // The consumer's hook runs FIRST and must succeed. It is the
+              // only point at which a projection can restore the prefix the
+              // checkpoint stands for, and a failure here leaves the cursor
+              // where it was, so nothing is skipped behind the consumer's
+              // back.
+              onResync(resync).pipe(
                 // The cursor must move BEFORE the restart reads it: the
-                // bootstrap snapshots the cursors as it is constructed.
+                // bootstrap snapshots the cursors as it is issued.
                 Effect.andThen(commit(resync.runId, resync.checkpointSeq)),
                 Effect.map(resynced)
               )

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Duration, Effect, Exit, Tracer } from "effect"
+import { Duration, Effect, Exit, Redacted, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import { vi } from "vitest"
 import * as BranchProtocol from "../src/BranchProtocol.ts"
@@ -9,7 +9,7 @@ import { SyncError } from "../src/SyncError.ts"
 const branchId = "live-branch" as BranchProtocol.BranchId
 const otherBranchId = "other-branch" as BranchProtocol.BranchId
 
-const authority = BranchShare.makeHmac({ secret: "share-secret" })
+const authority = BranchShare.makeHmac({ secret: Redacted.make("share-secret") })
 
 const run = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.provide(TestClock.layer()))
 
@@ -23,8 +23,8 @@ describe("BranchShare", () => {
     Effect.gen(function*() {
       const [empty, shortClaims] = yield* run(
         Effect.gen(function*() {
-          const empty = yield* Effect.exit(BranchShare.makeHmac({ secret: "" }))
-          const short = yield* BranchShare.makeHmac({ secret: "x" })
+          const empty = yield* Effect.exit(BranchShare.makeHmac({ secret: Redacted.make("") }))
+          const short = yield* BranchShare.makeHmac({ secret: Redacted.make("x") })
           const capability = yield* short.mint({
             branchId,
             capabilityId: "short-key",
@@ -173,7 +173,7 @@ describe("BranchShare", () => {
           const share = yield* BranchShare.BranchShare
           const capability = yield* share.mint({ branchId, capabilityId: "cap-l", access: "write", ttlMs: 1_000 })
           return (yield* share.verify(capability, { branchId, access: "write" })).access
-        }).pipe(Effect.provide(BranchShare.layerHmac({ secret: "layer-secret" })))
+        }).pipe(Effect.provide(BranchShare.layerHmac({ secret: Redacted.make("layer-secret") })))
       )
 
       expect(access).toBe("write")
@@ -243,7 +243,7 @@ describe("BranchShare", () => {
     Effect.gen(function*() {
       const importFailure = new Error("import refused")
       const importKeySpy = vi.spyOn(crypto.subtle, "importKey").mockRejectedValueOnce(importFailure)
-      const importError = yield* run(Effect.flip(BranchShare.makeHmac({ secret: "broken" })))
+      const importError = yield* run(Effect.flip(BranchShare.makeHmac({ secret: Redacted.make("broken") })))
       importKeySpy.mockRestore()
 
       const [share, capability] = yield* run(
@@ -260,12 +260,15 @@ describe("BranchShare", () => {
       const verifyError = yield* run(Effect.flip(share.verify(capability, { branchId, access: "write" })))
       signSpy.mockRestore()
 
+      // The cause is a bounded RENDERING, not the host object: `SyncError` is
+      // the declared error schema of every RPC in both groups, so an
+      // arbitrary `unknown` here had no defined wire form and no ceiling.
       expect(importError).toBeInstanceOf(SyncError)
       expect(importError.code).toBe("unknown")
-      expect(importError.cause).toBe(importFailure)
+      expect(importError.cause).toBe(`Error: ${importFailure.message}`)
       expect(verifyError).toBeInstanceOf(SyncError)
       expect(verifyError.code).toBe("unknown")
-      expect(verifyError.cause).toBe(signFailure)
+      expect(verifyError.cause).toBe(`Error: ${signFailure.message}`)
     }))
 
   it.effect("annotates mint and verify spans with the branch identity, never the capability material", () =>

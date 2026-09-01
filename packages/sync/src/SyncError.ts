@@ -8,20 +8,8 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { Resync } from "./SyncProtocol.ts"
 
-/**
- * Stable error codes returned by sync operations.
- *
- * `compacted` reports that the request's cursor for one run starts below that
- * run's compaction floor, so the entries it asks for have been deleted. It is
- * its own code rather than an `unknown` because it is RECOVERABLE and nothing
- * else here is: the accompanying {@link SyncError.resync} names the checkpoint
- * to resume from, and a follower that applies it converges. Folding it into
- * `unknown` cost the checkpoint, and with it every path back.
- *
- * @category models
- * @since 0.1.0
- */
-export const ErrorCode = Schema.Literals([
+/** The literals behind {@link ErrorCode}, also read by {@link SyncError.is}. */
+const errorCodes = [
   "invalid_request",
   "unauthorized",
   "not_found",
@@ -35,7 +23,24 @@ export const ErrorCode = Schema.Literals([
   "compacted",
   "closed",
   "unknown"
-]).annotate({ identifier: "@smthrs/sync/ErrorCode" })
+] as const
+
+/**
+ * Stable error codes returned by sync operations.
+ *
+ * `compacted` reports that the request's cursor for one run starts below that
+ * run's compaction floor, so the entries it asks for have been deleted. It is
+ * its own code rather than an `unknown` because it is RECOVERABLE and nothing
+ * else here is: the accompanying {@link SyncError.resync} names the checkpoint
+ * to resume from, and a follower that applies it converges. Folding it into
+ * `unknown` cost the checkpoint, and with it every path back.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const ErrorCode = Schema.Literals(errorCodes).annotate({ identifier: "@smthrs/sync/ErrorCode" })
+
+const codes: ReadonlySet<string> = new Set(errorCodes)
 
 /**
  * Stable error code returned by a sync operation.
@@ -52,21 +57,46 @@ export type ErrorCode = typeof ErrorCode.Type
  * sequence a follower resumes from. It is optional so every other code keeps
  * the shape it already had on the wire.
  *
+ * `cause` is a bounded STRING, not the host object that failed. This error is
+ * the declared error schema of every RPC in both groups, so whatever it
+ * carries reaches a remote follower that may hold nothing but a branch share
+ * link. A `Schema.Unknown` cause published the host's own failure verbatim —
+ * a driver message with SQL text, a rejected credential — counted against no
+ * size ceiling, and had no defined wire form for a class instance or a cyclic
+ * value. `internal/causeText` is the one renderer that fills it.
+ *
  * @category errors
  * @since 0.1.0
  */
 export class SyncError extends Schema.TaggedError<SyncError>()("@smthrs/sync/SyncError", {
   code: ErrorCode,
   message: Schema.String,
-  cause: Schema.optional(Schema.Unknown),
+  cause: Schema.optional(Schema.String),
   resync: Schema.optional(Resync)
 }) {
   /**
-   * Returns `true` when a value is a `SyncError`.
+   * Returns `true` when a value carries this error's shape: the tag, a `code`
+   * this package declares, a string `message`, and a `resync` only alongside
+   * `compacted`.
+   *
+   * It is a STRUCTURAL check, not a class check, deliberately. Everything that
+   * reaches it on a shipped path has crossed a boundary that rebuilds the
+   * value — the RPC client's schema-decoded error channel, or a browser
+   * `postMessage` that keeps the fields and drops the prototype — and a check
+   * that demanded the prototype would refuse an error the package itself sent.
+   * What it does not verify is that the value was produced by this package: a
+   * value constructed in-process with the right fields passes.
    *
    * @since 0.1.0
    */
-  static readonly is = (value: unknown): value is SyncError => Predicate.isTagged(value, "@smthrs/sync/SyncError")
+  static readonly is = (value: unknown): value is SyncError => {
+    if (!Predicate.isTagged(value, "@smthrs/sync/SyncError")) return false
+    const candidate = value as { readonly code?: unknown; readonly message?: unknown; readonly resync?: unknown }
+    if (typeof candidate.message !== "string") return false
+    if (typeof candidate.code !== "string" || !codes.has(candidate.code)) return false
+    if (candidate.resync === undefined) return true
+    return candidate.code === "compacted" && Schema.is(Resync)(candidate.resync)
+  }
 }
 
 /**

@@ -155,7 +155,10 @@ describe("SyncServer workspace scope", () => {
       if (Exit.isFailure(exit)) {
         const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail")?.error
         expect(failure).toBeInstanceOf(SyncError)
-        expect(failure).toMatchObject({ code: "unknown", message: "disk gone" })
+        // The host's own message never crosses the boundary; the run does.
+        expect(failure).toMatchObject({ code: "unknown" })
+        expect((failure as SyncError).message).toContain("Journal read failed for run")
+        expect((failure as SyncError).message).not.toContain("disk gone")
       }
     }))
 

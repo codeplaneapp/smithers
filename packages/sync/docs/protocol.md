@@ -1,15 +1,3 @@
----
-description: "Read-only journal replication: cursor-based reads and credit-bounded subscriptions over Effect RPC."
----
-
-# Journal synchronization
-
-This page defines the journal replication protocol in `@smthrs/sync`:
-cursor-based reads and credit-bounded subscriptions over Effect RPC, plus the
-branch collaboration group that complements them.
-
-{/* generated:sync-protocol start */}
-
 ## Scopes and cursors
 
 A client reads either one run or every run in a workspace:
@@ -113,11 +101,3 @@ carry ephemeral presence. `BranchRpcs` has no production mount at
 
 Bidirectional reconciliation of the read path, acknowledgement windows, and
 resumable transport sessions remain unplanned.
-
-{/* generated:sync-protocol end */}
-
-## Authentication
-
-`SyncAuth` is an Effect RPC middleware service, and the package ships its production implementation: `SyncAuth.layer` verifies a `WorkspaceShare` capability, the branch share scheme extended with a signed `kid` for key rotation, presented in the `flows-sync-workspace` request header, and installs the resulting `SyncPrincipal` for the request. The principal defaults to anonymous, and the server refuses anonymous access to every non-branch run and to workspace listings, so an unauthenticated connection can read only branch runs it holds a branch share capability for. The verified expiry travels with the principal, so an open subscription ends with `unauthorized` when the credential that opened it runs out. Signing secrets are provisioned as `Redacted` values through `WorkspaceShare.layerHmac` (explicit keyring) or `WorkspaceShare.layerConfig` (`FLOWS_SYNC_SECRET`, `FLOWS_SYNC_KEY_ID`); there is no default secret. A deployment may substitute its own `SyncAuth` implementation at the transport boundary.
-
-See [Journal](/concepts/journal) and the [`@smthrs/sync` reference](/api/sync).

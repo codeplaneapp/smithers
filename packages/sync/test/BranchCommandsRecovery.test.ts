@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Journal } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Effect, Exit, Layer } from "effect"
+import { Effect, Exit, Layer, Redacted } from "effect"
 import { TestClock } from "effect/testing"
 import * as BranchCommands from "../src/BranchCommands.ts"
 import * as BranchProtocol from "../src/BranchProtocol.ts"
@@ -66,7 +66,7 @@ describe("BranchCommands ambiguous commit recovery", () => {
           Effect.provide(
             Layer.mergeAll(
               TestJournal.layer(),
-              BranchShare.layerHmac({ secret: "ambiguous-secret" })
+              BranchShare.layerHmac({ secret: Redacted.make("ambiguous-secret") })
             )
           ),
           Effect.provide(TestClock.layer())

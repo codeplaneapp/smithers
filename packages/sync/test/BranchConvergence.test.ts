@@ -8,7 +8,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Journal } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Effect, Layer, Stream } from "effect"
+import { Effect, Layer, Redacted, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import * as BranchCommands from "../src/BranchCommands.ts"
 import * as BranchProjection from "../src/BranchProjection.ts"
@@ -27,7 +27,7 @@ const bob = "bob" as BranchProtocol.ParticipantId
 
 const layer = Layer.mergeAll(
   TestJournal.layer(),
-  BranchShare.layerHmac({ secret: "convergence-secret" }),
+  BranchShare.layerHmac({ secret: Redacted.make("convergence-secret") }),
   RunCatalog.layerStatic([runId])
 )
 
@@ -241,24 +241,16 @@ describe("branch convergence", () => {
           if (first === undefined || second === undefined) {
             return yield* Effect.die(new Error("expected both canonical edits"))
           }
-          const delivered = (entries: ReadonlyArray<typeof first>) =>
-            SyncClient.make({
-              client: {
-                "Sync.Read": () => Effect.succeed({ entries, cursors: [], done: true }),
-                "Sync.Subscribe": () => Stream.never as Stream.Stream<SyncProtocol.Frame>
-              } as unknown as Parameters<typeof SyncClient.make>[0]["client"]
-            })
-          const leftClient = yield* delivered([first, first, second])
-          const rightClient = yield* delivered([second, first, second])
-          const leftEntries = yield* Stream.runCollect(
-            Stream.take(leftClient.subscribe({ scope, cursors: [], capability }), 3)
-          )
-          const rightEntries = yield* Stream.runCollect(
-            Stream.take(rightClient.subscribe({ scope, cursors: [], capability }), 3)
-          )
+          // The projection is the unit under test, and it is asked the
+          // question directly: the same entries in two different arrival
+          // orders, with a duplicate in each, must fold to one document. The
+          // client is deliberately NOT the delivery mechanism here — it
+          // refuses a page that repeats or reorders a sequence as a protocol
+          // violation, which is a different guarantee, covered by its own
+          // suite.
           return [
-            BranchProjection.project(branchId, leftEntries),
-            BranchProjection.project(branchId, rightEntries)
+            BranchProjection.project(branchId, [first, first, second]),
+            BranchProjection.project(branchId, [second, first, second])
           ] as const
         })
       )

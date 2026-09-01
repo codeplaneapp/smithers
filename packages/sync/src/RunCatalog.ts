@@ -15,7 +15,17 @@ import * as Stream from "effect/Stream"
 /**
  * Workspace run enumeration operations.
  *
- * // TODO(port): supplied by Gateway/host until @smthrs/journal exposes a workspace list/watch contract.
+ * `list` is the AUTHORITATIVE run set and `changes` is only a low-latency
+ * wake: a subscriber that misses an announcement re-lists rather than losing
+ * state, and a subscriber whose covered set must stay accurate re-lists on a
+ * cadence of its own. Every implementation returns a fresh array from `list`,
+ * so a caller may retain and sort what it receives without disturbing another
+ * reader.
+ *
+ * The catalog is supplied by the host rather than derived from the journal:
+ * `@smthrs/journal` has no workspace-wide list or watch contract, and
+ * `@smthrs/engine-store` owns the durable run set that {@link makePolling}
+ * reads.
  *
  * @category models
  * @since 0.1.0
@@ -44,19 +54,26 @@ export const make = (implementation: Service): Service => RunCatalog.of(implemen
 /**
  * Provides an immutable run catalog.
  *
+ * `list` answers with a fresh array each time, matching {@link makeMemory} and
+ * {@link makePolling}. Handing every caller the same instance let one reader
+ * sort or splice the catalog in place for every other reader, which is a
+ * defect a `ReadonlyArray` type hides from TypeScript and not from JavaScript.
+ *
  * @category layers
  * @since 0.1.0
  */
 export const layerStatic = (
   ids: ReadonlyArray<JournalEvent.RunId>
-): Layer.Layer<RunCatalog> =>
-  Layer.succeed(
+): Layer.Layer<RunCatalog> => {
+  const known = Array.from(new Set(ids))
+  return Layer.succeed(
     RunCatalog,
     make({
-      list: Effect.succeed(Array.from(new Set(ids))),
+      list: Effect.sync(() => [...known]),
       changes: Stream.empty
     })
   )
+}
 
 /**
  * Announcements a stalled {@link Service.changes} subscriber may fall behind

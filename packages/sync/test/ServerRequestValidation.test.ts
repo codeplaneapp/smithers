@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Journal, JournalEvent } from "@smthrs/journal"
-import { Effect, Layer, Schema, Stream } from "effect"
+import { Effect, Layer, Result, Schema, Stream } from "effect"
 import * as RunCatalog from "../src/RunCatalog.ts"
 import * as SyncPrincipal from "../src/SyncPrincipal.ts"
 import * as SyncProtocol from "../src/SyncProtocol.ts"
@@ -23,26 +23,32 @@ const entry = (sequence: number) =>
   })
 
 describe("SyncServer request validation", () => {
-  it.effect("pins duplicate cursors as first-wins for reads but last-write for response state", () =>
+  // The read position came from the FIRST duplicate and the echoed response
+  // state from the LAST, so a follower persisting the returned cursors — which
+  // the protocol tells it to do — skipped entries the page never carried.
+  // There is no correct choice between the two readings, so neither is made.
+  it.effect("refuses a cursor set that names one run twice, on both request paths", () =>
     Effect.gen(function*() {
-      const observedAfter: Array<JournalEvent.Seq | undefined> = []
-      const response = yield* (
+      const reads: Array<JournalEvent.Seq | undefined> = []
+      const [readFailure, subscribeFailure] = yield* (
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
-          return yield* server.read({
-            scope: { _tag: "Run", runId },
-            cursors: [
-              { runId, afterSeq: seq(0) },
-              { runId, afterSeq: seq(2) }
-            ],
-            limit: 10
-          })
+          const cursors = [
+            { runId, afterSeq: seq(0) },
+            { runId, afterSeq: seq(2) }
+          ]
+          return [
+            yield* Effect.flip(server.read({ scope: { _tag: "Run", runId }, cursors, limit: 10 })),
+            yield* Effect.flip(
+              Stream.runCollect(server.subscribe({ scope: { _tag: "Run", runId }, cursors, credit: 4 }))
+            )
+          ] as const
         }).pipe(
           Effect.provide(
             Layer.mergeAll(
               Journal.layerNoop({
                 entries: ({ after }) => {
-                  observedAfter.push(after)
+                  reads.push(after)
                   return Effect.succeed({ entries: [entry(1), entry(2)], hasMore: false })
                 }
               }),
@@ -53,33 +59,34 @@ describe("SyncServer request validation", () => {
         )
       )
 
-      // CONTRACT: malformed duplicate cursors currently diverge: cursorOf uses
-      // the first item, while the response Map was initialized by the last one.
-      expect(observedAfter).toEqual([0])
-      expect(response.entries.map((value) => value.seq)).toEqual([1, 2])
-      expect(response.cursors).toEqual([{ runId, afterSeq: 2 }])
+      expect(readFailure.code).toBe("invalid_request")
+      expect(readFailure.message).toContain(runId)
+      expect(subscribeFailure.code).toBe("invalid_request")
+      // Refused before the journal is touched at all.
+      expect(reads).toEqual([])
     }))
 
-  it.effect("pins the absence of server-side upper bounds for limit and credit", () =>
+  it.effect("bounds limit at the wire and clamps it again for an in-process caller", () =>
     Effect.gen(function*() {
       const oversized = 1_000_000
-      const readRequest = Schema.decodeUnknownSync(SyncProtocol.ReadRequest)({
-        scope: { _tag: "Run", runId },
-        cursors: [],
-        limit: oversized
-      })
-      const subscribeRequest = Schema.decodeUnknownSync(SyncProtocol.SubscribeRequest)({
-        scope: { _tag: "Run", runId },
-        cursors: [],
-        credit: oversized
-      })
+      // The wire refuses the over-limit request outright.
+      expect(
+        Result.isFailure(
+          Schema.decodeUnknownResult(SyncProtocol.ReadRequest)({
+            scope: { _tag: "Run", runId },
+            cursors: [],
+            limit: oversized
+          })
+        )
+      ).toBe(true)
+
       let receivedLimit = 0
-      const result = yield* (
+      const page = yield* (
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
-          const page = yield* server.read(readRequest)
-          const frames = yield* Stream.runCollect(server.subscribe(subscribeRequest))
-          return { frames: Array.from(frames), page }
+          // Constructed directly, bypassing the schema, the way an in-process
+          // caller can. The journal must still never see an unbounded page.
+          return yield* server.read({ scope: { _tag: "Run", runId }, cursors: [], limit: oversized })
         }).pipe(
           Effect.provide(
             Layer.mergeAll(
@@ -87,8 +94,7 @@ describe("SyncServer request validation", () => {
                 entries: ({ limit }) => {
                   receivedLimit = limit
                   return Effect.succeed({ entries: [entry(0)], hasMore: false })
-                },
-                stream: () => Stream.succeed(entry(0))
+                }
               }),
               RunCatalog.layerStatic([runId]),
               SyncPrincipal.layerWorkspace("validation-suite")
@@ -97,12 +103,38 @@ describe("SyncServer request validation", () => {
         )
       )
 
-      // CONTRACT: the wire schemas require non-negative integers but impose no
-      // memory/fan-out maximum, and the server forwards the requested values.
-      expect(readRequest.limit).toBe(oversized)
-      expect(subscribeRequest.credit).toBe(oversized)
-      expect(receivedLimit).toBe(oversized)
-      expect(result.page.entries).toHaveLength(1)
-      expect(result.frames).toHaveLength(1)
+      expect(receivedLimit).toBe(SyncProtocol.maxReadLimit)
+      expect(page.entries).toHaveLength(1)
+      expect(
+        Schema.decodeUnknownSync(SyncProtocol.ReadRequest)({
+          scope: { _tag: "Run", runId },
+          cursors: [],
+          limit: SyncProtocol.maxReadLimit
+        })
+      ).toMatchObject({ limit: SyncProtocol.maxReadLimit })
+    }))
+
+  it.effect("refuses a policy that is not a positive safe integer instead of quietly disabling it", () =>
+    Effect.gen(function*() {
+      const refusals = yield* (
+        Effect.gen(function*() {
+          return [
+            // NaN made every `bytes > maxFrameBytes` comparison false, which
+            // silently removed the ceiling the option exists to install.
+            yield* Effect.flip(SyncServer.makeLiveWith({ maxFrameBytes: Number.NaN })),
+            yield* Effect.flip(SyncServer.makeLiveWith({ concurrency: 0 })),
+            yield* Effect.flip(SyncServer.makeLiveWith({ tailIntervalMs: -1 }))
+          ] as const
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(Journal.layerNoop({}), RunCatalog.layerStatic([runId]))
+          )
+        )
+      )
+
+      for (const refusal of refusals) {
+        expect(refusal.code).toBe("invalid_request")
+        expect(refusal.message).toContain("SyncServer.Options")
+      }
     }))
 })

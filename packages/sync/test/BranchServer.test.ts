@@ -8,7 +8,20 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Journal } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Deferred, Effect, Exit, Fiber, Layer, Option, Queue, Schema, type Scope, Stream } from "effect"
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Queue,
+  Redacted,
+  Result,
+  Schema,
+  type Scope,
+  Stream
+} from "effect"
 import { TestClock } from "effect/testing"
 import * as RpcClient from "effect/unstable/rpc/RpcClient"
 import type * as RpcClientError from "effect/unstable/rpc/RpcClientError"
@@ -26,16 +39,22 @@ import {
   type CommandId,
   Cursor,
   type ParticipantId,
-  SayCommand
+  SayCommand,
+  ShareClaims
 } from "../src/BranchProtocol.ts"
 import * as BranchRpcs from "../src/BranchRpcs.ts"
 import * as BranchServer from "../src/BranchServer.ts"
 import * as BranchShare from "../src/BranchShare.ts"
+import { SyncError } from "../src/SyncError.ts"
 import * as SyncPrincipal from "../src/SyncPrincipal.ts"
 import { SyncAuth } from "../src/SyncRpcs.ts"
 import * as TestSocket from "../src/test/TestSocket.ts"
 
-const base = Layer.mergeAll(TestJournal.layer(), BranchShare.layerHmac({ secret: "wire-secret" }), BranchIds.layer)
+const base = Layer.mergeAll(
+  TestJournal.layer(),
+  BranchShare.layerHmac({ secret: Redacted.make("wire-secret") }),
+  BranchIds.layer
+)
 const services = Layer.mergeAll(BranchPresence.layer({ leaseMs: 600_000 }), BranchCommands.layer).pipe(
   Layer.provide(base)
 )
@@ -65,9 +84,16 @@ type Client = RpcClient.RpcClient<RpcGroup.Rpcs<typeof BranchRpcs.BranchRpcs>, R
  * hand-rolled `Protocol` bound to the socket pair), so typed failures decode
  * on the client exactly as they would over a hosted transport.
  */
-const connect = (pair: TestSocket.Pair, authenticated = true): Effect.Effect<Client, never, Requirements> =>
+const connect = (
+  pair: TestSocket.Pair,
+  authenticated = true,
+  shareOverride?: BranchShare.Service
+): Effect.Effect<Client, never, Requirements> =>
   Effect.gen(function*() {
-    const handlers = yield* Layer.build(BranchServer.layerHandlers)
+    const ambient = yield* BranchShare.BranchShare
+    const handlers = yield* Layer.build(BranchServer.layerHandlers).pipe(
+      Effect.provideService(BranchShare.BranchShare, shareOverride ?? ambient)
+    )
     const serialization = RpcSerialization.json.makeUnsafe()
     const writer = yield* pair.server.writer
     const protocol = yield* RpcServer.Protocol.make((writeRequest) =>
@@ -217,6 +243,43 @@ describe("BranchRpcs over the wire", () => {
       expect(linkExpiry).toBeLessThanOrEqual(ownerExpiry)
     }))
 
+  // `share.verify` reads the clock inside its own generator, after awaiting the
+  // HMAC, and the handler reads it again. A parent that expires between the two
+  // used to clamp the ttl to zero and hand back a capability `verify` refuses
+  // on first use: a success carrying something that can never authorize.
+  it.effect("refuses to mint a link from a capability that expired mid-request", () =>
+    Effect.gen(function*() {
+      const failure = yield* program(
+        Effect.gen(function*() {
+          const ambient = yield* BranchShare.BranchShare
+          const expired = BranchShare.make({
+            ...ambient,
+            // Verification succeeds, and the claims it returns are already out
+            // of date by the time the handler reads the clock.
+            verify: (capability) =>
+              Effect.succeed(
+                new ShareClaims({
+                  access: "write",
+                  branchId: capability.claims.branchId,
+                  capabilityId: capability.claims.capabilityId,
+                  expiresAtMs: 0,
+                  issuedAtMs: 0
+                })
+              )
+          })
+          const pair = yield* TestSocket.makePair()
+          const client = yield* connect(pair, true, expired)
+          const created = yield* client["Branch.CreateBranch"]({ ttlMs: 600_000 })
+          return yield* Effect.flip(
+            client["Branch.MintShare"]({ capability: created.capability, access: "read", ttlMs: 60_000 })
+          )
+        })
+      )
+
+      expect(failure).toMatchObject({ code: "unauthorized" })
+      expect(failure.message).toContain("expired")
+    }))
+
   it.effect("refuses to mint from a read-only capability", () =>
     Effect.gen(function*() {
       const error = yield* program(
@@ -268,17 +331,35 @@ describe("BranchRpcs over the wire", () => {
             cursor: new Cursor({ cardId: "branch-card", offset: 12 })
           })
 
-          const gate = yield* Deferred.make<void>()
+          const snapshot = yield* Deferred.make<void>()
+          const departure = yield* Deferred.make<void>()
+          let emitted = 0
           const watched = yield* Stream.runCollect(
             Stream.take(
               client["Branch.WatchRoster"]({ capability, branchId }).pipe(
-                Stream.tap(() => Deferred.succeed(gate, undefined))
+                Stream.tap(() => {
+                  emitted += 1
+                  return emitted === 1
+                    ? Deferred.succeed(snapshot, undefined)
+                    : emitted === 2
+                    ? Deferred.succeed(departure, undefined)
+                    : Effect.void
+                })
               ),
-              2
+              3
             )
           ).pipe(Effect.forkChild({ startImmediately: true }))
-          yield* Deferred.await(gate)
+          yield* Deferred.await(snapshot)
           yield* client["Branch.Leave"]({ capability, branchId, participantId: alice })
+          yield* Deferred.await(departure)
+          // A caret that moves is a roster change, so the watch emits again.
+          yield* client["Branch.Announce"]({
+            capability,
+            branchId,
+            participantId: bob,
+            displayName: "Bob",
+            cursor: new Cursor({ cardId: "branch-card", offset: 20 })
+          })
           return yield* Fiber.join(watched)
         })
       )
@@ -286,41 +367,67 @@ describe("BranchRpcs over the wire", () => {
       const rosters = Array.from(emissions, (frame) => frame.participants)
       expect(rosters.map((roster) => roster.map((participant) => participant.participantId))).toEqual([
         [alice, bob],
+        [bob],
         [bob]
       ])
       const bobSighting = rosters[0]?.[1]
       expect(bobSighting?.displayName).toBe("Bob")
       expect(bobSighting?.cursor).toMatchObject({ cardId: "branch-card", offset: 12 })
+      expect(rosters[2]?.[0]?.cursor).toMatchObject({ cardId: "branch-card", offset: 20 })
     }))
 
-  it.effect("decodes an empty displayName at the RPC schema and refuses it inside presence", () =>
+  it.effect("refuses an empty displayName at the wire schema, before any handler runs", () =>
     Effect.gen(function*() {
-      const [decodedName, exit, roster] = yield* program(
+      // `BranchRpcs.AnnouncePayload` IS `BranchPresence.Announcement`, so the
+      // wire and the service cannot disagree about what a legal announcement
+      // is. It used to accept `""` and hand it to a `NonEmptyString`
+      // `Participant` constructor, which THREW: a defect outside the
+      // `SyncError` channel the RPC declares, which an `Exit.isFailure`
+      // assertion could not tell from a typed refusal.
+      const decoded = Schema.decodeUnknownResult(BranchRpcs.AnnouncePayload)({
+        capability: null,
+        branchId: "b",
+        participantId: alice,
+        displayName: "",
+        cursor: null
+      })
+      expect(Result.isFailure(decoded)).toBe(true)
+
+      const [exit, roster] = yield* program(
         Effect.gen(function*() {
           const pair = yield* TestSocket.makePair()
           const client = yield* connect(pair)
           const presence = yield* BranchPresence.BranchPresence
           const created = yield* client["Branch.CreateBranch"]({ ttlMs: 600_000 })
-          const payload = Schema.decodeUnknownSync(BranchRpcs.AnnouncePayload)({
-            capability: created.capability,
-            branchId: created.branchId,
-            participantId: alice,
-            displayName: "",
-            cursor: null
-          })
-          const outcome = yield* Effect.exit(client["Branch.Announce"](payload))
+          const outcome = yield* Effect.exit(
+            presence.announce({
+              capability: created.capability,
+              branchId: created.branchId,
+              participantId: alice,
+              displayName: "" as string,
+              cursor: null
+            })
+          )
           const current = yield* presence.list({
             capability: created.capability,
             branchId: created.branchId
           })
-          return [payload.displayName, outcome, current] as const
+          return [outcome, current] as const
         })
       )
 
-      // CONTRACT: the wire schema accepts the empty string; constructing the
-      // service's NonEmpty Participant fails before the roster is mutated.
-      expect(decodedName).toBe("")
+      // An in-process caller that bypasses the wire is refused TYPED, not by
+      // a constructor throwing: the cause reason is a Fail carrying a
+      // `SyncError`, which `Exit.isFailure` alone could never distinguish
+      // from the Die this used to produce.
       expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        const reason = exit.cause.reasons[0]
+        expect(reason?._tag).toBe("Fail")
+        const failure = reason?._tag === "Fail" ? reason.error : undefined
+        expect(SyncError.is(failure)).toBe(true)
+        expect((failure as SyncError).code).toBe("invalid_request")
+      }
       expect(roster).toEqual([])
     }))
 

@@ -1,0 +1,39 @@
+/**
+ * Execution-time validation of the numeric policies this package's
+ * constructors accept.
+ *
+ * Every `Options` field is typed `number`, and TypeScript admits `NaN`,
+ * `Infinity`, zero, and a negative under that type. Each of them disables the
+ * thing it configures rather than tightening it: `maxFrameBytes: NaN` makes
+ * every `bytes > maxFrameBytes` comparison false, so the ceiling silently
+ * stops existing; `concurrency: 0` reaches a bounded `Stream.flatMap`
+ * unchecked. A policy is checked once, where it enters, and a bad one is a
+ * typed refusal rather than a bound that quietly does nothing.
+ *
+ * @since 1.0.0-rc.0
+ */
+import * as Effect from "effect/Effect"
+import { SyncError } from "../SyncError.ts"
+
+/**
+ * The caller's value when it is a positive safe integer, the fallback when the
+ * caller supplied none, and a typed `invalid_request` refusal otherwise. The
+ * message names the option so the offending field is identifiable without the
+ * error carrying anything but the scalar it was given.
+ *
+ * @category validation
+ * @since 1.0.0-rc.0
+ */
+export const positiveInt = (
+  name: string,
+  value: number | undefined,
+  fallback: number
+): Effect.Effect<number, SyncError> => {
+  if (value === undefined) return Effect.succeed(fallback)
+  return Number.isSafeInteger(value) && value > 0 ? Effect.succeed(value) : Effect.fail(
+    new SyncError({
+      code: "invalid_request",
+      message: `${name} must be a positive safe integer, not ${value}`
+    })
+  )
+}

@@ -23,6 +23,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { BranchId, Cursor, Participant, ParticipantId, ShareCapability } from "./BranchProtocol.ts"
 import * as BranchShare from "./BranchShare.ts"
+import { positiveInt } from "./internal/options.ts"
 import { SyncError } from "./SyncError.ts"
 
 /**
@@ -88,8 +89,22 @@ export type LeaveRequest = typeof LeaveRequest.Type
 export interface Service {
   readonly announce: (announcement: Announcement) => Effect.Effect<Participant, SyncError>
   readonly leave: (request: LeaveRequest) => Effect.Effect<void, SyncError>
+  /**
+   * One branch's live roster, as a fresh array the caller may retain and sort.
+   * Reading it is also what drops the branch's expired leases.
+   */
   readonly list: (request: RosterRequest) => Effect.Effect<ReadonlyArray<Participant>, SyncError>
   readonly changes: Stream.Stream<BranchId>
+  /**
+   * How long one announcement keeps a participant on the roster, in
+   * milliseconds.
+   *
+   * A lease lapses without anyone reporting it, and nothing publishes on
+   * `changes` when it does, so a watcher cannot learn of the last
+   * participant's departure from the change feed alone. It re-lists on this
+   * cadence instead, which is the longest a lapsed lease can stay visible.
+   */
+  readonly leaseMs: number
 }
 
 /**
@@ -111,6 +126,15 @@ export const make = (implementation: Service): Service => BranchPresence.of(impl
 const unavailable = new SyncError({ code: "closed", message: "Branch presence is unavailable" })
 
 /**
+ * The lease {@link makeNoop} reports. It holds no one, so the value only has
+ * to be a positive number a watcher can build a re-list cadence from.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const defaultLeaseMs = 30_000
+
+/**
  * Constructs a presence registry that holds no one.
  *
  * @category constructors
@@ -122,6 +146,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service =>
     leave: () => Effect.fail(unavailable),
     list: () => Effect.succeed([]),
     changes: Stream.empty,
+    leaseMs: defaultLeaseMs,
     ...overrides
   })
 
@@ -145,7 +170,12 @@ export const PresenceOptions = Schema.Struct({
    * Roster changes a stalled {@link Service.changes} subscriber may fall
    * behind by. Defaults to {@link defaultChangesCapacity}.
    */
-  changesCapacity: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0)))
+  changesCapacity: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+  /**
+   * Participants one branch may hold at once. Defaults to
+   * {@link defaultMaxParticipants}.
+   */
+  maxParticipants: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0)))
 })
 /**
  * The value form of {@link PresenceOptions}.
@@ -172,7 +202,21 @@ export type PresenceOptions = typeof PresenceOptions.Type
  */
 export const defaultChangesCapacity = 256
 
-const key = (branchId: BranchId, participantId: ParticipantId): string => `${branchId}\u0000${participantId}`
+/**
+ * Participants one branch may hold at once.
+ *
+ * A roster is unbounded fan-out in two directions: it is walked on every
+ * `list`, and `Branch.Roster` returns it whole, which no frame ceiling covers.
+ * Nothing caps how many distinct `participantId`s one write capability may
+ * announce, so without this a single share link could pin an arbitrary number
+ * of `Participant` objects until their leases expired. Two hundred and fifty
+ * six is far above any real collaborative session; a further announce is
+ * refused with `backpressure`.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const defaultMaxParticipants = 256
 
 /**
  * Constructs the in-memory, lease-expiring presence registry.
@@ -181,28 +225,57 @@ const key = (branchId: BranchId, participantId: ParticipantId): string => `${bra
  * roster but never appears on it, so a shared read link cannot be used to
  * impersonate a collaborator.
  *
+ * The roster is keyed by branch and then by participant, so listing one branch
+ * costs that branch rather than every participant the process holds, and no
+ * two branches can share a slot. One flat key built by concatenation collided
+ * for valid branded ids, which let one announcement overwrite another branch's
+ * participant.
+ *
  * The change feed slides at {@link defaultChangesCapacity}: announcing never
  * waits on a stalled watcher, and never grows the process on its behalf.
+ *
+ * Fails with `invalid_request` when an option is not a positive safe integer.
  *
  * @category constructors
  * @since 0.1.0
  */
-export const makeMemory = (options: PresenceOptions): Effect.Effect<Service, never, BranchShare.BranchShare> =>
+export const makeMemory = (
+  options: PresenceOptions
+): Effect.Effect<Service, SyncError, BranchShare.BranchShare> =>
   Effect.gen(function*() {
+    const leaseMs = yield* positiveInt("BranchPresence.PresenceOptions.leaseMs", options.leaseMs, defaultLeaseMs)
+    const changesCapacity = yield* positiveInt(
+      "BranchPresence.PresenceOptions.changesCapacity",
+      options.changesCapacity,
+      defaultChangesCapacity
+    )
+    const maxParticipants = yield* positiveInt(
+      "BranchPresence.PresenceOptions.maxParticipants",
+      options.maxParticipants,
+      defaultMaxParticipants
+    )
     const share = yield* BranchShare.BranchShare
-    const roster = new Map<string, Participant>()
-    const changes = yield* PubSub.sliding<BranchId>(options.changesCapacity ?? defaultChangesCapacity)
+    const roster = new Map<BranchId, Map<ParticipantId, Participant>>()
+    const changes = yield* PubSub.sliding<BranchId>(changesCapacity)
 
-    /** Drops every lease that has run out, so expiry needs no timer fiber. */
+    /**
+     * One branch's unexpired participants, dropping that branch's run-out
+     * leases on the way through, so expiry needs no timer fiber. A branch
+     * whose last lease lapses loses its own map, so an abandoned branch costs
+     * nothing.
+     */
     const live = (branchId: BranchId, nowMs: number): Array<Participant> => {
+      const branch = roster.get(branchId)
+      if (branch === undefined) return []
       const remaining: Array<Participant> = []
-      for (const [entryKey, participant] of roster) {
+      for (const [participantId, participant] of branch) {
         if (participant.leaseExpiresAtMs <= nowMs) {
-          roster.delete(entryKey)
+          branch.delete(participantId)
           continue
         }
-        if (participant.branchId === branchId) remaining.push(participant)
+        remaining.push(participant)
       }
+      if (branch.size === 0) roster.delete(branchId)
       return remaining.sort((left, right) => left.participantId < right.participantId ? -1 : 1)
     }
 
@@ -212,7 +285,28 @@ export const makeMemory = (options: PresenceOptions): Effect.Effect<Service, nev
         participantId: announcement.participantId
       })
       yield* share.verify(announcement.capability, { branchId: announcement.branchId, access: "write" })
+      // The wire schema IS `Announcement`, so a remote caller cannot reach
+      // here with an empty name. An in-process caller can, and `Participant`
+      // requires a `NonEmptyString`: without this the constructor threw a
+      // defect out of an operation whose type promises a `SyncError`.
+      if (announcement.displayName.length === 0) {
+        return yield* Effect.fail(
+          new SyncError({ code: "invalid_request", message: "A participant's display name must not be empty" })
+        )
+      }
       const nowMs = yield* Clock.currentTimeMillis
+      // Run-out leases are dropped before the cap is judged, so a branch that
+      // has simply been busy over time is never refused for a stale roster.
+      live(announcement.branchId, nowMs)
+      const branch = roster.get(announcement.branchId) ?? new Map<ParticipantId, Participant>()
+      if (!branch.has(announcement.participantId) && branch.size >= maxParticipants) {
+        return yield* Effect.fail(
+          new SyncError({
+            code: "backpressure",
+            message: `Branch ${announcement.branchId} already holds ${maxParticipants} participants`
+          })
+        )
+      }
       const participant = new Participant({
         branchId: announcement.branchId,
         participantId: announcement.participantId,
@@ -220,9 +314,10 @@ export const makeMemory = (options: PresenceOptions): Effect.Effect<Service, nev
         cursor: announcement.cursor === null
           ? null
           : new Cursor({ cardId: announcement.cursor.cardId, offset: announcement.cursor.offset }),
-        leaseExpiresAtMs: nowMs + options.leaseMs
+        leaseExpiresAtMs: nowMs + leaseMs
       })
-      roster.set(key(announcement.branchId, announcement.participantId), participant)
+      branch.set(announcement.participantId, participant)
+      roster.set(announcement.branchId, branch)
       yield* PubSub.publish(changes, announcement.branchId)
       return participant
     })
@@ -230,7 +325,11 @@ export const makeMemory = (options: PresenceOptions): Effect.Effect<Service, nev
     const leave = Effect.fn("BranchPresence.leave")(function*(request: LeaveRequest) {
       yield* Effect.annotateCurrentSpan({ branchId: request.branchId, participantId: request.participantId })
       yield* share.verify(request.capability, { branchId: request.branchId, access: "write" })
-      roster.delete(key(request.branchId, request.participantId))
+      const branch = roster.get(request.branchId)
+      if (branch !== undefined) {
+        branch.delete(request.participantId)
+        if (branch.size === 0) roster.delete(request.branchId)
+      }
       yield* PubSub.publish(changes, request.branchId)
     })
 
@@ -240,15 +339,16 @@ export const makeMemory = (options: PresenceOptions): Effect.Effect<Service, nev
       return live(request.branchId, yield* Clock.currentTimeMillis)
     })
 
-    return make({ announce, leave, list, changes: Stream.fromPubSub(changes) })
+    return make({ announce, leave, list, changes: Stream.fromPubSub(changes), leaseMs })
   })
 
 /**
- * Provides the in-memory, lease-expiring presence registry.
+ * Provides the in-memory, lease-expiring presence registry. Fails with
+ * `invalid_request` when an option is not a positive safe integer.
  *
  * @category layers
  * @since 0.1.0
  */
 export const layer = (
   options: PresenceOptions
-): Layer.Layer<BranchPresence, never, BranchShare.BranchShare> => Layer.effect(BranchPresence, makeMemory(options))
+): Layer.Layer<BranchPresence, SyncError, BranchShare.BranchShare> => Layer.effect(BranchPresence, makeMemory(options))

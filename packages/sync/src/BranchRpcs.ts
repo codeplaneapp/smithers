@@ -16,16 +16,9 @@
  */
 import * as Schema from "effect/Schema"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
-import {
-  Access,
-  BranchId,
-  CommandReceipt,
-  CommandSubmission,
-  Cursor,
-  Participant,
-  ParticipantId,
-  ShareCapability
-} from "./BranchProtocol.ts"
+import * as BranchCommands from "./BranchCommands.ts"
+import * as BranchPresence from "./BranchPresence.ts"
+import { Access, BranchId, CommandReceipt, Participant, ShareCapability } from "./BranchProtocol.ts"
 import { SyncError } from "./SyncError.ts"
 import { SyncAuth } from "./SyncRpcs.ts"
 
@@ -40,13 +33,18 @@ export const maximumBranchTtlMs = 24 * 60 * 60 * 1000
 /**
  * Schema for a capability-bearing command submission.
  *
+ * It IS `BranchCommands.SubmitRequest`, not a copy of it. Four wire payloads
+ * used to re-declare the message their service already owned, and the
+ * announce copy had already drifted: it accepted `displayName: ""` where the
+ * service requires a non-empty name, so a wire-legal announce reached a
+ * `Participant` constructor and threw a defect outside the declared
+ * `SyncError` channel. Naming the service's schema makes that drift
+ * impossible rather than fixed once.
+ *
  * @category schemas
  * @since 0.1.0
  */
-export const SubmitPayload = Schema.Struct({
-  capability: ShareCapability,
-  submission: CommandSubmission
-})
+export const SubmitPayload = BranchCommands.SubmitRequest
 
 /**
  * A capability-bearing command submission.
@@ -62,13 +60,7 @@ export type SubmitPayload = typeof SubmitPayload.Type
  * @category schemas
  * @since 0.1.0
  */
-export const AnnouncePayload = Schema.Struct({
-  capability: ShareCapability,
-  branchId: BranchId,
-  participantId: ParticipantId,
-  displayName: Schema.String,
-  cursor: Schema.NullOr(Cursor)
-})
+export const AnnouncePayload = BranchPresence.Announcement
 
 /**
  * One participant's announcement of itself on a branch.
@@ -84,11 +76,7 @@ export type AnnouncePayload = typeof AnnouncePayload.Type
  * @category schemas
  * @since 0.1.0
  */
-export const LeavePayload = Schema.Struct({
-  capability: ShareCapability,
-  branchId: BranchId,
-  participantId: ParticipantId
-})
+export const LeavePayload = BranchPresence.LeaveRequest
 
 /**
  * A capability-bearing request to drop one participant.
@@ -104,10 +92,7 @@ export type LeavePayload = typeof LeavePayload.Type
  * @category schemas
  * @since 0.1.0
  */
-export const RosterPayload = Schema.Struct({
-  capability: ShareCapability,
-  branchId: BranchId
-})
+export const RosterPayload = BranchPresence.RosterRequest
 
 /**
  * A capability-bearing request for one branch's roster.
