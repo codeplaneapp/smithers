@@ -16,6 +16,8 @@ The controller also keeps the script itself, for the one host that needs it. A f
 
 Every `ctx.call` inside a cell is its own keyed, journaled, permission-gated boundary at the tier the flow declares — a cell is never one opaque activity. That is what makes a crash or a permission park mid-cell recoverable: the cell source re-executes from the top, boundaries that already settled replay their recorded values, and execution reaches the parked call deterministically.
 
+One case is bounded rather than free: a call the `callMs` ceiling interrupted settled nowhere, so a re-executed frame issues it to the host again and is then handed the recorded timeout. The cell's branch is stable either way; what the run pays for twice is the interrupted call. [`docs/api.md#durability`](./docs/api.md#durability) says why the call cannot move inside the record that would suppress it, and `CellTurn`'s `issued` says it again where it happens.
+
 ## Flows are the only capability primitive
 
 A cell is handed exactly one authority: `ctx.call(flowName, input)`. There is no `ctx.fs`, no `ctx.shell`, no `ctx.mcp`, no `ctx.spawn` / `ctx.send` / `ctx.await`. Standard host capabilities, incoming MCP tools, and subagents are all _ordinary flow declarations plus a binding_, so a cell reaches every one of them with the same two lines and every one of them settles through the same durable `EngineLike.call` boundary with the same `CellCallStarted` / `CellCallSettled` trail.

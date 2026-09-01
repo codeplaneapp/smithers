@@ -1467,9 +1467,18 @@ describe("CellTurn replay", () => {
  * attempt, so they need the storage half — and they need it to round-trip
  * through the declared schema, because a durable store hands back decoded JSON
  * and never the object the first attempt held.
+ *
+ * The key is `name` and `identity` TOGETHER, because several records of one
+ * frame share an identity and differ only in name. Its separator is U+0000,
+ * which no field can contain, so no two distinct boundaries collide on one
+ * key. It is written as an escape rather than typed in: a literal NUL byte
+ * makes this whole file binary to `grep` and `rg`, which silently drops it
+ * from every repository-wide sweep.
  */
 const boundaryKey = (boundary: EngineLike.RecordBoundary<unknown>): string =>
-  `${boundary.name} ${boundary.identity.session ?? ""} ${boundary.identity.frame} ${boundary.identity.boundary}`
+  `${boundary.name}\u0000${
+    boundary.identity.session ?? ""
+  }\u0000${boundary.identity.frame}\u0000${boundary.identity.boundary}`
 
 /** Wraps a scripted engine so its recorded boundaries persist in `records`. */
 const journaled = (

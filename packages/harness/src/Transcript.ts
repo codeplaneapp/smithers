@@ -16,6 +16,7 @@ import { Result, Schema } from "effect"
 import * as AgentEvent from "./AgentEvent.ts"
 import type * as Cell from "./Cell.ts"
 import type * as EngineLike from "./EngineLike.ts"
+import { printsObservation } from "./internal/printsObservation.ts"
 
 /**
  * Stable failures produced while projecting a durable transcript.
@@ -82,6 +83,17 @@ export interface ProjectedState {
  */
 export interface CellEvidence {
   readonly produced: ReadonlyArray<Cell.Source>
+  /**
+   * What each frame printed, in journal order.
+   *
+   * The print buffer is the whole of the context channel: it is what the NEXT
+   * model turn reads, and `AgentEvent.CellPrinted` is journaled rather than
+   * derived precisely so a projection can rebuild that window without
+   * re-running anything. It was missing from this decoder, so a transcript
+   * projected from a harness-native journal could not reconstruct what the
+   * model saw.
+   */
+  readonly printed: ReadonlyArray<AgentEvent.CellPrinted>
   readonly callsStarted: ReadonlyArray<Cell.Call>
   readonly callsSettled: ReadonlyArray<AgentEvent.CellCallSettled>
   readonly settled: ReadonlyArray<AgentEvent.CellSettled>
@@ -90,18 +102,8 @@ export interface CellEvidence {
   readonly aborts: ReadonlyArray<string>
 }
 
-const eventType = {
-  aborted: "flows.harness.aborted.v1",
-  cellCallSettled: "flows.harness.cell-call-settled.v1",
-  cellCallStarted: "flows.harness.cell-call-started.v1",
-  cellProduced: "flows.harness.cell-produced.v1",
-  cellSettled: "flows.harness.cell-settled.v1",
-  compactionSettled: "flows.harness.compaction-settled.v1",
-  modelSettled: "flows.harness.model-settled.v1",
-  steeringDrained: "flows.harness.steering-drained.v1",
-  suspended: "flows.harness.suspended.v1",
-  transitionApplied: "flows.harness.transition-applied.v1"
-} as const
+/** The one journal-event-type table; see `AgentEvent.eventType`. */
+const eventType = AgentEvent.eventType
 
 const projectionFailed = (entry: JournalEvent.Entry, cause: unknown): TranscriptError =>
   new TranscriptError({
@@ -122,6 +124,7 @@ const ordered = (entries: ReadonlyArray<JournalEvent.Entry>): ReadonlyArray<Jour
 const decodeModelSettled = Schema.decodeUnknownResult(AgentEvent.ModelSettled)
 const decodeSteeringDrained = Schema.decodeUnknownResult(AgentEvent.SteeringDrained)
 const decodeCompactionSettled = Schema.decodeUnknownResult(AgentEvent.CompactionSettled)
+const decodeCellPrinted = Schema.decodeUnknownResult(AgentEvent.CellPrinted)
 const decodeCellProduced = Schema.decodeUnknownResult(AgentEvent.CellProduced)
 const decodeCellCallStarted = Schema.decodeUnknownResult(AgentEvent.CellCallStarted)
 const decodeCellCallSettled = Schema.decodeUnknownResult(AgentEvent.CellCallSettled)
@@ -158,6 +161,8 @@ export const projectStateResult = (
 ): Result.Result<ProjectedState, TranscriptError> => {
   const events = ordered(entries)
   const produced: Array<Cell.Source> = []
+  const printed: Array<AgentEvent.CellPrinted> = []
+  const prints = new Map<number, ProjectedMessage>()
   const callsStarted: Array<Cell.Call> = []
   const callsSettled: Array<AgentEvent.CellCallSettled> = []
   const settledCells: Array<AgentEvent.CellSettled> = []
@@ -177,6 +182,24 @@ export const projectStateResult = (
         const decoded = decode(decodeCellProduced, entry)
         if (Result.isFailure(decoded)) return Result.fail(decoded.failure)
         produced.push(decoded.success.cell)
+        break
+      }
+      case eventType.cellPrinted: {
+        const decoded = decode(decodeCellPrinted, entry)
+        if (Result.isFailure(decoded)) return Result.fail(decoded.failure)
+        printed.push(decoded.success)
+        // Decoded once, here, and read back by sequence below.
+        //
+        // Rendered through the controller's own helper rather than replayed
+        // raw: the journal carries the buffer and the controller sends
+        // `printsObservation` of it, so projecting the raw text rebuilds a
+        // window the run never had. A frame that printed nothing is a message
+        // too — the turn it opened told the model so — and dropping it loses a
+        // user turn the model read.
+        prints.set(entry.seq, {
+          kind: "transcript",
+          message: ModelRequest.Message.user(printsObservation(decoded.success.text))
+        })
         break
       }
       case eventType.cellCallStarted: {
@@ -237,6 +260,13 @@ export const projectStateResult = (
 
   for (const entry of events) {
     if (compaction !== undefined && entry.seq <= compaction.sequence) continue
+    // The print buffer is the context channel: what a cell printed is what the
+    // next model turn read, in the place the journal put it.
+    const print = prints.get(entry.seq)
+    if (print !== undefined) {
+      messages.push(print)
+      continue
+    }
     switch (entry.eventType) {
       case eventType.modelSettled: {
         const decoded = decode(decodeModelSettled, entry)
@@ -279,6 +309,7 @@ export const projectStateResult = (
     replaced: compaction?.payload.replacedPrefixDigest,
     cell: {
       produced,
+      printed,
       callsStarted,
       callsSettled,
       settled: settledCells,

@@ -117,12 +117,12 @@ frame boundary.
 
 ## Reference
 
-27 public modules, 330 documented exports.
+27 public modules, 335 documented exports.
 
 | Module | Public exports | Description |
 | --- | --- | --- |
 | `HarnessError` | `HarnessErrorCode`, `HarnessError` | Stable failures reported at the harness translation boundary. |
-| `AgentEvent` | `DisciplineArmed`, `TurnOpened`, `ModelDelta`, `ModelRetried`, `ModelSettled`, `CellProduced`, `CellRejectedInFrame`, `CellCallStarted`, `CellCallSettled`, `CellPrinted`, `CellSettled`, `TransitionApplied`, `ReadOnlyDemanded`, `RepeatDemanded`, `NarrowedDemanded`, `UnmovedDemanded`, `UnresolvedDemanded`, `NarrowOnlyDemanded`, `SufficiencyObserved`, `VacuousVerificationObserved`, `MutationObserved`, `CheckpointMinted`, `Suspended`, `CompactionSettled`, `SteeringDrained`, `TurnClosed`, `PermissionRequired`, `Aborted`, `Resolved`, `AgentEvent` | Serializable events emitted by harness adapters. |
+| `AgentEvent` | `DisciplineArmed`, `TurnOpened`, `ModelDelta`, `ModelRetried`, `ModelSettled`, `CellProduced`, `CellRejectedInFrame`, `CellCallStarted`, `CellCallSettled`, `CellPrinted`, `CellSettled`, `TransitionApplied`, `ReadOnlyDemanded`, `RepeatDemanded`, `NarrowedDemanded`, `UnmovedDemanded`, `UnresolvedDemanded`, `NarrowOnlyDemanded`, `SufficiencyObserved`, `VacuousVerificationObserved`, `MutationObserved`, `CheckpointMinted`, `Suspended`, `CompactionSettled`, `SteeringDrained`, `TurnClosed`, `PermissionRequired`, `Aborted`, `Resolved`, `AgentEvent`, `eventType` | Serializable events emitted by harness adapters. |
 | `Plan` | `Child`, `Batch`, `ChildResult`, `ChildProgress`, `ChildSettled`, `SpliceEvent` | Local structural plan nodes used at the harness-to-engine boundary. |
 | `EngineLike` | `SuspendReasonCode`, `SuspendReason`, `SealedModelStep`, `BoundaryIdentity`, `DurableSchema`, `RecordBoundary`, `Observation`, `Snapshot`, `CaptureRequest`, `EngineLike`, `make`, `layer`, `makeNoop`, `layerNoop` | Narrow engine port consumed by the built-in harness. |
 | `Tokens` | `Count`, `Segment`, `Accounting`, `Estimator`, `estimate`, `count`, `combine` | Deterministic token accounting for context windows. |
@@ -132,12 +132,12 @@ frame boundary.
 | `Steering` | `Delivery`, `SteerInsert`, `QueueInsert`, `Insert`, `SeatChange`, `ThinkingChange`, `ActivateTools`, `Item`, `Queue`, `Drain`, `BoundaryInput`, `DrainRecord`, `drainRecord`, `PromotionState`, `empty`, `enqueue`, `drainAtClose`, `promoteAtIdle`, `Source`, `SourceInput`, `make`, `makeNoop`, `layer`, `layerNoop` | Turn-boundary steering values and their source contract. |
 | `Notifications` | `Options`, `make`, `layer` | Adapter from the durable notification queue to harness turn boundaries. |
 | `Cell` | `Language`, `Source`, `digestOf`, `source`, `ContextEntry`, `Continue`, `Complete`, `Park`, `Transition`, `renderText`, `RejectionCode`, `Settled`, `Raised`, `Rejected`, `Outcome`, `FlowProjection`, `project`, `CallFailureCode`, `defaultCallFailureCode`, `callFailureHint`, `CallIdentity`, `declarationDigest`, `Call`, `baseCheckpoint`, `checkpoint`, `checkpointOf`, `CallResult`, `callFailure`, `Extracted`, `extract` | The cell contract. |
-| `Sandbox` | `SandboxErrorCode`, `SandboxError`, `Invocation`, `Mint`, `Minter`, `mintUnavailable`, `Handler`, `Limits`, `Capabilities`, `defaultLimits`, `minimumMemoryBytes`, `printFrameBytes`, `printStatementFloor`, `printRetainedBytes`, `withDefaults`, `Intent`, `replTransition`, `RealmEvaluation`, `RealmFrame`, `Realm`, `RealmOptions`, `Sandbox`, `make`, `layer`, `makeNoop`, `layerNoop`, `realmUnsupported`, `callTimedOut`, `compile`, `PendingCall`, `Latch`, `latch`, `driveCell`, `raisedOutcome` | The deterministic script sandbox port. |
+| `Sandbox` | `SandboxErrorCode`, `SandboxError`, `Invocation`, `Mint`, `Minter`, `mintUnavailable`, `Handler`, `Limits`, `Capabilities`, `defaultLimits`, `minimumSteps`, `minimumTimeMs`, `minimumMemoryBytes`, `printFrameBytes`, `printStatementFloor`, `printRetainedBytes`, `withDefaults`, `Intent`, `replTransition`, `RealmEvaluation`, `RealmFrame`, `Realm`, `RealmOptions`, `Sandbox`, `make`, `layer`, `makeNoop`, `layerNoop`, `realmUnsupported`, `callTimedOut`, `compile`, `PendingCall`, `Latch`, `latch`, `driveCell`, `raisedOutcome` | The deterministic script sandbox port. |
 | `CellTurn` | `defaultMaxFrames`, `defaultReadOnlyFrames`, `defaultModelCallMs`, `defaultRepeatFrames`, `defaultNarrowingDemands`, `defaultUnmovedDemands`, `defaultUnresolvedDemands`, `defaultRevalidations`, `defaultMaxCheckpoints`, `State`, `Input`, `make`, `teach`, `run` | The cell-first controller. |
 | `CellHistory` | `ExecutedCell`, `Service`, `CellHistory`, `make`, `makeCells`, `makeNoop`, `layer`, `layerCells`, `layerNoop` | The source of every cell the current turn executed. |
 | `CellCalls` | `Implementation`, `Prompt`, `PromptRunner`, `Options`, `Resolver`, `make` | Registry-backed resolution for the flow calls a cell makes. |
 | `FlowBinding` | `Declared`, `DescriptorOptions`, `descriptorOf`, `Binding`, `Options`, `make`, `provide`, `Source`, `source`, `Catalog`, `empty`, `catalogResult`, `catalog`, `registry` | The executable-flow binding contract. |
-| `StructuredOutput` | `StructuredOutputFailure`, `maxIssues`, `jsonSchema`, `digest`, `instructions`, `issuesDigest`, `correction`, `lastBalanced`, `candidates`, `decode` | Turning one agent's final text into a value the declared output schema accepts, or into a typed failure. |
+| `StructuredOutput` | `StructuredOutputFailureCode`, `OutputIssue`, `StructuredOutputFailure`, `maxIssues`, `jsonSchema`, `digest`, `instructions`, `issuesDigest`, `correction`, `lastBalanced`, `candidates`, `decode` | Turning one agent's final text into a value the declared output schema accepts, or into a typed failure. |
 | `TruncatedOutput` | `flagSuffix`, `droppedSuffix`, `flagKey`, `minimumBytes`, `retained`, `Capture`, `Reuse`, `captures`, `reuse`, `refusal`, `retain`, `Ledger` | The truncation ledger: |
 | `CallLedger` | `bound`, `width`, `members`, `Entry`, `Ledger`, `subject`, `target`, `digest`, `payload`, `Settlement`, `entry`, `settled`, `remember`, `render` | The call ledger: |
 | `NarrowedCheck` | `retained`, `maxTerms`, `targeting`, `names`, `lex`, `terms`, `conditions`, `Check`, `Narrowing`, `check`, `narrows`, `find`, `demand`, `Only`, `findOnly`, `demandOnly`, `remember`, `Ledger` | The narrowing ledger: |
@@ -198,6 +198,7 @@ Serializable events emitted by harness adapters.
 | `Aborted` | class | events | A normalized harness abort. |
 | `Resolved` | class | events | The final assistant message produced by the harness. |
 | `AgentEvent` | const | events | All normalized events emitted by a harness adapter. |
+| `eventType` | const | events | The journal event type of every member of `AgentEvent`, by tag. |
 
 ### Plan
 
@@ -205,7 +206,7 @@ Serializable events emitted by harness adapters.
 
 Local structural plan nodes used at the harness-to-engine boundary.
 
-These values project the canonical registry metadata defined by `packages/registry/src/Descriptor.ts` and consumed by the core contracts in `docs/specs/Concepts/Flow Builder Brief.md` and the splice boundary in `docs/specs/Concepts/Vendored Flow Engine.md`. Source order is retained only for result correlation; graph dependencies are the sole sequencing signal.
+These values project the canonical registry metadata defined by `packages/registry/src/Descriptor.ts` and consumed by the core contracts in `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary` and the splice boundary in `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary`. Source order is retained only for result correlation; graph dependencies are the sole sequencing signal.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -222,7 +223,7 @@ These values project the canonical registry metadata defined by `packages/regist
 
 Narrow engine port consumed by the built-in harness.
 
-Governing contracts: `docs/specs/Concepts/Effect Harness.md`, `docs/specs/Concepts/Flow Builder Brief.md`, `docs/specs/Concepts/Step Keys.md`, and `docs/specs/Concepts/Vendored Flow Engine.md`.
+Governing contracts: `packages/harness/docs/concepts.md#durable-cell-loop`, `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary`, `packages/harness/docs/concepts.md#step-keys-and-the-model-layer`, and `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -261,9 +262,9 @@ Deterministic token accounting for context windows.
 
 `import * as ContextWindow from "@smthrs/harness/ContextWindow"`
 
-The immutable, provider-neutral context assembled for one model request.
+The immutable, provider-neutral context assembled for one model request. Every array it exposes is frozen, so a runtime mutation throws in strict mode instead of silently invalidating the cached digest.
 
-Governing design: `docs/specs/Concepts/Context Window.md`.
+Governing design: `packages/harness/docs/concepts.md#context-window`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -330,7 +331,7 @@ Declarations for sealed transcript-summary steps.
 
 Turn-boundary steering values and their source contract.
 
-Governing designs: `docs/specs/Concepts/Notification Queue.md` and `docs/specs/Specs/Harness.md`.
+Governing designs: `packages/harness/docs/concepts.md#notification-queue` and `packages/harness/docs/concepts.md#notification-queue`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -365,7 +366,7 @@ Governing designs: `docs/specs/Concepts/Notification Queue.md` and `docs/specs/S
 
 Adapter from the durable notification queue to harness turn boundaries.
 
-Governing contract: `docs/specs/Concepts/Notification Queue.md`.
+Governing contract: `packages/harness/docs/concepts.md#notification-queue`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -385,7 +386,7 @@ Nothing here executes anything. Execution is `Sandbox`; durability is `EngineLik
 
 A cell does not *return* its transition. The realm is a REPL that outlives the cell, so a cell states its intent by calling `ctx.done` or `ctx.park` and `Sandbox.replTransition` builds the value; there is no returned object to decode. What the cell filed by hand — durable state, a projected context, a list of keys to re-render, a list of ordinals to recall — is gone with the surface that asked for it, and the fields survive here for one purpose only: decoding the journals that were written while it existed.
 
-Governing design: `docs/specs/Concepts/Durable Cell Loop.md`, `docs/specs/Concepts/Repl Realm.md` and `docs/specs/Concepts/Agent Cell Context.md`.
+Governing design: `packages/harness/docs/concepts.md#durable-cell-loop`, `packages/harness/docs/concepts.md#repl-realm` and `packages/harness/docs/concepts.md#agent-cell-context`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -444,10 +445,12 @@ Cancellation is fiber interruption and teardown is scope finalization; a sandbox
 | `Limits` | interface | models | Execution limits for one cell evaluation. |
 | `Capabilities` | interface | models | Which limits a binding can actually enforce. |
 | `defaultLimits` | const | constants | The execution ceilings a cell runs under when the caller declares none. |
+| `minimumSteps` | const | constants | Smallest interpreter-step budget a binding can enter a realm under. |
+| `minimumTimeMs` | const | constants | Smallest wall-clock budget, in milliseconds, a binding can enter a realm under. |
 | `minimumMemoryBytes` | const | constants | Smallest heap ceiling the QuickJS binding can initialize and tear down safely. |
-| `printFrameBytes` | const | constants | How much of one frame's whole print buffer reaches the next model turn. |
-| `printStatementFloor` | const | constants | The smallest share of `printFrameBytes` one print statement is given. |
-| `printRetainedBytes` | const | constants | How much of one frame's print buffer the host keeps while the cell still runs. |
+| `printFrameBytes` | const | constants | How many UTF-8 bytes of one frame's whole print buffer reach the next model turn. |
+| `printStatementFloor` | const | constants | The smallest UTF-8-byte share of `printFrameBytes` one print statement is given. |
+| `printRetainedBytes` | const | constants | How many UTF-8 bytes of one frame's print buffer the host keeps while the cell still runs. |
 | `withDefaults` | const | constructors | Fills omitted ceilings from `defaultLimits` for limits a binding can enforce. |
 | `Intent` | type | models | What a REPL cell asked the controller to do. |
 | `replTransition` | const | constructors | Builds the durable transition one cell settled. |
@@ -479,7 +482,7 @@ Smithers is a state machine. This module is its deterministic outer loop: it dec
 
 One frame is: seal a model step, recover the cell from the settlement, run it in the sandbox, resolve each of its flow calls as its own keyed durable boundary, then apply the transition it returned. The cell owns the state that carries forward and the exact context the next frame sees.
 
-Governing design: `docs/specs/Concepts/Durable Cell Loop.md`.
+Governing design: `packages/harness/docs/concepts.md#durable-cell-loop`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -534,7 +537,7 @@ The split between a failed result and a failed effect is the contract `EngineLik
 
 The resolver's shape is exactly `FlowEngineLike.CallRunner["run"]`, so a durable host wires it in without this browser-safe package depending on the engine binding.
 
-Governing design: `docs/specs/Concepts/Durable Cell Loop.md` and `docs/specs/Concepts/Flow Registry.md`.
+Governing design: `packages/harness/docs/concepts.md#durable-cell-loop` and `packages/harness/docs/concepts.md#flow-registry`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -561,7 +564,7 @@ This is deliberately *not* a second registry. The descriptors a catalog projects
 
 The failure split is the one `EngineLike.call` declares. A refusal the agent could plausibly correct — malformed input, a flow that failed, output that is not serializable — becomes a `failure` `CallResult` the cell observes as a catchable exception. Anything the cell must never swallow — a permission requirement, an abort, a suspension — stays in the typed error channel, and an interruption is never caught at all.
 
-Governing design: `docs/specs/Concepts/Durable Cell Loop.md` and `docs/specs/Concepts/Flow Registry.md`.
+Governing design: `packages/harness/docs/concepts.md#durable-cell-loop` and `packages/harness/docs/concepts.md#flow-registry`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -586,7 +589,7 @@ Governing design: `docs/specs/Concepts/Durable Cell Loop.md` and `docs/specs/Con
 
 Turning one agent's final text into a value the declared output schema accepts, or into a typed failure.
 
-A model may answer with a bare JSON document, prose wrapped around a JSON document, a fenced block, or JSON of the wrong shape. Downstream nodes must never receive that ambiguity, so this module implements the recovery contract in `docs/specs/Concepts/Structured Output.md`:
+A model may answer with a bare JSON document, prose wrapped around a JSON document, a fenced block, or JSON of the wrong shape. Downstream nodes must never receive that ambiguity, so this module implements the recovery contract in `packages/harness/docs/concepts.md#structured-output`:
 
 1. parse the complete, BOM-stripped response and decode it; 2. otherwise scan once for balanced JSON containers, take the container whose matching close ends last, and decode that; 3. otherwise report a typed `StructuredOutputFailure` carrying bounded diagnostics, which is what a caller re-prompts with when it still holds a correction slot.
 
@@ -598,6 +601,8 @@ Reference consulted: `reference/effect` `packages/effect/src/unstable/ai/Languag
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
+| `StructuredOutputFailureCode` | const | models | Stable reasons a structured-output boundary failed. |
+| `OutputIssue` | class | models | One bounded issue raised while decoding structured output. |
 | `StructuredOutputFailure` | class | errors | The terminal failure of one structured-output boundary. |
 | `maxIssues` | const | constants | The most validation issues a failure or a correction prompt carries. |
 | `jsonSchema` | const | conversions | The JSON Schema document for a declared output schema. |
@@ -808,7 +813,7 @@ The proof that was already true before anything changed.
 
 **Its input no longer exists.** `stored` reads the reserved `verification` key out of the durable state a cell filed by hand, and the filing surface was deleted on 2026-08-24: `Cell.Continue.state` decodes and is populated by nothing. An arm that re-wires this module reads nothing until it first decides where a realm run declares its verification — a name bound in the realm, a print, or a new field — so the wave that turns this back on carries that decision with it. `stored` is left reading `Schema.Json` because that decision has not been made and the r90–r96 journals it can be replayed against are still filing journals.
 
-It was live for exactly one wave. `fullbench/reports/rerun-r93.md` §1 reads the result off the 45 journals, and the reason it is off is that the wave cannot price it:
+It was live for exactly one wave. the r93 wave report reads the result off the 45 journals, and the reason it is off is that the wave cannot price it:
 
 - It fired **twice in 45 journals**, and on neither of the instances the diagnosis or the replay predicted. `django__django-14351`, the run it was written for, resolved that wave with **no observation on its journal at all** — so the row it was built to close was closed by something else, and two prompt rules landed in the same round. - `sympy__sympy-13878` is the firing that worked: told at frame 1 that its stored check was already green, the run replaced it, spent seventeen more frames on a different proof, and resolved — cheaper and in fewer frames than any earlier wave. - `django__django-15732` is the firing that did not. The observation landed on frame 7, which is the frame that made the correct edit. On frame 8 the run made a second edit that rewrote the enclosing block and restored the first edit's text **byte for byte**. Both edits reported `mutated: true` on an `observed` basis, the final tree equalled the base, and the captured diff was zero bytes. The instance had resolved in r90, r91 and r92; it is the wave's only empty patch.
 
@@ -865,7 +870,7 @@ The QuickJS-WASM sandbox binding.
 
 This is the production `Sandbox`: the cell runs inside a QuickJS interpreter compiled to WebAssembly, which is a genuinely separate JavaScript realm with no reference to the host's globals, prototypes, or module loader. The same single-file variant runs unmodified on Node and in a browser, so a browser host provides this layer and calls the identical harness.
 
-What the cell can reach is exactly `ctx`: `ctx.call` bridges to the host's durable flow boundary, `ctx.flows` is a frozen catalog projection. The prelude removes `Date` and `Math.random` from the realm, because a replayed cell must reach the same calls in the same order. There is no filesystem, no network, no process, and no module loader to reach in the first place.
+What the cell can reach is exactly `ctx`: `ctx.call` bridges to the host's durable flow boundary, `ctx.flows` is a frozen catalog projection. The prelude removes `Date` and `Math.random` from the realm, because a replayed cell must reach the same calls in the same order, and `Proxy`, because a value that answers reflection from a handler cannot be weighed against the run's memory ceiling. There is no filesystem, no network, no process, and no module loader to reach in the first place.
 
 Teardown is scope finalization and cancellation is fiber interruption: an interrupted frame disposes the runtime, which is the only thing holding the cell alive.
 

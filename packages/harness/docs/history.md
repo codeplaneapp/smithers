@@ -12,9 +12,11 @@ Two things to know before reading them:
 - They cite wave reports and benchmark analysis files (`fullbench/reports/*`,
   `evals/swebench/fullbench/*`) that live outside this repository. The numbers
   quoted from them are reproduced here; the files are not.
-- One entry claims a test pins the rendered cell contract's SHA-256.
-  `test/CellPrompt.test.ts` pins an estimated-token ceiling, not a digest. The
-  ceiling is the real guard.
+- One entry says a test pins the rendered cell contract's SHA-256 at
+  `25a1c933…` over 9,193 characters. A test does pin both, and both numbers
+  have moved since: `test/CellPrompt.test.ts` pins 8,811 characters and
+  `58be572b…`, alongside the 2,400-token estimate ceiling. Read the test for
+  the current values; the entry records what was measured at the time.
 
 ---
 

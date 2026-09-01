@@ -272,8 +272,14 @@ describe("Transcript", () => {
   it("rebuilds the window the next turn read, prints included", () => {
     // `CellPrinted` was journaled and never projected, so a transcript rebuilt
     // from a harness-native journal was missing the entire context channel:
-    // what a cell printed IS what the next model turn reads. An empty buffer
-    // contributes nothing, because the absence of a print is not a user message.
+    // what a cell printed IS what the next model turn reads.
+    //
+    // The journal carries the raw buffer and the controller sends
+    // `printsObservation` of it, so the projection has to render the same way
+    // or it rebuilds a window the run never had. An empty buffer is a message
+    // too: the turn it opened told the model the realm still holds what the
+    // cell bound. Replaying the raw text, or dropping the empty one, is a
+    // window that differs from the one the model was actually sent.
     const source = Cell.source("console.log(\"found it\")")
     const events: ReadonlyArray<AgentEvent.AgentEvent> = [
       new AgentEvent.ModelSettled({
@@ -304,8 +310,15 @@ describe("Transcript", () => {
 
     const state = Result.getOrThrow(Transcript.projectStateResult(entries))
 
-    expect(state.messages.map((item) => item.message.role)).toEqual(["assistant", "user"])
-    expect(state.messages[1]?.message).toEqual(ModelRequest.Message.user("found it"))
+    expect(state.messages.map((item) => item.message.role)).toEqual(["assistant", "user", "user"])
+    expect(state.messages[1]?.message).toEqual(
+      ModelRequest.Message.user("What your cell printed:\nfound it")
+    )
+    expect(state.messages[2]?.message).toEqual(
+      ModelRequest.Message.user(
+        "Your cell printed nothing, so this turn opens with nothing new to read. Everything it bound is still in the realm; print what you need to look at."
+      )
+    )
     expect(state.cell.printed.map((event) => event.text)).toEqual(["found it", ""])
   })
 

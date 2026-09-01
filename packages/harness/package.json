@@ -40,6 +40,7 @@
     "./*/index": null
   },
   "files": [
+    "docs/*.md",
     "src/**/*.ts",
     "dist/**/*.js",
     "dist/**/*.js.map",

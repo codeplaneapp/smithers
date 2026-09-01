@@ -32,6 +32,7 @@ import * as EngineLike from "./EngineLike.ts"
 import { HarnessError } from "./HarnessError.ts"
 import * as cellPrompt from "./internal/cellPrompt.ts"
 import * as elide from "./internal/elide.ts"
+import { printsObservation } from "./internal/printsObservation.ts"
 import * as NarrowedCheck from "./NarrowedCheck.ts"
 import * as Sandbox from "./Sandbox.ts"
 import * as Steering from "./Steering.ts"
@@ -1103,11 +1104,6 @@ const bindingPathMiss = (
  * cache is for, and it is what the per-frame rebuild of the transcript this
  * replaced could never be.
  */
-const printsObservation = (prints: string): string =>
-  prints === ""
-    ? "Your cell printed nothing, so this turn opens with nothing new to read. Everything it bound is still in the realm; print what you need to look at."
-    : `What your cell printed:\n${prints}`
-
 const revalidationNote = (rejection: Cell.Rejected): string =>
   `${rejection.message}\n\nThis reply is not a frame. Nothing ran, nothing changed, and no call was made, so you are being asked again inside the same frame instead of losing it: everything above this line is already in the provider's cache, and only what you write next is paid for. Emit the corrected cell and nothing else.`
 
