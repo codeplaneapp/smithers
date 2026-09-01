@@ -16,6 +16,48 @@ import * as FileSet from "@smthrs/plan/FileSet"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import type * as PlatformError from "effect/PlatformError"
+import * as Schema from "effect/Schema"
+
+/**
+ * The default maximum number of directory entries visited by one expansion.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const defaultMaxEntries = 100_000
+
+/**
+ * The stable error code returned when enumeration exceeds its safety bound.
+ *
+ * @since 1.0.0
+ * @category errors
+ */
+export const FileEnumerationErrorCode = Schema.Literal("entry_limit_exceeded")
+
+/**
+ * The stable error code returned when enumeration exceeds its safety bound.
+ *
+ * @since 1.0.0
+ * @category errors
+ */
+export type FileEnumerationErrorCode = typeof FileEnumerationErrorCode.Type
+
+/**
+ * A workspace enumeration exceeded its configured entry limit.
+ *
+ * @since 1.0.0
+ * @category errors
+ */
+export class FileEnumerationError extends Schema.TaggedError<FileEnumerationError>()(
+  "@smthrs/engine-store/FileEnumerationError",
+  {
+    code: FileEnumerationErrorCode,
+    message: Schema.String,
+    pattern: Schema.String,
+    limit: Schema.Number,
+    cause: Schema.Unknown
+  }
+) {}
 
 /**
  * How an enumeration talks to a FileSystem that does not speak
@@ -32,10 +74,93 @@ export interface EnumerationOptions {
    * spelled `"."`.
    */
   readonly resolve?: (path: string) => string
+  /**
+   * Maximum number of directory entries one expansion may visit. Defaults to
+   * {@link defaultMaxEntries}. Enumeration fails instead of returning a
+   * partial result when the walk exceeds this bound.
+   */
+  readonly maxEntries?: number | undefined
 }
 
 /** @internal */
 const defaultResolve = (path: string): string => path === "" ? "." : path
+
+const ignoredDirectoryNames = new Set([".git", ".jj", "node_modules"])
+
+interface EnumerationBudget {
+  readonly limit: number
+  count: number
+  pattern: string
+}
+
+const budgetFor = (pattern: string, options: EnumerationOptions): EnumerationBudget => ({
+  limit: options.maxEntries ?? defaultMaxEntries,
+  count: 0,
+  pattern
+})
+
+const explicitIgnoredDirectories = (dir: string): ReadonlySet<string> =>
+  new Set(dir.replaceAll("\\", "/").split("/").filter((part) => ignoredDirectoryNames.has(part)))
+
+const visit = (budget: EnumerationBudget): Effect.Effect<void, FileEnumerationError> => {
+  budget.count += 1
+  if (budget.count <= budget.limit) return Effect.void
+  const message = `enumerating pattern ${JSON.stringify(budget.pattern)} exceeded the ${budget.limit}-entry limit`
+  return Effect.fail(
+    new FileEnumerationError({
+      code: "entry_limit_exceeded",
+      pattern: budget.pattern,
+      limit: budget.limit,
+      message,
+      cause: new RangeError(message)
+    })
+  )
+}
+
+interface EnumeratedEntries {
+  readonly files: ReadonlyArray<string>
+  readonly directories: ReadonlyArray<string>
+}
+
+const enumerateUnder = (
+  fs: FileSystem.FileSystem,
+  dir: string,
+  resolve: (path: string) => string,
+  budget: EnumerationBudget
+): Effect.Effect<EnumeratedEntries, PlatformError.PlatformError | FileEnumerationError> =>
+  Effect.gen(function*() {
+    // The workspace root itself always exists; a host may not even answer
+    // `exists` for its own spelling of it, so only subtrees are probed.
+    const present = dir === "" || (yield* fs.exists(resolve(dir)))
+    if (!present) return { files: [], directories: [] }
+
+    const files: Array<string> = []
+    const directories: Array<string> = [dir]
+    const pending: Array<string> = [dir]
+    const explicit = explicitIgnoredDirectories(dir)
+    while (pending.length > 0) {
+      const current = pending.pop()!
+      const entries = [...yield* fs.readDirectory(resolve(current))].sort()
+      for (const entry of entries) {
+        yield* visit(budget)
+        const relative = entry.replaceAll("\\", "/")
+        const path = current === "" ? relative : `${current}/${relative}`
+        // Effect 4.0.0-rc.108 readDirectory returns names without entry types,
+        // so this implementation must stat each visited entry.
+        const info = yield* fs.stat(resolve(path))
+        if (info.type === "File") {
+          files.push(path)
+          continue
+        }
+        if (info.type !== "Directory") continue
+        const name = path.slice(path.lastIndexOf("/") + 1)
+        if (ignoredDirectoryNames.has(name) && !explicit.has(name)) continue
+        directories.push(path)
+        pending.push(path)
+      }
+    }
+    return { files: files.sort(), directories: directories.sort() }
+  })
 
 /**
  * Every file under `dir` (workspace-relative; `""` for the workspace root),
@@ -51,22 +176,10 @@ export const filesUnder = (
   fs: FileSystem.FileSystem,
   dir: string,
   options: EnumerationOptions = {}
-): Effect.Effect<ReadonlyArray<string>, PlatformError.PlatformError> =>
+): Effect.Effect<ReadonlyArray<string>, PlatformError.PlatformError | FileEnumerationError> =>
   Effect.gen(function*() {
     const resolve = options.resolve ?? defaultResolve
-    // The workspace root itself always exists; a host may not even answer
-    // `exists` for its own spelling of it, so only subtrees are probed.
-    const present = dir === "" || (yield* fs.exists(resolve(dir)))
-    if (!present) return []
-    const entries = yield* fs.readDirectory(resolve(dir), { recursive: true })
-    const files: Array<string> = []
-    for (const entry of entries) {
-      const relative = entry.replaceAll("\\", "/")
-      const path = dir === "" ? relative : `${dir}/${relative}`
-      const info = yield* fs.stat(resolve(path))
-      if (info.type === "File") files.push(path)
-    }
-    return files.sort()
+    return (yield* enumerateUnder(fs, dir, resolve, budgetFor(dir === "" ? "**" : `${dir}/**`, options))).files
   })
 
 /**
@@ -86,26 +199,11 @@ export const entriesUnder = (
   options: EnumerationOptions = {}
 ): Effect.Effect<
   { readonly files: ReadonlyArray<string>; readonly directories: ReadonlyArray<string> },
-  PlatformError.PlatformError
+  PlatformError.PlatformError | FileEnumerationError
 > =>
   Effect.gen(function*() {
     const resolve = options.resolve ?? defaultResolve
-    const present = yield* fs.exists(resolve(dir))
-    if (!present) return { files: [], directories: [] }
-    const entries = yield* fs.readDirectory(resolve(dir), { recursive: true })
-    const files: Array<string> = []
-    const directories: Array<string> = [dir]
-    for (const entry of entries) {
-      const relative = entry.replaceAll("\\", "/")
-      const path = `${dir}/${relative}`
-      const info = yield* fs.stat(resolve(path))
-      if (info.type === "File") files.push(path)
-      else {
-        /* v8 ignore else -- special entries (symlinks, sockets) are neither materializable leaves nor prunable scaffolding */
-        if (info.type === "Directory") directories.push(path)
-      }
-    }
-    return { files: files.sort(), directories: directories.sort() }
+    return yield* enumerateUnder(fs, dir, resolve, budgetFor(`${dir}/**`, options))
   })
 
 /**
@@ -139,15 +237,18 @@ export const expandGlob = (
   fs: FileSystem.FileSystem,
   glob: FileSet.Glob,
   options: EnumerationOptions = {}
-): Effect.Effect<ReadonlyArray<string>, PlatformError.PlatformError> =>
+): Effect.Effect<ReadonlyArray<string>, PlatformError.PlatformError | FileEnumerationError> =>
   Effect.gen(function*() {
+    const resolve = options.resolve ?? defaultResolve
     const matched = new Set<string>()
     const walked = new Set<string>()
+    const budget = budgetFor("", options)
     for (const include of glob.include) {
       const prefix = staticPrefix(include)
       if (walked.has(prefix)) continue
       walked.add(prefix)
-      for (const path of yield* filesUnder(fs, prefix, options)) {
+      budget.pattern = include
+      for (const path of (yield* enumerateUnder(fs, prefix, resolve, budget)).files) {
         if (FileSet.matchesGlob(glob, path)) matched.add(path)
       }
     }
