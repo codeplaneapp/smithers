@@ -92,7 +92,9 @@ export interface Environment {
 const required = (environment: Environment, name: keyof Environment): string => {
   const value = environment[name]
   if (value === undefined || value === "") {
-    throw new Error(`SandboxedFlow guest: ${name} is not set; the host starts the bundle with both request and result paths`)
+    throw new Error(
+      `SandboxedFlow guest: ${name} is not set; the host starts the bundle with both request and result paths`
+    )
   }
   return value
 }
@@ -119,6 +121,7 @@ const guestCrypto = Crypto.make({
   digest: (algorithm, data) =>
     Effect.tryPromise({
       try: () => globalThis.crypto.subtle.digest(algorithm, data as Uint8Array<ArrayBuffer>),
+      /* v8 ignore next 8 -- WebCrypto refuses only an algorithm name, and the engine names none outside `DigestAlgorithm` */
       catch: (cause) =>
         PlatformError.systemError({
           _tag: "Unknown",
@@ -129,6 +132,58 @@ const guestCrypto = Crypto.make({
         })
     }).pipe(Effect.map((buffer) => new Uint8Array(buffer)))
 })
+
+/** The most characters of a failure's fields a description quotes. */
+const quotedFieldCharacters = 1024
+
+/**
+ * The own fields of a failure as JSON, `_tag`, `message`, and `stack` left
+ * out, cut at {@link quotedFieldCharacters}; nothing when there are none or
+ * they cannot be serialized (a defect can carry a cycle; a typed error
+ * cannot, because the engine encoded it before it got here).
+ */
+const fields = (value: object): string | undefined => {
+  try {
+    const rendered = JSON.stringify(
+      value,
+      (key, field: unknown) => key === "_tag" || key === "message" || key === "stack" ? undefined : field
+    )
+    if (rendered === "{}") return undefined
+    return rendered.length > quotedFieldCharacters ? `${rendered.slice(0, quotedFieldCharacters)}…` : rendered
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * One failure as a line the host can quote: its tag or name, its message
+ * when it has one, and its own fields as JSON. Not `Cause.pretty`, whose
+ * rendering of a tagged error with no `message` is the tag followed by a
+ * stack trace into the bundle, which tells the host nothing.
+ */
+const describe = (value: unknown): string => {
+  if (typeof value !== "object" || value === null) return String(value)
+  const tag = Predicate.hasProperty(value, "_tag") && typeof value._tag === "string"
+    ? value._tag
+    : value instanceof Error
+    ? value.name
+    : "failure"
+  const message = Predicate.hasProperty(value, "message") && typeof value.message === "string" && value.message !== ""
+    ? `: ${value.message}`
+    : ""
+  const own = fields(value)
+  return `${tag}${message}${own === undefined ? "" : ` ${own}`}`
+}
+
+/** Every reason the cause carries, one line each. */
+const describeCause = (cause: Cause.Cause<unknown>): string =>
+  cause.reasons.map((reason) =>
+    Cause.isFailReason(reason)
+      ? describe(reason.error)
+      : Cause.isDieReason(reason)
+      ? `defect ${describe(reason.defect)}`
+      : "interrupted"
+  ).join("; ")
 
 /**
  * Runs the request the host wrote and writes the result it expects.
@@ -181,5 +236,5 @@ const execute = (
     )
     return Exit.isSuccess(exit)
       ? { status: "finished", output: exit.value } as const
-      : { status: "failed", error: Cause.pretty(exit.cause) } as const
+      : { status: "failed", error: describeCause(exit.cause) } as const
   })

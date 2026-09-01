@@ -23,10 +23,13 @@
  * the re-exported namespace names.
  *
  * The one exception is `@smthrs/flow`: the authoring model is re-exported
- * *flat*, so `Flow`, `Action`, `RetryPolicy`, `DurableDeferred`,
- * `DurableClock`, `DurableQueue`, `FlowRuntime`, and `StepIdentity` sit at the
- * top level beside the infrastructure namespaces. Writing a flow is the point
- * of the library; `Flows.Flow.Flow.make` would be noise.
+ * *flat*, so all fourteen of `Action`, `DurableClock`, `DurableDeferred`,
+ * `DurableQueue`, `Flow`, `FlowRuntime`, `Graph`, `HumanTask`, `Interpreter`,
+ * `Poll`, `RetryPolicy`, `Sleep`, `StepIdentity`, and `WaitFor` sit at the top
+ * level beside the infrastructure namespaces. Writing a flow is the point of
+ * the library; `Flows.Flow.Flow.make` would be noise. `Interpreter` is part of
+ * that set because a host composition needs it: the registration layer
+ * `NodeRuntime.layerHost` takes is built from `Interpreter.layer(flow)`.
  *
  * ```ts
  * import { Action, Engine, Flow, Journal } from "@smthrs/flows"
@@ -39,7 +42,7 @@
  * surface is what you reach for, namespaces everywhere else. The rest of that
  * package (`Frame`, `TimeTravelStore`, the two store layers,
  * `EffectBoundary`) is reached through `@smthrs/time-travel` directly; see
- * `docs/specs/Concepts/Time Travel Service.md`.
+ * https://smithers.sh/api/time-travel.
  *
  * There is no plugin namespace and no hook catalog: extension in `flows` is
  * Effect dependency injection. You extend the engine by providing a `Layer`,

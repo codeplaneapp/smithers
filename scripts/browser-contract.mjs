@@ -94,6 +94,12 @@ export const NODE_ONLY = [
     entry: "packages/flows/src/NodeRuntime.ts",
     expect: "node:sqlite",
     reason: "the supported production composition opens the database through NodeDatabase"
+  },
+  {
+    name: "@smthrs/flows/SandboxedFlow",
+    entry: "packages/flows/src/SandboxedFlow.ts",
+    expect: "node:url",
+    reason: "the sandboxed child-flow tier bundles a host module with esbuild and starts a guest runtime"
   }
 ]
 

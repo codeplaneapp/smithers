@@ -99,11 +99,24 @@ export class RuntimeConfigurationError extends Schema.TaggedError<RuntimeConfigu
 const invalidConfiguration = (field: string, message: string): RuntimeConfigurationError =>
   new RuntimeConfigurationError({ code: "invalid_runtime_configuration", field, message })
 
-const Configuration = Schema.Struct({
-  filename: Schema.NonEmptyString,
-  workspaceRoot: Schema.optional(Schema.NonEmptyString),
-  owner: Schema.Struct({ hostId: Schema.NonEmptyString })
-})
+/**
+ * Decodes one named option and reports the option that was wrong.
+ *
+ * A single struct decode would answer "options" for every refusal, and the
+ * whole point of {@link RuntimeConfigurationError.field} is that an embedder
+ * can tell an empty `filename` from an empty `owner.hostId` without reading
+ * prose. Decoding field by field makes the name come from the call site rather
+ * than from walking a schema issue tree.
+ */
+const decodeField = <A>(field: string, schema: Schema.Codec<A>, value: unknown, expectation: string): A => {
+  try {
+    return Schema.decodeUnknownSync(schema)(value)
+  } catch {
+    throw invalidConfiguration(field, `NodeRuntime ${field} ${expectation}`)
+  }
+}
+
+const nonEmpty = "must be a non-empty string"
 
 interface ValidatedOptions {
   readonly filename: string
@@ -114,29 +127,24 @@ interface ValidatedOptions {
 
 /** Captures one absolute, immutable runtime configuration at API entry. */
 const validate = (options: Options): ValidatedOptions => {
-  const filename = options.filename
-  const workspaceRoot = options.workspaceRoot
-  const owner = options.owner
+  const filename = decodeField("filename", Schema.NonEmptyString, options.filename, nonEmpty)
+  const configuredRoot = options.workspaceRoot
+  const workspaceRoot = configuredRoot === undefined
+    ? undefined
+    : decodeField("workspaceRoot", Schema.NonEmptyString, configuredRoot, nonEmpty)
+  // A JavaScript caller can omit `owner` entirely, so the field is read off a
+  // possibly-absent record rather than dereferenced.
+  const owner = options.owner as { readonly hostId?: unknown } | undefined
+  const hostId = decodeField("owner.hostId", Schema.NonEmptyString, owner?.hostId, nonEmpty)
   const isAlive = options.isAlive
-  const decoded = (() => {
-    try {
-      return Schema.decodeUnknownSync(Configuration)({
-        filename,
-        ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
-        owner
-      })
-    } catch {
-      throw invalidConfiguration("options", "NodeRuntime requires non-empty filename and owner.hostId values")
-    }
-  })()
   if (typeof isAlive !== "function") {
     throw invalidConfiguration("isAlive", "NodeRuntime isAlive must be a function")
   }
-  const absoluteFilename = resolve(decoded.filename)
+  const absoluteFilename = resolve(filename)
   return Object.freeze({
     filename: absoluteFilename,
-    workspaceRoot: resolve(decoded.workspaceRoot ?? dirname(absoluteFilename)),
-    owner: Object.freeze({ hostId: decoded.owner.hostId }),
+    workspaceRoot: resolve(workspaceRoot ?? dirname(absoluteFilename)),
+    owner: Object.freeze({ hostId }),
     isAlive
   })
 }
@@ -174,17 +182,11 @@ const databaseLayer = (filename: string) =>
  * @slop
  */
 export const storage = (filename: string, workspaceRoot?: string) => {
-  let decodedFilename: string
-  try {
-    decodedFilename = Schema.decodeUnknownSync(Schema.NonEmptyString)(filename)
-  } catch {
-    throw invalidConfiguration("filename", "NodeRuntime filename must be a non-empty string")
-  }
-  const validatedFilename = resolve(decodedFilename)
+  const validatedFilename = resolve(decodeField("filename", Schema.NonEmptyString, filename, nonEmpty))
   const databaseRoot = dirname(validatedFilename)
-  const resolvedWorkspaceRoot = resolve(
-    Schema.decodeUnknownSync(Schema.NonEmptyString)(workspaceRoot ?? databaseRoot)
-  )
+  const resolvedWorkspaceRoot = workspaceRoot === undefined
+    ? databaseRoot
+    : resolve(decodeField("workspaceRoot", Schema.NonEmptyString, workspaceRoot, nonEmpty))
   const database = Layer.provideMerge(Migrations.layer, databaseLayer(validatedFilename))
   return Layer.mergeAll(
     SqlJournal.layer({ capacity: 1024, overflow: "reject" }),
@@ -654,7 +656,7 @@ export const layerHost = <
   // guarded surface, because a body is exactly what the capability check
   // exists for. That is why the engine is built over the kernel here and not
   // beside it: an action resolves its host services from the engine's context.
-  const raw =  Layer.mergeAll(NodeHost.layerAt(workspaceRoot), NodeHost.NodeCrypto.layer).pipe(
+  const raw = Layer.mergeAll(NodeHost.layerAt(workspaceRoot), NodeHost.NodeCrypto.layer).pipe(
     Layer.provideMerge(RedactedLogger.layer())
   )
   const privilegedJj = Layer.effect(KernelJj.Jj, KernelJj.Jj).pipe(Layer.provide(raw))

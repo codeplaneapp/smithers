@@ -48,13 +48,10 @@ is chosen by the program that runs, not by the library it depends on.
 ## The barrel is a browser entry point
 
 `@smthrs/flows` bundles for a browser, and `pnpm run browser` gates it along
-with every package root it re-exports: `@smthrs/canonical`,
-`@smthrs/capability`, `@smthrs/crypto`, `@smthrs/jj`,
-`@smthrs/jj/browser/BrowserJj`, `@smthrs/platform-browser`,
-`@smthrs/platform-browser/BrowserHost`, `@smthrs/sandbox`, `@smthrs/kernel`,
-`@smthrs/keys`, `@smthrs/database`, `@smthrs/journal`, `@smthrs/run-store`,
-`@smthrs/step-cache`, `@smthrs/flow`, `@smthrs/engine`,
-`@smthrs/engine-store`, `@smthrs/sync`, and `@smthrs/time-travel`.
+with every package root it re-exports.
+[Browser support](https://smithers.sh/architecture/browser-support) lists the
+gated entry points; that page tracks the gate's own contract, so it is the one
+place the list is written down.
 
 Bundling is not durable execution. The rc.0 durable engine is supported only on
 Node.js >= 22.19.0 with local SQLite; browser and edge runtimes may author and

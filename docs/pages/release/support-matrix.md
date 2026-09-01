@@ -97,7 +97,7 @@ execution claim.
 | [`@smthrs/engine`](/api/engine) | `FlowEngine`, `FlowProxy`, vendored `effect/unstable/workflow` fork. | gated yes |
 | [`@smthrs/engine-store`](/api/engine-store) | Durable `FlowEngine`: journal, run, cache, artifact stores; `RunDriver` sweep; `DisasterRecovery`. | gated yes |
 | [`@smthrs/flow`](/api/flow) | Authoring model: `Flow`, `Action`, `Interpreter`, durable deferred/clock/queue, `RetryPolicy`. | gated yes |
-| [`@smthrs/flows`](/api/flows) | Curated aggregate barrel and `./NodeRuntime` production composition. | gated yes (root); `NodeRuntime` gated Node-only |
+| [`@smthrs/flows`](/api/flows) | Curated aggregate barrel, `./NodeRuntime` production composition, and `./SandboxedFlow` sandboxed child flows. | gated yes (root); `NodeRuntime` and `SandboxedFlow` gated Node-only |
 | [`@smthrs/gateway`](/api/gateway) | Gateway wire schemas, projections, session tokens, `SuperviseRuntime` port; the Phase 4 projection server. | no claim |
 | `@smthrs/harness` | Built-in agent harness: dynamic nodes, sealed model steps, QuickJS cell runtime. | no claim |
 | [`@smthrs/jj`](/api/jj) | Jujutsu host service; ships `wasm/flows_jj.wasm`. | gated yes (root, `browser/BrowserJj`); `node/NodeJj`, `bun/BunJj` gated Node-only |

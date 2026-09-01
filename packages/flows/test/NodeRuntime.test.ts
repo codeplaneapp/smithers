@@ -34,6 +34,7 @@ import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
 import * as Capability from "@smthrs/capability/Capability"
 import * as Permission from "@smthrs/capability/Permission"
 import * as Cause from "effect/Cause"
+import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -239,35 +240,41 @@ describe("the supported Node SQLite composition", () => {
     // Validation is eager: `layer` builds the composition when it is CALLED,
     // so a program with an empty filename fails at wiring time rather than
     // opening a database at some arbitrary later scope.
-    expect(() =>
+    //
+    // Each refusal is pinned by CODE and FIELD, not by a message. `field` is
+    // the whole reason `RuntimeConfigurationError` carries more than a string:
+    // an embedder that surfaces "which option did I get wrong" reads it, and a
+    // bare `.toThrow()` would let a refactor collapse every refusal back into
+    // one "options" answer without failing anything.
+    const refusal = (field: string) => expect.objectContaining({ code: "invalid_runtime_configuration", field })
+    const declare = (options: NodeRuntime.Options) => () =>
       NodeRuntime.layer(
-        { filename: "", owner: { hostId: "gate" }, isAlive: () => Effect.succeed(false) },
+        options,
         StepBoundary.layer,
         WorkspaceSandbox.layerFileSystem(),
         Layer.empty
       )
-    ).toThrow()
-    expect(() =>
-      NodeRuntime.layer(
-        { filename, owner: { hostId: "" }, isAlive: () => Effect.succeed(false) },
-        StepBoundary.layer,
-        WorkspaceSandbox.layerFileSystem(),
-        Layer.empty
-      )
-    ).toThrow()
-    expect(() => NodeRuntime.storage("")).toThrow()
+
+    expect(declare({ filename: "", owner: { hostId: "gate" }, isAlive: () => Effect.succeed(false) }))
+      .toThrowError(refusal("filename"))
+    expect(declare({ filename, owner: { hostId: "" }, isAlive: () => Effect.succeed(false) }))
+      .toThrowError(refusal("owner.hostId"))
+    // A JavaScript caller can omit `owner` altogether; the refusal still has
+    // to name the field rather than crash on the dereference.
+    expect(declare({ filename, isAlive: () => Effect.succeed(false) } as never))
+      .toThrowError(refusal("owner.hostId"))
+    expect(declare({ filename, workspaceRoot: "", owner: { hostId: "gate" }, isAlive: () => Effect.succeed(false) }))
+      .toThrowError(refusal("workspaceRoot"))
+    expect(() => NodeRuntime.storage("")).toThrowError(refusal("filename"))
+    // `storage`'s second argument is its own refusal path, and it used to
+    // escape as a raw schema failure with no code at all.
+    expect(() => NodeRuntime.storage(filename, "")).toThrowError(refusal("workspaceRoot"))
     // `isAlive` is the one option the schema cannot check, because a function
     // is not a JSON value. A JavaScript caller that passes the wrong shape has
     // to hear about it here rather than at the first ownership claim, hours
     // into a run.
-    expect(() =>
-      NodeRuntime.layer(
-        { filename, owner: { hostId: "gate" }, isAlive: "not a function" as never },
-        StepBoundary.layer,
-        WorkspaceSandbox.layerFileSystem(),
-        Layer.empty
-      )
-    ).toThrow(/isAlive must be a function/)
+    expect(declare({ filename, owner: { hostId: "gate" }, isAlive: "not a function" as never }))
+      .toThrowError(refusal("isAlive"))
     // Nothing above may have created the database the journey below owns.
     expect(existsSync(filename)).toBe(false)
   })
@@ -567,6 +574,19 @@ describe("the Node host composition", () => {
     Layer.provideMerge(Action.layerImplementations)
   )
 
+  /**
+   * A stand-in for a discovered flow catalog.
+   *
+   * The real one is `@smthrs/registry`, an agent-group package the engine
+   * barrel does not depend on. What the registry seam promises is an ORDER —
+   * the catalog is provided beneath registration and above the engine — and
+   * that order is visible with any service at all in the catalog's position.
+   */
+  interface Catalog {
+    readonly names: ReadonlyArray<string>
+  }
+  const Catalog: Context.Service<Catalog, Catalog> = Context.Service("flows/test/NodeRuntime/Catalog")
+
   const readHostBack = <A>(query: (database: DatabaseSync) => A): A => {
     const database = new DatabaseSync(hostFile, { readOnly: true })
     try {
@@ -619,6 +639,87 @@ describe("the Node host composition", () => {
     )
 
     expect(value).toMatch(/^refused:/)
+  }, 60_000)
+
+  it("builds the registry between the engine and registration, with both in scope", async () => {
+    // The optional `registry` argument exists for ONE documented ordering
+    // claim: the catalog is built after the engine and before registration, so
+    // a registration that reads a catalog off it — `@smthrs/registry`'s
+    // `Executable.layer`, which turns every discovered descriptor into a
+    // registered durable flow — has the catalog AND the live engine in hand.
+    // Nothing in the repository passes a registry, so the claim was
+    // unexercised; this case is what makes it a behavior rather than a
+    // sentence. `Catalog` stands in for the real registry because
+    // `@smthrs/registry` is an agent-group package this one does not depend on;
+    // what is under test is the build order, not the catalog's own contents.
+    mkdirSync(hostRoot, { recursive: true })
+    writeFileSync(note, "host note")
+    const observed: Array<{ readonly names: ReadonlyArray<string>; readonly engine: boolean }> = []
+    const catalog = Layer.succeed(Catalog)({ names: ["discovered-child"] })
+    const registration = Layer.effectDiscard(
+      Effect.gen(function*() {
+        const discovered = yield* Catalog
+        const engine = yield* FlowRuntime.FlowRuntime
+        observed.push({ names: discovered.names, engine: engine !== undefined })
+      })
+    ).pipe(Layer.provideMerge(hostFlows))
+
+    const value = await Effect.runPromise(
+      Host.execute({ what: "read" }, { executionId: "host-registry" }).pipe(
+        Effect.provide(
+          NodeRuntime.layerHost(
+            {
+              filename: hostFile,
+              owner: { hostId: "host-registry" },
+              signals: [],
+              rules: [[
+                new Permission.Rule({
+                  effect: "allow",
+                  pattern: new Capability.CapabilityPattern({ action: "fs:read", resource: `${hostRoot}/**` })
+                })
+              ]]
+            },
+            registration,
+            catalog
+          )
+        ),
+        Effect.scoped
+      )
+    )
+
+    // The registration ran with both services resolvable, and the runtime it
+    // finished is the one that then drove a flow home.
+    expect(observed).toEqual([{ names: ["discovered-child"], engine: true }])
+    expect(value).toBe("host note")
+  }, 60_000)
+
+  it("grants from a later ruleset but keeps the first ruleset's deny a veto", async () => {
+    // A nested `rules` value is not a flat list with extra brackets.
+    // `@smthrs/capability`'s `evaluate` gives `rulesets[0]` — the CONFIGURED
+    // policy — a hard veto and then applies last-match-wins across the rest,
+    // so a deny in the first ruleset and a deny in the second behave
+    // differently. The single-ruleset cases above cannot see that asymmetry.
+    const spawn = (effect: "allow" | "deny") =>
+      new Permission.Rule({
+        effect,
+        pattern: new Capability.CapabilityPattern({ action: "proc:spawn", resource: "*" })
+      })
+    const attempt = (hostId: string, executionId: string, rules: NodeRuntime.HostOptions["rules"]) =>
+      Effect.runPromise(
+        Host.execute({ what: "spawn" }, { executionId }).pipe(
+          Effect.provide(
+            NodeRuntime.layerHost({ filename: hostFile, owner: { hostId }, signals: [], rules }, hostFlows)
+          ),
+          Effect.scoped
+        )
+      )
+
+    // Nothing in the configured ruleset matches, so the grant in the second
+    // ruleset is what decides — and it is honored.
+    expect(await attempt("host-rules-later", "host-rules-later", [[], [spawn("allow")]])).toMatch(/^ran:/)
+    // The same allow, behind a configured deny, cannot lift it.
+    expect(await attempt("host-rules-veto", "host-rules-veto", [[spawn("deny")], [spawn("allow")]]))
+      .toMatch(/^refused:/)
   }, 60_000)
 
   it("installs the shutdown signals it was not told about, and removes them again", async () => {

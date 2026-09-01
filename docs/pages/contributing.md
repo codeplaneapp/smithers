@@ -65,7 +65,7 @@ If your own earlier commit in the current series is wrong, rewrite or squash the
 | Epic | Commits | Depends on |
 | --- | --- | --- |
 | `vocs-scaffold` | the Vocs devDependency and `vocs.config.ts`; the sidebar in reading order; the package barrel export docs | nothing |
-| `api-reference` | one commit per package page, in sidebar order: host, journal, database, kernel, keys, engine, engine-store, sync, time-travel, then the `@smthrs/flows` barrel | `vocs-scaffold` |
+| `api-reference` | one commit per package page, in sidebar order: host, journal, database, kernel, keys, engine, engine-store, sync, time-travel, then the [`@smthrs/flows`](/api/flows) barrel | `vocs-scaffold` |
 | `internals` | the public API test inventory; observability; internal details; data structures | `api-reference` |
 | `architecture` | the mermaid devDependency; the architecture page; package structure | `internals` |
 | `narrative` | examples; design decisions; external; this page; the introduction | `architecture` |
@@ -74,11 +74,11 @@ If your own earlier commit in the current series is wrong, rewrite or squash the
 
 ### Planned
 
-Each of these closes a gap named in [External](/external). They are listed in dependency order. None has landed in full; `production-layer` has landed in part, as noted in its row.
+Each of these closes a gap named in [External](/external). They are listed in dependency order. Only `production-layer` has landed, as noted in its row; the rest are still open.
 
 | Epic | Intended commits | Depends on |
 | --- | --- | --- |
-| `production-layer` | a `@smthrs/flows` layer composing database, migrations, journal stores, durable deferred and clock state, kernel, a platform bundle, and engine; a durable getting-started example that survives a restart; the manifest and gate updates. Partly landed: the `NodeRuntime` subpath packages the storage and engine composition and the durable example builds on it; the package-level real-SQLite gate is also landed. Still open are the kernel and platform-bundle half: `NodeRuntime` installs neither `NodeHost.layer` nor the guarded `HostServices` kernel | nothing |
+| `production-layer` | a `@smthrs/flows` layer composing database, migrations, journal stores, durable deferred and clock state, kernel, a platform bundle, and engine; a durable getting-started example that survives a restart; the manifest and gate updates. Landed: `NodeRuntime.layer` packages the storage and engine composition and leaves host services, the step boundary, and the workspace sandbox to the caller, and `NodeRuntime.layerHost` supplies the contained Node host, the guarded `HostServices` kernel over an unattended grant store, the liveness probe, and bounded signal shutdown. The durable example builds on it and the package-level real-SQLite gate is landed | nothing |
 | `injectable-seams` | put a service or a defaulted option in front of `resolveRetry`, then `classifyError`, then `resolveShareability`, then `waitStart` and `wake`, one seam per commit with a suite proving a provided `Layer` changes engine behavior | `production-layer` |
 | ~~`supervisor`~~ | Withdrawn. The run driver's heartbeat-cadence sweep handles `released` and cancel-requested parked rows plus stale `running` rows; no separate `Supervisor.layer` is planned; see [gap 8](/release/known-limitations#8-supervisor-sweep--closed-inside-the-run-driver). Durable clocks are instead re-armed by `DeferredPersistence.sweepDue` during flow registration and fire through per-clock timer fibers. A gateway supervisor that launches a process for an abandoned run is a distinct, still-unplanned piece of work | nothing |
 | `run-control` | a `RunControl` service journalling attributed pause, cancel, and hijack with actor and reason; the run-row columns; hijack as an alternative `RunControl` implementation | `injectable-seams` |

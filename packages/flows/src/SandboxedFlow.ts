@@ -312,7 +312,9 @@ const loadBundler = (): Promise<Bundler> => import(bundlerSpecifier) as Promise<
  */
 const runnerPath = (): string => {
   const here = import.meta.url
-  return fileURLToPath(new URL(`./internal/SandboxedFlowGuest${here.endsWith(".ts") ? ".ts" : ".js"}`, here))
+  /* v8 ignore next -- the `.js` arm runs only from `dist`, where this module has been built */
+  const extension = here.endsWith(".ts") ? ".ts" : ".js"
+  return fileURLToPath(new URL(`./internal/SandboxedFlowGuest${extension}`, here))
 }
 
 /** The bundle's main: the entry's exports and the guest environment, handed to the runner. */
@@ -418,7 +420,10 @@ const collect = (
       const bytes = yield* session.readFile(`${workdir}/${path}`).pipe(
         Effect.mapError(sessionFailure(`the changed file ${path} could not be read back`))
       )
-      diff.push({ path, bytes })
+      // A plain copy: a provider answers with whatever its transport holds,
+      // a pooled `Buffer` for the local directory, and the diff is data the
+      // caller keeps.
+      diff.push({ path, bytes: new Uint8Array(bytes) })
     }
     return diff
   })
@@ -446,7 +451,8 @@ const readResult = (
     }
     return yield* Effect.try({
       try: () => Schema.decodeUnknownSync(Guest.Result)(JSON.parse(new TextDecoder().decode(bytes))),
-      catch: (cause) => failure("result_unreadable", `the guest wrote a result that is not the protocol's JSON; ${outputs}`, cause)
+      catch: (cause) =>
+        failure("result_unreadable", `the guest wrote a result that is not the protocol's JSON; ${outputs}`, cause)
     })
   })
 
@@ -492,10 +498,11 @@ export const execute = <
     // encode has no way to be satisfied on the other side of a machine
     // boundary, so the dynamic schema-service parameters are erased here the
     // way the interpreter erases them for a handoff.
-    const encodedPayload = yield* (Schema.encodeEffect(Schema.toCodecJson(flow.payloadSchema))(payload) as Effect.Effect<
-      unknown,
-      Schema.SchemaError
-    >).pipe(Effect.orDie)
+    const encodedPayload =
+      yield* (Schema.encodeEffect(Schema.toCodecJson(flow.payloadSchema))(payload) as Effect.Effect<
+        unknown,
+        Schema.SchemaError
+      >).pipe(Effect.orDie)
     const built = yield* bundle(options.entry)
     return yield* Effect.raceFirst(
       Effect.scoped(

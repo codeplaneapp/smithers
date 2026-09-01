@@ -92,6 +92,19 @@ const expected = [
 ].sort()
 
 describe("barrel", () => {
+  it("keeps the flat authoring names disjoint from the engine namespaces", () => {
+    // `src/index.ts` pairs `export * from "@smthrs/flow"` with the `export * as
+    // X` namespaces, and an explicit named export SHADOWS a star export. So if
+    // `@smthrs/flow` ever exported a name an engine package already claims —
+    // `Plan`, `Artifacts`, `Sandbox` and `Journal` are all plausible authoring
+    // names — the flat export would vanish from the barrel with no error. The
+    // `Set` below would hide exactly that: both sources contribute the same
+    // string, the expected universe is unchanged, and every assertion stays
+    // green while a public export disappears. This is the assertion that
+    // catches it; the `Set` only keeps the sorted comparison well-formed.
+    expect(namespacedEnginePackageNames.map(namespaceName).filter((name) => name in FlowPackage)).toEqual([])
+  })
+
   it("ships no unsupported Cloudflare durable-runtime subpath", () => {
     expect(isFile(join(packagesDir, "flows", "src", "CloudflareRuntime.ts"))).toBe(false)
   })
@@ -149,8 +162,8 @@ describe("barrel", () => {
   /**
    * `TimeTravel` is the one entry that is a service KEY rather than a
    * namespace, so `yield* Flows.TimeTravel` is the whole onboarding for time
-   * travel (`docs/specs/Concepts/Time Travel Service.md`). That it typechecks
-   * as a yieldable is the acceptance criterion; the durable tag key is what a
+   * travel (https://smithers.sh/api/time-travel). That it typechecks as a
+   * yieldable is the acceptance criterion; the durable tag key is what a
    * rename would silently break.
    */
   it("re-exports TimeTravel as a yieldable service key, not a namespace", () => {

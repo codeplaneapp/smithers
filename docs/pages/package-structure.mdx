@@ -230,7 +230,7 @@ A package root exports contracts. A platform implementation lives under a subpat
 | `@smthrs/std/Grep`, `@smthrs/std/Glob` | yes | yes | search and glob contracts over the injected `FileSystem`, with no adapter bound |
 | `@smthrs/std/Search`, `@smthrs/std/PortableSearch` | yes | yes | the search contract and its in-process implementation |
 
-28 entry points bundle for the browser, and 7 are documented Node-only.
+28 entry points bundle for the browser, and 8 are documented Node-only.
 
 :::warning[Bundling is a weaker claim than running]
 `@smthrs/journal`, `@smthrs/run-store`, `@smthrs/step-cache`, and `@smthrs/plan` bundle because they depend on the `DurableWriter` contract. A browser application still has to supply a browser SQL client, such as Effect's sqlite-wasm OPFS worker, to that contract. No such layer ships here.

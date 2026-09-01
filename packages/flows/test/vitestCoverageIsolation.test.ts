@@ -684,6 +684,13 @@ describe("vitest coverage isolation conformance", () => {
       // branch, so the `else` on the owned transition can never be covered.
       "engine-store/src/internal/RunDriver.ts": 1,
       "engine/src/FlowEngine/make.ts": 1,
+      // The guest runner is resolved beside this module, and only a built
+      // `dist` copy answers to the `.js` extension the arm covers.
+      "flows/src/SandboxedFlow.ts": 1,
+      // WebCrypto's digest refuses an unknown algorithm NAME, and the guest
+      // names none outside `DigestAlgorithm`, so the rejection translation is
+      // unreachable from the engine.
+      "flows/src/internal/SandboxedFlowGuest.ts": 1,
       // `fenced`'s `info` and `body` groups are mandatory (outside any
       // alternation or quantifier), so they participate in every match; the
       // fallbacks only discharge the optional type on
@@ -770,7 +777,15 @@ describe("vitest coverage isolation conformance", () => {
       // Splitting any string yields a first field; the nullish arm only
       // discharges noUncheckedIndexedAccess before the type lookup.
       "sandbox/src/Sandbox/fileSystem.ts": 1,
-      "step-cache/src/CacheStore.ts": 1
+      // Bounded inert JSON is exactly `@smthrs/canonical`'s accepted domain,
+      // so the encoder's refusal arm is unreachable from an admitted row; the
+      // other two are conflict arms whose blocking row is read inside the same
+      // serialized write transaction that saw the insert fail.
+      "step-cache/src/CacheStore.ts": 3,
+      // One defensive normalization for a future `Duration` input that throws,
+      // and one path guard that `KeyDigest` already satisfies by excluding
+      // every path separator and dot segment.
+      "step-cache/src/RemoteCacheStore.ts": 2
     }
     const sourceFiles = (directory: string): Array<string> => {
       let entries

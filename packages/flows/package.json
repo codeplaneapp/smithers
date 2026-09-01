@@ -100,7 +100,8 @@
     "@smthrs/sync": "1.0.0-rc.0",
     "@smthrs/time-travel": "1.0.0-rc.0",
     "@smthrs/platform-node": "1.0.0-rc.0",
-    "effect": "4.0.0-rc.108"
+    "effect": "4.0.0-rc.108",
+    "esbuild": "0.28.1"
   },
   "devDependencies": {
     "@effect/platform-node": "4.0.0-rc.108",
@@ -114,13 +115,13 @@
     "@types/node": "25.9.5",
     "@vitest/coverage-v8": "4.1.9",
     "dprint": "0.55.2",
-    "esbuild": "0.28.1",
     "eslint": "9.39.1",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
     "eslint-plugin-jsdoc": "64.1.0",
     "eslint-plugin-unicorn": "61.0.2",
     "madge": "8.0.0",
+    "microsandbox": "0.6.16",
     "typescript": "6.0.3",
     "typescript-eslint": "8.65.0",
     "vitest": "4.1.9"

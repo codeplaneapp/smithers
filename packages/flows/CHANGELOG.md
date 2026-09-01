@@ -13,6 +13,11 @@
 
 ### Removed
 
+- Dropped the `Plugin` namespace. Extension in flows is Effect dependency
+  injection: you extend the engine by providing a `Layer` and replace a
+  behavior by providing a different implementation of the service, or a
+  different constructor option, at the seam that owns it. There is no plugin
+  namespace and no hook catalog to import.
 - Dropped the `Host` and `PlatformBrowser` namespaces. `@smthrs/host` was
   dissolved, and the `@smthrs/platform-*` bundles are deliberately not
   re-exported here — for the same reason `effect`'s index does not re-export
