@@ -40,7 +40,13 @@ afterEach(async () => {
   await Fs.rm(root, { recursive: true, force: true })
 })
 
-/** A conventional dual-format build target for a package at `cwd`. */
+/**
+ * A conventional dual-format build target for a package at `cwd`.
+ *
+ * The tool is the package's own build program because that is what produces
+ * both halves: one `tsc -p` invocation emits one module format, and `TsBuild`
+ * refuses to declare `dual` over it.
+ */
 const build = (cwd: string, format: "esm" | "cjs" | "dual" = "dual") =>
   TsBuild({
     packageManager,
@@ -48,7 +54,7 @@ const build = (cwd: string, format: "esm" | "cjs" | "dual" = "dual") =>
     entries: [Input.file("src/index.ts")],
     deps: [],
     tsconfig: Input.file("tsconfig.json"),
-    tool: { name: "tsc" },
+    tool: { name: "program", entry: Input.file("scripts/build.mjs") },
     format,
     outDir: "dist",
     cwd

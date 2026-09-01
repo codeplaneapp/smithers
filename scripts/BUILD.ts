@@ -146,7 +146,9 @@ export const releasePack = Smithers.NodeBinary({
   // Most packages use workspace default-target synthesis and therefore have
   // no BUILD.ts export this file can import. The selector is still a real
   // graph edge: every package `lib` settles before packing, including future
-  // packages admitted under `packages/`.
+  // packages admitted under `packages/`. `lib` is the whole distribution,
+  // `dist/esm` and `dist/cjs`, which is what `assertBuilt` in the packing
+  // program requires; nothing here depends on a prior `pnpm run build`.
   deps: [Smithers.Target.subtree("//packages/...", "lib")]
 })
 
@@ -279,6 +281,19 @@ export const localSmithersUnit = Smithers.NodeTest({
 })
 
 /**
+ * The CLI build the documentation gates spawn.
+ *
+ * `packages/cli/bin/smithers.mjs` runs `dist/esm/bin.js` when that file
+ * exists and `src/bin.ts` otherwise, so a gate that spawns the binary reads
+ * the `//packages/cli:lib` output tree whenever the graph has produced one.
+ * Without this edge the gate and the build race: `smithers-build test
+ * '//scripts/...'` plans the package builds for {@link releasePack} alongside
+ * these gates, and a spawn that lands mid-emit resolves half a `dist`.
+ * `packages/cli` carries no BUILD.ts of its own, so the edge is a selector.
+ */
+const cliBuild = Smithers.Target.subtree("//packages/cli/...", "lib")
+
+/**
  * The documentation gate: house style, page shape, links, the CLI catalog
  * against the binary, the removed surfaces, the generated pages, and the route
  * plan.
@@ -293,7 +308,7 @@ export const docs = Smithers.NodeTest({
   runtime,
   runner: Smithers.entrypoint(Smithers.file("//scripts/check-docs.mjs")),
   srcs: sources,
-  deps: []
+  deps: [cliBuild]
 })
 
 /**
@@ -336,5 +351,5 @@ export const docsUnit = Smithers.NodeTest({
     Smithers.file("//scripts/normalize-bunx.test.ts")
   ]),
   srcs: sources,
-  deps: []
+  deps: [cliBuild]
 })

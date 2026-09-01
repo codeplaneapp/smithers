@@ -169,6 +169,11 @@ export const entrypoint = (entry: Input.File, args: ReadonlyArray<string> = []):
  * entry point; they complete the key material so a gate re-runs when what it
  * measures changes.
  *
+ * `deps` accepts a subtree selector as well as a target, the same shape
+ * `NodeBinary` accepts. A gate that spawns a program built by another
+ * package has to order itself after that package's build, and the package that
+ * owns the build is often reached by selector rather than by import.
+ *
  * @category schemas
  * @since 0.1.0
  */
@@ -176,7 +181,7 @@ export const Attrs = Schema.Struct({
   runtime: Runtime.Runtime,
   runner: Runner,
   srcs: Schema.Array(Input.Declared),
-  deps: Schema.Array(Target.Target),
+  deps: Schema.Array(Target.Dependency),
   env: Schema.Record(Schema.String, Schema.String).pipe(
     Schema.withConstructorDefault(Effect.succeed({}))
   ),

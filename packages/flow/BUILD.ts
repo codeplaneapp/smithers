@@ -20,7 +20,7 @@ export const lib = Smithers.TsBuild({
   entries: [Smithers.file("src/index.ts")],
   deps: [plan],
   tsconfig: Smithers.file("tsconfig.json"),
-  tool: { name: "tsc" },
+  tool: { name: "program", entry: Smithers.file("scripts/build.mjs") },
   format: "dual",
   outDir: "dist",
   cwd

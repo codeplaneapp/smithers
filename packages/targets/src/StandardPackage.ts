@@ -43,6 +43,12 @@ export interface Options {
   readonly dprintConfig?: Input.File | undefined
   readonly readme?: Input.File | undefined
   /**
+   * The program that builds the package's distribution. It defaults to the
+   * conventional `scripts/build.mjs`, which is what the repository's
+   * per-package `build` script runs.
+   */
+  readonly buildProgram?: Input.File | undefined
+  /**
    * The circular-dependency guard this package runs. It defaults to the
    * conventional `scripts/circular.mjs`, which is what the repository's
    * per-package `circular` script runs.
@@ -71,8 +77,9 @@ export interface StandardTargets {
  * `fmt`, and `docs` targets.
  *
  * Defaults follow the Smithers repository layout: sources in `src`, tests in
- * `test`, `tsc -p` over the package `tsconfig.json`, the test half of the
- * package `check` script as `tsc -p tsconfig.test.json --noEmit`, Vitest with
+ * `test`, the package `build` program over the package `tsconfig.json`, the
+ * test half of the package `check` script as `tsc -p tsconfig.test.json
+ * --noEmit`, Vitest with
  * the package `vitest.config.ts`, ESLint with the package flat
  * `eslint.config.js` plus the root `eslint.jsdoc.js`, and dprint with the
  * package `dprint.json`. Together `lib` + `check` cover what the repository's
@@ -106,13 +113,19 @@ export const StandardPackage = (options: Options): StandardTargets => {
     Input.file("//eslint.jsdoc.js")
   ]
   const dprintConfig = options.dprintConfig ?? Input.file("dprint.json")
+  // The published packages are dual: `PackageJson` derives an `import` and a
+  // `require` condition from this `format`, and `scripts/pack-release.mjs`
+  // refuses a package missing either half. One `tsc -p` run emits one format,
+  // so the producer is the package's own build program, which compiles the
+  // ESM half and its declarations with the package tsconfig and rewrites the
+  // same sources as CommonJS in a second pass.
   const lib = TsBuild({
     packageManager: options.packageManager,
     srcs: [sources],
     entries: [Input.file("src/index.ts")],
     deps,
     tsconfig,
-    tool: { name: "tsc" },
+    tool: { name: "program", entry: options.buildProgram ?? Input.file("scripts/build.mjs") },
     format: "dual",
     outDir: "dist",
     cwd
