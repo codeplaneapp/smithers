@@ -1498,6 +1498,34 @@ export const make = (
         }
       })
 
+    /** Fails a run whose persisted round identity or budget is malformed. */
+    const endInvalidRound = (
+      seam: HandoffSeam,
+      error: FlowEngine.Round.InvalidRound
+    ): Effect.Effect<void> =>
+      Effect.gen(function*() {
+        const stateJson = yield* encodeState({
+          ...seam.state,
+          result: (yield* encodeResult(seam.flow, new Flow.Complete({ exit: Exit.die(error) }))).encoded
+        })
+        const transitioned = yield* transitionAndRecord(
+          seam.executionId,
+          "failed",
+          stateJson,
+          {
+            decision: "round-invalid",
+            status: "failed",
+            message: error.message,
+            owner: dependencies.owner
+          },
+          { cancelRequested: "absent" },
+          applyChildExitPolicy(seam.executionId)
+        )
+        if (transitioned._tag === "GuardFailed") {
+          yield* cancelOwned(seam.executionId, seam.state)
+        }
+      })
+
     /**
      * The handoff seam: the one place a round's terminal settlement and its
      * successor are decided together.
@@ -1513,7 +1541,11 @@ export const make = (
         { flowName: seam.flow._tag, maxRounds: seam.state.maxRounds }
       ).pipe(
         Effect.flatMap((advanced) => continueLineage(seam, advanced)),
-        Effect.catch((error) => endLineage(seam, error))
+        Effect.catch((error) =>
+          error instanceof FlowEngine.Round.InvalidRound
+            ? endInvalidRound(seam, error)
+            : endLineage(seam, error)
+        )
       )
 
     const drive = (executionId: string): Effect.Effect<void, never, Crypto.Crypto> =>

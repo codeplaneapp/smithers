@@ -315,6 +315,7 @@ const makeWithEngineJj = (
       }),
       deferredResult: deferred.deferredResult,
       deferredDone: deferred.deferredDone,
+      deferredDoneIfWaiting: deferred.deferredDoneIfWaiting,
       scheduleClock: deferred.scheduleClock,
       // The engine races this against its suspension backoff sleep, so an
       // IN-PROCESS wake — deferred completed, clock fired, operator resume,
