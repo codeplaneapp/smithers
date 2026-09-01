@@ -21,6 +21,19 @@ const runtimeLayer = Runtime.layerNoop("node", {
   platform
 })
 
+/**
+ * The same runtime, on a Windows host.
+ *
+ * The manager reads `platform.os` from this service to decide which name rule
+ * the ambient environment is held to, so a Windows-only rule needs a Windows
+ * runtime rather than a Windows machine.
+ */
+const windowsRuntimeLayer = Runtime.layerNoop("node", {
+  requirement: ">=22.19.0",
+  version: "24.9.0",
+  platform: { os: "win32", arch: "x64", libc: null }
+})
+
 const withFixture = async <A>(name: string, use: (root: string) => Promise<A>): Promise<A> => {
   const root = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), `smthrs-${name}-`)))
   try {
@@ -94,6 +107,57 @@ describe("PackageManager.storeRoot", () => {
         environment: { Path: "one", PATH: "two" }
       }, { ...platform, os: "win32" })
     ).toThrow(/case-insensitive name/)
+  })
+
+  /**
+   * `layerPackageManager` hands these options the host's own `process.env`. A
+   * Windows runner's environment carries names the POSIX convention never
+   * produces: `ProgramFiles(x86)` and `CommonProgramFiles(x86)` are set by
+   * Windows itself on every 64-bit image. The record is a lookup source, not a
+   * set of declarations, so refusing it because the operating system named a
+   * variable the way it always has is a build that cannot run.
+   */
+  it("accepts the environment names a Windows host sets for itself", () => {
+    expect(() =>
+      PackageManager.makeNoop("pnpm", {
+        requirement: "11.21.0",
+        projectRoot: "/workspace",
+        environment: {
+          Path: "C:\\Windows",
+          "ProgramFiles(x86)": "C:\\Program Files (x86)",
+          "CommonProgramFiles(x86)": "C:\\Program Files (x86)\\Common Files"
+        }
+      }, { ...platform, os: "win32" })
+    ).not.toThrow()
+  })
+
+  /**
+   * Windows still has a name rule, and it is the environment block's own: a
+   * name is non-empty and carries neither `=` nor a control character, because
+   * `NAME=VALUE` entries separated by NUL are all the block can represent. A
+   * name the block cannot carry fails here rather than reaching a spawn.
+   */
+  it("refuses a name a Windows environment block cannot carry", () => {
+    for (const name of ["A=B", "", "A\u0007B"]) {
+      expect(() =>
+        PackageManager.makeNoop("pnpm", {
+          requirement: "11.21.0",
+          projectRoot: "/workspace",
+          environment: { [name]: "x" }
+        }, { ...platform, os: "win32" })
+      ).toThrow(/environment name is not portable/)
+    }
+  })
+
+  /** Off Windows the portable name rule is unchanged. */
+  it("keeps the portable name rule on a POSIX host", () => {
+    expect(() =>
+      PackageManager.makeNoop("pnpm", {
+        requirement: "11.21.0",
+        projectRoot: "/workspace",
+        environment: { "ProgramFiles(x86)": "C:\\Program Files (x86)" }
+      }, platform)
+    ).toThrow(/package-manager environment name is not portable: "ProgramFiles\(x86\)"/)
   })
 
   it("does not invoke user string conversion while rejecting an invalid timeout", () => {
@@ -335,6 +399,34 @@ describe("PackageManager.storeRoot", () => {
       expect(observed.secret).toBeUndefined()
       expect(observed.home).toBeUndefined()
       expect(observed.userconfig).toBe("/dev/null")
+    })
+  })
+
+  /**
+   * Accepting a Windows name into the lookup source does not put it on a child.
+   * Only the bootstrap list and the names a `.npmrc` references are selected
+   * from the source, and both are portable by construction, so what the manager
+   * spawns with stays a POSIX-named environment on every host.
+   */
+  it("never forwards a non-portable ambient name into the child environment", async () => {
+    await withFixture("package-manager-windows-env", async (root) => {
+      const executable = NodePath.join(root, "pnpm.mjs")
+      await writeExecutable(executable, "process.stdout.write(JSON.stringify(Object.keys(process.env)))")
+      const manager = await Effect.runPromise(
+        PackageManager.makePnpm({
+          requirement: "11.21.0",
+          projectRoot: root,
+          executable,
+          environment: {
+            Path: process.env.PATH,
+            "ProgramFiles(x86)": "C:\\Program Files (x86)",
+            "CommonProgramFiles(x86)": "C:\\Program Files (x86)\\Common Files"
+          }
+        }).pipe(Effect.provide(NodeServices.layer), Effect.provide(windowsRuntimeLayer))
+      )
+      const names = JSON.parse(await Effect.runPromise(manager.version)) as ReadonlyArray<string>
+      expect(names.filter((name) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))).toEqual([])
+      expect(names).toContain("PATH")
     })
   })
 
