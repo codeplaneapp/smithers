@@ -139,11 +139,13 @@ describe("SqlJournal source-event retention", () => {
       )
       expect(load).toBeDefined()
       expect(load).toContain("LIMIT")
-      // The retained window answers from memory; everything older falls through
-      // to the synchronous durable duplicate check before admission.
+      // The retained window answers from memory. Everything older is admitted
+      // optimistically, because admission reads nothing at all, and collapses
+      // onto the committed row at the insert instead.
       expect(receipts.newest._tag).toBe("Duplicate")
-      expect(receipts.oldest._tag).toBe("Duplicate")
-      // The fall-through returns the original receipt and never duplicates a row.
+      expect(receipts.oldest._tag).toBe("Accepted")
+      // Either way the table keeps one row per identity: the count is taken
+      // after the layer's own closing flush has drained the optimistic entry.
       expect(yield* eventCount).toBe(6)
     }))
 
@@ -164,7 +166,8 @@ describe("SqlJournal source-event retention", () => {
         Effect.scoped
       )
       expect(receipts.newest._tag).toBe("Duplicate")
-      expect(receipts.oldest._tag).toBe("Duplicate")
+      // Evicted, so the index cannot answer it and the insert does.
+      expect(receipts.oldest._tag).toBe("Accepted")
       expect(yield* eventCount).toBe(5)
     }))
 
@@ -382,10 +385,14 @@ describe("SqlJournal canonical idempotency fingerprints", () => {
     }))
 })
 
-/** Explicit producer identities consult SQLite synchronously after cache eviction. */
-describe("SqlJournal durable dedup behind an evicted index entry", () => {
+/**
+ * An explicit producer identity the bounded index has evicted is admitted
+ * optimistically: admission reads nothing, and the unique index
+ * `(run_id, source_id, source_seq)` settles it at the insert.
+ */
+describe("SqlJournal dedup behind an evicted index entry", () => {
   effect(
-    "returns the original duplicate from a fresh layer without allocating or enqueueing",
+    "admits an evicted identity without reading, and collapses it at the insert",
     () =>
       Effect.gen(function*() {
         yield* seed(5, { capacity: 64, overflow: "reject" })
@@ -395,9 +402,16 @@ describe("SqlJournal durable dedup behind an evicted index entry", () => {
           const subscription = yield* service.changes
           queries.length = 0
           const receipt = yield* service.emitLossy(input(0))
+          const firstAdmission = [...queries]
+          queries.length = 0
+          const second = yield* service.emitLossy(input(1))
+          const secondAdmission = [...queries]
           yield* service.flush
           return {
             receipt,
+            second,
+            firstAdmission,
+            secondAdmission,
             published: yield* PubSub.remaining(subscription),
             queries: [...queries]
           }
@@ -409,30 +423,37 @@ describe("SqlJournal durable dedup behind an evicted index entry", () => {
           Effect.scoped
         )
 
-        expect(outcome.receipt).toEqual({
-          _tag: "Duplicate",
-          seq: 0,
-          sourceSeq: 0,
-          status: "committed"
-        })
+        // The whole point: no dedup lookup between the caller's emit and the
+        // queue. The one statement a first admission for a run still issues is
+        // the canonical floor read, which is cached from then on, so the
+        // second admission reads nothing at all. A producer flushing from
+        // inside somebody else's open write transaction cannot deadlock
+        // against statements that are never issued.
+        expect(outcome.firstAdmission.map((query) => query.trim())).toEqual([
+          "SELECT MAX(seq) + 1 AS next FROM flows_journal_events WHERE run_id = ?"
+        ])
+        expect(outcome.secondAdmission).toEqual([])
+        expect(outcome.receipt).toMatchObject({ _tag: "Accepted", sourceSeq: 0 })
+        expect(outcome.second).toMatchObject({ _tag: "Accepted", sourceSeq: 1 })
+        // The insert is the admission decision, and the identity lookup runs
+        // only on the rows it refused.
+        expect(outcome.queries.filter((query) => query.includes("INSERT INTO flows_journal_events")))
+          .toHaveLength(2)
+        expect(outcome.queries.filter((query) => query.includes("WHERE event_id"))).toHaveLength(2)
+        // A collapsed entry is not a new entry: nothing is published and the
+        // table still holds the five originals.
         expect(outcome.published).toBe(0)
-        expect(outcome.queries.filter((query) => query.includes("WHERE event_id"))).toHaveLength(1)
-        expect(outcome.queries.some((query) => query.includes("MAX(seq) + 1"))).toBe(false)
-        expect(outcome.queries.some((query) => query.includes("MAX(source_seq) + 1"))).toBe(false)
-        expect(outcome.queries.some((query) => query.includes("INSERT INTO flows_journal_events"))).toBe(false)
         expect(yield* eventCount).toBe(5)
       })
   )
 
-  effect("fails a changed retry synchronously without a delayed flush error", () =>
+  effect("reports a changed retry behind an evicted entry through the flush", () =>
     Effect.gen(function*() {
       yield* seed(5, { capacity: 64, overflow: "reject" })
-      const queries: Array<string> = []
       const outcome = yield* Effect.gen(function*() {
         const service = yield* Journal
         const subscription = yield* service.changes
-        queries.length = 0
-        const failure = yield* Effect.flip(service.emitLossy(
+        const receipt = yield* service.emitLossy(
           new Input({
             runId: run,
             sourceId: source,
@@ -440,33 +461,73 @@ describe("SqlJournal durable dedup behind an evicted index entry", () => {
             eventType: "event",
             payload: { value: "changed" }
           }, { disableChecks: true })
-        ))
-        yield* service.flush
-        return {
-          failure,
-          published: yield* PubSub.remaining(subscription),
-          queries: [...queries]
-        }
+        )
+        const failure = yield* Effect.flip(service.flush)
+        return { receipt, failure, published: yield* PubSub.remaining(subscription) }
       }).pipe(
-        Effect.provide(journal(
-          { capacity: 64, overflow: "reject", sourceEventCache: 2 },
-          recordingDatabase(queries)
-        )),
+        Effect.provide(journal({ capacity: 64, overflow: "reject", sourceEventCache: 2 })),
         Effect.scoped
       )
 
+      // Admission cannot classify what it does not read, so a reused identity
+      // carrying different bytes is refused by the insert and reported to
+      // whoever waits on the flush. The committed row is untouched either way,
+      // which is the property that matters: a duplicate is dropped, never the
+      // original.
+      expect(outcome.receipt).toMatchObject({ _tag: "Accepted", sourceSeq: 0 })
       expect(outcome.failure).toBeInstanceOf(JournalError)
       expect((outcome.failure as JournalError).code).toBe("idempotency_conflict")
       expect(outcome.published).toBe(0)
-      expect(outcome.queries.filter((query) => query.includes("WHERE event_id"))).toHaveLength(1)
-      expect(outcome.queries.some((query) => query.includes("MAX(seq) + 1"))).toBe(false)
-      expect(outcome.queries.some((query) => query.includes("MAX(source_seq) + 1"))).toBe(false)
-      expect(outcome.queries.some((query) => query.includes("INSERT INTO flows_journal_events"))).toBe(false)
       expect(yield* eventCount).toBe(5)
     }))
 
+  effect("keeps a producer that owns its identity out of the conflict path", () =>
+    Effect.gen(function*() {
+      const identified = (sequence: number, value: unknown): Input =>
+        new Input({
+          runId: run,
+          sourceId: source,
+          sourceSeq: sourceSeq(sequence),
+          dedupe: "identity",
+          eventType: "event",
+          payload: { value }
+        }, { disableChecks: true })
+      const receipts = yield* Effect.gen(function*() {
+        const service = yield* Journal
+        const first = yield* service.emitLossy(identified(0, "recorded"))
+        yield* service.flush
+        // Evict entry 0 from the bounded index, so the re-emission below is
+        // settled by the constraint rather than by memory.
+        yield* service.emitLossy(identified(1, 1))
+        yield* service.emitLossy(identified(2, 2))
+        yield* service.flush
+        const evicted = yield* service.emitLossy(identified(0, "replayed"))
+        yield* service.flush
+        // And once more from the index, which is holding entry 0 again.
+        const cached = yield* service.emitLossy(identified(0, "replayed twice"))
+        yield* service.flush
+        return { first, evicted, cached }
+      }).pipe(
+        Effect.provide(journal({ capacity: 64, overflow: "reject", sourceEventCache: 2 })),
+        Effect.scoped
+      )
+
+      expect(receipts.first._tag).toBe("Accepted")
+      expect(receipts.evicted._tag).toBe("Accepted")
+      expect(receipts.cached).toMatchObject({ _tag: "Duplicate", seq: 0, sourceSeq: 0 })
+      // Three rows, and the first observation of identity 0 is the one that
+      // stands: re-emitting an event whose sequence is derived from the event
+      // never rewrites and never doubles the record of it.
+      expect(yield* eventCount).toBe(3)
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      const rows = yield* sql<{ readonly payload_json: string }>`
+        SELECT payload_json FROM flows_journal_events WHERE source_seq = 0
+      `
+      expect(rows.map((row) => row.payload_json)).toEqual(["{\"value\":\"recorded\"}"])
+    }))
+
   effect(
-    "keeps cache hits and implicit producer sequences off the durable identity lookup",
+    "keeps cache hits and implicit producer sequences off every admission read",
     () =>
       Effect.gen(function*() {
         const queries: Array<string> = []
@@ -477,7 +538,7 @@ describe("SqlJournal durable dedup behind an evicted index entry", () => {
 
           queries.length = 0
           expect((yield* service.emitLossy(input(0)))._tag).toBe("Duplicate")
-          expect(queries.some((query) => query.includes("WHERE event_id"))).toBe(false)
+          expect(queries).toEqual([])
 
           queries.length = 0
           yield* service.emitLossy(
@@ -501,25 +562,23 @@ describe("SqlJournal durable dedup behind an evicted index entry", () => {
   )
 
   effect(
-    "reports a failed durable identity lookup as sink_failed, not as a fresh admission",
+    "loses the batch, not the admission, when the sink cannot insert",
     () =>
       Effect.gen(function*() {
         yield* Effect.gen(function*() {
           const service = yield* Journal
           yield* service.emitLossy(input(0))
           yield* service.flush
-          // Evict entry 0 from the bounded index, so the retry below has to ask
-          // the database who owns this producer sequence.
-          yield* service.emitLossy(input(1))
-          yield* service.emitLossy(input(2))
-          yield* service.flush
 
           const sql = yield* Effect.service(SqlClient.SqlClient)
           yield* sql`DROP TABLE flows_journal_events`
 
-          const failure = yield* Effect.flip(service.emitLossy(input(0)))
+          // Admission still succeeds: it touches no table. The dead sink is
+          // reported where the write actually happens.
+          expect((yield* service.emitLossy(input(1)))._tag).toBe("Accepted")
+          const failure = yield* Effect.flip(service.flush)
           expect(failure.code).toBe("sink_failed")
-          expect(failure.message).toBe("could not read durable source event")
+          expect(failure.message).toBe("journal sink failed")
         }).pipe(
           Effect.provide(journal({ capacity: 64, overflow: "reject", sourceEventCache: 1 })),
           Effect.scoped

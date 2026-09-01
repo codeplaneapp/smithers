@@ -365,12 +365,23 @@ export type Compacted = typeof Compacted.Type
  *
  * - `seq` is assigned synchronously by the selected channel per run. It is the
  *   canonical durable order used by replay, paging, streams, and projections.
- * - `sourceSeq` is assigned synchronously per `(runId, sourceId)` and is the
- *   idempotency key for producer retries.
+ * - `sourceSeq` is assigned synchronously per `(runId, sourceId)`, or supplied
+ *   by the producer, and is the idempotency key for producer retries.
  *
  * Rejected or dropped admissions consume both allocations, so gaps are valid.
- * Exact retries return `Duplicate` with the original canonical `seq` and do
- * not consume either allocation.
+ * A retry the in-process index still holds returns `Duplicate` with the
+ * original canonical `seq` and consumes neither allocation.
+ *
+ * A retry it no longer holds is admitted optimistically and settled by
+ * `UNIQUE (run_id, source_id, source_seq)` at the insert: admission issues no
+ * dedup read, so the receipt is `Accepted`, the entry collapses onto the
+ * committed row instead of doubling it, and a reused identity carrying
+ * different bytes surfaces its `idempotency_conflict` through `flush` rather
+ * than through the emit. The read is deliberately absent. `emitLossy` exists
+ * to be callable from inside somebody else's open write transaction, and a
+ * SELECT there waits on the writer that is waiting on the caller: the agent
+ * executor's exit flush deadlocked exactly so. What a producer keeps in
+ * exchange is the choice of what a collision means, through `Input.dedupe`.
  *
  * This table is Smithers' logical (domain) write-ahead log and is intended to
  * become the authoritative state history. The storage engine's own WAL

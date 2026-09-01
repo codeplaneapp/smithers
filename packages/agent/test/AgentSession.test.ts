@@ -427,6 +427,98 @@ const drive = (
     }
   })
 
+/**
+ * Two frames that each stop on an `ask`, so one run parks twice and every
+ * resume replays a longer prefix than the one before it.
+ */
+const askFrames = [
+  `const first = await ctx.call("ask", { question: "publish the log?" })
+console.log("first=" + first.approved)`,
+  `const second = await ctx.call("ask", { question: "publish the report?" })
+ctx.done("second=" + second.approved)`
+]
+
+/**
+ * A scripted model that answers each frame the provider is actually asked for.
+ *
+ * A replayed frame never reaches the provider, so the number of recorded calls
+ * is the frame index: the model hands back frame zero's cell once, frame one's
+ * cell once, and the run's third incarnation asks it for nothing at all.
+ */
+const scripted = (sources: ReadonlyArray<string>, captured: Array<Captured>): Model.Model =>
+  Model.make({
+    stream: (request) =>
+      Stream.suspend(() => {
+        const events = cellEvents(sources[captured.length] ?? sources.at(-1)!, `cell-${captured.length}`)
+        captured.push({ request, events })
+        return Stream.fromIterable(events)
+      })
+  })
+
+/**
+ * Approves the nth in-run request of a run and resumes it.
+ *
+ * `watch` replays the run's committed history before it follows, so taking
+ * `index` requests and reading the last is what names the request this park is
+ * waiting on rather than the one the previous park already answered.
+ */
+const approvePark = (
+  control: Control.Service,
+  runtime: ControlRuntime.Service,
+  runId: string,
+  index: number
+): Effect.Effect<string, unknown> =>
+  Effect.gen(function*() {
+    const requested = yield* control.watch({ runId }).pipe(
+      Stream.filter((event) => event.kind === "control.approval.requested"),
+      Stream.take(index),
+      Stream.runCollect
+    )
+    const requestedPayload = requested[index - 1]?.payload as {
+      readonly question: string
+      readonly payload: unknown
+    }
+    yield* awaitStatus(runtime, runId, "waiting-approval")
+    yield* control.approve(Schema.decodeUnknownSync(ControlSchema.ApprovalPayload)(requestedPayload.payload))
+    yield* control.resume({ runId, idempotencyKey: `resume:${index}` })
+    return requestedPayload.question
+  })
+
+/** Drives one run through two parks and two resumes, then reads its trail. */
+const driveTwoParks: Effect.Effect<
+  { readonly questions: ReadonlyArray<string>; readonly agentTrail: ReadonlyArray<JournalEvent.Entry> },
+  unknown,
+  Control.Control | ControlRuntime.ControlRuntime | Journal.Journal
+> = Effect.gen(function*() {
+  const control = yield* Control.Control
+  const runtime = yield* ControlRuntime.ControlRuntime
+  const journal = yield* Journal.Journal
+
+  const card = yield* control.plan({ flowId: "agents/notes", input: {} })
+  yield* control.approve(card.approval)
+  const receipt = yield* control.run({
+    _tag: "Plan",
+    planId: card.planId,
+    digest: card.digest,
+    envelope: card.envelope,
+    idempotencyKey: "run:two-parks"
+  })
+  if (receipt._tag !== "Accepted" || receipt.runId === undefined) {
+    return yield* Effect.die("expected an accepted run")
+  }
+  const runId = receipt.runId
+  const first = yield* approvePark(control, runtime, runId, 1)
+  const second = yield* approvePark(control, runtime, runId, 2)
+  yield* awaitStatus(runtime, runId, "completed")
+
+  yield* journal.flush
+  const page = yield* journal.entries({ runId: JournalEvent.RunId.make(runId), limit: 1_000 })
+  return {
+    questions: [first, second],
+    agentTrail: page.entries.filter((entry) => entry.eventType.startsWith("control.agent."))
+  }
+})
+
 const textOf = (request: ModelRequest.ModelRequest): string =>
   request.messages.flatMap((message) => message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])))
     .join("\n")
@@ -527,12 +619,18 @@ describe("AgentSession", () => {
     // Per-call latency is journaled next to usage, so a benchmark can measure
     // seconds per call and not only per run.
     //
-    // KNOWN DEFECT, pinned exactly rather than tolerated. Two frames make two
-    // model calls, and this run journals FOUR `model-settled` rows: the park's
-    // resumed attempt re-executes both frames and the executor re-journals
-    // every event it replays. Each row carries `usage`, so a projection summing
-    // a run's tokens over-counts once per park. Tightening this number is the
-    // assertion a safe fix has to make. Three attempted routes are blocked:
+    // TWO calls, TWO rows. The park's resumed attempt re-executes both frames
+    // and republishes every event in the replayed prefix, so this used to
+    // journal four `model-settled` rows and a projection summing `usage`
+    // over-counted a run's tokens once per park. Each trail event now carries
+    // the identity `AgentSession.traceIdentity` derives from where it sits and
+    // what it says: the frame, its ordinal within that frame, the frame's
+    // cell, the event type, and the payload minus the observation metadata a
+    // replay restamps. `UNIQUE (run_id, source_id, source_seq)` then refuses
+    // the republished row. The divergent half of the same resume is asserted
+    // below and is the property the fix turns on.
+    //
+    // The three routes recorded here before it stay closed:
     //
     // - Suppressing a replayed frame's events needs the harness to know a frame
     //   is replaying. `EngineLike.record` returns only the value, so the marker
@@ -540,13 +638,15 @@ describe("AgentSession", () => {
     //   published `AgentEvent`. It would still be wrong on the frame a
     //   resume lands in, which replays its model step and then produces genuinely
     //   new events after the steering drain that answered its park.
-    // - A deterministic producer identity per event (`sourceId` + `sourceSeq`)
-    //   does dedupe correctly, and deadlocks. An explicit `sourceSeq` sends
-    //   `emitLossy` through `SqlJournal`'s `preflightExplicit`, which issues a
-    //   SELECT before admission; the executor's exit flush runs inside the
-    //   engine's write transaction, so that read waits on the writer that is
-    //   waiting on it. Measured: this case runs in 410 ms without the explicit
-    //   sequence and does not finish in 120 s with it.
+    // - A deterministic identity WITH a preflight read deadlocks. An explicit
+    //   `sourceSeq` used to send `emitLossy` through `SqlJournal`'s
+    //   `preflightExplicit`, which issued a SELECT before admission; the
+    //   executor's exit flush runs inside the engine's write transaction, so
+    //   that read waited on the writer that was waiting on it. Measured: 410 ms
+    //   without the explicit sequence, no completion in 120 s with it. The
+    //   identity was right and the plumbing was wrong: admission now reads
+    //   nothing and the unique index answers at the insert, which is why this
+    //   case runs in roughly the time it always did.
     // - A per-incarnation high-water count can read at the start of `body`,
     //   after activation commits and before `agent.run` opens a step
     //   transaction, so it does not reproduce that SELECT deadlock. Its
@@ -559,12 +659,31 @@ describe("AgentSession", () => {
     //   28 and lost the new `cell-call-settled`, `cell-printed`, and
     //   `cell-settled`, including the only settled evidence for `ask`.
     const settled = outcome.agentTrail.filter((entry) => entry.eventType === "control.agent.model-settled")
-    expect(settled).toHaveLength(4)
+    expect(settled).toHaveLength(2)
     expect(
       settled.every((entry) =>
         typeof (entry.payload as { readonly durationMillis?: unknown }).durationMillis === "number"
       )
     ).toBe(true)
+    // The resumed attempt's DIVERGENCE is journaled in full. The parked
+    // attempt's frame one ended at `permission-required`; the approved attempt
+    // answers the same `ask`, at the same ordinal of the same frame, with a
+    // `cell-call-settled` and then runs the frame to its end. Both rows stand,
+    // and the run's whole record is 21 rows from the park plus the 7 the
+    // resume added, which is the count the discarded suppression prototype
+    // could not reach.
+    expect(outcome.agentTrail.map((entry) => entry.eventType)).toContain("control.agent.permission-required")
+    const asks = outcome.agentTrail.filter((entry) =>
+      entry.eventType === "control.agent.cell-call-settled" &&
+      (entry.payload as { readonly flowName?: unknown }).flowName === "ask"
+    )
+    expect(asks).toHaveLength(1)
+    expect((asks[0]!.payload as { readonly value: { readonly approved: boolean } }).value.approved).toBe(true)
+    expect(outcome.agentTrail).toHaveLength(28)
+    // One row per identity: nothing was journaled twice, and nothing that the
+    // resume produced was refused as a duplicate of something else.
+    expect(new Set(outcome.agentTrail.map((entry) => entry.sourceSeq)).size)
+      .toBe(outcome.agentTrail.length)
     // The steer admitted through Control.steer reached frame one's context at
     // the frame boundary, alongside the cell's own continuation insert.
     const frameOneText = textOf(captured[1]!.request)
@@ -615,6 +734,53 @@ describe("AgentSession", () => {
     // Every recorded call was matched and consumed: the recording drove the
     // whole loop, nothing was unscripted and nothing was left over.
     expect(replayed.unconsumed).toEqual([])
+  })
+
+  it("keeps one row per event across a second park, and journals what diverges", {
+    timeout: 30_000
+  }, async () => {
+    const captured: Array<Captured> = []
+    const outcome = await Effect.runPromise(
+      Effect.gen(function*() {
+        const gate = yield* Deferred.make<void>()
+        // Nothing in these frames touches the gated tool, so the gate is open
+        // from the start.
+        yield* Deferred.succeed(gate, void 0)
+        return yield* driveTwoParks.pipe(
+          Effect.provide(stack({ resolve: seat(scripted(askFrames, captured)), notes: [], gate }))
+        )
+      }).pipe(Effect.scoped) as Effect.Effect<{
+        questions: ReadonlyArray<string>
+        agentTrail: ReadonlyArray<JournalEvent.Entry>
+      }>
+    )
+
+    expect(outcome.questions).toEqual(["publish the log?", "publish the report?"])
+    // Three incarnations, two provider calls: the second resume replays both
+    // frames from their sealed steps and asks the provider for neither.
+    expect(captured).toHaveLength(2)
+    // The count a projection sums. Without a per-event identity this run
+    // journals one `model-settled` for the first attempt, two more for the
+    // attempt that answers the first ask, and two more again for the attempt
+    // that answers the second: five rows for two calls, growing with every
+    // park. A second resume is where a fix that only handles the first one
+    // comes apart, so it is asserted separately from the single-park case.
+    const settled = outcome.agentTrail.filter((entry) => entry.eventType === "control.agent.model-settled")
+    expect(settled).toHaveLength(2)
+    expect(new Set(outcome.agentTrail.map((entry) => entry.sourceSeq)).size)
+      .toBe(outcome.agentTrail.length)
+    // Both asks were answered after their park, and both answers survived:
+    // dedup by identity refuses a republished row without touching the rows a
+    // divergent resume adds.
+    const asks = outcome.agentTrail.filter((entry) =>
+      entry.eventType === "control.agent.cell-call-settled" &&
+      (entry.payload as { readonly flowName?: unknown }).flowName === "ask"
+    )
+    expect(asks).toHaveLength(2)
+    expect(
+      outcome.agentTrail.filter((entry) => entry.eventType === "control.agent.permission-required")
+    ).toHaveLength(2)
+    expect(outcome.agentTrail.filter((entry) => entry.eventType === "control.agent.resolved")).toHaveLength(1)
   })
 
   it("settles resume events for runs it never launched without holding the bridge", { timeout: 30_000 }, async () => {

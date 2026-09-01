@@ -110,6 +110,36 @@ export const SourceSeq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe
 export type SourceSeq = typeof SourceSeq.Type
 
 /**
+ * Schema for what a re-emitted `(runId, sourceId, sourceSeq)` identity means.
+ *
+ * `content` is the default and the strict reading: the identity names one set
+ * of bytes, so a producer that re-emits it with different bytes has a bug and
+ * the journal says so with `idempotency_conflict`.
+ *
+ * `identity` is for a producer that derives the sequence from the event
+ * itself. There a collision IS the same event observed twice, and the bytes
+ * that differ between the two observations are metadata ABOUT the observation
+ * rather than the event: when a replayed frame was re-recorded, how long a
+ * step took the second time a durable engine served it from its record. The
+ * first admitted row stands and the re-emission settles as `Duplicate`. Only
+ * declare it with a sequence derived from the event's own content, because
+ * the journal then has nothing else with which to notice two different events
+ * wearing one identity.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Dedupe = Schema.Literals(["content", "identity"])
+
+/**
+ * What a re-emitted producer identity means.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Dedupe = typeof Dedupe.Type
+
+/**
  * Schema for an event submitted to the journal.
  *
  * Event types and values intentionally remain an open envelope. The durable
@@ -122,6 +152,8 @@ export class Input extends Schema.Class<Input>("@smthrs/journal/JournalEvent/Inp
   runId: RunId,
   sourceId: SourceId,
   sourceSeq: Schema.optional(SourceSeq),
+  /** How a collision on this event's identity is settled. Defaults to `content`. */
+  dedupe: Schema.optional(Dedupe),
   eventType: identifier,
   payload: Schema.Unknown,
   meta: Schema.optional(Schema.Unknown)

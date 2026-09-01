@@ -169,6 +169,76 @@ export interface Options {
 const sourceId = JournalEvent.SourceId.make("/control/executor")
 
 /**
+ * The agent trail's own producer, separate from the executor's lifecycle
+ * events.
+ *
+ * The trail supplies its own producer sequences ({@link traceIdentity}) while
+ * `control.run.*` and `control.approval.requested` allocate theirs from the
+ * journal's floor. Sharing one producer would mix the two schemes in one
+ * sequence space: the floor is `MAX(source_seq) + 1`, so it would jump to a
+ * derived identity plus one, and a later derived identity could name a
+ * sequence a lifecycle event had already taken. Two producers keep each
+ * scheme's numbers to itself.
+ */
+const trailSourceId = JournalEvent.SourceId.make("/control/executor/trail")
+
+/**
+ * Payload fields a replayed event does not reproduce.
+ *
+ * `at` is stamped when the executor recorded the event, and `durationMillis`
+ * is measured around a step the engine serves from its record on the way back,
+ * so both differ between the attempt that first produced an event and the
+ * attempt that replays it. They describe the observation rather than the
+ * event, so the identity below is derived without them and the first
+ * attempt's values are the ones that stand.
+ */
+const observationOnly = new Set(["at", "durationMillis"])
+
+/**
+ * The producer identity of one journaled agent event.
+ *
+ * A resumed attempt replays its whole prefix and re-publishes every event in
+ * it, so without an identity of their own those events were journaled again:
+ * the auto-allocated sequence never collided, the dedup index never fired, and
+ * a projection summing `control.agent.model-settled` usage over-counted a
+ * run's tokens once per park. This is the identity that lets
+ * `UNIQUE (run_id, source_id, source_seq)` answer, and it has to hold for a
+ * resumed attempt that DIVERGES rather than only for one that repeats.
+ *
+ * The material is where the event sits and what it says: the frame, its
+ * ordinal within that frame, the cell that frame produced, the event type, and
+ * the event's own payload minus {@link observationOnly}. A replayed event
+ * regenerates all five, so it regenerates the identity and the index refuses
+ * it. An event produced after divergence differs in at least one of them, so
+ * it derives a different identity and is admitted normally: the approved
+ * `ask` writes `cell-call-settled` where the parked attempt wrote
+ * `permission-required`, at the same ordinal of the same frame, and the two
+ * do not collide. A running count across the incarnation cannot make that
+ * distinction, which is why one was tried and rejected.
+ *
+ * Truncation is to 48 bits, comfortably inside the safe-integer range the
+ * journal allocates in, and the birthday bound over a run's thousands of
+ * events is around 1e-9. The failure it bounds is a dropped duplicate, never a
+ * rewritten row: the first observation of an identity is the one that stands.
+ *
+ * @category projections
+ * @since 0.1.0
+ */
+export const traceIdentity = (
+  frame: number,
+  ordinal: number,
+  cell: string,
+  eventType: string,
+  payload: Readonly<Record<string, unknown>>
+): JournalEvent.SourceSeq => {
+  const material = Object.fromEntries(
+    Object.entries(payload).filter(([key]) => !observationOnly.has(key))
+  )
+  const digest = Digest.digest(CanonicalJson.stringify({ cell, eventType, frame, material, ordinal }))
+  return JournalEvent.SourceSeq.make(Number.parseInt(digest.slice(0, 12), 16))
+}
+
+/**
  * How long a resume delegation must stand unanswered before a composition
  * that did not park the run may take it up.
  *
@@ -980,7 +1050,8 @@ export const make = (
       )
 
     /**
-     * Emits one agent-trace event on the journal's lossy channel.
+     * Emits one agent-trace event on the journal's lossy channel, under the
+     * identity {@link traceIdentity} derived for it.
      *
      * The channel matters more than it looks. A trace event is telemetry, not
      * lifecycle state, and the executor emits it from inside the harness
@@ -990,16 +1061,28 @@ export const make = (
      * consumer accepts the event. Runs stalled silently at 0% CPU a few frames
      * in. `emitLossy` queues instead of joining the transaction, which is the
      * documented channel for exactly this.
+     *
+     * The explicit sequence rides the same channel. It used to send the emit
+     * through a preflight SELECT before admission, which reintroduced that
+     * deadlock from the other side, and `emitLossy` now settles an explicit
+     * identity from memory or admits it optimistically, leaving the unique
+     * index to refuse the duplicate at the insert. `dedupe: "identity"` is
+     * this producer saying the sequence is derived from the event: the
+     * observation metadata that differs between a first attempt and a replay
+     * must not be read as two different events.
      */
     const trail = (
       runId: string,
+      sourceSeq: JournalEvent.SourceSeq,
       eventType: string,
       payload: unknown
     ): Effect.Effect<void, unknown> =>
       journal.emitLossy(
         new JournalEvent.Input({
           runId: JournalEvent.RunId.make(runId),
-          sourceId,
+          sourceId: trailSourceId,
+          sourceSeq,
+          dedupe: "identity",
           eventType,
           payload: JSON.parse(JSON.stringify(payload))
         })
@@ -1244,13 +1327,15 @@ export const make = (
         // channel because its queue drains through the same writer. Pushing
         // onto an array cannot block, so the frame always proceeds; the pump
         // below writes whatever has accumulated once the writer is free again.
-        const pending: Array<{ readonly eventType: string; readonly payload: unknown }> = []
+        const pending: Array<
+          { readonly sourceSeq: JournalEvent.SourceSeq; readonly eventType: string; readonly payload: unknown }
+        > = []
         const flush = Effect.suspend(() =>
           Effect.forEach(
             pending.splice(0, pending.length),
             // Contained per entry rather than per batch: one refused event must
             // not take the rest of the batch down with it.
-            (entry) => Effect.ignore(trail(payload.runId, entry.eventType, entry.payload)),
+            (entry) => Effect.ignore(trail(payload.runId, entry.sourceSeq, entry.eventType, entry.payload)),
             { discard: true }
           )
         )
@@ -1260,16 +1345,39 @@ export const make = (
         // flushes in batches: `emitted_at_ms` is admission time, so every
         // event in one flush shares a millisecond and per-call timing is
         // unrecoverable from the row alone.
+        //
+        // Where the run is, as the stream reports it, which is what
+        // `traceIdentity` derives an event's identity from. A resumed attempt
+        // republishes its whole prefix from frame zero, so counting frames and
+        // the events inside them reproduces the same coordinates for the same
+        // events, and only for them. Non-journaled events (the model deltas)
+        // are not counted: they carry no row, and leaving them out keeps the
+        // ordinal a position in the trail rather than in the stream.
+        let frame = -1
+        let ordinal = 0
+        let cell = ""
         const record = (event: AgentEvent.AgentEvent): Effect.Effect<void> =>
           Effect.flatMap(Clock.currentTimeMillis, (at) =>
             Effect.sync(() => {
               tags.push(event._tag)
+              if (event._tag === "turn-opened") {
+                frame += 1
+                ordinal = 0
+                cell = ""
+              }
+              if (event._tag === "cell-produced") cell = event.cell.digest
               const projected = trace(event)
               if (projected !== undefined) {
-                pending.push({
-                  eventType: projected.eventType,
-                  payload: { ...(projected.payload as Record<string, unknown>), at }
-                })
+                // Normalized once, here, so the identity is derived from the
+                // same bytes the journal stores. A projection carries optional
+                // fields as `undefined`, which JSON drops and canonical JSON
+                // refuses outright, so deriving straight from the projection
+                // threw on the first `cell-call-settled` that answered without
+                // a message.
+                const material = JSON.parse(JSON.stringify(projected.payload)) as Record<string, unknown>
+                const sourceSeq = traceIdentity(frame, ordinal, cell, projected.eventType, material)
+                ordinal += 1
+                pending.push({ sourceSeq, eventType: projected.eventType, payload: { ...material, at } })
               }
             }))
         const pump = yield* Effect.forkChild(

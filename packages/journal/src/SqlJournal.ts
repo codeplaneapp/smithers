@@ -49,7 +49,16 @@ import {
   type Service,
   type StreamOptions
 } from "./Journal.ts"
-import { Entry, Input, makeEventId, type RunId, type Seq, type SourceId, type SourceSeq } from "./JournalEvent.ts"
+import {
+  type Dedupe,
+  Entry,
+  Input,
+  makeEventId,
+  type RunId,
+  type Seq,
+  type SourceId,
+  type SourceSeq
+} from "./JournalEvent.ts"
 import * as JournalMetrics from "./JournalMetrics.ts"
 import { OwnerId } from "./OwnerId.ts"
 import type { Projection } from "./Projection.ts"
@@ -160,6 +169,8 @@ interface QueuedEntry {
   readonly eventType: string
   readonly payloadJson: string
   readonly metaJson: string
+  /** The producer's reading of a collision on this entry's identity. */
+  readonly dedupe: Dedupe
 }
 
 interface JournalRow {
@@ -823,9 +834,11 @@ export const layer = (
       ): Result.Result<EmitReceipt, JournalError> => {
         const { metaJson, payloadJson, validated } = prepared
         if (
-          existing.eventType !== validated.eventType ||
-          existing.payloadJson !== payloadJson ||
-          existing.metaJson !== metaJson
+          validated.dedupe !== "identity" && (
+            existing.eventType !== validated.eventType ||
+            existing.payloadJson !== payloadJson ||
+            existing.metaJson !== metaJson
+          )
         ) {
           return Result.fail(error(
             "idempotency_conflict",
@@ -840,56 +853,47 @@ export const layer = (
         })
       }
 
-      /** Resolves an explicit producer retry before sequence allocation. */
-      const preflightExplicit = (prepared: Prepared): Effect.Effect<EmitReceipt | undefined, JournalError> =>
-        Effect.suspend(() => {
-          const { validated } = prepared
-          const sourceSeq = validated.sourceSeq
-          if (sourceSeq === undefined) return Effect.succeed(undefined)
-          if (
-            !Number.isSafeInteger(sourceSeq) ||
-            sourceSeq < 0 ||
-            sourceSeq === Number.MAX_SAFE_INTEGER
-          ) {
-            return Effect.fail(
-              error("invalid_event", "journal sequence is outside the allocatable safe integer range")
-            )
-          }
-          const identity = sourceEventKey(validated.runId, validated.sourceId, sourceSeq)
-          const cached = state.sourceEvents.get(identity)
-          if (cached !== undefined) {
-            return Effect.fromResult(compareSourceEvent(prepared, sourceSeq, cached))
-          }
-          return sql<JournalRow>`
-            SELECT run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
-              event_type, payload_json, meta_json
-            FROM flows_journal_events
-            WHERE event_id = ${makeEventId(validated.runId, validated.sourceId, sourceSeq)}
-              OR (
-                run_id = ${validated.runId}
-                AND source_id = ${validated.sourceId}
-                AND source_seq = ${sourceSeq}
-              )
-            ORDER BY seq ASC
-            LIMIT 1
-          `.pipe(
-            Effect.mapError((cause) => error("sink_failed", "could not read durable source event", cause)),
-            Effect.flatMap((rows) => {
-              const row = rows[0]
-              if (row === undefined) return Effect.succeed(undefined)
-              const existing: SourceEvent = {
-                seq: Number(row.seq) as Seq,
-                eventType: row.event_type,
-                payloadJson: row.payload_json,
-                metaJson: row.meta_json,
-                status: "committed"
-              }
-              return Effect.fromResult(compareSourceEvent(prepared, sourceSeq, existing)).pipe(
-                Effect.tap(() => Effect.sync(() => retain(identity, existing)))
-              )
-            })
+      /**
+       * Answers an explicit producer identity from memory alone, before
+       * anything is allocated.
+       *
+       * This performs NO read. That is the whole point of it: `emitLossy` is
+       * the channel a producer reaches for precisely because it may be called
+       * from inside somebody else's open write transaction, and this used to
+       * issue a SELECT here for every explicit sequence. The executor's exit
+       * flush in `@smthrs/agent` runs inside the engine's write transaction,
+       * so that read waited on the writer that was waiting on the flush and
+       * the run stalled at 0% CPU: measured, that case did not finish in
+       * 120 s with the read and takes about half a second without it. What the
+       * read used to answer, a producer identity that is already durable but
+       * no longer in the bounded index, the unique index
+       * `(run_id, source_id, source_seq)` answers at insert time instead: the
+       * queued insert runs first and reads only the row it actually collided
+       * with, inside the writer's own transaction where a read cannot
+       * deadlock against it.
+       *
+       * A cache miss therefore admits optimistically. The receipt is
+       * `Accepted` where it would once have been `Duplicate`, which the lossy
+       * channel already allows for: `Accepted` is admission to the queue, not
+       * a commit, and the entry still collapses onto the committed row rather
+       * than doubling it.
+       */
+      const admitFromIndex = (prepared: Prepared): Result.Result<EmitReceipt | undefined, JournalError> => {
+        const { validated } = prepared
+        const sourceSeq = validated.sourceSeq
+        if (sourceSeq === undefined) return Result.succeed(undefined)
+        if (
+          !Number.isSafeInteger(sourceSeq) ||
+          sourceSeq < 0 ||
+          sourceSeq === Number.MAX_SAFE_INTEGER
+        ) {
+          return Result.fail(
+            error("invalid_event", "journal sequence is outside the allocatable safe integer range")
           )
-        })
+        }
+        const cached = state.sourceEvents.get(sourceEventKey(validated.runId, validated.sourceId, sourceSeq))
+        return cached === undefined ? Result.succeed(undefined) : compareSourceEvent(prepared, sourceSeq, cached)
+      }
 
       const queuedEmit: Service["emitLossy"] = Effect.fn("Journal.emitLossy")((input: Input) =>
         Effect.annotateCurrentSpan({
@@ -904,12 +908,12 @@ export const layer = (
                 Effect.suspend(() => Effect.fromResult(prepare(input, emittedAtMs))),
                 (prepared) =>
                   Effect.flatMap(
-                    preflightExplicit(prepared),
-                    (preflight) =>
-                      preflight !== undefined
-                        ? Effect.succeed(preflight)
+                    Effect.fromResult(admitFromIndex(prepared)),
+                    (indexed) =>
+                      indexed !== undefined
+                        ? Effect.succeed(indexed)
                         : Effect.flatMap(
-                          ensureFloors(prepared.validated.runId, prepared.validated.sourceId),
+                          ensureFloors(prepared.validated),
                           (floors) =>
                             allocation.withPermit(Effect.fromResult(
                               Result.gen(function*() {
@@ -919,23 +923,12 @@ export const layer = (
                                   floors.sourceSeq,
                                   state.sourceSequences.get(key) ?? 0
                                 )
-                                if (validated.sourceSeq !== undefined) {
-                                  const identity = sourceEventKey(
-                                    validated.runId,
-                                    validated.sourceId,
-                                    validated.sourceSeq
-                                  )
-                                  const cached = state.sourceEvents.get(identity)
-                                  if (cached !== undefined) {
-                                    return yield* compareSourceEvent(prepared, validated.sourceSeq, cached)
-                                  }
-                                }
-                                // An explicit producer sequence was validated and
-                                // answered by `preflightExplicit`, and an implicit one
-                                // is the floor `ensureFloors` already proved to be a
-                                // non-negative safe integer. Only exhaustion is left:
-                                // the allocator cannot advance past MAX_SAFE_INTEGER,
-                                // and neither can the identity that follows it.
+                                // An explicit producer sequence was validated by
+                                // `admitFromIndex`, and an implicit one is the floor
+                                // `ensureFloors` already proved to be a non-negative
+                                // safe integer. Only exhaustion is left: the allocator
+                                // cannot advance past MAX_SAFE_INTEGER, and neither can
+                                // the identity that follows it.
                                 const sourceSeq: SourceSeq = validated.sourceSeq ?? (nextSourceSeq as SourceSeq)
                                 if (sourceSeq === Number.MAX_SAFE_INTEGER) {
                                   return yield* Result.fail(
@@ -970,7 +963,8 @@ export const layer = (
                                   emittedAtMs,
                                   eventType: validated.eventType,
                                   payloadJson,
-                                  metaJson
+                                  metaJson,
+                                  dedupe: validated.dedupe ?? "content"
                                 }
                                 let evicted: QueuedEntry | undefined
                                 if (Queue.sizeUnsafe(queue) >= options.capacity && options.overflow === "drop-oldest") {
@@ -1230,6 +1224,13 @@ export const layer = (
       /**
        * Reads the row a duplicate emit collides with.
        *
+       * On the queued channel this runs only AFTER the insert, on the row that
+       * insert's `ON CONFLICT DO NOTHING` actually refused: the unique index is
+       * the admission decision there, so a batch of entries that collide with
+       * nothing costs no lookups at all, and the one a collision costs happens
+       * inside the writer's own transaction. See {@link insertOne} for why the
+       * durable channel still asks first.
+       *
        * The lookup covers BOTH unique constraints the insert can conflict on:
        * `UNIQUE (event_id)` and `UNIQUE (run_id, source_id, source_seq)`. It is
        * tempting to keep only the first, because `makeEventId` is injective in
@@ -1263,9 +1264,11 @@ export const layer = (
           }
           const row = existing[0]!
           if (
-            row.event_type !== queued.eventType ||
-            row.payload_json !== queued.payloadJson ||
-            row.meta_json !== queued.metaJson
+            queued.dedupe !== "identity" && (
+              row.event_type !== queued.eventType ||
+              row.payload_json !== queued.payloadJson ||
+              row.meta_json !== queued.metaJson
+            )
           ) {
             return yield* Effect.fail(
               error(
@@ -1288,15 +1291,26 @@ export const layer = (
        * `renewRangeLocked`) reduced to one SQL predicate: a zombie owner whose
        * run was reclaimed cannot append, and fails with `fence_lost`.
        *
-       * The fence outranks dedup. The duplicate lookup answers an ownerless
-       * insert up front, but a fenced insert consults it only after the
-       * INSERT produced no row AND `fenceGuard` has confirmed the owner in
-       * the same serialized transaction, Temporal conditions every request
-       * on the `rangeID` before anything else. Answering a zombie's
-       * resubmission from the dedup index would launder its lost fence into
-       * a `Duplicate` receipt for work the live owner committed; a confirmed
-       * owner's conflict, by contrast, is a genuine duplicate (its own
-       * earlier commit, or a forked run's copied row).
+       * The fence outranks dedup. A fenced insert consults the dedup index
+       * only after the INSERT produced no row AND `fenceGuard` has confirmed
+       * the owner in the same serialized transaction, Temporal conditions
+       * every request on the `rangeID` before anything else. Answering a
+       * zombie's resubmission from the dedup index would launder its lost
+       * fence into a `Duplicate` receipt for work the live owner committed; a
+       * confirmed owner's conflict, by contrast, is a genuine duplicate (its
+       * own earlier commit, or a forked run's copied row).
+       *
+       * The queued channel is decided by the constraint alone. The ownerless
+       * DURABLE path keeps its up-front lookup, and the reason is measured
+       * rather than aesthetic: with two connections open on one file, removing
+       * it left `emitDurableUnfenced` transactions overlapping, so one of them
+       * blocked in SQLite's synchronous busy wait until the driver's
+       * `busy_timeout` expired. The two-connection case in `JournalDurable`
+       * went from 17 ms and no write retries to 5.4 s and one, three runs each
+       * way. That is a read this channel is buying scheduling room with, and
+       * it is affordable here: a durable emit already reads its allocation
+       * floor in the same transaction, and its caller is by definition not
+       * flushing from inside somebody else's.
        */
       const insertOne = (
         queued: QueuedEntry,
@@ -1304,7 +1318,7 @@ export const layer = (
         enforceCompactionFloor = false
       ): Effect.Effect<Commit, JournalError | SqlError.SqlError> =>
         Effect.gen(function*() {
-          if (fence._tag === "Unfenced") {
+          if (fence._tag === "Unfenced" && !enforceCompactionFloor) {
             const duplicate = yield* selectExisting(queued)
             if (duplicate !== undefined) {
               return duplicate
@@ -1548,21 +1562,29 @@ export const layer = (
        * without the allocator; the caller later takes the short allocator
        * permit, re-checks the monotonic cache, and reserves both sequences in
        * one synchronous step.
+       *
+       * A producer that supplies its own `sourceSeq` allocates nothing from
+       * the producer floor, so that floor is not read for it. This is what
+       * makes the explicit path readless end to end once the run's own `seq`
+       * floor is known, which it is from the first entry any producer writes
+       * for the run.
        */
       const ensureFloors = (
-        runId: RunId,
-        sourceId: SourceId
+        input: Input
       ): Effect.Effect<{ readonly seq: number; readonly sourceSeq: number }, JournalError> =>
         Effect.suspend(() => {
-          const key = sourceKey(runId, sourceId)
+          const runId = input.runId
+          const key = sourceKey(runId, input.sourceId)
           const seq = state.sequences.get(runId)
-          const sourceSeq = state.sourceSequences.get(key)
+          const sourceSeq = input.sourceSeq === undefined ? state.sourceSequences.get(key) : 0
           if (seq !== undefined && sourceSeq !== undefined) {
             return Effect.succeed({ seq, sourceSeq })
           }
           return Effect.all({
             seq: seq === undefined ? nextDurable("seq", runId, undefined) : Effect.succeed(seq),
-            sourceSeq: nextDurable("source_seq", runId, sourceId)
+            sourceSeq: sourceSeq === undefined
+              ? nextDurable("source_seq", runId, input.sourceId)
+              : Effect.succeed(sourceSeq)
           }).pipe(
             Effect.mapError((cause) => error("sink_failed", "could not read journal allocation floor", cause)),
             Effect.flatMap((floors) => {
@@ -1658,11 +1680,12 @@ export const layer = (
               const { metaJson, payloadJson, validated } = prepared
               const written = yield* Effect.uninterruptibleMask((restore) =>
                 restore(writer.write(Effect.gen(function*() {
-                  const durableSourceSeq = yield* nextDurable(
-                    "source_seq",
-                    validated.runId,
-                    validated.sourceId
-                  )
+                  // Read only for a producer that allocates from this floor. A
+                  // supplied sequence is not allocated, so reading the floor
+                  // for it costs a query whose answer is discarded.
+                  const durableSourceSeq = validated.sourceSeq === undefined
+                    ? yield* nextDurable("source_seq", validated.runId, validated.sourceId)
+                    : 0
                   const durableSeq = yield* nextDurable("seq", validated.runId, undefined)
                   const reserved = yield* allocation.withPermit(Effect.fromResult(Result.gen(function*() {
                     const key = sourceKey(validated.runId, validated.sourceId)
@@ -1714,7 +1737,8 @@ export const layer = (
                     emittedAtMs,
                     eventType: validated.eventType,
                     payloadJson,
-                    metaJson
+                    metaJson,
+                    dedupe: validated.dedupe ?? "content"
                   }
                   const commit = yield* insertOne(queued, fence)
                   return { commit, queued, sourceSeq }
