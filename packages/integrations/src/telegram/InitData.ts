@@ -133,10 +133,10 @@ export interface VerifySignatureOptions extends VerifyOptions {
   readonly publicKeyHex?: string | undefined
 }
 
-const bytesToHex = (buffer: ArrayBuffer | Uint8Array): string => {
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
+/** Hex for a Web Crypto digest, which is always an `ArrayBuffer`. */
+const bytesToHex = (buffer: ArrayBuffer): string => {
   let out = ""
-  for (const byte of bytes) out += byte.toString(16).padStart(2, "0")
+  for (const byte of new Uint8Array(buffer)) out += byte.toString(16).padStart(2, "0")
   return out
 }
 

@@ -521,6 +521,15 @@ export const make = (
           new IntegrationError("decode-failed", `Linear team with key "${key}" not found.`, { teamKey: key })
         )
       }
+      // The same rule `namedNodes` follows: erasing a wrong-typed member turns
+      // "Linear changed this field" into "this team has no key", which reads as
+      // a caller error and hides the contract change. Absent stays absent.
+      for (const member of ["key", "name"] as const) {
+        const value = team[member]
+        if (value !== undefined && value !== null && typeof value !== "string") {
+          return yield* Effect.fail(decodeFailed(`teams.nodes[0].${member}`, "a string"))
+        }
+      }
       // Frozen, because the cache hands the same object to every later call on
       // this client: a consumer that mutated it would change the identity the
       // next mutation runs against.

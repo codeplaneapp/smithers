@@ -166,6 +166,16 @@ describe("poll", () => {
     const failure = await Effect.runPromise(Effect.flip(source().poll(null)))
     expect(failure.reason).toBe("decode-failed")
     expect(failure.message).toContain("not an update array")
+    expect(failure.details).toMatchObject({ resultType: "boolean" })
+  })
+
+  // `typeof null` is "object", which would have named the one malformed answer
+  // an operator is most likely to see after the one shape it is not.
+  it("names a null result as null rather than as an object", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, { ok: true, result: null }))
+    const failure = await Effect.runPromise(Effect.flip(source().poll(null)))
+    expect(failure.reason).toBe("decode-failed")
+    expect(failure.details).toMatchObject({ resultType: "null" })
   })
 
   // A cursor that does not parse used to be dropped, which sent getUpdates

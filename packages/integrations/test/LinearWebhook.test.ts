@@ -6,6 +6,7 @@ import * as Payload from "../src/linear/Payload.ts"
 import {
   correlations,
   decode,
+  DEFAULT_TIMESTAMP_SKEW_MS,
   idempotencyKey,
   MAX_TIMESTAMP_SKEW_MS,
   names,
@@ -169,8 +170,26 @@ describe("the replay window cannot be turned off by configuration", () => {
     expect(verify(raw(issueUpdate), SECRET, { nowMs: Number.NaN })).toBe(false)
   })
 
+  // The option documents a finite integer of milliseconds. A fractional window
+  // is a configuration mistake, and honoring it would leave the doc and the
+  // guard disagreeing about what the package accepts.
+  it("refuses a fractional window, which the option's own type forbids", () => {
+    for (const maxTimestampSkewMs of [0.5, 1.5, 59_999.5]) {
+      expect(verify(raw(issueUpdate), SECRET, { nowMs: NOW, maxTimestampSkewMs })).toBe(false)
+    }
+    expect(verify(raw(issueUpdate), SECRET, { nowMs: NOW, maxTimestampSkewMs: 0 })).toBe(true)
+  })
+
   it("still honors a window inside the bound", () => {
     expect(verify(raw(issueUpdate), SECRET, { nowMs: NOW + 120_000, maxTimestampSkewMs: 300_000 })).toBe(true)
+  })
+
+  // A caller that passes no clock gets the wall clock, which is the spelling
+  // every production ingress uses: `nowMs` exists for the tests.
+  it("reads the wall clock when the caller supplies no nowMs", () => {
+    const now = Date.now()
+    expect(verify(raw({ ...issueUpdate, webhookTimestamp: now }), SECRET)).toBe(true)
+    expect(verify(raw({ ...issueUpdate, webhookTimestamp: now - DEFAULT_TIMESTAMP_SKEW_MS * 10 }), SECRET)).toBe(false)
   })
 
   it("derives the same delivery identity with and without the header", () => {

@@ -1,8 +1,13 @@
 import { SmithersError } from "@smthrs/errors/SmithersError"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { resolve as resolvePath } from "node:path"
 import { describe, expect, it } from "vitest"
-import { fromIntegrationError, MAX_MESSAGE_LENGTH } from "../src/core/ActionFailure.ts"
+import {
+  fromIntegrationError,
+  IntegrationFailure,
+  MAX_MESSAGE_LENGTH,
+  toIntegrationError
+} from "../src/core/ActionFailure.ts"
 import { buildAuthorizationUrl, RESERVED_PARAMS } from "../src/core/AuthorizationUrl.ts"
 import * as ExternalEvent from "../src/core/ExternalEvent.ts"
 import {
@@ -38,6 +43,14 @@ describe("readJsonPath", () => {
     expect(readJsonPath(payload, "repository.full_name.deeper")).toBeUndefined()
     expect(readJsonPath(payload, "list.0")).toBeUndefined()
     expect(readJsonPath(null, "a")).toBeUndefined()
+  })
+
+  // A provider that sends the key with no value is saying the same thing as a
+  // provider that omits it, and the walk stops either way rather than trying
+  // to read a segment off `undefined`.
+  it("treats an own property whose value is undefined as missing", () => {
+    expect(readJsonPath({ issue: undefined }, "issue")).toBeUndefined()
+    expect(readJsonPath({ issue: undefined }, "issue.number")).toBeUndefined()
   })
 
   // The getter reads attacker-supplied provider payloads at caller-chosen
@@ -398,6 +411,58 @@ describe("ActionFailure conversion is total", () => {
 
   it("still reports a value that is not an Error", () => {
     expect(fromIntegrationError("not an error")).toMatchObject({ message: "not an error" })
+  })
+
+  // `deliveredMessageIds` is read off an arbitrary error's details, and
+  // `Schema.Number` encodes a non-finite member as the string "NaN". A journal
+  // row that claims a message id of NaN is worse than one that claims none, so
+  // a list that is not entirely message ids is dropped rather than persisted.
+  it("journals delivered ids only when every member is one", () => {
+    const withIds = (deliveredMessageIds: unknown) =>
+      fromIntegrationError(
+        new IntegrationError("delivery-failed", "boom", { deliveredMessageIds })
+      ).deliveredMessageIds
+    expect(withIds([7, 8])).toEqual([7, 8])
+    expect(withIds([])).toBeUndefined()
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 1.5, "9", null]) {
+      expect(withIds([7, bad])).toBeUndefined()
+    }
+    expect(withIds("7,8")).toBeUndefined()
+  })
+
+  // The converter filters, but a journal row is data on disk that a later
+  // process decodes. A corrupt or hand-edited row must fail to decode rather
+  // than hand a caller a "message id" of NaN under the field's documented type.
+  it("refuses to decode a persisted row whose delivered ids are not message ids", async () => {
+    const row = (deliveredMessageIds: unknown) => ({
+      _tag: "/integrations/IntegrationFailure",
+      reason: "delivery-failed",
+      message: "x",
+      retryable: false,
+      deliveredMessageIds
+    })
+    const decode = (value: unknown) =>
+      Effect.runPromise(
+        Effect.exit(Schema.decodeUnknownEffect(IntegrationFailure)(value) as Effect.Effect<unknown, unknown>)
+      )
+    expect((await decode(row([7, 8])))._tag).toBe("Success")
+    for (const bad of [[-1], [0], [1.5], ["NaN"], ["7"]]) {
+      expect((await decode(row(bad)))._tag).toBe("Failure")
+    }
+  })
+
+  // The round trip has to survive the journal: an action reads its own failure
+  // back after a restart and hands it to a caller as the class again.
+  it("carries an ambiguous outcome and the delivered ids back out of the schema", () => {
+    const failure = fromIntegrationError(
+      new IntegrationError("delivery-failed", "boom", { outcomeUnknown: true, deliveredMessageIds: [7] })
+    )
+    expect(failure.outcomeUnknown).toBe(true)
+    const back = toIntegrationError(failure)
+    expect(back.details).toMatchObject({ outcomeUnknown: true, deliveredMessageIds: [7] })
+    // A failure with neither detail leaves both off rather than writing nulls.
+    expect(toIntegrationError(fromIntegrationError(new Error("boom"))).details)
+      .not.toHaveProperty("outcomeUnknown")
   })
 })
 

@@ -69,6 +69,22 @@ describe("repositoryPath", () => {
     expect(isRepo("..")).toBe(false)
     expect(isRepo(".")).toBe(false)
   })
+
+  // A GitHub Enterprise Managed User's login is `<name>_<enterprise shortcode>`
+  // and it owns repositories in its own namespace. Refusing the underscore
+  // locked every enterprise-managed account out of this package, and it bought
+  // nothing: only `.` and `/` can leave the endpoint.
+  it("accepts a managed user's underscore login", () => {
+    expect(isOwner("mona_contoso")).toBe(true)
+    expect(repositoryPath("mona_contoso", "repo")).toBe("mona_contoso/repo")
+    expect(fullNamePath("octo_admin/notes")).toBe("octo_admin/notes")
+  })
+
+  it("still refuses an underscore where GitHub does not allow one", () => {
+    expect(isOwner("_leading")).toBe(false)
+    expect(isOwner("trailing_")).toBe(false)
+    expect(isOwner("a_b_c_d_e_f")).toBe(false)
+  })
 })
 
 const decode = <A>(schema: Schema.Schema<A>, value: unknown) =>

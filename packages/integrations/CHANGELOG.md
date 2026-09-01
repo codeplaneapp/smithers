@@ -31,6 +31,10 @@ listed a changelog; this is it.
 - Added `Environment.ambientWorkingDirectory`, package-owned documentation
   under `docs/`, and the `BUILD.ts` target that generates the published API
   page from it.
+- Added `Core.ActionFailure.isMessageId` and `Core.ActionFailure.MessageId`,
+  the one rule the Telegram guard, the journal conversion, and the persisted
+  schema all read, so a list one accepts and another rejects cannot put a throw
+  back into `Effect.mapError` or a `NaN` into a journal row.
 
 ### Changed
 
@@ -78,7 +82,24 @@ listed a changelog; this is it.
   and made a partial send report the ids it had already delivered.
 - Fixed `Telegram.InitData` reporting a malformed `publicKeyHex` as an
   unsupported runtime, and bounded the freshness window at both ends.
-- Fixed the Linear webhook accepting an unbounded replay window.
+- Fixed the Linear webhook accepting an unbounded replay window, and a
+  fractional `maxTimestampSkewMs` the option's own documentation forbids.
+- Fixed `GitHub.Repository` refusing a GitHub Enterprise Managed User's
+  `<name>_<shortcode>` login, which locked every enterprise-managed account out
+  of the package. Only `.` and `/` can walk a request off its endpoint, and
+  neither is in the widened class.
+- Fixed a `sendMessage` the Bot API answered with an unusable `message_id`
+  reaching the journal as an ambiguous delivery. The message was delivered and
+  only its receipt is unreadable, so it is now `decode-failed` with a known
+  outcome rather than a write an operator might resend.
+- Fixed `Linear.LinearClient.resolveTeam` erasing a wrong-typed `key` or `name`
+  on a resolved team to `undefined`, which turned "Linear changed this field"
+  into "this team has no key". It now fails `decode-failed` naming the path, the
+  rule the other connection readers already followed.
+- Fixed the error contract in `docs/api.md` claiming every failure a caller sees
+  is an `IntegrationError`. That holds for the Effect channel; the plan-time
+  helpers that validate their arguments throw `SmithersError`, and the page now
+  names them.
 - Fixed a request body that cannot be serialized being reported as a write
   whose outcome is unknown, a `sendMessage` result with a non-positive
   `message_id` counting as delivered, a `getUpdates` cursor read through
@@ -89,3 +110,10 @@ listed a changelog; this is it.
 - Fixed the false claims in the README and the published API page: the Telegram
   environment variable, the redelivery guarantee, the retry promise on an
   irreversible action, and the uniform error contract.
+- Fixed `Telegram.TelegramClient.isTelegramApiError` admitting a claimed Bot
+  API failure that carries no `deliveredMessageIds`, which made
+  `toIntegrationError` spread a missing array and throw a bare `TypeError`
+  inside `Effect.mapError`, where a throw is a defect rather than the
+  classified failure the action's type promises. A list whose members are not
+  all message ids is now dropped rather than journaled, since `Schema.Number`
+  encodes a non-finite member as the string "NaN".

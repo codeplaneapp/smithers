@@ -22,7 +22,8 @@
  */
 import { SmithersError } from "@smthrs/errors/SmithersError"
 import { Context, Duration, Effect, Layer, Schedule } from "effect"
-import { IntegrationError } from "../core/IntegrationError.ts"
+import { isMessageId } from "../core/ActionFailure.ts"
+import { IntegrationError, type Reason, reasons } from "../core/IntegrationError.ts"
 import * as Environment from "../Environment.ts"
 import { chunk } from "./Chunk.ts"
 import { resolve as resolveConfig, type TelegramConfig } from "./Config.ts"
@@ -53,6 +54,15 @@ export class TelegramApiError extends SmithersError {
    * already holds.
    */
   readonly deliveredMessageIds: ReadonlyArray<number>
+  /**
+   * The classification to use instead of the one the error code implies.
+   *
+   * Set for a failure the transport did not report: an answer the Bot API
+   * called a success but this module could not read. It has no error code, and
+   * without this it would be classified the way a lost connection is, which
+   * says the outcome is in doubt when the message was in fact delivered.
+   */
+  readonly reason: Reason | null
 
   constructor(message: string, options: {
     readonly method: string
@@ -60,6 +70,7 @@ export class TelegramApiError extends SmithersError {
     readonly description?: string | null | undefined
     readonly retryAfterSeconds?: number | null | undefined
     readonly deliveredMessageIds?: ReadonlyArray<number> | undefined
+    readonly reason?: Reason | undefined
     readonly cause?: unknown
   }) {
     super("TELEGRAM_API_ERROR", message, {
@@ -69,6 +80,7 @@ export class TelegramApiError extends SmithersError {
       retryAfterSeconds: options.retryAfterSeconds ?? null,
       deliveredMessageIds: options.deliveredMessageIds ?? []
     }, { cause: options.cause, name: "TelegramApiError" })
+    this.reason = options.reason ?? null
     this.errorCode = options.errorCode ?? null
     this.retryAfterSeconds = options.retryAfterSeconds ?? null
     this.deliveredMessageIds = options.deliveredMessageIds ?? []
@@ -84,12 +96,22 @@ export class TelegramApiError extends SmithersError {
 export const isTelegramApiError = (error: unknown): error is TelegramApiError => {
   if (error instanceof TelegramApiError) return true
   if (!(error instanceof Error) || error.name !== "TelegramApiError") return false
-  // A name is forgeable, so the fields every reader of this refinement touches
-  // have to be there too. An error that only claims the name falls through to
-  // the caller's unclassified path.
-  const candidate = error as { readonly summary?: unknown; readonly errorCode?: unknown }
+  // A name is forgeable, so every field a reader of this refinement touches has
+  // to be there too, `deliveredMessageIds` included: `toIntegrationError`
+  // spreads it, and spreading a missing array throws a bare `TypeError` inside
+  // `Effect.mapError`, where a throw is a defect rather than a classified
+  // failure. An error that only claims the name — a forgery, or a
+  // `TelegramApiError` from a copy of this module built before the field
+  // existed — falls through to the caller's unclassified path instead.
+  const candidate = error as {
+    readonly summary?: unknown
+    readonly errorCode?: unknown
+    readonly deliveredMessageIds?: unknown
+  }
   return typeof candidate.summary === "string" &&
-    (candidate.errorCode === null || typeof candidate.errorCode === "number")
+    (candidate.errorCode === null || typeof candidate.errorCode === "number") &&
+    Array.isArray(candidate.deliveredMessageIds) &&
+    candidate.deliveredMessageIds.every(isMessageId)
 }
 
 /**
@@ -108,14 +130,20 @@ export const isTelegramApiError = (error: unknown): error is TelegramApiError =>
 export const toIntegrationError = (error: unknown): unknown => {
   if (!isTelegramApiError(error)) return error
   const code = error.errorCode
-  const transient = code === 429 || (typeof code === "number" && code >= 500)
-  const reason = transient
+  // Read as an absent override rather than as a value. The refinement admits a
+  // `TelegramApiError` from a copy of this module built before `reason`
+  // existed, whose `reason` is `undefined` and not `null`, and one whose
+  // `reason` is a string this build cannot encode. Either would otherwise turn
+  // an exhausted rate limit into a non-retryable failure with a known outcome.
+  const override = reasons.includes(error.reason as Reason) ? error.reason as Reason : null
+  const transient = (code === 429 || (typeof code === "number" && code >= 500)) && override === null
+  const reason = override ?? (transient
     ? "delivery-failed" as const
     : code === 401 || code === 403
     ? "permission-denied" as const
     : code === 400 || code === 404
     ? "decode-failed" as const
-    : "delivery-failed" as const
+    : "delivery-failed" as const)
   return new IntegrationError(reason, error.summary, {
     method: error.details?.["method"],
     errorCode: code,
@@ -124,8 +152,10 @@ export const toIntegrationError = (error: unknown): unknown => {
     retryable: transient,
     // A transport failure or a 5xx may have delivered the message anyway, and
     // a multi-chunk send that failed partway through certainly delivered the
-    // chunks it names. Both cross to the journal.
-    outcomeUnknown: code === null || (typeof code === "number" && code >= 500),
+    // chunks it names. Both cross to the journal. An override means the Bot API
+    // answered and this module could not read the answer, which is a known
+    // outcome with an unreadable receipt, not an ambiguous one.
+    outcomeUnknown: override === null && (code === null || (typeof code === "number" && code >= 500)),
     deliveredMessageIds: [...error.deliveredMessageIds]
   }, { cause: error })
 }
@@ -490,11 +520,11 @@ export const make = (
         // The record has to name every message it claims to have sent, so a
         // result with no usable id is a decode failure rather than a silent
         // shortfall between `messageIds` and `chunkCount`.
-        if (typeof messageId !== "number" || !Number.isSafeInteger(messageId) || messageId <= 0) {
+        if (!isMessageId(messageId)) {
           return yield* Effect.fail(
             new TelegramApiError(
               `Telegram sendMessage returned no usable message_id for chunk ${index + 1} of ${chunks.length}.`,
-              { method: "sendMessage", deliveredMessageIds: [...messageIds] }
+              { method: "sendMessage", deliveredMessageIds: [...messageIds], reason: "decode-failed" }
             )
           )
         }

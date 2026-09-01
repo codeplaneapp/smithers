@@ -53,10 +53,10 @@ const escapePreservingBlockquote = (text: string): string => {
 }
 
 /** Inside a code block Telegram requires backtick and backslash escaped. */
-const escapeCode = (text: string): string => text.length === 0 ? "" : text.replace(/([`\\])/g, "\\$1")
+const escapeCode = (text: string): string => text.replace(/([`\\])/g, "\\$1")
 
 /** Inside an inline-link URL only `)` and `\` need escaping. */
-const escapeUrl = (url: string): string => url.length === 0 ? "" : url.replace(/([)\\])/g, "\\$1")
+const escapeUrl = (url: string): string => url.replace(/([)\\])/g, "\\$1")
 
 /**
  * Converts standard markdown to MarkdownV2.

@@ -68,6 +68,15 @@ describe("rate-limit detection", () => {
     expect(isRateLimitResponse(404, new Headers(), { message: "Not Found" })).toBe(false)
   })
 
+  // A 403 whose body is not JSON, or is JSON without a `message` string, is an
+  // ordinary refusal. Reading it as a secondary limit would retry a request
+  // GitHub has already decided about.
+  it("does not count a 403 whose body names nothing", () => {
+    for (const body of [null, "Forbidden", 403, { message: 403 }, {}]) {
+      expect(isRateLimitResponse(403, new Headers(), body)).toBe(false)
+    }
+  })
+
   it("honors Retry-After and x-ratelimit-reset, capped at one minute", () => {
     expect(retryAfterMs(new Headers({ "retry-after": "5" }))).toBe(5000)
     expect(retryAfterMs(new Headers({ "retry-after": "600" }))).toBe(60_000)
@@ -205,6 +214,31 @@ describe("GitHubClient over a real HTTP server", () => {
     const failure = await Effect.runPromise(Effect.flip(client().request("POST", "/x", { a: 1 })))
     expect(fixture.requests).toHaveLength(1)
     expect(failure.details).toMatchObject({ outcomeUnknown: true, retryable: false })
+  })
+
+  it("joins a path that carries no leading slash", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, { ok: true }))
+    await Effect.runPromise(client().request("GET", "repos/o/r"))
+    expect(fixture.requests[0]?.url).toBe("/repos/o/r")
+  })
+
+  // `Retry-After` is the provider saying when, and honoring it is the whole
+  // point of reading the header: a retry that ignores it walks straight back
+  // into the same limit.
+  it("waits the interval a rate limit asked for before repeating", async () => {
+    let calls = 0
+    fixture = await startFixture((_request, response) => {
+      calls += 1
+      if (calls === 1) {
+        json(response, 429, { message: "rate limited" }, { "retry-after": "0.05" })
+        return
+      }
+      json(response, 200, { ok: true })
+    })
+    const startedAt = Date.now()
+    expect(await Effect.runPromise(client().request("GET", "/x"))).toEqual({ ok: true })
+    expect(calls).toBe(2)
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(50)
   })
 
   // A rate limit is a refusal, not an ambiguous outcome: the request was not

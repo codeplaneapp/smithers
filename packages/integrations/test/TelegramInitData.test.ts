@@ -229,6 +229,15 @@ describe("the freshness window is bounded at both ends", () => {
     await expect(verifyWithBotToken(initData, BOT_TOKEN, { nowMs: NOW })).resolves.toBeDefined()
   })
 
+  // `nowMs` exists for the tests. A caller that passes none gets the wall
+  // clock, which is the spelling every real Mini App verification uses.
+  it("reads the wall clock when the caller supplies no nowMs", async () => {
+    const fresh = await hmacInitData(baseFields(Math.floor(Date.now() / 1000)))
+    await expect(verifyWithBotToken(fresh, BOT_TOKEN)).resolves.toBeDefined()
+    const ancient = await hmacInitData(baseFields(Math.floor(Date.now() / 1000) - 999_999))
+    await expect(verifyWithBotToken(ancient, BOT_TOKEN)).rejects.toThrow(/expired/)
+  })
+
   // A zero or negative policy silently disabled the check rather than
   // reporting the configuration mistake it is.
   it("refuses a freshness policy that is not a usable window", async () => {

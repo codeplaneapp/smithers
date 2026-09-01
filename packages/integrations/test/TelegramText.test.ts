@@ -133,6 +133,18 @@ describe("markdown", () => {
     expect(toTelegram("see **this**.")).toBe("see *this*\\.")
   })
 
+  it("keeps an empty fence rather than dropping it", () => {
+    expect(toTelegram("```\n```")).toBe("```\n```")
+  })
+
+  // The substitution runs until the text stops changing, because a stored
+  // segment can itself hold a sentinel. Two independent tokens are the case
+  // that proves it stops instead of spending every pass.
+  it("substitutes every stored token, however many there are", () => {
+    expect(toTelegram("**a** and `b` and [c](https://x.example/)"))
+      .toBe("*a* and `b` and [c](https://x.example/)")
+  })
+
   it("cannot be confused by a NUL the caller supplied", () => {
     expect(toTelegram(`a${NUL}0${NUL}b **c**`)).toBe("a0b *c*")
   })

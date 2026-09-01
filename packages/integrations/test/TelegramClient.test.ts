@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
+import { fromIntegrationError } from "../src/core/ActionFailure.ts"
 import { type IntegrationError, isIntegrationError, isRetryable } from "../src/core/IntegrationError.ts"
 import { resolve } from "../src/telegram/Config.ts"
 import {
@@ -428,6 +429,92 @@ describe("toIntegrationError", () => {
     // A forged name with no shape behind it is not a Bot API failure either.
     const forged = Object.assign(new Error("forged"), { name: "TelegramApiError" })
     expect(toIntegrationError(forged)).toBe(forged)
+  })
+
+  // The realistic trigger is a `TelegramApiError` from a second copy of this
+  // module, built before `deliveredMessageIds` existed. It satisfies the name,
+  // the summary, and the error code, so the refinement admitted it and the
+  // spread of a missing array threw a bare `TypeError` — inside
+  // `Effect.mapError`, where a throw is a defect rather than the classified
+  // failure the action's type promises.
+  it("does not admit a claimed Bot API failure whose delivered ids are missing or malformed", () => {
+    for (
+      const extra of [
+        {},
+        { deliveredMessageIds: null },
+        { deliveredMessageIds: "1,2" },
+        { deliveredMessageIds: [1, "2"] }
+      ]
+    ) {
+      const claimed = Object.assign(new Error("boom"), {
+        name: "TelegramApiError",
+        summary: "boom",
+        errorCode: 500,
+        ...extra
+      })
+      expect(isTelegramApiError(claimed)).toBe(false)
+      expect(toIntegrationError(claimed)).toBe(claimed)
+    }
+  })
+
+  // The same value has to survive the whole path: the action maps a client
+  // failure through `toIntegrationError` and then `fromIntegrationError`, so a
+  // throw in either becomes a defect the caller's `catchAll` never sees.
+  it("converts a claimed Bot API failure to a journalable failure rather than throwing", () => {
+    const claimed = Object.assign(new Error("boom"), { name: "TelegramApiError", summary: "boom", errorCode: 500 })
+    const failure = fromIntegrationError(toIntegrationError(claimed))
+    expect(failure.reason).toBe("delivery-failed")
+    expect(failure.retryable).toBe(false)
+  })
+
+  // A `sendMessage` the Bot API answered 200 with an unusable `message_id` did
+  // deliver the message: the outcome is known, only the id is unreadable. That
+  // is a decode failure, and reporting it as an ambiguous delivery told an
+  // operator to consider resending a message the reader already has.
+  it("classifies an unreadable success as decode-failed with a known outcome", async () => {
+    fixture = await startFixture((request, response) =>
+      method(request.url) === "sendMessage"
+        ? json(response, 200, ok({ message_id: "not-a-number" }))
+        : json(response, 200, ok(true))
+    )
+    const failure = await Effect.runPromise(Effect.flip(client().sendMessageSmart(42, "hi")))
+    const mapped = toIntegrationError(failure) as IntegrationError
+    expect(mapped.reason).toBe("decode-failed")
+    expect(mapped.details).toMatchObject({ outcomeUnknown: false })
+    expect(isRetryable(mapped)).toBe(false)
+    expect(fromIntegrationError(mapped).reason).toBe("decode-failed")
+  })
+
+  // The refinement admits a `TelegramApiError` from a copy of this module built
+  // before `reason` existed, whose `reason` is `undefined` rather than `null`,
+  // and one whose `reason` is a string this build cannot encode. Reading either
+  // as an override would turn an exhausted rate limit into a non-retryable
+  // failure whose outcome is claimed to be known.
+  it("ignores a reason a foreign error does not carry or this build cannot encode", () => {
+    for (const extra of [{}, { reason: undefined }, { reason: "invented-in-a-newer-build" }]) {
+      const foreign = Object.assign(new Error("boom"), {
+        name: "TelegramApiError",
+        summary: "boom",
+        errorCode: 429,
+        deliveredMessageIds: [],
+        ...extra
+      })
+      const mapped = toIntegrationError(foreign) as IntegrationError
+      expect(mapped.reason).toBe("delivery-failed")
+      expect(isRetryable(mapped)).toBe(true)
+      expect(mapped.details).toMatchObject({ outcomeUnknown: false })
+    }
+  })
+
+  it("carries the delivered ids of a partial send onto the integration error", () => {
+    const partial = new TelegramApiError("boom", {
+      method: "sendMessage",
+      errorCode: 500,
+      deliveredMessageIds: [7, 8]
+    })
+    const mapped = toIntegrationError(partial) as IntegrationError
+    expect(mapped.details?.["deliveredMessageIds"]).toEqual([7, 8])
+    expect(fromIntegrationError(mapped).deliveredMessageIds).toEqual([7, 8])
   })
 
   it("keeps the original failure as the cause", () => {

@@ -553,5 +553,83 @@ describe("adversarial mutation results", () => {
     fixture = await graphql({ IssueLabels: { issueLabels: null } })
     const failure = await Effect.runPromise(Effect.flip(client().resolveLabelIds("team-eng-id", ["Bug"])))
     expect(failure.message).toContain("label(s) not found")
+    await fixture.close()
+    // A connection object that carries no `nodes` key at all says the same
+    // thing as one whose `nodes` is null: there are none.
+    fixture = await graphql({ IssueLabels: { issueLabels: {} } })
+    expect((await Effect.runPromise(Effect.flip(client().resolveLabelIds("team-eng-id", ["Bug"])))).message)
+      .toContain("label(s) not found")
+  })
+
+  // A GraphQL error list is provider-shaped, so a member without a `message`
+  // has to read as an unnamed error rather than as "undefined".
+  it("names a GraphQL error that carries no message", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, { errors: [{}, { message: "nope" }] }))
+    const failure = await Effect.runPromise(Effect.flip(client().getIssue("issue-uuid")))
+    expect(failure.message).toContain("unknown")
+    expect(failure.message).toContain("nope")
+  })
+
+  // A 200 with neither `data` nor `errors` is a contract change. It must reach
+  // the caller as a mutation that returned nothing, not as a crash reading a
+  // member off undefined.
+  it("reports a success envelope that carries no data at all", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, {}))
+    const failure = await Effect.runPromise(
+      Effect.flip(client().createIssue({ teamId: "team-eng-id", title: "t" }))
+    )
+    expect(failure.reason).toBe("delivery-failed")
+    expect(failure.details).toMatchObject({ success: false })
+  })
+
+  // `success` absent is not `success: false`, and the failure detail has to say
+  // which one Linear sent rather than inventing a value.
+  it("reports a mutation payload that omits success", async () => {
+    const cases: ReadonlyArray<readonly [string, () => Effect.Effect<unknown, IntegrationError>]> = [
+      ["IssueCreate", () => client().createIssue({ teamId: "team-eng-id", title: "t" })],
+      ["IssueUpdate", () => client().updateIssue("issue-uuid", { title: "t" })],
+      ["CommentCreate", () => client().commentOnIssue("issue-uuid", "hi")]
+    ]
+    for (const [operationName, run] of cases) {
+      const key = operationName.charAt(0).toLowerCase() + operationName.slice(1)
+      fixture = await graphql({ [operationName]: { [key]: { issue: ISSUE, comment: { id: "c" } } } })
+      const failure = await Effect.runPromise(Effect.flip(run()))
+      expect(failure.details).toMatchObject({ success: false })
+      await fixture.close()
+      fixture = undefined
+    }
+  })
+
+  it("names a comment's issue member when it is not an object", async () => {
+    fixture = await graphql({
+      CommentCreate: { commentCreate: { success: true, comment: { id: "c", body: "b", issue: "ENG-1" } } }
+    })
+    expect((await Effect.runPromise(Effect.flip(client().commentOnIssue("issue-uuid", "hi")))).details)
+      .toMatchObject({ path: "commentCreate.comment.issue" })
+  })
+
+  // The same rule `namedNodes` follows for a state or a label: erasing a
+  // wrong-typed member turns "Linear changed this field" into "this team has no
+  // key", which reads as a caller error and hides the contract change.
+  it("names a wrong-typed member on a resolved team instead of erasing it", async () => {
+    for (const [member, path] of [["key", "teams.nodes[0].key"], ["name", "teams.nodes[0].name"]] as const) {
+      fixture = await graphql({ TeamByKey: { teams: { nodes: [{ id: "team-eng-id", [member]: 7 }] } } })
+      const failure = await Effect.runPromise(Effect.flip(client().createIssue({ teamKey: "ENG", title: "t" })))
+      expect(failure.reason).toBe("decode-failed")
+      expect(failure.details).toMatchObject({ path })
+      await fixture.close()
+      fixture = undefined
+    }
+  })
+
+  // Linear may answer a team lookup with the id alone. That is usable, so it
+  // resolves rather than failing, and the optional members read as absent.
+  it("accepts a team that carries only an id", async () => {
+    fixture = await graphql({
+      TeamByKey: { teams: { nodes: [{ id: "team-eng-id" }] } },
+      IssueCreate: { issueCreate: { success: true, issue: ISSUE } }
+    })
+    const created = await Effect.runPromise(client().createIssue({ teamKey: "ENG", title: "t" }))
+    expect(created.id).toBe(ISSUE.id)
   })
 })

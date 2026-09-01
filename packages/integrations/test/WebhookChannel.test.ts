@@ -108,17 +108,17 @@ const githubChannel = (secret = SECRET) =>
     route: Core.startFlow("triage")
   })
 
-const githubHeaders = (signature: string) => ({
+const githubHeaders = (signature: string, deliveryId = "delivery-1") => ({
   "x-github-event": "issues",
-  "x-github-delivery": "delivery-1",
+  "x-github-delivery": deliveryId,
   "x-hub-signature-256": signature
 })
 
 // Built the way an ingress must build one: the idempotency key comes from the
 // provider's own delivery identity, through the helper the module exports, not
 // from a literal this test invented.
-const githubDelivery = (body: string, signature: string): Channels.RawInbound => {
-  const raw = { body: bytes(body), headers: githubHeaders(signature) }
+const githubDelivery = (body: string, signature: string, deliveryId = "delivery-1"): Channels.RawInbound => {
+  const raw = { body: bytes(body), headers: githubHeaders(signature, deliveryId) }
   return { ...raw, idempotencyKey: GitHubWebhook.idempotencyKey(raw) as string }
 }
 
@@ -196,23 +196,23 @@ describe("redelivery", () => {
     expect(receipts[1]?._tag).toBe("AlreadyApplied")
   })
 
+  // The second delivery differs only in `x-github-delivery`, so the two keys
+  // have to differ because the package derived them, not because the test
+  // wrote a different literal into the second one.
   it("treats a different delivery id as a new delivery", async () => {
     const calls: Array<string> = []
     const signature = `sha256=${computeHmacSha256Hex(ISSUE_BODY, SECRET)}`
     const channel = githubChannel()
+    const first = githubDelivery(ISSUE_BODY, signature)
+    const second = githubDelivery(ISSUE_BODY, signature, "delivery-2")
+    expect(second.idempotencyKey).not.toBe(first.idempotencyKey)
     const receipts = await Effect.runPromise(
       Effect.gen(function*() {
         const channels = yield* Channels.Channels
         yield* channels.register(channel)
-        const first = yield* channels.ingest({
-          channel: channel.name,
-          raw: githubDelivery(ISSUE_BODY, signature)
-        })
-        const second = yield* channels.ingest({
-          channel: channel.name,
-          raw: { ...githubDelivery(ISSUE_BODY, signature), idempotencyKey: "delivery-2" }
-        })
-        return [first, second]
+        const accepted = yield* channels.ingest({ channel: channel.name, raw: first })
+        const next = yield* channels.ingest({ channel: channel.name, raw: second })
+        return [accepted, next]
       }).pipe(
         Effect.provide(Channels.layerMemory.pipe(Layer.provide(controlLayer(calls)))),
         Effect.orDie
@@ -297,11 +297,20 @@ const linearBody = (timestampMs: number) =>
     webhookTimestamp: timestampMs
   })
 
-const linearDelivery = (body: string, signature: string): Channels.RawInbound => ({
-  body: bytes(body),
-  headers: { "linear-signature": signature, "linear-delivery": "linear-delivery-1" },
-  idempotencyKey: "linear-delivery-1"
-})
+// Derived, not invented: the Linear fixture builds its key the way an ingress
+// must, through the helper the module exports.
+const linearDelivery = (body: string, signature: string): Channels.RawInbound => {
+  const raw = { body: bytes(body), headers: { "linear-signature": signature, "linear-delivery": "linear-delivery-1" } }
+  // An ingress derives the key before it knows whether the body is JSON, which
+  // is exactly why the helper falls back to the header on its own.
+  let payload: unknown
+  try {
+    payload = JSON.parse(body)
+  } catch {
+    payload = undefined
+  }
+  return { ...raw, idempotencyKey: LinearWebhook.idempotencyKey(raw, payload) }
+}
 
 describe("Linear channel", () => {
   const now = 1_700_000_000_000

@@ -91,7 +91,7 @@ export const verify = (raw: RawInbound, secret: string, options: VerifyOptions =
   const skew = options.maxTimestampSkewMs ?? DEFAULT_TIMESTAMP_SKEW_MS
   // An unbounded or nonsensical window disables the replay check, so it is
   // refused rather than honored: verification fails closed.
-  if (!Number.isFinite(skew) || skew < 0 || skew > MAX_TIMESTAMP_SKEW_MS) return false
+  if (!Number.isSafeInteger(skew) || skew < 0 || skew > MAX_TIMESTAMP_SKEW_MS) return false
   const nowMs = options.nowMs ?? Date.now()
   if (!Number.isFinite(nowMs)) return false
   return Math.abs(nowMs - sentAt) <= skew

@@ -23,10 +23,16 @@ import { IntegrationError } from "../core/IntegrationError.ts"
  * GitHub's rule for an account name: 1 to 39 characters, alphanumerics and
  * hyphens, not starting with a hyphen.
  *
+ * One underscore is allowed as a separator, because a GitHub Enterprise
+ * Managed User's login is `<name>_<enterprise shortcode>` and such an account
+ * owns repositories in its own namespace. Refusing it locked every
+ * enterprise-managed account out of this package and bought nothing: only `.`
+ * and `/` can walk a request off its endpoint, and neither is in this class.
+ *
  * @category constants
  * @since 1.0.0
  */
-export const OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/
+export const OWNER_PATTERN = /^(?=.{1,39}$)[A-Za-z0-9][A-Za-z0-9-]*(?:_[A-Za-z0-9][A-Za-z0-9-]*)?$/
 
 /**
  * GitHub's rule for a repository name: 1 to 100 characters of alphanumerics,
