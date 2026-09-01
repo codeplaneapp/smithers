@@ -27,6 +27,16 @@ const details = (flow: Flow.Any) =>
 const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
   (flow as unknown as (input: unknown) => Node.Node<unknown, unknown>)(input)
 
+const bindInput = (expected: Schema.Top, actual: Schema.Top): Flow.Any =>
+  Pattern.bind(
+    Pattern.slot({ input: expected, output: Schema.Unknown }),
+    Flow.make({
+      input: actual,
+      output: Schema.Unknown,
+      body: (input) => Node.succeed(input)
+    })
+  )
+
 describe("Pattern", () => {
   it("fails typed when a required slot has no binding", () => {
     const required = Pattern.slot({ input: Schema.String, output: Schema.String })
@@ -131,6 +141,83 @@ describe("Pattern", () => {
           "The slot default input schemas cannot be compared because the expected input schema (String) has no JSON Schema form"
       })
     )
+  })
+
+  it("names the first JSON Schema path when Struct field types differ", () => {
+    const expected = Schema.Struct({ name: Schema.String, age: Schema.String })
+    const actual = Schema.Struct({ name: Schema.String, age: Schema.Number })
+
+    expect(() => bindInput(expected, actual)).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message:
+          "The bound flow has an incompatible input schema: both schemas are Objects and they first differ at schema.properties.age.anyOf"
+      })
+    )
+  })
+
+  it("names a Struct field present on only one side in either direction", () => {
+    const narrow = Schema.Struct({ name: Schema.String })
+    const wide = Schema.Struct({ name: Schema.String, extra: Schema.String })
+    const refusal = {
+      code: "invalid_decorator",
+      message:
+        "The bound flow has an incompatible input schema: both schemas are Objects and they first differ at schema.properties.extra"
+    }
+
+    expect(() => bindInput(narrow, wide)).toThrow(expect.objectContaining(refusal))
+    expect(() => bindInput(wide, narrow)).toThrow(expect.objectContaining(refusal))
+  })
+
+  it("names ordered-array length and element differences", () => {
+    const two = Schema.Union([Schema.Literal("a"), Schema.Literal("b")])
+    const three = Schema.Union([Schema.Literal("a"), Schema.Literal("b"), Schema.Literal("c")])
+    const changed = Schema.Union([Schema.Literal("a"), Schema.Literal("c")])
+
+    expect(() => bindInput(two, three)).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message:
+          "The bound flow has an incompatible input schema: both schemas are Union and they first differ at schema.enum"
+      })
+    )
+    expect(() => bindInput(two, changed)).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message:
+          "The bound flow has an incompatible input schema: both schemas are Union and they first differ at schema.enum[1]"
+      })
+    )
+  })
+
+  it("names a same-tag scalar leaf difference", () => {
+    expect(() => bindInput(Schema.Literal("a"), Schema.Literal("b"))).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message:
+          "The bound flow has an incompatible input schema: both schemas are Literal and they first differ at schema.enum[0]"
+      })
+    )
+  })
+
+  it("accepts distinct schemas with identical JSON Schema documents", () => {
+    const expected = Schema.Struct({ value: Schema.Null, name: Schema.String })
+    const actual = Schema.Struct({ value: Schema.Null, name: Schema.String })
+
+    expect(() => bindInput(expected, actual)).not.toThrow()
+  })
+
+  it("ignores object-key declaration order when schemas are otherwise identical", () => {
+    const expected = Schema.Struct({
+      alpha: Schema.optionalKey(Schema.String),
+      beta: Schema.optionalKey(Schema.Number)
+    })
+    const actual = Schema.Struct({
+      beta: Schema.optionalKey(Schema.Number),
+      alpha: Schema.optionalKey(Schema.String)
+    })
+
+    expect(() => bindInput(expected, actual)).not.toThrow()
   })
 
   it("checks input contravariance and output covariance against an independent seeded oracle", () => {

@@ -29,11 +29,16 @@ export interface Slot<I extends Schema.Top, O extends Schema.Top> {
 
 type SchemaCompatibilityIssue = Exclude<ReturnType<typeof Compose.schemasCompatible>, undefined>
 
-const schemaRefusalMessage = (subject: string, issue: SchemaCompatibilityIssue): string =>
-  issue._tag === "IncompatibleSchemas"
-    ? `${subject} has an incompatible ${issue.side} schema: expected ${issue.expectedTag}, received ${issue.actualTag}`
-    : `${subject} ${issue.side} schemas cannot be compared because the ${issue.schema} ${issue.side} schema ` +
+const schemaRefusalMessage = (subject: string, issue: SchemaCompatibilityIssue): string => {
+  if (issue._tag === "SchemaConversionFailed") {
+    return `${subject} ${issue.side} schemas cannot be compared because the ${issue.schema} ${issue.side} schema ` +
       `(${issue.tag}) has no JSON Schema form`
+  }
+  return issue.path === undefined
+    ? `${subject} has an incompatible ${issue.side} schema: expected ${issue.expectedTag}, received ${issue.actualTag}`
+    : `${subject} has an incompatible ${issue.side} schema: both schemas are ${issue.expectedTag} and they first ` +
+      `differ at ${issue.path}`
+}
 
 /**
  * Declares a flow-valued slot.

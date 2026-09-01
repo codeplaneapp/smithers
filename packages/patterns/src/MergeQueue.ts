@@ -232,11 +232,10 @@ const validate = (
  * failed member, and a batch join fails on the first failing member and
  * interrupts the rest.
  *
- * That wire marker deliberately remains
- * `{ _tag: "Quarantined", member, error }`; its `member` key is protocol
- * metadata, not the landing-call payload. MergeQueue stores successful and
- * quarantined results in separate arrays, so it does not classify arbitrary
- * successful values by this shape.
+ * The wire marker is `{ _tag: "Quarantined", id, error }`, the same shape as
+ * the runtime {@link Quarantined} result, and MergeQueue keeps landed and
+ * quarantined results in separate arrays so the marker never classifies an
+ * arbitrary successful value.
  *
  * `make` throws a `PatternError` when there are no members, when two members
  * share an id, when `concurrency` is not a positive safe integer, or when
@@ -283,8 +282,8 @@ export const make = (
         // classifies an arbitrary successful value.
         return Node.catch(declared, {
           onFailure: Node.capture(
-            { member: entry.id },
-            (error: unknown) => Node.succeed({ _tag: "Quarantined", member: entry.id, error })
+            { id: entry.id },
+            (error: unknown) => Node.succeed({ _tag: "Quarantined", id: entry.id, error })
           )
         })
       }

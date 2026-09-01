@@ -93,6 +93,29 @@ describe("MergeQueue", () => {
     expect(Graph.diagnostics(batched)).toEqual([])
   })
 
+  it("settles a declared quarantine with the runtime result shape", () => {
+    const graph = Graph.build(
+      MergeQueue.make([{ id: "docs", flow: land }], { failurePolicy: "quarantine" }),
+      "land"
+    )
+    const marker = Graph.nodes(graph)
+      .filter((node) => node.kind === "Succeed")
+      .map((node) => (node.keyMaterial.body as { readonly _tag: "Succeed"; readonly value: unknown }).value)
+      .find(
+        (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          "_tag" in value &&
+          value._tag === "Quarantined"
+      )
+
+    expect(marker).toEqual({
+      _tag: "Quarantined",
+      id: "docs",
+      error: { _tag: "PlannedInput", path: [] }
+    })
+  })
+
   it("batches by two at concurrency 2", () => {
     const graph = Graph.build(MergeQueue.make(members, { concurrency: 2, failurePolicy: "halt" }), "land")
 

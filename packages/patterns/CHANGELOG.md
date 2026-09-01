@@ -65,11 +65,14 @@
   snapshots columns, supports prototype-shaped names, evaluates `until` on
   the final allowed pass, requires `maxIterations` whenever `until` is
   supplied, and runs `onComplete` exactly once after settlement.
-- `MergeQueue` uses `id` in declaration call payloads to match runtime and
-  safely handles prototype-shaped member ids.
+- `MergeQueue` uses `id` in declaration call payloads and quarantine markers
+  to match runtime, and safely handles prototype-shaped member ids.
 - `Optimizer.run` refuses non-finite evaluator scores before continuing.
 - Pattern composition reports the input or output side and schema AST tags for
-  compatibility failures, distinct from JSON Schema conversion failures.
+  compatibility failures, distinct from JSON Schema conversion failures. A
+  refusal between schemas with the same AST tag names the first differing JSON
+  Schema path, and object-key declaration order no longer decides
+  compatibility.
 - `PatternError` carries an optional `cause` for the error or errors it
   reports.
 - `Quarantine` settles both success and failure in explicit `Succeeded` and

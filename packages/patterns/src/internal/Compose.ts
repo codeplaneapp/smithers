@@ -202,12 +202,40 @@ export const redeclare = (
 export const seal = (flow: Flow.Any): Flow.Any =>
   Flow.sealed(flow as unknown as Flow.Flow<Schema.Top, Schema.Top, unknown>)
 
-const schemaDocument = (schema: Schema.Top): string | undefined => {
+const schemaDocument = (schema: Schema.Top): unknown | undefined => {
   try {
-    return JSON.stringify(Schema.toJsonSchemaDocument(schema))
+    return Schema.toJsonSchemaDocument(schema)
   } catch {
     return undefined
   }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const step = (path: string, key: string): string => path === "" ? key : `${path}.${key}`
+
+const firstDifference = (expected: unknown, actual: unknown, path: string): string | undefined => {
+  if (isRecord(expected) && isRecord(actual)) {
+    // JSON objects are unordered, so sorted keys keep compatibility and paths
+    // independent of declaration order. JSON Schema arrays encode ordered
+    // keywords such as `anyOf` and `enum`, so they stay positional.
+    for (const key of [...new Set([...Object.keys(expected), ...Object.keys(actual)])].sort()) {
+      if (!Object.hasOwn(expected, key) || !Object.hasOwn(actual, key)) return step(path, key)
+      const difference = firstDifference(expected[key], actual[key], step(path, key))
+      if (difference !== undefined) return difference
+    }
+    return undefined
+  }
+  if (Array.isArray(expected) && Array.isArray(actual)) {
+    if (expected.length !== actual.length) return path
+    for (let index = 0; index < expected.length; index += 1) {
+      const difference = firstDifference(expected[index], actual[index], `${path}[${index}]`)
+      if (difference !== undefined) return difference
+    }
+    return undefined
+  }
+  return Object.is(expected, actual) ? undefined : path
 }
 
 const isTop = (schema: Schema.Top): boolean => schema.ast._tag === "Any" || schema.ast._tag === "Unknown"
@@ -222,6 +250,7 @@ type SchemaCompatibilityIssue =
     readonly side: SchemaSide
     readonly expectedTag: string
     readonly actualTag: string
+    readonly path: string | undefined
   }
   | {
     readonly _tag: "SchemaConversionFailed"
@@ -233,13 +262,19 @@ type SchemaCompatibilityIssue =
 const incompatible = (
   side: SchemaSide,
   expected: Schema.Top,
-  actual: Schema.Top
-): SchemaCompatibilityIssue => ({
-  _tag: "IncompatibleSchemas",
-  side,
-  expectedTag: expected.ast._tag,
-  actualTag: actual.ast._tag
-})
+  actual: Schema.Top,
+  path?: string
+): SchemaCompatibilityIssue => {
+  const expectedTag = expected.ast._tag
+  const actualTag = actual.ast._tag
+  return {
+    _tag: "IncompatibleSchemas",
+    side,
+    expectedTag,
+    actualTag,
+    path: expectedTag === actualTag ? path : undefined
+  }
+}
 
 const compareSchemas = (
   side: SchemaSide,
@@ -255,7 +290,8 @@ const compareSchemas = (
   if (actualDocument === undefined) {
     return { _tag: "SchemaConversionFailed", side, schema: "actual", tag: actual.ast._tag }
   }
-  return expectedDocument === actualDocument ? undefined : incompatible(side, expected, actual)
+  const difference = firstDifference(expectedDocument, actualDocument, "")
+  return difference === undefined ? undefined : incompatible(side, expected, actual, difference)
 }
 
 /**
