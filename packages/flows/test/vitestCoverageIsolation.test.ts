@@ -582,18 +582,28 @@ describe("vitest coverage isolation conformance", () => {
       // `JSON.stringify` throw arm is unreachable; it exists so a future
       // cause shape reports the failure it carries instead of a TypeError.
       "agent/src/AgentAction.ts": 1,
+      // `findMissing` accepts at most 1,000 strict 64-byte digests, so its
+      // serialized request cannot reach the 256 KiB protocol ceiling. The
+      // assertion remains beside serialization to fail closed if either
+      // invariant changes.
+      "artifacts/src/RemoteArtifacts.ts": 1,
       // The agent package's former hints (FlowEngineLike's canonicalization
       // mappers and AgentSession's process-loss fallbacks) were removed with
       // the code that needed them in 81b218ce7; the entries leave with them.
       // Canonical capture rejects accessor properties before recursively
       // freezing the captured object graph, so the descriptor walk only sees
       // data properties in both identity implementations.
+      // Graph's four guards defend invariants established by the same build:
+      // every node has key material, recorded dependency targets exist, and
+      // reachability suppresses duplicate dependencies before conflict edges
+      // are added. They remain hard failures if a future pass breaks those
+      // invariants.
+      "core/src/Graph.ts": 4,
       "core/src/internal/node.ts": 1,
-      // The Node runtime merges `engineRules` under a program's configured
-      // ruleset only after returning for the empty case, so the first
-      // ruleset it reads back is always there; the fallback exists to
-      // discharge the optional an index read carries.
-      "flows/src/NodeRuntime.ts": 1,
+      // The YAML parser always attaches a position to parser issues and a
+      // mapping always converts to a non-null object. Both guards keep the
+      // redacted diagnostic path total across future parser upgrades.
+      "core/src/internal/skillFrontmatter.ts": 2,
       // Three unreachable-by-construction branches in the plan scheduler: the
       // ready-set can never be empty while work is pending (the compiler
       // rejects cycles), the dispatch key is built from strings so
@@ -661,18 +671,20 @@ describe("vitest coverage isolation conformance", () => {
       // `Result` has no way to carry that proof. Its twin left with the
       // transcript-replacement branch a `continue` used to take.
       "harness/src/Transcript.ts": 1,
-      "journal/src/SqlJournal.ts": 1,
+      // Published journal values come from acyclic decoded JSON; synchronous
+      // queue size/take cannot disagree while admission is open; and bytes
+      // just emitted by the JSON encoder decode immediately. The three guards
+      // keep those boundaries fail-closed if an implementation changes.
+      "journal/src/SqlJournal.ts": 3,
+      // A successful optimizer loop has run at least one body, so `attempts`
+      // is non-empty; the fallback exists only because Loop's generic result
+      // does not encode that postcondition.
+      "patterns/src/Optimizer.ts": 1,
       // `FileSet.Entry` is a closed two-member union, so the final
       // comparison arm's `else` and the fallthrough after every pair
       // returned are both unreachable by construction.
       "plan/src/FileSet.ts": 2,
       "plan/src/internal/node.ts": 1,
-      // Two unreachable-by-construction fallbacks in the plan compiler. Plan
-      // order closes every dependency before its dependent, so the
-      // transitive-closure fallback is unreachable; and the reader-after-writer
-      // pass walks an edge map keyed by every node of the plan, whose values
-      // hold node ids only, so its `edges.get(current)` lookup always hits.
-      "plan/src/Plan.ts": 2,
       // Every `flows_plans` column carries a CHECK constraint, so a row that
       // fails the row decode cannot be written.
       "plan/src/PlanStore.ts": 1,
@@ -682,6 +694,17 @@ describe("vitest coverage isolation conformance", () => {
       "plan/src/Planned.ts": 1,
       "run-store/src/AttemptStore.ts": 1,
       "run-store/src/RunStore.ts": 1,
+      // Provider processes can only originate from each provider's `spawn`,
+      // which records the opaque handle before returning it. These guards
+      // turn a future provenance violation into a typed unknown-process error.
+      "sandbox/src/AwsSandbox/make.ts": 1,
+      "sandbox/src/ContainerSandbox/make.ts": 1,
+      // Session paths are absolute beneath an absolute root, so parent
+      // creation is skipped only for the filesystem root. The second guard is
+      // the same opaque-process provenance check as the remote providers.
+      "sandbox/src/DirectorySandbox/make.ts": 2,
+      "sandbox/src/JustBashSandbox/make.ts": 1,
+      "sandbox/src/KubernetesSandbox/make.ts": 1,
       // `spawn` is the only source of a `RemoteProcess`, and it records every
       // one it returns, so the scripted provider's kill lookup cannot miss.
       "sandbox/src/RemoteChildProcessSpawner/TestRemote.ts": 1,
@@ -689,6 +712,9 @@ describe("vitest coverage isolation conformance", () => {
       // `Effect.sync`, so supervision's fallback for a failing `isRunning`
       // only discharges the error channel the handle type declares.
       "sandbox/src/SandboxSupervision/make.ts": 1,
+      // Splitting any string yields a first field; the nullish arm only
+      // discharges noUncheckedIndexedAccess before the type lookup.
+      "sandbox/src/Sandbox/fileSystem.ts": 1,
       "step-cache/src/CacheStore.ts": 1
     }
     const sourceFiles = (directory: string): Array<string> => {
