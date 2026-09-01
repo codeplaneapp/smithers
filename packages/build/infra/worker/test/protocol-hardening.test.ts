@@ -18,7 +18,8 @@ import {
   maxJsonDepth,
   maxJsonMembers,
   maxKeyDigestLength,
-  maxRecordedRunIdLength
+  maxRecordedRunIdLength,
+  maxReferencedDigests
 } from "../protocol.ts"
 
 const token = "test-token-with-sufficient-entropy-for-unit-tests"
@@ -293,16 +294,32 @@ describe("remote-cache hardening", () => {
     expect((await handler(jsonRequest(`/ac/${keyDigest}`, second, { method: "PUT" }))).status).toBe(409)
   })
 
-  it("stores declared artifact metadata verbatim without interpreting it", async () => {
+  it("validates declared artifact metadata and stores accepted bytes verbatim", async () => {
     const actionCache = new MemoryActionCache()
     const handler = makeHandler({ actionCache })
-    // Nothing reads the artifacts a publication declares, so a digest the
-    // service would once have refused must not cost the client a 400 for
-    // metadata the service only ever stores and returns.
-    const body = JSON.stringify({
+    const malformed = JSON.stringify({
       keyDigest,
       result: { exitOk: true },
       meta: { boundary: { declaredOutputs: { outputs: [{ digest: "not-a-digest" }] } } }
+    })
+    const refused = await handler(request(`/ac/${keyDigest}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: malformed
+    }))
+
+    expect(refused.status).toBe(400)
+    await expect(refused.json()).resolves.toEqual({ error: "body contains invalid or unsupported cache metadata" })
+    expect(actionCache.entries.size).toBe(0)
+
+    const body = JSON.stringify({
+      keyDigest,
+      result: { exitOk: true },
+      meta: {
+        boundary: {
+          declaredOutputs: { outputs: [{ digest: "b".repeat(64) }, { digest: "c".repeat(64) }] }
+        }
+      }
     })
 
     const stored = await handler(request(`/ac/${keyDigest}`, {
@@ -315,6 +332,28 @@ describe("remote-cache hardening", () => {
     expect(stored.status).toBe(201)
     expect(actionCache.entries.get(keyDigest)?.body).toBe(body)
     expect(await fetched.text()).toBe(body)
+  })
+
+  it("rejects malformed or excessive declared artifact references", async () => {
+    const actionCache = new MemoryActionCache()
+    const handler = makeHandler({ actionCache })
+    const tooMany = Array.from({ length: maxReferencedDigests + 1 }, (_, index) => ({
+      digest: index.toString(16).padStart(64, "0")
+    }))
+
+    for (const outputs of ["not-an-array", [null], tooMany]) {
+      const response = await handler(jsonRequest(`/ac/${keyDigest}`, {
+        keyDigest,
+        result: { exitOk: true },
+        meta: { boundary: { declaredOutputs: { outputs } } }
+      }, { method: "PUT" }))
+
+      expect(response.status).toBe(400)
+      await expect(response.json()).resolves.toEqual({
+        error: "body contains invalid or unsupported cache metadata"
+      })
+    }
+    expect(actionCache.entries.size).toBe(0)
   })
 
   it("rejects lossy or structurally hostile canonical JSON", () => {
@@ -1136,6 +1175,112 @@ describe("remote-cache hardening", () => {
     const revocable = Proxy.revocable({ value: 1 }, {})
     revocable.revoke()
     expect(() => canonicalJson(revocable.proxy)).toThrow()
+  })
+
+  it("holds the request cap while action-cache response bodies remain unread", async () => {
+    const body = JSON.stringify({ keyDigest, result: { exitOk: true } })
+    const actionCache = new MemoryActionCache()
+    actionCache.entries.set(keyDigest, {
+      body,
+      resultJson: canonicalJson({ exitOk: true }),
+      createdAtMs: null,
+      recordedRunId: null,
+      recordedEventSeq: null
+    })
+    const handler = makeHandler({ actionCache })
+
+    const held = await Promise.all(
+      Array.from({ length: maxConcurrentCacheRequests }, () => handler(request(`/ac/${keyDigest}`)))
+    )
+    expect(held.every((response) => response.status === 200)).toBe(true)
+
+    const refused = await handler(request(`/ac/${keyDigest}`))
+    expect(refused.status).toBe(429)
+    expect(refused.headers.get("retry-after")).toBe("1")
+
+    await Promise.all(held.map((response) => response.body?.cancel()))
+  })
+
+  it("releases exactly one action-cache request permit on body cancel, drain, or error", async () => {
+    const body = JSON.stringify({ keyDigest, result: { exitOk: true } })
+    const nativeResponse = globalThis.Response
+
+    for (const completion of ["cancel", "drain", "error"] as const) {
+      const streams: Array<{
+        readonly controller: ReadableStreamDefaultController<Uint8Array<ArrayBufferLike>>
+        readonly cancellations: number
+      }> = []
+      class ControlledResponse extends nativeResponse {
+        constructor(responseBody?: BodyInit | null, init?: ResponseInit) {
+          if (responseBody === body && init?.status === 200) {
+            let controller!: ReadableStreamDefaultController<Uint8Array<ArrayBufferLike>>
+            let cancellations = 0
+            const stream = new ReadableStream<Uint8Array<ArrayBufferLike>>({
+              start(value) {
+                controller = value
+              },
+              cancel() {
+                cancellations += 1
+              }
+            })
+            super(stream, init)
+            streams.push({
+              controller,
+              get cancellations() {
+                return cancellations
+              }
+            })
+            return
+          }
+          super(responseBody, init)
+        }
+      }
+      vi.stubGlobal("Response", ControlledResponse)
+
+      try {
+        const actionCache = new MemoryActionCache()
+        actionCache.entries.set(keyDigest, {
+          body,
+          resultJson: canonicalJson({ exitOk: true }),
+          createdAtMs: null,
+          recordedRunId: null,
+          recordedEventSeq: null
+        })
+        const handler = makeHandler({ actionCache })
+        const held = await Promise.all(
+          Array.from({ length: maxConcurrentCacheRequests }, () => handler(request(`/ac/${keyDigest}`)))
+        )
+        expect(held.every((response) => response.status === 200)).toBe(true)
+        expect((await handler(request(`/ac/${keyDigest}`))).status).toBe(429)
+
+        const firstResponse = held[0]
+        const firstStream = streams[0]
+        if (firstResponse === undefined || firstResponse.body === null || firstStream === undefined) {
+          throw new Error("action-cache response did not expose a controlled body")
+        }
+        if (completion === "cancel") {
+          await firstResponse.body.cancel()
+          expect(firstStream.cancellations).toBe(1)
+        } else if (completion === "drain") {
+          firstStream.controller.enqueue(textEncoder.encode("done"))
+          firstStream.controller.close()
+          expect(await firstResponse.text()).toBe("done")
+        } else {
+          firstStream.controller.error(new Error("stream failed"))
+          await expect(firstResponse.arrayBuffer()).rejects.toThrow("stream failed")
+        }
+
+        const admitted = await handler(request(`/ac/${keyDigest}`))
+        expect(admitted.status).toBe(200)
+        // Exactly one permit was released: the other original responses and
+        // this replacement still occupy the request ceiling.
+        expect((await handler(request(`/ac/${keyDigest}`))).status).toBe(429)
+        await Promise.all(held.slice(1).map((response) => response.body?.cancel()))
+        await admitted.body?.cancel()
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    }
   })
 
   it("holds an artifact transfer slot until the response body is done", async () => {

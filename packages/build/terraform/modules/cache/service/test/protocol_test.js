@@ -1064,6 +1064,111 @@ describe("content-addressed storage", () => {
     )
   })
 
+  test("holds the request cap while action-cache response bodies remain unread", async () => {
+    const body = JSON.stringify({ keyDigest, result: { exitOk: true } })
+    const actionCache = memoryActionCache()
+    actionCache.entries.set(keyDigest, {
+      body,
+      resultJson: canonicalJson({ exitOk: true }),
+      createdAtMs: null,
+      recordedRunId: null,
+      recordedEventSeq: null,
+      digests: []
+    })
+    const handler = makeHandler({ actionCache })
+
+    const held = await Promise.all(
+      Array.from({ length: maxConcurrentCacheRequests }, () => handler(request(`/ac/${keyDigest}`)))
+    )
+    expect(held.every((response) => response.status === 200)).toBe(true)
+
+    const refused = await handler(request(`/ac/${keyDigest}`))
+    expect(refused.status).toBe(429)
+    expect(refused.headers.get("retry-after")).toBe("1")
+
+    await Promise.all(held.map((response) => response.body?.cancel()))
+  })
+
+  test("releases exactly one action-cache request permit on body cancel, drain, or error", async () => {
+    const body = JSON.stringify({ keyDigest, result: { exitOk: true } })
+    const nativeResponse = globalThis.Response
+
+    for (const completion of ["cancel", "drain", "error"]) {
+      const streams = []
+      class ControlledResponse extends nativeResponse {
+        constructor(responseBody, init) {
+          if (responseBody === body && init?.status === 200) {
+            let controller
+            let cancellations = 0
+            const stream = new ReadableStream({
+              start(value) {
+                controller = value
+              },
+              cancel() {
+                cancellations += 1
+              }
+            })
+            super(stream, init)
+            streams.push({
+              controller,
+              get cancellations() {
+                return cancellations
+              }
+            })
+            return
+          }
+          super(responseBody, init)
+        }
+      }
+      globalThis.Response = ControlledResponse
+
+      try {
+        const actionCache = memoryActionCache()
+        actionCache.entries.set(keyDigest, {
+          body,
+          resultJson: canonicalJson({ exitOk: true }),
+          createdAtMs: null,
+          recordedRunId: null,
+          recordedEventSeq: null,
+          digests: []
+        })
+        const handler = makeHandler({ actionCache })
+        const held = await Promise.all(
+          Array.from({ length: maxConcurrentCacheRequests }, () => handler(request(`/ac/${keyDigest}`)))
+        )
+        expect(held.every((response) => response.status === 200)).toBe(true)
+        expect((await handler(request(`/ac/${keyDigest}`))).status).toBe(429)
+
+        const firstResponse = held[0]
+        const firstStream = streams[0]
+        if (firstResponse === undefined || firstResponse.body === null || firstStream === undefined) {
+          throw new Error("action-cache response did not expose a controlled body")
+        }
+        if (completion === "cancel") {
+          await firstResponse.body.cancel()
+          expect(firstStream.cancellations).toBe(1)
+        } else if (completion === "drain") {
+          firstStream.controller.enqueue(new TextEncoder().encode("done"))
+          firstStream.controller.close()
+          expect(await firstResponse.text()).toBe("done")
+        } else {
+          firstStream.controller.error(new Error("stream failed"))
+          await expect(firstResponse.arrayBuffer()).rejects.toThrow("stream failed")
+        }
+
+        const admitted = await handler(request(`/ac/${keyDigest}`))
+        expect(admitted.status).toBe(200)
+        // Exactly one permit was released: the other original responses and
+        // this replacement still occupy the request ceiling.
+        expect((await handler(request(`/ac/${keyDigest}`))).status).toBe(429)
+        await Promise.all(held.slice(1).map((response) => response.body?.cancel()))
+        await admitted.body?.cancel()
+      } finally {
+        globalThis.Response = nativeResponse
+      }
+    }
+  })
+
   test("holds streaming downloads through cancel, drain, and error, releasing exactly one slot", async () => {
     const digest = digestOf("streaming artifact")
     for (const completion of ["cancel", "drain", "error"]) {

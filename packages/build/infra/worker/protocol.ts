@@ -62,6 +62,14 @@ export const maxFindMissingDigests = 1000
 export const maxKeyDigestLength = 512
 
 /**
+ * The most artifact references one publication records.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maxReferencedDigests = 1000
+
+/**
  * The longest journal run identifier the service stores.
  *
  * Separate from {@link maxKeyDigestLength} because a cache key and a run
@@ -250,8 +258,8 @@ export interface ProtocolDependencies {
   readonly readTokenHash: string
   /**
    * SHA-256 of the credential that may publish to it. Only a context whose
-   * inputs were reviewed holds this one. A deployment that has not split its
-   * credentials yet configures the same digest twice.
+   * inputs were reviewed holds this one. This digest must differ from the read
+   * credential digest.
    */
   readonly writeTokenHash: string
   readonly health?: () => Promise<void>
@@ -654,6 +662,31 @@ const validatedContentBody = (object: unknown): BodyInit => {
   return descriptor.value as BodyInit
 }
 
+/** Extracts only artifacts the engine's declared-output boundary references. */
+const referencedDigests = (record: Record<string, unknown>): ReadonlyArray<string> => {
+  const outputs = (
+    record["meta"] as
+      | {
+        readonly boundary?: { readonly declaredOutputs?: { readonly outputs?: unknown } }
+      }
+      | null
+      | undefined
+  )?.boundary?.declaredOutputs?.outputs
+  if (outputs === undefined) return []
+  if (!Array.isArray(outputs)) throw new Error("declared outputs must be an array")
+  const references = new Set<string>()
+  for (const output of outputs) {
+    if (!isRecord(output)) throw new Error("declared output must be an object")
+    if (!Object.hasOwn(output, "digest") || output["digest"] === null || Object.hasOwn(output, "content")) continue
+    if (typeof output["digest"] !== "string" || !hexDigest.test(output["digest"])) {
+      throw new Error("declared output digest is invalid")
+    }
+    references.add(output["digest"])
+    if (references.size > maxReferencedDigests) throw new Error("publication references too many artifacts")
+  }
+  return [...references]
+}
+
 const readPublication = async (request: Request, keyDigest: string): Promise<PublicationRead> => {
   const parsed = await readJson(request, maxActionCacheBodyBytes)
   if (!parsed.ok) return parsed
@@ -670,6 +703,9 @@ const readPublication = async (request: Request, keyDigest: string): Promise<Pub
   try {
     canonicalJson(parsed.value)
     resultJson = canonicalJson(enveloped ? record["result"] : parsed.value)
+    // The two deployments serve one protocol. The self-hosted tier refcounts
+    // references that this tier only stores, so both tiers validate them.
+    if (enveloped) referencedDigests(record)
   } catch {
     return {
       ok: false,
@@ -745,8 +781,9 @@ const matches = (supplied: Uint8Array<ArrayBuffer>, expected: Uint8Array<ArrayBu
  *
  * Both comparisons always run and neither short circuits, so the answer costs
  * the same work whichever credential was presented and whichever byte first
- * differs. A deployment that configures one secret for both directions matches
- * both, and the more capable classification wins so publication keeps working.
+ * differs. The two digests are refused at construction when they are equal, so
+ * a token can classify as `write` or as `read` but never as both by
+ * configuration.
  */
 const presentedCredential = async (
   request: Request,
@@ -1102,6 +1139,9 @@ const normalizeDependencies = (value: ProtocolDependencies): NormalizedProtocolD
   if (typeof writeTokenHash !== "string" || !hexDigest.test(writeTokenHash)) {
     throw new TypeError("writeTokenHash must be a lowercase SHA-256 digest")
   }
+  if (readTokenHash === writeTokenHash) {
+    throw new TypeError("readTokenHash and writeTokenHash must differ, or the read credential can publish")
+  }
   const configuredMaximum = read("maxArtifactBytes")
   const maxArtifactBytes = configuredMaximum ?? maxArtifactBodyBytes
   if (
@@ -1258,7 +1298,19 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
               activeActionCachePublications -= 1
             }
           }
-          return await handleActionCache(request, keyDigest, url, actionCache)
+          const response = await handleActionCache(request, keyDigest, url, actionCache)
+          // A hit streams its stored body after the handler returns, so the
+          // request slot has to outlive the return and end with the stream.
+          if (request.method !== "GET" || response.status !== 200 || response.body === null) {
+            return response
+          }
+          streaming = true
+          let released = false
+          return heldWhileStreaming(response, () => {
+            if (released) return
+            released = true
+            activeCacheRequests -= 1
+          })
         }
         if (segments.length === 3 && segments[0] === "" && segments[1] === "cas") {
           let digest: string

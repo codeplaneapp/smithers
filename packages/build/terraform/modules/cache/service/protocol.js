@@ -1026,7 +1026,19 @@ export const createHandler = (dependencies) => {
               activeActionCachePublications -= 1
             }
           }
-          return await handleActionCache(request, keyDigest, url, actionCache)
+          const response = await handleActionCache(request, keyDigest, url, actionCache)
+          // A hit streams its stored body after the handler returns, so the
+          // request slot has to outlive the return and end with the stream.
+          if (request.method !== "GET" || response.status !== 200 || response.body === null) {
+            return response
+          }
+          streaming = true
+          let released = false
+          return heldWhileStreaming(response, () => {
+            if (released) return
+            released = true
+            activeCacheRequests -= 1
+          })
         }
         if (segments.length === 3 && segments[0] === "" && segments[1] === "cas") {
           let digest

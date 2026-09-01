@@ -115,13 +115,16 @@ this order:
    `SMITHERS_CACHE_READ_TOKEN` and `SMITHERS_CACHE_WRITE_TOKEN` in the
    deploying shell and run the deploy. Both are required: `alchemy.run.ts`
    fails the deployment when either is missing, rather than starting a Worker
-   that answers on one credential. To keep every existing client working during
-   the rollout, set **both to the current `SMITHERS_CACHE_TOKEN` value**. The
-   Worker classifies a token matching both digests as `write`, so nothing
-   changes for a client that still sends one credential.
-2. **Add the repository secrets.** Add `SMITHERS_CACHE_READ_TOKEN` and
-   `SMITHERS_CACHE_WRITE_TOKEN` to the GitHub repository, still both holding
-   the current value.
+   that answers on one credential. They must also differ. Both implementations
+   refuse two equal digests at construction, because one secret configured for
+   both directions is one credential wearing two names and every reader holding
+   it can publish. To keep every existing client working during the rollout,
+   set the **write** token to the current `SMITHERS_CACHE_TOKEN` value and mint
+   a new read token: a client that still sends the old single credential
+   classifies as `write` and nothing it does changes.
+2. **Add the repository secrets.** Add `SMITHERS_CACHE_READ_TOKEN` holding the
+   newly minted read token and `SMITHERS_CACHE_WRITE_TOKEN` holding the current
+   value to the GitHub repository.
 3. **Land the CI generation change** above, so pull-request jobs stop receiving
    the write credential.
 4. **Rotate.** Only now generate a new write credential, redeploy the Worker
@@ -139,6 +142,9 @@ keeps reading for the rest of the run. That is the read-only posture, which is
 exactly what a pull-request job should have. Builds stay correct and lose only
 publication, and every cache hit still lands.
 
-The self-hosted stack under `../terraform/` serves the same protocol and still
-has one credential. Give it the same split, or run it knowing every client that
-can read it can publish to it.
+The self-hosted stack under `../terraform/` serves the same protocol and now
+carries the same split: `SMITHERS_CACHE_READ_TOKEN` and
+`SMITHERS_CACHE_WRITE_TOKEN`, refused when they are equal, classified by method
+before the route is parsed. Its loopback-only development mode, which
+configures no token at all, is the one deployment shape without the split, and
+`variables.tf` cannot produce it.

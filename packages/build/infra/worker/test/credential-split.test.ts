@@ -235,15 +235,20 @@ describe("both credentials read, and only the write credential publishes", () =>
   })
 
   /**
-   * A deployment that has not split its credentials yet configures the same
-   * secret twice. The more capable classification wins, so publication keeps
-   * working while the operator rolls the second secret out.
+   * An operator rolling out the split gives the current token to the write
+   * digest and mints a distinct read token, so rollout never needs one secret
+   * to hold both roles.
    */
-  it("publishes when one secret is configured for both directions", async () => {
-    const { handler } = deploy({ read: writeCredential, write: writeCredential })
-
-    expect((await handler(as(writeCredential, `/ac/${keyDigest}`, publication(keyDigest)))).status).toBe(201)
-    expect((await handler(as(writeCredential, `/ac/${keyDigest}`))).status).toBe(200)
+  it("refuses a deployment that configures one secret for both directions", () => {
+    const credentialHash = hashOf(writeCredential)
+    expect(() =>
+      createHandler({
+        actionCache: new MemoryActionCache(),
+        contentStore: new MemoryContentStore(),
+        readTokenHash: credentialHash,
+        writeTokenHash: credentialHash
+      })
+    ).toThrow("must differ")
   })
 
   it("refuses a deployment configured with anything but two digests", () => {

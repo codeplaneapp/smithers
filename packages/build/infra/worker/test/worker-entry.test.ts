@@ -2,7 +2,8 @@ import { createHash } from "node:crypto"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { makeTestDatabase, type TestDatabase } from "./d1.ts"
 
-const tokenHash = createHash("sha256").update("entry-point-token", "utf8").digest("hex")
+const readTokenHash = createHash("sha256").update("entry-point-read-token", "utf8").digest("hex")
+const writeTokenHash = createHash("sha256").update("entry-point-write-token", "utf8").digest("hex")
 
 const bucket = (): R2Bucket =>
   ({
@@ -30,8 +31,8 @@ describe("worker entry point", () => {
     ({
       CACHE_DATABASE: d1.database,
       CACHE_BUCKET: bucket(),
-      CACHE_READ_TOKEN: tokenHash,
-      CACHE_WRITE_TOKEN: tokenHash,
+      CACHE_READ_TOKEN: readTokenHash,
+      CACHE_WRITE_TOKEN: writeTokenHash,
       ...overrides
     }) as never
 
