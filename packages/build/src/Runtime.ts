@@ -382,8 +382,17 @@ const probeFailed = (label: string, cause: unknown): RuntimeError =>
  *
  * Nothing else is forwarded. A `--version` run needs no proxy, no certificate
  * bundle, and no temporary directory, so it is given none.
+ *
+ * Exported because only a composition root can read the host environment, and
+ * the one that does should hand {@link Options.environment} these four names
+ * rather than restate them: a second copy of the list is a list that drifts,
+ * and passing the whole of `process.env` puts every ambient name through this
+ * module's normalization for four values it keeps.
+ *
+ * @category constants
+ * @since 0.1.0
  */
-const lookupEnvironmentNames = ["PATH", "PATHEXT", "SYSTEMROOT", "WINDIR"] as const
+export const lookupEnvironmentNames = ["PATH", "PATHEXT", "SYSTEMROOT", "WINDIR"] as const
 
 interface NormalizedOptions {
   readonly requirement: string
@@ -456,6 +465,18 @@ const probeEnvironment = (options: NormalizedOptions): Record<string, string> | 
 }
 
 /**
+ * The shape of a version a probe accepts from an interpreter's own output.
+ *
+ * Dotted numbers with an optional leading `v`, an optional `-prerelease`, and
+ * an optional `+build` suffix. The suffixes are here because {@link satisfies}
+ * reads them: an exact pin matches on prerelease identity, so a parser that
+ * refused `1.3.0-canary.2` as unparsable made `=1.3.0-canary.2` a requirement
+ * no real interpreter could ever satisfy. Every quantifier is over a single
+ * character class, so a long hostile token costs one linear scan.
+ */
+const versionToken = /^v?\d+(?:\.\d+)*(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?(?:\+[0-9A-Za-z][0-9A-Za-z.-]*)?$/
+
+/**
  * Measures the interpreter version by running it.
  *
  * When the composition supplied an `environment`, the child receives the four
@@ -470,7 +491,7 @@ const probeEnvironment = (options: NormalizedOptions): Record<string, string> | 
  * An empty environment is not an alternative either, because a child given one
  * cannot resolve a bare executable name through `PATH`. Only a composition root
  * knows the host environment, so only a composition root can close this: pass
- * `environment`.
+ * `environment`, selecting {@link lookupEnvironmentNames} out of the host's own.
  *
  * Standard output is collected under {@link maximumVersionOutputBytes} and
  * decoded afterwards, so an executable that prints megabytes is refused at the
@@ -536,7 +557,7 @@ const measureVersion = (
       // version-shaped token on the first line covers both without a
       // per-runtime parser.
       const first = output.split("\n", 1)[0] ?? ""
-      const token = first.trim().split(/\s+/).find((word) => /^v?\d+(\.\d+)*$/.test(word))
+      const token = first.trim().split(/\s+/).find((word) => versionToken.test(word))
       return token === undefined
         ? Effect.fail(
           new RuntimeError({

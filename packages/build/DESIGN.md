@@ -165,12 +165,13 @@ diagnostics; it is not a freshness marker that skips reconciliation.
 | Manager | Status      | Fetch/link behavior                                                             |
 | ------- | ----------- | ------------------------------------------------------------------------------- |
 | pnpm    | Implemented | `pnpm fetch`, then offline frozen `pnpm install`, both with scripts disabled    |
-| npm     | Unsupported | No verified fetch-only operation matching the declared lockfile boundary        |
 | Bun     | Unsupported | No documented fetch-only plus offline-link pair strong enough for this contract |
-| Yarn    | Unsupported | Reserved in the service schema; no implementation is wired                      |
 
-Unsupported layers are deliberate typed services, not missing providers. They
-answer every operation with `PackageManagerError { code: "unsupported" }`.
+`PackageManager.Name` is `pnpm | bun` and nothing else, so npm and Yarn are not
+unsupported selections: no declaration can name one. The Bun row is the only
+unsupported selection, and it is a deliberate typed service rather than a
+missing provider. It answers every operation with
+`PackageManagerError { code: "unsupported" }`.
 
 The store path is fixed at `.flows/store/<manager>`. Consequently the direct
 `install` command requires the default `.flows` cache-directory setting.
@@ -255,7 +256,8 @@ barriers.
 
 1. **No general sandbox.** Effects declarations do not confine arbitrary tools.
 2. **No shared install replay.** All install boundaries remain `expected`.
-3. **Only pnpm installation.** npm, Bun, and Yarn refuse explicitly.
+3. **Only pnpm installation.** Bun, the one other manager a declaration can
+   name, refuses explicitly.
 4. **Whole-lockfile granularity.** There is no rules_js-style per-package fetch
    graph yet.
 5. **Lifecycle scripts disabled.** Arbitrary dependency code needs a separate,

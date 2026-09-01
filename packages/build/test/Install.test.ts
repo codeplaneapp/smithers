@@ -429,4 +429,23 @@ describe("Install", () => {
       for (const action of actions) expect(action.draft.effects.boundaryMode).toBe("expected")
     }
   })
+
+  /**
+   * Measure's payload was empty, so a pnpm install and a Bun install of one
+   * workspace recorded the same measure key: `Graph.build` folds a call's
+   * literal payload into the node's key material, and an empty payload folds
+   * nothing. The `expected` boundary keeps that inert today and a `hard` one
+   * would turn it into a hit on the other manager's measurement.
+   */
+  it("keys measure on the declared manager so two managers cannot share one measurement", () => {
+    const measureOf = (manager: PackageManager.Name) => {
+      const graph = Graph.build(Install.Install, { manager })
+      const node = graph.nodes.filter((node) => node.kind === "ActionCall")[0]!
+      expect(node.draft.material.body).toMatchObject({ action: "smithers-build/install/measure" })
+      return node.draft.material.inputs
+    }
+    expect(measureOf("pnpm")).toEqual([{ _tag: "Literal", value: { manager: "pnpm" } }])
+    expect(measureOf("bun")).toEqual([{ _tag: "Literal", value: { manager: "bun" } }])
+    expect(measureOf("pnpm")).not.toEqual(measureOf("bun"))
+  })
 })

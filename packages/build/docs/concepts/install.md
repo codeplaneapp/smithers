@@ -49,7 +49,7 @@ process, and crypto services. The CLI composition in
 The flow payload is `{ manager }`, the manager the workspace declared.
 
 ```text
-Measure.call({})
+Measure.call({ manager })
   -> Fetch[manager].call({ content })
     -> Link.call({ content, store })
 ```
@@ -89,6 +89,12 @@ those services.
 The action uses an `expected` boundary and is never answered from the cross-run
 engine cache: a restored measurement would describe another machine's checkout.
 
+The declared manager is in the measure payload as key material and is read by
+nothing: the implementation takes the manager from its layer. With an empty
+payload, a pnpm install and a Bun install of one workspace shared a single
+measure key, which the `expected` boundary made inert and a `hard` boundary
+would make a hit on another manager's measurement.
+
 `.npmrc` is limited to 256 KiB, `package.json` to 4 MiB, and lockfiles to
 64 MiB. Reads use stable regular-file descriptors, exact UTF-8, and
 canonical-path checks inside the project root.
@@ -106,12 +112,19 @@ the key through the layer identity the planner records for the target, which is
 derived from the BUILD.ts declaration. The absolute project root and store path
 are host placement, not content identity.
 
-Before fetch starts, the implementation checks three things against each other:
-the manager the workspace declared, the manager the composition provided, and
-the versions the host actually has. A mismatch fails with
-`environment_mismatch` before anything is written. This replaces the old
-cross-round recheck, which could only compare one measurement of a host against
-an earlier measurement of the same host.
+Before fetch starts, the implementation checks the layer for internal
+consistency, its lockfile name and store directory against what its own manager
+name implies, and then holds the host to both declared versions. A mismatch
+fails with `environment_mismatch` before anything is written. This replaces the
+old cross-round recheck, which could only compare one measurement of a host
+against an earlier measurement of the same host.
+
+The manager the workspace declared is not compared against the manager the
+composition provided. A sealed action receives the layer and never the
+declaration, so that comparison belongs to the composition root that wires one
+against the other; `d191c9dfcf` removed the guard that pretended otherwise. The
+declared manager still reaches the measure step's key material through its
+payload, so two managers cannot share one measurement.
 
 Fetch returns a `StoreManifest`:
 
@@ -158,12 +171,14 @@ restored from another machine.
 
 ## Manager support
 
+A declaration selects pnpm or Bun. Those two are the whole of
+`PackageManager.Name`, so npm and Yarn are not unsupported selections: they
+cannot be written down at all, and a BUILD.ts naming one fails to decode.
+
 | Manager | Status      | Behavior                                                                             |
 | ------- | ----------- | ------------------------------------------------------------------------------------ |
 | pnpm    | Implemented | Frozen fetch into `.flows/store/pnpm`, then frozen offline link with scripts ignored |
-| npm     | Unsupported | No verified fetch-only verb satisfying the declared lockfile boundary                |
 | Bun     | Unsupported | No documented fetch-only and offline-link pair satisfying the contract               |
-| Yarn    | Unsupported | Named for future compatibility; no implementation is wired                           |
 
 The pnpm commands are:
 

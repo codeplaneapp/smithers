@@ -215,6 +215,50 @@ describe("Runtime measurement", () => {
     })
   })
 
+  /**
+   * `satisfies` matches an exact pin on prerelease identity, but the probe's
+   * own parser accepted only `^v?\d+(\.\d+)*$`, so a real interpreter printing
+   * `1.3.0-canary.2` was refused as `probe_failed` before the comparator ever
+   * saw it. `=1.3.0-canary.2` was therefore a requirement no host could meet,
+   * and the unit tests for the comparator could not show it.
+   */
+  it("measures a prerelease and holds an exact pin to its identity", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "canary-bun.mjs")
+      await writeExecutable(executable, "process.stdout.write(\"1.3.0-canary.2\\n\")")
+      const pinned = await Effect.runPromise(
+        Runtime.make("bun", { requirement: "=1.3.0-canary.2", platform, executable }).pipe(
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      expect(await Effect.runPromise(pinned.version)).toBe("1.3.0-canary.2")
+      expect(await Effect.runPromise(pinned.verify)).toBe("1.3.0-canary.2")
+
+      const release = await Effect.runPromise(
+        Runtime.make("bun", { requirement: "=1.3.0", platform, executable }).pipe(
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      const refused = await refusalOf(release.verify)
+      expect(refused.code).toBe("unsatisfied")
+      expect(refused.message).toMatch(/this host runs bun 1\.3\.0-canary\.2, and the workspace declares =1\.3\.0/)
+    })
+  })
+
+  it("measures a version carrying build metadata", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "built-node.mjs")
+      await writeExecutable(executable, "process.stdout.write(\"v24.9.0+build.7\\n\")")
+      const service = await Effect.runPromise(
+        Runtime.make("node", { requirement: ">=22.19.0", platform, executable }).pipe(
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      expect(await Effect.runPromise(service.version)).toBe("24.9.0+build.7")
+      expect(await Effect.runPromise(service.verify)).toBe("24.9.0+build.7")
+    })
+  })
+
   it("refuses a measured version the declaration excludes", async () => {
     await withFixture(async (root) => {
       const executable = NodePath.join(root, "old-node.mjs")

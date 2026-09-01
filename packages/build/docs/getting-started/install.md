@@ -20,8 +20,9 @@ workspace, never through a registry.
 
 - Node.js 22.19 or newer.
 - pnpm. Catalog targets run their tools through whichever package manager the
-  workspace declares, but the install flow has a live implementation only for
-  pnpm today; the other managers fail with a typed `unsupported` error.
+  workspace declares, and a declaration names pnpm or Bun. The install flow has
+  a live implementation only for pnpm today; a Bun declaration fails with a
+  typed `unsupported` error.
 - A git worktree. Discovery prefers `git ls-files`; outside a worktree it falls
   back to a `.gitignore` walker.
 

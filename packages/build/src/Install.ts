@@ -157,12 +157,22 @@ const measureInputPatterns: ReadonlyArray<string> = [
  * it. Re-measuring costs two file digests, and a restored measurement would
  * describe another machine's checkout.
  *
+ * `manager` is in the payload as key material and for nothing else: the
+ * implementation reads the manager from its layer, never from here. With an
+ * empty payload a pnpm install and a Bun install of one workspace shared a
+ * single measure key, which is inert only while the boundary stays `expected`
+ * and becomes a hit on another manager's measurement the day it hardens. The
+ * declared manager is not checked against the composed layer here, and
+ * `d191c9dfcf` says why: that check belongs at the composition root that wires
+ * a layer against a declaration, not inside a sealed action that receives only
+ * the layer.
+ *
  * @category actions
  * @since 0.1.0
  * @slop
  */
 export const Measure = Action.make("smithers-build/install/measure", {
-  payload: {},
+  payload: { manager: PackageManager.Name },
   success: Content,
   error: PackageManager.PackageManagerError,
   tier: "sealed"
@@ -322,6 +332,7 @@ export type InstallFlow = Flow.Flow<
  * @private
  */
 const measureFetchLink = <R>(
+  manager: PackageManager.Name,
   fetch: (
     content: Planned.Planned<Content>
   ) => Node.Node<PackageManager.StoreManifest, PackageManager.PackageManagerError, R>
@@ -332,7 +343,7 @@ const measureFetchLink = <R>(
   | Action.Requirement<"smithers-build/install/measure">
   | Action.Requirement<"smithers-build/install/link">
 > =>
-  Measure.call({}).pipe(
+  Measure.call({ manager }).pipe(
     Node.andThen((content) => fetch(content).pipe(Node.andThen((store) => Link.call({ content, store }))))
   )
 
@@ -366,8 +377,8 @@ export const Install: InstallFlow = Flow.make("smithers-build/install", {
     Requires
   > =>
     manager === "pnpm"
-      ? measureFetchLink((content) => FetchPnpm.call({ content }))
-      : measureFetchLink((content) => FetchBun.call({ content }))
+      ? measureFetchLink(manager, (content) => FetchPnpm.call({ content }))
+      : measureFetchLink(manager, (content) => FetchBun.call({ content }))
 }).annotate(Flow.Capabilities, ["fs:read", "fs:write", "net:get", "net:post", "proc:spawn"])
 
 /** @private */
@@ -395,13 +406,19 @@ const verifyManagerContract = (
 }
 
 /**
- * Checks the layer against the declaration and the host against both.
+ * Checks the layer against itself and the host against both declarations.
  *
- * Three things have to agree before a manager writes anything: the manager the
- * workspace declared, the manager the composition provided, and the versions
- * the host actually has. The first mismatch is a wiring error and the last is
- * a machine that is not set up the way the workspace says it must be; both are
- * reported before any store or tree is touched.
+ * Two things have to agree before a manager writes anything: the layer has to
+ * be internally consistent, its lockfile name and store directory matching what
+ * its own manager name implies, and the host has to satisfy the runtime and
+ * manager versions the layers declare. The first is a wiring error and the
+ * second is a machine that is not set up the way the workspace says it must be;
+ * both are reported before any store or tree is touched.
+ *
+ * The manager the workspace declared is deliberately not compared against the
+ * layer here. A sealed action receives only the layer, so it cannot see the
+ * declaration; `d191c9dfcf` moved that check to the composition root that wires
+ * one against the other.
  *
  * @private
  */
