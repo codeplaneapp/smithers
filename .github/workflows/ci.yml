@@ -112,12 +112,12 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Assert the runner ships the declared browser
         run: |
-          if [ ! -x /usr/bin/google-chrome ]; then
+          if [ ! -x '/usr/bin/google-chrome' ]; then
             echo '/usr/bin/google-chrome is missing from this runner image.' >&2
             echo 'findBrowser only probes BROWSER_CANDIDATES in apps/ui/src/launch-checklist/BrowserLaunch.ts' >&2
             exit 1
           fi
-          /usr/bin/google-chrome --version
+          '/usr/bin/google-chrome' --version
       - name: UI end-to-end suites
         run: pnpm exec smithers-build test '//apps/ui'
         env:
