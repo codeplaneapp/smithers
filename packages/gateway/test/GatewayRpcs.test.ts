@@ -154,6 +154,32 @@ describe("Approval.Submit", () => {
       expect(submitted.resume).toBeUndefined()
     }).pipe(Effect.provide(served)))
 
+  /**
+   * `Approval.Submit` is a control mutation wearing a gateway payload, and the
+   * decision it records is the one an operator is answerable for. The
+   * composition here defaults to `local`/`operator` and the middleware
+   * authenticates `gateway-test`, so a handler that never read
+   * `ControlPrincipal` writes the wrong name into the journal.
+   */
+  test("journals the authenticated principal rather than the runtime's default", () =>
+    Effect.gen(function*() {
+      const rpc = yield* RpcTest.makeClient(GatewayRpcs)
+      const control = yield* Control
+      const card = yield* control.plan({ flowId: "system/test", input: {} })
+
+      yield* rpc["Approval.Submit"]({
+        target: { _tag: "Plan", planId: card.planId, digest: card.digest, envelope: card.envelope },
+        scope: "run",
+        idempotencyKey: `attributed:${card.planId}`,
+        decision: "approve"
+      })
+
+      const events = yield* Stream.runCollect(control.watch({ runId: `plan:${card.planId}`, follow: false }))
+      const decided = events.find((event) => event.kind === "control.approval.approved")
+      expect((decided?.payload as { readonly principal?: unknown } | null)?.principal)
+        .toMatchObject({ id: "gateway-test", kind: "test" })
+    }).pipe(Effect.provide(served)))
+
   test("denies a plan, which has no run to resume either way", () =>
     Effect.gen(function*() {
       const rpc = yield* RpcTest.makeClient(GatewayRpcs)

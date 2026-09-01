@@ -25,6 +25,7 @@
  */
 import { Control } from "@smthrs/control/Control"
 import type * as ControlError from "@smthrs/control/ControlError"
+import { ControlPrincipal } from "@smthrs/control/ControlRpcs"
 import type * as ControlSchema from "@smthrs/control/ControlSchema"
 import * as ControlServer from "@smthrs/control/ControlServer"
 import { SyncRpcs } from "@smthrs/sync/SyncRpcs"
@@ -87,7 +88,18 @@ export const layerHandlers = GatewayRpcs.toLayer(
        * resume delegation; the gateway is only a transport adapter. */
       "Approval.Submit": Effect.fn("Gateway.submitApproval")((input) =>
         Effect.gen(function*() {
-          const payload = { target: input.target, scope: input.scope, idempotencyKey: input.idempotencyKey }
+          // The identity the shared `ControlAuth` middleware authenticated, as
+          // `ControlServer` stamps it on `Approve` and `Deny`. This mount is
+          // the same decision under a different payload, so it is answerable
+          // to the same operator, and a decision journaled under the
+          // composition's default operator names the wrong one.
+          const principal = yield* ControlPrincipal
+          const payload = {
+            target: input.target,
+            scope: input.scope,
+            idempotencyKey: input.idempotencyKey,
+            principal
+          }
           const decision = input.decision === "approve"
             ? yield* control.approve(payload)
             : yield* control.deny(payload)
@@ -160,8 +172,9 @@ const keptAlive = (
  *
  * Wrapping the service rather than re-declaring the handlers keeps
  * `@smthrs/control` `ControlServer` the single definition of what every
- * procedure does, principal stamping on `Approve` and `Deny` included. Only
- * `watch` behaves differently, and only in what it adds.
+ * procedure does, including the principal it stamps on every mutation that
+ * records who asked. Only `watch` behaves differently, and only in what it
+ * adds.
  *
  * @since 1.0.0
  * @category layers

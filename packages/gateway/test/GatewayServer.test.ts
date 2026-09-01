@@ -226,6 +226,30 @@ describe("the assembled gateway over a real loopback bind", () => {
       maxRequestBodyBytes: 64
     }))))
 
+  test("lets an authenticated request reach the body guard", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const response = yield* Effect.promise(() =>
+        fetch(`${url}/rpc`, {
+          method: "POST",
+          headers: {
+            authorization: "Bearer edge-secret",
+            "content-type": "application/json"
+          },
+          body: "{}"
+        })
+      )
+
+      expect(response.status).toBe(400)
+      expect(yield* Effect.promise(() => response.json() as Promise<unknown>)).toMatchObject({
+        code: "malformed_request"
+      })
+    }).pipe(Effect.provide(served({
+      host: "127.0.0.1",
+      port: 0,
+      credential: "edge-secret"
+    }))))
+
   test("passes a well-formed request message through to the server it names", () =>
     Effect.gen(function*() {
       const url = yield* baseUrl
@@ -281,6 +305,52 @@ describe("the assembled gateway over a real loopback bind", () => {
       // The cancel is durable: the next read of the same run says so.
       expect(remote.after.items).toMatchObject([{ runId: remote.runId, status: "cancelled" }])
     }).pipe(Effect.provide(served())))
+
+  /**
+   * Attribution over a credentialed bind, which is the only composition where
+   * the authenticated identity and the runtime's default differ. A loopback
+   * gateway authenticates `local`/`operator` and the SQL runtime defaults to
+   * the same pair, so every earlier suite agreed with a handler that dropped
+   * the principal and one that forwarded it.
+   */
+  test("journals a bearer operator's cancel as the bearer, not as the local default", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const remote = yield* Effect.gen(function*() {
+        const control = yield* Control
+        const card = yield* control.plan({ flowId: "system/test", input: { suite: "bearer" } })
+        yield* control.approve(approvalOf(card))
+        const receipt = yield* control.run({
+          _tag: "Plan",
+          planId: card.planId,
+          digest: card.digest,
+          envelope: card.envelope,
+          idempotencyKey: `run:${card.planId}`
+        })
+        if (receipt._tag !== "Accepted" || receipt.runId === undefined) {
+          return yield* Effect.die("expected an accepted run")
+        }
+        yield* control.cancel({
+          runId: receipt.runId,
+          idempotencyKey: `cancel:${receipt.runId}`,
+          reason: "a remote operator asked"
+        })
+        return receipt.runId
+        // Only the unary mounts carry the credential: `ControlClient` attaches
+        // the bearer to HTTP and the socket protocol has no header to put it
+        // on, so the record is read back in process below.
+      }).pipe(Effect.provide(client(url, "edge-secret")))
+
+      const control = yield* Control
+      const events = yield* Stream.runCollect(control.watch({ runId: remote, follow: false }))
+      const listed = yield* control.list({ _tag: "runs", filters: { runId: remote } })
+
+      const requested = events.find((event) => event.kind === "control.run.cancel-requested")
+      expect((requested?.payload as { readonly principal?: unknown } | null)?.principal)
+        .toMatchObject({ id: "gateway", kind: "bearer" })
+      if (listed._tag !== "runs") return
+      expect(listed.items[0]?.cancellation?.principal).toMatchObject({ id: "gateway", kind: "bearer" })
+    }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, credential: "edge-secret" }))))
 
   test("streams a projection snapshot and keeps the connection alive between changes", () =>
     Effect.gen(function*() {
@@ -402,6 +472,12 @@ describe("the Watch keepalive", () => {
 })
 
 describe("gateway bind policy", () => {
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])("refuses the invalid body limit %s", (maxRequestBodyBytes) => {
+    expect(() => GatewayServer.layerIngress({ maxRequestBodyBytes })).toThrow(
+      "Gateway request body limit must be a positive safe integer"
+    )
+  })
+
   it("defaults a bind with no host to loopback", () => {
     expect(NodeGateway.listenOptions({ port: 0 })).toEqual({ port: 0, host: "127.0.0.1" })
   })
