@@ -212,6 +212,51 @@ const gc = (options?: ArtifactGc.GcOptions) =>
     return yield* collector.gc(options)
   })
 
+describe("option bounds", () => {
+  const invalidPositive = [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]
+  const invalidNonNegative = [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]
+
+  it.live("rejects an invalid page size before scanning any durable roots", () =>
+    Effect.gen(function*() {
+      for (const pageSize of invalidPositive) {
+        const host = memoryFs()
+        const garbage = host.seedBlob(`invalid-page-${String(pageSize)}`, 100 * dayMs)
+        const failure = yield* withCrypto(
+          gc().pipe(Effect.flip, Effect.provide(harness(host, { pageSize })))
+        )
+        expect(failure).toMatchObject({
+          code: "invalid_options",
+          message: "artifact GC pageSize must be a positive safe integer"
+        })
+        expect(host.hasBlob(garbage)).toBe(true)
+      }
+    }))
+
+  it.live("rejects invalid call and policy grace bounds before inventory or deletion", () =>
+    Effect.gen(function*() {
+      for (const graceMs of invalidNonNegative) {
+        const directHost = memoryFs()
+        const directGarbage = directHost.seedBlob(`invalid-direct-${String(graceMs)}`, 100 * dayMs)
+        const direct = yield* withCrypto(
+          gc({ graceMs }).pipe(Effect.flip, Effect.provide(harness(directHost)))
+        )
+        expect(direct).toMatchObject({
+          code: "invalid_options",
+          message: "artifact GC graceMs must be a non-negative safe integer"
+        })
+        expect(directHost.hasBlob(directGarbage)).toBe(true)
+
+        const policyHost = memoryFs()
+        const policyGarbage = policyHost.seedBlob(`invalid-policy-${String(graceMs)}`, 100 * dayMs)
+        const policy = yield* withCrypto(
+          gc().pipe(Effect.flip, Effect.provide(harness(policyHost, { policy: { graceMs } })))
+        )
+        expect(policy.code).toBe("invalid_options")
+        expect(policyHost.hasBlob(policyGarbage)).toBe(true)
+      }
+    }))
+})
+
 describe("mark: durable roots keep their referenced blobs", () => {
   it.live("never collects a blob referenced by a run's attempt row or a cache entry", () =>
     Effect.gen(function*() {
@@ -333,6 +378,37 @@ describe("mark: durable roots keep their referenced blobs", () => {
           })
           return yield* gc().pipe(Effect.flip)
         }).pipe(Effect.provide(harness(host)))
+      )
+      expect(failure.code).toBe("mark_failed")
+      expect(host.hasBlob(garbage)).toBe(true)
+    }))
+
+  it.live("fails the collection when an attempt checkpoint is not valid JSON", () =>
+    Effect.gen(function*() {
+      const host = memoryFs()
+      const garbage = host.seedBlob("protected-by-checkpoint-refusal", 100 * dayMs)
+      const roots = Layer.succeed(SqlClient.SqlClient)(
+        ((strings: TemplateStringsArray) =>
+          strings.join("?").includes("flows_attempts")
+            ? Effect.succeed([{
+              run_id: "run-corrupt-checkpoint",
+              step_key_digest: "step-corrupt-checkpoint",
+              attempt: 1,
+              checkpoint_json: "{",
+              meta_json: "{}"
+            }])
+            : Effect.succeed([])) as never
+      )
+      const collector = ArtifactGc.layer().pipe(
+        Layer.provide(Layer.mergeAll(
+          roots,
+          Layer.succeed(ArtifactSweep.ArtifactSweep)(
+            ArtifactSweep.makeFileSystem(host.fs, { coordination: "process" })
+          )
+        ))
+      )
+      const failure = yield* withCrypto(
+        gc().pipe(Effect.flip, Effect.provide(collector))
       )
       expect(failure.code).toBe("mark_failed")
       expect(host.hasBlob(garbage)).toBe(true)

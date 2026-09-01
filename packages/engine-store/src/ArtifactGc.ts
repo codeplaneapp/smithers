@@ -43,7 +43,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
-import * as StepBoundary from "./StepBoundary.ts"
+import * as ArtifactRoots from "./internal/ArtifactRoots.ts"
 
 /**
  * Stable error codes returned by artifact garbage collection.
@@ -52,7 +52,7 @@ import * as StepBoundary from "./StepBoundary.ts"
  * @since 0.1.0
  * @slop
  */
-export const ArtifactGcErrorCode = Schema.Literals(["mark_failed", "sweep_failed"])
+export const ArtifactGcErrorCode = Schema.Literals(["invalid_options", "mark_failed", "sweep_failed"])
 
 /**
  * Stable error codes returned by artifact garbage collection.
@@ -211,25 +211,13 @@ export interface MakeOptions {
   readonly pageSize?: number | undefined
 }
 
-/**
- * The shape a root row's metadata must decode to once it claims boundary
- * evidence at all. Metadata with no `boundary` key is the ordinary case —
- * rows recorded before a boundary existed, and failed attempts, legitimately
- * carry none — and contributes nothing.
- */
-const RootMeta = Schema.Struct({
-  boundary: StepBoundary.BoundaryEvidence
-})
-
-const MetaJson = Schema.fromJsonString(Schema.Unknown)
-
-const ArtifactDigest = /^[0-9a-f]{64}$/
-
 const markFailed = (message: string, cause: unknown): ArtifactGcError =>
   new ArtifactGcError({ code: "mark_failed", message, cause })
 
 const sweepFailed = (message: string, cause: unknown): ArtifactGcError =>
   new ArtifactGcError({ code: "sweep_failed", message, cause })
+
+const invalidOptions = (message: string): ArtifactGcError => new ArtifactGcError({ code: "invalid_options", message })
 
 /**
  * Extracts the digests one root row keeps live, FAIL-SAFE: a row whose
@@ -239,58 +227,15 @@ const sweepFailed = (message: string, cause: unknown): ArtifactGcError =>
  * metadata shape with no `boundary` key at all is the ordinary
  * foreign-evidence case `referencedDigests` already defines as empty.
  */
-const rootDigests = (
-  table: string,
-  metaJson: string
-): Effect.Effect<ReadonlyArray<string>, ArtifactGcError> =>
-  Effect.gen(function*() {
-    // Both tables CHECK `json_valid` on their metadata columns, so the JSON
-    // itself always parses; only the boundary shape can be foreign.
-    const meta = yield* Schema.decodeUnknownEffect(MetaJson)(metaJson).pipe(Effect.orDie)
-    if (meta === null || typeof meta !== "object" || !("boundary" in meta)) return []
-    const decoded = Schema.decodeUnknownResult(RootMeta)(meta)
-    if (decoded._tag === "Failure") {
-      return yield* Effect.fail(
-        markFailed(`a ${table} row carries boundary evidence this build cannot decode`, decoded.failure)
-      )
-    }
-    return StepBoundary.referencedDigests(decoded.success.boundary)
-  })
+const rootDigests = (table: string, metaJson: string): Effect.Effect<ReadonlyArray<string>, ArtifactGcError> =>
+  ArtifactRoots.rootDigests(table, metaJson).pipe(
+    Effect.mapError((cause) => markFailed(cause.message, cause.cause))
+  )
 
-const collectArtifactDigests = (root: unknown): ReadonlyArray<string> => {
-  const digests = new Set<string>()
-  const pending: Array<unknown> = [root]
-  while (pending.length > 0) {
-    const next = pending.pop()
-    if (typeof next === "string") {
-      if (ArtifactDigest.test(next)) digests.add(next)
-      continue
-    }
-    if (Array.isArray(next)) {
-      pending.push(...next)
-      continue
-    }
-    if (next !== null && typeof next === "object") {
-      pending.push(...Object.values(next as Readonly<Record<string, unknown>>))
-    }
-  }
-  return [...digests]
-}
-
-/**
- * Attempt checkpoints are executable state and intentionally opaque to
- * `AttemptStore`, but a checkpoint can carry an artifact address that the
- * retrying step expects to resolve. Over-retention of digest-shaped strings is
- * safe; missing one would let GC delete bytes a live checkpoint still needs.
- */
-const checkpointDigests = (
-  checkpointJson: string | null
-): Effect.Effect<ReadonlyArray<string>, ArtifactGcError> =>
-  Effect.gen(function*() {
-    if (checkpointJson === null) return []
-    const checkpoint = yield* Schema.decodeUnknownEffect(MetaJson)(checkpointJson).pipe(Effect.orDie)
-    return collectArtifactDigests(checkpoint)
-  })
+const checkpointDigests = (checkpointJson: string | null): Effect.Effect<ReadonlyArray<string>, ArtifactGcError> =>
+  ArtifactRoots.checkpointDigests(checkpointJson).pipe(
+    Effect.mapError((cause) => markFailed(cause.message, cause.cause))
+  )
 
 /**
  * Builds the collector over the composition's own durable tables and the
@@ -378,9 +323,15 @@ export const make = (
 
     const gc: Service["gc"] = Effect.fn("ArtifactGc.gc")((gcOptions) =>
       Effect.gen(function*() {
+        if (!Number.isSafeInteger(pageSize) || pageSize < 1) {
+          return yield* Effect.fail(invalidOptions("artifact GC pageSize must be a positive safe integer"))
+        }
         const grace = gcOptions?.graceMs ??
           (Option.isSome(policy) ? policy.value.graceMs : undefined) ??
           defaultGraceMs
+        if (!Number.isSafeInteger(grace) || grace < 0) {
+          return yield* Effect.fail(invalidOptions("artifact GC graceMs must be a non-negative safe integer"))
+        }
         const live = new Set<string>(gcOptions?.pins ?? [])
         if (Option.isSome(policy) && policy.value.pins !== undefined) {
           for (const digest of yield* policy.value.pins) live.add(digest)
