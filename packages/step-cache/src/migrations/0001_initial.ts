@@ -1,7 +1,7 @@
 /**
  * Initial durable step result cache schema.
  *
- * Schema boundary: `docs/specs/Research/Smithers Deviations 2026-07-28.md`.
+ * See the {@link https://smithers.sh/api/step-cache | step-cache reference}.
  *
  * @since 0.1.0
  */

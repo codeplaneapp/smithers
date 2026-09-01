@@ -1,7 +1,7 @@
 /**
  * Deterministic bundle of the production step cache service.
  *
- * Governing design: `docs/specs/Concepts/Step Keys.md`.
+ * See the {@link https://smithers.sh/concepts/step-keys | step-key contract}.
  *
  * @since 0.1.0
  */

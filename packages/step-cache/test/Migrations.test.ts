@@ -1,6 +1,7 @@
 /**
  * The step cache owns `flows_step_cache` and reserves migration id block
- * 2000 — see `docs/specs/Concepts/Journal Split.md`.
+ * 2000 — see the journal architecture at
+ * https://smithers.sh/concepts/journal.
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"

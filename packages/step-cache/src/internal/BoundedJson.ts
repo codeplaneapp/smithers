@@ -1,5 +1,15 @@
-/** Inert JSON admission for values crossing the step-cache boundary. */
+/**
+ * Inert JSON admission for values crossing the step-cache boundary.
+ *
+ * @since 1.0.0-rc.0
+ */
 
+/**
+ * Resource limits for one admitted JSON tree.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
 export interface Limits {
   readonly maxBytes: number
   readonly maxDepth: number
@@ -9,8 +19,20 @@ export interface Limits {
   readonly maxKeyBytes: number
 }
 
+/**
+ * Detached JSON value accepted by the cache persistence boundary.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
 export type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
 
+/**
+ * Result of admitting or refusing an unknown JSON candidate.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
 export type Result =
   | { readonly ok: true; readonly value: Json }
   | { readonly ok: false; readonly complaint: string }
@@ -38,6 +60,9 @@ const stringBytes = (value: string, maximum: number): number | undefined => {
 /**
  * Copies a JSON tree without invoking getters or `toJSON`, under explicit
  * byte, depth, node, and member limits.
+ *
+ * @category validation
+ * @since 1.0.0-rc.0
  */
 export const admit = (input: unknown, limits: Limits): Result => {
   let bytes = 0
@@ -85,7 +110,9 @@ export const admit = (input: unknown, limits: Limits): Result => {
         const output: Array<Json> = []
         for (let index = 0; index < length.value; index++) {
           const descriptor = Object.getOwnPropertyDescriptor(object, String(index))
-          if (descriptor === undefined || !("value" in descriptor)) return refuse("contains a sparse or accessor array member")
+          if (descriptor === undefined || !("value" in descriptor)) {
+            return refuse("contains a sparse or accessor array member")
+          }
           const member = visit(descriptor.value, depth + 1)
           if (!member.ok) return member
           output.push(member.value)
@@ -96,7 +123,9 @@ export const admit = (input: unknown, limits: Limits): Result => {
             const index = Number(key)
             if (index < length.value && String(index) === key) continue
           }
-          if (Object.getOwnPropertyDescriptor(object, key)?.enumerable) return refuse("has an enumerable non-index array member")
+          if (Object.getOwnPropertyDescriptor(object, key)?.enumerable) {
+            return refuse("has an enumerable non-index array member")
+          }
         }
         return { ok: true, value: Object.freeze(output) }
       }

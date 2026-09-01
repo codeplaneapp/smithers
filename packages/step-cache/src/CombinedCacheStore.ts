@@ -117,9 +117,8 @@ export const make = (options: Options): CacheStore.Service => {
     // corrupt evidence this host could not materialize — and none of those
     // observations generalize to the shared tier, where another machine may
     // hold the artifacts this one lost. Reclaiming shared entries is an
-    // explicit release verb (`docs/specs/Concepts/Reconciliation.md`) and is
-    // ticketed (`.smithers/tickets/cas-garbage-collection.md`), never a side
-    // effect of one host's failed replay.
+    // explicit retention operation, never a side effect of one host's failed
+    // replay.
     Effect.annotateCurrentSpan({ keyDigest }).pipe(Effect.andThen(local.evict(keyDigest, evictOptions)))
   )
 
@@ -152,10 +151,11 @@ export const layer = <EL, RL, ER, RR>(options: {
   Layer.effect(CacheStore.CacheStore)(
     Effect.map(
       Effect.all({ local: options.local, remote: options.remote }),
-      ({ local, remote }) => make({
-        local,
-        remote,
-        ...(options.publication === undefined ? {} : { publication: options.publication })
-      })
+      ({ local, remote }) =>
+        make({
+          local,
+          remote,
+          ...(options.publication === undefined ? {} : { publication: options.publication })
+        })
     )
   )

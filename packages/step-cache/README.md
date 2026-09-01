@@ -1,78 +1,98 @@
 # @smthrs/step-cache
 
-The Smithers step result cache: which sealed action results may be reused.
-Split out of `@smthrs/journal`; see
-[journal concepts](../../docs/pages/concepts/journal.md).
-
-`CacheStore` is a keyed memoization of sealed step results, addressed by the
-step key digest of [step keys](../../docs/pages/concepts/step-keys.md). It is
-deliberately called a _cache_: entries may be evicted, a stale entry is a miss
-rather than a corruption, and admission is gated the same way for normal
-execution, replay, and speculation validation alike.
-
-It shares nothing with the journal or the run store beyond the database
-underneath, which is why it is its own package and depends only on
-`@smthrs/database`.
+Durable, content-addressed storage for sealed step results. Entries are
+reusable execution evidence, but the mutable head remains a cache: it may be
+expired or evicted without rewriting the append-only provenance ledger.
 
 ```sh
 pnpm add @smthrs/step-cache
 ```
 
+The package depends on `@smthrs/canonical` for stable JSON and
+`@smthrs/database` for driver-neutral durable writes. Its root remains
+browser-bundleable; only the explicit test helper binds Node SQLite.
+
 ## Public API
 
-The root exports these namespaces, also available from matching
-`@smthrs/step-cache/*` subpaths.
+The root exports five namespaces, also available through matching subpaths.
 
-| Namespace    | Public exports                                                                                                                                                                                            |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CacheStore` | `CacheStoreErrorCode`, `CacheStoreError`, `CacheEntry`, and `PutResult`; `Service` / `CacheStore` operations `get`, `put`, `evict`, and `sweepExpired`; `make`, `makeNoop`, `layerNoop`, and SQL `layer`. |
-| `Migrations` | `set` (the namespaced migration set for `flows_step_cache`), `run`, and prerequisite `layer`.                                                                                                             |
+| Namespace            | Contract                                                                                                                                                                     |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CacheStore`         | Schemas, limits, validation helpers, `CacheStoreError`, `get`, `put`, fenced `evict`, `sweepExpired`, SQL `layer`, and explicit failing `makeNoop` / `layerNoop` test seams. |
+| `CacheStoreMetrics`  | Hit, miss, and put-outcome counters.                                                                                                                                         |
+| `CombinedCacheStore` | Local-first read-through, local write-back, and inline or deferred remote publication.                                                                                       |
+| `RemoteCacheStore`   | Bounded HTTP action-cache client under `/ac/{keyDigest}`.                                                                                                                    |
+| `Migrations`         | Namespaced migration `set`, `run`, and prerequisite `layer`.                                                                                                                 |
 
-The root is written against the driver-neutral `@smthrs/database` contract and
-bundles for the browser. The test double binds a Node SQLite database, so it
-lives under an explicit subpath:
+`CacheStore` also exposes `encodeCanonical`, `validateKey`,
+`validateRecordedBy`, `validateFence`, `validateAge`, and `snapshotEntry` for
+adapters implementing the same boundary. Internal migration implementation
+files are not exported.
 
-| Import                                   | Public exports                                                |
-| ---------------------------------------- | ------------------------------------------------------------- |
-| `@smthrs/step-cache/test/TestCacheStore` | **Node only.** `layer`, providing a migrated in-memory cache. |
+The Node-only test layer is available at
+`@smthrs/step-cache/test/TestCacheStore`.
 
-An engine needs this package, `@smthrs/journal`, and `@smthrs/run-store` over
-one database; `@smthrs/engine-store/Migrations` composes all four migration
-sets, and `@smthrs/engine-store/test/TestStores` is the in-memory bundle.
+## Durable contract
+
+- A key is one URL-segment-safe digest matching `[A-Za-z0-9_-]{1,256}`.
+- `put` is first-writer-wins. It returns `Inserted`, `ExistingSame`, or
+  `Conflict`; an exact `(keyDigest, recordedRunId, recordedEventSeq)` provenance
+  record is immutable even after the mutable head is evicted.
+- Inputs are detached and frozen at effect start. Accessors, sparse or cyclic
+  structures, non-JSON values, ill-formed Unicode, and hostile object shells
+  are rejected without executing user hooks.
+- Each `result` and `meta` tree is bounded to 4 MiB, depth 128, 100,000 nodes,
+  and 100,000 members. Run ids are non-empty, control-free, well-formed text of
+  at most 1,024 UTF-16 code units. Timestamps and event sequences are
+  non-negative safe integers.
+- `CacheStoreError.code` is one of `invalid_cache`, `constraint`,
+  `decode_failed`, `persistence_failed`, or `unknown`. Boundary diagnostics do
+  not retain rejected payloads or transport causes.
+
+`get(keyDigest, { recordedBy, maxAgeMs })` can select the immutable provenance
+row for one journal event and apply a read-only age bound. An expired recorded
+row is a miss, never a fallback to a newer head. `evict(keyDigest, {
+ifRecordedBy })` performs one compare-and-swap delete. `sweepExpired` removes
+old heads only; it never deletes provenance.
+
+## Local and remote composition
 
 ```ts
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
-import { CacheStore, Migrations } from "@smthrs/step-cache"
+import { CacheStore, CombinedCacheStore, Migrations, RemoteCacheStore } from "@smthrs/step-cache"
 import { Effect, Layer } from "effect"
 
 const database = NodeDatabase.layer({ filename: "flows.db" })
-const cache = CacheStore.layer.pipe(
+const local = CacheStore.layer.pipe(
   Layer.provide(Layer.provideMerge(Migrations.layer, database))
 )
 
-const program = Effect.gen(function*() {
-  const store = yield* CacheStore.CacheStore
-  return yield* store.get("digest")
-}).pipe(Effect.provide(cache))
+const remote = RemoteCacheStore.make({
+  endpoint: "https://cache.example.com/base",
+  headers: { authorization: "Bearer …" },
+  requestTimeout: "30 seconds"
+})
+
+const cache = CombinedCacheStore.layer({
+  local: Effect.service(CacheStore.CacheStore).pipe(Effect.provide(local)),
+  remote,
+  publication: "deferred"
+})
 ```
 
-## Age bounds
+Remote endpoints must use HTTPS, except loopback HTTP for local development.
+Credentials in `headers` are snapshotted once at construction. Every request
+and response body is finite: the default deadline is 60 seconds and the
+response limit is 4 MiB. A lookup maps `404` to a miss; publication maps `201`
+to `Inserted`, other successful statuses to `ExistingSame`, and `409` to
+`Conflict`. Remote retention is server-owned, so `sweepExpired` validates its
+argument and returns zero.
 
-`get(keyDigest, { maxAgeMs })` refuses a row recorded more than `maxAgeMs`
-before the current clock reading, so a caller that declared a time to live
-reads a miss instead of a stale result. The bound is a read policy: the row
-stays on disk, and a second caller declaring a longer bound still reads it.
+When entries reference artifacts, publish every artifact to the shared
+artifact tier before publishing the cache entry. Use deferred publication when
+the local write occurs inside a database transaction; perform remote I/O only
+after that transaction commits.
 
-A lookup that also names `recordedBy` reads that exact ledger row. When the
-bound refuses it the answer is a miss, not the head row: the head may hold a
-result a later run recorded, and a replay of the named event must read that
-event's row or nothing.
-
-`sweepExpired(olderThanMs)` is the collection half. It deletes head rows older
-than the bound and answers how many it deleted. It never touches the
-append-only `flows_step_cache_recorded` ledger, because an old frame's replay
-projects what that event recorded and deleting the evidence would change a
-replayed answer.
-
-See the [step-cache reference](../../docs/pages/api/step-cache.md) and
-[step keys](../../docs/pages/concepts/step-keys.md).
+See the [step-cache API](https://smithers.sh/api/step-cache),
+[step-key contract](https://smithers.sh/concepts/step-keys), and
+[journal architecture](https://smithers.sh/concepts/journal).

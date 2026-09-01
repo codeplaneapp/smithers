@@ -5,8 +5,8 @@
  * id block `2000` so its ids can never collide with the journal's or the run
  * store's — see `@smthrs/database`'s `Migrations` for how the blocks compose.
  *
- * Derived contracts: `docs/specs/Concepts/Step Keys.md` and
- * `docs/specs/Concepts/Journal Split.md`.
+ * See the {@link https://smithers.sh/concepts/step-keys | step-key contract}
+ * and {@link https://smithers.sh/concepts/journal | journal architecture}.
  *
  * @since 0.1.0
  */

@@ -4,8 +4,8 @@
  * This store receives already-computed digests and recorded results. It does
  * not inspect step layers, capabilities, or result metadata.
  *
- * Governing designs: `docs/specs/Concepts/Step Keys.md` and
- * `docs/specs/Concepts/Trust Granularity.md`.
+ * See the {@link https://smithers.sh/concepts/step-keys | step-key contract}
+ * and {@link https://smithers.sh/concepts/journal | journal architecture}.
  *
  * @since 0.1.0
  */
@@ -23,16 +23,36 @@ import * as SqlError from "effect/unstable/sql/SqlError"
 import * as CacheStoreMetrics from "./CacheStoreMetrics.ts"
 import * as BoundedJson from "./internal/BoundedJson.ts"
 
-/** Maximum encoded bytes admitted for one `result` or `meta` JSON tree. */
+/**
+ * Maximum encoded bytes admitted for one `result` or `meta` JSON tree.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
 export const maximumJsonBytes = 4 * 1024 * 1024
 
-/** Maximum nesting admitted for one cache JSON tree. */
+/**
+ * Maximum nesting admitted for one cache JSON tree.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
 export const maximumJsonDepth = 128
 
-/** Maximum values admitted for one cache JSON tree. */
+/**
+ * Maximum values admitted for one cache JSON tree.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
 export const maximumJsonNodes = 100_000
 
-/** Maximum members admitted by one cache JSON array or object. */
+/**
+ * Maximum members admitted by one cache JSON array or object.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
 export const maximumJsonMembers = 100_000
 
 const jsonLimits: BoundedJson.Limits = {
@@ -89,7 +109,12 @@ const NonNegativeSafeInt = Schema.Int.check(
   Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)
 )
 
-/** Maximum number of characters accepted in one cache-key digest. */
+/**
+ * Maximum number of characters accepted in one cache-key digest.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
 export const maximumKeyDigestLength = 256
 
 /**
@@ -109,10 +134,20 @@ export const KeyDigest = Schema.String.check(
   })
 )
 
-/** A validated cache-key digest. */
+/**
+ * A validated cache-key digest.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
 export type KeyDigest = typeof KeyDigest.Type
 
-/** Maximum number of UTF-16 code units accepted in a recording run id. */
+/**
+ * Maximum number of UTF-16 code units accepted in a recording run id.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
 export const maximumRecordedRunIdLength = 1_024
 
 const isWellFormedText = (value: string): boolean => {
@@ -131,19 +166,34 @@ const wellFormedText = Schema.makeFilter(
   { title: "wellFormedText" }
 )
 
-/** Run id carried by an immutable cache provenance record. */
+/**
+ * Run id carried by an immutable cache provenance record.
+ *
+ * @category schemas
+ * @since 1.0.0-rc.0
+ */
 export const RecordedRunId = Schema.NonEmptyString.check(
   Schema.isMaxLength(maximumRecordedRunIdLength),
   wellFormedText
 )
 
-/** Exact journal event that recorded a cache result. */
+/**
+ * Exact journal event that recorded a cache result.
+ *
+ * @category schemas
+ * @since 1.0.0-rc.0
+ */
 export const RecordedBy = Schema.Struct({
   runId: RecordedRunId,
   eventSeq: NonNegativeSafeInt
 })
 
-/** Exact journal event that recorded a cache result. */
+/**
+ * Exact journal event that recorded a cache result.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
 export type RecordedBy = typeof RecordedBy.Type
 
 /**
@@ -270,8 +320,9 @@ export interface Service {
  *
  * The identity string equals the defining module path, like every other
  * service identity in this repository. The pre-split `flows/journal/CacheStore`
- * identity from `docs/specs/Concepts/Journal Split.md` was retired pre-release,
- * while no persisted journal or step-key digest named it.
+ * identity was retired before rc.0, while no persisted journal or step-key
+ * digest named it. See the
+ * {@link https://smithers.sh/concepts/journal | journal architecture}.
  *
  * @category services
  * @since 0.1.0
@@ -378,8 +429,7 @@ export const validateRecordedBy = (
  */
 export const validateFence = (
   fence: EvictOptions["ifRecordedBy"]
-): Effect.Effect<void, CacheStoreError> =>
-  validateRecordedBy(fence, "eviction fence")
+): Effect.Effect<void, CacheStoreError> => validateRecordedBy(fence, "eviction fence")
 
 /**
  * Refuses an age bound no row could satisfy before any statement is issued.

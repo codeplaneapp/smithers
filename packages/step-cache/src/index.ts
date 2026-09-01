@@ -2,9 +2,10 @@
  * The step result cache: which sealed results may be reused.
  *
  * `CacheStore` is a keyed memoization of sealed action results whose entries
- * may be evicted — a cache, in the `docs/specs/Concepts/Step Keys.md` sense —
- * and it shares nothing with the journal or the run store beyond the database
- * beneath it. See `docs/specs/Concepts/Journal Split.md`.
+ * may be evicted. It shares nothing with the journal or the run store beyond
+ * the database beneath it. See the
+ * {@link https://smithers.sh/concepts/step-keys | step-key contract} and
+ * {@link https://smithers.sh/concepts/journal | journal architecture}.
  *
  * This entry point is browser-bundleable: the service is written against the
  * driver-neutral `@smthrs/database` contract. The test double, which binds a
