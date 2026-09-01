@@ -1,12 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DatabaseError, DurableWriter, type Service as WriterService } from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Deferred, Effect, Fiber, Layer, PubSub, Stream, Tracer } from "effect"
+import { Deferred, Effect, Fiber, Layer, PubSub, Schema, Stream, Tracer } from "effect"
 import type * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as Statement from "effect/unstable/sql/Statement"
-import { Journal, JournalError } from "../src/Journal.ts"
+import { EntriesOptions, Journal, JournalError, maxEntriesLimit } from "../src/Journal.ts"
 import { Input, makeEventId, type RunId, type Seq, type SourceId, type SourceSeq } from "../src/JournalEvent.ts"
 import * as Migrations from "../src/Migrations.ts"
 import * as SqlJournal from "../src/SqlJournal.ts"
@@ -1224,6 +1224,35 @@ describe("Journal", () => {
         expect(
           [...first.entries, ...second.entries, ...third.entries].map((entry) => entry.seq)
         ).toEqual([0, 1, 2, 3, 4])
+      })
+    )
+  })
+
+  effect("bounds entries pages in the schema and the service", () => {
+    const run = runId("bounded-page")
+    const source = sourceId("producer")
+
+    return runJournal(
+      Effect.gen(function*() {
+        const journal = yield* Journal
+        yield* journal.emitLossy(input(run, source, "first", {}))
+        yield* journal.emitLossy(input(run, source, "second", {}))
+        yield* journal.flush
+
+        const page = yield* journal.entries({ runId: run, limit: maxEntriesLimit })
+        expect(page.entries.map((entry) => entry.eventType)).toEqual(["first", "second"])
+        expect(page.hasMore).toBe(false)
+
+        const failure = yield* Effect.flip(
+          journal.entries({ runId: run, limit: maxEntriesLimit + 1 })
+        )
+        expect(failure.code).toBe("invalid_event")
+        expect(() =>
+          Schema.decodeUnknownSync(EntriesOptions)({
+            runId: run,
+            limit: maxEntriesLimit + 1
+          })
+        ).toThrow()
       })
     )
   })

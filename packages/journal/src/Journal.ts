@@ -220,7 +220,22 @@ export const StreamOptions = Schema.Struct({
 export type StreamOptions = typeof StreamOptions.Type
 
 /**
+ * Largest page `entries` will read.
+ *
+ * A page is decoded into memory in full before the caller sees its first
+ * entry, so an unbounded limit lets one call materialize a whole run. The
+ * largest page any caller in this repository asks for is 512, so this
+ * ceiling refuses only a limit that was going to be a memory incident.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const maxEntriesLimit = 10_000
+
+/**
  * Cursor and page size for durable journal reads.
+ *
+ * `limit` is at most `maxEntriesLimit` (10,000 entries).
  *
  * @category models
  * @since 0.1.0
@@ -228,7 +243,7 @@ export type StreamOptions = typeof StreamOptions.Type
 export const EntriesOptions = Schema.Struct({
   runId: RunId,
   after: Schema.optionalKey(Seq),
-  limit: Schema.Int.check(Schema.isGreaterThan(0))
+  limit: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(maxEntriesLimit))
 })
 
 /**

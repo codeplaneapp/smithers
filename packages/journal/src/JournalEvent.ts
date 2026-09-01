@@ -16,6 +16,21 @@ import * as Schema from "effect/Schema"
 const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
 
 /**
+ * Longest identifier the journal persists.
+ *
+ * A run id, a source id and an event type are index columns of a permanent
+ * table and are held in per-run maps for the layer's lifetime, so an
+ * unbounded one costs durable index space and heap that nothing ever
+ * reclaims. Every identifier this repository mints is a uuid or a short
+ * dotted name, two orders of magnitude below this bound, so the ceiling
+ * refuses only the shapes that were never identifiers.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const maxIdentifierLength = 1024
+
+/**
  * A persistable identifier: non-empty, and representable in the store.
  *
  * SQLite binds a lone UTF-16 surrogate as U+FFFD, so two ill-formed
@@ -29,17 +44,20 @@ const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\
  * The empty string is rejected for a plainer reason: it names nothing, and the
  * journal used to accept it at decode and then reject it at the service, so a
  * caller could hold a "valid" identifier the next call refused.
+ * The length is bounded because every identifier occupies permanent index
+ * space and layer-lifetime heap.
  */
 const identifier = Schema.String.check(
   Schema.isMinLength(1),
+  Schema.isMaxLength(maxIdentifierLength),
   Schema.makeFilter((value: string) => !loneSurrogate.test(value), { title: "wellFormedIdentifier" })
 )
 
 /**
  * Schema for an identifier of one durable run.
  *
- * Non-empty and free of unpaired UTF-16 surrogates, because the store cannot
- * tell two ill-formed identifiers apart.
+ * Between 1 and 1,024 UTF-16 code units and free of unpaired UTF-16
+ * surrogates, because the store cannot tell two ill-formed identifiers apart.
  *
  * @category schemas
  * @since 0.1.0
@@ -57,10 +75,17 @@ export type RunId = typeof RunId.Type
 /**
  * Schema for the canonical, durable sequence number within a run.
  *
+ * `Number.MAX_SAFE_INTEGER` is excluded because the journal must always be
+ * able to allocate the next sequence. `Number.MAX_SAFE_INTEGER + 1` is not a
+ * distinct integer, so the maximum is not an allocatable sequence.
+ *
  * @category schemas
  * @since 0.1.0
  */
-export const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+export const Seq = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThan(Number.MAX_SAFE_INTEGER)
+).pipe(
   Schema.brand("@smthrs/journal/JournalEvent/Seq")
 )
 
@@ -75,8 +100,9 @@ export type Seq = typeof Seq.Type
 /**
  * Schema for an event producer identifier.
  *
- * Non-empty and free of unpaired UTF-16 surrogates, on the same terms as
- * `RunId`: the pair identifies a producer's retries in the database.
+ * Between 1 and 1,024 UTF-16 code units and free of unpaired UTF-16
+ * surrogates, on the same terms as `RunId`: the pair identifies a producer's
+ * retries in the database.
  *
  * @category schemas
  * @since 0.1.0
@@ -94,10 +120,17 @@ export type SourceId = typeof SourceId.Type
 /**
  * Schema for a producer-local event sequence number.
  *
+ * `Number.MAX_SAFE_INTEGER` is excluded because the journal must always be
+ * able to allocate the next sequence. `Number.MAX_SAFE_INTEGER + 1` is not a
+ * distinct integer, so the maximum is not an allocatable sequence.
+ *
  * @category schemas
  * @since 0.1.0
  */
-export const SourceSeq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+export const SourceSeq = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThan(Number.MAX_SAFE_INTEGER)
+).pipe(
   Schema.brand("@smthrs/journal/JournalEvent/SourceSeq")
 )
 
@@ -154,6 +187,7 @@ export class Input extends Schema.Class<Input>("@smthrs/journal/JournalEvent/Inp
   sourceSeq: Schema.optional(SourceSeq),
   /** How a collision on this event's identity is settled. Defaults to `content`. */
   dedupe: Schema.optional(Dedupe),
+  /** Non-empty, well-formed UTF-16 of at most 1,024 code units. */
   eventType: identifier,
   payload: Schema.Unknown,
   meta: Schema.optional(Schema.Unknown)

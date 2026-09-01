@@ -45,6 +45,7 @@ import {
   Journal,
   JournalError,
   make as makeJournal,
+  maxEntriesLimit,
   type OverflowPolicy,
   type Service,
   type StreamOptions
@@ -1063,6 +1064,14 @@ export const layer = (
           }
           if (!Number.isSafeInteger(pageOptions.limit) || pageOptions.limit <= 0) {
             return yield* Effect.fail(error("invalid_event", "limit must be a positive safe integer"))
+          }
+          if (pageOptions.limit > maxEntriesLimit) {
+            return yield* Effect.fail(
+              error(
+                "invalid_event",
+                `limit ${pageOptions.limit} exceeds the maximum page of ${maxEntriesLimit}`
+              )
+            )
           }
           const after = pageOptions.after ?? -1
           if (!Number.isSafeInteger(after) || after < -1) {

@@ -1,6 +1,19 @@
+import { Schema } from "effect"
 import { FastCheck, TestSchema } from "effect/testing"
 import { describe, expect, it } from "vitest"
-import { Entry, Input, makeEventId, type RunId, type SourceId, type SourceSeq } from "../src/JournalEvent.ts"
+import {
+  Entry,
+  Input,
+  makeEventId,
+  maxIdentifierLength,
+  RunId,
+  Seq,
+  SourceId,
+  SourceSeq,
+  type RunId as RunIdType,
+  type SourceId as SourceIdType,
+  type SourceSeq as SourceSeqType
+} from "../src/JournalEvent.ts"
 
 const params = {
   numRuns: Number(process.env.FC_NUM_RUNS ?? 100),
@@ -9,9 +22,9 @@ const params = {
   markInterruptAsFailure: true
 } satisfies FastCheck.Parameters<unknown>
 
-const runId = (value: string): RunId => value as RunId
-const sourceId = (value: string): SourceId => value as SourceId
-const sourceSeq = (value: number): SourceSeq => value as SourceSeq
+const runId = (value: string): RunIdType => value as RunIdType
+const sourceId = (value: string): SourceIdType => value as SourceIdType
+const sourceSeq = (value: number): SourceSeqType => value as SourceSeqType
 
 describe("JournalEvent properties", () => {
   it("Entry survives encode-then-decode for arbitrary envelopes", async () => {
@@ -22,6 +35,49 @@ describe("JournalEvent properties", () => {
   it("Input survives encode-then-decode for arbitrary submissions", async () => {
     const asserts = new TestSchema.Asserts(Input)
     await asserts.verifyLosslessTransformation({ params })
+  })
+
+  it.each([
+    [
+      "RunId",
+      () => Schema.decodeUnknownSync(RunId)("r".repeat(maxIdentifierLength)),
+      () => Schema.decodeUnknownSync(RunId)("r".repeat(maxIdentifierLength + 1))
+    ],
+    [
+      "SourceId",
+      () => Schema.decodeUnknownSync(SourceId)("s".repeat(maxIdentifierLength)),
+      () => Schema.decodeUnknownSync(SourceId)("s".repeat(maxIdentifierLength + 1))
+    ],
+    [
+      "Input.eventType",
+      () =>
+        Schema.decodeUnknownSync(Input)({
+          runId: "run",
+          sourceId: "source",
+          eventType: "e".repeat(maxIdentifierLength),
+          payload: null
+        }),
+      () =>
+        Schema.decodeUnknownSync(Input)({
+          runId: "run",
+          sourceId: "source",
+          eventType: "e".repeat(maxIdentifierLength + 1),
+          payload: null
+        })
+    ],
+    [
+      "Seq",
+      () => Schema.decodeUnknownSync(Seq)(Number.MAX_SAFE_INTEGER - 1),
+      () => Schema.decodeUnknownSync(Seq)(Number.MAX_SAFE_INTEGER)
+    ],
+    [
+      "SourceSeq",
+      () => Schema.decodeUnknownSync(SourceSeq)(Number.MAX_SAFE_INTEGER - 1),
+      () => Schema.decodeUnknownSync(SourceSeq)(Number.MAX_SAFE_INTEGER)
+    ]
+  ])("%s accepts its supported upper boundary and refuses the next value", (_name, accepted, refused) => {
+    expect(accepted).not.toThrow()
+    expect(refused).toThrow()
   })
 
   it("makeEventId keeps distinct (runId, sourceId, sourceSeq) tuples distinct", () => {
