@@ -58,10 +58,12 @@ export const sameJson = (left: Json | undefined, right: Json | undefined): boole
     return true
   }
   if (Array.isArray(right)) return false
-  const leftKeys = Object.keys(left)
-  if (leftKeys.length !== Object.keys(right).length) return false
+  const leftObject = left as { readonly [key: string]: Json }
+  const rightObject = right as { readonly [key: string]: Json }
+  const leftKeys = Object.keys(leftObject)
+  if (leftKeys.length !== Object.keys(rightObject).length) return false
   for (const key of leftKeys) {
-    if (!Object.hasOwn(right, key) || !sameJson(left[key], right[key])) return false
+    if (!Object.hasOwn(rightObject, key) || !sameJson(leftObject[key], rightObject[key])) return false
   }
   return true
 }

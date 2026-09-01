@@ -148,8 +148,7 @@ export const RunStoreErrorCode = Schema.Literals([
   "not_found_row",
   "constraint",
   "decode_failed",
-  "persistence_failed",
-  "unknown"
+  "persistence_failed"
 ])
 
 /**
@@ -405,6 +404,9 @@ export interface Service {
   /**
    * Claims and activates an exact snapshot atomically under the supplied owner.
    * Replacing a different running owner also requires matching liveness evidence.
+   * A composition builds that `LivenessEvidence` with a `LivenessProbe`.
+   * `evidence.checkedAtMs` must equal `nowMs` exactly, so evidence probed at T
+   * is refused when this operation is called at T+1.
    */
   readonly claimAndOwn: (
     runId: string,
@@ -424,6 +426,12 @@ export interface Service {
     claimant: OwnerId,
     claimedAtMs: number
   ) => Effect.Effect<AbandonClaimOutcome, RunStoreError>
+  /**
+   * Recovers an exact stale claim after matching its claimant and liveness
+   * evidence. A composition builds `LivenessEvidence` with a `LivenessProbe`.
+   * `evidence.checkedAtMs` must equal `nowMs` exactly, so evidence probed at T
+   * is refused when this operation is called at T+1.
+   */
   readonly recoverClaim: (
     runId: string,
     staleClaimant: OwnerId,
@@ -444,6 +452,12 @@ export interface Service {
     stateJson?: string | undefined,
     guard?: TransitionGuard | undefined
   ) => Effect.Effect<TransitionOutcome, RunStoreError>
+  /**
+   * Steals an exact run snapshot after matching liveness evidence for its
+   * recorded owner. A composition builds `LivenessEvidence` with a
+   * `LivenessProbe`. `evidence.checkedAtMs` must equal `nowMs` exactly, so
+   * evidence probed at T is refused when this operation is called at T+1.
+   */
   readonly steal: (
     runId: string,
     expected: RunSnapshot,

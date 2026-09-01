@@ -29,14 +29,23 @@ describe("service contracts", () => {
         state: "completed",
         finishedAtMs: 1
       }
-      expect((yield* (Effect.flip(service.put(attempt, owner)))).message).toContain("put")
-      expect((yield* (Effect.flip(service.get(attempt)))).message).toContain("get")
-      expect(
-        (yield* (Effect.flip(
-          service.heartbeat("run", "digest", 0, owner, 1)
-        ))).message
-      ).toContain("heartbeat")
-      expect((yield* (Effect.flip(service.finish(finish, owner)))).message).toContain("finish")
+      const detail = "the store is unavailable in this environment"
+      expect(yield* Effect.flip(service.put(attempt, owner))).toMatchObject({
+        method: "put",
+        message: `unknown: AttemptStore.put: ${detail}`
+      })
+      expect(yield* Effect.flip(service.get(attempt))).toMatchObject({
+        method: "get",
+        message: `unknown: AttemptStore.get: ${detail}`
+      })
+      expect(yield* Effect.flip(service.heartbeat("run", "digest", 0, owner, 1))).toMatchObject({
+        method: "heartbeat",
+        message: `unknown: AttemptStore.heartbeat: ${detail}`
+      })
+      expect(yield* Effect.flip(service.finish(finish, owner))).toMatchObject({
+        method: "finish",
+        message: `unknown: AttemptStore.finish: ${detail}`
+      })
 
       const result = yield* (
         Effect.gen(function*() {

@@ -39,6 +39,9 @@ export {
  * checks it: the write refuses any row whose `heartbeat_at_ms` is still inside
  * the window. It is therefore accepted from a claimant on any host, while the
  * other two stay bound to the host relation that makes them meaningful.
+ * The observation must carry the exact instant supplied to the consuming
+ * operation: `checkedAtMs` must equal that operation's `nowMs`. A caller that
+ * probes at T and calls at T+1 is refused and must build fresh evidence.
  *
  * @since 0.1.0
  * @category models
@@ -58,13 +61,13 @@ export const LivenessEvidence = Schema.Struct({
 export type LivenessEvidence = typeof LivenessEvidence.Type
 
 /**
- * Injected liveness probe used by ownership arbitration before calling
- * `RunStore.steal`.
+ * Evidence-factory signature a composition uses for ownership arbitration.
  *
- * A probe may inspect a PID only when `expectedOwner.hostId` equals
- * `claimant.hostId`. Cross-host checks must not inspect the local PID and fall
- * back to stale-heartbeat reachability evidence. `RunStore` only validates
- * supplied evidence and never probes a process or network itself.
+ * A `LivenessProbe` returns `LivenessEvidence` or `undefined` for `steal`,
+ * `claimAndOwn`, and `recoverClaim` to verify. {@link LivenessCheck} is the
+ * separate alive-or-not question the engine asks before it decides to steal.
+ * `RunStore` validates supplied evidence and never probes a process or network
+ * itself.
  *
  * @since 0.1.0
  * @category models
@@ -173,10 +176,14 @@ export const leaseLiveness = (
  * checks. Three answers matter:
  *
  * - It returns: the process exists and is signalable. The owner is alive.
- * - It throws `EPERM`: the process EXISTS and this user may not signal it.
- *   That is a positive liveness answer, not a failure — reading it as death
- *   would let one user's engine steal from another's on a shared host.
- * - It throws anything else (`ESRCH`): no such process. The owner is gone.
+ * - It throws `ESRCH`: no such process exists. This is the sole death answer,
+ *   so the owner is gone.
+ * - It throws anything else, including `EPERM`, `EINVAL`, or an unrecognized
+ *   value: the owner is treated as alive because an unknown answer is not
+ *   death.
+ *
+ * This `ESRCH`-only death rule deliberately aligns with
+ * `@smthrs/platform-node`'s `HostLiveness`.
  *
  * A pid is only meaningful inside one process namespace, so a recorded owner
  * on another host is never probed: the answer is `false` and the arbitration

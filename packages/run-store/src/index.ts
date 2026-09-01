@@ -3,7 +3,7 @@
  *
  * `RunStore` and `AttemptStore` hold the executable authoritative state that
  * recovery reads; `Ownership` supplies the liveness evidence and heartbeat
- * supervision that arbitrate it. The fencing token they trade in — `OwnerId` —
+ * supervision that arbitrate it. The fencing token they trade in, `OwnerId`,
  * is defined by `@smthrs/journal`, because the journal is what it fences, and
  * is re-exported from `Ownership` here. See the
  * [journal model](/concepts/journal).

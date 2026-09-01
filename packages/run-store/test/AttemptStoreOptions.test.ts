@@ -303,13 +303,21 @@ describe("AttemptStore options", () => {
         hostile
       ], (options) => Effect.flip(AttemptStore.makeWith(options as never)))
       expect(failures.every((failure) => failure.code === "invalid_attempt")).toBe(true)
+      expect(failures.every((failure) => failure.method === "makeWith")).toBe(true)
+      expect(
+        failures.every((failure) => failure.message.startsWith("invalid_attempt: AttemptStore.makeWith: "))
+      ).toBe(true)
     }).pipe(Effect.provide(base), Effect.scoped))
 
   it.effect("the noop store reports patch as unavailable", () =>
     Effect.gen(function*() {
       const store = AttemptStore.makeNoop()
       const failure = yield* Effect.flip(store.patch({ runId: "r", stepKeyDigest: "d", attempt: 0 }, {}, owner))
-      expect(failure.code).toBe("unknown")
+      expect(failure).toMatchObject({
+        code: "unknown",
+        method: "patch",
+        message: "unknown: AttemptStore.patch: the store is unavailable in this environment"
+      })
     }))
 
   it.effect("layerWith provides a configured store", () =>

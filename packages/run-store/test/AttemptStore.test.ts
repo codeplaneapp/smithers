@@ -409,6 +409,66 @@ describe("AttemptStore", () => {
       expect(result).toEqual({ _tag: "ExistingSame" })
     }))
 
+  it.effect("compares re-put JSON by content instead of object key order", () =>
+    Effect.gen(function*() {
+      const results = yield* migrated(Effect.gen(function*() {
+        yield* createRun()
+        const store = yield* AttemptStore
+        const attempt = (
+          index: number,
+          fields: Partial<AttemptStoreLive.Attempt>
+        ): AttemptStoreLive.Attempt => ({
+          runId: "run-1",
+          stepKeyDigest: `digest-${index}`,
+          attempt: 0,
+          state: "running",
+          startedAtMs: 10,
+          meta: {},
+          ...fields
+        })
+        const cases = [
+          [
+            attempt(0, { meta: { a: 1, b: 2 } }),
+            attempt(0, { meta: { b: 2, a: 1 } })
+          ],
+          [
+            attempt(1, {
+              checkpoint: { nested: { a: 1, b: 2 }, entries: [{ c: 3, d: 4 }] }
+            }),
+            attempt(1, {
+              checkpoint: { entries: [{ d: 4, c: 3 }], nested: { b: 2, a: 1 } }
+            })
+          ],
+          [
+            attempt(2, { meta: { value: 1 } }),
+            attempt(2, { meta: { value: 2 } })
+          ],
+          [
+            attempt(3, { meta: { value: 1 } }),
+            attempt(3, { meta: { value: 1, extra: true } })
+          ],
+          [
+            attempt(4, { checkpoint: [1, 2] }),
+            attempt(4, { checkpoint: [2, 1] })
+          ]
+        ] as const
+
+        return yield* Effect.forEach(cases, ([first, second]) =>
+          Effect.gen(function*() {
+            yield* store.put(first, owner)
+            return yield* store.put(second, owner)
+          }))
+      }))
+
+      expect(results).toEqual([
+        { _tag: "ExistingSame" },
+        { _tag: "ExistingSame" },
+        { _tag: "Conflict" },
+        { _tag: "Conflict" },
+        { _tag: "Conflict" }
+      ])
+    }))
+
   it.effect("does not heartbeat terminal attempts", () =>
     Effect.gen(function*() {
       const result = yield* migrated(Effect.gen(function*() {
@@ -481,6 +541,37 @@ describe("AttemptStore", () => {
       expect(result.finished).toEqual({ _tag: "Finished" })
       expect(result.repeated).toEqual({ _tag: "StateChanged" })
       expect(result.stored.outcome).toEqual({ value: "first" })
+    }))
+
+  it.effect("attributes invalid identities to the refusing operation", () =>
+    Effect.gen(function*() {
+      const failures = yield* migrated(Effect.gen(function*() {
+        yield* createRun()
+        const store = yield* AttemptStore
+        const id = { runId: "run-1", stepKeyDigest: "digest", attempt: -1 }
+        return yield* Effect.all([
+          Effect.flip(store.get(id)),
+          Effect.flip(store.put({ ...id, state: "running", startedAtMs: 0, meta: {} }, owner)),
+          Effect.flip(store.heartbeat(id.runId, id.stepKeyDigest, id.attempt, owner, 1)),
+          Effect.flip(store.finish({ ...id, state: "completed", finishedAtMs: 1 }, owner)),
+          Effect.flip(store.patch(id, {}, owner))
+        ])
+      }))
+      const expected = [
+        ["get", "attempt identity violates the durable identifier contract"],
+        ["put", "attempt violates the persistence contract"],
+        ["heartbeat", "attempt identity violates the durable identifier contract"],
+        ["finish", "finished attempt violates the contract"],
+        ["patch", "attempt identity violates the durable identifier contract"]
+      ] as const
+
+      for (const [index, [method, detail]] of expected.entries()) {
+        expect(failures[index]).toMatchObject({
+          code: "invalid_attempt",
+          method,
+          message: `invalid_attempt: AttemptStore.${method}: ${detail}`
+        })
+      }
     }))
 
   it.effect("rejects invalid ids, timestamps, states, and JSON values with stable codes", () =>
@@ -625,7 +716,9 @@ describe("AttemptStore", () => {
     Effect.gen(function*() {
       const existing = new AttemptStoreLive.AttemptStoreError({
         code: "unknown",
-        message: "existing"
+        method: "get",
+        message: "unknown: AttemptStore.get: existing",
+        cause: { category: "unknown" }
       })
       const causes: ReadonlyArray<unknown> = [
         existing,
@@ -641,15 +734,15 @@ describe("AttemptStore", () => {
         null,
         "failure"
       ]
-      const codes = yield* (
+      const failures = yield* (
         Effect.forEach(
           causes,
           (cause) =>
             Effect.gen(function*() {
               const store = yield* AttemptStore
-              return (yield* Effect.flip(
+              return yield* Effect.flip(
                 store.get({ runId: "run", stepKeyDigest: "digest", attempt: 0 })
-              )).code
+              )
             }).pipe(
               Effect.provide(AttemptStoreLive.layer),
               Effect.provide(failingDatabase(cause))
@@ -657,7 +750,7 @@ describe("AttemptStore", () => {
         )
       )
 
-      expect(codes).toEqual([
+      expect(failures.map((failure) => failure.code)).toEqual([
         "unknown",
         "constraint",
         "constraint",
@@ -666,6 +759,17 @@ describe("AttemptStore", () => {
         "persistence_failed",
         "persistence_failed",
         "persistence_failed"
+      ])
+      expect(failures.every((failure) => failure.method === "get")).toBe(true)
+      expect(failures.map((failure) => failure.message)).toEqual([
+        "unknown: AttemptStore.get: existing",
+        "constraint: AttemptStore.get: attempt persistence failed",
+        "constraint: AttemptStore.get: attempt persistence failed",
+        "constraint: AttemptStore.get: attempt persistence failed",
+        "persistence_failed: AttemptStore.get: attempt persistence failed",
+        "persistence_failed: AttemptStore.get: attempt persistence failed",
+        "persistence_failed: AttemptStore.get: attempt persistence failed",
+        "persistence_failed: AttemptStore.get: attempt persistence failed"
       ])
     }))
 })

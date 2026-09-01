@@ -133,6 +133,7 @@ export class AttemptStoreError extends Schema.TaggedError<AttemptStoreError>()(
   "@smthrs/run-store/AttemptStoreError",
   {
     code: AttemptStoreErrorCode,
+    method: Schema.String,
     message: Schema.String,
     cause: Schema.optional(Schema.Unknown)
   }
@@ -390,10 +391,26 @@ interface RunFenceRow {
   readonly owner_nonce: string | null
 }
 
-const error = (code: AttemptStoreErrorCode, message: string): AttemptStoreError =>
-  new AttemptStoreError({ code, message })
+type AttemptStoreMethod = "makeWith" | keyof Service
+
+const attemptStoreError = (
+  method: AttemptStoreMethod,
+  code: AttemptStoreErrorCode,
+  detail: string,
+  cause?: unknown
+): AttemptStoreError =>
+  new AttemptStoreError({
+    code,
+    method,
+    message: `${code}: AttemptStore.${method}: ${detail}`,
+    cause
+  })
+
+const error = (method: AttemptStoreMethod, code: AttemptStoreErrorCode, detail: string): AttemptStoreError =>
+  attemptStoreError(method, code, detail)
 
 const encode = (
+  method: AttemptStoreMethod,
   value: unknown,
   field: string,
   maxBytes = maximumValueBytes
@@ -402,24 +419,25 @@ const encode = (
     const admitted = Boundary.admitJson(value, jsonLimits(maxBytes))
     return admitted.ok
       ? Effect.succeed(JSON.stringify(admitted.value))
-      : Effect.fail(error("invalid_attempt", `${field} ${admitted.complaint}`))
+      : Effect.fail(error(method, "invalid_attempt", `${field} ${admitted.complaint}`))
   })
 
-const encodeOptionalWith = (
-  encode: (value: unknown, field: string) => Effect.Effect<string, AttemptStoreError>
-) =>
-(value: unknown | undefined, field: string): Effect.Effect<string | null, AttemptStoreError> =>
-  value === undefined ? Effect.succeed(null) : encode(value, field)
+const encodeOptionalWith =
+  (method: AttemptStoreMethod) =>
+  (value: unknown | undefined, field: string): Effect.Effect<string | null, AttemptStoreError> =>
+    value === undefined ? Effect.succeed(null) : encode(method, value, field)
 
 const defaultMaxCheckpointBytes = 1024 * 1024
 
 const defaultInProgressStates: ReadonlyArray<string> = ["running"]
 
 const encodeCheckpointWith =
-  (maxBytes: number) => (value: unknown | undefined): Effect.Effect<string | null, AttemptStoreError> =>
-    value === undefined ? Effect.succeed(null) : encode(value, "checkpoint", maxBytes)
+  (method: AttemptStoreMethod, maxBytes: number) =>
+  (value: unknown | undefined): Effect.Effect<string | null, AttemptStoreError> =>
+    value === undefined ? Effect.succeed(null) : encode(method, value, "checkpoint", maxBytes)
 
 const decode = (
+  method: AttemptStoreMethod,
   value: string | null,
   field: string,
   maxBytes = maximumValueBytes
@@ -429,25 +447,26 @@ const decode = (
     const admitted = Boundary.admitJsonText(value, jsonLimits(maxBytes))
     return admitted.ok
       ? Effect.succeed(admitted.json)
-      : Effect.fail(error("decode_failed", `${field} ${admitted.complaint}`))
+      : Effect.fail(error(method, "decode_failed", `${field} ${admitted.complaint}`))
   })
 
 const decodeRequired = (
+  method: AttemptStoreMethod,
   value: string,
   field: string,
   maxBytes = maximumValueBytes
 ): Effect.Effect<JsonValue, AttemptStoreError> =>
   // A non-null SQL column cannot take `decode`'s missing-value branch.
-  decode(value, field, maxBytes) as Effect.Effect<JsonValue, AttemptStoreError>
+  decode(method, value, field, maxBytes) as Effect.Effect<JsonValue, AttemptStoreError>
 
-const validateId = (id: AttemptId): Effect.Effect<void, AttemptStoreError> =>
+const validateId = (method: AttemptStoreMethod, id: AttemptId): Effect.Effect<void, AttemptStoreError> =>
   Boundary.isDurableText(id.runId) &&
     Boundary.isDurableText(id.stepKeyDigest) &&
     Number.isSafeInteger(id.attempt) &&
     id.attempt >= 0
     ? Effect.void
     : Effect.fail(
-      error("invalid_attempt", "attempt identity violates the durable identifier contract")
+      error(method, "invalid_attempt", "attempt identity violates the durable identifier contract")
     )
 
 const inspectRecord = (
@@ -481,6 +500,7 @@ const inspectRecord = (
 }
 
 const snapshotJson = (
+  method: AttemptStoreMethod,
   value: unknown,
   field: string,
   maxBytes = maximumValueBytes
@@ -488,10 +508,10 @@ const snapshotJson = (
   const admitted = Boundary.admitJson(value, jsonLimits(maxBytes))
   return admitted.ok
     ? { ok: true, value: admitted.value }
-    : { ok: false, error: error("invalid_attempt", `${field} ${admitted.complaint}`) }
+    : { ok: false, error: error(method, "invalid_attempt", `${field} ${admitted.complaint}`) }
 }
 
-const snapshotId = (input: AttemptId): Effect.Effect<AttemptId, AttemptStoreError> =>
+const snapshotId = (method: AttemptStoreMethod, input: AttemptId): Effect.Effect<AttemptId, AttemptStoreError> =>
   Effect.suspend(() => {
     try {
       const values = inspectRecord(input, ["runId", "stepKeyDigest", "attempt"], [], "attempt id")
@@ -500,13 +520,13 @@ const snapshotId = (input: AttemptId): Effect.Effect<AttemptId, AttemptStoreErro
         stepKeyDigest: values.stepKeyDigest,
         attempt: values.attempt
       }) as AttemptId
-      return Effect.as(validateId(id), id)
+      return Effect.as(validateId(method, id), id)
     } catch {
-      return Effect.fail(error("invalid_attempt", "attempt id must be an inert data record"))
+      return Effect.fail(error(method, "invalid_attempt", "attempt id must be an inert data record"))
     }
   })
 
-const snapshotAttempt = (input: Attempt): Effect.Effect<Attempt, AttemptStoreError> =>
+const snapshotAttempt = (method: AttemptStoreMethod, input: Attempt): Effect.Effect<Attempt, AttemptStoreError> =>
   Effect.suspend(() => {
     try {
       const values = inspectRecord(
@@ -517,10 +537,10 @@ const snapshotAttempt = (input: Attempt): Effect.Effect<Attempt, AttemptStoreErr
       )
       const checkpoint = values.checkpoint === undefined
         ? undefined
-        : snapshotJson(values.checkpoint, "checkpoint", maximumCheckpointBytes)
-      const attemptError = values.error === undefined ? undefined : snapshotJson(values.error, "error")
-      const outcome = values.outcome === undefined ? undefined : snapshotJson(values.outcome, "outcome")
-      const meta = snapshotJson(values.meta, "meta")
+        : snapshotJson(method, values.checkpoint, "checkpoint", maximumCheckpointBytes)
+      const attemptError = values.error === undefined ? undefined : snapshotJson(method, values.error, "error")
+      const outcome = values.outcome === undefined ? undefined : snapshotJson(method, values.outcome, "outcome")
+      const meta = snapshotJson(method, values.meta, "meta")
       if (checkpoint !== undefined && !checkpoint.ok) return Effect.fail(checkpoint.error)
       if (attemptError !== undefined && !attemptError.ok) return Effect.fail(attemptError.error)
       if (outcome !== undefined && !outcome.ok) return Effect.fail(outcome.error)
@@ -539,14 +559,17 @@ const snapshotAttempt = (input: Attempt): Effect.Effect<Attempt, AttemptStoreErr
         meta: meta.value
       })
       return Schema.decodeUnknownEffect(Attempt)(candidate).pipe(
-        Effect.mapError(() => error("invalid_attempt", "attempt violates the persistence contract"))
+        Effect.mapError(() => error(method, "invalid_attempt", "attempt violates the persistence contract"))
       )
     } catch {
-      return Effect.fail(error("invalid_attempt", "attempt must be an inert data record"))
+      return Effect.fail(error(method, "invalid_attempt", "attempt must be an inert data record"))
     }
   })
 
-const snapshotFinish = (input: FinishAttempt): Effect.Effect<FinishAttempt, AttemptStoreError> =>
+const snapshotFinish = (
+  method: AttemptStoreMethod,
+  input: FinishAttempt
+): Effect.Effect<FinishAttempt, AttemptStoreError> =>
   Effect.suspend(() => {
     try {
       const values = inspectRecord(
@@ -555,9 +578,9 @@ const snapshotFinish = (input: FinishAttempt): Effect.Effect<FinishAttempt, Atte
         ["error", "outcome", "meta"],
         "finished attempt"
       )
-      const attemptError = values.error === undefined ? undefined : snapshotJson(values.error, "error")
-      const outcome = values.outcome === undefined ? undefined : snapshotJson(values.outcome, "outcome")
-      const meta = values.meta === undefined ? undefined : snapshotJson(values.meta, "meta")
+      const attemptError = values.error === undefined ? undefined : snapshotJson(method, values.error, "error")
+      const outcome = values.outcome === undefined ? undefined : snapshotJson(method, values.outcome, "outcome")
+      const meta = values.meta === undefined ? undefined : snapshotJson(method, values.meta, "meta")
       if (attemptError !== undefined && !attemptError.ok) return Effect.fail(attemptError.error)
       if (outcome !== undefined && !outcome.ok) return Effect.fail(outcome.error)
       if (meta !== undefined && !meta.ok) return Effect.fail(meta.error)
@@ -570,22 +593,25 @@ const snapshotFinish = (input: FinishAttempt): Effect.Effect<FinishAttempt, Atte
         ...(attemptError === undefined ? {} : { error: attemptError.value }),
         ...(outcome === undefined ? {} : { outcome: outcome.value }),
         ...(meta === undefined ? {} : { meta: meta.value })
-      })).pipe(Effect.mapError(() => error("invalid_attempt", "finished attempt violates the contract")))
+      })).pipe(Effect.mapError(() => error(method, "invalid_attempt", "finished attempt violates the contract")))
     } catch {
-      return Effect.fail(error("invalid_attempt", "finished attempt must be an inert data record"))
+      return Effect.fail(error(method, "invalid_attempt", "finished attempt must be an inert data record"))
     }
   })
 
-const snapshotPatch = (input: AttemptPatch): Effect.Effect<AttemptPatch, AttemptStoreError> =>
+const snapshotPatch = (
+  method: AttemptStoreMethod,
+  input: AttemptPatch
+): Effect.Effect<AttemptPatch, AttemptStoreError> =>
   Effect.suspend(() => {
     try {
       const values = inspectRecord(input, [], ["checkpoint", "error", "outcome", "meta"], "attempt patch")
       const checkpoint = values.checkpoint === undefined
         ? undefined
-        : snapshotJson(values.checkpoint, "checkpoint", maximumCheckpointBytes)
-      const attemptError = values.error === undefined ? undefined : snapshotJson(values.error, "error")
-      const outcome = values.outcome === undefined ? undefined : snapshotJson(values.outcome, "outcome")
-      const meta = values.meta === undefined ? undefined : snapshotJson(values.meta, "meta")
+        : snapshotJson(method, values.checkpoint, "checkpoint", maximumCheckpointBytes)
+      const attemptError = values.error === undefined ? undefined : snapshotJson(method, values.error, "error")
+      const outcome = values.outcome === undefined ? undefined : snapshotJson(method, values.outcome, "outcome")
+      const meta = values.meta === undefined ? undefined : snapshotJson(method, values.meta, "meta")
       if (checkpoint !== undefined && !checkpoint.ok) return Effect.fail(checkpoint.error)
       if (attemptError !== undefined && !attemptError.ok) return Effect.fail(attemptError.error)
       if (outcome !== undefined && !outcome.ok) return Effect.fail(outcome.error)
@@ -597,7 +623,7 @@ const snapshotPatch = (input: AttemptPatch): Effect.Effect<AttemptPatch, Attempt
         ...(meta === undefined ? {} : { meta: meta.value })
       }))
     } catch {
-      return Effect.fail(error("invalid_attempt", "attempt patch must be an inert data record"))
+      return Effect.fail(error(method, "invalid_attempt", "attempt patch must be an inert data record"))
     }
   })
 
@@ -607,7 +633,10 @@ interface ResolvedOptions {
   readonly putMode: "insert" | "upsert"
 }
 
-const snapshotOptions = (input: Options): Effect.Effect<ResolvedOptions, AttemptStoreError> =>
+const snapshotOptions = (
+  method: AttemptStoreMethod,
+  input: Options
+): Effect.Effect<ResolvedOptions, AttemptStoreError> =>
   Effect.suspend(() => {
     try {
       const values = inspectRecord(
@@ -624,7 +653,7 @@ const snapshotOptions = (input: Options): Effect.Effect<ResolvedOptions, Attempt
         maxNodes: 257
       })
       if (!admitted.ok || !Array.isArray(admitted.value)) {
-        return Effect.fail(error("invalid_attempt", "inProgressStates must be an inert string array"))
+        return Effect.fail(error(method, "invalid_attempt", "inProgressStates must be an inert string array"))
       }
       const states = admitted.value
       if (
@@ -632,7 +661,9 @@ const snapshotOptions = (input: Options): Effect.Effect<ResolvedOptions, Attempt
         states.some((state) => !Boundary.isDurableText(state)) ||
         new Set(states).size !== states.length
       ) {
-        return Effect.fail(error("invalid_attempt", "inProgressStates must contain unique durable state names"))
+        return Effect.fail(
+          error(method, "invalid_attempt", "inProgressStates must contain unique durable state names")
+        )
       }
       const maxCheckpointBytes = values.maxCheckpointBytes ?? defaultMaxCheckpointBytes
       if (
@@ -641,12 +672,12 @@ const snapshotOptions = (input: Options): Effect.Effect<ResolvedOptions, Attempt
         maxCheckpointBytes > maximumCheckpointBytes
       ) {
         return Effect.fail(
-          error("invalid_attempt", `maxCheckpointBytes must be between 1 and ${maximumCheckpointBytes}`)
+          error(method, "invalid_attempt", `maxCheckpointBytes must be between 1 and ${maximumCheckpointBytes}`)
         )
       }
       const putMode = values.putMode ?? "insert"
       if (putMode !== "insert" && putMode !== "upsert") {
-        return Effect.fail(error("invalid_attempt", "putMode must be insert or upsert"))
+        return Effect.fail(error(method, "invalid_attempt", "putMode must be insert or upsert"))
       }
       return Effect.succeed(Object.freeze({
         inProgressStates: Object.freeze([...states]) as ReadonlyArray<string>,
@@ -654,7 +685,7 @@ const snapshotOptions = (input: Options): Effect.Effect<ResolvedOptions, Attempt
         putMode
       }))
     } catch {
-      return Effect.fail(error("invalid_attempt", "attempt store options must be an inert data record"))
+      return Effect.fail(error(method, "invalid_attempt", "attempt store options must be an inert data record"))
     }
   })
 
@@ -664,26 +695,17 @@ const ownsRunningRun = (row: RunFenceRow, owner: OwnerId): boolean =>
   row.owner_pid === owner.pid &&
   row.owner_nonce === owner.nonce
 
-const sameOptional = (actual: string | null, expected: string | null): boolean => actual === expected
+const sameAttempt = (stored: Attempt, expected: Attempt): boolean =>
+  stored.state === expected.state &&
+  stored.startedAtMs === expected.startedAtMs &&
+  stored.finishedAtMs === expected.finishedAtMs &&
+  stored.heartbeatAtMs === expected.heartbeatAtMs &&
+  Boundary.sameJson(stored.checkpoint, expected.checkpoint) &&
+  Boundary.sameJson(stored.error, expected.error) &&
+  Boundary.sameJson(stored.outcome, expected.outcome) &&
+  Boundary.sameJson(stored.meta, expected.meta)
 
-const sameAttempt = (
-  row: AttemptRow,
-  attempt: Attempt,
-  checkpoint: string | null,
-  attemptError: string | null,
-  outcome: string | null,
-  meta: string
-): boolean =>
-  row.state === attempt.state &&
-  row.started_at_ms === attempt.startedAtMs &&
-  row.finished_at_ms === (attempt.finishedAtMs ?? null) &&
-  row.heartbeat_at_ms === (attempt.heartbeatAtMs ?? null) &&
-  sameOptional(row.checkpoint_json, checkpoint) &&
-  sameOptional(row.error_json, attemptError) &&
-  sameOptional(row.outcome_json, outcome) &&
-  row.meta_json === meta
-
-const mapPersistenceError = (cause: unknown): AttemptStoreError => {
+const mapPersistenceError = (method: AttemptStoreMethod, cause: unknown): AttemptStoreError => {
   if (Schema.is(AttemptStoreError)(cause)) {
     return cause
   }
@@ -692,24 +714,27 @@ const mapPersistenceError = (cause: unknown): AttemptStoreError => {
     : SqlError.isSqlError(cause) &&
       (cause.reason instanceof SqlError.ConstraintError || cause.reason instanceof SqlError.UniqueViolation)
   return error(
+    method,
     constraint ? "constraint" : "persistence_failed",
     "attempt persistence failed"
   )
 }
 
-const decodeRow = (input: unknown): Effect.Effect<Attempt, AttemptStoreError> =>
+const decodeRow = (method: AttemptStoreMethod, input: unknown): Effect.Effect<Attempt, AttemptStoreError> =>
   Schema.decodeUnknownEffect(AttemptRow)(input).pipe(
-    Effect.mapError(() => error("decode_failed", "could not decode flows_attempts row")),
+    Effect.mapError(() => error(method, "decode_failed", "could not decode flows_attempts row")),
     Effect.flatMap((row) => {
       if (
         (row.finished_at_ms !== null && row.finished_at_ms < row.started_at_ms) ||
         (row.heartbeat_at_ms !== null && row.heartbeat_at_ms < row.started_at_ms)
-      ) return Effect.fail(error("decode_failed", "flows_attempts row has a reversed lifecycle timeline"))
+      ) {
+        return Effect.fail(error(method, "decode_failed", "flows_attempts row has a reversed lifecycle timeline"))
+      }
       return Effect.all({
-        checkpoint: decode(row.checkpoint_json, "checkpoint_json", maximumCheckpointBytes),
-        error: decode(row.error_json, "error_json"),
-        outcome: decode(row.outcome_json, "outcome_json"),
-        meta: decodeRequired(row.meta_json, "meta_json")
+        checkpoint: decode(method, row.checkpoint_json, "checkpoint_json", maximumCheckpointBytes),
+        error: decode(method, row.error_json, "error_json"),
+        outcome: decode(method, row.outcome_json, "outcome_json"),
+        meta: decodeRequired(method, row.meta_json, "meta_json")
       }).pipe(
         Effect.map(({ checkpoint, error: attemptError, outcome, meta }) =>
           Object.freeze({
@@ -743,17 +768,21 @@ export const makeWith = (
     const sql = yield* Effect.service(SqlClient.SqlClient)
     const writer = yield* DurableWriter
 
-    const configured = yield* snapshotOptions(options)
+    const configured = yield* snapshotOptions("makeWith", options)
     const inProgressStates = configured.inProgressStates
     const maxCheckpointBytes = configured.maxCheckpointBytes
     const upsert = configured.putMode === "upsert"
-    const encodeOptional = encodeOptionalWith(encode)
-    const encodeCheckpoint = encodeCheckpointWith(maxCheckpointBytes)
+    const putEncodeOptional = encodeOptionalWith("put")
+    const putEncodeCheckpoint = encodeCheckpointWith("put", maxCheckpointBytes)
+    const heartbeatEncodeCheckpoint = encodeCheckpointWith("heartbeat", maxCheckpointBytes)
+    const finishEncodeOptional = encodeOptionalWith("finish")
+    const patchEncodeOptional = encodeOptionalWith("patch")
+    const patchEncodeCheckpoint = encodeCheckpointWith("patch", maxCheckpointBytes)
     const inProgress = sql.in("state", [...inProgressStates])
 
     const put: Service["put"] = Effect.fn("AttemptStore.put")((input, owner) =>
       Effect.gen(function*() {
-        const attempt = yield* snapshotAttempt(input)
+        const attempt = yield* snapshotAttempt("put", input)
         yield* Effect.annotateCurrentSpan({
           runId: attempt.runId,
           stepKeyDigest: attempt.stepKeyDigest,
@@ -763,12 +792,14 @@ export const makeWith = (
           (attempt.finishedAtMs !== undefined && attempt.finishedAtMs < attempt.startedAtMs) ||
           (attempt.heartbeatAtMs !== undefined && attempt.heartbeatAtMs < attempt.startedAtMs)
         ) {
-          return yield* Effect.fail(error("invalid_attempt", "attempt lifecycle timestamps must not precede start"))
+          return yield* Effect.fail(
+            error("put", "invalid_attempt", "attempt lifecycle timestamps must not precede start")
+          )
         }
-        const checkpoint = yield* encodeCheckpoint(attempt.checkpoint)
-        const attemptError = yield* encodeOptional(attempt.error, "error")
-        const outcome = yield* encodeOptional(attempt.outcome, "outcome")
-        const meta = yield* encode(attempt.meta, "meta")
+        const checkpoint = yield* putEncodeCheckpoint(attempt.checkpoint)
+        const attemptError = yield* putEncodeOptional(attempt.error, "error")
+        const outcome = yield* putEncodeOptional(attempt.outcome, "outcome")
+        const meta = yield* encode("put", attempt.meta, "meta")
         return yield* writer.write(
           Effect.gen(function*() {
             const inserted = yield* sql<{ readonly attempt: number }>`
@@ -847,19 +878,20 @@ export const makeWith = (
           `
             /* v8 ignore next -- the owned run and conflicting row are read in the same serialized write transaction */
             if (rows.length === 0) {
-              return yield* Effect.fail(error("unknown", "attempt disappeared during put"))
+              return yield* Effect.fail(error("put", "unknown", "attempt disappeared during put"))
             }
-            return sameAttempt(rows[0]!, attempt, checkpoint, attemptError, outcome, meta)
+            const stored = yield* decodeRow("put", rows[0]!)
+            return sameAttempt(stored, attempt)
               ? { _tag: "ExistingSame" } as const
               : { _tag: "Conflict" } as const
           })
-        ).pipe(Effect.mapError(mapPersistenceError))
+        ).pipe(Effect.mapError((cause) => mapPersistenceError("put", cause)))
       })
     )
 
     const get: Service["get"] = Effect.fn("AttemptStore.get")((input) =>
       Effect.gen(function*() {
-        const id = yield* snapshotId(input)
+        const id = yield* snapshotId("get", input)
         yield* Effect.annotateCurrentSpan({
           runId: id.runId,
           stepKeyDigest: id.stepKeyDigest,
@@ -870,8 +902,8 @@ export const makeWith = (
           heartbeat_at_ms, checkpoint_json, error_json, outcome_json, meta_json
         FROM flows_attempts
         WHERE run_id = ${id.runId} AND step_key_digest = ${id.stepKeyDigest} AND attempt = ${id.attempt}
-      `.pipe(Effect.mapError(mapPersistenceError))
-        return rows.length === 0 ? Option.none() : yield* Effect.map(decodeRow(rows[0]!), Option.some)
+      `.pipe(Effect.mapError((cause) => mapPersistenceError("get", cause)))
+        return rows.length === 0 ? Option.none() : yield* Effect.map(decodeRow("get", rows[0]!), Option.some)
       })
     )
 
@@ -885,11 +917,13 @@ export const makeWith = (
     ) =>
       Effect.gen(function*() {
         yield* Effect.annotateCurrentSpan({ runId, stepKeyDigest, attempt })
-        yield* validateId({ runId, stepKeyDigest, attempt })
+        yield* validateId("heartbeat", { runId, stepKeyDigest, attempt })
         if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
-          return yield* Effect.fail(error("invalid_attempt", "nowMs must be a non-negative safe integer"))
+          return yield* Effect.fail(
+            error("heartbeat", "invalid_attempt", "nowMs must be a non-negative safe integer")
+          )
         }
-        const checkpoint = yield* encodeCheckpoint(checkpointValue)
+        const checkpoint = yield* heartbeatEncodeCheckpoint(checkpointValue)
         return yield* writer.write(
           Effect.gen(function*() {
             const updated = yield* sql<{ readonly attempt: number }>`
@@ -930,17 +964,19 @@ export const makeWith = (
               return { _tag: "FenceLost" } as const
             }
             if (inProgressStates.includes(found[0]!.state) && nowMs < found[0]!.started_at_ms) {
-              return yield* Effect.fail(error("invalid_attempt", "heartbeat timestamp precedes attempt start"))
+              return yield* Effect.fail(
+                error("heartbeat", "invalid_attempt", "heartbeat timestamp precedes attempt start")
+              )
             }
             return { _tag: "StateChanged" } as const
           })
-        ).pipe(Effect.mapError(mapPersistenceError))
+        ).pipe(Effect.mapError((cause) => mapPersistenceError("heartbeat", cause)))
       })
     )
 
     const finish: Service["finish"] = Effect.fn("AttemptStore.finish")((input, owner) =>
       Effect.gen(function*() {
-        const attempt = yield* snapshotFinish(input)
+        const attempt = yield* snapshotFinish("finish", input)
         yield* Effect.annotateCurrentSpan({
           runId: attempt.runId,
           stepKeyDigest: attempt.stepKeyDigest,
@@ -950,11 +986,13 @@ export const makeWith = (
           inProgressStates.includes(attempt.state) ||
           !Boundary.isDurableText(attempt.state)
         ) {
-          return yield* Effect.fail(error("invalid_attempt", "finish requires a terminal state and valid timestamp"))
+          return yield* Effect.fail(
+            error("finish", "invalid_attempt", "finish requires a terminal state and valid timestamp")
+          )
         }
-        const attemptError = yield* encodeOptional(attempt.error, "error")
-        const outcome = yield* encodeOptional(attempt.outcome, "outcome")
-        const meta = yield* encodeOptional(attempt.meta, "meta")
+        const attemptError = yield* finishEncodeOptional(attempt.error, "error")
+        const outcome = yield* finishEncodeOptional(attempt.outcome, "outcome")
+        const meta = yield* finishEncodeOptional(attempt.meta, "meta")
         return yield* writer.write(
           Effect.gen(function*() {
             const updated = yield* sql<{ readonly attempt: number }>`
@@ -1000,27 +1038,29 @@ export const makeWith = (
               return { _tag: "FenceLost" } as const
             }
             if (inProgressStates.includes(found[0]!.state) && attempt.finishedAtMs < found[0]!.started_at_ms) {
-              return yield* Effect.fail(error("invalid_attempt", "finish timestamp precedes attempt start"))
+              return yield* Effect.fail(
+                error("finish", "invalid_attempt", "finish timestamp precedes attempt start")
+              )
             }
             return { _tag: "StateChanged" } as const
           })
-        ).pipe(Effect.mapError(mapPersistenceError))
+        ).pipe(Effect.mapError((cause) => mapPersistenceError("finish", cause)))
       })
     )
 
     const patch: Service["patch"] = Effect.fn("AttemptStore.patch")((idInput, patchInput, owner) =>
       Effect.gen(function*() {
-        const id = yield* snapshotId(idInput)
-        const fields = yield* snapshotPatch(patchInput)
+        const id = yield* snapshotId("patch", idInput)
+        const fields = yield* snapshotPatch("patch", patchInput)
         yield* Effect.annotateCurrentSpan({
           runId: id.runId,
           stepKeyDigest: id.stepKeyDigest,
           attempt: id.attempt
         })
-        const checkpoint = yield* encodeCheckpoint(fields.checkpoint)
-        const attemptError = yield* encodeOptional(fields.error, "error")
-        const outcome = yield* encodeOptional(fields.outcome, "outcome")
-        const meta = yield* encodeOptional(fields.meta, "meta")
+        const checkpoint = yield* patchEncodeCheckpoint(fields.checkpoint)
+        const attemptError = yield* patchEncodeOptional(fields.error, "error")
+        const outcome = yield* patchEncodeOptional(fields.outcome, "outcome")
+        const meta = yield* patchEncodeOptional(fields.meta, "meta")
         return yield* writer.write(
           Effect.gen(function*() {
             // Unlike `heartbeat`/`finish` there is no state predicate: a patch
@@ -1058,7 +1098,7 @@ export const makeWith = (
               ? { _tag: "NotFound" } as const
               : { _tag: "FenceLost" } as const
           })
-        ).pipe(Effect.mapError(mapPersistenceError))
+        ).pipe(Effect.mapError((cause) => mapPersistenceError("patch", cause)))
       })
     )
 
@@ -1080,7 +1120,8 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
  * @since 0.1.0
  */
 export const makeNoop = (overrides: Partial<Service> = {}): Service => {
-  const unavailable = (method: string) => Effect.fail(error("unknown", `${method} is unavailable`))
+  const unavailable = (method: Exclude<AttemptStoreMethod, "makeWith">) =>
+    Effect.fail(attemptStoreError(method, "unknown", "the store is unavailable in this environment"))
   return {
     put: Effect.fn("AttemptStore.put")(() => unavailable("put")),
     get: Effect.fn("AttemptStore.get")(() => unavailable("get")),
