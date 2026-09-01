@@ -593,16 +593,25 @@ type ToolOutcome = { readonly _tag: "resolved"; readonly tool: ResolvedTool } | 
 const binNameOf = async (
   root: string,
   packageName: string,
-  bin: string | undefined
+  bin: string | undefined,
+  searchPath: ReadonlyArray<string> = [root]
 ): Promise<{ readonly name: string } | { readonly problem: string }> => {
   if (bin !== undefined) return { name: bin }
   const parts = packageName.split("/")
   const basename = parts[parts.length - 1]!
   let declared: unknown
-  try {
-    const manifest = NodePath.join(root, "node_modules", ...packageName.split("/"), "package.json")
-    declared = (JSON.parse(await Fs.readFile(manifest, "utf8")) as { readonly bin?: unknown }).bin
-  } catch {
+  let read = false
+  for (const directory of searchPath) {
+    try {
+      const manifest = NodePath.join(directory, "node_modules", ...packageName.split("/"), "package.json")
+      declared = (JSON.parse(await Fs.readFile(manifest, "utf8")) as { readonly bin?: unknown }).bin
+      read = true
+      break
+    } catch {
+      // The module is not installed at this level; try the next one up.
+    }
+  }
+  if (!read) {
     return { name: basename }
   }
   if (typeof declared === "string") return { name: basename }
@@ -995,18 +1004,46 @@ const fetchOutFiles = (context: PlanContext, target: Target.AnyTarget): Readonly
     .map((entry) => Input.resolvePath(packagePath, entry))
 }
 
-const resolveTool = async (context: PlanContext, reference: Record<string, unknown>): Promise<ToolOutcome> => {
-  const key = JSON.stringify(reference)
+/**
+ * The directories a package-local binary reference searches, nearest first.
+ *
+ * `S.NodeModule.Bin` is a package-local reference, and a pnpm workspace links a
+ * member's own devDependencies into that member's `node_modules/.bin` rather
+ * than the workspace root. Searching the declaring package first and the root
+ * last resolves both layouts: pnpm's per-package links and the hoisted layout
+ * npm and yarn produce.
+ */
+const nodeModuleSearchPath = (root: string, packagePath: string): ReadonlyArray<string> => {
+  const directories: Array<string> = []
+  let current = packagePath
+  while (current !== "" && current !== ".") {
+    directories.push(NodePath.join(root, current))
+    const parent = NodePath.posix.dirname(current)
+    if (parent === current) break
+    current = parent === "." ? "" : parent
+  }
+  directories.push(root)
+  return directories
+}
+
+const resolveTool = async (
+  context: PlanContext,
+  reference: Record<string, unknown>,
+  packagePath: string
+): Promise<ToolOutcome> => {
+  const key = JSON.stringify({ packagePath, reference })
   const known = context.tools.get(key)
   if (known !== undefined) return known
   const tag = reference["_tag"]
   let outcome: ToolOutcome
   if (tag === "NodeModuleBin") {
     const packageName = String(reference["package"])
+    const searchPath = nodeModuleSearchPath(context.root, packagePath)
     const resolvedBin = await binNameOf(
       context.root,
       packageName,
-      typeof reference["bin"] === "string" ? reference["bin"] : undefined
+      typeof reference["bin"] === "string" ? reference["bin"] : undefined,
+      searchPath
     )
     if ("problem" in resolvedBin) {
       outcome = {
@@ -1020,16 +1057,21 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
       return outcome
     }
     const bin = resolvedBin.name
-    const path = NodePath.join(context.root, "node_modules", ".bin", bin)
-    const version = await moduleVersion(context.root, packageName)
-    const identity = { tag: "NodeModuleBin", package: packageName, bin, version }
+    let path = NodePath.join(context.root, "node_modules", ".bin", bin)
     let executable = false
-    try {
-      await Fs.access(path, 1)
-      executable = true
-    } catch {
-      executable = false
+    for (const directory of searchPath) {
+      const candidate = NodePath.join(directory, "node_modules", ".bin", bin)
+      try {
+        await Fs.access(candidate, 1)
+        path = candidate
+        executable = true
+        break
+      } catch {
+        // Absent at this level; the next directory up may link it.
+      }
     }
+    const version = await moduleVersion(NodePath.dirname(NodePath.dirname(NodePath.dirname(path))), packageName)
+    const identity = { tag: "NodeModuleBin", package: packageName, bin, version }
     outcome = executable
       ? { _tag: "resolved", tool: { path, identity } }
       : {
@@ -1563,7 +1605,7 @@ const visit = async (
   const resolveToken = async (entry: string): Promise<string> => {
     if (entry.startsWith("{smthrs:tool:") && entry.endsWith("}")) {
       const reference = JSON.parse(entry.slice("{smthrs:tool:".length, -1)) as Record<string, unknown>
-      const outcome = await resolveTool(context, reference)
+      const outcome = await resolveTool(context, reference, packagePath)
       toolchain.push(outcome.tool.identity)
       if (outcome._tag === "refused") {
         noteRefusal(outcome.tool.refusal)
@@ -1591,7 +1633,11 @@ const visit = async (
       } catch {
         noteRefusal(`generator script not found: ${resolved}`)
       }
-      return resolved
+      // Anchored to the workspace root rather than left relative, so the same
+      // argv names the same file under a declaration that sets `cwd`. The
+      // token is substituted with the tree root at spawn time, which keeps the
+      // planned argv host independent and therefore cacheable across machines.
+      return `${workspaceRootToken}/${resolved}`
     }
     if (entry === Shell.bunToken) {
       const outcome = await resolveBun(context)
@@ -1690,24 +1736,29 @@ const visit = async (
     }
   }
 
-  // Every tool spawns from the workspace root: the observed declarations are
+  // A tool spawns from the workspace root by default: most declarations are
   // written against it (root-relative config paths, `//`-anchored scripts,
   // shell text naming workspace paths), and tools that resolve their config
-  // by walking upward behave identically. Package scoping happens through
-  // declared inputs and write sets, not the process cwd.
+  // by walking upward behave identically. Package scoping normally happens
+  // through declared inputs and write sets rather than the process cwd. A
+  // shell declaration that names `cwd` overrides it, because eslint, dprint,
+  // and vitest each resolve their config and ignore globs against the working
+  // directory, so a monorepo's per-package gate cannot be expressed without
+  // one.
   let cwd = "."
   const isShellExec = rule === "Shell.Build" || rule === "Shell.Test" || rule === "Shell.Run" ||
     rule === "Shell.Serve" || rule === "Shell.Diff"
   if (isShellExec && refusal === undefined) {
     const shellAttrs = attrs as Shell.ExecAttrs
     const payload = Shell.execPayload(shellAttrs)
+    cwd = payload.cwd
     env = { ...(payload.env as Record<string, string>) }
     const resolved: Array<string> = []
     for (const entry of payload.argv as ReadonlyArray<string>) {
       if (entry.startsWith("{smthrs:tool:") && entry.endsWith("}")) {
         const reference = JSON.parse(entry.slice("{smthrs:tool:".length, -1)) as Record<string, unknown>
         if (reference["_tag"] === "GoRun") {
-          const outcome = await resolveTool(context, reference)
+          const outcome = await resolveTool(context, reference, packagePath)
           toolchain.push(outcome.tool.identity)
           if (outcome._tag === "refused") noteRefusal(outcome.tool.refusal)
           else resolved.push(outcome.tool.path, "run", String(reference["spec"]))
@@ -1720,7 +1771,7 @@ const visit = async (
       const bun = await resolveBun(context)
       const consts: Record<string, string> = {}
       for (const [name, reference] of Object.entries(shellAttrs.using ?? {})) {
-        const outcome = await resolveTool(context, reference as Record<string, unknown>)
+        const outcome = await resolveTool(context, reference as Record<string, unknown>, packagePath)
         toolchain.push({ slot: `using:${name}`, identity: outcome.tool.identity })
         if (outcome._tag === "refused") noteRefusal(outcome.tool.refusal)
         else consts[name] = outcome.tool.path
@@ -1844,7 +1895,7 @@ const visit = async (
           if (entry.startsWith("{smthrs:tool:") && entry.endsWith("}")) {
             const reference = JSON.parse(entry.slice("{smthrs:tool:".length, -1)) as Record<string, unknown>
             if (reference["_tag"] === "GoRun") {
-              const outcome = await resolveTool(context, reference)
+              const outcome = await resolveTool(context, reference, packagePath)
               toolchain.push(outcome.tool.identity)
               if (outcome._tag === "refused") noteRefusal(outcome.tool.refusal)
               else resolved.push(outcome.tool.path, "run", String(reference["spec"]))
@@ -1888,7 +1939,7 @@ const visit = async (
       const generatorPath: Array<string> = []
       if (Array.isArray(generatorTools)) {
         for (const reference of generatorTools) {
-          const outcome = await resolveTool(context, reference as Record<string, unknown>)
+          const outcome = await resolveTool(context, reference as Record<string, unknown>, packagePath)
           toolchain.push({ slot: "tool", identity: outcome.tool.identity })
           if (outcome._tag === "refused") noteRefusal(outcome.tool.refusal)
           else generatorPath.push(NodePath.dirname(outcome.tool.path))

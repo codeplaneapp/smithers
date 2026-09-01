@@ -30,6 +30,13 @@ const sharedFields = {
   using: Schema.optional(Attr.Using),
   args: Schema.optional(Attr.Args),
   runtimeArgs: Schema.optional(Schema.Array(Schema.String)),
+  // A workspace-relative working directory. A shell target spawns from the
+  // workspace root by default, which is what a repository-wide command wants.
+  // A per-package tool wants the package: eslint, dprint, and vitest all
+  // resolve their configuration and their ignore globs against the working
+  // directory, so a monorepo cannot express a package's own lint or format
+  // gate without naming one.
+  cwd: Schema.optional(Schema.NonEmptyString),
   env: Schema.optional(Attr.Env),
   data: Schema.optional(Attr.Data),
   secrets: Schema.optional(Attr.Secrets),
@@ -203,6 +210,7 @@ export interface ExecAttrs {
   readonly using?: Readonly<Record<string, Reference.Tool>> | undefined
   readonly args?: ReadonlyArray<string | Reference.FlagRef> | undefined
   readonly runtimeArgs?: ReadonlyArray<string> | undefined
+  readonly cwd?: string | undefined
   readonly env?: Readonly<Record<string, string>> | undefined
   readonly secrets?: ReadonlyArray<Secret.Secret> | undefined
 }
@@ -267,7 +275,7 @@ export const execPayload = (attrs: ExecAttrs): Exec.CallPayload => {
     throw new Error("shell declaration names no executable")
   }
   return {
-    cwd: ".",
+    cwd: attrs.cwd ?? ".",
     argv,
     env: environment,
     timeoutMs: packageExecTimeoutMs
