@@ -77,7 +77,7 @@ export interface Options {
   readonly clockFireRetryPolicy?: Schedule.Schedule<unknown, unknown> | undefined
 }
 
-type Requirements =
+type PublicRequirements =
   | AttemptStore.AttemptStore
   | CacheStore.CacheStore
   // DECIDED (2026-08-11, pending review): hashing is a construction-time
@@ -88,13 +88,14 @@ type Requirements =
   // requirement of the composition (`docs/specs/Concepts/Trampoline Loops.md`).
   | Crypto.Crypto
   | DurableEngineState.DurableEngineState
-  | EngineJj.EngineJj
   | Journal.Journal
   | Jj.Jj
   | OwnerIdentity.OwnerIdentity
   | RunStore.RunStore
   | Scope.Scope
   | StepBoundary.Service
+
+type Requirements = PublicRequirements | EngineJj.EngineJj
 
 const isBoundaryMetadata = Schema.is(FileBoundary)
 
@@ -109,7 +110,7 @@ const isBoundaryMetadata = Schema.is(FileBoundary)
  * @category constructors
  * @slop
  */
-export const make = (
+const makeWithEngineJj = (
   options: Options
 ): Effect.Effect<FlowRuntime.FlowRuntime["Service"], never, Requirements> =>
   Effect.gen(function*() {
@@ -207,6 +208,7 @@ export const make = (
         runId: parent.executionId,
         owner,
         sourceId: options.journalSource,
+        engineJj,
         execute: (actionInput) => (actionInput.action as Action.Any).executeEncoded as Effect.Effect<unknown, unknown>,
         idempotencyKey: input.action.idempotencyKey === undefined
           ? undefined
@@ -232,7 +234,6 @@ export const make = (
         Effect.provideService(CacheStore.CacheStore, cacheStore),
         Effect.provideService(Journal.Journal, journal),
         Effect.provideService(Jj.Jj, actionJj),
-        Effect.provideService(EngineJj.EngineJj, engineJj),
         Effect.provideService(RunStore.RunStore, runStore),
         Effect.provideService(StepBoundary.StepBoundary, stepBoundary),
         (dispatch) =>
@@ -331,6 +332,24 @@ export const make = (
   })
 
 /**
+ * Constructs the production encoded composition using the ambient `Jj` for
+ * both public action access and private engine bookkeeping.
+ *
+ * @since 0.1.0
+ * @category constructors
+ * @slop
+ */
+export const make = (
+  options: Options
+): Effect.Effect<FlowRuntime.FlowRuntime["Service"], never, PublicRequirements> =>
+  Effect.gen(function*() {
+    const jj = yield* Jj.Jj
+    return yield* makeWithEngineJj(options).pipe(
+      Effect.provideService(EngineJj.EngineJj, jj)
+    )
+  })
+
+/**
  * Provides the durable flow engine.
  *
  * @since 0.1.0
@@ -371,7 +390,7 @@ const layerBase = (
       }))
   )
   return Layer.merge(
-    Layer.effect(FlowRuntime.FlowRuntime, make(options)),
+    Layer.effect(FlowRuntime.FlowRuntime, makeWithEngineJj(options)),
     snapshotBoundary
   )
 }
@@ -385,8 +404,14 @@ const layerBase = (
  * @category layers
  * @slop
  */
-export const layer = (options: Options) =>
-  layerBase(options).pipe(Layer.provide(EngineJj.layerFromJj))
+export const layer = (
+  options: Options
+): Layer.Layer<FlowEngine.SnapshotBoundary | FlowRuntime.FlowRuntime, never, PublicRequirements> =>
+  layerBase(options).pipe(Layer.provide(EngineJj.layerFromJj)) as Layer.Layer<
+    FlowEngine.SnapshotBoundary | FlowRuntime.FlowRuntime,
+    never,
+    PublicRequirements
+  >
 
 /**
  * Provides the durable engine with a private repository implementation for
@@ -398,7 +423,15 @@ export const layer = (options: Options) =>
 export const layerWithPrivilegedJj = <E, R>(
   options: Options,
   privilegedJj: Layer.Layer<Jj.Jj, E, R>
-) =>
+): Layer.Layer<
+  FlowEngine.SnapshotBoundary | FlowRuntime.FlowRuntime,
+  E,
+  PublicRequirements | R
+> =>
   layerBase(options).pipe(
     Layer.provide(EngineJj.layerFromJj.pipe(Layer.provide(privilegedJj)))
-  )
+  ) as Layer.Layer<
+    FlowEngine.SnapshotBoundary | FlowRuntime.FlowRuntime,
+    E,
+    PublicRequirements | R
+  >

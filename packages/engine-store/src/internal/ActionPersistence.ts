@@ -34,7 +34,6 @@ import * as StepSandbox from "../StepSandbox.ts"
 import * as WorkspaceSandbox from "../WorkspaceSandbox.ts"
 import * as AttemptAdmission from "./AttemptAdmission.ts"
 import * as CachePublication from "./CachePublication.ts"
-import * as EngineJj from "./EngineJj.ts"
 import * as EffectRecords from "./EffectRecords.ts"
 import * as JournalRecords from "./JournalRecords.ts"
 import * as SandboxedExecution from "./SandboxedExecution.ts"
@@ -323,6 +322,12 @@ export interface Dependencies {
   readonly sourceId: string
   /** Runs one action body. The only part of a dispatch this module delegates. */
   readonly execute: (input: ActionInput) => Effect.Effect<unknown, unknown>
+  /**
+   * Repository authority reserved for engine bookkeeping. When omitted, the
+   * ambient public `Jj` service preserves the standalone constructor's
+   * compatibility behavior.
+   */
+  readonly engineJj?: Jj.Jj | undefined
   /**
    * Makes a retry of an irreversible action recognizable downstream. Its
    * absence is what {@link IrreversibleRetryRequiresIdempotencyKey} reports.
@@ -1488,7 +1493,7 @@ export const make = (deps: Dependencies) => {
             )
           }
           if (input.tier === "compensable") {
-            const jj = yield* EngineJj.EngineJj
+            const jj = deps.engineJj === undefined ? yield* Jj.Jj : deps.engineJj
             if (adopted && runningMeta?.snapshotId !== undefined) {
               // The dead incarnation persisted this attempt's own pre-image
               // before mutating the workspace (issue #87): restore it so the
