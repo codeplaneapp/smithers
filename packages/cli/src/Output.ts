@@ -102,7 +102,7 @@ export const exitCode = (value: unknown): number => {
     if (record._tag === "Parked" || record.status === "waiting-approval") return 3
     if (record._tag === "Interrupted" || record.signal === "SIGINT") return 130
     if (record.signal === "SIGTERM") return 143
-    if (record._tag === "Error") return 1
+    if (record._tag === "Error" || record._tag === "Conflict") return 1
   }
   return 0
 }

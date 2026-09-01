@@ -46,6 +46,9 @@ export const admissionVariable = "SMITHERS_INTERNAL_DETACHED_ADMISSION"
  */
 export const defaultTimeoutMs = 30_000
 
+/** Grace given to each of SIGTERM and SIGKILL during failed-launch cleanup. */
+export const defaultTerminationGraceMs = 2_000
+
 /** The extra multiple of the timeout a still-running child is granted. */
 const liveChildGraceMultiple = 4
 
@@ -104,31 +107,83 @@ export const logTail = (file: string, maxBytes: number = tailBytes): string => {
   }
 }
 
+/** Whether a POSIX process group still has a member. */
+const processGroupAlive = (pid: number): boolean => {
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch (error) {
+    return (error as { readonly code?: string } | null)?.code !== "ESRCH"
+  }
+}
+
+const childAlive = (child: ChildProcess): boolean => child.exitCode === null && child.signalCode === null
+
+const waitUntil = async (predicate: () => boolean, timeoutMs: number): Promise<boolean> => {
+  const deadline = Date.now() + timeoutMs
+  while (predicate()) {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) return false
+    await sleep(Math.min(pollIntervalMs, remaining))
+  }
+  return true
+}
+
+const signalGroup = (pid: number, signal: NodeJS.Signals): void => {
+  try {
+    process.kill(-pid, signal)
+  } catch (error) {
+    if ((error as { readonly code?: string } | null)?.code !== "ESRCH") throw error
+  }
+}
+
 /**
- * Terminates a child that never reached admission, process group first.
+ * Terminates and reaps a child that never reached admission.
  *
- * The child was spawned into its own process group (`detached: true`), so the
- * negative pid signals the group: a `smithers run` that already started an
- * agent must not leave that agent behind when its launch is abandoned.
+ * On POSIX the group, not just its leader, must disappear before this resolves.
+ * A cooperative group gets SIGTERM; a group still present after the grace
+ * window gets SIGKILL and another bounded reap window. The boolean is false
+ * when the host could not confirm containment, so a caller never reports an
+ * orphan-prone launch as successfully terminated.
  *
  * @category destructors
  * @since 1.0.0
  */
-export const terminate = (child: ChildProcess): void => {
-  if (child.exitCode !== null || child.signalCode !== null) return
-  try {
-    if (child.pid !== undefined && process.platform !== "win32") {
-      process.kill(-child.pid, "SIGTERM")
-      return
+export const terminate = async (
+  child: ChildProcess,
+  graceMs: number = defaultTerminationGraceMs
+): Promise<boolean> => {
+  const grace = Number.isFinite(graceMs) ? Math.max(1, Math.trunc(graceMs)) : defaultTerminationGraceMs
+  const pid = child.pid
+  if (pid !== undefined && process.platform !== "win32") {
+    if (!processGroupAlive(pid)) return true
+    try {
+      signalGroup(pid, "SIGTERM")
+    } catch {
+      return false
     }
-  } catch {
-    // The group is already gone; fall through to the direct signal.
+    if (await waitUntil(() => processGroupAlive(pid), grace)) return true
+    try {
+      signalGroup(pid, "SIGKILL")
+    } catch {
+      return false
+    }
+    return waitUntil(() => processGroupAlive(pid), grace)
   }
+
+  if (!childAlive(child)) return true
   try {
     child.kill("SIGTERM")
   } catch {
-    // Racing the child's own exit is not a launch failure.
+    return !childAlive(child)
   }
+  if (await waitUntil(() => childAlive(child), grace)) return true
+  try {
+    child.kill("SIGKILL")
+  } catch {
+    return !childAlive(child)
+  }
+  return waitUntil(() => childAlive(child), grace)
 }
 
 /**
@@ -174,6 +229,8 @@ export interface Options {
   readonly execPath?: string | undefined
   readonly entry?: string | undefined
   readonly intervalMs?: number | undefined
+  /** Grace given to each cleanup signal after the admission deadline. */
+  readonly terminationGraceMs?: number | undefined
   /** Where a slow-boot notice goes; stderr in production. */
   readonly onSlowBoot?: ((message: string) => void) | undefined
 }
@@ -242,11 +299,13 @@ export const launch = async (options: Options): Promise<Launched | Rejected> => 
       }
       const elapsedMs = Date.now() - startedAt
       if (elapsedMs >= maxWaitMs) {
-        terminate(child)
+        const terminated = await terminate(child, options.terminationGraceMs)
         return {
           reason: `Detached engine did not reach admission within ${maxWaitMs}ms. The engine process (pid ${
             child.pid ?? "unknown"
-          }) was still alive and was terminated. Set SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS to raise the window.`,
+          }) was still alive and ${
+            terminated ? "was terminated" : "could not be confirmed terminated"
+          }. Set SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS to raise the window.`,
           tail,
           logFile: pending
         }

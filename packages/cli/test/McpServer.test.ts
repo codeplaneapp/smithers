@@ -6,7 +6,7 @@
  * by the code that consumes them rather than by a reimplementation.
  */
 import { NodeServices } from "@effect/platform-node"
-import { Control as ControlService, ControlRuntime } from "@smthrs/control"
+import { Control as ControlService, ControlError, ControlRuntime } from "@smthrs/control"
 import * as TestControl from "@smthrs/control/test/TestControl"
 import * as McpClient from "@smthrs/mcp/McpClient"
 import { Effect, Layer } from "effect"
@@ -29,6 +29,29 @@ const control = TestControl.layer({ now: () => 0 })
 
 const call = (tool: McpServer.Tool, args: Record<string, unknown> = {}) =>
   Effect.runPromise(tool.call(args).pipe(Effect.provide(control)) as Effect.Effect<McpServer.Envelope>)
+
+const callWith = (
+  provided: Layer.Layer<ControlService.Control>,
+  tool: McpServer.Tool,
+  args: Record<string, unknown> = {}
+) => Effect.runPromise(tool.call(args).pipe(Effect.provide(provided)) as Effect.Effect<McpServer.Envelope>)
+
+const rpcCallWith = async (
+  provided: Layer.Layer<ControlService.Control>,
+  name: string,
+  args: Record<string, unknown> = {}
+): Promise<McpServer.Envelope> => {
+  const reply = await Effect.runPromise(
+    McpServer.respond(
+      { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } } as never,
+      McpServer.tools(),
+      "1.0.0-rc.0"
+    ).pipe(Effect.provide(provided)) as Effect.Effect<Record<string, unknown>>
+  ) as { readonly result: { readonly structuredContent: McpServer.Envelope } }
+  return reply.result.structuredContent
+}
+
+const rpcCall = (name: string, args: Record<string, unknown> = {}) => rpcCallWith(control, name, args)
 
 const find = (name: string) =>
   McpServer.tools({ surface: "both", verbs: Verb.shipped })
@@ -88,6 +111,15 @@ describe("the tool surface", () => {
       .not.toContain("run_workflow")
     expect(McpServer.tools({ readOnly: true }).map((tool) => tool.name)).toContain("get_run")
   })
+
+  it("advertises closed object schemas for every tool", () => {
+    for (const tool of McpServer.tools({ surface: "both", verbs: Verb.shipped })) {
+      expect([tool.name, tool.inputSchema]).toEqual([
+        tool.name,
+        expect.objectContaining({ type: "object", additionalProperties: false })
+      ])
+    }
+  })
 })
 
 describe("the envelope", () => {
@@ -111,6 +143,78 @@ describe("the envelope", () => {
   it("lists flows, runs, and one run's events over the control plane", async () => {
     expect(await call(find("list_workflows"))).toMatchObject({ ok: true })
     expect(await call(find("list_runs"), { flowId: "system/test", status: "running" })).toMatchObject({ ok: true })
+  })
+
+  it("omits reserved system flows from the workflow catalog", async () => {
+    const result = await call(find("list_workflows")) as { readonly ok: true; readonly data: ReadonlyArray<{
+      readonly flowId: string
+    }> }
+
+    expect(result.data.map((flow) => flow.flowId)).not.toContain("system/test")
+    expect(result.data.map((flow) => flow.flowId)).not.toContain("system/release")
+  })
+
+  it("refuses a reserved workflow before asking the control plane to plan it", async () => {
+    let planCalls = 0
+    const recordingControl = Layer.effect(
+      ControlService.Control,
+      Effect.map(ControlService.Control, (service) =>
+        ControlService.make({
+          ...service,
+          plan: (input) => {
+            planCalls += 1
+            return service.plan(input)
+          }
+        }))
+    ).pipe(Layer.provide(control))
+
+    const result = await callWith(recordingControl, find("run_workflow"), { flowId: "system/release" })
+
+    expect(result).toMatchObject({ ok: false, error: { code: "unsupported" } })
+    expect((result as { readonly error: { readonly message: string } }).error.message)
+      .toContain("system/release is a reserved system flow id")
+    expect(planCalls).toBe(0)
+  })
+
+  it("validates the run status and names every accepted value", async () => {
+    const refused = await rpcCall("list_runs", { status: "done" })
+
+    expect(refused).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } })
+    const message = (refused as { readonly error: { readonly message: string } }).error.message
+    expect(message).toContain("status")
+    for (const status of [
+      "accepted",
+      "running",
+      "parked",
+      "waiting-approval",
+      "cancelled",
+      "completed",
+      "failed"
+    ]) expect(message).toContain(status)
+
+    expect(await rpcCall("list_runs", { status: "running" })).toMatchObject({ ok: true })
+  })
+
+  it.each([-1, 1.5])("refuses the watch cursor %s", async (afterSequence) => {
+    const result = await rpcCall("watch_run", { runId: "run-1", afterSequence })
+
+    expect(result).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } })
+    expect((result as { readonly error: { readonly message: string } }).error.message)
+      .toContain("afterSequence")
+  })
+
+  it("refuses a non-object workflow input", async () => {
+    const result = await rpcCall("run_workflow", { flowId: "project/demo", input: "not-an-object" })
+
+    expect(result).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } })
+    expect((result as { readonly error: { readonly message: string } }).error.message).toContain("input")
+  })
+
+  it("refuses members that the advertised schema does not declare", async () => {
+    const result = await rpcCall("list_runs", { unexpected: true })
+
+    expect(result).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } })
+    expect((result as { readonly error: { readonly message: string } }).error.message).toContain("unexpected")
   })
 
   it("names a missing argument rather than failing the call", async () => {
@@ -186,6 +290,43 @@ describe("the envelope", () => {
       .toMatchObject({ ok: false, error: { code: "RUN_NOT_FOUND" } })
     expect(await call(find("get_node_detail"), { runId: "absent", nodeId: "read#1" }))
       .toMatchObject({ ok: false, error: { code: "NODE_NOT_FOUND" } })
+  })
+
+  it("uses a tagged control failure's stable code", async () => {
+    expect(await call(find("run_workflow"), { flowId: "project/missing" }))
+      .toMatchObject({ ok: false, error: { code: "FLOW_NOT_FOUND" } })
+  })
+
+  it("redacts a credential from a tagged failure message", async () => {
+    const credential = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
+    const refusingControl = Layer.effect(
+      ControlService.Control,
+      Effect.map(ControlService.Control, (service) =>
+        ControlService.make({
+          ...service,
+          list: () => Effect.fail(new ControlError.Unauthorized({ message: `Bearer ${credential}` }))
+        }))
+    ).pipe(Layer.provide(control))
+
+    const result = await rpcCallWith(refusingControl, "list_runs")
+    const error = (result as { readonly error: { readonly code: string; readonly message: string } }).error
+
+    expect(error.code).toBe("UNAUTHORIZED")
+    expect(error.message).toContain("[REDACTED_TOKEN]")
+    expect(error.message).not.toContain(credential)
+  })
+
+  it("propagates a control defect out of respond", async () => {
+    const defectiveControl = Layer.effect(
+      ControlService.Control,
+      Effect.map(ControlService.Control, (service) =>
+        ControlService.make({
+          ...service,
+          list: () => Effect.die(new Error("list invariant failed"))
+        }))
+    ).pipe(Layer.provide(control))
+
+    await expect(rpcCallWith(defectiveControl, "list_runs")).rejects.toThrow("list invariant failed")
   })
 
   it("answers the raw surface with the command to run", async () => {

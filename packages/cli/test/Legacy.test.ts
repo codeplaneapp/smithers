@@ -25,9 +25,20 @@ const directory = (): string => {
 const legacyDatabase = (runs: ReadonlyArray<readonly [string, string]>): string => {
   const file = join(directory(), "smithers.db")
   const database = new DatabaseSync(file)
-  database.exec("CREATE TABLE _smithers_runs (run_id TEXT, workflow_name TEXT, status TEXT)")
+  database.exec(`CREATE TABLE _smithers_runs (
+    run_id TEXT,
+    workflow_name TEXT,
+    workflow_path TEXT,
+    status TEXT,
+    heartbeat_at_ms INTEGER,
+    runtime_owner_id TEXT,
+    parent_run_id TEXT,
+    pause_requested_at_ms INTEGER,
+    cancel_requested_at_ms INTEGER
+  )`)
   for (const [runId, status] of runs) {
-    database.prepare("INSERT INTO _smithers_runs VALUES (?, ?, ?)").run(runId, "review", status)
+    database.prepare("INSERT INTO _smithers_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(runId, "review", undefined, status, undefined, undefined, undefined, undefined, undefined)
   }
   database.close()
   return file
@@ -54,7 +65,7 @@ describe("reading a 0.x database", () => {
     expect(database.readable).toBe(true)
     expect(database.runs.map((run) => run.runId)).toEqual(["run-1", "run-3"])
     expect(database.runs[0]).toEqual({ runId: "run-1", workflowName: "review", status: "running" })
-    expect(Legacy.terminalStatuses).toEqual(["finished", "failed", "cancelled", "continued"])
+    expect(Legacy.terminalStatuses).toBe(RunState.terminalStatuses)
   })
 
   it("reports nothing for a file that is not there", () => {
@@ -104,3 +115,4 @@ describe("the migration refusal", () => {
     expect(Legacy.refusal([Legacy.read(file)])).toContain("unreadable")
   })
 })
+import { RunState } from "@smthrs/migrate"

@@ -37,19 +37,25 @@ import { join } from "node:path"
  * The OAuth token endpoint the refresh grant is sent to. This is the auth
  * host, not the backend-api host serving model calls.
  *
+ * Exported so a test can point the refresh at a local server. A wrong value
+ * here surfaces as an authentication failure on the first expired token, not
+ * at startup.
+ *
  * @category constants
  * @since 0.1.0
- * @slop
  */
 export const refreshUrl = "https://auth.openai.com/oauth/token"
 
 /**
- * The codex CLI's public OAuth client id. Not a secret: it names the client
- * whose sessions `auth.json` holds, and a refresh must present the same id.
+ * The codex CLI's public OAuth client id.
+ *
+ * Not a secret: it names the client whose sessions `auth.json` holds, and a
+ * refresh grant is rejected unless it presents the same id the session was
+ * minted under. It is pinned to codex's own id because this store reads and
+ * rewrites codex's file rather than keeping a session of its own.
  *
  * @category constants
  * @since 0.1.0
- * @slop
  */
 export const clientId = "app_EMoamEEZ73f0CkXaXp7hrann"
 
@@ -60,9 +66,13 @@ const EXPIRY_MARGIN_MS = 5 * 60_000
  * Where the auth store lives for a given environment: `$CODEX_HOME/auth.json`,
  * defaulting to `~/.codex/auth.json` exactly as codex does.
  *
+ * The resolution has to match codex's byte for byte. This store shares one
+ * file with a program the operator also runs, so resolving a different path
+ * would silently sign with a session the codex CLI has already rotated away.
+ * Pure: it reads the environment it is handed and touches no disk.
+ *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const locate = (environment: Readonly<Record<string, string | undefined>>): string => {
   const home = environment["CODEX_HOME"]
@@ -71,13 +81,19 @@ export const locate = (environment: Readonly<Record<string, string | undefined>>
 
 /**
  * One auth store, shared by every seat that resolves against the same file.
- * Sharing is what makes the refresh single-flight process-wide: parallel
- * sealed steps signing concurrently await one refresh rather than racing the
- * token endpoint with the same refresh token.
+ *
+ * Build it once per process with {@link make} and hand the same value to every
+ * seat. Sharing is what makes the refresh single-flight: parallel sealed steps
+ * signing concurrently await one refresh rather than racing the token endpoint
+ * with the same refresh token, which the endpoint answers by invalidating the
+ * loser's session.
+ *
+ * The single flight is per store, so it does not arbitrate against the codex
+ * CLI running in another process. That residual race is documented on
+ * {@link make}.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Store {
   readonly auth: (options: { readonly modelId: string }) => Auth.Auth
@@ -87,9 +103,11 @@ export interface Store {
  * What {@link make} needs: the store file and the executor refresh traffic
  * runs through.
  *
+ * Both are parameters so a test can point at a scratch file and a scripted
+ * executor instead of the operator's real session and the live token endpoint.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly file: string
@@ -146,9 +164,21 @@ const lastRefreshInstant = (now: number): string => new Date(now).toISOString().
 /**
  * Builds the shared ChatGPT auth store over one `auth.json` file.
  *
+ * The returned store hands each seat an `Auth` that reuses the recorded access
+ * token until it is within five minutes of its JWT expiry, then refreshes
+ * once for every waiter. A refresh re-reads `auth.json` immediately before
+ * spending the refresh token, writes the result to a per-process temporary
+ * file, and renames it into place, so a crash cannot leave a truncated
+ * session behind.
+ *
+ * Known residual race: the codex CLI shares this file and can rotate the
+ * refresh token between this store's re-read and its call to the endpoint. The
+ * loser of that race sees its session invalidated and the operator has to log
+ * in again. The re-read narrows the window; closing it needs a lock file
+ * keyed by `auth.json` that codex also honors.
+ *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Store => {
   const { executor, file } = options

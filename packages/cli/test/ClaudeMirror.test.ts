@@ -143,6 +143,21 @@ describe("one mirror frame", () => {
     expect(frame.outputs).toEqual({})
   })
 
+  it("keeps run-wide ordinals when a repeated flow call straddles the cursor", () => {
+    const repeated = [
+      event("control.agent.cell-call-started", { flowName: "bash", input: { command: "first" } }),
+      event("control.agent.cell-call-settled", { flowName: "bash", outcome: "success", value: "first output" }),
+      event("control.agent.cell-call-started", { flowName: "bash", input: { command: "second" } }),
+      event("control.agent.cell-call-settled", { flowName: "bash", outcome: "success", value: "second output" })
+    ]
+
+    const frame = ClaudeMirror.frame("run-1", run("running"), repeated, { afterSeq: repeated[1]!.sequence })
+
+    expect(frame.changed).toEqual(["bash#2"])
+    expect(frame.outputs).toEqual({ "bash#2": "second output" })
+    expect(frame.outputs["bash#1"]).toBeUndefined()
+  })
+
   it("truncates a long output rather than sending the whole thing", () => {
     const long = [
       event("control.agent.cell-call-started", { flowName: "read", input: {} }),
@@ -154,6 +169,22 @@ describe("one mirror frame", () => {
     expect(frame.outputs["read#1"]).toHaveLength(10)
     expect(frame.outputs["read#1"]?.endsWith("…")).toBe(true)
     expect(ClaudeMirror.defaultMaxOutputChars).toBe(2000)
+  })
+
+  it("honors zero and one-character bounds without splitting an astral character", () => {
+    const output = (value: string, maxOutputChars: number): string | undefined => {
+      const bounded = [
+        event("control.agent.cell-call-started", { flowName: "read", input: {} }),
+        event("control.agent.cell-call-settled", { flowName: "read", outcome: "success", value })
+      ]
+      return ClaudeMirror.frame("run-1", run("running"), bounded, { maxOutputChars }).outputs["read#1"]
+    }
+
+    expect(output("abc", 0)).toBe("")
+    expect(output("abc", 1)).toBe("…")
+    expect(output("😀abc", 2)).toBe("😀…")
+    expect(Array.from(output("😀abc", 2) ?? "")).toHaveLength(2)
+    expect(output("😀abc", 2)?.endsWith("\ud83d")).toBe(false)
   })
 
   it("carries the pending approval only while the run is parked on one", () => {

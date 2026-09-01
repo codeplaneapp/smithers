@@ -18,11 +18,16 @@ import type { Socket } from "effect/unstable/socket/Socket"
 import * as ExecutorOwnership from "./ExecutorOwnership.ts"
 
 /**
- * Configuration parsed before the command handlers are run.
+ * Everything the durable layers need to know before any flag is parsed.
+ *
+ * The composition roots are built from this, and they are built before the
+ * command tree runs, so these four values are read straight off the argument
+ * vector and the environment by `NodeControl.makeConfig` rather than by a
+ * handler. An invalid value is reported there as a usage error; by the time a
+ * handler sees a `Config` it is already valid.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Config {
   readonly remote?: string | undefined
@@ -55,13 +60,16 @@ export interface Config {
 /**
  * The runtime and journal a local composition executes on.
  *
+ * Pass one to {@link layer} to choose where a local command's runs and events
+ * are recorded: {@link engineMemory} for a composition that must not touch the
+ * disk, `NodeControl.engineDurable` for the real project database.
+ *
  * A journal is required, not optional: `Journal.layerNoop()` is a closed stub,
  * so every mutation event (decide/resume/launch) failed with
  * `journal_closed` after the runtime had already transitioned.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Engine {
   readonly runtime: Layer.Layer<ControlRuntime.ControlRuntime>
@@ -82,7 +90,6 @@ export interface Engine {
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const engineMemory: Engine = {
   // The runtime mints identifiers through `Crypto`, which is a host service
@@ -145,7 +152,6 @@ const rpcUrl = (remote: string): string => {
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = (
   config: Config,

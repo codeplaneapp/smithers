@@ -7,7 +7,17 @@
  * `bunx smthrs --mcp`, which pointed every agent at the last published build
  * regardless of what the operator was running.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -81,11 +91,60 @@ describe("registering the MCP server", () => {
     expect(Agents.addMcp(Agents.find("claude")!, directory).status).toBe("written")
   })
 
-  it("treats an unparseable configuration as empty rather than failing", () => {
+  it("preserves an unparseable configuration byte for byte and refuses to update it", () => {
     const directory = home()
-    writeFileSync(join(directory, ".claude.json"), "{ not json")
+    const path = join(directory, ".claude.json")
+    const original = Buffer.from("{ not json\n\u0000operator data")
+    writeFileSync(path, original)
 
-    expect(Agents.addMcp(Agents.find("claude")!, directory).status).toBe("written")
+    const wired = Agents.addMcp(Agents.find("claude")!, directory)
+
+    // The old test pinned replacement with a Smithers-only document. That
+    // made one syntax error destroy the operator's entire agent configuration.
+    expect(wired.status).toBe("failed")
+    expect(wired.reason).toContain(path)
+    expect(wired.reason).toMatch(/parse|valid JSON/i)
+    expect(readFileSync(path)).toEqual(original)
+  })
+
+  it("preserves and refuses a configuration whose root is an array", () => {
+    const directory = home()
+    const path = join(directory, ".claude.json")
+    const original = "[1, {\"operator\": true}]\n"
+    writeFileSync(path, original)
+
+    const wired = Agents.addMcp(Agents.find("claude")!, directory)
+
+    expect(wired).toMatchObject({ status: "failed", path })
+    expect(wired.reason).toMatch(/root.*object/i)
+    expect(readFileSync(path, "utf8")).toBe(original)
+  })
+
+  it("preserves and refuses an array-valued mcpServers member", () => {
+    const directory = home()
+    const path = join(directory, ".claude.json")
+    const original = "{\"theme\":\"dark\",\"mcpServers\":[{\"operator\":true}]}\n"
+    writeFileSync(path, original)
+
+    const wired = Agents.addMcp(Agents.find("claude")!, directory)
+
+    expect(wired).toMatchObject({ status: "failed", path })
+    expect(wired.reason).toMatch(/mcpServers.*object/i)
+    expect(readFileSync(path, "utf8")).toBe(original)
+  })
+
+  it("atomically updates a valid file without changing its mode", () => {
+    const directory = home()
+    const path = join(directory, ".claude.json")
+    writeFileSync(path, "{\"theme\":\"dark\"}\n")
+    chmodSync(path, 0o640)
+
+    const wired = Agents.addMcp(Agents.find("claude")!, directory)
+
+    expect(wired.status).toBe("written")
+    expect(statSync(path).mode & 0o777).toBe(0o640)
+    expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({ theme: "dark" })
+    expect(readdirSync(directory).filter((entry) => entry.includes(".tmp"))).toEqual([])
   })
 
   it("reports a configuration it cannot write", () => {

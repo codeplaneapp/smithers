@@ -35,7 +35,13 @@ describe("the projection", () => {
     ])
 
     expect(nodes.map((node) => node.nodeId)).toEqual(["read#1", "read#2", "write#1"])
-    expect(nodes[0]).toMatchObject({ outcome: "success", value: "contents of a", input: { path: "a.ts" } })
+    expect(nodes[0]).toMatchObject({
+      outcome: "success",
+      value: "contents of a",
+      input: { path: "a.ts" },
+      startedSequence: expect.any(Number),
+      settledSequence: expect.any(Number)
+    })
     expect(nodes[2]).toMatchObject({ outcome: "failure", message: "permission denied" })
   })
 
@@ -46,6 +52,8 @@ describe("the projection", () => {
 
     expect(nodes).toHaveLength(1)
     expect(nodes[0]).toMatchObject({ nodeId: "bash#1", outcome: "pending" })
+    expect(nodes[0]?.startedSequence).toBeDefined()
+    expect(nodes[0]?.settledSequence).toBeUndefined()
     expect(nodes[0]?.settledAt).toBeUndefined()
   })
 

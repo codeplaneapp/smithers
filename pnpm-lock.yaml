@@ -1170,12 +1170,18 @@ importers:
       '@smthrs/agent':
         specifier: 1.0.0-rc.0
         version: link:../agent
+      '@smthrs/canonical':
+        specifier: 1.0.0-rc.0
+        version: link:../canonical
       '@smthrs/capability':
         specifier: 1.0.0-rc.0
         version: link:../capability
       '@smthrs/control':
         specifier: 1.0.0-rc.0
         version: link:../control
+      '@smthrs/crypto':
+        specifier: 1.0.0-rc.0
+        version: link:../crypto
       '@smthrs/database':
         specifier: 1.0.0-rc.0
         version: link:../database

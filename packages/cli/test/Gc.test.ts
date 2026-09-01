@@ -10,7 +10,7 @@
  * row, and collecting it is data loss the operator did not ask for.
  */
 import { Cause, Effect, Exit } from "effect"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
@@ -88,8 +88,8 @@ const engineProject = (
 }
 
 /** Every run id left in a project's engine database, sorted. */
-const runIdsIn = (root: string): ReadonlyArray<string> => {
-  const database = new DatabaseSync(join(root, ".flows", "engine.db"))
+const runIdsIn = (root: string, file = "engine.db"): ReadonlyArray<string> => {
+  const database = new DatabaseSync(join(root, ".flows", file))
   const rows = database.prepare("SELECT run_id FROM flows_runs ORDER BY run_id").all()
   database.close()
   return rows.map((row) => String(row["run_id"]))
@@ -109,7 +109,10 @@ describe("the retention window", () => {
   })
 
   it("refuses a spelling it cannot read rather than guessing a window", () => {
-    for (const value of ["", "forever", "30", "d30", "-1d", "30y"]) expect(Gc.duration(value)).toBeUndefined()
+    for (const value of ["", "forever", "30", "d30", "-1d", "30y", "0s", "0d"]) {
+      expect(Gc.duration(value)).toBeUndefined()
+    }
+    expect(Gc.duration("30d")).toBe(30 * 24 * 60 * 60 * 1000)
   })
 
   it("keeps a month by default", () => {
@@ -151,19 +154,24 @@ describe("the sweep", () => {
     expect(result.reports.every((report) => report.runs.length === 0)).toBe(true)
   })
 
-  it("names a database it could not open instead of reporting an empty sweep of it", async () => {
+  it("aborts before deleting from either database when one cannot participate", async () => {
     // An empty report of an unopenable file is the worst answer available:
     // `gc --dry-run` is trusted to name exactly what a real pass would delete,
-    // and "nothing" is indistinguishable from "nothing to do". The other
-    // database is still swept, so one locked file does not stop the command.
-    const root = project("engine.db")
-    writeFileSync(join(root, ".flows", "control.db"), "not a database at all")
+    // and "nothing" is indistinguishable from "nothing to do". Probing every
+    // file first keeps a bad engine database from deleting the control half of
+    // a run.
+    const root = engineProject([
+      { runId: "settled", status: "completed", finishedAtMs: 1 }
+    ], [])
+    renameSync(join(root, ".flows", "engine.db"), join(root, ".flows", "control.db"))
+    mkdirSync(join(root, ".flows", "engine.db"))
 
-    const result = await Effect.runPromise(Gc.sweep(root, { olderThan: "1d", dryRun: false }))
+    const result = await Effect.runPromise(Gc.sweep(root, { olderThan: "1s", dryRun: false, now: 60_000 }))
 
-    expect(result.failures.map((failure) => failure.database)).toEqual([join(root, ".flows", "control.db")])
+    expect(result.failures.map((failure) => failure.database)).toEqual([join(root, ".flows", "engine.db")])
     expect(result.failures[0]!.reason).not.toBe("")
-    expect(result.reports.map((report) => report.database)).toEqual([join(root, ".flows", "engine.db")])
+    expect(result.reports).toEqual([])
+    expect(runIdsIn(root, "control.db")).toEqual(["settled"])
   })
 
   it("reports no failure when every database opened", async () => {
@@ -172,6 +180,37 @@ describe("the sweep", () => {
     )
 
     expect(result.failures).toEqual([])
+  })
+
+  it("sweeps both databases after both probes succeed", async () => {
+    const root = engineProject([
+      { runId: "engine-run", status: "completed", finishedAtMs: 1 }
+    ], [])
+    const control = new DatabaseSync(join(root, ".flows", "control.db"))
+    control.exec(`CREATE TABLE flows_migrations (
+      namespace TEXT NOT NULL,
+      id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      applied_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (namespace, id)
+    )`)
+    control.exec(`CREATE TABLE flows_runs (
+      run_id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      finished_at_ms INTEGER,
+      parent_run_id TEXT REFERENCES flows_runs(run_id)
+    )`)
+    control.prepare("INSERT INTO flows_runs VALUES (?, ?, ?, ?, ?)")
+      .run("control-run", "completed", 1, 1, null)
+    control.close()
+
+    const result = await Effect.runPromise(Gc.sweep(root, { olderThan: "1s", dryRun: false, now: 60_000 }))
+
+    expect(result.failures).toEqual([])
+    expect(result.reports.map((report) => report.database)).toEqual(Gc.databases(root))
+    expect(runIdsIn(root, "control.db")).toEqual([])
+    expect(runIdsIn(root)).toEqual([])
   })
 
   it("keeps a spawned settled child whose parent is still parked", async () => {

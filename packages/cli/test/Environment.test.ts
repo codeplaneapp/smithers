@@ -82,7 +82,7 @@ describe("the environment contract", () => {
     )
       .toBe(5000)
     expect(Environment.readInteger({ FLOWS_TEST_TIMEOUT_MS: "42" }, "SMITHERS_TEST_TIMEOUT_MS")).toBe(42)
-    for (const value of ["0", "-1", "soon", ""]) {
+    for (const value of ["30abc", " 30", "30 ", "0", "-1", "3e2", "soon", ""]) {
       expect(
         Environment.readInteger(
           { SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS: value },

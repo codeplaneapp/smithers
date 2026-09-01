@@ -31,7 +31,14 @@
   "engines": {
     "node": ">=22.19.0"
   },
-  "sideEffects": [],
+  "sideEffects": [
+    "./src/bin.ts",
+    "./src/Version.ts",
+    "./dist/esm/bin.js",
+    "./dist/esm/Version.js",
+    "./dist/cjs/bin.js",
+    "./dist/cjs/Version.js"
+  ],
   "bin": {
     "smithers": "./bin/smithers.mjs"
   },
@@ -88,8 +95,10 @@
     "@effect/platform-node": "4.0.0-rc.108",
     "@effect/platform-node-shared": "4.0.0-rc.108",
     "@smthrs/agent": "1.0.0-rc.0",
+    "@smthrs/canonical": "1.0.0-rc.0",
     "@smthrs/capability": "1.0.0-rc.0",
     "@smthrs/control": "1.0.0-rc.0",
+    "@smthrs/crypto": "1.0.0-rc.0",
     "@smthrs/database": "1.0.0-rc.0",
     "@smthrs/engine-store": "1.0.0-rc.0",
     "@smthrs/flows": "1.0.0-rc.0",

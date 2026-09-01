@@ -45,18 +45,55 @@ describe("Output.make human rendering", () => {
     expect(render(value, "json").text).toBe("{\"a\":null,\"z\":{\"a\":[{\"c\":2,\"d\":1}],\"y\":1}}")
     expect(render(value, "json").text).toBe(render(value, "json").text)
   })
+
+  it("sorts keys by code unit rather than the host locale", () => {
+    expect(render({ a: 1, Z: 2 }, "json").text).toBe("{\"Z\":2,\"a\":1}")
+  })
+
+  it("marks a cycle instead of overflowing the stack", () => {
+    const value: { self?: unknown } = {}
+    value.self = value
+
+    expect(render(value, "json").text).toBe("{\"self\":\"[Circular]\"}")
+  })
+
+  it("marks values nested past the deterministic depth limit", () => {
+    const root: { child?: unknown } = {}
+    let cursor = root
+    for (let depth = 0; depth < 258; depth++) {
+      const child: { child?: unknown } = {}
+      cursor.child = child
+      cursor = child
+    }
+
+    expect(render(root, "json").text).toContain("[Deep]")
+  })
+
+  it("renders BigInt and undefined in both formats", () => {
+    expect(render(17n, "human").text).toBe("17n")
+    expect(render(17n, "json").text).toBe("\"17n\"")
+    expect(render(undefined, "human").text).toBe("[Undefined]")
+    expect(render(undefined, "json").text).toBe("\"[Undefined]\"")
+  })
 })
 
 describe("Output.exitCode", () => {
   it.each(
     [
-      ["a parked receipt", { _tag: "Parked" }, 3],
-      ["a run waiting for approval", { status: "waiting-approval" }, 3],
-      ["an interrupted receipt", { _tag: "Interrupted" }, 130],
-      ["a SIGINT report", { signal: "SIGINT" }, 130],
-      ["a SIGTERM report", { signal: "SIGTERM" }, 143],
-      ["an error receipt", { _tag: "Error" }, 1],
-      ["an accepted receipt", { _tag: "Accepted" }, 0],
+      [
+        "a parked receipt",
+        { _tag: "Parked", receiptId: "receipt-1", planId: "plan-1", status: "waiting-approval" },
+        3
+      ],
+      ["a cancelled terminal receipt", { _tag: "Terminal", runId: "run-1", status: "cancelled" }, 130],
+      ["a failed terminal receipt", { _tag: "Terminal", runId: "run-1", status: "failed" }, 1],
+      ["an accepted receipt", { _tag: "Accepted", receiptId: "receipt-1", runId: "run-1" }, 0],
+      ["caller data tagged Parked", { _tag: "Parked" }, 0],
+      ["caller data waiting for approval", { status: "waiting-approval" }, 0],
+      ["caller data tagged Interrupted", { _tag: "Interrupted" }, 0],
+      ["caller data carrying SIGINT", { signal: "SIGINT" }, 0],
+      ["caller data carrying SIGTERM", { signal: "SIGTERM" }, 0],
+      ["caller data tagged Error", { _tag: "Error" }, 0],
       ["an empty object", {}, 0],
       ["an empty array", [], 0],
       ["null", null, 0],
@@ -68,17 +105,22 @@ describe("Output.exitCode", () => {
     expect(Output.exitCode(value)).toBe(expected)
   })
 
-  it("prefers the parked status over every other marker on the same value", () => {
-    // The checks are ordered, so a value carrying several markers reports the
-    // one an operator has to act on first.
-    expect(Output.exitCode({ _tag: "Error", status: "waiting-approval", signal: "SIGTERM" })).toBe(3)
-    expect(Output.exitCode({ _tag: "Error", signal: "SIGINT" })).toBe(130)
-    expect(Output.exitCode({ _tag: "Error", signal: "SIGTERM" })).toBe(143)
+  it("ignores even several receipt-shaped markers on caller data", () => {
+    expect(Output.exitCode({ _tag: "Error", status: "waiting-approval", signal: "SIGTERM" })).toBe(0)
   })
 
   it("stamps the same status onto the rendered value in either format", () => {
-    expect(render({ _tag: "Parked" }, "json").exitCode).toBe(3)
-    expect(render({ _tag: "Parked" }, "human").exitCode).toBe(3)
+    const receipt = { _tag: "Parked", receiptId: "receipt-1", planId: "plan-1", status: "waiting-approval" }
+    expect(render(receipt, "json").exitCode).toBe(3)
+    expect(render(receipt, "human").exitCode).toBe(3)
+  })
+
+  it("provides an explicit caller-value wrapper that always exits successfully", () => {
+    const receipt = { _tag: "Terminal", runId: "run-1", status: "failed" }
+    const rendered = render(Output.renderValue(receipt), "json")
+
+    expect(rendered.text).toBe("{\"_tag\":\"Terminal\",\"runId\":\"run-1\",\"status\":\"failed\"}")
+    expect(rendered.exitCode).toBe(0)
   })
 })
 

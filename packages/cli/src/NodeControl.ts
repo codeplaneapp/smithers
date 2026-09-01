@@ -71,9 +71,11 @@ import { HttpRouter } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
 import { Socket } from "effect/unstable/socket"
 import type { SqlClient } from "effect/unstable/sql/SqlClient"
+import { randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync } from "node:fs"
 import { createServer } from "node:http"
 import type { ListenOptions } from "node:net"
+import { hostname } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import * as Application from "./Application.ts"
 import * as CodexAuth from "./CodexAuth.ts"
@@ -469,6 +471,7 @@ export const engineDurable = (
   registry?: Layer.Layer<Registry.Registry> | undefined
 ): EngineDurable => {
   const file = databasePath(root)
+  const owner = Object.freeze({ hostId: hostname(), pid: process.pid, nonce: randomUUID() })
   // Suspended so a `--remote` invocation, which never builds this layer, does
   // not leave an empty `.flows/` behind. SQLite opens a file but will not
   // create the directory holding it, and a missing one is the first-run case,
@@ -491,12 +494,12 @@ export const engineDurable = (
     Layer.orDie
   )
   const runtime = registry === undefined
-    ? SqlControlRuntime.layer().pipe(Layer.provide([stores, NodeCrypto.layer]), Layer.orDie)
+    ? SqlControlRuntime.layer({ owner }).pipe(Layer.provide([stores, NodeCrypto.layer]), Layer.orDie)
     : Layer.effect(ControlRuntime.ControlRuntime)(
       Effect.gen(function*() {
         const registryService = yield* Registry.Registry
         const discovered = yield* registryService.list()
-        return yield* SqlControlRuntime.make({ flows: [...systemFlows, ...discovered.map(durableFlow)] })
+        return yield* SqlControlRuntime.make({ owner, flows: [...systemFlows, ...discovered.map(durableFlow)] })
       })
     ).pipe(Layer.provide([stores, NodeCrypto.layer, registry]), Layer.orDie)
   return {
@@ -947,7 +950,7 @@ export const layerExecutor = (
     {
       filename: executionDatabasePath(root),
       workspaceRoot,
-      owner: { hostId: "flows-cli" },
+      owner: { hostId: hostname() },
       // Two terminals over one project are two engine processes over one
       // `.flows/engine.db`, so "one engine process at a time" was never true
       // and a stub answering `false` let each steal the other's running rows

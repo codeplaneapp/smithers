@@ -14,13 +14,18 @@
  * @since 1.0.0
  */
 import { Control as ControlService, ControlSchema } from "@smthrs/control"
+import * as Canonical from "@smthrs/canonical/Canonical"
+import * as Sha256 from "@smthrs/crypto/Sha256"
 import * as UnsupportedBackend from "@smthrs/database/UnsupportedBackend"
 import * as ResolveJj from "@smthrs/jj/node/resolveJjBinary"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import type * as Namespace from "@smthrs/memory/Namespace"
 import * as MigrateCommand from "@smthrs/migrate/flow/Command"
+import { Ownership } from "@smthrs/run-store"
 import { Clock, Console, Effect, Option, Schema, Stream } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
+import { randomUUID } from "node:crypto"
+import { hostname } from "node:os"
 import * as Agents from "./Agents.ts"
 import * as Bug from "./Bug.ts"
 import * as ClaudeMirror from "./ClaudeMirror.ts"
@@ -603,13 +608,9 @@ const cancel = Command.make("cancel", { runId: Argument.string("run-id") }, (con
  * @since 1.0.0
  */
 export const signalKey = (runId: string, payload: ControlSchema.SignalPayload): string => {
-  const serialized = JSON.stringify(payload)
-  let hash = 0x811c9dc5
-  for (let index = 0; index < serialized.length; index++) {
-    hash ^= serialized.charCodeAt(index)
-    hash = Math.imul(hash, 0x01000193) >>> 0
-  }
-  return `cli:signal:${runId}:${hash.toString(16).padStart(8, "0")}`
+  const encoded = Schema.encodeSync(ControlSchema.SignalPayload)(payload)
+  const canonical = Schema.decodeUnknownSync(Canonical.Canonical)(encoded)
+  return `cli:signal:${runId}:${Sha256.digestSync(canonical)}`
 }
 
 const signalCommand = Command.make("signal", {
@@ -639,18 +640,19 @@ const steer = Command.make("steer", {
     yield* refuseRemoved("steer", { takeover: config.takeover })
     const control = yield* ControlService.Control
     const stamp = Date.now()
+    const messageId = `cli:steer:${config.runId}:${randomUUID()}`
     yield* render(
       yield* control.steer({
         runId: config.runId,
         message: {
           kind: "Message",
-          messageId: `cli:steer:${config.runId}:${stamp}`,
+          messageId,
           runId: config.runId,
           principal: { kind: "operator", id: "cli", stampedAt: stamp },
           createdAt: stamp,
           body: config.message
         },
-        idempotencyKey: `cli:steer:${config.runId}:${stamp}`
+        idempotencyKey: messageId
       })
     )
   })).pipe(Command.withDescription(Verb.find("steer")!.help))
@@ -708,7 +710,7 @@ const ps = Command.make("ps", {
     const control = yield* ControlService.Control
     const now = yield* Clock.currentTimeMillis
     yield* render(
-      labelled(
+      yield* labelled(
         yield* control.list({
           _tag: "runs",
           filters: {
@@ -724,13 +726,8 @@ const ps = Command.make("ps", {
 /**
  * The window a driven launch may sit at `accepted` before it claims the run.
  *
- * `accepted` with owner pid 0 is NOT proof on its own that no executor is
- * coming: an ordinary driven launch commits that row and flips it to
- * `running` a moment later, and a reader in another process sees the
- * intermediate state (measured at 175 ms and 191 ms on this repository's own
- * launch path). Every CLI-written run also carries pid 0, because
- * `SqlControlRuntime` defaults the owner that way. So the listing waits out
- * the handoff before it labels anything.
+ * An ordinary driven launch commits an accepted summary before its executor
+ * begins work, so the listing waits out this handoff before probing the owner.
  */
 const executorHandoffWindowMillis = 5_000
 
@@ -739,21 +736,30 @@ const executorHandoffWindowMillis = 5_000
  *
  * This is a rendering heuristic over the listing's own fields, not a durable
  * verdict: the durable one is the `control.run.pending` event the status card
- * reads from the run's journal. It answers true for a run that has sat at
- * `accepted` with owner pid 0, declaring no other wait, for longer than
- * {@link executorHandoffWindowMillis}. Such a run is real, durable, and
- * waiting for a host that drives its flow — a module flow's delegates are
- * registered in code by the program that hosts them — and only
- * `smithers cancel` ends it if none arrives.
+ * reads from the run's journal. For a same-host owner it uses the same
+ * fail-closed PID probe as run recovery. A foreign-host owner cannot be
+ * inspected and is never declared absent here.
  */
-const unclaimed = (run: ControlSchema.RunSummary, now: number): boolean => {
-  if (run.status !== "accepted" || run.waitingReason !== undefined) return false
-  if (now - run.updatedAt < executorHandoffWindowMillis) return false
-  if (run.ownerId === undefined) return true
+const statusObserver: Ownership.OwnerId = Object.freeze({
+  hostId: hostname(),
+  pid: process.pid,
+  nonce: "cli-status-observer"
+})
+
+const unclaimed = (run: ControlSchema.RunSummary, now: number): Effect.Effect<boolean> => {
+  if (run.status !== "accepted" || run.waitingReason !== undefined) return Effect.succeed(false)
+  if (now - run.updatedAt < executorHandoffWindowMillis) return Effect.succeed(false)
+  if (run.ownerId === undefined) return Effect.succeed(true)
   try {
-    return (JSON.parse(run.ownerId) as { readonly pid?: unknown }).pid === 0
+    const owner = Schema.decodeUnknownSync(Ownership.OwnerId)(JSON.parse(run.ownerId))
+    if (owner.hostId !== statusObserver.hostId) return Effect.succeed(false)
+    return Ownership.sameHostPidProbe(owner, {
+      claimant: statusObserver,
+      heartbeatAtMs: null,
+      nowMs: now
+    }).pipe(Effect.map((alive) => !alive))
   } catch {
-    return false
+    return Effect.succeed(false)
   }
 }
 
@@ -764,20 +770,21 @@ const unclaimed = (run: ControlSchema.RunSummary, now: number): boolean => {
  * holds on an executor, and before the label a listing showed it as an
  * ordinary `accepted` run — indistinguishable from one a live peer owns.
  */
-const labelled = (listed: ControlSchema.ListResponse, now: number): ControlSchema.ListResponse =>
+const labelled = (listed: ControlSchema.ListResponse, now: number): Effect.Effect<ControlSchema.ListResponse> =>
   listed._tag === "runs"
-    ? {
-      ...listed,
-      items: listed.items.map((run) => unclaimed(run, now) ? { ...run, waitingReason: "executor" } : run)
-    }
-    : listed
+    ? Effect.map(
+      Effect.forEach(listed.items, (run) =>
+        Effect.map(unclaimed(run, now), (missing) => missing ? { ...run, waitingReason: "executor" } : run)),
+      (items) => ({ ...listed, items })
+    )
+    : Effect.succeed(listed)
 
 const statusOf = (runId: Option.Option<string>) =>
   Effect.gen(function*() {
     yield* guardGlobals
     const control = yield* ControlService.Control
     const filters = Option.isSome(runId) ? { runId: runId.value } : undefined
-    const listed = labelled(yield* control.list({ _tag: "runs", filters }), yield* Clock.currentTimeMillis)
+    const listed = yield* labelled(yield* control.list({ _tag: "runs", filters }), yield* Clock.currentTimeMillis)
     const root = yield* rootCommand
     // `--json` keeps the stable listing shape untouched; a human reader with a
     // run id gets the diagnosis card computed from that run's own events.

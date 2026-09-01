@@ -27,6 +27,7 @@ import { Cause, Effect, Queue, Schema, Stream } from "effect"
 import { createInterface } from "node:readline"
 import * as Forensics from "./Forensics.ts"
 import * as NodeOutput from "./NodeOutput.ts"
+import * as Unsupported from "./Unsupported.ts"
 
 /**
  * The MCP protocol revision this server implements.
@@ -153,7 +154,12 @@ export const supportedTools: ReadonlyArray<Tool> = [
     call: () =>
       envelope(
         Effect.flatMap(ControlService.Control, (control) => control.list({ _tag: "flows" })),
-        (listed) => succeeded(listed._tag === "flows" ? listed.items : [])
+        (listed) =>
+          succeeded(
+            listed._tag === "flows"
+              ? listed.items.filter((item) => !Unsupported.isReservedFlow(item.flowId))
+              : []
+          )
       )
   },
   {
@@ -170,6 +176,11 @@ export const supportedTools: ReadonlyArray<Tool> = [
     call: (args) => {
       const flowId = text(args["flowId"])
       if (flowId === undefined) return Effect.succeed(missingArgument("flowId"))
+      if (Unsupported.isReservedFlow(flowId)) {
+        return Effect.succeed(
+          failed("INVALID_INPUT", Unsupported.reservedFlowError("up", flowId).message)
+        )
+      }
       const input = args["input"] ?? {}
       return envelope(
         Effect.gen(function*() {
