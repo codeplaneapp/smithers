@@ -26,7 +26,9 @@ const stampValue = async (
     case "buildTime":
       return new Date().toISOString()
     case "versionMeta": {
-      const exact = await PackageTree.runGit(root, ["describe", "--tags", "--exact-match", "HEAD"]).catch(() => "")
+      // `tag --points-at` represents an untagged commit with successful empty
+      // output, so an actual git failure remains distinguishable from "dev".
+      const exact = await PackageTree.runGit(root, ["tag", "--points-at", "HEAD"])
       return exact.trim() === "" ? "dev" : ""
     }
     default:
