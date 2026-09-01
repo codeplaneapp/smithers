@@ -44,6 +44,12 @@ export interface SmithersErrorOptions {
  * @since 1.0.0
  */
 export class SmithersError extends Error {
+  /**
+   * The name the error reports. Installed by the constructor as a
+   * non-enumerable own property; `declare` keeps this type-level so no class
+   * field is emitted.
+   */
+  declare readonly name: string
   /** The machine-readable classification. */
   readonly code: SmithersErrorCode
   /** The message without the appended documentation URL. */

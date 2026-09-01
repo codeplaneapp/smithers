@@ -12,6 +12,17 @@ import {
 import { hasSmithersErrorShape, isSmithersError, SmithersError } from "../src/SmithersError.ts"
 
 describe("SmithersError", () => {
+  it("keeps its public fields readonly", () => {
+    const pin = (error: SmithersError): void => {
+      // @ts-expect-error SmithersError.name must remain readonly.
+      error.name = "mutated"
+      // @ts-expect-error SmithersError.details must remain readonly.
+      error.details = undefined
+    }
+
+    expect(typeof pin).toBe("function")
+  })
+
   it("uses the default name", () => {
     expect(new SmithersError("INVALID_INPUT", "x").name).toBe("SmithersError")
   })
