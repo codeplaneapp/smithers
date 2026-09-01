@@ -8,7 +8,7 @@
  * fresh session to land on.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Fiber, PlatformError, Ref, Schedule } from "effect"
+import { Deferred, Effect, Fiber, PlatformError, Ref, Schedule } from "effect"
 import { TestClock } from "effect/testing"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
@@ -236,6 +236,107 @@ describe("SandboxSupervision", () => {
 
       expect(provider.state.openedSessions).toEqual(["test-session"])
       expect(yield* Ref.get(record.events)).toEqual([])
+    }))
+
+  it.effect.each([
+    { named: "without a ping", ping: undefined },
+    { named: "with a ping", ping: Effect.void }
+  ])("opens a fresh session for the command after an open that failed, $named", ({ ping }) =>
+    Effect.gen(function*() {
+      // `RemoteChildProcessSpawner.make` answers a failed open with a spawner
+      // whose every command fails, which is right for a caller holding one
+      // session and wrong for a supervisor: cached as a generation it replayed
+      // the one open failure for the life of the layer, and a provider with no
+      // `ping` had nothing that could ever clear it.
+      const base = RemoteChildProcessSpawner.TestRemote.make({
+        ...ping === undefined ? {} : { ping },
+        scripts: { greet: { stdout: "hello" } }
+      })
+      let opens = 0
+      const provider: RemoteChildProcessSpawner.Provider = {
+        ...base,
+        open: (session) =>
+          Effect.suspend(() => {
+            opens += 1
+            return opens === 1 ? Effect.fail(gone()) : base.open(session)
+          })
+      }
+
+      const outcome = yield* Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner
+        const refused = yield* Effect.flip(spawner.string(ChildProcess.make("greet")))
+        const served = yield* spawner.string(ChildProcess.make("greet"))
+        return { refused, served }
+      }).pipe(Effect.provide(SandboxSupervision.layer(provider, { interval })))
+
+      expect(reason(outcome.refused)).toBe("NotFound")
+      expect(outcome.refused.message).toContain("session is gone")
+      expect(outcome.served).toBe("hello")
+      // The second command opened a second time rather than replaying the
+      // first failure, and the failed attempt left nothing behind.
+      expect(opens).toBe(2)
+      expect(base.state.openedSessions).toEqual(["test-session"])
+      expect(base.state.commands).toEqual(["greet"])
+    }))
+
+  it.effect("retires the session even when the reporter defects", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        ping: Effect.fail(gone()),
+        scripts: { serve: { pending: true }, greet: { stdout: "hello" } }
+      })
+      // Reporting is observational and caller-supplied. Sequencing it ahead of
+      // the two operations that are not put every waiter and the remote
+      // machine behind a stranger's HTTP call.
+      const reporter: SandboxSupervision.Reporter = {
+        unhealthy: () => Effect.die(new Error("the reporter exploded"))
+      }
+
+      const outcome = yield* Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner
+        const running = yield* Effect.forkChild(spawner.exitCode(ChildProcess.make("serve")), {
+          startImmediately: true
+        })
+        yield* TestClock.adjust(interval)
+        const failed = yield* Effect.flip(Fiber.join(running))
+        // The retired session's scope was closed, and the next command opens a
+        // fresh one instead of waiting on a permit the reporter never gave up.
+        expect(provider.state.cancellations).toBe(1)
+        return { failed, served: yield* spawner.string(ChildProcess.make("greet")) }
+      }).pipe(Effect.provide(SandboxSupervision.layer(provider, { interval, reporter })))
+
+      expect(reason(outcome.failed)).toBe("NotFound")
+      expect(outcome.served).toBe("hello")
+      expect(provider.state.openedSessions).toEqual(["test-session", "test-session"])
+    }))
+
+  it.effect("fails the commands a retirement covers before the reporter has answered", () =>
+    Effect.gen(function*() {
+      const reporting = yield* Deferred.make<void>()
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        ping: Effect.fail(gone()),
+        scripts: { serve: { pending: true } }
+      })
+      // A reporter that never returns. Everything the retirement MUST do is
+      // sequenced ahead of it, so this asserts the ordering rather than a
+      // timeout: the waiter fails and the machine is released while the
+      // reporter is still hanging.
+      const reporter: SandboxSupervision.Reporter = {
+        unhealthy: () => Effect.andThen(Deferred.succeed(reporting, undefined), Effect.never)
+      }
+
+      const failed = yield* Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner
+        const running = yield* Effect.forkChild(spawner.exitCode(ChildProcess.make("serve")), {
+          startImmediately: true
+        })
+        yield* TestClock.adjust(interval)
+        yield* Deferred.await(reporting)
+        return yield* Effect.flip(Fiber.join(running))
+      }).pipe(Effect.provide(SandboxSupervision.layer(provider, { interval, reporter })))
+
+      expect(reason(failed)).toBe("NotFound")
+      expect(provider.state.cancellations).toBe(1)
     }))
 
   it.effect("reports through the logger when no reporter is injected", () =>

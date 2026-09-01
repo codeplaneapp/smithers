@@ -500,6 +500,117 @@ describe("Sandbox.fileSystem", () => {
       )
     }))
 
+  it.effect("asks for one entry per line, so a pseudo-terminal cannot columnize the listing", () =>
+    Effect.gen(function*() {
+      // POSIX `ls` writes one entry per line only when its output is not a
+      // terminal; on a terminal it columnizes. `AwsSandbox` runs every command
+      // through a Session Manager pseudo-terminal, so a bare `ls -A` came back
+      // as one space-padded line that parsed into a single bogus name. This
+      // session is that terminal: it columnizes any listing that did not ask
+      // for one entry per line.
+      const pty = Sandbox.TestSession.make({
+        script: (command) =>
+          command.includes("ls -1A")
+            ? { stdout: "a.txt\nb.txt\nc.txt\n" }
+            : command.includes("ls -A")
+            ? { stdout: "a.txt      b.txt      c.txt\n" }
+            : { exitCode: 0 }
+      })
+      const listed = yield* Effect.scoped(
+        Effect.flatMap(probeSession(pty), (files) => files.readDirectory("/tree"))
+      )
+      expect(listed).toEqual(["a.txt", "b.txt", "c.txt"])
+    }))
+
+  it.effect("roots dotted, empty, and root-workdir paths without doubling or dropping a slash", () =>
+    Effect.gen(function*() {
+      const provider = Sandbox.TestSession.make({ workdir: "/work//", script: () => ({ exitCode: 0 }) })
+      const rooted = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const files = yield* probeSession(provider)
+          for (const path of [".", "", "./x", ".//y", "./././deep/z", "..", "/absolute"]) {
+            yield* files.makeDirectory(path)
+          }
+        })
+      )
+      expect(rooted).toBeUndefined()
+      const targets = provider.state.commands.map((command) => /mkdir (.*); fi$/.exec(command)?.[1])
+      // The workdir's trailing slashes are gone, `.` and `""` name the workdir
+      // itself, `./` prefixes are stripped rather than passed through, and an
+      // absolute path is left alone.
+      expect(targets).toEqual([
+        "/work",
+        "/work",
+        "/work/x",
+        "/work/y",
+        "/work/deep/z",
+        "/work/..",
+        "/absolute"
+      ])
+
+      // A session whose workspace IS the root still names the root, not the
+      // empty string the host shell would read as its own directory.
+      const atRoot = Sandbox.TestSession.make({ workdir: "/", script: () => ({ exitCode: 0 }) })
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const files = yield* probeSession(atRoot)
+          yield* files.makeDirectory(".")
+          yield* files.makeDirectory("etc")
+        })
+      )
+      expect(atRoot.state.commands.map((command) => /mkdir (.*); fi$/.exec(command)?.[1])).toEqual(["/", "/etc"])
+    }))
+
+  it.effect("hands a native override the rooted path, and reports its failure as its own", () =>
+    Effect.gen(function*() {
+      const seen: Array<ReadonlyArray<string>> = []
+      const gone = PlatformError.systemError({
+        _tag: "Unknown",
+        module: "FileSystem",
+        method: "exists",
+        description: "the override gave up"
+      })
+      const provider = Sandbox.TestSession.make({ workdir: "/work", script: () => ({ exitCode: 0 }) })
+      const outcome = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const session = yield* provider.acquire("probe")
+          // A partial override: two operations native, everything else probed.
+          const files = Sandbox.fileSystem({
+            ...session,
+            files: {
+              exists: (path) =>
+                Effect.suspend(() => {
+                  seen.push(["exists", path])
+                  return Effect.fail(gone)
+                }),
+              rename: (from, to) =>
+                Effect.sync(() => {
+                  seen.push(["rename", from, to])
+                })
+            }
+          })
+          const failed = yield* Effect.flip(files.exists("notes.txt"))
+          yield* files.rename("./from.txt", "to.txt")
+          // An operation the override does not supply still runs as a probe,
+          // and it is rooted the same way.
+          yield* files.makeDirectory("build")
+          return failed
+        })
+      )
+      // The override never re-implements the rooting rule and never sees a
+      // relative path: the resolver is in front of it, not beside it.
+      expect(seen).toEqual([
+        ["exists", "/work/notes.txt"],
+        ["rename", "/work/from.txt", "/work/to.txt"]
+      ])
+      expect(provider.state.commands).toHaveLength(1)
+      expect(provider.state.commands[0]).toContain("mkdir /work/build")
+      // A failing override is reported as an override failure, not swallowed
+      // into `false` the way an absent path would be.
+      expect(platformReason(outcome)).toBe("Unknown")
+      expect(String(outcome)).toContain("the override gave up")
+    }))
+
   it.effect("prefers a session's native override to the probe", () =>
     Effect.gen(function*() {
       const provider = Sandbox.TestSession.make()

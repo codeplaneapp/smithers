@@ -144,7 +144,15 @@ export const make = (options: ContainerSandboxOptions): Provider => {
               "sleep",
               "infinity"
             ])
-            if (created.code !== 0 && !created.stderr.includes("already in use")) {
+            if (created.code === 0) return
+            // A refused create is either a name already taken, which is the
+            // reattach this provider is built around, or anything else, which
+            // is a failure. The engine says which in English prose, and the
+            // prose is not a contract: podman words the conflict differently
+            // from docker and a localized daemon differently again. The
+            // question goes to the engine as a question instead.
+            const existing = yield* run(["container", "inspect", name])
+            if (existing.code !== 0) {
               return yield* Effect.fail(
                 new ProviderError({
                   code: "unavailable",

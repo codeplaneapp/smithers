@@ -120,7 +120,7 @@ const rooted = (
       ? (path: string, ...rest: ReadonlyArray<unknown>) => call(resolve(path), ...rest)
       : (from: string, to: string, ...rest: ReadonlyArray<unknown>) => call(resolve(from), resolve(to), ...rest)
   }
-  return wrapped as Partial<FileSystem.FileSystem>
+  return wrapped
 }
 
 const probeFailed = (method: string, path: string) =>
@@ -243,11 +243,19 @@ const deniedExit = 12
  */
 export const fileSystem = (session: Session): FileSystem.FileSystem => {
   const quote = CommandLine.quote
-  const workdir = session.workdir.replace(/\/+$/, "")
+  // Trailing slashes go, because every resolved path adds its own. A workdir
+  // that is nothing but slashes is the root, and stripping it to the empty
+  // string would quote `''` into the probe and name the host's cwd rather than
+  // the machine's; the root keeps its one slash and never doubles it.
+  const trimmedWorkdir = session.workdir.replace(/\/+$/, "")
+  const workdir = trimmedWorkdir === "" ? "/" : trimmedWorkdir
   const resolve = (path: string): string => {
     if (path.startsWith("/")) return path
-    const trimmed = path.replace(/^(\.\/)+/, "")
-    return trimmed === "" || trimmed === "." ? workdir : `${workdir}/${trimmed}`
+    // Leading `./` and the slashes around it go together, so `.//x` names the
+    // same entry `./x` does rather than reaching the machine as `<workdir>//x`.
+    const relative = path.replace(/^(?:\.?\/+)*/, "")
+    if (relative === "" || relative === ".") return workdir
+    return workdir === "/" ? `/${relative}` : `${workdir}/${relative}`
   }
   const statOf = Effect.fn("Sandbox.fileSystem.stat")(function*(raw: string) {
     const path = resolve(raw)

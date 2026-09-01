@@ -102,6 +102,13 @@ const machineName = (prefix: string, session: string): string =>
  * `executeCommand` takes a command line and nothing else, so the redirect in
  * `internal/stdinRedirect` is the only honest route.
  *
+ * Command output is not byte-exact here. That `result` is a string, so what
+ * this provider streams is the string re-encoded as UTF-8: a command whose
+ * output is not valid UTF-8, such as a tarball or a compiled binary written to
+ * stdout, comes back changed. File transfer is byte-exact regardless, so a
+ * caller that needs bytes has the command write a file and reads it back with
+ * `readFile`.
+ *
  * @category constructors
  * @since 0.1.0
  */

@@ -80,6 +80,13 @@ const processOf = (stdout: string, stderr: string, exitCode: number): RemoteProc
  * SDK's base64 encoding and the text is read from the result's `content`
  * field. This preserves arbitrary bytes without importing host modules.
  *
+ * Command output is not byte-exact here. The SDK reports a command's stdout
+ * and stderr as strings, so what this provider streams is those strings
+ * re-encoded as UTF-8: a command whose output is not valid UTF-8, such as a
+ * tarball or a compiled binary written to stdout, comes back changed. File
+ * transfer is byte-exact regardless, so a caller that needs bytes has the
+ * command write a file and reads it back with `readFile`.
+ *
  * @category constructors
  * @since 0.1.0
  */

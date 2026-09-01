@@ -121,6 +121,12 @@ const engine = (fault: (args: ReadonlyArray<string>) => Response | undefined = (
         containers.set(name, { started: false })
         return canned({ stdout: "0123456789ab\n" })
       }
+      if (args[0] === "container" && args[1] === "inspect") {
+        const name = args[2]!
+        return containers.has(name)
+          ? canned({ stdout: `[{"Id":"0123456789ab","Name":"/${name}"}]\n` })
+          : canned({ exitCode: 1, stderr: `Error response from daemon: No such container: ${name}\n` })
+      }
       if (args[0] === "start") {
         const held = containers.get(args[1]!)
         if (held === undefined) {
@@ -289,6 +295,29 @@ describe("ContainerSandbox", () => {
       expect(refusal).toBeInstanceOf(ProviderError)
       expect((refusal as ProviderError).message).toContain("no such image")
       expect(refusing.calls[0]!.args).toContain("/workspace")
+
+      // A conflict the engine words in some other language is still a
+      // conflict. The reattach asks the engine whether the container is there
+      // rather than reading its prose, so podman, a localized daemon, or a
+      // reworded docker message reattaches like any other.
+      let creates = 0
+      const podman = engine((args) => {
+        if (args[0] !== "create") return undefined
+        creates += 1
+        // The first create succeeds through the fake's own handler; the
+        // second is refused in podman's wording, which shares no substring
+        // with docker's.
+        return creates === 1
+          ? undefined
+          : { exitCode: 125, stderr: `Error: creating container storage: the name is taken by an existing container` }
+      })
+      const podmanProvider = ContainerSandbox.make({ spawner: podman.spawner, image: "img", workdir })
+      const leakedTwice = yield* Scope.make()
+      const held = yield* Effect.provideService(podmanProvider.acquire("localized"), Scope.Scope, leakedTwice)
+      const reattached = yield* acquired(podmanProvider, (session) => Effect.succeed(session.remoteId), "localized")
+      expect(reattached).toBe(held.remoteId)
+      expect(podman.calls.map((call) => call.args.slice(0, 2))).toContainEqual(["container", "inspect"])
+      expect(Exit.isSuccess(yield* Effect.exit(Scope.close(leakedTwice, Exit.void)))).toBe(true)
     }), 30_000)
 
   it.effect("fails acquisition when the container cannot start or be prepared", () =>

@@ -7,7 +7,7 @@
  * honors the contract reports nothing, and each way of missing it is named.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 import * as ProviderConformance from "../src/ProviderConformance/index.ts"
 import * as RemoteChildProcessSpawner from "../src/RemoteChildProcessSpawner/index.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
@@ -131,6 +131,56 @@ describe("ProviderConformance", () => {
       expect(violations[0]?.actual).toBe("the command was still running after the signal")
       // The signal was delivered and accepted. That is exactly the point.
       expect(provider.state.kills).toContainEqual({ command: "serve", signal: "SIGTERM" })
+    }))
+
+  it.effect("holds a provider that declares standard input to actually delivering it", () =>
+    Effect.gen(function*() {
+      // `Provider.stdin` exists so a transport that cannot deliver input
+      // refuses the command instead of dropping it. A suite that took the flag
+      // at its word would pass an adapter that sets it and then ignores
+      // `RemoteOptions.stdin`, which is the exact silent input loss the flag
+      // was added to close.
+      const discards = RemoteChildProcessSpawner.TestRemote.make({
+        scripts: { ...scripts, cat: { stdout: "" } },
+        stdin: true
+      })
+      const dropped = yield* ProviderConformance.check(discards, commands)
+      expect(checks(dropped)).toEqual(["delivers-standard-input"])
+      // The bytes reached the provider. It simply did not put them anywhere.
+      expect(discards.state.inputs.some((input) => input !== undefined)).toBe(true)
+
+      // The same provider with a `spawn` that hands the input back conforms.
+      const delivers: RemoteChildProcessSpawner.Provider = {
+        ...discards,
+        spawn: (command, spawnOptions) =>
+          command === "cat" && spawnOptions.stdin !== undefined
+            ? Effect.succeed({
+              stdout: Stream.make(spawnOptions.stdin),
+              stderr: Stream.empty,
+              exitCode: Effect.succeed(0)
+            })
+            : discards.spawn(command, spawnOptions)
+      }
+      expect(yield* ProviderConformance.check(delivers, commands)).toEqual([])
+
+      // A provider that never declared the capability is never asked: the
+      // adapter refuses input-fed commands for it, so there is nothing to
+      // prove and nothing to convict.
+      const silent = RemoteChildProcessSpawner.TestRemote.make({ scripts })
+      expect(yield* ProviderConformance.check(silent, commands)).toEqual([])
+      expect(silent.state.commands).not.toContain("cat")
+    }))
+
+  it.effect("uses the fixture's own copiesStdin command when it names one", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        scripts: { ...scripts, tee: { stdout: "" } },
+        stdin: true
+      })
+      const violations = yield* ProviderConformance.check(provider, { ...commands, copiesStdin: "tee" })
+      expect(checks(violations)).toEqual(["delivers-standard-input"])
+      expect(provider.state.commands).toContain("tee")
+      expect(provider.state.commands).not.toContain("cat")
     }))
 
   it("names the deadline a signalled command has to stop inside", () => {

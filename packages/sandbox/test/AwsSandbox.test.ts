@@ -846,6 +846,99 @@ describe("AwsSandbox", () => {
     60_000
   )
 
+  it.effect("refuses a write-slice size that would spin or truncate, and accepts the rest", () =>
+    Effect.gen(function*() {
+      // `chunkBytes` is the increment of the loop that splits a file into
+      // commands. `0` and negatives never advance the offset and spin forever
+      // on empty slices; `NaN` makes the offset `NaN` after one iteration and
+      // ends the loop having written a single empty slice, which is a silently
+      // truncated file rather than an error.
+      for (const chunkBytes of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, 3072.5]) {
+        const error = yield* Effect.flip(
+          acquired(transportProvider(fakeEcs(), fakeCli(), {}, { chunkBytes }), () => Effect.void)
+        )
+        expect(error).toMatchObject({ code: "spawn_error" })
+        expect((error as ProviderError).message).toContain("ExecTransport.chunkBytes")
+        expect((error as ProviderError).message).toContain("at least 1")
+        expect((error as ProviderError).message).toContain(String(chunkBytes))
+      }
+
+      // A single byte per slice is legal, if wasteful, and the file still
+      // arrives whole.
+      const bytes = new Uint8Array([0, 1, 2, 250, 251, 252])
+      const round = yield* acquired(
+        transportProvider(fakeEcs(), fakeCli(), {}, { chunkBytes: 1 }),
+        (session) =>
+          Effect.gen(function*() {
+            yield* session.writeFile(`${root}/sliced.bin`, bytes)
+            return yield* session.readFile(`${root}/sliced.bin`)
+          })
+      )
+      expect(Array.from(round)).toEqual(Array.from(bytes))
+    }), 60_000)
+
+  it.effect("provisions rather than adopting when every task the key names has stopped", () =>
+    Effect.gen(function*() {
+      // A key whose leftovers are all STOPPED owns no machine: adopting one
+      // would hand the caller a task that can never run a command.
+      const stopped = fakeEcs()
+      const stoppedProvider = transportProvider(stopped, fakeCli())
+      const leaked = yield* Scope.make()
+      yield* Effect.provideService(stoppedProvider.acquire("aws/stopped"), Scope.Scope, leaked)
+      stopped.describeSteps.push("stopped")
+      yield* acquired(stoppedProvider, () => Effect.void, "aws/stopped")
+      expect(stopped.runInputs).toHaveLength(2)
+      yield* Scope.close(leaked, Exit.void)
+
+      // A describe that answers with an empty list, and one that answers with
+      // no `tasks` field at all, both read the same way: nothing to adopt, so
+      // provision.
+      for (const [step, key] of [["empty", "aws/empty"], ["missing", "aws/missing"]] as const) {
+        const bare = fakeEcs()
+        const bareProvider = transportProvider(bare, fakeCli())
+        const leakedToo = yield* Scope.make()
+        yield* Effect.provideService(bareProvider.acquire(key), Scope.Scope, leakedToo)
+        bare.describeSteps.push(step)
+        yield* acquired(bareProvider, () => Effect.void, key)
+        expect(bare.runInputs).toHaveLength(2)
+        yield* Scope.close(leakedToo, Exit.void)
+      }
+    }), 60_000)
+
+  it.effect("pins the nonce framing that separates a command's status from terminal noise", () =>
+    Effect.gen(function*() {
+      // The plugin exits zero whatever the remote command did, so the status
+      // travels in-band inside this framing. Both halves of it are written
+      // here and parsed here; a change to either that is not a change to both
+      // reads every command as `aborted`.
+      const cli = fakeCli()
+      const ran = yield* acquired(
+        transportProvider(fakeEcs(), cli),
+        (session) => output(session, "echo framed; exit 4")
+      )
+      // The wrapper's own status line is what the exit code came from: the
+      // plugin reported zero.
+      expect(ran).toEqual({ stdout: "framed\n", code: 4 })
+
+      // The workspace is the only part of these lines this test cannot know.
+      const framing = (command: string): string => command.replaceAll(root, "<workdir>")
+      const first = cli.calls[0]!
+      expect(first.args.at(-2)).toBe("--command")
+      expect(framing(first.args.at(-1)!)).toBe(
+        "sh -c '( mkdir -p <workdir> && rm -rf /tmp/.smthrs-sbx && mkdir -p /tmp/.smthrs-sbx ); "
+          + "printf '\\''\\n__smthrs_exit_0_%s__\\n'\\'' \"$?\"'"
+      )
+      // A spawned command records its pid, honors a cancellation left before
+      // it started, and prints the same sentinel with its own nonce.
+      const spawned = cli.calls.find((call) => call.args.at(-1)?.includes("echo framed") === true)!
+      expect(framing(spawned.args.at(-1)!)).toBe(
+        "sh -c 'if [ -e /tmp/.smthrs-sbx/1.pid.cancel ]; then c=143; "
+          + "elif cd <workdir>; then /bin/sh -c '\\''echo framed; exit 4'\\'' & p=$!; "
+          + "echo \"$p\" > /tmp/.smthrs-sbx/1.pid; wait \"$p\"; c=$?; else c=127; fi; "
+          + "printf '\\''\\n__smthrs_exit_1_%s__\\n'\\'' \"$c\"'"
+      )
+    }), 60_000)
+
   it.effect("passes the sandbox conformance suite through the CLI session transport", () =>
     Effect.gen(function*() {
       const violations = yield* SandboxConformance.check(transportProvider(fakeEcs(), fakeCli()), {

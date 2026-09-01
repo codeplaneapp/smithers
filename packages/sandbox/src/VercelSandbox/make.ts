@@ -135,6 +135,13 @@ const machineName = (prefix: string, session: string): string =>
  * are Writables for output), so the redirect in `internal/stdinRedirect` is
  * the only honest route.
  *
+ * Command output is not byte-exact here. `runCommand` hands back stdout and
+ * stderr as strings, so what this provider streams is those strings re-encoded
+ * as UTF-8: a command whose output is not valid UTF-8, such as a tarball or a
+ * compiled binary written to stdout, comes back changed. File transfer is
+ * byte-exact regardless, so a caller that needs bytes has the command write a
+ * file and reads it back with `readFile`.
+ *
  * Vercel limits the timeout accepted by one create request to five minutes.
  * Longer requested lifetimes create at that ceiling, then call
  * `extendTimeout` with only the remaining duration because that API extends by

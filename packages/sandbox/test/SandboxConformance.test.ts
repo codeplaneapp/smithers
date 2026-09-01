@@ -12,7 +12,7 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import { mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll } from "vitest"
+import { afterAll, vi } from "vitest"
 import * as DirectorySandbox from "../src/DirectorySandbox/index.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import * as Sandbox from "../src/Sandbox/index.ts"
@@ -236,4 +236,36 @@ describe("SandboxConformance", () => {
       )
       expect(names).toEqual(expect.arrayContaining(["writes-its-output", "reports-a-nonzero-exit"]))
     }), 120_000)
+
+  it("builds its default fixture on a host with no Node globals at all", async () => {
+    // This module is part of a package whose contract is that it is
+    // platform-neutral and browser-bundleable, and `check` defaults its
+    // fixture to `uniquePosixCommands`. A free `process` identifier is not a
+    // bundling error: it survives the bundle and throws `ReferenceError` in a
+    // browser on the first call. The whole module is reloaded without
+    // `globalThis.process` so its load-time work is judged too.
+    const host = globalThis as { process?: unknown }
+    const node = host.process
+    vi.resetModules()
+    try {
+      delete host.process
+      const fresh = await import("../src/SandboxConformance/posixCommands.ts")
+      const first = fresh.uniquePosixCommands()
+      const second = fresh.uniquePosixCommands()
+      for (const commands of [first, second]) {
+        const duration = /^sleep (\d{6})$/.exec(commands.runs)?.[1]
+        expect(duration).toBeDefined()
+        // The survivor pattern brackets the fixture's last digit so it cannot
+        // match its own command line.
+        expect(commands.survivor).toBe(`pgrep -f 'sleep ${duration!.slice(0, -1)}[${duration!.slice(-1)}]'`)
+        expect(commands.shell).toBe(true)
+      }
+      // Two runs on one host never share a duration, which is the whole point
+      // of the per-call fixture.
+      expect(first.runs).not.toBe(second.runs)
+    } finally {
+      host.process = node
+      vi.resetModules()
+    }
+  })
 })
