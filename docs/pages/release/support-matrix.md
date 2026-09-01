@@ -91,7 +91,7 @@ execution claim.
 | [`@smthrs/capability`](/api/capability) | Capability vocabulary, tiers, typed permission failures. | gated yes |
 | [`@smthrs/cli`](/cli) | The `smithers` executable and `NodeControl` composition. | Node |
 | [`@smthrs/control`](/api/control) | Control services, RPC schema, `ControlServer`/`ControlClient`, `SqlControlRuntime`, credentials. | no claim (no `node:` imports) |
-| `@smthrs/core` | Plan-time `Flow`/`Node` builders and `Graph`. | no claim |
+| [`@smthrs/core`](/api/core) | Plan-time `Flow`/`Node` builders and `Graph`. | no claim |
 | [`@smthrs/crypto`](/api/crypto) | Injected cryptographic schema transformations. | gated yes |
 | [`@smthrs/database`](/api/database) | `SqlClient` access, write retry, `Migrations` ladder. | gated yes (root); `node/NodeDatabase` gated Node-only |
 | [`@smthrs/engine`](/api/engine) | `FlowEngine`, `FlowProxy`, vendored `effect/unstable/workflow` fork. | gated yes |

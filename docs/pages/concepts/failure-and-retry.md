@@ -108,16 +108,20 @@ defect: it is naming a time to come back. A model-backed step
 an attempt:
 
 - `QuotaPolicy` decides whether the refusal names a deadline and what that
-  deadline is, and refuses to park at all beyond its configured ceiling.
+  deadline is, and refuses to park at all beyond its configured ceiling. A
+  composition binds it or binds `QuotaPolicy.layerUnclassified()`; there is no
+  default.
 - The park is a durable suspension under `annotateWaiting({ reason: "quota" })`,
   so a supervisor sees a parked run with a wake time.
 - The retry is `Action.retry`, so it runs as a NEW attempt of the same step and
   the step's own correction budget is untouched.
 
 The engine records a provider refusal as the model step's result, which is what
-makes a replay free. A quota refusal is the exception: it says nothing about the
-request, so it fails the sealed action instead of being recorded, and no cache
-row outlives the window.
+makes a replay free. A capacity refusal is the exception: it says nothing about
+the request, so it fails the sealed action instead of being recorded, and no
+cache row outlives the window. That floor belongs to the recorder and holds
+whichever classifier is composed. `layerUnclassified` opts out of the park, not
+out of the floor.
 
 Spending is bounded separately. `@smthrs/agent/Budget` accumulates token usage
 across a run's model calls, keyed by each step's content key so a replayed step
@@ -146,7 +150,7 @@ The default heartbeat interval is one second and the stale threshold is 30 secon
 
 - `TimeTravel.rewind` performs a fenced, audited rewind protocol, including the bounded retry that blocks unsafe irreversible reattempts.
 - Compensation assesses and invokes registered rollback handlers as part of that protocol.
-- Building `TimeTravel.layer` completes or rolls back interrupted rewind audits, so startup recovery is never a call the application makes.
+- Building `TimeTravel.layer` completes or rolls back interrupted rewind audits, except one whose run a live process still holds, so startup recovery is never a call the application makes. A refused audit stays pending for the next build rather than being closed. `TimeTravel.layerWith({ isAlive })` supplies the liveness check; it defaults to `Ownership.leaseLiveness()`.
 
 The service requires boundary records and store integration supplied by the application. The engine does not create all time-travel records automatically today.
 
