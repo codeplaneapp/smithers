@@ -119,6 +119,11 @@ export const read = (environment: Source, name: string): string | undefined => {
 export const readInteger = (environment: Source, name: string): number | undefined => {
   const raw = read(environment, name)
   if (raw === undefined) return undefined
+  // The whole value has to be digits. `Number.parseInt` stops at the first
+  // character it cannot read, so it answered 30 for `30abc` and for `30s`,
+  // which is the opposite of the "ignore anything else" this function
+  // promises: a typo silently became a plausible-looking budget.
+  if (!/^\d+$/.test(raw)) return undefined
   const parsed = Number.parseInt(raw, 10)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
 }
