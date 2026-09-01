@@ -9,7 +9,7 @@ import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { decodeBase64Bytes, encodeBase64Bytes } from "../internal/base64.ts"
-import { killScript } from "../internal/killScript.ts"
+import { cancelGuard, killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure, remoteProcessOf } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
@@ -22,12 +22,24 @@ interface ResourceValues {
   readonly memory?: string | undefined
 }
 
-interface Resources {
+/**
+ * The Pod's CPU and memory requests and limits, as Kubernetes names them.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface KubernetesSandboxResources {
   readonly requests?: ResourceValues | undefined
   readonly limits?: ResourceValues | undefined
 }
 
-interface Options {
+/**
+ * How the provider reaches its cluster and shapes each session's Pod.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface KubernetesSandboxOptions {
   readonly spawner: ChildProcessSpawner["Service"]
   readonly image: string
   readonly namespace?: string | undefined
@@ -37,7 +49,7 @@ interface Options {
   readonly workdir?: string | undefined
   readonly env?: Readonly<Record<string, string>> | undefined
   readonly labels?: Readonly<Record<string, string>> | undefined
-  readonly resources?: Resources | undefined
+  readonly resources?: KubernetesSandboxResources | undefined
   readonly serviceAccount?: string | undefined
   readonly nodeSelector?: Readonly<Record<string, string>> | undefined
   readonly createArgs?: ReadonlyArray<string> | undefined
@@ -71,7 +83,7 @@ const podNameOf = (prefix: string, sessionKey: string): string => {
   return `${candidate.slice(0, maximumPodNameLength - digest.length).replace(/-+$/, "")}${digest}`
 }
 
-const overrideArgs = (name: string, options: Options): ReadonlyArray<string> => {
+const overrideArgs = (name: string, options: KubernetesSandboxOptions): ReadonlyArray<string> => {
   const spec = {
     ...options.serviceAccount === undefined ? {} : { serviceAccountName: options.serviceAccount },
     ...options.nodeSelector === undefined ? {} : { nodeSelector: options.nodeSelector },
@@ -120,7 +132,7 @@ const overrideArgs = (name: string, options: Options): ReadonlyArray<string> => 
  * @category constructors
  * @since 0.1.0
  */
-export const make = (options: Options): Provider => {
+export const make = (options: KubernetesSandboxOptions): Provider => {
   const program = options.program ?? "kubectl"
   const workdir = options.workdir ?? "/workspace"
   const prefix = options.namePrefix ?? "smthrs-sbx-"
@@ -251,13 +263,18 @@ export const make = (options: Options): Provider => {
             )
             // `env(1)`, not `export`: export requires a shell identifier and
             // aborts the whole chain for a key Node accepts (`a-b=1`), while
-            // env passes any name through. The pid survives the whole chain:
-            // `exec` replaces the recorded shell with env, env replaces
-            // itself with `sh`, and `sh -c` execs a lone simple command.
+            // env passes any name through. The shell after it is absolute for
+            // the reason the prefix exists at all: `env` resolves its program
+            // through the environment it just built, so a caller's `PATH`
+            // override would keep a bare `sh` from ever starting. The pid
+            // survives the whole chain: `exec` replaces the recorded shell
+            // with env, env replaces itself with `/bin/sh`, and `sh -c` execs
+            // a lone simple command.
             const script = [
               `cd ${CommandLine.quote(resolveCwd(spawnOptions.cwd))}`,
               `echo $$ > ${pidfile}`,
-              `exec ${environment.length === 0 ? "" : `env ${environment.join(" ")} `}sh -c ${
+              cancelGuard(pidfile),
+              `exec ${environment.length === 0 ? "" : `env ${environment.join(" ")} `}/bin/sh -c ${
                 CommandLine.quote(command)
               }`
             ].join(" && ")
