@@ -22,6 +22,16 @@ import goldens from "./fixtures/key-goldens.json" with { type: "json" }
 // The graph root was re-pinned deliberately after `@smthrs/plan` moved
 // function identities from FNV-1a source hashes to SHA-256 source hashes. The
 // leaf keys are unchanged; only the parent plan material includes that identity.
+//
+// It was re-pinned a second time, also deliberately, when graph identity became
+// injective and stopped reading caller-owned state. That change gave undefined,
+// -0, accessors, and several Effect instances their own encodings, so it moved
+// key material to `flows/key-material/v2` and captured-function identity to
+// `sha256-source-captures/v4` precisely so no hardened encoding could alias a
+// key its predecessor produced. All three graph keys moved, the leaves included,
+// because the same change re-encodes the effect declarations and placements a
+// leaf is keyed on. The two StepKey digests are unchanged, since neither reads
+// graph material.
 
 const buildGraph = (): Core.Graph.Graph => {
   const read = Core.Node.dynamic({
