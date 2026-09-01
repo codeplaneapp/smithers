@@ -1,7 +1,7 @@
 /**
  * Claim-gated durable flow run lifecycle.
  *
- * Governing design: `docs/specs/Concepts/Run Ownership.md`.
+ * Governing design: `docs/pages/internals.md`.
  *
  * @since 0.1.0
  */
@@ -44,7 +44,7 @@ const RunStateJson = Schema.fromJsonString(RunState)
  *
  * The class is declared by `@smthrs/flow` (it is part of the `execute`
  * contract) and re-exported here for the detector's callers. See
- * `docs/specs/Concepts/Run Ownership.md`.
+ * `docs/pages/internals.md`.
  *
  * @since 0.1.0
  * @category errors
@@ -459,10 +459,10 @@ export const make = (
      *
      * `meta.lineageId` is a JOURNAL lineage id (`FlowEngine.Lineage`,
      * `<runId>/root`), because that is the space a time-travel frame addresses:
-     * `docs/specs/Concepts/Time Travel.md` makes a frame `(lineageId, seq)`, and
+     * `docs/pages/concepts/time-travel.md` makes a frame `(lineageId, seq)`, and
      * replay skips an entry whose `meta.lineageId` names a different lineage.
      * The run row's `lineageId` column is a different space — the TRAMPOLINE
-     * lineage of `docs/specs/Concepts/Trampoline Loops.md`, round 0's execution
+     * lineage of `docs/pages/api/engine.md`, round 0's execution
      * id.
      *
      * DECIDED (2026-08-12): decisions address the journal lineage of the run
@@ -606,7 +606,7 @@ export const make = (
           // The decision carries the state it committed, so run state at a
           // frame is DERIVED by replaying decisions rather than read off the
           // run row's current `state_json`
-          // (`docs/specs/Concepts/Time Travel.md`; Temporal's
+          // (`docs/pages/concepts/time-travel.md`; Temporal's
           // `ndc/state_rebuilder.go` is the model). Without it a fork at an
           // early frame silently inherited the parent's *latest* state.
           yield* emitDecision(runId, { ...(decision as object), state: JSON.parse(stateJson) })
@@ -1386,7 +1386,7 @@ export const make = (
      * `parent_run_id` column, not a `flows_run_parents` edge: that table is
      * the subflow DAG cycle detection walks, and a round is the same run
      * continuing rather than a child being spawned
-     * (`docs/specs/Concepts/Trampoline Loops.md`).
+     * (`docs/pages/api/flow.md`).
      */
     const continueLineage = (
       seam: HandoffSeam,
@@ -1495,7 +1495,7 @@ export const make = (
      *
      * The round itself ran to completion; what is refused is the handoff, so
      * the round settles `failed` carrying the typed refusal and no successor
-     * is created (`docs/specs/Concepts/Trampoline Loops.md` §Budget).
+     * is created (`docs/pages/api/flow.md`).
      */
     const endLineage = (
       seam: HandoffSeam,
@@ -2146,7 +2146,7 @@ export const make = (
                 // A spawn is a lineage edge, and a DETACHED spawn is a tier-3
                 // effect: nothing the parent's rewind can undo, because the child
                 // is its own claim and its own journal
-                // (`docs/specs/Concepts/Subflows.md` §detached spawn). The record
+                // (`docs/pages/concepts/subflows.md`). The record
                 // is boundary-shaped so the same assessment that classifies a
                 // sent webhook classifies an orphaned child, and it is emitted at
                 // `succeeded` because by this point the child run durably exists.
@@ -2175,7 +2175,7 @@ export const make = (
                     // spawn is detached" indistinguishable from "this producer
                     // predates the field". A run created with a parent is a
                     // separate run row with its own claim, which is what detached
-                    // means (`docs/specs/Concepts/Subflows.md`); attached nesting
+                    // means (`docs/pages/concepts/subflows.md`); attached nesting
                     // never reaches `create` because it is one journal.
                     { childRunId: options.executionId, flowName: flow._tag, attached: false }
                   )

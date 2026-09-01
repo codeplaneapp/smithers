@@ -1,9 +1,9 @@
 /**
  * Durable action dispatch at the engine encoded seam.
  *
- * Governing designs: `docs/specs/Concepts/Run Ownership.md`,
- * `docs/specs/Concepts/Step Keys.md`, and
- * `docs/specs/Concepts/Trust Granularity.md`.
+ * Governing designs: `docs/pages/internals.md`,
+ * `docs/pages/concepts/step-keys.md`, and
+ * `docs/pages/concepts/action-graph.md`.
  *
  * @since 0.1.0
  */
@@ -510,7 +510,7 @@ export const make = (deps: Dependencies) => {
   // The lineage every record this executor writes addresses itself to.
   // An action is a node inside its run's root lineage, not a lineage of
   // its own: a lineage segment is minted only where a separate run is
-  // (`docs/specs/Concepts/Subflows.md`).
+  // (`docs/pages/concepts/subflows.md`).
   const lineageId = FlowEngine.Lineage.root(deps.runId)
   return Effect.fn("ActionPersistence.execute")((input: ActionInput) =>
     Effect.gen(function*() {
@@ -1571,7 +1571,7 @@ export const make = (deps: Dependencies) => {
             /**
              * THE TIER-2 ANCHOR FOR AN ORDINARY FRAME.
              *
-             * `docs/specs/Concepts/Time Travel.md` requires the jj pointer
+             * `docs/pages/concepts/time-travel.md` requires the jj pointer
              * current when a seq was journaled to be recorded at the frame,
              * because replay cannot derive it. Only compensable work took a
              * fresh snapshot, so every other frame had no anchor at all and a
@@ -1721,7 +1721,7 @@ export const make = (deps: Dependencies) => {
            * before the body starts, and the terminal record commits after it
            * settles — `succeeded` with the recorded result, `unknown` for a
            * failure, defect, or interruption whose external outcome nobody can
-           * testify to (`docs/specs/Concepts/Time Travel Compensation.md`).
+           * testify to (`docs/pages/concepts/time-travel.md`).
            *
            * The compensable record is what makes the tier-2 restore REAL: a
            * rewind classifies the doomed suffix by its boundary rows, so a
@@ -1902,7 +1902,7 @@ export const make = (deps: Dependencies) => {
           }
           if (settlement !== undefined) {
             // Forensics requires both halves as journal facts, never inferred
-            // from an absence (`docs/specs/Concepts/Forensics.md`): what the
+            // from an absence (`docs/pages/concepts/journal.md`): what the
             // transaction proposed, and that it reached the host.
             yield* emitConverging(
               JournalRecords.diffBundleCaptured(attemptSource("diff-bundle"), {

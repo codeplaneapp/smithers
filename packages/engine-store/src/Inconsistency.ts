@@ -11,12 +11,10 @@
  * `cacheInconsistency` hook (`(event) => Effect<InconsistencyVerdict>`); the
  * strict layer is the future default plugin.
  *
- * Recorded in [[Engine Hardening Round 1]]
- * (`docs/specs/Concepts/Engine Hardening Round 1.md`), section 2 — including
- * why the core default is strict.
+ * The core default is strict so an invariant violation cannot pass silently.
  *
- * Governing designs: `docs/specs/Concepts/Step Keys.md` and
- * `docs/specs/Concepts/Trust Granularity.md`.
+ * Governing designs: `docs/pages/concepts/step-keys.md` and
+ * `docs/pages/concepts/action-graph.md`.
  *
  * @since 0.1.0
  */

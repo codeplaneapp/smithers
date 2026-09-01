@@ -8,7 +8,7 @@
  * `node:crypto` import, and browser support is a hard requirement, so a store
  * that reached for either directly could not be composed in a tab at all.
  *
- * Governing design: `docs/specs/Concepts/Run Ownership.md`.
+ * Governing design: `docs/pages/internals.md`, "Claims and fencing".
  *
  * @since 0.1.0
  */

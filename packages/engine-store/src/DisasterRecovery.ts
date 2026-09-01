@@ -8,7 +8,7 @@
  * consistent snapshot under WAL while writers stay live. The content-addressed
  * artifact blobs are copied beside it, digest-verified, after the database
  * snapshot: results reference artifacts only after publication
- * (`docs/specs/Concepts/Remote Cache.md`), so a blob walk taken after the
+ * (`docs/pages/api/step-cache.md`), so a blob walk taken after the
  * database snapshot is a superset of every digest the snapshot references.
  * A manifest written last records the digests a restore must verify, so a
  * partial backup is detectable by its missing manifest.

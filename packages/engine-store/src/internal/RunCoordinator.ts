@@ -1,7 +1,7 @@
 /**
  * Coordinates keyed drain executions.
  *
- * Governing design: `docs/specs/Concepts/Run Ownership.md`.
+ * Governing design: `docs/pages/internals.md`.
  *
  * Adapted nearly verbatim from
  * `reference/opencode/packages/core/src/session/run-coordinator.ts`:

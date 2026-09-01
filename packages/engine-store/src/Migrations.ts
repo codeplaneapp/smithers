@@ -10,8 +10,8 @@
  * cache, {@link sets} is also the full durable schema an engine needs, and
  * {@link layer} installs it in dependency order.
  *
- * Derived contracts: `docs/specs/Concepts/Vendored Workflow Engine.md` and
- * `docs/specs/Concepts/Journal Split.md`.
+ * Derived contracts: `docs/pages/architecture/package-map.md` and
+ * `docs/pages/concepts/journal.md`.
  *
  * @since 0.1.0
  */

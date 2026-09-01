@@ -9,10 +9,7 @@
  * barrel-exported surface so that `internal/` never has to be imported by
  * consumers.
  *
- * Design notes: [[Events And Errors]]
- * (`docs/specs/Concepts/Events And Errors.md`), [[Engine Hardening Round 1]]
- * (`docs/specs/Concepts/Engine Hardening Round 1.md`),
- * `docs/specs/Concepts/Run Ownership.md`,
+ * Related documentation: `docs/pages/internals.md`,
  * `docs/pages/release/support-matrix.md`.
  *
  * @since 0.1.0

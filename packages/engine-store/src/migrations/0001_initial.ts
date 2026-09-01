@@ -1,7 +1,7 @@
 /**
  * Initial durable deferred-completion and clock-deadline schema.
  *
- * Schema boundary: `docs/specs/Research/Smithers Deviations 2026-07-28.md`.
+ * Schema boundary: `docs/pages/concepts/durable-execution-model.md`.
  *
  * @since 0.1.0
  */

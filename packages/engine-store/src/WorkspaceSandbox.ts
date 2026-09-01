@@ -25,16 +25,16 @@
  * same caveat the proof of concept carried. A body that reaches the host
  * through a service this module does not seed (a spawned native process, an
  * undecorated socket) is outside the transaction. Actually denying that
- * ambient access is the VM/`SandboxProvider` provisioning story in
- * `docs/specs/Concepts/Agent Adapters.md`, and it is future work. The one host
+ * ambient access requires a machine boundary such as the providers in
+ * `docs/pages/api/sandbox.md`. The one host
  * write this module *does* perform is confined, however: copy-back resolves
  * symlinks before it lands a byte and refuses any target whose canonical
  * location escapes the workspace root.
  *
- * Governing designs: `docs/specs/Concepts/Diff Review.md` (sandbox writes reach
- * the host only via copy-back of a selected, content-addressed, journaled
- * bundle), `docs/specs/Concepts/Effect Taxonomy.md` (the sandboxed-versus-bare
- * enforcement tiers), and `docs/specs/Concepts/Trust Granularity.md`.
+ * `docs/pages/release/known-limitations.md` documents that settled bundles
+ * reach the host without a human review gate. Governing designs:
+ * `docs/pages/concepts/action-graph.md` and
+ * `docs/pages/concepts/effect-integration.md`.
  *
  * @since 0.1.0
  */
@@ -345,9 +345,9 @@ export class WorkspaceError extends Schema.TaggedError<WorkspaceError>()(
  * base snapshot was taken.
  *
  * The engine answers this by retrying the attempt from a fresh base a bounded
- * number of times — rebase-shaped. The wider strategy surface (delay, rebase
- * versus stop, merge) is `docs/specs/Concepts/Worktree Lanes.md`'s and is not
- * decided here; this error is the seam it will attach to.
+ * number of times. This local retry is rebase-shaped. The removed worktree-lane
+ * surface is documented in `docs/pages/release/known-limitations.md`; this
+ * error does not recreate it.
  *
  * @category errors
  * @since 0.1.0
@@ -466,7 +466,7 @@ export const layer = (service: Service): Layer.Layer<Service> => Layer.succeed(W
  * world when its execution turns out to be invalid, and has reached it twice
  * when copy-back loses a race and the body re-runs. Deduplication is by
  * {@link QueuedEffect.idempotencyKey}, which is the same key
- * `docs/specs/Concepts/Effect Taxonomy.md` requires before an irreversible
+ * `docs/pages/concepts/actions.md` requires before an irreversible
  * effect may be retried at all.
  *
  * @category services
@@ -531,7 +531,7 @@ const normalizePath = (root: string, path: string): Result.Result<string, Worksp
  * Whether a declared write-set entry covers an observed path. Entries are
  * ordinarily literal paths (what `StepBoundary` captures); `*` and `**` are
  * honored so a declaration written as a glob per
- * `docs/specs/Concepts/Effect Taxonomy.md` still means what it says.
+ * `docs/pages/api/plan.md` still means what it says.
  */
 const covers = (entry: FileSet.Entry, path: string): boolean =>
   typeof entry === "string"
@@ -1187,9 +1187,9 @@ const escapesWorkspace = (path: string, resolved: string): WorkspaceError =>
  * Builds the filesystem-backed workspace sandbox.
  *
  * **Copy-in, not overlay.** The transaction is seeded with exactly the
- * declared read set and nothing else, which is the sandboxed tier of
- * `docs/specs/Concepts/Effect Taxonomy.md:44-48` — Bazel's own strategy — and
- * the reason whole-tree write observation is structural here. Re-rooting a
+ * declared read set and nothing else, which is the sandboxed tier in
+ * `docs/pages/concepts/action-graph.md`. Bazel uses the same strategy, which
+ * is why whole-tree write observation is structural here. Re-rooting a
  * body onto a bare host tree instead would leave every undeclared file
  * readable and reduce enforcement to the taxonomy's weakest, post-hoc
  * detection-by-diff tier; and the OS-level overlay that would fix that is not

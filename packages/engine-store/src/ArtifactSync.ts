@@ -26,7 +26,7 @@
  * split: what a replay prefetches is this module's decision, what a read
  * materializes is the combined store's.
  *
- * Governing design: `docs/specs/Concepts/Remote Cache.md`.
+ * Governing design: `docs/pages/api/artifacts.md`.
  *
  * @since 0.1.0
  */

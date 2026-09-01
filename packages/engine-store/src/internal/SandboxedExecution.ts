@@ -3,10 +3,9 @@
  * copy its diff bundle back, and rebase a bounded number of times when the
  * host moved underneath it.
  *
- * Governing designs: `docs/specs/Concepts/Diff Review.md` (a bundle is a
- * content-addressed, journaled value that reaches the host only through
- * copy-back) and `docs/specs/Concepts/Effect Taxonomy.md` (declared sets, the
- * hard/expected modes, and the conflict trichotomy).
+ * `docs/pages/release/known-limitations.md` documents that copy-back has no
+ * human review gate. `docs/pages/concepts/action-graph.md` governs boundary
+ * evidence and copy-back.
  *
  * @since 0.1.0
  */
@@ -52,10 +51,9 @@ export interface Settlement {
  * How many times a losing copy-back re-runs the body from a fresh base.
  *
  * Bounded on purpose: an unbounded rebase against a workspace under sustained
- * concurrent modification never converges, and the whole strategy surface
- * (delay, rebase versus stop, merge) belongs to
- * `docs/specs/Concepts/Worktree Lanes.md`. This is the seam that surface will
- * attach to, not a stand-in for it.
+ * concurrent modification never converges. The removed worktree-lane surface
+ * is documented in `docs/pages/release/known-limitations.md`; this retry budget
+ * does not recreate it.
  *
  * @since 0.1.0
  * @category models

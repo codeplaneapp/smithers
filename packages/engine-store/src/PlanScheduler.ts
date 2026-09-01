@@ -15,9 +15,8 @@
  * REBUILDING → DONE`) and `EvaluationProgressReceiver` for the outcome
  * vocabulary. Two deliberate deviations:
  *
- * 1. **No reverse-dependency index, no invalidating node visitor.**
- *    `docs/specs/Concepts/Engine Hardening Round 1.md` rejects both outright:
- *    content addressing subsumes them. A node is "dirty" iff the key it would
+ * 1. **No reverse-dependency index, no invalidating node visitor.** Content
+ *    addressing subsumes them. A node is "dirty" iff the key it would
  *    dispatch under differs from the one it dispatched under, and the
  *    dispatch-time recheck already computes that. There is no dirty bit to
  *    propagate, so there is nothing for a visitor to walk.
@@ -36,7 +35,7 @@
  *
  * ## The three limits
  *
- * `docs/specs/Concepts/Concurrency.md` insists the same number must never
+ * `docs/pages/concepts/concurrency.md` explains why the same number must never
  * stand in for graph width, scheduler admission, and provider capacity. This
  * module owns the middle one only: `concurrency.steps` is the leaf-execution
  * cap, and `concurrency.agents` is the subset cap an agent node consumes in
@@ -52,7 +51,7 @@
  *
  * ## Observing the world exactly once
  *
- * `docs/specs/Concepts/Staleness.md`'s torn-run rule: never re-observe the
+ * `docs/pages/release/support-matrix.md` records the torn-run rule: never re-observe the
  * world mid-run. Paths the plan reads but no node writes are **source** paths;
  * they are measured once, before the first dispatch, and pinned for the rest
  * of the run. Paths a node in the plan produces are measured after their
@@ -105,8 +104,8 @@ import * as WorkspaceSandbox from "./WorkspaceSandbox.ts"
  *   a `stop-merge` strategy stopped it in favour of a merge node. Skyframe
  *   splits failure by version instead; a content-addressed store never serves
  *   a failure from cache, so that split has no meaning here and this one does.
- * - `deferred` — a selection guess postponed this sink
- *   (`docs/specs/Concepts/Probabilistic Selection.md`). It never dispatched,
+ * - `deferred`: a selection guess postponed this sink
+ *   (`docs/pages/selection.md`). It never dispatched,
  *   wrote no cache row, and is journaled as a debt for a later guess-free
  *   pass. Distinct from `skipped` — the work was runnable, a guess postponed
  *   it — and never reported as passed.
@@ -444,7 +443,7 @@ export const make = (options: Options): Service => {
   const agentCap = positiveSafeInteger("concurrency.agents", options.concurrency?.agents ?? Number.MAX_SAFE_INTEGER)
 
   // Every scheduler record addresses the run's root lineage, so a frame can
-  // reach it (`docs/specs/Concepts/Time Travel.md`).
+  // reach it (`docs/pages/concepts/time-travel.md`).
   const lineageId = FlowEngine.Lineage.root(options.runId)
   const source = (suffix: string) => ({ runId: options.runId, sourceId: `${options.sourceId}/${suffix}`, lineageId })
 
@@ -1003,10 +1002,11 @@ export const make = (options: Options): Service => {
       /**
        * `stop-merge`: the losing action is stopped and both lanes are routed
        * through an explicit merge node appended to the SAME plan, as an
-       * ordinary elaboration. `docs/specs/Concepts/Worktree Lanes.md`'s
-       * restart-or-fail landing contract governs the merge critical section,
-       * so the merge node carries no rebase budget of its own: it lands, or
-       * the run has a failed node.
+       * ordinary elaboration. The merge critical section uses this module's
+       * restart-or-fail landing contract, so the merge node carries no rebase
+       * budget of its own: it lands, or the run has a failed node. The removed
+       * worktree-lane surface is documented in
+       * `docs/pages/release/known-limitations.md`.
        */
       const appendMerge = (node: Plan.PlanNode) =>
         Effect.gen(function*() {
@@ -1182,8 +1182,8 @@ export const make = (options: Options): Service => {
 
       /**
        * The selection consult, once per run, against the initial plan and the
-       * pinned belief snapshot (`docs/specs/Concepts/Probabilistic
-       * Selection.md`). Only sinks — nodes nothing in the plan depends on —
+       * pinned belief snapshot (`docs/pages/selection.md`). Only sinks,
+       * nodes nothing in the plan depends on,
        * are offered, because deferring a node something consumes would block
        * or corrupt its consumers. A verdict may postpone or propose, never
        * remove: `Admit` is a no-op, a `Defer` marks the sink for the loop

@@ -2,11 +2,9 @@
  * Durable deferred-completion and clock-deadline state used by the flow
  * engine adapter.
  *
- * The waiting-reason taxonomy (one `waiting` status plus
- * `reason`/`wakeAt`/`token` columns) is specified by
- * [[Run Ownership]] (`docs/specs/Concepts/Run Ownership.md`) and recorded in
- * [[Engine Hardening Round 1]]
- * (`docs/specs/Concepts/Engine Hardening Round 1.md`), section 5.
+ * The waiting-reason taxonomy uses one `waiting` status plus
+ * `reason`/`wakeAt`/`token` columns. See
+ * `docs/pages/concepts/durable-execution-model.md`.
  *
  * @since 0.1.0
  */
@@ -516,7 +514,7 @@ export interface Service {
    * way to find the runs a cancelled parent linked to itself. Cancellation
    * cascade reads it rather than an in-process instance map, so a
    * cross-process cancel observed by a driver that never spawned the children
-   * still reaches them (`docs/specs/Concepts/Subflows.md`). Served by the
+   * still reaches them (`docs/pages/concepts/subflows.md`). Served by the
    * `flows_run_parents_parent_idx` index.
    */
   readonly runChildren: (parentId: string) => Effect.Effect<ReadonlyArray<RunParentEdge>>

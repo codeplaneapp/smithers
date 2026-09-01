@@ -27,7 +27,7 @@
  * journaled by the caller instead, which is the same treatment an unverified
  * read set gets — visible, not silent.
  *
- * Governing design: `docs/specs/Concepts/Remote Cache.md`.
+ * Governing design: `docs/pages/api/step-cache.md`.
  *
  * @since 0.1.0
  */

@@ -26,10 +26,9 @@
  *   collector: a blob published — or freshened by a dedupe `put` — after the
  *   mark began carries a fresh mtime and survives, no lock required.
  *
- * Collection NEVER runs automatically. `gc()` is an explicit verb, exactly as
- * `docs/specs/Concepts/Reconciliation.md` requires of every deletion —
- * "deletion is the irreversible direction", and a human approving a plan must
- * be approving the deletions too. The opt-in {@link ArtifactGcPolicy} layer
+ * Collection NEVER runs automatically. `gc()` is an explicit verb because
+ * deletion is irreversible, and a human approving a plan must approve the
+ * deletions too. The opt-in {@link ArtifactGcPolicy} layer
  * configures *how* an invocation collects (grace bound, pinned digests); it
  * does not schedule anything.
  *

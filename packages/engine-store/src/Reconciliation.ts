@@ -2,8 +2,8 @@
  * The reconciliation seam: what happens when the world disagrees with the
  * declaration.
  *
- * `docs/specs/Concepts/Effect Taxonomy.md` describes expected sets as the soft
- * mode — going outside them is allowed, journaled, and "triggers a
+ * `docs/pages/release/support-matrix.md` describes expected sets as the soft
+ * mode: going outside them is allowed, journaled, and "triggers a
  * **reconciliation flow** — pluggable, a flow like everything else". The
  * deviation events have been emitted since the isolated-execution lane landed
  * (`internal/ActionPersistence.ts`, both `expectedSetDeviation` sites) and

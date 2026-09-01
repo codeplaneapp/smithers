@@ -566,7 +566,7 @@ export const referencedDigests = (evidence: BoundaryEvidence): ReadonlyArray<str
  *
  * The blob mechanics — content addressing, atomic publication, digest
  * verification, dedupe — belong to `artifacts` and were extracted into
- * `@smthrs/artifacts` (`docs/specs/Concepts/Remote Cache.md`). What stays here
+ * `@smthrs/artifacts` (`docs/pages/api/artifacts.md`). What stays here
  * is the *policy* that decides which outputs become blobs at all: the
  * inline-versus-spill budgets are a property of how large an evidence row may
  * get, not of how bytes are stored.
