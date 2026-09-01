@@ -48,13 +48,17 @@ const circular = S.Shell.Test({
 })
 
 // The Bun leg of the runtime-compatibility matrix ci/BUILD.ts owns: this
-// package's vitest suite re-run under Bun. `--root` carries that target's
-// `cwd`, because package-mode Shell targets always spawn from the workspace
-// root. Coverage stays off because @vitest/coverage-v8 needs V8's inspector
-// and Bun runs JavaScriptCore, so `test` above remains the coverage gate.
+// package's vitest suite re-run under Bun. Bun spawns the installed vitest
+// entry file by path for two reasons. `bun x vitest` downloads the package
+// manifest from the registry, and package-mode targets run with the network
+// denied. `S.NodeModule.Bin("vitest")` resolves to the node_modules/.bin
+// shim, which execs node, so it would turn this leg into a second Node run.
+// Coverage stays off because @vitest/coverage-v8 needs V8's inspector and Bun
+// runs JavaScriptCore, so `test` above remains the coverage gate.
 const bunTest = S.Shell.Test({
   bin: S.Host.bin("bun"),
-  args: ["x", "vitest", "run", "--root", "packages/keys", "--environment", "node", "--coverage.enabled=false"],
+  args: ["./node_modules/vitest/vitest.mjs", "run", "--environment", "node", "--coverage.enabled=false"],
+  cwd,
   data: [srcs, tests, S.file("vitest.config.ts"), lib]
 })
 

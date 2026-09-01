@@ -2,7 +2,7 @@
 
 **Durable agent workflows that survive the process running them.**
 
-[![CI](https://github.com/smithersai/smithers/actions/workflows/ci.yml/badge.svg)](https://github.com/smithersai/smithers/actions/workflows/ci.yml)
+[![CI](https://github.com/smithersai/smithers/actions/workflows/ci-test.yml/badge.svg)](https://github.com/smithersai/smithers/actions/workflows/ci-test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-2563eb)](#license)
 [![Docs](https://img.shields.io/badge/docs-smithers.sh-2563eb)](https://smithers.sh)
 

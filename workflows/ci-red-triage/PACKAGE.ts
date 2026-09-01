@@ -15,7 +15,20 @@ const ciRedTriage = S.Agent.Diff({
     S.file("//WORKFLOW-CANDIDATES.md"),
     S.file("//research/ci-inventory.md"),
     S.file("//research/issue-themes.md"),
-    S.file("//.github/workflows/ci.yml"),
+    // The package-mode port retired the single generated ci.yml and split its
+    // jobs across one workflow per lane. A glob cannot reach them from here:
+    // glob expansion stays inside the declaring package, and .github belongs
+    // to the root package, so the successors are named one by one.
+    S.file("//.github/workflows/ci-test.yml"),
+    S.file("//.github/workflows/ci-browser.yml"),
+    S.file("//.github/workflows/ci-rust.yml"),
+    S.file("//.github/workflows/ci-wasm.yml"),
+    S.file("//.github/workflows/ci-bun.yml"),
+    S.file("//.github/workflows/ci-apps-e2e.yml"),
+    S.file("//.github/workflows/ci-examples.yml"),
+    S.file("//.github/workflows/ci-faults.yml"),
+    S.file("//.github/workflows/ci-node-macos.yml"),
+    S.file("//.github/workflows/ci-node-windows.yml"),
     S.file("//docs/alpha-notes.md")
   ],
   changes: ["//**"],

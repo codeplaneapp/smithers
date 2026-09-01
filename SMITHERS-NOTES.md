@@ -150,6 +150,35 @@ Every one refused a real target, and each carries a red-then-green test.
    convention here and would be enforcing if the repository's branch
    protection required them.
 
+## The sandbox is new, and the test tier had to be declared for it
+
+BUILD mode never sandboxed anything. `sandbox-exec` appears in exactly one
+module, `packages/build-cli/src/PackageExec.ts`, which is the package-mode
+executor; the BUILD-mode `Executor.ts` contains no occurrence of the string,
+and neither `Vitest.Attrs` nor `NodeTest.Attrs` has a `sandbox` field to
+declare. Every vitest suite in this repository therefore ran unconfined with
+the host network until this port.
+
+Package mode denies IP networking by default and permits only local unix
+sockets, so the first full `//:gates` run produced 49 `listen EPERM` failures
+from suites that bind a loopback port. That is new by construction, not a
+regression in those suites, and the fix is a declaration: `S.Shell.Test` takes
+`sandbox: { network: "loopback" }`, which permits bind, accept, and connect on
+localhost with no egress (`packages/targets/src/Attr.ts` defines the union;
+`PackageExec.ts` builds the profile).
+
+Two details decide individual cases. The profile restricts IP networking only,
+because it opens with `(allow default)`: the filesystem, process spawning, and
+the docker socket stay reachable, so no suite needs `sandbox: "none"` for
+docker, the real `jj` binary, or the keychain. And the loopback filter is
+literally `local ip "localhost:*"`, which covers `127.0.0.1` and `::1` but not
+a wildcard bind, so `packages/engine` needs the full opening: its
+`FlowProxyServer` test uses `NodeHttpServer.layerTest`, which binds `::` with
+no host.
+
+Declaring a sandbox is key material, so annotating a target invalidates its
+cache entry and re-runs that suite once.
+
 ## Failure modes and host drift
 
 - The `vendor/jj` submodule is not initialized in this worktree, so the

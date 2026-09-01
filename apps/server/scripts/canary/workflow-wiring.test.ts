@@ -86,18 +86,31 @@ describe("canary probes are wired into a gate", () => {
     expect(masked).toEqual([])
   })
 
-  it("lints every workflow file in ci.yml's actionlint step", () => {
-    const ci = readWorkflow("ci.yml")
-    const args = ci.split("\n").find((line) => line.trim().startsWith("args:"))
-    expect(args).toBeDefined()
-    const unlinted = workflowNames.filter((name) => !(args as string).includes(`.github/workflows/${name}`))
+  it("lints every workflow file in the actionlint step", () => {
+    // The caller is found by content, not by name: the package-mode port
+    // retired ci.yml and moved the step to release.yml, and a hardcoded
+    // filename would fail on the move rather than on the coverage gap this
+    // assertion exists to catch.
+    const callers = workflowNames
+      .map((name) => ({ name, text: readWorkflow(name) }))
+      .filter((workflow) => workflow.text.includes("rhysd/actionlint"))
+    expect(callers.map((caller) => caller.name)).not.toEqual([])
+    const args = callers
+      .map((caller) => caller.text.split("\n").find((line) => line.trim().startsWith("args:")))
+      .filter((line): line is string => line !== undefined)
+      .join(" ")
+    const unlinted = workflowNames.filter((name) => !args.includes(`.github/workflows/${name}`))
     expect(unlinted).toEqual([])
   })
 
-  it("keeps ci.yml free of step conditions (issue #176)", () => {
+  it("keeps the generated workflows free of step conditions (issue #176)", () => {
     // packages/flows/test/vitestCoverageIsolation.test.ts owns this pin.
     // It is restated here because the apps workspaces run `bun test` and
-    // never load that suite, and this file edits ci.yml.
-    expect(readWorkflow("ci.yml")).not.toMatch(/^\s*if:/m)
+    // never load that suite, and this file edits the workflow directory.
+    const generated = workflowNames.filter((name) => name.startsWith("ci-"))
+    expect(generated).not.toEqual([])
+    for (const name of generated) {
+      expect(readWorkflow(name), name).not.toMatch(/^\s*if:/m)
+    }
   })
 })

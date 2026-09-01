@@ -9,16 +9,36 @@ import { Smithers as S } from "@smthrs/targets"
 // one out of every gate's digest.
 const srcs = S.Filegroup({ srcs: S.glob(["**/*.mjs", "**/*.ts"]) })
 
-// The pack directory the release rehearsal writes and the smoke check reads.
+// The pack directory the release rehearsal writes and the smoke check reads,
+// relative to the workspace root. pack-release.mjs resolves its destination
+// argument against the repository root rather than the working directory, and
+// smoke-release.mjs resolves the same string against the working directory,
+// which for a package-mode Shell target is the workspace root. One string
+// therefore names the same directory to both.
 const packDirectory = "dist/release-packs"
+
+// `outDirs` resolves against the package directory, so the same relative
+// string would declare scripts/dist/release-packs and the build would fail on
+// an output the script never writes. The `//` prefix anchors it at the
+// workspace root, where pack-release.mjs actually writes.
+const packOutDirectory = `//${packDirectory}`
 
 const node = S.Runtime.bin
 
-/** `node --test` over the named suites. */
+// A package-mode Shell target spawns from the workspace root, and `node --test`
+// resolves its operands against the working directory. These suites want that
+// root: generate-llms.test.mjs asserts the route of
+// `${process.cwd()}/docs/pages/index.mdx`, so a working directory of scripts/
+// makes it read the tree two levels off. The targets therefore keep the default
+// root working directory and name each suite workspace-relative, the way the
+// BUILD-era `Smithers.file("//scripts/…")` runner did.
+const suitePath = (file: string) => `scripts/${file}`
+
+/** `node --test` over the named suites, spawned from the workspace root. */
 const testRunner = (files: ReadonlyArray<string>) =>
   S.Shell.Test({
     bin: node,
-    args: ["--test", ...files],
+    args: ["--test", ...files.map(suitePath)],
     data: [srcs]
   })
 
@@ -28,7 +48,7 @@ const packManifest = testRunner(["pack-release.test.mjs"])
 
 const releaseRehearsal = S.Shell.Test({
   bin: node,
-  args: ["--test", "release-rehearsal.test.mjs"],
+  args: ["--test", suitePath("release-rehearsal.test.mjs")],
   data: [srcs, S.file("//.github/workflows/release.yml")]
 })
 
@@ -72,7 +92,17 @@ const legacyAbsent = gate("check-legacy-absent.mjs")
 
 // --- unit suites behind the gates ---------------------------------------
 
-const npmDedupeUnit = testRunner(["check-npm-dedupe.test.mjs"])
+// The suite resolves the same fixture the npmDedupe gate does, through npm's
+// arborist against the live registry, so it carries the same network
+// declaration. Without it the install stalls against the denied sandbox until
+// the target's wall-clock bound.
+const npmDedupeUnit = S.Shell.Test({
+  bin: node,
+  args: ["--test", suitePath("check-npm-dedupe.test.mjs")],
+  data: [srcs],
+  sandbox: { network: true }
+})
+
 const localSmithersUnit = testRunner(["check-local-smithers.test.mjs"])
 const eslintJsdocUnit = testRunner(["eslint-jsdoc.test.mjs"])
 
@@ -99,7 +129,7 @@ const releasePack = S.Shell.Build({
   script: S.file("pack-release.mjs"),
   args: [packDirectory],
   data: [srcs],
-  outDirs: [packDirectory]
+  outDirs: [packOutDirectory]
 })
 
 const releaseSmoke = S.Shell.Test({

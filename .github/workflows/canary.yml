@@ -22,7 +22,7 @@
 # tick, and only when $CANARY_SESSION_COOKIE is configured. That is 24 short
 # turns a day, and zero if the secret is absent.
 #
-# LINTING. ci.yml names this file in its actionlint step, and
+# LINTING. release.yml names this file in its actionlint step, and
 # apps/server/scripts/canary/workflow-wiring.test.ts fails when a workflow is
 # missing from that list.
 name: Canary
