@@ -225,9 +225,9 @@ const ReviewHandler = Layer.mergeAll(
   Interpreter.layer(Review)
 ).pipe(Layer.provideMerge(Action.layerImplementations))
 
-// Run and observe. execute needs an executionId unless the flow declares
-// idempotencyKey (Review does, so it may be omitted); discard: true
-// returns the execution ID without waiting.
+// Run and observe. Identity precedence is an explicit executionId, the
+// flow's idempotencyKey (Review has one), then CurrentExecutionIds.derived.
+// discard: true returns that execution ID without waiting.
 const run = Effect.gen(function*() {
   const executionId = yield* Review.executionId({ pr: "42" })
   const started = yield* Review.execute({ pr: "42" }, { discard: true })
