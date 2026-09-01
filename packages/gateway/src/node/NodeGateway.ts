@@ -100,6 +100,11 @@ export const listenOptions = (options: ServerOptions): ListenOptions => {
  */
 export const layerAuth = (options: ServerOptions): Layer.Layer<ControlRpcs.ControlAuth> =>
   options.credential === undefined || options.credential === ""
+    // The bypass is safe only because `listenOptions` refuses any bind but
+    // loopback when no credential is configured, so nothing off this machine
+    // can reach the RPC mount that runs as the local operator. Changing that
+    // bind rule without changing this branch reopens the control plane.
+    // eslint-disable-next-line no-restricted-syntax -- loopback-only bind, see above
     ? ControlRpcs.layerNoopAuth({ id: "local", kind: "operator", stampedAt: 0 })
     : ControlRpcs.layerBearerAuth({
       token: options.credential,

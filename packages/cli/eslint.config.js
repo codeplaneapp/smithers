@@ -2,6 +2,7 @@ import js from "@eslint/js"
 import importPlugin from "eslint-plugin-import"
 import unicorn from "eslint-plugin-unicorn"
 import tseslint from "typescript-eslint"
+import { invariants, uninstalledSafety } from "../../eslint.invariants.js"
 import { jsdocConvention } from "../../eslint.jsdoc.js"
 
 export default tseslint.config(
@@ -58,5 +59,12 @@ export default tseslint.config(
       "unicorn/prefer-array-flat-map": "error"
     }
   },
-  ...jsdocConvention
+  ...jsdocConvention,
+  // `swallowedCause` (3 sites in src/Command.ts, all
+  // `Effect.catchCause(() => Effect.succeed(...))` around a control watch) and
+  // `ambientAuthority` (30 sites across Command, Detached, Doctor, Init,
+  // NodeControl, Project, Serve) are not wired yet. The ambient reads are the
+  // larger job: the CLI resolves its project root and its environment inline
+  // rather than taking them as parameters.
+  ...invariants(uninstalledSafety)
 )

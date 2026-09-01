@@ -1176,5 +1176,9 @@ export const layerServerNoopAuth = (options: ServerOptions = defaultServerOption
   if (!isLoopbackHost(host)) {
     throw new Error(`Refusing non-loopback control bind ${host} with permissive authentication`)
   }
+  // The `isLoopbackHost` refusal three lines up is the whole guard: this
+  // composition cannot be built for a bind anything off this machine can
+  // reach. `listen: false` keeps it in-process on top of that.
+  // eslint-disable-next-line no-restricted-syntax -- guarded by the refusal above
   return layerServer(ControlRpcs.layerNoopAuth(), { ...options, listen: false })
 }

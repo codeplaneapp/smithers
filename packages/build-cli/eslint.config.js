@@ -2,6 +2,7 @@ import js from "@eslint/js"
 import importPlugin from "eslint-plugin-import"
 import unicorn from "eslint-plugin-unicorn"
 import tseslint from "typescript-eslint"
+import { invariants, uninstalledSafety } from "../../eslint.invariants.js"
 import { jsdocConvention } from "../../eslint.jsdoc.js"
 
 export default tseslint.config(
@@ -90,5 +91,10 @@ export default tseslint.config(
     rules: {
       "jsdoc/check-tag-names": ["error", { definedTags: ["category", "since", "slop"] }]
     }
-  }
+  },
+  // `swallowedCause` (7 sites: GitSubmoduleExec, PackageTree, StampExec, all
+  // `.catch(() => "")` around git) and `ambientAuthority` (27 sites across 13
+  // modules) are not wired yet. Both need the values threaded through a
+  // parameter before the rules can hold here.
+  ...invariants(uninstalledSafety)
 )

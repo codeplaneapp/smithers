@@ -2,6 +2,7 @@ import js from "@eslint/js"
 import importPlugin from "eslint-plugin-import"
 import unicorn from "eslint-plugin-unicorn"
 import tseslint from "typescript-eslint"
+import { invariants, uninstalledSafety } from "../../eslint.invariants.js"
 import { jsdocConvention } from "../../eslint.jsdoc.js"
 
 export default tseslint.config(
@@ -58,5 +59,9 @@ export default tseslint.config(
       "unicorn/prefer-array-flat-map": "error"
     }
   },
-  ...jsdocConvention
+  ...jsdocConvention,
+  // `swallowedCause` (src/telegram/TelegramClient.ts:363) and `ambientAuthority`
+  // (10 sites: each provider's Config.ts reads its own token out of the process
+  // environment) are not wired yet.
+  ...invariants(uninstalledSafety)
 )

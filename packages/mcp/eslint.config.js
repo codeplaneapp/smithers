@@ -2,6 +2,7 @@ import js from "@eslint/js"
 import importPlugin from "eslint-plugin-import"
 import unicorn from "eslint-plugin-unicorn"
 import tseslint from "typescript-eslint"
+import { ambientAuthority, invariants, swallowedCause, uninstalledSafety } from "../../eslint.invariants.js"
 import { jsdocConvention } from "../../eslint.jsdoc.js"
 
 export default tseslint.config(
@@ -58,5 +59,6 @@ export default tseslint.config(
       "unicorn/prefer-array-flat-map": "error"
     }
   },
-  ...jsdocConvention
+  ...jsdocConvention,
+  ...invariants(uninstalledSafety, swallowedCause, ambientAuthority)
 )

@@ -2,6 +2,7 @@ import js from "@eslint/js"
 import importPlugin from "eslint-plugin-import"
 import unicorn from "eslint-plugin-unicorn"
 import tseslint from "typescript-eslint"
+import { invariants, swallowedCause, uninstalledSafety } from "../../eslint.invariants.js"
 import { jsdocConvention } from "../../eslint.jsdoc.js"
 
 export default tseslint.config(
@@ -59,5 +60,8 @@ export default tseslint.config(
       "unicorn/prefer-array-flat-map": "error"
     }
   },
-  ...jsdocConvention
+  ...jsdocConvention,
+  // `ambientAuthority` is not wired yet: 5 sites in src/Exec.ts, src/LlmLint.ts and
+  // src/SecretProxy.ts, which build a child process environment from this one.
+  ...invariants(uninstalledSafety, swallowedCause)
 )
