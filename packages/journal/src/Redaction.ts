@@ -102,6 +102,22 @@ export const isSensitiveKey = (key: string): boolean => {
   return sensitiveKeySuffixes.some((suffix) => canonical.endsWith(suffix))
 }
 
+/**
+ * A field name with a credential in it replaced outright, not rewritten in place.
+ *
+ * Redacting part of a key changes what the key reads as. `secret=sk-` rewrites
+ * to `secret=[REDACTED]`, which now ENDS in a sensitive name, so a second
+ * application would replace a value the first one left alone and redaction
+ * would stop being a fixed point. Naming the whole key holds the verdict still:
+ * `[REDACTED]` matches no rule and names no credential. Two such keys collapse
+ * into one and the later member wins, which is the fidelity trade every other
+ * marker here makes.
+ */
+const redactKey = (key: string, rules: ReadonlyArray<Rule>): string => {
+  const redacted = redactString(key, rules)
+  return redacted === key ? key : placeholder
+}
+
 const redactString = (value: string, rules: ReadonlyArray<Rule>): string =>
   rules.reduce(
     (text, rule) =>
@@ -122,6 +138,29 @@ const redactString = (value: string, rules: ReadonlyArray<Rule>): string =>
 export interface Options {
   readonly rules?: ReadonlyArray<Rule> | undefined
 }
+
+/** Own keys of a binary view that name one of its bytes rather than a property. */
+const indexKey = /^(?:0|[1-9][0-9]*)$/
+
+/** `Uint8Array 1024 bytes`, or the bare marker when the view refuses to say. */
+const describeBinary = (node: object): string => {
+  try {
+    const name = node.constructor?.name
+    const size = (node as { byteLength?: unknown }).byteLength
+    return typeof name === "string" && typeof size === "number" ? `${name} ${size} bytes` : binaryMarker
+  } catch {
+    return binaryMarker
+  }
+}
+
+/**
+ * The key {@link redact} files a binary view's size under.
+ *
+ * @since 0.1.0
+ * @category redaction
+ * @slop
+ */
+export const binaryMarker = "[Binary]"
 
 /**
  * What {@link redact} writes in place of a function or a class object.
@@ -174,6 +213,25 @@ export const depthMarker = "[Deep]"
  */
 export const redact = (value: unknown, options?: Options): unknown => {
   const rules = options?.rules ?? defaultRules
+  /**
+   * A binary view named by its type and size, with its own properties walked.
+   *
+   * Its bytes are not text the rules can read, and rebuilding it from its
+   * entries wrote one key per byte: a 100 kB buffer rendered 1.4 MB. Handing
+   * the view back untouched is not the answer either, because `redact` is the
+   * journal's own write path, so a caller's `apiKey` property hung on a buffer
+   * went into a durable row in clear. Name the bytes, keep walking the text.
+   */
+  const binary = (node: object, ancestors: WeakSet<object>, depth: number): unknown => {
+    const named: Record<string, unknown> = { [binaryMarker]: describeBinary(node) }
+    for (const [key, field] of Object.entries(node as Record<string, unknown>)) {
+      // An index is one of the bytes just named, not a property a caller set.
+      if (indexKey.test(key)) continue
+      named[redactKey(key, rules)] = isSensitiveKey(key) ? placeholder : walk(field, ancestors, depth + 1)
+    }
+    return named
+  }
+
   const walk = (node: unknown, ancestors: WeakSet<object>, depth = 0): unknown => {
     if (typeof node === "string") return redactString(node, rules)
     // A function, a class object or a symbol carries text a walk never reaches
@@ -182,10 +240,7 @@ export const redact = (value: unknown, options?: Options): unknown => {
     if (typeof node === "function") return functionMarker
     if (typeof node === "symbol") return symbolMarker
     if (node === null || typeof node !== "object") return node
-    // A binary view holds bytes, not strings, so there is nothing to redact and
-    // rebuilding it from its entries would render one key per byte: a 100 kB
-    // buffer became 1.4 MB of output.
-    if (ArrayBuffer.isView(node) || node instanceof ArrayBuffer) return node
+    if (ArrayBuffer.isView(node) || node instanceof ArrayBuffer) return binary(node, ancestors, depth)
     if (ancestors.has(node)) return "[Circular]"
     // A journal row is bounded by its schema, but a LOGGED value is arbitrary:
     // the logger sends every non-Error value here, and a chain deep enough to
@@ -206,7 +261,13 @@ export const redact = (value: unknown, options?: Options): unknown => {
       return Object.fromEntries(
         Object.entries(node as Record<string, unknown>).map((
           [key, field]
-        ) => [key, isSensitiveKey(key) ? placeholder : walk(field, ancestors, depth + 1)])
+        ) => [
+          // The KEY is text too. Rewriting only values let a credential used as
+          // a log annotation key reach the operator, since Effect renders an
+          // annotation as `key=value`, and become an OTLP span attribute name.
+          redactKey(key, rules),
+          isSensitiveKey(key) ? placeholder : walk(field, ancestors, depth + 1)
+        ])
       )
     } finally {
       ancestors.delete(node)

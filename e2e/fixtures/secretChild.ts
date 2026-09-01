@@ -49,6 +49,19 @@ const registration = Interpreter.layer(Deploy).pipe(
         Effect.andThen(
           Effect.logInfo("deploy finished").pipe(Effect.withLogSpan(`fetch token=${apiKey}`))
         ),
+        // The fourth line logs a cause carrying a host error. An aborted fetch
+        // fails with a `DOMException`, whose `name` lives in an internal slot,
+        // so a redacted copy built on its prototype is an impostor that throws
+        // from inside `Cause.pretty` and kills the run the line describes.
+        Effect.andThen(
+          Effect.suspend(() => {
+            const controller = new AbortController()
+            controller.abort()
+            return Effect.fail(controller.signal.reason).pipe(
+              Effect.catchCause((cause) => Effect.logError(`cleanup after Bearer ${apiKey}`, cause))
+            )
+          })
+        ),
         Effect.as(`deployed ${endpoint} token=${apiKey}`)
       )
     )

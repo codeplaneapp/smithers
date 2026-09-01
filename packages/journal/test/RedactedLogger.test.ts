@@ -50,9 +50,19 @@ const capture = (): Capture => {
   }
 }
 
-/** Everything the console was handed for the run, as one string. */
+/**
+ * Everything the console was handed for the run, as one string.
+ *
+ * Rendered the way a console renders: a string bare, everything else through
+ * `inspect`. Not `String` for everything, which was the earlier form:
+ * `String({apiKey: "sk-..."})` is `[object Object]`, so every assertion built on
+ * it was blind to a credential inside a non-string argument, and a leak shipped
+ * green underneath that blindness once already.
+ */
 const rendered = (recorded: Capture): string =>
-  recorded.lines.map((line) => line.map((value) => String(value)).join(" ")).join("\n")
+  recorded.lines
+    .map((line) => line.map((value) => typeof value === "string" ? value : inspect(value, { depth: 8 })).join(" "))
+    .join("\n")
 
 /** Runs `body` under `logger`, redacted, against a capturing console. */
 const loggedWith = <E>(
@@ -119,6 +129,24 @@ describe("RedactedLogger", () => {
       // The provider-key rule wins the span before the bearer rule reaches it,
       // which is the journal's own order and the reason both rules exist.
       expect(text).toContain("Bearer [REDACTED_API_KEY]")
+    }))
+
+  it.effect("survives a cause carrying a host error the clone cannot impersonate", () =>
+    Effect.gen(function*() {
+      // `redactError` rebuilds an error with `Object.create` over its own
+      // prototype. A DOMException keeps `name` and `code` in internal slots
+      // behind prototype getters, so the clone is the impostor that killed the
+      // run for `Headers` and `Event`: the clone itself succeeds, and the throw
+      // arrives later from inside `Cause.pretty`. An AbortSignal's reason is a
+      // DOMException, so this is an ordinary cancelled action.
+      const controller = new AbortController()
+      controller.abort()
+      const recorded = yield* logged(
+        Effect.fail(controller.signal.reason).pipe(
+          Effect.catchCause((cause) => Effect.logError("action failed", cause))
+        )
+      )
+      expect(rendered(recorded)).toContain("action failed")
     }))
 
   it.effect("keeps a credential out of a log span's label", () =>
@@ -462,6 +490,31 @@ describe("RedactedLogger", () => {
     expect(rendered).toContain(Redaction.depthMarker)
   })
 
+  it("does not leak a credential a binary view carries into the journal", () => {
+    // `Redaction.redact` is the JOURNAL WRITE path, not only the log path:
+    // SqlJournal encodes `redact(payload)` into `payload_json`. Handing a
+    // binary view back untouched to avoid rendering one key per byte therefore
+    // wrote a caller's own `apiKey` property into a durable row in clear.
+    const redactor = Redaction.make()
+    const bytes = Object.assign(new Uint8Array([1, 2, 3, 4]), {
+      apiKey: "sk-live-e2ecase22NEVERLOGTHIS",
+      note: "token=sk-live-e2ecase22NEVERLOGTHIS"
+    })
+    expect(JSON.stringify(redactor(bytes))).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+    expect(JSON.stringify(redactor({ body: bytes }))).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+    expect(inspect(redactor(bytes))).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+  })
+
+  it("does not leak a credential an object key carries", () => {
+    // A key is text too. The walk rewrote every value and no key, so a
+    // credential used as a log annotation key, which Effect renders as
+    // `key=value`, survived the rules on the operator's terminal and became an
+    // OTLP span attribute NAME.
+    const redactor = Redaction.make()
+    const keyed = { "sk-live-e2ecase22NEVERLOGTHIS": "seat" }
+    expect(JSON.stringify(redactor(keyed))).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+  })
+
   it("does not leak a credential carried by a function or a symbol", () => {
     // The shared walker returns anything that is neither a string nor an
     // object untouched, so a function's own properties never met a rule and
@@ -488,15 +541,17 @@ describe("RedactedLogger", () => {
     expect(String(redactor("ANTHROPIC_sk-ant-api03-abcdefghij"))).not.toContain("sk-ant-api03-abcdefghij")
   })
 
-  it("keeps a binary view whole instead of one key per byte", () => {
-    // The collapse rebuilds a value from its entries, which turns a buffer
-    // into an object with one key per byte: a 100 kB buffer rendered 1.4 MB of
-    // stderr. A binary view holds no strings, so there is nothing to redact.
+  it("names a binary view rather than rebuilding it one key per byte", () => {
+    // Restated 2026-09-01: the first form asserted the view was handed back as
+    // itself, which put a caller's own property into a journal row in clear.
+    // The size half of the finding stands, so the bytes are named instead.
     const redactor = Redaction.make()
-    const bytes = Buffer.alloc(1_000, 7)
-    const rendered = RedactedLogger.redactArgument(bytes, redactor)
-    expect(ArrayBuffer.isView(rendered)).toBe(true)
-    expect(inspect(rendered).length).toBeLessThan(500)
+    const bytes = Object.assign(Buffer.alloc(100_000, 7), { seat: "sk-live-e2ecase22NEVERLOGTHIS" })
+    const rendered = inspect(RedactedLogger.redactArgument(bytes, redactor))
+    expect(rendered).toContain(Redaction.binaryMarker)
+    expect(rendered).toContain("100000 bytes")
+    expect(rendered).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+    expect(rendered.length).toBeLessThan(500)
   })
 
   it("does not leak a credential the walk cannot reach when the console refuses", () => {

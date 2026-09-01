@@ -169,6 +169,23 @@ describe("Redaction", () => {
     )
   })
 
+  it("names a binary view that refuses to describe itself", () => {
+    // The description reads two properties off the view, and either can be an
+    // own accessor that throws or a prototype the caller removed. Neither is a
+    // reason to lose the line, so both fall back to the bare marker.
+    const redact = Redaction.make()
+    const throwing = new Uint8Array([1, 2])
+    Object.defineProperty(throwing, "constructor", {
+      get: () => {
+        throw new TypeError("no constructor for you")
+      },
+      configurable: true
+    })
+    expect(redact(throwing)).toEqual({ [Redaction.binaryMarker]: Redaction.binaryMarker })
+    const bare = Object.setPrototypeOf(new Uint8Array([3]), null) as Uint8Array
+    expect(redact(bare)).toEqual({ [Redaction.binaryMarker]: Redaction.binaryMarker })
+  })
+
   effect("keeps payloads verbatim when redaction is disabled", () =>
     Effect.gen(function*() {
       const journal = yield* Journal

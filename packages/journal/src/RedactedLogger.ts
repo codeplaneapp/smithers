@@ -122,6 +122,41 @@ const renderDepthMarker = "[Deep]"
 const toArray = (message: unknown): ReadonlyArray<unknown> => Array.isArray(message) ? message : [message]
 
 /**
+ * `error` with the redacted text defined on it, or `undefined` if it will not render.
+ *
+ * `message` and `stack` are defined rather than assigned. `Error.stack` is an
+ * optional property, so under `exactOptionalPropertyTypes` an assignment cannot
+ * carry the `undefined` an already stackless error has. Everything a renderer
+ * reads is then read once here: a prototype whose getters are backed by
+ * internal slots the clone does not have throws on the first of them.
+ */
+const renderable = (error: Error, message: string, stack: unknown): Error | undefined => {
+  try {
+    Object.defineProperty(error, "message", { value: message, writable: true, configurable: true })
+    Object.defineProperty(error, "stack", { value: stack, writable: true, configurable: true })
+    void `${error.name}${error.message}${String(error.stack)}${String(error)}`
+    return error
+  } catch {
+    return undefined
+  }
+}
+
+/** A plain `Error` standing in for one whose class cannot be impersonated. */
+const plainError = (error: Error, message: string, stack: unknown): Error => {
+  const plain = new Error(message)
+  // Read from the ORIGINAL, where the brand check passes. A name is the part of
+  // the class a renderer actually prints, so it survives even when the class
+  // itself cannot.
+  try {
+    Object.defineProperty(plain, "name", { value: String(error.name), writable: true, configurable: true })
+  } catch {
+    // A name that will not even be read is not worth the log line.
+  }
+  Object.defineProperty(plain, "stack", { value: stack, writable: true, configurable: true })
+  return plain
+}
+
+/**
  * A copy of `error` carrying the same information with the rules applied.
  *
  * `Object.create` over the original prototype rather than `new Error`, so a
@@ -132,6 +167,15 @@ const toArray = (message: unknown): ReadonlyArray<unknown> => Array.isArray(mess
  * that loop and defined as data properties, because V8 gives an error an own
  * `stack` ACCESSOR whose getter would read the unredacted text straight back
  * out of the original.
+ *
+ * The clone is then PROVEN, not assumed. A host error such as a `DOMException`,
+ * which is what an `AbortSignal` carries as its reason, keeps `name` and `code`
+ * in internal slots behind prototype getters, so a clone over that prototype is
+ * an impostor: creating it succeeds and the brand check throws later, from
+ * inside `Cause.pretty`, killing the run the line was describing. Reading what
+ * a renderer reads settles that here, where a failure costs the class and
+ * nothing else. Proving happens before the own-key walk, so the memo only ever
+ * holds an object that renders, and a cycle can never point at an impostor.
  */
 const redactError = (
   error: Error,
@@ -146,7 +190,10 @@ const redactError = (
   // on the clone and every reference to one error is the same redacted object.
   const memoized = seen.get(error)
   if (memoized !== undefined) return memoized
-  const clone = Object.create(Object.getPrototypeOf(error)) as Error
+  const message = String(redactor(error.message))
+  const stack = typeof error.stack === "string" ? String(redactor(error.stack)) : error.stack
+  const clone = renderable(Object.create(Object.getPrototypeOf(error)) as Error, message, stack)
+    ?? plainError(error, message, stack)
   seen.set(error, clone)
   for (const key of Reflect.ownKeys(error)) {
     if (key === "message" || key === "stack") continue
@@ -170,19 +217,6 @@ const redactError = (
       configurable: true
     })
   }
-  Object.defineProperty(clone, "message", {
-    value: String(redactor(error.message)),
-    writable: true,
-    configurable: true
-  })
-  // Defined rather than assigned. `Error.stack` is an optional property, so
-  // under `exactOptionalPropertyTypes` an assignment cannot carry the
-  // `undefined` an already stackless error has.
-  Object.defineProperty(clone, "stack", {
-    value: typeof error.stack === "string" ? String(redactor(error.stack)) : error.stack,
-    writable: true,
-    configurable: true
-  })
   return clone
 }
 
