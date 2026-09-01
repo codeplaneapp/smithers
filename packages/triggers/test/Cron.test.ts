@@ -58,4 +58,55 @@ describe("Cron", () => {
       code: "unsatisfiable_cron"
     })
   })
+
+  it("tests the cap before it pushes, so a limit of zero returns nothing", async () => {
+    const cron = await Effect.runPromise(Cron.parse("0 * * * *", "UTC"))
+    const from = new Date("2026-01-01T00:00:00.000Z")
+    const to = new Date("2026-01-01T05:00:00.000Z")
+    expect(await Effect.runPromise(Cron.occurrencesBetween(cron, from, to, 0))).toEqual([])
+    expect(await Effect.runPromise(Cron.occurrencesBetween(cron, from, to, 1))).toEqual([
+      new Date("2026-01-01T01:00:00.000Z")
+    ])
+    expect(await Effect.runPromise(Cron.occurrencesBetween(cron, from, to, 5))).toHaveLength(5)
+    expect(await Effect.runPromise(Cron.occurrencesBetween(cron, from, to, 6))).toHaveLength(5)
+  })
+
+  // A limit that is not a count used to disable the cap rather than be refused,
+  // so `NaN` searched without a bound at all.
+  it("refuses a limit that is not a non-negative safe integer", async () => {
+    const cron = await Effect.runPromise(Cron.parse("0 * * * *", "UTC"))
+    const from = new Date("2026-01-01T00:00:00.000Z")
+    const to = new Date("2026-01-01T05:00:00.000Z")
+    for (const limit of [Number.NaN, 1.5, -1, Number.POSITIVE_INFINITY]) {
+      const error = await Effect.runPromise(Effect.flip(Cron.occurrencesBetween(cron, from, to, limit)))
+      expect(error).toMatchObject({ code: "invalid_options", path: "limit" })
+      expect(error.message).toContain(String(limit))
+    }
+  })
+
+  it("caps an unstated limit at maxOccurrences instead of searching unbounded", async () => {
+    const cron = await Effect.runPromise(Cron.parse("* * * * *", "UTC"))
+    const from = new Date("2026-01-01T00:00:00.000Z")
+    const to = new Date("2026-01-03T00:00:00.000Z")
+    const occurrences = await Effect.runPromise(Cron.occurrencesBetween(cron, from, to))
+    expect(occurrences).toHaveLength(Cron.maxOccurrences)
+  })
+
+  // The occurrence is the boundary instant, never the sub-second offset the
+  // caller happened to observe it at, so an idempotency key derived from it is
+  // the same for every observer of the same tick.
+  it("zeroes milliseconds when the instant itself matches", async () => {
+    const cron = await Effect.runPromise(Cron.parse("0 * * * *", "UTC"))
+    const matching = new Date("2026-01-01T01:00:00.000Z")
+    matching.setMilliseconds(457)
+    const occurrence = await Effect.runPromise(Cron.previousAtOrBefore(cron, matching))
+    expect(occurrence.toISOString()).toBe("2026-01-01T01:00:00.000Z")
+  })
+
+  it("keeps the parsed timezone beside the expression it came from", async () => {
+    const zoned = await Effect.runPromise(Cron.parse("0 9 * * *", "America/New_York"))
+    const naive = await Effect.runPromise(Cron.parse("0 9 * * *"))
+    expect(zoned).toMatchObject({ expression: "0 9 * * *", timezone: "America/New_York" })
+    expect("timezone" in naive).toBe(false)
+  })
 })

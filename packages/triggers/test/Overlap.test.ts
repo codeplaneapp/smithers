@@ -13,4 +13,15 @@ describe("Overlap", () => {
     expect(Overlap.pendingAfter({ running: true, pending: 20, due: 10 })).toBe(20)
     expect(Overlap.pendingAfter({ running: true, pending: 20, due: 30 })).toBe(30)
   })
+
+  it("buffers the due occurrence when nothing is pending yet", () => {
+    expect(Overlap.pendingAfter({ running: true, due: 10 })).toBe(10)
+    expect(Overlap.pendingAfter({ running: true, pending: undefined, due: 10 })).toBe(10)
+  })
+
+  it("fires regardless of policy when no run is in flight", () => {
+    for (const policy of ["skip", "buffer-one", "supersede"] as const) {
+      expect(Overlap.decide(policy, { running: false, pending: 5, due: 10 })).toBe("fire")
+    }
+  })
 })
