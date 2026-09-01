@@ -58,6 +58,11 @@ bounds, pattern grammar, and permission failures are documented in the
 The `Plan` namespace re-exports [`@smthrs/plan`](/api/plan), which owns step
 identity, graph compilation, static effect declarations, and plan storage.
 
+The `Journal` namespace re-exports [`@smthrs/journal`](/api/journal), which owns
+the append-only event record every durable run is replayed from, and the
+redaction rules that keep a credential out of both a committed row and a log
+line.
+
 ## NodeRuntime
 
 `@smthrs/flows/NodeRuntime` is the only supported durable-runtime subpath in
