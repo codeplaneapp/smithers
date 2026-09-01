@@ -1,0 +1,144 @@
+# Cache trust model
+
+The remote build cache is a shared oracle: a target that finds its content key
+in the cache does not run, and its stored result is reported green. Whoever can
+publish under a key therefore decides the outcome of every later build that
+computes that key.
+
+## Trust model
+
+A remote build cache has untrusted readers and trusted writers. This is how
+remote caches are deployed generally, in Bazel, Buck2, Nx, and Turborepo alike,
+and the reason is the same everywhere: reading a result is harmless, publishing
+one is a claim about what a build produces.
+
+- A **reader** is any job that pulls. That includes a job building an
+  unreviewed branch, so a read credential is expected to be widely held and is
+  treated as public within the organization.
+- A **writer** is a job whose inputs were reviewed before it ran. Only
+  post-merge jobs on the trunk branch qualify.
+
+The realistic failure does not need an attacker. A target whose real input is
+not in its declared inputs computes the same key from different content. Run it
+in a pull request, publish the green result, and the next trunk build reads a
+result produced from code nobody merged. One credential makes that a routine
+accident. Two credentials make publishing an authorization, not a side effect
+of having read access.
+
+Two mechanisms enforce it, and only the first is a control:
+
+1. **The server refuses.** `worker/protocol.ts` classifies the presented bearer
+   token as `write`, `read`, or `none`, and refuses `PUT` and `DELETE` on
+   anything but `write` with `403`, before the request body is read. This is
+   not configuration; a job holding the read credential cannot publish.
+2. **The client namespaces its publications.** A job that sets
+   `SMITHERS_CACHE_NAMESPACE` publishes under `<namespace>/<key>` and still
+   reads at the bare key, so its results are invisible to trunk while it keeps
+   every trunk cache hit. This is defence in depth, not a control: it binds
+   nothing on the server, and a holder of the write credential can decline to
+   use it. What it buys is a correct posture for a deployment that has not
+   split its secrets yet, and containment of the accidental case above.
+
+## Which secret goes in which job
+
+| Secret                       | Value            | Rendered into        |
+| ---------------------------- | ---------------- | -------------------- |
+| `SMITHERS_CACHE_URL`         | Endpoint         | Every job            |
+| `SMITHERS_CACHE_READ_TOKEN`  | Read credential  | Every job            |
+| `SMITHERS_CACHE_WRITE_TOKEN` | Write credential | Post-merge jobs only |
+
+A `pull_request`-triggered job receives the read credential and no write
+credential. It pulls at full speed and publishes nothing.
+
+## The change GithubCiGen needs
+
+Today `packages/targets/src/GithubCiGen.ts` renders cache host state in
+`cacheEnvironment` (around line 795), from one optional `cacheTokenSecret`
+attr (declared around line 245). `render` computes that map once and spreads
+the same `env` block onto every generated step of every job, so the one token
+reaches `pull_request` runs and `push` runs alike. The root `BUILD.ts` declares
+`cacheToken = Smithers.Secret("SMITHERS_CACHE_TOKEN")` and passes it as
+`cacheTokenSecret`.
+
+The change, in order:
+
+1. Add an optional `cacheWriteTokenSecret: Schema.optional(Secret.Declaration)`
+   attr beside `cacheTokenSecret`, and document `cacheTokenSecret` as the read
+   credential.
+2. Split `cacheEnvironment(attrs)` into two renderings: the shared entries
+   (endpoint and read token) and the write entry. Keep the shared function as
+   it is and add `writeCacheEnvironment(attrs)` returning at most one entry.
+3. In `render`, decide per job rather than once for the workflow. A job earns
+   the write entry only when the workflow cannot be triggered by a pull
+   request, which is `attrs.pullRequest === false`, or when the job itself is
+   guarded by a condition that excludes pull-request events. The smallest
+   correct form is a per-job `publishesToCache: Schema.optional(Schema.Boolean)`
+   on the `Job` struct (around line 171), defaulting to false. When it is true,
+   `render` adds the write entry to that job's step `env` and emits
+   `if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}`
+   in the same block that emits `runs-on`; `Job` declares no `if` today, so
+   that line is new. Never emit the write entry on a job without that guard: a
+   `pull_request` run of the same job would receive it.
+4. In the root `BUILD.ts`, declare
+   `cacheWriteToken = Smithers.Secret("SMITHERS_CACHE_WRITE_TOKEN")`, rename
+   `cacheToken` to name `SMITHERS_CACHE_READ_TOKEN`, pass both, and mark the
+   publishing job.
+
+Landing that change regenerates `.github/workflows/ci.yml`. The workflow is a
+generated root file whose drift is gated, so the regenerated file belongs in
+the same commit as the `GithubCiGen` and `BUILD.ts` edits:
+
+```sh
+pnpm exec smithers-build build '//:ci'
+pnpm exec smithers-build lint '//:ci'
+```
+
+Today the repository declares no `RemoteCache.make(...)` at all: it uses the
+`SMITHERS_CACHE_URL` override with the default `SMITHERS_CACHE_TOKEN`, which
+resolves to the shared-credential posture. Declaring the split in the root
+`BUILD.ts` is what makes the client send two different credentials:
+
+```ts
+export const remoteCache = Smithers.RemoteCache.make({
+  endpoint: "https://build.smithers.sh",
+  read: Smithers.Secret("SMITHERS_CACHE_READ_TOKEN"),
+  write: Smithers.Secret("SMITHERS_CACHE_WRITE_TOKEN")
+})
+```
+
+## Operational step, and deployment ordering
+
+The deployed Worker must hold both secrets before any of that ships. Deploy in
+this order:
+
+1. **Configure the Worker with both secrets.** Set
+   `SMITHERS_CACHE_READ_TOKEN` and `SMITHERS_CACHE_WRITE_TOKEN` in the
+   deploying shell and run the deploy. Both are required: `alchemy.run.ts`
+   fails the deployment when either is missing, rather than starting a Worker
+   that answers on one credential. To keep every existing client working during
+   the rollout, set **both to the current `SMITHERS_CACHE_TOKEN` value**. The
+   Worker classifies a token matching both digests as `write`, so nothing
+   changes for a client that still sends one credential.
+2. **Add the repository secrets.** Add `SMITHERS_CACHE_READ_TOKEN` and
+   `SMITHERS_CACHE_WRITE_TOKEN` to the GitHub repository, still both holding
+   the current value.
+3. **Land the CI generation change** above, so pull-request jobs stop receiving
+   the write credential.
+4. **Rotate.** Only now generate a new write credential, redeploy the Worker
+   with the new `SMITHERS_CACHE_WRITE_TOKEN` and the unchanged read token, and
+   update the repository secret. Rotating before step 3 breaks every job that
+   still sends the old value as its write credential.
+
+If the Worker does not have both secrets configured before the client change
+ships, the deployment fails at step 1 and no Worker is replaced. If the
+repository secrets are added out of order, the failure is a build that publishes
+nothing: the client sends an absent or stale write credential, the Worker
+answers `401` or `403`, and the CLI warns
+`remote cache publication refused; this credential may only read` once and
+keeps reading for the rest of the run. That is the read-only posture, which is
+exactly what a pull-request job should have. Builds stay correct and lose only
+publication, and every cache hit still lands.
+
+The self-hosted stack under `../terraform/` serves the same protocol and still
+has one credential. Give it the same split, or run it knowing every client that
+can read it can publish to it.

@@ -5,6 +5,21 @@ import * as NodePath from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 const redacted = "__SMITHERS_CACHE_TOKEN_REDACTED__"
+
+/**
+ * The Worker bindings that carry a cache credential.
+ *
+ * `CACHE_TOKEN` is the single-credential deployment this service had before
+ * reads and writes were separated. Legacy state can still hold it, so it stays
+ * on the list.
+ */
+const credentialBindingNames = new Set(["CACHE_TOKEN", "CACHE_READ_TOKEN", "CACHE_WRITE_TOKEN"])
+
+const credentialEnvironmentNames = [
+  "SMITHERS_CACHE_TOKEN",
+  "SMITHERS_CACHE_READ_TOKEN",
+  "SMITHERS_CACHE_WRITE_TOKEN"
+] as const
 const infraDirectory = NodePath.dirname(NodePath.dirname(fileURLToPath(import.meta.url)))
 const defaultStateDirectory = NodePath.join(infraDirectory, ".alchemy", "state", "SmithersBuildRemoteCache")
 
@@ -35,7 +50,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
 const normalizeOptions = (value: RedactAlchemyStateOptions): {
-  readonly bearerToken: string | undefined
+  readonly bearerTokens: ReadonlyArray<string>
   readonly directory: string
 } => {
   let prototype: object | null
@@ -70,14 +85,21 @@ const normalizeOptions = (value: RedactAlchemyStateOptions): {
   const configuredDirectory = read("directory")
   const directory = configuredDirectory ?? defaultStateDirectory
   const configuredToken = read("bearerToken")
-  const bearerToken = configuredToken ?? process.env["SMITHERS_CACHE_TOKEN"]
   if (typeof directory !== "string" || !NodePath.isAbsolute(directory)) {
     throw new TypeError("Alchemy state directory must be an absolute path")
   }
-  if (bearerToken !== undefined && typeof bearerToken !== "string") {
+  if (configuredToken !== undefined && typeof configuredToken !== "string") {
     throw new TypeError("Alchemy state bearer token must be a string when supplied")
   }
-  return { bearerToken, directory }
+  // Without an override, every credential this service can be deployed with is
+  // scrubbed. Missing one would leave a raw value in state that the operator
+  // believes was redacted.
+  const bearerTokens = configuredToken !== undefined
+    ? [configuredToken]
+    : credentialEnvironmentNames
+      .map((name) => process.env[name])
+      .filter((token): token is string => typeof token === "string" && token !== "")
+  return { bearerTokens, directory }
 }
 
 const errorCode = (value: unknown): string | undefined => {
@@ -221,22 +243,25 @@ const readStateFile = async (file: string): Promise<{ readonly identity: FileIde
   return { identity, state }
 }
 
-const redactWorkerState = (value: unknown, bearerToken: string | undefined): boolean => {
+const isCredentialBinding = (name: unknown): boolean => typeof name === "string" && credentialBindingNames.has(name)
+
+const redactWorkerState = (value: unknown, bearerTokens: ReadonlyArray<string>): boolean => {
   if (!isRecord(value)) return false
   let changed = false
+  const isBearer = (candidate: unknown): boolean => typeof candidate === "string" && bearerTokens.includes(candidate)
 
   const props = isRecord(value["props"]) ? value["props"] : null
   const env = props !== null && isRecord(props["env"]) ? props["env"] : null
-  const token = env !== null && isRecord(env["CACHE_TOKEN"]) ? env["CACHE_TOKEN"] : null
-  if (token !== null && bearerToken !== undefined && token["__redacted__"] === bearerToken) {
+  for (const [name, entry] of env === null ? [] : Object.entries(env)) {
+    if (!isCredentialBinding(name) || !isRecord(entry) || !isBearer(entry["__redacted__"])) continue
     changed = true
-    token["__redacted__"] = redacted
+    entry["__redacted__"] = redacted
   }
 
   const bindings = value["bindings"]
   if (!Array.isArray(bindings)) return changed
   for (const binding of bindings) {
-    if (!isRecord(binding) || binding["sid"] !== "CACHE_TOKEN") continue
+    if (!isRecord(binding) || !isCredentialBinding(binding["sid"])) continue
     const data = isRecord(binding["data"]) ? binding["data"] : null
     const nativeBindings = data?.["bindings"]
     if (!Array.isArray(nativeBindings)) continue
@@ -244,10 +269,9 @@ const redactWorkerState = (value: unknown, bearerToken: string | undefined): boo
       if (
         !isRecord(nativeBinding) ||
         nativeBinding["type"] !== "secret_text" ||
-        nativeBinding["name"] !== "CACHE_TOKEN" ||
-        typeof nativeBinding["text"] !== "string"
+        !isCredentialBinding(nativeBinding["name"])
       ) continue
-      if (bearerToken !== undefined && nativeBinding["text"] === bearerToken) {
+      if (isBearer(nativeBinding["text"])) {
         changed = true
         nativeBinding["text"] = redacted
       }
@@ -354,9 +378,13 @@ const writeStateFile = async (
   if (primary !== undefined) throw primary
 }
 
-const redactFile = async (root: string, file: string, bearerToken: string | undefined): Promise<boolean> => {
+const redactFile = async (
+  root: string,
+  file: string,
+  bearerTokens: ReadonlyArray<string>
+): Promise<boolean> => {
   const { identity, state } = await readStateFile(file)
-  if (!redactWorkerState(state, bearerToken)) return false
+  if (!redactWorkerState(state, bearerTokens)) return false
   const rendered = `${JSON.stringify(state, null, 2)}\n`
   if (Buffer.byteLength(rendered, "utf8") > maximumRenderedStateBytes) {
     throw new RangeError(`redacted Alchemy state exceeds ${maximumRenderedStateBytes} bytes: ${file}`)
@@ -423,12 +451,12 @@ const discoverWorkerStates = async (
  * used for other durable repository state.
  */
 export const redactAlchemyState = async (options: RedactAlchemyStateOptions = {}): Promise<number> => {
-  const { bearerToken, directory } = normalizeOptions(options)
+  const { bearerTokens, directory } = normalizeOptions(options)
   const discovered = await discoverWorkerStates(directory)
   if (discovered === null) return 0
   let changed = 0
   for (const file of discovered.files) {
-    if (await redactFile(discovered.root, file, bearerToken)) changed += 1
+    if (await redactFile(discovered.root, file, bearerTokens)) changed += 1
   }
   return changed
 }

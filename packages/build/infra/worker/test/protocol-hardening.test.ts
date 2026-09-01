@@ -21,7 +21,9 @@ import {
 } from "../protocol.ts"
 
 const token = "test-token-with-sufficient-entropy-for-unit-tests"
-const tokenHash = createHash("sha256").update(token, "utf8").digest("hex")
+/** These cases exercise hardening, not the credential split, so `token` publishes. */
+const writeTokenHash = createHash("sha256").update(token, "utf8").digest("hex")
+const readTokenHash = createHash("sha256").update("a-reader-that-never-publishes", "utf8").digest("hex")
 const keyDigest = "a".repeat(64)
 const textEncoder = new TextEncoder()
 
@@ -90,14 +92,16 @@ interface HandlerOverrides {
   readonly contentStore?: ContentStore
   readonly health?: () => Promise<void>
   readonly maxArtifactBytes?: number
-  readonly tokenHash?: string
+  readonly readTokenHash?: string
+  readonly writeTokenHash?: string
 }
 
 const makeHandler = (overrides: HandlerOverrides = {}) =>
   createHandler({
     actionCache: overrides.actionCache ?? new MemoryActionCache(),
     contentStore: overrides.contentStore ?? new MemoryContentStore(),
-    tokenHash: overrides.tokenHash ?? tokenHash,
+    readTokenHash: overrides.readTokenHash ?? readTokenHash,
+    writeTokenHash: overrides.writeTokenHash ?? writeTokenHash,
     ...(overrides.health === undefined ? {} : { health: overrides.health }),
     ...(overrides.maxArtifactBytes === undefined
       ? {}
@@ -179,7 +183,8 @@ const digestOf = (text: string): string => createHash("sha256").update(text, "ut
 
 describe("remote-cache hardening", () => {
   it("fails construction on invalid security and allocation settings", () => {
-    expect(() => makeHandler({ tokenHash: "not-a-digest" })).toThrow("tokenHash")
+    expect(() => makeHandler({ readTokenHash: "not-a-digest" })).toThrow("readTokenHash")
+    expect(() => makeHandler({ writeTokenHash: "not-a-digest" })).toThrow("writeTokenHash")
     expect(() => makeHandler({ maxArtifactBytes: 0 })).toThrow("maxArtifactBytes")
     expect(() => makeHandler({ maxArtifactBytes: Number.MAX_SAFE_INTEGER })).toThrow("maxArtifactBytes")
   })
@@ -572,11 +577,13 @@ describe("remote-cache hardening", () => {
     const dependencies: {
       actionCache: ActionCache
       contentStore: ContentStore
-      tokenHash: string
+      readTokenHash: string
+      writeTokenHash: string
     } = {
       actionCache,
       contentStore: new MemoryContentStore(),
-      tokenHash
+      readTokenHash,
+      writeTokenHash
     }
     const handler = createHandler(dependencies)
     dependencies.actionCache = {
@@ -590,14 +597,15 @@ describe("remote-cache hardening", () => {
     const accessor = Object.defineProperty(
       {
         actionCache,
-        contentStore: new MemoryContentStore()
+        contentStore: new MemoryContentStore(),
+        readTokenHash
       },
-      "tokenHash",
+      "writeTokenHash",
       {
         enumerable: true,
         get: () => {
           reads += 1
-          return tokenHash
+          return writeTokenHash
         }
       }
     )

@@ -12,7 +12,10 @@ import {
 interface CacheWorkerEnv {
   readonly CACHE_DATABASE: D1Database
   readonly CACHE_BUCKET: R2Bucket
-  readonly CACHE_TOKEN: string
+  /** SHA-256 of the pull credential every job may hold, trusted or not. */
+  readonly CACHE_READ_TOKEN: string
+  /** SHA-256 of the publish credential only post-merge jobs may hold. */
+  readonly CACHE_WRITE_TOKEN: string
 }
 
 interface KeyRow {
@@ -263,7 +266,8 @@ const handlerFor = (env: CacheWorkerEnv): CacheHandler => {
   isolateHandler = createHandler({
     actionCache: makeActionCache(env.CACHE_DATABASE),
     contentStore: makeContentStore(env.CACHE_BUCKET),
-    tokenHash: env.CACHE_TOKEN,
+    readTokenHash: env.CACHE_READ_TOKEN,
+    writeTokenHash: env.CACHE_WRITE_TOKEN,
     health: makeHealth(env.CACHE_DATABASE, env.CACHE_BUCKET)
   })
   return isolateHandler
