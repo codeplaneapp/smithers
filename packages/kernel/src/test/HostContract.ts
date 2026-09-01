@@ -14,7 +14,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as JjService from "@smthrs/jj"
 import type { Jj, JjErrorCode } from "@smthrs/jj"
-import { Effect, Fiber, FileSystem, type Layer, Path, Stream } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, type Layer, Option, Path, Stream } from "effect"
 import { HttpClient } from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
@@ -48,7 +48,46 @@ export interface FailureCapability<Code extends string> {
 export interface FileSystemSuccess {
   readonly expected: "success"
   readonly scratchPath?: string | undefined
+  /** Operations this otherwise available host deliberately refuses. */
+  readonly unsupported?: Partial<Record<FileSystemOperation, string>> | undefined
 }
+
+/** Every method on Effect's closed filesystem service. */
+export const FileSystemOperations = [
+  "access",
+  "copy",
+  "copyFile",
+  "chmod",
+  "chown",
+  "glob",
+  "exists",
+  "link",
+  "makeDirectory",
+  "makeTempDirectory",
+  "makeTempDirectoryScoped",
+  "makeTempFile",
+  "makeTempFileScoped",
+  "open",
+  "readDirectory",
+  "readFile",
+  "readFileString",
+  "readLink",
+  "realPath",
+  "remove",
+  "rename",
+  "sink",
+  "stat",
+  "stream",
+  "symlink",
+  "truncate",
+  "utimes",
+  "watch",
+  "writeFile",
+  "writeFileString"
+] as const
+
+/** One method of Effect's closed filesystem service. */
+export type FileSystemOperation = typeof FileSystemOperations[number]
 
 /**
  * Successful Path contract expectation.
@@ -231,6 +270,103 @@ const unsupportedChildProcess = (operation: "string" | "stream", code: string) =
       : assertFailure(spawner.string(unsupported), code)
   })
 
+const fileSystemProbe = (
+  fs: FileSystem.FileSystem,
+  operation: FileSystemOperation,
+  root: string
+): Effect.Effect<unknown, unknown, unknown> => {
+  const at = (name: string): string => `${root}/${operation}-${name}`
+  const source = `${root}/source.txt`
+  const bytes = new TextEncoder().encode("host-contract")
+  switch (operation) {
+    case "access":
+      return fs.access(source)
+    case "copy":
+      return fs.copy(source, at("copy.txt"))
+    case "copyFile":
+      return fs.copyFile(source, at("copy-file.txt"))
+    case "chmod":
+      return fs.chmod(source, 0o600)
+    case "chown":
+      return Effect.flatMap(fs.stat(source), (info) =>
+        fs.chown(
+          source,
+          Option.getOrElse(info.uid, () => 0),
+          Option.getOrElse(info.gid, () => 0)
+        ))
+    case "glob":
+      return fs.glob("**/*.txt", { root })
+    case "exists":
+      return Effect.tap(fs.exists(source), (exists) => Effect.sync(() => expect(exists).toBe(true)))
+    case "link":
+      return fs.link(source, at("hard-link.txt"))
+    case "makeDirectory":
+      return fs.makeDirectory(at("directory"), { recursive: true })
+    case "makeTempDirectory":
+      return Effect.flatMap(fs.makeTempDirectory({ directory: root }), (path) => fs.remove(path, { recursive: true }))
+    case "makeTempDirectoryScoped":
+      return Effect.scoped(
+        Effect.flatMap(fs.makeTempDirectoryScoped({ directory: root }), (path) => fs.exists(path))
+      )
+    case "makeTempFile":
+      return Effect.flatMap(fs.makeTempFile({ directory: root }), (path) => fs.remove(path, { force: true }))
+    case "makeTempFileScoped":
+      return Effect.scoped(
+        Effect.flatMap(fs.makeTempFileScoped({ directory: root }), (path) => fs.exists(path))
+      )
+    case "open":
+      return Effect.scoped(Effect.flatMap(fs.open(source, { flag: "r" }), (file) => file.stat))
+    case "readDirectory":
+      return fs.readDirectory(root)
+    case "readFile":
+      return fs.readFile(source)
+    case "readFileString":
+      return fs.readFileString(source)
+    case "readLink": {
+      const link = at("symbolic-link.txt")
+      return fs.symlink(source, link).pipe(Effect.andThen(fs.readLink(link)))
+    }
+    case "realPath":
+      return fs.realPath(source)
+    case "remove": {
+      const path = at("remove.txt")
+      return fs.writeFile(path, bytes).pipe(Effect.andThen(fs.remove(path)))
+    }
+    case "rename": {
+      const from = at("rename-from.txt")
+      return fs.writeFile(from, bytes).pipe(Effect.andThen(fs.rename(from, at("rename-to.txt"))))
+    }
+    case "sink":
+      return Stream.run(Stream.succeed(bytes), fs.sink(at("sink.txt")))
+    case "stat":
+      return fs.stat(source)
+    case "stream":
+      return Stream.runDrain(fs.stream(source))
+    case "symlink":
+      return fs.symlink(source, at("symlink.txt"))
+    case "truncate": {
+      const path = at("truncate.txt")
+      return fs.writeFile(path, bytes).pipe(Effect.andThen(fs.truncate(path, 1)))
+    }
+    case "utimes":
+      return fs.utimes(source, new Date(0), new Date(0))
+    case "watch":
+      return Effect.gen(function*() {
+        const watched = yield* Stream.runHead(fs.watch(root)).pipe(
+          Effect.timeout("5 seconds"),
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* Effect.yieldNow
+        yield* fs.writeFile(at("watched.txt"), bytes)
+        yield* Fiber.join(watched)
+      })
+    case "writeFile":
+      return fs.writeFile(at("write.txt"), bytes)
+    case "writeFileString":
+      return fs.writeFileString(at("write-string.txt"), "host-contract")
+  }
+}
+
 /** The default stdin probe: echo back one line read from the child's stdin. */
 const defaultStdinCommand = ChildProcess.make(
   "/bin/sh",
@@ -275,22 +411,38 @@ export const runHostContract = (
         layer
       ))
 
-    it.live("declares FileSystem behavior", () =>
+    it.live("declares every FileSystem operation", () =>
       run(
         fileSystemCap.expected === "failure"
           ? Effect.gen(function*() {
             const fs = yield* FileSystem.FileSystem
-            yield* assertFailure(fs.readFile("/host-contract/unsupported"), fileSystemCap.code)
+            yield* Effect.forEach(
+              FileSystemOperations,
+              (operation) => assertFailure(
+                fileSystemProbe(fs, operation, "/host-contract/unsupported"),
+                fileSystemCap.code
+              ),
+              { discard: true }
+            )
           })
           : Effect.gen(function*() {
             const fs = yield* FileSystem.FileSystem
-            const path = scratchPath
+            const root = scratchPath
             const bytes = new TextEncoder().encode("host-contract")
             yield* Effect.gen(function*() {
-              yield* fs.writeFile(path, bytes)
-              expect(new TextDecoder().decode(yield* fs.readFile(path))).toBe("host-contract")
+              yield* fs.makeDirectory(root, { recursive: true })
+              yield* fs.writeFile(`${root}/source.txt`, bytes)
+              yield* Effect.forEach(
+                FileSystemOperations,
+                (operation) => {
+                  const probe = fileSystemProbe(fs, operation, root)
+                  const code = fileSystemCap.unsupported?.[operation]
+                  return code === undefined ? probe : assertFailure(probe, code)
+                },
+                { discard: true }
+              )
             }).pipe(
-              Effect.ensuring(fs.remove(path, { force: true }).pipe(Effect.ignore))
+              Effect.ensuring(fs.remove(root, { recursive: true, force: true }).pipe(Effect.ignore))
             )
           }),
         layer

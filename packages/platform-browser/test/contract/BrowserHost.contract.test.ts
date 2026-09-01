@@ -127,7 +127,30 @@ runHostContract(
   "BrowserHost",
   layer,
   {
-    fileSystem: { expected: "success", scratchPath: "/browser-host-contract" },
+    fileSystem: {
+      expected: "success",
+      scratchPath: "/browser-host-contract",
+      unsupported: {
+        chmod: "NotFound",
+        chown: "NotFound",
+        copy: "NotFound",
+        copyFile: "NotFound",
+        glob: "NotFound",
+        link: "NotFound",
+        makeTempDirectory: "NotFound",
+        makeTempDirectoryScoped: "NotFound",
+        makeTempFile: "NotFound",
+        makeTempFileScoped: "NotFound",
+        open: "NotFound",
+        readLink: "NotFound",
+        rename: "NotFound",
+        sink: "NotFound",
+        symlink: "NotFound",
+        truncate: "NotFound",
+        utimes: "NotFound",
+        watch: "NotFound"
+      }
+    },
     path: { expected: "success" },
     childProcess: {
       expected: "success",

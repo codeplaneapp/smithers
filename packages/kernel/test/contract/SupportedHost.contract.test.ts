@@ -105,7 +105,29 @@ runHostContract(
   ),
   {
     // Every capability below takes the suite's defaults on purpose.
-    fileSystem: { expected: "success" },
+    fileSystem: {
+      expected: "success",
+      unsupported: {
+        chmod: "NotFound",
+        chown: "NotFound",
+        copy: "NotFound",
+        copyFile: "NotFound",
+        glob: "NotFound",
+        link: "NotFound",
+        makeTempDirectory: "NotFound",
+        makeTempDirectoryScoped: "NotFound",
+        makeTempFile: "NotFound",
+        makeTempFileScoped: "NotFound",
+        open: "NotFound",
+        readLink: "NotFound",
+        rename: "NotFound",
+        sink: "NotFound",
+        symlink: "NotFound",
+        truncate: "NotFound",
+        utimes: "NotFound",
+        watch: "NotFound"
+      }
+    },
     path: { expected: "success" },
     childProcess: { expected: "success" },
     jj: { expected: "success" },
