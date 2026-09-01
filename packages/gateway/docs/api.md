@@ -148,10 +148,13 @@ An idle subscription emits a keepalive every
 for a relay that cuts sooner. Both settings must be positive safe integers, and
 a value that is not is refused with `bind_failed` before anything binds.
 
-What is not bounded at 1.0.0-rc.0: a projection read collects a run's whole
-journal, and a workspace read collects every matching run's journal. There is no
-event ceiling, no encoded-byte ceiling, and no overflow frame. A workspace
-listing passes no limit to `Control.list`.
+A workspace listing pages the control plane with an explicit limit and folds at
+most `Projections.maxWorkspaceRuns` runs. A workspace with more runs is answered
+as its first `maxWorkspaceRuns` runs.
+
+What is not bounded at 1.0.0-rc.0: a projection read collects each selected
+run's whole journal. There is no event ceiling, no encoded-byte ceiling, and no
+overflow frame.
 
 ## Supervision
 

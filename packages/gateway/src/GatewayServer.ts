@@ -289,49 +289,21 @@ export interface IngressOptions {
 
 const encodeGatewayError = Schema.encodeUnknownSync(GatewayError)
 
+/** One refusal on the wire: the typed error, under the status it answers. */
+const refuse = (error: GatewayError, status: number) =>
+  HttpServerResponse.jsonUnsafe(encodeGatewayError(error), { status })
+
 const malformedRequest = (path: string) =>
-  HttpServerResponse.jsonUnsafe(
-    encodeGatewayError(
-      new GatewayError({
-        code: "malformed_request",
-        message: `POST ${path} carries no RPC request message`
-      })
-    ),
-    { status: 400 }
-  )
+  new GatewayError({ code: "malformed_request", message: `POST ${path} carries no RPC request message` })
 
 const unauthorizedRequest = () =>
-  HttpServerResponse.jsonUnsafe(
-    encodeGatewayError(
-      new GatewayError({
-        code: "unauthorized",
-        message: "A valid bearer credential is required"
-      })
-    ),
-    { status: 401 }
-  )
+  new GatewayError({ code: "unauthorized", message: "A valid bearer credential is required" })
 
 const requestTooLarge = (path: string, maxBytes: number) =>
-  HttpServerResponse.jsonUnsafe(
-    encodeGatewayError(
-      new GatewayError({
-        code: "request_too_large",
-        message: `POST ${path} exceeds the ${maxBytes}-byte request limit`
-      })
-    ),
-    { status: 413 }
-  )
-
-const unreadableRequest = (path: string) =>
-  HttpServerResponse.jsonUnsafe(
-    encodeGatewayError(
-      new GatewayError({
-        code: "malformed_request",
-        message: `POST ${path} carries a body the server could not read`
-      })
-    ),
-    { status: 400 }
-  )
+  new GatewayError({
+    code: "request_too_large",
+    message: `POST ${path} exceeds the ${maxBytes}-byte request limit`
+  })
 
 /** The message `@effect/platform-node-shared` `NodeStream` gives a size overflow. */
 const maxBytesExceeded = "maxBytes exceeded"
@@ -365,6 +337,36 @@ export const exceededBodyLimit = (error: unknown): boolean => {
     : undefined
   return cause instanceof Error && cause.message === maxBytesExceeded
 }
+
+/**
+ * The refusal a failed request-body read earns, and the status it answers
+ * under.
+ *
+ * A body over the limit is 413 `request_too_large`. Every other read failure,
+ * a truncated body or a reset transport among them, is 400
+ * `malformed_request`: the request cannot be retried smaller, because its size
+ * was never the problem.
+ *
+ * @param path the mount the request was made to
+ * @param maxBytes the configured limit
+ * @param error the failure the body read produced
+ * @since 1.0.0
+ * @category constructors
+ */
+export const bodyRefusal = (
+  path: string,
+  maxBytes: number,
+  error: unknown
+): { readonly error: GatewayError; readonly status: number } =>
+  exceededBodyLimit(error)
+    ? { error: requestTooLarge(path, maxBytes), status: 413 }
+    : {
+      error: new GatewayError({
+        code: "malformed_request",
+        message: `POST ${path} carries a body the server could not read`
+      }),
+      status: 400
+    }
 
 /**
  * Whether a request body carries at least one RPC message the server can act
@@ -427,7 +429,7 @@ export const layerIngress = (options: IngressOptions = {}) => {
           const path = new URL(request.url, "http://gateway.invalid").pathname
           if (protectedPaths.includes(path) && options.authorize !== undefined) {
             const authorized = yield* options.authorize(request.headers)
-            if (!authorized) return unauthorizedRequest()
+            if (!authorized) return refuse(unauthorizedRequest(), 401)
           }
           if (request.method !== "POST" || !rpcPaths.includes(path)) return yield* httpEffect
           // A declared length is a hint that saves reading a body already
@@ -435,7 +437,9 @@ export const layerIngress = (options: IngressOptions = {}) => {
           // that declares less than it sends is still measured by the read,
           // and a chunked body declares nothing at all.
           const declaredLength = Number(request.headers["content-length"])
-          if (Number.isFinite(declaredLength) && declaredLength > maxBytes) return requestTooLarge(path, maxBytes)
+          if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+            return refuse(requestTooLarge(path, maxBytes), 413)
+          }
           const read = yield* request.text.pipe(
             Effect.provideService(HttpServerRequest.MaxBodySize, FileSystem.Size(maxBytes)),
             Effect.match({
@@ -447,9 +451,10 @@ export const layerIngress = (options: IngressOptions = {}) => {
             })
           )
           if (read.body === undefined) {
-            return exceededBodyLimit(read.error) ? requestTooLarge(path, maxBytes) : unreadableRequest(path)
+            const answer = bodyRefusal(path, maxBytes, read.error)
+            return refuse(answer.error, answer.status)
           }
-          return carriesRpcRequest(serialization, read.body) ? yield* httpEffect : malformedRequest(path)
+          return carriesRpcRequest(serialization, read.body) ? yield* httpEffect : refuse(malformedRequest(path), 400)
         })
     }),
     { global: true }

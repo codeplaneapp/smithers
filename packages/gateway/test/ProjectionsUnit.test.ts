@@ -27,6 +27,11 @@ const run: RunSummary = {
   updatedAt: 2
 }
 
+const numberedRun = (ordinal: number): RunSummary => ({
+  ...run,
+  runId: `run-${ordinal}`
+})
+
 const event = (sequence: number, kind: string, payload: unknown): ControlEvent => ({
   sequence,
   kind,
@@ -62,6 +67,108 @@ const control = (overrides: Partial<ControlService>): ControlService => ({
   ...overrides
 } as ControlService)
 
+describe("Projections run-list pagination", () => {
+  it.effect("folds workspace rows from every control-list page", () =>
+    Effect.gen(function*() {
+      const first = Array.from({ length: 100 }, (_, index) => numberedRun(index + 1))
+      const second = [numberedRun(101)]
+      let listCalls = 0
+      const projections = Projections.make(control({
+        list: () => {
+          listCalls += 1
+          return Effect.succeed(
+            listCalls === 1
+              ? { _tag: "runs", items: first, nextCursor: "page-2" } satisfies ListResponse
+              : { _tag: "runs", items: second } satisfies ListResponse
+          )
+        }
+      }))
+
+      const snapshot = yield* projections.snapshot({ _tag: "workspace-runs" })
+      expect(snapshot.rows.map((row) => (row as { readonly runId: string }).runId)).toEqual(
+        [...first, ...second].map((item) => item.runId)
+      )
+      expect(listCalls).toBe(2)
+    }))
+
+  it.effect("stops a perpetually paginated listing at the workspace ceiling", () =>
+    Effect.gen(function*() {
+      let listCalls = 0
+      const projections = Projections.make(control({
+        list: () => {
+          const page = listCalls
+          listCalls += 1
+          return Effect.succeed({
+            _tag: "runs",
+            items: Array.from({ length: 100 }, (_, index) => numberedRun(page * 100 + index + 1)),
+            nextCursor: `page-${page + 1}`
+          } satisfies ListResponse)
+        }
+      }))
+
+      const snapshot = yield* projections.snapshot({ _tag: "workspace-runs" })
+      expect(Projections.maxWorkspaceRuns).toBe(500)
+      expect(snapshot.rows).toHaveLength(500)
+      expect(listCalls).toBe(5)
+    }))
+
+  it.effect("passes an explicit numeric limit on every run-list request", () =>
+    Effect.gen(function*() {
+      const limits: Array<number | undefined> = []
+      const projections = Projections.make(control({
+        list: (request) => {
+          limits.push(request.limit)
+          return Effect.succeed({ _tag: "runs", items: [] } satisfies ListResponse)
+        }
+      }))
+
+      yield* projections.snapshot({ _tag: "workspace-runs" })
+      expect(limits).toEqual([expect.any(Number)])
+    }))
+
+  it.effect("does not page a run-scoped lookup past its first match", () =>
+    Effect.gen(function*() {
+      let listCalls = 0
+      const projections = Projections.make(control({
+        list: () => {
+          listCalls += 1
+          return Effect.succeed({ _tag: "runs", items: [run], nextCursor: "another-page" } satisfies ListResponse)
+        }
+      }))
+
+      const snapshot = yield* projections.snapshot({ _tag: "run-summary", runId: run.runId })
+      expect(snapshot.rows).toHaveLength(1)
+      expect(listCalls).toBe(1)
+    }))
+
+  it.effect("maps and redacts a failure from a later run-list page", () =>
+    Effect.gen(function*() {
+      let listCalls = 0
+      const persistence = new PersistenceError({
+        operation: "list runs at /private/tmp/control.db",
+        message: "SQL failed on the second page",
+        cause: { statement: "select secret from runs" }
+      })
+      const projections = Projections.make(control({
+        list: () => {
+          listCalls += 1
+          return listCalls === 1
+            ? Effect.succeed({ _tag: "runs", items: [run], nextCursor: "page-2" } satisfies ListResponse)
+            : Effect.fail(persistence)
+        }
+      }))
+
+      const failure = yield* Effect.flip(projections.snapshot({ _tag: "workspace-runs" }))
+      expect(listCalls).toBe(2)
+      expect(failure.code).toBe("run_unavailable")
+      expect(failure.message).toBe("Listing runs failed")
+      expect(failure.cause).toEqual({ _tag: "/control/PersistenceError", code: "persistence_failed" })
+      expect(JSON.stringify(failure)).not.toContain("SQL failed")
+      expect(JSON.stringify(failure)).not.toContain("select secret")
+      expect(JSON.stringify(failure)).not.toContain("/private/tmp")
+    }))
+})
+
 describe("Projections read-path failures", () => {
   it.effect("reports a failed run listing as a gateway refusal", () =>
     Effect.gen(function*() {
@@ -92,6 +199,38 @@ describe("Projections read-path failures", () => {
         expect(json).not.toContain(privateText)
       }
       expect(() => Schema.encodeUnknownSync(GatewayError)(failure)).not.toThrow()
+    }))
+
+  it.effect("carries no cause at all when the failure is not a tagged error", () =>
+    Effect.gen(function*() {
+      // A control plane is typed, but the wire is not: a transport that hands
+      // back a string, a bare object, or nothing is still a read that failed,
+      // and the client learns that much and nothing it cannot act on.
+      for (
+        const opaque of [
+          "boom",
+          { message: "boom", statement: "select secret from runs" },
+          { _tag: 7 },
+          null
+        ]
+      ) {
+        const projections = Projections.make(
+          control({ list: () => Effect.fail(opaque as unknown as Unavailable) })
+        )
+        const failure = yield* Effect.flip(projections.snapshot({ _tag: "workspace-runs" }))
+        expect(failure.code).toBe("run_unavailable")
+        expect(failure.cause).toBeUndefined()
+        expect(JSON.stringify(failure)).not.toContain("select secret")
+      }
+    }))
+
+  it.effect("names a tagged failure that carries no code", () =>
+    Effect.gen(function*() {
+      const projections = Projections.make(
+        control({ list: () => Effect.fail({ _tag: "/control/Mystery" } as unknown as Unavailable) })
+      )
+      const failure = yield* Effect.flip(projections.snapshot({ _tag: "workspace-runs" }))
+      expect(failure.cause).toEqual({ _tag: "/control/Mystery" })
     }))
 
   it.effect("reports a failed event read as a gateway refusal naming the run", () =>
@@ -129,6 +268,30 @@ describe("Projections approvals inbox", () => {
       expect(snapshot.rows).toMatchObject([{ runId: "run-1", requestId: "gate", status: "pending" }])
       // The workspace inbox is not scoped to a run, so its cursor names none.
       expect(snapshot.cursor).toEqual({ projection: "approvals", runId: null, value: 0 })
+    }))
+})
+
+describe("Projections node output", () => {
+  it.effect("answers only the node the selector named", () =>
+    Effect.gen(function*() {
+      const calls = [
+        event(1, "control.agent.cell-call-started", { flowName: "write" }),
+        event(2, "control.agent.cell-call-settled", { flowName: "write", outcome: "success", value: "wrote it" }),
+        event(3, "control.agent.cell-call-started", { flowName: "read" }),
+        event(4, "control.agent.cell-call-settled", { flowName: "read", outcome: "success", value: "read it" })
+      ]
+      const projections = Projections.make(control({
+        list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+        watch: () => Stream.fromIterable(calls)
+      }))
+
+      expect((yield* projections.snapshot({ _tag: "node-output", runId: "run-1", nodeId: "call-2" })).rows)
+        .toMatchObject([{ nodeId: "call-2", output: "read it" }])
+      // A node the run never opened is an empty answer, not a refusal: the run
+      // exists, and a client asking about a node it has not seen settle yet is
+      // asking a question with an answer.
+      expect((yield* projections.snapshot({ _tag: "node-output", runId: "run-1", nodeId: "call-9" })).rows)
+        .toEqual([])
     }))
 })
 
@@ -303,6 +466,12 @@ describe("Projections subscriptions", () => {
         { _tag: "workspace-runs" },
         { projection: "workspace-runs", runId: null, value: 0 },
         "workspace"
+      ],
+      [
+        "a cursor that names no run",
+        { _tag: "run-events", runId: "run-1" },
+        { projection: "run-events", runId: null, value: 1 },
+        "for run none"
       ]
     ] as const satisfies ReadonlyArray<
       readonly [

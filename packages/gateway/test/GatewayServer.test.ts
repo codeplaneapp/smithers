@@ -84,28 +84,20 @@ const exactBodyBytes = new TextEncoder().encode(exactBody).byteLength
  * One HTTP/1.1 exchange written straight onto a socket.
  *
  * `fetch` owns framing headers: it refuses to set `connection` and `upgrade`,
- * it rewrites `content-length`, and it will not send a body it then abandons.
- * A WebSocket upgrade and a truncated body are exactly what has to be proved
- * here, so the request is written by hand.
- *
- * `truncate` sends the headers and the body given and then half-closes, so the
- * server reads fewer bytes than the request declared and its read fails for a
- * reason that is not a size overflow. The write side stays open, so the answer
- * still arrives.
+ * and it rewrites `content-length`. A WebSocket upgrade and an exact body
+ * length are exactly what has to be proved here, so the request is written by
+ * hand.
  */
 const raw = (
   target: string,
   head: ReadonlyArray<string>,
-  body = "",
-  truncate = false
+  body = ""
 ): Promise<{ readonly status: number; readonly body: string }> => {
   const url = new URL(target)
   return new Promise((resolve, reject) => {
     let received = ""
-    const socket = connect({ host: url.hostname, port: Number(url.port), allowHalfOpen: true }, () => {
-      const request = `${[...head, `Host: ${url.host}`, "", ""].join("\r\n")}${body}`
-      if (truncate) socket.end(request)
-      else socket.write(request)
+    const socket = connect({ host: url.hostname, port: Number(url.port) }, () => {
+      socket.write(`${[...head, `Host: ${url.host}`, "", ""].join("\r\n")}${body}`)
     })
     const answer = () => {
       const separator = received.indexOf("\r\n\r\n")
@@ -180,6 +172,22 @@ describe("telling a size overflow from every other body-read failure", () => {
     // 413 for every read failure told a client to shrink a request that was
     // never the problem.
     expect(GatewayServer.exceededBodyLimit(error)).toBe(expected)
+  })
+
+  it("answers 413 for the overflow and 400 for every other read failure", () => {
+    // A truncated body cannot be provoked over a socket the client can still
+    // read the answer on: Node aborts the request and writes nothing. The
+    // refusal is therefore chosen by a function of its own, so both arms are
+    // exercised rather than only the one a real client can reach.
+    const tooLarge = GatewayServer.bodyRefusal("/rpc", 64, httpServerError(new Error("maxBytes exceeded")))
+    expect(tooLarge.status).toBe(413)
+    expect(tooLarge.error.code).toBe("request_too_large")
+    expect(tooLarge.error.message).toBe("POST /rpc exceeds the 64-byte request limit")
+
+    const unreadable = GatewayServer.bodyRefusal("/projections", 64, httpServerError(new Error("aborted")))
+    expect(unreadable.status).toBe(400)
+    expect(unreadable.error.code).toBe("malformed_request")
+    expect(unreadable.error.message).toBe("POST /projections carries a body the server could not read")
   })
 })
 
@@ -304,23 +312,6 @@ describe("the assembled gateway over a real loopback bind", () => {
       const overLimit = yield* Effect.promise(() => post([`Content-Length: ${exactBodyBytes + 1}`], `${exactBody} `))
       expect(overLimit.status).toBe(413)
       expect(JSON.parse(overLimit.body)).toMatchObject({ code: "request_too_large" })
-
-      // A body the server could not read is not a body that was too big.
-      // Answering 413 for every read failure told a client to shrink a request
-      // that was never the problem, so a truncated body earns 400 instead.
-      const truncated = yield* Effect.promise(() =>
-        raw(
-          `${url}/rpc`,
-          ["POST /rpc HTTP/1.1", "Content-Type: application/json", `Content-Length: ${exactBodyBytes}`],
-          exactBody.slice(0, 4),
-          true
-        )
-      )
-      expect(truncated.status).toBe(400)
-      expect(JSON.parse(truncated.body)).toMatchObject({
-        code: "malformed_request",
-        message: "POST /rpc carries a body the server could not read"
-      })
 
       // A declared length that understates the body smuggles nothing past the
       // limit, and needs no test of its own: HTTP/1.1 framing means the server

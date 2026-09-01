@@ -46,6 +46,20 @@ import type * as GatewaySchema from "./GatewaySchema.ts"
 export const heartbeatIntervalMillis = 30_000
 
 /**
+ * The most runs one workspace projection folds.
+ *
+ * A workspace projection reads one full journal per run, so the number of
+ * runs it folds is bounded on purpose. This is the gateway's own ceiling, not
+ * the control plane's default page size. It is 500 because that equals
+ * `ControlSchema.maxPageSize`, letting the control plane satisfy the whole
+ * gateway allowance in one page when it can.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export const maxWorkspaceRuns = 500
+
+/**
  * Read-path operations served by the gateway.
  *
  * @since 1.0.0
@@ -220,12 +234,33 @@ export const make = (
 
   const runsMatching = (
     filters: { readonly runId?: string; readonly status?: ControlSchema.RunStatus }
-  ): Effect.Effect<ReadonlyArray<ControlSchema.RunSummary>, GatewayError> =>
-    control.list({ _tag: "runs", filters }).pipe(
-      Effect.tapError((cause) => Effect.logWarning("Listing runs failed", cause)),
-      Effect.mapError((cause) => unavailable("Listing runs failed", cause)),
-      Effect.map((response) => response._tag === "runs" ? response.items : [])
-    )
+  ): Effect.Effect<ReadonlyArray<ControlSchema.RunSummary>, GatewayError> => {
+    const singleRun = filters.runId !== undefined
+    const ceiling = singleRun ? 1 : maxWorkspaceRuns
+    const page = (
+      accumulated: ReadonlyArray<ControlSchema.RunSummary>,
+      cursor?: string | undefined
+    ): Effect.Effect<ReadonlyArray<ControlSchema.RunSummary>, GatewayError> => {
+      const remaining = ceiling - accumulated.length
+      return control.list({
+        _tag: "runs",
+        filters,
+        limit: remaining,
+        ...(cursor === undefined ? {} : { cursor })
+      }).pipe(
+        Effect.tapError((cause) => Effect.logWarning("Listing runs failed", cause)),
+        Effect.mapError((cause) => unavailable("Listing runs failed", cause)),
+        Effect.flatMap((response) => {
+          if (response._tag !== "runs") return Effect.succeed(accumulated)
+          const runs = [...accumulated, ...response.items.slice(0, remaining)]
+          return singleRun || response.nextCursor === undefined || runs.length >= ceiling
+            ? Effect.succeed(runs)
+            : page(runs, response.nextCursor)
+        })
+      )
+    }
+    return Effect.suspend(() => page([]))
+  }
 
   /**
    * The one run a run-scoped selector names, or a typed refusal.
