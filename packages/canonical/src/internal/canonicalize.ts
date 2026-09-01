@@ -70,9 +70,11 @@ const serialize = (value: unknown, ancestors: WeakSet<object>): string | undefin
     }
     if (Array.isArray(value)) {
       // An element with no JSON representation (undefined, a symbol, a
-      // function, or a toJSON that returned undefined) serializes as null,
-      // exactly as JSON.stringify renders it.
-      const items = value.map((item) => serialize(item, ancestors) ?? "null")
+      // function, a toJSON that returned undefined, or a hole in a sparse
+      // array) serializes as null, exactly as JSON.stringify renders it.
+      // `Array.from` visits holes; `Array.prototype.map` skips them, and
+      // joining the result of a skipped hole emitted `[,1]`, which is not JSON.
+      const items = Array.from(value, (item) => serialize(item, ancestors) ?? "null")
       return `[${items.join(",")}]`
     }
     const record = value as Record<string, unknown>

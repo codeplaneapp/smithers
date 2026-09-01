@@ -142,7 +142,14 @@ describe("values JSON.stringify coerces", () => {
     ["a toJSON returning undefined, in an array", [{ toJSON: (): undefined => undefined }], "[null]"],
     ["a function property", { x: (): number => 1 }, "{}"],
     ["a function property beside a kept one", { x: (): number => 1, y: 2 }, "{\"y\":2}"],
-    ["a toJSON returning undefined, as a property", { x: { toJSON: (): undefined => undefined } }, "{}"]
+    ["a toJSON returning undefined, as a property", { x: { toJSON: (): undefined => undefined } }, "{}"],
+    // An array hole has no JSON representation either, and `JSON.stringify`
+    // renders it null like the rest. `Array.prototype.map` skips holes instead
+    // of visiting them, so joining its result emitted `[,1]`, which no parser
+    // accepts.
+    ["a hole", [, 1], "[null,1]"],
+    ["a trailing hole", [1, ,], "[1,null]"],
+    ["only holes", [, ,], "[null,null]"]
   ])("serializes %s the way JSON.stringify does", (_name, input, expected) => {
     expect(serialize(input)).toBe(expected)
     expect(serialize(input)).toBe(JSON.stringify(input))
@@ -432,10 +439,16 @@ describe("collection boundaries", () => {
     expect(serialize([3, 1, 3, 2])).toBe("[3,1,3,2]")
   })
 
-  it("rejects a sparse array rather than returning invalid JSON", () => {
+  // Restated 2026-08-31. This cell pinned the pre-fix behavior: the serializer
+  // skipped array holes, emitted `[,,"end"]`, and the schema's JSON.parse net
+  // turned that invalid document into a decode failure. Rejection was the net
+  // catching a defect, not the contract. The exported contract is
+  // JSON.stringify parity, which renders a hole as null.
+  it("serializes a sparse array's holes as null, as JSON.stringify does", () => {
     const sparse = new Array<unknown>(3)
     sparse[2] = "end"
-    expect(failure(sparse)).toEqual(expect.objectContaining({ _tag: "SchemaError" }))
+    expect(serialize(sparse)).toBe("[null,null,\"end\"]")
+    expect(serialize(sparse)).toBe(JSON.stringify(sparse))
   })
 
   it("serializes ten thousand array elements", () => {
