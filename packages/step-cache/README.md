@@ -53,7 +53,16 @@ The Node-only test layer is available at
 row for one journal event and apply a read-only age bound. An expired recorded
 row is a miss, never a fallback to a newer head. `evict(keyDigest, {
 ifRecordedBy })` performs one compare-and-swap delete. `sweepExpired` removes
-old heads only; it never deletes provenance.
+old heads only, strictly below the floor, so a row recorded exactly at it
+survives.
+
+No verb here deletes a ledger row. Whole-run reclamation belongs to
+`@smthrs/engine-store`, whose retention pass erases a terminal run's ledger
+rows by `recorded_run_id` together with the journal that could have replayed
+them. A ledger row recorded by a run that never existed on this host, which is
+every row `CombinedCacheStore`'s write-back lands from a shared tier, matches
+no run-scoped delete and is never reclaimed: a host composing a shared tier
+accepts ledger growth proportional to the remote entries it has read.
 
 ## Local and remote composition
 
