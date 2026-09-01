@@ -30,6 +30,7 @@ describe("Baseline", () => {
       ]
     }))
 
+    expect(baseline.suite).toBe("suite")
     expect(baseline.records).toEqual([
       { suite: "suite", case: "scored", scorer: "judge", scorerName: "judge-name", stepKey: "step-1", score: 0.75 },
       { suite: "suite", case: "bare", scorer: "judge", stepKey: "step-3", score: 0.25 }
@@ -68,6 +69,7 @@ describe("Baseline", () => {
 
   it("round-trips through write and load byte for byte", async () => {
     const baseline = await Effect.runPromise(Baseline.make({
+      suite: "s",
       records: [
         { suite: "s", case: "b", scorer: "x", scorerName: "exact", stepKey: "k", score: 1 },
         { suite: "s", case: "a", scorer: "x", stepKey: "k", score: 0 }
@@ -98,6 +100,23 @@ describe("Baseline", () => {
     expect(Baseline.write(baseline)).toBe(
       "{\"records\":[{\"case\":\"c\",\"score\":0.5,\"scorer\":\"x\",\"stepKey\":\"k\",\"suite\":\"s\"}],\"version\":1}\n"
     )
+  })
+
+  it("reads each record field once before validating and committing it", async () => {
+    let reads = 0
+    const stateful = {
+      ...record,
+      get scorerName(): unknown {
+        reads += 1
+        return reads === 1 ? "first" : {}
+      }
+    }
+    const baseline = await Effect.runPromise(
+      Baseline.make({ records: [stateful as Baseline.BaselineRecord] })
+    )
+
+    expect(reads).toBe(1)
+    expect(baseline.records[0]?.scorerName).toBe("first")
   })
 
   it("names the record index and field of every decode failure", async () => {
@@ -160,6 +179,10 @@ describe("Baseline", () => {
     const notArray = await failure(Baseline.load("{\"version\":1,\"records\":{}}"))
     expect(notArray.message).toBe("Baseline records must be an array")
     expect(notArray.path).toBe("records")
+
+    const invalidSuite = await failure(Baseline.load("{\"version\":1,\"suite\":7,\"records\":[]}"))
+    expect(invalidSuite.message).toBe("Baseline field 'suite' must be a string, got number")
+    expect(invalidSuite.path).toBe("suite")
 
     const notJson = await failure(Baseline.load("{"))
     expect(notJson.message).toBe("Baseline is not valid JSON")

@@ -110,6 +110,38 @@ describe("Gate", () => {
     expect(Gate.ciGrade(verdict).exitCode).toBe(1)
   })
 
+  it("uses readable scorer labels in findings and faults, with a key fallback", async () => {
+    const named = {
+      ...scored(0),
+      scorer: "0123456789abcdef",
+      scorerName: "exact"
+    } as Extract<Runner.Observation, { kind: "score" }>
+    const baselineRecord = {
+      suite: "s",
+      case: "c",
+      scorer: named.scorer,
+      scorerName: named.scorerName,
+      stepKey: "baseline",
+      score: 1
+    }
+    const verdict = await Effect.runPromise(
+      Gate.check({
+        ...report([named]),
+        regressions: [{ case: "c", scorer: named.scorer, baseline: baselineRecord, actual: named, drop: 1 }],
+        nondeterminism: [{ case: "c", scorer: named.scorer, baseline: baselineRecord, actual: named, delta: -1 }],
+        missing: [
+          { side: "run", case: "named", scorer: named.scorer, scorerName: "exact", stepKey: "k" },
+          { side: "baseline", case: "bare", scorer: "bare-key", stepKey: "k" }
+        ]
+      }, { mean: 0 })
+    )
+    const summary = Gate.ciGrade(verdict).summary
+    expect(summary).toContain("regression for c/exact (01234567)")
+    expect(summary).toContain("nondeterminism for c/exact (01234567)")
+    expect(summary).toContain("missing run observation for named/exact (01234567)/k")
+    expect(summary).toContain("missing baseline observation for bare/bare-key/k")
+  })
+
   // The gate summary used to print only the message, which the runner had
   // already replaced with a fixed sentence, so CI printed a tautology.
   it("names the code and the original message of a case the target failed", async () => {

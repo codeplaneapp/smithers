@@ -2,7 +2,7 @@
  * Canonical committed evaluation baselines.
  *
  * A baseline is the record of what a suite used to score, committed beside the
- * suite it belongs to. It holds only the five fields a comparison reads, and
+ * suite it belongs to. It holds only the fields a comparison reads, and
  * validation rebuilds every record from those fields, so nothing a caller
  * happened to attach to an object travels into a committed artifact.
  *
@@ -43,11 +43,16 @@ export interface BaselineRecord {
 /**
  * Canonical committed evaluation baseline.
  *
+ * `suite` records artifact ownership even when `records` is empty. It is
+ * optional so a baseline written before artifact ownership was added still
+ * loads and relies on the suite carried by each record.
+ *
  * @category models
  * @since 0.1.0
  */
 export interface Baseline {
   readonly version: typeof version
+  readonly suite?: string | undefined
   readonly records: ReadonlyArray<BaselineRecord>
 }
 
@@ -68,20 +73,26 @@ const decodeRecord = (value: unknown, index: number): Effect.Effect<BaselineReco
       return yield* fail(`Baseline record must be an object, got ${value === null ? "null" : typeof value}`, at)
     }
     const source = value as { readonly [key: string]: unknown }
-    const suite = yield* stringField(source.suite, "suite", `${at}.suite`)
-    const caseName = yield* stringField(source.case, "case", `${at}.case`)
-    const scorer = yield* stringField(source.scorer, "scorer", `${at}.scorer`)
-    const stepKey = yield* stringField(source.stepKey, "stepKey", `${at}.stepKey`)
-    const score = source.score
+    const rawSuite = source.suite
+    const rawCase = source.case
+    const rawScorer = source.scorer
+    const rawScorerName = source.scorerName
+    const rawStepKey = source.stepKey
+    const rawScore = source.score
+    const suite = yield* stringField(rawSuite, "suite", `${at}.suite`)
+    const caseName = yield* stringField(rawCase, "case", `${at}.case`)
+    const scorer = yield* stringField(rawScorer, "scorer", `${at}.scorer`)
+    const stepKey = yield* stringField(rawStepKey, "stepKey", `${at}.stepKey`)
+    const score = rawScore
     if (typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 1) {
       return yield* fail(
         `Baseline record field 'score' must be a finite number in [0, 1], got ${String(score)}`,
         `${at}.score`
       )
     }
-    if (source.scorerName !== undefined && typeof source.scorerName !== "string") {
+    if (rawScorerName !== undefined && typeof rawScorerName !== "string") {
       return yield* fail(
-        `Baseline record field 'scorerName' must be a string, got ${typeof source.scorerName}`,
+        `Baseline record field 'scorerName' must be a string, got ${typeof rawScorerName}`,
         `${at}.scorerName`
       )
     }
@@ -92,7 +103,7 @@ const decodeRecord = (value: unknown, index: number): Effect.Effect<BaselineReco
       suite,
       case: caseName,
       scorer,
-      ...(source.scorerName === undefined ? {} : { scorerName: source.scorerName }),
+      ...(rawScorerName === undefined ? {} : { scorerName: rawScorerName }),
       stepKey,
       score: Object.is(score, -0) ? 0 : score
     }
@@ -103,15 +114,21 @@ const validate = (value: unknown): Effect.Effect<Baseline, EvalError> =>
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
       return yield* fail("Baseline must be an object")
     }
-    const artifact = value as { readonly version?: unknown; readonly records?: unknown }
-    if (artifact.version !== version) {
-      return yield* fail(`Baseline version must be ${version}, got ${String(artifact.version)}`, "version")
+    const artifact = value as { readonly version?: unknown; readonly suite?: unknown; readonly records?: unknown }
+    const rawVersion = artifact.version
+    const rawSuite = artifact.suite
+    const rawRecords = artifact.records
+    if (rawVersion !== version) {
+      return yield* fail(`Baseline version must be ${version}, got ${String(rawVersion)}`, "version")
     }
-    if (!Array.isArray(artifact.records)) {
+    if (rawSuite !== undefined && typeof rawSuite !== "string") {
+      return yield* fail(`Baseline field 'suite' must be a string, got ${typeof rawSuite}`, "suite")
+    }
+    if (!Array.isArray(rawRecords)) {
       return yield* fail("Baseline records must be an array", "records")
     }
-    const records = yield* Effect.forEach(artifact.records, decodeRecord)
-    return { version, records: Object.freeze(records) }
+    const records = yield* Effect.forEach(rawRecords, decodeRecord)
+    return { version, ...(rawSuite === undefined ? {} : { suite: rawSuite }), records: Object.freeze(records) }
   })
 
 /**
@@ -136,15 +153,16 @@ export const fromRun = (run: RunResult): Effect.Effect<Baseline, EvalError> => {
       }]
       : []
   )
-  return validate({ version, records })
+  return validate({ version, suite: run.suite, records })
 }
 
 /**
  * Validates an in-memory baseline.
  *
- * The result is a snapshot: records are rebuilt from their five known fields
- * and the array is frozen, so mutating the array or the objects that were
- * passed in cannot change the validated baseline.
+ * The result is a snapshot: every known field is read once, then records are
+ * rebuilt from those validated values and the array is frozen. Mutating the
+ * array or the objects that were passed in cannot change the validated
+ * baseline, and a stateful getter cannot substitute a value after validation.
  *
  * Fails with `invalid_baseline` carrying the record index and field name in
  * `path` for a wrong version, a non-array `records`, a record that is not an
@@ -156,7 +174,12 @@ export const fromRun = (run: RunResult): Effect.Effect<Baseline, EvalError> => {
  */
 export const make = (
   baseline: Omit<Baseline, "version"> & { readonly version?: typeof version }
-): Effect.Effect<Baseline, EvalError> => validate({ version: baseline.version ?? version, records: baseline.records })
+): Effect.Effect<Baseline, EvalError> => {
+  const artifactVersion = baseline.version ?? version
+  const suite = baseline.suite
+  const records = baseline.records
+  return validate({ version: artifactVersion, ...(suite === undefined ? {} : { suite }), records })
+}
 
 /**
  * Serializes a baseline with recursively sorted keys and stable numbers.
@@ -173,7 +196,11 @@ export const write = (baseline: Baseline): string => {
   const sortKey = (record: BaselineRecord): string =>
     JSON.stringify([record.suite, record.case, record.scorer, record.stepKey])
   const records = [...baseline.records].sort((left, right) => compareText(sortKey(left), sortKey(right)))
-  return stringify({ version: baseline.version, records })
+  return stringify({
+    version: baseline.version,
+    ...(baseline.suite === undefined ? {} : { suite: baseline.suite }),
+    records
+  })
 }
 
 /**

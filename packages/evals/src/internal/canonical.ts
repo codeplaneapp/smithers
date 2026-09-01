@@ -65,37 +65,62 @@ const primitive = (value: unknown, options: Options): unknown => {
   return value
 }
 
+const unreadable = (cause: unknown): string => {
+  try {
+    return `[unreadable: ${String(cause)}]`
+  } catch {
+    return "[unreadable]"
+  }
+}
+
 const entriesOf = (value: object): ReadonlyArray<readonly [string, unknown]> =>
   Object.keys(value).map((key) => {
     try {
       return [key, (value as { readonly [key: string]: unknown })[key]] as const
     } catch (cause) {
-      return [key, `[unreadable: ${String(cause)}]`] as const
+      return [key, unreadable(cause)] as const
     }
   })
+
+const objectOf = (
+  entries: ReadonlyArray<readonly [string, unknown]>,
+  depth: number,
+  seen: Set<object>,
+  options: Options
+): object =>
+  Object.fromEntries(
+    entries
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => compareText(left, right))
+      .map(([key, entry]) => [key, walk(entry, depth + 1, seen, options)])
+  )
 
 const walk = (value: unknown, depth: number, seen: Set<object>, options: Options): unknown => {
   if (value === null || typeof value !== "object") return primitive(value, options)
   if (seen.has(value)) return "[circular]"
   if (depth > maxDepth) return "[depth exceeded]"
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? "[invalid Date]" : value.toISOString()
-  if (value instanceof Error) return `[${value.name}: ${truncate(value.message, options.maxStringLength)}]`
-  seen.add(value)
   try {
-    if (Array.isArray(value)) return value.map((entry) => walk(entry, depth + 1, seen, options))
-    if (value instanceof Set) return [...value].map((entry) => walk(entry, depth + 1, seen, options))
-    if (value instanceof Map) {
-      return [...value.entries()]
-        .map(([key, entry]) => [walk(key, depth + 1, seen, options), walk(entry, depth + 1, seen, options)])
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? "[invalid Date]" : value.toISOString()
+    seen.add(value)
+    try {
+      if (value instanceof Error) {
+        const properties = new Map(entriesOf(value))
+        properties.set("name", String(value.name))
+        properties.set("message", String(value.message))
+        return objectOf([...properties], depth, seen, options)
+      }
+      if (Array.isArray(value)) return value.map((entry) => walk(entry, depth + 1, seen, options))
+      if (value instanceof Set) return [...value].map((entry) => walk(entry, depth + 1, seen, options))
+      if (value instanceof Map) {
+        return [...value.entries()]
+          .map(([key, entry]) => [walk(key, depth + 1, seen, options), walk(entry, depth + 1, seen, options)])
+      }
+      return objectOf(entriesOf(value), depth, seen, options)
+    } finally {
+      seen.delete(value)
     }
-    return Object.fromEntries(
-      entriesOf(value)
-        .filter(([, entry]) => entry !== undefined)
-        .sort(([left], [right]) => compareText(left, right))
-        .map(([key, entry]) => [key, walk(entry, depth + 1, seen, options)])
-    )
-  } finally {
-    seen.delete(value)
+  } catch (cause) {
+    return unreadable(cause)
   }
 }
 
@@ -106,9 +131,11 @@ const walk = (value: unknown, depth: number, seen: Set<object>, options: Options
  * members are dropped. Everything JSON cannot express becomes a bracketed
  * marker rather than a throw or a silent `null`: `[circular]`,
  * `[depth exceeded]`, `[NaN]`, `[Infinity]`, `[-Infinity]`, `[bigint n]`,
- * `[function]`, `[symbol]`, `[unreadable: …]` for a getter that threw, and
- * `[Name: message]` for an `Error`. A `Date` becomes its ISO string, a `Set`
- * an array, and a `Map` an array of key/value pairs.
+ * `[function]`, `[symbol]`, and `[unreadable: …]` when a foreign operation
+ * throws. An `Error` becomes an object containing its own enumerable fields
+ * plus `name` and `message`, so typed error fields survive serialization. A
+ * `Date` becomes its ISO string, a `Set` an array, and a `Map` an array of
+ * key/value pairs.
  *
  * @since 0.1.0
  * @private

@@ -174,6 +174,29 @@ const validate = (options: MakeOptions): EvalError | undefined => {
   return undefined
 }
 
+// Every field is read exactly once, into these two shapes, before anything is
+// validated or copied. Reading a field twice let a getter return the name that
+// passed validation and then a different one into the suite, which is the same
+// hole a baseline record had.
+const readCase = (suiteCase: Case): Case => ({
+  name: suiteCase.name,
+  input: suiteCase.input,
+  expected: suiteCase.expected
+})
+
+const readBinding = (binding: Binding): Binding => {
+  const read: { -readonly [K in keyof Binding]: Binding[K] } = {
+    scorer: binding.scorer,
+    appliesTo: binding.appliesTo,
+    sampling: binding.sampling
+  }
+  const groundTruth = binding.groundTruth
+  if (groundTruth !== undefined) read.groundTruth = groundTruth
+  const context = binding.context
+  if (context !== undefined) read.context = context
+  return read
+}
+
 const copyCase = (suiteCase: Case, index: number): Effect.Effect<Case, EvalError> =>
   Effect.gen(function*() {
     const input = yield* clone(suiteCase.input, `cases[${index}].input`)
@@ -185,11 +208,15 @@ const copyCase = (suiteCase: Case, index: number): Effect.Effect<Case, EvalError
 const copyBinding = (binding: Binding, index: number): Effect.Effect<Binding, EvalError> =>
   Effect.gen(function*() {
     // `scorer` and `appliesTo` are executable identities matched by reference,
-    // so they are carried over unchanged; only the inert data is snapshotted.
+    // so they are carried over unchanged; sampling, ground truth, and context
+    // are inert data that must not remain caller-owned.
+    const sampling = binding.sampling === undefined
+      ? undefined
+      : yield* clone(binding.sampling, `bindings[${index}].sampling`)
     const copied: { -readonly [K in keyof Binding]: Binding[K] } = {
       scorer: binding.scorer,
       appliesTo: binding.appliesTo,
-      sampling: binding.sampling
+      sampling: sampling as Binding["sampling"]
     }
     if (binding.groundTruth !== undefined) {
       copied.groundTruth = yield* clone(binding.groundTruth, `bindings[${index}].groundTruth`)
@@ -203,11 +230,15 @@ const copyBinding = (binding: Binding, index: number): Effect.Effect<Binding, Ev
 /**
  * Builds and validates a fixed suite.
  *
- * Every case and binding is copied, so the suite is a snapshot the caller can
- * no longer reach: mutating the array or the input object that was passed in
- * leaves the validated suite unchanged. The copy is a `structuredClone`, which
- * is also the check that the data is inert; a case carrying a function or a
- * class instance fails with `invalid_suite` naming the offending path.
+ * When the effect runs, it reads every option, case field, and binding field
+ * exactly once, then validates and copies only what it read. Validating one
+ * value and copying another let a getter hand the suite something validation
+ * never saw. Every case and binding is then copied, including a binding's
+ * sampling policy, so the suite is a snapshot the caller can no longer reach:
+ * mutating an array, case input, or ratio policy afterwards leaves the
+ * validated suite unchanged. The copy is a `structuredClone`, which is also the
+ * check that the data is inert; a case carrying a function or a class instance
+ * fails with `invalid_suite` naming the offending path.
  *
  * Fails with `invalid_suite` for an empty or control-character name, no cases,
  * more than `limits.cases` cases, a duplicate case name, or a concurrency that
@@ -216,20 +247,26 @@ const copyBinding = (binding: Binding, index: number): Effect.Effect<Binding, Ev
  * @category constructors
  * @since 0.1.0
  */
-export const make = (options: MakeOptions): Effect.Effect<Suite, EvalError> => {
-  const error = validate(options)
-  if (error !== undefined) return Effect.fail(error)
-  return Effect.gen(function*() {
-    const cases = yield* Effect.forEach(options.cases, copyCase)
-    const bindings = yield* Effect.forEach(options.bindings ?? [], copyBinding)
-    return {
-      name: options.name,
-      cases: Object.freeze(cases),
-      bindings: Object.freeze(bindings),
-      concurrency: options.concurrency
-    }
+export const make = (options: MakeOptions): Effect.Effect<Suite, EvalError> =>
+  Effect.suspend(() => {
+    const name = options.name
+    const concurrency = options.concurrency
+    const cases = [...options.cases].map(readCase)
+    const bindings = [...(options.bindings ?? [])].map(readBinding)
+    const snapshot: MakeOptions = { name, concurrency, cases, bindings }
+    const error = validate(snapshot)
+    if (error !== undefined) return Effect.fail(error)
+    return Effect.gen(function*() {
+      const copiedCases = yield* Effect.forEach(cases, copyCase)
+      const copiedBindings = yield* Effect.forEach(bindings, copyBinding)
+      return {
+        name,
+        cases: Object.freeze(copiedCases),
+        bindings: Object.freeze(copiedBindings),
+        concurrency
+      }
+    })
   })
-}
 
 /**
  * Options used when decoding JSON Lines.

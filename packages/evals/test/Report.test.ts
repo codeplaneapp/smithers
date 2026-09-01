@@ -62,6 +62,34 @@ describe("Report", () => {
     )
   })
 
+  it("keeps a failed case's stable error code and path in the JSON wire format", async () => {
+    const base = await empty()
+    const failed: Regression.Report = {
+      ...base,
+      run: {
+        runId: "run",
+        suite: "s",
+        cases: [{
+          case: "broken",
+          error: new EvalError({
+            code: "executor",
+            message: "Target failed for case 'broken': boom",
+            path: "cases[0].input"
+          }),
+          observations: []
+        }],
+        observations: []
+      }
+    }
+    expect(Report.json(failed)).toBe(
+      "{\"baseline\":{\"records\":[],\"version\":1},\"inconclusive\":[],\"missing\":[],\"nondeterminism\":[]," +
+        "\"regressions\":[],\"run\":{\"cases\":[{\"case\":\"broken\",\"error\":{" +
+        "\"_tag\":\"flows/evals/EvalError\",\"code\":\"executor\",\"message\":\"Target failed for case 'broken': boom\"," +
+        "\"name\":\"flows/evals/EvalError\",\"path\":\"cases[0].input\"},\"observations\":[]}]," +
+        "\"observations\":[],\"runId\":\"run\",\"suite\":\"s\"},\"samples\":[],\"suite\":\"s\"}\n"
+    )
+  })
+
   it("renders a report of a run whose target crashed rather than a page of zeroes", async () => {
     const crashed = await report({
       run: {
@@ -167,6 +195,31 @@ describe("Report", () => {
     expect(rendered).toContain("line break")
   })
 
+  it("coerces non-string Markdown cells and treats nullish cells as empty", async () => {
+    const malformed = await report({
+      suite: 42 as unknown as string,
+      missing: [{
+        side: null as unknown as "run",
+        case: undefined as unknown as string,
+        scorer: 7 as unknown as string,
+        stepKey: null as unknown as string
+      }]
+    })
+    const rendered = Report.markdown(malformed)
+    expect(rendered).toContain("# Evaluation report: 42")
+    expect(rendered).toContain("|  |  | 7 |  |")
+
+    const unreadable = await report({
+      suite: {
+        [Symbol.toPrimitive]: () => {
+          throw new TypeError("cannot stringify")
+        }
+      } as unknown as string
+    })
+    expect(() => Report.markdown(unreadable)).not.toThrow()
+    expect(Report.markdown(unreadable)).toContain("# Evaluation report: [unreadable]")
+  })
+
   it("falls back to the scorer key when the scorer has no name", async () => {
     const anonymous = await report({
       inconclusive: [
@@ -181,5 +234,23 @@ describe("Report", () => {
       ]
     })
     expect(Report.markdown(anonymous)).toContain("| c | 0123456789abcdef | step | judge down |")
+  })
+
+  it("uses a scorer name in a missing row and the bare key when no name exists", async () => {
+    const missing = await report({
+      missing: [
+        {
+          side: "run",
+          case: "named",
+          scorer: "0123456789abcdef",
+          scorerName: "exact",
+          stepKey: "step"
+        },
+        { side: "baseline", case: "bare", scorer: "bare-key", stepKey: "step" }
+      ]
+    })
+    const rendered = Report.markdown(missing)
+    expect(rendered).toContain("| run | named | exact (01234567) | step |")
+    expect(rendered).toContain("| baseline | bare | bare-key | step |")
   })
 })

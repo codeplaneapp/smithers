@@ -46,6 +46,9 @@ const samples = (report: Report): ReadonlyArray<ScoreSample> =>
       }
   )
 
+const scorerLabel = (scorer: string, scorerName: string | undefined): string =>
+  scorerName === undefined ? scorer : `${scorerName} (${scorer.slice(0, 8)})`
+
 /**
  * An environment fault: something the comparison needed was never observed, so
  * the harness owes an answer it cannot give. A fault withholds a decision;
@@ -55,7 +58,9 @@ const environmentFaults = (report: Report): ReadonlyArray<string> => [
   ...report.run.cases.flatMap((result) =>
     result.error === undefined ? [] : [`case '${result.case}' failed: ${result.error.code}: ${result.error.message}`]
   ),
-  ...report.missing.map((item) => `missing ${item.side} observation for ${item.case}/${item.scorer}/${item.stepKey}`)
+  ...report.missing.map((item) =>
+    `missing ${item.side} observation for ${item.case}/${scorerLabel(item.scorer, item.scorerName)}/${item.stepKey}`
+  )
 ]
 
 /**
@@ -64,8 +69,12 @@ const environmentFaults = (report: Report): ReadonlyArray<string> => [
  * score at an unchanged one. Both are results, so both are red.
  */
 const findings = (report: Report): ReadonlyArray<string> => [
-  ...report.regressions.map((item) => `regression for ${item.case}/${item.scorer}`),
-  ...report.nondeterminism.map((item) => `nondeterminism for ${item.case}/${item.scorer}`)
+  ...report.regressions.map((item) =>
+    `regression for ${item.case}/${scorerLabel(item.scorer, item.actual.scorerName)}`
+  ),
+  ...report.nondeterminism.map((item) =>
+    `nondeterminism for ${item.case}/${scorerLabel(item.scorer, item.actual.scorerName)}`
+  )
 ]
 
 /**

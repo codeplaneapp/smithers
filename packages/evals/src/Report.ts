@@ -39,8 +39,19 @@ export const renderJson = json
 /** The longest run of text any single Markdown cell renders. */
 const maxCellLength = 240
 
-const cell = (value: string): string => {
-  const flattened = [...value]
+const cell = (value: unknown): string => {
+  let text = ""
+  if (value !== undefined && value !== null) {
+    if (typeof value === "string") text = value
+    else {
+      try {
+        text = String(value)
+      } catch {
+        text = "[unreadable]"
+      }
+    }
+  }
+  const flattened = [...text]
     .map((character) => {
       const code = character.codePointAt(0)!
       return code < 0x20 || code === 0x7f ? " " : character
@@ -133,7 +144,7 @@ export const markdown = (report: RegressionReport): string => {
       report.missing.map((item) => [
         cell(item.side),
         cell(item.case),
-        cell(item.scorer),
+        scorerCell(item.scorer, item.scorerName),
         cell(item.stepKey)
       ])
     ),

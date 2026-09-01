@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect"
 import { describe, expect, it } from "vitest"
+import * as Baseline from "../src/Baseline.ts"
 import type { EvalError } from "../src/EvalError.ts"
 import * as Regression from "../src/Regression.ts"
 import type * as Runner from "../src/Runner.ts"
@@ -108,6 +109,29 @@ describe("Regression", () => {
     expect(mixed.message).toBe("Baseline holds records for suite 'a', 'b', but the run is suite 's'")
   })
 
+  it("checks artifact ownership even when a baseline has no records", async () => {
+    const emptyForeign = await Effect.runPromise(Baseline.fromRun({
+      runId: "run",
+      suite: "OTHER",
+      cases: [],
+      observations: []
+    }))
+    const foreign = await failure(Regression.compare(emptyForeign, run("old", 0.9)))
+    expect(foreign.code).toBe("invalid_baseline")
+    expect(foreign.message).toBe("Baseline belongs to suite 'OTHER', but the run is suite 's'")
+    expect(foreign.path).toBe("baseline.suite")
+
+    const legacy = await Effect.runPromise(Baseline.load("{\"version\":1,\"records\":[]}"))
+    const report = await Effect.runPromise(Regression.compare(legacy, {
+      runId: "run",
+      suite: "s",
+      cases: [],
+      observations: []
+    }))
+    expect(legacy.suite).toBeUndefined()
+    expect(report.missing).toEqual([])
+  })
+
   it("retains observations missing from either side", async () => {
     const missingFromRun = await Effect.runPromise(
       Regression.compare(baseline, { runId: "run", suite: "s", cases: [], observations: [] })
@@ -118,6 +142,54 @@ describe("Regression", () => {
       Regression.compare({ version: 1, records: [] }, run("new", 0.5))
     )
     expect(missingFromBaseline.missing).toEqual([{ side: "baseline", case: "c", scorer: "x", stepKey: "new" }])
+  })
+
+  it("carries the paired scorer name into missing observations", async () => {
+    const result = await Effect.runPromise(
+      Regression.compare(
+        {
+          version: 1,
+          records: [{
+            suite: "s",
+            case: "expected",
+            scorer: "0123456789abcdef",
+            scorerName: "baseline-name",
+            stepKey: "old",
+            score: 1
+          }]
+        },
+        {
+          runId: "run",
+          suite: "s",
+          cases: [],
+          observations: [{
+            case: "actual",
+            scorer: "fedcba9876543210",
+            scorerName: "actual-name",
+            stepKey: "new",
+            kind: "score",
+            score: 1,
+            at: "t"
+          }]
+        }
+      )
+    )
+    expect(result.missing).toEqual([
+      {
+        side: "run",
+        case: "expected",
+        scorer: "0123456789abcdef",
+        scorerName: "baseline-name",
+        stepKey: "old"
+      },
+      {
+        side: "baseline",
+        case: "actual",
+        scorer: "fedcba9876543210",
+        scorerName: "actual-name",
+        stepKey: "new"
+      }
+    ])
   })
 
   it("carries inconclusive observations through untouched", async () => {

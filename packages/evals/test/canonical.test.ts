@@ -46,7 +46,7 @@ describe("canonical", () => {
     })).toEqual({
       big: "[bigint 1]",
       date: "2026-01-01T00:00:00.000Z",
-      error: "[TypeError: boom]",
+      error: { message: "boom", name: "TypeError" },
       fn: "[function]",
       invalidDate: "[invalid Date]",
       list: [1, "two"],
@@ -68,11 +68,46 @@ describe("canonical", () => {
     expect(encode(value)).toEqual({ boom: "[unreadable: TypeError: no]" })
   })
 
+  it("reports proxies whose keys or collection iteration cannot be read", () => {
+    const keys = new Proxy({}, {
+      ownKeys: () => {
+        throw new TypeError("keys unavailable")
+      }
+    })
+    const iteration = new Proxy(new Set([1]), {
+      get: (target, property, receiver) => {
+        if (property === Symbol.iterator) throw new TypeError("iteration unavailable")
+        return Reflect.get(target, property, receiver)
+      }
+    })
+    const date = new Proxy(new Date("2026-01-01T00:00:00.000Z"), {
+      get: () => {
+        throw new TypeError("date unavailable")
+      }
+    })
+
+    for (const value of [keys, iteration, date]) {
+      expect(stringify(value)).toContain("[unreadable:")
+    }
+
+    const cause = new Proxy(new Error("hidden"), {
+      get: () => {
+        throw new Error("cause unavailable")
+      }
+    })
+    const causeCannotBeRead = new Proxy({}, {
+      ownKeys: () => {
+        throw cause
+      }
+    })
+    expect(stringify(causeCannotBeRead)).toBe("\"[unreadable]\"\n")
+  })
+
   it("caps an embedded string and says how much it dropped", () => {
     expect(encode({ text: "abcdef" }, { maxStringLength: 3 })).toEqual({ text: "abc[truncated 3 chars]" })
     expect(encode({ text: "abc" }, { maxStringLength: 3 })).toEqual({ text: "abc" })
     expect(encode({ error: new TypeError("abcdef") }, { maxStringLength: 3 })).toEqual({
-      error: "[TypeError: abc[truncated 3 chars]]"
+      error: { message: "abc[truncated 3 chars]", name: "Typ[truncated 6 chars]" }
     })
   })
 

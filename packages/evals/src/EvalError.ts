@@ -19,6 +19,10 @@ import * as Schema from "effect/Schema"
  * - `invalid_tolerance`: the caller passed a tolerance that is not a finite
  *   non-negative number. Fix the call, not the baseline.
  * - `executor`: the target flow failed for a case.
+ * - `ambiguous_score_job`: two score jobs shared a step key and a scorer, so
+ *   an order-only batch runner's results cannot be attributed to a case. Give
+ *   each case its own step key, or use a runner that implements
+ *   `runBatchCorrelated`.
  * - `scorer_protocol`: a batch runner broke the `runBatch` contract by returning
  *   the wrong number of observations, or observations that identify jobs other
  *   than the ones it was given. Nothing it returned can be trusted.
@@ -33,6 +37,7 @@ export const EvalErrorCode = Schema.Literals([
   "invalid_baseline",
   "invalid_tolerance",
   "executor",
+  "ambiguous_score_job",
   "scorer_protocol",
   "scorer_unavailable"
 ])

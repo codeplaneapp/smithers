@@ -62,7 +62,8 @@ export interface Nondeterminism {
  *
  * `side` names the side it is missing from: `"run"` for a baseline record the
  * run never reproduced, `"baseline"` for a score the run produced that no
- * baseline record accounts for.
+ * baseline record accounts for. `scorerName` comes from the observation that
+ * is present, when that artifact carried one.
  *
  * @category models
  * @since 0.1.0
@@ -71,6 +72,7 @@ export interface MissingObservation {
   readonly side: "baseline" | "run"
   readonly case: string
   readonly scorer: string
+  readonly scorerName?: string | undefined
   readonly stepKey: string
 }
 
@@ -175,9 +177,9 @@ const pairsFor = (
  * they decide nothing and a gate has to see them.
  *
  * Fails with `invalid_tolerance` when a tolerance is not finite and
- * non-negative, and with `invalid_baseline` when the baseline holds records for
- * a suite other than the one the run reports. A baseline from another suite
- * used to compare clean, so the wrong path in CI read as a pass.
+ * non-negative, and with `invalid_baseline` when the artifact or any of its
+ * records belongs to a suite other than the one the run reports. Artifact
+ * ownership covers an empty baseline, whose records cannot identify its suite.
  *
  * @category constructors
  * @since 0.1.0
@@ -204,6 +206,16 @@ export const compare = (
         code: "invalid_tolerance",
         message: `Regression tolerance 'relative' must be finite and non-negative, got ${String(relative)}`,
         path: "tolerances.relative"
+      })
+    )
+  }
+  const baselineSuite = baseline.suite
+  if (baselineSuite !== undefined && baselineSuite !== run.suite) {
+    return Effect.fail(
+      new EvalError({
+        code: "invalid_baseline",
+        message: `Baseline belongs to suite '${baselineSuite}', but the run is suite '${run.suite}'`,
+        path: "baseline.suite"
       })
     )
   }
@@ -236,6 +248,7 @@ export const compare = (
           side: "baseline",
           case: pair.observed.case,
           scorer: pair.observed.scorer,
+          ...(pair.observed.scorerName === undefined ? {} : { scorerName: pair.observed.scorerName }),
           stepKey: pair.observed.stepKey
         })
         continue
@@ -245,6 +258,7 @@ export const compare = (
           side: "run",
           case: pair.expected.case,
           scorer: pair.expected.scorer,
+          ...(pair.expected.scorerName === undefined ? {} : { scorerName: pair.expected.scorerName }),
           stepKey: pair.expected.stepKey
         })
         continue

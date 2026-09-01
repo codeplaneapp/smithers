@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer"
 import { describe, expect, it } from "vitest"
 import * as CaseExecutor from "../src/CaseExecutor.ts"
 import { EvalError } from "../src/EvalError.ts"
+import * as Report from "../src/Report.ts"
 import * as Runner from "../src/Runner.ts"
 import * as Suite from "../src/Suite.ts"
 
@@ -476,14 +477,193 @@ describe("Runner", () => {
     expect(error.path).toBe("runBatch[0]")
   })
 
+  it("refuses ambiguous jobs before calling an order-only batch runner", async () => {
+    const suite = await suiteOf("ambiguous", [binding], [{ name: "a", input: 1 }, { name: "b", input: 2 }])
+    let called = false
+    const reversing: Runner.ScoreBatchRunner = {
+      runBatch: (jobs) => {
+        called = true
+        return Effect.succeed(
+          [...jobs].reverse().map((job, index) => ({
+            ...job.observation,
+            kind: "score" as const,
+            score: index === 0 ? 0.99 : 0.11,
+            at: job.at
+          }))
+        )
+      }
+    }
+    const error = await failureOf(
+      Runner.run(suite, { ...runOptions, scorer: reversing }).pipe(Effect.provide(succeeding))
+    )
+    expect(called).toBe(false)
+    expect(error.code).toBe("ambiguous_score_job")
+    expect(error.message).toContain("cases 'a' and 'b'")
+    expect(error.message).toContain("step key 'step'")
+    expect(error.message).toContain(`scorer exact (${scorerFlow.scorerKey.slice(0, 8)})`)
+    expect(error.message).toContain(
+      "Give each case its own step key, or provide a batch runner that implements runBatchCorrelated"
+    )
+    expect(error.path).toBe("runBatch")
+  })
+
+  it("scores ambiguous jobs through the correlated inline runner", async () => {
+    const suite = await suiteOf("inline-ambiguous", [binding], [
+      { name: "a", input: 1 },
+      { name: "b", input: 2 }
+    ])
+    const result = await Effect.runPromise(Runner.run(suite, runOptions).pipe(Effect.provide(succeeding)))
+    expect(result.cases.map((caseResult) => caseResult.observations[0]?.kind)).toEqual(["score", "score"])
+    expect(result.observations.map((observation) => observation.kind === "score" && observation.score)).toEqual([1, 1])
+  })
+
+  it("correlates reversed batch results by job identity", async () => {
+    const suite = await suiteOf("correlated", [binding], [{ name: "a", input: 1 }, { name: "b", input: 2 }])
+    const scorer: Runner.ScoreBatchRunner = {
+      runBatch: () => Effect.die("order-only path used"),
+      runBatchCorrelated: (jobs) =>
+        Effect.succeed(
+          jobs.map((job, index) => ({
+            identity: job.identity,
+            observation: {
+              ...job.observation,
+              kind: "score" as const,
+              score: index === 0 ? 0.11 : 0.99,
+              at: job.at
+            }
+          })).reverse()
+        )
+    }
+    const result = await Effect.runPromise(
+      Runner.run(suite, { ...runOptions, scorer }).pipe(Effect.provide(succeeding))
+    )
+    expect(result.cases.map((caseResult) => {
+      const observation = caseResult.observations[0]
+      return observation?.kind === "score" ? observation.score : undefined
+    })).toEqual([0.11, 0.99])
+  })
+
+  it("rejects duplicate and unknown correlated identities", async () => {
+    const suite = await suiteOf("bad-identities", [binding], [{ name: "a", input: 1 }, { name: "b", input: 2 }])
+    const observation = (job: Runner.ScoreJob): Runner.ScoreObservation => ({
+      ...job.observation,
+      kind: "score",
+      score: 1,
+      at: job.at
+    })
+    const adapter = (
+      runBatchCorrelated: NonNullable<Runner.ScoreBatchRunner["runBatchCorrelated"]>
+    ): Runner.ScoreBatchRunner => ({ runBatch: () => Effect.die("order-only path used"), runBatchCorrelated })
+
+    let duplicateIdentity = ""
+    const duplicate = await failureOf(
+      Runner.run(suite, {
+        ...runOptions,
+        scorer: adapter((jobs) => {
+          duplicateIdentity = jobs[0]!.identity
+          return Effect.succeed([
+            { identity: jobs[0]!.identity, observation: observation(jobs[0]!) },
+            { identity: jobs[0]!.identity, observation: observation(jobs[1]!) }
+          ])
+        })
+      }).pipe(Effect.provide(succeeding))
+    )
+    expect(duplicate.code).toBe("scorer_protocol")
+    expect(duplicate.message).toContain(`duplicate identity '${duplicateIdentity}'`)
+    expect(duplicate.message).toContain("result index 1")
+
+    const unknown = await failureOf(
+      Runner.run(suite, {
+        ...runOptions,
+        scorer: adapter((jobs) =>
+          Effect.succeed([
+            { identity: "not-a-job", observation: observation(jobs[0]!) },
+            { identity: jobs[1]!.identity, observation: observation(jobs[1]!) }
+          ])
+        )
+      }).pipe(Effect.provide(succeeding))
+    )
+    expect(unknown.code).toBe("scorer_protocol")
+    expect(unknown.message).toContain("unknown identity 'not-a-job'")
+    expect(unknown.message).toContain("result index 0")
+  })
+
+  it("rejects correlated arity and echoed identity mismatches", async () => {
+    const suite = await suiteOf("bad-correlated-results", [binding], [
+      { name: "a", input: 1 },
+      { name: "b", input: 2 }
+    ])
+    const adapter = (
+      runBatchCorrelated: NonNullable<Runner.ScoreBatchRunner["runBatchCorrelated"]>
+    ): Runner.ScoreBatchRunner => ({ runBatch: () => Effect.die("order-only path used"), runBatchCorrelated })
+
+    const wrongArity = await failureOf(
+      Runner.run(suite, {
+        ...runOptions,
+        scorer: adapter((jobs) =>
+          Effect.succeed([{
+            identity: jobs[0]!.identity,
+            observation: { ...jobs[0]!.observation, kind: "score", score: 1, at: jobs[0]!.at }
+          }])
+        )
+      }).pipe(Effect.provide(succeeding))
+    )
+    expect(wrongArity.code).toBe("scorer_protocol")
+    expect(wrongArity.message).toContain("returned 1 results for 2 jobs")
+    expect(wrongArity.path).toBe("runBatchCorrelated")
+
+    const wrongEcho = await failureOf(
+      Runner.run(suite, {
+        ...runOptions,
+        scorer: adapter((jobs) =>
+          Effect.succeed(jobs.map((job, index) => ({
+            identity: job.identity,
+            observation: {
+              ...job.observation,
+              targetStepKey: index === 0 ? "wrong-step" : job.observation.targetStepKey,
+              kind: "score" as const,
+              score: 1,
+              at: job.at
+            }
+          })))
+        )
+      }).pipe(Effect.provide(succeeding))
+    )
+    expect(wrongEcho.code).toBe("scorer_protocol")
+    expect(wrongEcho.message).toContain("where job 0 asked for")
+    expect(wrongEcho.message).toContain("at step 'step'")
+    expect(wrongEcho.message).toContain("returned step 'wrong-step'")
+    expect(wrongEcho.path).toBe("runBatchCorrelated[0]")
+  })
+
+  it("turns a correlated batch failure into identity-tagged inconclusive results", async () => {
+    const suite = await suiteOf("correlated-failure", [binding], [{ name: "a", input: 1 }, { name: "b", input: 2 }])
+    const scorer: Runner.ScoreBatchRunner = {
+      runBatch: () => Effect.die("order-only path used"),
+      runBatchCorrelated: () => Effect.fail("correlated judge unavailable")
+    }
+    const result = await Effect.runPromise(
+      Runner.run(suite, { ...runOptions, scorer }).pipe(Effect.provide(succeeding))
+    )
+    expect(result.observations).toHaveLength(2)
+    expect(
+      result.observations.every((item) =>
+        item.kind === "inconclusive" && item.reason.includes("correlated judge unavailable")
+      )
+    ).toBe(true)
+  })
+
   it("refuses a batch runner that drops or duplicates results", async () => {
     const suite = await suiteOf("arity", [binding], [{ name: "a", input: 1 }, { name: "b", input: 2 }])
+    const executor = executorFor((suiteCase) =>
+      Effect.succeed({ output: suiteCase.input, stepKey: suiteCase.name, latencyMs: 0, target })
+    )
     const observations = (jobs: ReadonlyArray<Runner.ScoreJob>) =>
       jobs.map((job) => ({ ...job.observation, kind: "score" as const, score: 1, at: job.at }))
 
     const dropping = await failureOf(
       Runner.run(suite, { ...runOptions, scorer: { runBatch: (jobs) => Effect.succeed(observations(jobs).slice(1)) } })
-        .pipe(Effect.provide(succeeding))
+        .pipe(Effect.provide(executor))
     )
     expect(dropping.code).toBe("scorer_protocol")
     expect(dropping.message).toBe(
@@ -495,7 +675,7 @@ describe("Runner", () => {
       Runner.run(suite, {
         ...runOptions,
         scorer: { runBatch: (jobs) => Effect.succeed([...observations(jobs), ...observations(jobs)]) }
-      }).pipe(Effect.provide(succeeding))
+      }).pipe(Effect.provide(executor))
     )
     expect(duplicating.message).toContain("4 observations for 2 jobs")
   })
@@ -541,6 +721,133 @@ describe("Runner", () => {
       }).pipe(Effect.provide(succeeding))
     )
     expect(result.observations[0]).toMatchObject({ kind: "inconclusive", reason: "judge down", scorerName: "exact" })
+  })
+
+  it("replaces an inconclusive observation without a reason and renders it", async () => {
+    const suite = await suiteOf("missing-reason", [binding])
+    for (const reason of [undefined, ""]) {
+      const result = await Effect.runPromise(
+        Runner.run(suite, {
+          ...runOptions,
+          scorer: {
+            runBatch: (jobs) =>
+              Effect.succeed(jobs.map((job) =>
+                ({
+                  ...job.observation,
+                  kind: "inconclusive",
+                  reason,
+                  at: job.at
+                }) as unknown as Runner.ScoreObservation
+              ))
+          }
+        }).pipe(Effect.provide(succeeding))
+      )
+      const observation = result.observations[0]
+      expect(observation?.kind).toBe("inconclusive")
+      expect(observation?.kind === "inconclusive" && observation.reason).toBe(
+        `Scorer exact (${scorerFlow.scorerKey.slice(0, 8)}) returned an inconclusive observation with no reason`
+      )
+      const inconclusive = result.observations.filter((item): item is Extract<Runner.Observation, {
+        kind: "inconclusive"
+      }> => item.kind === "inconclusive")
+      const rendered = Report.markdown({
+        suite: result.suite,
+        baseline: { version: 1, records: [] },
+        run: result,
+        regressions: [],
+        nondeterminism: [],
+        missing: [],
+        samples: [],
+        inconclusive
+      })
+      expect(rendered).toContain("returned an inconclusive observation with no reason")
+    }
+  })
+
+  it("bounds the generated reason for an inconclusive observation without one", async () => {
+    const named = Scorer.make({
+      id: "packages/evals/test/Runner/long-name",
+      version: "1",
+      name: "x".repeat(5000),
+      score: () => Effect.succeed({ score: 1 })
+    })
+    const suite = await suiteOf("bounded-missing-reason", [Binding.make({ scorer: named, appliesTo: target })])
+    const result = await Effect.runPromise(
+      Runner.run(suite, {
+        ...runOptions,
+        scorer: {
+          runBatch: (jobs) =>
+            Effect.succeed(jobs.map((job) =>
+              ({
+                ...job.observation,
+                kind: "inconclusive",
+                reason: undefined,
+                at: job.at
+              }) as unknown as Runner.ScoreObservation
+            ))
+        }
+      }).pipe(Effect.provide(succeeding))
+    )
+    const observation = result.observations[0]
+    expect(observation?.kind === "inconclusive" && observation.reason.endsWith("[truncated]")).toBe(true)
+    expect(observation?.kind === "inconclusive" && observation.reason.length).toBeLessThan(2100)
+  })
+
+  it("turns an unknown observation kind into a named inconclusive observation", async () => {
+    const suite = await suiteOf("unknown-kind", [binding])
+    const result = await Effect.runPromise(
+      Runner.run(suite, {
+        ...runOptions,
+        scorer: {
+          runBatch: (jobs) =>
+            Effect.succeed(jobs.map((job) =>
+              ({
+                ...job.observation,
+                kind: "mystery",
+                at: job.at
+              }) as unknown as Runner.ScoreObservation
+            ))
+        }
+      }).pipe(Effect.provide(succeeding))
+    )
+    const observation = result.observations[0]
+    expect(observation?.kind).toBe("inconclusive")
+    expect(observation?.kind === "inconclusive" && observation.reason).toBe(
+      `Scorer exact (${scorerFlow.scorerKey.slice(0, 8)}) returned an unusable observation kind 'mystery'`
+    )
+  })
+
+  it("bounds string reasons and drops a non-string score reason", async () => {
+    const suite = await suiteOf("score-reasons", [binding])
+    for (const reason of ["x".repeat(5000), 42]) {
+      const result = await Effect.runPromise(
+        Runner.run(suite, {
+          ...runOptions,
+          scorer: {
+            runBatch: (jobs) =>
+              Effect.succeed(jobs.map((job) =>
+                ({
+                  ...job.observation,
+                  kind: "score",
+                  score: 0.5,
+                  reason,
+                  meta: { kept: true },
+                  at: job.at
+                }) as unknown as Runner.ScoreObservation
+              ))
+          }
+        }).pipe(Effect.provide(succeeding))
+      )
+      const observation = result.observations[0]
+      expect(observation?.kind).toBe("score")
+      expect(observation?.meta).toEqual({ kept: true })
+      if (typeof reason === "string") {
+        expect(observation?.reason?.endsWith("[truncated]")).toBe(true)
+        expect(observation?.reason?.length).toBeLessThan(2100)
+      } else {
+        expect(Object.hasOwn(observation!, "reason")).toBe(false)
+      }
+    }
   })
 
   it("builds an injective job identity", async () => {

@@ -77,50 +77,61 @@ Four rules decide what a comparison reports, and none of them are obvious:
 - **A binding matches its target by reference identity.** `binding.appliesTo` has
   to be the same flow value the execution reports as its `target`; a structurally
   equal copy grades nothing.
-- **A baseline belongs to one suite.** Comparing a run against a baseline whose
-  records name another suite fails with `invalid_baseline` rather than reporting
-  a clean pass.
+- **A baseline belongs to one suite.** New artifacts carry `Baseline.suite`, so
+  ownership is checked even when the baseline has no records. Older artifacts
+  without that field still load and rely on each record's suite. A mismatch
+  fails with `invalid_baseline` rather than reporting a clean pass.
 
 ## Failure codes
 
 `EvalError.code` is the stable branch point.
 
-| Code                  | Raised when                                                                                                                                | Who fixes it             |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
-| `invalid_suite`       | The suite declaration is wrong: a name, a case, a concurrency, a fixture line, non-cloneable case data, or an undecidable sampling policy. | The suite author         |
-| `invalid_run_options` | `Runner.run`'s own options are wrong: an empty `runId`, or an `at` that is not a canonical UTC instant.                                    | The caller               |
-| `invalid_baseline`    | The committed baseline is unreadable, holds a record the schema rejects, or belongs to another suite.                                      | Regenerate the baseline  |
-| `invalid_tolerance`   | A comparison tolerance is not a finite non-negative number.                                                                                | The caller               |
-| `executor`            | The target flow failed for a case, or no executor was available.                                                                           | The target or the wiring |
-| `scorer_protocol`     | A batch runner returned the wrong number of observations, or observations identifying jobs other than the ones it was given.               | The batch runner         |
-| `scorer_unavailable`  | No batch runner was available to score with.                                                                                               | The wiring               |
+| Code                  | Raised when                                                                                                                                | Who fixes it              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
+| `invalid_suite`       | The suite declaration is wrong: a name, a case, a concurrency, a fixture line, non-cloneable case data, or an undecidable sampling policy. | The suite author          |
+| `invalid_run_options` | `Runner.run`'s own options are wrong: an empty `runId`, or an `at` that is not a canonical UTC instant.                                    | The caller                |
+| `invalid_baseline`    | The committed baseline is unreadable, holds a record the schema rejects, or belongs to another suite.                                      | Regenerate the baseline   |
+| `invalid_tolerance`   | A comparison tolerance is not a finite non-negative number.                                                                                | The caller                |
+| `executor`            | The target flow failed for a case, or no executor was available.                                                                           | The target or the wiring  |
+| `ambiguous_score_job` | Two jobs share a step key and scorer, so an order-only runner cannot attribute their results to cases.                                     | The suite or batch runner |
+| `scorer_protocol`     | A batch runner returned the wrong number of observations, or observations identifying jobs other than the ones it was given.               | The batch runner          |
+| `scorer_unavailable`  | No batch runner was available to score with.                                                                                               | The wiring                |
 
-Every failure carries a `path` locating the offending value: `cases[1].input`,
-`records[3].score`, `options.at`, `runBatch[0]`.
+Most failures carry a `path` locating the offending value: `cases[1].input`,
+`records[3].score`, `options.at`, `runBatch[0]`. A failure about an artifact as a
+whole, or about the absence of a runner, carries no path.
 
 ## The batch protocol
 
-`Runner.ScoreBatchRunner.runBatch` returns plain observations that carry no way
-back to the job that produced them, so correlation is positional and the
-contract has to be stated:
+`Runner.ScoreBatchRunner.runBatchCorrelated` returns each observation with its
+job identity. A correlated runner may return results in any order. A run rejects
+a duplicate identity, an unknown identity, a missing identity, the wrong result
+count, or an observation that does not echo its job's `targetStepKey` and
+`scorerKey` with `scorer_protocol`.
+
+`runBatch` remains the order-only protocol for adapters that cannot return job
+identities. Its contract is positional:
 
 1. Exactly one observation per job.
 2. In the order the jobs were given.
 3. Each observation repeats its job's `targetStepKey` and `scorerKey`.
 
-A run verifies all three and fails with `scorer_protocol` when one is broken,
-rather than attributing one case's score to another. A returned score that is not
-finite and inside `[0, 1]` becomes an inconclusive observation naming the scorer
-and the offending value; the run's own timestamp, not the adapter's, is what
-reaches the observation.
+A run verifies all three and fails with `scorer_protocol` when one is broken.
+Before calling an order-only runner, it also refuses two jobs that share a step
+key and scorer with `ambiguous_score_job`. Give each case its own step key, or
+provide a runner that implements `runBatchCorrelated`. A returned score that is
+not finite and inside `[0, 1]` becomes an inconclusive observation naming the
+scorer and the offending value; the run's own timestamp, not the adapter's, is
+what reaches the observation.
 
 ## Determinism and limits
 
 - `Runner.run` takes `runId` and `at` from the caller and stamps every
   observation with them, so two runs over the same inputs produce identical
   observations and identical `Report.json` bytes.
-- `Suite.make` snapshots case and binding data with `structuredClone` and freezes
-  the arrays it returns, so the suite cannot change after it is validated.
+- When the `Suite.make` effect runs, it snapshots its options, copies case and
+  binding data with `structuredClone`, and freezes the arrays it returns. The
+  suite cannot change after it is validated.
 - `Suite.limits` declares the ceilings: `concurrency` 1024, `cases` 10000,
   `fixtureLength` 8388608 code units for one JSON Lines fixture.
 - `Report.json` embeds each case's raw `execution.output`. Strings are capped at
@@ -165,6 +176,7 @@ The root entry point exports these namespaces; each is also importable from
 | `Runner.ScoreJob`               | models        | A blocking scorer job, matching `/scorers/Runner`.                                  |
 | `Runner.ScoreBatchRunner`       | services      | Structural adapter for `/scorers`' blocking batch runner.                           |
 | `Runner.ScoreObservation`       | models        | A score result aligned with a `ScoreRequest`.                                       |
+| `Runner.BatchResult`            | models        | A batch result tagged with the identity of the job that produced it.                |
 | `Runner.CaseResult`             | models        | Per-case result retained by the deterministic runner.                               |
 | `Runner.RunResult`              | models        | Stable result of a suite run.                                                       |
 | `Runner.RunOptions`             | models        | Options for a deterministic suite run.                                              |
