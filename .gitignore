@@ -113,3 +113,11 @@ apps/reports/launch-checklist/*-dry-run/
 
 # Crush agent local session database
 .crush/
+
+# Commit-pass mutexes. Several sessions commit into this checkout at once and
+# coordinate through these paths, so they exist while work is in flight. They
+# are host state, not source: jj snapshots the working copy, so an unignored
+# lock reaches the index, and `known-files.d.ts` is generated from the same
+# discovery walk, so it reached the published inventory too.
+.commit-lock
+.commit-lock-pass/
