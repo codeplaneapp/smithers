@@ -24,6 +24,7 @@
  * ownership claim like any driver and refuses a live run. Phase one below parks
  * the run at a `DurableDeferred.await`, which is what makes it rewindable.
  */
+import { FlowEngine } from "@smthrs/engine"
 import { Action, DurableDeferred, Flow, Interpreter } from "@smthrs/flow"
 import { Journal, JournalEvent } from "@smthrs/journal"
 import { SqlTimeTravelStore, TimeTravel } from "@smthrs/time-travel"
@@ -49,8 +50,15 @@ export const Settlement = DurableDeferred.make("examples/settlement", {
   success: Schema.String
 })
 
-/** The run's root lineage, exactly as `FlowEngine.Lineage` mints it. */
-const lineageId = "ledger-1/root"
+/**
+ * The run's root lineage, built by the constructor that mints it.
+ *
+ * A journal lineage id is an opaque versioned encoding, not a path a caller
+ * assembles. `FlowEngine.Lineage.root` is the one place it is minted, and the
+ * engine stamps the result on every record the run writes, so building the
+ * frame's address through it is what makes the frame addressable at all.
+ */
+const lineageId = FlowEngine.Lineage.root("ledger-1")
 
 /**
  * `TimeTravel.layer` asks only for injectable contracts — the store plus the
