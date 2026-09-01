@@ -97,6 +97,9 @@
     "vitest": "4.1.9"
   },
   "peerDependenciesMeta": {
+    "@effect/vitest": {
+      "optional": true
+    },
     "vitest": {
       "optional": true
     }
