@@ -10,7 +10,7 @@ runHostContract(
       "host-contract-exec": { stdout: "test-exec" },
       "host-contract-stream": { stdout: "test-stream" },
       "host-contract-options": { stdout: "test-options" },
-      "host-contract-interrupt": { stdout: "" }
+      "host-contract-interrupt": { pending: true }
     }
   }),
   {
@@ -53,6 +53,7 @@ runHostContract(
       // The scripted interpreter runs a command line to completion; it has no
       // stdin to feed.
       stdin: { expected: "failure", code: "BadArgument" },
+      pipeline: { expected: "failure", code: "BadArgument" },
       interruptCommand: ChildProcess.make("host-contract-interrupt")
     },
     jj: { expected: "failure", code: "not_installed" },

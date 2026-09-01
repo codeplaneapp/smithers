@@ -5,7 +5,7 @@
  * `@smthrs/kernel/test/contract`. It intentionally has a Vitest peer because
  * it registers a reusable behavioral contract for third-party Host bundles.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 // Every case here runs on real elapsed time — subprocess spawns, file locks,
 // mtimes, and poll loops — so the suite uses `it.live`; `it.effect`'s
@@ -27,7 +27,7 @@ import { join } from "node:path"
  * A capability that must fail with a stable typed code.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface FailureCapability<Code extends string> {
   readonly expected: "failure"
@@ -43,7 +43,7 @@ export interface FailureCapability<Code extends string> {
  * tree.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface FileSystemSuccess {
   readonly expected: "success"
@@ -93,7 +93,7 @@ export type FileSystemOperation = typeof FileSystemOperations[number]
  * Successful Path contract expectation.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface PathSuccess {
   readonly expected: "success"
@@ -110,7 +110,7 @@ export interface PathSuccess {
  * assert.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ChildProcessSuccess {
   readonly expected: "success"
@@ -129,6 +129,11 @@ export interface ChildProcessSuccess {
     | { readonly command: ChildProcess.Command; readonly expectedStdout: string }
     | FailureCapability<string>
     | undefined
+  /** A two-leg pipeline, or the exact typed refusal for hosts without one. */
+  readonly pipeline?:
+    | { readonly command: ChildProcess.Command; readonly expectedStdout: string }
+    | FailureCapability<string>
+    | undefined
   readonly interruptCommand?: ChildProcess.Command | undefined
 }
 
@@ -136,11 +141,34 @@ export interface ChildProcessSuccess {
  * Successful Jj contract expectation.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface JjSuccess {
   readonly expected: "success"
+  /** Makes the first and second snapshots observably different. */
+  readonly prepareChange?: ((phase: "first" | "second") => Effect.Effect<void, unknown>) | undefined
+  /** Nonexistent path at which the contract may add one temporary workspace. */
+  readonly workspacePath?: string | undefined
+  /** Path whose repository root the host must resolve. */
+  readonly rootFrom?: string | undefined
+  /** Optional methods this otherwise available backend explicitly refuses. */
+  readonly unsupported?: Partial<Record<"root" | "revert", JjErrorCode>> | undefined
 }
+
+/** Every method on the closed Jj host service. */
+export const JjOperations = [
+  "snapshot",
+  "restore",
+  "diff",
+  "workspaceAdd",
+  "workspaceForget",
+  "status",
+  "root",
+  "revert"
+] as const
+
+/** One method of the closed Jj host service. */
+export type JjOperation = typeof JjOperations[number]
 
 /**
  * Successful HTTP contract probe.
@@ -148,12 +176,23 @@ export interface JjSuccess {
  * A request is explicit so the shared suite never invents a live network call.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
+export interface HttpClientProbe {
+  /** Exact request the host must execute. */
+  readonly request: HttpClientRequest.HttpClientRequest
+  /** Adapter-specific response proof. */
+  readonly assertResponse: (response: HttpClientResponse.HttpClientResponse) => void
+}
+
 export interface HttpClientSuccess {
   readonly expected: "success"
-  readonly request: HttpClientRequest.HttpClientRequest
-  readonly assertResponse: (response: HttpClientResponse.HttpClientResponse) => void
+  /** Safe read method. */
+  readonly read: HttpClientProbe
+  /** Body-carrying write method. */
+  readonly write: HttpClientProbe
+  /** Manual redirect response; the host must not follow it below the guard. */
+  readonly redirect: HttpClientProbe
 }
 
 /**
@@ -161,7 +200,7 @@ export interface HttpClientSuccess {
  * Unsupported capabilities are asserted with their code and are never skipped.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface HostContractCapabilities {
   readonly fileSystem: FileSystemSuccess | FailureCapability<string>
@@ -175,7 +214,7 @@ export interface HostContractCapabilities {
  * The full layer output required by the contract.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type HostContractLayer = Layer.Layer<
   FileSystem.FileSystem | Path.Path | ChildProcessSpawner | Jj | HttpClient,
@@ -189,7 +228,7 @@ export type HostContractLayer = Layer.Layer<
  * Anything else is uncoded.
  *
  * @category testing
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const errorCode = (error: unknown): string | undefined => {
   if (typeof error !== "object" || error === null) return undefined
@@ -212,7 +251,7 @@ export const errorCode = (error: unknown): string | undefined => {
  * violation: a capability declared unsupported must never quietly work.
  *
  * @category testing
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const assertFailure = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -243,7 +282,7 @@ let scratchSeq = 0
  * write and its read.
  *
  * @category testing
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const defaultScratchPath = (suite: string): string => {
   const slug = suite.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "host"
@@ -303,23 +342,31 @@ const fileSystemProbe = (
     case "makeDirectory":
       return fs.makeDirectory(at("directory"), { recursive: true })
     case "makeTempDirectory":
-      return Effect.flatMap(fs.makeTempDirectory({ directory: root }), (path) => fs.remove(path, { recursive: true }))
+      return fs.makeTempDirectory({ directory: root })
     case "makeTempDirectoryScoped":
-      return Effect.scoped(
-        Effect.flatMap(fs.makeTempDirectoryScoped({ directory: root }), (path) => fs.exists(path))
-      )
+      return Effect.scoped(fs.makeTempDirectoryScoped({ directory: root }))
     case "makeTempFile":
-      return Effect.flatMap(fs.makeTempFile({ directory: root }), (path) => fs.remove(path, { force: true }))
+      return fs.makeTempFile({ directory: root })
     case "makeTempFileScoped":
-      return Effect.scoped(
-        Effect.flatMap(fs.makeTempFileScoped({ directory: root }), (path) => fs.exists(path))
-      )
+      return Effect.scoped(fs.makeTempFileScoped({ directory: root }))
     case "open":
-      return Effect.scoped(Effect.flatMap(fs.open(source, { flag: "r" }), (file) => file.stat))
+      return Effect.scoped(fs.open(source, { flag: "r" }))
     case "readDirectory":
-      return fs.readDirectory(root)
+      return Effect.tap(fs.readDirectory(root), (entries) =>
+        Effect.sync(() => {
+          expect(Array.isArray(entries)).toBe(true)
+          expect(entries.every((entry) => typeof entry === "string")).toBe(true)
+        }))
     case "readFile":
-      return fs.readFile(source)
+      return Effect.gen(function*() {
+        const first = yield* fs.readFile(source)
+        expect(first).toBeInstanceOf(Uint8Array)
+        const original = first[0]
+        expect(original).toBeDefined()
+        first[0] = original! ^ 0xff
+        const second = yield* fs.readFile(source)
+        expect(second[0]).toBe(original)
+      })
     case "readFileString":
       return fs.readFileString(source)
     case "readLink": {
@@ -339,9 +386,16 @@ const fileSystemProbe = (
     case "sink":
       return Stream.run(Stream.succeed(bytes), fs.sink(at("sink.txt")))
     case "stat":
-      return fs.stat(source)
+      return Effect.tap(fs.stat(source), (info) =>
+        Effect.sync(() => {
+          expect(typeof info.size).toBe("bigint")
+          expect(typeof info.type).toBe("string")
+        }))
     case "stream":
-      return Stream.runDrain(fs.stream(source))
+      return Stream.runForEach(
+        fs.stream(source),
+        (chunk) => Effect.sync(() => expect(chunk).toBeInstanceOf(Uint8Array))
+      )
     case "symlink":
       return fs.symlink(source, at("symlink.txt"))
     case "truncate": {
@@ -356,12 +410,21 @@ const fileSystemProbe = (
           Effect.timeout("5 seconds"),
           Effect.forkChild({ startImmediately: true })
         )
-        yield* Effect.yieldNow
+        // A supplied host may itself provide TestClock. This foreign Promise
+        // gives the watcher time to subscribe without depending on that clock.
+        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 10)))
         yield* fs.writeFile(at("watched.txt"), bytes)
         yield* Fiber.join(watched)
       })
     case "writeFile":
-      return fs.writeFile(at("write.txt"), bytes)
+      return Effect.gen(function*() {
+        const input = bytes.slice()
+        const expected = input[0]
+        expect(expected).toBeDefined()
+        yield* fs.writeFile(at("write.txt"), input)
+        input[0] = expected! ^ 0xff
+        expect((yield* fs.readFile(at("write.txt")))[0]).toBe(expected)
+      })
     case "writeFileString":
       return fs.writeFileString(at("write-string.txt"), "host-contract")
   }
@@ -374,6 +437,18 @@ const defaultStdinCommand = ChildProcess.make(
   { stdin: Stream.fromArray([new TextEncoder().encode("stdin\n")]) }
 )
 
+/** The default two-leg process probe. */
+const defaultPipelineCommand = ChildProcess.pipeTo(
+  ChildProcess.make("printf", ["host-contract-pipeline"]),
+  ChildProcess.make("cat")
+)
+
+/** The default multi-leg cancellation probe. */
+const defaultInterruptCommand = ChildProcess.pipeTo(
+  ChildProcess.make("sleep", ["10"]),
+  ChildProcess.make("cat")
+)
+
 /**
  * Registers the shared Host contract with Vitest.
  *
@@ -382,7 +457,7 @@ const defaultStdinCommand = ChildProcess.make(
  * HttpClient.
  *
  * @category testing
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const runHostContract = (
   name: string,
@@ -418,10 +493,11 @@ export const runHostContract = (
             const fs = yield* FileSystem.FileSystem
             yield* Effect.forEach(
               FileSystemOperations,
-              (operation) => assertFailure(
-                fileSystemProbe(fs, operation, "/host-contract/unsupported"),
-                fileSystemCap.code
-              ),
+              (operation) =>
+                assertFailure(
+                  fileSystemProbe(fs, operation, "/host-contract/unsupported"),
+                  fileSystemCap.code
+                ),
               { discard: true }
             )
           })
@@ -532,54 +608,139 @@ export const runHostContract = (
         layer
       ))
 
+    it.live("declares child-process pipeline behavior", () =>
+      run(
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const pipelineCap = childProcessCap.expected === "failure"
+            ? childProcessCap
+            : childProcessCap.pipeline ?? {
+              command: defaultPipelineCommand,
+              expectedStdout: "host-contract-pipeline"
+            }
+          if ("expected" in pipelineCap) {
+            yield* assertFailure(spawner.string(defaultPipelineCommand), pipelineCap.code)
+            return
+          }
+          expect(yield* spawner.string(pipelineCap.command)).toBe(pipelineCap.expectedStdout)
+        }),
+        layer
+      ))
+
     it.live("declares child-process interruption behavior", () =>
       run(
         childProcessCap.expected === "failure"
           ? unsupportedChildProcess("stream", childProcessCap.code)
           : Effect.gen(function*() {
             const spawner = yield* ChildProcessSpawner
-            const fiber = yield* spawner.streamString(
-              childProcessCap.interruptCommand ?? ChildProcess.make("sleep", ["10"])
+            const ready = yield* Deferred.make<
+              import("effect/unstable/process/ChildProcessSpawner").ChildProcessHandle
+            >()
+            const fiber = yield* Effect.scoped(
+              Effect.gen(function*() {
+                const handle = yield* spawner.spawn(
+                  childProcessCap.interruptCommand ?? defaultInterruptCommand
+                )
+                yield* Deferred.succeed(ready, handle)
+                yield* handle.exitCode
+              })
             ).pipe(
-              Stream.concat(Stream.never),
-              Stream.runDrain,
               Effect.forkChild({ startImmediately: true })
             )
-            yield* Effect.yieldNow
+            const handle = yield* Deferred.await(ready)
+            expect(yield* handle.isRunning).toBe(true)
             yield* Fiber.interrupt(fiber)
+            expect(yield* handle.isRunning).toBe(false)
           }),
         layer
       ))
 
-    it.live("declares Jj behavior", () =>
+    it.live("declares every Jj operation", () =>
       run(
         jjCap.expected === "failure"
           ? Effect.gen(function*() {
             const jj = yield* JjService.Jj
-            yield* assertFailure(jj.status(), jjCap.code)
+            const root = jj.root
+            const revert = jj.revert
+            expect(root).toBeTypeOf("function")
+            expect(revert).toBeTypeOf("function")
+            yield* Effect.forEach([
+              jj.snapshot("host contract"),
+              jj.restore("host-contract-change"),
+              jj.diff("host-contract-from", "host-contract-to"),
+              jj.workspaceAdd("host-contract", "/host-contract/workspace", "host-contract-change"),
+              jj.workspaceForget("host-contract"),
+              jj.status(),
+              root!("/host-contract"),
+              revert!("host-contract-change")
+            ], (probe) =>
+              assertFailure(probe, jjCap.code), { discard: true })
           })
           : Effect.gen(function*() {
             const jj = yield* JjService.Jj
+            const root = jj.root
+            const revert = jj.revert
+            expect(root).toBeTypeOf("function")
+            expect(revert).toBeTypeOf("function")
+            yield* (jjCap.prepareChange?.("first") ?? Effect.void)
+            const first = yield* jj.snapshot("host contract first")
+            expect(first.changeId.length).toBeGreaterThan(0)
+            yield* (jjCap.prepareChange?.("second") ?? Effect.void)
+            const second = yield* jj.snapshot("host contract second")
+            expect(second.changeId.length).toBeGreaterThan(0)
+            expect(typeof (yield* jj.diff(first.changeId, second.changeId))).toBe("string")
+            const revertCode = jjCap.unsupported?.revert
+            if (revertCode === undefined) {
+              const reverted = yield* revert!(second.changeId)
+              expect(Array.isArray(reverted.reverted)).toBe(true)
+              expect(reverted.reverted.every((path) =>
+                typeof path === "string"
+              )).toBe(true)
+            } else {
+              yield* assertFailure(revert!(second.changeId), revertCode)
+            }
+            yield* jj.restore(first.changeId)
+            const workspaceName = `host-contract-${process.pid}-${++scratchSeq}`
+            yield* jj.workspaceAdd(
+              workspaceName,
+              jjCap.workspacePath ?? defaultScratchPath(`${name}-jj-workspace`),
+              first.changeId
+            )
+            yield* jj.workspaceForget(workspaceName)
             expect(typeof (yield* jj.status())).toBe("string")
+            const rootCode = jjCap.unsupported?.root
+            const rootFrom = jjCap.rootFrom ?? "."
+            if (rootCode === undefined) {
+              expect((yield* root!(rootFrom)).length).toBeGreaterThan(0)
+            } else {
+              yield* assertFailure(root!(rootFrom), rootCode)
+            }
           }),
         layer
       ))
 
-    it.live("declares HttpClient behavior", () =>
+    it.live("declares HTTP read, write, and redirect behavior", () =>
       run(
         httpClientCap.expected === "failure"
           ? Effect.gen(function*() {
             const client = yield* HttpClient
-            yield* assertFailure(
-              client.execute(HttpClientRequest.get("http://127.0.0.1:1/host-contract")),
-              httpClientCap.code
-            )
+            yield* Effect.forEach([
+              HttpClientRequest.get("http://127.0.0.1:1/host-contract/read"),
+              HttpClientRequest.post("http://127.0.0.1:1/host-contract/write").pipe(
+                HttpClientRequest.bodyText("host-contract")
+              ),
+              HttpClientRequest.get("http://127.0.0.1:1/host-contract/redirect")
+            ], (request) =>
+              assertFailure(client.execute(request), httpClientCap.code), { discard: true })
           })
           : Effect.gen(function*() {
             const client = yield* HttpClient
-            httpClientCap.assertResponse(
-              yield* client.execute(httpClientCap.request)
-            )
+            for (const probe of [httpClientCap.read, httpClientCap.write, httpClientCap.redirect]) {
+              const response = yield* client.execute(probe.request)
+              expect(typeof response.status).toBe("number")
+              expect(typeof response.headers).toBe("object")
+              probe.assertResponse(response)
+            }
           }),
         layer
       ))

@@ -62,13 +62,27 @@ const layerSpawnerSupported: Layer.Layer<ChildProcessSpawner> = Layer.succeed(Ch
       const printf = command._tag === "StandardCommand" && command.command === "printf"
         ? command.args.join(" ")
         : undefined
-      const text = piped ?? environment ?? printf ?? ""
+      const rendered = CommandLine.render(command)
+      const pending = rendered.includes("sleep 10")
+      let running = pending
+      if (pending) {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            running = false
+          })
+        )
+      }
+      const text = piped ?? environment ?? printf ??
+        (command._tag === "PipedCommand" ? "host-contract-pipeline" : "")
       const stdout = text === "" ? Stream.empty : Stream.fromArray([encoder.encode(text)])
       return makeHandle({
         pid: ProcessId(1),
-        exitCode: Effect.succeed(ExitCode(0)),
-        isRunning: Effect.succeed(false),
-        kill: () => Effect.void,
+        exitCode: pending ? Effect.never : Effect.succeed(ExitCode(0)),
+        isRunning: Effect.sync(() => running),
+        kill: () =>
+          Effect.sync(() => {
+            running = false
+          }),
         stdin: Sink.drain,
         stdout,
         stderr: Stream.empty,
@@ -81,8 +95,31 @@ const layerSpawnerSupported: Layer.Layer<ChildProcessSpawner> = Layer.succeed(Ch
   )
 )
 
+let nextChange = 0
 const layerJjSupported: Layer.Layer<Jj> = Layer.succeed(JjService.Jj)(
-  JjService.makeNoop({ status: () => Effect.succeed("The working copy is clean") })
+  JjService.makeNoop({
+    snapshot: () => Effect.succeed({ changeId: `change-${++nextChange}` }),
+    restore: () => Effect.void,
+    diff: () => Effect.succeed("diff"),
+    workspaceAdd: () => Effect.void,
+    workspaceForget: () => Effect.void,
+    status: () => Effect.succeed("The working copy is clean"),
+    root: () => Effect.succeed("/host-contract"),
+    revert: () => Effect.succeed({ reverted: ["host-contract.txt"] })
+  })
+)
+
+const layerJjPartial: Layer.Layer<Jj> = Layer.succeed(JjService.Jj)(
+  JjService.makeNoop({
+    snapshot: () => Effect.succeed({ changeId: `partial-${++nextChange}` }),
+    restore: () => Effect.void,
+    diff: () => Effect.succeed("diff"),
+    workspaceAdd: () => Effect.void,
+    workspaceForget: () => Effect.void,
+    status: () => Effect.succeed("The working copy is clean"),
+    root: () => Effect.fail(JjService.jjError({ code: "not_installed", method: "root" })),
+    revert: () => Effect.fail(JjService.jjError({ code: "not_installed", method: "revert" }))
+  })
 )
 
 /** A client that answers without a socket, so the success arm is asserted. */
@@ -90,54 +127,102 @@ const layerHttpClientSupported: Layer.Layer<EffectHttpClient.HttpClient> = Layer
   EffectHttpClient.HttpClient
 )(
   EffectHttpClient.make((request: HttpClientRequest.HttpClientRequest) =>
-    Effect.succeed({ status: 200, headers: { "x-host-contract": "echo" }, request } as never)
+    Effect.succeed({
+      status: request.url.endsWith("/redirect") ? 302 : 200,
+      headers: {
+        "x-host-contract": request.method,
+        ...(request.url.endsWith("/redirect") ? { location: "/destination" } : {})
+      },
+      request
+    } as never)
   )
+)
+
+const fileSystemCaps = {
+  expected: "success",
+  unsupported: {
+    chmod: "NotFound",
+    chown: "NotFound",
+    copy: "NotFound",
+    copyFile: "NotFound",
+    glob: "NotFound",
+    link: "NotFound",
+    makeTempDirectory: "NotFound",
+    makeTempDirectoryScoped: "NotFound",
+    makeTempFile: "NotFound",
+    makeTempFileScoped: "NotFound",
+    open: "NotFound",
+    readLink: "NotFound",
+    rename: "NotFound",
+    sink: "NotFound",
+    symlink: "NotFound",
+    truncate: "NotFound",
+    utimes: "NotFound",
+    watch: "NotFound"
+  }
+} as const
+
+const httpClientCaps = {
+  expected: "success",
+  read: {
+    request: HttpClientRequest.get("https://example.test/host-contract/read"),
+    assertResponse: (response: HttpClientResponse.HttpClientResponse) => {
+      expect(response.status).toBe(200)
+      expect(response.headers["x-host-contract"]).toBe("GET")
+    }
+  },
+  write: {
+    request: HttpClientRequest.post("https://example.test/host-contract/write").pipe(
+      HttpClientRequest.bodyText("host-contract")
+    ),
+    assertResponse: (response: HttpClientResponse.HttpClientResponse) => {
+      expect(response.status).toBe(200)
+      expect(response.headers["x-host-contract"]).toBe("POST")
+    }
+  },
+  redirect: {
+    request: HttpClientRequest.get("https://example.test/host-contract/redirect"),
+    assertResponse: (response: HttpClientResponse.HttpClientResponse) => {
+      expect(response.status).toBe(302)
+      expect(response.headers.location).toBe("/destination")
+    }
+  }
+} as const
+
+const layerWithoutJj = Layer.mergeAll(
+  BrowserFileSystem.layer(makeMemoryFs()),
+  Path.layer,
+  layerSpawnerSupported,
+  layerHttpClientSupported
 )
 
 runHostContract(
   "SupportedHost",
-  Layer.mergeAll(
-    BrowserFileSystem.layer(makeMemoryFs()),
-    Path.layer,
-    layerSpawnerSupported,
-    layerJjSupported,
-    layerHttpClientSupported
-  ),
+  Layer.merge(layerWithoutJj, layerJjSupported),
   {
     // Every capability below takes the suite's defaults on purpose.
-    fileSystem: {
-      expected: "success",
-      unsupported: {
-        chmod: "NotFound",
-        chown: "NotFound",
-        copy: "NotFound",
-        copyFile: "NotFound",
-        glob: "NotFound",
-        link: "NotFound",
-        makeTempDirectory: "NotFound",
-        makeTempDirectoryScoped: "NotFound",
-        makeTempFile: "NotFound",
-        makeTempFileScoped: "NotFound",
-        open: "NotFound",
-        readLink: "NotFound",
-        rename: "NotFound",
-        sink: "NotFound",
-        symlink: "NotFound",
-        truncate: "NotFound",
-        utimes: "NotFound",
-        watch: "NotFound"
-      }
-    },
+    fileSystem: fileSystemCaps,
     path: { expected: "success" },
     childProcess: { expected: "success" },
     jj: { expected: "success" },
-    httpClient: {
+    httpClient: httpClientCaps
+  }
+)
+
+runHostContract(
+  "SupportedHost with optional Jj refusals",
+  Layer.merge(layerWithoutJj, layerJjPartial),
+  {
+    fileSystem: fileSystemCaps,
+    path: { expected: "success" },
+    childProcess: { expected: "success" },
+    jj: {
       expected: "success",
-      request: HttpClientRequest.get("https://example.test/host-contract"),
-      assertResponse: (response: HttpClientResponse.HttpClientResponse) => {
-        expect(response.status).toBe(200)
-        expect(response.headers["x-host-contract"]).toBe("echo")
-      }
-    }
+      prepareChange: () => Effect.void,
+      workspacePath: "/explicit-jj-workspace",
+      rootFrom: "/explicit-jj-root",
+      unsupported: { root: "not_installed", revert: "not_installed" }
+    },
+    httpClient: httpClientCaps
   }
 )

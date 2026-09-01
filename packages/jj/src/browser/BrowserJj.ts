@@ -274,7 +274,15 @@ export const make = (options: BrowserJjOptions): Jj => {
     workspaceForget: (name) =>
       Effect.asVoid(invoke("workspaceForget", "jj workspace forget", { op: "workspaceForget", root, name })),
     status: () =>
-      Effect.flatMap(invoke("status", "jj status", { op: "status", root }), (ok) => stringField("status", ok, "status"))
+      Effect.flatMap(
+        invoke("status", "jj status", { op: "status", root }),
+        (ok) => stringField("status", ok, "status")
+      ),
+    root: () => Effect.succeed(root),
+    // The frozen rc.0 wasm ABI has no revert operation. The method remains
+    // present and fails explicitly so feature detection never depends on an
+    // optional property disappearing.
+    revert: () => fail("jj revert")
   })
 }
 
@@ -312,5 +320,7 @@ export const layerUnsupported: Layer.Layer<Jj> = Layer.succeed(Jj)({
   diff: () => fail("jj diff"),
   workspaceAdd: () => fail("jj workspace add"),
   workspaceForget: () => fail("jj workspace forget"),
-  status: () => fail("jj status")
+  status: () => fail("jj status"),
+  root: () => fail("jj root"),
+  revert: () => fail("jj revert")
 })

@@ -9,7 +9,7 @@
  * `scripts/browser-check.mjs` documents this module as a Node-only entry point
  * even though every service it composes is itself browser-safe.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import type { Jj } from "@smthrs/jj"
 import * as BrowserJj from "@smthrs/jj/browser/BrowserJj"
@@ -47,7 +47,7 @@ interface Entry {
  * the adapter shows up in tests.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const makeMemoryFs = (
   initial?: Readonly<Record<string, string>>
@@ -151,7 +151,7 @@ export const makeMemoryFs = (
  * depend on a host tool being installed.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const makeStubBash = (
   responses?: Readonly<
@@ -160,10 +160,11 @@ export const makeStubBash = (
       stderr?: string
       exitCode?: number
       delayMs?: number
+      pending?: boolean
     }>
   >
 ): BrowserChildProcessSpawner.JustBashLike => ({
-  exec: async (command) => {
+  exec: async (command, options) => {
     const scripted = responses?.[command]
     if (scripted === undefined) {
       return { stdout: "", stderr: `command not found: ${command}\n`, exitCode: 127 }
@@ -174,6 +175,16 @@ export const makeStubBash = (
       // fiber here to sleep on `Clock`. The delay exists only to make a
       // scripted command observably slow to its caller.
       await new Promise((resolve) => setTimeout(resolve, scripted.delayMs))
+    }
+    if (scripted.pending === true) {
+      await new Promise<never>((_resolve, reject) => {
+        const signal = options?.signal
+        if (signal?.aborted === true) {
+          reject(signal.reason)
+          return
+        }
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true })
+      })
     }
     return {
       stdout: scripted.stdout ?? "",
@@ -190,7 +201,7 @@ export const makeStubBash = (
  * to be a `Layer` — so we provide the two-method `Random` reference directly.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layerSeededRandom = (seed = 42): Layer.Layer<never> =>
   Layer.succeed(Random.Random)(
@@ -214,7 +225,7 @@ export const layerSeededRandom = (seed = 42): Layer.Layer<never> =>
  * The complete deterministic Host surface.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type TestHost =
   | FileSystem.FileSystem
@@ -237,7 +248,7 @@ export type TestHost =
  * service agree about what exists rather than each holding its own store.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layer = (options?: {
   readonly files?: Readonly<Record<string, string>>
@@ -247,6 +258,7 @@ export const layer = (options?: {
       stderr?: string
       exitCode?: number
       delayMs?: number
+      pending?: boolean
     }>
   >
   readonly seed?: number
@@ -277,6 +289,6 @@ export const layer = (options?: {
  * commands, or a different PRNG seed.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const TestHost: Layer.Layer<TestHost> = layer()
