@@ -324,7 +324,8 @@ describe("ProcessReaper", () => {
         system: {
           ...ProcessReaper.posixSystem,
           isAlive: () => "dead",
-          ownGroup: () => null,
+          // Resolvable, so the guard this case is about is the one that runs.
+          ownGroup: () => 1,
           // A host with no usable `ps`: busybox, distroless, or a probe that
           // timed out.
           startedAtMs: () => ({ _tag: "unavailable" }),
@@ -342,6 +343,35 @@ describe("ProcessReaper", () => {
       expect(ledger.reaped).toEqual([])
     }))
 
+  /**
+   * The own-group comparison is the guard that stops a stale record naming the
+   * shell this host runs in. It is read from `ps` like the start time, so it can
+   * be unavailable on its own, and skipping a guard that could not run is not
+   * the same as running it and passing.
+   */
+  it.effect("keeps a record when it could not read its own process group", () =>
+    Effect.gen(function*() {
+      const ledger = spyLedger([{ ...target(987_654, 987_654, "unknown-group"), startedAtMs: Date.now() }])
+      const killed: Array<number> = []
+      const reaped = yield* ProcessReaper.reap({
+        ownerPid: 1,
+        system: {
+          ...ProcessReaper.posixSystem,
+          isAlive: () => "dead",
+          ownGroup: () => null,
+          startedAtMs: () => ({ _tag: "started", startedAtMs: Date.now() }),
+          killTree: (record) => {
+            killed.push(record.pid)
+            return "signalled"
+          }
+        }
+      }).pipe(Effect.provideService(ProcessLedger.ProcessLedger, ledger.service))
+
+      expect(reaped.map((entry) => entry.refusal)).toEqual(["own-group-unknown"])
+      expect(killed).toEqual([])
+      expect(ledger.skipped).toEqual([])
+    }))
+
   it.effect("retires a record whose pid the operating system says is gone", () =>
     Effect.gen(function*() {
       const ledger = spyLedger([{ ...target(987_654, 987_654, "already-exited"), startedAtMs: Date.now() }])
@@ -351,7 +381,7 @@ describe("ProcessReaper", () => {
         system: {
           ...ProcessReaper.posixSystem,
           isAlive: () => "dead",
-          ownGroup: () => null,
+          ownGroup: () => 1,
           startedAtMs: () => ({ _tag: "gone" }),
           killTree: (record) => {
             killed.push(record.pid)
@@ -385,7 +415,7 @@ describe("ProcessReaper", () => {
         system: {
           ...ProcessReaper.posixSystem,
           isAlive: () => "dead",
-          ownGroup: () => null,
+          ownGroup: () => 1,
           bootedAtMs: () => bootMs,
           startedAtMs: () => ({ _tag: "unsupported" }),
           killTree: () => "signalled"
@@ -458,6 +488,13 @@ describe("ProcessReaper", () => {
     expect(withPs(psShim("wordy", "not a number")).ownGroup()).toBeNull()
     expect(withPs(psShim("mute", "")).ownGroup()).toBeNull()
     expect(withPs(psShim("absent", "", 1)).ownGroup()).toBeNull()
+
+    // A nonzero exit is how `ps` says "no such pid", and also how a `ps` that
+    // rejected the column, or is not a `ps` at all, answers about a pid that is
+    // very much alive. Retiring a live orphan as `gone` on that is the same
+    // fail-open the start-time check exists to close, so the kernel is asked.
+    expect(withPs(psShim("refusing", "", 2)).startedAtMs(process.pid)).toEqual({ _tag: "unavailable" })
+    expect(withPs(psShim("refusing", "", 2)).startedAtMs(2_147_483_646)).toEqual({ _tag: "gone" })
   })
 
   it("refuses to signal a durable record whose numbers name nothing it may kill", () => {

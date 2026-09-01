@@ -26,7 +26,8 @@
  * - that group is not THIS process's group, and its pid is not this process's
  *   pid. The host's real process group is read from the operating system,
  *   because a stored number can claim anything and the shell that started this
- *   host shares its group;
+ *   host shares its group. A host that cannot read its own group keeps the
+ *   record rather than signalling it on a guard that did not run;
  * - the number still names the process the record describes. A record written
  *   before this machine booted names a pid from a pid space that no longer
  *   exists, and within one boot the recorded start time has to match the start
@@ -42,9 +43,9 @@
  * platform can signal, a pid that is gone, a start time that does not match — is
  * retired through {@link ProcessLedger.Service.skipped}, which says in the
  * journal that nothing was signalled and stops every later incarnation
- * re-examining a number the operating system has moved on from. The two
- * refusals a later incarnation CAN answer differently — `owner-alive` and
- * `identity-unverified` — retire nothing.
+ * re-examining a number the operating system has moved on from. The three
+ * refusals a later incarnation CAN answer differently — `owner-alive`,
+ * `identity-unverified`, and `own-group-unknown` — retire nothing.
  *
  * @since 0.1.0
  */
@@ -160,6 +161,13 @@ const bootedAtMs = (): number => Date.now() - Math.round(uptime() * 1000)
  */
 const startedAtMs = (executable: string) => (pid: number): StartTime => {
   const answer = ps(executable, "lstart", pid)
+  if (answer._tag === "gone") {
+    // A nonzero exit is `ps` saying the pid does not exist, but it is also what
+    // a `ps` that rejected the column, or one that is not the `ps` this probe
+    // expects, says about a pid that is very much alive. The kernel is asked
+    // directly before a live process is retired as gone.
+    return liveness(pid) === "dead" ? answer : { _tag: "unavailable" }
+  }
   if (answer._tag !== "printed") return answer
   const parsed = Date.parse(answer.text)
   return Number.isNaN(parsed) ? { _tag: "unavailable" } : { _tag: "started", startedAtMs: parsed }
@@ -393,6 +401,8 @@ export type Refusal =
   | "no-group"
   /** It named this host's own process group or pid. */
   | "own-group"
+  /** This host could not read its OWN process group, so it cannot rule that out. */
+  | "own-group-unknown"
   /** Its numbers do not name anything this platform may signal. */
   | "invalid-record"
   /** It was written before this machine booted, so the pid space is not the same. */
@@ -411,12 +421,16 @@ export type Refusal =
  *
  * A refusal is final when the operating system has moved on from the number:
  * saying so in the journal is what stops every later incarnation re-examining
- * it. These two are not final. `owner-alive` means the incarnation that owns
- * the record will contain its own children, and `identity-unverified` means
- * this host could not ask the question at all — a host that CAN ask has to get
- * the chance.
+ * it. These three are not final. `owner-alive` means the incarnation that owns
+ * the record will contain its own children; `identity-unverified` and
+ * `own-group-unknown` mean this host could not ask a question at all — a host
+ * that CAN ask has to get the chance.
  */
-const retained: ReadonlySet<Refusal> = new Set<Refusal>(["owner-alive", "identity-unverified"])
+const retained: ReadonlySet<Refusal> = new Set<Refusal>([
+  "owner-alive",
+  "identity-unverified",
+  "own-group-unknown"
+])
 
 /**
  * One record, and what the reaper decided about it.
@@ -475,6 +489,11 @@ const refuse = (
   if (ownGroup !== null && (record.pgid === ownGroup || record.pid === ownGroup)) return "own-group"
   const target = system.refuseTarget(record)
   if (target !== undefined) return target
+  // A record naming a group can only be cleared of naming THIS host's group by
+  // reading that group. When the probe cannot answer, the comparison above was
+  // not made rather than made and passed, so the record is kept instead of
+  // signalled on a guard that did not run.
+  if (record.pgid !== null && ownGroup === null) return "own-group-unknown"
   if (system.isAlive(record.ownerPid) !== "dead") return "owner-alive"
   return refuseOnIdentity(system, record, bootMs)
 }
