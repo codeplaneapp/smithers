@@ -268,9 +268,9 @@ with.
 | Verb | Receipts | Typed failures |
 | --- | --- | --- |
 | `plan` | returns a `PlanCard`, not a receipt | `FlowNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable` |
-| `run` (`Plan`) | `Accepted`, `AlreadyApplied`, `Conflict`, `Parked` | `RunNotFound`, `PlanDigestMismatch`, `EnvelopeMismatch`, `ClaimLost`, `LaunchFailed`, `PersistenceError`, `Unavailable` |
+| `run` (`Plan`) | `Accepted`, `AlreadyApplied`, `Conflict`, `Parked` | `PlanNotFound`, `PlanDenied`, `PlanDigestMismatch`, `EnvelopeMismatch`, `ClaimLost`, `LaunchFailed`, `PersistenceError`, `Unavailable` |
 | `run` (`Resume`), `resume` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable` |
-| `approve`, `deny` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `RunNotFound`, `PersistenceError`, `Unavailable` |
+| `approve`, `deny` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `PersistenceError`, `Unavailable` |
 | `steer` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable` |
 | `signal` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `NoMatchingWait`, `PersistenceError`, `Unavailable` |
 | `cancel` | `Accepted`, `Terminal` | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable` |
@@ -278,8 +278,9 @@ with.
 
 `ControlError.ControlErrorSchema` is the single membership list for the union,
 including `CredentialConflict`, and `ControlClient.isControlError` is derived
-from it. Each class carries a stable `code` (`run_not_found`, `claim_lost`,
-`no_matching_wait`, `invalid_input`, and so on) that clients may branch on.
+from it. Each class carries a stable `code` (`plan_not_found`, `plan_denied`,
+`run_not_found`, `claim_lost`, `no_matching_wait`, `invalid_input`, and so on)
+that clients may branch on.
 
 ## Deployment requirements
 

@@ -15,26 +15,28 @@ import {
   LaunchFailed,
   NoMatchingWait,
   PersistenceError,
+  PlanDenied,
   PlanDigestMismatch,
+  PlanNotFound,
   RunNotFound,
   TransportError,
   Unauthorized,
   Unavailable
 } from "./ControlError.ts"
 import {
-  ApprovalPayload,
+  ApprovalInputSchema,
+  CancelInputSchema,
   ControlEvent,
-  Envelope,
-  FlowId,
-  IdempotencyKey,
   ListRequest,
   ListResponse,
   PlanCard,
+  PlanInputSchema,
   type Principal,
+  ReasonedMutationInputSchema,
   Receipt,
-  RunId,
-  SignalPayload,
-  SteerMessage,
+  RunInputSchema,
+  SignalInputSchema,
+  SteerInputSchema,
   WatchFilter
 } from "./ControlSchema.ts"
 
@@ -60,58 +62,6 @@ export class ControlAuth extends RpcMiddleware.Service<ControlAuth, {
   provides: ControlPrincipal
 }>()("/control/ControlAuth", { error: Unauthorized }) {}
 
-const PlanInput = Schema.Struct({
-  flowId: FlowId,
-  input: Schema.Json,
-  idempotencyKey: Schema.optional(IdempotencyKey)
-})
-
-const RunInput = Schema.Union([
-  Schema.TaggedStruct("Plan", {
-    planId: Schema.String,
-    digest: Schema.String,
-    envelope: Envelope,
-    idempotencyKey: IdempotencyKey
-  }),
-  Schema.TaggedStruct("Resume", { runId: RunId, idempotencyKey: IdempotencyKey })
-])
-
-// Principal is deliberately absent: the server supplies it through ControlAuth.
-const ApprovalInput = ApprovalPayload
-
-const SteerInput = Schema.Struct({
-  runId: RunId,
-  message: SteerMessage,
-  idempotencyKey: IdempotencyKey
-})
-
-const SignalInput = Schema.Struct({
-  runId: RunId,
-  signal: SignalPayload,
-  idempotencyKey: IdempotencyKey
-})
-
-const RunMutationInput = Schema.Struct({ runId: RunId, idempotencyKey: IdempotencyKey })
-
-/**
- * A lifecycle mutation carries the operator's stated reason.
- *
- * The reason is on the wire because attribution is written where the decision
- * is made, and a remote operator decides it here. `Control.resume` records it
- * on `control.run.resume` exactly as `cancel` records it on
- * `control.run.cancel-requested`, so a wire payload without the field made a
- * local `resume({reason})` and a remote one differ silently.
- *
- * The principal is deliberately NOT on the wire: the server stamps the identity
- * it authenticated, so a client cannot name someone else.
- */
-const ReasonedMutationInput = Schema.Struct({
-  ...RunMutationInput.fields,
-  reason: Schema.optional(Schema.String)
-})
-
-const CancelInput = ReasonedMutationInput
-
 const mutationErrors = Schema.Union([RunNotFound, ClaimLost, PersistenceError, Unavailable])
 
 /**
@@ -123,15 +73,17 @@ const mutationErrors = Schema.Union([RunNotFound, ClaimLost, PersistenceError, U
  */
 export const ControlRpcs = RpcGroup.make(
   Rpc.make("Plan", {
-    payload: PlanInput,
+    payload: PlanInputSchema,
     success: PlanCard,
     error: Schema.Union([FlowNotFound, InvalidInput, PersistenceError, Unavailable])
   }),
   Rpc.make("Run", {
-    payload: RunInput,
+    payload: RunInputSchema,
     success: Receipt,
     error: Schema.Union([
       RunNotFound,
+      PlanNotFound,
+      PlanDenied,
       PlanDigestMismatch,
       EnvelopeMismatch,
       ClaimLost,
@@ -141,41 +93,43 @@ export const ControlRpcs = RpcGroup.make(
     ])
   }),
   Rpc.make("Approve", {
-    payload: ApprovalInput,
+    payload: ApprovalInputSchema,
     success: Receipt,
     error: Schema.Union([
       PlanDigestMismatch,
       EnvelopeMismatch,
       AlreadyResolved,
+      PlanNotFound,
       RunNotFound,
       PersistenceError,
       Unavailable
     ])
   }),
   Rpc.make("Deny", {
-    payload: ApprovalInput,
+    payload: ApprovalInputSchema,
     success: Receipt,
     error: Schema.Union([
       PlanDigestMismatch,
       EnvelopeMismatch,
       AlreadyResolved,
+      PlanNotFound,
       RunNotFound,
       PersistenceError,
       Unavailable
     ])
   }),
   Rpc.make("Steer", {
-    payload: SteerInput,
+    payload: SteerInputSchema,
     success: Receipt,
     error: Schema.Union([RunNotFound, InvalidInput, PersistenceError, Unavailable])
   }),
   Rpc.make("Signal", {
-    payload: SignalInput,
+    payload: SignalInputSchema,
     success: Receipt,
     error: Schema.Union([RunNotFound, NoMatchingWait, PersistenceError, Unavailable])
   }),
-  Rpc.make("Cancel", { payload: CancelInput, success: Receipt, error: mutationErrors }),
-  Rpc.make("Resume", { payload: ReasonedMutationInput, success: Receipt, error: mutationErrors }),
+  Rpc.make("Cancel", { payload: CancelInputSchema, success: Receipt, error: mutationErrors }),
+  Rpc.make("Resume", { payload: ReasonedMutationInputSchema, success: Receipt, error: mutationErrors }),
   // `list` and `watch` carry the whole `ControlError` union in their contract,
   // so they name it once rather than restating its members. Two hand-copied
   // lists is how `CredentialConflict` came to be a control error the union did

@@ -46,12 +46,11 @@
  * @since 0.1.0
  */
 import { DurableWriter } from "@smthrs/database/DurableWriter"
-import type { Ownership } from "@smthrs/run-store"
-import { RunStore } from "@smthrs/run-store"
-import { Clock, Crypto, Effect, Fiber, Layer, Option } from "effect"
+import { Ownership, RunStore } from "@smthrs/run-store"
+import { Clock, Crypto, Effect, Fiber, Layer, Option, Schema } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as Attribution from "./Cancellation.ts"
-import type { ApprovalTarget, PlanInput } from "./Control.ts"
+import type { PlanInput } from "./Control.ts"
 import {
   AlreadyResolved,
   ClaimLost,
@@ -59,25 +58,30 @@ import {
   FlowNotFound,
   InvalidInput,
   PersistenceError,
+  PlanDenied,
   PlanDigestMismatch,
+  PlanNotFound,
   RunNotFound
 } from "./ControlError.ts"
 import type { ApprovalToken, BulkGrant, LaunchResult, MemoryFlow, Service, StoredPlan } from "./ControlRuntime.ts"
 import { ControlRuntime, make } from "./ControlRuntime.ts"
-import type {
-  Cancellation,
+import {
+  ApprovalTarget,
   Envelope,
-  FlowId,
-  IdempotencyKey,
+  GrantScope,
   PlanCard,
   Principal,
   Receipt,
-  RunId,
-  RunStatus,
   RunSummary,
   SignalPayload,
-  SteerMessage
+  SteerMessage,
+  type Cancellation,
+  type FlowId,
+  type IdempotencyKey,
+  type RunId,
+  type RunStatus
 } from "./ControlSchema.ts"
+import { canonicalIssue, cappedIssue, schemaIssuePath } from "./internal/issues.ts"
 import { accepted, alreadyApplied, canonical, emptyEnvelope, planCard, sameEnvelope } from "./internal/planning.ts"
 import * as Lineage from "./Lineage.ts"
 import { plannable } from "./SystemFlows.ts"
@@ -117,6 +121,31 @@ const persistence = (operation: string) => (cause: unknown): PersistenceError =>
     message: `Control runtime failed to ${operation}`,
     cause
   })
+
+const storedFailure = (location: string, path: string, reason: string): PersistenceError =>
+  new PersistenceError({
+    operation: `decode ${location}`,
+    message: `Control runtime could not decode ${location}: ${cappedIssue(path, reason)}`
+  })
+
+const decodeStoredValue = <S extends Schema.Top>(
+  location: string,
+  schema: S,
+  value: unknown
+): Effect.Effect<S["Type"], PersistenceError, S["DecodingServices"]> =>
+  Schema.decodeUnknownEffect(schema)(value).pipe(
+    Effect.mapError((error) => storedFailure(location, schemaIssuePath(error), "stored value does not match its schema"))
+  )
+
+const decodeStoredJson = <S extends Schema.Top>(
+  location: string,
+  schema: S,
+  json: string
+): Effect.Effect<S["Type"], PersistenceError, S["DecodingServices"]> =>
+  Effect.try({
+    try: () => JSON.parse(json) as unknown,
+    catch: () => storedFailure(location, "$", "stored value is not valid JSON")
+  }).pipe(Effect.flatMap((value) => decodeStoredValue(location, schema, value)))
 
 /** A random identifier that does not depend on any Node API. */
 const randomId = (): string => globalThis.crypto.randomUUID()
@@ -191,6 +220,24 @@ interface TokenRow {
   readonly targetJson: string
   readonly resolved: number
 }
+
+const PlanDecision = Schema.Literals(["pending", "approved", "denied"])
+
+const CancelRequestPayload = Schema.Struct({
+  principal: Schema.optional(Principal),
+  reason: Schema.optional(Schema.String)
+})
+
+const EngineInterruptionPayload = Schema.Struct({
+  outcome: Schema.optional(Schema.String),
+  interruptedAtMs: Schema.optional(Schema.Number)
+})
+
+// Control only projects an engine-owned row's flow name. Importing the full
+// engine state schema would add an engine-store runtime dependency, so this
+// validates exactly the field this package reads and permits the remaining
+// engine-owned fields to pass through the struct decoder unused.
+const EngineStateProjection = Schema.Struct({ flowName: Schema.NonEmptyString })
 
 const migrations = [
   `CREATE TABLE IF NOT EXISTS control_plans (
@@ -319,17 +366,18 @@ const makeRuntime = (
         FROM control_plans WHERE plan_id = ${planId}
       `.pipe(query("read a plan"), Effect.map((rows) => Option.fromNullishOr(rows[0])))
 
-    const storedPlan = (row: PlanRow): StoredPlan => ({
-      card: JSON.parse(row.cardJson) as PlanCard,
-      decodedInput: JSON.parse(row.decodedInputJson) as unknown,
-      decision: row.decision as StoredPlan["decision"]
-    })
+    const storedPlan = (row: PlanRow): Effect.Effect<StoredPlan, PersistenceError> =>
+      Effect.all({
+        card: decodeStoredJson("control_plans.card_json", PlanCard, row.cardJson),
+        decodedInput: decodeStoredJson("control_plans.decoded_input_json", Schema.Json, row.decodedInputJson),
+        decision: decodeStoredValue("control_plans.decision", PlanDecision, row.decision)
+      })
 
-    const requirePlan = (planId: string): Effect.Effect<PlanRow, RunNotFound | PersistenceError> =>
+    const requirePlan = (planId: string): Effect.Effect<PlanRow, PlanNotFound | PersistenceError> =>
       Effect.flatMap(
         readPlan(planId),
         Option.match({
-          onNone: () => Effect.fail(new RunNotFound({ runId: planId })),
+          onNone: () => Effect.fail(new PlanNotFound({ planId })),
           onSome: Effect.succeed
         })
       )
@@ -367,32 +415,33 @@ const makeRuntime = (
       }
     }
 
-    /**
-     * The control summary a run row carries, when it carries one.
-     *
-     * A run this plane launched has its `RunSummary` written into `state_json`
-     * by the same fenced `UPDATE` that moves its status. A run the engine
-     * created has the engine's state there instead, and this returns
-     * `undefined` for it rather than pretending the shape matched.
-     */
-    const storedSummary = (stateJson: string): RunSummary | undefined => {
-      const parsed = JSON.parse(stateJson) as unknown
-      if (typeof parsed !== "object" || parsed === null) return undefined
-      const candidate = parsed as Partial<RunSummary>
-      return typeof candidate.runId === "string" && typeof candidate.flowId === "string" &&
-          typeof candidate.status === "string"
-        ? candidate as RunSummary
-        : undefined
-    }
+    type DecodedRunState =
+      | { readonly _tag: "Control"; readonly summary: RunSummary }
+      | { readonly _tag: "Engine"; readonly flowName: string }
 
-    /** The flow name the engine records in its own run state. */
-    const engineFlowName = (stateJson: string): string => {
-      const parsed = JSON.parse(stateJson) as unknown
-      const name = typeof parsed === "object" && parsed !== null
-        ? (parsed as { readonly flowName?: unknown }).flowName
-        : undefined
-      return typeof name === "string" && name.length > 0 ? name : "unknown"
-    }
+    /**
+     * Decodes one state row once, then validates the projection its keys name.
+     * A control summary and an engine state share the column but not a schema.
+     */
+    const decodeRunState = (stateJson: string): Effect.Effect<DecodedRunState, PersistenceError> =>
+      Effect.gen(function*() {
+        const parsed = yield* decodeStoredJson("flows_runs.state_json", Schema.Json, stateJson)
+        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+          const candidate = parsed as Readonly<Record<string, unknown>>
+          if ("runId" in candidate || "flowId" in candidate || "status" in candidate) {
+            return {
+              _tag: "Control",
+              summary: yield* decodeStoredValue("flows_runs.state_json as RunSummary", RunSummary, parsed)
+            }
+          }
+        }
+        const engine = yield* decodeStoredValue(
+          "flows_runs.state_json as engine state",
+          EngineStateProjection,
+          parsed
+        )
+        return { _tag: "Engine", flowName: engine.flowName }
+      })
 
     const optional = <A>(value: A | null | undefined): { readonly value?: A } =>
       value === null || value === undefined ? {} : { value }
@@ -447,37 +496,43 @@ const makeRuntime = (
      * @param row the run row
      * @param ancestry the fork markers and spawn edges of the whole database
      */
-    const summaryFrom = (row: RunStore.RunRow, ancestry: AncestryIndex): RunSummary => {
-      const stored = storedSummary(row.stateJson)
-      const base: RunSummary = stored ?? {
-        runId: row.runId,
-        flowId: engineFlowName(row.stateJson),
-        status: controlStatus(row.status),
-        createdAt: row.createdAtMs,
-        updatedAt: row.finishedAtMs ?? row.startedAtMs ?? row.createdAtMs
-      }
-      const parentRunId = optional(row.parentRunId).value ?? ancestry.spawnedBy.get(row.runId)
-      const lineageId = optional(row.lineageId).value
-      const roundOrdinal = optional(row.roundOrdinal).value
-      const origin = Lineage.originOf({
-        ...(parentRunId === undefined ? {} : { parentRunId }),
-        ...(roundOrdinal === undefined ? {} : { roundOrdinal }),
-        forked: ancestry.forked.has(row.runId)
+    const summaryFrom = (
+      row: RunStore.RunRow,
+      ancestry: AncestryIndex
+    ): Effect.Effect<RunSummary, PersistenceError> =>
+      Effect.gen(function*() {
+        const state = yield* decodeRunState(row.stateJson)
+        const base: RunSummary = state._tag === "Control"
+          ? state.summary
+          : {
+            runId: row.runId,
+            flowId: state.flowName,
+            status: controlStatus(row.status),
+            createdAt: row.createdAtMs,
+            updatedAt: row.finishedAtMs ?? row.startedAtMs ?? row.createdAtMs
+          }
+        const parentRunId = optional(row.parentRunId).value ?? ancestry.spawnedBy.get(row.runId)
+        const lineageId = optional(row.lineageId).value
+        const roundOrdinal = optional(row.roundOrdinal).value
+        const origin = Lineage.originOf({
+          ...(parentRunId === undefined ? {} : { parentRunId }),
+          ...(roundOrdinal === undefined ? {} : { roundOrdinal }),
+          forked: ancestry.forked.has(row.runId)
+        })
+        const waitingReason = ancestry.waitingFor.get(row.runId)
+        const cancellation = ancestry.cancellations.get(row.runId)
+        const pendingResume = ancestry.pendingResumes.get(row.runId)
+        return {
+          ...base,
+          ...(pendingResume === undefined ? {} : { pendingResume }),
+          ...(parentRunId === undefined ? {} : { parentRunId }),
+          ...(lineageId === undefined ? {} : { lineageId }),
+          ...(roundOrdinal === undefined ? {} : { roundOrdinal }),
+          ...(origin === undefined ? {} : { origin }),
+          ...(waitingReason === undefined ? {} : { waitingReason }),
+          ...(cancellation === undefined ? {} : { cancellation })
+        }
       })
-      const waitingReason = ancestry.waitingFor.get(row.runId)
-      const cancellation = ancestry.cancellations.get(row.runId)
-      const pendingResume = ancestry.pendingResumes.get(row.runId)
-      return {
-        ...base,
-        ...(pendingResume === undefined ? {} : { pendingResume }),
-        ...(parentRunId === undefined ? {} : { parentRunId }),
-        ...(lineageId === undefined ? {} : { lineageId }),
-        ...(roundOrdinal === undefined ? {} : { roundOrdinal }),
-        ...(origin === undefined ? {} : { origin }),
-        ...(waitingReason === undefined ? {} : { waitingReason }),
-        ...(cancellation === undefined ? {} : { cancellation })
-      }
-    }
 
     /**
      * The runs a `fork-created` marker names.
@@ -580,14 +635,21 @@ const makeRuntime = (
       WHERE event_type = ${Attribution.requestedEventType} AND ${within("run_id", scope)}
       ORDER BY run_id, seq
     `.pipe(
-        Effect.map((rows) => {
+        Effect.catchIf(
+          missingTable("flows_journal_events"),
+          () => Effect.succeed(new Array<{ readonly runId: string; readonly emittedAtMs: number; readonly payloadJson: string }>())
+        ),
+        Effect.mapError(persistence("read cancel requests")),
+        Effect.flatMap((rows) =>
+          Effect.gen(function*() {
           const requests = new Map<string, Attribution.Request>()
           for (const row of rows) {
             if (requests.has(row.runId)) continue
-            const payload = JSON.parse(row.payloadJson) as {
-              readonly principal?: Principal
-              readonly reason?: string
-            }
+            const payload = yield* decodeStoredJson(
+              "flows_journal_events.payload_json for control.run.cancel-requested",
+              CancelRequestPayload,
+              row.payloadJson
+            )
             requests.set(row.runId, {
               requestedAt: Number(row.emittedAtMs),
               ...(payload.principal === undefined ? {} : { principal: payload.principal }),
@@ -595,12 +657,8 @@ const makeRuntime = (
             })
           }
           return requests
-        }),
-        Effect.catchIf(
-          missingTable("flows_journal_events"),
-          () => Effect.succeed(new Map<string, Attribution.Request>() as ReadonlyMap<string, Attribution.Request>)
-        ),
-        Effect.mapError(persistence("read cancel requests"))
+          })
+        )
       )
 
     /**
@@ -621,23 +679,26 @@ const makeRuntime = (
       FROM flows_journal_events
       WHERE event_type = ${Attribution.interruptedEventType} AND ${within("run_id", scope)}
     `.pipe(
-        Effect.map((rows) => {
+        Effect.catchIf(
+          missingTable("flows_journal_events"),
+          () => Effect.succeed(new Array<{ readonly runId: string; readonly payloadJson: string }>())
+        ),
+        Effect.mapError(persistence("read engine interruptions")),
+        Effect.flatMap((rows) =>
+          Effect.gen(function*() {
           const cancelled = new Map<string, number>()
           for (const row of rows) {
-            const payload = JSON.parse(row.payloadJson) as {
-              readonly outcome?: string
-              readonly interruptedAtMs?: number
-            }
+            const payload = yield* decodeStoredJson(
+              "flows_journal_events.payload_json for flows.engine.interrupted",
+              EngineInterruptionPayload,
+              row.payloadJson
+            )
             if (payload.outcome !== "cancelled") continue
             cancelled.set(row.runId, Number(payload.interruptedAtMs ?? 0))
           }
           return cancelled
-        }),
-        Effect.catchIf(
-          missingTable("flows_journal_events"),
-          () => Effect.succeed(new Map<string, number>() as ReadonlyMap<string, number>)
-        ),
-        Effect.mapError(persistence("read engine interruptions"))
+          })
+        )
       )
 
     /**
@@ -767,7 +828,8 @@ const makeRuntime = (
         return chain
       })
 
-    const summaryOf = (row: RunStore.RunRow): RunSummary => JSON.parse(row.stateJson) as RunSummary
+    const summaryOf = (row: RunStore.RunRow): Effect.Effect<RunSummary, PersistenceError> =>
+      decodeStoredJson("flows_runs.state_json as RunSummary", RunSummary, row.stateJson)
 
     const snapshotOf = (row: RunStore.RunRow): RunStore.RunSnapshot => ({
       status: row.status,
@@ -832,8 +894,9 @@ const makeRuntime = (
         )
         if (outcome._tag === "NotFound") return yield* Effect.fail(new RunNotFound({ runId }))
         if (outcome._tag !== "Activated") return yield* Effect.fail(new ClaimLost({ runId }))
+        const summary = yield* summaryOf(row)
         return yield* transition(runId, claimant, {
-          ...summaryOf(row),
+          ...summary,
           ownerId: JSON.stringify(claimant)
         }, "accepted")
       })
@@ -860,14 +923,21 @@ const makeRuntime = (
       SELECT plan_id AS "planId" FROM control_plans ORDER BY rowid
     `.pipe(query("list plans"), Effect.map((rows) => rows.map((row) => row.planId)))
 
-    const messages = (
+    const messages = <S extends Schema.Top>(
       runId: RunId,
-      kind: "steer" | "signal"
-    ): Effect.Effect<ReadonlyArray<unknown>, PersistenceError> =>
+      kind: "steer" | "signal",
+      schema: S
+    ): Effect.Effect<ReadonlyArray<S["Type"]>, PersistenceError, S["DecodingServices"]> =>
       sql<{ readonly payloadJson: string }>`
         SELECT payload_json AS "payloadJson" FROM control_run_messages
         WHERE run_id = ${runId} AND kind = ${kind} ORDER BY seq
-      `.pipe(query("read run messages"), Effect.map((rows) => rows.map((row) => JSON.parse(row.payloadJson))))
+      `.pipe(
+        query("read run messages"),
+        Effect.flatMap((rows) =>
+          Effect.forEach(rows, (row) =>
+            decodeStoredJson(`control_run_messages.payload_json as ${kind}`, schema, row.payloadJson))
+        )
+      )
 
     const appendMessage = (
       runId: RunId,
@@ -888,7 +958,7 @@ const makeRuntime = (
         if (flow === undefined) return yield* new FlowNotFound({ flowId: input.flowId })
         const planFingerprint = yield* Effect.try({
           try: () => canonical({ flowId: input.flowId, input: input.input }),
-          catch: (cause) => new InvalidInput({ issue: String(cause) })
+          catch: (cause) => new InvalidInput({ issue: canonicalIssue(cause) })
         })
         if (input.idempotencyKey !== undefined) {
           const prior = yield* sql<{ readonly fingerprint: string; readonly planId: string }>`
@@ -903,7 +973,10 @@ const makeRuntime = (
               })
             }
             const stored = yield* readPlan(found.planId)
-            if (Option.isSome(stored)) return { card: storedPlan(stored.value).card, created: false }
+            if (Option.isSome(stored)) {
+              const decoded = yield* storedPlan(stored.value)
+              return { card: decoded.card, created: false }
+            }
           }
         }
         const decoded = yield* (flow.decode?.(input.input) ?? Effect.try({
@@ -911,7 +984,7 @@ const makeRuntime = (
             canonical(input.input)
             return input.input
           },
-          catch: (cause) => new InvalidInput({ issue: String(cause) })
+          catch: (cause) => new InvalidInput({ issue: canonicalIssue(cause) })
         }))
         const planId = `plan-${yield* nextSequence("plan")}`
         const handoff = flow.plan === undefined ? undefined : yield* flow.plan(decoded, planId)
@@ -942,7 +1015,7 @@ const makeRuntime = (
         })).pipe(Effect.mapError(persistence("store a plan")))
         return { card, created: true }
       }),
-      getPlan: Effect.fn("SqlControlRuntime.getPlan")((planId: string) => Effect.map(requirePlan(planId), storedPlan)),
+      getPlan: Effect.fn("SqlControlRuntime.getPlan")((planId: string) => Effect.flatMap(requirePlan(planId), storedPlan)),
       listPlanIds,
       lookupApproval: Effect.fn("SqlControlRuntime.lookupApproval")(function*(target: ApprovalTarget) {
         const tokenId = target._tag === "Plan" ? target.planId : target.requestId
@@ -952,9 +1025,11 @@ const makeRuntime = (
         `.pipe(query("read an approval token"))
         const row = rows[0]
         if (row === undefined) {
-          return yield* new RunNotFound({ runId: target._tag === "Node" ? target.runId : target.planId })
+          return yield* (target._tag === "Node"
+            ? new RunNotFound({ runId: target.runId })
+            : new PlanNotFound({ planId: target.planId }))
         }
-        const stored = JSON.parse(row.targetJson) as ApprovalTarget
+        const stored = yield* decodeStoredJson("control_tokens.target_json", ApprovalTarget, row.targetJson)
         if (stored.digest !== target.digest) {
           return yield* new PlanDigestMismatch({
             planId: tokenId,
@@ -994,7 +1069,7 @@ const makeRuntime = (
             })
           )
         }
-        const stored = JSON.parse(row.targetJson) as ApprovalTarget
+        const stored = yield* decodeStoredJson("control_tokens.target_json", ApprovalTarget, row.targetJson)
         if (stored.digest !== target.digest) {
           return yield* new PlanDigestMismatch({
             planId: target.requestId,
@@ -1050,7 +1125,7 @@ const makeRuntime = (
         envelope: Envelope
       ) {
         const row = yield* requirePlan(planId)
-        const plan = storedPlan(row)
+        const plan = yield* storedPlan(row)
         if (plan.card.digest !== requestedDigest) {
           return yield* new PlanDigestMismatch({
             planId,
@@ -1077,7 +1152,7 @@ const makeRuntime = (
           }
           return parked
         }
-        if (plan.decision !== "approved") return yield* new ClaimLost({ runId: planId })
+        if (plan.decision !== "approved") return yield* new PlanDenied({ planId })
 
         const sequence = yield* nextSequence("run")
         const runId = `run-${sequence}`
@@ -1116,7 +1191,7 @@ const makeRuntime = (
       getRun: Effect.fn("SqlControlRuntime.getRun")((runId: RunId) =>
         Effect.gen(function*() {
           const row = yield* requireRow(runId)
-          return summaryFrom(row, yield* ancestryIndex(yield* ancestorChain(runId)))
+          return yield* summaryFrom(row, yield* ancestryIndex(yield* ancestorChain(runId)))
         })
       ),
       listRuns: Effect.fn("SqlControlRuntime.listRuns")(() =>
@@ -1131,7 +1206,7 @@ const makeRuntime = (
           // reported no runs at all.
           const summaries = yield* Effect.forEach(runIds, (runId) =>
             requireRow(runId).pipe(
-              Effect.map((row) => Option.some(summaryFrom(row, ancestry))),
+              Effect.flatMap((row) => Effect.map(summaryFrom(row, ancestry), Option.some)),
               Effect.catchTag("/control/RunNotFound", () => Effect.succeed(Option.none<RunSummary>()))
             ))
           return summaries.filter(Option.isSome).map((summary) => summary.value)
@@ -1157,8 +1232,13 @@ const makeRuntime = (
             DELETE FROM control_run_messages WHERE run_id = ${runId} AND kind = 'steer'
             RETURNING payload_json AS "payloadJson"
           `
-          return rows.map((row) => JSON.parse(row.payloadJson) as SteerMessage)
-        })).pipe(Effect.mapError(persistence("drain steering")))
+          return yield* Effect.forEach(rows, (row) =>
+            decodeStoredJson("control_run_messages.payload_json as steer", SteerMessage, row.payloadJson))
+        })).pipe(
+          Effect.mapError((cause) =>
+            cause instanceof PersistenceError ? cause : persistence("drain steering")(cause)
+          )
+        )
         return drained
       }),
       deliverSignal: Effect.fn("SqlControlRuntime.deliverSignal")((runId: RunId, signal: SignalPayload) =>
@@ -1168,7 +1248,7 @@ const makeRuntime = (
       ),
       deliveredSignals: Effect.fn("SqlControlRuntime.deliveredSignals")(function*(runId: RunId) {
         yield* requireRow(runId)
-        return (yield* messages(runId, "signal")) as ReadonlyArray<SignalPayload>
+        return yield* messages(runId, "signal", SignalPayload)
       }),
       requestResume: Effect.fn("SqlControlRuntime.requestResume")(function*(runId: RunId) {
         yield* requireRow(runId)
@@ -1219,7 +1299,7 @@ const makeRuntime = (
       }),
       interrupt: Effect.fn("SqlControlRuntime.interrupt")(function*(runId: RunId) {
         const row = yield* requireRow(runId)
-        const summary = summaryOf(row)
+        const summary = yield* summaryOf(row)
         // Terminality is asked FIRST, as `resume` asks it. A settled run has
         // released its owner, so `ownedByUs` is false for every process
         // including the one that ran it, and asking ownership first answered
@@ -1238,7 +1318,7 @@ const makeRuntime = (
         options?: { readonly scope?: "launched" | "any" | undefined } | undefined
       ) {
         const row = yield* requireRow(runId)
-        const summary = summaryOf(row)
+        const summary = yield* summaryOf(row)
         if (terminal(summary.status)) return summary
         // Start-or-join: owning the run already means resume is a no-op, and a
         // run owned by a live peer is theirs to drive.
@@ -1273,11 +1353,10 @@ const makeRuntime = (
         status: RunStatus
       ) {
         const row = yield* requireRow(runId)
-        const presented = yield* Effect.try({
-          try: () => JSON.parse(fence) as Ownership.OwnerId,
-          catch: () => new ClaimLost({ runId })
-        })
-        return yield* transition(runId, presented, summaryOf(row), status)
+        const presented = yield* decodeStoredJson("control fence", Ownership.OwnerId, fence).pipe(
+          Effect.mapError(() => new ClaimLost({ runId }))
+        )
+        return yield* transition(runId, presented, yield* summaryOf(row), status)
       }),
       /**
        * The submitted identity wins, and only the clock is the runtime's.
@@ -1305,9 +1384,11 @@ const makeRuntime = (
         `.pipe(query("read a mutation"))
         const row = rows[0]
         if (row === undefined) return undefined
-        return row.fingerprint === fingerprint
-          ? alreadyApplied(key, JSON.parse(row.receiptJson) as Receipt)
-          : { _tag: "Conflict" as const, message: `idempotency key ${key} was used for another mutation` }
+        if (row.fingerprint !== fingerprint) {
+          return { _tag: "Conflict" as const, message: `idempotency key ${key} was used for another mutation` }
+        }
+        const receipt = yield* decodeStoredJson("control_mutations.receipt_json", Receipt, row.receiptJson)
+        return alreadyApplied(key, receipt)
       }),
       recordMutation: Effect.fn("SqlControlRuntime.recordMutation")((
         key: IdempotencyKey,
@@ -1354,13 +1435,19 @@ const makeRuntime = (
           FROM control_grants ORDER BY installed_at_ms, token_id
         `.pipe(
           query("list grants"),
-          Effect.map((rows) =>
-            rows.map((row): BulkGrant => ({
-              tokenId: row.tokenId,
-              envelope: JSON.parse(row.envelopeJson) as Envelope,
-              scope: row.scope as BulkGrant["scope"],
-              installedAt: Number(row.installedAtMs)
-            }))
+          Effect.flatMap((rows) =>
+            Effect.forEach(rows, (row): Effect.Effect<BulkGrant, PersistenceError> =>
+              Effect.all({
+                envelope: decodeStoredJson("control_grants.envelope_json", Envelope, row.envelopeJson),
+                scope: decodeStoredValue("control_grants.scope", GrantScope, row.scope)
+              }).pipe(
+                Effect.map(({ envelope, scope }) => ({
+                  tokenId: row.tokenId,
+                  envelope,
+                  scope,
+                  installedAt: Number(row.installedAtMs)
+                }))
+              ))
           )
         )
       )()

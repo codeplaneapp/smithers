@@ -11,6 +11,8 @@ import {
   EnvelopeMismatch,
   FlowNotFound,
   InvalidInput,
+  PlanDenied,
+  PlanNotFound,
   RunNotFound
 } from "../src/ControlError.ts"
 import { ControlRuntime, type MemoryOptions, type Service } from "../src/ControlRuntime.ts"
@@ -65,12 +67,11 @@ describe("ControlRuntime.layerMemory", () => {
     )
 
     expect(observed.fingerprint).toBeInstanceOf(InvalidInput)
-    // Restated 2026-08-31: these pins formerly matched "NaN is not allowed"
-    // and "not valid JSON". Canonical's public contract now guarantees stable
-    // codes and located paths, which control must preserve for its callers.
-    expect((observed.fingerprint as InvalidInput).issue).toContain("canonical_nan: NaN at $.input")
+    // Canonical's public contract supplies stable codes and located paths. The
+    // control boundary keeps those two fields and drops the rejected value.
+    expect((observed.fingerprint as InvalidInput).issue).toBe("$.input: canonical_nan")
     expect(observed.decode).toBeInstanceOf(InvalidInput)
-    expect((observed.decode as InvalidInput).issue).toContain("canonical_unsupported_value: undefined at $")
+    expect((observed.decode as InvalidInput).issue).toBe("$: canonical_unsupported_value")
   })
 
   it("replays a plan for a repeated idempotency key and refuses a reused one", async () => {
@@ -116,8 +117,8 @@ describe("ControlRuntime.layerMemory", () => {
       })
     )
 
-    expect(observed.plan).toBeInstanceOf(RunNotFound)
-    expect((observed.plan as RunNotFound).runId).toBe("plan-absent")
+    expect(observed.plan).toBeInstanceOf(PlanNotFound)
+    expect((observed.plan as PlanNotFound).planId).toBe("plan-absent")
     // A node target names the run, not the request: that is the id an
     // operator can act on.
     expect(observed.node).toBeInstanceOf(RunNotFound)
@@ -193,15 +194,15 @@ describe("ControlRuntime.layerMemory", () => {
         const token = yield* runtime.lookupApproval(card.approval.target)
         yield* runtime.resolveApproval(token, "denied", principal)
         const denied = yield* Effect.flip(runtime.launch(card.planId, card.digest, card.envelope))
-        return { missing, widened, denied }
+        return { card, missing, widened, denied }
       })
     )
 
-    expect(observed.missing).toBeInstanceOf(RunNotFound)
-    expect((observed.missing as RunNotFound).runId).toBe("plan-absent")
+    expect(observed.missing).toBeInstanceOf(PlanNotFound)
+    expect((observed.missing as PlanNotFound).planId).toBe("plan-absent")
     expect(observed.widened).toBeInstanceOf(EnvelopeMismatch)
-    // A denied plan is not parked and not startable: it has lost its claim.
-    expect(observed.denied).toBeInstanceOf(ClaimLost)
+    expect(observed.denied).toBeInstanceOf(PlanDenied)
+    expect((observed.denied as PlanDenied).planId).toBe(observed.card.planId)
   })
 
   it("refuses every owner-sensitive operation once a park has released the fence", async () => {

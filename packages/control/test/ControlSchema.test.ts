@@ -9,6 +9,14 @@ const roundTrip = <A>(schema: Schema.Codec<A, unknown, never, never>, value: A):
 
 const storedKey = Schema.decodeUnknownSync(PersistedPlan.KeyDigest)
 
+const envelope = {
+  capabilities: ["fs:read"],
+  flows: ["review"],
+  budget: { tokens: 1_000 }
+} as const
+
+const principal = { id: "operator-1", kind: "user", stampedAt: 1 }
+
 describe("ControlSchema", () => {
   it("round-trips a plan card", () => {
     roundTrip(ControlSchema.PlanCard, {
@@ -123,6 +131,118 @@ describe("ControlSchema", () => {
     })
     roundTrip(ControlSchema.Receipt, { _tag: "Conflict", message: "digest changed" })
     roundTrip(ControlSchema.Receipt, { _tag: "Terminal", runId: "run-1", status: "completed" })
+  })
+
+  it("round-trips and rejects plan request payloads", () => {
+    roundTrip(ControlSchema.PlanInputSchema, {
+      flowId: "review",
+      input: { pullRequest: 17 },
+      idempotencyKey: "plan-17"
+    })
+    expect(() =>
+      Schema.decodeUnknownSync(ControlSchema.PlanInputSchema)({ flowId: "review", input: new Date(0) })
+    ).toThrow()
+  })
+
+  it("round-trips and rejects run request payloads", () => {
+    roundTrip(ControlSchema.RunInputSchema, {
+      _tag: "Plan",
+      planId: "plan-17",
+      digest: "digest-17",
+      envelope,
+      idempotencyKey: "run-17"
+    })
+    expect(() => Schema.decodeUnknownSync(ControlSchema.RunInputSchema)({ _tag: "Other" })).toThrow()
+  })
+
+  it("round-trips and rejects approval request payloads", () => {
+    roundTrip(ControlSchema.ApprovalInputSchema, {
+      target: { _tag: "Plan", planId: "plan-17", digest: "digest-17", envelope },
+      scope: "run",
+      idempotencyKey: "approve-17"
+    })
+    expect(() =>
+      Schema.decodeUnknownSync(ControlSchema.ApprovalInputSchema)({
+        target: { _tag: "Plan", planId: "plan-17", digest: "digest-17", envelope },
+        scope: "forever",
+        idempotencyKey: "approve-17"
+      })
+    ).toThrow()
+  })
+
+  it("round-trips and rejects steer request payloads", () => {
+    roundTrip(ControlSchema.SteerInputSchema, {
+      runId: "run-17",
+      message: {
+        messageId: "message-17",
+        runId: "run-17",
+        principal,
+        createdAt: 1,
+        body: "continue"
+      },
+      idempotencyKey: "steer-17"
+    })
+    expect(() =>
+      Schema.decodeUnknownSync(ControlSchema.SteerInputSchema)({
+        runId: "run-17",
+        message: { body: "missing envelope" },
+        idempotencyKey: "steer-17"
+      })
+    ).toThrow()
+  })
+
+  it("round-trips and rejects signal request payloads", () => {
+    roundTrip(ControlSchema.SignalInputSchema, {
+      runId: "run-17",
+      signal: { name: "approved", payload: { by: "operator-1" } },
+      idempotencyKey: "signal-17"
+    })
+    expect(() =>
+      Schema.decodeUnknownSync(ControlSchema.SignalInputSchema)({
+        runId: "run-17",
+        signal: { name: 17, payload: null },
+        idempotencyKey: "signal-17"
+      })
+    ).toThrow()
+  })
+
+  it("round-trips and rejects basic run mutation request payloads", () => {
+    roundTrip(ControlSchema.RunMutationInputSchema, {
+      runId: "run-17",
+      idempotencyKey: "mutation-17"
+    })
+    expect(() =>
+      Schema.decodeUnknownSync(ControlSchema.RunMutationInputSchema)({ idempotencyKey: "mutation-17" })
+    ).toThrow()
+  })
+
+  it("round-trips and rejects reasoned run mutation request payloads", () => {
+    roundTrip(ControlSchema.ReasonedMutationInputSchema, {
+      runId: "run-17",
+      idempotencyKey: "mutation-17",
+      reason: "operator request"
+    })
+    expect(() =>
+      Schema.decodeUnknownSync(ControlSchema.ReasonedMutationInputSchema)({
+        runId: "run-17",
+        idempotencyKey: "mutation-17",
+        reason: 17
+      })
+    ).toThrow()
+  })
+
+  it("round-trips and rejects cancel request payloads", () => {
+    roundTrip(ControlSchema.CancelInputSchema, {
+      runId: "run-17",
+      idempotencyKey: "cancel-17",
+      reason: "operator request"
+    })
+    expect(() =>
+      Schema.decodeUnknownSync(ControlSchema.CancelInputSchema)({
+        runId: 17,
+        idempotencyKey: "cancel-17"
+      })
+    ).toThrow()
   })
 
   it("carries the unsupported principalId filter to the server rather than stripping it", () => {

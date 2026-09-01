@@ -8,7 +8,7 @@
  *
  * @since 0.1.0
  */
-import { Canonical } from "@smthrs/canonical"
+import { canonicalize } from "@smthrs/canonical"
 import { Sha256 } from "@smthrs/crypto"
 import type * as PersistedPlan from "@smthrs/plan/Plan"
 import { Effect, Schema } from "effect"
@@ -37,7 +37,7 @@ export const emptyEnvelope: Envelope = {
  * @private
  * @slop
  */
-export const canonical = (value: unknown): string => Schema.decodeUnknownSync(Canonical)(value)
+export const canonical = (value: unknown): string => canonicalize(value)
 
 /**
  * The content digest of a value's canonical bytes.

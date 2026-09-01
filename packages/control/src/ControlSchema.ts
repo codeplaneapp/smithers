@@ -588,6 +588,106 @@ export const SignalPayload = Schema.Struct({
 export type SignalPayload = typeof SignalPayload.Type
 
 /**
+ * The RPC request schema for planning.
+ *
+ * The wire accepts JSON because an RPC request must be serializable. The local
+ * `Control.PlanInput` keeps `input` as `unknown` so a runtime can decode its
+ * flow's own input schema before anything crosses a transport.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const PlanInputSchema = Schema.Struct({
+  flowId: FlowId,
+  input: Schema.Json,
+  idempotencyKey: Schema.optional(IdempotencyKey)
+})
+
+/**
+ * The RPC request schema for starting a plan or resuming a run.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const RunInputSchema = Schema.Union([
+  Schema.TaggedStruct("Plan", {
+    planId: Schema.String,
+    digest: Schema.String,
+    envelope: Envelope,
+    idempotencyKey: IdempotencyKey
+  }),
+  Schema.TaggedStruct("Resume", { runId: RunId, idempotencyKey: IdempotencyKey })
+])
+
+/**
+ * The RPC request schema for an approval decision.
+ *
+ * The authenticated server supplies the principal, so a client cannot name a
+ * different identity on the wire.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const ApprovalInputSchema = ApprovalPayload
+
+/**
+ * The RPC request schema for steering a run.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const SteerInputSchema = Schema.Struct({
+  runId: RunId,
+  message: SteerMessage,
+  idempotencyKey: IdempotencyKey
+})
+
+/**
+ * The RPC request schema for signaling a run.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const SignalInputSchema = Schema.Struct({
+  runId: RunId,
+  signal: SignalPayload,
+  idempotencyKey: IdempotencyKey
+})
+
+/**
+ * The shared fields of an RPC run mutation request.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const RunMutationInputSchema = Schema.Struct({ runId: RunId, idempotencyKey: IdempotencyKey })
+
+/**
+ * The RPC request schema for a lifecycle mutation that records a reason.
+ *
+ * The reason is on the wire because the server records it with the decision.
+ * The principal is absent because the authenticated server stamps it.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const ReasonedMutationInputSchema = Schema.Struct({
+  ...RunMutationInputSchema.fields,
+  reason: Schema.optional(Schema.String)
+})
+
+/**
+ * The RPC request schema for cancellation.
+ *
+ * Cancellation currently has the same wire shape as every reasoned lifecycle
+ * mutation. This named alias keeps the operation's public contract explicit.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const CancelInputSchema = ReasonedMutationInputSchema
+
+/**
  * A journal-projection cursor, optional run restriction, and delivery mode.
  * Omitting `follow` preserves the live-stream behavior; `false` requests a
  * finite snapshot of entries durable when the request is handled.

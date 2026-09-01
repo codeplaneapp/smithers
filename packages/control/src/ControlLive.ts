@@ -26,7 +26,9 @@ import {
   LaunchFailed,
   NoMatchingWait,
   PersistenceError,
+  type PlanDenied,
   type PlanDigestMismatch,
+  type PlanNotFound,
   type RunNotFound,
   Unavailable
 } from "./ControlError.ts"
@@ -875,7 +877,14 @@ export const layer: Layer.Layer<
           // DELEGATION rather than as the claim a resume is.
           ? runMutation(input)
           : mutate<
-            RunNotFound | PlanDigestMismatch | EnvelopeMismatch | ClaimLost | LaunchFailed | PersistenceError,
+            | RunNotFound
+            | PlanNotFound
+            | PlanDenied
+            | PlanDigestMismatch
+            | EnvelopeMismatch
+            | ClaimLost
+            | LaunchFailed
+            | PersistenceError,
             never
           >(
             "run",

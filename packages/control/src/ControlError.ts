@@ -22,6 +22,46 @@ export class RunNotFound extends Schema.TaggedError<RunNotFound>()("/control/Run
 }) {}
 
 /**
+ * No plan with this id exists.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class PlanNotFound extends Schema.TaggedError<PlanNotFound>()("/control/PlanNotFound", {
+  code: constantCode("plan_not_found"),
+  planId: Schema.String
+}) {
+  /**
+   * The sentence an operator reads. Every renderer in the tree prints
+   * `message`, so a refusal without one does not explain the next action.
+   */
+  override get message(): string {
+    return `Plan ${this.planId} was not found. Create the plan again before approving or launching it.`
+  }
+}
+
+/**
+ * The plan was denied and cannot be launched.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class PlanDenied extends Schema.TaggedError<PlanDenied>()("/control/PlanDenied", {
+  code: constantCode("plan_denied"),
+  planId: Schema.String
+}) {
+  /**
+   * The sentence an operator reads. Every renderer in the tree prints
+   * `message`, so a denial must state how to make a later launch possible.
+   */
+  override get message(): string {
+    return `Plan ${this.planId} was denied and cannot be launched. Create and approve a new plan before running it.`
+  }
+}
+
+/**
  * No flow with this id is registered.
  *
  * @category errors
@@ -231,6 +271,8 @@ export class CredentialConflict extends Schema.TaggedError<CredentialConflict>()
  */
 export const ControlErrorSchema = Schema.Union([
   RunNotFound,
+  PlanNotFound,
+  PlanDenied,
   FlowNotFound,
   PlanDigestMismatch,
   EnvelopeMismatch,

@@ -9,7 +9,7 @@ import { Registry } from "@smthrs/registry"
 import { Effect, Layer, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import { Control } from "../src/Control.ts"
-import { ClaimLost, InvalidInput, LaunchFailed, PersistenceError } from "../src/ControlError.ts"
+import { InvalidInput, LaunchFailed, PersistenceError, PlanDenied } from "../src/ControlError.ts"
 import * as ControlExecutor from "../src/ControlExecutor.ts"
 import { ControlRuntime, type MemoryFlow } from "../src/ControlRuntime.ts"
 import type { Envelope, ListResponse, Principal, Receipt } from "../src/ControlSchema.ts"
@@ -307,7 +307,8 @@ describe("ControlLive mutations", () => {
     // Only an approval installs an envelope; a denial installs nothing.
     expect(observed.grants).toEqual([])
     expect(observed.stored.decision).toBe("denied")
-    expect(observed.started).toBeInstanceOf(ClaimLost)
+    expect(observed.started).toBeInstanceOf(PlanDenied)
+    expect((observed.started as PlanDenied).planId).toBe(observed.stored.card.planId)
   })
 
   it("answers Terminal on every run-verb resume replay after the run settled", async () => {

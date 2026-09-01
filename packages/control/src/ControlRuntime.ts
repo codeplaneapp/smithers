@@ -20,7 +20,9 @@ import {
   FlowNotFound,
   InvalidInput,
   PersistenceError,
+  PlanDenied,
   PlanDigestMismatch,
+  PlanNotFound,
   RunNotFound
 } from "./ControlError.ts"
 import type {
@@ -38,6 +40,7 @@ import type {
   SignalPayload,
   SteerMessage
 } from "./ControlSchema.ts"
+import { canonicalIssue } from "./internal/issues.ts"
 import {
   accepted,
   alreadyApplied as replayReceipt,
@@ -220,13 +223,13 @@ export interface PendingResume {
  */
 export interface Service {
   readonly plan: (input: PlanInput) => Effect.Effect<PlanOutcome, FlowNotFound | InvalidInput | PersistenceError>
-  readonly getPlan: (planId: string) => Effect.Effect<StoredPlan, RunNotFound | PersistenceError>
+  readonly getPlan: (planId: string) => Effect.Effect<StoredPlan, PlanNotFound | PersistenceError>
   readonly listPlanIds: Effect.Effect<ReadonlyArray<string>, PersistenceError>
   readonly lookupApproval: (
     target: ApprovalTarget
   ) => Effect.Effect<
     ApprovalToken,
-    PlanDigestMismatch | EnvelopeMismatch | AlreadyResolved | RunNotFound | PersistenceError
+    PlanDigestMismatch | EnvelopeMismatch | AlreadyResolved | PlanNotFound | RunNotFound | PersistenceError
   >
   /**
    * Creates the durable token for one in-run approval request, or returns the
@@ -263,7 +266,7 @@ export interface Service {
     envelope: Envelope
   ) => Effect.Effect<
     LaunchResult,
-    RunNotFound | PlanDigestMismatch | EnvelopeMismatch | ClaimLost | PersistenceError
+    PlanNotFound | PlanDenied | PlanDigestMismatch | EnvelopeMismatch | ClaimLost | PersistenceError
   >
   readonly getRun: (runId: RunId) => Effect.Effect<RunSummary, RunNotFound | PersistenceError>
   readonly listRuns: Effect.Effect<ReadonlyArray<RunSummary>, PersistenceError>
@@ -451,7 +454,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           if (flow === undefined) return yield* new FlowNotFound({ flowId: input.flowId })
           const planFingerprint = yield* Effect.try({
             try: () => canonical({ flowId: input.flowId, input: input.input }),
-            catch: (cause) => new InvalidInput({ issue: String(cause) })
+            catch: (cause) => new InvalidInput({ issue: canonicalIssue(cause) })
           })
           if (input.idempotencyKey !== undefined) {
             const prior = planKeys.get(input.idempotencyKey)
@@ -470,7 +473,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
               canonical(input.input)
               return input.input
             },
-            catch: (cause) => new InvalidInput({ issue: String(cause) })
+            catch: (cause) => new InvalidInput({ issue: canonicalIssue(cause) })
           }))
           const planId = `plan-${++planSequence}`
           const handoff = flow.plan === undefined ? undefined : yield* flow.plan(decoded, planId)
@@ -494,17 +497,19 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           return { card, created: true }
         }),
         getPlan: Effect.fn("ControlRuntime.getPlan")((planId) =>
-          Effect.fromOption(Option.fromNullishOr(plans.get(planId)), () => new RunNotFound({ runId: planId })).pipe(
+          Effect.fromOption(Option.fromNullishOr(plans.get(planId)), () => new PlanNotFound({ planId })).pipe(
             Effect.map(asStored)
           )
         ),
         listPlanIds: Effect.fn("ControlRuntime.listPlanIds")(() => Effect.sync(() => Array.from(plans.keys())))(),
         lookupApproval: Effect.fn("ControlRuntime.lookupApproval")(function*(target) {
           const tokenId = target._tag === "Plan" ? target.planId : target.requestId
-          const token = yield* Effect.fromOption(Option.fromNullishOr(tokens.get(tokenId)), () =>
-            new RunNotFound({
-              runId: target._tag === "Node" ? target.runId : target.planId
-            }))
+          const token = yield* Effect.fromOption(
+            Option.fromNullishOr(tokens.get(tokenId)),
+            () => target._tag === "Node"
+              ? new RunNotFound({ runId: target.runId })
+              : new PlanNotFound({ planId: target.planId })
+          )
           if (token.target.digest !== target.digest) {
             return yield* new PlanDigestMismatch({
               planId: tokenId,
@@ -568,7 +573,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
         launch: Effect.fn("ControlRuntime.launch")(function*(planId, requestedDigest, envelope) {
           const plan = yield* Effect.fromOption(
             Option.fromNullishOr(plans.get(planId)),
-            () => new RunNotFound({ runId: planId })
+            () => new PlanNotFound({ planId })
           )
           if (plan.card.digest !== requestedDigest) {
             return yield* new PlanDigestMismatch({
@@ -596,7 +601,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
             }
           }
           if (plan.decision !== "approved") {
-            return yield* new ClaimLost({ runId: planId })
+            return yield* new PlanDenied({ planId })
           }
           const runId = `run-${++runSequence}`
           const fence = `fence-${++fenceSequence}`

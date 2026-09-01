@@ -18,7 +18,9 @@ import {
   ClaimLost,
   EnvelopeMismatch,
   LaunchFailed,
+  PlanDenied,
   PlanDigestMismatch,
+  PlanNotFound,
   RunNotFound
 } from "../src/ControlError.ts"
 import * as ControlExecutor from "../src/ControlExecutor.ts"
@@ -189,10 +191,25 @@ export const contract = (name: string, harness: Harness): void => {
         const fence = yield* runtime.claimFence("missing").pipe(Effect.flip)
         const steer = yield* runtime.drainSteering("missing").pipe(Effect.flip)
 
-        expect(plan).toBeInstanceOf(RunNotFound)
+        expect(plan).toBeInstanceOf(PlanNotFound)
+        expect((plan as PlanNotFound).code).toBe("plan_not_found")
+        expect((plan as PlanNotFound).planId).toBe("missing")
         expect(run).toBeInstanceOf(RunNotFound)
         expect(fence).toBeInstanceOf(RunNotFound)
         expect(steer).toBeInstanceOf(RunNotFound)
+      }))
+
+    test("distinguishes a denied plan from a lost run claim", () =>
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const { card } = yield* runtime.plan({ flowId: "system/test", input: { suite: "denied" } })
+        const token = yield* runtime.lookupApproval(card.approval.target)
+        yield* runtime.resolveApproval(token, "denied", { id: "operator", kind: "test", stampedAt: 1 })
+        const denied = yield* runtime.launch(card.planId, card.digest, card.envelope).pipe(Effect.flip)
+
+        expect(denied).toBeInstanceOf(PlanDenied)
+        expect((denied as PlanDenied).code).toBe("plan_denied")
+        expect((denied as PlanDenied).planId).toBe(card.planId)
       }))
 
     test("rejects an envelope mismatch", () =>

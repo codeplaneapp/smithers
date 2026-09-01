@@ -15,6 +15,27 @@ replay, one claim scoped to runs this plane launched, and one
 `control.run.resume` entry carrying the authenticated principal and the stated
 reason.
 
+## Receipts and failures
+
+Every mutation answers a `Receipt`; `plan` returns a `PlanCard` instead. The
+typed error identifies the failed resource, so a plan that never became a run
+does not report a run failure.
+
+| Verb | Receipts | Typed failures |
+| --- | --- | --- |
+| `plan` | returns a `PlanCard`, not a receipt | `FlowNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable` |
+| `run` (`Plan`) | `Accepted`, `AlreadyApplied`, `Conflict`, `Parked` | `PlanNotFound`, `PlanDenied`, `PlanDigestMismatch`, `EnvelopeMismatch`, `ClaimLost`, `LaunchFailed`, `PersistenceError`, `Unavailable` |
+| `run` (`Resume`), `resume` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable` |
+| `approve`, `deny` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `PersistenceError`, `Unavailable` |
+| `steer` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable` |
+| `signal` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `NoMatchingWait`, `PersistenceError`, `Unavailable` |
+| `cancel` | `Accepted`, `Terminal` | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable` |
+| `list`, `watch` | a page or a stream | every member of `ControlError` |
+
+`PlanNotFound` carries `code: "plan_not_found"`; `PlanDenied` carries
+`code: "plan_denied"`. Their `planId` identifies the plan the operator must
+create or replace.
+
 A listing is bounded. `limit` is a positive integer no larger than
 `ControlSchema.maxPageSize` (500) and defaults to
 `ControlSchema.defaultPageSize` (100); a limit outside that range, and a cursor

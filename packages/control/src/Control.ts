@@ -14,7 +14,9 @@ import type {
   LaunchFailed,
   NoMatchingWait,
   PersistenceError,
+  PlanDenied,
   PlanDigestMismatch,
+  PlanNotFound,
   RunNotFound,
   Unavailable
 } from "./ControlError.ts"
@@ -31,13 +33,20 @@ import type {
   Principal,
   Receipt,
   RunId,
+  RunInputSchema,
+  SignalInputSchema,
   SignalPayload,
+  SteerInputSchema,
   SteerMessage,
   WatchFilter
 } from "./ControlSchema.ts"
 
 /**
  * Raw input submitted to planning. Decoding is owned by `ControlRuntime`.
+ *
+ * This local contract accepts `unknown` so the selected flow can decode its
+ * own input. `ControlSchema.PlanInputSchema` is the narrower JSON wire
+ * contract used by RPC clients.
  *
  * @category models
  * @since 0.1.0
@@ -56,19 +65,7 @@ export interface PlanInput {
  * @since 0.1.0
  * @slop
  */
-export type RunInput =
-  | {
-    readonly _tag: "Plan"
-    readonly planId: string
-    readonly digest: string
-    readonly envelope: Envelope
-    readonly idempotencyKey: IdempotencyKey
-  }
-  | {
-    readonly _tag: "Resume"
-    readonly runId: RunId
-    readonly idempotencyKey: IdempotencyKey
-  }
+export type RunInput = typeof RunInputSchema.Type
 
 /**
  * @category models
@@ -79,6 +76,10 @@ export type { ApprovalTarget } from "./ControlSchema.ts"
 
 /**
  * Full approval decision submitted to the authenticated server boundary.
+ *
+ * The local service may receive a runtime-stamped principal.
+ * `ControlSchema.ApprovalInputSchema` excludes it from the wire so a remote
+ * client cannot claim another identity.
  *
  * @category models
  * @since 0.1.0
@@ -95,11 +96,7 @@ export interface ApprovalInput extends ApprovalPayload {
  * @since 0.1.0
  * @slop
  */
-export interface SteerInput {
-  readonly runId: RunId
-  readonly message: SteerMessage
-  readonly idempotencyKey: IdempotencyKey
-}
+export type SteerInput = typeof SteerInputSchema.Type
 
 /**
  * Signal mutation arguments.
@@ -108,14 +105,14 @@ export interface SteerInput {
  * @since 0.1.0
  * @slop
  */
-export interface SignalInput {
-  readonly runId: RunId
-  readonly signal: SignalPayload
-  readonly idempotencyKey: IdempotencyKey
-}
+export type SignalInput = typeof SignalInputSchema.Type
 
 /**
  * Run lifecycle mutation arguments.
+ *
+ * The local contract includes the runtime-stamped principal.
+ * `ControlSchema.ReasonedMutationInputSchema` carries only the caller's reason
+ * over RPC.
  *
  * @category models
  * @since 0.1.0
@@ -155,19 +152,39 @@ export interface Service {
     input: RunInput
   ) => Effect.Effect<
     Receipt,
-    RunNotFound | PlanDigestMismatch | EnvelopeMismatch | ClaimLost | LaunchFailed | PersistenceError | Unavailable
+    | RunNotFound
+    | PlanNotFound
+    | PlanDenied
+    | PlanDigestMismatch
+    | EnvelopeMismatch
+    | ClaimLost
+    | LaunchFailed
+    | PersistenceError
+    | Unavailable
   >
   readonly approve: (
     input: ApprovalInput
   ) => Effect.Effect<
     Receipt,
-    PlanDigestMismatch | EnvelopeMismatch | AlreadyResolved | RunNotFound | PersistenceError | Unavailable
+    | PlanDigestMismatch
+    | EnvelopeMismatch
+    | AlreadyResolved
+    | PlanNotFound
+    | RunNotFound
+    | PersistenceError
+    | Unavailable
   >
   readonly deny: (
     input: ApprovalInput
   ) => Effect.Effect<
     Receipt,
-    PlanDigestMismatch | EnvelopeMismatch | AlreadyResolved | RunNotFound | PersistenceError | Unavailable
+    | PlanDigestMismatch
+    | EnvelopeMismatch
+    | AlreadyResolved
+    | PlanNotFound
+    | RunNotFound
+    | PersistenceError
+    | Unavailable
   >
   readonly steer: (
     input: SteerInput
