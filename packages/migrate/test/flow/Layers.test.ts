@@ -107,6 +107,11 @@ describe("Layers.commandsFor over a real project", () => {
 })
 
 describe("Layers.rules over a real grant store", () => {
+  it("refuses a relative root before constructing grant rules", () => {
+    expect(() => Layers.rules({ root: "../project", runStatePaths, commands }))
+      .toThrow(/migration root.*absolute.*\.\.\/project/i)
+  })
+
   it.effect("lets a unit write inside the project", () =>
     Effect.gen(function*() {
       expect(yield* permitted("fs:write", `${root}/flows/simple/flow.ts`)).toBe(true)

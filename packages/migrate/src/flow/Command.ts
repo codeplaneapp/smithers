@@ -21,6 +21,7 @@ import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import type * as Path from "effect/Path"
+import { resolve } from "node:path"
 import { make, type MigrateError } from "../MigrateError.ts"
 import * as Report from "../Report.ts"
 import * as RunState from "../RunState.ts"
@@ -149,8 +150,10 @@ export const commandsOf = (
   )
 
 /**
- * The execution id one migration takes. Stable per project and per start, so a
- * crashed run resumes rather than forking.
+ * The execution id one migration invocation takes. The direct Node composition
+ * uses an in-memory engine, so this id is intentionally unique per start and
+ * cannot imply cross-process resume. The checkpoint's pending marker is the
+ * crash-recovery path for that composition.
  *
  * @category combinators
  * @since 0.1.0
@@ -392,7 +395,9 @@ export const optionsOf = (flags: Flags, cwd: string): MigrateOptions => {
     ...(flags.verifyTest === undefined ? {} : { test: flags.verifyTest })
   }
   return {
-    root: flags.root ?? cwd,
+    // The CLI passes its positional target as both values, so an explicit path
+    // must resolve from the process rather than treating that target as a base.
+    root: resolve(flags.root ?? cwd),
     mode: flags.scan ? "scan" : flags.apply ? "apply" : "plan",
     ...(flags.seat === undefined ? {} : { seat: flags.seat }),
     ...(unsafe === undefined

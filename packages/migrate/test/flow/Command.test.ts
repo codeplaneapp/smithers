@@ -11,6 +11,7 @@ import * as Options from "@smthrs/migrate/flow/Options"
 import * as Report from "@smthrs/migrate/Report"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { resolve } from "node:path"
 import { copyFixture, hashTree, nodeLayer } from "../fixtures/helpers.ts"
 
 const flags = (overrides: Partial<Command.Flags> = {}): Command.Flags => ({
@@ -45,6 +46,12 @@ describe("Command.optionsOf", () => {
     expect(Options.reportDir(options)).toBe(".smithers-migrate")
     expect(Options.flowsDir(options)).toBe("flows")
     expect(Options.maxRepairRounds(options)).toBe(3)
+  })
+
+  it("resolves an explicit relative root at the command seam", () => {
+    expect(Command.optionsOf(flags({ root: "." }), "/ignored").root).toBe(resolve("."))
+    expect(Command.optionsOf(flags({ root: "../old" }), "/ignored").root).toBe(resolve("../old"))
+    expect(Command.optionsOf(flags({ root: "project" }), "project").root).toBe(resolve("project"))
   })
 
   it("obeys the safer of two contradictory modes", () => {

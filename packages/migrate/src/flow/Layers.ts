@@ -50,6 +50,7 @@ import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import type * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
+import { isAbsolute } from "node:path"
 import * as Scan from "../Scan.ts"
 import * as Units from "../Units.ts"
 import type * as Contract from "./Contract.ts"
@@ -194,6 +195,13 @@ export const verificationCommands = (commands: Contract.Commands): ReadonlyArray
   ])
 ]
 
+const absoluteRoot = (root: string): string => {
+  if (!isAbsolute(root)) {
+    throw new TypeError(`migration root must be absolute before grant construction, received "${root}"`)
+  }
+  return root
+}
+
 /**
  * The permission rules one migration runs under: the project tree, the
  * commands that verify it, the model calls that rewrite it, and a denial for
@@ -228,7 +236,7 @@ export const rules = (options: {
   readonly runStatePaths: ReadonlyArray<string>
   readonly commands: Contract.Commands
 }): ReadonlyArray<Permission.Rule> => {
-  const root = options.root.replace(/\/+$/, "")
+  const root = absoluteRoot(options.root).replace(/\/+$/, "")
   const allow = (action: Capability.PatternAction, resource: string): Permission.Rule =>
     new Permission.Rule({ effect: "allow", pattern: new Capability.CapabilityPattern({ action, resource }) })
   const deny = (action: Capability.PatternAction, resource: string): Permission.Rule =>
@@ -328,6 +336,7 @@ const executor = RequestExecutor.layer.pipe(
  * @since 0.1.0
  */
 export const layerNode = (config: NodeConfig) => {
+  absoluteRoot(config.root)
   const seats = Layer.effect(
     SeatResolver.SeatResolver,
     Effect.map(RequestExecutor.RequestExecutor, (request) =>
@@ -410,8 +419,9 @@ export const commandsFor = (
  * @category layers
  * @since 0.1.0
  */
-export const layerNodeScanned = (config: ScannedConfig) =>
-  Layer.unwrap(
+export const layerNodeScanned = (config: ScannedConfig) => {
+  absoluteRoot(config.root)
+  return Layer.unwrap(
     Effect.gen(function*() {
       const result = yield* Scan.scan(config.root, {
         ...(config.flowsDir === undefined ? {} : { flowsDir: config.flowsDir })
@@ -425,6 +435,7 @@ export const layerNodeScanned = (config: ScannedConfig) =>
       })
     })
   ).pipe(Layer.provide(NodeServices.layer))
+}
 
 /**
  * The cell a scripted model answers one frame with.
