@@ -73,13 +73,21 @@ exactly the zombie entry the fence exists to reject.
 
 ## Identifiers
 
-`RunId`, `SourceId`, and an `Input`'s `eventType` are non-empty and free of
-unpaired UTF-16 surrogates. SQLite binds a lone surrogate as U+FFFD, so two
-ill-formed identifiers that differ only in their surrogates would land on one
-persisted key: the second run's first event would dedupe into the first run's
-row, and a read by either id would return the same history. The schema rejects
-them, so an identifier that decodes is an identifier the store can tell apart.
-Valid astral text is ordinary text and round-trips exactly.
+`RunId`, `SourceId`, and both an `Input`'s and a committed `Entry`'s
+`eventType` are non-empty, at most 1,024 UTF-16 code units, free of unpaired
+UTF-16 surrogates, and free of NUL. SQLite binds a lone surrogate as U+FFFD, so
+two ill-formed identifiers that differ only in their surrogates would land on
+one persisted key: the second run's first event would dedupe into the first
+run's row, and a read by either id would return the same history. SQLite's
+`length()` stops at the first NUL, so a NUL-bearing identifier fails the
+column's own non-empty check and the caller is told the sink failed about an
+identifier it had just supplied. The schema rejects both, so an identifier that
+decodes is an identifier the store can tell apart. Valid astral text is
+ordinary text and round-trips exactly.
+
+`entries`, `stream`, `checkpoint`, `latestCheckpoint`, and `compact` decode the
+same schemas, so an identifier the writer refuses is refused on every read with
+`invalid_event` rather than answered with an empty page.
 
 :::warning
 Reads below a run's compaction floor fail with `compacted`. See
@@ -111,11 +119,18 @@ order does not change the answer. An exact producer retry returns `Duplicate`
 with `status: "committed"`; a reused producer sequence carrying different
 content fails `idempotency_conflict`.
 
+The persisted bytes are `JSON.stringify` semantics with object keys sorted: a
+`Date` is its ISO string, an `undefined` member is dropped, `NaN` is `null`.
+Sorting happens over the encoded JSON, never over the raw value, so
+canonicalization cannot destroy anything the encoder would have kept.
+
 Two consequences follow from comparing the persisted, redacted bytes. Two
 different secrets that redact to the same placeholder are the same event to the
-journal, and `NaN` encodes as `null`. Comparing the pre-redaction value instead
-would keep unredacted secrets resident in the in-process index, which is the
-leak this package exists to prevent.
+journal, and `NaN` and `null` are the same value. Comparing the pre-redaction
+value instead would keep unredacted secrets resident in the in-process index,
+which is the leak this package exists to prevent, and the durable re-check at
+insert can only read the persisted bytes, so a pre-redaction oracle would make
+the verdict depend on whether the in-process index still held the identity.
 
 ## `transact`, one transaction for the entry and the state it describes
 
@@ -241,21 +256,40 @@ cannot mutate another's view.
 the `changes` buffer. Run ids, source ids, and event types are limited to 1,024
 UTF-16 code units, and `Seq` and `SourceSeq` stop at
 `Number.MAX_SAFE_INTEGER - 1` so the journal can always allocate the next
-sequence. `entries` reads at most 10,000 entries in one page. These limits do
-not bound payload or meta bytes, which remain uncapped, so a small number of
-very large values can still be the memory bill.
+sequence. `entries` reads at most 10,000 entries in one page.
+
+`capacity` bounds entries, never bytes. `maxEntryBytes` is the opt-in byte
+bound: set it and an event whose encoded `payload` plus `meta` exceeds it fails
+`invalid_event` before any sequence is allocated, so a refused event leaves no
+gap. It is unset by default, because a running engine may legitimately write
+large payloads and a cap introduced under one would refuse writes that used to
+succeed; with it unset a small number of very large values is still the memory
+bill, and every one of them is replayed to each sync subscriber and
+time-travel consumer on every read.
+
 `sourceEventCache` (default `4096`) bounds the in-process producer-idempotency
 index; the database unique constraint stays authoritative, so eviction changes
-performance, not the answer. Resident memory and startup decode are
-O(`sourceEventCache`), not O(total events). Redaction traverses at most
-`Redaction.maxDepth` container edges and fails a deeper payload as
-`invalid_event` rather than overflowing the stack.
+the receipt, not the durable answer. A miss on an explicit producer sequence
+admits optimistically without a read: `emitLossy` returns `Accepted` where a
+resident entry would have returned `Duplicate`, the insert collapses onto the
+committed row through the unique index rather than doubling it, and a changed
+retry behind an evicted entry surfaces `idempotency_conflict` from `flush`
+instead of from the emit. The pre-admission read is deliberately gone: it
+deadlocked an agent's exit flush against the engine's own writer, measured at
+over 120 seconds versus about half a second without it. Resident memory and
+startup decode are O(`sourceEventCache`), not O(total events).
+
+Redaction traverses at most `Redaction.maxDepth` container edges and fails a
+deeper payload as `invalid_event` rather than overflowing the stack. The
+canonical encoder carries the same ceiling, so a value that reaches it through
+`Redaction.makeNoop()` is refused the same way.
 
 ## SQL journal
 
 `SqlJournal.layer(options)` provides the bounded telemetry writer and the inline
 durable writer over `DurableWriter`. Options are `capacity`, `overflow`, and the
-optional `batchSize`, `sourceEventCache`, `redact`, and `compaction`.
+optional `batchSize`, `sourceEventCache`, `maxEntryBytes`, `redact`, and
+`compaction`.
 `compaction` is off by default: without it the journal never deletes an entry,
 and checkpointing stays a caller-driven `checkpoint` and `compact` call. See
 [Checkpoints and compaction](/compaction).
@@ -339,7 +373,7 @@ See [Journal semantics](/concepts/journal), [Concurrency](/concepts/concurrency)
 | `Redaction.Rule` | interface | models | A textual redaction rule. |
 | `Redaction.placeholder` | const | constants | The placeholder written in place of a redacted value. |
 | `Redaction.defaultRules` | const | constants | Best-effort textual rules for credential shapes observed in real reports. |
-| `Redaction.isSensitiveKey` | const | predicates | Whether a field name names a credential, ignoring case and separators, so `api_key`, `apiKey`, and `x-api-key` are all recognised. |
+| `Redaction.isSensitiveKey` | const | predicates | Whether a field name names a credential. |
 | `Redaction.maxDepth` | const | constants | Maximum number of container edges traversed from a redaction root. |
 | `Redaction.Options` | interface | models | Options for `redact`. |
 | `Redaction.binaryWalkLimit` | const | redaction | How many bytes a view may hold, and how many own members `redact` reads off it, before it stops reading them. |

@@ -146,6 +146,35 @@ const stubbedRows = (
     keepWriter
   )
 
+/**
+ * Records every compaction-policy seeding COUNT and yields before running it.
+ *
+ * The yield opens the scheduling window the lost-count race needs: without a
+ * per-run permit both settlements pass the "is the counter seeded" check before
+ * either one answers it.
+ */
+const yieldingCounts = (seeds: Array<string>): DatabaseDecorator =>
+  Layer.merge(
+    Layer.effect(
+      SqlClient.SqlClient,
+      Effect.gen(function*() {
+        const base = yield* Effect.service(SqlClient.SqlClient)
+        return new Proxy(base, {
+          apply(target, thisArgument, argumentsList) {
+            const statement = Reflect.apply(target, thisArgument, argumentsList) as Statement.Statement<unknown>
+            if (typeof statement.compile !== "function") return statement
+            const sqlText = statement.compile()[0]
+            if (!sqlText.includes("COUNT(*) AS total")) return statement
+            return Effect.sync(() => {
+              seeds.push(sqlText)
+            }).pipe(Effect.andThen(Effect.yieldNow), Effect.andThen(statement))
+          }
+        }) as SqlClient.SqlClient
+      })
+    ),
+    keepWriter
+  )
+
 /** Parks every durable page read behind `gate`, announcing arrival once. */
 const gatedPageReads = (
   gate: Deferred.Deferred<void>,
@@ -1180,6 +1209,56 @@ describe("the compaction policy hook", () => {
               )
           }
         })),
+        Effect.scoped
+      )
+    }))
+
+  effect("serializes the policy counter across concurrent settlements", () =>
+    Effect.gen(function*() {
+      // `noteCommitted` seeds its per-run counter from a durable COUNT, and the
+      // COUNT is an awaited read. Without a per-run permit two settlements that
+      // overlapped both observed an unseeded counter, both issued the COUNT, and
+      // the later reply overwrote the newer count with a stale one: measured with
+      // `entryThreshold: 10`, ten committed events produced zero capture calls
+      // and no checkpoint. The discriminating assertion is the number of seeding
+      // COUNTs: exactly one per run, however many settlements race.
+      const seeds: Array<string> = []
+      const captured: Array<number> = []
+      yield* Effect.gen(function*() {
+        const service = yield* Journal
+        const first = yield* service.emitDurableUnfenced(input(0)).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+        const second = yield* service.emitDurableUnfenced(input(1)).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* Fiber.join(first)
+        yield* Fiber.join(second)
+        expect(seeds).toHaveLength(1)
+
+        // And the counter still reaches the threshold, which the lost count
+        // suppressed entirely. The overlapping pair is counted twice, because
+        // the seeding COUNT already saw both rows and the second settlement
+        // then added its own, so the attempt lands one commit EARLY rather than
+        // never: over-counting is the safe direction, and `policyCompact`
+        // re-seeds from a fresh COUNT so it does not accumulate.
+        yield* emitMany(service, 2, 8)
+        expect(captured).toEqual([8])
+        expect(Option.getOrThrow(yield* service.latestCheckpoint(run)).seq).toBe(8)
+      }).pipe(
+        Effect.provide(journal(
+          {
+            compaction: {
+              entryThreshold: 10,
+              capture: (_, upTo) =>
+                Effect.sync(() => {
+                  captured.push(upTo)
+                  return null
+                })
+            }
+          },
+          yieldingCounts(seeds)
+        )),
         Effect.scoped
       )
     }))

@@ -129,17 +129,78 @@ export const defaultRules: ReadonlyArray<Rule> = [
   }
 ]
 
-const sensitiveKeySuffixes = ["authorization", "cookie", "apikey", "token", "password", "secret"]
+/**
+ * Credential names this module refuses to persist, matched as suffixes of the
+ * separator-free lowercase form of a key.
+ *
+ * The list is the union of the names `packages/cli/src/Bug.ts` redacts
+ * structurally, because the journal is the PERMANENT side of that pair: a bug
+ * report is one upload an operator reviews before it leaves the machine, while
+ * `flows_journal_events.payload_json` is replayed verbatim to every sync
+ * subscriber and time-travel consumer forever. The journal redacting less than
+ * the report inverts the risk, and it did: `credential`, `credentials`, `dsn`,
+ * and `connectionString` all round-tripped through a durable row in clear.
+ *
+ * Two families are spelled out rather than reduced to a shorter word, because
+ * these are SUFFIX tests: `connectionString` does not end in `connection`, and
+ * `secretKey` does not end in `secret`. A bare `key` suffix is not on the list
+ * for the opposite reason: it would redact `monkey` and `turkey`.
+ */
+const sensitiveKeySuffixes = [
+  "authorization",
+  "cookie",
+  "apikey",
+  "token",
+  "password",
+  "secret",
+  "credential",
+  "dsn",
+  "connection",
+  "connectionstring",
+  "connectionuri",
+  "connectionurl",
+  "secretkey",
+  "privatekey",
+  "signingkey",
+  "encryptionkey",
+  "sessionkey"
+]
 
 /**
- * Whether a field name names a credential, ignoring case and separators, so
- * `api_key`, `apiKey`, and `x-api-key` are all recognised.
+ * A trailing `key` that is a word of its own.
+ *
+ * Read against the ORIGINAL key, where the separators that make `key` a word
+ * still exist: `key`, `api_key`, `x-api-key`, `signing-key`. This is the shape
+ * `packages/cli/src/Bug.ts` matches, and stopping here is deliberate. Treating
+ * a camel-case hump as a separator too, `/[a-z0-9]Key$/`, looks equivalent and
+ * is not: it redacted `idempotencyKey`, the durable identity an effect boundary
+ * replays on, out of `@smthrs/engine-store`'s journal rows. A credential-named
+ * key is covered by {@link sensitiveKeySuffixes} instead, where the word before
+ * `key` has to be one that names a secret.
+ */
+const trailingKeyWord = /(?:^|[^A-Za-z0-9])key$/i
+
+/**
+ * Whether a field name names a credential.
+ *
+ * Case and separators are ignored, so `api_key`, `apiKey`, and `x-api-key` are
+ * all recognised, one trailing plural `s` is stripped so `credentials` reads as
+ * `credential`, and a trailing `key` counts where it is a word of its own or
+ * where the word before it names a secret.
+ *
+ * The rule is a suffix test, not a substring test. `tokenizer`, `secretary`,
+ * `monkey`, and `idempotencyKey` are ordinary field names, and replacing their
+ * values would destroy data in a permanent row without protecting anything.
+ * That is the one place this rule is deliberately narrower than
+ * `packages/cli/src/Bug.ts`'s substring form, which can afford the false
+ * positives because its output is a single report an operator reads once.
  *
  * @since 0.1.0
  * @category predicates
  */
 export const isSensitiveKey = (key: string): boolean => {
-  const canonical = key.toLowerCase().replace(/[^a-z0-9]/g, "")
+  if (trailingKeyWord.test(key)) return true
+  const canonical = key.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/s$/, "")
   return sensitiveKeySuffixes.some((suffix) => canonical.endsWith(suffix))
 }
 

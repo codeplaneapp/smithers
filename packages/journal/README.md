@@ -108,18 +108,25 @@ schema, `checkpoint_invalid`, `reader_behind`, and `compacted` are the
 compaction-aware codes (they carry `checkpointSeq`), and `unknown` is reserved
 for a genuinely unclassified journal defect.
 
-**Identifiers.** `RunId`, `SourceId`, and an `Input`'s `eventType` are
-non-empty and free of unpaired UTF-16 surrogates: SQLite binds a lone surrogate
-as U+FFFD, so two ill-formed identifiers would land on one persisted key and
-destroy run isolation. Valid astral text round-trips exactly. `OwnerId.pid` is
-a non-negative integer, and an owner that is not an `OwnerId` fails
-`invalid_event` rather than degrading into `fence_lost`.
+**Identifiers.** `RunId`, `SourceId`, and both an `Input`'s and a committed
+`Entry`'s `eventType` are non-empty, at most 1,024 UTF-16 code units, free of
+unpaired UTF-16 surrogates, and free of NUL: SQLite binds a lone surrogate as
+U+FFFD, so two ill-formed identifiers would land on one persisted key and
+destroy run isolation, and SQLite's `length()` stops at the first NUL, so a
+NUL-bearing identifier fails the column's own non-empty check and reports a
+caller fault as a sink outage. Valid astral text round-trips exactly. The read
+and maintenance methods decode the same schemas, so an identifier the writer
+refuses is refused on every read too. `OwnerId.pid` is a non-negative integer,
+and an owner that is not an `OwnerId` fails `invalid_event` rather than
+degrading into `fence_lost`.
 
 **Idempotency equality.** `(runId, sourceId, sourceSeq)` is the producer
 identity. Two emissions under one identity are the same event when their event
 type and their canonically encoded, redacted `payload` and `meta` match, so key
-order does not matter. Two values that redact to the same bytes are the same
-event to the journal, and `NaN` encodes as `null`.
+order does not matter. The persisted bytes keep `JSON.stringify` semantics, a
+`Date` as its ISO string included, because keys are sorted over the ENCODED
+JSON rather than over the raw value. Two values that redact to the same bytes
+are the same event to the journal, and `NaN` and `null` are the same value.
 
 **Copy and loss semantics.** `changes` is a bounded sliding buffer sized by the
 layer's `capacity`: a slow subscriber loses entries with no error and no gap
@@ -131,12 +138,17 @@ frozen, so one subscriber cannot mutate another's view.
 queue and the size of the `changes` buffer. Run ids, source ids, and event types
 are limited to 1,024 UTF-16 code units; `Seq` and `SourceSeq` stop at
 `Number.MAX_SAFE_INTEGER - 1`; and `entries` reads at most 10,000 entries per
-page. Payload and meta bytes remain uncapped, so a small number of very large
+page. `maxEntryBytes` is the opt-in byte bound: set it and an event whose
+encoded `payload` plus `meta` exceeds it fails `invalid_event` before any
+sequence is allocated. It is unset by default, so a small number of very large
 values can still be the memory bill. Redaction fails a payload deeper than
 `Redaction.maxDepth` container edges as `invalid_event` rather than overflowing
-the stack. `sourceEventCache` bounds the in-process producer-idempotency index; the
-database unique constraint stays authoritative, so eviction changes performance,
-not the answer.
+the stack, and the canonical encoder carries the same ceiling for a caller who
+disables redaction. `sourceEventCache` bounds the in-process
+producer-idempotency index; the database unique constraint stays authoritative,
+so a miss changes the receipt, not the durable answer: an explicit producer
+sequence the index has evicted is admitted without a read and collapses onto
+the committed row at insert.
 
 ## Consistency across the package boundary
 

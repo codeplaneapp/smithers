@@ -29,7 +29,19 @@
 - Durable read failures report the new `read_failed` code instead of `unknown`,
   which is now reserved for a genuinely unclassified journal defect.
 - `payload` and `meta` are encoded with sorted object keys, so producer
-  idempotency compares JSON values rather than one serialization of them.
+  idempotency compares JSON values rather than one serialization of them. The
+  sort runs over the ENCODED JSON, so the persisted bytes keep every
+  `JSON.stringify` semantic.
+- `JournalEvent.Entry.eventType` uses the same bounded identifier as
+  `Input.eventType`. It was a bare `Schema.String`, so a consumer decoding a
+  committed row accepted event types no emit could have produced.
+- Every identifier rejects NUL. SQLite's `length()` stops at the first one, so
+  the column's own non-empty check failed and the caller was told `sink_failed`
+  about an identifier it had just supplied.
+- `entries`, `stream`, `checkpoint`, `latestCheckpoint`, and `compact` decode
+  the schemas this package publishes instead of hand-checking a subset of them.
+  A lone-surrogate run id was refused at `emit` and answered with an empty page
+  at `entries`.
 
 ### Added
 
@@ -41,6 +53,9 @@
   redactor applied at the single encode chokepoint.
 - `TestJournalOptions` forwards `sourceEventCache`, `redact`, and `compaction`,
   so the sanctioned test bundle can exercise every layer option.
+- `SqlJournalOptions.maxEntryBytes` bounds one entry's encoded bytes. It is
+  unset by default: `capacity` bounds entry COUNT, so without it a handful of
+  multi-megabyte payloads is the memory bill.
 - Package-owned documentation under `docs/`, generated into
   `docs/pages/api/journal.md` by `scripts/docs.mjs` and drift-checked by the
   `//packages/journal:docsPages` target.
@@ -52,7 +67,22 @@
   embedded JSON credential members. The bearer rule consumes the full RFC 6750
   token alphabet instead of stopping at the first `+`, `/`, or `~`.
 - `Redaction.redact` mirrors `JSON.stringify`'s `toJSON` step, so a `Date`
-  persists as its ISO string instead of `{}`.
+  persists as its ISO string instead of `{}`. The canonical encoder now runs
+  after encoding rather than over the raw redactor output, so the same `Date`
+  survives `Redaction.makeNoop()` too, and a redactor returning a cycle fails
+  `invalid_event` instead of killing the emit with a defect.
+- `Redaction.isSensitiveKey` recognises `credential`, `credentials`, `dsn`, the
+  connection-string family, a plural form of every name it knew, and a trailing
+  `key` word. The permanent journal redacted strictly less than the one-shot
+  `smithers bug` report, which inverted the risk.
+- The redacting console redacts the label `count`, `countReset`, `time`, and
+  `timeEnd` print. All four were bound straight to the delegate as if they
+  carried no output, and `timeLog` already redacted its label, so a timer could
+  never be found again under the name it was registered with.
+- The compaction policy's per-run counter is serialized. Two settlements that
+  overlapped both issued the seeding COUNT and the later reply overwrote the
+  newer count with a stale one, so ten committed events produced no compaction
+  at all.
 - A `Rule` with `replace` omitted now replaces the whole match, as its JSDoc
   always said. It used to emit `"123-45-678=[REDACTED]"` for a match containing
   no `=`, leaking every character but the last.

@@ -76,14 +76,22 @@ export const isRedacted = (logger: Logger.Logger<any, any>): boolean => TypeId i
 
 /**
  * Console methods that write caller-supplied values, mapped to whether their
- * arguments carry log output. The ones marked `false` take a label or nothing
- * at all and are forwarded untouched.
+ * arguments carry log output.
+ *
+ * Only `clear` and `groupEnd` are marked `false`, because those two take no
+ * arguments at all: there is nothing for the rules to read and binding them
+ * straight through saves a copy per call. Every other method here, `count`,
+ * `countReset`, `time`, and `timeEnd` included, accepts a caller-supplied
+ * LABEL and prints it, so a label of `api_key=sk-…` reached the terminal
+ * through all four of them. `timeLog` already redacted its label, so the pair
+ * `time` / `timeLog` also disagreed about what a timer is called; redacting all
+ * of them is what makes a label match itself again.
  */
 const consoleMethods = {
   assert: true,
   clear: false,
-  count: false,
-  countReset: false,
+  count: true,
+  countReset: true,
   debug: true,
   dir: true,
   dirxml: true,
@@ -94,8 +102,8 @@ const consoleMethods = {
   info: true,
   log: true,
   table: true,
-  time: false,
-  timeEnd: false,
+  time: true,
+  timeEnd: true,
   timeLog: true,
   trace: true,
   warn: true

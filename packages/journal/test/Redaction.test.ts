@@ -211,6 +211,98 @@ describe("Redaction", () => {
     for (const sample of bugScrubSamples) expect(Redaction.redact(sample)).not.toBe(sample)
   })
 
+  it("covers every structural key Bug.scrub redacts", () => {
+    // The textual test above covers `Bug.scrubText`. This one covers the OTHER
+    // half of packages/cli/src/Bug.ts, its `secretKey` rule
+    // `/(?:api[-_]?key|[-_]key$|^key$|token|secret|password|credential|
+    // authorization|dsn|connection)/i`, which replaces a member's value
+    // wholesale whatever it holds. The journal used to cover only a subset, so
+    // `{ credential, credentials, dsn, connectionString }` round-tripped
+    // through a permanent row in clear while the one-shot bug report scrubbed
+    // them.
+    const sensitive = [
+      "authorization",
+      "Authorization",
+      "cookie",
+      "cookies",
+      "apikey",
+      "api_key",
+      "apiKey",
+      "x-api-key",
+      "token",
+      "tokens",
+      "refresh_token",
+      "password",
+      "passwords",
+      "secret",
+      "secrets",
+      "credential",
+      "credentials",
+      "serviceCredential",
+      "dsn",
+      "databaseDsn",
+      "connection",
+      "connections",
+      "connectionString",
+      "connectionUri",
+      "connectionUrl",
+      "key",
+      "API_KEY",
+      "signing-key",
+      // Covered by the spelled-out `secretkey` / `privatekey` suffixes, not by
+      // a camel-case reading of a trailing `key`. See `ordinary` below.
+      "privateKey",
+      "secretKey"
+    ]
+    for (const key of sensitive) {
+      expect({ key, sensitive: Redaction.isSensitiveKey(key) }).toEqual({ key, sensitive: true })
+    }
+
+    // Suffix, never substring: replacing these values would destroy ordinary
+    // debugging data in a permanent row without protecting anything.
+    //
+    // `idempotencyKey` is the case that matters. Reading a camel-case hump as a
+    // separator before `key` looks equivalent to reading `-` or `_` as one, and
+    // it redacted the durable identity `@smthrs/engine-store`'s effect
+    // boundaries replay on. `publicKey` is not a secret either.
+    const ordinary = [
+      "tokenizer",
+      "secretary",
+      "monkey",
+      "turkey",
+      "keyboard",
+      "description",
+      "passwordless",
+      "idempotencyKey",
+      "publicKey"
+    ]
+    for (const key of ordinary) {
+      expect({ key, sensitive: Redaction.isSensitiveKey(key) }).toEqual({ key, sensitive: false })
+    }
+  })
+
+  it("replaces a credential-named member's value wholesale", () => {
+    expect(
+      Redaction.redact({
+        credential: "opaque-credential",
+        credentials: "opaque-credentials",
+        dsn: "opaque-dsn",
+        connectionString: "opaque-connection",
+        privateKey: "opaque-key",
+        idempotencyKey: "charge-1",
+        note: "kept"
+      })
+    ).toEqual({
+      credential: Redaction.placeholder,
+      credentials: Redaction.placeholder,
+      dsn: Redaction.placeholder,
+      connectionString: Redaction.placeholder,
+      privateKey: Redaction.placeholder,
+      idempotencyKey: "charge-1",
+      note: "kept"
+    })
+  })
+
   it("keeps every built-in textual rule global", () => {
     expect(Redaction.defaultRules.every((rule) => rule.pattern.flags.includes("g"))).toBe(true)
   })
@@ -500,6 +592,117 @@ describe("Redaction", () => {
       Effect.provide(
         journalLayer({ capacity: 8, overflow: "reject", redact: Redaction.makeNoop() })
       ),
+      Effect.scoped
+    ))
+
+  effect("redacts a credential-named member into the durable row", () =>
+    Effect.gen(function*() {
+      const journal = yield* Journal
+      const run = runId("structural-credentials")
+      yield* journal.emitDurableUnfenced(
+        input(run, sourceId("action"), "connect", {
+          credential: "opaque-credential",
+          credentials: "opaque-credentials",
+          dsn: "opaque-dsn",
+          connectionString: "opaque-connection",
+          note: "kept"
+        })
+      )
+      const page = yield* journal.entries({ runId: run, limit: 10 })
+      expect(page.entries[0]!.payload).toEqual({
+        credential: Redaction.placeholder,
+        credentials: Redaction.placeholder,
+        dsn: Redaction.placeholder,
+        connectionString: Redaction.placeholder,
+        note: "kept"
+      })
+    }).pipe(Effect.provide(journalLayer()), Effect.scoped))
+})
+
+/**
+ * The redactor and the persisted bytes are separate concerns that met when
+ * idempotency became key-order independent: the canonicalizer ran over the RAW
+ * redactor output and its result became the row, so anything the canonicalizer
+ * could not represent was destroyed in a permanent row or killed the emit as a
+ * defect.
+ */
+describe("SqlJournal persisted-value fidelity", () => {
+  const instant = "2020-01-01T00:00:00.000Z"
+  const dated = (run: RunId) => input(run, sourceId("action"), "dated", { at: new Date(instant), n: 1 })
+
+  const roundTrip = (options: SqlJournal.SqlJournalOptions, run: RunId) =>
+    Effect.gen(function*() {
+      const journal = yield* Journal
+      yield* journal.emitDurableUnfenced(dated(run))
+      yield* journal.emitLossy(dated(runId(`${run}-lossy`)))
+      yield* journal.flush
+      const durable = yield* journal.entries({ runId: run, limit: 10 })
+      const lossy = yield* journal.entries({ runId: runId(`${run}-lossy`), limit: 10 })
+      return [durable.entries[0]!.payload, lossy.entries[0]!.payload]
+    }).pipe(Effect.provide(journalLayer(options)), Effect.scoped)
+
+  effect("mirrors JSON.stringify for a Date under either shipped redactor", () =>
+    Effect.gen(function*() {
+      // Measured before the fix: with `makeNoop()` this persisted `{"at":{}}`
+      // forever, because the canonicalizer rebuilt every object from
+      // `Object.keys` and never consulted `Date.prototype.toJSON`. The two
+      // shipped redactors disagreed on a value that is not a credential at all.
+      const verbatim = yield* roundTrip(
+        { capacity: 8, overflow: "reject", redact: Redaction.makeNoop() },
+        runId("date-noop")
+      )
+      const scrubbed = yield* roundTrip({ capacity: 8, overflow: "reject" }, runId("date-default"))
+      for (const payload of [...verbatim, ...scrubbed]) {
+        expect(payload).toEqual({ at: instant, n: 1 })
+      }
+    }))
+
+  effect("reports a redactor that returns a cycle as invalid_event, and stays usable", () =>
+    Effect.gen(function*() {
+      const journal = yield* Journal
+      const failure = yield* Effect.flip(
+        journal.emitDurableUnfenced(input(runId("cyclic"), sourceId("action"), "boom", { cycle: true }))
+      )
+      expect(failure.code).toBe("invalid_event")
+      // The next emit must still work: the failure is the caller's event, not
+      // the journal's health. A defect here tore down an enclosing `transact`.
+      const receipt = yield* journal.emitDurableUnfenced(
+        input(runId("cyclic"), sourceId("action"), "next", { a: 1 })
+      )
+      expect(receipt._tag).toBe("Accepted")
+    }).pipe(
+      Effect.provide(
+        journalLayer({
+          capacity: 8,
+          overflow: "reject",
+          redact: (value) => {
+            if (typeof value === "object" && value !== null && "cycle" in (value as Record<string, unknown>)) {
+              const cycle: Record<string, unknown> = {}
+              cycle["self"] = cycle
+              return cycle
+            }
+            return value
+          }
+        })
+      ),
+      Effect.scoped
+    ))
+
+  effect("refuses a value nested past the redaction depth even with redaction disabled", () =>
+    Effect.gen(function*() {
+      // The default redactor refuses this one step earlier. `makeNoop()` skips
+      // that check, so the canonical encoder carries the same ceiling rather
+      // than recursing until the stack gives out.
+      const journal = yield* Journal
+      const failure = yield* Effect.flip(
+        journal.emitDurableUnfenced(
+          input(runId("deep"), sourceId("action"), "deep", nestedValue(Redaction.maxDepth + 2))
+        )
+      )
+      expect(failure.code).toBe("invalid_event")
+      expect(failure.message).toContain("canonicalized")
+    }).pipe(
+      Effect.provide(journalLayer({ capacity: 8, overflow: "reject", redact: Redaction.makeNoop() })),
       Effect.scoped
     ))
 })

@@ -36,26 +36,26 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as SqlError from "effect/unstable/sql/SqlError"
 import {
   Checkpoint,
-  type CheckpointOptions,
+  CheckpointOptions,
   type Compacted,
-  type CompactOptions,
+  CompactOptions,
   type DurableReceipt,
   type EmitReceipt,
+  EntriesOptions,
   type EntriesPage,
   Journal,
   JournalError,
   make as makeJournal,
-  maxEntriesLimit,
   type OverflowPolicy,
   type Service,
-  type StreamOptions
+  StreamOptions
 } from "./Journal.ts"
 import {
   type Dedupe,
   Entry,
   Input,
   makeEventId,
-  type RunId,
+  RunId,
   type Seq,
   type SourceId,
   type SourceSeq
@@ -107,8 +107,9 @@ export interface SqlJournalOptions {
    * and the sliding `changes` buffer, where a slow subscriber silently loses
    * the entries that fall out of it.
    *
-   * It bounds entries, not bytes. There is no payload byte cap, so a handful
-   * of very large payloads can still be the memory bill.
+   * It bounds entries, not bytes. Set {@link SqlJournalOptions.maxEntryBytes}
+   * to bound the size of one entry as well; with it unset a handful of very
+   * large payloads is still the memory bill.
    */
   readonly capacity: number
   /** Policy applied when the lossy admission queue is full. */
@@ -119,22 +120,46 @@ export interface SqlJournalOptions {
    * Upper bound on the in-process source-event index, the map that answers
    * producer idempotency from memory.
    *
-   * The index is a cache, never the authority. An explicit producer sequence
-   * missed by the cache is checked against `flows_journal_events` before the
-   * journal allocates or admits it, so a retry synchronously returns the
-   * durable original or fails `idempotency_conflict`. Bounding the cache keeps
-   * startup decode and resident memory O(bound) rather than O(total events ever
-   * written), mirroring
-   * Temporal's refusal to hold unbounded history in a shard
-   * (`service/history`). The separate sequence-floor maps start empty and grow
-   * only with runs and producers this layer instance touches; they are lazy,
-   * not governed by this bound.
+   * The index is a cache, never the authority, and a MISS costs a receipt, not
+   * correctness. On a miss for an explicit producer sequence the entry is
+   * admitted optimistically without any read: `emitLossy` returns `Accepted`
+   * where a resident entry would have returned `Duplicate`, and the insert
+   * collapses onto the committed row through the unique index
+   * `(run_id, source_id, source_seq)` rather than doubling it. A CHANGED retry
+   * behind an evicted entry therefore surfaces `idempotency_conflict` from
+   * `flush`, not from the emit. See `admitFromIndex` for why the read is gone:
+   * `emitLossy` is called from inside other write transactions, and the
+   * pre-admission SELECT deadlocked `@smthrs/agent`'s exit flush against the
+   * engine's own writer, measured at over 120 s versus about half a second
+   * without it.
+   *
+   * Bounding the cache keeps startup decode and resident memory O(bound) rather
+   * than O(total events ever written), mirroring Temporal's refusal to hold
+   * unbounded history in a shard (`service/history`). The separate
+   * sequence-floor maps start empty and grow only with runs and producers this
+   * layer instance touches; they are lazy, not governed by this bound.
    *
    * Idempotency compares canonical persisted JSON after redaction. Two inputs
    * that redact to the same value are therefore the same event, and JSON's
    * encoding intentionally treats `NaN` and `null` as the same `null` value.
    */
   readonly sourceEventCache?: number | undefined
+  /**
+   * Largest single entry the journal admits, measured in UTF-8 bytes of the
+   * encoded `payload` plus `meta`.
+   *
+   * Unset by default, which means unbounded: `capacity` bounds how MANY entries
+   * the admission queue and the `changes` buffer hold, never how large one is,
+   * so without this a handful of multi-megabyte payloads is the memory bill,
+   * and every one of them is replayed to each sync subscriber and time-travel
+   * consumer on every read. Set it where the journal is fed by untrusted or
+   * unbounded producers.
+   *
+   * The bound is checked after encoding and BEFORE any sequence is allocated or
+   * anything is queued, so a refused entry costs no sequence and leaves no gap.
+   * An entry over the bound fails `invalid_event`.
+   */
+  readonly maxEntryBytes?: number | undefined
   /**
    * Scrub applied to every `payload` and `meta` before it is encoded for
    * persistence.
@@ -232,6 +257,16 @@ interface RunBarrier {
    * a second compactor never observes a half-open barrier.
    */
   readonly compactionLock: Semaphore.Semaphore
+  /**
+   * Serializes the compaction policy's per-run bookkeeping.
+   *
+   * A third lock rather than a reuse of either one above: the bookkeeping ends
+   * by running a compaction, and a compaction takes `compactionLock` and
+   * `semaphore` through `withCompactionBarrier`, so counting under either of
+   * those would deadlock against the work it schedules. No admission path takes
+   * this one.
+   */
+  readonly maintenance: Semaphore.Semaphore
   /** Open while a compaction owns the run; every admission awaits it. */
   compaction: Deferred.Deferred<void> | undefined
 }
@@ -306,27 +341,69 @@ const sourceEventKey = (runId: RunId, sourceId: SourceId, sourceSeq: SourceSeq):
   `${sourceKey(runId, sourceId)}:${sourceSeq}`
 
 /**
- * Sorts the plain JSON tree used as an idempotency fingerprint.
+ * Sorts a PARSED JSON tree so two encodings of one value compare equal.
+ *
+ * The argument is always `JSON.parse` output. That precondition is the whole
+ * safety argument: parse output has no prototype `toJSON`, no cycle, and no
+ * leaf JSON cannot represent, so this walk needs none of the handling
+ * {@link Redaction.redact} carries. Running it over a raw value instead is
+ * what broke: it rebuilt objects from `Object.keys`, so `{ at: new Date(...) }`
+ * persisted as `{"at":{}}` under `Redaction.makeNoop()` while the default
+ * redactor persisted the ISO string, and a redactor returning a cycle
+ * recursed until the stack gave out and killed the emit with a defect instead
+ * of a `JournalError`.
  *
  * `@smthrs/canonical` is the repository's general-purpose implementation, but
  * journal cannot add that dependency while this release's lockfiles are frozen.
  */
-const canonicalizeFingerprint = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonicalizeFingerprint)
+const canonicalizeFingerprint = (value: unknown, depth: number): unknown => {
+  if (depth > Redaction.maxDepth) {
+    throw new RangeError(`journal value nests deeper than ${Redaction.maxDepth} containers`)
+  }
+  if (Array.isArray(value)) return value.map((element) => canonicalizeFingerprint(element, depth + 1))
   if (value === null || typeof value !== "object") return value
   const record = value as Record<string, unknown>
   return Object.fromEntries(
-    Object.keys(record).sort().map((key) => [key, canonicalizeFingerprint(record[key])])
+    Object.keys(record).sort().map((key) => [key, canonicalizeFingerprint(record[key], depth + 1)])
   )
 }
 
+/**
+ * Encodes a value as JSON, reporting anything the encoder refuses as a typed
+ * failure.
+ *
+ * The encoder's failure channel covers every value it declines, a `BigInt` and
+ * a cycle included, so nothing here has to catch a throw. What used to reach
+ * the emit as a `Die` came from the canonicalizer running BEFORE this, over a
+ * raw value it was never given the guards for; {@link encodeFingerprint} runs
+ * it after.
+ */
 const encodeJson = (value: unknown, field: string): Result.Result<string, JournalError> =>
   Schema.encodeUnknownResult(UnknownFromJsonString)(value).pipe(
     Result.mapError((cause) => error("invalid_event", `${field} must be JSON-serializable`, cause))
   )
 
+/**
+ * The persisted bytes of one field: JSON, with object members in a stable key
+ * order.
+ *
+ * Encoding happens FIRST and canonicalization runs over the parsed result, so
+ * the bytes keep exactly the `JSON.stringify` semantics they had before
+ * idempotency became key-order independent: a `Date` is its ISO string, an
+ * `undefined` member is dropped, `NaN` is `null`. Canonicalizing the raw value
+ * instead silently destroyed every one of those.
+ *
+ * Nesting is bounded at `Redaction.maxDepth`, the same ceiling the default
+ * redactor enforces one step earlier, so a value that reaches this walk through
+ * `Redaction.makeNoop()` is refused as `invalid_event` rather than exhausting
+ * the stack as a defect.
+ */
 const encodeFingerprint = (value: unknown, field: string): Result.Result<string, JournalError> =>
-  encodeJson(canonicalizeFingerprint(value), field)
+  Result.flatMap(encodeJson(value, field), (json) =>
+    Result.try({
+      try: () => JSON.stringify(canonicalizeFingerprint(JSON.parse(json), 0)),
+      catch: (cause) => error("invalid_event", `${field} could not be canonicalized`, cause)
+    }))
 
 /**
  * Whether one write is fenced on a run's persisted ownership.
@@ -362,6 +439,19 @@ const requireFence = (owner: unknown, method: string): Result.Result<Fence, Jour
 
 const decodeInput = Schema.decodeUnknownResult(Input)
 const decodeEntry = Schema.decodeUnknownEffect(Entry)
+/**
+ * The read and maintenance boundaries decode the schemas they publish.
+ *
+ * `EntriesOptions`, `StreamOptions`, `CheckpointOptions`, `CompactOptions` and
+ * `RunId` already carry every invariant these methods need, and hand-checking a
+ * subset of them here let the read side disagree with the write side about what
+ * an identifier is.
+ */
+const decodeEntriesOptions = Schema.decodeUnknownResult(EntriesOptions)
+const decodeStreamOptions = Schema.decodeUnknownResult(StreamOptions)
+const decodeCheckpointOptions = Schema.decodeUnknownResult(CheckpointOptions)
+const decodeCompactOptions = Schema.decodeUnknownResult(CompactOptions)
+const decodeRunId = Schema.decodeUnknownResult(RunId)
 
 const decodeRow = (row: JournalRow): Effect.Effect<Entry, JournalError> =>
   Effect.all({
@@ -419,8 +509,18 @@ const freezePublished = <A>(value: A): A => {
 interface ValidatedOptions {
   readonly batchSize: number
   readonly sourceEventCache: number
+  readonly maxEntryBytes: number | undefined
   readonly redact: Redaction.Redactor
 }
+
+/**
+ * UTF-8 size of the bytes an entry persists.
+ *
+ * `TextEncoder` rather than `Buffer.byteLength` because this module has no
+ * other `node:` import and the journal's browser-facing consumers bundle it.
+ */
+const encodedBytes = (encoder: TextEncoder, payloadJson: string, metaJson: string): number =>
+  encoder.encode(payloadJson).length + encoder.encode(metaJson).length
 
 const validateOptions = (options: SqlJournalOptions): Effect.Effect<ValidatedOptions, JournalError> =>
   Effect.suspend(() => {
@@ -436,12 +536,23 @@ const validateOptions = (options: SqlJournalOptions): Effect.Effect<ValidatedOpt
       return Effect.fail(error("invalid_event", "sourceEventCache must be a positive safe integer"))
     }
     if (
+      options.maxEntryBytes !== undefined &&
+      (!Number.isSafeInteger(options.maxEntryBytes) || options.maxEntryBytes <= 0)
+    ) {
+      return Effect.fail(error("invalid_event", "maxEntryBytes must be a positive safe integer"))
+    }
+    if (
       options.compaction !== undefined &&
       (!Number.isSafeInteger(options.compaction.entryThreshold) || options.compaction.entryThreshold <= 0)
     ) {
       return Effect.fail(error("invalid_event", "compaction.entryThreshold must be a positive safe integer"))
     }
-    return Effect.succeed({ batchSize, sourceEventCache, redact: options.redact ?? Redaction.make() })
+    return Effect.succeed({
+      batchSize,
+      sourceEventCache,
+      maxEntryBytes: options.maxEntryBytes,
+      redact: options.redact ?? Redaction.make()
+    })
   })
 
 const isJournalError = Schema.is(JournalError)
@@ -461,9 +572,11 @@ export const layer = (
   Layer.effect(
     Journal,
     Effect.gen(function*() {
-      const { batchSize, redact, sourceEventCache } = yield* validateOptions(options)
+      const { batchSize, maxEntryBytes, redact, sourceEventCache } = yield* validateOptions(options)
       const sql = yield* Effect.service(SqlClient.SqlClient)
       const writer = yield* DurableWriter
+      /** One encoder for the layer: constructing one per emit measured slower. */
+      const byteCounter = new TextEncoder()
 
       const queue = yield* Queue.dropping<QueuedEntry>(options.capacity)
       const changes = yield* PubSub.sliding<Entry>(options.capacity)
@@ -560,6 +673,7 @@ export const layer = (
         const created: RunBarrier = {
           semaphore: Semaphore.makeUnsafe(1),
           compactionLock: Semaphore.makeUnsafe(1),
+          maintenance: Semaphore.makeUnsafe(1),
           compaction: undefined
         }
         runBarriers.set(runId, created)
@@ -821,11 +935,22 @@ export const layer = (
             try: () => redact(validated.meta ?? null),
             catch: (cause) => error("invalid_event", "meta could not be redacted", cause)
           })
-          return {
-            validated,
-            payloadJson: yield* encodeFingerprint(redactedPayload, "payload"),
-            metaJson: yield* encodeFingerprint(redactedMeta, "meta")
+          const payloadJson = yield* encodeFingerprint(redactedPayload, "payload")
+          const metaJson = yield* encodeFingerprint(redactedMeta, "meta")
+          // Measured on the encoded bytes, and here rather than at admission,
+          // so a refused entry costs no sequence and leaves no gap in the run.
+          if (maxEntryBytes !== undefined) {
+            const bytes = encodedBytes(byteCounter, payloadJson, metaJson)
+            if (bytes > maxEntryBytes) {
+              return yield* Result.fail(
+                error(
+                  "invalid_event",
+                  `event is ${bytes} bytes, over the ${maxEntryBytes}-byte maxEntryBytes bound`
+                )
+              )
+            }
           }
+          return { validated, payloadJson, metaJson }
         })
 
       const compareSourceEvent = (
@@ -1059,24 +1184,17 @@ export const layer = (
             limit: pageOptions.limit,
             ...(pageOptions.after === undefined ? {} : { after: pageOptions.after })
           })
-          if (pageOptions.runId.length === 0) {
-            return yield* Effect.fail(error("invalid_event", "runId must not be empty"))
-          }
-          if (!Number.isSafeInteger(pageOptions.limit) || pageOptions.limit <= 0) {
-            return yield* Effect.fail(error("invalid_event", "limit must be a positive safe integer"))
-          }
-          if (pageOptions.limit > maxEntriesLimit) {
-            return yield* Effect.fail(
-              error(
-                "invalid_event",
-                `limit ${pageOptions.limit} exceeds the maximum page of ${maxEntriesLimit}`
-              )
-            )
-          }
+          // `EntriesOptions` already carries every one of these invariants: a
+          // well-formed non-empty `runId`, a `Seq` cursor, and a `limit`
+          // between 1 and `maxEntriesLimit`. Hand-checking them here let the
+          // read boundary disagree with the write boundary, and it did: a
+          // lone-surrogate run id was refused at `emit` and answered with an
+          // empty page at `entries`.
+          yield* Effect.fromResult(Result.mapError(
+            decodeEntriesOptions(pageOptions),
+            (cause) => error("invalid_event", "entries options violate the journal read contract", cause)
+          ))
           const after = pageOptions.after ?? -1
-          if (!Number.isSafeInteger(after) || after < -1) {
-            return yield* Effect.fail(error("invalid_event", "after must be a canonical sequence or undefined"))
-          }
           const rows = yield* sql<JournalRow>`
             SELECT run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
               event_type, payload_json, meta_json
@@ -1143,6 +1261,10 @@ export const layer = (
               runId: streamOptions.runId,
               ...(streamOptions.afterSequence === undefined ? {} : { afterSequence: streamOptions.afterSequence })
             })
+            yield* Effect.fromResult(Result.mapError(
+              decodeStreamOptions(streamOptions),
+              (cause) => error("invalid_event", "stream options violate the journal read contract", cause)
+            ))
             const wake = yield* subscribeRun(streamOptions.runId)
             // The cursor lives in a registered box for the stream's lifetime
             // so `compact` can see how far every live follower has read.
@@ -1814,12 +1936,10 @@ export const layer = (
             runId: checkpointOptions.runId,
             seq: checkpointOptions.seq
           })
-          if (checkpointOptions.runId.length === 0) {
-            return yield* Effect.fail(error("invalid_event", "runId must not be empty"))
-          }
-          if (!Number.isSafeInteger(checkpointOptions.seq) || checkpointOptions.seq < 0) {
-            return yield* Effect.fail(error("invalid_event", "seq must be a canonical committed sequence"))
-          }
+          yield* Effect.fromResult(Result.mapError(
+            decodeCheckpointOptions(checkpointOptions),
+            (cause) => error("invalid_event", "checkpoint options violate the journal contract", cause)
+          ))
           // The state round-trips verbatim: it is replay input, so redaction
           // deliberately does not apply, rewriting it would resume the run
           // with the wrong data. A secret that must not persist belongs in a
@@ -1894,9 +2014,10 @@ export const layer = (
       const latestCheckpoint: Service["latestCheckpoint"] = Effect.fn("Journal.latestCheckpoint")((runId: RunId) =>
         Effect.gen(function*() {
           yield* Effect.annotateCurrentSpan({ runId })
-          if (runId.length === 0) {
-            return yield* Effect.fail(error("invalid_event", "runId must not be empty"))
-          }
+          yield* Effect.fromResult(Result.mapError(
+            decodeRunId(runId),
+            (cause) => error("invalid_event", "runId violates the journal identifier contract", cause)
+          ))
           const rows = yield* sql<CheckpointRow>`
             SELECT run_id, seq, state_json, created_at_ms, compacted_at_ms
             FROM flows_journal_checkpoints
@@ -1918,9 +2039,10 @@ export const layer = (
             runId: compactOptions.runId,
             ...(compactOptions.upTo === undefined ? {} : { upTo: compactOptions.upTo })
           })
-          if (compactOptions.runId.length === 0) {
-            return yield* Effect.fail(error("invalid_event", "runId must not be empty"))
-          }
+          yield* Effect.fromResult(Result.mapError(
+            decodeCompactOptions(compactOptions),
+            (cause) => error("invalid_event", "compact options violate the journal contract", cause)
+          ))
           const compactedAtMs = yield* Clock.currentTimeMillis
           return yield* withCompactionBarrier(
             compactOptions.runId,
@@ -2086,30 +2208,53 @@ export const layer = (
        * restarted process still compacts a long pre-existing history. The
        * durable COUNT already includes the rows the caller is reporting: they
        * committed before this settlement ran.
+       *
+       * The read-modify-write runs under the run's `maintenance` permit because
+       * the seeding COUNT is an awaited SQL read. Without the permit two
+       * settlements that overlapped both observed an unseeded counter, both
+       * issued the COUNT, and the later reply overwrote the newer count with a
+       * stale one: measured with `entryThreshold: 10`, ten committed events
+       * produced zero capture calls and no checkpoint. A settlement that
+       * commits BETWEEN the seeding COUNT and the counter write is now counted
+       * twice instead, which only brings an attempt forward, and
+       * {@link policyCompact} re-seeds the counter from a fresh COUNT when it
+       * finishes, so the error does not accumulate.
+       *
+       * The permit is released before the compaction runs. Holding it across
+       * `policyCompact` would make a slow `capture` block every other
+       * settlement of the same run, which is the stall {@link settleCommit}
+       * moved this work off the allocation permit to avoid.
        */
       const noteCommitted = (runId: RunId, committed: number): Effect.Effect<void> => {
         const policy = compactionPolicy
         if (policy === undefined || committed <= 0) {
           return Effect.void
         }
-        return Effect.gen(function*() {
-          if (compactingRuns.has(runId)) {
-            return
-          }
-          const known = compactionCounts.get(runId)
-          const current = known === undefined ? yield* countEntries(runId) : known + committed
-          compactionCounts.set(runId, current)
-          if (current < policy.entryThreshold) {
-            return
-          }
-          compactingRuns.add(runId)
-          yield* Effect.ensuring(
-            policyCompact(policy, runId),
-            Effect.sync(() => {
-              compactingRuns.delete(runId)
-            })
-          )
-        }).pipe(
+        return barrierFor(runId).maintenance.withPermit(
+          Effect.gen(function*() {
+            if (compactingRuns.has(runId)) {
+              return false
+            }
+            const known = compactionCounts.get(runId)
+            const current = known === undefined ? yield* countEntries(runId) : known + committed
+            compactionCounts.set(runId, current)
+            if (current < policy.entryThreshold) {
+              return false
+            }
+            compactingRuns.add(runId)
+            return true
+          })
+        ).pipe(
+          Effect.flatMap((triggered) =>
+            triggered
+              ? Effect.ensuring(
+                policyCompact(policy, runId),
+                Effect.sync(() => {
+                  compactingRuns.delete(runId)
+                })
+              )
+              : Effect.void
+          ),
           Effect.catchCause((cause) =>
             Cause.hasInterruptsOnly(cause)
               ? Effect.failCause(cause as Cause.Cause<never>)

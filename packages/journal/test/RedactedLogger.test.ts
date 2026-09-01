@@ -29,8 +29,11 @@ const capture = (): Capture => {
     console: {
       assert: record,
       clear: ignore,
-      count: ignore,
-      countReset: ignore,
+      // `count` and the timer methods take a caller-supplied LABEL and print
+      // it, so they are recorded here like any other output method. They used
+      // to be `ignore`, which is why the leak below went unseen.
+      count: record,
+      countReset: record,
       debug: record,
       dir: record,
       dirxml: record,
@@ -41,8 +44,8 @@ const capture = (): Capture => {
       info: record,
       log: record,
       table: record,
-      time: ignore,
-      timeEnd: ignore,
+      time: record,
+      timeEnd: record,
       timeLog: record,
       trace: record,
       warn: record
@@ -811,9 +814,52 @@ describe("RedactedLogger", () => {
   it("forwards a console method that carries no output untouched", () => {
     const recorded = capture()
     const redacting = RedactedLogger.redactingConsole(recorded.console, Redaction.make())
+    // `groupEnd` and `clear` take no arguments at all, so there is nothing for
+    // the rules to read and the delegate is bound straight through.
     redacting.groupEnd()
+    redacting.clear()
     redacting.log("Bearer abcdefghijkl")
     expect(rendered(recorded)).toBe("Bearer [REDACTED_TOKEN]")
+  })
+
+  it("redacts the label a counter or a timer prints", () => {
+    // `count`, `countReset`, `time`, and `timeEnd` were bound straight to the
+    // delegate as if they carried no output, but every one of them ECHOES its
+    // caller-supplied label: `console.count("api_key=sk-abcdefgh")` prints
+    // `api_key=sk-abcdefgh: 1`. All four put a credential on the operator's
+    // terminal.
+    const secrets = ["TOKEN=dummy-secret", "api_key=sk-abcdefgh", "Bearer abcdefghijkl"]
+    for (const label of secrets) {
+      const recorded = capture()
+      const redacting = RedactedLogger.redactingConsole(recorded.console, Redaction.make())
+      redacting.count(label)
+      redacting.countReset(label)
+      redacting.time(label)
+      redacting.timeEnd(label)
+      const output = rendered(recorded)
+      expect(output).not.toContain("dummy-secret")
+      expect(output).not.toContain("sk-abcdefgh")
+      expect(output).not.toContain("abcdefghijkl")
+      expect(output).not.toContain(label)
+      expect(recorded.lines).toHaveLength(4)
+    }
+  })
+
+  it("keeps a timer's label the same value at both ends", () => {
+    // `timeLog` already redacted its label while `time` did not, so a timer
+    // registered under a raw label could never be found again under the
+    // redacted one. All four sharing the rules is what makes the pair match.
+    const recorded = capture()
+    const redacting = RedactedLogger.redactingConsole(recorded.console, Redaction.make())
+    const label = "phase token=sk-abcdefgh"
+    redacting.time(label)
+    redacting.timeLog(label)
+    redacting.timeEnd(label)
+    expect(recorded.lines.map((line) => line[0])).toEqual([
+      `phase token=${Redaction.placeholder}`,
+      `phase token=${Redaction.placeholder}`,
+      `phase token=${Redaction.placeholder}`
+    ])
   })
 
   it("wraps a logger once", () => {

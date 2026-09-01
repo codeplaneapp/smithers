@@ -16,6 +16,24 @@ import * as Schema from "effect/Schema"
 const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
 
 /**
+ * A NUL anywhere in an identifier.
+ *
+ * SQLite's `length()` counts the characters BEFORE the first NUL, and every
+ * identifier column carries `CHECK (length(...) > 0)`, so a leading-NUL run id
+ * measures zero and the write fails the constraint. Measured on this tree, an
+ * emit with a leading-NUL run id came back as `sink_failed` with a
+ * `DatabaseError` cause, which tells the caller the database is down when the
+ * real fault is the identifier it just supplied. A NUL after the first
+ * character is refused on the same terms: it makes the column's own length
+ * check disagree with the identifier's length.
+ *
+ * Built from a code point rather than written as a pattern literal: a control
+ * character in a regex is exactly the typo `no-control-regex` exists to catch,
+ * and no reader can see one in the source.
+ */
+const embeddedNul = new RegExp(String.fromCharCode(0))
+
+/**
  * Longest identifier the journal persists.
  *
  * A run id, a source id and an event type are index columns of a permanent
@@ -41,6 +59,10 @@ export const maxIdentifierLength = 1024
  * identifier the caller decoded and the identifier the database stores the
  * same value.
  *
+ * A NUL is rejected for the reason {@link embeddedNul} gives: the column's own
+ * length check cannot see past one, so the store refuses the identifier as a
+ * constraint violation and the caller is told the sink failed.
+ *
  * The empty string is rejected for a plainer reason: it names nothing, and the
  * journal used to accept it at decode and then reject it at the service, so a
  * caller could hold a "valid" identifier the next call refused.
@@ -50,14 +72,16 @@ export const maxIdentifierLength = 1024
 const identifier = Schema.String.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(maxIdentifierLength),
-  Schema.makeFilter((value: string) => !loneSurrogate.test(value), { title: "wellFormedIdentifier" })
+  Schema.makeFilter((value: string) => !loneSurrogate.test(value), { title: "wellFormedIdentifier" }),
+  Schema.makeFilter((value: string) => !embeddedNul.test(value), { title: "nulFreeIdentifier" })
 )
 
 /**
  * Schema for an identifier of one durable run.
  *
- * Between 1 and 1,024 UTF-16 code units and free of unpaired UTF-16
- * surrogates, because the store cannot tell two ill-formed identifiers apart.
+ * Between 1 and 1,024 UTF-16 code units, free of unpaired UTF-16 surrogates
+ * because the store cannot tell two ill-formed identifiers apart, and free of
+ * NUL because the store's own length check cannot see past one.
  *
  * @category schemas
  * @since 0.1.0
@@ -100,9 +124,8 @@ export type Seq = typeof Seq.Type
 /**
  * Schema for an event producer identifier.
  *
- * Between 1 and 1,024 UTF-16 code units and free of unpaired UTF-16
- * surrogates, on the same terms as `RunId`: the pair identifies a producer's
- * retries in the database.
+ * The same shape `RunId` accepts, on the same terms: the pair identifies a
+ * producer's retries in the database.
  *
  * @category schemas
  * @since 0.1.0
@@ -187,7 +210,7 @@ export class Input extends Schema.Class<Input>("@smthrs/journal/JournalEvent/Inp
   sourceSeq: Schema.optional(SourceSeq),
   /** How a collision on this event's identity is settled. Defaults to `content`. */
   dedupe: Schema.optional(Dedupe),
-  /** Non-empty, well-formed UTF-16 of at most 1,024 code units. */
+  /** Non-empty, NUL-free, well-formed UTF-16 of at most 1,024 code units. */
   eventType: identifier,
   payload: Schema.Unknown,
   meta: Schema.optional(Schema.Unknown)
@@ -206,11 +229,21 @@ export class Input extends Schema.Class<Input>("@smthrs/journal/JournalEvent/Inp
 export class Entry extends Schema.Class<Entry>("@smthrs/journal/JournalEvent/Entry")({
   runId: RunId,
   seq: Seq,
+  /**
+   * Derived by {@link makeEventId} from the other three identity members, never
+   * supplied by a caller, so it carries no check of its own.
+   */
   eventId: Schema.String,
   sourceId: SourceId,
   sourceSeq: SourceSeq,
   emittedAtMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  eventType: Schema.String,
+  /**
+   * The same bounded identifier `Input.eventType` accepts. It used to be a bare
+   * `Schema.String` here, so a consumer decoding an `Entry` accepted an empty,
+   * over-long, NUL-bearing, or ill-formed-UTF-16 event type that no emit could
+   * ever have produced.
+   */
+  eventType: identifier,
   payload: Schema.Unknown,
   meta: Schema.Unknown
 }) {}

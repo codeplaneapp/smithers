@@ -7,8 +7,18 @@ import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as Statement from "effect/unstable/sql/Statement"
 import { EntriesOptions, Journal, JournalError, maxEntriesLimit } from "../src/Journal.ts"
-import { Entry, Input, makeEventId, type RunId, type Seq, type SourceId, type SourceSeq } from "../src/JournalEvent.ts"
+import {
+  Entry,
+  Input,
+  makeEventId,
+  maxIdentifierLength,
+  type RunId,
+  type Seq,
+  type SourceId,
+  type SourceSeq
+} from "../src/JournalEvent.ts"
 import * as Migrations from "../src/Migrations.ts"
+import type { OwnerId } from "../src/OwnerId.ts"
 import * as SqlJournal from "../src/SqlJournal.ts"
 
 const runId = (value: string): RunId => value as RunId
@@ -1086,19 +1096,18 @@ describe("Journal", () => {
       { discard: true }
     ))
 
-  effect("accepts a multi-megabyte payload on both channels: there is no byte cap", () =>
+  effect("accepts a multi-megabyte payload when no byte cap is configured", () =>
     runJournal(
       Effect.gen(function*() {
-        // `capacity` bounds the *number* of queued events, never their size, and
-        // neither `prepare` nor `encodeJson` imposes a byte limit. One event can
-        // therefore be arbitrarily large. This case pins that behaviour as it is
-        // today — accepted and round-tripped verbatim — rather than asserting a
-        // limit that does not exist.
-        //
-        // Whether the journal should cap payload bytes is an open contract
-        // question for the maintainers: a row this size is replayed to every
-        // sync subscriber and time-travel consumer, so the cost is paid on every
-        // read, not just the write. See the audit's `SqlJournal.ts` P1 finding.
+        // `capacity` bounds the NUMBER of queued events, never their size, so
+        // one event can be arbitrarily large unless the layer sets
+        // `maxEntryBytes`. That option is off by default because a durable
+        // engine already in flight may legitimately write large payloads, and a
+        // cap introduced under it would refuse writes that used to succeed. The
+        // cost of leaving it off is real and is stated on the option: a row this
+        // size is replayed to every sync subscriber and time-travel consumer, so
+        // it is paid on every read, not just the write. The `maxEntryBytes`
+        // cases below pin the bounded contract.
         const journal = yield* Journal
         const run = runId("huge-payload")
         const huge = "x".repeat(5 * 1024 * 1024)
@@ -2039,4 +2048,144 @@ describe("span attributes", () => {
       })
     )
   })
+})
+
+/**
+ * The read boundary decodes the schemas the package publishes.
+ *
+ * `EntriesOptions`, `StreamOptions`, `CheckpointOptions`, `CompactOptions` and
+ * `RunId` already carry the non-empty, well-formed, bounded contract, but the
+ * service used to hand-check a subset of it: a lone-surrogate run id was
+ * refused at `emit` and answered with an empty page at `entries`, so a caller
+ * could read with an identifier the writer would never accept.
+ */
+describe("SqlJournal read boundaries", () => {
+  const owner: OwnerId = { hostId: "host", pid: 1, nonce: "nonce" }
+  const illFormed = runId("\uD800")
+
+  for (
+    const [name, bad] of [
+      ["empty", runId("")],
+      ["lone-surrogate", illFormed],
+      ["over-long", runId("r".repeat(maxIdentifierLength + 1))]
+    ] as const
+  ) {
+    effect(`refuses an ${name} runId on every read and maintenance method`, () =>
+      runJournal(
+        Effect.gen(function*() {
+          const journal = yield* Journal
+          const codes = yield* Effect.all([
+            Effect.flip(journal.entries({ runId: bad, limit: 10 })),
+            Effect.flip(Stream.runCollect(journal.stream({ runId: bad }))),
+            Effect.flip(journal.latestCheckpoint(bad)),
+            Effect.flip(journal.checkpoint({ runId: bad, seq: 0 as Seq, state: null }, owner)),
+            Effect.flip(journal.compact({ runId: bad }, owner))
+          ])
+          expect(codes.map((failure) => (failure as JournalError).code)).toEqual([
+            "invalid_event",
+            "invalid_event",
+            "invalid_event",
+            "invalid_event",
+            "invalid_event"
+          ])
+        })
+      ))
+  }
+
+  effect("refuses a NUL-bearing identifier as a caller fault, not a sink outage", () =>
+    runJournal(
+      Effect.gen(function*() {
+        // SQLite's `length()` stops at the first NUL, so the column's own
+        // `CHECK (length(run_id) > 0)` refused this write and the caller was
+        // told `sink_failed`: the database looked broken because of an
+        // identifier the caller had just supplied.
+        const journal = yield* Journal
+        const nul = String.fromCharCode(0)
+        const failures = yield* Effect.all([
+          Effect.flip(journal.emitDurableUnfenced(input(runId(`${nul}run`), sourceId("s"), "e", null))),
+          Effect.flip(journal.emitDurableUnfenced(input(runId("run"), sourceId(`${nul}s`), "e", null))),
+          Effect.flip(journal.emitDurableUnfenced(input(runId("run"), sourceId("s"), `${nul}e`, null)))
+        ])
+        for (const failure of failures) expect(failure.code).toBe("invalid_event")
+      })
+    ))
+
+  effect("accepts a well-formed astral identifier end to end", () =>
+    runJournal(
+      Effect.gen(function*() {
+        // The well-formedness check must refuse only UNPAIRED surrogates. A
+        // valid pair is ordinary text the store round-trips.
+        const journal = yield* Journal
+        const run = runId("run-\u{1F600}")
+        yield* journal.emitDurableUnfenced(input(run, sourceId("source-\u{1F600}"), "step.\u{1F600}", { ok: true }))
+        const page = yield* journal.entries({ runId: run, limit: 10 })
+        expect(page.entries.map((entry) => [entry.runId, entry.sourceId, entry.eventType])).toEqual([
+          [run, "source-\u{1F600}", "step.\u{1F600}"]
+        ])
+      })
+    ))
+})
+
+/**
+ * `capacity` bounds how MANY entries the queue and the `changes` buffer hold,
+ * never how large one is. `maxEntryBytes` is the opt-in byte bound; it is off by
+ * default so a running engine that legitimately writes large payloads is not
+ * refused by an upgrade.
+ */
+describe("SqlJournal maxEntryBytes", () => {
+  const run = runId("bounded")
+  // `{"blob":"…"}` around the string: 11 bytes of envelope for the payload plus
+  // the 4 bytes of `null` meta.
+  const envelopeBytes = 15
+  const cap = envelopeBytes + 64
+
+  const withCap = <A, E>(body: Effect.Effect<A, E, Journal | Scope.Scope>) =>
+    body.pipe(
+      Effect.provide(journalLayer({ capacity: 16, overflow: "reject", maxEntryBytes: cap })),
+      Effect.scoped
+    )
+
+  for (const [name, bytes] of [["zero", 0], ["fractional", 1.5]] as const) {
+    effect(`refuses a ${name} maxEntryBytes at layer construction`, () =>
+      Effect.gen(function*() {
+        const failure = yield* Effect.flip(
+          Effect.scoped(Effect.provide(
+            Effect.service(Journal),
+            journalLayer({ capacity: 16, overflow: "reject", maxEntryBytes: bytes })
+          ))
+        )
+        expect((failure as JournalError).code).toBe("invalid_event")
+        expect((failure as JournalError).message).toContain("maxEntryBytes")
+      }))
+  }
+
+  effect("accepts an entry at the bound and refuses the next byte on both channels", () =>
+    withCap(
+      Effect.gen(function*() {
+        const journal = yield* Journal
+        const atBound = "x".repeat(cap - envelopeBytes)
+        const overBound = `${atBound}x`
+
+        expect((yield* journal.emitDurableUnfenced(input(run, sourceId("durable"), "fits", { blob: atBound })))._tag)
+          .toBe("Accepted")
+        expect((yield* journal.emitLossy(input(run, sourceId("lossy"), "fits", { blob: atBound })))._tag)
+          .toBe("Accepted")
+        yield* journal.flush
+
+        const durable = yield* Effect.flip(
+          journal.emitDurableUnfenced(input(run, sourceId("durable"), "over", { blob: overBound }))
+        )
+        const lossy = yield* Effect.flip(journal.emitLossy(input(run, sourceId("lossy"), "over", { blob: overBound })))
+        for (const failure of [durable, lossy]) {
+          expect(failure.code).toBe("invalid_event")
+          expect(failure.message).toContain("maxEntryBytes")
+        }
+
+        // The bound is checked before allocation, so a refused entry costs no
+        // sequence: the next accepted event takes the one the refusal would
+        // have consumed.
+        const next = yield* journal.emitDurableUnfenced(input(run, sourceId("durable"), "after", { blob: "y" }))
+        expect(next).toMatchObject({ _tag: "Accepted", seq: 2 })
+      })
+    ))
 })
