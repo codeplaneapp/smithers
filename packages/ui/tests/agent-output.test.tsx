@@ -40,6 +40,33 @@ describe("parseAgentOutput", () => {
     });
   });
 
+  test("treats a null tool error as absent and renders the successful output", () => {
+    const model = parseAgentOutput({
+      toolCalls: [
+        { toolCallId: "call-null", toolName: "read", output: { content: "actual output" }, error: null },
+      ],
+    });
+
+    expect(model?.toolCalls[0]).toEqual({
+      id: "call-null",
+      name: "read",
+      state: "output-available",
+      result: { content: "actual output" },
+    });
+    const html = renderToStaticMarkup(<AgentOutput model={model!} />);
+    expect(html).toContain("Done");
+    expect(html).not.toContain(">null<");
+  });
+
+  test("maps interrupted terminal tool states to denied even when partial output exists", () => {
+    for (const status of ["cancelled", "canceled", "aborted", "interrupted", "timeout", "timed-out"]) {
+      const model = parseAgentOutput({
+        toolCalls: [{ toolCallId: status, toolName: "shell", status, output: "partial output" }],
+      });
+      expect(model?.toolCalls[0]?.state).toBe("output-denied");
+    }
+  });
+
   test("accepts snake-case and JSON-encoded calls while dropping raw thinking fields", () => {
     const model = parseAgentOutput({
       output: "Working",

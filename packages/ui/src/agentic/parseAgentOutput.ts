@@ -126,7 +126,12 @@ function reasoningSummaryText(record: UnknownRecord): string | undefined {
   return texts.length ? texts.join("\n\n") : undefined;
 }
 
-function normalizeToolState(value: unknown, call: UnknownRecord, streaming: boolean): ToolCallState {
+function normalizeToolState(
+  value: unknown,
+  result: unknown | undefined,
+  error: unknown | undefined,
+  streaming: boolean,
+): ToolCallState {
   const state = typeof value === "string" ? value.toLowerCase().replaceAll("_", "-") : "";
   if (
     state === "input-streaming" ||
@@ -146,11 +151,15 @@ function normalizeToolState(value: unknown, call: UnknownRecord, streaming: bool
     return "output-available";
   }
   if (["error", "failed", "failure"].includes(state)) return "output-error";
-  if (["denied", "rejected"].includes(state)) return "output-denied";
-  if (call.error !== undefined || call.errorText !== undefined || call.error_text !== undefined) {
-    return "output-error";
+  if (
+    ["denied", "rejected", "cancelled", "canceled", "aborted", "interrupted", "timeout", "timed-out"].includes(
+      state,
+    )
+  ) {
+    return "output-denied";
   }
-  if (call.result !== undefined || call.output !== undefined) return "output-available";
+  if (error !== undefined) return "output-error";
+  if (result !== undefined) return "output-available";
   return streaming ? "running" : "input-available";
 }
 
@@ -176,6 +185,10 @@ function formatError(value: unknown): string {
   }
 }
 
+function normalizeOptionalError(value: unknown): unknown | undefined {
+  return value === null ? undefined : value;
+}
+
 function parseToolCall(
   value: unknown,
   index: number,
@@ -192,17 +205,14 @@ function parseToolCall(
   const matchedResult = resultById.get(id);
   const args = value.input ?? value.args ?? value.arguments ?? functionCall?.arguments;
   const result = value.result ?? value.output ?? matchedResult?.result ?? matchedResult?.output;
-  const error = value.errorText ?? value.error_text ?? value.error ?? matchedResult?.error;
+  const error = normalizeOptionalError(value.errorText ?? value.error_text ?? value.error ?? matchedResult?.error);
   const durationMs =
     readNumber(value, ["durationMs", "duration_ms"]) ??
     (matchedResult ? readNumber(matchedResult, ["durationMs", "duration_ms"]) : undefined);
   const state = normalizeToolState(
     value.state ?? value.status ?? matchedResult?.state ?? matchedResult?.status,
-    {
-      ...value,
-      ...(result === undefined ? {} : { result }),
-      ...(error === undefined ? {} : { error }),
-    },
+    result,
+    error,
     streaming,
   );
   return {
