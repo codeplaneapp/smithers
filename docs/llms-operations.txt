@@ -796,26 +796,29 @@ How to back up a durable Smithers store, verify the backup, and restore it after
 | `objects/<xx>/<digest>` | the content-addressed artifact blobs | copied after the database snapshot, digest-verified during the copy |
 | `manifest.json` | the database digest and size, the applied migration ladder, and every blob digest | written last, so its presence marks a complete backup |
 
-The order matters. Artifacts are published to the store before anything references them, and the blob walk runs after the database snapshot, so every digest the snapshot references is in the backup. A blob whose bytes no longer hash to its address fails the backup instead of being captured; repair the store before backing it up.
+The order matters. The backup holds a heartbeat-backed artifact lease while it snapshots the database and copies blobs. Publication may continue, but garbage-collection deletion is fenced, so a digest referenced by the frozen database cannot disappear during the copy. The backup decodes every cache, attempt-boundary, and checkpoint root from that frozen snapshot and refuses success if any referenced blob is absent. A blob whose bytes no longer hash to its address also fails the backup; repair the store before backing it up.
 
 ### Taking a backup
 
-Backups are hot. `VACUUM INTO` reads one consistent snapshot while writers keep committing; nothing is paused and no lock is held against the engine. Writes that commit after the snapshot's read transaction starts are not in the backup.
+Backups are hot. `VACUUM INTO` reads one consistent snapshot while database writers keep committing; the engine is not paused. Writes that commit after the snapshot's read transaction starts are not in the backup. Artifact publication may continue, while sweep deletion waits for the backup lease to end.
 
 ```sh
 node scripts/flows-backup.mjs backup <database-file> <backup-directory> [objects-directory]
 ```
 
-The backup directory must be empty or absent. From code, compose `DisasterRecovery.backup` over the existing layers: `SqlClient` on the live database, `FileSystem`, and `Crypto`.
+The backup directory must be empty or absent. From code, compose `DisasterRecovery.backup` over the existing layers: `SqlClient` on the live database, `FileSystem`, and `Crypto`. The required `snapshotDatabaseLayer` opens the frozen `VACUUM INTO` file for root inspection; it must use the same supported SQLite host adapter.
 
 ```ts
 import { DisasterRecovery } from "@smthrs/engine-store"
+import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as Effect from "effect/Effect"
 
 const program = Effect.gen(function*() {
   return yield* DisasterRecovery.backup({
     directory: "/backups/2026-08-13T12-00",
-    objectsDirectory: "/srv/flows/.flows/objects"
+    objectsDirectory: "/srv/flows/.flows/objects",
+    snapshotDatabaseLayer: (databaseFile) =>
+      NodeDatabase.layer({ filename: databaseFile })
   })
 })
 ```

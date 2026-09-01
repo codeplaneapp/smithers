@@ -5867,7 +5867,7 @@ Functions are the subtle part. An unannotated mapper, continuation, or flow
 body receives a _process-local_ `sha256-source-ephemeral/v4` identity, because
 JavaScript cannot inspect closure state: two runs of the same program give the
 same body two different digests. Only `Node.capture` produces the
-cross-process-stable `sha256-source-captures/v3` identity, by folding the
+cross-process-stable `sha256-source-captures/v4` identity, by folding the
 canonicalized inert values a function closes over into its digest. A step whose
 result must survive a restart therefore has to declare its captures.
 
@@ -5977,7 +5977,7 @@ Pure effect declarations used to describe flow read and write envelopes.
 | `Declaration` (interface) | models | A normalized description of the resources a flow or step may read and write. |
 | `make` (const) | constructors | Constructs a deterministic effect declaration. |
 | `MakeOptions` (interface) | models | Input accepted by `make`. |
-| `narrow` (const) | validation | ") && path.startsWith(envelope.slice(0, -2))) ||     (envelope.endsWith("*") && path.startsWith(envelope.slice(0, -1))) } |
+| `narrow` (const) | validation | Verifies that a step declaration stays within an enclosing flow envelope. |
 | `NarrowResult` (type) | models | A result of checking that a step declaration narrows a flow envelope. |
 | `overlaps` (const) | analysis | Returns the concrete or narrower write declarations shared by two effect declarations. |
 | `sealed` (const) | constructors | Returns a sealed, hermetic copy of an effect declaration. |
@@ -5993,6 +5993,7 @@ Calling a flow constructs a `FlowCall` node. It never evaluates the flow body; g
 | `agent` (const) | constructors | Alias for `make`. |
 | `annotate` (const) | combinators | Attaches one typed annotation to a flow, returning a fresh flow. |
 | `Any` (interface) | utility | Marker-only existential type for heterogeneous collections of flows. |
+| `BodyDeclaration` (interface) | models | The seat, collaborator, and prompt declaration a body-backed flow records. |
 | `Error` (type) | utility | Extracts the error type of a flow. |
 | `Flow` (interface) | models | A callable flow declaration. |
 | `FlowError` (class) | errors | A typed flow construction failure. |
@@ -6238,6 +6239,9 @@ import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 | Import | Source | Platform |
 | --- | --- | --- |
 | `@smthrs/database` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/index.ts) | any |
+| `@smthrs/database/DurableWriter` | [src/DurableWriter.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/DurableWriter.ts) | any |
+| `@smthrs/database/DatabaseMetrics` | [src/DatabaseMetrics.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/DatabaseMetrics.ts) | any |
+| `@smthrs/database/Migrations` | [src/Migrations.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/Migrations.ts) | any |
 | `@smthrs/database/UnsupportedBackend` | [src/UnsupportedBackend.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/UnsupportedBackend.ts) | any |
 | `@smthrs/database/node/NodeDatabase` | [src/node/NodeDatabase.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/node/NodeDatabase.ts) | Node |
 | `@smthrs/database/cloudflare/DurableObjectDatabase` | [src/cloudflare/DurableObjectDatabase.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/cloudflare/DurableObjectDatabase.ts) | Cloudflare Workers |
@@ -10987,7 +10991,7 @@ The checklist:
 | `answers-a-ping` | a declared `ping` answers while the session is open |
 | `signals-a-running-command` | a declared `kill` STOPS a live process |
 
-The kill check watches the process, not the call. A `kill` that returns success and leaves the command running satisfies the type and leaks a process inside the sandbox for every cancelled action, so the check waits for `runs` to stop and reports `the command was still running after the signal` when it does not. How it stopped is not the subject: a provider that reports a signalled process as a failed `exitCode` is as conforming as one that reports a status. `Commands.stopsWithin` bounds the wait, defaulting to `ProviderConformance.defaultStopsWithin` (5 seconds).
+The kill check watches the process, not the call. A `kill` that returns success and leaves the command running satisfies the type and leaks a process inside the sandbox for every cancelled action, so the check waits for `runs` to stop and reports `the command was still running after the signal` when it does not. How it stopped is not the subject: a provider that reports a signalled process as a failed `exitCode` is as conforming as one that reports a status. `Commands.stopsWithin` bounds the wait, defaulting to `ProviderConformance.defaultStopsWithin` (5 seconds). The handle is only the wrapper, though, and a shell that dies while its child lives on satisfies every observation the handle allows, so a fixture may also name `Commands.survivor`: a command that exits zero while the signalled command's work is still alive. It runs in the same session after the exit is observed, and a zero exit is the violation `the command's work was still running after its handle reported it stopped`.
 
 The checks run through `RemoteChildProcessSpawner.layer`, because a provider that satisfies the interface but not the adapter is of no use to a caller, and each check gets a fresh session so a check that leaves one unusable cannot decide the next. The optional capabilities are checked only when the provider declares them: an absent `ping` or `kill` is a documented absence, not a defect.
 
@@ -11053,9 +11057,10 @@ What `layerHost` deliberately does not do is what `SandboxSupervision` does for 
 
 | Export | Kind | Notes |
 | --- | --- | --- |
-| `CheckOptions` | interface | session key, command fixture, and declared `kill` / `ping` capabilities |
+| `CheckOptions` | interface | session key, command fixture, declared `kill` / `ping` capabilities, and `checkTimeout`, the wall-clock deadline that convicts a hung check under any clock |
 | `check` | function | returns all violations of the session and delegated spawn contracts |
-| `posixCommands` | const | default `Commands` fixture for POSIX-shell sessions; sets `shell: true` |
+| `posixCommands` | const | the `Commands` fixture shape for POSIX-shell sessions; sets `shell: true` |
+| `uniquePosixCommands` | function | the fixture `check` actually runs by default: the same shape with a per-call sleep duration, so concurrent suites on one host never mistake each other's fixture for a survivor |
 
 ```ts
 import { SandboxConformance } from "@smthrs/sandbox"
@@ -11151,13 +11156,13 @@ const provider = KubernetesSandbox.make({
 
 Commands run through `kubectl exec` under the guest `sh`, in the requested `cwd` with the requested environment exported. Files travel through the same channel as base64: a read runs guest `base64`, a write pipes base64 into `base64 -d` on the exec's stdin after `mkdir -p` of the parent, and "file contents cross the text boundary as base64 and remain byte exact". `kill` is the `ContainerSandbox` design, a pidfile per command and a second exec that signals descendants before the recorded pid. `ping` is `kubectl exec <pod> -- true`.
 
-Isolation is the cluster's, not the provider's: the image, the service account, and the namespace's policies decide what a Pod can reach, and the provider only forwards the shaping options above. The image must carry `sh` and `base64`. The Ready timeout is fixed. The real-backend suite runs against the `orbstack` context and skips wherever `kubectl cluster-info` does not answer there.
+Isolation is the cluster's, not the provider's: the image, the service account, and the namespace's policies decide what a Pod can reach, and the provider only forwards the shaping options above. The image must carry `sh`, `env`, and `base64`. The Ready timeout is fixed. The real-backend suite runs against the `orbstack` context and skips wherever `kubectl cluster-info` does not answer there.
 
 #### JustBashSandbox
 
 | Export | Kind | Notes |
 | --- | --- | --- |
-| `JustBashLike` | interface | the structural slice of a just-bash interpreter: `run(command, { cwd, env })` resolving to `{ stdout, stderr, exitCode }` |
+| `JustBashLike` | interface | the structural slice of a just-bash interpreter, matching the real `Bash.exec(commandLine, options)`: `cwd`, `env`, `stdin` with `stdinKind: "bytes"`, resolving to `{ stdout, stderr, exitCode }` |
 | `make` | constructor | builds a `Sandbox.Provider` whose machines are subdirectories of `root` (default `/workspace`) in one virtual filesystem; `bash` and `fs` are required |
 
 ```ts
@@ -11170,9 +11175,9 @@ const provider = JustBashSandbox.make({
 })
 ```
 
-`acquire` creates `root/<slug>` through the injected `FileSystem` and removes it, recursively, when the scope closes. Commands go to `bash.run` with the session workdir as `cwd` and the defined entries of the spawn environment; reads, writes, and the native `files` operations (`exists`, `stat`, `readDirectory`, `makeDirectory`, `remove`, `rename`, `realPath`, `readLink`, with relative paths rooted at the workdir) go to the injected `FileSystem`. The caller must mount the interpreter and that service on the same tree: "In a browser this normally means just-bash and `BrowserFileSystem` both view the same ZenFS volume." `ping` always succeeds. There is no machine to reattach; a same-key acquire recreates the directory with a recursive `makeDirectory`, which leaves whatever the mounted tree already holds in place.
+`acquire` creates `root/<slug>` through the injected `FileSystem` and removes it, recursively, when the scope closes. Commands go to `bash.exec` with the session workdir as `cwd` (a relative spawn `cwd` is rooted under it), the defined entries of the spawn environment, and any spawn `stdin` rendered as a latin1 string under `stdinKind: "bytes"`, the byte representation the interpreter documents; reads, writes, and the native `files` operations (`exists`, `stat`, `readDirectory`, `makeDirectory`, `remove`, `rename`, `realPath`, `readLink`, with relative paths rooted at the workdir) go to the injected `FileSystem`. The caller must mount the interpreter and that service on the same tree: "In a browser this normally means just-bash and `BrowserFileSystem` both view the same ZenFS volume." `ping` always succeeds. There is no machine to reattach; a same-key acquire recreates the directory with a recursive `makeDirectory`, which leaves whatever the mounted tree already holds in place.
 
-"This provider is a workspace boundary, not a security boundary. An interpreted command can address anything its shared virtual filesystem permits." Runs are serialized behind one permit, because just-bash has one mutable filesystem view. A spawn completes before it returns, stdout and stderr each replay at most one chunk, and `isRunning` is already `false` by the time a caller can observe the adapted handle. There is no stdin, no signal delivery, no separately spawned process pipeline, and no incremental output, so sessions omit `kill`. The suite runs against an in-memory tree and a scripted interpreter; nothing here is proven against the real just-bash package.
+"This provider is a workspace boundary, not a security boundary. An interpreted command can address anything its shared virtual filesystem permits." Runs are serialized behind one permit, because just-bash has one mutable filesystem view. A spawn completes before it returns, stdout and stderr each replay at most one chunk, and `isRunning` is already `false` by the time a caller can observe the adapted handle. There is no signal delivery, no separately spawned process pipeline, and no incremental output, so sessions omit `kill` and the conformance kill check is skipped for them. The suite runs the interpreter as a real shell over the same real directory the injected `FileSystem` serves, and the slice is proven assignable from a real just-bash 3.2.0 `Bash` instance, with a negative control against the old shape.
 
 #### MicrosandboxSandbox
 
@@ -11196,9 +11201,9 @@ const provider = MicrosandboxSandbox.make({
 })
 ```
 
-The machine name is `smthrs-msb-<slug>`. `acquire` configures the builder and calls `create`; when the SDK answers `sandboxAlreadyExists` it fetches the handle and connects when the machine is running or starts it (detached, for sticky sessions) when it is stopped. "Machine creation is registered as a scoped resource before guest setup, so a microVM that boots but cannot prepare its workspace is stopped." `ephemeral` persistence, the default, stops the machine when the scope closes; `sticky` "deliberately leaves it running so the next acquire of the same session key can reconnect", and only stops a sticky machine it created but could not prepare. Commands run through `execStreamWith(shell, ["-lc", command])` with the workdir applied per execution, "because Microsandbox validates a builder workdir before the selected image has booted", and the single-drain handle is collected exactly once. Writes use the SDK's byte-safe `fs().write`; reads run guest `base64` and decode it, "because the required SDK read operation is UTF-8 text only". `ping` reads `/etc/hostname`.
+The machine name is `smthrs-msb-<slug>`. `acquire` configures the builder and calls `create`; when the SDK answers `sandboxAlreadyExists` it fetches the handle and connects when the machine is running or starts it (detached, for sticky sessions) when it is stopped. "Machine creation is registered as a scoped resource before guest setup, so a microVM that boots but cannot prepare its workspace is stopped." `ephemeral` persistence, the default, stops the machine when the scope closes; `sticky` "deliberately leaves it running so the next acquire of the same session key can reconnect", and only stops a sticky machine it created but could not prepare. Commands run through `execStreamWith(shell, ["-c", command])` with the workdir applied per execution, "because Microsandbox validates a builder workdir before the selected image has booted", and the single-drain handle is collected exactly once; output comes back through the byte-typed `stdoutBytes()`/`stderrBytes()`. Writes use the SDK's byte-safe `fs().write` and reads its byte-typed `fs().read`; standard input rides the exec builder's own `stdinBytes` channel. `ping` reads `/etc/hostname`.
 
-`image` and `snapshot` are exclusive; naming both fails with `unavailable` before any vendor call. Output is collected after the command finishes: one stdout chunk, one stderr chunk, no streaming, no stdin, and no `kill`. A stopped ephemeral machine is gone with its files. The real-backend suite runs the conformance check against a real microVM only where the `microsandbox` binary answers `--version`.
+`image` and `snapshot` are exclusive; naming both fails with `unavailable` before any vendor call. Output is collected after the command finishes: one stdout chunk, one stderr chunk, no streaming, and no `kill`. A stopped ephemeral machine is gone with its files. The real-backend suite runs the conformance check against a real microVM only where the `microsandbox` binary answers `--version`.
 
 #### VercelSandbox
 
@@ -11225,7 +11230,7 @@ const provider = VercelSandbox.make({
 
 The machine name is `smthrs-<slug>`, lowercased. `acquire` calls `Sandbox.getOrCreate` with `persistent: true` and `resume: true`, so a name that already exists is resumed with its filesystem, and the scope finalizer calls `stop()`, which leaves the persistent sandbox in place for the next acquire. Credentials resolve in a fixed order: an explicit `oidcToken` or `VERCEL_OIDC_TOKEN` wins; otherwise `token`, `teamId`, and `projectId` are sent together or not at all; the environment consulted is `options.env`, never `process.env`. "Vercel limits the timeout accepted by one create request to five minutes. Longer requested lifetimes create at that ceiling, then call `extendTimeout` with only the remaining duration because that API extends by its argument rather than setting an absolute target." Commands run as `sh -lc` through `runCommand`, with `commandEnv` under the per-spawn environment. A read drains `readFile`'s stream, string or bytes, into one buffer, and `null` is `not_found`; a write runs `mkdir -p` for the parent and calls `writeFiles`.
 
-`timeoutMs` must be a positive finite number, `maxDurationMs` is a caller-owned cap checked before any vendor request, and `workdir` must be absolute; each refusal is a `spawn_error` raised before anything is acquired. Output arrives after the command finishes, so there is no streaming, no stdin, and no `kill`. There is no real-backend suite; the provider is proven against an SDK fake that models persistence, credential precedence, and the timeout remainder.
+`timeoutMs` must be a positive finite number, `maxDurationMs` is a caller-owned cap checked before any vendor request, and `workdir` must be absolute; each refusal is a `spawn_error` raised before anything is acquired. Output arrives after the command finishes, so there is no streaming and no `kill`; `runCommand` has no input channel, so standard input is staged as a workspace file and redirected. There is no real-backend suite; the provider is proven against a fake that keeps the vendor API shapes and runs every command through a real shell against real files.
 
 #### DaytonaSandbox
 
@@ -11246,7 +11251,7 @@ const provider = DaytonaSandbox.make({
 
 The machine name is `smthrs-<slug>`, lowercased. `acquire` calls `get(name)` first; a 404 creates a sandbox with that name, and an existing one is started with `startTimeoutSeconds`. "Creation or attachment is registered as a scoped resource before start and workspace preparation, so any later failure still runs the blocking delete finalizer", `delete(sandbox, deleteTimeoutSeconds, true)`. The workdir is `options.workdir` or the sandbox's own `getWorkDir()`, and either must be absolute. Commands run through `process.executeCommand(command, cwd, env)`. "Daytona's byte-native download and stream-upload operations serve file transfer; shell execution creates missing parents": `downloadFile` for reads, with `FILE_NOT_FOUND` mapped to `not_found`, and `uploadFileStream` for writes.
 
-Teardown deletes the sandbox, so nothing survives a normal release; only a crash-left sandbox is found again by name. `executeCommand` returns one `result` string, so `stderr` is always empty and output arrives after the command finishes; there is no streaming, no stdin, and no `kill`. There is no real-backend suite; the provider is proven against an SDK fake.
+Teardown deletes the sandbox, so nothing survives a normal release; only a crash-left sandbox is found again by name. `executeCommand` returns one `result` string with no stderr field on the wire, so a command's standard error arrives merged into standard output rather than separately, and output arrives after the command finishes; there is no streaming and no `kill`, and standard input is staged as a workspace file and redirected. There is no real-backend suite; the provider is proven against a fake that keeps the documented API and error shapes (unverified live) and runs every command through a real shell against real files.
 
 #### AwsSandbox
 
@@ -11298,9 +11303,9 @@ const provider = CloudflareSandbox.make({
 })
 ```
 
-"The Worker binding is the credential and infrastructure handle." `acquire` resolves the Durable Object whose id is the session slug, with `enableDefaultSession: false` so the SDK's implicit shell session is never opened, forwards `keepAlive` and `sleepAfter` only when set, registers `destroy()` on the scope, and creates the workdir. In `exec` mode a command is `sandbox.exec` and its completed result; in `process` mode it is `startProcess`, then `waitForExit`, then `getLogs`, and the exit code falls back from the exit, to the handle, to `1`. "File payloads use the SDK's base64 encoding and the text is read from the result's `content` field. This preserves arbitrary bytes without importing host modules." `FILE_NOT_FOUND` is `not_found`. `ping` runs `exec("true")` in the workdir.
+"The Worker binding is the credential and infrastructure handle." `acquire` resolves the Durable Object whose id is the session slug, with `enableDefaultSession: false` so the SDK's implicit shell session is never opened, forwards `keepAlive` and `sleepAfter` only when set, registers `destroy()` on the scope, and creates the workdir. In `exec` mode a command is `sandbox.exec` and its completed result; in `process` mode it is `startProcess`, then `waitForExit`, then `getLogs`; a process that reports no exit status on either surface fails with `spawn_error` rather than being given one. "File payloads use the SDK's base64 encoding and the text is read from the result's `content` field. This preserves arbitrary bytes without importing host modules." `FILE_NOT_FOUND` is `not_found`. `ping` runs `exec("true")` in the workdir.
 
-This provider does not create infrastructure. The Durable Object namespace, its container image, and the Worker that holds the binding are deployed by the caller, and the binding is the credential; there is nothing to configure here beyond it. Output arrives after the command completes in both modes, so there is no streaming, no stdin, and no `kill`. The finalizer destroys the object, so a normal release discards its files; only a crash-left object is found again by id. There is no real-backend suite; both execution modes are proven against a fake binding.
+This provider does not create infrastructure. The Durable Object namespace, its container image, and the Worker that holds the binding are deployed by the caller, and the binding is the credential; there is nothing to configure here beyond it. Output arrives after the command completes in both modes, so there is no streaming and no `kill`; the exec options carry no input channel at 0.12.9, so standard input is staged as a workspace file and redirected. The finalizer destroys the object, so a normal release discards its files; only a crash-left object is found again by id. There is no real-backend suite; both execution modes are proven against a fake binding that runs every command through a real shell against real files.
 
 #### Browser support
 
@@ -13303,26 +13308,29 @@ How to back up a durable Smithers store, verify the backup, and restore it after
 | `objects/<xx>/<digest>` | the content-addressed artifact blobs | copied after the database snapshot, digest-verified during the copy |
 | `manifest.json` | the database digest and size, the applied migration ladder, and every blob digest | written last, so its presence marks a complete backup |
 
-The order matters. Artifacts are published to the store before anything references them, and the blob walk runs after the database snapshot, so every digest the snapshot references is in the backup. A blob whose bytes no longer hash to its address fails the backup instead of being captured; repair the store before backing it up.
+The order matters. The backup holds a heartbeat-backed artifact lease while it snapshots the database and copies blobs. Publication may continue, but garbage-collection deletion is fenced, so a digest referenced by the frozen database cannot disappear during the copy. The backup decodes every cache, attempt-boundary, and checkpoint root from that frozen snapshot and refuses success if any referenced blob is absent. A blob whose bytes no longer hash to its address also fails the backup; repair the store before backing it up.
 
 ### Taking a backup
 
-Backups are hot. `VACUUM INTO` reads one consistent snapshot while writers keep committing; nothing is paused and no lock is held against the engine. Writes that commit after the snapshot's read transaction starts are not in the backup.
+Backups are hot. `VACUUM INTO` reads one consistent snapshot while database writers keep committing; the engine is not paused. Writes that commit after the snapshot's read transaction starts are not in the backup. Artifact publication may continue, while sweep deletion waits for the backup lease to end.
 
 ```sh
 node scripts/flows-backup.mjs backup <database-file> <backup-directory> [objects-directory]
 ```
 
-The backup directory must be empty or absent. From code, compose `DisasterRecovery.backup` over the existing layers: `SqlClient` on the live database, `FileSystem`, and `Crypto`.
+The backup directory must be empty or absent. From code, compose `DisasterRecovery.backup` over the existing layers: `SqlClient` on the live database, `FileSystem`, and `Crypto`. The required `snapshotDatabaseLayer` opens the frozen `VACUUM INTO` file for root inspection; it must use the same supported SQLite host adapter.
 
 ```ts
 import { DisasterRecovery } from "@smthrs/engine-store"
+import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as Effect from "effect/Effect"
 
 const program = Effect.gen(function*() {
   return yield* DisasterRecovery.backup({
     directory: "/backups/2026-08-13T12-00",
-    objectsDirectory: "/srv/flows/.flows/objects"
+    objectsDirectory: "/srv/flows/.flows/objects",
+    snapshotDatabaseLayer: (databaseFile) =>
+      NodeDatabase.layer({ filename: databaseFile })
   })
 })
 ```
@@ -16447,7 +16455,7 @@ These are the behaviors that have to be exercised against real implementations, 
 | `@smthrs/platform-bun`          | 1      | the same suite against the Bun bundle, which runs the Node fallback under vitest                                                                                                                                                |
 | `@smthrs/platform-browser`      | 5      | the same suite against `BrowserHost`, plus the ZenFS filesystem adapter and the just-bash spawner                                                                                                                               |
 | `@smthrs/jj`                    | 4      | the contract and its no-op, the jj CLI against a real repository, error classification against a scripted binary, and the Bun and browser layers                                                                                |
-| `@smthrs/sandbox`               | 22     | the barrel, spawner adaptation and kill, the scripted and real-process providers, both conformance suites, the health probe, supervision, the session contract, and nine machine providers, three of them against real backends |
+| `@smthrs/sandbox`               | 23     | the barrel, spawner adaptation and kill, the scripted and real-process providers, both conformance suites, the health probe, supervision, the session contract, and nine machine providers, three of them against real backends |
 | `@smthrs/platform-browser`      | 4      | the filesystem adapter's operations and bounded streaming against a real directory, the spawner's command rendering, rejected inputs, handle capabilities, and its serialized uninterruptible boundary, and the aggregate layer |
 | `@smthrs/journal`               | 12     | durable and lossy admission, fencing, transactions, retention, redaction, projections, migrations                                                                                                                               |
 | `@smthrs/run-store`             | 9      | run and attempt stores, ownership arbitration, run metadata, migrations                                                                                                                                                         |
