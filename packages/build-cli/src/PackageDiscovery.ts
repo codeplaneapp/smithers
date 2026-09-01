@@ -61,12 +61,39 @@ export interface RepositoryBoundary {
 }
 
 /**
+ * Whether a declaration file exists at `absolute` under that exact spelling.
+ *
+ * macOS and Windows resolve `WORKSPACE.ts` to a file committed as
+ * `Workspace.ts`, so an `lstat` probe alone reports every ordinary source
+ * module with that spelling as a workspace declaration. This repository ships
+ * one at `packages/build-cli/src/Workspace.ts`, which refused its own graph
+ * with `nested_workspace_undeclared` until the listing settled the case: only
+ * the directory entry carries the on-disk spelling.
+ */
+const declarationAt = async (absolute: string): Promise<boolean> => {
+  try {
+    const stats = await Fs.lstat(absolute)
+    if (!(stats.isFile() || stats.isSymbolicLink())) return false
+  } catch {
+    // Absent is the common case; every other failure re-surfaces when
+    // discover() admits the file properly.
+    return false
+  }
+  try {
+    const entries = await Fs.readdir(NodePath.dirname(absolute))
+    return entries.includes(NodePath.basename(absolute))
+  } catch {
+    return false
+  }
+}
+
+/**
  * The nearest ancestor of `start` that holds a workspace declaration, or
  * undefined when no ancestor does.
  *
- * The presence probe is deliberately cheap — an `lstat` per candidate — and
- * decides only which mode the CLI runs in; {@link discover} re-admits the
- * file under the full SafeFs policy.
+ * The presence probe is deliberately cheap — an `lstat` per candidate, then a
+ * listing to confirm the spelling — and decides only which mode the CLI runs
+ * in; {@link discover} re-admits the file under the full SafeFs policy.
  *
  * @category discovery
  * @since 0.1.0
@@ -80,13 +107,7 @@ export const findWorkspaceRoot = async (start: string): Promise<string | undefin
         NodePath.join(directory, "WORKSPACE.ts")
       ]
     ) {
-      try {
-        const stats = await Fs.lstat(candidate)
-        if (stats.isFile() || stats.isSymbolicLink()) return directory
-      } catch {
-        // Absent is the common case; every other failure re-surfaces when
-        // discover() admits the file properly.
-      }
+      if (await declarationAt(candidate)) return directory
     }
     const parent = NodePath.dirname(directory)
     if (parent === directory) return undefined
@@ -105,12 +126,7 @@ export const findWorkspaceRoot = async (start: string): Promise<string | undefin
  */
 export const workspaceFileOf = async (root: string): Promise<string | undefined> => {
   for (const candidate of [".smithers/WORKSPACE.ts", "WORKSPACE.ts"]) {
-    try {
-      const stats = await Fs.lstat(NodePath.join(root, candidate))
-      if (stats.isFile()) return candidate
-    } catch {
-      // Absent is the common case; discover() reports every other failure.
-    }
+    if (await declarationAt(NodePath.join(root, candidate))) return candidate
   }
   return undefined
 }
@@ -143,16 +159,7 @@ const pruned = (walk: Walk, child: string): boolean =>
 const nestedWorkspace = async (walk: Walk, child: string): Promise<boolean> => {
   const probes = ["WORKSPACE.ts", ".smithers/WORKSPACE.ts"]
     .filter((relative) => `${child}/${relative}` !== walk.workspaceFile)
-    .map(async (relative) => {
-      try {
-        const stats = await Fs.lstat(NodePath.join(walk.root, child, relative))
-        return stats.isFile() || stats.isSymbolicLink()
-      } catch {
-        // Absent is the common case; admission errors surface when that
-        // nested workspace is selected directly.
-        return false
-      }
-    })
+    .map((relative) => declarationAt(NodePath.join(walk.root, child, relative)))
   return (await Promise.all(probes)).some((found) => found)
 }
 

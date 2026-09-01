@@ -1353,8 +1353,31 @@ export class Workspace {
       // output, so an absolute or traversing entry is not a path git found in
       // this workspace.
       const paths = gitPaths(nulPaths(names), this.cacheDirectory)
-      const files = await Input.digestFiles(this.root, paths, { signal: this.signal })
-      const patch = files.length === 0
+      // A changed submodule appears in the listing as a gitlink, and no digest
+      // can read one: it materializes as a directory, which is refused the way
+      // a FIFO or a socket is. Every repository that vendors a submodule would
+      // otherwise refuse every diff-scoped target once that pointer moved.
+      // Asking git for the same listing without submodules names them by
+      // difference, and the pointer still reaches the digest below, because the
+      // patch covers every changed path including the gitlink hunks.
+      const readable = new Set(
+        gitPaths(
+          nulPaths(
+            await runGit(
+              this.root,
+              ["diff", "--name-only", "-z", "--ignore-submodules=all", "--end-of-options", base, "--"],
+              this.signal
+            )
+          ),
+          this.cacheDirectory
+        )
+      )
+      const files = await Input.digestFiles(
+        this.root,
+        paths.filter((path) => readable.has(path)),
+        { signal: this.signal }
+      )
+      const patch = paths.length === 0
         ? ""
         : await runGit(
           this.root,

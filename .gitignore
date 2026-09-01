@@ -98,7 +98,6 @@ worktrees/
 /.smithers/*
 # The package-mode workspace declaration is source (docs/migration/package-mode-port.md).
 !/.smithers/WORKSPACE.ts
-!/.smithers/WORKSPACE.staged.ts
 !/.smithers/agents.ts
 !packages/build-cli/test/fixtures/force-spec/.smithers/
 packages/*/.smithers/

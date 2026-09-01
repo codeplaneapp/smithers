@@ -1350,7 +1350,31 @@ const expandGitDiff = async (
     return true
   })
   const paths = selected.map((entry) => entry.path).sort()
-  const files = await Input.digestFiles(context.root, paths, { signal: context.signal })
+  // A changed submodule appears in the listing as a gitlink, and no digest can
+  // read one: it materializes as a directory, which is refused the way a FIFO
+  // or a socket is. Every repository that vendors a submodule would otherwise
+  // refuse every diff-scoped target once that pointer moved. Asking git for the
+  // same listing without submodules names them by difference, and the pointer
+  // still reaches the digest below, because the patch covers every selected
+  // path including the gitlink hunks.
+  const readable = new Set(
+    parseNameStatusZ(
+      await PackageTree.runGit(context.root, [
+        "diff",
+        "--name-status",
+        "-z",
+        "--ignore-submodules=all",
+        "--end-of-options",
+        base,
+        "--"
+      ])
+    ).map((entry) => entry.path)
+  )
+  const files = await Input.digestFiles(
+    context.root,
+    paths.filter((path) => readable.has(path)),
+    { signal: context.signal }
+  )
   const patch = paths.length === 0
     ? ""
     : await PackageTree.runGit(context.root, ["diff", "--binary", "--end-of-options", base, "--", ...paths])

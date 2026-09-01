@@ -77,11 +77,6 @@ export const Workspace = S.Workspace("smithers", {
     "fixture-viem-node-spec": S.LocalRepository("packages/build-cli/test/fixtures/viem-node-spec"),
     "template-aomi": S.LocalRepository("packages/create-app/template/aomi"),
     "template-default": S.LocalRepository("packages/create-app/template/default"),
-    "ui-e2e-repo-plugin": S.LocalRepository("apps/ui/e2e/fixtures/repo-plugin"),
-    // Not package workspaces, but declared to prune the walk: the pinned jj
-    // submodule and the 0.x sources are both large trees no PACKAGE.ts will
-    // ever join, and discovery's directory/entry limits are finite.
-    "vendor-jj": S.LocalRepository("vendor/jj"),
-    "legacy-0x": S.LocalRepository("legacy")
+    "ui-e2e-repo-plugin": S.LocalRepository("apps/ui/e2e/fixtures/repo-plugin")
   }
 })
