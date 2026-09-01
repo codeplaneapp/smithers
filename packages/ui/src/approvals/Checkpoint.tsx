@@ -5,7 +5,7 @@ import { useInjectUiCss } from "../styles";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { Button } from "../button";
 import { Spinner } from "../spinner";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../tooltip";
 import { APPROVALS_CHECKPOINTS_CSS_ID, approvalsCss } from "./approvalsCss";
 
 export type CheckpointModel = {
@@ -155,10 +155,12 @@ export function CheckpointTrigger({ tooltip, children, className, ...props }: Ch
   );
   if (tooltip === undefined) return button;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent>{tooltip}</TooltipContent>
-    </Tooltip>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent>{tooltip}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
