@@ -328,6 +328,33 @@ export const validatePath = (value: string, what: string): string => {
 }
 
 /**
+ * A path a generated step spawns rather than matches.
+ *
+ * {@link pathShape} admits `*` and a leading `-` because it also validates
+ * artifact globs, and neither belongs in something the shell is asked to
+ * execute: `*` expands against the runner's working directory, so the step
+ * would test and then run whichever entry sorts first, and a leading `-` turns
+ * the value into an option to `[`. Two capabilities, two shapes.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const executableShape = /^[A-Za-z0-9_./][A-Za-z0-9_./-]*$/
+
+/**
+ * Validates one declared executable path, or throws naming what rejected it.
+ *
+ * @category validation
+ * @since 0.1.0
+ */
+export const validateExecutable = (value: string, what: string): string => {
+  if (!executableShape.test(value) || value.includes("..")) {
+    throw new Error(`CiToolchain: ${JSON.stringify(value)} is not a usable ${what}`)
+  }
+  return value
+}
+
+/**
  * Schema for a declared system browser requirement.
  *
  * The runner image is expected to ship it; the generated step asserts the path
@@ -361,7 +388,7 @@ export const Browser = (options: {
   readonly reason: string
 }): SystemBrowser =>
   SystemBrowser.make({
-    executable: validatePath(options.executable, "browser executable"),
+    executable: validateExecutable(options.executable, "browser executable"),
     reason: options.reason
   })
 

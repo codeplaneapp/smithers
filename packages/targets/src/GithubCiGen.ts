@@ -646,6 +646,15 @@ const diagnostic = (text: string): string => {
   return `echo '${text}' >&2`
 }
 
+/**
+ * Renders one declared value as a single shell word.
+ *
+ * Validation at the declaration boundary already refuses shell syntax; quoting
+ * here is the second guard, so a value that ever slips past the first one is
+ * still one word and still the word that was declared.
+ */
+const shellWord = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
+
 /** The steps one declared interpreter installation renders to. */
 const runtimeSteps = (setup: CiToolchain.RuntimeSetup): ReadonlyArray<RenderedStep> => {
   switch (setup.name) {
@@ -723,12 +732,12 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
     steps.push({
       name: "Assert the runner ships the declared browser",
       run: [
-        `if [ ! -x ${executable} ]; then`,
+        `if [ ! -x ${shellWord(executable)} ]; then`,
         `  ${diagnostic(`${executable} is missing from this runner image.`)}`,
         `  ${diagnostic(needs.browser.reason)}`,
         "  exit 1",
         "fi",
-        `${executable} --version`
+        `${shellWord(executable)} --version`
       ].join("\n")
     })
   }

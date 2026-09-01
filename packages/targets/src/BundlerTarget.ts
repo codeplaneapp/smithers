@@ -236,9 +236,6 @@ export const Build = Action.make("smithers-build/bundler-build", {
   tier: "sealed"
 })
 
-/** Strips the workspace anchor from a declared `//`-rooted file path. */
-const workspacePath = (path: string): string => path.startsWith("//") ? path.slice(2) : path
-
 const resolveDefinition = Target.make("Bundler.Rspack.resolve", {
   attrs: ResolveAttrs,
   kinds: ["build"],
@@ -251,7 +248,7 @@ const resolveDefinition = Target.make("Bundler.Rspack.resolve", {
   cache: true,
   implementation: (attrs) =>
     Resolve.call({
-      configPath: workspacePath(attrs.config.path),
+      configPath: Input.rootRelative(".", attrs.config.path),
       entries: [...attrs.entries],
       mode: "development"
     })
@@ -269,7 +266,7 @@ const buildDefinition = Target.make("Bundler.Rspack.build", {
   implementation: (attrs) =>
     captureOutputs(
       Build.call({
-        configPath: workspacePath(attrs.config.path),
+        configPath: Input.rootRelative(".", attrs.config.path),
         environment: attrs.environment,
         mode: attrs.mode,
         env: attrs.env === undefined ? {} : { ...attrs.env },

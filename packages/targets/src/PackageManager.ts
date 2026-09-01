@@ -474,7 +474,10 @@ export const dlx = (manager: PackageManager, argv: ReadonlyArray<string>): Array
     case "pnpm":
       return [manager.executable, "dlx", ...argv]
     case "bun":
-      return ["bunx", ...argv]
+      // `bun x` and `bunx` are the same command, and this is the spelling that
+      // honours a declared `executable`: a wrapper script, an absolute path, or
+      // a sandbox shim is what the declaration asked to spawn.
+      return [manager.executable, "x", ...argv]
   }
 }
 

@@ -38,9 +38,6 @@ export const Attrs = Schema.Struct({
  */
 export type Attrs = typeof Attrs.Type
 
-/** Strips the workspace-root marker so a rooted path works from the root cwd. */
-const workspacePath = (path: string): string => path.startsWith("//") ? path.slice(2) : path
-
 /**
  * Plans TypeDoc generation into the declared documentation directory.
  *
@@ -69,13 +66,13 @@ export const TypedocDocs = Target.make("TypedocDocs", {
     const argv: Array<string> = PackageManager.exec(attrs.packageManager, [
       "typedoc",
       "--out",
-      workspacePath(attrs.outDir),
+      Input.rootRelative(".", attrs.outDir),
       "--tsconfig",
-      workspacePath(attrs.tsconfig.path)
+      Input.rootRelative(".", attrs.tsconfig.path)
     ])
-    if (attrs.config !== null) argv.push("--options", workspacePath(attrs.config.path))
+    if (attrs.config !== null) argv.push("--options", Input.rootRelative(".", attrs.config.path))
     for (const plugin of attrs.plugin) argv.push("--plugin", plugin)
-    for (const entry of attrs.entryPoints) argv.push(workspacePath(entry.path))
+    for (const entry of attrs.entryPoints) argv.push(Input.rootRelative(".", entry.path))
     return captureOutputs(Target.runTool({ cwd: ".", argv }), ".", [attrs.outDir])
   }
 })

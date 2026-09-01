@@ -30,7 +30,7 @@ const packDefinition = Target.make("Npm.Pack", {
  * @category targets
  * @since 0.1.0
  */
-export const Pack = (attrs: (typeof PackAttrs)["~type.make.in"]): Target.AnyTarget => packDefinition(attrs)
+export const Pack = packDefinition
 
 /** Attrs for an outward npm publish.
  *
@@ -58,7 +58,7 @@ const publishDefinition = Target.make("Npm.Publish", {
  * @category targets
  * @since 0.1.0
  */
-export const Publish = (attrs: (typeof PublishAttrs)["~type.make.in"]): Target.AnyTarget => publishDefinition(attrs)
+export const Publish = publishDefinition
 
 /** Attrs for fetching the currently published package.
  *
@@ -79,8 +79,7 @@ const publishedDefinition = Target.make("Npm.Published", {
  * @category targets
  * @since 0.1.0
  */
-export const Published = (attrs: (typeof PublishedAttrs)["~type.make.in"]): Target.AnyTarget =>
-  publishedDefinition(attrs)
+export const Published = publishedDefinition
 
 /** Attrs for checking a downstream repository.
  *
@@ -106,5 +105,4 @@ const downstreamDefinition = Target.make("Npm.Downstream", {
  * @category targets
  * @since 0.1.0
  */
-export const Downstream = (attrs: (typeof DownstreamAttrs)["~type.make.in"]): Target.AnyTarget =>
-  downstreamDefinition(attrs)
+export const Downstream = downstreamDefinition

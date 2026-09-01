@@ -504,6 +504,40 @@ const isMetadata = (value: unknown): value is Metadata => {
 }
 
 /**
+ * Wraps a definition in a pre-validation without erasing what it is.
+ *
+ * A catalog rule that has to refuse something the schema cannot express — one
+ * crate selector, one artifact source — used to be written as a bare arrow
+ * annotated `: Target.AnyTarget`, which threw away the `id`, `attrs` schema,
+ * and `kinds` that every unwrapped rule carries, and collapsed the Flow's
+ * success and error types to `Schema.Top`. Half the catalog exported one shape
+ * and half the other, so no tool could read a rule's attrs schema for
+ * validation, documentation, or editor support without knowing which half it
+ * had. This keeps one shape: the guard runs first, and the value is still a
+ * {@link Definition}.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const guard = <
+  Id extends string,
+  Attrs extends Flow.AnyStructSchema,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+  Requires
+>(
+  definition: Definition<Id, Attrs, Success, Error, Requires>,
+  validate: (attrs: Attrs["~type.make.in"]) => void
+): Definition<Id, Attrs, Success, Error, Requires> =>
+  Object.assign(
+    (attrs: Attrs["~type.make.in"]): Target<Id, Attrs, Success, Error, Requires> => {
+      validate(attrs)
+      return definition(attrs)
+    },
+    { id: definition.id, attrs: definition.attrs, kinds: definition.kinds }
+  )
+
+/**
  * Reads the planner metadata attached by {@link make}.
  *
  * @category accessors
@@ -628,7 +662,12 @@ const collect = (
     for (let index = 0; index < value.length; index += 1) {
       if (names[index] !== String(index)) return
       const descriptor = Object.getOwnPropertyDescriptor(value, String(index))
-      if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) return
+      if (descriptor === undefined) return
+      // A non-data element is rejected rather than skipped: skipping the rest
+      // would drop a declared input the target still reads, which keys the
+      // target on fewer inputs than it consumes.
+      if (!("value" in descriptor)) throw nonDataProperty(String(index))
+      if (descriptor.enumerable !== true) continue
       collect(descriptor.value, inputs, dependencies, dependencySelectors, seen)
     }
     return
@@ -638,9 +677,125 @@ const collect = (
   if (Object.getOwnPropertySymbols(value).length > 0) return
   for (const key of Object.getOwnPropertyNames(value)) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) return
+    if (descriptor === undefined) return
+    if (!("value" in descriptor)) throw nonDataProperty(key)
+    if (descriptor.enumerable !== true) continue
     collect(descriptor.value, inputs, dependencies, dependencySelectors, seen)
   }
+}
+
+const nonDataProperty = (key: string): TypeError =>
+  new TypeError(`target attrs must contain only enumerable data properties; ${JSON.stringify(key)} is an accessor`)
+
+/**
+ * Attrs nesting one declaration may reach.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumAttrsDepth = 64
+
+/**
+ * Members one declaration's attrs may carry, counted across the whole tree.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumAttrsMembers = 100_000
+
+/**
+ * Copies author input into a bounded, null-hostile snapshot before anything
+ * reads it as attrs.
+ *
+ * The schema decode used to run first, which meant the Proxy and descriptor
+ * guards only ever saw the decoded value: a Proxy sprang its traps and an
+ * enumerable getter was invoked — twice — before either guard could refuse it.
+ * A getter that answers differently on its two reads would key the target on
+ * one value and plan another, so the author's object is read exactly once,
+ * as data, and every later read is of this copy.
+ *
+ * Targets, dependency selectors, declared inputs, and any value with a
+ * non-plain prototype pass through as opaque handles rather than being walked.
+ */
+const snapshotAttrs = (
+  value: unknown,
+  depth: number,
+  budget: { count: number },
+  seen: Map<object, unknown>
+): unknown => {
+  if ((typeof value === "object" && value !== null) || typeof value === "function") {
+    if (NodeUtil.isProxy(value)) throw new TypeError("target attrs must not contain a Proxy")
+  }
+  if (typeof value !== "object" || value === null) return value
+  if (isTarget(value) || isDependencySelector(value) || Input.isDeclared(value)) return value
+  const prototype = Object.getPrototypeOf(value)
+  const isPlainArray = Array.isArray(value) && prototype === Array.prototype
+  if (!isPlainArray && prototype !== Object.prototype && prototype !== null) return value
+  // A value reached twice keeps one copy, which is also what makes a cyclic
+  // declaration terminate here instead of running out the depth bound.
+  const existing = seen.get(value)
+  if (existing !== undefined) return existing
+  if (depth >= maximumAttrsDepth) throw new RangeError("target attrs nest deeper than the declaration bound")
+  const spend = (): void => {
+    budget.count += 1
+    if (budget.count > maximumAttrsMembers) {
+      throw new RangeError("target attrs carry more members than the declaration bound")
+    }
+  }
+  if (isPlainArray) {
+    const copy: Array<unknown> = []
+    seen.set(value, copy)
+    for (let index = 0; index < value.length; index += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index))
+      if (descriptor !== undefined && !("value" in descriptor)) throw nonDataProperty(String(index))
+      spend()
+      copy.push(descriptor === undefined ? undefined : snapshotAttrs(descriptor.value, depth + 1, budget, seen))
+    }
+    return copy
+  }
+  const copy: Record<string, unknown> = {}
+  seen.set(value, copy)
+  for (const key of Object.getOwnPropertyNames(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (descriptor === undefined) continue
+    if (!("value" in descriptor)) throw nonDataProperty(key)
+    if (descriptor.enumerable !== true) continue
+    spend()
+    copy[key] = snapshotAttrs(descriptor.value, depth + 1, budget, seen)
+  }
+  return copy
+}
+
+/**
+ * Freezes a decoded value and everything the target owns inside it.
+ *
+ * Targets, dependency selectors, and declared inputs are handles the author
+ * still holds, so they are left alone; everything else here was produced by
+ * {@link snapshotAttrs} or by the schema and belongs to this target.
+ */
+const freezeOwned = (value: unknown): void => {
+  if (typeof value !== "object" || value === null) return
+  if (Object.isFrozen(value)) return
+  if (isTarget(value) || isDependencySelector(value) || Input.isDeclared(value)) return
+  const prototype = Object.getPrototypeOf(value)
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) return
+  Object.freeze(value)
+  for (const key of Object.getOwnPropertyNames(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (descriptor !== undefined && "value" in descriptor) freezeOwned(descriptor.value)
+  }
+}
+
+const freezeView = (view: KindView): KindView => {
+  freezeOwned(view.attrs)
+  Object.freeze(view.dependencies)
+  Object.freeze(view.dependencySelectors)
+  Object.freeze(view.inputs)
+  if (view.outputs !== undefined) {
+    Object.freeze(view.outputs.paths)
+    Object.freeze(view.outputs)
+  }
+  return Object.freeze(view)
 }
 
 /**
@@ -804,7 +959,10 @@ export const make = <
     const site = sourceSite()
     let attrs: Attrs["Type"]
     try {
-      attrs = options.attrs.make(attrsInput, strictMake)
+      attrs = options.attrs.make(
+        snapshotAttrs(attrsInput, 0, { count: 0 }, new Map()) as Attrs["~type.make.in"],
+        strictMake
+      )
     } catch (cause) {
       throw declarationRejected(id, site, cause)
     }
@@ -824,7 +982,7 @@ export const make = <
     const verbGate = resolvedVerbGate === undefined ? undefined : [...new Set(resolvedVerbGate)]
     const outputsFor = (value: Attrs["Type"]): DeclaredOutputs | undefined =>
       options.outputs === undefined ? undefined : declaredOutputs(id, options.outputs(value))
-    const baseView: KindView = {
+    const baseView: KindView = freezeView({
       attrs,
       dependencies: [...new Set(dependencies)],
       dependencySelectors: [...new Map(dependencySelectors.map((selector) => [
@@ -834,7 +992,7 @@ export const make = <
       inputs: [...new Set(inputs)],
       cacheable: cacheableFor(attrs),
       outputs: outputsFor(attrs)
-    }
+    })
     const kindViews = new Map<Kind, KindView>()
     const forKind = (kind: Kind): KindView => {
       if (options.attrsForKind === undefined) return baseView
@@ -847,7 +1005,10 @@ export const make = <
       }
       let mapped: Attrs["Type"]
       try {
-        mapped = options.attrs.make(candidate, strictMake)
+        mapped = options.attrs.make(
+          snapshotAttrs(candidate, 0, { count: 0 }, new Map()) as Attrs["~type.make.in"],
+          strictMake
+        )
       } catch (cause) {
         throw declarationRejected(`${id} (${kind})`, site, cause)
       }
@@ -857,7 +1018,7 @@ export const make = <
       collect(mapped, mappedInputs, mappedDependencies, mappedDependencySelectors, new Set())
       if (options.inputs !== undefined) mappedInputs.push(...options.inputs(mapped))
       const dependenciesForKind = [...new Set(mappedDependencies)]
-      const view: KindView = {
+      const view: KindView = freezeView({
         attrs: mapped,
         dependencies: dependenciesForKind,
         dependencySelectors: [...new Map(mappedDependencySelectors.map((selector) => [
@@ -867,7 +1028,7 @@ export const make = <
         inputs: [...new Set(mappedInputs)],
         cacheable: cacheableFor(mapped),
         outputs: outputsFor(mapped)
-      }
+      })
       kindViews.set(kind, view)
       return view
     }
@@ -877,11 +1038,11 @@ export const make = <
       error: errorSchema,
       body: (value) => options.implementation(value, context)
     })
-    const value: Metadata = {
+    const value: Metadata = Object.freeze({
       target: id,
       implementationDigest,
       schemaIdentity,
-      kinds: [...new Set(options.kinds)],
+      kinds: Object.freeze([...new Set(options.kinds)]),
       attrs,
       attrsSchema: options.attrs,
       decodeSuccess,
@@ -890,10 +1051,10 @@ export const make = <
       inputs: baseView.inputs,
       cacheable: baseView.cacheable,
       outputs: baseView.outputs,
-      verbGate,
+      verbGate: verbGate === undefined ? undefined : Object.freeze(verbGate),
       sourceFile: declarationSourceFile,
       forKind
-    }
+    })
     Object.defineProperty(flow, TargetTypeId, {
       configurable: false,
       enumerable: false,

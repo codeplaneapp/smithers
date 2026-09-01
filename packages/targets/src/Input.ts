@@ -315,6 +315,26 @@ export const resolvePath = (packageDir: string, value: string): string => {
   return normalized.replace(/^\.\//, "")
 }
 
+/**
+ * Renders one declared path the way an argv running from `cwd` needs it.
+ *
+ * A `//` path is workspace-rooted, and a child runs under the target's `cwd`.
+ * Stripping the `//` and handing the remainder to the child resolves it
+ * against `cwd` instead of the root, so `//scripts/check.mjs` under cwd
+ * `packages/foo` silently means `packages/foo/scripts/check.mjs`. This walks
+ * back out to the root first. A package-relative path is already what the
+ * child needs and passes through unchanged.
+ *
+ * @category expansion
+ * @since 0.1.0
+ */
+export const rootRelative = (cwd: string, value: string): string => {
+  if (!value.startsWith("//")) return value
+  const from = posix(NodePath.normalize(cwd === "" ? "." : cwd))
+  const rendered = posix(NodePath.relative(from === "." ? "." : from, value.slice(2)))
+  return rendered === "" ? "." : rendered
+}
+
 interface IgnoreScope {
   readonly base: string
   readonly matcher: ReturnType<typeof createIgnore>

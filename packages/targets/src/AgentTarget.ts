@@ -700,9 +700,13 @@ export const collectGitDiffs = (data: (typeof Attr.Data)["Type"]): ReadonlyArray
 const canonicalize = (value: unknown, seen: Set<object>): unknown => {
   if (Target.isTarget(value)) {
     const metadata = Target.metadata(value)
+    // `implementationDigest` is deliberately absent. It digests function
+    // identity, which carries per-process entropy for any callback not built
+    // with `Node.capture`, so including it would re-key every gate on every
+    // process start and the verdict cache could never hit across runs.
     return {
       $attrs: canonicalize(metadata.attrs, seen),
-      $implementation: metadata.implementationDigest,
+      $schemas: metadata.schemaIdentity,
       $target: metadata.target
     }
   }
@@ -729,10 +733,12 @@ const canonicalize = (value: unknown, seen: Set<object>): unknown => {
 
 /**
  * The structural identity of one target: its definition name plus a digest of
- * its implementation digest and canonically encoded attrs.
+ * its canonically encoded attrs and schema contracts.
  *
  * Agent gate identities are key material for the agent verdict cache, so two
- * instances of the same definition with different attrs must not collide.
+ * instances of the same definition with different attrs must not collide, and
+ * one instance must produce the same identity in every process. Nothing
+ * process-local enters the digest for that second reason.
  * This is a plan-time stand-in for the planner's full target key, which also
  * digests expanded file inputs; the integration point swaps it for the
  * planner key without changing the payload shape.
@@ -742,7 +748,7 @@ const canonicalize = (value: unknown, seen: Set<object>): unknown => {
  */
 export const targetIdentity = (target: Target.AnyTarget): string => {
   const metadata = Target.metadata(target)
-  const encoded = JSON.stringify(canonicalize(target, new Set()))
+  const encoded = JSON.stringify(canonicalize(target, new Set())) ?? "$unencodable"
   return `${metadata.target}#${createHash("sha256").update(encoded).digest("hex")}`
 }
 
@@ -796,7 +802,7 @@ const lintDefinition = Target.make("Agent.Lint", {
  * @category targets
  * @since 0.1.0
  */
-export const Lint = (attrs: (typeof LintAttrs)["~type.make.in"]): Target.AnyTarget => lintDefinition(attrs)
+export const Lint = lintDefinition
 
 /**
  * Attrs for {@link Diff}.
@@ -858,7 +864,7 @@ const diffDefinition = Target.make("Agent.Diff", {
  * @category targets
  * @since 0.1.0
  */
-export const Diff = (attrs: (typeof DiffAttrs)["~type.make.in"]): Target.AnyTarget => diffDefinition(attrs)
+export const Diff = diffDefinition
 
 /**
  * Attrs for {@link Pr}.
@@ -923,7 +929,7 @@ const prDefinition = Target.make("Agent.Pr", {
  * @category targets
  * @since 0.1.0
  */
-export const Pr = (attrs: (typeof PrAttrs)["~type.make.in"]): Target.AnyTarget => prDefinition(attrs)
+export const Pr = prDefinition
 
 /**
  * The model name one agent declaration names.

@@ -91,8 +91,16 @@ describe("Anvil and Docker targets", () => {
     })
     expect(Target.metadata(service).target).toBe("Docker.Serve")
     expect(Target.metadata(build)).toMatchObject({ target: "Docker.Build", cacheable: true })
-    expect(Target.metadata(build).outputs).toEqual({ cwd: ".", paths: ["docker-image"] })
-    expect(Target.metadata(bake).outputs).toEqual({ cwd: ".", paths: ["docker-image-api"] })
+    // The declared output name carries a digest of the exact declaration, so a
+    // package with two image builds never gives both the same path.
+    expect(Target.metadata(build).outputs?.paths).toEqual([expect.stringMatching(/^docker-image-[0-9a-f]{12}$/)])
+    expect(Target.metadata(bake).outputs?.paths).toEqual([
+      expect.stringMatching(/^docker-image-api-[0-9a-f]{12}$/)
+    ])
+    const second = Docker.Build({ dockerfile: Input.file("//other/Dockerfile"), context: "//" })
+    expect(Target.metadata(second).outputs?.paths).not.toEqual(Target.metadata(build).outputs?.paths)
+    expect(Docker.imageOutputPath("a-b", "Docker.Bake x a/b"))
+      .not.toBe(Docker.imageOutputPath("a-b", "Docker.Bake x a?b"))
     expect(Target.metadata(push)).toMatchObject({ target: "Docker.Push", cacheable: false })
   })
 

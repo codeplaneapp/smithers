@@ -134,6 +134,12 @@ const clippyCheck = (options: {
     denyWarnings: options.denyWarnings ?? true
   })
 
+/** The option names the BUILD-era clippy gate reads; every other key is package-mode. */
+const clippyCheckOptions = ["allTargets", "locked", "denyWarnings"] as const
+
+/** The option names the BUILD-era test gate reads; every other key is package-mode. */
+const testCheckOptions = ["locked"] as const
+
 /** Declares the BUILD-era `cargo test` gate; see {@link Test}. */
 const testCheck = (options: {
   /** @default true */
@@ -740,6 +746,29 @@ export const appSetFilter = (attrs: unknown): MetadataFilter | undefined => {
 }
 
 /**
+ * Table nesting a metadata filter or a parsed manifest may reach.
+ *
+ * A manifest is not first-party content: crate-set expansion reads
+ * `Cargo.toml` files under `vendor/` and git submodules. Bounding the walk
+ * keeps a hostile manifest from turning a subset match into unbounded
+ * recursion.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumMetadataDepth = 32
+
+/**
+ * Table keys a parsed manifest may never carry.
+ *
+ * `__proto__`, `constructor`, and `prototype` are the three keys that reach
+ * `Object.prototype` through an ordinary property write. A manifest naming one
+ * is refused rather than silently reshaped, because a reader that quietly
+ * dropped it would report a metadata table the file does not describe.
+ */
+const reservedMetadataKeys = new Set(["__proto__", "constructor", "prototype"])
+
+/**
  * Whether a manifest's metadata table satisfies a declared filter.
  *
  * The filter matches as a subset: every key it names must be present with the
@@ -749,11 +778,16 @@ export const appSetFilter = (attrs: unknown): MetadataFilter | undefined => {
  * @category matching
  * @since 0.1.0
  */
-export const metadataMatches = (metadata: unknown, filter: unknown): boolean => {
+export const metadataMatches = (metadata: unknown, filter: unknown, depth = 0): boolean => {
+  if (depth > maximumMetadataDepth) throw new RangeError("cargo metadata filter is too deep")
   if (typeof filter !== "object" || filter === null || Array.isArray(filter)) return metadata === filter
   if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) return false
+  const subject = metadata as Record<string, unknown>
   for (const [key, expected] of Object.entries(filter as Record<string, unknown>)) {
-    if (!metadataMatches((metadata as Record<string, unknown>)[key], expected)) return false
+    // Own properties only: an inherited `toString` or `constructor` must never
+    // satisfy a filter the manifest never declared.
+    if (!Object.hasOwn(subject, key)) return false
+    if (!metadataMatches(subject[key], expected, depth + 1)) return false
   }
   return true
 }
@@ -775,8 +809,13 @@ export const manifestFacts = (
   text: string
 ): { readonly name: string | undefined; readonly metadata: Record<string, unknown> } => {
   let name: string | undefined
-  const metadata: Record<string, unknown> = {}
+  const metadata: Record<string, unknown> = Object.create(null) as Record<string, unknown>
   let path: ReadonlyArray<string> | undefined
+  const refuseReserved = (segment: string): void => {
+    if (reservedMetadataKeys.has(segment)) {
+      throw new Error(`Cargo.toml names the reserved key ${JSON.stringify(segment)} under [package.metadata]`)
+    }
+  }
   const unquote = (token: string): string =>
     (token.startsWith("\"") && token.endsWith("\"") && token.length >= 2) ||
       (token.startsWith("'") && token.endsWith("'") && token.length >= 2)
@@ -841,13 +880,18 @@ export const manifestFacts = (
       continue
     }
     if (path.length < 3 || path[0] !== "package" || path[1] !== "metadata") continue
+    if (path.length - 2 > maximumMetadataDepth) throw new RangeError("Cargo.toml metadata table is too deep")
+    refuseReserved(key)
     let table = metadata
     for (const segment of path.slice(2)) {
-      const existing = table[segment]
+      refuseReserved(segment)
+      // Own properties only: a plain read would follow the prototype chain and
+      // hand the walk an object it is about to write through.
+      const existing = Object.hasOwn(table, segment) ? table[segment] : undefined
       if (typeof existing === "object" && existing !== null && !Array.isArray(existing)) {
         table = existing as Record<string, unknown>
       } else {
-        const created: Record<string, unknown> = {}
+        const created: Record<string, unknown> = Object.create(null) as Record<string, unknown>
         table[segment] = created
         table = created
       }
@@ -896,6 +940,27 @@ const requireOneSelector = (id: string, attrs: unknown, selectors: ReadonlyArray
 const namesCrates = (attrs: unknown): boolean =>
   typeof attrs === "object" && attrs !== null &&
   crateSelectors.some((selector) => (attrs as Record<string, unknown>)[selector] !== undefined)
+
+/**
+ * Refuses a package-mode declaration that names no crate selector.
+ *
+ * Every selector field is optional, so the overload cannot be chosen by shape
+ * alone: `Cargo.Clippy({ offline: true })` is admitted against the package-mode
+ * signature and would otherwise fall through to the BUILD-era check, which
+ * reads none of those keys and invents its own defaults. Any key the check
+ * form does not itself define therefore has to be a package-mode key, and a
+ * package-mode declaration owes exactly one selector.
+ */
+const requireSelectorForPackageKeys = (
+  id: string,
+  attrs: unknown,
+  checkOptions: ReadonlyArray<string>
+): void => {
+  if (attrs === undefined) return
+  if (typeof attrs !== "object" || attrs === null) throw new TypeError(`${id} attrs must be an object`)
+  const foreign = Object.keys(attrs).filter((key) => !checkOptions.includes(key))
+  if (foreign.length > 0) requireOneSelector(id, attrs, crateSelectors)
+}
 
 const fetchDefinition = Target.make("Cargo.Fetch", {
   attrs: FetchAttrs,
@@ -975,10 +1040,10 @@ const appSetDefinition = Target.make("Cargo.AppSet", {
  * @category targets
  * @since 0.1.0
  */
-export const Fetch = (attrs: (typeof FetchAttrs)["~type.make.in"]): Target.AnyTarget => {
-  requireAtMostOneSelector("Cargo.Fetch", attrs, ["workspace", "crates"])
-  return fetchDefinition(attrs)
-}
+export const Fetch = Target.guard(
+  fetchDefinition,
+  (attrs) => requireAtMostOneSelector("Cargo.Fetch", attrs, ["workspace", "crates"])
+)
 
 /**
  * A `cargo build` over a workspace, one package, or a crate set.
@@ -986,10 +1051,10 @@ export const Fetch = (attrs: (typeof FetchAttrs)["~type.make.in"]): Target.AnyTa
  * @category targets
  * @since 0.1.0
  */
-export const Build = (attrs: (typeof BuildAttrs)["~type.make.in"]): Target.AnyTarget => {
-  requireOneSelector("Cargo.Build", attrs, crateSelectors)
-  return buildDefinition(attrs)
-}
+export const Build = Target.guard(
+  buildDefinition,
+  (attrs) => requireOneSelector("Cargo.Build", attrs, crateSelectors)
+)
 
 /**
  * Runs cargo-nextest over the selected crates.
@@ -997,10 +1062,10 @@ export const Build = (attrs: (typeof BuildAttrs)["~type.make.in"]): Target.AnyTa
  * @category targets
  * @since 0.1.0
  */
-export const Nextest = (attrs: (typeof NextestAttrs)["~type.make.in"]): Target.AnyTarget => {
-  requireOneSelector("Cargo.Nextest", attrs, crateSelectors)
-  return nextestDefinition(attrs)
-}
+export const Nextest = Target.guard(
+  nextestDefinition,
+  (attrs) => requireOneSelector("Cargo.Nextest", attrs, crateSelectors)
+)
 
 /**
  * Runs cargo-deny against the declared policy.
@@ -1008,7 +1073,7 @@ export const Nextest = (attrs: (typeof NextestAttrs)["~type.make.in"]): Target.A
  * @category targets
  * @since 0.1.0
  */
-export const Deny = (attrs: (typeof DenyAttrs)["~type.make.in"]): Target.AnyTarget => denyDefinition(attrs)
+export const Deny = denyDefinition
 
 /**
  * A `cargo doc` build over a workspace, one package, or a crate set.
@@ -1016,10 +1081,10 @@ export const Deny = (attrs: (typeof DenyAttrs)["~type.make.in"]): Target.AnyTarg
  * @category targets
  * @since 0.1.0
  */
-export const Doc = (attrs: (typeof DocAttrs)["~type.make.in"]): Target.AnyTarget => {
-  requireOneSelector("Cargo.Doc", attrs, crateSelectors)
-  return docDefinition(attrs)
-}
+export const Doc = Target.guard(
+  docDefinition,
+  (attrs) => requireOneSelector("Cargo.Doc", attrs, crateSelectors)
+)
 
 /**
  * A crate set computed from manifest globs, filterable by
@@ -1039,7 +1104,7 @@ export const Doc = (attrs: (typeof DocAttrs)["~type.make.in"]): Target.AnyTarget
  * @category targets
  * @since 0.1.0
  */
-export const AppSet = (attrs: (typeof AppSetAttrs)["~type.make.in"]): Target.AnyTarget => appSetDefinition(attrs)
+export const AppSet = appSetDefinition
 
 /**
  * Checks whether a value is a declared crate set.
@@ -1112,7 +1177,10 @@ export function Clippy(options?: {
 }): ClippyCheck
 export function Clippy(attrs: (typeof PackageClippyAttrs)["~type.make.in"]): Target.AnyTarget
 export function Clippy(attrs?: unknown): ClippyCheck | Target.AnyTarget {
-  if (!namesCrates(attrs)) return clippyCheck(attrs as Parameters<typeof clippyCheck>[0])
+  if (!namesCrates(attrs)) {
+    requireSelectorForPackageKeys("Cargo.Clippy", attrs, clippyCheckOptions)
+    return clippyCheck(attrs as Parameters<typeof clippyCheck>[0])
+  }
   requireOneSelector("Cargo.Clippy", attrs, crateSelectors)
   return packageClippyDefinition(
     attrs as (typeof PackageClippyAttrs)["~type.make.in"]
@@ -1136,7 +1204,10 @@ export function Clippy(attrs?: unknown): ClippyCheck | Target.AnyTarget {
 export function Test(options?: { readonly locked?: boolean | undefined }): TestCheck
 export function Test(attrs: (typeof PackageTestAttrs)["~type.make.in"]): Target.AnyTarget
 export function Test(attrs?: unknown): TestCheck | Target.AnyTarget {
-  if (!namesCrates(attrs)) return testCheck(attrs as Parameters<typeof testCheck>[0])
+  if (!namesCrates(attrs)) {
+    requireSelectorForPackageKeys("Cargo.Test", attrs, testCheckOptions)
+    return testCheck(attrs as Parameters<typeof testCheck>[0])
+  }
   requireOneSelector("Cargo.Test", attrs, crateSelectors)
   return packageTestDefinition(attrs as (typeof PackageTestAttrs)["~type.make.in"])
 }

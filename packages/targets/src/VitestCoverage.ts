@@ -10,6 +10,7 @@ import * as Exec from "./Exec.ts"
 import * as Input from "./Input.ts"
 import * as PackageManager from "./PackageManager.ts"
 import * as Target from "./Target.ts"
+import * as ToolBuild from "./ToolBuild.ts"
 
 /**
  * Attributes for {@link VitestCoverage}.
@@ -59,7 +60,9 @@ export type Attrs = typeof Attrs.Type
  */
 export const CoverageReport = Schema.Struct({
   run: Exec.Result,
-  reportsDirectory: Schema.NonEmptyString
+  reportsDirectory: Schema.NonEmptyString,
+  /** The digested manifest of the written report tree. */
+  outputs: Schema.Array(ToolBuild.Output)
 })
 
 /**
@@ -76,12 +79,14 @@ export type CoverageReport = typeof CoverageReport.Type
  *
  * The body records one {@link Exec.Exec} node that runs
  * `pnpm exec vitest run` from `cwd` with coverage enabled for the declared
- * provider, report directory, and thresholds. The success value carries
- * `reportsDirectory` so downstream targets can consume the written reports.
- * Key material contains test, source, and config digests, dependency keys,
- * coverage provider, report path, and thresholds. This models tevm's
- * `test:coverage` target and Vitest coverage. Executing the plan requires
- * {@link Exec.ExecLive}.
+ * provider, report directory, and thresholds, then the shared output-capture
+ * step that digests the report tree into the CAS. A zero-exit run that wrote
+ * no report fails the target rather than reporting success, and the captured
+ * manifest is what lets a downstream target — or a cache replay — materialize
+ * the reports. Key material contains test, source, and config digests,
+ * dependency keys, coverage provider, report path, and thresholds. This models
+ * tevm's `test:coverage` target and Vitest coverage. Executing the plan
+ * requires {@link Exec.ExecLive} and {@link ToolBuild.CaptureOutputsLive}.
  *
  * @category targets
  * @since 0.1.0
@@ -90,24 +95,32 @@ export const VitestCoverage = Target.make("VitestCoverage", {
   attrs: Attrs,
   kinds: ["test"],
   success: CoverageReport,
-  error: Exec.ExecError,
+  error: ToolBuild.BuildError,
+  outputs: (attrs) => ({ cwd: attrs.cwd, paths: [attrs.reportsDirectory] }),
   implementation: (attrs) =>
-    Node.all({
-      run: Target.runTool({
-        cwd: attrs.cwd,
-        argv: PackageManager.exec(attrs.packageManager, [
-          "vitest",
-          "run",
-          ...(attrs.config === null ? [] : ["--config", attrs.config.path]),
-          "--coverage.enabled=true",
-          `--coverage.provider=${attrs.provider}`,
-          `--coverage.reportsDirectory=${attrs.reportsDirectory}`,
-          `--coverage.thresholds.branches=${attrs.thresholds.branches}`,
-          `--coverage.thresholds.functions=${attrs.thresholds.functions}`,
-          `--coverage.thresholds.lines=${attrs.thresholds.lines}`,
-          `--coverage.thresholds.statements=${attrs.thresholds.statements}`
-        ])
-      }),
-      reportsDirectory: Node.succeed(attrs.reportsDirectory)
-    })
+    Target.runTool({
+      cwd: attrs.cwd,
+      argv: PackageManager.exec(attrs.packageManager, [
+        "vitest",
+        "run",
+        ...(attrs.config === null ? [] : ["--config", attrs.config.path]),
+        "--coverage.enabled=true",
+        `--coverage.provider=${attrs.provider}`,
+        `--coverage.reportsDirectory=${attrs.reportsDirectory}`,
+        `--coverage.thresholds.branches=${attrs.thresholds.branches}`,
+        `--coverage.thresholds.functions=${attrs.thresholds.functions}`,
+        `--coverage.thresholds.lines=${attrs.thresholds.lines}`,
+        `--coverage.thresholds.statements=${attrs.thresholds.statements}`
+      ])
+    }).pipe(
+      Node.andThen((run) =>
+        ToolBuild.CaptureOutputs.call({ cwd: attrs.cwd, paths: [attrs.reportsDirectory] }).pipe(
+          Node.map((captured) => ({
+            run,
+            reportsDirectory: attrs.reportsDirectory,
+            outputs: captured.outputs
+          }))
+        )
+      )
+    )
 })

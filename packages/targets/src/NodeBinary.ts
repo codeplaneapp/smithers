@@ -52,15 +52,6 @@ export const Attrs = Schema.Struct({
  */
 export type Attrs = typeof Attrs.Type
 
-/**
- * Strips the workspace-root marker from a declared path.
- *
- * A `//`-rooted declaration names a path from the workspace root, which is what
- * the argv needs when `cwd` is the workspace root. A package-relative
- * declaration is already relative to `cwd` and passes through unchanged. The
- * same convention `TypedocDocs` applies.
- */
-const workspacePath = (path: string): string => path.startsWith("//") ? path.slice(2) : path
 
 /**
  * Builds the run argv from decoded attrs at plan time.
@@ -69,7 +60,7 @@ const workspacePath = (path: string): string => path.startsWith("//") ? path.sli
  * @since 0.1.0
  */
 export const runArgv = (attrs: Attrs): ReadonlyArray<string> =>
-  Runtime.run(attrs.runtime, [workspacePath(attrs.entry.path), ...attrs.args])
+  Runtime.run(attrs.runtime, [Input.rootRelative(attrs.cwd, attrs.entry.path), ...attrs.args])
 
 /**
  * Runs one declared JavaScript program under the build verb.

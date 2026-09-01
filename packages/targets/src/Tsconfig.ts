@@ -85,7 +85,7 @@ export type Attrs = typeof Attrs.Type
 export const render = (attrs: Attrs): string => {
   const options = ManifestJson.cloneObject(attrs.compilerOptions, "Tsconfig compilerOptions")
   const document: Record<string, ManifestJson.Value> = {}
-  if (attrs.extends !== null) document["extends"] = relative(attrs.extends.path)
+  if (attrs.extends !== null) document["extends"] = relative(attrs.cwd, attrs.extends.path)
   if (Object.keys(options).length > 0) document["compilerOptions"] = options
   if (attrs.include.length > 0) document["include"] = [...attrs.include]
   if (attrs.exclude.length > 0) document["exclude"] = [...attrs.exclude]
@@ -100,10 +100,13 @@ export const render = (attrs: Attrs): string => {
  *
  * The compiler resolves a bare specifier as a package name, so a sibling file
  * has to carry an explicit relative prefix. A workspace-rooted `//` path is
- * rewritten to one relative to the root.
+ * rewritten relative to the directory the generated file is written into, not
+ * merely stripped of its anchor: `//tsconfig.base.json` written under
+ * `packages/foo` is `../../tsconfig.base.json`, and stripping alone would name
+ * a sibling that is not there.
  */
-const relative = (path: string): string => {
-  const stripped = path.startsWith("//") ? path.slice(2) : path
+const relative = (cwd: string, path: string): string => {
+  const stripped = Input.rootRelative(cwd, path)
   return stripped.startsWith("./") || stripped.startsWith("../") ? stripped : `./${stripped}`
 }
 

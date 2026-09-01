@@ -150,7 +150,7 @@ const fmtDefinition = Target.make("Foundry.Fmt", {
  * @category targets
  * @since 0.1.0
  */
-export const Build = (attrs: (typeof BuildAttrs)["~type.make.in"]): Target.AnyTarget => buildDefinition(attrs)
+export const Build = buildDefinition
 
 /**
  * Runs forge tests under the declared profile and service/data edges.
@@ -158,7 +158,7 @@ export const Build = (attrs: (typeof BuildAttrs)["~type.make.in"]): Target.AnyTa
  * @category targets
  * @since 0.1.0
  */
-export const Test = (attrs: (typeof TestAttrs)["~type.make.in"]): Target.AnyTarget => testDefinition(attrs)
+export const Test = testDefinition
 
 /**
  * Checks or writes forge formatting inside the declared write set.
@@ -166,4 +166,4 @@ export const Test = (attrs: (typeof TestAttrs)["~type.make.in"]): Target.AnyTarg
  * @category targets
  * @since 0.1.0
  */
-export const Fmt = (attrs: (typeof FmtAttrs)["~type.make.in"]): Target.AnyTarget => fmtDefinition(attrs)
+export const Fmt = fmtDefinition

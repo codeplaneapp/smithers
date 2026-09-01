@@ -9,10 +9,10 @@
  *   invocation is a second publish. The rules opt out of the cache in the
  *   package executor and this module exists so the reason is written once.
  * - **Declared secrets.** Each rule names the credential it needs. A
- *   declaration that omits it is refused at plan time, before anything is
- *   spawned, and a declaration that names it but runs in an environment
- *   carrying no value is refused at execution, still before anything is
- *   spawned. Values are read for presence only and never logged.
+ *   declaration that omits it is refused here, before anything is spawned.
+ *   Only the declaration is read: a variable that is declared but carries no
+ *   value on this host is refused later, at the transport boundary that
+ *   resolves it, so no value is ever read here.
  * - **Approval.** `approval: "required"` refuses until a durable approval is
  *   granted. Package mode has no approval store, so the refusal is the
  *   honest answer there and the invocation has no side effect to undo.
@@ -28,10 +28,10 @@ import type * as Secret from "./Secret.ts"
 /**
  * Why one outward invocation was refused.
  *
- * `missing_secret` covers both a declaration that never names the required
- * variable and an environment that carries no value for it.
- * `approval_unsatisfied` covers `approval: "required"` with no granted
- * approval.
+ * `missing_secret` covers a declaration that never names the required
+ * variable; a variable that is declared but unset is refused later, at the
+ * transport boundary. `approval_unsatisfied` covers `approval: "required"`
+ * with no granted approval.
  *
  * @category models
  * @since 0.1.0
@@ -71,8 +71,12 @@ export const isRefused = (value: unknown): value is Refused => value instanceof 
  * @since 0.1.0
  */
 export interface Invocation {
-  /** @deprecated Secret values are resolved only by the outbound transport. */
-  readonly environment: Readonly<Record<string, string | undefined>>
+  /**
+   * Never read.
+   *
+   * @deprecated Secret values are resolved only by the outbound transport.
+   */
+  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
   readonly approvalGranted: boolean
 }
 

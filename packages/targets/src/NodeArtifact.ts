@@ -28,7 +28,7 @@ const copyDefinition = Target.make("Copy", {
  * @category targets
  * @since 0.1.0
  */
-export const Copy = (attrs: (typeof CopyAttrs)["~type.make.in"]): Target.AnyTarget => copyDefinition(attrs)
+export const Copy = copyDefinition
 
 /** Attrs for materializing literal text.
  *
@@ -50,7 +50,7 @@ const literalDefinition = Target.make("Literal", {
  * @category targets
  * @since 0.1.0
  */
-export const Literal = (attrs: (typeof LiteralAttrs)["~type.make.in"]): Target.AnyTarget => literalDefinition(attrs)
+export const Literal = literalDefinition
 
 /** Attrs for a derived overlay file set.
  *
@@ -72,7 +72,7 @@ const overlayDefinition = Target.make("Overlay", {
  * @category targets
  * @since 0.1.0
  */
-export const Overlay = (attrs: (typeof OverlayAttrs)["~type.make.in"]): Target.AnyTarget => overlayDefinition(attrs)
+export const Overlay = overlayDefinition
 
 /** Attrs for Markdown fenced code extraction.
  *
@@ -94,8 +94,7 @@ const codeBlocksDefinition = Target.make("Markdown.CodeBlocks", {
  * @category targets
  * @since 0.1.0
  */
-export const CodeBlocks = (attrs: (typeof CodeBlocksAttrs)["~type.make.in"]): Target.AnyTarget =>
-  codeBlocksDefinition(attrs)
+export const CodeBlocks = codeBlocksDefinition
 
 /** Attrs for declaration compatibility checking.
  *
@@ -118,7 +117,7 @@ const apiCompatDefinition = Target.make("Api.Compat", {
  * @category targets
  * @since 0.1.0
  */
-export const Compat = (attrs: (typeof ApiCompatAttrs)["~type.make.in"]): Target.AnyTarget => apiCompatDefinition(attrs)
+export const Compat = apiCompatDefinition
 
 /** Attrs for package size budgets.
  *
@@ -140,5 +139,4 @@ const sizeBudgetsDefinition = Target.make("Size.Budgets", {
  * @category targets
  * @since 0.1.0
  */
-export const Budgets = (attrs: (typeof SizeBudgetsAttrs)["~type.make.in"]): Target.AnyTarget =>
-  sizeBudgetsDefinition(attrs)
+export const Budgets = sizeBudgetsDefinition

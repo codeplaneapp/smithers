@@ -114,7 +114,7 @@ const testDefinition = Target.make("Go.Test", {
   implementation: () => Target.notImplemented("Go.Test")
 })
 /** */
-export const Test = (attrs: (typeof TestAttrs)["~type.make.in"]): Target.AnyTarget => testDefinition(attrs)
+export const Test = testDefinition
 
 /** */
 export const BinaryAttrs = Schema.Struct({
@@ -138,7 +138,7 @@ const binaryDefinition = Target.make("Go.Binary", {
   implementation: () => Target.notImplemented("Go.Binary")
 })
 /** */
-export const Binary = (attrs: (typeof BinaryAttrs)["~type.make.in"]): Target.AnyTarget => binaryDefinition(attrs)
+export const Binary = binaryDefinition
 
 /** */
 export const ModDownloadAttrs = Schema.Struct({
@@ -153,8 +153,7 @@ const modDownloadDefinition = Target.make("Go.ModDownload", {
   implementation: () => Target.notImplemented("Go.ModDownload")
 })
 /** */
-export const ModDownload = (attrs: (typeof ModDownloadAttrs)["~type.make.in"]): Target.AnyTarget =>
-  modDownloadDefinition(attrs)
+export const ModDownload = modDownloadDefinition
 
 /** */
 export const LintAttrs = Schema.Struct({
@@ -170,7 +169,7 @@ const lintDefinition = Target.make("Go.Lint", {
   implementation: () => Target.notImplemented("Go.Lint")
 })
 /** */
-export const Lint = (attrs: (typeof LintAttrs)["~type.make.in"]): Target.AnyTarget => lintDefinition(attrs)
+export const Lint = lintDefinition
 
 /** */
 export const GenerateAttrs = Schema.Struct({
@@ -185,7 +184,7 @@ const generateDefinition = Target.make("Go.Generate", {
   implementation: () => Target.notImplemented("Go.Generate")
 })
 /** */
-export const Generate = (attrs: (typeof GenerateAttrs)["~type.make.in"]): Target.AnyTarget => generateDefinition(attrs)
+export const Generate = generateDefinition
 
 /** */
 export const FuzzAttrs = Schema.Struct({
@@ -201,7 +200,7 @@ const fuzzDefinition = Target.make("Go.Fuzz", {
   implementation: () => Target.notImplemented("Go.Fuzz")
 })
 /** */
-export const Fuzz = (attrs: (typeof FuzzAttrs)["~type.make.in"]): Target.AnyTarget => fuzzDefinition(attrs)
+export const Fuzz = fuzzDefinition
 
 /**
  * Renders the same linker flags `Go.Binary` links, as the one string a

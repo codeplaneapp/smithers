@@ -311,12 +311,11 @@ const diffDefinition = Target.make("Shell.Diff", {
   implementation: (attrs) => planExec(attrs)
 })
 
-const withOneExecutable = <A>(id: string, attrs: unknown, construct: () => A): A => {
+const requireOneExecutable = (id: string, attrs: unknown): void => {
   if (typeof attrs !== "object" || attrs === null) {
     throw new TypeError(`${id} attrs must be an object`)
   }
   Attr.requireOneExecutable(id, attrs as Record<string, unknown>, ["bin", "bun", "command", "script"])
-  return construct()
 }
 
 /**
@@ -325,13 +324,12 @@ const withOneExecutable = <A>(id: string, attrs: unknown, construct: () => A): A
  * @category targets
  * @since 0.1.0
  */
-export const Build = (attrs: (typeof BuildAttrs)["~type.make.in"]): Target.AnyTarget =>
-  withOneExecutable("Shell.Build", attrs, () => {
-    if ((attrs.outDirs?.length ?? 0) + (attrs.outFiles?.length ?? 0) === 0) {
-      throw new TypeError("Shell.Build requires at least one outDirs or outFiles entry")
-    }
-    return buildDefinition(attrs)
-  })
+export const Build = Target.guard(buildDefinition, (attrs) => {
+  requireOneExecutable("Shell.Build", attrs)
+  if ((attrs.outDirs?.length ?? 0) + (attrs.outFiles?.length ?? 0) === 0) {
+    throw new TypeError("Shell.Build requires at least one outDirs or outFiles entry")
+  }
+})
 
 /**
  * A tool run whose exit status is the test verdict.
@@ -339,8 +337,7 @@ export const Build = (attrs: (typeof BuildAttrs)["~type.make.in"]): Target.AnyTa
  * @category targets
  * @since 0.1.0
  */
-export const Test = (attrs: (typeof TestAttrs)["~type.make.in"]): Target.AnyTarget =>
-  withOneExecutable("Shell.Test", attrs, () => testDefinition(attrs) as unknown as Target.AnyTarget)
+export const Test = Target.guard(testDefinition, (attrs) => requireOneExecutable("Shell.Test", attrs))
 
 /**
  * A tool run executed only when named explicitly.
@@ -348,8 +345,7 @@ export const Test = (attrs: (typeof TestAttrs)["~type.make.in"]): Target.AnyTarg
  * @category targets
  * @since 0.1.0
  */
-export const Run = (attrs: (typeof RunAttrs)["~type.make.in"]): Target.AnyTarget =>
-  withOneExecutable("Shell.Run", attrs, () => runDefinition(attrs) as unknown as Target.AnyTarget)
+export const Run = Target.guard(runDefinition, (attrs) => requireOneExecutable("Shell.Run", attrs))
 
 /**
  * A scoped long-running service with the readiness/health/stop probe
@@ -358,8 +354,7 @@ export const Run = (attrs: (typeof RunAttrs)["~type.make.in"]): Target.AnyTarget
  * @category targets
  * @since 0.1.0
  */
-export const Serve = (attrs: (typeof ServeAttrs)["~type.make.in"]): Target.AnyTarget =>
-  withOneExecutable("Shell.Serve", attrs, () => serveDefinition(attrs) as unknown as Target.AnyTarget)
+export const Serve = Target.guard(serveDefinition, (attrs) => requireOneExecutable("Shell.Serve", attrs))
 
 /**
  * A tool run whose writes are mechanically confined to the declared
@@ -368,5 +363,4 @@ export const Serve = (attrs: (typeof ServeAttrs)["~type.make.in"]): Target.AnyTa
  * @category targets
  * @since 0.1.0
  */
-export const Diff = (attrs: (typeof DiffAttrs)["~type.make.in"]): Target.AnyTarget =>
-  withOneExecutable("Shell.Diff", attrs, () => diffDefinition(attrs) as unknown as Target.AnyTarget)
+export const Diff = Target.guard(diffDefinition, (attrs) => requireOneExecutable("Shell.Diff", attrs))

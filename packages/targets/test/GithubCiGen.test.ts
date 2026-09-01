@@ -579,8 +579,8 @@ describe("render", () => {
         steps: [{ verb: Verb.Test, pattern: "//apps/ui" }]
       }]
     }))
-    expect(rendered).toContain("          if [ ! -x /usr/bin/google-chrome ]; then\n")
-    expect(rendered).toContain("          /usr/bin/google-chrome --version\n")
+    expect(rendered).toContain("          if [ ! -x '/usr/bin/google-chrome' ]; then\n")
+    expect(rendered).toContain("          '/usr/bin/google-chrome' --version\n")
     expect(rendered).toContain("          mkdir -p \"$RUNNER_TEMP/e2e-artifacts\"\n")
     // Each copy is existence-guarded: a green run leaves no screenshots, and an
     // unexpanded glob handed to a bare `cp` fails the whole job (PR #1631).

@@ -87,7 +87,17 @@ export class DriftError extends Schema.TaggedError<DriftError>()(
   "smithers-build/DriftError",
   {
     path: Schema.NonEmptyString,
-    message: Schema.NonEmptyString
+    message: Schema.NonEmptyString,
+    /**
+     * Why the check failed, as a stable code rather than prose.
+     *
+     * `missing` and `drifted` are both answered by regenerating the file.
+     * `unreadable` is not: a permissions failure, a symlink where a generated
+     * file belongs, invalid UTF-8, or an oversized file all reach this error,
+     * and calling any of them drift would send an operator to regenerate a
+     * file whose problem regeneration does not touch.
+     */
+    reason: Schema.optional(Schema.Literals(["missing", "drifted", "unreadable"]))
   }
 ) {}
 
@@ -431,6 +441,9 @@ export const writeGeneratedFile = (
 /**
  * Fails with {@link DriftError} unless the checked-in file matches.
  *
+ * The failure carries a `reason`: `missing` and `drifted` are answered by
+ * regenerating the file, `unreadable` never is.
+ *
  * @category effects
  * @since 0.1.0
  */
@@ -453,7 +466,12 @@ export const checkGeneratedFile = (
           what: "generated file"
         })
       },
-      catch: (cause) => new DriftError({ path: payload.path, message: failureMessage(cause) })
+      catch: (cause) =>
+        new DriftError({
+          path: payload.path,
+          reason: "unreadable",
+          message: `the generated file could not be read: ${failureMessage(cause)}`
+        })
     }),
     (actual) =>
       actual === payload.contents
@@ -461,6 +479,7 @@ export const checkGeneratedFile = (
         : Effect.fail(
           new DriftError({
             path: payload.path,
+            reason: actual === undefined ? "missing" : "drifted",
             message: actual === undefined
               ? "the generated file is missing"
               : "the checked-in file drifted from its generated form"

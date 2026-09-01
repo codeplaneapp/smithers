@@ -69,10 +69,9 @@ const fetchDefinition = Target.make(ruleId, {
  * @category targets
  * @since 0.1.0
  */
-export const Fetch = (attrs: (typeof FetchAttrs)["~type.make.in"]): Target.AnyTarget => {
+export const Fetch = Target.guard(fetchDefinition, (attrs) => {
   if (typeof attrs !== "object" || attrs === null) throw new TypeError("Fetch attrs must be an object")
-  return fetchDefinition(attrs)
-}
+})
 
 /**
  * Checks whether a value is a {@link Fetch} target.

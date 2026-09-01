@@ -462,6 +462,14 @@ const knownOptions: ReadonlySet<string> = new Set([
 
 const workspaceName = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
+/**
+ * Code units of a rejected name one diagnostic may render.
+ *
+ * Every other validator in this package bounds its rejection detail before
+ * rendering it; this is that bound for declaration names.
+ */
+const maximumRejectedNameCodeUnits = 256
+
 /** Normalizes one portable workspace-relative repository path. */
 const repositoryPath = (value: string): string => {
   if (value === "" || value.includes("\0") || /^[\\/]|^[A-Za-z]:/.test(value)) {
@@ -498,8 +506,17 @@ const repositoryPath = (value: string): string => {
  * @since 0.1.0
  */
 export const Workspace = (name: string, options: WorkspaceOptions): WorkspaceDeclaration => {
-  if (typeof name !== "string" || !workspaceName.test(name)) {
-    throw new Error(`Workspace name must be a portable identifier: ${JSON.stringify(name)}`)
+  // The two failures are split so a caller who passed the options object first
+  // is told that, rather than having their whole declaration — host paths and
+  // secret names included — serialized unbounded into a message that reaches
+  // CI logs.
+  if (typeof name !== "string") {
+    throw new TypeError("Workspace name must be a string; Workspace(name, options) takes the name first")
+  }
+  if (!workspaceName.test(name)) {
+    throw new Error(
+      `Workspace name must be a portable identifier: ${JSON.stringify(name.slice(0, maximumRejectedNameCodeUnits))}`
+    )
   }
   if (typeof options !== "object" || options === null) {
     throw new TypeError("Workspace options must be an object")
@@ -582,7 +599,11 @@ export const Workspace = (name: string, options: WorkspaceOptions): WorkspaceDec
     const paths = new Set<string>()
     for (const [repoName, repo] of Object.entries(options.repos)) {
       if (!workspaceName.test(repoName)) {
-        throw new TypeError(`Workspace repo name is not portable: ${JSON.stringify(repoName)}`)
+        throw new TypeError(
+          `Workspace repo name is not portable: ${
+            JSON.stringify(repoName.slice(0, maximumRejectedNameCodeUnits))
+          }`
+        )
       }
       if (!LocalRepository.isDeclaration(repo)) {
         throw new TypeError(`Workspace repo ${repoName} must be an S.LocalRepository declaration`)

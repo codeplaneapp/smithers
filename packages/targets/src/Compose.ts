@@ -15,6 +15,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import type * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
+import { constants as NodeFsConstants } from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import * as Attr from "./Attr.ts"
@@ -212,10 +213,27 @@ export const GenerateCheck = Action.make("smithers-build/generate-check", {
   tier: "sealed"
 })
 
-/** One declared output as it stood before the generator ran. */
-interface OutputSnapshot {
-  readonly path: string
+/**
+ * What one declared output is, beyond its bytes.
+ *
+ * A restore that knows only bytes cannot tell a regular file from a symlink
+ * standing where one belongs, and would write through that symlink into a file
+ * outside the declared tree.
+ */
+type OutputKind = "absent" | "file" | "symlink" | "other"
+
+/** One declared output exactly as it stood before the generator ran. */
+interface OutputState {
+  readonly kind: OutputKind
+  /** File contents, or the link target for a symlink. */
   readonly bytes: Buffer | undefined
+  /** Permission bits, so a chmod-only change is drift and is undone. */
+  readonly mode: number | undefined
+}
+
+/** One declared output as it stood before the generator ran. */
+interface OutputSnapshot extends OutputState {
+  readonly path: string
 }
 
 /** Maximum code units one excerpted line contributes to a drift message. */
@@ -235,11 +253,20 @@ const excerpt = (line: string | undefined): string =>
  * alone, and an operator's next move is to open the file the generator would
  * have rewritten.
  */
-const driftMessage = (path: string, previous: Buffer | undefined, current: Buffer | undefined): string => {
-  if (previous === undefined) return `${path} is written by the generator and the checkout does not carry it`
-  if (current === undefined) return `${path} is carried by the checkout and the generator removes it`
-  const checkedIn = previous.toString("utf8").split("\n")
-  const regenerated = current.toString("utf8").split("\n")
+const driftMessage = (path: string, previous: OutputState, current: OutputState): string => {
+  if (previous.kind === "absent") return `${path} is written by the generator and the checkout does not carry it`
+  if (current.kind === "absent") return `${path} is carried by the checkout and the generator removes it`
+  if (previous.kind !== current.kind) {
+    return `${path} is a ${previous.kind} in the checkout and the generator leaves a ${current.kind}`
+  }
+  if (previous.bytes === undefined || current.bytes === undefined) {
+    return `${path} changed and the change is not readable as text`
+  }
+  if (previous.bytes.equals(current.bytes)) {
+    return `${path} kept its contents and the generator changed its permissions`
+  }
+  const checkedIn = previous.bytes.toString("utf8").split("\n")
+  const regenerated = current.bytes.toString("utf8").split("\n")
   const differing = checkedIn.findIndex((line, position) => line !== regenerated[position])
   const line = differing === -1 ? Math.min(checkedIn.length, regenerated.length) : differing
   return `${path} drifted from its generated form: ` +
@@ -247,14 +274,28 @@ const driftMessage = (path: string, previous: Buffer | undefined, current: Buffe
     `first difference at line ${line + 1}: ${excerpt(checkedIn[line])} became ${excerpt(regenerated[line])}`
 }
 
-/** Reads one declared output, or undefined when the generator has not written it. */
-const readOutput = async (absolute: string): Promise<Buffer | undefined> => {
+const absent: OutputState = { kind: "absent", bytes: undefined, mode: undefined }
+
+/**
+ * Reads one declared output without following a symlink at its final segment.
+ *
+ * `lstat` first, so a symlink is recorded as a symlink and its target is never
+ * opened. Only ENOENT means absent; every other failure is a broken workspace
+ * and is raised.
+ */
+const readOutput = async (absolute: string): Promise<OutputState> => {
+  let stats
   try {
-    return await Fs.readFile(absolute)
+    stats = await Fs.lstat(absolute)
   } catch (cause) {
-    if (SafeFs.errorCode(cause) === "ENOENT") return undefined
+    if (SafeFs.errorCode(cause) === "ENOENT") return absent
     throw cause
   }
+  if (stats.isSymbolicLink()) {
+    return { kind: "symlink", bytes: Buffer.from(await Fs.readlink(absolute), "utf8"), mode: undefined }
+  }
+  if (!stats.isFile()) return { kind: "other", bytes: undefined, mode: stats.mode & 0o7777 }
+  return { kind: "file", bytes: await Fs.readFile(absolute), mode: stats.mode & 0o7777 }
 }
 
 /**
@@ -288,12 +329,45 @@ const snapshotOutputs = async (
   Promise.all(
     (await outputPaths(workspaceRoot, changes, signal)).map(async (path) => ({
       path,
-      bytes: await readOutput(NodePath.join(workspaceRoot, path))
+      ...await readOutput(NodePath.join(workspaceRoot, path))
     }))
   )
 
-const unchanged = (previous: Buffer | undefined, current: Buffer | undefined): boolean =>
-  previous === undefined ? current === undefined : current !== undefined && previous.equals(current)
+const unchanged = (previous: OutputState, current: OutputState): boolean => {
+  if (previous.kind !== current.kind || previous.mode !== current.mode) return false
+  if (previous.bytes === undefined) return current.bytes === undefined
+  return current.bytes !== undefined && previous.bytes.equals(current.bytes)
+}
+
+/**
+ * Puts one declared output back exactly as it was.
+ *
+ * Whatever stands there now is removed by name, which unlinks a symlink rather
+ * than following it, and the replacement file is opened `O_NOFOLLOW` so a race
+ * that re-creates a link between the two steps fails loudly instead of writing
+ * through it. A pre-existing directory is left alone: its contents are not in
+ * the snapshot, so removing it would destroy more than the check borrowed.
+ */
+const restoreOutput = async (absolute: string, previous: OutputState): Promise<void> => {
+  if (previous.kind === "other") return
+  await Fs.rm(absolute, { force: true, recursive: true })
+  if (previous.kind === "absent") return
+  if (previous.kind === "symlink") {
+    await Fs.symlink(previous.bytes?.toString("utf8") ?? "", absolute)
+    return
+  }
+  const handle = await Fs.open(
+    absolute,
+    NodeFsConstants.O_WRONLY | NodeFsConstants.O_CREAT | NodeFsConstants.O_EXCL | NodeFsConstants.O_NOFOLLOW,
+    previous.mode ?? 0o644
+  )
+  try {
+    await handle.writeFile(previous.bytes ?? Buffer.alloc(0))
+  } finally {
+    await handle.close()
+  }
+  if (previous.mode !== undefined) await Fs.chmod(absolute, previous.mode)
+}
 
 /**
  * Restores every declared output and reports the first one the generator
@@ -310,12 +384,11 @@ const restoreOutputs = async (
   let drift: GeneratedFile.DriftError | undefined
   for (const path of [...paths].sort()) {
     const absolute = NodePath.join(workspaceRoot, path)
-    const previous = before.find((entry) => entry.path === path)?.bytes
+    const previous = before.find((entry) => entry.path === path) ?? absent
     const current = await readOutput(absolute)
     if (unchanged(previous, current)) continue
     drift ??= GeneratedFile.driftError(path, driftMessage(path, previous, current))
-    if (previous === undefined) await Fs.rm(absolute, { force: true })
-    else await Fs.writeFile(absolute, previous)
+    await restoreOutput(absolute, previous)
   }
   return drift
 }
@@ -324,8 +397,9 @@ const restoreOutputs = async (
  * Runs a generator and fails when it rewrote a declared output.
  *
  * A generator writes into the real tree, which is the only tree it knows how
- * to write; the check snapshots every declared output first and restores each
- * one before it settles, so a `lint` run leaves the working tree byte for byte
+ * to write; the check snapshots every declared output first — its bytes, its
+ * file type, and its permission bits, read without following a symlink — and
+ * restores each one before it settles, so a `lint` run leaves the working tree
  * as it found it, whether the generator succeeded, drifted, or failed. A
  * generator that writes outside its declared `changes` is outside the
  * contract, exactly as it is under package mode's enforced write set.
@@ -489,12 +563,11 @@ const requireWriteSet = (attrs: Record<string, unknown>): void => {
  * @category targets
  * @since 0.1.0
  */
-export const Generate = (attrs: (typeof GenerateAttrs)["~type.make.in"]): Target.AnyTarget => {
+export const Generate = Target.guard(generateDefinition, (attrs) => {
   if (typeof attrs !== "object" || attrs === null) throw new TypeError("Generate attrs must be an object")
   Attr.requireOneExecutable("Generate", attrs, ["emit", "script", "bin", "command"])
   requireWriteSet(attrs)
-  return generateDefinition(attrs)
-}
+})
 
 /**
  * Attrs for {@link Suite}.
@@ -518,7 +591,7 @@ const suiteDefinition = Target.make("Suite", {
  * @category targets
  * @since 0.1.0
  */
-export const Suite = (attrs: (typeof SuiteAttrs)["~type.make.in"]): Target.AnyTarget => suiteDefinition(attrs)
+export const Suite = suiteDefinition
 
 /**
  * Attrs for {@link Alias}.
@@ -917,7 +990,7 @@ const testDefinition = Target.make("Test", {
  * @category targets
  * @since 0.1.0
  */
-export const Test = (attrs: (typeof TestAttrs)["~type.make.in"]): Target.AnyTarget => testDefinition(attrs)
+export const Test = testDefinition
 
 /**
  * Attrs for {@link Materialize}.
@@ -1030,4 +1103,4 @@ const cleanDefinition = Target.make("Clean", {
  * @category targets
  * @since 0.1.0
  */
-export const Clean = (attrs: (typeof CleanAttrs)["~type.make.in"]): Target.AnyTarget => cleanDefinition(attrs)
+export const Clean = cleanDefinition

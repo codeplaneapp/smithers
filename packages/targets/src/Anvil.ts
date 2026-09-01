@@ -37,4 +37,4 @@ const definition = Target.make("Anvil.Fork", {
  * @category targets
  * @since 0.1.0
  */
-export const Fork = (attrs: (typeof ForkAttrs)["~type.make.in"]): Target.AnyTarget => definition(attrs)
+export const Fork = definition

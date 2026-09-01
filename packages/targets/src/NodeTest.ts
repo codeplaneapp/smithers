@@ -196,15 +196,6 @@ export const Attrs = Schema.Struct({
  */
 export type Attrs = typeof Attrs.Type
 
-/**
- * Strips the workspace-root marker from a declared path.
- *
- * A `//`-rooted declaration names a path from the workspace root, which is what
- * the argv needs when `cwd` is the workspace root. A package-relative
- * declaration is already relative to `cwd` and passes through unchanged. The
- * same convention `TypedocDocs` applies.
- */
-const workspacePath = (path: string): string => path.startsWith("//") ? path.slice(2) : path
 
 /**
  * Builds the run argv from decoded attrs at plan time.
@@ -218,11 +209,11 @@ const workspacePath = (path: string): string => path.startsWith("//") ? path.sli
 export const runArgv = (attrs: Attrs): ReadonlyArray<string> => {
   switch (attrs.runner.name) {
     case "test-runner":
-      return Runtime.test(attrs.runtime, attrs.runner.tests.map((test) => workspacePath(test.path)))
+      return Runtime.test(attrs.runtime, attrs.runner.tests.map((test) => Input.rootRelative(attrs.cwd, test.path)))
     case "suite":
-      return Runtime.test(attrs.runtime, attrs.runner.paths.map(workspacePath))
+      return Runtime.test(attrs.runtime, attrs.runner.paths.map((path) => Input.rootRelative(attrs.cwd, path)))
     case "entrypoint":
-      return Runtime.run(attrs.runtime, [workspacePath(attrs.runner.entry.path), ...attrs.runner.args])
+      return Runtime.run(attrs.runtime, [Input.rootRelative(attrs.cwd, attrs.runner.entry.path), ...attrs.runner.args])
   }
 }
 

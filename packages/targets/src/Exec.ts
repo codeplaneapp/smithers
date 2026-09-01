@@ -203,13 +203,46 @@ export type Result = typeof Result.Type
  * @category errors
  * @since 0.1.0
  */
+export const ExecFailureCode = Schema.Literals([
+  "invalid_payload",
+  "spawn_failed",
+  "timed_out",
+  "signaled",
+  "stream_failed",
+  "secret_proxy_failed",
+  "exit_status"
+])
+
+/**
+ * Why one external-tool run failed, as a closed code rather than prose.
+ *
+ * Every one of these reported `exitCode: -1` with free-form stderr text, so a
+ * caller deciding whether to retry a transient spawn, tell the operator an
+ * executable is missing, treat a timeout as a budget problem, or escalate a
+ * secret-proxy failure had to parse an unstable string.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type ExecFailureCode = typeof ExecFailureCode.Type
+
+/**
+ * A typed external-tool failure.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
 export const ExecError = Schema.Struct({
   _tag: Schema.Literal("smithers-build/ExecError"),
   argv: Schema.NonEmptyArray(Schema.String),
   cwd: Schema.String,
   exitCode: Schema.Number,
   stdout: Schema.String,
-  stderr: Schema.String
+  stderr: Schema.String,
+  /** Which failure class this is. */
+  code: Schema.optional(ExecFailureCode),
+  /** The signal that terminated the child, when one did. */
+  signal: Schema.optional(Schema.NonEmptyString)
 })
 
 /**
@@ -724,6 +757,7 @@ const spawnTool = (
           argv: payload.argv,
           cwd: payload.cwd,
           exitCode: -1,
+          code: "spawn_failed",
           stdout: "",
           stderr: tail(failureMessage(cause))
         })
@@ -743,12 +777,19 @@ const spawnTool = (
       clearTimeout(timer)
       resume(outcome)
     }
-    const failure = (message: string, out: string): void =>
+    const failure = (
+      message: string,
+      out: string,
+      code: ExecFailureCode,
+      signal?: NodeJS.Signals
+    ): void =>
       settle(Effect.fail(
         execError({
           argv: payload.argv,
           cwd: payload.cwd,
           exitCode: -1,
+          code,
+          ...(signal === undefined ? {} : { signal }),
           stdout: out,
           stderr: tail(message)
         })
@@ -764,11 +805,11 @@ const spawnTool = (
     }
     const timer = setTimeout(() => {
       killTree(child)
-      failure(`the tool timed out after ${payload.timeoutMs}ms`, stdout.tail)
+      failure(`the tool timed out after ${payload.timeoutMs}ms`, stdout.tail, "timed_out")
     }, payload.timeoutMs)
     if (child.stdout === null || child.stderr === null) {
       killTree(child)
-      failure("the child was spawned without a stdout and stderr pipe", "")
+      failure("the child was spawned without a stdout and stderr pipe", "", "spawn_failed")
       return Effect.sync(() => killTree(child))
     }
     child.stdout.on("data", (chunk: Buffer) => {
@@ -792,18 +833,18 @@ const spawnTool = (
       // from the tail the diagnostic carries.
       finish(stdout)
       finish(stderr)
-      failure(error.message, stdout.tail)
+      failure(error.message, stdout.tail, "spawn_failed")
     })
     child.on("close", (exitCode: number | null, signal: NodeJS.Signals | null) => {
       if (settled) return
       finish(stdout)
       finish(stderr)
-      if (streamFailure !== undefined) return failure(streamFailure, stdout.tail)
+      if (streamFailure !== undefined) return failure(streamFailure, stdout.tail, "stream_failed")
       // A signalled child has no exit code. Reporting only -1 loses the one
-      // fact that explains the failure, so the signal is named in the tail the
-      // diagnostic carries.
+      // fact that explains the failure, so the signal is its own field and is
+      // named in the tail the diagnostic carries too.
       if (exitCode === null && signal !== null) {
-        return failure(`${stderr.tail}\nthe tool was terminated by ${signal}`, stdout.tail)
+        return failure(`${stderr.tail}\nthe tool was terminated by ${signal}`, stdout.tail, "signaled", signal)
       }
       settle(Effect.succeed({
         exitCode: exitCode ?? -1,
@@ -850,6 +891,7 @@ const withSecretEnvironment = <A, E>(
           argv: diagnostic.argv,
           cwd: diagnostic.cwd,
           exitCode: -1,
+          code: "secret_proxy_failed",
           stdout: "",
           stderr: tail(`the secret substitution proxy did not start: ${failureMessage(cause)}`)
         })
@@ -921,6 +963,7 @@ export const run = (
           argv: diagnostic.argv,
           cwd: diagnostic.cwd,
           exitCode: -1,
+          code: "invalid_payload",
           stdout: "",
           stderr: tail(failureMessage(cause))
         })
@@ -941,6 +984,7 @@ export const run = (
                   argv: resolved.argv,
                   cwd: resolved.cwd,
                   exitCode: output.exitCode,
+                  code: "exit_status",
                   stdout: output.stdoutTail,
                   stderr: output.stderrTail
                 })

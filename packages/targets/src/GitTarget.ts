@@ -36,7 +36,7 @@ const commitDefinition = Target.make("Git.Commit", {
  * @category targets
  * @since 0.1.0
  */
-export const Commit = (attrs: (typeof CommitAttrs)["~type.make.in"]): Target.AnyTarget => commitDefinition(attrs)
+export const Commit = commitDefinition
 
 /** Attrs for the outward pull-request rule.
  *
@@ -61,7 +61,7 @@ const prDefinition = Target.make("Git.Pr", {
  * @category targets
  * @since 0.1.0
  */
-export const Pr = (attrs: (typeof PrAttrs)["~type.make.in"]): Target.AnyTarget => prDefinition(attrs)
+export const Pr = prDefinition
 
 /** Attrs for a .gitmodules-selected submodule set.
  *
@@ -85,8 +85,7 @@ const submodulesDefinition = Target.make("Git.Submodules", {
  * @category targets
  * @since 0.1.0
  */
-export const Submodules = (attrs: (typeof SubmodulesAttrs)["~type.make.in"]): Target.AnyTarget =>
-  submodulesDefinition(attrs)
+export const Submodules = submodulesDefinition
 
 /** Attrs for one gitlink-selected submodule.
  *
@@ -107,8 +106,7 @@ const submoduleDefinition = Target.make("Git.Submodule", {
  * @category targets
  * @since 0.1.0
  */
-export const Submodule = (attrs: (typeof SubmoduleAttrs)["~type.make.in"]): Target.AnyTarget =>
-  submoduleDefinition(attrs)
+export const Submodule = submoduleDefinition
 
 /**
  * The validated attrs of one `Git.Commit` target.

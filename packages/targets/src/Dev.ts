@@ -20,7 +20,15 @@ export const Attrs = Schema.Struct({
   inputs: Schema.Array(Input.Declared),
   deps: Schema.Array(Target.Target),
   cwd: Schema.NonEmptyString,
-  readyWhen: Schema.NullOr(Schema.String)
+  /**
+   * Always `null`.
+   *
+   * A readiness marker would be a promise this rule cannot keep: the shared
+   * exec action has no readiness probe, so a string here re-keyed the target
+   * on a semantic nothing observed. `Shell.Serve` models real readiness
+   * through `Attr.Readiness` and is the rule to reach for instead.
+   */
+  readyWhen: Schema.Null
 })
 
 /**
@@ -36,8 +44,9 @@ export type Attrs = typeof Attrs.Type
  *
  * The body records one {@link Exec.Exec} node spawning `command` with `args`
  * from `cwd`. The spawn is a pass-through: the node succeeds when the process
- * exits cleanly and interrupting the fiber kills it. `readyWhen` stays
- * declared key material; the shared exec action has no readiness probe. The
+ * exits cleanly and interrupting the fiber kills it. `readyWhen` is `null`:
+ * the shared exec action has no readiness probe, and a declaration that names
+ * one is refused rather than silently ignored. The
  * target is non-cacheable because it stays live. This models tevm's `dev`
  * targets and common watch-process prior art. Executing the plan requires
  * {@link Exec.ExecLive}.

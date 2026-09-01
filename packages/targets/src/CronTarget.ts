@@ -28,7 +28,7 @@ const cronDefinition = Target.make("Cron", {
  * @category targets
  * @since 0.1.0
  */
-export const Cron = (attrs: (typeof CronAttrs)["~type.make.in"]): Target.AnyTarget => cronDefinition(attrs)
+export const Cron = cronDefinition
 
 /** Reads validated Cron attrs.
  *

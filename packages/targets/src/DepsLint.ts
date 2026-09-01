@@ -6,6 +6,7 @@
 import * as Node from "@smthrs/plan/Node"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { createHash } from "node:crypto"
 import * as NodePath from "node:path"
 import * as Exec from "./Exec.ts"
 import * as Input from "./Input.ts"
@@ -67,17 +68,15 @@ const knipConfig = (attrs: Attrs): string => {
 }
 
 /**
- * Deterministic 32-bit FNV-1a hex fingerprint naming the generated knip
- * configuration file, so distinct ignore sets sharing one `cwd` never race
- * on one path.
+ * Deterministic SHA-256 hex fingerprint naming the generated knip
+ * configuration file, so distinct ignore sets sharing one `cwd` never race on
+ * one path.
+ *
+ * The 32-bit FNV-1a this replaced had real collisions: two ordinary ignore
+ * lists could name one file, and whichever target wrote last decided the
+ * configuration the other one was judged under.
  */
-const fingerprint = (text: string): string => {
-  let hash = 0x811c9dc5
-  for (let index = 0; index < text.length; index++) {
-    hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193) >>> 0
-  }
-  return hash.toString(16).padStart(8, "0")
-}
+const fingerprint = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex")
 
 /**
  * Plans missing, unused, and undeclared dependency checks.

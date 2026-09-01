@@ -37,7 +37,7 @@ const retainDefinition = Target.make("Memory.Retain", {
  * @category targets
  * @since 0.1.0
  */
-export const Retain = (attrs: (typeof RetainAttrs)["~type.make.in"]): Target.AnyTarget => retainDefinition(attrs)
+export const Retain = retainDefinition
 
 /**
  * The validated attrs of one `Memory.Retain` target.

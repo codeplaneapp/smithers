@@ -31,7 +31,7 @@ const versionDefinition = Target.make("Changesets.Version", {
  * @category targets
  * @since 0.1.0
  */
-export const Version = (attrs: (typeof VersionAttrs)["~type.make.in"]): Target.AnyTarget => versionDefinition(attrs)
+export const Version = versionDefinition
 
 /** Attrs for an outward changesets publish.
  *
@@ -59,4 +59,4 @@ const publishDefinition = Target.make("Changesets.Publish", {
  * @category targets
  * @since 0.1.0
  */
-export const Publish = (attrs: (typeof PublishAttrs)["~type.make.in"]): Target.AnyTarget => publishDefinition(attrs)
+export const Publish = publishDefinition

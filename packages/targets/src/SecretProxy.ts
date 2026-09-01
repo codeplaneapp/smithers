@@ -18,7 +18,10 @@
  * 3. **Secret destination URLs.** {@link Proxy.urlFor} gives a child a
  *    loopback capability URL. The proxy resolves the real HTTP or HTTPS URL
  *    only when the child calls that capability, then performs the outbound
- *    request itself. The true destination never enters child argv or env.
+ *    request itself. The true destination never enters child argv or env, and
+ *    the boundary is seeded with the resolved URL, its origin, and its request
+ *    target, so an upstream that echoes any of them back gets the capability
+ *    URL rewritten over it before the child sees the response.
  *
  * The value is read from the host environment at substitution time and kept
  * only in the request-local boundary, never in the durable vault. A run that
@@ -140,6 +143,16 @@ export const maximumSecretValueBytes = 16 * 1024
 export interface RequestBoundary {
   /** Replaces authorized placeholders, resolving each declaration once. */
   readonly substitute: (text: string) => string
+  /**
+   * Replaces authorized placeholders in a request target, percent-encoding
+   * each substituted value.
+   *
+   * A resolved value is arbitrary bounded text. Written into a request path
+   * verbatim, a space or a code point above U+00FF is rejected by the HTTP
+   * client itself, so the value is encoded on the way in and both forms are
+   * redacted on the way out.
+   */
+  readonly substitutePath: (text: string) => string
   /** Replaces authorized placeholders in a header record. */
   readonly substituteHeaders: (
     headers: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>
@@ -148,6 +161,26 @@ export interface RequestBoundary {
   readonly redact: (text: string) => string
   /** Replaces resolved values in response bytes with their placeholders. */
   readonly redactBytes: (bytes: Uint8Array) => Buffer
+  /**
+   * The environment names this boundary has resolved so far, never a value.
+   *
+   * A transport-level rejection names the declaration the operator has to fix
+   * without the diagnostic carrying the credential itself.
+   */
+  readonly resolvedDeclarations: () => ReadonlyArray<string>
+}
+
+/**
+ * One value a boundary must never let back out, and what stands in for it.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Protected {
+  /** The text the child already holds and may see. */
+  readonly placeholder: string
+  /** The host-owned text that must never reach the child. */
+  readonly value: string
 }
 
 /**
@@ -166,8 +199,15 @@ export interface Vault {
   readonly mint: (credential: Secret.HttpCredential) => string
   /** Resolves a source for a host-owned destination capability. */
   readonly resolve: (secret: Secret.Secret) => string
-  /** Opens one exact-origin request boundary. */
-  readonly request: (audience: string) => RequestBoundary
+  /**
+   * Opens one exact-origin request boundary.
+   *
+   * `protect` seeds the boundary with values it did not resolve itself. The
+   * secret-destination path resolves its URL before the boundary exists, so
+   * without this the one value that matters is the one value redaction cannot
+   * see.
+   */
+  readonly request: (audience: string, protect?: ReadonlyArray<Protected> | undefined) => RequestBoundary
   /** Whether any placeholder has been minted. */
   readonly isEmpty: () => boolean
 }
@@ -233,7 +273,7 @@ export const makeVault = (options: { readonly read?: Read | undefined } = {}): V
       if (!Secret.isSecret(secret)) throw new TypeError("vault resolve requires a secret declaration")
       return resolveSecret(secret)
     },
-    request: (audience) => {
+    request: (audience, protect) => {
       let parsed: URL
       try {
         parsed = new URL(audience)
@@ -245,8 +285,18 @@ export const makeVault = (options: { readonly read?: Read | undefined } = {}): V
         parsed.username !== "" || parsed.password !== ""
       ) throw new TypeError("secret request audience must be an exact HTTP origin")
       const normalized = parsed.origin
-      const resolved = new Map<string, { readonly placeholder: string; readonly value: string }>()
-      const substitute = (text: string): string => {
+      const resolved = new Map<string, string>()
+      const declarations = new Set<string>()
+      // Protected text keyed by the exact bytes that must never leave, so one
+      // value written in two encodings is two entries pointing at one
+      // placeholder.
+      const protectedValues = new Map<string, string>()
+      const protectValue = (value: string, placeholder: string): void => {
+        if (value === "" || protectedValues.has(value)) return
+        protectedValues.set(value, placeholder)
+      }
+      for (const entry of protect ?? []) protectValue(entry.value, entry.placeholder)
+      const replaceIn = (text: string, render: (value: string) => string): string => {
         if (byPlaceholder.size === 0 || !text.includes(placeholderPrefix)) return text
         return text.replace(placeholderPattern, (match) => {
           const credential = byPlaceholder.get(match)
@@ -258,20 +308,28 @@ export const makeVault = (options: { readonly read?: Read | undefined } = {}): V
             throw new SecretAudienceDenied(credential.secret.env, normalized)
           }
           const previous = resolved.get(match)
-          if (previous !== undefined) return previous.value
-          const value = resolveSecret(credential.secret)
-          resolved.set(match, { placeholder: match, value })
-          return value
+          const value = previous ?? resolveSecret(credential.secret)
+          if (previous === undefined) resolved.set(match, value)
+          declarations.add(credential.secret.env)
+          protectValue(value, match)
+          const rendered = render(value)
+          protectValue(rendered, match)
+          return rendered
         })
       }
+      const substitute = (text: string): string => replaceIn(text, (value) => value)
+      // Longest first, so a value that contains another is replaced whole
+      // rather than leaving the remainder of it in the output.
+      const protections = (): ReadonlyArray<readonly [string, string]> =>
+        [...protectedValues.entries()].sort((left, right) => right[0].length - left[0].length)
       const redact = (text: string): string => {
         let output = text
-        for (const { placeholder, value } of resolved.values()) output = output.split(value).join(placeholder)
+        for (const [value, placeholder] of protections()) output = output.split(value).join(placeholder)
         return output
       }
       const redactBytes = (input: Uint8Array): Buffer => {
         let output = Buffer.from(input)
-        for (const { placeholder, value } of resolved.values()) {
+        for (const [value, placeholder] of protections()) {
           const needle = Buffer.from(value, "utf8")
           if (needle.byteLength === 0) continue
           const replacement = Buffer.from(placeholder, "utf8")
@@ -292,6 +350,8 @@ export const makeVault = (options: { readonly read?: Read | undefined } = {}): V
       }
       return {
         substitute,
+        substitutePath: (text) => replaceIn(text, encodeURIComponent),
+        resolvedDeclarations: () => [...declarations],
         substituteHeaders: (headers) => {
           const output: Record<string, string | Array<string>> = {}
           for (const [name, value] of Object.entries(headers)) {
@@ -387,19 +447,21 @@ const connectionHeaders = (headers: NodeHttp.IncomingHttpHeaders): ReadonlySet<s
  */
 export const startProxy = (vault: Vault): Promise<Proxy> =>
   new Promise((resolve, reject) => {
-    const destinations = new Map<string, Secret.Secret>()
+    const destinations = new Map<string, { readonly secret: Secret.Secret; readonly url: string }>()
     const destinationByDeclaration = new Map<string, string>()
     const server = NodeHttp.createServer((request, response) => {
       let target: URL
       let secretDestination = false
+      let protect: ReadonlyArray<Protected> | undefined
       const requestUrl = request.url ?? ""
       if (requestUrl.startsWith(secretUrlPath)) {
         const route = requestUrl.slice(secretUrlPath.length)
-        const destination = destinations.get(route)
-        if (destination === undefined) {
+        const entry = destinations.get(route)
+        if (entry === undefined) {
           response.writeHead(404).end("unknown secret destination")
           return
         }
+        const destination = entry.secret
         let resolved: string
         try {
           resolved = vault.resolve(destination)
@@ -421,6 +483,18 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
           return
         }
         secretDestination = true
+        // The credential here is the URL itself. An upstream that reflects the
+        // request target in a body, a header, or an error page would hand it
+        // straight back, so every part of it is protected by the loopback
+        // capability the child already holds.
+        const capability = new URL(entry.url)
+        const requestTarget = `${target.pathname}${target.search}`
+        protect = [
+          { placeholder: entry.url, value: target.href },
+          { placeholder: entry.url, value: resolved },
+          { placeholder: capability.origin, value: target.origin },
+          ...(requestTarget === "/" ? [] : [{ placeholder: capability.pathname, value: requestTarget }])
+        ]
       } else {
         try {
           target = new URL(requestUrl)
@@ -473,7 +547,7 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
             }
           }
           forwarded["accept-encoding"] = "identity"
-          boundary = vault.request(target.origin)
+          boundary = vault.request(target.origin, protect)
           headers = boundary.substituteHeaders(forwarded)
           headers.host = target.host
           const raw = Buffer.concat(chunks)
@@ -487,7 +561,7 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
           if (body.byteLength !== raw.byteLength) headers["content-length"] = String(body.byteLength)
           path = secretDestination
             ? `${target.pathname}${target.search}`
-            : boundary.substitute(`${target.pathname}${target.search}`)
+            : boundary.substitutePath(`${target.pathname}${target.search}`)
         } catch (cause) {
           const denied = cause instanceof SecretAudienceDenied
           const message = cause instanceof SecretUnavailable || cause instanceof SecretValueInvalid || denied
@@ -497,59 +571,75 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
           return
         }
         const requestUpstream = target.protocol === "https:" ? NodeHttps.request : NodeHttp.request
-        const upstream = requestUpstream(
-          {
-            protocol: target.protocol,
-            hostname: target.hostname,
-            port: target.port === "" ? (target.protocol === "https:" ? 443 : 80) : target.port,
-            method: request.method,
-            path,
-            headers
-          },
-          (upstreamResponse) => {
-            const encoding = upstreamResponse.headers["content-encoding"]
-            if (encoding !== undefined && encoding !== "identity") {
-              upstreamResponse.resume()
-              response.writeHead(502).end("upstream returned an encoded response")
-              return
-            }
-            const responseChunks: Array<Buffer> = []
-            let responseBytes = 0
-            let responseRejected = false
-            upstreamResponse.on("data", (chunk: Buffer) => {
-              if (responseRejected) return
-              responseBytes += chunk.byteLength
-              if (responseBytes > maximumResponseBodyBytes) {
-                responseRejected = true
-                responseChunks.length = 0
-                upstreamResponse.destroy()
-                response.writeHead(502).end("upstream response is too large")
+        // Constructing the client request validates the method, the request
+        // target, and every header value, and throws synchronously when one is
+        // not something HTTP can carry. Outside a handler that throw is an
+        // uncaught exception in an event listener, which ends the whole build
+        // process instead of this one target.
+        let upstream: NodeHttp.ClientRequest
+        try {
+          upstream = requestUpstream(
+            {
+              protocol: target.protocol,
+              hostname: target.hostname,
+              port: target.port === "" ? (target.protocol === "https:" ? 443 : 80) : target.port,
+              method: request.method,
+              path,
+              headers
+            },
+            (upstreamResponse) => {
+              const encoding = upstreamResponse.headers["content-encoding"]
+              if (encoding !== undefined && encoding !== "identity") {
+                upstreamResponse.resume()
+                response.writeHead(502).end("upstream returned an encoded response")
                 return
               }
-              responseChunks.push(chunk)
-            })
-            upstreamResponse.on("end", () => {
-              if (responseRejected) return
-              const responseHeaders: Record<string, string | Array<string>> = {}
-              const nominated = connectionHeaders(upstreamResponse.headers)
-              for (const [name, value] of Object.entries(upstreamResponse.headers)) {
-                const lower = name.toLowerCase()
-                if (
-                  value !== undefined && !hopByHop.has(lower) && !nominated.has(lower) &&
-                  lower !== "content-length" && lower !== "content-encoding"
-                ) {
-                  responseHeaders[name] = Array.isArray(value)
-                    ? value.map(boundary.redact)
-                    : boundary.redact(value)
+              const responseChunks: Array<Buffer> = []
+              let responseBytes = 0
+              let responseRejected = false
+              upstreamResponse.on("data", (chunk: Buffer) => {
+                if (responseRejected) return
+                responseBytes += chunk.byteLength
+                if (responseBytes > maximumResponseBodyBytes) {
+                  responseRejected = true
+                  responseChunks.length = 0
+                  upstreamResponse.destroy()
+                  response.writeHead(502).end("upstream response is too large")
+                  return
                 }
-              }
-              const redacted = boundary.redactBytes(Buffer.concat(responseChunks))
-              responseHeaders["content-length"] = String(redacted.byteLength)
-              response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders)
-              response.end(redacted)
-            })
-          }
-        )
+                responseChunks.push(chunk)
+              })
+              upstreamResponse.on("end", () => {
+                if (responseRejected) return
+                const responseHeaders: Record<string, string | Array<string>> = {}
+                const nominated = connectionHeaders(upstreamResponse.headers)
+                for (const [name, value] of Object.entries(upstreamResponse.headers)) {
+                  const lower = name.toLowerCase()
+                  if (
+                    value !== undefined && !hopByHop.has(lower) && !nominated.has(lower) &&
+                    lower !== "content-length" && lower !== "content-encoding"
+                  ) {
+                    responseHeaders[name] = Array.isArray(value)
+                      ? value.map(boundary.redact)
+                      : boundary.redact(value)
+                  }
+                }
+                const redacted = boundary.redactBytes(Buffer.concat(responseChunks))
+                responseHeaders["content-length"] = String(redacted.byteLength)
+                response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders)
+                response.end(redacted)
+              })
+            }
+          )
+        } catch {
+          const named = boundary.resolvedDeclarations()
+          response.writeHead(502).end(
+            named.length === 0
+              ? "the request could not be represented as an http request"
+              : `the declared secret ${named.join(", ")} produced an invalid request target`
+          )
+          return
+        }
         upstream.setTimeout(upstreamTimeoutMs, () => upstream.destroy(new Error("upstream request timed out")))
         upstream.on("error", () => {
           if (!response.headersSent) response.writeHead(502)
@@ -613,7 +703,7 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
           if (existing !== undefined) return existing
           const route = randomBytes(32).toString("hex")
           const url = `http://127.0.0.1:${address.port}${secretUrlPath}${route}`
-          destinations.set(route, snapshot)
+          destinations.set(route, { secret: snapshot, url })
           destinationByDeclaration.set(key, url)
           return url
         },

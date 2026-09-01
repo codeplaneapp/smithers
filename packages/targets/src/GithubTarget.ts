@@ -41,7 +41,7 @@ const setupDefinition = Target.make("Github.Setup", {
  * @category targets
  * @since 0.1.0
  */
-export const Setup = (attrs: (typeof SetupAttrs)["~type.make.in"]): Target.AnyTarget => setupDefinition(attrs)
+export const Setup = setupDefinition
 
 /**
  * Schema for a `release` trigger's activity types, GitHub's own set.
@@ -288,7 +288,7 @@ const workflowDefinition = Target.make("Github.Workflow", {
  * @category targets
  * @since 0.1.0
  */
-export const Workflow = (attrs: (typeof WorkflowAttrs)["~type.make.in"]): Target.AnyTarget => workflowDefinition(attrs)
+export const Workflow = workflowDefinition
 
 /**
  * Attrs for {@link CiGen}.
@@ -315,7 +315,7 @@ const ciGenDefinition = Target.make("Github.CiGen", {
  * @category targets
  * @since 0.1.0
  */
-export const CiGen = (attrs: (typeof CiGenAttrs)["~type.make.in"]): Target.AnyTarget => ciGenDefinition(attrs)
+export const CiGen = ciGenDefinition
 
 /**
  * Attrs for {@link Pr}.
@@ -343,7 +343,7 @@ const prDefinition = Target.make("Github.Pr", {
  * @category targets
  * @since 0.1.0
  */
-export const Pr = (attrs: (typeof PrAttrs)["~type.make.in"]): Target.AnyTarget => prDefinition(attrs)
+export const Pr = prDefinition
 
 /** Attrs for publishing a generated site through GitHub Pages.
  *
@@ -368,7 +368,7 @@ const pagesDefinition = Target.make("Github.Pages", {
  * @category targets
  * @since 0.1.0
  */
-export const Pages = (attrs: (typeof PagesAttrs)["~type.make.in"]): Target.AnyTarget => pagesDefinition(attrs)
+export const Pages = pagesDefinition
 
 /** Attrs for creating one GitHub release.
  *
@@ -396,7 +396,7 @@ const releaseDefinition = Target.make("Github.Release", {
  * @category targets
  * @since 0.1.0
  */
-export const Release = (attrs: (typeof ReleaseAttrs)["~type.make.in"]): Target.AnyTarget => releaseDefinition(attrs)
+export const Release = releaseDefinition
 
 /** Trigger syntax accepted by compact {@link Ci}.
  *
