@@ -10,17 +10,17 @@ import { FileBoundary } from "@smthrs/flow/FileBoundary"
 import { FileInput } from "@smthrs/flow/FileInput"
 import { Key } from "@smthrs/keys"
 import * as FileSet from "@smthrs/plan/FileSet"
-import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as FileBoundarySnapshot from "./internal/FileBoundarySnapshot.ts"
 import * as FileEnumeration from "./internal/FileEnumeration.ts"
+import { compareText } from "./internal/Ordering.ts"
 
 /**
  * A file boundary that has been measured but not yet run: the caller's
@@ -359,7 +359,7 @@ export interface Service {
     prepared: PreparedBoundary
   ) => Effect.Effect<
     BoundaryEvidence,
-    UndeclaredWrite | MissingDeclaredOutput | SurvivingDeclaredRemoval | UnsupportedBoundary,
+    UndeclaredWrite | MissingDeclaredOutput | SurvivingDeclaredRemoval | UnsupportedBoundary | BoundaryCorruption,
     Crypto.Crypto
   >
   readonly replayOutputs: (
@@ -540,38 +540,17 @@ export interface FileSystemOptions {
    */
   readonly maxTotalInlineBytes?: number | undefined
   /**
-   * Maximum file digests retained by this boundary service's stat-keyed LRU
-   * memo. Set to zero to disable retention. Defaults to 4096 entries.
+   * @deprecated Digests are always recomputed from bytes. Retained only for
+   * source compatibility with pre-rc callers.
    */
   readonly maxDigestMemoEntries?: number | undefined
 }
 
 const defaultMaxInlineBytes = 1024 * 1024
 const defaultMaxTotalInlineBytes = 8 * 1024 * 1024
-const defaultMaxDigestMemoEntries = 4096
-
-/**
- * Files this recent are always re-hashed. A filesystem may expose timestamps
- * too coarse to distinguish same-size rewrites within one tick; retaining a
- * digest inside that granularity window would turn unchanged stat metadata
- * into false content evidence.
- */
-const digestMemoRecencyWindowMs = 2_000
-
-interface StatIdentity {
-  readonly key: string
-  readonly mtimeMs: number | undefined
-}
-
-interface DigestMemoEntry {
-  readonly identity: StatIdentity
-  readonly digest: string
-}
-
 interface MeasuredDigest {
   readonly digest: string
-  /** Present when this call had to read the file, so capture can reuse it. */
-  readonly bytes?: Uint8Array | undefined
+  readonly bytes: Uint8Array
 }
 
 type MaterializedOutput = typeof DigestReferencedOutput.Type
@@ -625,60 +604,15 @@ export const makeFileSystem = (
 ): Service => {
   const maxInlineBytes = options.maxInlineBytes ?? defaultMaxInlineBytes
   const maxTotalInlineBytes = options.maxTotalInlineBytes ?? defaultMaxTotalInlineBytes
-  const maxDigestMemoEntries = Math.max(
-    0,
-    Math.floor(options.maxDigestMemoEntries ?? defaultMaxDigestMemoEntries)
-  )
-  const digestMemo = new Map<string, DigestMemoEntry>()
-  const statIdentity = (info: FileSystem.File.Info): StatIdentity => {
-    const mtimeMs = Option.getOrUndefined(info.mtime)?.getTime()
-    const ino = Option.getOrUndefined(info.ino)
-    // Effect v4 exposes no ctime. Path (the outer Map key), size, mtime,
-    // device, and optional inode are the complete Bazel-style content
-    // discriminators its File.Info contract makes available.
-    return {
-      key: `${info.size}:${mtimeMs ?? "none"}:${info.dev}:${ino ?? "none"}`,
-      mtimeMs
-    }
-  }
-  const rememberDigest = (path: string, identity: StatIdentity, digest: string) => {
-    // Map insertion order is the LRU list: refreshing a path moves it to the
-    // tail, and the head is evicted when the configured cap is exceeded.
-    digestMemo.delete(path)
-    digestMemo.set(path, { identity, digest })
-    if (digestMemo.size > maxDigestMemoEntries) {
-      digestMemo.delete(digestMemo.keys().next().value!)
-    }
-  }
+  // Stat tuples are not content identities: a same-size rewrite can preserve
+  // mtime, device, and inode on every supported filesystem.
+  void options.maxDigestMemoEntries
   const readDigest = Effect.fn("StepBoundary.readDigest")(function*(path: string) {
     const bytes = yield* fs.readFile(path)
     const digest = yield* Schema.decodeUnknownEffect(Sha256)(bytes).pipe(Effect.orDie)
     return { digest, bytes } satisfies MeasuredDigest
   })
-  const digestOf = Effect.fn("StepBoundary.digestOf")(function*(path: string) {
-    const status = yield* fs.stat(path).pipe(Effect.option)
-    // A host without usable stat support keeps the old read+hash behavior and
-    // contributes no memo entry. Callers retain their existing host-failure
-    // translation if the fallback read itself is refused.
-    if (Option.isNone(status)) return yield* readDigest(path)
-    const identity = statIdentity(status.value)
-    const cached = digestMemo.get(path)
-    if (
-      cached !== undefined &&
-      cached.identity.key === identity.key &&
-      identity.mtimeMs !== undefined
-    ) {
-      const nowMs = yield* Clock.currentTimeMillis
-      if (identity.mtimeMs < nowMs - digestMemoRecencyWindowMs) {
-        digestMemo.delete(path)
-        digestMemo.set(path, cached)
-        return { digest: cached.digest, bytes: undefined } satisfies MeasuredDigest
-      }
-    }
-    const measured = yield* readDigest(path)
-    rememberDigest(path, identity, measured.digest)
-    return measured
-  })
+  const digestOf = readDigest
   const measure = (path: string): Effect.Effect<string, UnsupportedBoundary, Crypto.Crypto> =>
     fs.exists(path).pipe(
       Effect.flatMap((present) =>
@@ -704,7 +638,7 @@ export const makeFileSystem = (
     const present = yield* fs.exists(path).pipe(Effect.mapError(hostFailure))
     if (!present) return { output: { path, digest: null } satisfies MaterializedOutput, inlinedBytes: 0 }
     const measured = yield* digestOf(path).pipe(Effect.mapError(hostFailure))
-    const bytes = measured.bytes ?? (yield* fs.readFile(path).pipe(Effect.mapError(hostFailure)))
+    const bytes = measured.bytes
     const digest = measured.digest
     // Inline only while both bounds hold (issue #122): the per-output bound
     // and the settle-wide aggregate budget the caller threads through.
@@ -724,7 +658,17 @@ export const makeFileSystem = (
     // property that used to live here — atomic publication, verify-once
     // dedupe, healing rewrite of a corrupt address — is now the store's, and
     // is tested there (`@smthrs/artifacts`).
-    yield* artifacts.put(bytes).pipe(Effect.mapError(artifactFailure))
+    const stored = yield* artifacts.put(bytes).pipe(Effect.mapError(artifactFailure))
+    if (stored !== digest) {
+      return yield* Effect.fail(
+        new BoundaryCorruption({
+          code: "boundary_corruption",
+          path,
+          recordedDigest: `${stored}`,
+          measuredDigest: digest
+        })
+      )
+    }
     return { output: { path, digest, sizeBytes: bytes.length } satisfies MaterializedOutput, inlinedBytes: 0 }
   })
   const materialize = Effect.fn("StepBoundary.materialize")(function*(output: MaterializedOutput) {
@@ -802,9 +746,10 @@ export const makeFileSystem = (
   })
   return make({
     prepare: Effect.fn("StepBoundary.prepare")(function*(descriptor) {
+      const boundary = FileBoundarySnapshot.make(descriptor)
       yield* Effect.annotateCurrentSpan({
-        reads: descriptor.readSet.length,
-        boundaryMode: descriptor.boundaryMode
+        reads: boundary.readSet.length,
+        boundaryMode: boundary.boundaryMode
       })
       // The dirty check's evidence (issue #90): what the host actually
       // measured for every declared read, never the declaration itself —
@@ -812,13 +757,16 @@ export const makeFileSystem = (
       // compare the declaration against itself and pass unconditionally
       // (issue #104).
       const readSnapshot: Array<FileInput> = []
-      for (const entry of descriptor.readSet) {
+      for (const entry of boundary.readSet) {
         if (FileSet.isGlob(entry)) {
           for (const path of yield* expandGlob(entry)) readSnapshot.push({ path, digest: yield* measure(path) })
         } else readSnapshot.push({ path: entry.path, digest: yield* measure(entry.path) })
       }
-      readSnapshot.sort((left, right) => left.path.localeCompare(right.path))
-      return { descriptor, readSnapshot }
+      readSnapshot.sort((left, right) => compareText(left.path, right.path))
+      return Object.freeze({
+        descriptor: boundary,
+        readSnapshot: Object.freeze(readSnapshot.map((entry) => Object.freeze({ ...entry })))
+      })
     }),
     settle: Effect.fn("StepBoundary.settle")(function*(prepared) {
       yield* Effect.annotateCurrentSpan({
@@ -870,7 +818,7 @@ export const makeFileSystem = (
         }
       }
       outputPaths.push(...removes)
-      for (const path of [...new Set(outputPaths)].sort()) {
+      for (const path of [...new Set(outputPaths)].sort(compareText)) {
         const captured = yield* capture(path, maxTotalInlineBytes - inlinedBytes)
         // `capture` reports the bytes it actually inlined (zero for a
         // digest-only reference), so the aggregate budget never has to
@@ -993,7 +941,9 @@ export const makeFileSystem = (
       // Remove only directories proven empty after pruning and
       // materialization. Deepest-first preserves every directory that still
       // contains a recorded child while clearing stale empty scaffolding.
-      const directories = [...emptyDirectoryCandidates].sort((left, right) => right.length - left.length)
+      const directories = [...emptyDirectoryCandidates].sort((left, right) =>
+        right.length - left.length || compareText(left, right)
+      )
       for (const directory of directories) {
         const entries = yield* fs.readDirectory(directory).pipe(Effect.mapError(hostFailure))
         if (entries.length === 0) yield* fs.remove(directory).pipe(Effect.mapError(hostFailure))

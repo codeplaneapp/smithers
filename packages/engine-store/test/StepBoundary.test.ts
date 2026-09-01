@@ -1,8 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
 import type { FileBoundary } from "@smthrs/flow/FileBoundary"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
+import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -348,7 +350,7 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
       expect(prepared.readSnapshot[0]!.digest).toBe(sha256("post-edit content"))
     }))
 
-  it.effect("reads an unchanged, old file once across repeated measurements", () =>
+  it.effect("re-hashes an unchanged old file across repeated measurements", () =>
     Effect.gen(function*() {
       const host = memoryFs({ "memo.txt": "stable" })
       host.mtimes.set("memo.txt", 0)
@@ -365,14 +367,14 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
         }).pipe(Effect.provide(TestClock.layer()))
       )
 
-      expect(host.reads).toEqual(["memo.txt"])
+      expect(host.reads).toEqual(["memo.txt", "memo.txt"])
       expect(snapshots.map((snapshot) => snapshot.readSnapshot[0]?.digest)).toEqual([
         sha256("stable"),
         sha256("stable")
       ])
     }))
 
-  it.effect("reuses a trusted digest while capture reads the payload only once", () =>
+  it.effect("hashes the exact bytes capture records", () =>
     Effect.gen(function*() {
       const host = memoryFs({ "memo.txt": "stable" })
       host.mtimes.set("memo.txt", 0)
@@ -389,8 +391,7 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
         }).pipe(Effect.provide(TestClock.layer()))
       )
 
-      // Prepare reads and hashes once. Capture trusts that digest, then performs
-      // only the content read it needs for the inline payload.
+      // Prepare and capture each hash the bytes they actually observe.
       expect(host.reads).toEqual(["memo.txt", "memo.txt"])
       expect(evidence.declaredOutputs).toMatchObject({
         outputs: [{ path: "memo.txt", digest: sha256("stable") }]
@@ -421,10 +422,10 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
       expect(digests).toEqual([sha256("old"), sha256("new-size")])
     }))
 
-  it.effect("re-hashes a recent same-size rewrite even when its stat identity is unchanged", () =>
+  it.effect("re-hashes an old same-size rewrite even when its stat identity is unchanged", () =>
     Effect.gen(function*() {
       const host = memoryFs({ "memo.txt": "before" })
-      host.mtimes.set("memo.txt", 10_000)
+      host.mtimes.set("memo.txt", 0)
       const boundary = StepBoundary.makeFileSystem(host.fs, ArtifactStore.makeNoop())
       const digest = yield* withCrypto(
         Effect.gen(function*() {
@@ -435,8 +436,9 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
             boundaryMode: "hard"
           }
           yield* boundary.prepare(descriptor)
-          // Same path, size, mtime, device, and inode: only the recency guard
-          // keeps coarse timestamp granularity from hiding this rewrite.
+          // Same path, size, old mtime, device, and inode. A stat-identity
+          // memo would return the stale digest forever; only reading the
+          // bytes again can observe this rewrite.
           host.files.set("memo.txt", encoder.encode("after!"))
           return (yield* boundary.prepare(descriptor)).readSnapshot[0]!.digest
         }).pipe(Effect.provide(TestClock.layer()))
@@ -446,7 +448,115 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
       expect(digest).toBe(sha256("after!"))
     }))
 
-  it.effect("evicts the least-recent digest at the configured cap", () =>
+  it.effect("snapshots a mutable declaration before its first asynchronous host read", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const bytes = encoder.encode("stable")
+      const fs = FileSystem.makeNoop({
+        exists: (() => Effect.succeed(true)) as never,
+        readFile: (() =>
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as(bytes)
+          )) as never
+      })
+      const mutable: FileBoundary = {
+        readSet: [{ path: "input.txt", digest: sha256("stable") }],
+        writeSet: [{ _tag: "Glob", include: ["dist/**/*.js"], exclude: ["dist/tmp/**"] }],
+        removes: ["stale.txt"],
+        boundaryMode: "hard"
+      }
+      const running = yield* withCrypto(
+        StepBoundary.makeFileSystem(fs, ArtifactStore.makeNoop()).prepare(mutable).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+      )
+      yield* Deferred.await(entered)
+      ;(mutable.readSet as Array<unknown>).push({ path: "late.txt", digest: "late" })
+      ;(mutable.writeSet[0] as unknown as { include: Array<string>; exclude?: Array<string> }).include.push("late/**")
+      ;(mutable.writeSet[0] as unknown as { exclude?: Array<string> }).exclude?.push("dist/other/**")
+      ;(mutable.removes as Array<string>).push("late-remove.txt")
+      ;(mutable as { boundaryMode: "hard" | "expected" }).boundaryMode = "expected"
+      yield* Deferred.succeed(release, undefined)
+      const prepared = yield* Fiber.join(running)
+
+      expect(prepared.descriptor).toEqual({
+        readSet: [{ path: "input.txt", digest: sha256("stable") }],
+        writeSet: [{ _tag: "Glob", include: ["dist/**/*.js"], exclude: ["dist/tmp/**"] }],
+        removes: ["stale.txt"],
+        boundaryMode: "hard"
+      })
+      expect(Object.isFrozen(prepared)).toBe(true)
+      expect(Object.isFrozen(prepared.descriptor)).toBe(true)
+      expect(Object.isFrozen(prepared.descriptor.readSet)).toBe(true)
+      expect(Object.isFrozen(prepared.descriptor.writeSet[0])).toBe(true)
+    }))
+
+  it.effect("hashes and stores the exact post-step bytes after an old same-size rewrite", () =>
+    Effect.gen(function*() {
+      const host = memoryFs({ "memo.txt": "before" })
+      host.mtimes.set("memo.txt", 0)
+      const artifacts = ArtifactStore.makeMemory()
+      const boundary = StepBoundary.makeFileSystem(host.fs, artifacts, { maxInlineBytes: 0 })
+      const observed = yield* withCrypto(Effect.gen(function*() {
+        const prepared = yield* boundary.prepare({
+          readSet: [{ path: "memo.txt", digest: sha256("before") }],
+          writeSet: ["memo.txt"],
+          boundaryMode: "hard"
+        })
+        host.files.set("memo.txt", encoder.encode("after!"))
+        const evidence = yield* boundary.settle(prepared)
+        const outputs = evidence.declaredOutputs as {
+          readonly outputs: ReadonlyArray<{ readonly digest: string | null }>
+        }
+        const digest = outputs.outputs[0]!.digest!
+        return { digest, stored: decoder.decode(yield* artifacts.get(digest)) }
+      }))
+
+      expect(observed).toEqual({ digest: sha256("after!"), stored: "after!" })
+    }))
+
+  it.effect("refuses an artifact store that claims a different address", () =>
+    Effect.gen(function*() {
+      const host = memoryFs({ "output.txt": "built" })
+      const artifacts = ArtifactStore.makeNoop({
+        put: () => Effect.succeed(sha256("different") as ArtifactStore.Digest)
+      })
+      const boundary = StepBoundary.makeFileSystem(host.fs, artifacts, { maxInlineBytes: 0 })
+      const failure = yield* withCrypto(Effect.flip(Effect.gen(function*() {
+        const prepared = yield* boundary.prepare({ readSet: [], writeSet: ["output.txt"], boundaryMode: "hard" })
+        return yield* boundary.settle(prepared)
+      })))
+
+      expect(failure).toMatchObject({
+        _tag: "@smthrs/engine-store/BoundaryCorruption",
+        code: "boundary_corruption",
+        path: "output.txt",
+        recordedDigest: sha256("different"),
+        measuredDigest: sha256("built")
+      })
+    }))
+
+  it.effect("uses one locale-independent UTF-16 order for measured reads and outputs", () =>
+    Effect.gen(function*() {
+      const expected = ["e\u0301", "é", "日本", "😀", "\uE000"]
+      const host = memoryFs(Object.fromEntries(expected.map((path) => [path, path])))
+      const boundary = StepBoundary.makeFileSystem(host.fs, ArtifactStore.makeNoop())
+      const evidence = yield* withCrypto(Effect.gen(function*() {
+        const prepared = yield* boundary.prepare({
+          readSet: [...expected].reverse().map((path) => ({ path, digest: sha256(path) })),
+          writeSet: [...expected].reverse(),
+          boundaryMode: "hard"
+        })
+        expect(prepared.readSnapshot.map((entry) => entry.path)).toEqual(expected)
+        return yield* boundary.settle(prepared)
+      }))
+      const outputs = evidence.declaredOutputs as { readonly outputs: ReadonlyArray<{ readonly path: string }> }
+      expect(outputs.outputs.map((entry) => entry.path)).toEqual(expected)
+    }))
+
+  it.effect("keeps the obsolete memo option from weakening fresh measurement", () =>
     Effect.gen(function*() {
       const host = memoryFs({ "a.txt": "a", "b.txt": "b", "c.txt": "c" })
       for (const path of host.files.keys()) host.mtimes.set(path, 0)
@@ -1054,6 +1164,7 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
         "tree/.kept": "dotfile",
         "tree/a.txt": "a",
         "tree/nested/b.txt": "tampered",
+        "tree/spare/.secret": "spare",
         "tree/stale/.secret": "stale"
       })
       yield* withCrypto(
@@ -1067,7 +1178,13 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
         "tree/nested/b.txt"
       ])
       expect(consumer.writes).toEqual(["tree/nested/b.txt"])
-      expect(consumer.removals).toEqual(["tree/stale/.secret", "tree/stale"])
+      expect(consumer.removals).toEqual([
+        "tree/spare/.secret",
+        "tree/stale/.secret",
+        "tree/spare",
+        "tree/stale"
+      ])
+      expect(consumer.directories.has("tree/spare")).toBe(false)
       expect(consumer.directories.has("tree/stale")).toBe(false)
       expect(decoder.decode(consumer.files.get("tree/nested/b.txt"))).toBe("b")
     }))
