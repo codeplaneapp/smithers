@@ -151,6 +151,7 @@ export default defineConfig({
         { text: "@smthrs/gateway", link: "/api/gateway" },
         { text: "@smthrs/agent", link: "/api/agent" },
         { text: "@smthrs/integrations", link: "/api/integrations" },
+        { text: "@smthrs/triggers", link: "/api/triggers" },
         {
           text: "@smthrs/patterns",
           link: "/api/patterns",

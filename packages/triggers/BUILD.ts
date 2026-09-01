@@ -16,5 +16,5 @@ export const docsPages = Smithers.Generate({
     Smithers.glob("//packages/triggers/docs/*.md"),
     Smithers.file("//packages/triggers/package.json")
   ],
-  changes: ["packages/triggers/README.md"]
+  changes: ["docs/pages/api/triggers.md", "packages/triggers/README.md"]
 })

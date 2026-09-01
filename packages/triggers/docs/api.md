@@ -20,7 +20,7 @@ message.
 | `invalid_cron`            | The Effect cron parser rejects an expression or timezone.                                               |
 | `unsatisfiable_cron`      | A next, previous, or interval occurrence search exhausts its search bound.                              |
 | `verification_failed`     | Webhook verification fails, including a signature mismatch or typed credential-resolution failure.      |
-| `catch_up_bound_exceeded` | `maxCatchUp` is invalid or the selected policy owes more occurrences than the bound permits.            |
+| `catch_up_bound_exceeded` | `maxCatchUp` is invalid, catch-up exceeds its bound, or an unbounded interval exceeds the package cap.  |
 | `runner`                  | The scheduler cannot plan, launch, inspect, cancel, or finish approval retries for a run.               |
 | `store`                   | A migration, persistence, or row-decoding operation fails, or a no-op store method is unavailable.      |
 
@@ -40,7 +40,15 @@ A launch-capable claim writes a reservation before it starts a run.
 `TriggerStore.reservationPrefix` is `trigger-reservation:`, and
 `TriggerStore.reservationId` appends the trigger ID and occurrence. The
 `SqlTriggerStore.reservationLeaseMs` lease is 300,000 milliseconds, or 5
-minutes. The store may reclaim an expired reservation.
+minutes. `TriggerStore.reservationLeaseMs` owns the shared value and
+`SqlTriggerStore` re-exports it. Both store implementations reclaim an expired
+reservation.
+
+`TriggerStore.claimPending` reads the buffered occurrence, applies the same
+claim rules as `claimFire`, and clears the buffer only after a successful claim
+inside one transaction. A refused or failed claim leaves the buffer intact. If
+a process dies after claiming buffered work but before launching it, expiration
+of that launch reservation restores the buffered occurrence.
 
 The persisted `last_fired_at_ms` watermark only moves forward. SQL updates use
 the greater of the stored value and the completed occurrence. The scheduler's
@@ -54,10 +62,11 @@ registration.
 
 ## Cron, catch-up, and scheduler limits
 
-`Cron.occurrencesBetween` uses `Cron.maxOccurrences`, currently 1000, when the
-caller omits `limit`. An explicit `limit` must be a non-negative safe integer;
-zero returns no occurrences. `Schedule.maxCatchUpLimit` equals the same cap, so
-a schedule cannot declare a larger catch-up bound.
+`Cron.occurrencesBetween` fails with `catch_up_bound_exceeded` when the caller
+omits `limit` and the interval holds more than `Cron.maxOccurrences`, currently
+1000. An explicit `limit` silently caps the result and must be a non-negative
+safe integer; zero returns no occurrences. `Schedule.maxCatchUpLimit` equals
+the same cap, so a schedule cannot declare a larger catch-up bound.
 
 `maxCatchUp` defaults to 0. `CatchUp.occurrences` validates the bound before it
 selects `none`, `one`, or `all`, and every policy answers to the bound. In
