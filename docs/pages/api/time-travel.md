@@ -50,8 +50,9 @@ const program = Effect.gen(function*() {
 
 Every module under `src/` is published at `@smthrs/time-travel/<Module>` by the
 package `exports` map. `@smthrs/time-travel/internal/*` is mapped to `null`:
-`Replay`, `Fork`, `Rewind`, `Recovery`, `Compensation`, `SnapshotProjector`, and
-`EffectHandlerRegistry` are machinery a caller never names.
+`Replay`, `Fork`, `Rewind`, `Retry`, `Recovery`, `Compensation`,
+`SnapshotProjector`, and `EffectHandlerRegistry` are machinery a caller never
+names.
 
 ## Operations
 
@@ -147,9 +148,9 @@ as its identity and classification, never as the effect's `input` or `output`.
   PostgreSQL and PGlite are unsupported.
 - Journal reads page at 100 entries by default. `pageSize` is a throughput knob
   and never changes a derived answer.
-- A rewind materializes the suffix after the frame, and a fork the suffix it
-  carries past, in memory. Both refuse a suffix past a fixed bound rather than
-  exhausting the process while a run's ownership is held.
+- A rewind materializes the suffix after the frame in memory, a fork the suffix
+  it carries past, and a replay the prefix it folds. There is no configured
+  maximum, so a very long history is bounded by process memory.
 - `Projection.reduce` receives store entries by reference. Treat them as
   read-only: mutating one rewrites the evidence the fold is reading.
 - The memory store is a behavioural peer of the SQL store for the answers both
@@ -240,6 +241,10 @@ one export the barrel also re-exports flat.
 | `TimeTravelStore.AttemptRef` | const + type | models | The attempt rows that existed at a frame, addressed the way `flows_attempts` addresses them. |
 | `TimeTravelStore.Descendants` | const + type | schemas | A run's descendants at a frame, split by whether they still depend on the history under that frame. |
 | `TimeTravelStore.Audit` | const + type | schemas | The durable record of one rewind attempt, written before the rewind touches anything and updated as it progresses. |
+| `TimeTravelStore.AuditPatch` | const + type | schemas | The keys an open audit row may be advanced through. |
+| `TimeTravelStore.auditPatchKeys` | const | models | The keys `AuditPatch` admits, in the order a store reports them. |
+| `TimeTravelStore.validateAuditPatch` | const | validators | Refuses a patch carrying a key `AuditPatch` does not admit. |
+| `TimeTravelStore.forkFrameMessage` | const | constructors | The refusal both stores raise for a fork whose frame addresses no record. |
 | `TimeTravelStore.Receipt` | const + type | schemas | Proof that one side effect was compensated during a rewind. |
 | `TimeTravelStore.ArchiveResult` | const + type | schemas | What a truncation actually did: how many journal records it archived, and which lineage edges it left pointing at history that no longer exists. |
 | `TimeTravelStore.Fork` | const + type | models | A fork's outcome: the child run, its lineage edge, and everything the boundary assessment disclosed. |

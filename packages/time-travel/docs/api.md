@@ -20,8 +20,9 @@ const program = Effect.gen(function*() {
 
 Every module under `src/` is published at `@smthrs/time-travel/<Module>` by the
 package `exports` map. `@smthrs/time-travel/internal/*` is mapped to `null`:
-`Replay`, `Fork`, `Rewind`, `Recovery`, `Compensation`, `SnapshotProjector`, and
-`EffectHandlerRegistry` are machinery a caller never names.
+`Replay`, `Fork`, `Rewind`, `Retry`, `Recovery`, `Compensation`,
+`SnapshotProjector`, and `EffectHandlerRegistry` are machinery a caller never
+names.
 
 ## Operations
 
@@ -117,9 +118,9 @@ as its identity and classification, never as the effect's `input` or `output`.
   PostgreSQL and PGlite are unsupported.
 - Journal reads page at 100 entries by default. `pageSize` is a throughput knob
   and never changes a derived answer.
-- A rewind materializes the suffix after the frame, and a fork the suffix it
-  carries past, in memory. Both refuse a suffix past a fixed bound rather than
-  exhausting the process while a run's ownership is held.
+- A rewind materializes the suffix after the frame in memory, a fork the suffix
+  it carries past, and a replay the prefix it folds. There is no configured
+  maximum, so a very long history is bounded by process memory.
 - `Projection.reduce` receives store entries by reference. Treat them as
   read-only: mutating one rewrites the evidence the fold is reading.
 - The memory store is a behavioural peer of the SQL store for the answers both

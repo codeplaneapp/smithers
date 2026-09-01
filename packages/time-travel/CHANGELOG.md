@@ -58,22 +58,15 @@
   `status`, `rateLimit`, and `detail`. `Partial<Audit>` let a caller patch
   identity keys that one store applied and the other silently ignored.
 - `MemoryTimeTravelStore` is held to the SQL store's answers: it enforces the
-  ownership fence, writes the fork-created marker, keeps records that carry no
-  lineage, deduplicates detached edges, and deep-copies on every read and write.
+  ownership fence through the new `Options.runOwners`, writes the fork-created
+  marker, keeps records that carry no lineage, refuses a fork whose frame
+  addresses no record, and copies the opaque audit and receipt payloads on every
+  read and write. `SqlTimeTravelStore` deduplicates detached edges to match it.
 - Error causes carry an effect's identity and classification, never its `input`
   or `output`. `TimeTravelError` encodes its cause, so a raw payload on one was
   a size and secret hazard.
 - Time travel is a library API in this release, and only a library API: no CLI
   verb, no MCP tool, and it is not composed into `NodeControl`.
-
-### Removed
-
-- `EffectBoundary.fromEntry`, the lenient decoder that returned `undefined` for
-  a malformed boundary payload and so could silently drop an irreversible
-  effect. `decodeEntry` fails closed and is the decoder to use.
-- The unused tier-aware `Retry` machinery, `Compensation.execute`, and the
-  unreachable members of the internal effect-handler registry. None had a
-  production caller.
 
 ### Fixed
 
@@ -95,10 +88,8 @@
   `hasMore`, instead of treating it as the end of history.
 - `RewindOptions.detachedChildren` is decoded, so a misspelled policy is
   refused `invalid` rather than silently selecting the destructive one.
-- `Replay.rederive` folds per page rather than buffering a run's whole history,
-  and a fork refuses a suffix past a documented bound.
-- `SnapshotProjector` resolves a carried anchor from its own lineage rather
-  than from whichever lineage wrote the last explicit snapshot.
+- A migration failure names the object whose statement raised it, so a driver
+  error like "views may not be indexed" is actionable.
 
 ## [0.1.0] - 2026-08-05
 
