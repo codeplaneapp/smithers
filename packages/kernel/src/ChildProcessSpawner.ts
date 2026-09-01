@@ -25,10 +25,144 @@ import { make as makeCapability } from "@smthrs/capability/Capability"
 import { toPlatformError } from "@smthrs/capability/Permission"
 import { Effect, Layer } from "effect"
 import { systemError } from "effect/PlatformError"
-import type * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner, make as makeSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as CommandLine from "./CommandLine.ts"
 import { GrantStore } from "./GrantStore.ts"
+
+const data = (value: object, name: PropertyKey): unknown => {
+  const descriptor = Object.getOwnPropertyDescriptor(value, name)
+  if (descriptor === undefined || !("value" in descriptor)) {
+    throw new TypeError(`command ${String(name)} must be a data property`)
+  }
+  return descriptor.value
+}
+
+const optionalData = (value: object, name: PropertyKey): unknown => {
+  const descriptor = Object.getOwnPropertyDescriptor(value, name)
+  if (descriptor === undefined) return undefined
+  if (!("value" in descriptor)) throw new TypeError(`command ${String(name)} must be a data property`)
+  return descriptor.value
+}
+
+const snapshotRecord = (
+  value: Readonly<Record<string, string | undefined>> | undefined
+): Record<string, string | undefined> | undefined => {
+  if (value === undefined) return undefined
+  const snapshot: Record<string, string | undefined> = {}
+  for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+    if (!descriptor.enumerable) continue
+    if (!("value" in descriptor) || (descriptor.value !== undefined && typeof descriptor.value !== "string")) {
+      throw new TypeError("command environment must contain string data properties")
+    }
+    snapshot[name] = descriptor.value
+  }
+  return Object.freeze(snapshot)
+}
+
+const snapshotStreamConfig = <A>(value: A): A => {
+  if (typeof value !== "object" || value === null) return value
+  const descriptors = Object.getOwnPropertyDescriptors(value)
+  if (descriptors.stream === undefined) return value
+  if (!("value" in descriptors.stream)) throw new TypeError("command stream must be a data property")
+  const snapshot: Record<string, unknown> = { stream: descriptors.stream.value }
+  for (const name of ["endOnDone", "encoding"] as const) {
+    const descriptor = descriptors[name]
+    if (descriptor !== undefined) {
+      if (!("value" in descriptor)) throw new TypeError(`command ${name} must be a data property`)
+      snapshot[name] = descriptor.value
+    }
+  }
+  return Object.freeze(snapshot) as A
+}
+
+const snapshotAdditionalFds = (
+  value: ChildProcess.CommandOptions["additionalFds"]
+): ChildProcess.CommandOptions["additionalFds"] => {
+  if (value === undefined) return undefined
+  const snapshot: Record<`fd${number}`, ChildProcess.AdditionalFdConfig> = {}
+  for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+    if (!descriptor.enumerable) continue
+    if (!("value" in descriptor) || typeof descriptor.value !== "object" || descriptor.value === null) {
+      throw new TypeError("additional file descriptors must be data records")
+    }
+    const config = descriptor.value as ChildProcess.AdditionalFdConfig
+    const type = data(config, "type")
+    if (type === "input") {
+      const stream = Object.getOwnPropertyDescriptor(config, "stream")
+      snapshot[name as `fd${number}`] = Object.freeze({
+        type,
+        ...(stream === undefined ? {} : "value" in stream ? { stream: stream.value } : (() => {
+          throw new TypeError("additional fd stream must be a data property")
+        })())
+      })
+    } else if (type === "output") {
+      const sink = Object.getOwnPropertyDescriptor(config, "sink")
+      snapshot[name as `fd${number}`] = Object.freeze({
+        type,
+        ...(sink === undefined ? {} : "value" in sink ? { sink: sink.value } : (() => {
+          throw new TypeError("additional fd sink must be a data property")
+        })())
+      })
+    } else {
+      throw new TypeError("additional file descriptor type is invalid")
+    }
+  }
+  return Object.freeze(snapshot)
+}
+
+const snapshotOptions = (options: ChildProcess.CommandOptions): ChildProcess.CommandOptions =>
+  Object.freeze({
+    killSignal: options.killSignal,
+    forceKillAfter: options.forceKillAfter,
+    cwd: options.cwd,
+    env: snapshotRecord(options.env),
+    extendEnv: options.extendEnv,
+    shell: options.shell,
+    detached: options.detached,
+    windowsHide: options.windowsHide,
+    stdin: snapshotStreamConfig(options.stdin),
+    stdout: snapshotStreamConfig(options.stdout),
+    stderr: snapshotStreamConfig(options.stderr),
+    additionalFds: snapshotAdditionalFds(options.additionalFds)
+  })
+
+const snapshotCommand = (command: ChildProcess.Command): ChildProcess.Command => {
+  const tag = data(command, "_tag")
+  if (tag === "StandardCommand") {
+    const executable = data(command, "command")
+    const args = data(command, "args")
+    const options = data(command, "options")
+    if (typeof executable !== "string" || !Array.isArray(args) || !args.every((arg) => typeof arg === "string")) {
+      throw new TypeError("standard command executable and arguments are invalid")
+    }
+    if (typeof options !== "object" || options === null) throw new TypeError("command options are invalid")
+    return ChildProcess.make(
+      executable,
+      Object.freeze([...args]),
+      snapshotOptions(options as ChildProcess.CommandOptions)
+    )
+  }
+  if (tag === "PipedCommand") {
+    const left = data(command, "left")
+    const right = data(command, "right")
+    const options = data(command, "options")
+    if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) {
+      throw new TypeError("pipeline commands are invalid")
+    }
+    if (typeof options !== "object" || options === null) throw new TypeError("pipeline options are invalid")
+    const from = optionalData(options, "from")
+    const to = optionalData(options, "to")
+    return ChildProcess.pipeTo(
+      snapshotCommand(right as ChildProcess.Command),
+      Object.freeze({
+        ...(from === undefined ? {} : { from: from as ChildProcess.PipeFromOption }),
+        ...(to === undefined ? {} : { to: to as ChildProcess.PipeToOption })
+      })
+    )(snapshotCommand(left as ChildProcess.Command))
+  }
+  throw new TypeError("unsupported command shape")
+}
 
 /**
  * The process spawner service — Effect's tag, unchanged. Re-exported so the
@@ -111,8 +245,7 @@ export const layer: Layer.Layer<ChildProcessSpawner, never, ChildProcessSpawner 
   Effect.gen(function*() {
     const spawner = yield* ChildProcessSpawner
     const grants = yield* GrantStore
-    const check = (command: ChildProcess.Command) =>
-      Effect.suspend(() => {
+    const check = (command: ChildProcess.Command) => {
         const rendered = CommandLine.render(command)
         return grants.check(makeCapability("proc:spawn", rendered), {
           cwd: CommandLine.cwd(command)
@@ -126,10 +259,21 @@ export const layer: Layer.Layer<ChildProcessSpawner, never, ChildProcessSpawner 
             })
           )
         )
-      })
+    }
     return makeSpawner(
       Effect.fn("ChildProcessSpawner.spawn")((command: ChildProcess.Command) =>
-        check(command).pipe(Effect.andThen(spawner.spawn(command)))
+        Effect.try({
+          try: () => snapshotCommand(command),
+          catch: () =>
+            systemError({
+              _tag: "InvalidData",
+              module: "ChildProcessSpawner",
+              method: "spawn",
+              description: "command must be an immutable supported process description"
+            })
+        }).pipe(
+          Effect.flatMap((snapshot) => check(snapshot).pipe(Effect.andThen(spawner.spawn(snapshot))))
+        )
       )
     )
   })

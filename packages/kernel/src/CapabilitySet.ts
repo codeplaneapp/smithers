@@ -8,7 +8,7 @@
  *
  * @since 0.1.0
  */
-import { type Capability, type CapabilityPattern, matches } from "@smthrs/capability/Capability"
+import { type Capability, CapabilityPattern, matches } from "@smthrs/capability/Capability"
 import { Context, Effect } from "effect"
 
 const CapabilitySetTypeId: unique symbol = Symbol.for("@smthrs/kernel/CapabilitySet")
@@ -56,7 +56,12 @@ const compareGroup = (
 const normalizeGroup = (
   patterns: ReadonlyArray<CapabilityPattern>
 ): ReadonlyArray<CapabilityPattern> => {
-  const sorted = patterns.slice().sort(comparePattern)
+  const sorted = patterns.map((pattern) =>
+    Object.freeze(new CapabilityPattern({
+      action: pattern.action,
+      resource: pattern.resource
+    }))
+  ).sort(comparePattern)
   const normalized: Array<CapabilityPattern> = []
   for (const pattern of sorted) {
     const previous = normalized.at(-1)

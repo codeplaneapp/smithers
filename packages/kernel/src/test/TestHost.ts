@@ -67,7 +67,7 @@ export const makeMemoryFs = (
   const put = (path: string, data: Uint8Array): void => {
     const key = normalize(path)
     mkdirp(key.replace(/\/[^/]*$/, "") || "/")
-    entries.set(key, { type: "file", data })
+    entries.set(key, { type: "file", data: data.slice() })
   }
 
   for (const [path, contents] of Object.entries(initial ?? {})) put(path, encoder.encode(contents))
@@ -96,7 +96,7 @@ export const makeMemoryFs = (
     readFile: async (path) => {
       const entry = get(path)
       if (entry.type !== "file") throw enoent(path)
-      return entry.data
+      return entry.data.slice()
     },
     writeFile: async (path, data) => put(path, data),
     mkdir: async (path, options) => {

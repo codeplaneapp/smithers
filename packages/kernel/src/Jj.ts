@@ -14,6 +14,7 @@
  * @since 0.1.0
  */
 import { make as makeCapability } from "@smthrs/capability/Capability"
+import { permissionDenied } from "@smthrs/capability/Permission"
 import { type ChangeId, Jj } from "@smthrs/jj"
 import { Effect, FileSystem as EffectFileSystem, Layer, Path as EffectPath } from "effect"
 import { canonicalResource } from "./FileSystem.ts"
@@ -103,14 +104,16 @@ export const layer: Layer.Layer<
           Effect.flatMap((resource) =>
             grants.check(makeCapability("jj:workspace-add", resource)).pipe(
               Effect.andThen(grants.check(makeCapability("fs:write", resource))),
-              Effect.andThen(
-                jj.workspaceAdd(
-                  name,
-                  path.normalize(
-                    path.isAbsolute(destination) ? destination : path.resolve(workspace.root, destination)
-                  ),
-                  revision
-                )
+              Effect.andThen(canonicalResource(fileSystem, path, workspace.root, destination)),
+              Effect.flatMap((settled) =>
+                settled === resource
+                  ? jj.workspaceAdd(name, resource, revision)
+                  : Effect.fail(
+                    permissionDenied(
+                      makeCapability("jj:workspace-add", resource),
+                      "workspace destination no longer names the resource that was authorized"
+                    )
+                  )
               )
             )
           )

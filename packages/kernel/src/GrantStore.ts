@@ -9,9 +9,11 @@
  */
 import {
   type Capability,
+  Capability as CapabilityValue,
   CapabilityPattern,
   type EffectTier,
   format,
+  maxResourceLength,
   matches,
   subsumes,
   tierOf
@@ -138,6 +140,235 @@ interface PendingEntry extends PendingRequest {
   readonly deferred: Deferred.Deferred<void, PermissionDenied>
 }
 
+/**
+ * Maximum policy rules retained by one store.
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumRules = 1_024
+/**
+ * Maximum predicates in one approval envelope.
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumEnvelopePatterns = 256
+/**
+ * Maximum permission requests parked at once.
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumPendingRequests = 1_024
+/**
+ * Maximum nesting depth of permission metadata.
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumMetadataDepth = 16
+/**
+ * Maximum members across one permission metadata graph.
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumMetadataMembers = 1_024
+/**
+ * Maximum encoded bytes retained for one metadata value.
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumMetadataBytes = 64 * 1024
+/**
+ * Maximum encoded bytes persisted for one grant event.
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumEventBytes = 256 * 1024
+/**
+ * Maximum length of a run, plan, request, or signature identity.
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumIdentityLength = 4_096
+/**
+ * Maximum capability resource length enforced by the capability vocabulary.
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumCapabilityResourceLength = maxResourceLength
+
+const encoder = new TextEncoder()
+
+const isWellFormed = (value: string): boolean => {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index)
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1)
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false
+      index += 1
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false
+    }
+  }
+  return true
+}
+
+const invalid = (message: string): GrantStoreError =>
+  new GrantStoreError({ code: "invalid_resolution", message })
+
+const immutableFields = <A extends object, K extends keyof A>(
+  value: A,
+  fields: ReadonlyArray<K>
+): A => {
+  for (const field of fields) {
+    Object.defineProperty(value, field, {
+      value: value[field],
+      enumerable: true,
+      writable: false,
+      configurable: false
+    })
+  }
+  return value
+}
+
+const snapshotCapability = (capability: Capability): Capability =>
+  immutableFields(
+    new CapabilityValue({ action: capability.action, resource: capability.resource }),
+    ["action", "resource"]
+  )
+
+const snapshotPattern = (pattern: CapabilityPattern): CapabilityPattern =>
+  immutableFields(
+    new CapabilityPattern({ action: pattern.action, resource: pattern.resource }),
+    ["action", "resource"]
+  )
+
+const snapshotRule = (rule: Rule): Rule =>
+  immutableFields(
+    new Rule({ effect: rule.effect, pattern: snapshotPattern(rule.pattern) }),
+    ["effect", "pattern"]
+  )
+
+const snapshotFailure = (what: string, cause: unknown): GrantStoreError =>
+  cause instanceof GrantStoreError ? cause : invalid(`${what} is invalid`)
+
+const attemptSnapshot = <A>(what: string, evaluate: () => A): Effect.Effect<A, GrantStoreError> =>
+  Effect.try({
+    try: evaluate,
+    catch: (cause) => snapshotFailure(what, cause)
+  })
+
+type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
+
+const metadataSnapshot = (input: Readonly<Record<string, unknown>>): Readonly<Record<string, Json>> => {
+  let members = 0
+  const active = new WeakSet<object>()
+
+  const visit = (value: unknown, depth: number): Json => {
+    if (depth > maximumMetadataDepth) throw invalid(`metadata exceeds depth ${maximumMetadataDepth}`)
+    if (value === null || typeof value === "boolean") return value
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) throw invalid("metadata contains a non-finite number")
+      return value
+    }
+    if (typeof value === "string") {
+      if (!isWellFormed(value)) throw invalid("metadata contains ill-formed text")
+      if (value.length > maximumMetadataBytes) throw invalid(`metadata exceeds ${maximumMetadataBytes} bytes`)
+      return value
+    }
+    if (typeof value !== "object" || value === null) throw invalid("metadata must be JSON data")
+    if (active.has(value)) throw invalid("metadata must not contain cycles")
+    active.add(value)
+    try {
+      if (Array.isArray(value)) {
+        const descriptors = Object.getOwnPropertyDescriptors(value)
+        const snapshot: Array<Json> = []
+        for (let index = 0; index < value.length; index += 1) {
+          members += 1
+          if (members > maximumMetadataMembers) {
+            throw invalid(`metadata exceeds ${maximumMetadataMembers} members`)
+          }
+          const descriptor = descriptors[String(index)]
+          if (descriptor === undefined || !("value" in descriptor)) {
+            throw invalid("metadata arrays must be dense data")
+          }
+          snapshot.push(visit(descriptor.value, depth + 1))
+        }
+        return Object.freeze(snapshot)
+      }
+
+      const prototype = Object.getPrototypeOf(value)
+      if (prototype !== Object.prototype && prototype !== null) {
+        throw invalid("metadata objects must be plain records")
+      }
+      const snapshot: Record<string, Json> = {}
+      for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+        if (!descriptor.enumerable) continue
+        members += 1
+        if (members > maximumMetadataMembers) {
+          throw invalid(`metadata exceeds ${maximumMetadataMembers} members`)
+        }
+        if (!isWellFormed(key) || !("value" in descriptor)) {
+          throw invalid("metadata members must be well-formed data properties")
+        }
+        if (descriptor.value !== undefined) snapshot[key] = visit(descriptor.value, depth + 1)
+      }
+      return Object.freeze(snapshot)
+    } finally {
+      active.delete(value)
+    }
+  }
+
+  const snapshot = visit(input, 0)
+  if (Array.isArray(snapshot) || snapshot === null || typeof snapshot !== "object") {
+    throw invalid("metadata must be a record")
+  }
+  const encoded = JSON.stringify(snapshot)
+  if (encoder.encode(encoded).byteLength > maximumMetadataBytes) {
+    throw invalid(`metadata exceeds ${maximumMetadataBytes} bytes`)
+  }
+  return snapshot as Readonly<Record<string, Json>>
+}
+
+const validIdentity = (value: unknown): value is string | undefined =>
+  value === undefined ||
+  (typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= maximumIdentityLength &&
+    isWellFormed(value) &&
+    !value.includes("\0"))
+
+const prepareEnvelope = (
+  input: EnvelopeGrantOptions,
+  expectedPlanDigest: string | undefined,
+  workspaceRoot: string
+): Effect.Effect<{
+  readonly planDigest: string
+  readonly scope: "run" | "remembered"
+  readonly patterns: ReadonlyArray<CapabilityPattern>
+}, GrantStoreError> =>
+  attemptSnapshot("grant envelope", () => {
+    if (!Array.isArray(input.patterns)) throw invalid("patterns must be an array")
+    if (input.patterns.length > maximumEnvelopePatterns) {
+      throw invalid(`patterns exceed ${maximumEnvelopePatterns} entries`)
+    }
+    const patterns = canonicalEnvelopePatterns(input.patterns)
+    // An empty envelope carries no authority. It is deliberately a no-op even
+    // when replayed without the plan identity that authorized a non-empty one.
+    if (patterns.length === 0) {
+      return { planDigest: expectedPlanDigest ?? "", scope: "run" as const, patterns }
+    }
+    const scope = input.scope ?? "run"
+    if (!isEnvelopeScope(scope)) throw invalid("scope must be run or remembered")
+    if (expectedPlanDigest === undefined) throw invalid("grant envelope requires a configured planDigest")
+    if (!validIdentity(input.planDigest)) throw invalid("planDigest is empty, malformed, or too long")
+    if (input.planDigest !== expectedPlanDigest) throw invalid("planDigest mismatch")
+    for (let index = 0; index < patterns.length; index += 1) {
+      if (!isValidEnvelopePattern(patterns[index]!, workspaceRoot)) {
+        throw invalid(`patterns[${index}] is outside the workspace envelope`)
+      }
+    }
+    return { planDigest: input.planDigest, scope, patterns }
+  })
+
 const exactPattern = (capability: Capability): CapabilityPattern =>
   new CapabilityPattern({
     action: capability.action,
@@ -172,15 +403,16 @@ const isEnvelopeScope = (value: string): value is "run" | "remembered" => value 
  */
 export const canonicalEnvelopePatterns = (
   patterns: ReadonlyArray<CapabilityPattern>
-): Array<CapabilityPattern> => {
+): ReadonlyArray<CapabilityPattern> => {
   const byIdentity = new Map<string, CapabilityPattern>()
-  for (const pattern of patterns) {
+  for (const input of patterns) {
+    const pattern = snapshotPattern(input)
     const identity = format(pattern)
     if (!byIdentity.has(identity)) {
       byIdentity.set(identity, pattern)
     }
   }
-  return [...byIdentity.keys()].sort().map((identity) => byIdentity.get(identity)!)
+  return Object.freeze([...byIdentity.keys()].sort().map((identity) => byIdentity.get(identity)!))
 }
 
 /**
@@ -267,21 +499,27 @@ export const isValidEnvelopePattern = (
 const normalizeRules = (
   rules: MakeOptions["rules"]
 ): {
-  readonly configured: Array<Rule>
-  readonly remembered: Array<Rule>
+  readonly configured: ReadonlyArray<Rule>
+  readonly remembered: ReadonlyArray<Rule>
 } => {
   if (rules === undefined || rules.length === 0 || rules[0] === undefined) {
     return { configured: [], remembered: [] }
   }
+  if (rules.length > maximumRules) throw invalid(`rules exceed ${maximumRules} entries`)
   if (Array.isArray(rules[0])) {
     const rulesets = rules as ReadonlyArray<ReadonlyArray<Rule>>
+    let count = 0
+    for (const ruleset of rulesets) {
+      count += ruleset.length
+      if (count > maximumRules) throw invalid(`rules exceed ${maximumRules} entries`)
+    }
     return {
-      configured: [...rulesets[0]!],
-      remembered: rulesets.slice(1).flatMap((ruleset) => [...ruleset])
+      configured: Object.freeze(rulesets[0]!.map(snapshotRule)),
+      remembered: Object.freeze(rulesets.slice(1).flatMap((ruleset) => ruleset.map(snapshotRule)))
     }
   }
   return {
-    configured: [...(rules as ReadonlyArray<Rule>)],
+    configured: Object.freeze((rules as ReadonlyArray<Rule>).map(snapshotRule)),
     remembered: []
   }
 }
@@ -303,49 +541,87 @@ export const make = (
 ): Effect.Effect<Service, GrantStoreError, Scope.Scope | Workspace> =>
   Effect.gen(function*() {
     const attended = options.attended ?? true
+    const runId = options.runId
+    const planDigest = options.planDigest
+    if (!validIdentity(runId)) {
+      return yield* Effect.fail(invalid("runId is empty, malformed, or too long"))
+    }
+    if (!validIdentity(planDigest)) {
+      return yield* Effect.fail(invalid("planDigest is empty, malformed, or too long"))
+    }
     const workspace = yield* Workspace
     const initialCeiling = yield* current
     const workspaceRoot = workspace.root
-    const initial = normalizeRules(options.rules)
+    const initial = yield* attemptSnapshot("rules", () => normalizeRules(options.rules))
+    const initialRunRules = yield* attemptSnapshot("runRules", () => {
+      const values = options.runRules ?? []
+      if (values.length > maximumRules) throw invalid(`runRules exceed ${maximumRules} entries`)
+      return values.map(snapshotRule)
+    })
+    if (initial.configured.length + initial.remembered.length + initialRunRules.length > maximumRules) {
+      return yield* Effect.fail(invalid(`rules exceed ${maximumRules} entries`))
+    }
     const configuredRules = initial.configured
     const envelopeRules: Array<Rule> = []
-    const runRules: Array<{ readonly rule: Rule; readonly ceiling: CapabilitySet }> = (options.runRules ?? []).map(
+    const runRules: Array<{ readonly rule: Rule; readonly ceiling: CapabilitySet }> = initialRunRules.map(
       (rule) => ({ rule, ceiling: initialCeiling })
     )
-    const rememberedRules = initial.remembered
+    const rememberedRules = [...initial.remembered]
     const pending = new Map<string, PendingEntry>()
     const persist = options.persist ?? (() => Effect.void)
-    const grantedEnvelopes = new Set<string>(options.envelopeSignatures ?? [])
+    const signatures = yield* attemptSnapshot("envelopeSignatures", () => {
+      const values = options.envelopeSignatures ?? []
+      if (!Array.isArray(values) || values.length > maximumRules) {
+        throw invalid(`envelopeSignatures exceed ${maximumRules} entries`)
+      }
+      return values.map((value, index) => {
+        if (typeof value !== "string" || !validIdentity(value)) {
+          throw invalid(`envelopeSignatures[${index}] is malformed or too long`)
+        }
+        return value
+      })
+    })
+    const grantedEnvelopes = new Set<string>(signatures)
     let nextRequestId = 1
     let closed = false
     const mutation = yield* Semaphore.make(1)
 
-    if (
-      rememberedRules.some((rule) => rule.effect === "allow" && !isValidEnvelopePattern(rule.pattern, workspaceRoot))
-      || runRules.some(({ rule }) => rule.effect === "allow" && !isValidEnvelopePattern(rule.pattern, workspaceRoot))
-    ) {
-      return yield* Effect.fail(new GrantStoreError({ code: "invalid_resolution" }))
+    const persistEvent = (event: GrantEvent): Effect.Effect<void, GrantStoreError> => {
+      // Every event is constructed below exclusively from validated primitive
+      // identities and immutable capability snapshots, so encoding cannot
+      // observe caller objects or invoke a caller-defined `toJSON` hook.
+      const bytes = encoder.encode(JSON.stringify(event)).byteLength
+      return bytes <= maximumEventBytes
+        ? persist(event)
+        : Effect.fail(invalid(`grant event exceeds ${maximumEventBytes} bytes`))
     }
 
-    if (options.envelope !== undefined && options.envelope.patterns.length > 0) {
-      const scope = options.envelope.scope ?? "run"
-      if (
-        !isEnvelopeScope(scope)
-        || options.planDigest === undefined
-        || options.envelope.planDigest !== options.planDigest
-        || options.envelope.planDigest.length === 0
-        || options.envelope.patterns.some((pattern) => !isValidEnvelopePattern(pattern, workspaceRoot))
-      ) {
-        return yield* Effect.fail(new GrantStoreError({ code: "invalid_resolution" }))
-      }
-      const patterns = canonicalEnvelopePatterns(options.envelope.patterns)
-      const signature = envelopeSignature(options.envelope.planDigest, scope, patterns)
+    const invalidRemembered = rememberedRules.findIndex((rule) =>
+      rule.effect === "allow" && !isValidEnvelopePattern(rule.pattern, workspaceRoot)
+    )
+    if (invalidRemembered !== -1) {
+      return yield* Effect.fail(invalid(`rememberedRules[${invalidRemembered}] is outside the workspace envelope`))
+    }
+    const invalidRun = runRules.findIndex(({ rule }) =>
+      rule.effect === "allow" && !isValidEnvelopePattern(rule.pattern, workspaceRoot)
+    )
+    if (invalidRun !== -1) {
+      return yield* Effect.fail(invalid(`runRules[${invalidRun}] is outside the workspace envelope`))
+    }
+
+    if (options.envelope !== undefined) {
+      const envelope = yield* prepareEnvelope(options.envelope, planDigest, workspaceRoot)
+      const { patterns, scope } = envelope
+      if (patterns.length === 0) {
+        // An empty envelope carries no authority and no durable event.
+      } else {
+      const signature = envelopeSignature(envelope.planDigest, scope, patterns)
       if (!grantedEnvelopes.has(signature)) {
-        yield* persist(
+        yield* persistEvent(
           new EnvelopeGrant({
             eventType: "flows.kernel.grant.envelope.v1",
-            runId: options.runId ?? "",
-            planDigest: options.envelope.planDigest,
+            runId: runId ?? "",
+            planDigest: envelope.planDigest,
             patterns,
             scope
           })
@@ -355,6 +631,7 @@ export const make = (
       const destination = scope === "remembered" ? rememberedRules : envelopeRules
       for (const pattern of patterns) {
         destination.push(new Rule({ effect: "allow", pattern }))
+      }
       }
     }
 
@@ -393,6 +670,9 @@ export const make = (
       ceiling: CapabilitySet
     ): Effect.Effect<PendingEntry, GrantStoreError> =>
       Effect.gen(function*() {
+        if (pending.size >= maximumPendingRequests) {
+          return yield* Effect.fail(invalid(`pending requests exceed ${maximumPendingRequests} entries`))
+        }
         const requestId = `permission-${nextRequestId++}`
         const deferred = yield* Deferred.make<void, PermissionDenied>()
         const entry: PendingEntry = {
@@ -412,39 +692,48 @@ export const make = (
     const check: Service["check"] = Effect.fn("GrantStore.check")((capability, meta = {}) =>
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function*() {
+          const request = yield* attemptSnapshot("permission request", () => ({
+            capability: snapshotCapability(capability),
+            meta: metadataSnapshot(meta)
+          }))
           const entry = yield* mutation.withPermit(
             Effect.gen(function*() {
               if (closed) {
                 return yield* Effect.fail(new GrantStoreError({ code: "store_closed" }))
               }
               const ceiling = yield* current
-              if (!allows(ceiling, capability)) {
-                return yield* Effect.fail(permissionDenied(capability, "outside capability ceiling"))
+              if (!allows(ceiling, request.capability)) {
+                return yield* Effect.fail(permissionDenied(request.capability, "outside capability ceiling"))
               }
 
-              const decision = evaluate(rulesets(capability), capability)
+              const decision = evaluate(rulesets(request.capability), request.capability)
               if (decision === "allow") {
                 return undefined
               }
               if (decision === "deny") {
-                return yield* Effect.fail(permissionDenied(capability, "denied by permission policy"))
+                return yield* Effect.fail(permissionDenied(request.capability, "denied by permission policy"))
               }
 
-              const tier = tierOf(capability, { workspaceRoot })
+              const tier = tierOf(request.capability, { workspaceRoot })
               if (!attended) {
                 const requestId = yield* nextUnattendedRequestId
                 return yield* Effect.fail(
                   permissionRequired({
                     requestId,
-                    runId: options.runId,
-                    capability,
+                    runId,
+                    capability: request.capability,
                     tier,
-                    meta
+                    meta: request.meta
                   })
                 )
               }
 
-              return yield* allocateRequest(capability, tier, { ...meta }, ceiling)
+              return yield* allocateRequest(
+                request.capability,
+                tier,
+                request.meta as Record<string, unknown>,
+                ceiling
+              )
             })
           )
           if (entry === undefined) {
@@ -512,18 +801,22 @@ export const make = (
             if (entry === undefined) {
               return yield* Effect.fail(new GrantStoreError({ code: "request_not_found" }))
             }
-            const pattern = resolution === "run" || resolution === "remembered"
-              ? suppliedPattern ?? exactPattern(entry.capability)
-              : exactPattern(entry.capability)
+            const pattern = yield* attemptSnapshot("grant pattern", () =>
+              snapshotPattern(
+                resolution === "run" || resolution === "remembered"
+                  ? suppliedPattern ?? exactPattern(entry.capability)
+                  : exactPattern(entry.capability)
+              )
+            )
 
             switch (resolution) {
               case "once": {
-                yield* persist(
+                yield* persistEvent(
                   new OnceGrant({
                     eventType: "flows.kernel.grant.once.v1",
                     requestId,
-                    runId: options.runId ?? "",
-                    ...(options.planDigest === undefined ? {} : { planDigest: options.planDigest }),
+                    runId: runId ?? "",
+                    ...(planDigest === undefined ? {} : { planDigest }),
                     capability: entry.capability,
                     pattern,
                     scope: "once",
@@ -535,7 +828,7 @@ export const make = (
                 return
               }
               case "run": {
-                if (options.planDigest === undefined || options.planDigest.length === 0) {
+                if (planDigest === undefined) {
                   return yield* Effect.fail(
                     new GrantStoreError({
                       code: "invalid_resolution",
@@ -544,15 +837,18 @@ export const make = (
                   )
                 }
                 if (!isValidGrantPattern(pattern, entry.capability, entry.tier, workspaceRoot)) {
-                  return yield* Effect.fail(new GrantStoreError({ code: "invalid_resolution" }))
+                  return yield* Effect.fail(invalid("grant pattern exceeds the requested authority"))
                 }
-                const rule = new Rule({ effect: "allow", pattern })
-                yield* persist(
+                if (configuredRules.length + envelopeRules.length + runRules.length + rememberedRules.length >= maximumRules) {
+                  return yield* Effect.fail(invalid(`rules exceed ${maximumRules} entries`))
+                }
+                const rule = snapshotRule(new Rule({ effect: "allow", pattern }))
+                yield* persistEvent(
                   new RunGrant({
                     eventType: "flows.kernel.grant.run.v1",
                     requestId,
-                    runId: options.runId ?? "",
-                    planDigest: options.planDigest,
+                    runId: runId ?? "",
+                    planDigest,
                     capability: entry.capability,
                     pattern,
                     scope: "run",
@@ -565,15 +861,18 @@ export const make = (
               }
               case "remembered": {
                 if (!isValidGrantPattern(pattern, entry.capability, entry.tier, workspaceRoot)) {
-                  return yield* Effect.fail(new GrantStoreError({ code: "invalid_resolution" }))
+                  return yield* Effect.fail(invalid("grant pattern exceeds the requested authority"))
                 }
-                const rule = new Rule({ effect: "allow", pattern })
-                yield* persist(
+                if (configuredRules.length + envelopeRules.length + runRules.length + rememberedRules.length >= maximumRules) {
+                  return yield* Effect.fail(invalid(`rules exceed ${maximumRules} entries`))
+                }
+                const rule = snapshotRule(new Rule({ effect: "allow", pattern }))
+                yield* persistEvent(
                   new RememberedGrant({
                     eventType: "flows.kernel.grant.remembered.v1",
                     requestId,
-                    runId: options.runId ?? "",
-                    ...(options.planDigest === undefined ? {} : { planDigest: options.planDigest }),
+                    runId: runId ?? "",
+                    ...(planDigest === undefined ? {} : { planDigest }),
                     capability: entry.capability,
                     pattern,
                     scope: "remembered",
@@ -585,12 +884,12 @@ export const make = (
                 return
               }
               case "deny": {
-                yield* persist(
+                yield* persistEvent(
                   new DeniedGrant({
                     eventType: "flows.kernel.grant.denied.v1",
                     requestId,
-                    runId: options.runId ?? "",
-                    ...(options.planDigest === undefined ? {} : { planDigest: options.planDigest }),
+                    runId: runId ?? "",
+                    ...(planDigest === undefined ? {} : { planDigest }),
                     capability: entry.capability,
                     pattern,
                     scope: "once",
@@ -613,68 +912,63 @@ export const make = (
     const list: Service["list"] = Effect.fn("GrantStore.list")(() =>
       mutation.withPermit(
         Effect.sync(() =>
-          Array.from(
+          Object.freeze(Array.from(
             pending.values(),
-            ({ requestId, capability, tier, meta }): PendingRequest => ({
+            ({ requestId, capability, tier, meta }): PendingRequest => Object.freeze({
               requestId,
-              capability,
+              capability: snapshotCapability(capability),
               tier,
-              meta
+              meta: metadataSnapshot(meta)
             })
-          )
+          ))
         )
       )
     )()
 
-    const grantEnvelope: Service["grantEnvelope"] = Effect.fn("GrantStore.grantEnvelope")((
-      { patterns, planDigest, scope = "run" }
-    ) =>
+    const grantEnvelope: Service["grantEnvelope"] = Effect.fn("GrantStore.grantEnvelope")((input) =>
       Effect.uninterruptible(
-        mutation.withPermit(
+        Effect.gen(function*() {
+          const prepared = yield* prepareEnvelope(input, planDigest, workspaceRoot)
+          if (prepared.patterns.length === 0) return
+          yield* mutation.withPermit(
           Effect.gen(function*() {
             if (closed) {
               return yield* Effect.fail(new GrantStoreError({ code: "store_closed" }))
             }
-            if (
-              !isEnvelopeScope(scope)
-              || options.planDigest === undefined
-              || planDigest !== options.planDigest
-              || planDigest.length === 0
-              || patterns.some((pattern) => !isValidEnvelopePattern(pattern, workspaceRoot))
-            ) {
-              // A runtime-invalid scope is caller input, not a defect: it must
-              // surface as a typed store error before it can reach the event
-              // schema constructor.
-              return yield* Effect.fail(new GrantStoreError({ code: "invalid_resolution" }))
-            }
-            if (patterns.length === 0) {
-              return
-            }
-            const canonical = canonicalEnvelopePatterns(patterns)
-            const signature = envelopeSignature(planDigest, scope, canonical)
+            const signature = envelopeSignature(prepared.planDigest, prepared.scope, prepared.patterns)
             if (grantedEnvelopes.has(signature)) {
               // The same approval was already activated and persisted —
               // repeating or reordering its predicates is a no-op, not new
               // durable evidence.
               return
             }
-            yield* persist(
+            if (
+              configuredRules.length + envelopeRules.length + runRules.length + rememberedRules.length +
+                prepared.patterns.length > maximumRules
+            ) {
+              return yield* Effect.fail(invalid(`rules exceed ${maximumRules} entries`))
+            }
+            if (grantedEnvelopes.size >= maximumRules) {
+              return yield* Effect.fail(invalid(`grant envelopes exceed ${maximumRules} entries`))
+            }
+            yield* persistEvent(
               new EnvelopeGrant({
                 eventType: "flows.kernel.grant.envelope.v1",
-                runId: options.runId ?? "",
-                planDigest,
-                patterns: canonical,
-                scope
+                runId: runId ?? "",
+                planDigest: prepared.planDigest,
+                patterns: prepared.patterns,
+                scope: prepared.scope
               })
             )
             grantedEnvelopes.add(signature)
-            const destination = scope === "remembered" ? rememberedRules : envelopeRules
-            for (const pattern of canonical) {
-              destination.push(new Rule({ effect: "allow", pattern }))
+            const destination = prepared.scope === "remembered" ? rememberedRules : envelopeRules
+            for (const pattern of prepared.patterns) {
+              destination.push(snapshotRule(new Rule({ effect: "allow", pattern })))
             }
             yield* resolveCovered
           })
-        )
+          )
+        })
       )
     )
 

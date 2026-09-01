@@ -1,8 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Capability from "@smthrs/capability/Capability"
 import { PermissionDenied } from "@smthrs/capability/Permission"
-import { Effect, Fiber, Option } from "effect"
+import { Effect, Fiber, Option, Stream } from "effect"
 import * as EffectHttpClient from "effect/unstable/http/HttpClient"
+import * as HttpBody from "effect/unstable/http/HttpBody"
 import * as HttpClientErrorModule from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
@@ -210,6 +211,103 @@ describe("HttpClient", () => {
       yield* Fiber.interrupt(fiber)
       expect(checks).toEqual([{ action: "net:get", resource: "example.test" }])
     }).pipe((effect) => protectedClient(effect, never, store(checks)))
+  })
+
+  itEffect("snapshots every supported request body, URL parameter, and hash representation", () => {
+    const checks: Array<Capability.Capability> = []
+    const seen: Array<HttpClientRequest.HttpClientRequest> = []
+    const raw = EffectHttpClient.make((request) =>
+      Effect.sync(() => {
+        seen.push(request)
+        return { status: 204, headers: {}, request } as HttpClientResponse.HttpClientResponse
+      })
+    )
+    const bytes = new Uint8Array([1, 2, 3])
+    const buffer = new Uint8Array([4, 5, 6]).buffer
+    const params = new URLSearchParams({ mode: "safe" })
+    const blob = new Blob(["safe"])
+    const form = new FormData()
+    form.append("mode", "safe")
+    const bodies: ReadonlyArray<HttpBody.HttpBody> = [
+      HttpBody.raw(bytes),
+      HttpBody.raw(buffer),
+      HttpBody.raw(params),
+      HttpBody.raw(blob),
+      HttpBody.raw(null),
+      HttpBody.raw("text"),
+      HttpBody.raw(7),
+      HttpBody.raw(true),
+      HttpBody.uint8Array(bytes, "application/octet-stream"),
+      HttpBody.formData(form),
+      HttpBody.stream(Stream.succeed(bytes), "application/octet-stream", bytes.byteLength)
+    ]
+
+    return Effect.gen(function*() {
+      const client = yield* EffectHttpClient.HttpClient
+      yield* Effect.forEach(
+        bodies,
+        (body, index) =>
+          client.execute(
+            HttpClientRequest.post(`https://example.test/body-${index}`).pipe(
+              HttpClientRequest.setUrlParam("query", "safe"),
+              HttpClientRequest.setHash("section"),
+              HttpClientRequest.setBody(body)
+            )
+          ),
+        { discard: true }
+      )
+
+      expect(seen).toHaveLength(bodies.length)
+      expect(seen.map((request) => request.body._tag)).toEqual([
+        "Raw",
+        "Raw",
+        "Raw",
+        "Raw",
+        "Raw",
+        "Raw",
+        "Raw",
+        "Raw",
+        "Uint8Array",
+        "FormData",
+        "Stream"
+      ])
+      expect((seen[0]!.body as HttpBody.Raw).body).not.toBe(bytes)
+      expect((seen[1]!.body as HttpBody.Raw).body).not.toBe(buffer)
+      expect((seen[2]!.body as HttpBody.Raw).body).not.toBe(params)
+      expect((seen[3]!.body as HttpBody.Raw).body).toBe(blob)
+      expect((seen[8]!.body as HttpBody.Uint8Array).body).not.toBe(bytes)
+      expect((seen[9]!.body as HttpBody.FormData).formData).not.toBe(form)
+      expect(seen[0]!.urlParams.params).toEqual([["query", "safe"]])
+      expect(Option.getOrThrow(seen[0]!.hash)).toBe("section")
+      expect(checks).toHaveLength(bodies.length)
+    }).pipe((effect) => protectedClient(effect, raw, store(checks)))
+  })
+
+  itEffect("rejects unsupported raw request bodies before checking or sending", () => {
+    const checks: Array<Capability.Capability> = []
+    const calls: Array<string> = []
+    const unsupported = [{}, undefined, Symbol("body"), 1n, () => "body"]
+    return Effect.gen(function*() {
+      const client = yield* EffectHttpClient.HttpClient
+      for (const value of unsupported) {
+        const failure = yield* Effect.flip(
+          client.execute(
+            HttpClientRequest.post("https://example.test/body").pipe(
+              HttpClientRequest.setBody(HttpBody.raw(value))
+            )
+          )
+        )
+        expect(failure).toMatchObject({
+          _tag: "HttpClientError",
+          reason: {
+            _tag: "TransportError",
+            description: "HTTP request must be an immutable supported request description"
+          }
+        })
+      }
+      expect(checks).toEqual([])
+      expect(calls).toEqual([])
+    }).pipe((effect) => protectedClient(effect, host(calls), store(checks)))
   })
 
   itEffect("answers the stub with an unavailable-host transport failure", () =>
