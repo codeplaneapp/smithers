@@ -130,6 +130,27 @@ describe("lookups", () => {
       expect(tier.calls[0]!.url).toContain("recordedEventSeq=3")
     }))
 
+  it.effect("sends the first recordedBy accessor value as lookup provenance", () =>
+    Effect.gen(function*() {
+      const tier = tierOf(() => new Response(JSON.stringify(entry), { status: 200 }))
+      let reads = 0
+      const options = Object.defineProperty({}, "recordedBy", {
+        enumerable: true,
+        get: () => {
+          reads++
+          return reads === 1
+            ? { runId: "validated-run", eventSeq: 11 }
+            : { runId: "later-run", eventSeq: 12 }
+        }
+      }) as CacheStore.GetOptions
+      yield* Effect.flatMap(tier.store, (store) => store.get(entry.keyDigest, options))
+
+      const url = new URL(tier.calls[0]!.url)
+      expect(url.searchParams.get("recordedRunId")).toBe("validated-run")
+      expect(url.searchParams.get("recordedEventSeq")).toBe("11")
+      expect(reads).toBe(1)
+    }))
+
   it.effect("reports a miss on 404", () =>
     Effect.gen(function*() {
       const tier = tierOf(() => new Response(null, { status: 404 }))
@@ -570,6 +591,25 @@ describe("evictions", () => {
       )
       expect(tier.calls[0]!.url).toContain("recordedRunId=run-1")
       expect(tier.calls[0]!.url).toContain("recordedEventSeq=3")
+    }))
+
+  it.effect("never rereads an accessor-backed eviction fence as unfenced", () =>
+    Effect.gen(function*() {
+      const tier = tierOf(() => new Response(null, { status: 200 }))
+      let reads = 0
+      const options = Object.defineProperty({}, "ifRecordedBy", {
+        enumerable: true,
+        get: () => {
+          reads++
+          return reads === 1 ? { runId: "validated-run", eventSeq: 11 } : undefined
+        }
+      }) as CacheStore.EvictOptions
+      yield* Effect.flatMap(tier.store, (store) => store.evict(entry.keyDigest, options))
+
+      const url = new URL(tier.calls[0]!.url)
+      expect(url.searchParams.get("recordedRunId")).toBe("validated-run")
+      expect(url.searchParams.get("recordedEventSeq")).toBe("11")
+      expect(reads).toBe(1)
     }))
 
   it.effect("reports false on 404", () =>

@@ -419,7 +419,9 @@ export const validateKey = (keyDigest: string): Effect.Effect<void, CacheStoreEr
   )
 
 /**
- * Validates a provenance selector before a store performs I/O.
+ * Validates a provenance selector before a store performs I/O and returns the
+ * schema-decoded copy (or `undefined`). Returning that detached value lets the
+ * operation decode once and never reread caller-owned accessors.
  *
  * @category validation
  * @since 1.0.0-rc.0
@@ -427,11 +429,10 @@ export const validateKey = (keyDigest: string): Effect.Effect<void, CacheStoreEr
 export const validateRecordedBy = (
   recordedBy: RecordedBy | undefined,
   field = "recordedBy"
-): Effect.Effect<void, CacheStoreError> =>
+): Effect.Effect<RecordedBy | undefined, CacheStoreError> =>
   recordedBy === undefined
-    ? Effect.void
+    ? Effect.succeed(undefined)
     : Schema.decodeUnknownEffect(RecordedBy)(recordedBy).pipe(
-      Effect.asVoid,
       Effect.mapError((cause) => error("invalid_cache", `${field} violates the provenance contract`, cause))
     )
 
@@ -440,29 +441,39 @@ export const validateRecordedBy = (
  * issued. A fence naming an empty run or a sequence number no journal can
  * record is a compare-and-swap no row could ever satisfy; running it anyway
  * would misreport the caller's mistake as an ordinary "nothing matched".
+ * It returns the decoded fence (or `undefined`) so the guarded delete uses
+ * exactly the value that validation observed, including its inner fields.
  *
  * @category validation
  * @since 1.0.0-rc.0
  */
 export const validateFence = (
   fence: EvictOptions["ifRecordedBy"]
-): Effect.Effect<void, CacheStoreError> => validateRecordedBy(fence, "eviction fence")
+): Effect.Effect<RecordedBy | undefined, CacheStoreError> => validateRecordedBy(fence, "eviction fence")
 
 /**
  * Refuses an age bound no row could satisfy before any statement is issued.
  * A negative or fractional millisecond count is a caller mistake, and running
  * it anyway would report that mistake as an ordinary miss.
+ * It returns the checked primitive (or `undefined`) so an operation reads an
+ * option accessor once and computes its age floor from that same value.
  *
  * @category validation
  * @since 1.0.0-rc.0
  */
-export const validateAge = (field: string, value: number | undefined): Effect.Effect<void, CacheStoreError> =>
+export const validateAge = (
+  field: string,
+  value: number | undefined
+): Effect.Effect<number | undefined, CacheStoreError> =>
   value === undefined || (Number.isSafeInteger(value) && value >= 0)
-    ? Effect.void
+    ? Effect.succeed(value)
     : Effect.fail(error("invalid_cache", `${field} must be a non-negative safe integer`))
 
 /**
  * Takes an inert, detached snapshot of a cache entry at effect start.
+ * Schema decoding builds a new top-level object, so the returned entry is
+ * frozen after decoding; freezing only the provisional input would leave the
+ * shell received by callers mutable.
  *
  * @category validation
  * @since 1.0.0-rc.0
@@ -502,6 +513,7 @@ export const snapshotEntry = (input: CacheEntry): Effect.Effect<CacheEntry, Cach
         recordedEventSeq: values.recordedEventSeq
       })
       return Schema.decodeUnknownEffect(CacheEntry)(snapshot).pipe(
+        Effect.map((entry) => Object.freeze(entry)),
         Effect.mapError(() => error("invalid_cache", "cache entry violates the persistence contract"))
       )
     } catch {
@@ -559,16 +571,16 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     Effect.gen(function*() {
       yield* Effect.annotateCurrentSpan({ keyDigest })
       yield* validateKey(keyDigest)
-      yield* validateAge("maxAgeMs", options?.maxAgeMs)
-      yield* validateRecordedBy(options?.recordedBy)
+      const maxAgeMs = yield* validateAge("maxAgeMs", options?.maxAgeMs)
+      const recordedBy = yield* validateRecordedBy(options?.recordedBy)
       // The age floor is resolved once, from the injected clock, so both reads
       // below judge the same instant and a row cannot be fresh for the ledger
-      // read and stale for the head read of one lookup.
-      const floorMs = options?.maxAgeMs === undefined
+      // read and stale for the head read of one lookup. The validated value,
+      // not the caller's option object, is the only value this computation reads.
+      const floorMs = maxAgeMs === undefined
         ? undefined
-        : (yield* Clock.currentTimeMillis) - options.maxAgeMs
+        : (yield* Clock.currentTimeMillis) - maxAgeMs
       const withinBound = (row: CacheEntry): boolean => floorMs === undefined || row.createdAtMs >= floorMs
-      const recordedBy = options?.recordedBy
       if (recordedBy !== undefined) {
         // The ledger row is the durable evidence a replay of that exact event
         // must read; the head is only the fallback for entries recorded under
@@ -685,13 +697,13 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     Effect.gen(function*() {
       yield* Effect.annotateCurrentSpan({ keyDigest })
       yield* validateKey(keyDigest)
-      yield* validateFence(options?.ifRecordedBy)
+      const fenced = yield* validateFence(options?.ifRecordedBy)
       // The provenance predicate rides in the DELETE itself (issue #119):
       // a read-then-delete leaves a window in which another *process* records
       // a fresh row under the same key, and the unconditional delete would
       // drop it. Temporal fences its mutable-state writes the same way — the
-      // guard is part of the write, never a prior read.
-      const fenced = options?.ifRecordedBy
+      // guard is part of the write, never a prior read. The statement reads the
+      // decoded fence, never the caller's provenance object.
       const deleted = yield* writer.write(
         fenced === undefined
           ? sql`DELETE FROM flows_step_cache WHERE key_digest = ${keyDigest}`.raw

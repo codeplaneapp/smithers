@@ -165,6 +165,57 @@ describe("CacheStore", () => {
       expect(Option.getOrThrow(result.head)).toEqual(replaced)
     }))
 
+  it.effect("computes the age floor from the first maxAgeMs accessor value", () =>
+    Effect.gen(function*() {
+      let reads = 0
+      const options = Object.defineProperty({}, "maxAgeMs", {
+        enumerable: true,
+        get: () => {
+          reads++
+          return reads === 1 ? Number.MAX_SAFE_INTEGER : 0
+        }
+      }) as CacheStoreLive.GetOptions
+      const found = yield* migrated(Effect.gen(function*() {
+        const store = yield* CacheStore
+        yield* store.put(entry)
+        return yield* store.get(entry.keyDigest, options)
+      }))
+
+      expect(Option.getOrThrow(found)).toEqual(entry)
+      expect(reads).toBe(1)
+    }))
+
+  it.effect("reads the ledger provenance from the first recordedBy accessor value", () =>
+    Effect.gen(function*() {
+      const replaced = {
+        ...entry,
+        result: { output: "replaced" },
+        createdAtMs: 20,
+        recordedRunId: "run-2",
+        recordedEventSeq: 9
+      }
+      let reads = 0
+      const options = Object.defineProperty({}, "recordedBy", {
+        enumerable: true,
+        get: () => {
+          reads++
+          return reads === 1
+            ? { runId: entry.recordedRunId, eventSeq: entry.recordedEventSeq }
+            : { runId: replaced.recordedRunId, eventSeq: replaced.recordedEventSeq }
+        }
+      }) as CacheStoreLive.GetOptions
+      const found = yield* migrated(Effect.gen(function*() {
+        const store = yield* CacheStore
+        yield* store.put(entry)
+        yield* store.evict(entry.keyDigest)
+        yield* store.put(replaced)
+        return yield* store.get(entry.keyDigest, options)
+      }))
+
+      expect(Option.getOrThrow(found)).toEqual(entry)
+      expect(reads).toBe(1)
+    }))
+
   it.effect("keeps the first recorded bytes for a provenance across a conflicting re-put", () =>
     Effect.gen(function*() {
       const result = yield* migrated(Effect.gen(function*() {
@@ -323,6 +374,52 @@ describe("CacheStore", () => {
       expect(Option.isSome(result.survived)).toBe(true)
       expect(result.matching).toBe(true)
       expect(Option.isNone(result.gone)).toBe(true)
+    }))
+
+  it.effect("never rereads an accessor-backed eviction option as unconditional", () =>
+    Effect.gen(function*() {
+      let reads = 0
+      const options = Object.defineProperty({}, "ifRecordedBy", {
+        enumerable: true,
+        get: () => {
+          reads++
+          return reads === 1
+            ? { runId: "foreign-run", eventSeq: entry.recordedEventSeq }
+            : undefined
+        }
+      }) as CacheStoreLive.EvictOptions
+      const result = yield* migrated(Effect.gen(function*() {
+        const store = yield* CacheStore
+        yield* store.put(entry)
+        const evicted = yield* store.evict(entry.keyDigest, options)
+        return { evicted, survivor: yield* store.get(entry.keyDigest) }
+      }))
+
+      expect(result.evicted).toBe(false)
+      expect(Option.getOrThrow(result.survivor)).toEqual(entry)
+      expect(reads).toBe(1)
+    }))
+
+  it.effect("fences an eviction on the first decoded inner provenance value", () =>
+    Effect.gen(function*() {
+      let reads = 0
+      const fence = Object.defineProperty({ eventSeq: entry.recordedEventSeq }, "runId", {
+        enumerable: true,
+        get: () => {
+          reads++
+          return reads === 1 ? entry.recordedRunId : "foreign-run"
+        }
+      }) as CacheStoreLive.RecordedBy
+      const result = yield* migrated(Effect.gen(function*() {
+        const store = yield* CacheStore
+        yield* store.put(entry)
+        const evicted = yield* store.evict(entry.keyDigest, { ifRecordedBy: fence })
+        return { evicted, found: yield* store.get(entry.keyDigest) }
+      }))
+
+      expect(result.evicted).toBe(true)
+      expect(Option.isNone(result.found)).toBe(true)
+      expect(reads).toBe(1)
     }))
 
   it.effect("fences an eviction on the recording run, not the event seq alone", () =>
@@ -567,6 +664,27 @@ describe("CacheStore", () => {
       }))
       expect(failures.every((failure) => failure.code === "invalid_cache")).toBe(true)
       expect(reads).toBe(0)
+    }))
+
+  it.effect("returns a frozen top-level snapshot shell", () =>
+    Effect.gen(function*() {
+      const snapshot = yield* CacheStoreLive.snapshotEntry(entry)
+      const originalResult = snapshot.result
+      const mutable = snapshot as { keyDigest: string; result: unknown }
+      try {
+        mutable.result = { output: "changed" }
+      } catch {
+        // Strict-mode assignment to the frozen snapshot is expected to throw.
+      }
+      try {
+        mutable.keyDigest = "changed"
+      } catch {
+        // Strict-mode assignment to the frozen snapshot is expected to throw.
+      }
+
+      expect(Object.isFrozen(snapshot)).toBe(true)
+      expect(snapshot.result).toBe(originalResult)
+      expect(snapshot.keyDigest).toBe(entry.keyDigest)
     }))
 
   it.effect("ignores non-enumerable shell metadata while snapshotting", () =>

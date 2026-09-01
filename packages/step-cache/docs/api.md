@@ -41,13 +41,13 @@ Every input is checked before a statement or a request is issued, and the same
 checks run at both tiers, so an input the SQL store refuses is not accepted by
 the HTTP one:
 
-| Rule                              | Value                                                                                                |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `keyDigest` grammar               | `[A-Za-z0-9_-]`, 1 to `maximumKeyDigestLength` (256) characters                                      |
-| `result` and `meta` size          | `maximumJsonBytes`, four MiB                                                                         |
-| `result` and `meta` shape         | `maximumJsonDepth` 128, `maximumJsonNodes` 100,000, `maximumJsonMembers` 100,000                     |
-| `recordedRunId`                   | non-empty, control-free, well-formed text of at most `maximumRecordedRunIdLength` (1,024) code units |
-| `createdAtMs`, `recordedEventSeq` | non-negative safe integers                                                                           |
+| Rule                              | Value                                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `keyDigest` grammar               | `[A-Za-z0-9_-]`, 1 to `maximumKeyDigestLength` (256) characters                                  |
+| `result` and `meta` size          | `maximumJsonBytes`, four MiB                                                                     |
+| `result` and `meta` shape         | `maximumJsonDepth` 128, `maximumJsonNodes` 100,000, `maximumJsonMembers` 100,000                 |
+| `recordedRunId`                   | non-empty, NUL-free, well-formed text of at most `maximumRecordedRunIdLength` (1,024) code units |
+| `createdAtMs`, `recordedEventSeq` | non-negative safe integers                                                                       |
 
 The key grammar is the reason the digest is safe at both boundaries: `.`, `..`,
 path separators, control characters, and lone surrogates are unrepresentable,
@@ -79,7 +79,11 @@ in `flows_step_cache` and an immutable record in the append-only
 `(keyDigest, recordedRunId, recordedEventSeq)`. A second `put` under a
 provenance the ledger already holds is `Conflict` unless its `result`, `meta`,
 and `createdAtMs` are identical, so an evicted head can be restored from the
-same bytes but never rewritten with different ones. Whether the insert
+same bytes but never rewritten with different ones. Under a provenance the
+ledger has never seen, the head is arbitrated on the canonical `result` alone:
+a second run recording the same result is `ExistingSame` though its `meta`,
+`createdAtMs`, and run identity all differ, because `Conflict` is reserved for
+two runs disagreeing about what a step produced. Whether the insert
 conflicted and whether a fenced delete hit are read through
 [`DurableWriter.affectedRows`](/api/database#durablewriter) rather than a
 driver-specific `changes` cast, so the outcomes hold on every backend (issue
@@ -179,7 +183,7 @@ HTTP does not define:
 | ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | `GET /ac/{keyDigest}`                                | `200` with the entry JSON, or `404` for a miss                                         |
 | `GET` with `recordedRunId` and `recordedEventSeq`    | the entry that provenance recorded if still held, otherwise the head                   |
-| `PUT /ac/{keyDigest}`                                | `201` for a first write, another 2xx for an identical entry, `409` for a different one |
+| `PUT /ac/{keyDigest}`                                | `201` for a first write, another 2xx when nothing disagrees, `409` when something does |
 | `DELETE /ac/{keyDigest}`                             | 2xx when it removed the entry, `404` when it did not                                   |
 | `DELETE` with `recordedRunId` and `recordedEventSeq` | remove only while the entry still carries that provenance, `404` on a mismatch         |
 
@@ -192,6 +196,15 @@ lookup with its head whenever it holds no row for that provenance, so an entry
 carrying different provenance is accepted as that documented fallback.
 Provenance-fenced reads and evictions require a conforming server.
 :::
+
+Arbitrate `PUT` in the two stages the SQL tier arbitrates it in. A publication
+reusing a `(keyDigest, recordedRunId, recordedEventSeq)` the tier already
+recorded is `409` unless its `result`, `meta`, and `createdAtMs` all match,
+because that provenance record is immutable. Every other publication is
+arbitrated on the canonical `result` alone, as the head is: a second run
+recording the same result under its own provenance is not a conflict, and
+answering `409` there makes `CombinedCacheStore` count cross-host divergence
+that has not happened.
 
 ### Combining tiers
 

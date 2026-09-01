@@ -42,7 +42,10 @@ export const hit: Metric.Metric<number, Metric.CounterState<number>> = Metric.wi
 })
 
 /**
- * `lookups` view counting misses: no row existed for the key digest.
+ * `lookups` view counting misses: the lookup had no entry it could serve.
+ *
+ * That covers a key digest with no row at all and a row the caller's
+ * `maxAgeMs` bound refused, which is a miss rather than a stale hit.
  *
  * @category metrics
  * @since 0.1.0

@@ -33,9 +33,17 @@
  *   `recordedEventSeq`, the tier answers the entry that provenance recorded if
  *   it still holds it, and its head otherwise, which is exactly the SQL tier's
  *   ledger-then-head rule.
- * - `PUT` answers `201` for a first write, any other 2xx for an entry
- *   identical to the one already held, and `409` for a different one. That is
- *   what makes first-writer-wins decidable over dumb HTTP.
+ * - `PUT` answers `201` for a first write, any other 2xx when what it already
+ *   holds does not disagree, and `409` when it does. Decide that in the two
+ *   stages the SQL tier decides it in. A publication reusing a
+ *   `(keyDigest, recordedRunId, recordedEventSeq)` the tier already recorded is
+ *   `409` unless its `result`, `meta`, and `createdAtMs` all match, because
+ *   that provenance record is immutable. Every other publication is arbitrated
+ *   on the canonical `result` alone, as the head is: a second run recording the
+ *   same result under its own provenance carries a different `meta`,
+ *   `createdAtMs`, and run identity without being a conflict, and answering
+ *   `409` there would report cross-host divergence that has not happened. That
+ *   is what makes first-writer-wins decidable over dumb HTTP.
  * - `DELETE` answers 2xx when it removed the entry and `404` when it did not.
  *   With `recordedRunId` and `recordedEventSeq` the delete is a
  *   compare-and-swap: remove the entry only while it still carries that
@@ -169,9 +177,11 @@ const timedOut = (): CacheStore.CacheStoreError =>
  *
  * Status mapping for `put`, which is the only operation with a three-way
  * outcome: `201 Created` is `Inserted`, any other 2xx is `ExistingSame` (the
- * server already held an identical entry), and `409 Conflict` is `Conflict`
- * (it held a *different* one). That is the smallest vocabulary that preserves
- * `CacheStore`'s first-writer-wins contract over dumb HTTP.
+ * server already held an entry this publication does not disagree with), and
+ * `409 Conflict` is `Conflict` (it held one it does). What counts as
+ * disagreement is the two-stage rule in the module doc's server contract. That
+ * is the smallest vocabulary that preserves `CacheStore`'s first-writer-wins
+ * contract over dumb HTTP.
  *
  * @category constructors
  * @since 0.1.0
@@ -245,8 +255,15 @@ export const make = (
     if (endpoint.username !== "" || endpoint.password !== "" || endpoint.search !== "" || endpoint.hash !== "") {
       return yield* Effect.fail(invalidConfiguration("endpoint authority"))
     }
-    endpoint.pathname = endpoint.pathname.replace(/\/+$/, "")
-    const acPrefix = `${endpoint.pathname}/ac/`.replace(/\/{2,}/g, "/")
+    // Only the trailing slash is the client's to drop, which is all
+    // `Options.endpoint` promises. Trimming it leaves either an empty path or
+    // one that does not end in a separator, so the join below cannot double a
+    // separator, and an empty interior segment the operator configured stays a
+    // segment the server may route on. The trim is a local: assigning `""` to
+    // `URL.pathname` reads back as `/`, which is what a collapsing pass here
+    // used to hide by rewriting interior separators too.
+    const rootPath = endpoint.pathname.replace(/\/+$/, "")
+    const acPrefix = `${rootPath}/ac/`
     const base = endpoint.origin
     const requestDeadlineOption = yield* Effect.try({
       try: () => Duration.fromInput(configured.requestTimeout ?? defaultRequestTimeout),
@@ -328,12 +345,11 @@ export const make = (
       withDeadline(Effect.gen(function*() {
         yield* Effect.annotateCurrentSpan({ keyDigest })
         yield* CacheStore.validateKey(keyDigest)
-        yield* CacheStore.validateRecordedBy(getOptions?.recordedBy)
-        yield* CacheStore.validateAge("maxAgeMs", getOptions?.maxAgeMs)
-        const floorMs = getOptions?.maxAgeMs === undefined
+        const recordedBy = yield* CacheStore.validateRecordedBy(getOptions?.recordedBy)
+        const maxAgeMs = yield* CacheStore.validateAge("maxAgeMs", getOptions?.maxAgeMs)
+        const floorMs = maxAgeMs === undefined
           ? undefined
-          : (yield* Clock.currentTimeMillis) - getOptions.maxAgeMs
-        const recordedBy = getOptions?.recordedBy
+          : (yield* Clock.currentTimeMillis) - maxAgeMs
         const lookup = HttpClientRequest.get(acUrl(keyDigest))
         const request = recordedBy === undefined
           ? lookup
@@ -411,12 +427,12 @@ export const make = (
         // `/ac/` collection root instead of a single entry, so the preflight
         // that guards `get` guards the DELETE all the more.
         yield* CacheStore.validateKey(keyDigest)
-        yield* CacheStore.validateFence(evictOptions?.ifRecordedBy)
-        const fenced = evictOptions?.ifRecordedBy
+        const fenced = yield* CacheStore.validateFence(evictOptions?.ifRecordedBy)
         // The provenance fence rides in the request the same way it rides in
         // the SQL `DELETE`: the server compares before deleting, so a fresher
         // entry recorded by another machine between this caller's lookup and
-        // its eviction is never dropped with the poison.
+        // its eviction is never dropped with the poison. The request reads the
+        // decoded fence, never the caller's provenance object.
         const deletion = HttpClientRequest.make("DELETE")(acUrl(keyDigest))
         const request = fenced === undefined
           ? deletion

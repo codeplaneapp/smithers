@@ -31,6 +31,24 @@
 - `CombinedCacheStore` counts a shared-tier `Conflict` on
   `CacheStoreMetrics.put.Conflict`, so cross-host divergence reaches an
   operator instead of being discarded with the shared outcome.
+- `validateRecordedBy`, `validateFence`, and `validateAge` now resolve to the
+  value they checked rather than to `void`, and both tiers read each option
+  through that returned value. Every operation option is therefore decoded once
+  and never reread from a caller's accessor.
+- `snapshotEntry` freezes the entry schema decoding produces, not only the
+  provisional object it decodes.
+
+### Fixed
+
+- A fenced `evict` can no longer degrade into an unconditional delete. Both
+  tiers read `ifRecordedBy` once, so an options object whose accessor answered a
+  valid fence to the validator and `undefined` to the statement no longer drops
+  a row recorded by another run, and no longer sends an unfenced `DELETE` to a
+  shared tier. `maxAgeMs` and `recordedBy` are read the same single way.
+- `CombinedCacheStore.put` can no longer publish a different value than it
+  persisted. The entry it forwards to both tiers is frozen at every level, so a
+  local tier that mutates the shell between the two writes cannot change what
+  the shared tier receives.
 
 ### Security
 

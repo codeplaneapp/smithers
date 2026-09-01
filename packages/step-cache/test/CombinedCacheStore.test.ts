@@ -182,6 +182,34 @@ describe("publication detachment", () => {
       expect(remote.rows.get(entry.keyDigest)!.result).toEqual({ value: "before" })
     }))
 
+  it.effect("keeps the shared publication unchanged when the local tier mutates its shell", () =>
+    Effect.gen(function*() {
+      const published: Array<CacheStore.CacheEntry> = []
+      const local = CacheStore.makeNoop({
+        put: (candidate) =>
+          Effect.sync(() => {
+            try {
+              ;(candidate as { result: unknown }).result = { value: "changed locally" }
+            } catch {
+              // Strict-mode assignment to the frozen snapshot is expected to throw.
+            }
+            return { _tag: "Inserted" } as const
+          })
+      })
+      const remote = CacheStore.makeNoop({
+        put: (candidate) =>
+          Effect.sync(() => {
+            published.push(candidate)
+            return { _tag: "Inserted" } as const
+          })
+      })
+      const combined = CombinedCacheStore.make({ local, remote })
+      const original = { ...entry, result: { value: "original" } }
+
+      expect(yield* combined.put(original)).toEqual({ _tag: "Inserted" })
+      expect(published[0]!.result).toEqual({ value: "original" })
+    }))
+
   it.effect("refuses an entry it cannot read without running caller code", () =>
     Effect.gen(function*() {
       const local = snapshottingTier()
