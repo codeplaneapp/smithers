@@ -80,6 +80,15 @@ a default: only the program knows whether it has a durable one.
 absolute repository root rather than the process working directory. Both refuse
 a relative root.
 
+Both contained factories take `BunHost.ContainedOptions`: the escalation
+deadline plus the reaper's `ownerPid` and system seam. `platform` is not part of
+it. The spawner underneath is Effect's Node spawner, which decides whether a
+child leads a process group from the real `process.platform` whatever it is
+told, so a caller-supplied value could only make the ledger record `pgid: null`
+for a child that genuinely leads one, and `ProcessReaper` retires such a record
+without signalling anything. Each factory reads the options when it is called,
+so mutating the object afterwards changes neither layer.
+
 ## Conformance
 
 The package runs the shared suite from

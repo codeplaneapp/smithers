@@ -61,6 +61,13 @@ is a ledger record like any other.
 `Jj` bound to one absolute repository root instead of the process working
 directory. Both refuse a relative root.
 
+Both contained factories take `BunHost.ContainedOptions`: the escalation
+deadline plus the reaper's `ownerPid` and system seam. `platform` is not part of
+it, because the spawner underneath decides whether a child leads a process group
+from the real `process.platform` whatever it is told, so a caller-supplied value
+could only make the ledger record `pgid: null` for a child that genuinely leads
+one, which `ProcessReaper` then retires without signalling anything.
+
 ## Modules
 
 | Module          | What it provides                                                                                                                                                                |

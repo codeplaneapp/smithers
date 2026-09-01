@@ -93,6 +93,42 @@ export const implementationIds: Readonly<Record<(typeof HostServiceIds)[number],
   "effect/HttpClient": "@effect/platform-bun/BunHttpClient"
 }
 
+/**
+ * What a caller may configure about containment.
+ *
+ * `ContainedSpawner.Options.platform` is deliberately not part of it. It
+ * decides one thing, whether a command that names no `detached` option gets a
+ * process group of its own, and the spawner underneath IS Effect's Node
+ * spawner, which detaches by `process.platform` whatever a record claims. A
+ * caller-supplied `"win32"` on a POSIX host would therefore record
+ * `pgid: null` for a child that really does lead a group, and
+ * {@link ProcessReaper.reap} would retire that record as `no-group` and leave
+ * the orphan running forever: a durable lie rather than a compile error.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type ContainedOptions = Omit<ContainedSpawner.Options, "platform"> & ProcessReaper.Options
+
+/**
+ * The spawner half of {@link ContainedOptions}, with the REAL platform last.
+ *
+ * Split from the reaper half rather than passed as one merged object, so a
+ * property meant for one of them can never be read by the other, and read here
+ * rather than at layer-build time, so a caller that mutates the object it
+ * handed over cannot change what either layer was built with.
+ */
+const containment = (options?: ContainedOptions): ContainedSpawner.Options => ({
+  graceMs: options?.graceMs,
+  platform: process.platform
+})
+
+/** The reaper half of {@link ContainedOptions}. */
+const reaping = (options?: ContainedOptions): ProcessReaper.Options => ({
+  ownerPid: options?.ownerPid,
+  system: options?.system
+})
+
 /** The two services `BunChildProcessSpawner` resolves paths and files with. */
 const platform = Layer.mergeAll(BunFileSystem.layer, Path.layer)
 
@@ -146,22 +182,21 @@ export const layerAt = (root: string): Layer.Layer<BunHost> =>
  * @since 1.0.0-rc.0
  */
 export const layerContained = (
-  options?: ContainedSpawner.Options & ProcessReaper.Options
-): Layer.Layer<BunHost, never, ProcessLedger.ProcessLedger> =>
-  Layer.mergeAll(
+  options?: ContainedOptions
+): Layer.Layer<BunHost, never, ProcessLedger.ProcessLedger> => {
+  const spawner = Layer.provide(
+    ContainedSpawner.layer(containment(options)),
+    Layer.provide(BunChildProcessSpawner.layer, platform)
+  )
+  return Layer.mergeAll(
     platform,
     layerHttpClient,
     // jj goes through the CONTAINED spawner here, not around it, exactly as in
     // `NodeHost.layerContained`: a jj child that starts its own process leads
     // no recorded group, is in no ledger, and outlives the host that ran it.
-    Layer.provideMerge(
-      BunJj.layerSpawner,
-      Layer.provide(
-        ContainedSpawner.layer({ platform: process.platform, ...options }),
-        Layer.provide(BunChildProcessSpawner.layer, platform)
-      )
-    )
-  ).pipe(Layer.provideMerge(ProcessReaper.layer(options)))
+    Layer.provideMerge(BunJj.layerSpawner, spawner)
+  ).pipe(Layer.provideMerge(ProcessReaper.layer(reaping(options))))
+}
 
 /**
  * Provides the contained Bun host bound to one absolute repository root.
@@ -171,16 +206,15 @@ export const layerContained = (
  */
 export const layerContainedAt = (
   root: string,
-  options?: ContainedSpawner.Options & ProcessReaper.Options
-): Layer.Layer<BunHost, never, ProcessLedger.ProcessLedger> =>
-  Layer.mergeAll(
+  options?: ContainedOptions
+): Layer.Layer<BunHost, never, ProcessLedger.ProcessLedger> => {
+  const spawner = Layer.provide(
+    ContainedSpawner.layer(containment(options)),
+    Layer.provide(BunChildProcessSpawner.layer, platform)
+  )
+  return Layer.mergeAll(
     platform,
     layerHttpClient,
-    Layer.provideMerge(
-      BunJj.layerSpawnerAt(root),
-      Layer.provide(
-        ContainedSpawner.layer({ platform: process.platform, ...options }),
-        Layer.provide(BunChildProcessSpawner.layer, platform)
-      )
-    )
-  ).pipe(Layer.provideMerge(ProcessReaper.layer(options)))
+    Layer.provideMerge(BunJj.layerSpawnerAt(root), spawner)
+  ).pipe(Layer.provideMerge(ProcessReaper.layer(reaping(options))))
+}

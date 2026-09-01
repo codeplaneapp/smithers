@@ -15,6 +15,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { runHostContract } from "@smthrs/kernel/test/contract"
 import { Deferred, Effect, Fiber, Schedule } from "effect"
+import { HttpClient } from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
@@ -33,17 +34,26 @@ if (jjAvailable) execFileSync("jj", ["git", "init", jjRoot], { stdio: "ignore" }
 const jjStatusWorks = jjAvailable && spawnSync("jj", ["status"], { cwd: jjRoot, stdio: "ignore" }).status === 0
 const jjWorkspacePath = `${jjRoot}-workspace`
 
+/**
+ * Echoes a request body back when there is one, so a caller can prove the bytes
+ * it sent arrived, and answers `host-contract` otherwise.
+ */
 const server = createServer((request, response) => {
   if (request.url === "/redirect") {
     response.writeHead(302, { location: "/must-not-follow" })
     response.end()
     return
   }
-  response.writeHead(200, {
-    "content-type": "text/plain",
-    "x-host-contract": `${request.method}:${request.url}`
+  const chunks: Array<Buffer> = []
+  request.on("data", (chunk: Buffer) => void chunks.push(chunk))
+  request.on("end", () => {
+    const sent = Buffer.concat(chunks).toString("utf8")
+    response.writeHead(200, {
+      "content-type": "text/plain",
+      "x-host-contract": `${request.method}:${request.url}`
+    })
+    response.end(sent === "" ? "host-contract" : sent)
   })
-  response.end("host-contract")
 })
 server.unref()
 const listening = await new Promise<number | undefined>((resolve) => {
@@ -100,6 +110,32 @@ runHostContract("BunHost", BunHost.layerAt(jjRoot), {
         }
       }
     }
+})
+
+/**
+ * The shared contract inspects a response's status and headers but never its
+ * body, because `assertResponse` is synchronous and reading a body is an
+ * `Effect`. A client that returned every header and no bytes would satisfy it,
+ * so the payload is observed here instead.
+ */
+describe.skipIf(listening === undefined)("BunHost HttpClient payloads", () => {
+  it.effect("returns the bytes the server wrote, on both request shapes", () =>
+    Effect.gen(function*() {
+      const bodies = yield* Effect.gen(function*() {
+        const client = yield* HttpClient
+        const read = yield* client.execute(HttpClientRequest.get(`http://127.0.0.1:${listening}/payload`))
+        const written = yield* client.execute(
+          HttpClientRequest.post(`http://127.0.0.1:${listening}/payload`).pipe(
+            HttpClientRequest.bodyText("sent-by-the-bun-client")
+          )
+        )
+        return { read: yield* read.text, written: yield* written.text }
+      }).pipe(Effect.provide(BunHost.layer))
+
+      // The server echoes a request body it received, so the second value is
+      // proof the outgoing bytes arrived and not just that a response came back.
+      expect(bodies).toEqual({ read: "host-contract", written: "sent-by-the-bun-client" })
+    }))
 })
 
 const nodeErrorCode = (error: unknown): unknown =>

@@ -22,6 +22,15 @@
 
 ### Changed
 
+- `BunHost.layerContained` and `BunHost.layerContainedAt` take
+  `BunHost.ContainedOptions`, which is `ContainedSpawner.Options` without
+  `platform`, plus `ProcessReaper.Options`. The spawner always gets the real
+  `process.platform`: a caller-supplied `"win32"` on a POSIX host used to win
+  the spread and record `pgid: null` for a child that genuinely leads a process
+  group, and `ProcessReaper.reap` retires such a record as `no-group` without
+  signalling anything, so the orphan outlived every incarnation. Both halves are
+  now read when the factory is called rather than when the layer is built, so
+  mutating the object afterwards cannot change what either layer was built with.
 - `BunHost.implementationIds` names `@smthrs/platform-node/AtomicFileSystem` for
   the filesystem slot, which is the module actually behind it, and writes every
   key as a literal so reordering `HostServiceIds` cannot mis-pair a slot with

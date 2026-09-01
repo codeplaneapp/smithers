@@ -53,16 +53,38 @@ const waitForFile = async (path: string): Promise<string> => {
   throw new Error(`the shim never wrote ${path}`)
 }
 
-/** A detached shell that leads its own group and has a background child. */
-const startOrphanGroup = async (directory: string): Promise<{ leader: number; follower: number }> => {
+/**
+ * A detached shell that leads its own group and has a background child.
+ *
+ * The leader pid comes back immediately rather than after the background pid
+ * is readable: the reaper re-checks a record's `startedAtMs` against the pid's
+ * real start instant within `identityToleranceMs`, so the caller must be free
+ * to write the record before waiting on anything.
+ */
+const startOrphanGroup = (directory: string): { follower: Promise<number>; leader: number } => {
   const pidFile = join(directory, "follower.pid")
   const child = spawn("sh", ["-c", `sleep 30 & echo $! > ${pidFile}; sleep 30`], {
     detached: true,
     stdio: "ignore"
   })
   child.unref()
-  const follower = Number(await waitForFile(pidFile))
-  return { leader: child.pid as number, follower }
+  return { follower: waitForFile(pidFile).then(Number), leader: child.pid as number }
+}
+
+/**
+ * Ends a group the reaper was supposed to end.
+ *
+ * The fixture starts a DETACHED group precisely so nothing holds a handle for
+ * it. When the assertions pass, the reaper has already killed it and this is a
+ * no-op; when they fail, this is the only thing standing between a failing run
+ * and two `sleep 30` processes nobody is accountable for.
+ */
+const killGroup = (leader: number): void => {
+  try {
+    process.kill(-leader, "SIGKILL")
+  } catch {
+    // already gone, which is the passing case
+  }
 }
 
 /** A pid that is certainly not a running process any more. */
@@ -87,9 +109,11 @@ describe.skipIf(process.platform === "win32")("BunHost.layerContained", () => {
   it.live("kills the group a dead incarnation abandoned, while the layer is built", () =>
     Effect.gen(function*() {
       const directory = temporaryDirectory()
+      let abandonedLeader: number | undefined
       try {
-        const group = yield* Effect.promise(() => startOrphanGroup(directory))
         const deadOwner = yield* Effect.promise(exitedPid)
+        const group = startOrphanGroup(directory)
+        abandonedLeader = group.leader
 
         // The incarnation that started the process, and then died. Recording
         // through a real ledger is what stamps the record with the pid's real
@@ -100,6 +124,8 @@ describe.skipIf(process.platform === "win32")("BunHost.layerContained", () => {
           pgid: group.leader,
           commandDigest: "sh -c sleep"
         })
+        // Only now is it safe to wait: the record is already stamped.
+        const follower = yield* Effect.promise(() => group.follower)
 
         // This incarnation inherits that record and nothing else.
         const current = yield* ProcessLedger.makeMemory({ hostId: "bun-reaped", ownerPid: process.pid })
@@ -110,28 +136,67 @@ describe.skipIf(process.platform === "win32")("BunHost.layerContained", () => {
           reaped: (record) => Effect.sync(() => void retired.push(record))
         })
 
-        // Building the layer is the whole trigger: no operation is run through it.
-        yield* Effect.void.pipe(
-          Effect.provide(
-            BunHost.layerContained({ graceMs: 300 }).pipe(
-              Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(inherited))
-            )
-          ),
-          Effect.scoped
+        const options = { graceMs: 300, ownerPid: process.pid }
+        const host = BunHost.layerContained(options).pipe(
+          Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(inherited))
         )
+        // The factory took what it needed when it was called. A caller that
+        // mutates the object afterwards cannot change what the reaper trusts:
+        // this `ownerPid` would refuse the record as `own-group` if the live
+        // object were read at layer-build time instead.
+        options.ownerPid = group.leader
+
+        // Building the layer is the whole trigger: no operation is run through it.
+        yield* Effect.void.pipe(Effect.provide(host), Effect.scoped)
 
         expect(retired).toEqual([abandoned])
         expect(yield* Effect.promise(() => waitForExit(group.leader, 5_000))).toBe(true)
         // The background process nothing ever held a handle for died with it.
-        expect(yield* Effect.promise(() => waitForExit(group.follower, 5_000))).toBe(true)
+        expect(yield* Effect.promise(() => waitForExit(follower, 5_000))).toBe(true)
       } finally {
+        if (abandonedLeader !== undefined) killGroup(abandonedLeader)
         rmSync(directory, { recursive: true, force: true })
+      }
+    }), 30_000)
+
+  /**
+   * `ContainedSpawner.Options.platform` decides only whether a child gets a
+   * process group of its own, and Effect's spawner decides that from the REAL
+   * `process.platform` whatever the ledger was told. A caller-supplied
+   * `"win32"` winning the spread would record `pgid: null` for a child that
+   * genuinely leads a group, and `ProcessReaper.reap` retires such a record as
+   * `no-group` without signalling anything, so the orphan outlives every
+   * incarnation. The option is not part of `ContainedOptions`, and this pins
+   * that a cast cannot put it back.
+   */
+  it.live("records the real process group even when a caller claims another platform", () =>
+    Effect.gen(function*() {
+      const spoofed = { graceMs: 300, platform: "win32" } as BunHost.ContainedOptions
+      for (
+        const build of [
+          () => BunHost.layerContained(spoofed),
+          () => BunHost.layerContainedAt(realpathSync(tmpdir()), spoofed)
+        ]
+      ) {
+        const ledger = yield* ProcessLedger.makeMemory({ hostId: "bun-spoofed", ownerPid: process.pid })
+        const host = build().pipe(Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(ledger)))
+        const observed = yield* Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const handle = yield* spawner.spawn(ChildProcess.make("sleep", ["30"]))
+          return { live: yield* ledger.live, pid: handle.pid as number }
+        }).pipe(Effect.provide(host), Effect.scoped)
+
+        expect(observed.live).toEqual([expect.objectContaining({ pgid: observed.pid, pid: observed.pid })])
+        expect(yield* Effect.promise(() => waitForExit(observed.pid, 5_000))).toBe(true)
       }
     }), 30_000)
 
   it.live("escalates to SIGKILL when a child ignores SIGTERM", () =>
     Effect.gen(function*() {
       const directory = temporaryDirectory()
+      // A child that ignores `SIGTERM` is exactly the child a failed assertion
+      // would leave running, so its group is ended unconditionally on the way out.
+      let trapped: number | undefined
       try {
         const graceMs = 400
         const marker = join(directory, "trapped.ready")
@@ -159,6 +224,7 @@ describe.skipIf(process.platform === "win32")("BunHost.layerContained", () => {
         )
 
         const pid = yield* Deferred.await(pidReady)
+        trapped = pid
         // Interrupting before the trap is installed would prove nothing.
         yield* Effect.promise(() => waitForFile(marker))
         expect(yield* ledger.live).toEqual([
@@ -173,6 +239,7 @@ describe.skipIf(process.platform === "win32")("BunHost.layerContained", () => {
         expect(Date.now() - before).toBeGreaterThanOrEqual(graceMs)
         expect(yield* ledger.live).toEqual([])
       } finally {
+        if (trapped !== undefined) killGroup(trapped)
         rmSync(directory, { recursive: true, force: true })
       }
     }), 30_000)

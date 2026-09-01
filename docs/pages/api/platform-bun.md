@@ -94,6 +94,15 @@ a default: only the program knows whether it has a durable one.
 absolute repository root rather than the process working directory. Both refuse
 a relative root.
 
+Both contained factories take `BunHost.ContainedOptions`: the escalation
+deadline plus the reaper's `ownerPid` and system seam. `platform` is not part of
+it. The spawner underneath is Effect's Node spawner, which decides whether a
+child leads a process group from the real `process.platform` whatever it is
+told, so a caller-supplied value could only make the ledger record `pgid: null`
+for a child that genuinely leads one, and `ProcessReaper` retires such a record
+without signalling anything. Each factory reads the options when it is called,
+so mutating the object afterwards changes neither layer.
+
 ## Conformance
 
 The package runs the shared suite from
@@ -133,6 +142,7 @@ with capability checks. [@smthrs/platform-node](/api/platform-node) and
 | `BunFileSystem.Options`     | type  | models   | The interpreter and byte limits `layerWith` accepts.                                              |
 | `BunHost.BunHost`           | type  | models   | The complete closed Host service union provided by Bun.                                           |
 | `BunHost.implementationIds` | const | models   | Stable implementation identities keyed by the closed Host service slots.                          |
+| `BunHost.ContainedOptions`  | type  | models   | What a caller may configure about containment.                                                    |
 | `BunHost.layer`             | const | layers   | Provides all five Bun Host services, including the runtime-independent Path service.              |
 | `BunHost.layerAt`           | const | layers   | Provides all five Bun Host services bound to one absolute repository root.                        |
 | `BunHost.layerContained`    | const | layers   | Provides the Bun host with process containment turned on.                                         |
