@@ -294,6 +294,18 @@ describe("Poll as a plan", () => {
     expect(declare(1)).not.toThrow()
   })
 
+  it("reserves the durable attempt field for the poll lineage", () => {
+    expect(() =>
+      Poll.make("poll/reserved-attempt", {
+        input: { attempt: Schema.Number },
+        result: Schema.String,
+        intervalMs: 10,
+        maxAttempts: 2,
+        check: ({ attempt }) => Probe.call({ until: 2, attempt })
+      })
+    ).toThrow(/reserved "attempt"/)
+  })
+
   it("refuses a schedule whose longest wait no durable clock can be armed with", () => {
     const declare = (options: {
       readonly intervalMs: number
