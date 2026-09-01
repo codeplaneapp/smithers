@@ -30,7 +30,11 @@ import * as ScriptRunner from "./ScriptRunner.ts"
  * cannot even bootstrap and QuickJS aborts natively instead of failing
  * typed. `steps` counts interrupt-handler polls — QuickJS polls roughly
  * every few thousand instructions, so the budget is an order-of-magnitude
- * bound on work, not an instruction count.
+ * bound on work, not an instruction count. `stackBytes` bounds in-realm
+ * recursion; leaving it unset lets deep recursion exhaust the HOST
+ * WebAssembly stack instead, which aborts the module on dispose rather
+ * than raising a catchable in-realm error, so opting out is only ever
+ * right for a trusted fixture.
  *
  * @category models
  * @since 0.1.0
@@ -39,6 +43,7 @@ import * as ScriptRunner from "./ScriptRunner.ts"
 export interface Limits {
   readonly memoryBytes?: number | undefined
   readonly steps?: number | undefined
+  readonly stackBytes?: number | undefined
 }
 
 /**
@@ -52,7 +57,22 @@ export interface Limits {
 export const memoryFloor = 256 * 1024
 
 /**
- * Production-safe runner limits. Passing an explicit `undefined` for either
+ * The largest in-realm stack the runner will grant. Measured against
+ * quickjs-emscripten-core 0.32.0: at 512 KiB and above, deep recursion
+ * exhausts the host WebAssembly stack first — `evalCode` throws a host
+ * `RangeError` the realm can neither see nor catch, the realm is left
+ * holding live GC objects, and `runtime.dispose()` aborts the module. At
+ * 256 KiB QuickJS raises its own catchable `stack overflow` and dispose is
+ * clean.
+ *
+ * @category constants
+ * @since 0.1.0
+ * @slop
+ */
+export const stackCeiling = 256 * 1024
+
+/**
+ * Production-safe runner limits. Passing an explicit `undefined` for any
  * field opts out of that limit.
  *
  * @category constants
@@ -61,6 +81,7 @@ export const memoryFloor = 256 * 1024
  */
 export const defaultLimits: Required<Limits> = {
   memoryBytes: 64 * 1024 * 1024,
+  stackBytes: stackCeiling,
   steps: 10_000
 }
 
@@ -72,23 +93,45 @@ export const defaultLimits: Required<Limits> = {
  */
 const prelude = `(function () {
   var bridge = globalThis.__call
-  var encodeInput = function (input) {
+  var check = function (value) {
     var seen = []
     var visit = function (value) {
       if (value === null || typeof value === "string" || typeof value === "boolean") return
       if (typeof value === "number" && Number.isFinite(value)) return
-      if (typeof value !== "object") throw new TypeError("ctx.call input must be JSON-serializable")
-      if (seen.indexOf(value) >= 0) throw new TypeError("ctx.call input must be JSON-serializable")
+      if (typeof value !== "object") throw new TypeError("not JSON-serializable")
+      if (seen.indexOf(value) >= 0) throw new TypeError("not JSON-serializable")
       var prototype = Object.getPrototypeOf(value)
       if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
-        throw new TypeError("ctx.call input must be JSON-serializable")
+        throw new TypeError("not JSON-serializable")
       }
       seen.push(value)
       Object.keys(value).forEach(function (key) { visit(value[key]) })
       seen.pop()
     }
-    visit(input)
+    visit(value)
+  }
+  var encodeInput = function (input) {
+    try {
+      check(input)
+    } catch (error) {
+      throw new TypeError("ctx.call input must be JSON-serializable")
+    }
     return JSON.stringify(input)
+  }
+  // The outcome crosses the same gate as a call payload, in the realm that
+  // produced it. Without this the wrapper's own JSON.stringify would
+  // silently rewrite the terminal result — done(NaN) to Done(null), a
+  // function or undefined property dropped, a toJSON hook executed — and
+  // the two runner bindings would disagree about what a valid outcome is.
+  // Returning null (never throwing) keeps the distinction the host draws
+  // between "not JSON" and "not an outcome".
+  globalThis.__encodeOutcome = function (value) {
+    try {
+      check(value)
+    } catch (error) {
+      return null
+    }
+    return JSON.stringify(value)
   }
   delete globalThis.__call
   delete globalThis.Date
@@ -124,9 +167,16 @@ const prelude = `(function () {
   }
 })()`
 
+// The encoder is captured into an eval-lexical `const` and deleted from the
+// global object before the script body runs, so it is neither reachable as
+// `globalThis.__encodeOutcome` nor reassignable. The `__script` assignment
+// stays one top-level statement of the exact former shape: a script that
+// escapes the async wrapper must still land as a runtime failure.
 const wrap = (text: string): string =>
-  `globalThis.__script = (async () => {\n${text}\n})().then(function (value) {
-  return JSON.stringify(value === undefined ? null : value)
+  `const __encodeOutcome = globalThis.__encodeOutcome
+delete globalThis.__encodeOutcome
+globalThis.__script = (async () => {\n${text}\n})().then(function (value) {
+  return __encodeOutcome(value === undefined ? null : value)
 })`
 
 interface Pending {
@@ -134,6 +184,27 @@ interface Pending {
   readonly payload: unknown
   readonly settle: (payload: unknown) => void
   readonly refusal?: string | undefined
+}
+
+/**
+ * Encodes one bridge settlement for the realm.
+ *
+ * `ScriptRunner.jsonBoundary` bounds the shape and size of what reaches
+ * here, but encoding is the last host-side step before a synchronous
+ * QuickJS callback, and a `JSON.stringify` that throws there escapes as an
+ * untyped defect that kills the whole run. It degrades to a refusal the
+ * script can catch instead, so this function is total.
+ *
+ * @category constructors
+ * @since 0.1.0
+ * @slop
+ */
+export const encodeSettlement = (name: string, settlement: unknown): string => {
+  try {
+    return JSON.stringify(settlement)
+  } catch {
+    return JSON.stringify({ message: `the "${name}" call result cannot be encoded`, ok: false })
+  }
 }
 
 /**
@@ -175,6 +246,9 @@ const evaluate = <E>(
         if (limits.memoryBytes !== undefined) {
           runtime.setMemoryLimit(Math.max(limits.memoryBytes, memoryFloor))
         }
+        if (limits.stackBytes !== undefined) {
+          runtime.setMaxStackSize(Math.min(limits.stackBytes, stackCeiling))
+        }
         if (limits.steps !== undefined) {
           const budget = limits.steps
           let steps = 0
@@ -185,8 +259,20 @@ const evaluate = <E>(
       }),
       ({ context, runtime }) =>
         Effect.sync(() => {
-          context.dispose()
-          runtime.dispose()
+          // Disposal is best-effort. A realm that exhausted the host WASM
+          // stack still holds live GC objects, and QuickJS asserts on that
+          // during teardown; letting the assertion out would make cleanup
+          // the run's outcome and lose whatever the script actually did.
+          try {
+            context.dispose()
+          } catch {
+            // The module is already aborted; there is nothing left to free.
+          }
+          try {
+            runtime.dispose()
+          } catch {
+            // As above.
+          }
         })
     )
     const { context, runtime } = acquired
@@ -207,7 +293,7 @@ const evaluate = <E>(
       deferreds.add(deferred)
       const settle = (payload: unknown): void => {
         try {
-          const handle = context.newString(JSON.stringify(payload))
+          const handle = context.newString(encodeSettlement(name, payload))
           deferred.resolve(handle)
           handle.dispose()
         } finally {
@@ -312,17 +398,25 @@ const evaluate = <E>(
       if (state.type === "fulfilled") {
         const value = context.dump(state.value)
         state.value.dispose()
-        if (typeof value !== "string") {
+        // The in-realm encoder answers null for a value the realm's own
+        // JSON.stringify would rewrite, and a script that replaced
+        // JSON.stringify can hand back text that is not JSON at all. Both
+        // are the same refusal the in-process binding makes.
+        let decoded: unknown
+        try {
+          if (typeof value !== "string") throw new TypeError(ScriptRunner.unserializableOutcome)
+          decoded = JSON.parse(value)
+        } catch {
           return yield* new ScriptRunner.ScriptFailure({
             code: "invalid_outcome",
-            message: "the script returned a value that is not JSON-serializable"
+            message: ScriptRunner.unserializableOutcome
           })
         }
-        const outcome = ScriptRunner.decodeOutcome(JSON.parse(value))
+        const outcome = ScriptRunner.decodeOutcome(decoded)
         if (outcome._tag === "None") {
           return yield* new ScriptRunner.ScriptFailure({
             code: "invalid_outcome",
-            message: "the script did not return done(...), to(...), or park(...)"
+            message: ScriptRunner.notAnOutcome
           })
         }
         return outcome.value
@@ -342,7 +436,19 @@ const evaluate = <E>(
         message: "the script awaited something that never settles — the only thing worth awaiting is ctx.call"
       })
     }
-  }).pipe(Effect.scoped)
+  }).pipe(
+    Effect.scoped,
+    // Last line of defence for the sealed realm's own machinery. A native
+    // WebAssembly abort — the shape a host-stack exhaustion takes — is a
+    // defect, and a defect escapes `Chain.run` entirely: nothing is
+    // journaled, so the resumed link replays the same script and dies the
+    // same way forever. Degrading it to a `runtime` ScriptFailure makes it
+    // a journaled observation the model can route around, which is the
+    // contract this module states.
+    Effect.catchDefect((defect) =>
+      new ScriptRunner.ScriptFailure({ code: "runtime", message: ScriptRunner.failureMessage(defect) })
+    )
+  )
 
 /**
  * Constructs the QuickJS runner, compiling the WebAssembly module once per

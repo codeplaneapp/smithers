@@ -62,8 +62,11 @@ describe.each(runners)("runner conformance: %s", (_name, layer) => {
   })
 
   it("returns to and park outcomes, park defaulting its message", async () => {
-    const to = await runWith(layer, `return to({ text: "next", digest: "d" })`, echo)
-    expect(to).toEqual({ _tag: "To", script: { digest: "d", text: "next" } })
+    // The digest a script hands to `to` is discarded and re-derived from
+    // the text: a script chooses its successor's source, never the replay
+    // identity that source is keyed by.
+    const to = await runWith(layer, `return to({ text: "next", digest: "FORGED" })`, echo)
+    expect(to).toEqual({ _tag: "To", script: Script.make("next") })
     const park = await runWith(layer, `return park("timer")`, echo)
     expect(park).toEqual({ _tag: "Park", reason: { code: "timer", message: "" } })
   })
@@ -184,6 +187,43 @@ describe.each(runners)("runner conformance: %s", (_name, layer) => {
     ) as ScriptRunner.ScriptFailure
     expect(error.code).toBe("runtime")
     expect(error.message).toContain("never settles")
+  })
+
+  // Every row here is a value `JSON.stringify` would SILENTLY REWRITE.
+  // Laundering one produces a different terminal result than the script
+  // wrote — done(NaN) reported as Done(null) — so both bindings refuse
+  // before decoding, with the same code and the same message.
+  it.each([
+    ["a non-finite number", `return done(NaN)`],
+    ["an infinity", `return done(Infinity)`],
+    ["a function property", `return done({ a: 1, f: function () {} })`],
+    ["an undefined property", `return done({ a: 1, u: undefined })`],
+    ["a toJSON hook", `return done({ toJSON: function () { return 7 } })`]
+  ])("refuses an outcome carrying %s", async (_case, text) => {
+    const error = await failWith(layer, text, echo) as ScriptRunner.ScriptFailure
+    expect(error.code).toBe("invalid_outcome")
+    expect(error.message).toBe(ScriptRunner.unserializableOutcome)
+  })
+
+  it("separates a JSON value that is not an outcome from one that is not JSON", async () => {
+    const notOutcome = await failWith(layer, `return { nope: true }`, echo) as ScriptRunner.ScriptFailure
+    expect(notOutcome.message).toBe(ScriptRunner.notAnOutcome)
+  })
+})
+
+describe("in-process runner isolation", () => {
+  // Pinned deliberately as the OPPOSITE of the sealed realm above. The
+  // `Function` constructor builds its body in global scope, so this layer
+  // provides no isolation at all; only `QuickJsRunner.layer()` does. If
+  // this test ever starts failing because the escape closed, the layer's
+  // JSDoc has to change with it.
+  it("provides no isolation: a script reaches the host globals", async () => {
+    const outcome = await runWith(
+      ScriptRunner.layerInProcess,
+      `return done([typeof globalThis, typeof process, typeof process.env])`,
+      echo
+    )
+    expect(outcome).toEqual({ _tag: "Done", value: ["object", "object", "object"] })
   })
 })
 
@@ -331,6 +371,79 @@ describe("QuickJs sealed realm", () => {
   it("fails a return the realm cannot serialize as an outcome", async () => {
     const error = await failWith(layer, `return function () {}`, echo) as ScriptRunner.ScriptFailure
     expect(error.code).toBe("invalid_outcome")
+  })
+
+  // Without an explicit stack limit, deep in-realm recursion exhausts the
+  // HOST WebAssembly stack: evalCode throws a RangeError the realm never
+  // sees, the realm is left holding live GC objects, and dispose() hits a
+  // QuickJS assertion that escapes Chain.run as an untyped defect — a
+  // chain that journals nothing and dies identically on every resume.
+  it("lets a script catch its own stack overflow instead of aborting the module", async () => {
+    const outcome = await runWith(
+      layer,
+      [
+        `function f(n) { return n === 0 ? 0 : f(n - 1) + 1 }`,
+        `var r`,
+        `try { r = f(100000) } catch (error) { r = "caught:" + error.message }`,
+        `return done(String(r))`
+      ].join("\n"),
+      echo
+    )
+    expect(outcome).toEqual({ _tag: "Done", value: "caught:stack overflow" })
+  })
+
+  it("fails typed on an uncaught stack overflow", async () => {
+    const error = await failWith(
+      layer,
+      `function f(n) { return f(n + 1) }\nreturn done(f(0))`,
+      echo
+    ) as ScriptRunner.ScriptFailure
+    expect(error.code).toBe("runtime")
+  })
+
+  it("refuses a call payload too deep for the in-realm encoder", async () => {
+    const outcome = await runWith(
+      layer,
+      [
+        `var deep = {}`,
+        `var head = deep`,
+        `for (var i = 0; i < 20000; i++) { head.n = {}; head = head.n }`,
+        `const message = await ctx.call("x", deep).catch(function (error) { return error.message })`,
+        `return done(message)`
+      ].join("\n"),
+      echo
+    )
+    expect(outcome).toEqual({ _tag: "Done", value: "ctx.call input must be JSON-serializable" })
+  })
+
+  it("refuses an outcome too deep for the in-realm encoder", async () => {
+    const error = await failWith(
+      layer,
+      [
+        `var deep = {}`,
+        `var head = deep`,
+        `for (var i = 0; i < 20000; i++) { head.n = {}; head = head.n }`,
+        `return done(deep)`
+      ].join("\n"),
+      echo
+    ) as ScriptRunner.ScriptFailure
+    expect(error.code).toBe("invalid_outcome")
+    expect(error.message).toBe(ScriptRunner.unserializableOutcome)
+  })
+
+  it("refuses an outcome the script re-encoded as non-JSON text", async () => {
+    const error = await failWith(
+      layer,
+      `globalThis.JSON.stringify = function () { return "not-json" }\nreturn done("ignored")`,
+      echo
+    ) as ScriptRunner.ScriptFailure
+    expect(error.code).toBe("invalid_outcome")
+    expect(error.message).toBe(ScriptRunner.unserializableOutcome)
+  })
+
+  it("keeps the outcome encoder off the global object", async () => {
+    const outcome = await runWith(layer, `return done(typeof globalThis.__encodeOutcome)`, echo)
+    expect(outcome).toEqual({ _tag: "Done", value: "undefined" })
   })
 
   it("journals time and randomness through the one door, replaying identically", async () => {

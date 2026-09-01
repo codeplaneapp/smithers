@@ -146,11 +146,18 @@ export const done = (value: typeof Schema.Json.Type): Done => ({ _tag: "Done", v
 /**
  * Continues the chain with a successor script.
  *
+ * The digest is RE-DERIVED from the text and the caller's is discarded.
+ * Scripts are model-authored and `to` is in their scope, so a script that
+ * passed `{ text, digest }` through unchanged would choose its successor's
+ * replay identity: two different texts could share one digest, and the
+ * successor's calls would prefix-match a previous script's settled results
+ * instead of re-keying. A script's digest is the digest of its text, always.
+ *
  * @category constructors
  * @since 0.1.0
  * @slop
  */
-export const to = (script: Script.Script): To => ({ _tag: "To", script })
+export const to = (script: Script.Script): To => ({ _tag: "To", script: Script.make(script.text) })
 
 /**
  * Suspends the lineage with a typed waiting reason.

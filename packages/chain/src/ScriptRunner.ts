@@ -8,7 +8,7 @@
  *
  * @since 0.1.0
  */
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import * as Outcome from "./Outcome.ts"
 import type * as Script from "./Script.ts"
 
@@ -110,22 +110,71 @@ type Settled = { readonly _tag: "value"; readonly value: unknown } | {
   readonly error: unknown
 }
 
+const decodeOutcomeShape = Schema.decodeUnknownOption(Outcome.Outcome)
+
 /**
  * Decodes a script's returned value into an outcome; shared by every
- * runner binding so they reject the same shapes.
+ * runner binding so they reject the same shapes and normalize identically.
+ *
+ * A `To` is rebuilt through {@link Outcome.to}, which re-derives the
+ * successor's digest from its text: a script may choose the text it hands
+ * on, never the replay identity that text is keyed by.
  *
  * @category gates
  * @since 0.1.0
  * @slop
  */
-export const decodeOutcome = Schema.decodeUnknownOption(Outcome.Outcome)
+export const decodeOutcome = (value: unknown): Option.Option<Outcome.Outcome> =>
+  Option.map(
+    decodeOutcomeShape(value),
+    (outcome) => outcome._tag === "To" ? Outcome.to(outcome.script) : outcome
+  )
+
+/**
+ * The deepest nesting a value may carry across the boundary. Journal
+ * payloads are shallow; the cap exists so a pathological value is REFUSED
+ * rather than overflowing the host stack inside the walk.
+ *
+ * @category constants
+ * @since 0.1.0
+ * @slop
+ */
+export const maxJsonDepth = 128
+
+/**
+ * The boundary's size budget, in units: one per node plus one per code unit
+ * of every string and key. It bounds the serialized form well below the
+ * length at which `JSON.stringify` throws, which is what keeps the
+ * host-side stringify in the QuickJS bridge total.
+ *
+ * @category constants
+ * @since 0.1.0
+ * @slop
+ */
+export const maxJsonSize = 8 * 1024 * 1024
+
+const refused = { _tag: "Refused" } as const
 
 /**
  * The bridge's strict JSON boundary, shared by every binding: only null,
  * finite numbers, strings, booleans, and acyclic plain objects/arrays
- * cross, and what crosses is a structural copy. Mirrors the check the
- * QuickJS prelude performs in-realm, so both runners refuse the same
- * shapes with the same message.
+ * within {@link maxJsonDepth} and {@link maxJsonSize} cross, and what
+ * crosses is a structural copy. Mirrors the check the QuickJS prelude
+ * performs in-realm, so both runners refuse the same shapes with the same
+ * message.
+ *
+ * The walk is TOTAL and SINGLE-READ. It builds the copy as it validates,
+ * reading every property exactly once, so a getter or proxy trap that
+ * answers differently on a second read cannot smuggle an unvalidated
+ * subtree across; and it converts every throw — a throwing accessor, a
+ * throwing `ownKeys` trap, a cycle, a depth or size overrun — into
+ * `Refused`. A host handler returning something unserializable is a
+ * rejected call the script can observe, never a defect.
+ *
+ * `undefined` is refused everywhere except as the whole value, where it
+ * becomes `null`. Array holes read as `undefined` and are refused too:
+ * `JSON.stringify` would silently rewrite them to `null`, and this
+ * boundary never changes a value it accepts.
  *
  * @category gates
  * @since 0.1.0
@@ -134,24 +183,50 @@ export const decodeOutcome = Schema.decodeUnknownOption(Outcome.Outcome)
 export const jsonBoundary = (
   value: unknown
 ): { readonly _tag: "Ok"; readonly value: unknown } | { readonly _tag: "Refused" } => {
-  const seen: Array<unknown> = []
-  const visit = (candidate: unknown): boolean => {
-    if (candidate === null || typeof candidate === "string" || typeof candidate === "boolean") return true
-    if (typeof candidate === "number") return Number.isFinite(candidate)
-    if (typeof candidate !== "object") return false
-    if (seen.includes(candidate)) return false
-    const prototype = Object.getPrototypeOf(candidate)
-    if (!Array.isArray(candidate) && prototype !== Object.prototype && prototype !== null) return false
-    seen.push(candidate)
-    const ok = Object.keys(candidate as Record<string, unknown>).every((key) =>
-      visit((candidate as Record<string, unknown>)[key])
-    )
-    seen.pop()
-    return ok
+  const seen = new Set<object>()
+  let budget = maxJsonSize
+  const spend = (units: number): void => {
+    budget = budget - units
+    if (budget < 0) throw refused
   }
-  const normalized = value === undefined ? null : value
-  if (!visit(normalized)) return { _tag: "Refused" }
-  return { _tag: "Ok", value: JSON.parse(JSON.stringify(normalized)) }
+  const copy = (candidate: unknown, depth: number): unknown => {
+    if (depth > maxJsonDepth) throw refused
+    spend(1)
+    if (candidate === null || typeof candidate === "boolean") return candidate
+    if (typeof candidate === "string") {
+      spend(candidate.length)
+      return candidate
+    }
+    if (typeof candidate === "number") {
+      if (!Number.isFinite(candidate)) throw refused
+      return candidate
+    }
+    if (typeof candidate !== "object") throw refused
+    if (seen.has(candidate)) throw refused
+    seen.add(candidate)
+    if (Array.isArray(candidate)) {
+      const copied: Array<unknown> = []
+      for (let index = 0; index < candidate.length; index = index + 1) {
+        copied.push(copy(candidate[index], depth + 1))
+      }
+      seen.delete(candidate)
+      return copied
+    }
+    const prototype = Object.getPrototypeOf(candidate)
+    if (prototype !== Object.prototype && prototype !== null) throw refused
+    const copied: Record<string, unknown> = {}
+    for (const key of Object.keys(candidate)) {
+      spend(key.length)
+      copied[key] = copy((candidate as Record<string, unknown>)[key], depth + 1)
+    }
+    seen.delete(candidate)
+    return copied
+  }
+  try {
+    return { _tag: "Ok", value: copy(value === undefined ? null : value, 0) }
+  } catch {
+    return refused
+  }
 }
 
 /**
@@ -166,6 +241,26 @@ export const failureMessage = (error: unknown): string =>
   typeof error === "object" && error !== null && "message" in error
     ? String((error as { readonly message: unknown }).message)
     : String(error)
+
+/**
+ * The message every binding reports when a script's returned value is not
+ * JSON — the first half of the shared outcome gate.
+ *
+ * @category constants
+ * @since 0.1.0
+ * @slop
+ */
+export const unserializableOutcome = "the script returned a value that is not JSON-serializable"
+
+/**
+ * The message every binding reports when a script's returned value is JSON
+ * but not one of the three outcomes — the second half of the shared gate.
+ *
+ * @category constants
+ * @since 0.1.0
+ * @slop
+ */
+export const notAnOutcome = "the script did not return done(...), to(...), or park(...)"
 
 const abortError = (): Error => new Error("the link was aborted")
 
@@ -263,11 +358,24 @@ const runInProcess = <E>(
         if (settled._tag === "thrown") {
           return yield* new ScriptFailure({ code: "runtime", message: failureMessage(settled.error) })
         }
-        const outcome = decodeOutcome(settled.value)
+        // The outcome crosses the same boundary as a call payload, and it
+        // crosses BEFORE decoding. The QuickJS binding validates in-realm
+        // for the same reason: a value its own `JSON.stringify` would
+        // rewrite — NaN, a function property, `undefined`, a `toJSON`
+        // hook — must be refused here rather than laundered into a
+        // different terminal result.
+        const bounded = jsonBoundary(settled.value)
+        if (bounded._tag === "Refused") {
+          return yield* new ScriptFailure({
+            code: "invalid_outcome",
+            message: unserializableOutcome
+          })
+        }
+        const outcome = decodeOutcome(bounded.value)
         if (outcome._tag === "None") {
           return yield* new ScriptFailure({
             code: "invalid_outcome",
-            message: "the script did not return done(...), to(...), or park(...)"
+            message: notAnOutcome
           })
         }
         return outcome.value
