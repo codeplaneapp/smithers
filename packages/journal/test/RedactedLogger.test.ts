@@ -490,6 +490,67 @@ describe("RedactedLogger", () => {
     expect(rendered).toContain(Redaction.depthMarker)
   })
 
+  it("does not leak a credential an error's own name carries", () => {
+    // `plainError` copied the original's `name` verbatim while running message
+    // and stack through the rules. It is reached exactly for the classes whose
+    // name is caller data rather than a class name, and the console path hides
+    // it because the console re-runs the rules over the rendered string. The
+    // tracer logger does not, so this went to OTLP in clear.
+    const redactor = Redaction.make()
+    class ApiError extends Error {
+      readonly #token: string
+      constructor(message: string, token: string) {
+        super(message)
+        this.#token = token
+      }
+      override get name(): string {
+        return `ApiError(${this.#token})`
+      }
+    }
+    const redacted = RedactedLogger.redactArgument(
+      new ApiError("request refused", "sk-live-e2ecase22NEVERLOGTHIS"),
+      redactor
+    ) as Error
+    expect(String(redacted.name)).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+    expect(inspect(redacted)).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+  })
+
+  it("does not leak a credential a binary view's class name carries", () => {
+    // `describeBinary` interpolated the constructor name into the `[Binary]`
+    // value without redacting it, on the journal WRITE path.
+    const redactor = Redaction.make()
+    const named = { [`token=sk-live-e2ecase22NEVERLOGTHIS`]: class extends Uint8Array {} }[
+      `token=sk-live-e2ecase22NEVERLOGTHIS`
+    ]!
+    expect(JSON.stringify(redactor(new named([1, 2])))).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+  })
+
+  it("keeps a caller's member on a binary view instead of routing it through __proto__", () => {
+    // The binary branch built its result with `named[key] = …`, the literal
+    // `__proto__` hole the object branch documents and avoids.
+    const redactor = Redaction.make()
+    const view = new Uint8Array([1])
+    Object.defineProperty(view, "__proto__", {
+      value: { kept: "important" },
+      enumerable: true,
+      configurable: true,
+      writable: true
+    })
+    const result = redactor(view) as Record<string, unknown>
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype)
+    expect(JSON.stringify(result)).toContain("kept")
+  })
+
+  it("names a large binary view without walking a property per byte", () => {
+    // `Object.entries` on a view materialises one pair per byte before the
+    // index filter discards them: 1 MB cost 312 ms on the journal write path.
+    const redactor = Redaction.make()
+    const started = Date.now()
+    const result = redactor(Buffer.alloc(4_000_000, 7))
+    expect(Date.now() - started).toBeLessThan(200)
+    expect(JSON.stringify(result)).toContain("4000000 bytes")
+  })
+
   it("does not leak a credential a binary view carries into the journal", () => {
     // `Redaction.redact` is the JOURNAL WRITE path, not only the log path:
     // SqlJournal encodes `redact(payload)` into `payload_json`. Handing a

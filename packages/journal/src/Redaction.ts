@@ -139,6 +139,28 @@ export interface Options {
   readonly rules?: ReadonlyArray<Rule> | undefined
 }
 
+/**
+ * How many bytes a view may hold before {@link redact} stops reading its members.
+ *
+ * Enumerating a view's own properties materialises one pair per byte, so the
+ * walk costs the buffer's size even though the rendering does not.
+ *
+ * @since 0.1.0
+ * @category redaction
+ * @slop
+ */
+export const binaryWalkLimit = 65_536
+
+/** A view's byte length, or `Infinity` when it will not say, which skips the walk. */
+const byteLength = (node: object): number => {
+  try {
+    const size = (node as { byteLength?: unknown }).byteLength
+    return typeof size === "number" ? size : Number.POSITIVE_INFINITY
+  } catch {
+    return Number.POSITIVE_INFINITY
+  }
+}
+
 /** Own keys of a binary view that name one of its bytes rather than a property. */
 const indexKey = /^(?:0|[1-9][0-9]*)$/
 
@@ -223,13 +245,25 @@ export const redact = (value: unknown, options?: Options): unknown => {
    * went into a durable row in clear. Name the bytes, keep walking the text.
    */
   const binary = (node: object, ancestors: WeakSet<object>, depth: number): unknown => {
-    const named: Record<string, unknown> = { [binaryMarker]: describeBinary(node) }
-    for (const [key, field] of Object.entries(node as Record<string, unknown>)) {
-      // An index is one of the bytes just named, not a property a caller set.
-      if (indexKey.test(key)) continue
-      named[redactKey(key, rules)] = isSensitiveKey(key) ? placeholder : walk(field, ancestors, depth + 1)
+    // The description is text read off the value, so it meets the rules like
+    // any other text: a class name is caller data, and a view whose
+    // constructor is named after a credential wrote it into a durable row.
+    const entries: Array<[string, unknown]> = [[binaryMarker, redactString(describeBinary(node), rules)]]
+    // `Object.entries` on a view materialises one pair per byte before the
+    // index filter can discard them, which cost 312 ms for 1 MB on the journal
+    // write path. Past the bound the bytes are named and nothing else is read,
+    // so a member a caller hung on a large view is dropped rather than shown.
+    if (byteLength(node) <= binaryWalkLimit) {
+      for (const [key, field] of Object.entries(node as Record<string, unknown>)) {
+        // An index is one of the bytes just named, not a property a caller set.
+        if (indexKey.test(key)) continue
+        entries.push([redactKey(key, rules), isSensitiveKey(key) ? placeholder : walk(field, ancestors, depth + 1)])
+      }
     }
-    return named
+    // `Object.fromEntries`, not `named[key] = …`, for the reason the object
+    // branch below gives: a literal `__proto__` key would route through the
+    // inherited setter and the member would vanish from the row.
+    return Object.fromEntries(entries)
   }
 
   const walk = (node: unknown, ancestors: WeakSet<object>, depth = 0): unknown => {

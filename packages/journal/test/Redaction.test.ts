@@ -184,6 +184,16 @@ describe("Redaction", () => {
     expect(redact(throwing)).toEqual({ [Redaction.binaryMarker]: Redaction.binaryMarker })
     const bare = Object.setPrototypeOf(new Uint8Array([3]), null) as Uint8Array
     expect(redact(bare)).toEqual({ [Redaction.binaryMarker]: Redaction.binaryMarker })
+    // A size that will not be read is treated as over the walk bound, so the
+    // members are skipped rather than enumerated against an unknown cost.
+    const sizeless = Object.assign(new Uint8Array([4]), { seat: "kept" })
+    Object.defineProperty(sizeless, "byteLength", {
+      get: () => {
+        throw new TypeError("no byteLength for you")
+      },
+      configurable: true
+    })
+    expect(redact(sizeless)).toEqual({ [Redaction.binaryMarker]: Redaction.binaryMarker })
   })
 
   effect("keeps payloads verbatim when redaction is disabled", () =>

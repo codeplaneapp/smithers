@@ -142,13 +142,20 @@ const renderable = (error: Error, message: string, stack: unknown): Error | unde
 }
 
 /** A plain `Error` standing in for one whose class cannot be impersonated. */
-const plainError = (error: Error, message: string, stack: unknown): Error => {
+const plainError = (error: Error, message: string, stack: unknown, redactor: Redaction.Redactor): Error => {
   const plain = new Error(message)
   // Read from the ORIGINAL, where the brand check passes. A name is the part of
   // the class a renderer actually prints, so it survives even when the class
   // itself cannot.
   try {
-    Object.defineProperty(plain, "name", { value: String(error.name), writable: true, configurable: true })
+    // Through the rules, like the message and the stack. A name is read off the
+    // original, and for the classes that reach here it is caller data rather
+    // than a class name, so an unredacted copy exported the credential to OTLP.
+    Object.defineProperty(plain, "name", {
+      value: String(redactor(String(error.name))),
+      writable: true,
+      configurable: true
+    })
   } catch {
     // A name that will not even be read is not worth the log line.
   }
@@ -193,7 +200,7 @@ const redactError = (
   const message = String(redactor(error.message))
   const stack = typeof error.stack === "string" ? String(redactor(error.stack)) : error.stack
   const clone = renderable(Object.create(Object.getPrototypeOf(error)) as Error, message, stack)
-    ?? plainError(error, message, stack)
+    ?? plainError(error, message, stack, redactor)
   seen.set(error, clone)
   for (const key of Reflect.ownKeys(error)) {
     if (key === "message" || key === "stack") continue
