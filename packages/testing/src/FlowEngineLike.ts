@@ -46,9 +46,21 @@ import {
 import type { EngineSubjectError } from "./TestingError.ts"
 import { EngineUnavailableError } from "./TestingError.ts"
 
+/**
+ * The payload wrapper the adapter registers for every `FlowSpec`.
+ *
+ * `value` is an optional key rather than a required one because the engine
+ * stores a payload through the flow's own JSON codec, and `undefined` is not a
+ * JSON value. A caller that runs a flow with no payload therefore encodes as
+ * `{}`, which round-trips, instead of as `{ value: undefined }`, which the
+ * codec rejects. Absence is already how {@link ExecutionResult} spells "no
+ * value", so both directions of the subject agree.
+ */
+const payloadSchema = Schema.Struct({ value: Schema.optionalKey(Schema.Unknown) })
+
 type Subject = Flow.Flow<
   string,
-  Schema.Struct<{ readonly value: typeof Schema.Unknown }>,
+  typeof payloadSchema,
   typeof Schema.Unknown,
   typeof Schema.Unknown
 >
@@ -283,7 +295,7 @@ export const make = (): Effect.Effect<
       Effect.provideService(
         Effect.gen(function*() {
           const flow: Subject = Flow.make(spec.name, {
-            payload: { value: Schema.Unknown },
+            payload: payloadSchema.fields,
             success: Schema.Unknown,
             error: Schema.Unknown,
             // The registration below supplies this flow's behavior: the engine
@@ -374,7 +386,8 @@ export const make = (): Effect.Effect<
           yield* arm(executionId)
           yield* engine.execute(flow, {
             executionId,
-            payload: { value: options.payload },
+            // Omitted rather than set to `undefined`: see `payloadSchema`.
+            payload: options.payload === undefined ? {} : { value: options.payload },
             discard: true
           }).pipe(
             // `FlowCycleDetected` is part of the engine's typed `execute`

@@ -89,4 +89,34 @@ describe("FlowEngine.layerMemory conformance", () => {
         value: "settled"
       })
     }).pipe(Effect.provide(subject)))
+
+  // Pins the payload boundary: the engine stores a payload through the flow's
+  // own JSON codec, and `undefined` is not a JSON value. A run started with no
+  // payload must therefore reach the step as `undefined` and settle, rather
+  // than dying inside the codec before the flow ever starts.
+  it.scoped("starts a flow that was given no payload", () =>
+    Effect.gen(function*() {
+      const engine = yield* EngineSubject.EngineSubject
+      const seen: Array<unknown> = []
+
+      const result = yield* engine.run({
+        flow: {
+          name: "testing/engine-like/absent-payload",
+          steps: [{
+            key: "echo",
+            sealed: false,
+            kind: "step",
+            run: (input) =>
+              Effect.sync(() => {
+                seen.push(input)
+                return "ran"
+              })
+          }]
+        },
+        payload: undefined
+      })
+
+      expect(seen).toEqual([undefined])
+      expect(result).toMatchObject({ status: "completed", value: "ran" })
+    }).pipe(Effect.provide(subject)))
 })
