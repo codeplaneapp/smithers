@@ -95,7 +95,8 @@ export interface Options {
 }
 
 /**
- * Default deadline for one remote cache request.
+ * Default deadline for one whole remote cache operation, its request and its
+ * response body together.
  *
  * @category constants
  * @since 1.0.0-rc.0

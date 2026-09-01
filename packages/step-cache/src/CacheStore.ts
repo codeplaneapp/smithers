@@ -2,7 +2,8 @@
  * Durable content-addressed step result storage.
  *
  * This store receives already-computed digests and recorded results. It does
- * not inspect step layers, capabilities, or result metadata.
+ * not interpret step layers, capabilities, or result metadata: `result` and
+ * `meta` are admitted as bounded, inert JSON and stored verbatim.
  *
  * See the {@link https://smithers.sh/concepts/step-keys | step-key contract}
  * and {@link https://smithers.sh/concepts/journal | journal architecture}.

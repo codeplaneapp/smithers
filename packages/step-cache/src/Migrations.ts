@@ -1,9 +1,11 @@
 /**
  * Step cache schema migrations.
  *
- * This package owns `flows_step_cache` and nothing else. It reserves migration
- * id block `2000` so its ids can never collide with the journal's or the run
- * store's — see `@smthrs/database`'s `Migrations` for how the blocks compose.
+ * This package owns two tables and nothing else: the mutable `flows_step_cache`
+ * head and the append-only `flows_step_cache_recorded` provenance ledger. It
+ * reserves migration id block `2000` so its ids can never collide with the
+ * journal's or the run store's — see `@smthrs/database`'s `Migrations` for how
+ * the blocks compose.
  *
  * See the {@link https://smithers.sh/concepts/step-keys | step-key contract}
  * and {@link https://smithers.sh/concepts/journal | journal architecture}.

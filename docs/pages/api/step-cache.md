@@ -351,7 +351,7 @@ subpath, except the Node-only test layer, which has only its subpath.
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `Options` (interface) | models | How to reach the shared step-result tier. |
-| `defaultRequestTimeout` (const) | constants | Default deadline for one remote cache request. |
+| `defaultRequestTimeout` (const) | constants | Default deadline for one whole remote cache operation, its request and its response body together. |
 | `maximumEntryBytes` (const) | constants | Default and absolute maximum encoded cache entry size. |
 | `make` (const) | constructors | Builds a remote cache store over Effect's `HttpClient`. |
 | `layer` (const) | layers | Provides a remote cache store as the `CacheStore` tag. |
