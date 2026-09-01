@@ -561,6 +561,52 @@ ctx.done(String(waited.waitedSeconds))`
     expect(settled[0]?.result.value).toEqual({ waitedSeconds: 0 })
   })
 
+  it("refuses waits above the ceiling or outside finite time without scheduling them", async () => {
+    const scheduled: Array<string> = []
+    const outcome = await drive(
+      Effect.gen(function*() {
+        const engine = yield* FlowRuntime.FlowRuntime
+        const services = yield* Effect.context<Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance>()
+        const immediateClock = FlowRuntime.FlowRuntime.of({
+          ...engine,
+          scheduleClock: (flow, options) =>
+            Effect.sync(() => {
+              scheduled.push(options.clock.name)
+            }).pipe(
+              Effect.andThen(
+                engine.deferredDone(options.clock.deferred, {
+                  flowName: flow._tag,
+                  executionId: options.executionId,
+                  deferredName: options.clock.deferred.name,
+                  exit: Exit.void
+                })
+              )
+            )
+        })
+        const clockServices = Context.add(services, FlowRuntime.FlowRuntime, immediateClock)
+        return yield* collect({
+          flows: [StandardFlows.clock(clockServices, { maxSeconds: 61 })],
+          cells: [
+            `const refused = []
+for (const seconds of [62, 1 / 0]) {
+  try { await ctx.call("wait", { seconds }) } catch (error) { refused.push(String(error.message)) }
+}
+const exact = await ctx.call("wait", { seconds: 61 })
+ctx.done(refused.length + ":" + exact.waitedSeconds)`
+          ]
+        })
+      })
+    )
+
+    expect(outcome._tag).toBe("completed")
+    const settled = settledCalls(eventsOf(outcome))
+    expect(settled.map((event) => event.result.outcome)).toEqual(["failure", "failure", "success"])
+    expect(settled[0]?.result.message).toContain("61")
+    expect(settled[1]?.result.message).toContain("finite")
+    expect(scheduled).toHaveLength(1)
+    expect(scheduled[0]?.split("/").at(-1)).toBe("2")
+  })
+
   it("keeps two waits of the same duration apart, because a durable clock is named", async () => {
     // A durable clock is identified by its name — the deferred it awaits is
     // `DurableClock/<name>` — so a name derived from the duration would make

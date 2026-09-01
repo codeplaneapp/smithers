@@ -184,15 +184,20 @@ export const layerUnclassified = (): Layer.Layer<QuotaClassifier> => Layer.succe
  * The delays a provider spells out in prose rather than in a field.
  *
  * Ported from the old CLI-agent classifier, which had to read text because a
- * subprocess adapter never sees a header. Each pattern captures one number and
- * one unit; anything else is left to {@link Config.defaultWaitMillis}, since a
- * misread number is a worse wait than an honest guess.
+ * subprocess adapter never sees a header. Each pattern captures one number;
+ * unit-bearing forms bind one explicit unit, while the final bare form owns
+ * the HTTP `Retry-After` seconds value. Anything else is left to
+ * {@link Config.defaultWaitMillis}, since a misread number is a worse wait than
+ * an honest guess.
  */
 const textualDelays: ReadonlyArray<{ readonly pattern: RegExp; readonly unitMillis: number }> = [
   { pattern: /(?:try|retry)\s+again\s+in\s+(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b/i, unitMillis: 1_000 },
   { pattern: /(?:try|retry)\s+again\s+in\s+(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)\b/i, unitMillis: 60_000 },
   { pattern: /(?:try|retry)\s+again\s+in\s+(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i, unitMillis: 3_600_000 },
-  { pattern: /retry[- ]after[:=]?\s*(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)?\b/i, unitMillis: 1_000 },
+  { pattern: /retry[- ]after[:=]?\s*(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b/i, unitMillis: 1_000 },
+  { pattern: /retry[- ]after[:=]?\s*(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)\b/i, unitMillis: 60_000 },
+  { pattern: /retry[- ]after[:=]?\s*(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i, unitMillis: 3_600_000 },
+  { pattern: /retry[- ]after[:=]?\s*(\d+(?:\.\d+)?)(?!\s*[a-z])/i, unitMillis: 1_000 },
   { pattern: /resets?\s+in\s+(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b/i, unitMillis: 1_000 },
   { pattern: /resets?\s+in\s+(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)\b/i, unitMillis: 60_000 },
   { pattern: /resets?\s+in\s+(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i, unitMillis: 3_600_000 }

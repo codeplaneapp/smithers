@@ -239,6 +239,14 @@ describe("the accumulator", () => {
     // one has already decided what counts.
     expect(Budget.tokensOf({ totalTokens: 10, inputTokens: 3, outputTokens: 4 })).toBe(10)
   })
+
+  it("keeps the durable usage payload wire-compatible", () => {
+    const encoded = Schema.encodeSync(Budget.UsageRecord)({ stepKey: "step-a", tokens: 640 })
+
+    // Changing this literal is a durable wire-format change to record in
+    // CHANGELOG.md, because resumed runs read payloads written by older hosts.
+    expect(encoded).toEqual({ stepKey: "step-a", tokens: 640 })
+  })
 })
 
 describe("a token budget", () => {
@@ -337,6 +345,27 @@ describe("a token budget", () => {
     expect(verdicts.second).toMatchObject({ _tag: "refuse", exceeded: { onExceeded: "skip-remaining" } })
     // Latched: the third check refuses without any new usage at all.
     expect(verdicts.third).toMatchObject({ _tag: "refuse", exceeded: { onExceeded: "skip-remaining" } })
+  })
+
+  it("keeps the first token refusal's numbers on every latched verdict", async () => {
+    const verdicts = await Effect.runPromise(
+      Effect.gen(function*() {
+        const budget = yield* Budget.make({ tokens: { max: 100, onExceeded: "skip-remaining" } })
+        yield* budget.record("step-a", { totalTokens: 60 })
+        const first = yield* budget.check("step-b")
+        const second = yield* budget.check("step-c")
+        const third = yield* budget.check("step-d")
+        return { first, second, third }
+      })
+    )
+
+    expect(verdicts.first).toMatchObject({
+      _tag: "refuse",
+      exceeded: { scope: "tokens", onExceeded: "skip-remaining", used: 60, max: 100, next: 60 }
+    })
+    const firstExceeded = (verdicts.first as { readonly exceeded: Budget.BudgetExceeded }).exceeded
+    expect((verdicts.second as { readonly exceeded: Budget.BudgetExceeded }).exceeded).toEqual(firstExceeded)
+    expect((verdicts.third as { readonly exceeded: Budget.BudgetExceeded }).exceeded).toEqual(firstExceeded)
   })
 })
 
@@ -844,22 +873,33 @@ const instanceFor = (executionId: string): FlowRuntime.FlowInstance["Service"] =
     }
   })
 
-/** One usage record as the journal hands it back. */
-const usageEntry = (seq: number, payload: unknown): JournalEvent.Entry =>
+/** One budget record as the journal hands it back. */
+const budgetEntry = (
+  seq: number,
+  eventType: string,
+  payload: unknown,
+  sourceId = "/agent/budget"
+): JournalEvent.Entry =>
   new JournalEvent.Entry({
     runId: JournalEvent.RunId.make("usage-pages"),
     seq: JournalEvent.Seq.make(seq),
     eventId: `event-${seq}`,
-    sourceId: JournalEvent.SourceId.make("/agent/budget"),
+    sourceId: JournalEvent.SourceId.make(sourceId),
     sourceSeq: JournalEvent.SourceSeq.make(seq),
     emittedAtMs: 0,
-    eventType: Budget.usageEvent,
+    eventType,
     payload,
     meta: {}
   })
 
+/** One usage record as the journal hands it back. */
+const usageEntry = (seq: number, payload: unknown): JournalEvent.Entry => budgetEntry(seq, Budget.usageEvent, payload)
+
 /** A journal that hands back the given pages, one read at a time. */
-const pagedJournal = (pages: ReadonlyArray<ReadonlyArray<JournalEvent.Entry>>) =>
+const pagedJournal = (
+  pages: ReadonlyArray<ReadonlyArray<JournalEvent.Entry>>,
+  writable = true
+) =>
   Journal.layerNoop({
     flush: Effect.void,
     entries: (options) =>
@@ -868,8 +908,55 @@ const pagedJournal = (pages: ReadonlyArray<ReadonlyArray<JournalEvent.Entry>>) =
           ? 0
           : pages.findIndex((page) => page.at(-1)?.seq === options.after) + 1
         return { entries: pages[index] ?? [], hasMore: index + 1 < pages.length }
+      }),
+    ...(writable
+      ? {
+        emitDurableUnfenced: () =>
+          Effect.succeed({
+            _tag: "Accepted" as const,
+            seq: JournalEvent.Seq.make(1),
+            sourceSeq: JournalEvent.SourceSeq.make(1)
+          })
+      }
+      : {})
+  })
+
+/** A writable journal whose committed rows can be shared by budget instances. */
+const budgetLedger = () => {
+  const recorded: Array<JournalEvent.Entry> = []
+  const journal = Journal.makeNoop({
+    flush: Effect.void,
+    entries: ({ runId, after, limit }) =>
+      Effect.sync(() => {
+        const runEntries = recorded.filter((entry) => entry.runId === runId)
+        const start = after === undefined
+          ? 0
+          : runEntries.findIndex((entry) => entry.seq === after) + 1
+        const entries = runEntries.slice(start, start + limit)
+        return { entries, hasMore: start + entries.length < runEntries.length }
+      }),
+    emitDurableUnfenced: (input) =>
+      Effect.sync(() => {
+        const seq = JournalEvent.Seq.make(recorded.length + 1)
+        const sourceSeq = input.sourceSeq ?? JournalEvent.SourceSeq.make(recorded.length + 1)
+        recorded.push(
+          new JournalEvent.Entry({
+            runId: input.runId,
+            seq,
+            eventId: JournalEvent.makeEventId(input.runId, input.sourceId, sourceSeq),
+            sourceId: input.sourceId,
+            sourceSeq,
+            emittedAtMs: 0,
+            eventType: input.eventType,
+            payload: input.payload,
+            meta: input.meta ?? {}
+          })
+        )
+        return { _tag: "Accepted" as const, seq, sourceSeq }
       })
   })
+  return { journal, recorded }
+}
 
 describe("recovering a run's earlier spend", () => {
   it("reads every page of the run's journal, not just the first", async () => {
@@ -894,27 +981,39 @@ describe("recovering a run's earlier spend", () => {
     expect(observed).toEqual({ tokens: 550, calls: 2, largestCall: 300 })
   })
 
-  it("ignores a record it cannot read as a call", async () => {
-    const observed = await Effect.runPromise(
-      Effect.gen(function*() {
-        const budget = yield* Budget.make({})
-        return yield* budget.usage
-      }).pipe(
-        Effect.provide(
-          Layer.merge(
-            pagedJournal([[
-              usageEntry(1, { stepKey: 7, tokens: 300 }),
-              usageEntry(2, { stepKey: "step-b", tokens: "lots" }),
-              usageEntry(3, null),
-              usageEntry(4, { stepKey: "step-c", tokens: 120 })
-            ]]),
-            Layer.succeed(FlowRuntime.FlowInstance)(instanceFor("usage-pages"))
+  it("fails closed on a current usage record it cannot decode", async () => {
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        Effect.gen(function*() {
+          const budget = yield* Budget.make({})
+          return yield* budget.usage
+        }).pipe(
+          Effect.provide(
+            Layer.merge(
+              pagedJournal([[
+                usageEntry(1, { stepKey: "step-a", tokens: 300 }),
+                usageEntry(2, {
+                  stepKey: "private-model-step",
+                  tokens: "private malformed payload"
+                })
+              ]]),
+              Layer.succeed(FlowRuntime.FlowInstance)(instanceFor("usage-pages"))
+            )
           )
         )
       )
     )
 
-    expect(observed).toEqual({ tokens: 120, calls: 1, largestCall: 120 })
+    const failure = failureOf(exit) as Budget.AccountingUnavailable
+    expect(failure).toMatchObject({
+      _tag: "flows/agent/BudgetAccountingUnavailable",
+      phase: "recover",
+      runId: "usage-pages"
+    })
+    expect(failure.message).toContain("seq 2")
+    expect(failure.message).toContain("/agent/budget")
+    expect(failure.message).not.toContain("private-model-step")
+    expect(failure.message).not.toContain("private malformed payload")
   })
 
   it("fails closed when the journal cannot be read, rather than starting the run at zero", async () => {
@@ -993,7 +1092,7 @@ describe("recovering a run's earlier spend", () => {
             Layer.merge(
               // Readable, writable on nothing: `pagedJournal` answers reads and
               // leaves every emit at the closed stub's failure.
-              pagedJournal([]),
+              pagedJournal([], false),
               Layer.succeed(FlowRuntime.FlowInstance)(instanceFor("usage-write"))
             )
           )
@@ -1009,6 +1108,149 @@ describe("recovering a run's earlier spend", () => {
       phase: "record",
       runId: "usage-write"
     })
+  })
+
+  it("preserves a tagged durable-write cause on the accounting failure", async () => {
+    const ledger = budgetLedger()
+    const cause = new Journal.JournalError({
+      code: "sink_failed",
+      message: "the usage sink refused this record",
+      cause: { storageCode: "ELEDGER" }
+    })
+    const journal = Journal.make({
+      ...ledger.journal,
+      emitDurableUnfenced: (input) =>
+        input.eventType === Budget.usageEvent
+          ? Effect.fail(cause)
+          : ledger.journal.emitDurableUnfenced(input)
+    })
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        Effect.gen(function*() {
+          const budget = yield* Budget.make({})
+          yield* budget.record("step-a", { totalTokens: 40 })
+        }).pipe(
+          Effect.provideService(Journal.Journal, journal),
+          Effect.provideService(FlowRuntime.FlowInstance, instanceFor("usage-write-cause"))
+        )
+      )
+    )
+
+    expect(failureOf(exit)).toMatchObject({
+      _tag: "flows/agent/BudgetAccountingUnavailable",
+      phase: "record",
+      runId: "usage-write-cause",
+      cause: {
+        _tag: "@smthrs/journal/JournalError",
+        code: "sink_failed",
+        cause: { storageCode: "ELEDGER" }
+      }
+    })
+  })
+})
+
+describe("a durable latency clock", () => {
+  it("keeps its original zero across budget instances for the same run", async () => {
+    const ledger = budgetLedger()
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const first = yield* Budget.make({ latency: { maxMillis: 5_000 } })
+        const initial = yield* first.check("step-a")
+        yield* TestClock.adjust("6 seconds")
+        const second = yield* Budget.make({ latency: { maxMillis: 5_000 } })
+        const resumed = yield* second.check("step-b")
+        return { initial, resumed }
+      }).pipe(
+        Effect.provideService(Journal.Journal, ledger.journal),
+        Effect.provideService(FlowRuntime.FlowInstance, instanceFor("latency-resume")),
+        Effect.provide(TestClock.layer())
+      )
+    )
+
+    expect(observed.initial._tag).toBe("proceed")
+    expect(observed.resumed).toMatchObject({
+      _tag: "refuse",
+      exceeded: { scope: "latency", used: 6_000, max: 5_000, next: 0 }
+    })
+  })
+
+  it("writes its durable zero at most once per run", async () => {
+    const ledger = budgetLedger()
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const budget = yield* Budget.make({ latency: { maxMillis: 5_000 } })
+        yield* budget.check("step-a")
+        yield* budget.check("step-b")
+      }).pipe(
+        Effect.provideService(Journal.Journal, ledger.journal),
+        Effect.provideService(FlowRuntime.FlowInstance, instanceFor("latency-once")),
+        Effect.provide(TestClock.layer())
+      )
+    )
+
+    expect(ledger.recorded.filter((entry) => entry.eventType === Budget.budgetStartedEvent))
+      .toHaveLength(1)
+  })
+
+  it("recovers the earliest durable zero when duplicate records exist", async () => {
+    const verdict = await Effect.runPromise(
+      Effect.gen(function*() {
+        yield* TestClock.adjust("3 seconds")
+        const budget = yield* Budget.make({ latency: { maxMillis: 1_000 } })
+        return yield* budget.check("step-a")
+      }).pipe(
+        Effect.provide(
+          Layer.merge(
+            pagedJournal([[
+              budgetEntry(1, Budget.budgetStartedEvent, { startedAt: 2_000 }),
+              budgetEntry(2, Budget.budgetStartedEvent, { startedAt: 500 })
+            ]]),
+            Layer.succeed(FlowRuntime.FlowInstance)(instanceFor("usage-pages"))
+          )
+        ),
+        Effect.provide(TestClock.layer())
+      )
+    )
+
+    expect(verdict).toMatchObject({
+      _tag: "refuse",
+      exceeded: { scope: "latency", used: 2_500, max: 1_000 }
+    })
+  })
+
+  it("fails closed on a durable zero it cannot decode", async () => {
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        Effect.gen(function*() {
+          const budget = yield* Budget.make({ latency: { maxMillis: 1_000 } })
+          return yield* budget.check("step-a")
+        }).pipe(
+          Effect.provide(
+            Layer.merge(
+              pagedJournal([[
+                budgetEntry(
+                  7,
+                  Budget.budgetStartedEvent,
+                  { startedAt: "private malformed clock origin" },
+                  "/agent/private-budget"
+                )
+              ]]),
+              Layer.succeed(FlowRuntime.FlowInstance)(instanceFor("usage-pages"))
+            )
+          )
+        )
+      )
+    )
+
+    const failure = failureOf(exit) as Budget.AccountingUnavailable
+    expect(failure).toMatchObject({
+      _tag: "flows/agent/BudgetAccountingUnavailable",
+      phase: "recover",
+      runId: "usage-pages"
+    })
+    expect(failure.message).toContain("seq 7")
+    expect(failure.message).toContain("/agent/private-budget")
+    expect(failure.message).not.toContain("private malformed clock origin")
   })
 })
 
@@ -1084,13 +1326,18 @@ describe("an explicitly unbounded composition", () => {
       }).pipe(Effect.provide(TestClock.layer()))
     )
 
-    expect(verdicts.first).toMatchObject({ _tag: "refuse", exceeded: { scope: "latency" } })
-    // Latched by a latency stop, and the follow-up names the tokens it had
-    // spent rather than inventing a second latency reading.
+    expect(verdicts.first).toMatchObject({
+      _tag: "refuse",
+      exceeded: { scope: "latency", onExceeded: "skip-remaining", used: 2_000, max: 1_000, next: 0 }
+    })
+    // The latch carries the original refusal, so later skipped calls report
+    // the same ceiling and numbers rather than fabricating a token verdict.
     expect(verdicts.second).toMatchObject({
       _tag: "refuse",
-      exceeded: { scope: "tokens", onExceeded: "skip-remaining", max: 0 }
+      exceeded: { scope: "latency", onExceeded: "skip-remaining", used: 2_000, max: 1_000, next: 0 }
     })
+    const firstExceeded = (verdicts.first as { readonly exceeded: Budget.BudgetExceeded }).exceeded
+    expect((verdicts.second as { readonly exceeded: Budget.BudgetExceeded }).exceeded).toEqual(firstExceeded)
   })
 })
 

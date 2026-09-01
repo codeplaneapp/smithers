@@ -54,7 +54,7 @@ export interface Seat {
 export const make = (seat: Seat): Seat => seat
 
 /**
- * A seat the host could not turn into a model route — an unknown provider, a
+ * A seat the host could not turn into a model route: an unknown provider, a
  * missing API key, an invalid endpoint.
  *
  * @category errors

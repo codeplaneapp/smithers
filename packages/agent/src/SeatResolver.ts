@@ -90,7 +90,7 @@ const contextWindows: ReadonlyArray<readonly [RegExp, number]> = [
 ]
 
 /**
- * The context window, in tokens, of a known model id — with a conservative
+ * The context window, in tokens, of a known model id, with a conservative
  * floor for models the catalog has not met. Never zero: zero is `CellTurn`'s
  * "compaction disabled", and a resolver that resolves a window must not
  * silently disable it.

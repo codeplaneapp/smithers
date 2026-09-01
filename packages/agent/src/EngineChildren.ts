@@ -41,9 +41,11 @@ import type { ControlError } from "@smthrs/control/ControlError"
 import type { Flow } from "@smthrs/flow"
 import { Action, FlowRuntime } from "@smthrs/flow"
 import { RunStore } from "@smthrs/run-store"
+import * as Cause from "effect/Cause"
 import * as Crypto from "effect/Crypto"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import type * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -106,6 +108,18 @@ export const childExecutionId = (
 const notFound = (message: string): ChildError => new ChildError({ code: "not_found", message })
 
 const failed = (message: string): ChildError => new ChildError({ code: "failed", message })
+
+/**
+ * The largest rendered child cause returned to a cell.
+ *
+ * 2,048 characters preserve a useful typed error and its immediate context
+ * without copying an unbounded engine stack into the cell transcript and its
+ * durable call record.
+ */
+const maxChildFailureCauseCharacters = 2_048
+
+const boundedCause = (cause: Cause.Cause<unknown>): string =>
+  Cause.pretty(cause).slice(0, maxChildFailureCauseCharacters)
 
 /**
  * The one thing this port reads out of a child run's state document.
@@ -234,10 +248,18 @@ export const make = (
       remaining: Duration.Duration
     ): Effect.Effect<void, ChildError> =>
       Effect.gen(function*() {
-        const ended = yield* Effect.sync(() => fiber.pollUnsafe() !== undefined)
+        const ended = yield* Effect.sync(() => fiber.pollUnsafe())
         const row = yield* rowOf(child)
         if (Option.isSome(row)) return
-        if (ended) {
+        if (ended !== undefined) {
+          if (Exit.isFailure(ended)) {
+            return yield* Effect.fail(
+              failed(
+                `agent/spawn could not start ${flowName}, so the child run ${child} was never created.\n` +
+                  boundedCause(ended.cause)
+              )
+            )
+          }
           return yield* Effect.fail(
             notFound(
               `agent/spawn could not start ${flowName}: this host's runtime does not run it, ` +
@@ -320,7 +342,9 @@ export const make = (
           )
         }
         if (settled.exit._tag === "Failure") {
-          return yield* Effect.fail(failed(`The child run ${child} failed.`))
+          return yield* Effect.fail(
+            failed(`The child run ${child} failed.\n${boundedCause(settled.exit.cause)}`)
+          )
         }
         return Option.some({ child, output: asText(settled.exit.value) })
       })

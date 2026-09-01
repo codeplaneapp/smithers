@@ -41,7 +41,10 @@ import { Context, Effect, Schema } from "effect"
 export const SpawnInput = Schema.Struct({
   flow: Schema.String.annotate({ description: "The registered flow the child runs" }),
   input: Schema.optional(Schema.Json).annotate({ description: "The child's input" }),
-  label: Schema.optional(Schema.String).annotate({ description: "A human-facing label for the child" })
+  label: Schema.optional(Schema.String).annotate({
+    description:
+      "Identifies this child within the run and is part of its id; two concurrent children of one flow need two labels. Defaults to the flow name."
+  })
 })
 
 /**
@@ -100,7 +103,8 @@ const lifecycle = { reads: [], writes: [], mode: "expected", onConflict: "serial
  */
 export const spawnFlow = Flow.make({
   name: "agent/spawn",
-  description: "Start a child agent running a registered flow, and return its id without waiting for it.",
+  description:
+    "Start a child agent and return its id without waiting; its label is its identity, so concurrent children of one flow need distinct labels.",
   input: SpawnInput,
   output: SpawnOutput,
   effects: lifecycle

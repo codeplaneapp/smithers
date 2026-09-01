@@ -6,7 +6,7 @@
   "smthrs": {
     "group": "agent"
   },
-  "description": "The Smithers agent: the production agent loop composed on the durable engine, plus the two adapters that run it — AgentSession for control-plane runs and AgentAction for typed workflow steps",
+  "description": "The Smithers agent: the production agent loop composed on the durable engine, plus the two adapters that run it, AgentSession for control-plane runs and AgentAction for typed workflow steps",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",

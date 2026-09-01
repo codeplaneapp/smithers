@@ -425,6 +425,13 @@ describe("the default classifier", () => {
     expect(QuotaPolicy.parseDelay("Rate limit reached. Try again in 2 minutes.")).toBe(120_000)
     expect(QuotaPolicy.parseDelay("quota resets in 1 hour")).toBe(3_600_000)
     expect(QuotaPolicy.parseDelay("retry-after: 30")).toBe(30_000)
+    expect(QuotaPolicy.parseDelay("Rate limited. Retry after 5 minutes.")).toBe(300_000)
+    expect(QuotaPolicy.parseDelay("retry after 2 hours")).toBe(7_200_000)
+    expect(QuotaPolicy.parseDelay("Retry-After: 120")).toBe(120_000)
+    expect(QuotaPolicy.parseDelay("retry after 90 seconds")).toBe(90_000)
+    // Unit-specific prose wins over the bare header form, even when the bare
+    // header appears first, because it carries the less ambiguous duration.
+    expect(QuotaPolicy.parseDelay("Retry-After: 120. Retry after 5 minutes.")).toBe(300_000)
     expect(QuotaPolicy.parseDelay("try again in about a minute")).toBeUndefined()
     expect(QuotaPolicy.parseDelay("try again in -3 seconds")).toBeUndefined()
   })

@@ -7,7 +7,7 @@
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { FlowEngine } from "@smthrs/engine"
-import { Flow, FlowRuntime } from "@smthrs/flow"
+import { Action, Flow, FlowRuntime } from "@smthrs/flow"
 import * as Cell from "@smthrs/harness/Cell"
 import * as ContextWindow from "@smthrs/harness/ContextWindow"
 import * as EngineLike from "@smthrs/harness/EngineLike"
@@ -20,6 +20,7 @@ import * as ModelRequest from "@smthrs/model/ModelRequest"
 import * as Route from "@smthrs/model/Route"
 import { Node } from "@smthrs/plan"
 import * as PersistedPlan from "@smthrs/plan/Plan"
+import * as StepKey from "@smthrs/plan/StepKey"
 import * as Checkpoints from "@smthrs/std/Checkpoints"
 import * as StdError from "@smthrs/std/StdError"
 import {
@@ -1230,6 +1231,35 @@ describe("cell call identity across runs", () => {
         executed.push(`${call.flowName}#${call.identity.ordinal}`)
         return new Cell.CallResult({ outcome: "success", value: executed.length })
       })
+  })
+
+  it("keeps the sandbox cache key separate from the durable activity key", async () => {
+    const call = sharedCellCall("sealed")
+    const outcome = await drive(Effect.gen(function*() {
+      const sandboxKey = yield* StepKey.fromKeyMaterial(
+        FlowEngineLike.callMaterial(call, ["host-layer"]),
+        {}
+      )
+      const port = yield* FlowEngineLike.make({
+        model: countingModel([]),
+        route: staticRoute(),
+        layers: ["host-layer"],
+        capabilities: {},
+        calls: {
+          run: () =>
+            Effect.map(Action.CurrentInvocationKey, (key) =>
+              new Cell.CallResult({ outcome: "success", value: key ?? "missing" }))
+        }
+      })
+      const result = yield* port.call(call)
+      return { sandboxKey, activityKey: result.value }
+    }))
+
+    // `callMaterial` keys the workspace sandbox declaration; the dispatched
+    // activity also carries the durable scope and composition layers.
+    expect(completed(outcome)).toMatchObject({ activityKey: expect.stringMatching(/^key1_/) })
+    expect((completed(outcome) as { readonly activityKey: string; readonly sandboxKey: string }).activityKey)
+      .not.toBe((completed(outcome) as { readonly activityKey: string; readonly sandboxKey: string }).sandboxKey)
   })
 
   /**

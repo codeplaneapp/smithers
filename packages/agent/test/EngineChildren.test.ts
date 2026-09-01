@@ -92,6 +92,24 @@ const Unstarted = Flow.make("agent/test/children-unstarted", {
   body: () => Node.succeed("")
 })
 
+const Counted = Flow.make("agent/test/children-counted", {
+  payload: { count: Schema.Number },
+  success: Schema.String,
+  error: Schema.Never,
+  body: () => Node.succeed("")
+})
+
+class WorkerRefusal extends Schema.TaggedError<WorkerRefusal>()("agent/test/WorkerRefusal", {
+  message: Schema.String
+}) {}
+
+const Refusing = Flow.make("agent/test/children-refusing", {
+  payload: {},
+  success: Schema.String,
+  error: WorkerRefusal,
+  body: () => Node.succeed("")
+})
+
 /**
  * A child that parks, then reports what it was told while it was parked.
  *
@@ -122,7 +140,7 @@ const redriveGate = DurableDeferred.make("agent/test/children-redrive", { succes
 const collideGate = DurableDeferred.make("agent/test/children-collide", { success: Schema.String })
 
 /** Every flow this host is willing to start as a child. */
-const childFlows = [Worker, Structured, Silent, Unstarted, Steerable]
+const childFlows = [Worker, Structured, Silent, Unstarted, Counted, Refusing, Steerable]
 
 /** The text of one rendered steering insert. */
 const textOf = (message: ModelRequest.Message): string =>
@@ -230,6 +248,7 @@ const registerChildren = (runtime: FlowRuntime.FlowRuntime["Service"]) =>
     yield* runtime.register(Worker, () => Effect.succeed("worker finished"))
     yield* runtime.register(Structured, () => Effect.succeed({ ok: true }))
     yield* runtime.register(Silent, () => Effect.void)
+    yield* runtime.register(Counted, ({ count }) => Effect.succeed(`counted ${count}`))
   })
 
 const children = (options?: Partial<EngineChildren.Options>) =>
@@ -313,7 +332,28 @@ describe("EngineChildren.spawn", () => {
       ).toBe("not_found")
     })))
 
-  it("reports a declared flow the engine never registered as not_found", () =>
+  it("uses labels as child identity and defaults them to the flow name", () =>
+    run(Effect.gen(function*() {
+      const runtime = yield* engine("children-label-identity")
+      const port = yield* children().pipe(Effect.provideService(FlowRuntime.FlowRuntime, runtime))
+      yield* registerChildren(runtime)
+      yield* runtime.register(Parent, () =>
+        Effect.gen(function*() {
+          const first = yield* port.spawn({ flow: Worker._tag })
+          const second = yield* port.spawn({ flow: Worker._tag })
+          const labelledA = yield* port.spawn({ flow: Worker._tag, label: "reviewer-a" })
+          const labelledB = yield* port.spawn({ flow: Worker._tag, label: "reviewer-b" })
+          return JSON.stringify({ first, second, labelledA, labelledB })
+        }).pipe(Effect.orDie))
+
+      const encoded = yield* runtime.execute(Parent, { executionId: "spawn-labels", payload: {} })
+      const ids = JSON.parse(encoded) as Record<string, { readonly child: string }>
+
+      expect(ids["first"]?.child).toBe(ids["second"]?.child)
+      expect(ids["labelledA"]?.child).not.toBe(ids["labelledB"]?.child)
+    })))
+
+  it("reports an unregistered declared flow as a failed start", () =>
     run(Effect.gen(function*() {
       const runtime = yield* engine("children-unstarted")
       const store = yield* RunStore.RunStore
@@ -333,10 +373,28 @@ describe("EngineChildren.spawn", () => {
       const code = yield* runtime.execute(Parent, { executionId: "spawn-unstarted", payload: {} })
       const row = yield* Effect.exit(store.get(EngineChildren.childExecutionId("spawn-unstarted", "ghost")))
 
-      expect(code).toBe("not_found")
-      // Nothing durable was created, which is why `not_found` is the honest
-      // answer rather than a child that exists and failed.
+      expect(code).toBe("failed")
+      // Nothing durable was created, but the declaration exists: the ended
+      // start attempt is an engine failure rather than an absent flow.
       expect(Exit.isFailure(row)).toBe(true)
+    })))
+
+  it("reports a child payload rejected by its schema as a failed start", () =>
+    run(Effect.gen(function*() {
+      const runtime = yield* engine("children-invalid-payload")
+      const port = yield* children().pipe(Effect.provideService(FlowRuntime.FlowRuntime, runtime))
+      yield* registerChildren(runtime)
+      yield* runtime.register(Parent, () =>
+        port.spawn({ flow: Counted._tag, input: { count: "many" } as never }).pipe(
+          Effect.map((spawned) => spawned.child),
+          Effect.catch((error) =>
+            Effect.succeed(`${(error as ChildFlows.ChildError).code}|${(error as ChildFlows.ChildError).message}`)
+          )
+        ))
+
+      const refusal = yield* runtime.execute(Parent, { executionId: "spawn-invalid-payload", payload: {} })
+      expect(refusal).toContain("failed|")
+      expect(refusal).toContain("count")
     })))
 
   it("gives up on a start that neither creates a run nor ends", () =>
@@ -479,14 +537,14 @@ describe("EngineChildren.await", () => {
       expect((yield* port.await({ child: silent })).output).toBe("null")
     })))
 
-  it("reports a child that ended without a value", () =>
+  it("includes a typed child failure tag in the await refusal", () =>
     run(Effect.gen(function*() {
       const runtime = yield* engine("children-await-failed")
       const store = yield* RunStore.RunStore
       const port = yield* children().pipe(Effect.provideService(FlowRuntime.FlowRuntime, runtime))
-      yield* runtime.register(Worker, () => Effect.die(new Error("worker exploded")))
+      yield* runtime.register(Refusing, () => Effect.fail(new WorkerRefusal({ message: "worker refused" })))
       yield* runtime.register(Parent, () =>
-        port.spawn({ flow: Worker._tag, label: "doomed" }).pipe(
+        port.spawn({ flow: Refusing._tag, label: "doomed" }).pipe(
           Effect.map((spawned) => spawned.child),
           Effect.orDie
         ))
@@ -495,7 +553,9 @@ describe("EngineChildren.await", () => {
       yield* Effect.sleep("50 millis")
       expect((yield* store.get(child)).status).toBe("failed")
 
-      expect(childErrorOf(yield* Effect.exit(port.await({ child })))?.code).toBe("failed")
+      const refusal = childErrorOf(yield* Effect.exit(port.await({ child })))
+      expect(refusal?.code).toBe("failed")
+      expect(refusal?.message).toContain("agent/test/WorkerRefusal")
     })))
 
   it("refuses a round that handed off instead of answering", () =>
@@ -530,20 +590,31 @@ describe("EngineChildren.await", () => {
         "cancelled-child",
         JSON.stringify({ version: 1, flowName: Worker._tag, payload: {} })
       )
-      yield* store.requestCancel("cancelled-child", 1)
+      // The cancel stamp is the CALLER's timestamp and the store writes it
+      // unchecked, while `decodeRunRow` refuses any row whose
+      // `cancelRequestedAtMs` precedes `createdAtMs`. A literal would persist a
+      // row every later `get` rejects forever, so the request is stamped from
+      // the row the store just created.
+      const created = yield* store.get("cancelled-child")
+      const requested = yield* store.requestCancel("cancelled-child", created.createdAtMs)
+      expect(requested._tag).toBe("CancelRequested")
       const cancelled = yield* store.get("cancelled-child")
-      yield* store.claimAndOwn(
+      const claimed = yield* store.claimAndOwn(
         "cancelled-child",
         { status: cancelled.status, owner: cancelled.owner, heartbeatAtMs: cancelled.heartbeatAtMs },
         { hostId: "children-await-refusals", pid: 1, nonce: "cancel" },
-        1
+        created.createdAtMs
       )
-      yield* store.transitionOwned(
+      // Asserted rather than discarded: a refused claim would otherwise surface
+      // as an unrelated failure several statements later.
+      expect(claimed._tag).toBe("Activated")
+      const transitioned = yield* store.transitionOwned(
         "cancelled-child",
         { hostId: "children-await-refusals", pid: 1, nonce: "cancel" },
         "cancelled",
         JSON.stringify({ version: 1, flowName: Worker._tag, payload: {} })
       )
+      expect(transitioned._tag).toBe("Transitioned")
       yield* store.create(
         "foreign-flow-child",
         JSON.stringify({ version: 1, flowName: "agent/test/not-declared-here", payload: {} })

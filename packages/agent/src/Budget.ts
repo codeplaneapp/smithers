@@ -20,24 +20,26 @@
  *
  * - **The accumulator is per run, keyed by the model step's content key, and
  *   projected from the journal.** Every call writes a {@link usageEvent}
- *   record on the journal's DURABLE channel, and a budget entering a run folds
- *   that run's records back before it decides anything. This is what makes a
- *   budget survive a restart: the engine resumes a run from its recorded NODE
- *   results and never re-enters a settled step's body, so an accumulator that
- *   lived only in memory would start a resumed run at zero and hand it a
- *   second full allowance. Keying by the content key is the other half: a
+ *   record and the run's first question writes a {@link budgetStartedEvent}
+ *   record on the journal's DURABLE channel. A budget entering a run folds
+ *   both back before it decides anything. This is what makes a budget survive
+ *   a restart: the engine resumes a run from its recorded NODE results and
+ *   never re-enters a settled step's body, so memory-only usage would hand a
+ *   resumed run a second token allowance and a memory-only clock would re-arm
+ *   its latency allowance. Keying by the content key is the other half: a
  *   replayed call and its own recovered record are the same key, so it counts
  *   once. Keying the accumulator itself by execution id is the third: one
  *   layer built at composition level serves every run the engine drives, and a
  *   single shared tally would spend run A's tokens out of run B's allowance.
  * - **The accounting fails closed.** A budget whose record could not be
- *   written, whose ledger could not be read, or whose ledger is longer than
- *   one recovery reads raises {@link AccountingUnavailable} instead of
- *   answering. Every one of those is a run that would come back from a restart
- *   with an allowance it has already spent, and the difference between a
- *   budget and a decoration is that it refuses rather than guesses. Only the
- *   {@link budgetWarningEvent} record is allowed to be lost: nothing reads it
- *   back, so losing one costs a line in an operator view and no decision.
+ *   written, whose ledger could not be read or decoded, or whose ledger is
+ *   longer than one recovery reads raises {@link AccountingUnavailable}
+ *   instead of answering. Every one of those is a run that would come back
+ *   from a restart with an allowance it has already spent, and the difference
+ *   between a budget and a decoration is that it refuses rather than guesses.
+ *   Only the {@link budgetWarningEvent} record is allowed to be lost: nothing
+ *   reads it back, so losing one costs a line in an operator view and no
+ *   decision.
  * - **Refusal is a projection, not a post-mortem.** The check happens BEFORE a
  *   call, and it projects the call's cost as the largest one the run has made.
  *   A budget that only noticed after the fact would always be exceeded by the
@@ -100,6 +102,8 @@ export interface TokenBudget {
  * It bounds when a call may START, not how long one may take: a call already
  * in flight is the provider's clock, and cutting it off is
  * `Agent.Options.modelCallMs`, which exists and is a different budget.
+ * Its zero is the run's first budget question and is durable, so a park or
+ * process restart does not grant the run the whole interval again.
  *
  * @category models
  * @since 0.1.0
@@ -190,9 +194,12 @@ export class Skipped extends Schema.TaggedError<Skipped>()(
  *
  * So the seam fails instead. `phase` says which half broke: `record` is the
  * write after a call the accumulator counted, `recover` is the read a run
- * makes before its first decision. A `record` failure is worth retrying — the
- * model step it accounts is sealed, so a re-dispatch replays the recorded
- * answer and writes the record again rather than paying a provider twice.
+ * makes before its first decision. A usage `record` failure is worth retrying:
+ * the model step it accounts is sealed, so a re-dispatch replays the recorded
+ * answer and writes the record again rather than paying a provider twice. A
+ * clock-zero `record` failure happens before the call and retries the write.
+ * `cause` preserves the encodable shape of the underlying storage failure so
+ * an operator keeps its tag, code, and fields alongside the human summary.
  *
  * @category errors
  * @since 0.1.0
@@ -203,7 +210,9 @@ export class AccountingUnavailable extends Schema.TaggedError<AccountingUnavaila
     phase: Schema.Literals(["record", "recover"]),
     /** The run whose ledger is unavailable. */
     runId: Schema.String,
-    message: Schema.String
+    message: Schema.String,
+    /** The encodable storage or codec failure that made the ledger unavailable. */
+    cause: Schema.optional(Schema.Unknown)
   }
 ) {}
 
@@ -359,12 +368,60 @@ export const budgetWarningEvent = "flows.agent.budget-warning.v1"
  * A write that FAILS is a different thing from a composition that keeps no
  * journal, and it is not ignored: it raises {@link AccountingUnavailable}, so
  * the step that made the call fails rather than the run continuing with spend
- * only this process remembers.
+ * only this process remembers. The read side fails closed the same way when a
+ * current-version record does not decode through {@link UsageRecord}: that is
+ * a ledger this budget cannot read, not evidence that the call never happened.
+ * If forward-compatible skipping is ever wanted, it must be gated on an
+ * explicit version-field mismatch rather than on a failed current-version
+ * decode.
  *
  * @category records
  * @since 0.1.0
  */
 export const usageEvent = "flows.agent.usage.v1"
+
+/**
+ * The payload one {@link usageEvent} record carries.
+ *
+ * This is the wire format of a DURABLE record read back on resume, so it has
+ * an owner on both the write and read side. A record that does not decode is a
+ * ledger this budget cannot read rather than a call that never happened, and
+ * recovery fails closed instead of handing the run that allowance again.
+ *
+ * @category records
+ * @since 1.0.0-rc.0
+ */
+export const UsageRecord = Schema.Struct({
+  stepKey: Schema.String,
+  tokens: Schema.Finite
+})
+
+/**
+ * The journal event one run's latency clock zero is written to.
+ *
+ * Like {@link usageEvent}, this record is READ BACK on resume. A run whose
+ * zero is not recovered re-arms its whole latency allowance on every park,
+ * reclaim, or process restart, so the first recovery writes it durably and
+ * later recoveries keep the earliest value they find.
+ *
+ * @category records
+ * @since 1.0.0-rc.0
+ */
+export const budgetStartedEvent = "flows.agent.budget-started.v1"
+
+/**
+ * The payload one {@link budgetStartedEvent} record carries.
+ *
+ * This is a durable wire format owned by both the first writer and every
+ * resumed reader. An undecodable current-version payload leaves the latency
+ * ledger unknown, so recovery fails closed instead of choosing a new zero.
+ *
+ * @category records
+ * @since 1.0.0-rc.0
+ */
+export const BudgetStartedRecord = Schema.Struct({
+  startedAt: Schema.Finite
+})
 
 /** The journal source every record this module writes is attributed to. */
 const recordSource = JournalEvent.SourceId.make("/agent/budget")
@@ -387,7 +444,7 @@ interface State {
   readonly tokens: number
   readonly largestCall: number
   readonly counted: ReadonlySet<string>
-  readonly latched: boolean
+  readonly latched: BudgetExceeded | undefined
 }
 
 const exceeded = (
@@ -434,7 +491,7 @@ const verdictFor = (failure: BudgetExceeded): Verdict =>
 const emit = (
   write: (journal: Journal.Service, input: JournalEvent.Input) => Effect.Effect<unknown, unknown>,
   eventType: string,
-  payload: Record<string, unknown>
+  payload: unknown
 ): Effect.Effect<void, unknown> =>
   Effect.gen(function*() {
     const journal = yield* Effect.serviceOption(Journal.Journal)
@@ -452,6 +509,22 @@ const emit = (
   })
 
 /**
+ * Makes an accounting cause survive its error schema's encoder.
+ *
+ * This mirrors the action-boundary idiom in `AgentAction`: render a live error
+ * instance to plain JSON so its tag, code, and fields survive, and keep a
+ * string approximation only for a value JSON cannot represent.
+ */
+const encodableCause = (cause: unknown): unknown => {
+  try {
+    return JSON.parse(JSON.stringify(cause))
+  } catch {
+    /* v8 ignore next -- journal and schema failures in this module carry JSON-compatible fields; this arm keeps a future cyclic or BigInt-bearing failure from replacing the accounting error with a rendering defect */
+    return String(cause)
+  }
+}
+
+/**
  * The failure a broken half of the ledger reports.
  *
  * One sentence per phase rather than a shared one, because the two are
@@ -462,14 +535,16 @@ const emit = (
 const unavailable = (
   phase: "record" | "recover",
   runId: string,
-  detail: string
+  detail: string,
+  cause?: unknown
 ): AccountingUnavailable =>
   new AccountingUnavailable({
     phase,
     runId,
     message: phase === "record"
-      ? `The budget could not durably record what run ${runId} just spent, so a resumed run would be given that allowance again: ${detail}`
-      : `The budget could not read what run ${runId} has already spent, so it cannot say what is left: ${detail}`
+      ? `The budget could not durably record run ${runId}'s ledger, so a resumed run could be given that allowance again: ${detail}`
+      : `The budget could not read run ${runId}'s ledger, so it cannot say what allowance is left: ${detail}`,
+    ...(cause === undefined ? {} : { cause: encodableCause(cause) })
   })
 
 /**
@@ -492,10 +567,24 @@ const journalWarning = (payload: Record<string, unknown>): Effect.Effect<void> =
  */
 const journalUsage = (
   runId: string,
-  payload: Record<string, unknown>
+  payload: typeof UsageRecord.Encoded
 ): Effect.Effect<void, AccountingUnavailable> =>
   emit((journal, input) => journal.emitDurableUnfenced(input), usageEvent, payload).pipe(
-    Effect.mapError((cause) => unavailable("record", runId, String(cause)))
+    Effect.mapError((cause) => unavailable("record", runId, String(cause), cause))
+  )
+
+/**
+ * Writes one latency clock zero on the journal's DURABLE channel.
+ *
+ * See {@link budgetStartedEvent} for why a fresh process must recover this
+ * value instead of starting the whole latency allowance again.
+ */
+const journalBudgetStarted = (
+  runId: string,
+  payload: typeof BudgetStartedRecord.Encoded
+): Effect.Effect<void, AccountingUnavailable> =>
+  emit((journal, input) => journal.emitDurableUnfenced(input), budgetStartedEvent, payload).pipe(
+    Effect.mapError((cause) => unavailable("record", runId, String(cause), cause))
   )
 
 /** How many journal entries one recovery read asks for at a time. */
@@ -517,27 +606,41 @@ const recoveryPageSize = 500
  */
 export const defaultRecoveryEntries = 1_000_000
 
+interface RecoveredLedger {
+  readonly usage: ReadonlyMap<string, number>
+  readonly startedAt: number | undefined
+}
+
 /**
- * Reads back the usage one run already recorded.
+ * Reads back the usage and latency zero one run already recorded.
  *
- * Returns the calls it found keyed by step, so the caller folds them through
- * the same accumulator a live call goes through and the dedupe applies to both.
+ * Returns calls keyed by step, so the caller folds them through the same
+ * accumulator a live call goes through and the dedupe applies to both. The
+ * earliest clock zero wins, making a duplicate write harmless without letting
+ * a later incarnation move the allowance forward.
  *
  * A composition with no journal recovers nothing, because it never recorded
  * anything and there is nothing to be wrong about. Every OTHER absence fails:
  * a journal that cannot be flushed or read, and a journal longer than
- * `entryLimit`, are runs whose spend is unknown rather than zero.
+ * `entryLimit`, are runs whose spend or clock zero is unknown rather than zero.
  */
 const recoverUsage = (
   runId: string,
   entryLimit: number
-): Effect.Effect<ReadonlyMap<string, number>, AccountingUnavailable> =>
+): Effect.Effect<RecoveredLedger, AccountingUnavailable> =>
   Effect.gen(function*() {
     const recovered = new Map<string, number>()
+    let startedAt = Number.POSITIVE_INFINITY
     const journal = yield* Effect.serviceOption(Journal.Journal)
-    if (Option.isNone(journal)) return recovered
+    if (Option.isNone(journal)) return { usage: recovered, startedAt: undefined }
     const id = JournalEvent.RunId.make(runId)
-    const unreadable = (cause: unknown) => unavailable("recover", runId, String(cause))
+    const unreadable = (cause: unknown) => unavailable("recover", runId, String(cause), cause)
+    const undecodable = (entry: JournalEvent.Entry, record: string) =>
+      unavailable(
+        "recover",
+        runId,
+        `its ${record} record at seq ${entry.seq} from ${entry.sourceId} does not decode`
+      )
     // Flushed first, and the flush failure is the read's failure: entries the
     // journal is still holding are entries this run spent.
     yield* journal.value.flush.pipe(Effect.mapError(unreadable))
@@ -550,14 +653,26 @@ const recoverUsage = (
           : { runId: id, after, limit: recoveryPageSize }
       ).pipe(Effect.mapError(unreadable))
       for (const entry of read.entries) {
-        if (entry.eventType !== usageEvent) continue
-        const payload = entry.payload as { readonly stepKey?: unknown; readonly tokens?: unknown }
-        if (typeof payload?.stepKey !== "string" || typeof payload.tokens !== "number") continue
-        recovered.set(payload.stepKey, payload.tokens)
+        if (entry.eventType === usageEvent) {
+          const payload = yield* Schema.decodeUnknownEffect(UsageRecord)(entry.payload).pipe(
+            Effect.mapError(() => undecodable(entry, "usage"))
+          )
+          recovered.set(payload.stepKey, payload.tokens)
+        } else if (entry.eventType === budgetStartedEvent) {
+          const payload = yield* Schema.decodeUnknownEffect(BudgetStartedRecord)(entry.payload).pipe(
+            Effect.mapError(() => undecodable(entry, "budget-started"))
+          )
+          startedAt = Math.min(startedAt, payload.startedAt)
+        }
       }
       scanned += read.entries.length
       const last = read.entries.at(-1)
-      if (!read.hasMore || last === undefined) return recovered
+      if (!read.hasMore || last === undefined) {
+        return {
+          usage: recovered,
+          startedAt: startedAt === Number.POSITIVE_INFINITY ? undefined : startedAt
+        }
+      }
       if (scanned >= entryLimit) {
         return yield* Effect.fail(
           unavailable(
@@ -581,8 +696,8 @@ const recoverUsage = (
  * latency budget's clock at process start.
  */
 interface RunAccount {
-  /** When this run first asked the budget anything: its latency clock's zero. */
-  readonly startedAt: number
+  /** The latency zero, replaced once when recovery finds its earlier durable value. */
+  startedAt: number
   readonly state: Ref.Ref<State>
   /**
    * Serializes the one-time recovery.
@@ -618,8 +733,8 @@ export const looseRunId = ""
  * drives runs for weeks from holding one tally per run it ever drove. It is
  * far above any plausible concurrency, so the entry a running run needs is
  * always the most recently used one and is never the one evicted; an evicted
- * run projects its spend back from its own durable records the next time it
- * asks a question, and only its latency clock restarts.
+ * run projects both its spend and its original latency zero back from its own
+ * durable records the next time it asks a question.
  *
  * @category constructors
  * @since 0.1.0
@@ -665,7 +780,7 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
         tokens: 0,
         largestCall: 0,
         counted: new Set<string>(),
-        latched: false
+        latched: undefined
       })
       const recovery = yield* Semaphore.make(1)
       return { startedAt, state, recovery, recovered: false } satisfies RunAccount
@@ -726,14 +841,32 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
         ] as const
       })
 
-    /** Recovers one run's earlier spend, once, before its first decision. */
+    /** Recovers one run's earlier spend and latency zero once, before its first decision. */
     const ensureRecovered = (run: RunAccount, runId: string): Effect.Effect<void, AccountingUnavailable> =>
       run.recovery.withPermits(1)(
         Effect.suspend(() => {
           if (run.recovered) return Effect.void
           return recoverUsage(runId, recoveryEntries).pipe(
-            Effect.flatMap((usage) =>
-              Effect.forEach(usage, ([stepKey, spent]) => account(run, stepKey, spent), { discard: true })
+            Effect.flatMap((ledger) =>
+              Effect.gen(function*() {
+                if (ledger.startedAt === undefined) {
+                  const payload = yield* Schema.encodeEffect(BudgetStartedRecord)({
+                    startedAt: run.startedAt
+                  }).pipe(
+                    Effect.mapError((cause) =>
+                      unavailable("record", runId, "its latency clock zero does not encode", cause)
+                    )
+                  )
+                  yield* journalBudgetStarted(runId, payload)
+                } else {
+                  run.startedAt = ledger.startedAt
+                }
+                yield* Effect.forEach(
+                  ledger.usage,
+                  ([stepKey, spent]) => account(run, stepKey, spent),
+                  { discard: true }
+                )
+              })
             ),
             Effect.andThen(Effect.sync(() => {
               run.recovered = true
@@ -765,7 +898,7 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
     const settle = (run: RunAccount, failure: BudgetExceeded): Effect.Effect<Verdict> =>
       Effect.gen(function*() {
         if (failure.onExceeded === "skip-remaining") {
-          yield* Ref.update(run.state, (current) => ({ ...current, latched: true }))
+          yield* Ref.update(run.state, (current) => ({ ...current, latched: failure }))
         }
         if (failure.onExceeded === "warn") {
           yield* journalWarning({
@@ -791,17 +924,7 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
         // calls a run has not made, not the ones it is replaying.
         if (stepKey !== undefined && current.counted.has(stepKey)) return { _tag: "proceed" }
         const now = yield* Clock.currentTimeMillis
-        if (current.latched) {
-          return verdictFor(
-            exceeded(
-              "tokens",
-              "skip-remaining",
-              current.tokens,
-              policy.tokens?.max ?? 0,
-              current.largestCall
-            )
-          )
-        }
+        if (current.latched !== undefined) return verdictFor(current.latched)
         const latency = policy.latency
         if (latency !== undefined && now - run.startedAt > latency.maxMillis) {
           return yield* settle(
@@ -849,7 +972,10 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
           // record exists to be read back by the NEXT incarnation of this run,
           // and a record whose call the live budget never counted would make
           // the resumed run count it twice.
-          yield* journalUsage(runId, { stepKey, tokens: spent })
+          const payload = yield* Schema.encodeEffect(UsageRecord)({ stepKey, tokens: spent }).pipe(
+            Effect.mapError((cause) => unavailable("record", runId, "its usage record does not encode", cause))
+          )
+          yield* journalUsage(runId, payload)
         }),
       usage: recovered.pipe(
         Effect.flatMap(({ run }) => Ref.get(run.state)),
@@ -870,14 +996,14 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
           // No accumulator, so no caching either: answering about an arbitrary
           // run must not leave one tally per run the process was ever asked
           // about.
-          return Effect.map(recoverUsage(runId, recoveryEntries), (records) => {
+          return Effect.map(recoverUsage(runId, recoveryEntries), (ledger) => {
             let tokens = 0
             let largestCall = 0
-            for (const spent of records.values()) {
+            for (const spent of ledger.usage.values()) {
               tokens += spent
               largestCall = Math.max(largestCall, spent)
             }
-            return { tokens, calls: records.size, largestCall }
+            return { tokens, calls: ledger.usage.size, largestCall }
           })
         })
     })

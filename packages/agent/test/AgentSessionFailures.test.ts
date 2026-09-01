@@ -35,7 +35,7 @@ import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
 import { RegistryError } from "@smthrs/registry/RegistryError"
 import { RunStore } from "@smthrs/run-store"
-import { Clock, Deferred, Duration, Effect, Fiber, Layer, Option, PubSub, Stream } from "effect"
+import { Clock, Deferred, Duration, Effect, Fiber, Layer, Option, PubSub, Schema, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
 import * as AgentSession from "../src/AgentSession.ts"
@@ -546,6 +546,8 @@ describe("the executor's registry seam", () => {
     expect(result.acceptance).toBe("accepted")
     expect(result.status).toBe("failed")
     expect(causeOf(record)).toContain("has a module body; only prompt flows run on the agent")
+    expect(causeOf(record)).toContain("engine_failed")
+    expect(causeOf(record)).not.toContain("SeatUnresolved")
   })
 
   it("leaves a flow the registry does not disclose pending, and drives nothing", async () => {
@@ -1289,28 +1291,38 @@ describe("the settlement a failure is persisted as", () => {
    * Rendering the error to the text the operator already reads is what makes
    * the settlement encodable.
    */
-  it("renders an error to the text `Cause.pretty` gives the operator", () => {
+  it("keeps a tagged schema error as a plain object with its refusal fields", () => {
+    class Refusal extends Schema.TaggedError<Refusal>()("agent/test/SettlementRefusal", {
+      reason: Schema.String,
+      retryable: Schema.Boolean
+    }) {}
     const rendered = AgentSession.settlementFailure(
-      new Seat.SeatUnresolved({ seat: "anthropic:test-model", message: "no credits remaining" })
+      new Refusal({ reason: "no credits remaining", retryable: false })
     )
 
-    expect(typeof rendered).toBe("string")
-    expect(String(rendered)).toContain("no credits remaining")
+    expect(rendered).toEqual({
+      _tag: "agent/test/SettlementRefusal",
+      reason: "no credits remaining",
+      retryable: false
+    })
+    expect(Object.getPrototypeOf(rendered)).toBe(Object.prototype)
   })
 
-  it("renders a class instance that is not an error", () => {
+  it("renders a class instance to its enumerable fields", () => {
     class Refusal {
       readonly reason = "billing"
     }
 
-    expect(typeof AgentSession.settlementFailure(new Refusal())).toBe("string")
+    expect(AgentSession.settlementFailure(new Refusal())).toEqual({ reason: "billing" })
   })
 
-  it("renders a value the JSON codec cannot take", () => {
-    expect(typeof AgentSession.settlementFailure(Number.POSITIVE_INFINITY)).toBe("string")
+  it("renders JSON-compatible projections before falling back to text", () => {
+    expect(AgentSession.settlementFailure(Number.POSITIVE_INFINITY)).toBeNull()
     expect(typeof AgentSession.settlementFailure(() => undefined)).toBe("string")
-    expect(typeof AgentSession.settlementFailure({ nested: { deep: new Error("boom") } })).toBe("string")
-    expect(typeof AgentSession.settlementFailure([1, new Error("boom")])).toBe("string")
+    expect(AgentSession.settlementFailure({ nested: { deep: new Error("boom") } })).toEqual({
+      nested: { deep: {} }
+    })
+    expect(AgentSession.settlementFailure([1, new Error("boom")])).toEqual([1, {}])
   })
 
   it("renders a cyclic or very deep value instead of throwing from the mapper", () => {

@@ -398,6 +398,8 @@ export interface AgentAction<
     | SeatResolver
     | Steering.Source
     | Crypto.Crypto
+    | Budget.Budget
+    | QuotaPolicy.QuotaClassifier
     | Payload["DecodingServices"]
     | Payload["EncodingServices"]
     | Output["DecodingServices"]
@@ -418,6 +420,21 @@ const completedOutput = (
 }
 
 /**
+ * Reports a refused budget as the budget failure, not as a harness one.
+ *
+ * The model boundary can only fail with what its port declares, so a refusal
+ * travels from {@link module:FlowEngineLike} wrapped in a `HarnessError`. The
+ * step is where an author reads it, and at a step "this run has spent its
+ * tokens" is a different fact from "the model call failed" — it names no
+ * provider, and no retry of the call will change it.
+ */
+const budgetFailure = (failure: AgentFailure): AgentFailure =>
+  failure instanceof HarnessError &&
+    (failure.cause instanceof Budget.BudgetExceeded || failure.cause instanceof Budget.Skipped)
+    ? failure.cause
+    : failure
+
+/**
  * Makes a failure survive the action boundary's encoder.
  *
  * `HarnessError.cause` is `Schema.Unknown`, and what the cell controller puts
@@ -434,21 +451,6 @@ const completedOutput = (
  * kept as its string form rather than dropped, because "something failed and we
  * cannot say what" is worse than a rendered approximation.
  */
-/**
- * Reports a refused budget as the budget failure, not as a harness one.
- *
- * The model boundary can only fail with what its port declares, so a refusal
- * travels from {@link module:FlowEngineLike} wrapped in a `HarnessError`. The
- * step is where an author reads it, and at a step "this run has spent its
- * tokens" is a different fact from "the model call failed" — it names no
- * provider, and no retry of the call will change it.
- */
-const budgetFailure = (failure: AgentFailure): AgentFailure =>
-  failure instanceof HarnessError &&
-    (failure.cause instanceof Budget.BudgetExceeded || failure.cause instanceof Budget.Skipped)
-    ? failure.cause
-    : failure
-
 const encodableFailure = (failure: AgentFailure): AgentFailure => {
   if (!(failure instanceof HarnessError) || failure.cause === undefined) return failure
   const cause = failure.cause

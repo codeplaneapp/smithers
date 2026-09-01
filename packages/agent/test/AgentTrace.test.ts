@@ -6,9 +6,11 @@
  */
 import * as Capability from "@smthrs/capability/Capability"
 import * as Permission from "@smthrs/capability/Permission"
+import * as Digest from "@smthrs/core/Digest"
 import * as AgentEvent from "@smthrs/harness/AgentEvent"
 import * as Cell from "@smthrs/harness/Cell"
 import * as EngineLike from "@smthrs/harness/EngineLike"
+import * as CanonicalJson from "@smthrs/model/CanonicalJson"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
 import * as ModelRequest from "@smthrs/model/ModelRequest"
 import { Option } from "effect"
@@ -444,5 +446,46 @@ describe("trace", () => {
         })
       )
     ).toBeUndefined()
+  })
+
+  it("replaces an oversized call value with its byte count and full-value digest", () => {
+    const value = "x".repeat(5 * 1024 * 1024)
+    const projected = AgentSession.trace(
+      new AgentEvent.CellCallSettled({
+        eventType: "flows.harness.cell-call-settled.v1",
+        flowName: "read",
+        identity,
+        result: new Cell.CallResult({ outcome: "success", value })
+      })
+    )
+
+    expect(projected).toEqual({
+      eventType: "control.agent.cell-call-settled",
+      payload: {
+        flowName: "read",
+        outcome: "success",
+        message: undefined,
+        value: {
+          truncated: true,
+          bytes: new TextEncoder().encode(value).byteLength,
+          digest: Digest.digest(CanonicalJson.stringify(value))
+        }
+      }
+    })
+
+    const small = { content: "unchanged" }
+    expect(
+      AgentSession.trace(
+        new AgentEvent.CellCallSettled({
+          eventType: "flows.harness.cell-call-settled.v1",
+          flowName: "read",
+          identity,
+          result: new Cell.CallResult({ outcome: "success", value: small })
+        })
+      )
+    ).toEqual({
+      eventType: "control.agent.cell-call-settled",
+      payload: { flowName: "read", outcome: "success", message: undefined, value: small }
+    })
   })
 })
