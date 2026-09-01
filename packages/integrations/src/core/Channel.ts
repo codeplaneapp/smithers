@@ -8,8 +8,14 @@
  * `Control`. Signature verification is the amplification guard, so nothing in
  * this module lets a provider decoder run before it.
  *
- * `Channels.ingest` also drops a replayed `idempotencyKey`, which is what
- * makes a provider redelivery safe to accept.
+ * `Channels.ingest` drops a replayed `idempotencyKey`, which is what makes a
+ * provider redelivery safe to accept. The key is the caller's to supply on the
+ * `RawInbound` it hands `ingest`; each provider module exports the
+ * `idempotencyKey` that derives it from that provider's delivery identity, and
+ * an ingress that does not pass one has no redelivery protection.
+ *
+ * The decoder's output is validated against `ExternalEvent` before it leaves
+ * this module, so a decoder bug fails on the delivery that triggered it.
  *
  * @since 1.0.0
  */
@@ -19,7 +25,7 @@ import type { FlowId, RunId, RunSummary } from "@smthrs/control/ControlSchema"
 import type { Credential, CredentialRef } from "@smthrs/control/Credential"
 import * as WebhookChannel from "@smthrs/control/WebhookChannel"
 import { Effect, Redacted, Schema } from "effect"
-import type { ExternalEvent } from "./ExternalEvent.ts"
+import { decode as decodeExternalEvent, type ExternalEvent } from "./ExternalEvent.ts"
 import { IntegrationError, isIntegrationError, toInvalidInput, toUnauthorized } from "./IntegrationError.ts"
 import * as SignalName from "./SignalName.ts"
 
@@ -75,7 +81,13 @@ export interface Config {
   /** The journal-safe reference to the signing secret. */
   readonly credential: Redacted.Redacted<CredentialRef>
   readonly secret: SecretResolver
-  /** The provider's signature check over the exact delivered bytes. */
+  /**
+   * The provider's signature check over the exact delivered bytes.
+   *
+   * A verifier that throws is treated as a failed verification: the delivery
+   * is refused with `Unauthorized`, not turned into a defect that kills the
+   * ingress fiber.
+   */
   readonly verify: (raw: RawInbound, secret: string) => boolean
   /**
    * The provider's decoder. Runs only after verification, and may throw an
@@ -109,14 +121,30 @@ const invalidSignature = (name: string): IntegrationError =>
  * @since 1.0.0
  */
 export const make = (config: Config): Channel => {
+  const unauthorized = () => toUnauthorized(invalidSignature(config.name))
   const verifier: WebhookChannel.SignatureVerifier = (raw, credential) =>
     config.secret(credential).pipe(
       Effect.flatMap((secret) =>
-        config.verify(raw, Redacted.value(secret))
-          ? Effect.void
-          : Effect.fail(toUnauthorized(invalidSignature(config.name)))
+        // An application-supplied verifier is ordinary code that can throw.
+        // A throw is a refusal, not a defect: the delivery did not verify.
+        Effect.try({ try: () => config.verify(raw, Redacted.value(secret)), catch: unauthorized }).pipe(
+          Effect.flatMap((verified) => verified ? Effect.void : Effect.fail(unauthorized()))
+        )
       )
     )
+  // An `IntegrationError` is provider-safe by construction, so its summary
+  // crosses to the control plane. Anything else is internal text, a
+  // `TypeError` message or a foreign error's docs-URL suffix, and only the
+  // channel name crosses; the detail stays in the log.
+  const decodeFailed = (cause: unknown): Effect.Effect<never, InvalidInput> =>
+    isIntegrationError(cause)
+      ? Effect.fail(toInvalidInput(cause))
+      : Effect.logWarning(`${config.name} webhook decoder failed`, cause).pipe(
+        Effect.zipRight(
+          Effect.fail(new InvalidInput({ issue: `${config.name} webhook payload could not be decoded.` }))
+        )
+      )
+
   const json = WebhookChannel.make({
     name: config.name,
     schema: Schema.Json,
@@ -132,11 +160,25 @@ export const make = (config: Config): Channel => {
     decode: (raw) =>
       json.decode(raw).pipe(
         Effect.flatMap((payload) =>
-          Effect.try({
-            try: () => config.decode(raw, payload),
-            catch: (cause) =>
-              isIntegrationError(cause) ? toInvalidInput(cause) : new InvalidInput({ issue: String(cause) })
-          })
+          Effect.try({ try: () => config.decode(raw, payload), catch: (cause) => cause }).pipe(
+            Effect.catch(decodeFailed),
+            // The decoder's own output is validated here, at the ingress
+            // boundary, so a decoder bug fails loudly on the delivery that
+            // triggered it rather than as a malformed signal three hops later.
+            Effect.flatMap((event) =>
+              decodeExternalEvent(event).pipe(
+                Effect.catch((issue) =>
+                  Effect.logWarning(`${config.name} webhook decoder produced a malformed event`, issue).pipe(
+                    Effect.zipRight(
+                      Effect.fail(
+                        new InvalidInput({ issue: `${config.name} webhook decoder produced a malformed event.` })
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
         )
       ),
     map: (event) => config.route(event as ExternalEvent),

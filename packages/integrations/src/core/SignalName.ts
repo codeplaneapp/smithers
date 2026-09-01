@@ -22,6 +22,19 @@ import type { ExternalEvent } from "./ExternalEvent.ts"
  */
 export const INTEGRATION_SIGNAL_PREFIX = "integration:"
 
+/**
+ * Whether `value` is a segment {@link eventName} accepts verbatim: a non-empty
+ * string with no surrounding whitespace and no `:`.
+ *
+ * One refinement serves the constructor and {@link parse}, so a name the
+ * constructor refuses to build is also a name the parser refuses to read.
+ *
+ * @category refinements
+ * @since 1.0.0
+ */
+export const isSegment = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.trim() === value && !value.includes(":")
+
 const requireSegment = (value: string, label: string): string => {
   const normalized = typeof value === "string" ? value.trim() : ""
   if (normalized.length === 0) {
@@ -40,7 +53,10 @@ const requireSegment = (value: string, label: string): string => {
  *
  * The `event` segment may contain dots, which is how per-action variants are
  * spelled (`pull_request.opened`). Neither segment may contain `:`, because
- * that is the separator {@link parse} splits on.
+ * that is the separator {@link parse} splits on. Both are trimmed.
+ *
+ * Throws `SmithersError` with code `INVALID_INPUT` when either segment is
+ * empty after trimming or contains a `:`.
  *
  * @category constructors
  * @since 1.0.0
@@ -61,6 +77,11 @@ export const isIntegrationSignalName = (name: unknown): name is string =>
  * Splits an `integration:<service>:<event>` name back into its parts, or
  * `null` when `name` is not one.
  *
+ * The round trip is closed in both directions: a name {@link eventName} could
+ * not have produced, such as one whose event segment carries a second `:` or
+ * whose service segment is padded with whitespace, parses as `null` rather
+ * than becoming an identity nothing can rebuild.
+ *
  * @category getters
  * @since 1.0.0
  */
@@ -69,12 +90,18 @@ export const parse = (name: string): { readonly service: string; readonly event:
   const rest = name.slice(INTEGRATION_SIGNAL_PREFIX.length)
   const separator = rest.indexOf(":")
   if (separator <= 0 || separator === rest.length - 1) return null
-  return { service: rest.slice(0, separator), event: rest.slice(separator + 1) }
+  const service = rest.slice(0, separator)
+  const event = rest.slice(separator + 1)
+  if (!isSegment(service) || !isSegment(event)) return null
+  return { service, event }
 }
 
 /**
  * The attribution stamped on a signal an integration delivered:
  * `integration:<service>`.
+ *
+ * Throws `SmithersError` with code `INVALID_INPUT` for an empty or
+ * colon-bearing service.
  *
  * @category constructors
  * @since 1.0.0

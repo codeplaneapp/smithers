@@ -73,13 +73,22 @@ export class IntegrationError extends SmithersError {
  * Whether `error` is an {@link IntegrationError}.
  *
  * The name check catches an error that crossed a module-instance boundary,
- * where `instanceof` alone would miss it.
+ * where `instanceof` alone would miss it. A name alone is not enough: it is
+ * forgeable, and an error from a copy of this module whose reason list has
+ * drifted carries a `reason` this instance cannot encode. So the name branch
+ * also requires the shape the conversions read, and anything else falls
+ * through to the caller's unclassified path instead of throwing there.
  *
  * @category refinements
  * @since 1.0.0
  */
-export const isIntegrationError = (error: unknown): error is IntegrationError =>
-  error instanceof IntegrationError || (error instanceof Error && error.name === "IntegrationError")
+export const isIntegrationError = (error: unknown): error is IntegrationError => {
+  if (error instanceof IntegrationError) return true
+  if (!(error instanceof Error) || error.name !== "IntegrationError") return false
+  const candidate = error as { readonly summary?: unknown; readonly reason?: unknown }
+  return typeof candidate.summary === "string" &&
+    reasons.includes(candidate.reason as Reason)
+}
 
 /**
  * Whether the failure is worth another attempt. Set by the clients on the

@@ -18,6 +18,12 @@ import type { RawInbound } from "@smthrs/control/Channels"
  * An empty, `null`, or `undefined` path returns `value` itself. Arrays are
  * treated as non-objects: every path this package reads addresses a record.
  *
+ * Only own properties are read. A provider payload is attacker-supplied and a
+ * caller may choose the path, so an inherited member such as `constructor` or
+ * `toString` must read as missing rather than hand back a host internal. A
+ * `__proto__` key that `JSON.parse` produced is an own property and stays
+ * readable as the data it is.
+ *
  * @category getters
  * @since 1.0.0
  */
@@ -26,6 +32,7 @@ export const readJsonPath = (value: unknown, path?: string | null): unknown => {
   let current = value
   for (const segment of path.split(".")) {
     if (current === null || typeof current !== "object" || Array.isArray(current)) return undefined
+    if (!Object.hasOwn(current, segment)) return undefined
     current = (current as Record<string, unknown>)[segment]
     if (current === undefined) return undefined
   }

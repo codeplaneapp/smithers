@@ -22,9 +22,33 @@ export interface AuthorizationRequest {
   /** A string, or scopes to space-join. Omitted when empty. */
   readonly scope?: string | ReadonlyArray<string> | undefined
   readonly codeChallengeMethod?: "S256" | "plain" | undefined
-  /** Provider-specific parameters, applied last so they can override. */
+  /**
+   * Provider-specific parameters, applied after the standard ones. The
+   * security parameters are reserved: see {@link RESERVED_PARAMS}.
+   */
   readonly extraParams?: Readonly<Record<string, string>> | undefined
 }
+
+/**
+ * The query parameters `extraParams` may not replace.
+ *
+ * `state` is the CSRF binding and `code_challenge` with its method is the PKCE
+ * binding, both validated above. Letting a caller overwrite them from a
+ * provider-specific map would disable exactly the protections this builder
+ * validates for, so they are refused rather than silently overwritten.
+ * `response_type` stays overridable, which is the one case the parameter
+ * exists for.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const RESERVED_PARAMS: ReadonlyArray<string> = [
+  "client_id",
+  "redirect_uri",
+  "state",
+  "code_challenge",
+  "code_challenge_method"
+]
 
 const parseEndpoint = (authorizationEndpoint: string): URL => {
   const invalid = () => new TypeError("OAuth authorizationEndpoint must be an absolute http(s) URL")
@@ -57,7 +81,9 @@ const normalizeScope = (scope: string | ReadonlyArray<string> | undefined): stri
  * Builds the URL to send the user to.
  *
  * `extraParams` is applied after the standard parameters, so a provider that
- * needs a different `response_type` can say so without a second builder.
+ * needs a different `response_type` can say so without a second builder. It
+ * cannot replace a parameter in {@link RESERVED_PARAMS}: a `TypeError` naming
+ * the key is raised instead.
  *
  * @category constructors
  * @since 1.0.0
@@ -78,6 +104,11 @@ export const buildAuthorizationUrl = (request: AuthorizationRequest): string => 
 
   const scope = normalizeScope(request.scope)
   if (scope !== undefined) url.searchParams.set("scope", scope)
-  for (const [key, value] of Object.entries(request.extraParams ?? {})) url.searchParams.set(key, value)
+  for (const [key, value] of Object.entries(request.extraParams ?? {})) {
+    if (RESERVED_PARAMS.includes(key)) {
+      throw new TypeError(`OAuth extraParams must not override the reserved parameter "${key}"`)
+    }
+    url.searchParams.set(key, value)
+  }
   return url.toString()
 }
