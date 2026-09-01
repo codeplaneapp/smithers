@@ -9,6 +9,7 @@ const srcs = S.Filegroup({
     S.file("//rust-toolchain.toml")
   ]
 })
+const cwd = "crates/flows-jj"
 
 const fetch = S.Cargo.Fetch({
   workspace: S.file("//Cargo.toml"),
@@ -41,7 +42,8 @@ const cargoTest = S.Cargo.Test({
 
 const buildScript = S.Shell.Test({
   bin: S.Runtime.bin,
-  args: ["--test", "crates/flows-jj/build-wasm.test.mjs"],
+  args: ["--test", "build-wasm.test.mjs"],
+  cwd,
   data: [srcs, S.file("build-wasm.mjs"), S.file("build-wasm.test.mjs")]
 })
 

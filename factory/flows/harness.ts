@@ -368,7 +368,12 @@ export const listWorkspacePackages = (): Array<WorkspacePackage> =>
       const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
         name?: unknown
       }
-      const expected = `@smthrs/${entry.name}`
+      // The deprecation shim is the one workspace package whose published name
+      // is not derived from its directory: it exists to own the retired
+      // `smthrs` name on the registry and throw a migration notice when it is
+      // imported, so requiring the scoped form would rename it out of the job
+      // it was published to do.
+      const expected = entry.name === "smthrs-deprecation" ? "smthrs" : `@smthrs/${entry.name}`
       if (manifest.name !== expected) {
         throw new Error(`${manifestPath} must declare the exact package name ${expected}`)
       }

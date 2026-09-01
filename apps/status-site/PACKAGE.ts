@@ -6,16 +6,19 @@ const srcs = S.Filegroup({
     S.file("alchemy.run.ts")
   ]
 })
+const cwd = "apps/status-site"
 
 const check = S.Shell.Test({
   bin: S.PackageManager.bin,
   args: ["--filter", "@smthrs/status-site", "exec", "tsc", "-p", "tsconfig.json", "--noEmit"],
+  cwd,
   data: [srcs, S.file("tsconfig.json")]
 })
 
 const unitTests = S.Shell.Test({
   bin: S.Host.bin("bun"),
-  args: ["test", "apps/status-site/tests"],
+  args: ["test", "tests"],
+  cwd,
   data: [srcs],
   sandbox: { network: true }
 })

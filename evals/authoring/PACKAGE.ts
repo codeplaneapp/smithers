@@ -5,21 +5,25 @@ const fireworksKey = S.Secret("FIREWORKS_API_KEY")
 const srcs = S.Filegroup({
   srcs: [S.file("validate.ts"), S.file("data/pilot-sft.jsonl")]
 })
+const cwd = "evals/authoring"
 
 const datasetValidate = S.Shell.Test({
   bin: S.Host.bin("bun"),
-  args: ["evals/authoring/validate.ts"],
+  args: ["validate.ts"],
+  cwd,
   data: [srcs]
 })
 
 const types = S.Shell.Test({
   bin: S.NodeModule.Bin("typescript", "tsc"),
-  args: ["-p", "evals/authoring/tsconfig.json", "--noEmit", "--lib", "ES2024"],
+  args: ["-p", "tsconfig.json", "--noEmit", "--lib", "ES2024"],
+  cwd,
   data: [srcs, S.file("tsconfig.json"), S.file("//tsconfig.base.json")]
 })
 
 const datasetUpload = S.Shell.Run({
-  command: "firectl dataset create pilot-sft-v0 evals/authoring/data/pilot-sft.jsonl",
+  command: "firectl dataset create pilot-sft-v0 data/pilot-sft.jsonl",
+  cwd,
   data: [srcs],
   gates: [datasetValidate],
   secrets: [fireworksKey],

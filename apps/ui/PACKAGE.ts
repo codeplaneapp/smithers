@@ -17,17 +17,20 @@ const srcs = S.Filegroup({
     S.file("playwright.config.ts")
   ]
 })
+const cwd = "apps/ui"
 
 const check = S.Shell.Test({
   bin: S.PackageManager.bin,
   args: ["--filter", "smithers-ui", "run", "check"],
+  cwd,
   data: [srcs, S.file("tsconfig.json")],
   sandbox: { network: true }
 })
 
 const unitTests = S.Shell.Test({
   bin: S.Host.bin("bun"),
-  args: ["test", "apps/ui/src"],
+  args: ["test", "src"],
+  cwd,
   data: [srcs],
   sandbox: { network: true }
 })

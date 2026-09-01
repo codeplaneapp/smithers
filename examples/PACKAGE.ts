@@ -5,16 +5,19 @@ const srcs = S.Filegroup({
 })
 
 const tests = S.Filegroup({ srcs: [S.glob("test/**/*.ts")] })
+const cwd = "examples"
 
 const check = S.Shell.Test({
   bin: S.NodeModule.Bin("typescript", "tsc"),
-  args: ["-p", "examples/tsconfig.json", "--noEmit"],
+  args: ["-p", "tsconfig.json", "--noEmit"],
+  cwd,
   data: [srcs, tests, S.file("tsconfig.json")]
 })
 
 const suite = S.Shell.Test({
   bin: S.PackageManager.bin,
   args: ["--filter", "@smthrs/examples", "exec", "vitest", "run"],
+  cwd,
   data: [srcs, tests, S.file("vitest.config.ts")],
   sandbox: { network: true }
 })

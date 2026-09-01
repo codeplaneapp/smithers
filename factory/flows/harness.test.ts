@@ -15,7 +15,12 @@ describe("factory harness guards", () => {
   test("workspace package identities are read from exact manifests", () => {
     const packages = listWorkspacePackages()
     expect(packages.length).toBeGreaterThan(0)
-    for (const pkg of packages) expect(pkg.npmName).toBe(`@smthrs/${pkg.dir}`)
+    for (const pkg of packages) {
+      // The deprecation shim owns the retired unscoped name on the registry;
+      // every other package is scoped after its directory.
+      const expected = pkg.dir === "smthrs-deprecation" ? "smthrs" : `@smthrs/${pkg.dir}`
+      expect(pkg.npmName).toBe(expected)
+    }
   })
 
   test("structured arguments are never interpreted by a shell", async () => {

@@ -3,16 +3,19 @@ import { Smithers as S } from "@smthrs/targets"
 const srcs = S.Filegroup({
   srcs: [S.glob("*.ts"), S.file("baseline.json")]
 })
+const cwd = "evals/agent"
 
 const suite = S.Shell.Test({
   bin: S.Host.bin("bun"),
-  args: ["evals/agent/run.ts"],
+  args: ["run.ts"],
+  cwd,
   data: [srcs]
 })
 
 const types = S.Shell.Test({
   bin: S.NodeModule.Bin("typescript", "tsc"),
-  args: ["-p", "evals/agent/tsconfig.json", "--noEmit", "--lib", "ES2024"],
+  args: ["-p", "tsconfig.json", "--noEmit", "--lib", "ES2024"],
+  cwd,
   data: [srcs, S.file("tsconfig.json"), S.file("//tsconfig.base.json")]
 })
 

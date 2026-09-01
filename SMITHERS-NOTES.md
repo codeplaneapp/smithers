@@ -144,6 +144,15 @@ Every one refused a real target, and each carries a red-then-green test.
   regression from this branch.
 - The examples suite passes 58 of 59; the live smoke needs an OpenAI seat
   with credit.
+- `//packages/build-cli:lint` reports seven errors on this host that a
+  case-sensitive filesystem cannot produce. Three read `Casing of
+  @smthrs/targets/Package does not match the underlying filesystem`, and the
+  other four are the `import/namespace` errors that follow from that failed
+  resolution (`'metadata' not found in imported namespace 'PackageValue'` and
+  the same for `isPackage` and `targetKeyPattern`). They reproduce identically
+  on the unmodified base commit, and the rule that emits them tests the
+  filesystem's own casing behavior, so Linux CI does not see them. The lint is
+  not weakened to hide them.
 
 ## Open questions
 

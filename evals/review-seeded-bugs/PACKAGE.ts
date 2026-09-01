@@ -6,10 +6,12 @@ const srcs = S.Filegroup({
     S.file("baseline.json")
   ]
 })
+const cwd = "evals/review-seeded-bugs"
 
 const suite = S.Shell.Test({
   bin: S.Host.bin("bun"),
-  args: ["evals/review-seeded-bugs/run.ts"],
+  args: ["run.ts"],
+  cwd,
   data: [srcs]
 })
 
@@ -17,9 +19,10 @@ const scorer = S.Shell.Test({
   bin: S.Host.bin("bun"),
   args: [
     "test",
-    "evals/review-seeded-bugs/score.test.ts",
-    "evals/review-seeded-bugs/deterministicReviewer.test.ts"
+    "score.test.ts",
+    "deterministicReviewer.test.ts"
   ],
+  cwd,
   data: [srcs]
 })
 
@@ -27,11 +30,12 @@ const types = S.Shell.Test({
   bin: S.NodeModule.Bin("typescript", "tsc"),
   args: [
     "-p",
-    "evals/review-seeded-bugs/tsconfig.json",
+    "tsconfig.json",
     "--noEmit",
     "--lib",
     "ES2024,DOM"
   ],
+  cwd,
   data: [srcs, S.file("tsconfig.json"), S.file("//tsconfig.base.json")]
 })
 

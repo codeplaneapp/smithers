@@ -1753,7 +1753,9 @@ const visit = async (
   if (isShellExec && refusal === undefined) {
     const shellAttrs = attrs as Shell.ExecAttrs
     const payload = Shell.execPayload(shellAttrs)
-    cwd = payload.cwd
+    // Read from the declaration rather than the planned payload, whose fields
+    // carry the schema's planned type rather than a plain string.
+    cwd = shellAttrs.cwd ?? "."
     env = { ...(payload.env as Record<string, string>) }
     const resolved: Array<string> = []
     for (const entry of payload.argv as ReadonlyArray<string>) {
