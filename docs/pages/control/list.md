@@ -26,6 +26,8 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | Error | Code |
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
+| `PlanNotFound` | `plan_not_found` |
+| `PlanDenied` | `plan_denied` |
 | `FlowNotFound` | `flow_not_found` |
 | `PlanDigestMismatch` | `plan_digest_mismatch` |
 | `EnvelopeMismatch` | `envelope_mismatch` |
@@ -38,6 +40,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | `PersistenceError` | `persistence_failed` |
 | `LaunchFailed` | `launch_failed` |
 | `NoMatchingWait` | `no_matching_wait` |
+| `CredentialConflict` | `credential_conflict` |
 
 ## Source
 

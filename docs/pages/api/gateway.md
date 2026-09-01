@@ -121,10 +121,9 @@ cursor sees each later change exactly once.
 `Projection.Subscribe` accepts an `after` cursor. With one it skips the snapshot
 and answers the deltas after that cursor. A cursor that names a different
 projection or a different run is refused with `malformed_request`, and so is a
-negative, fractional, or ahead-of-run cursor. A cursor on a workspace selector
-is refused too: control journal sequences belong to per-run partitions, so a
-workspace cursor is always `0` with a null run and no workspace projection is
-resumable from one.
+cursor on a workspace selector: control journal sequences belong to per-run
+partitions, so a workspace cursor is always `0` with a null run and no workspace
+projection is resumable from one.
 
 A workspace subscription therefore emits its snapshot and then keepalives; a
 client refreshes it by subscribing again.
@@ -134,14 +133,14 @@ client refreshes it by subscribing again.
 `GatewayErrorCode` is the whole failure vocabulary, and every member is
 constructed by a real path.
 
-| Code                | Status | Produced by                                                                                                                                              |
-| ------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bind_failed`       | none   | `NodeGateway.bindRefusal`, `NodeGateway.listenOptions`, `GatewayServer.layer`, `GatewayServer.layerIngress`, and `Projections.make`, at composition time |
-| `unauthorized`      | 401    | the ingress guard, on any protected path without the configured credential                                                                               |
-| `malformed_request` | 400    | the ingress guard, for a `POST` body carrying no RPC request message or a body it could not read, and the read path, for an invalid resume cursor        |
-| `request_too_large` | 413    | the ingress guard, for a body over the configured limit                                                                                                  |
-| `run_unavailable`   | none   | the read path, when listing runs or reading a run's events failed                                                                                        |
-| `run_not_found`     | none   | the read path, for a run the control plane does not have, identically for every run-scoped selector                                                      |
+| Code                | Status | Produced by                                                                                                                                                                       |
+| ------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bind_failed`       | none   | `NodeGateway.bindRefusal`, `NodeGateway.listenOptions`, `GatewayServer.layer`, `GatewayServer.layerIngress`, and `Projections.make`, at composition time                          |
+| `unauthorized`      | 401    | the ingress guard, on any protected path without the configured credential                                                                                                        |
+| `malformed_request` | 400    | the ingress guard, for a `POST` body carrying no RPC request message or a body it could not read, and the read path, for a resume cursor that does not belong to the subscription |
+| `request_too_large` | 413    | the ingress guard, for a body over the configured limit                                                                                                                           |
+| `run_unavailable`   | none   | the read path, when listing runs or reading a run's events failed                                                                                                                 |
+| `run_not_found`     | none   | the read path, for a run the control plane does not have, identically for every run-scoped selector                                                                               |
 
 `GatewayError.cause` carries only a redacted summary of an internal failure: its
 tag and its stable code. The whole cause is logged server-side instead, because

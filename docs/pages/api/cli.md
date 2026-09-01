@@ -161,7 +161,8 @@ surface used to compose or embed that executable.
 | `Gc.failureMessage` (const) | constructors | The stderr paragraph a sweep with failures owes its operator. |
 | `Init.ignoreRule` (const) | constants | The ignore rule rc.0 state needs. |
 | `Init.IgnoreStatus` (type) | models | What one ignore-file edit did. |
-| `Init.isValidName` (const) | predicates | Whether a scaffold name is one portable path segment and a safe YAML scalar. |
+| `Init.nameProblem` (const) | validation | Explains why a proposed flow name cannot be used by `init`. |
+| `Init.isValidName` (const) | predicates | Whether a scaffold name passes `nameProblem`. |
 | `Init.isRepository` (const) | predicates | Whether a directory is the root of a repository whose ignore file is worth editing. |
 | `Init.ensureIgnored` (const) | constructors | Adds `.flows/` to the repository ignore file, once. |
 | `Init.Seat` (interface) | models | The seat a scaffold declares, and the credential that chose it. |

@@ -13,6 +13,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | --- | --- | --- |
 | `runId` | `string` | yes |
 | `idempotencyKey` | `string` | yes |
+| `reason` | `string` | no |
 
 ## Success
 

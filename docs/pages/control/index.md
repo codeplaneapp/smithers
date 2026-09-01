@@ -19,7 +19,7 @@ store or the journal tables.
 | [`Deny`](/control/deny) | `target`, `scope`, `idempotencyKey` | `Accepted \| AlreadyApplied \| Parked \| Conflict \| Terminal` |
 | [`List`](/control/list) | `flows \| runs` | `flows \| runs` |
 | [`Plan`](/control/plan) | `flowId`, `input`, `idempotencyKey` | `{ planId, flowId, digest, inputSummary, envelope, deployClass, plan, nodes, approval }` |
-| [`Resume`](/control/resume) | `runId`, `idempotencyKey` | `Accepted \| AlreadyApplied \| Parked \| Conflict \| Terminal` |
+| [`Resume`](/control/resume) | `runId`, `idempotencyKey`, `reason` | `Accepted \| AlreadyApplied \| Parked \| Conflict \| Terminal` |
 | [`Run`](/control/run) | `Plan \| Resume` | `Accepted \| AlreadyApplied \| Parked \| Conflict \| Terminal` |
 | [`Signal`](/control/signal) | `runId`, `signal`, `idempotencyKey` | `Accepted \| AlreadyApplied \| Parked \| Conflict \| Terminal` |
 | [`Steer`](/control/steer) | `runId`, `message`, `idempotencyKey` | `Accepted \| AlreadyApplied \| Parked \| Conflict \| Terminal` |
@@ -38,7 +38,6 @@ writes.
 | `run-events` | `/projections/ws` |
 | `transcript` | `/projections/ws` |
 | `run-tree` | `/projections/ws` |
-| `plan-cards` | `/projections/ws` |
 | `approvals` | `/projections/ws` |
 | `node-output` | `/projections/ws` |
 

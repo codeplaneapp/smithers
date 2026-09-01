@@ -29,14 +29,16 @@ The root entry point exports these namespaces; each is also importable from
 | `Control` | `PlanInput` (interface) | models | Raw input submitted to planning. |
 | `Control` | `RunInput` (type) | models | Starts an approved plan or joins/resumes an existing run. |
 | `Control` | `ApprovalInput` (interface) | models | Full approval decision submitted to the authenticated server boundary. |
-| `Control` | `SteerInput` (interface) | models | Steering mutation arguments. |
-| `Control` | `SignalInput` (interface) | models | Signal mutation arguments. |
+| `Control` | `SteerInput` (type) | models | Steering mutation arguments. |
+| `Control` | `SignalInput` (type) | models | Signal mutation arguments. |
 | `Control` | `RunMutationInput` (interface) | models | Run lifecycle mutation arguments. |
 | `Control` | `Service` (interface) | models | Transport-independent control operations. |
 | `Control` | `Control` (class) | services | Service key for the authoritative control-plane vtable. |
 | `Control` | `make` (const) | constructors | Constructs a control service from an implementation record. |
 | `Control` | `layerNoop` (const) | layers | Provides an unavailable control implementation for optional integrations. |
 | `ControlError` | `RunNotFound` (class) | errors | No run with this id exists. |
+| `ControlError` | `PlanNotFound` (class) | errors | No plan with this id exists. |
+| `ControlError` | `PlanDenied` (class) | errors | The plan was denied and cannot be launched. |
 | `ControlError` | `FlowNotFound` (class) | errors | No flow with this id is registered. |
 | `ControlError` | `PlanDigestMismatch` (class) | errors | The submitted plan does not hash to the digest the caller declared, so the control plane refuses to store it. |
 | `ControlError` | `EnvelopeMismatch` (class) | errors | The plan's effect envelope differs from the one the caller declared. |
@@ -93,6 +95,14 @@ The root entry point exports these namespaces; each is also importable from
 | `ControlSchema` | `steerItem` (const) | conversions | The stored steering item one steer carries. |
 | `ControlSchema` | `SignalPayload` (const) | models | A durable, named signal delivered to a waiting run. |
 | `ControlSchema` | `SignalPayload` (type) | models | A durable, named signal delivered to a waiting run. |
+| `ControlSchema` | `PlanInputSchema` (const) | models | The RPC request schema for planning. |
+| `ControlSchema` | `RunInputSchema` (const) | models | The RPC request schema for starting a plan or resuming a run. |
+| `ControlSchema` | `ApprovalInputSchema` (const) | models | The RPC request schema for an approval decision. |
+| `ControlSchema` | `SteerInputSchema` (const) | models | The RPC request schema for steering a run. |
+| `ControlSchema` | `SignalInputSchema` (const) | models | The RPC request schema for signaling a run. |
+| `ControlSchema` | `RunMutationInputSchema` (const) | models | The shared fields of an RPC run mutation request. |
+| `ControlSchema` | `ReasonedMutationInputSchema` (const) | models | The RPC request schema for a lifecycle mutation that records a reason. |
+| `ControlSchema` | `CancelInputSchema` (const) | models | The RPC request schema for cancellation. |
 | `ControlSchema` | `WatchFilter` (const) | models | A journal-projection cursor, optional run restriction, and delivery mode. |
 | `ControlSchema` | `WatchFilter` (type) | models | A resumable journal-projection watch cursor and optional run restriction. |
 | `ControlSchema` | `ControlEvent` (const) | models | One ordered journal-projection delta streamed by `watch`. |
