@@ -546,6 +546,44 @@ const prompt = (text: string, input: unknown): string => {
 }
 
 /**
+ * Whether a value is a JSON value, the way `Schema.toCodecJson` means it.
+ *
+ * A class instance is not one, however plain its fields look, so this walks
+ * the structure rather than trusting `JSON.stringify`, which turns an `Error`
+ * into `{}` and reports success.
+ */
+const isJsonValue = (value: unknown): boolean => {
+  if (value === null) return true
+  const kind = typeof value
+  if (kind === "string" || kind === "boolean") return true
+  if (kind === "number") return Number.isFinite(value)
+  if (kind !== "object") return false
+  if (Array.isArray(value)) return value.every(isJsonValue)
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) return false
+  return Object.values(value as Record<string, unknown>).every(isJsonValue)
+}
+
+/**
+ * The failure the engine persists as this flow's settlement.
+ *
+ * `agent/run` declares `error: Schema.Unknown`, and `Schema.toCodecJson`
+ * reads that as "any JSON value". Every real agent failure is an `Error`
+ * instance instead — a `HarnessError` wrapping a `ModelError`, a
+ * `SeatUnresolved` — so the codec rejected every one of them, `engine-store`
+ * degraded the settlement into a projection, and it said so in a second WARN
+ * stack beside the run's own `An agent run failed` (Phase 7 smoke observation
+ * N1: two stack traces for one billing refusal). Rendering the error to the
+ * same text `Cause.pretty` gives the operator makes the settlement encodable,
+ * so the durable record carries the real refusal rather than a projection of
+ * it and the duplicate warning has nothing to report. A value that already is
+ * a JSON value is passed through untouched, and a defect stays a defect: this
+ * maps the failure channel only.
+ */
+const settlementFailure = (error: unknown): unknown =>
+  isJsonValue(error) ? error : Cause.pretty(Cause.fail(error))
+
+/**
  * The one durable flow every agent run executes. Its plan-time body is inert;
  * the behaviour is the `execute` registered by {@link make}, and the
  * execution id is the control run id.
@@ -1590,7 +1628,11 @@ export const make = (
         )
         activeBodies.set(payload.runId, fiber)
         return yield* Fiber.join(fiber).pipe(
-          Effect.ensuring(Effect.sync(() => activeBodies.delete(payload.runId)))
+          Effect.ensuring(Effect.sync(() => activeBodies.delete(payload.runId))),
+          // `settle` above already read the true exit, so the operator's line
+          // and the control plane's recorded cause are unchanged. This is
+          // only the shape the engine has to persist.
+          Effect.mapError(settlementFailure)
         )
       })).pipe(Scope.provide(scope))
 

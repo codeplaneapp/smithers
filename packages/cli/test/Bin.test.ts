@@ -1273,6 +1273,36 @@ describe("an attached launch's exit status", processBudget, () => {
     }
   })
 
+  /**
+   * One refusal is one operator line.
+   *
+   * The billing refusal in the Phase 7 smoke printed two WARN stacks for one
+   * failure (observation N1): the run's own `An agent run failed`, and
+   * `engine-store: the settlement of agent/run could not be encoded through
+   * its own codec`. The second is not a second failure. It fires because the
+   * `agent/run` flow declares `error: Schema.Unknown` and the body fails with
+   * an `Error` instance, which is not a JSON value, so EVERY agent failure
+   * degraded its durable settlement into a projection and told the operator
+   * about it in a second stack trace. The cause is the same one the first line
+   * already named.
+   */
+  it("prints one operator-facing warning for one refusal", () => {
+    const cwd = stageUnservableSeat()
+    try {
+      const launched = launch(cwd, ["up", "failing", "--json"])
+
+      expect(launched.error).toBeUndefined()
+      expect(launched.status).toBe(1)
+      const warnings = launched.stderr.split("\n").filter((line) => line.includes("WARN"))
+
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain("An agent run failed")
+      expect(launched.stderr).not.toContain("could not be encoded through its own codec")
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
   /** Every run decision the engine journal holds for a run, in order. */
   const engineDecisions = (cwd: string, runId: string): ReadonlyArray<string> => {
     const handle = new DatabaseSync(join(cwd, ".flows", "engine.db"), { readOnly: true })

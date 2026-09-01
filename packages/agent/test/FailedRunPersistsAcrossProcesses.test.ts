@@ -315,7 +315,19 @@ const watchForTheft = (root: string, runId: string, ticks = 80) =>
   })
 
 describe("an agent run whose seat rejects the call", () => {
-  it("is recorded failed in the engine store, with the unencodable cause projected onto the row", async () => {
+  /**
+   * Restated in the cli-boot-hygiene lane. It used to assert the settlement
+   * arrived as `flows/engine-store/UnencodableResult`, the projection
+   * `engine-store` degrades a settlement into when the flow's own codec
+   * rejects it — and announces in a second WARN stack beside the run's own
+   * `An agent run failed` (Phase 7 smoke observation N1). `agent/run` now
+   * renders its failure to the text `Cause.pretty` gives the operator before
+   * the engine persists it, so the settlement encodes, the row carries the
+   * refusal itself instead of a projection of it, and one refusal prints one
+   * warning. The assertion this test exists for is unchanged: the reason the
+   * run failed is on the row rather than lost with the drain.
+   */
+  it("is recorded failed in the engine store, with the refusal itself on the row", async () => {
     const root = makeRoot()
 
     const runId = await Effect.runPromise(
@@ -337,12 +349,13 @@ describe("an agent run whose seat rejects the call", () => {
     expect(controlRow?.status).toBe("failed")
     // And the reason is on the row rather than lost with the drain.
     const state = JSON.parse(engineRow?.state_json ?? "{}") as {
-      result?: { exit?: { cause?: ReadonlyArray<{ defect?: Record<string, unknown> }> } }
+      result?: { exit?: { cause?: ReadonlyArray<Record<string, unknown>> } }
     }
-    const defect = state.result?.exit?.cause?.[0]?.defect
-    expect(defect?.["_tag"]).toBe("flows/engine-store/UnencodableResult")
-    expect(String(defect?.["note"])).toContain("Expected JSON value")
-    expect(JSON.stringify(defect?.["reasons"])).toContain("You have no credits remaining")
+    const failure = state.result?.exit?.cause?.[0]
+    expect(failure?.["_tag"]).toBe("Fail")
+    expect(String(failure?.["error"])).toContain("You have no credits remaining")
+    // The projection is gone, and so is the second warning that announced it.
+    expect(JSON.stringify(state)).not.toContain("flows/engine-store/UnencodableResult")
   }, 120_000)
 
   it("is never stolen, re-opened, or re-billed by the next process over the same `.flows`", async () => {
