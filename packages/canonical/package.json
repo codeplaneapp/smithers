@@ -56,7 +56,9 @@
     "build": "node scripts/build.mjs",
     "check": "tsc -b tsconfig.json && tsc -p tsconfig.test.json --noEmit",
     "circular": "node scripts/circular.mjs",
+    "pretest": "pnpm run test:dist",
     "test": "vitest",
+    "test:dist": "pnpm run build && node --test test/dist-smoke.mjs",
     "coverage": "vitest --coverage"
   },
   "dependencies": {

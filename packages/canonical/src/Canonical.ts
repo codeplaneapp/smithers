@@ -61,15 +61,12 @@ export const Canonical = Schema.Unknown.pipe(
       Effect.try({
         try: () => {
           const result = canonicalize(value)
-          if (result === undefined) {
-            throw new TypeError("The value is not valid JSON")
-          }
           JSON.parse(result)
           return result
         },
         catch: (cause) =>
           new SchemaIssue.InvalidValue(
-            { message: cause instanceof Error ? cause.message : String(cause) },
+            { message: (cause as Error).message },
             value,
             parseOptions
           )

@@ -65,9 +65,12 @@ describe("ControlRuntime.layerMemory", () => {
     )
 
     expect(observed.fingerprint).toBeInstanceOf(InvalidInput)
-    expect((observed.fingerprint as InvalidInput).issue).toContain("NaN is not allowed")
+    // Restated 2026-08-31: these pins formerly matched "NaN is not allowed"
+    // and "not valid JSON". Canonical's public contract now guarantees stable
+    // codes and located paths, which control must preserve for its callers.
+    expect((observed.fingerprint as InvalidInput).issue).toContain("canonical_nan: NaN at $.input")
     expect(observed.decode).toBeInstanceOf(InvalidInput)
-    expect((observed.decode as InvalidInput).issue).toContain("not valid JSON")
+    expect((observed.decode as InvalidInput).issue).toContain("canonical_unsupported_value: undefined at $")
   })
 
   it("replays a plan for a repeated idempotency key and refuses a reused one", async () => {

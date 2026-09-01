@@ -42,6 +42,17 @@ const hasLoneSurrogate = (value: string): boolean => {
 const codeUnitCompare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0
 
 describe("Canonical properties", () => {
+  it("matches JSON.stringify after parsing for stringify-safe generated values", () => {
+    FastCheck.assert(
+      FastCheck.property(FastCheck.jsonValue(), (value) => {
+        const document = serialize(value)
+        expect(JSON.parse(document)).toEqual(JSON.parse(JSON.stringify(value)))
+        expect(() => JSON.parse(document)).not.toThrow()
+      }),
+      params
+    )
+  })
+
   it("canonicalization is idempotent and total over hostile JSON values", () => {
     // c(parse(c(x))) === c(x): a canonical document re-enters the serializer
     // and comes out byte-identical, so digests taken over documents are stable
@@ -116,7 +127,7 @@ describe("Canonical properties", () => {
           expect(Result.isFailure(outcome)).toBe(true)
           if (Result.isFailure(outcome)) {
             expect(outcome.failure._tag).toBe("SchemaError")
-            expect(outcome.failure.message).toMatch(/NaN is not allowed|Infinity is not allowed/)
+            expect(outcome.failure.message).toMatch(/canonical_nan: NaN|canonical_non_finite: [+-]?Infinity/)
           }
           return
         }
@@ -172,7 +183,7 @@ describe("Canonical properties", () => {
           expect(Result.isFailure(outcome)).toBe(true)
           if (Result.isFailure(outcome)) {
             expect(outcome.failure._tag).toBe("SchemaError")
-            expect(outcome.failure.message).toContain("Lone surrogate is not allowed")
+            expect(outcome.failure.message).toContain("canonical_lone_surrogate:")
           }
         }
       ),
