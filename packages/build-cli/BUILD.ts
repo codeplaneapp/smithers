@@ -9,11 +9,22 @@
  * unchanged.
  */
 import { Smithers } from "@smthrs/targets"
-import { packageManager, rootJSDocConfig, runtime } from "../../BUILD.ts"
+import { packageManager, rootInvariantsConfig, rootJSDocConfig, runtime } from "../../BUILD.ts"
 
 const cwd = "packages/build-cli"
 const sources = Smithers.glob("src/**/*.ts")
 const tests = Smithers.glob("test/**/*.test.ts")
+
+/**
+ * The workspace trees the suites load: PACKAGE.ts and WORKSPACE.ts fixtures,
+ * their goldens, and the checked-in files the render suites compare against.
+ *
+ * They are behavioural input to `PackageExecution`, `MultiRepo`, and the
+ * CI-render suites, so they belong in the test target's key. Without them,
+ * editing a fixture left the key unchanged and the run reported a cache hit
+ * on a result that predated the edit.
+ */
+const fixtures = Smithers.glob("test/fixtures/**/*")
 
 export const lib = Smithers.Typecheck({
   packageManager,
@@ -38,7 +49,7 @@ export const check = Smithers.Typecheck({
 export const test = Smithers.Vitest({
   packageManager,
   tests: [tests],
-  sources: [sources],
+  sources: [sources, fixtures],
   deps: [lib],
   config: Smithers.file("vitest.config.ts"),
   environment: "node",
@@ -50,7 +61,7 @@ export const lint = Smithers.EsLint({
   packageManager,
   sources: [sources],
   deps: [],
-  configs: [Smithers.file("eslint.config.js"), rootJSDocConfig],
+  configs: [Smithers.file("eslint.config.js"), rootJSDocConfig, rootInvariantsConfig],
   maxWarnings: 0,
   fix: false,
   cwd

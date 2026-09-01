@@ -7,6 +7,7 @@ export const rootPackageJson = Smithers.file("//package.json")
 export const rootTsconfig = Smithers.file("//tsconfig.base.json")
 export const workspaceTsconfig = Smithers.file("//tsconfig.json")
 export const rootJSDocConfig = Smithers.file("//eslint.jsdoc.js")
+export const rootInvariantsConfig = Smithers.file("//eslint.invariants.js")
 const workspace = Smithers.pnpmWorkspace("//pnpm-workspace.yaml")
 
 export const knownFiles = Smithers.Generate({
