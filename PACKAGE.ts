@@ -23,6 +23,7 @@ import { Package as evalsAgent } from "./evals/agent/PACKAGE.js"
 import { Package as evalsAuthoring } from "./evals/authoring/PACKAGE.js"
 import { Package as evalsReviewSeededBugs } from "./evals/review-seeded-bugs/PACKAGE.js"
 import { Package as evalsSwebench } from "./evals/swebench/PACKAGE.js"
+import { Package as e2e } from "./e2e/PACKAGE.js"
 import { Package as examples } from "./examples/PACKAGE.js"
 import { Package as factory } from "./factory/PACKAGE.js"
 import { Package as agent } from "./packages/agent/PACKAGE.js"
@@ -237,7 +238,8 @@ const gates = S.Suite({
     evalsSwebench.ci,
     examples.ci,
     factory.ci,
-    flowsJj.ci
+    flowsJj.ci,
+    e2e.ci
   ]
 })
 
@@ -264,7 +266,8 @@ const preCommit = S.Suite({
     evalsAuthoring.types,
     evalsReviewSeededBugs.types,
     evalsSwebench.types,
-    examples.check
+    examples.check,
+    e2e.check
   ]
 })
 
@@ -301,6 +304,13 @@ const on = { pullRequest: true, push: { branches: ["main"] } } as const
 // The whole deterministic surface, matching ci.yml's `test` job. It is the
 // superset of the jobs below: the split exists so a rust, bun, browser, or
 // end-to-end failure is legible on its own, exactly as it is in ci.yml.
+// The generated workflows cannot check their own drift from inside the graph:
+// naming `githubCi` here would make `ciTest` a member of the CiGen that lists
+// `ciTest`, which is a cycle the loader refuses. The BUILD-mode pipeline could,
+// because its steps were verb-and-pattern strings rather than target
+// references. Until a workflow can name a plain verb step, run
+// `smithers-build '//:githubCi'` from the reconciliation lane; SMITHERS-NOTES.md
+// records the gap.
 const ciTest = S.Github.Workflow({
   name: "ci-test",
   on,
@@ -378,6 +388,18 @@ const ciExamples = S.Github.Workflow({
   run: [examples.ci]
 })
 
+// Port of ci.yml `e2e-faults`. The matrix is advisory there because two of its
+// gates are red by design and owned elsewhere (case 22's redaction requirement
+// and the durable park). `continueOnError` has no attr in package mode, so the
+// lane is a separate workflow whose failure is read rather than enforced; the
+// required typecheck reaches the matrix through `//e2e:check` inside `gates`.
+const ciFaults = S.Github.Workflow({
+  name: "ci-faults",
+  on,
+  setup: githubSetup,
+  run: [e2e.faults]
+})
+
 // Ports of ci.yml `node-macos` and `node-windows`, which run the whole package
 // graph on both hosts. They stay in the workflow list at their ci.yml scope;
 // they are advisory there and cannot say so here until `continueOnError`
@@ -407,14 +429,14 @@ const githubCi = S.Github.CiGen({
     ciBun,
     ciAppsE2e,
     ciExamples,
+    ciFaults,
     ciNodeMacos,
     ciNodeWindows
   ],
-  // Hand-written workflows the generator must never touch. ci.yml stays
-  // preserved while the BUILD.ts pipeline owns it; the flip commit drops it
-  // from this list and deletes the file.
+  // Hand-written workflows the generator must never touch. The BUILD-mode
+  // ci.yml is gone: its steps called the `ci`, `docs`, and `install` verbs,
+  // which refuse in package mode, so it could only have failed.
   preserve: [
-    ".github/workflows/ci.yml",
     ".github/workflows/release.yml",
     ".github/workflows/apps-deploy.yml",
     ".github/workflows/canary.yml",
@@ -483,6 +505,7 @@ export const Package = S.Package({
     ciBun,
     ciAppsE2e,
     ciExamples,
+    ciFaults,
     ciNodeMacos,
     ciNodeWindows,
     githubCi,

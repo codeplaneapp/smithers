@@ -873,4 +873,26 @@ describe("toolchain variants", () => {
     expect(ci!.content).not.toContain("--affected-base")
     expect(ci!.content).not.toContain("fetch-depth")
   })
+
+  // A CiGen declared in the root PACKAGE.ts has the empty string for its
+  // package directory, and joining that naively renders `.//actions/setup`,
+  // which GitHub does not accept as a local action path.
+  it("renders the setup action path without a double slash from the root package", () => {
+    const run = anyTarget()
+    const setup = S.Github.Setup({ cacheUrl: S.Secret("SMITHERS_CACHE_URL") })
+    const workflow = S.Github.Workflow({ name: "ci", on: { pullRequest: true }, setup, run: [run] })
+    const ciGen = S.Github.CiGen({ workflows: [workflow] })
+    const rendered = GithubRender.render({
+      ciGen,
+      workspace: unitWorkspace,
+      resolve: resolver([
+        [ciGen, "//:githubCi"],
+        [run, "//:test"]
+      ]),
+      packageDir: ""
+    })
+    const ci = rendered.files.find((file) => file.path === "workflows/ci.yml")
+    expect(ci!.content).toContain("uses: ./actions/setup")
+    expect(ci!.content).not.toContain(".//actions/setup")
+  })
 })

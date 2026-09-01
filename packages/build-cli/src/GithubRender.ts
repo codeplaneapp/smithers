@@ -619,7 +619,10 @@ const renderWorkflow = (
       lines.push("        with:", ...mapping({ "fetch-depth": "0" }, "          "))
     }
     if (setup !== undefined) {
-      lines.push(`      - uses: ./${packageDir}/actions/setup`)
+      // The root package's directory is the empty string, and `./` + "" +
+      // "/actions/setup" renders the double slash `.//actions/setup`, which is
+      // not a path GitHub accepts for a local action.
+      lines.push(`      - uses: ./${packageDir === "" ? "" : `${packageDir}/`}actions/setup`)
       const withEntries: Record<string, string> = {}
       if (setup.cacheUrl !== undefined) withEntries["cache-url"] = `\${{ secrets.${setup.cacheUrl.env} }}`
       if (setup.cacheToken !== undefined) withEntries["cache-token"] = `\${{ secrets.${setup.cacheToken.env} }}`

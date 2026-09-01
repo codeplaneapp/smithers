@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
@@ -464,56 +464,69 @@ describe("vitest coverage isolation conformance", () => {
     // is the verb-and-pattern invocation that plans them: `smithers-build ci` over the
     // package graph covers lib, check, test, lint, fmt, docs, and circular for
     // every package, and the browser contract is its own labelled target.
-    const ci = readFileSync(join(packagesDir, "..", ".github", "workflows", "ci.yml"), "utf8")
-    expect(ci).toMatch(/^\s*- uses: pnpm\/action-setup@v6$/m)
-    expect(ci).toMatch(/^\s*- run: pnpm install --frozen-lockfile --ignore-scripts$/m)
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build ci '\/\/packages\/\.\.\.'/m)
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/scripts\/\.\.\.'$/m)
+    // Package mode replaced the single generated ci.yml with one workflow file
+    // per lane, all rendered from the root PACKAGE.ts `//:githubCi`
+    // declaration. What is pinned is unchanged in intent: the required lane has
+    // to reach the whole package graph, and each specialized lane has to keep
+    // running the target that proves its own requirement.
+    const workflow = (name: string): string =>
+      readFileSync(join(packagesDir, "..", ".github", "workflows", `${name}.yml`), "utf8")
+    const ci = workflow("ci-test")
+    expect(ci).toMatch(/^\s*- uses: \.\/actions\/setup$/m)
+    // `//:gates` is the deterministic superset: every package's ci suite, the
+    // apps, the evals, the examples, the crate, the scripts, the fault-matrix
+    // typecheck, and the known-file registry. A step that stops naming it skips
+    // enforcement with every other cell green.
+    expect(ci).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/:gates'$/m)
     // Browser support is a hard requirement met through layers; the browser
     // contract target is the only thing that proves it, so CI has to run it
     // (REVIEW.md blocker 7).
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/scripts:browserContract'$/m)
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/packages\/\.\.\.'$/m)
-    // The known-file registry is the one committed generated `.d.ts`. Its
-    // drift check runs nowhere else, so dropping this step would let a stale
-    // registry ship with every other cell green.
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build lint '\/\/:knownFiles'$/m)
-    // `tsconfig.json` is the committed generated root program. Its drift
-    // check runs nowhere else, so dropping this step would let a stale
-    // tsconfig ship with every other cell green.
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build lint '\/\/:tsconfig'$/m)
-    // The fault matrix. Until Phase 7 blocker B6 it ran under no gate at all:
-    // `//packages/...` does not reach `e2e/`, `e2e` was not a workspace member,
-    // and `//e2e:faults` failed in 262 ms with `Command "vitest" not found`.
-    // The typecheck is a required step and the matrix itself is the advisory
-    // `e2e-faults` job, because two gates in it are red by design and owned
-    // elsewhere (case 22's redaction requirement, and the durable park).
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build build '\/\/e2e:check'$/m)
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/e2e:faults'$/m)
-    expect(ci).toMatch(/tool: jj-cli@\d+\.\d+\.\d+/)
-    expect(ci).toMatch(/^\s*run: jj git init --colocate$/m)
+    expect(workflow("ci-browser")).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/scripts:browserContract'$/m)
+    // The fault matrix. The typecheck is required through `//e2e:check` inside
+    // `//:gates`, and the matrix itself is the advisory `ci-faults` lane,
+    // because two gates in it are red by design and owned elsewhere (case 22's
+    // redaction requirement, and the durable park).
+    expect(workflow("ci-faults")).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/e2e:faults'$/m)
+    expect(workflow("ci-rust")).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/crates\/flows-jj:rust'$/m)
+    expect(workflow("ci-wasm")).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/crates\/flows-jj:wasm'$/m)
+    // The setup action the workspace declaration renders installs the runtime
+    // and the package manager for every lane, so its own file is pinned rather
+    // than the install step it used to inline.
+    const setup = readFileSync(join(packagesDir, "..", "actions", "setup", "action.yml"), "utf8")
+    expect(setup).toMatch(/pnpm/)
   })
 
   it("keeps every CI step a target invocation, never a hand-written command", () => {
-    // The rule this pins: a BUILD.ts file declares targets, and the argv a
-    // target runs is rendered inside its implementation. A `run:` line in the
-    // generated workflow that is not a target invocation, an install, or a
-    // toolchain step derived from a declaration would mean someone reopened the
-    // free-form step surface that `GithubCiGen` deleted.
-    const ci = readFileSync(join(packagesDir, "..", ".github", "workflows", "ci.yml"), "utf8")
-    const commands = [...ci.matchAll(/^\s*(?:- )?run: (?!\|)(.+)$/gm)].map((match) => match[1]!)
-    expect(commands.length).toBeGreaterThan(0)
+    // The rule this pins: a PACKAGE.ts file declares targets, and the argv a
+    // target runs is rendered inside its implementation. A `run:` line in a
+    // generated workflow that is not a target invocation or a step derived from
+    // a declaration would mean someone reopened the free-form step surface that
+    // the generator deleted.
+    const workflowsDir = join(packagesDir, "..", ".github", "workflows")
+    const generated = readdirSync(workflowsDir).filter((name) => name.startsWith("ci-"))
+    expect(generated.length).toBeGreaterThan(0)
     const derived = [
-      /^pnpm exec smithers-build (?:build|test|lint|docs|ci) '\/\/[^']*'( --jobs \d+)?$/,
+      /^pnpm exec smithers-build '\/\/[^']*'( --jobs \d+)?$/,
       /^pnpm install --frozen-lockfile --ignore-scripts$/,
       /^rustup toolchain install$/,
       /^jj git init --colocate$/
     ]
-    expect(commands.filter((command) => !derived.some((shape) => shape.test(command)))).toEqual([])
-    // No recursive pnpm script survives as a gate: those are what the target
-    // graph replaced.
-    expect(ci).not.toMatch(/^\s*run: pnpm run /m)
-    expect(ci).not.toMatch(/^\s*run: node --test /m)
+    for (const name of generated) {
+      const contents = readFileSync(join(workflowsDir, name), "utf8")
+      // Every generated file says so, so a hand edit is visible in review.
+      expect(contents).toContain("Generated by smithers-build from //:githubCi")
+      const commands = [...contents.matchAll(/^\s*(?:- )?run: (?!\|)(.+)$/gm)].map((match) => match[1]!)
+      expect(commands.length).toBeGreaterThan(0)
+      expect(commands.filter((command) => !derived.some((shape) => shape.test(command)))).toEqual([])
+      // No recursive pnpm script survives as a gate: those are what the target
+      // graph replaced.
+      expect(contents).not.toMatch(/^\s*run: pnpm run /m)
+      expect(contents).not.toMatch(/^\s*run: node --test /m)
+    }
+    // The retired BUILD-mode pipeline called the `ci`, `docs`, and `install`
+    // verbs, which refuse in package mode. Its file is gone, and a restored one
+    // would run nothing but refusals.
+    expect(existsSync(join(workflowsDir, "ci.yml"))).toBe(false)
   })
 
   it("smoke-validates packed artifacts before rerunnable publication", () => {
@@ -530,8 +543,10 @@ describe("vitest coverage isolation conformance", () => {
     }
     expect(root.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/)
     expect(release).toMatch(/^\s*- uses: pnpm\/action-setup@v6$/m)
-    const ci = readFileSync(join(packagesDir, "..", ".github", "workflows", "ci.yml"), "utf8")
-    expect(ci).toMatch(/^\s*- uses: pnpm\/action-setup@v6$/m)
+    // The generated lanes install pnpm through the rendered composite action
+    // rather than inlining the step, so the pin follows it there.
+    const setup = readFileSync(join(packagesDir, "..", "actions", "setup", "action.yml"), "utf8")
+    expect(setup).toMatch(/^\s*- uses: pnpm\/action-setup@v\d+$/m)
     expect(release).toContain("pnpm publish \"$PACK_DIR/$tarball\"")
     expect(release).toContain("pnpm view \"$spec\" version")
     // The published set and its order are read out of the pack manifest, so a
@@ -562,9 +577,12 @@ describe("vitest coverage isolation conformance", () => {
     // verbatim regardless). Pin the trigger block exactly, and assert the
     // workflow contains no `if:` key at all — any conditional execution of
     // an enforcement step must widen this cell in review.
-    const ci = readFileSync(join(packagesDir, "..", ".github", "workflows", "ci.yml"), "utf8")
-    expect(ci).toMatch(/^on:\n {2}push:\n {4}branches: \[main\]\n {2}pull_request:$/m)
-    expect(ci).not.toMatch(/^\s*if:/m)
+    const workflowsDir = join(packagesDir, "..", ".github", "workflows")
+    for (const name of readdirSync(workflowsDir).filter((entry) => entry.startsWith("ci-"))) {
+      const contents = readFileSync(join(workflowsDir, name), "utf8")
+      expect(contents, name).toMatch(/^on:\n {2}pull_request:\n {2}push:\n {4}branches:\n {6}- main$/m)
+      expect(contents, name).not.toMatch(/^\s*if:/m)
+    }
   })
 
   it("inventories every coverage-ignore directive against a pinned allowlist (issues #153/#157)", () => {
