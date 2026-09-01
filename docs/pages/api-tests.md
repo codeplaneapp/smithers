@@ -112,10 +112,10 @@ normalization.
 
 {/* generated:flow-testing start */}
 
-The package-owned [`@smthrs/flow` suite](/api/flow) runs the authoring model
-against real interpretation rather than against doubles: every case builds a
-graph, drives it through `Interpreter.layer`, and reads the durable record a
-memory `FlowRuntime` kept.
+The package-owned [`@smthrs/flow` suite](/api/flow) combines pure schema,
+policy, and graph tests with interpreted flows. Runtime cases drive declared
+bodies through `Interpreter.layer` and read the durable record kept by the
+package's in-memory `FlowRuntime` contract fixture.
 
 Authoring is covered by flow definitions and their combinators, declared and
 inline actions, action requirements, retry pinning, cache policy, file
@@ -136,11 +136,12 @@ execution-id digest.
 
 Adversarial cases sit beside the ordinary ones rather than in a separate file.
 A completion token is refused when it names a deferred other than the one it
-was submitted through, and a human answer is refused when the token names a
-deferred no human task ever opened. Retry policy, sleeps, deadlines, and queue
-concurrency each refuse a non-finite or out-of-range value instead of arming a
-timer nobody wakes. Diagnostics that quote author data are bounded, and the
-placement comparison never runs an accessor.
+was submitted through. A human answer is admitted only while the run is parked
+on that exact approval token, so unopened and stale attempts cannot create a
+completion. Retry policy, sleeps, deadlines, and queue concurrency each refuse
+a non-finite or out-of-range value instead of arming a timer nobody wakes.
+Diagnostics that quote author data are bounded, and placement and payload
+inspection never run accessors.
 
 {/* generated:flow-testing end */}
 

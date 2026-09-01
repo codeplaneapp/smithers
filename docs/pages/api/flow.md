@@ -300,7 +300,7 @@ No shipped runtime reads `FlowInstance.awaitedDeferreds`. It is reserved for a r
 ## Exports
 
 The tables below are generated from the JSDoc above each exported declaration, so every export the
-barrel publishes with an `@category` tag appears here. 216 declarations across
+barrel publishes with an `@category` tag appears here. 230 declarations across
 14 namespaces.
 
 ### `Action`
@@ -366,7 +366,7 @@ Durable clock and timer services.
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
 | `DurableClock` | interface | models | Represents a durable flow timer with a name, duration, and deferred completed when the timer wakes. |
-| `make` | const | constructors | Creates a durable clock definition and its associated deferred wake-up signal. |
+| `make` | const | constructors | Declares one durable clock after validating its finite nonnegative duration. |
 | `sleep` | const | sleeping | Waits inside a flow, using an in-memory action for durations at or below the threshold and scheduling a durable clock for longer durations. |
 
 ### `DurableDeferred`
@@ -480,6 +480,7 @@ The execution contract flow authoring APIs are written against.
 | `FlowCycleDetected` | class | errors | Raised when executing a flow would close a cycle in the persisted parent-execution chain, which is a child asking to execute an execution id that already appears among its own ancestors. |
 | `FlowExecutionNotFound` | class | errors | Raised when `poll` is asked about an execution id the runtime never recorded. |
 | `FlowInstance` | class | services | Service that contains flow runtime state for one execution. |
+| `DeferredDoneIfWaitingOutcome` | type | models | Result of atomically completing a deferred only while its run is parked. |
 | `FlowRuntime` | class | services | Service that represents a flow runtime, responsible for registering and executing flows and coordinating actions, durable deferreds, interrupts, resumes, and clocks. |
 | `WaitingAnnotation` | interface | models | The waiting classification a flow can declare before suspending. |
 | `annotateWaiting` | const | combinators | Declares how the flow is about to wait, so a durable driver parks the run with that reason and token instead of the derived `timer`/`event` default. |
@@ -511,11 +512,24 @@ Asking a person something: typed answers, re-asking, and a deadline.
 | `Kind` | type | models | The shape a person is asked for. |
 | `Kind` | const | schemas | The schema the `kind` payload field is declared with. |
 | `HumanTaskFailed` | class | errors | A question that ended without an answer the task could accept. |
+| `HumanAnswerInvalid` | class | errors | An answer refused before it could consume durable storage. |
 | `tag` | const | constructors | The tag the human-task declaration is catalogued and resolved under. |
 | `defaultMaxAttempts` | const | constructors | The attempt budget a task that names none is asked under. |
 | `maxSchemaDepth` | const | constructors | The deepest supported JSON Schema path, counting the root as depth zero. |
 | `maxSchemaNodes` | const | constructors | The most schema objects one human-task request may contain. |
+| `maxSchemaValueNodes` | const | constructors | The most JSON values embedded across schema keywords such as `enum`. |
+| `maxSchemaValueDepth` | const | constructors | The deepest JSON value embedded in a schema, including enum members. |
 | `maxAnswerNodes` | const | constructors | The most JSON values one answer validation may visit. |
+| `maxAnswerBytes` | const | constructors | The largest encoded JSON answer that can enter the durable store. |
+| `maxSchemaBytes` | const | constructors | The largest encoded JSON Schema carried by one question. |
+| `maxAnswerDepth` | const | constructors | The deepest admitted answer tree. |
+| `maxJsonStringBytes` | const | constructors | The largest encoded string value admitted in a request or answer. |
+| `maxJsonKeyBytes` | const | constructors | The largest encoded object key admitted in a request or answer. |
+| `maxJsonMembers` | const | constructors | The most members admitted in one JSON array or object. |
+| `maxTaskNameBytes` | const | constructors | The largest encoded task name. |
+| `maxPromptBytes` | const | constructors | The largest encoded prompt. |
+| `maxOptions` | const | constructors | The largest option list on one select question. |
+| `maxOptionBytes` | const | constructors | The largest encoded select option. |
 | `maxAttemptBudget` | const | constructors | The largest attempt budget one human task may declare. |
 | `maxDiagnosticChars` | const | constructors | The most caller-supplied characters retained in one rendered diagnostic. |
 | `maxRetainedRejectionChars` | const | constructors | The most characters retained across a terminal failure's rejection list. |
