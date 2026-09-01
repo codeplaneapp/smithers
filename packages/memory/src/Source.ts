@@ -3,49 +3,42 @@
  *
  * Values returned by {@link declaredText} are accepted as
  * `Agent.Options.memory`. The source fetches primers and recall once per
- * `(lineageId, iteration)`, holds the rendered snapshot for retries, fences it,
- * caps it, and degrades to no text after a two-second timeout or typed failure.
+ * `(lineageId, iteration)`, freezes the rendered snapshot for retries, fences
+ * it, caps it, and degrades to no text after a two-second timeout or typed
+ * failure.
  *
  * ## What "once per `(lineageId, iteration)`" actually promises
  *
- * It is a memo held in the process that built the {@link Source}, and nothing
- * more. It is not durable, and this module cannot make it so: a durable
- * boundary needs an engine handle to record through, `read` is handed only
- * `MemoryStore` and `Recall`, and `@smthrs/memory` does not depend on the
- * harness that owns `EngineLike.record`.
+ * Every source has an in-process memo. With no
+ * {@link SnapshotRecorder.SnapshotRecorder} in the Effect context, that is the
+ * whole guarantee: two reads through one source return the same text, while a
+ * second source refetches live memory. This is the documented default for
+ * compositions that use `@smthrs/memory` alone.
  *
- * So the honest statement of the guarantee is:
- *
- * - **Within one process, against one {@link Source} value**, two reads of one
- *   `(lineageId, iteration)` return the same text, and the store is asked once.
- *   That is what makes a step's in-process retries stable.
- * - **Across a crash, a park, or any other process boundary**, they do not. The
- *   next process builds a new memo, refetches live memory, and renders whatever
- *   memory holds NOW — or `""`, if that fetch overruns its two-second budget.
- *   Memory is durable, mutable, shared state, so the second answer is routinely
- *   a different one.
+ * When a recorder is present, the first fetch for an identity goes through its
+ * boundary. A second source, including one built by a resumed process, receives
+ * that recorded text instead of refetching memory. The production adapter is
+ * `@smthrs/agent/MemorySnapshotRecorder.layer`; it implements this package's
+ * port through `@smthrs/harness` `EngineLike.record`. The dependency therefore
+ * points from agent to memory and harness, while memory imports neither.
  *
  * The consequence is worth stating plainly, because it is the reason to record
  * this value rather than re-derive it. Memory text goes into an agent's OPENING
  * context, so a resumed run whose snapshot came back different has a different
- * frame-zero prefix, which re-keys every sealed model step under it: the run
- * replays nothing, re-buys every model call it had already paid for, and forks
- * away from the attempt whose irreversible effects it has already performed.
- *
- * **A host that wants that guarantee must record this value itself**, at the
- * point where it has the run's own journal — the same treatment
- * `@smthrs/harness`'s `CellTurn` gives its workspace measurements and its
- * steering drains — and hand the RECORDED text to `Agent.Options.memory`. What
- * this module offers is the fetch, the rendering, and the fence; the durability
- * of the result belongs to whoever owns the run.
+ * frame-zero prefix. That re-keys every sealed model step under it, causing the
+ * run to re-execute model calls it already paid for. Composing the agent adapter
+ * closes that replay gap; omitting it deliberately keeps the process-local
+ * fallback.
  *
  * @see docs/specs/Concepts/Memory.md
  *
  * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as MemoryStore from "./MemoryStore.ts"
 import * as Recall from "./Recall.ts"
+import * as SnapshotRecorder from "./SnapshotRecorder.ts"
 
 /**
  * Source input and retry identity.
@@ -160,10 +153,11 @@ const fetch = (input: Input): Effect.Effect<string, never, MemoryStore.MemorySto
 /**
  * Constructs a memoizing memory source.
  *
- * The memo lives in this value's own closure, so it is scoped to this value and
- * to the process holding it. Two sources memoize separately, and a source built
- * by the next process memoizes nothing this one fetched. See the module
- * docblock for what that does and does not promise a resumed run.
+ * The closure memo is always present. When
+ * {@link SnapshotRecorder.SnapshotRecorder} is absent, it is the process-local
+ * default. When a recorder is composed, the memoized fetch first asks that
+ * recorder for the durable value of the same `(lineageId, iteration)`
+ * identity.
  *
  * @category constructors
  * @since 0.1.0
@@ -184,7 +178,23 @@ export const make = (options: { readonly capacity?: number | undefined } = {}): 
         snapshots.set(key, existing)
         return existing
       }
-      const current = Effect.runSync(Effect.cached(Effect.suspend(() => fetch(input))))
+      const identity: SnapshotRecorder.Identity = {
+        lineageId: input.lineageId,
+        iteration: input.iteration
+      }
+      const current = Effect.runSync(
+        Effect.cached(
+          Effect.suspend(() =>
+            Effect.flatMap(
+              Effect.serviceOption(SnapshotRecorder.SnapshotRecorder),
+              Option.match({
+                onNone: () => fetch(input),
+                onSome: (recorder) => recorder.record(identity, fetch(input))
+              })
+            )
+          )
+        )
+      )
       snapshots.set(key, current)
       while (snapshots.size > capacity) snapshots.delete(snapshots.keys().next().value!)
       return current

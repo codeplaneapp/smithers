@@ -1,8 +1,9 @@
-import { Cause, Effect, Fiber } from "effect"
+import { Cause, Effect, Fiber, Layer } from "effect"
 import { TestClock } from "effect/testing"
 import { describe, expect, it } from "vitest"
 import * as MemoryStore from "../src/MemoryStore.ts"
 import * as Recall from "../src/Recall.ts"
+import * as SnapshotRecorder from "../src/SnapshotRecorder.ts"
 import * as Source from "../src/Source.ts"
 
 const storeOf = (listNotes: () => Effect.Effect<ReadonlyArray<{ readonly text: string }>>) =>
@@ -14,14 +15,15 @@ const read = (
     readonly store: MemoryStore.Service
     readonly recall: Recall.Service
     readonly source?: Source.Source
+    readonly recorder?: Layer.Layer<SnapshotRecorder.SnapshotRecorder>
   }
-) =>
-  Effect.runPromise(
-    Source.declaredText(options.source ?? Source.make(), input).pipe(
-      Effect.provideService(MemoryStore.MemoryStore, options.store),
-      Effect.provideService(Recall.Recall, options.recall)
-    )
+) => {
+  const effect = Source.declaredText(options.source ?? Source.make(), input).pipe(
+    Effect.provideService(MemoryStore.MemoryStore, options.store),
+    Effect.provideService(Recall.Recall, options.recall)
   )
+  return Effect.runPromise(options.recorder === undefined ? effect : Effect.provide(effect, options.recorder))
+}
 
 describe("Source", () => {
   it("returns no injection after the advisory timeout", async () => {
@@ -200,17 +202,8 @@ describe("Source", () => {
   })
 
   it("refetches for a source built after the one that froze the snapshot", async () => {
-    // The memo is process-local and scoped to the source value, which is the
-    // whole of what "frozen per (lineageId, iteration)" promises. A resumed run
-    // is a new process holding a new source, so it asks memory again and is
-    // answered from memory as it stands NOW — and memory is durable, mutable,
-    // shared state, so that is routinely a different answer.
-    //
-    // It matters because this text opens an agent's context: a different answer
-    // is a different frame-zero prefix, which re-keys every sealed model step
-    // under it. The run replays nothing and re-buys every call it had paid for.
-    // A host that needs the guarantee records this value through its own run
-    // journal; the module docblock says so, and this pins what it says.
+    // With no recorder composed, a second source retains the documented
+    // memory-only fallback and reads current memory into its own local memo.
     let reads = 0
     const store = storeOf(() =>
       Effect.sync(() => {
@@ -222,13 +215,44 @@ describe("Source", () => {
     const original = Source.make()
     const first = await read(input, { source: original, store, recall: Recall.makeNoop() })
     const held = await read(input, { source: original, store, recall: Recall.makeNoop() })
-    // The next process. Same lineage, same iteration, same everything the key
-    // is made of.
+    // The next process, with the same lineage and iteration.
     const resumed = await read(input, { source: Source.make(), store, recall: Recall.makeNoop() })
 
     expect(held).toEqual(first)
     expect(resumed).not.toEqual(first)
     expect(reads).toBe(2)
+  })
+
+  it("replays a recorded snapshot into a second source after memory changes", async () => {
+    const recorded = new Map<string, string>()
+    const recorder = SnapshotRecorder.layer({
+      record: (identity, effect) =>
+        Effect.suspend(() => {
+          const key = `${identity.lineageId}\u0000${identity.iteration}`
+          const snapshot = recorded.get(key)
+          return snapshot === undefined
+            ? effect.pipe(Effect.tap((text) => Effect.sync(() => recorded.set(key, text))))
+            : Effect.succeed(snapshot)
+        })
+    })
+    let reads = 0
+    let memory = "memory before the crash"
+    const store = storeOf(() =>
+      Effect.sync(() => {
+        reads += 1
+        return [{ text: memory }]
+      })
+    )
+    const input = { lineageId: "durable", iteration: 4, banks: ["bank"], query: "q" }
+    const first = await read(input, { source: Source.make(), store, recall: Recall.makeNoop(), recorder })
+
+    memory = "memory after the crash"
+    const resumed = await read(input, { source: Source.make(), store, recall: Recall.makeNoop(), recorder })
+
+    expect(first.text).toContain("memory before the crash")
+    expect(resumed).toEqual(first)
+    expect(resumed.text).not.toContain("memory after the crash")
+    expect(reads).toBe(1)
   })
 
   it("evicts the least recently used snapshot at its finite capacity", async () => {
