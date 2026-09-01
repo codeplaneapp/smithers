@@ -29,6 +29,7 @@ import type * as Pipeable from "effect/Pipeable"
 import { pipeArguments } from "effect/Pipeable"
 import * as Schema from "effect/Schema"
 import type * as Types from "effect/Types"
+import { GraphBuildError } from "../GraphBuildError.ts"
 import * as Planned from "../Planned.ts"
 
 /**
@@ -232,7 +233,7 @@ export interface ActionCall extends Scheduled {
  */
 export interface FunctionIdentity {
   readonly _tag: "FunctionIdentity"
-  readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v3" | "static-node/v1"
+  readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v4" | "static-node/v1"
   readonly digest: string
 }
 
@@ -391,6 +392,30 @@ export interface PlannedReference {
   readonly path: ReadonlyArray<string>
 }
 
+/** The AST references minted by this module; structural lookalikes are data. */
+const plannedReferences = new WeakSet<object>()
+
+const makePlannedReference = (reference: Planned.Reference): PlannedReference => {
+  const value = Object.freeze({
+    _tag: "PlannedReference" as const,
+    node: reference.node,
+    path: Object.freeze([...reference.path])
+  })
+  plannedReferences.add(value)
+  return value
+}
+
+/**
+ * Reads an AST-owned planned reference without trusting its public data shape.
+ *
+ * @since 1.0.0
+ * @private
+ */
+export const plannedReference = (value: unknown): PlannedReference | undefined =>
+  typeof value === "object" && value !== null && plannedReferences.has(value)
+    ? value as PlannedReference
+    : undefined
+
 /**
  * Every AST variant.
  *
@@ -420,8 +445,33 @@ const declarations = new WeakMap<ActionCall | FlowCall, unknown>()
 interface CloneFrame {
   readonly source: Record<string, unknown> | ReadonlyArray<unknown>
   readonly output: Record<string, unknown> | Array<unknown>
+  readonly descriptors: PropertyDescriptorMap
   readonly keys: ReadonlyArray<string> | undefined
+  readonly path: ReadonlyArray<string>
   index: number
+}
+
+const payloadError = (path: ReadonlyArray<string>, reason: string): GraphBuildError =>
+  new GraphBuildError({
+    code: "invalid_payload",
+    node: "payload",
+    path,
+    message: `Plan payload at ${path.length === 0 ? "$" : `$.${path.join(".")}`} ${reason}`
+  })
+
+const inheritedDataProperty = (
+  value: object,
+  key: PropertyKey
+): { readonly found: boolean; readonly value?: unknown } => {
+  let current: object | null = value
+  while (current !== null) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, key)
+    if (descriptor !== undefined) {
+      return "value" in descriptor ? { found: true, value: descriptor.value } : { found: true }
+    }
+    current = Object.getPrototypeOf(current) as object | null
+  }
+  return { found: false }
 }
 
 /**
@@ -440,7 +490,11 @@ export const value = (input: unknown, seen: WeakMap<object, unknown> = new WeakM
   let result: unknown
   const frames: Array<CloneFrame> = []
   /** Resolves one member, opening a frame when it is an unseen container. */
-  const enter = (initial: unknown, place: (member: unknown | typeof missing) => void): void => {
+  const enter = (
+    initial: unknown,
+    place: (member: unknown | typeof missing) => void,
+    path: ReadonlyArray<string>
+  ): void => {
     let current = initial
     const replacements: Array<object> = []
     const resolving = new WeakSet<object>()
@@ -451,7 +505,7 @@ export const value = (input: unknown, seen: WeakMap<object, unknown> = new WeakM
     while (true) {
       const reference = Planned.reference(current)
       if (reference !== undefined) {
-        finish({ _tag: "PlannedReference", node: reference.node, path: [...reference.path] } satisfies PlannedReference)
+        finish(makePlannedReference(reference))
         return
       }
       const kind = typeof current
@@ -468,11 +522,14 @@ export const value = (input: unknown, seen: WeakMap<object, unknown> = new WeakM
         finish(missing)
         return
       }
-      const serializable = source as { readonly toJSON: () => unknown }
-      if ("toJSON" in serializable && typeof serializable.toJSON === "function") {
+      const toJSON = inheritedDataProperty(source, "toJSON")
+      if (toJSON.found && toJSON.value === undefined) {
+        throw payloadError(path, "has an accessor-backed toJSON member")
+      }
+      if (typeof toJSON.value === "function") {
         resolving.add(source)
         replacements.push(source)
-        current = serializable.toJSON()
+        current = Reflect.apply(toJSON.value, source, [])
         continue
       }
       if (kind === "function") {
@@ -480,7 +537,12 @@ export const value = (input: unknown, seen: WeakMap<object, unknown> = new WeakM
         finish(missing)
         return
       }
+      const prototype = Object.getPrototypeOf(source)
+      if (!Array.isArray(source) && prototype !== Object.prototype && prototype !== null) {
+        throw payloadError(path, "has an unsupported prototype and no data-valued toJSON method")
+      }
       const container = current as Record<string, unknown> | ReadonlyArray<unknown>
+      const descriptors = Object.getOwnPropertyDescriptors(container) as PropertyDescriptorMap
       const output: Record<string, unknown> | Array<unknown> = Array.isArray(container)
         ? []
         : Object.create(null) as Record<string, unknown>
@@ -489,7 +551,13 @@ export const value = (input: unknown, seen: WeakMap<object, unknown> = new WeakM
       frames.push({
         source: container,
         output,
-        keys: Array.isArray(container) ? undefined : Object.keys(container),
+        descriptors,
+        keys: Array.isArray(container)
+          ? undefined
+          : Reflect.ownKeys(descriptors).filter((key): key is string =>
+            typeof key === "string" && descriptors[key]!.enumerable === true
+          ),
+        path,
         index: 0
       })
       return
@@ -497,7 +565,7 @@ export const value = (input: unknown, seen: WeakMap<object, unknown> = new WeakM
   }
   enter(input, (member) => {
     result = member === missing ? undefined : member
-  })
+  }, [])
   while (frames.length > 0) {
     const frame = frames[frames.length - 1]!
     if (frame.index >= (frame.keys ?? frame.source as ReadonlyArray<unknown>).length) {
@@ -508,12 +576,18 @@ export const value = (input: unknown, seen: WeakMap<object, unknown> = new WeakM
     frame.index = position + 1
     if (frame.keys === undefined) {
       const members = frame.output as Array<unknown>
-      enter((frame.source as ReadonlyArray<unknown>)[position], (member) => {
+      const descriptor = frame.descriptors[String(position)]
+      if (descriptor !== undefined && !("value" in descriptor)) {
+        throw payloadError([...frame.path, String(position)], "is an accessor")
+      }
+      enter(descriptor === undefined ? undefined : descriptor.value, (member) => {
         members.push(member === missing ? null : member)
-      })
+      }, [...frame.path, String(position)])
     } else {
       const key = frame.keys[position]!
-      enter((frame.source as Record<string, unknown>)[key], (member) => {
+      const descriptor = frame.descriptors[key]!
+      if (!("value" in descriptor)) throw payloadError([...frame.path, key], "is an accessor")
+      enter(descriptor.value, (member) => {
         if (member === missing) return
         Object.defineProperty(frame.output, key, {
           configurable: true,
@@ -521,7 +595,7 @@ export const value = (input: unknown, seen: WeakMap<object, unknown> = new WeakM
           value: member,
           writable: true
         })
-      })
+      }, [...frame.path, key])
     }
   }
   return result
@@ -550,7 +624,7 @@ export const functionIdentity = (operation: unknown): FunctionIdentity => {
   }
   return {
     _tag: "FunctionIdentity",
-    algorithm: metadata === undefined ? "sha256-source-ephemeral/v4" : "sha256-source-captures/v3",
+    algorithm: metadata === undefined ? "sha256-source-ephemeral/v4" : "sha256-source-captures/v4",
     digest: digestSync(metadata === undefined ? `${source}\0${ephemeral}` : `${source}\0${metadata.captures}`)
   }
 }

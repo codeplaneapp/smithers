@@ -264,6 +264,31 @@ export class KeyMaterialError extends Schema.TaggedError<KeyMaterialError>()("@s
   message: Schema.String
 }) {}
 
+const validateEnvironment = (environment: EnvironmentIdentity): KeyMaterialError | undefined => {
+  const candidate = environment as { readonly declared?: unknown; readonly runScope?: unknown }
+  if (candidate.declared === false) {
+    if (typeof candidate.runScope !== "string" || candidate.runScope.length === 0) {
+      return new KeyMaterialError({
+        code: "invalid_environment",
+        message: "Undeclared environment identity requires a non-empty runScope"
+      })
+    }
+    return undefined
+  }
+  if (candidate.declared === true) {
+    return candidate.runScope === undefined
+      ? undefined
+      : new KeyMaterialError({
+        code: "invalid_environment",
+        message: "Declared environment identity must not include runScope"
+      })
+  }
+  return new KeyMaterialError({
+    code: "invalid_environment",
+    message: "Environment identity requires a boolean declared field"
+  })
+}
+
 const sortStrings = (values: ReadonlyArray<string>): Array<string> =>
   [...new Set(values.map((value) => value.normalize("NFC")))].sort()
 
@@ -353,15 +378,21 @@ const decodeKey = Schema.decodeUnknownEffect(Key)
  */
 export const content = (
   identity: ContentIdentity
-): Effect.Effect<StepKey, Schema.SchemaError, Crypto.Crypto> =>
-  decodeKey({
-    kind: "content",
-    body: identity.body,
-    inputs: normalizeInputs(identity.inputs),
-    layers: sortStrings(identity.layers),
-    capabilities: normalizeCapabilities(identity.capabilities),
-    ...(identity.environment === undefined ? {} : { environment: normalizeEnvironment(identity.environment) }),
-    ...(identity.hermetic === undefined ? {} : { hermetic: normalizeHermetic(identity.hermetic) })
+): Effect.Effect<StepKey, KeyMaterialError | Schema.SchemaError, Crypto.Crypto> =>
+  Effect.gen(function*() {
+    if (identity.environment !== undefined) {
+      const invalid = validateEnvironment(identity.environment)
+      if (invalid !== undefined) return yield* invalid
+    }
+    return yield* decodeKey({
+      kind: "content",
+      body: identity.body,
+      inputs: normalizeInputs(identity.inputs),
+      layers: sortStrings(identity.layers),
+      capabilities: normalizeCapabilities(identity.capabilities),
+      ...(identity.environment === undefined ? {} : { environment: normalizeEnvironment(identity.environment) }),
+      ...(identity.hermetic === undefined ? {} : { hermetic: normalizeHermetic(identity.hermetic) })
+    })
   })
 
 /**
@@ -412,7 +443,8 @@ export const fromKeyMaterial = (
       inputs[String(index)] = input.value
       continue
     }
-    if (!Object.hasOwn(dependencyDigests, input.from)) {
+    const descriptor = Object.getOwnPropertyDescriptor(dependencyDigests, input.from)
+    if (descriptor === undefined) {
       return Effect.fail(
         new KeyMaterialError({
           code: "missing_dependency",
@@ -420,7 +452,15 @@ export const fromKeyMaterial = (
         })
       )
     }
-    const digest = (dependencyDigests as Readonly<Record<string, unknown>>)[input.from]
+    if (!("value" in descriptor)) {
+      return Effect.fail(
+        new KeyMaterialError({
+          code: "missing_dependency",
+          message: `Digest for graph dependency ${input.from} must be a data property`
+        })
+      )
+    }
+    const digest: unknown = descriptor.value
     if (typeof digest !== "string") {
       return Effect.fail(
         new KeyMaterialError({
@@ -542,20 +582,9 @@ export const dispatchIdentity = (options: {
         message: `Cannot create a dispatch key for ${material.kind} material`
       })
     }
-    const environment = options.environment as
-      | { readonly declared: boolean; readonly runScope?: unknown }
-      | undefined
-    if (environment?.declared === false && environment.runScope === undefined) {
-      return yield* new KeyMaterialError({
-        code: "invalid_environment",
-        message: "Undeclared environment identity requires runScope"
-      })
-    }
-    if (environment?.declared === true && environment.runScope !== undefined) {
-      return yield* new KeyMaterialError({
-        code: "invalid_environment",
-        message: "Declared environment identity must not include runScope"
-      })
+    if (options.environment !== undefined) {
+      const invalid = validateEnvironment(options.environment)
+      if (invalid !== undefined) return yield* invalid
     }
     const inputs: Record<string, unknown> = {}
     for (let index = 0; index < material.inputs.length; index++) {
@@ -568,13 +597,20 @@ export const dispatchIdentity = (options: {
         inputs[String(index)] = digestInput(orderingOnly, { reference: "pending" })
         continue
       }
-      if (!Object.hasOwn(options.results, input.from)) {
+      const descriptor = Object.getOwnPropertyDescriptor(options.results, input.from)
+      if (descriptor === undefined) {
         return yield* new KeyMaterialError({
           code: "missing_dependency",
           message: `Missing settled result for graph dependency ${input.from}`
         })
       }
-      const compute = decodeKey({ kind: "input-value", value: project(options.results[input.from], input.path) })
+      if (!("value" in descriptor)) {
+        return yield* new KeyMaterialError({
+          code: "missing_dependency",
+          message: `Settled result for graph dependency ${input.from} must be a data property`
+        })
+      }
+      const compute = decodeKey({ kind: "input-value", value: project(descriptor.value, input.path) })
       const digest = yield* (
         options.digestMemo === undefined ? compute : options.digestMemo.digest(input.from, input.path, compute)
       )

@@ -77,6 +77,42 @@ describe("PlanStore", () => {
       expect(Option.getOrThrow(read)).toEqual(grown)
     }))
 
+  it.effect("refuses a divergent branch and rolls the attempted append back byte for byte", () =>
+    Effect.gen(function*() {
+      const base = yield* withCrypto(compile([draft("root")]))
+      const planA = yield* withCrypto(Plan.append(base, [draft("a")]))
+      const planB = yield* withCrypto(Plan.append(base, [draft("b")]))
+      const planB2 = yield* withCrypto(Plan.append(planB, [
+        draft("c", { inputs: [{ _tag: "Ref", from: "b", path: [] }] })
+      ]))
+      const { after, afterCount, before, beforeCount, failure } = yield* withStore((store) =>
+        Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          yield* store.record(base, 1)
+          yield* store.append(planA)
+          const before = yield* store.get(base.planId)
+          const beforeRows = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM flows_plan_nodes`
+          const failure = yield* Effect.flip(store.append(planB2))
+          const after = yield* store.get(base.planId)
+          const afterRows = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM flows_plan_nodes`
+          return {
+            after,
+            afterCount: afterRows[0]!.count,
+            before,
+            beforeCount: beforeRows[0]!.count,
+            failure
+          }
+        })
+      )
+
+      expect(failure).toMatchObject({
+        code: "constraint",
+        message: `plan ${base.planId} recorded plan's nodes diverge from the plan this append was grown from`
+      })
+      expect(after).toEqual(before)
+      expect(afterCount).toBe(beforeCount)
+    }))
+
   it.effect("refuses a skipped generation and rolls the attempted append back byte for byte", () =>
     Effect.gen(function*() {
       const base = yield* withCrypto(compile([draft("a")]))
@@ -190,7 +226,7 @@ describe("PlanStore", () => {
   it.effect("refuses an append whose newest generation has no nodes", () =>
     Effect.gen(function*() {
       const base = yield* withCrypto(compile([draft("root")]))
-      const empty = yield* withCrypto(Plan.append(base, []))
+      const empty: Plan.Plan = { ...base, generation: 1 }
       const failure = yield* withStore((store) =>
         Effect.gen(function*() {
           yield* store.record(base, 1)

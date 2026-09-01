@@ -196,7 +196,7 @@ describe("Plan.compile", () => {
 
   it.effect("compiles a 10,000-node Ref chain in both declaration orders without native recursion", () =>
     Effect.gen(function*() {
-      const size = 10_000
+      const size = Plan.maximumPlanNodes
       const ids = Array.from({ length: size }, (_, index) => `chain-${index}`)
       const nodes = ids.map((id, index) =>
         draft(id, {
@@ -208,6 +208,21 @@ describe("Plan.compile", () => {
 
       expect(forward.nodes.map((node) => node.id)).toEqual(ids)
       expect(reverse.nodes.map((node) => node.id)).toEqual(ids)
+      const overflow = yield* withCryptoFailure(Plan.append(forward, [draft("chain-overflow")]))
+      expect(overflow).toMatchObject({
+        code: "graph_too_large",
+        message: `A plan may contain at most ${Plan.maximumPlanNodes} nodes, received ${Plan.maximumPlanNodes + 1}`
+      })
+    }))
+
+  it.effect("refuses a graph above the documented node bound before quadratic analysis", () =>
+    Effect.gen(function*() {
+      const nodes = Array.from({ length: Plan.maximumPlanNodes + 1 }, (_, index) => draft(`wide-${index}`))
+      const failure = yield* withCryptoFailure(compile(nodes, "too-large"))
+      expect(failure).toMatchObject({
+        code: "graph_too_large",
+        message: `A plan may contain at most ${Plan.maximumPlanNodes} nodes, received ${Plan.maximumPlanNodes + 1}`
+      })
     }))
 
   it.effect("re-keys the dependent cone and nothing else when a leaf's declaration changes", () =>
@@ -664,6 +679,32 @@ describe("Plan.append", () => {
       expect(grown.nodes[0]).toBe(base.nodes[0])
     }))
 
+  it.effect("captures a frozen caller-built plan before the lazy effect runs", () =>
+    Effect.gen(function*() {
+      const compiled = yield* withCrypto(compile([draft("root")]))
+      const forged = Object.freeze({ ...compiled, nodes: [...compiled.nodes] })
+      const pending = Plan.append(
+        forged,
+        [draft("child", { inputs: [{ _tag: "Ref", from: "root", path: [] }] })]
+      )
+      ;(forged.nodes as Array<Plan.PlanNode>).length = 0
+      const grown = yield* withCrypto(pending)
+
+      expect(grown.nodes.map((node) => node.id)).toEqual(["root", "child"])
+      expect(grown.nodes[1]!.dependsOn).toEqual(["root"])
+    }))
+
+  it.effect("refuses an empty append without minting a generation", () =>
+    Effect.gen(function*() {
+      const base = yield* withCrypto(compile([draft("root")], "empty-append"))
+      const failure = yield* withCryptoFailure(Plan.append(base, []))
+
+      expect(failure).toMatchObject({
+        code: "invalid_node",
+        message: `Plan ${base.planId} append requires at least one draft`
+      })
+    }))
+
   it.effect("annotates a conflict discovered during elaboration on the new node only", () =>
     Effect.gen(function*() {
       const base = yield* withCrypto(compile([draft("root", { writes: ["out"] })]))
@@ -787,19 +828,129 @@ describe("Plan admission", () => {
       })
     }))
 
+  it.effect("decodes malformed effects into exact typed node errors", () =>
+    Effect.gen(function*() {
+      const malformed = (value: unknown) => compile([{ ...draft("node"), effects: value as Plan.NodeEffects }])
+      const notObject = yield* withCryptoFailure(malformed(1))
+      const readsNotArray = yield* withCryptoFailure(malformed({
+        reads: 1,
+        writes: [],
+        boundaryMode: "hard"
+      }))
+      const missing = yield* withCryptoFailure(malformed(undefined))
+      const unknownWrite = yield* withCryptoFailure(malformed({
+        reads: [],
+        writes: [{ _tag: "Wat" }],
+        boundaryMode: "hard"
+      }))
+      const invalidBoundary = yield* withCryptoFailure(malformed({
+        reads: [],
+        writes: [],
+        boundaryMode: "weird"
+      }))
+
+      expect(notObject).toMatchObject({
+        code: "invalid_node",
+        message: "Node node has invalid effects: Expected object"
+      })
+      expect(readsNotArray).toMatchObject({
+        code: "invalid_node",
+        message: "Node node has invalid effects: Expected array\n  at [\"reads\"]"
+      })
+      expect(missing).toMatchObject({
+        code: "invalid_node",
+        message: "Node node has invalid effects: Expected object"
+      })
+      expect(unknownWrite).toMatchObject({
+        code: "invalid_node",
+        message:
+          "Node node has invalid effects: Expected string | { readonly \"_tag\": \"Glob\", ... } | { readonly \"_tag\": \"TreeArtifact\", ... }\n  at [\"writes\"][0]"
+      })
+      expect(invalidBoundary).toMatchObject({
+        code: "invalid_node",
+        message: "Node node has invalid effects: Expected \"hard\" | \"expected\"\n  at [\"boundaryMode\"]"
+      })
+    }))
+
+  it.effect("refuses an invalid node kind with an exact typed error", () =>
+    Effect.gen(function*() {
+      const failure = yield* withCryptoFailure(compile([{
+        ...draft("node"),
+        kind: "banana" as unknown as Plan.PlanNode["kind"]
+      }]))
+
+      expect(failure).toMatchObject({
+        code: "invalid_node",
+        message: "Node node kind must be step, agent, or merge, received \"banana\""
+      })
+    }))
+
+  it.effect("refuses an invalid conflict strategy before overlap analysis", () =>
+    Effect.gen(function*() {
+      const failure = yield* withCryptoFailure(compile([
+        draft("first", { writes: ["shared"] }),
+        {
+          ...draft("node", { writes: ["shared"] }),
+          conflictStrategy: "fali" as unknown as Plan.PairStrategy
+        }
+      ]))
+
+      expect(failure).toMatchObject({
+        code: "invalid_node",
+        message: "Node node conflictStrategy must be serialize, lane, or fail, received \"fali\""
+      })
+    }))
+
+  it.effect("refuses an invalid runtime strategy with an exact typed error", () =>
+    Effect.gen(function*() {
+      const failure = yield* withCryptoFailure(compile([{
+        ...draft("node"),
+        runtimeStrategy: "junk" as unknown as Plan.RuntimeStrategy
+      }]))
+
+      expect(failure).toMatchObject({
+        code: "invalid_node",
+        message: "Node node runtimeStrategy must be delay-rebase or stop-merge, received \"junk\""
+      })
+    }))
+
+  it.effect("strips excess effect fields during draft admission", () =>
+    Effect.gen(function*() {
+      const plan = yield* withCrypto(compile([{
+        ...draft("node"),
+        effects: {
+          reads: [],
+          writes: [],
+          boundaryMode: "hard",
+          futureField: "ignored"
+        } as unknown as Plan.NodeEffects
+      }]))
+
+      expect("futureField" in plan.nodes[0]!.effects).toBe(false)
+    }))
+
+  it.effect("bounds a validation message that names an extremely long node id", () =>
+    Effect.gen(function*() {
+      const failure = yield* withCryptoFailure(compile([{
+        ...draft("x".repeat(100_000)),
+        kind: "banana" as unknown as Plan.PlanNode["kind"]
+      }]))
+
+      expect(failure).toMatchObject({ code: "invalid_node" })
+      expect((failure as Plan.PlanError).message.length).toBeLessThan(1_000)
+    }))
+
   it.effect("refuses a speculative material version with its schema path", () =>
     Effect.gen(function*() {
       const node = draft("node")
-      const material = { ...node.material, version: "flows/key-material/v2" }
+      const material = { ...node.material, version: "flows/key-material/v3" }
       const failure = yield* withCryptoFailure(compile([{
         ...node,
         material: material as unknown as KeyMaterial.KeyMaterial
       }]))
       expect(failure).toMatchObject({
         code: "invalid_node",
-        message: `Node node has invalid material ${
-          JSON.stringify(material)
-        }: Expected "flows/key-material/v1"\n  at ["version"]`
+        message: "Node node has invalid material: Expected \"flows/key-material/v2\"\n  at [\"version\"]"
       })
     }))
 
@@ -813,10 +964,27 @@ describe("Plan admission", () => {
       }]))
       expect(failure).toMatchObject({
         code: "invalid_node",
-        message: `Node node has invalid material ${
-          JSON.stringify(material)
-        }: Expected a value with a length of at least 1\n  at ["inputs"][0]["from"]`
+        message:
+          "Node node has invalid material: Expected a value with a length of at least 1\n  at [\"inputs\"][0][\"from\"]"
       })
+    }))
+
+  it.effect("never embeds invalid material payloads in admission errors", () =>
+    Effect.gen(function*() {
+      const node = draft("secret-node")
+      const failure = yield* withCryptoFailure(compile([{
+        ...node,
+        material: {
+          ...node.material,
+          kind: "banana",
+          body: { token: "TOP-SECRET-123" }
+        } as unknown as KeyMaterial.KeyMaterial
+      }]))
+
+      expect(failure).toMatchObject({ code: "invalid_node" })
+      expect((failure as Plan.PlanError).message).toContain("Node secret-node has invalid material:")
+      expect((failure as Plan.PlanError).message).toContain("at [")
+      expect((failure as Plan.PlanError).message).not.toContain("TOP-SECRET-123")
     }))
 
   it.effect("accepts and strips excess material fields while snapshotting schema arrays", () =>
@@ -949,7 +1117,7 @@ describe("PlanDiff.diff", () => {
           key: Schema.decodeUnknownSync(Plan.KeyDigest)(`key1_${"0".repeat(64)}`),
           material: {
             ...before.nodes[0]!.material,
-            version: "flows/key-material/v2" as KeyMaterial.KeyMaterial["version"]
+            version: "flows/key-material/v3" as KeyMaterial.KeyMaterial["version"]
           }
         }]
       }
@@ -1014,57 +1182,62 @@ describe("PlanDiff.diff", () => {
 })
 
 describe("Plan.compile effects validation", () => {
-  // Drafts are typed values, never decoded rows, so the `FileSet.Pattern`
-  // schema filter has not seen them: admission is where absolute and aliased
-  // spellings — which defeat exact-string overlap detection — are refused.
+  const invalidPattern = "file patterns must be workspace-relative and cannot traverse upward"
+
   it.effect("refuses an absolute declared path", () =>
     Effect.gen(function*() {
       const error = yield* withCryptoFailure(compile([draft("node", { writes: ["/etc/passwd"] })]))
-      expect(error).toMatchObject({ code: "invalid_effects" })
+      expect(error).toMatchObject({
+        code: "invalid_node",
+        message: `Node node has invalid effects: ${invalidPattern}\n  at ["writes"][0]`
+      })
     }))
 
   it.effect("refuses upward traversal and aliasing spellings", () =>
     Effect.gen(function*() {
       for (const spelling of ["../escape.txt", "./out.txt", "out//x.txt"]) {
         const error = yield* withCryptoFailure(compile([draft("node", { reads: [spelling] })]))
-        expect(error).toMatchObject({ code: "invalid_effects" })
+        expect(error).toMatchObject({
+          code: "invalid_node",
+          message: `Node node has invalid effects: ${invalidPattern}\n  at ["reads"][0]`
+        })
       }
     }))
 
   it.effect("refuses control characters at every declared filesystem site", () =>
     Effect.gen(function*() {
-      const declarations: ReadonlyArray<readonly [path: string, effects: Plan.NodeEffects]> = [
-        ["read\u0000.txt", { reads: ["read\u0000.txt"], writes: [], boundaryMode: "hard" }],
-        ["write\u0000.txt", { reads: [], writes: ["write\u0000.txt"], boundaryMode: "hard" }],
-        ["include\u0000/**", {
+      const declarations: ReadonlyArray<readonly [effects: Plan.NodeEffects, path: string]> = [
+        [{ reads: ["read\u0000.txt"], writes: [], boundaryMode: "hard" }, "[\"reads\"][0]"],
+        [{ reads: [], writes: ["write\u0000.txt"], boundaryMode: "hard" }, "[\"writes\"][0]"],
+        [{
           reads: [{ _tag: "Glob", include: ["include\u0000/**"] }],
           writes: [],
           boundaryMode: "hard"
-        }],
-        ["exclude\u0000/**", {
+        }, "[\"reads\"][0][\"include\"][0]"],
+        [{
           reads: [{ _tag: "Glob", include: ["**"], exclude: ["exclude\u0000/**"] }],
           writes: [],
           boundaryMode: "hard"
-        }],
-        ["tree\u0000", {
+        }, "[\"reads\"][0][\"exclude\"][0]"],
+        [{
           reads: [],
           writes: [{ _tag: "TreeArtifact", path: "tree\u0000" }],
           boundaryMode: "hard"
-        }],
-        ["remove\u0000.txt", {
+        }, "[\"writes\"][0][\"path\"]"],
+        [{
           reads: [],
           writes: [],
           removes: ["remove\u0000.txt"],
           boundaryMode: "hard"
-        }]
+        }, "[\"removes\"][0]"]
       ]
 
-      for (const [path, effects] of declarations) {
+      for (const [effects, path] of declarations) {
         const error = yield* withCryptoFailure(compile([{ ...draft("node"), effects }]))
         expect(error).toBeInstanceOf(Plan.PlanError)
-        expect((error as Plan.PlanError).code).toBe("invalid_effects")
+        expect((error as Plan.PlanError).code).toBe("invalid_node")
         expect((error as Plan.PlanError).message).toBe(
-          `Node node declares ${path}, which is not workspace-relative`
+          `Node node has invalid effects: ${invalidPattern}\n  at ${path}`
         )
       }
     }))
@@ -1075,7 +1248,10 @@ describe("Plan.compile effects validation", () => {
         ...draft("node"),
         effects: { reads: [{ _tag: "Glob", include: ["/abs/**"] }], writes: [], boundaryMode: "hard" }
       }]))
-      expect(error).toMatchObject({ code: "invalid_effects" })
+      expect(error).toMatchObject({
+        code: "invalid_node",
+        message: `Node node has invalid effects: ${invalidPattern}\n  at ["reads"][0]["include"][0]`
+      })
     }))
 
   it.effect("refuses a path declared as both a write and a removal", () =>

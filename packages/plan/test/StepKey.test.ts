@@ -275,7 +275,7 @@ describe("StepKey", () => {
       const nondeterministic = yield* withCrypto(
         StepKey.fromKeyMaterial(material({ nondeterministic: true }), {})
       )
-      expect(deterministic).toBe("key1_594e55424285180f3bcb35e6075d0e6961b6506cc15d78de0613eac91eeb9cd9")
+      expect(deterministic).toBe("key1_70a7f80ee5c3eb79693e5e98802145e7d928f6c67a57bec1338da6ee4f5ca0e9")
       expect(nondeterministic).not.toBe(deterministic)
     }))
 
@@ -315,6 +315,31 @@ describe("StepKey", () => {
         "missing_dependency",
         "Digest for graph dependency upstream must be a string"
       )
+    }))
+
+  it.effect("rejects an own dependency digest accessor without invoking it", () =>
+    Effect.gen(function*() {
+      let calls = 0
+      const digests = Object.defineProperty({}, "upstream", {
+        enumerable: true,
+        get: () => {
+          calls++
+          return "key1_upstream"
+        }
+      }) as Readonly<Record<string, string>>
+      const failure = yield* withCryptoFailure(
+        StepKey.fromKeyMaterial(
+          material({ inputs: [{ _tag: "Ref", from: "upstream", path: [] }] }),
+          digests
+        )
+      )
+
+      expectKeyMaterialError(
+        failure,
+        "missing_dependency",
+        "Digest for graph dependency upstream must be a data property"
+      )
+      expect(calls).toBe(0)
     }))
 
   it.effect("refuses non-content material", () =>
@@ -514,7 +539,7 @@ describe("StepKey.dispatchIdentity", () => {
         hermetic,
         environment: { ...environment, runScope: "run-1" }
       }))
-      expect(absent).toBe("key1_70bc16b1ef9256f7301167c9d11f332d39383c61d9f630d99bdc920c066b6ac2")
+      expect(absent).toBe("key1_7ce64818cbad9a440c9e8302693ab565de6b602ee548708d2773a690f8ea610e")
       expect(present).not.toBe(absent)
       expect(scoped).not.toBe(present)
     }))
@@ -535,7 +560,40 @@ describe("StepKey.dispatchIdentity", () => {
       expectKeyMaterialError(
         failure,
         "invalid_environment",
-        "Undeclared environment identity requires runScope"
+        "Undeclared environment identity requires a non-empty runScope"
+      )
+    }))
+
+  it.effect("rejects empty scopes and malformed environments through content", () =>
+    Effect.gen(function*() {
+      const base = { body: 1, inputs: {}, layers: [], capabilities: {} }
+      const empty = yield* withCryptoFailure(StepKey.content({
+        ...base,
+        environment: {
+          declared: false,
+          layers: [],
+          capabilities: {},
+          runScope: ""
+        }
+      }))
+      expectKeyMaterialError(
+        empty,
+        "invalid_environment",
+        "Undeclared environment identity requires a non-empty runScope"
+      )
+
+      const malformed = yield* withCryptoFailure(StepKey.content({
+        ...base,
+        environment: {
+          declared: "sometimes",
+          layers: [],
+          capabilities: {}
+        } as unknown as StepKey.EnvironmentIdentity
+      }))
+      expectKeyMaterialError(
+        malformed,
+        "invalid_environment",
+        "Environment identity requires a boolean declared field"
       )
     }))
 
@@ -585,7 +643,7 @@ describe("StepKey.dispatchIdentity", () => {
     Effect.gen(function*() {
       const deterministic = yield* withCrypto(dispatch({}, {}))
       const nondeterministic = yield* withCrypto(dispatch({ nondeterministic: true }, {}))
-      expect(deterministic).toBe("key1_70bc16b1ef9256f7301167c9d11f332d39383c61d9f630d99bdc920c066b6ac2")
+      expect(deterministic).toBe("key1_7ce64818cbad9a440c9e8302693ab565de6b602ee548708d2773a690f8ea610e")
       expect(nondeterministic).not.toBe(deterministic)
     }))
 
@@ -676,6 +734,28 @@ describe("StepKey.dispatchIdentity", () => {
     Effect.gen(function*() {
       const failure = yield* withCryptoFailure(dispatch({ inputs: [{ _tag: "Ref", from: "missing", path: [] }] }, {}))
       expect(failure).toMatchObject({ code: "missing_dependency" })
+    }))
+
+  it.effect("refuses an own settled-result accessor without invoking it", () =>
+    Effect.gen(function*() {
+      let calls = 0
+      const results = Object.defineProperty({}, "upstream", {
+        enumerable: true,
+        get: () => {
+          calls++
+          return { value: 1 }
+        }
+      }) as Readonly<Record<string, unknown>>
+      const failure = yield* withCryptoFailure(
+        dispatch({ inputs: [{ _tag: "Ref", from: "upstream", path: [] }] }, results)
+      )
+
+      expectKeyMaterialError(
+        failure,
+        "missing_dependency",
+        "Settled result for graph dependency upstream must be a data property"
+      )
+      expect(calls).toBe(0)
     }))
 
   it.effect("refuses non-content material", () =>

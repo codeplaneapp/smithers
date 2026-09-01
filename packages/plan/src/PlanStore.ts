@@ -237,10 +237,6 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       }
       yield* writer.write(
         Effect.gen(function*() {
-          const countRows = yield* sql<{ count: number }>`
-            SELECT COUNT(*) AS count FROM flows_plan_nodes WHERE plan_id = ${plan.planId}
-          `
-          yield* insertNodes(plan.planId, appended, countRows[0]!.count)
           const advanced = yield* sql`
             UPDATE flows_plans SET digest = ${plan.digest}, generation = ${plan.generation}
             WHERE plan_id = ${plan.planId}
@@ -263,6 +259,26 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
               )
             )
           }
+          const stored = yield* sql<{ node_id: string; key_digest: string; generation: number }>`
+            SELECT node_id, key_digest, generation
+            FROM flows_plan_nodes
+            WHERE plan_id = ${plan.planId}
+            ORDER BY ordinal
+          `
+          const recordedPrefix = stored.map((row) => [row.node_id, row.key_digest, row.generation])
+          const expectedPrefix = plan.nodes
+            .filter((node) => node.generation < plan.generation)
+            .map((node) => [node.id, node.key, node.generation])
+          if (JSON.stringify(recordedPrefix) !== JSON.stringify(expectedPrefix)) {
+            return yield* Effect.fail(
+              error(
+                "constraint",
+                `plan ${plan.planId} recorded plan's nodes diverge from the plan this append was grown from`,
+                undefined
+              )
+            )
+          }
+          yield* insertNodes(plan.planId, appended, stored.length)
         })
       ).pipe(Effect.mapError(mapPersistenceError))
     })

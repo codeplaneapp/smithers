@@ -25,7 +25,9 @@ describe("GraphBuildError", () => {
       "cyclic_payload",
       "payload_too_deep",
       "graph_too_deep",
-      "invalid_priority"
+      "duplicate_node",
+      "invalid_priority",
+      "invalid_payload"
     ])
   })
 })

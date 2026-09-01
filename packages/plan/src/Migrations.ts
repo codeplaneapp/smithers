@@ -18,6 +18,7 @@ import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as Layer from "effect/Layer"
 import initial from "./migrations/0001_initial.ts"
 import appendOnlyHardening from "./migrations/0002_append_only_hardening.ts"
+import forwardOnlyIdentity from "./migrations/0003_forward_only_identity.ts"
 
 /**
  * The plan store's namespaced migration set, for composition with the other
@@ -32,7 +33,8 @@ export const set: DatabaseMigrations.MigrationSet = {
   idOffset: DatabaseMigrations.idBlock * 4,
   migrations: {
     "0001_initial": initial,
-    "0002_append_only_hardening": appendOnlyHardening
+    "0002_append_only_hardening": appendOnlyHardening,
+    "0003_forward_only_identity": forwardOnlyIdentity
   }
 }
 

@@ -51,7 +51,7 @@ export type InputRef = typeof InputRef.Type
  * @category constants
  * @slop
  */
-export const version = "flows/key-material/v1"
+export const version = "flows/key-material/v2"
 
 /**
  * Everything that can change a node's result, handed to the digest.

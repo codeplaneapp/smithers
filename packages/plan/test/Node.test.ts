@@ -220,14 +220,9 @@ describe("Node", () => {
   })
 
   it("keeps the AST closure-free and JSON serializable", () => {
-    let accessorReads = 0
     const payload = {
       path: "counter.txt",
-      ignored: () => 1,
-      get count() {
-        accessorReads++
-        return 1
-      }
+      ignored: () => 1
     }
     const payloadNode = Node.succeed(payload)
     const functionOnly = Node.succeed({ ignored: () => 1 })
@@ -240,9 +235,8 @@ describe("Node", () => {
         else: () => Node.succeed("again")
       })
     )
-    expect(tagged(payloadNode.ast, "Succeed").value).toEqual({ path: "counter.txt", count: 1 })
+    expect(tagged(payloadNode.ast, "Succeed").value).toEqual({ path: "counter.txt" })
     expect(tagged(functionOnly.ast, "Succeed").value).toEqual({})
-    expect(accessorReads).toBe(1)
     const json = JSON.stringify(node.ast)
     expect(json).not.toContain("=>")
     expect(json).not.toContain("function")
@@ -272,12 +266,6 @@ describe("Node", () => {
 
   it.effect("mirrors canonical payload serialization across representative values", () =>
     Effect.gen(function*() {
-      class Example {
-        readonly count: number
-        constructor(count: number) {
-          this.count = count
-        }
-      }
       const callable = Object.assign(() => 1, { toJSON: () => new Date(0) })
       const corpus: ReadonlyArray<unknown> = [
         new Date(0),
@@ -285,18 +273,9 @@ describe("Node", () => {
         { a: 1 },
         [1, "x", true, null],
         { outer: { inner: [1, { value: "leaf" }] } },
-        new Example(1),
         { u: undefined },
         { f: () => 1 },
         [() => 1],
-        {
-          get boom() {
-            return 7
-          }
-        },
-        new Map([["a", 1]]),
-        new Set([1]),
-        /abc/g,
         callable,
         { toJSON: 1 }
       ]
@@ -316,13 +295,62 @@ describe("Node", () => {
     ])
     expect(tagged(Node.succeed(() => 1).ast, "Succeed").value).toBeUndefined()
     expect(tagged(Node.succeed(Symbol("value")).ast, "Succeed").value).toBeUndefined()
+    // eslint-disable-next-line no-sparse-arrays
+    expect(tagged(Node.succeed([, 1]).ast, "Succeed").value).toEqual([null, 1])
   })
 
-  it("deliberately mirrors canonical's empty objects for Map, Set, and RegExp", () => {
-    // @smthrs/canonical owns this JSON-mirroring rule for exotic objects.
-    expect(tagged(Node.succeed(new Map([["a", 1]])).ast, "Succeed").value).toEqual({})
-    expect(tagged(Node.succeed(new Set([1])).ast, "Succeed").value).toEqual({})
-    expect(tagged(Node.succeed(/abc/g).ast, "Succeed").value).toEqual({})
+  it("refuses unsupported prototypes instead of collapsing them onto an empty object", () => {
+    class Example {
+      readonly count: number
+      constructor(count: number) {
+        this.count = count
+      }
+    }
+    for (const payload of [new Map([["a", 1]]), new Set([1]), /abc/g, new Example(1)]) {
+      expect(() => Node.succeed(payload)).toThrowError(expect.objectContaining({
+        code: "invalid_payload",
+        path: []
+      }))
+    }
+  })
+
+  it("refuses payload accessors without invoking them", () => {
+    let calls = 0
+    const member = Object.defineProperty({}, "credential", {
+      enumerable: true,
+      get: () => {
+        calls++
+        return "secret"
+      }
+    })
+    const toJSON = Object.defineProperty({}, "toJSON", {
+      get: () => {
+        calls++
+        return () => ({})
+      }
+    })
+    const array = new Array<unknown>(1)
+    Object.defineProperty(array, "0", {
+      enumerable: true,
+      get: () => {
+        calls++
+        return "secret"
+      }
+    })
+
+    expect(() => Node.succeed({ nested: member })).toThrowError(expect.objectContaining({
+      code: "invalid_payload",
+      path: ["nested", "credential"]
+    }))
+    expect(() => Node.succeed(toJSON)).toThrowError(expect.objectContaining({
+      code: "invalid_payload",
+      path: []
+    }))
+    expect(() => Node.succeed(array)).toThrowError(expect.objectContaining({
+      code: "invalid_payload",
+      path: ["0"]
+    }))
+    expect(calls).toBe(0)
   })
 
   it("keeps raw function identity stable per object and fail-closed across objects", () => {
@@ -520,7 +548,7 @@ describe("internal/node call factories", () => {
     const two = make(2)
 
     expect(one(2)).toBe(3)
-    expect(Node.functionIdentity(one)).toMatchObject({ algorithm: "sha256-source-captures/v3" })
+    expect(Node.functionIdentity(one)).toMatchObject({ algorithm: "sha256-source-captures/v4" })
     expect(Node.functionIdentity(one)).not.toEqual(Node.functionIdentity(two))
     expect(Node.functionIdentity(make(1))).toEqual(Node.functionIdentity(one))
 

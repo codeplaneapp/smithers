@@ -22,6 +22,11 @@
 
 ### Breaking Changes
 
+- Bumped key material to `flows/key-material/v2` and captured-function
+  identity to `sha256-source-captures/v4`. Existing persisted step keys are
+  intentionally invalidated rather than being reused across changed identity
+  semantics.
+
 - Plan approval digests now include each node's conflict and runtime
   strategies. This moves plan digests without moving step keys. A running run
   pinned to the old digest needs a new approval before it can use the changed
@@ -41,6 +46,14 @@
   `invalid_environment` code.
 
 ### Fixed
+
+- Plan payload capture now refuses accessors and unsupported prototypes with
+  `invalid_payload` instead of executing getters or collapsing `Map`, `Set`,
+  `RegExp`, and class instances onto the same `{}` identity.
+- `StepKey.content` and `dispatchIdentity` now share one environment validator;
+  undeclared environments require a non-empty run scope on both paths.
+- Plans now fail with `graph_too_large` above `Plan.maximumPlanNodes`, bounding
+  the quadratic conflict-analysis workload.
 
 - `PlanStore.append` now advances the stored plan row with a compare-and-swap
   on the previous generation, so appending a skipped generation is refused

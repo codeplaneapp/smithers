@@ -105,6 +105,9 @@ export const RuntimeStrategy = Schema.Literals(["delay-rebase", "stop-merge"])
  */
 export type RuntimeStrategy = typeof RuntimeStrategy.Type
 
+/** @private */
+const NodeKind = Schema.Literals(["step", "agent", "merge"])
+
 /**
  * One resolved overlap between two writers that no dependency path already
  * orders. Conflict is a property of the PAIR, not of one declaration.
@@ -149,7 +152,7 @@ export type ConflictAnnotation = typeof ConflictAnnotation.Type
  */
 export const PlanNode = Schema.Struct({
   id: Schema.NonEmptyString,
-  kind: Schema.Literals(["step", "agent", "merge"]),
+  kind: NodeKind,
   key: KeyDigest,
   material: KeyMaterial.KeyMaterial,
   effects: NodeEffects,
@@ -231,10 +234,30 @@ export class PlanError extends Schema.TaggedError<PlanError>()("@smthrs/plan/Pla
     "duplicate_node",
     "overlap_forbidden",
     "invalid_effects",
-    "invalid_node"
+    "invalid_node",
+    "graph_too_large"
   ]),
   message: Schema.String
 }) {}
+
+/**
+ * Maximum number of nodes retained by one compiled plan.
+ *
+ * Conflict analysis is quadratic in node count, so an explicit ceiling keeps
+ * untrusted declarations from turning planning into an unbounded CPU task.
+ *
+ * @since 1.0.0
+ * @category limits
+ * @slop
+ */
+export const maximumPlanNodes = 10_000
+
+/** @private */
+const graphSizeError = (size: number): PlanError =>
+  new PlanError({
+    code: "graph_too_large",
+    message: `A plan may contain at most ${maximumPlanNodes} nodes, received ${size}`
+  })
 
 /**
  * Resolves the pair's verdict. `fail` dominates — a flow that promised
@@ -524,12 +547,22 @@ const digestOf = (
   planId: string,
   flow: string,
   nodes: ReadonlyArray<PlanNode>
-): Effect.Effect<StepKey.StepKey, Schema.SchemaError, Crypto.Crypto> =>
+): Effect.Effect<StepKey.StepKey, StepKey.KeyMaterialError | Schema.SchemaError, Crypto.Crypto> =>
   StepKey.content(approvalPayload(planId, flow, nodes))
 
 /** @private */
-const describeValue = (value: unknown): string =>
-  typeof value === "string" ? JSON.stringify(value) : Inspectable.toStringUnknown(value, 0)
+const maximumDescriptionLength = 256
+
+/** @private */
+const describeValue = (value: unknown): string => {
+  const rendered = typeof value === "string" ? JSON.stringify(value) : Inspectable.toStringUnknown(value, 0)
+  return rendered.length > maximumDescriptionLength
+    ? `${rendered.slice(0, maximumDescriptionLength - 3)}...`
+    : rendered
+}
+
+/** @private */
+const describeNodeId = (id: string): string => id.length > maximumDescriptionLength ? describeValue(id) : id
 
 /** @private */
 const validateIdentity = (planId: unknown, flow: unknown): PlanError | undefined => {
@@ -568,10 +601,7 @@ const emptySnapshot = (source: object): object =>
  * canonical serializer that refuses it, and freezing an object this package
  * did not create would mutate caller-owned state.
  */
-const snapshot = <A>(value: A): A => {
-  /* v8 ignore next -- every internal snapshot root is a plain plan container; non-container leaves pass through in the descriptor walk below */
-  if (!isSnapshotContainer(value)) return value
-
+const snapshot = <A extends object>(value: A): A => {
   const root = emptySnapshot(value)
   const memo = new WeakMap<object, object>([[value, root]])
   const pending: Array<{ readonly source: object; readonly target: object }> = [{ source: value, target: root }]
@@ -609,8 +639,15 @@ const freezeNode = (node: PlanNode): PlanNode =>
     )
   })
 
+/** Plans whose complete immutable snapshot was created by this module. */
+const frozenPlans = new WeakSet<Plan>()
+
 /** Freezes the plan envelope and its newly built node list. */
-const freezePlan = (plan: Plan): Plan => Object.freeze({ ...plan, nodes: Object.freeze([...plan.nodes]) })
+const freezePlan = (plan: Plan): Plan => {
+  const frozen = Object.freeze({ ...plan, nodes: Object.freeze([...plan.nodes]) })
+  frozenPlans.add(frozen)
+  return frozen
+}
 
 /**
  * Validates the runtime-only parts of `NodeDraft` without replacing effect
@@ -634,11 +671,40 @@ const validateDrafts = (
           })
         )
       }
+      const nodeId = describeNodeId(draft.id)
       if (draft.priority !== undefined && !Number.isSafeInteger(draft.priority)) {
         return yield* Effect.fail(
           new PlanError({
             code: "invalid_node",
-            message: `Node ${draft.id} priority must be a safe integer, received ${describeValue(draft.priority)}`
+            message: `Node ${nodeId} priority must be a safe integer, received ${describeValue(draft.priority)}`
+          })
+        )
+      }
+      if (draft.kind !== undefined && !Schema.is(NodeKind)(draft.kind)) {
+        return yield* Effect.fail(
+          new PlanError({
+            code: "invalid_node",
+            message: `Node ${nodeId} kind must be step, agent, or merge, received ${describeValue(draft.kind)}`
+          })
+        )
+      }
+      if (draft.conflictStrategy !== undefined && !Schema.is(PairStrategy)(draft.conflictStrategy)) {
+        return yield* Effect.fail(
+          new PlanError({
+            code: "invalid_node",
+            message: `Node ${nodeId} conflictStrategy must be serialize, lane, or fail, received ${
+              describeValue(draft.conflictStrategy)
+            }`
+          })
+        )
+      }
+      if (draft.runtimeStrategy !== undefined && !Schema.is(RuntimeStrategy)(draft.runtimeStrategy)) {
+        return yield* Effect.fail(
+          new PlanError({
+            code: "invalid_node",
+            message: `Node ${nodeId} runtimeStrategy must be delay-rebase or stop-merge, received ${
+              describeValue(draft.runtimeStrategy)
+            }`
           })
         )
       }
@@ -646,47 +712,35 @@ const validateDrafts = (
         Effect.mapError((cause) =>
           new PlanError({
             code: "invalid_node",
-            message: `Node ${draft.id} has invalid material ${describeValue(draft.material)}: ${cause.message}`
+            message: `Node ${nodeId} has invalid material: ${cause.message}`
+          })
+        )
+      )
+      const effects = yield* Schema.decodeUnknownEffect(NodeEffects)(draft.effects).pipe(
+        Effect.mapError((cause) =>
+          new PlanError({
+            code: "invalid_node",
+            message: `Node ${nodeId} has invalid effects: ${cause.message}`
           })
         )
       )
       return Object.freeze({
         ...draft,
         material: snapshot(material),
-        effects: snapshot(draft.effects)
+        effects: snapshot(effects)
       })
     }))
 
 /**
- * Declared effects are admitted exactly once, here. Drafts arrive as typed
- * values, never as decoded rows, so the `FileSet.Pattern` schema filter has
- * not seen them: a plan built in-process could otherwise carry absolute or
- * aliased spellings that defeat exact-string overlap detection, or declare
- * one path as both a write and a removal — the overlap the `FileBoundary`
- * schema refuses at the boundary but nothing refused at the plan.
+ * The effects schema admits each individual declaration in `validateDrafts`.
+ * This pass enforces the cross-field invariant that one path cannot be both a
+ * write and a removal.
  *
  * @private
  */
 const validateEffects = (id: string, effects: NodeEffects): PlanError | undefined => {
-  const patterns = (entry: FileSet.Entry): ReadonlyArray<string> =>
-    typeof entry === "string"
-      ? [entry]
-      : entry._tag === "TreeArtifact"
-      ? [entry.path]
-      : [...entry.include, ...entry.exclude ?? []]
   const removes = effects.removes ?? []
   const writes = FileSet.expand(effects.writes)
-  const declared = [...FileSet.expandReads(effects.reads), ...writes, ...removes]
-  for (const entry of declared) {
-    for (const pattern of patterns(entry)) {
-      if (!FileSet.workspaceRelative(pattern)) {
-        return new PlanError({
-          code: "invalid_effects",
-          message: `Node ${id} declares ${pattern}, which is not workspace-relative`
-        })
-      }
-    }
-  }
   for (const removal of removes) {
     if (writes.some((entry) => FileSet.overlaps(entry, removal))) {
       return new PlanError({
@@ -762,10 +816,9 @@ const keyNodes = (
  * Compiles drafts into a plan: topological order, dependency-digest
  * substitution, overlap annotation, and the plan digest. No I/O.
  *
- * Traversal uses explicit stacks and has no artificial node-count limit;
- * available memory is the bound. The conflict and reader/writer passes each
- * consider a quadratic number of node pairs, with effect sets expanded once
- * per node and reachability walked iteratively on demand.
+ * Traversal uses explicit stacks. Because the conflict and reader/writer
+ * passes consider a quadratic number of node pairs, plans are bounded by
+ * {@link maximumPlanNodes} and fail with `graph_too_large` above that limit.
  *
  * @since 0.1.0
  * @category constructors
@@ -780,6 +833,7 @@ export const compile = (options: {
   return Effect.gen(function*() {
     const invalidIdentity = validateIdentity(captured.planId, captured.flow)
     if (invalidIdentity !== undefined) return yield* Effect.fail(invalidIdentity)
+    if (captured.nodes.length > maximumPlanNodes) return yield* Effect.fail(graphSizeError(captured.nodes.length))
     const drafts = yield* validateDrafts(captured.nodes)
     const keyed = yield* keyNodes(drafts, [], 0)
     const nodes = yield* annotate(keyed, new Set())
@@ -812,12 +866,22 @@ export const append = (
   plan: Plan,
   drafts: ReadonlyArray<NodeDraft>
 ): Effect.Effect<Plan, PlanError | StepKey.KeyMaterialError | Schema.SchemaError, Crypto.Crypto> => {
-  const capturedPlan = Object.isFrozen(plan) ? plan : snapshot(plan)
+  const capturedPlan = frozenPlans.has(plan) ? plan : snapshot(plan)
   const capturedDrafts = snapshot(drafts)
   return Effect.gen(function*() {
     const invalidIdentity = validateIdentity(capturedPlan.planId, capturedPlan.flow)
     if (invalidIdentity !== undefined) return yield* Effect.fail(invalidIdentity)
+    const nextSize = capturedPlan.nodes.length + capturedDrafts.length
+    if (nextSize > maximumPlanNodes) return yield* Effect.fail(graphSizeError(nextSize))
     const validated = yield* validateDrafts(capturedDrafts)
+    if (validated.length === 0) {
+      return yield* Effect.fail(
+        new PlanError({
+          code: "invalid_node",
+          message: `Plan ${capturedPlan.planId} append requires at least one draft`
+        })
+      )
+    }
     const generation = capturedPlan.generation + 1
     const keyed = yield* keyNodes(validated, capturedPlan.nodes, generation)
     const nodes = yield* annotate(

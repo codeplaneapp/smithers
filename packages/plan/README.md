@@ -21,7 +21,7 @@ const program = Effect.gen(function*() {
       {
         id: "read-pr",
         material: {
-          version: "flows/key-material/v1",
+          version: "flows/key-material/v2",
           kind: "sealed",
           body: { action: "read-pr", pr: 4821 },
           inputs: [],
@@ -33,7 +33,7 @@ const program = Effect.gen(function*() {
       {
         id: "run-tests",
         material: {
-          version: "flows/key-material/v1",
+          version: "flows/key-material/v2",
           kind: "sealed",
           body: { action: "run-tests" },
           inputs: [{ _tag: "Ref", from: "read-pr", path: [] }],
@@ -124,7 +124,8 @@ stable codes: `cycle`, `unknown_dependency`, `duplicate_node`,
 `overlap_forbidden`, `invalid_effects` (a declared path that is not
 workspace-relative, or one path declared as both a write and a removal), and
 `invalid_node` (an empty plan id or node id, a priority that is not a safe
-integer, or key material this release cannot decode). They also surface
+integer, or key material this release cannot decode), and `graph_too_large`
+(more than `Plan.maximumPlanNodes` nodes). They also surface
 `StepKey.KeyMaterialError` for a missing dependency digest, non-content
 material, or an invalid environment identity, and Effect's `SchemaError` when a
 declaration has no canonical serialization.
@@ -139,7 +140,7 @@ A plan-time build refuses through `GraphBuildError`, whose closed code set
 names the site and the fix: `planned_value_computed`, `invalid_all_member`,
 `invalid_continuation`, `recursion_requires_boundary`,
 `placement_requires_boundary`, `cyclic_payload`, `payload_too_deep`,
-`graph_too_deep`, and `invalid_priority`.
+`graph_too_deep`, `duplicate_node`, `invalid_priority`, and `invalid_payload`.
 
 ## Path and payload rules
 
@@ -150,11 +151,12 @@ NFC, so the backslash spelling and the NFD spelling of one file overlap.
 segments, empty segments, the C0 control range, and DEL. C1 bytes stay legal,
 because a POSIX file name may contain them.
 
-A node payload is stored as its JSON mirror, exactly what canonical
-serialization hashes: a callable `toJSON` is honoured, a function or symbol
-member is dropped from an object and becomes `null` in an array, and shared
-references and cycles clone as they were written. The AST therefore holds only
-inert JSON data and ships, stores, and diffs without the process that built it.
+A node payload is stored as its inert JSON mirror: a data-valued callable
+`toJSON` is honoured, a function or symbol member is dropped from an object and
+becomes `null` in an array, and shared references and cycles clone as they were
+written. Accessors and unsupported prototypes without `toJSON` fail with
+`invalid_payload` instead of executing author code or collapsing distinct
+values onto `{}`.
 
 A `Planned` placeholder may be passed into a payload field, a branch, or a map,
 and field access is allowed because it records a reference path. It may never
@@ -165,9 +167,9 @@ application, `in`, and enumeration all throw a `GraphBuildError`.
 
 `Node.capture` refuses a capture record nested past 256 levels with a
 path-bearing `TypeError` rather than overflowing the native stack.
-`Plan.compile` walks with explicit stacks and never recurses per edge, so
-graph depth is bounded by memory alone; its conflict and reader-after-writer
-passes compare node pairs, so compilation is quadratic in node count.
+`Plan.compile` walks with explicit stacks and never recurses per edge. Its
+conflict and reader-after-writer passes compare node pairs, so compilation is
+quadratic in node count and one plan is capped at `Plan.maximumPlanNodes`.
 
 A compiled plan is a deep-frozen snapshot. Mutating the draft objects a caller
 passed in cannot change the plan, its keys, or its digest.

@@ -76,6 +76,18 @@ export type Ast = internal.NodeAst
 export type FunctionIdentity = Extract<Ast, { readonly _tag: "Map" }>["mapper"]
 
 /**
+ * Reads the inert AST reference created for a planned value.
+ *
+ * Structural lookalikes remain ordinary payload data. This accessor is the
+ * only recognition path because the marker itself is deliberately private to
+ * the AST cloner.
+ *
+ * @since 1.0.0
+ * @category accessors
+ */
+export const plannedReference = internal.plannedReference
+
+/**
  * A pure graph-building value, covariant in what it will succeed and fail
  * with and in what it will need to run. It is a description: holding one has
  * run nothing.
