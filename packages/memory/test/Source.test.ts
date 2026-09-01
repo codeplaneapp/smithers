@@ -199,6 +199,38 @@ describe("Source", () => {
     expect(reads).toBe(3)
   })
 
+  it("refetches for a source built after the one that froze the snapshot", async () => {
+    // The memo is process-local and scoped to the source value, which is the
+    // whole of what "frozen per (lineageId, iteration)" promises. A resumed run
+    // is a new process holding a new source, so it asks memory again and is
+    // answered from memory as it stands NOW — and memory is durable, mutable,
+    // shared state, so that is routinely a different answer.
+    //
+    // It matters because this text opens an agent's context: a different answer
+    // is a different frame-zero prefix, which re-keys every sealed model step
+    // under it. The run replays nothing and re-buys every call it had paid for.
+    // A host that needs the guarantee records this value through its own run
+    // journal; the module docblock says so, and this pins what it says.
+    let reads = 0
+    const store = storeOf(() =>
+      Effect.sync(() => {
+        reads += 1
+        return [{ text: `memory as it stood at read ${reads}` }]
+      })
+    )
+    const input = { lineageId: "resumed", iteration: 0, banks: ["bank"], query: "q" }
+    const original = Source.make()
+    const first = await read(input, { source: original, store, recall: Recall.makeNoop() })
+    const held = await read(input, { source: original, store, recall: Recall.makeNoop() })
+    // The next process. Same lineage, same iteration, same everything the key
+    // is made of.
+    const resumed = await read(input, { source: Source.make(), store, recall: Recall.makeNoop() })
+
+    expect(held).toEqual(first)
+    expect(resumed).not.toEqual(first)
+    expect(reads).toBe(2)
+  })
+
   it("evicts the least recently used snapshot at its finite capacity", async () => {
     let reads = 0
     const source = Source.make({ capacity: 1 })

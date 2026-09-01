@@ -3,9 +3,41 @@
  *
  * Values returned by {@link declaredText} are accepted as
  * `Agent.Options.memory`. The source fetches primers and recall once per
- * `(lineageId, iteration)`, freezes the
- * rendered snapshot for retries, fences it, caps it, and degrades to no text
- * after a two-second timeout or typed failure.
+ * `(lineageId, iteration)`, holds the rendered snapshot for retries, fences it,
+ * caps it, and degrades to no text after a two-second timeout or typed failure.
+ *
+ * ## What "once per `(lineageId, iteration)`" actually promises
+ *
+ * It is a memo held in the process that built the {@link Source}, and nothing
+ * more. It is not durable, and this module cannot make it so: a durable
+ * boundary needs an engine handle to record through, `read` is handed only
+ * `MemoryStore` and `Recall`, and `@smthrs/memory` does not depend on the
+ * harness that owns `EngineLike.record`.
+ *
+ * So the honest statement of the guarantee is:
+ *
+ * - **Within one process, against one {@link Source} value**, two reads of one
+ *   `(lineageId, iteration)` return the same text, and the store is asked once.
+ *   That is what makes a step's in-process retries stable.
+ * - **Across a crash, a park, or any other process boundary**, they do not. The
+ *   next process builds a new memo, refetches live memory, and renders whatever
+ *   memory holds NOW — or `""`, if that fetch overruns its two-second budget.
+ *   Memory is durable, mutable, shared state, so the second answer is routinely
+ *   a different one.
+ *
+ * The consequence is worth stating plainly, because it is the reason to record
+ * this value rather than re-derive it. Memory text goes into an agent's OPENING
+ * context, so a resumed run whose snapshot came back different has a different
+ * frame-zero prefix, which re-keys every sealed model step under it: the run
+ * replays nothing, re-buys every model call it had already paid for, and forks
+ * away from the attempt whose irreversible effects it has already performed.
+ *
+ * **A host that wants that guarantee must record this value itself**, at the
+ * point where it has the run's own journal — the same treatment
+ * `@smthrs/harness`'s `CellTurn` gives its workspace measurements and its
+ * steering drains — and hand the RECORDED text to `Agent.Options.memory`. What
+ * this module offers is the fetch, the rendering, and the fence; the durability
+ * of the result belongs to whoever owns the run.
  *
  * @see docs/specs/Concepts/Memory.md
  *
@@ -127,6 +159,11 @@ const fetch = (input: Input): Effect.Effect<string, never, MemoryStore.MemorySto
 
 /**
  * Constructs a memoizing memory source.
+ *
+ * The memo lives in this value's own closure, so it is scoped to this value and
+ * to the process holding it. Two sources memoize separately, and a source built
+ * by the next process memoizes nothing this one fetched. See the module
+ * docblock for what that does and does not promise a resumed run.
  *
  * @category constructors
  * @since 0.1.0
