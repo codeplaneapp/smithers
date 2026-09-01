@@ -10,8 +10,10 @@
  * What the cell can reach is exactly `ctx`: `ctx.call` bridges to the host's
  * durable flow boundary, `ctx.flows` is a frozen catalog projection. The
  * prelude removes `Date` and `Math.random` from the realm, because a replayed
- * cell must reach the same calls in the same order. There is no filesystem, no
- * network, no process, and no module loader to reach in the first place.
+ * cell must reach the same calls in the same order, and `Proxy`, because a
+ * value that answers reflection from a handler cannot be weighed against the
+ * run's memory ceiling. There is no filesystem, no network, no process, and no
+ * module loader to reach in the first place.
  *
  * Teardown is scope finalization and cancellation is fiber interruption: an
  * interrupted frame disposes the runtime, which is the only thing holding the
@@ -238,6 +240,19 @@ ${preludeHelpers}
   delete globalThis.__intent
   delete globalThis.Date
   delete Math.random
+  // Removed for the same reason as the two above: it makes the realm answer a
+  // question dishonestly. Every reading the panel probe takes goes through the
+  // intrinsics captured before any cell ran, and every property comes off its
+  // own descriptor, so a cell can neither rebind reflection nor hide weight
+  // behind a getter. Neither defence survives a value that IS the trap: a proxy
+  // answers \`getOwnPropertyNames\` from its handler, so one wrapping a
+  // megabyte-wide target weighs as an empty object while the realm holds the
+  // target alive, and the run's only ceiling over string data reads zero for it.
+  // No reading of a proxy can be trusted — any number it reports is a number the
+  // handler chose — and nothing else in this realm can construct one, so the
+  // constructor goes rather than the accounting. \`Reflect\` stays: it offers no
+  // way to make a proxy and the probe does not read through it.
+  delete globalThis.Proxy
   // The seal: once this frame has said how the run ends, it has ended, and the
   // calls a cell would have made after that line are not dispatched. It lives
   // here rather than on the host because ctx.call has to answer synchronously,
@@ -604,6 +619,22 @@ const weighDepth = 32
  * reflection and not the panel that would have named the binding for it. Called
  * fresh each frame instead, the probe would read whatever `Object` a cell had
  * left behind, and the frame after the shadowing would report an empty realm.
+ *
+ * Captured intrinsics stop a cell rebinding reflection, and reading every named
+ * property off its own descriptor stops a getter running. Neither stops a value
+ * that IS the trap, which is why `replPrelude` deletes `Proxy`: a proxy answers
+ * `getOwnPropertyNames` from its handler, so every number this walk could report
+ * for one is a number the cell chose. The constructor goes rather than the
+ * accounting, because there is no reading of a proxy the realm can be trusted to
+ * take.
+ *
+ * Two holes stay open, and both are stated rather than papered over. An array is
+ * walked by index and an index accessor therefore runs (see the array arm below
+ * for why a descriptor per element is not affordable here). And nothing weighs
+ * what a closure retains: a function is 8 bytes to this walk whatever its scope
+ * holds, which no walk over reachable properties can change. So this reading is
+ * honest accounting of the realm's own named data, and the ceiling it feeds
+ * bounds the realm a cell builds in the open — not one built to evade it.
  *
  * The returned function declares nothing on the global object and adds no name
  * of its own to the set it reports, because the host holds it as a handle rather

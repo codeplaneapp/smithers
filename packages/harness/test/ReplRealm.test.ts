@@ -430,6 +430,52 @@ describe("QuickJSSandbox.openRealm", () => {
     expect(frames[1]!.prints).toBe("false")
   })
 
+  it("gives a cell no way to answer reflection with a trap instead of its own keys", async () => {
+    // The last hole in the weighing, closed by removing the capability rather
+    // than by measuring around it. Every read the probe makes goes through the
+    // intrinsics it captured before any cell ran, which stops a cell rebinding
+    // `Object`, and every property comes off its own descriptor, which stops a
+    // getter running. Neither defence survives a value that IS the trap: a proxy
+    // answers `getOwnPropertyNames` from its handler, so before `Proxy` was
+    // removed this exact payload — 8 MiB of live string under a 4 MiB ceiling —
+    // weighed as an empty object and the next frame ran.
+    //
+    // Both halves are asserted, because the second is what makes the first worth
+    // anything: the constructor is gone, AND the payload it would have hidden is
+    // weighed and refused when it is bound in the open. The chunk loop is there
+    // because `setMemoryLimit` does refuse one allocation wider than the whole
+    // ceiling; what it never sees is the accumulation.
+    const build = `var target = { chunks: [] }
+       for (var index = 0; index < 128; index++) target.chunks.push("x".repeat(64 * 1024))`
+    const limits = {
+      memoryBytes: 4 * 1024 * 1024,
+      steps: Number.MAX_SAFE_INTEGER,
+      timeMs: 60_000
+    }
+
+    const trapped = await session([
+      `${build}
+       var hidden = new Proxy(target, { ownKeys: function () { return [] } })`
+    ], { limits })
+    const raised = trapped[0]!.outcome
+
+    expect(raised._tag).toBe("raised")
+    expect(raised._tag === "raised" && raised.name).toBe("ReferenceError")
+    expect(raised._tag === "raised" && raised.message).toContain("Proxy")
+
+    const open = await session([
+      build,
+      "console.log('refused')",
+      "target = undefined\nconsole.log('recovered')"
+    ], { limits })
+    const refusal = open[1]!.outcome
+
+    expect(open[0]!.outcome._tag).toBe("settled")
+    expect(refusal).toMatchObject({ _tag: "rejected", code: "limit_exceeded" })
+    expect(refusal._tag === "rejected" && refusal.message).toContain("target")
+    expect(open[2]!.prints).toBe("recovered")
+  }, 60_000)
+
   it("refuses a realm whose node budget cannot measure one root, then lets the freeing frame run", async () => {
     const frames = await session([
       `var tooWide = []
