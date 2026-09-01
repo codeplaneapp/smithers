@@ -6,6 +6,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Metric from "effect/Metric"
 import * as Option from "effect/Option"
@@ -129,6 +130,81 @@ const durableTier = (
   }
   return { rows, calls, getOptions, outcomes, store }
 }
+
+/**
+ * A tier that detaches its argument the way both shipped tiers do: at the start
+ * of its own `put`. Nothing else observes whether the composition hands the two
+ * tiers one value or two.
+ */
+const snapshottingTier = (
+  options: {
+    readonly gatePut?: Deferred.Deferred<void>
+    readonly reachedPut?: Deferred.Deferred<void>
+  } = {}
+) => {
+  const rows = new Map<string, CacheStore.CacheEntry>()
+  const store: CacheStore.Service = {
+    get: () => Effect.succeed(Option.none()),
+    put: (candidate: CacheStore.CacheEntry) =>
+      Effect.gen(function*() {
+        const snapshot = yield* CacheStore.snapshotEntry(candidate)
+        if (options.reachedPut !== undefined) yield* Deferred.succeed(options.reachedPut, undefined)
+        if (options.gatePut !== undefined) yield* Deferred.await(options.gatePut)
+        rows.set(snapshot.keyDigest, snapshot)
+        return { _tag: "Inserted" } as const
+      }),
+    evict: () => Effect.succeed(false),
+    sweepExpired: () => Effect.succeed(0)
+  }
+  return { rows, store }
+}
+
+describe("publication detachment", () => {
+  it.effect("hands both tiers the value the caller held when the put began", () =>
+    Effect.gen(function*() {
+      const reached = Deferred.makeUnsafe<void>()
+      const gate = Deferred.makeUnsafe<void>()
+      const local = snapshottingTier({ gatePut: gate, reachedPut: reached })
+      const remote = snapshottingTier()
+      const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+      const mutable = { ...entry, result: { value: "before" } }
+      const fiber = yield* Effect.forkChild(combined.put(mutable), { startImmediately: true })
+      yield* Deferred.await(reached)
+      // The caller mutates while the local write is parked. Each tier detaches
+      // at the start of its own `put`, so a composition that forwards the
+      // caller's object persists one value and publishes another under the same
+      // digest, and answers `Inserted` for both.
+      mutable.result = { value: "after" }
+      yield* Deferred.succeed(gate, undefined)
+      expect(yield* Fiber.join(fiber)).toEqual({ _tag: "Inserted" })
+
+      expect(local.rows.get(entry.keyDigest)!.result).toEqual({ value: "before" })
+      expect(remote.rows.get(entry.keyDigest)!.result).toEqual({ value: "before" })
+    }))
+
+  it.effect("refuses an entry it cannot read without running caller code", () =>
+    Effect.gen(function*() {
+      const local = snapshottingTier()
+      const remote = snapshottingTier()
+      const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+      const hostile = Object.defineProperty({ ...entry }, "keyDigest", {
+        enumerable: true,
+        configurable: true,
+        get: () => {
+          throw new Error("hostile")
+        }
+      }) as CacheStore.CacheEntry
+
+      const exit = yield* Effect.exit(combined.put(hostile))
+
+      // A throwing accessor is a caller mistake this package reports, never a
+      // defect it propagates, so the composition must not read a field before
+      // the snapshot that refuses the shape.
+      expect(Exit.isFailure(exit) && exit.cause.reasons[0]!._tag).toBe("Fail")
+      expect(local.rows.size).toBe(0)
+      expect(remote.rows.size).toBe(0)
+    }))
+})
 
 describe("lookups", () => {
   it.effect("answers from the local tier without touching the remote one", () =>

@@ -42,8 +42,8 @@ The Node-only test layer is available at
   structures, non-JSON values, ill-formed Unicode, and hostile object shells
   are rejected without executing user hooks.
 - Each `result` and `meta` tree is bounded to 4 MiB, depth 128, 100,000 nodes,
-  and 100,000 members. Run ids are non-empty, control-free, well-formed text of
-  at most 1,024 UTF-16 code units. Timestamps and event sequences are
+  and 100,000 members. Run ids are non-empty, NUL-free, well-formed text of at
+  most 1,024 UTF-16 code units. Timestamps and event sequences are
   non-negative safe integers.
 - `CacheStoreError.code` is one of `invalid_cache`, `constraint`,
   `decode_failed`, `persistence_failed`, or `unknown`. Boundary diagnostics do

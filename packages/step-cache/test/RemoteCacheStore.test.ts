@@ -532,6 +532,10 @@ describe("configuration", () => {
         const endpoint of [
           "https://cache.example.com/base/",
           "https://cache.example.com/base/😀",
+          // An empty interior segment is a path a server may route on, and
+          // `Options.endpoint` promises to ignore a trailing slash and nothing
+          // else, so the configured path reaches the wire as written.
+          "https://cache.example.com/tenant//namespace",
           "http://127.0.0.1:1234/base",
           "http://api.localhost:1234/base",
           "http://[::1]:1234/base"

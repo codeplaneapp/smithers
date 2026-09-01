@@ -170,6 +170,13 @@ const wellFormedText = Schema.makeFilter(
 /**
  * Run id carried by an immutable cache provenance record.
  *
+ * Non-empty, well-formed text without a NUL, of at most
+ * {@link maximumRecordedRunIdLength} code units. Other control characters are
+ * admitted deliberately: the id is opaque here, it reaches SQL as a bound
+ * parameter and the wire as a percent-encoded query value, and every stored
+ * ledger row is read back through this schema, so narrowing it would make a row
+ * an earlier build persisted undecodable.
+ *
  * @category schemas
  * @since 1.0.0-rc.0
  */

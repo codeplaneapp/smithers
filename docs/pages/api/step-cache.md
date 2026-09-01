@@ -66,13 +66,13 @@ Every input is checked before a statement or a request is issued, and the same
 checks run at both tiers, so an input the SQL store refuses is not accepted by
 the HTTP one:
 
-| Rule                              | Value                                                                                                |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `keyDigest` grammar               | `[A-Za-z0-9_-]`, 1 to `maximumKeyDigestLength` (256) characters                                      |
-| `result` and `meta` size          | `maximumJsonBytes`, four MiB                                                                         |
-| `result` and `meta` shape         | `maximumJsonDepth` 128, `maximumJsonNodes` 100,000, `maximumJsonMembers` 100,000                     |
-| `recordedRunId`                   | non-empty, control-free, well-formed text of at most `maximumRecordedRunIdLength` (1,024) code units |
-| `createdAtMs`, `recordedEventSeq` | non-negative safe integers                                                                           |
+| Rule                              | Value                                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `keyDigest` grammar               | `[A-Za-z0-9_-]`, 1 to `maximumKeyDigestLength` (256) characters                                  |
+| `result` and `meta` size          | `maximumJsonBytes`, four MiB                                                                     |
+| `result` and `meta` shape         | `maximumJsonDepth` 128, `maximumJsonNodes` 100,000, `maximumJsonMembers` 100,000                 |
+| `recordedRunId`                   | non-empty, NUL-free, well-formed text of at most `maximumRecordedRunIdLength` (1,024) code units |
+| `createdAtMs`, `recordedEventSeq` | non-negative safe integers                                                                       |
 
 The key grammar is the reason the digest is safe at both boundaries: `.`, `..`,
 path separators, control characters, and lone surrogates are unrepresentable,

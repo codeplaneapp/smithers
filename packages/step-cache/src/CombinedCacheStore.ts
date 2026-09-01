@@ -96,8 +96,16 @@ export const make = (options: Options): CacheStore.Service => {
     })
   )
 
-  const put: CacheStore.Service["put"] = Effect.fn("CombinedCacheStore.put")((entry: CacheStore.CacheEntry) =>
+  const put: CacheStore.Service["put"] = Effect.fn("CombinedCacheStore.put")((candidate: CacheStore.CacheEntry) =>
     Effect.gen(function*() {
+      // One detachment for both tiers, taken before any field is read. Each
+      // tier snapshots when its own `put` begins, so forwarding the caller's
+      // object let a mutation between the two writes persist one value locally
+      // and publish a different one under the same digest, with `Inserted`
+      // answered for both. Reading `keyDigest` off the argument first had the
+      // same shape of problem: a throwing accessor became a defect instead of
+      // the `invalid_cache` this package promises.
+      const entry = yield* CacheStore.snapshotEntry(candidate)
       yield* Effect.annotateCurrentSpan({ keyDigest: entry.keyDigest })
       // Local first, and the local outcome is the answer: first-writer-wins
       // conflict detection is what drives the `Inconsistency` receiver, and it
