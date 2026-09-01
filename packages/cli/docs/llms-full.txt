@@ -2686,7 +2686,7 @@ The default heartbeat interval is one second and the stale threshold is 30 secon
 
 - `TimeTravel.rewind` performs a fenced, audited rewind protocol, including the bounded retry that blocks unsafe irreversible reattempts.
 - Compensation assesses and invokes registered rollback handlers as part of that protocol.
-- Building `TimeTravel.layer` completes or rolls back interrupted rewind audits, so startup recovery is never a call the application makes.
+- Building `TimeTravel.layer` completes or rolls back interrupted rewind audits, except one whose run a live process still holds, so startup recovery is never a call the application makes. A refused audit stays pending for the next build rather than being closed. `TimeTravel.layerWith({ isAlive })` supplies the liveness check; it defaults to `Ownership.leaseLiveness()`.
 
 The service requires boundary records and store integration supplied by the application. The engine does not create all time-travel records automatically today.
 
@@ -3111,6 +3111,8 @@ A run cursor stores the last observed sequence. A workspace cursor is an array o
 
 The server merges workspace entries deterministically. Consumers should persist the returned cursor only after applying the returned batch.
 
+A page is also bounded by the encoded-entry ceiling, `maxFrameBytes`, which defaults to 1 MiB. The ceiling is a budget on the page, not a verdict on the read: the server serves entries until the next one would cross it, then returns `done: false` so the client asks for the rest. Only a single entry whose own encoded size exceeds the ceiling fails, with `frame_too_large`, because no page can carry it.
+
 ### Subscribe
 
 `Sync.Subscribe` streams:
@@ -3122,6 +3124,14 @@ The server merges workspace entries deterministically. Consumers should persist 
 The request includes a credit count. Credit is a hard limit on frames emitted by that subscription, not a sliding acknowledgement window. There is currently no Ack RPC. A client that needs more data opens another subscription from the last durable cursor.
 
 `SyncClient.subscribe` wraps the RPC stream and detects invalid cursor movement as `SyncGapError`. Transport, authentication, and reconnect policy remain application concerns.
+
+### Compacted runs
+
+A cursor below a run's compaction floor names entries the journal has deleted. The read or the subscription fails with `SyncError` code `compacted`, and the error carries a `Resync` of `{ runId, checkpointSeq }`: the floor to resume from. `SyncClient.subscribe` handles it rather than surfacing it. It moves that run's cursor to `checkpointSeq`, logs the skipped range, and restarts the subscription, so a workspace subscription costs one reconnect per compacted run instead of dying over one of them.
+
+:::warning
+The resync moves a cursor, not state. The entries below `checkpointSeq` are never delivered, and no sync RPC serves the checkpoint state that stands for them. A follower rebuilding a projection from scratch reads that prefix out of band: `journal.latestCheckpoint(runId)`, apply `checkpoint.state`, then continue from the sync stream. See Checkpoints and compaction.
+:::
 
 ### Authentication
 
@@ -3232,7 +3242,7 @@ Behind the service, an effect-handler registry maps effect kinds to assessment a
 
 Detached child policy is either `block` (the default) or `cancel`. Terminal descendants are disclosed as warnings because their external effects cannot be erased by deleting a parent suffix.
 
-Step 8 is why recovery is not an operation: building `TimeTravel.layer` finishes or rolls back any rewind a crash interrupted, before the service accepts new work.
+Step 8 is why recovery is not an operation: building `TimeTravel.layer` finishes or rolls back any rewind a crash interrupted, before the service accepts new work, except one whose run a live process still holds. That one is left exactly as the crash left it, still pending and still recoverable, so a rewind a living process still owns is never stolen. `TimeTravel.layerWith({ isAlive })` decides what counts as live; the default is the lease check the engine's run driver already applies to those rows.
 
 ### Current integration boundary
 
@@ -5469,7 +5479,8 @@ granted exactly, so an operator writing `net:get:https://api.test/v1?k=1`
 believes they wrote an exact resource and has written a one-character wildcard.
 Never build a pattern by concatenating agent-supplied text; derive it with
 `Capability.patternFromCapability`, which returns `Option.none()` for a resource
-the grammar cannot express exactly.
+the grammar cannot express exactly or one longer than
+`Capability.maxResourceLength`.
 
 Matching compares the pattern against the whole resource byte-exactly over
 UTF-16 code units. It performs no path normalization and no case folding, so
@@ -5481,7 +5492,10 @@ Pattern resources are bounded at `Capability.maxResourceLength` UTF-16 code
 units and reject anything longer at construction and decode. Exact capabilities
 are deliberately unbounded because they carry caller text on the authorization
 path. `Capability.maxMatchWork` bounds the product of the pattern and exact
-resource lengths and fails closed when matching would exceed that budget.
+resource lengths. `Capability.matches` returns `false` when that product exceeds
+the budget, and `Capability.withinMatchBudget` reports the case.
+`Permission.evaluate` returns `deny` when any rule cannot be decided, so an
+undecidable deny is never skipped.
 
 `Capability.format` renders a capability or a pattern as `action:resource`, and
 it is the durable identity a grant envelope is deduplicated and sorted by.
@@ -5546,6 +5560,7 @@ handling.
 | `Capability.CapabilityPattern` (class) | models | An action and resource glob used to grant or deny a family of capabilities. |
 | `Capability.parsePattern` (const) | parsing | Parses a formatted capability pattern. |
 | `Capability.patternFromCapability` (const) | constructors | Derives an exact pattern from a capability when the glob grammar can represent the resource exactly. |
+| `Capability.withinMatchBudget` (const) | predicates | Reports whether `matches` can decide a pattern and exact capability within `maxMatchWork`. |
 | `Capability.matches` (const) | predicates | Tests whether an exact capability is selected by a pattern. |
 | `Capability.subsumes` (const) | predicates | Conservatively determines whether every capability selected by `right` is also selected by `left`. |
 | `Capability.EffectTier` (const) | schemas | Schema for the durability and retry semantics of an effect. |
@@ -11646,10 +11661,12 @@ const frames = Effect.gen(function*() {
 | --- | --- | --- |
 | `Scope`, `RunScope`, `WorkspaceScope` | schemas + type | one run, or every run in a workspace |
 | `RunCursor`, `WorkspaceCursor` | schemas + types | `afterSeq` per run |
-| `ReadRequest`, `ReadResponse` | schemas + types | catch-up |
+| `Resync` | schema + type | `runId` plus `checkpointSeq`, the floor a compacted run resumes from |
+| `ReadRequest`, `ReadResponse` | schemas + types | catch-up; `done: false` means another page follows |
 | `SubscribeRequest` | schema + type | includes a credit count |
 | `Frame`, `EntriesFrame`, `HeartbeatFrame`, `ClosedFrame` | schemas + types | subscription frames |
 | `covers` | predicate | whether a cursor covers an entry |
+| `defaultMaxFrameBytes`, `encodedByteLength` | const + function | the 1 MiB ceiling both ends enforce, and the UTF-8 JSON byte length it measures |
 
 :::warning
 Credit is a hard limit on frames emitted by one subscription. There is no acknowledgement RPC, so a client that needs more opens another subscription from its last durable cursor.
@@ -11663,7 +11680,7 @@ Credit is a hard limit on frames emitted by one subscription. There is no acknow
 | `WorkspaceShare.WorkspaceShare`, `Service`, `WorkspaceClaims`, `WorkspaceCapability`, `Keyring`, `makeHmac`, `layerHmac`, `layerConfig`, `layerNoop` | [src/WorkspaceShare.ts](https://github.com/smithersai/smithers/blob/main/packages/sync/src/WorkspaceShare.ts) | workspace-read capability authority: HMAC claims with `kid` rotation over a `Redacted` keyring |
 | `SyncPrincipal.SyncPrincipal`, `Principal`, `anonymous`, `workspace`, `isWorkspace`, `layerWorkspace` | [src/SyncPrincipal.ts](https://github.com/smithersai/smithers/blob/main/packages/sync/src/SyncPrincipal.ts) | per-request principal reference, default anonymous; non-branch reads refuse anonymous callers |
 | `SyncServer.SyncServer`, `Service`, `make`, `makeLive`, `makeLiveWith`, `makeNoop`, `layer`, `layerWith`, `layerHandlers`, `layerNoop` | [src/SyncServer.ts](https://github.com/smithersai/smithers/blob/main/packages/sync/src/SyncServer.ts) | serves reads over `Journal` and `RunCatalog` |
-| `SyncClient.Sync`, `Service`, `SubscribeOptions`, `make`, `makeNoop`, `layer`, `layerNoop` | [src/SyncClient.ts](https://github.com/smithersai/smithers/blob/main/packages/sync/src/SyncClient.ts) | detects invalid cursor movement as `SyncGapError` |
+| `SyncClient.Sync`, `Service`, `SubscribeOptions`, `make`, `makeNoop`, `layer`, `layerNoop` | [src/SyncClient.ts](https://github.com/smithersai/smithers/blob/main/packages/sync/src/SyncClient.ts) | detects invalid cursor movement as `SyncGapError`; resyncs a `compacted` run from the checkpoint the server names |
 | `RunCatalog.RunCatalog`, `Service`, `make`, `makeMemory`, `layerStatic`, `layerNoop` | [src/RunCatalog.ts](https://github.com/smithersai/smithers/blob/main/packages/sync/src/RunCatalog.ts) | supplies the run list for workspace reads |
 
 ### SyncError
@@ -11672,9 +11689,23 @@ Credit is a hard limit on frames emitted by one subscription. There is no acknow
 
 | Export | Kind | Notes |
 | --- | --- | --- |
-| `SyncError` | class | carries an `ErrorCode` |
+| `SyncError` | class | carries an `ErrorCode`, and a `Resync` in the optional `resync` field on `compacted` |
 | `SyncGapError` | class | cursor moved past an entry the client never saw |
-| `ErrorCode` | const + type | code literals |
+| `ErrorCode` | const + type | code literals, including the recoverable `compacted` |
+
+`compacted` is the one recoverable code. Every other code reports a fault the
+follower can only surface. A read or a subscription whose cursor for one run
+starts below that run's compaction floor fails with `compacted`, and `resync`
+names the run and the checkpoint sequence to resume from.
+
+:::warning
+This is a CURSOR resync, not a STATE resync. The entries below `checkpointSeq`
+are deleted, so they are never delivered, and this wire carries no checkpoint
+state to stand in for them. A follower rebuilding a projection from scratch
+must read that prefix out of band with `Journal.latestCheckpoint(runId)` and
+apply `checkpoint.state` before it continues from the sync stream. No sync RPC
+serves it today.
+:::
 
 ### Branch protocol
 
@@ -11716,12 +11747,17 @@ This page is the public API reference for read-only journal synchronization over
 | --- | --- |
 | `WorkspaceScope`, `RunScope`, `Scope` | Replication selection schemas |
 | `RunCursor`, `WorkspaceCursor` | Per-run and canonical cursor collection |
+| `Resync` | Where a compacted run resumes: `runId` and `checkpointSeq` |
 | `ReadRequest`, `ReadResponse` | Paged catch-up schemas |
 | `SubscribeRequest` | Follow request with credit |
 | `EntriesFrame`, `HeartbeatFrame`, `ClosedFrame`, `Frame` | Stream frames |
 | `covers(scope, runId)` | Scope predicate |
+| `defaultMaxFrameBytes`, `encodedByteLength(value)` | The 1 MiB encoded-entry ceiling and its measurement |
 
-Cursor field names are `runId` and `afterSeq`.
+Cursor field names are `runId` and `afterSeq`. `Resync` field names are `runId`
+and `checkpointSeq`. `Resync` rides on `SyncError` as one optional field rather
+than as a new frame variant or a new RPC, so a follower that never meets a
+compacted run sees no change on the wire.
 
 #### RPC group
 
@@ -11729,9 +11765,19 @@ Cursor field names are `runId` and `afterSeq`.
 
 #### Server
 
-`SyncServer.Service` has `read(request)` and `subscribe(request)`. Exports include `SyncServer`, `make`, `makeNoop`, `layerNoop`, `makeLive`, and `layer`.
+`SyncServer.Service` has `read(request)` and `subscribe(request)`. Exports include `SyncServer`, `make`, `makeNoop`, `layerNoop`, `makeLive`, and `layer`. `makeLiveWith(options)` and `layerWith(options)` take an `Options` of `maxFrameBytes`, `concurrency`, and `tailIntervalMs`.
 
 The live layer requires `Journal` and `RunCatalog`. `RunCatalog` exposes `list` and `changes`; constructors include `make`, `layerStatic`, `makeMemory`, and `layerNoop`.
+
+`maxFrameBytes` is a PAGE budget on a read, not a verdict on it. `read` serves
+entries until the next one would cross the ceiling, then stops and reports
+`done: false`, so the follower asks for the rest; the returned cursors track
+what was served, so no entry is skipped and none is served twice. Only a SINGLE
+entry whose own encoded size exceeds the ceiling still fails, with
+`frame_too_large`, because no page can ever carry it. Failing the whole read
+instead wedged the follower: `frame_too_large` is neither retried nor
+retryable, so the next bootstrap carried the same cursors and got the same
+refusal.
 
 #### Client
 
@@ -11744,9 +11790,46 @@ The live layer requires `Journal` and `RunCatalog`. `RunCatalog` exposes `list` 
 
 The client advances its local cursor as each entry is admitted to the consumer, so interruption of a partial frame does not acknowledge entries that were never observed. The acknowledged cursor set is shared service state in a `Ref`, and a commit only ever advances it, so concurrent subscriptions cannot move it backward. A live follow that loses its transport reconnects under exponential backoff (capped at five seconds), resuming from the acknowledged cursors; gaps, authorization refusals, and server closes propagate to the consumer instead of retrying.
 
+#### Compaction and resync
+
+Compaction deletes a run's entries below a checkpoint, so a cursor under that
+floor names history that no longer exists. Both ends handle it:
+
+- The server maps the journal's `compacted` failure onto the boundary with its
+  own code and the run id the read was issued for. `SyncError.resync` carries
+  `{ runId, checkpointSeq }`. The run id comes from the call site because the
+  journal error carries only the sequence, and a workspace read fans out over
+  many runs. A `compacted` journal error that records no floor stays `unknown`,
+  because it names no resume point.
+- The client catches it, advances that run's cursor to `checkpointSeq`, logs
+  the skipped range at warning level with `runId` and `checkpointSeq`, and
+  restarts the subscription from the moved cursors. A checkpoint at or below
+  what the subscription already covers cannot move the cursor forward, so it
+  stays a failure rather than a retry that re-reads the same refusal.
+
+Before this, a `compacted` refusal was terminal. The client retries only
+`transport_failed`, so every resubscribe from the same cursors failed
+identically, and because a whole-workspace subscription merges per-run reads,
+one compacted run took down the whole subscription.
+
+:::warning
+The resync moves a cursor; it does not deliver state. Entries below
+`checkpointSeq` are gone from the journal and are never delivered. A follower
+rebuilding a projection from scratch must obtain that prefix out of band:
+`Journal.latestCheckpoint(runId)`, apply `checkpoint.state`, then continue from
+the sync stream. There is no sync RPC that serves checkpoint state today.
+:::
+
+A workspace subscription now survives a compacted run instead of dying with it,
+but it does not continue in place: it reconnects once per compacted run, from
+the cursors that run's resync moved.
+
 #### Errors
 
-`SyncError` has stable transport, authorization, request, and closure codes. `SyncGapError` reports a non-monotonic or inconsistent server interval.
+`SyncError` has stable transport, authorization, request, closure, and
+compaction codes. `compacted` is the only recoverable one, and it is the only
+one that sets `resync`. `SyncGapError` reports a non-monotonic or inconsistent
+server interval.
 
 See Journal synchronization and Journal.
 
@@ -11820,7 +11903,9 @@ const program = Effect.gen(function*() {
 | --- | --- | --- |
 | `TimeTravel` | service key | tag `@smthrs/time-travel/TimeTravel`; `yield* TimeTravel` is the whole surface |
 | `TimeTravel.layer` | layer | needs only `TimeTravelStore`, `Journal`, `RunStore`, `CacheStore`, and `Jj` |
-| `make` | constructor | the scoped effect `layer` is built from |
+| `TimeTravel.layerWith`, `layerWith` | layers | the same wiring under an explicit `Options`; the module-level function and the static are the same layer |
+| `make`, `makeWith` | constructors | the scoped effects the layers are built from; `makeWith` takes an `Options` |
+| `Options` | interface | `isAlive`, the only knob |
 | `Position` | schema + type | `runId` plus a `Frame`; an address, never a snapshot |
 | `Projection`, `ForkOptions`, `RewindOptions`, `ForkResult`, `RewindResult` | types | operation inputs and outputs |
 
@@ -11831,8 +11916,29 @@ const program = Effect.gen(function*() {
 | `rewind(position, options?)` | the fenced, audited suffix-removal protocol. The ownership claim and audit id are minted inside; `options.detachedChildren` (`"block"` by default, or `"cancel"`) and `options.pageSize` are the only knobs |
 
 Recovery is not an operation. Building `TimeTravel.layer` finishes or rolls
-back every interrupted rewind audit before the service accepts work, so a
-crashed rewind never needs a call the caller has to remember.
+back every interrupted rewind audit before the service accepts work, except one
+whose run a live process still holds, so a crashed rewind never needs a call the
+caller has to remember.
+
+That exception is the point of the liveness seam. A rewind a living process
+still owns must not be stolen, so recovery declines it: the audit stays
+`in_progress`, stays in `pendingAudits`, and nothing is written, which leaves
+the next build free to finish it. `Options.isAlive` is an
+`Ownership.LivenessCheck` and decides what "still live" means.
+It defaults to `Ownership.leaseLiveness()`, the same check the engine's run
+driver already applies to those rows: the owner is alive while its persisted
+heartbeat is younger than `Ownership.heartbeatStaleAfter`. A deployment that
+knows more supplies its own and refuses the takeover for longer; a supplied
+check can only refuse a takeover, never widen one, because the evidence
+recovery hands `RunStore.steal` is always `lease-expired` and `steal`
+re-verifies that claim inside the same write.
+
+```ts
+import { TimeTravel } from "@smthrs/time-travel"
+import * as Ownership from "@smthrs/run-store/Ownership"
+
+const layer = TimeTravel.layerWith({ isAlive: Ownership.leaseLiveness() })
+```
 
 `Replay`, `Fork`, `Rewind`, `Retry`, `Recovery`, `Compensation`, and
 `EffectHandlerRegistry` are internal machinery under
@@ -11924,9 +12030,19 @@ a `Position`, a run ID plus a `Frame`:
 
 `TimeTravel.layer` requires `TimeTravelStore`, `Journal`, `RunStore`,
 `CacheStore`, and `Jj`, and nothing else. Building it completes or rolls back
-interrupted rewind audits, so recovery is never a call. `Replay`, `Fork`,
-`Rewind`, `Retry`, `Recovery`, `Compensation`, and `EffectHandlerRegistry` are
-internal machinery under `src/internal/`.
+interrupted rewind audits, except one whose run a live process still holds, so
+recovery is never a call. `make`/`layer` use the default policy;
+`makeWith(options)` and `layerWith(options)` take an `Options`:
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `isAlive` | `Ownership.leaseLiveness()` | Whether the owner recorded on a run is still working, asked before startup recovery takes an interrupted rewind's run over. Answering `true` refuses the takeover and leaves the audit pending. |
+
+`TimeTravel.layerWith` is the same layer as the module-level `layerWith`,
+carried as a static so the umbrella barrel can export the service key without
+losing the way to provide it. `Replay`, `Fork`, `Rewind`, `Retry`, `Recovery`,
+`Compensation`, and `EffectHandlerRegistry` are internal machinery under
+`src/internal/`.
 
 `ForkOptions` carries only `workspaceRoot`; the workspace name is
 `smithers-fork-` followed by the child run id the fork mints, sanitized, capped
@@ -11938,6 +12054,18 @@ returns audit, archive, assessments, warnings, and cancelled children.
 Cancelling a detached child under `detachedChildren: "cancel"` is terminal and happens *before* the archive commit point, so it is the one rewind mutation rollback cannot undo. Each cancellation is written to the audit detail as it happens, and a rewind that later rolls back keeps the full `cancelledChildren` list and names the surviving cancellations in `detail.failure`. A `rolled_back` audit therefore never understates what the attempt left behind.
 
 Startup recovery uses archive evidence, not the engine-store replay classifier. An audit at `archive_committed` or `completed` is completed. Otherwise recovery requires the recorded suffix tail to be absent from the live journal and present in the archive. Missing or partial suffix evidence, or missing archive evidence, rolls back the compensation and restores the run's original state; it does not declare the rewind complete.
+
+An audit whose run another process still holds is a different outcome from a
+failure. Recovery reports it `Busy` and writes nothing: the audit keeps its
+`in_progress` status, stays in `pendingAudits`, and keeps whatever phase its
+live owner is still advancing, so a later pass retries it. Recording it
+`failed` closed it terminally and removed it from `pendingAudits` forever, so a
+rewind interrupted after its compensation but before its archive commit could
+never be rolled back by any pass, and the engine's stale-heartbeat steal then
+resumed the run against a workspace the rewind had already rewound.
+`Options.isAlive` is what turns "held by a process that died" back into
+progress: a run still `running` under a foreign owner the check calls alive is
+always refused.
 
 #### External-effect records
 
@@ -13145,6 +13273,8 @@ Sequence gaps are normal in the journal (rejected admissions consume sequences),
 
 - Every live in-process `stream` registers its durable cursor. `compact` refuses with `reader_behind` while any of them is behind the boundary, so a live follower's next page is never deleted out from under it.
 - Every other reader (`entries` pollers, `stream` subscribers in other processes, sync followers) is covered on the read side: a read whose cursor starts below the floor fails with `compacted`, carrying `checkpointSeq`, the floor to resync from. `@smthrs/sync` reads through `Journal.entries` and `Journal.stream`, so a remote follower behind the floor sees its read or subscription fail rather than a gapped history.
+
+Compaction is not fatal to a sync follower. The sync server maps that failure onto `SyncError` code `compacted` with a `Resync` of `{ runId, checkpointSeq }`, and `SyncClient.subscribe` performs the resync itself: it moves that run's cursor to the checkpoint, logs the skipped range, and restarts the subscription. What it cannot do is hand the follower the state below the checkpoint, because the sync wire does not carry it. A follower rebuilding derived state from scratch still does the three steps below against the journal itself. See the `@smthrs/sync` reference.
 
 Resync is three steps.
 
@@ -16310,13 +16440,14 @@ Sync shapes are on the wire, never in a table.
 | `Scope`                        | `Run` with a `runId`, or `Workspace`               |
 | `RunCursor`                    | `runId` plus `afterSeq`                            |
 | `WorkspaceCursor`              | an array of run cursors                            |
+| `Resync`                       | `runId` plus the `checkpointSeq` a compacted run resumes from |
 | `ReadRequest` / `ReadResponse` | scope, cursor, limit; entries plus the next cursor |
 | `SubscribeRequest`             | scope, cursors, and a credit count                 |
 | `EntriesFrame`                 | entries plus the next cursor                       |
 | `HeartbeatFrame`               | emitted when no entries arrive                     |
 | `ClosedFrame`                  | the single terminal frame                          |
 
-Because journal sequences may have holes, `afterSeq` means entries after this number. Credit bounds the frames one subscription emits. There is no acknowledgement RPC, so a client that needs more opens another subscription from its last durable cursor.
+Because journal sequences may have holes, `afterSeq` means entries after this number. Credit bounds the frames one subscription emits. There is no acknowledgement RPC, so a client that needs more opens another subscription from its last durable cursor. `Resync` is not a frame: it rides on `SyncError` as an optional field, set only on the `compacted` code, and it moves a cursor rather than delivering the state below the checkpoint.
 
 :::warning
 Persist a returned cursor only after applying the batch that came with it.

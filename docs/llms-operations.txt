@@ -257,7 +257,7 @@ Exclusions: X-06 (defer), X-19 (defer).
 
 #### Provider quota
 
-> **Provider quota.** A provider refusal that names a reset instant, a retry-after delay, or a delay in its message text parks the run under the `quota` waiting reason until that instant and resumes it there. The park is a sealed durable step (`agent/quota-park`), it journals `flows.agent.quota-parked.v1` with the wake time and where the deadline came from, and waiting does not consume the action's retry budget. The classifier is injected rather than assumed: a composition opts in with `QuotaPolicy.layerDefault()`, and the default `QuotaPolicy.layerNoop()` keeps a refusal a failure. A refusal that names no deadline, or one past the configured ceiling, still fails the call with `quota_exceeded`. Waking a quota park is bound to the process that owns the run: the driver's sweep wakes released and cancel-requested rows only, so a run parked for quota by a process that then died waits for its lease to expire before another process takes it over. The 0.x multi-account fallback seat pool (`smithers agents`, `fallbackAgents`) moved to the plugins repository; core resolves seats from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, and `SMITHERS_OPENAI_AUTH=chatgpt`.
+> **Provider quota.** A provider refusal that names a reset instant, a retry-after delay, or a delay in its message text parks the run under the `quota` waiting reason until that instant and resumes it there. The park is a sealed durable step (`agent/quota-park`), it journals `flows.agent.quota-parked.v1` with the wake time and where the deadline came from, and waiting does not consume the action's retry budget. The classifier is required rather than defaulted: a composition binds `QuotaPolicy.layerDefault()` to park, or `QuotaPolicy.layerUnclassified()` to say in writing that it wants no parking, and binding neither is a type error. Opting out gives up the park, not the recording floor. The recorder fails every capacity refusal it normalizes, `rate_limited`, `quota_exceeded`, `provider_internal`, and any refusal carrying HTTP 429, 503, 504, or 529, and never writes one as the sealed step's durable value, whichever classifier is composed. A refusal that names no deadline, or one past the configured ceiling, still fails the call with `quota_exceeded`. Waking a quota park is bound to the process that owns the run: the driver's sweep wakes released and cancel-requested rows only, so a run parked for quota by a process that then died waits for its lease to expire before another process takes it over. The 0.x multi-account fallback seat pool (`smithers agents`, `fallbackAgents`) moved to the plugins repository; core resolves seats from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, and `SMITHERS_OPENAI_AUTH=chatgpt`.
 
 Exclusions: X-05 / B-R1 (defer).
 
@@ -343,7 +343,7 @@ state column is what the release does today.
 | Durable `interruptUnsafe` | `FlowRuntime.interruptUnsafe` on the durable port aliases `interrupt` (`RunDriver.ts:1800`), a partial promise of forced cancellation without cleanup. |
 | Continue-as-new `Continued` terminal | Decided against in source (`RunDriver.ts:975-980`); handed-off rounds settle `completed` with `lineage_id` and `round_ordinal`. |
 | Checkpoints and worktree lanes | "Checkpoint" in rc.0 means a pinned git tree per cell call (`@smthrs/std` `Checkpoints.layerGit`, `ctx.checkpoint()`, `ctx.base`). No `Checkpoint` host capability, no lane lifecycle, no worktree verb. |
-| Quota park/wake, cross-process | Shipped (A28a). `QuotaPolicy` classifies a provider refusal into a deadline and `AgentAction.waitOutQuota` parks the run there through the sealed `agent/quota-park` step (`packages/agent/src/QuotaPolicy.ts`, `packages/agent/src/AgentAction.ts:341,564`). The classifier is injected: `QuotaPolicy.layerNoop()` keeps the refusal a failure and a composition opts in with `QuotaPolicy.layerDefault()`. Unsupported residual (B-R1): no cross-process quota wake sweep (A28b). |
+| Quota park/wake, cross-process | Shipped (A28a). `QuotaPolicy` classifies a provider refusal into a deadline and `AgentAction.waitOutQuota` parks the run there through the sealed `agent/quota-park` step (`packages/agent/src/QuotaPolicy.ts`, `packages/agent/src/AgentAction.ts:341,564`). The classifier is required: a composition binds `QuotaPolicy.layerDefault()` to park or `QuotaPolicy.layerUnclassified()` to keep the refusal a failure, and neither choice lets a capacity refusal become a sealed step's recorded value. Unsupported residual (B-R1): no cross-process quota wake sweep (A28b). |
 | Cross-process event-driven wake | In-process `WakeBus` only. |
 | Supervisor process and gateway auto-recovery | `SuperviseRuntime` ships noop only; no process watches for dead owners. Recovery is not nothing: a run becomes reclaimable 30 seconds after its owner's last heartbeat, and any process with the flow registered takes it over (A59). On a Node host the takeover asks the process table first (`Ownership.sameHostPidProbe`, section 5.1) and refuses while the recorded pid is still alive; every other host answers from the lease alone (`Ownership.leaseLiveness`). |
 | Detached child flows | Shipped for a host that composes `EngineChildren.layer` (A12): durable `agent/spawn`, `agent/send`, and `agent/await` over the flow runtime, the run store, and the control plane (`packages/agent/src/EngineChildren.ts`, exported at `packages/agent/src/index.ts:78`). A composition that supplies no children port refuses all three with `ChildError` code `unsupported` (`packages/agent/src/ChildFlows.ts:183-187`). Unsupported residual (B-R2): `agent/await` polls the child's run row on `pollInterval` and holds the caller's round open; it does not park the caller (`EngineChildren.ts:30-33,169`). |
@@ -663,7 +663,7 @@ Rules the write enforces:
 - `seq` must name a committed entry. The surviving row is what keeps the run's durable `MAX(seq)` allocation floor at or above the boundary, so a restarted process can never re-mint a truncated sequence.
 - `seq` must lie above the run's compaction floor; otherwise the write fails with `checkpoint_invalid`.
 - Re-checkpointing an uncompacted `seq` replaces its state. Last writer wins.
-- With an `owner`, the write is fenced on the run's persisted ownership like `emitDurable`: a reclaimed run fails with `fence_lost`.
+- The write is fenced on the run's persisted ownership like `emitDurable`: a reclaimed run fails with `fence_lost`. `owner` is mandatory, and a malformed one fails with `invalid_event`.
 
 The write shares `Journal.transact`'s discipline. Inside an open `transact` it joins the caller's transaction as a savepoint and rolls back with it, so you can capture state and write the checkpoint describing it atomically.
 
@@ -704,6 +704,8 @@ Sequence gaps are normal in the journal (rejected admissions consume sequences),
 - Every live in-process `stream` registers its durable cursor. `compact` refuses with `reader_behind` while any of them is behind the boundary, so a live follower's next page is never deleted out from under it.
 - Every other reader (`entries` pollers, `stream` subscribers in other processes, sync followers) is covered on the read side: a read whose cursor starts below the floor fails with `compacted`, carrying `checkpointSeq`, the floor to resync from. `@smthrs/sync` reads through `Journal.entries` and `Journal.stream`, so a remote follower behind the floor sees its read or subscription fail rather than a gapped history.
 
+Compaction is not fatal to a sync follower. The sync server maps that failure onto `SyncError` code `compacted` with a `Resync` of `{ runId, checkpointSeq }`, and `SyncClient.subscribe` performs the resync itself: it moves that run's cursor to the checkpoint, logs the skipped range, and restarts the subscription. What it cannot do is hand the follower the state below the checkpoint, because the sync wire does not carry it. A follower rebuilding derived state from scratch still does the three steps below against the journal itself. See the `@smthrs/sync` reference.
+
 Resync is three steps.
 
 ::::steps
@@ -743,9 +745,10 @@ Once a run's committed entry count reaches `entryThreshold`, the journal calls `
 
 Constraints on `capture`:
 
-- It runs post-commit in the fiber that crossed the threshold. Keep it to storage reads.
-- It must not emit through the same journal, because the triggering durable emit still holds the allocation permit, and it must not call `flush`.
-- A failure or a `reader_behind` refusal is logged at warning, damped for `entryThreshold` further commits, and never fails the emit that triggered it.
+- It runs post-commit, after the triggering emit has released the allocation permit, so a slow `capture` no longer stalls admission on unrelated runs. Keep it to storage reads anyway: it still delays the emit that triggered it.
+- It must not call `flush`, which waits on the lossy writer.
+- A capture is bounded by a 30 second timeout, so caller code cannot wedge the policy indefinitely.
+- A failure, a timeout, or a `reader_behind` refusal is logged at warning, damped for `entryThreshold` further commits, and never fails the emit that triggered it.
 
 ### Operational guidance
 
@@ -769,9 +772,9 @@ The implementation ships for the SQLite dialect (the `SqlJournal` all stores sha
 
 | Method | Returns | Behavior |
 | --- | --- | --- |
-| `checkpoint(options, owner?)` | `Checkpoint` | durably captures replay state at a committed sequence |
+| `checkpoint(options, owner)` | `Checkpoint` | durably captures replay state at a committed sequence |
 | `latestCheckpoint(runId)` | `Option<Checkpoint>` | the resync point; `compactedAtMs` non-null once it is the floor |
-| `compact(options, owner?)` | `Compacted` | truncates strictly below the checkpoint, atomically with the floor |
+| `compact(options, owner)` | `Compacted` | truncates strictly below the checkpoint, atomically with the floor |
 
 Schema: `flows_journal_checkpoints`, migration `journal/0002_checkpoints`, one row per `(run_id, seq)`.
 
@@ -1039,7 +1042,11 @@ Journal checkpointing and compaction, formerly listed here as planned, shipped i
 
 Route: /reference/errors
 
-> The `SmithersError` codes the integration adapters raise, and the reference URL every message prints.
+> SmithersError and the error codes the integration adapters raise.
+
+{/* Generated by `node packages/errors/scripts/docs.mjs` from packages/errors. Edit package sources, never this file. */}
+
+## Error codes
 
 `@smthrs/errors` is a private workspace package with one class,
 `SmithersError`, and the five codes the `@smthrs/integrations` trees raise. It
@@ -1048,24 +1055,33 @@ its failures as `Schema.TaggedError` classes of its own, which is the flows
 convention, so no new code belongs here unless an integration adapter raises
 it.
 
-This page is the target of `ERROR_REFERENCE_URL`. Every `SmithersError`
-message ends with `See https://smithers.sh/reference/errors`, so the page has
-to document every code the table below lists.
-`packages/errors/test/SmithersError.test.ts` asserts that it does.
+This page is the target of `ERROR_REFERENCE_URL`. A `SmithersError` message
+ends with `See https://smithers.sh/reference/errors` unless the caller passes
+`{ includeDocsUrl: false }` or the summary is blank. Before appending it, the
+class removes every trailing copy of the suffix, including copies followed or
+separated by whitespace, so the suffix is never appended twice.
 
 ### The codes
 
-| Code | Raised when | `details` |
-| --- | --- | --- |
-| `INVALID_INPUT` | An integration helper receives an argument it cannot use: a missing bot token, an approval option key containing a colon, callback data over Telegram's 64-byte limit, or a non-https Mini App URL. | none |
-| `INTEGRATION_ERROR` | An integration client, webhook source, or listener reconciliation fails. `reason` classifies the failure so a caller can map it to a transport status. | `{ reason, ...providerSafeDetails }` |
-| `TELEGRAM_API_ERROR` | The Telegram Bot API answers a call with `ok: false`, a non-JSON body, or a transport failure. The bot token is redacted from the message and details. | `{ method, errorCode, description, retryAfterSeconds }` |
-| `TELEGRAM_INIT_DATA_INVALID` | Telegram Mini App `initData` is empty, expired, missing its hash or signature, or fails HMAC or Ed25519 verification. | none |
-| `UNSUPPORTED` | The runtime lacks a primitive an integration needs, such as Web Crypto or Ed25519 verification. | none |
+{/* generated:error-codes start */}
 
-`packages/errors/src/ErrorCode.ts` holds the same table as
-`smithersErrorDefinitions`, and `SmithersErrorCode` is derived from its keys.
-Adding a code there and documenting it here are one change.
+| Code                         | Raised when                                                                                                                                                                                         | `details`                                                        |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `INVALID_INPUT`              | An integration helper receives an argument it cannot use: a missing bot token, an approval option key containing a colon, callback data over Telegram's 64-byte limit, or a non-https Mini App URL. | `{ [field]: value }` on the signal-name failures, otherwise none |
+| `INTEGRATION_ERROR`          | An integration client, webhook source, or listener reconciliation fails. `reason` classifies the failure so a caller can map it to a transport status.                                              | `{ reason, ...providerSafeDetails }`                             |
+| `TELEGRAM_API_ERROR`         | The Telegram Bot API answers a call with `ok: false`, a non-JSON body, or a transport failure. The bot token is redacted from the message and details.                                              | `{ method, errorCode, description, retryAfterSeconds }`          |
+| `TELEGRAM_INIT_DATA_INVALID` | Telegram Mini App `initData` is empty, expired, missing its hash or signature, or fails HMAC or Ed25519 verification.                                                                               | `{ authDate }` on the expiry failures, otherwise none            |
+| `UNSUPPORTED`                | The runtime lacks a primitive an integration needs, such as Web Crypto or Ed25519 verification.                                                                                                     | none                                                             |
+
+{/* generated:error-codes end */}
+
+The table above is generated from `smithersErrorDefinitions` in
+`packages/errors/src/ErrorCode.ts` by
+`packages/errors/scripts/docs.mjs`. `KnownSmithersErrorCode` is derived from
+the keys of `smithersErrorDefinitions`, and `SmithersErrorCode` is an alias of
+it, so the set of codes is closed. Adding a code means adding a row to
+`smithersErrorDefinitions` and regenerating this page in the same change.
+The `//packages/errors:docsPages` target fails on drift.
 
 ### Reading a failure
 
@@ -1079,13 +1095,24 @@ if (isSmithersError(error) && error.code === "TELEGRAM_API_ERROR") {
 }
 ```
 
-`SmithersError` carries four fields beyond `message`:
+`SmithersError` carries five fields beyond `message`:
 
 - `code`, the machine-readable classification above.
 - `summary`, the message without the appended documentation URL. Use this when
   you render a failure somewhere the URL would be noise.
-- `details`, provider-safe context. No constructor in `@smthrs/integrations`
-  ever puts a token, an API key, or a webhook secret here.
+- `details`, caller-supplied context that the class does not redact. The
+  `@smthrs/integrations` constructors uphold the obligation to remove tokens,
+  API keys, and webhook secrets before attaching it. The top-level record is
+  copied and frozen at construction, so adding, removing, or replacing a
+  top-level key on the caller's object afterwards cannot change it. Nested
+  values are shared by reference and are not deep-frozen, so a caller must not
+  mutate a nested record it has attached.
+- `cause`, stored verbatim and not redacted. The caller must redact provider
+  text, such as a bot token inside a URL or an API key inside a provider
+  message, before attaching it. For example,
+  `packages/integrations/src/telegram/TelegramClient.ts` exports
+  `redactBotToken` and runs it over provider text before constructing the
+  error.
 - `docsUrl`, this page.
 
 Pass `{ includeDocsUrl: false }` to leave the URL out of `message`.
@@ -1101,6 +1128,28 @@ written to the journal and read back after a restart.
 `Core.ActionFailure.IntegrationFailure` is the schema form: the same `reason`,
 a message already safe to persist, and `retryable`. `fromIntegrationError` and
 `toIntegrationError` convert between them.
+
+### Exports
+
+{/* generated:error-exports start */}
+
+| Export                                | Kind        | Summary                                                                     |
+| ------------------------------------- | ----------- | --------------------------------------------------------------------------- |
+| `ERROR_REFERENCE_URL` (const)         | constants   | The documentation page every code points at.                                |
+| `SmithersErrorDefinition` (interface) | models      | What a code means and when it is raised.                                    |
+| `smithersErrorDefinitions` (const)    | models      | Every known code, with the condition that raises it.                        |
+| `KnownSmithersErrorCode` (type)       | models      | A code this package documents.                                              |
+| `SmithersErrorCode` (type)            | models      | A code carried by a `SmithersError`.                                        |
+| `knownSmithersErrorCodes` (const)     | models      | Every documented code, in declaration order.                                |
+| `isKnownSmithersErrorCode` (const)    | refinements | Whether `code` is one this package documents.                               |
+| `getSmithersErrorDefinition` (const)  | getters     | The definition for `code`, or `undefined` when it is not a documented code. |
+| `getSmithersErrorDocsUrl` (const)     | getters     | The documentation URL shared by every code.                                 |
+| `SmithersErrorOptions` (interface)    | models      | Construction options for a `SmithersError`.                                 |
+| `SmithersError` (class)               | errors      | A Smithers integration failure.                                             |
+| `isSmithersError` (const)             | refinements | Whether `value` is a `SmithersError`.                                       |
+| `hasSmithersErrorShape` (const)       | refinements | Whether `value` has the structural fields of a `SmithersError`.             |
+
+{/* generated:error-exports end */}
 
 ---
 

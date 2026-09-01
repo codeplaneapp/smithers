@@ -2627,16 +2627,20 @@ defect: it is naming a time to come back. A model-backed step
 an attempt:
 
 - `QuotaPolicy` decides whether the refusal names a deadline and what that
-  deadline is, and refuses to park at all beyond its configured ceiling.
+  deadline is, and refuses to park at all beyond its configured ceiling. A
+  composition binds it or binds `QuotaPolicy.layerUnclassified()`; there is no
+  default.
 - The park is a durable suspension under `annotateWaiting({ reason: "quota" })`,
   so a supervisor sees a parked run with a wake time.
 - The retry is `Action.retry`, so it runs as a NEW attempt of the same step and
   the step's own correction budget is untouched.
 
 The engine records a provider refusal as the model step's result, which is what
-makes a replay free. A quota refusal is the exception: it says nothing about the
-request, so it fails the sealed action instead of being recorded, and no cache
-row outlives the window.
+makes a replay free. A capacity refusal is the exception: it says nothing about
+the request, so it fails the sealed action instead of being recorded, and no
+cache row outlives the window. That floor belongs to the recorder and holds
+whichever classifier is composed. `layerUnclassified` opts out of the park, not
+out of the floor.
 
 Spending is bounded separately. `@smthrs/agent/Budget` accumulates token usage
 across a run's model calls, keyed by each step's content key so a replayed step
@@ -2665,7 +2669,7 @@ The default heartbeat interval is one second and the stale threshold is 30 secon
 
 - `TimeTravel.rewind` performs a fenced, audited rewind protocol, including the bounded retry that blocks unsafe irreversible reattempts.
 - Compensation assesses and invokes registered rollback handlers as part of that protocol.
-- Building `TimeTravel.layer` completes or rolls back interrupted rewind audits, so startup recovery is never a call the application makes.
+- Building `TimeTravel.layer` completes or rolls back interrupted rewind audits, except one whose run a live process still holds, so startup recovery is never a call the application makes. A refused audit stays pending for the next build rather than being closed. `TimeTravel.layerWith({ isAlive })` supplies the liveness check; it defaults to `Ownership.leaseLiveness()`.
 
 The service requires boundary records and store integration supplied by the application. The engine does not create all time-travel records automatically today.
 
@@ -2734,7 +2738,7 @@ const rule = new Permission.Rule({
 })
 ```
 
-Capability matching normalizes path separators and matches the whole resource. `Capability.subsumes` is deliberately conservative: it returns `false` when containment cannot be proven syntactically.
+Capability matching compares the pattern against the whole resource byte-exactly and performs no path normalization and no case folding, so a backslash never matches a slash. `Capability.subsumes` is deliberately conservative: it returns `false` when containment cannot be proven syntactically.
 
 ### Ambient authority
 
@@ -2791,8 +2795,11 @@ of `docs/specs/Concepts/Diff Review.md` will attach.
 The transaction is a **deterministic transaction model, not a security
 boundary**. A body that reaches the host through a service the transaction does
 not seed, a spawned native process, an undecorated socket, is outside it.
-Actually denying that ambient access is the VM/`SandboxProvider` provisioning
-story in `docs/specs/Concepts/Agent Adapters.md`, and it is future work.
+Actually denying that ambient access now ships in the
+`@smthrs/sandbox` reference: `Sandbox.Provider`
+provisions the machine boundary, and `Sandbox.layerHost` supplies the held
+machine's filesystem, process spawner, and paths instead of relying on a path
+guard.
 
 ### Adapter limitations
 
@@ -2846,7 +2853,7 @@ There is no global order across runs.
 
 ### The journal is intended to be flows' authoritative logical WAL
 
-The journal is flows' own logical (domain) write-ahead log: run decisions, attempt lifecycle, deferred completions, clock schedules, permission decisions, and cache provenance. It is intended to become the authoritative state history. The SQLite or PostgreSQL WAL underneath it is only the storage durability substrate; it is never read as the application event API.
+The journal is flows' own logical (domain) write-ahead log: run decisions, attempt lifecycle, deferred completions, clock schedules, permission decisions, and cache provenance. It is intended to become the authoritative state history. The SQLite WAL underneath it is only the storage durability substrate; it is never read as the application event API.
 
 The rule that follows is that **a durable boundary may not advance the run or expose its result until the corresponding logical WAL entry is committed**. `emitDurable` allocates inside the write transaction and returns a receipt that is already committed.
 
@@ -3087,6 +3094,8 @@ A run cursor stores the last observed sequence. A workspace cursor is an array o
 
 The server merges workspace entries deterministically. Consumers should persist the returned cursor only after applying the returned batch.
 
+A page is also bounded by the encoded-entry ceiling, `maxFrameBytes`, which defaults to 1 MiB. The ceiling is a budget on the page, not a verdict on the read: the server serves entries until the next one would cross it, then returns `done: false` so the client asks for the rest. Only a single entry whose own encoded size exceeds the ceiling fails, with `frame_too_large`, because no page can carry it.
+
 ### Subscribe
 
 `Sync.Subscribe` streams:
@@ -3098,6 +3107,14 @@ The server merges workspace entries deterministically. Consumers should persist 
 The request includes a credit count. Credit is a hard limit on frames emitted by that subscription, not a sliding acknowledgement window. There is currently no Ack RPC. A client that needs more data opens another subscription from the last durable cursor.
 
 `SyncClient.subscribe` wraps the RPC stream and detects invalid cursor movement as `SyncGapError`. Transport, authentication, and reconnect policy remain application concerns.
+
+### Compacted runs
+
+A cursor below a run's compaction floor names entries the journal has deleted. The read or the subscription fails with `SyncError` code `compacted`, and the error carries a `Resync` of `{ runId, checkpointSeq }`: the floor to resume from. `SyncClient.subscribe` handles it rather than surfacing it. It moves that run's cursor to `checkpointSeq`, logs the skipped range, and restarts the subscription, so a workspace subscription costs one reconnect per compacted run instead of dying over one of them.
+
+:::warning
+The resync moves a cursor, not state. The entries below `checkpointSeq` are never delivered, and no sync RPC serves the checkpoint state that stands for them. A follower rebuilding a projection from scratch reads that prefix out of band: `journal.latestCheckpoint(runId)`, apply `checkpoint.state`, then continue from the sync stream. See Checkpoints and compaction.
+:::
 
 ### Authentication
 
@@ -3208,7 +3225,7 @@ Behind the service, an effect-handler registry maps effect kinds to assessment a
 
 Detached child policy is either `block` (the default) or `cancel`. Terminal descendants are disclosed as warnings because their external effects cannot be erased by deleting a parent suffix.
 
-Step 8 is why recovery is not an operation: building `TimeTravel.layer` finishes or rolls back any rewind a crash interrupted, before the service accepts new work.
+Step 8 is why recovery is not an operation: building `TimeTravel.layer` finishes or rolls back any rewind a crash interrupted, before the service accepts new work, except one whose run a live process still holds. That one is left exactly as the crash left it, still pending and still recoverable, so a rewind a living process still owns is never stolen. `TimeTravel.layerWith({ isAlive })` decides what counts as live; the default is the lease check the engine's run driver already applies to those rows.
 
 ### Current integration boundary
 
