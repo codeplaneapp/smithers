@@ -18,7 +18,6 @@ const ci = S.Github.Workflow({
   },
   concurrency: { group: "ci-${{ github.ref }}", cancelInProgress: "pull_request" },
   setup,
-  affected: true,
   run: [
     root.prePush,
     src.deadCode,
