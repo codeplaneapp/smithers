@@ -171,14 +171,16 @@ export interface Encoded {
     readonly deferredName: string
     readonly exit: Exit.Exit<unknown, unknown>
   }) => Effect.Effect<void>
-  readonly deferredDoneIfWaiting?: ((options: {
-    readonly flowName: string
-    readonly executionId: string
-    readonly deferredName: string
-    readonly reason: string
-    readonly token: string
-    readonly exit: Exit.Exit<unknown, unknown>
-  }) => Effect.Effect<FlowRuntime.DeferredDoneIfWaitingOutcome>) | undefined
+  readonly deferredDoneIfWaiting?:
+    | ((options: {
+      readonly flowName: string
+      readonly executionId: string
+      readonly deferredName: string
+      readonly reason: string
+      readonly token: string
+      readonly exit: Exit.Exit<unknown, unknown>
+    }) => Effect.Effect<FlowRuntime.DeferredDoneIfWaitingOutcome>)
+    | undefined
   readonly scheduleClock: (
     flow: Flow.Any,
     options: {
