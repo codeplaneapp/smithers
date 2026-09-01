@@ -316,11 +316,32 @@ const prGate = S.Suite({
 // carry those rows plus ubuntu (WorkflowAttrs takes a single `runsOn` string,
 // and the only matrix GithubRender.ts emits is the shard matrix it derives from
 // a sharded target); `requiredJobs`, the assertion that a rendered job is still
-// in the required set; and a per-job toolchain declaration (submodules plus a
-// rust toolchain for ci-rust and ci-wasm). Github.Setup carries only the two
-// cache secrets, and the generated setup action installs the workspace runtime
-// and package manager, not `cargo` or submodules.
-const githubSetup = S.Github.Setup({ cacheUrl, cacheToken })
+// in the required set; and `submodules`, the recursive checkout ci.yml's rust
+// and wasm-repro jobs use to fetch vendor/jj. Checkout is a workflow step
+// rather than a setup step, so a submodule pin has no home on Github.Setup.
+//
+// The workspace declaration covers Node, pnpm, and the pinned Rust toolchain,
+// which the setup action renders on its own. The rest of the host toolchain
+// lives here. `S.Host({ bins })` in .smithers/WORKSPACE.ts names the binaries
+// targets may reference and carries no version, so it cannot ask a runner to
+// install one: a runner without them fails every target that spawns one with
+// `host binary "bun" ... is not present on PATH`. These pins are the ones
+// ci.yml used, and the jj colocation is load bearing, because a GitHub
+// checkout is a git repository and the real-binary jj suites need a colocated
+// jj repository to open.
+const githubSetup = S.Github.Setup({
+  cacheUrl,
+  cacheToken,
+  tools: {
+    bun: S.CiToolchain.Bun({ runtime: S.Runtime.Bun({ version: ">=1.3.0" }), release: "1.3.14" }),
+    jj: S.CiToolchain.Jj({ release: "0.39.0" }),
+    // `@smthrs/std` proves its portable search against a real `rg`: the
+    // conformance suite runs both implementations and compares them. Without
+    // the binary the native half cannot start, and the parity check, which is
+    // the point of the suite, is the thing that fails.
+    ripgrep: S.CiToolchain.Ripgrep({ release: "14.1.1" })
+  }
+})
 
 const on = { pullRequest: true, push: { branches: ["main"] } } as const
 

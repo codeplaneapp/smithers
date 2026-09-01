@@ -41,10 +41,17 @@ const rust = S.Rust.Toolchain({
   lockfile: S.file("//Cargo.lock")
 })
 
-// The binaries CI actually installs (ci.yml): git checks out and drives the
-// working copy, jj backs the Jujutsu host service and the fault matrix, bun
-// runs apps/* and the ci/BUILD.ts matrix, cargo builds crates/flows-jj and
-// the wasm reproducibility gate.
+// The binaries a target may reference with `S.Host.bin(name)`: git checks out
+// and drives the working copy, jj backs the Jujutsu host service and the fault
+// matrix, bun runs apps/* and the Bun test targets, cargo builds
+// crates/flows-jj and the wasm reproducibility gate.
+//
+// This list is a name allowlist, not an installation request. It carries no
+// version and nothing installs from it, so a host missing one of these fails
+// every target that spawns it with `host binary "<name>" is declared in
+// S.Host({ bins }) but is not present on PATH`. Generated CI installs jj and
+// bun through the `tools` attr of the root PACKAGE.ts `S.Github.Setup`, cargo
+// through the rust toolchain declared above, and git from the runner image.
 const host = S.Host({
   bins: ["git", "jj", "bun", "cargo"]
 })

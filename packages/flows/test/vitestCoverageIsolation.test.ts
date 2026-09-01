@@ -469,8 +469,8 @@ describe("vitest coverage isolation conformance", () => {
     // declaration. What is pinned is unchanged in intent: the required lane has
     // to reach the whole package graph, and each specialized lane has to keep
     // running the target that proves its own requirement.
-    const workflow = (name: string): string =>
-      readFileSync(join(packagesDir, "..", ".github", "workflows", `${name}.yml`), "utf8")
+    const workflowsDir = join(packagesDir, "..", ".github", "workflows")
+    const workflow = (name: string): string => readFileSync(join(workflowsDir, `${name}.yml`), "utf8")
     const ci = workflow("ci-test")
     expect(ci).toMatch(/^\s*- uses: \.\/actions\/setup$/m)
     // `//:gates` is the deterministic superset: every package's ci suite, the
@@ -503,16 +503,52 @@ describe("vitest coverage isolation conformance", () => {
     expect(faultsJob).not.toContain("continue-on-error")
     expect(workflow("ci-rust")).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/crates\/flows-jj:rust'$/m)
     expect(workflow("ci-wasm")).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/crates\/flows-jj:wasm'$/m)
-    // The setup action the workspace declaration renders installs the runtime
-    // and the package manager for every lane, so its own file is pinned rather
-    // than the install step it used to inline. The jj install the real-binary
-    // host suite needs (issue #163) has no package-mode spelling yet: it was a
-    // per-job toolchain step in the retired ci.yml, `Github.Setup` carries the
-    // two cache secrets only, and the gap is recorded in the root PACKAGE.ts
-    // beside the workflow declarations. The pin comes back here when the attr
-    // does.
+    // The toolchain every lane installs. The retired ci.yml inlined these steps
+    // per job; package mode renders them once into the composite action, so the
+    // pins follow the steps into that file.
+    //
+    // These pins were dropped once, in the port that wrote this cell against
+    // the per-lane workflows, and replaced with a check that the setup action
+    // merely mentions pnpm. The generator then emitted a setup action with no
+    // bun, no jj, and no ripgrep in it, and the first package-mode CI run went
+    // red on 76 targets. Keep every step below asserted through the next
+    // rewrite: a suite that drives a real binary reports a missing binary as a
+    // failing gate, not as a skipped one.
+    //
+    // Pinning one file only pins the pipeline because every generated job
+    // reaches its toolchain through that file, so assert that first. A job that
+    // installs its own toolchain inline escapes every pin below.
+    for (const name of readdirSync(workflowsDir).filter((entry) => entry.startsWith("ci-"))) {
+      const contents = readFileSync(join(workflowsDir, name), "utf8")
+      const jobs = [...contents.matchAll(/^ {4}runs-on: /gm)].length
+      const setups = [...contents.matchAll(/^ {6}- uses: \.\/actions\/setup$/gm)].length
+      expect(jobs, name).toBeGreaterThan(0)
+      expect(setups, name).toEqual(jobs)
+    }
+    // A named step renders `- name:` first and its `uses:`/`run:` on the line
+    // below, so each pin accepts the step marker as optional.
     const setup = readFileSync(join(packagesDir, "..", "actions", "setup", "action.yml"), "utf8")
-    expect(setup).toMatch(/pnpm/)
+    // The package manager and the runtime, at the versions the workspace pins.
+    // `--frozen-lockfile` is what makes a lockfile drift a red gate rather than
+    // a resolution the runner performs on its own.
+    expect(setup).toMatch(/^\s*(?:- )?uses: pnpm\/action-setup@v\d+$/m)
+    expect(setup).toMatch(/^\s*(?:- )?uses: actions\/setup-node@v\d+$/m)
+    expect(setup).toMatch(/^\s*node-version: "?(?:>=)?22\.19\.0"?$/m)
+    expect(setup).toMatch(/^\s*(?:- )?run: pnpm install --frozen-lockfile\b/m)
+    // Bun runs apps/*, the ci-bun lane, and evals/agent (CLAUDE.md invariant).
+    // Without the install those suites do not run at all.
+    expect(setup).toMatch(/^\s*(?:- )?uses: oven-sh\/setup-bun@v\d+$/m)
+    expect(setup).toMatch(/^\s*bun-version: "?\d+\.\d+\.\d+"?$/m)
+    // jj, at a pinned release, plus the colocated init. `packages/jj` drives a
+    // real jj binary (issue #163) and a GitHub checkout is a git repository and
+    // not a jj one, so the host suite needs both steps, not just the install.
+    expect(setup).toMatch(/^\s*(?:- )?uses: taiki-e\/install-action@v\d+$/m)
+    expect(setup).toMatch(/^\s*tool: "?jj-cli@\d+\.\d+\.\d+"?$/m)
+    expect(setup).toMatch(/^\s*(?:- )?run: jj git init --colocate$/m)
+    // ripgrep, at a pinned release. `@smthrs/std` ships a portable search and a
+    // native one and gates on their parity, so a runner without `rg` deletes
+    // the only check that proves the portable implementation still matches.
+    expect(setup).toMatch(/^\s*tool: "?ripgrep@\d+\.\d+\.\d+"?$/m)
   })
 
   it("runs the package suites on every platform, from one roster, with no advisory bit", () => {
@@ -802,7 +838,12 @@ describe("vitest coverage isolation conformance", () => {
       // Splitting any string yields a first field; the nullish arm only
       // discharges noUncheckedIndexedAccess before the type lookup.
       "sandbox/src/Sandbox/fileSystem.ts": 1,
-      "step-cache/src/CacheStore.ts": 1
+      // Two arms of the same serialized write transaction, both unreachable by
+      // construction rather than untested. A conflicting insert and the read
+      // that follows it run inside one transaction, so the row the insert lost
+      // to is always present when the read looks for it. The second directive
+      // arrived with 81ab2425cd, which made cache provenance immutable.
+      "step-cache/src/CacheStore.ts": 2
     }
     const sourceFiles = (directory: string): Array<string> => {
       let entries

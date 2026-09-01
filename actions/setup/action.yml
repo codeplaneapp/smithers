@@ -19,6 +19,9 @@ runs:
     - uses: actions/setup-node@v4
       with:
         node-version: ">=22.19.0"
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.3.14
     - uses: dtolnay/rust-toolchain@stable
     - uses: actions/cache@v4
       with:
@@ -27,6 +30,17 @@ runs:
         restore-keys: pnpm-store-
     - run: pnpm install --frozen-lockfile
       shell: bash
+    - name: Install jj
+      uses: taiki-e/install-action@v2
+      with:
+        tool: jj-cli@0.39.0
+    - name: Initialize colocated jj repository
+      run: jj git init --colocate
+      shell: bash
+    - name: Install ripgrep
+      uses: taiki-e/install-action@v2
+      with:
+        tool: ripgrep@14.1.1
     - run: |
         if [ -n "${{ inputs.cache-url }}" ]; then
           echo "SMITHERS_CACHE_URL=${{ inputs.cache-url }}" >> "$GITHUB_ENV"

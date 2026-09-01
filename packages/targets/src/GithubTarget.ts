@@ -13,10 +13,41 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Attr from "./Attr.ts"
+import * as CiToolchain from "./CiToolchain.ts"
 import * as Input from "./Input.ts"
 import * as Reference from "./Reference.ts"
 import * as Secret from "./Secret.ts"
 import * as Target from "./Target.ts"
+
+/**
+ * Schema for the host tools one generated setup action installs.
+ *
+ * The workspace declaration tells the renderer how to install the JavaScript
+ * runtime, the package manager, and the Rust toolchain. It says nothing about
+ * the other binaries a suite spawns: `S.Host({ bins })` names them so a target
+ * may reference one, and it carries no version, so no workspace declaration
+ * can ask a runner to install one. These fields are that request.
+ *
+ * Each field takes a {@link CiToolchain} declaration, so a pin comes from the
+ * reviewed release enumeration rather than free text, and the action reference
+ * that performs the install stays a constant of the renderer.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const SetupTools = Schema.Struct({
+  bun: Schema.optional(CiToolchain.BunSetup),
+  jj: Schema.optional(CiToolchain.JjSetup),
+  ripgrep: Schema.optional(CiToolchain.RipgrepSetup)
+})
+
+/**
+ * The host tools one generated setup action installs.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type SetupTools = typeof SetupTools.Type
 
 /**
  * Attrs for {@link Setup}.
@@ -26,7 +57,8 @@ import * as Target from "./Target.ts"
  */
 export const SetupAttrs = Schema.Struct({
   cacheUrl: Schema.optional(Secret.Declaration),
-  cacheToken: Schema.optional(Secret.Declaration)
+  cacheToken: Schema.optional(Secret.Declaration),
+  tools: Schema.optional(SetupTools)
 })
 
 const setupDefinition = Target.make("Github.Setup", {

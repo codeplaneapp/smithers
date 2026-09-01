@@ -360,6 +360,13 @@ const renderSetupAction = (
       // A toolchain-only workspace: nothing to install for JavaScript.
       break
   }
+  const tools = setup.tools
+  // A workspace whose own runtime is Bun already installed it above, and a
+  // second setup-bun would install the same program twice.
+  if (tools?.bun !== undefined && toolchain.runtime?.kind !== "bun") {
+    lines.push("    - uses: oven-sh/setup-bun@v2")
+    lines.push("      with:", ...mapping({ "bun-version": tools.bun.release }, "        "))
+  }
   if (toolchain.rust !== undefined) {
     // The declared layer is the pin: the channel when the workspace names one,
     // and the pin file otherwise, which the action reads on its own.
@@ -380,6 +387,24 @@ const renderSetupAction = (
     )
     lines.push(`    - run: ${scalar(toolchain.store.install)}`)
     lines.push("      shell: bash")
+  }
+  if (tools?.jj !== undefined) {
+    lines.push("    - name: Install jj")
+    lines.push("      uses: taiki-e/install-action@v2")
+    lines.push("      with:", ...mapping({ tool: `jj-cli@${tools.jj.release}` }, "        "))
+    if (tools.jj.colocate) {
+      // A GitHub checkout is a git repository and not a jj one. Every suite
+      // that drives the real binary looks for the colocated repository this
+      // step creates, so it runs here, before the first target does.
+      lines.push("    - name: Initialize colocated jj repository")
+      lines.push("      run: jj git init --colocate")
+      lines.push("      shell: bash")
+    }
+  }
+  if (tools?.ripgrep !== undefined) {
+    lines.push("    - name: Install ripgrep")
+    lines.push("      uses: taiki-e/install-action@v2")
+    lines.push("      with:", ...mapping({ tool: `ripgrep@${tools.ripgrep.release}` }, "        "))
   }
   if (inputs.length > 0) {
     lines.push("    - run: |")
