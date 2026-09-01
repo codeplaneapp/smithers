@@ -513,7 +513,25 @@ describe("nextDelay numeric boundaries", () => {
 
   it("errorTag reads _tag, then Error name, and is otherwise undefined", () => {
     expect(RetryPolicy.errorTag({ _tag: "Tagged" })).toBe("Tagged")
-    expect(RetryPolicy.errorTag(new RangeError("x"))).toBe("RangeError")
+    const named = new Error("x")
+    Object.defineProperty(named, "name", { value: "NamedError" })
+    expect(RetryPolicy.errorTag(named)).toBe("NamedError")
+    for (
+      const [error, name] of [
+        [new EvalError("x"), "EvalError"],
+        [new RangeError("x"), "RangeError"],
+        [new ReferenceError("x"), "ReferenceError"],
+        [new SyntaxError("x"), "SyntaxError"],
+        [new TypeError("x"), "TypeError"],
+        [new URIError("x"), "URIError"],
+        [new AggregateError([], "x"), "AggregateError"],
+        [new Error("x"), "Error"]
+      ] as const
+    ) {
+      expect(RetryPolicy.errorTag(error)).toBe(name)
+    }
+    expect(RetryPolicy.errorTag(Object.defineProperty({}, "name", { get: () => "hidden" }))).toBeUndefined()
+    expect(RetryPolicy.errorTag(Object.defineProperty({}, "name", { value: 7 }))).toBeUndefined()
     expect(RetryPolicy.errorTag({ _tag: 7 })).toBe(undefined)
     expect(RetryPolicy.errorTag("string")).toBe(undefined)
     expect(RetryPolicy.errorTag(null)).toBe(undefined)
