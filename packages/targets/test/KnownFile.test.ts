@@ -156,7 +156,12 @@ describe("Smithers.file compile-time opt-in", () => {
     })
   }
 
-  it("accepts a generated good path and rejects a generated bad path", async () => {
+  // Two `tsc` compilations, which are CPU bound. Measured at 4.9 s on an idle
+  // developer machine and timed out against the 30 s package default on a
+  // two-core hosted runner, so the runner is more than six times slower. The
+  // budget accommodates that with room to spare and still bounds a genuine
+  // hang, which would not finish at any budget.
+  it("accepts a generated good path and rejects a generated bad path", { timeout: 120_000 }, async () => {
     const good = await compile("//good.txt", true)
     expect(good.status, String(good.stdout) + String(good.stderr)).toBe(0)
 

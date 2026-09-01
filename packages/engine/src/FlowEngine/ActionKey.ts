@@ -69,7 +69,10 @@ export const ordinalScope = (
   })
 
 const renderIssuePath = (segments: ReadonlyArray<PropertyKey>): string =>
-  segments.reduce(
+  // The type argument is explicit because `"$"` is itself a `PropertyKey`, so
+  // inference picks the non-generic overload, types the accumulator as
+  // `PropertyKey`, and then refuses `+` on a symbol.
+  segments.reduce<string>(
     (path, segment) => path + (typeof segment === "number" ? `[${segment}]` : `.${String(segment)}`),
     "$"
   )

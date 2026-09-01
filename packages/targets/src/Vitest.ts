@@ -39,7 +39,21 @@ export const Attrs = Schema.Struct({
   coverage: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(true))),
   cwd: Schema.NonEmptyString.pipe(
     Schema.withConstructorDefault(Effect.succeed("."))
-  )
+  ),
+  /**
+   * How long the run may take before the tool is killed.
+   *
+   * The exec default of ten minutes is measured against a developer machine
+   * and leaves a large suite no headroom on a hosted runner. `packages/cli`
+   * takes 142 s here and 600.4 s on a two-core runner, which is 4.2 times
+   * slower and exactly the ten-minute cap, so the target died rather than
+   * reporting. Twenty minutes is above that with room and still bounds a hang,
+   * which does not finish at any budget. A package that wants a tighter bound
+   * sets its own.
+   *
+   * @default 1_200_000
+   */
+  timeoutMs: Schema.Int.pipe(Schema.withConstructorDefault(Effect.succeed(1_200_000)))
 })
 
 /**
@@ -71,6 +85,7 @@ export const Vitest = Target.make("Vitest", {
   implementation: (attrs) =>
     Target.runTool({
       cwd: attrs.cwd,
+      timeoutMs: attrs.timeoutMs,
       argv: PackageManager.exec(attrs.packageManager, [
         "vitest",
         "run",
