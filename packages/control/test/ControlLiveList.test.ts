@@ -6,10 +6,10 @@
 import { Journal } from "@smthrs/journal"
 import { NotificationQueue } from "@smthrs/notifications"
 import { Registry } from "@smthrs/registry"
-import { Effect, type Layer, Stream } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import { Control } from "../src/Control.ts"
-import { ClaimLost, LaunchFailed, PersistenceError } from "../src/ControlError.ts"
+import { ClaimLost, InvalidInput, LaunchFailed, PersistenceError } from "../src/ControlError.ts"
 import * as ControlExecutor from "../src/ControlExecutor.ts"
 import { ControlRuntime, type MemoryFlow } from "../src/ControlRuntime.ts"
 import type { Envelope, ListResponse, Principal, Receipt } from "../src/ControlSchema.ts"
@@ -52,33 +52,67 @@ const items = (listed: ListResponse): ReadonlyArray<string> =>
   listed._tag === "flows" ? listed.items.map((item) => item.flowId) : listed.items.map((item) => item.runId)
 
 describe("ControlLive listings", () => {
-  it("pages a flow listing at zero, mid-page, exactly-at-limit, and past the end", async () => {
+  it("pages valid flow listings and refuses sizes or cursors that cannot make progress", async () => {
     const observed = await run(Effect.gen(function*() {
       const control = yield* Control
       return {
         all: yield* control.list({ _tag: "flows" }),
-        empty: yield* control.list({ _tag: "flows", limit: 0 }),
-        negative: yield* control.list({ _tag: "flows", limit: -1 }),
-        fractional: yield* control.list({ _tag: "flows", limit: 2.7 }),
+        invalidLimits: yield* Effect.forEach([0, -1, 2.7, Number.NaN, Number.POSITIVE_INFINITY], (limit) =>
+          control.list({ _tag: "flows", limit }).pipe(Effect.flip)),
         exact: yield* control.list({ _tag: "flows", limit: 3 }),
         tail: yield* control.list({ _tag: "flows", cursor: "2" }),
         beyond: yield* control.list({ _tag: "flows", cursor: "9" }),
-        unparsable: yield* control.list({ _tag: "flows", cursor: "not-a-cursor" })
+        unparsable: yield* control.list({ _tag: "flows", cursor: "not-a-cursor" }).pipe(Effect.flip)
       }
     }))
 
     expect(items(observed.all)).toEqual(["system/test", "review/pull-request", "release/train"])
-    // A zero-sized page still reports where the next one starts.
-    expect(observed.empty).toEqual({ _tag: "flows", items: [], nextCursor: "0" })
-    expect(observed.negative).toEqual({ _tag: "flows", items: [], nextCursor: "0" })
-    expect(items(observed.fractional)).toEqual(["system/test", "review/pull-request"])
-    expect(observed.fractional).toMatchObject({ nextCursor: "2" })
+    for (const error of observed.invalidLimits) {
+      expect(error).toBeInstanceOf(InvalidInput)
+      expect((error as InvalidInput).code).toBe("invalid_input")
+      expect((error as InvalidInput).issue).toContain("limit")
+    }
     // A page that lands exactly on the end carries no next cursor.
     expect(observed.exact).not.toHaveProperty("nextCursor")
     expect(items(observed.tail)).toEqual(["release/train"])
     expect(observed.beyond).toEqual({ _tag: "flows", items: [] })
-    // An unparsable cursor restarts at the beginning rather than failing.
-    expect(items(observed.unparsable)).toEqual(items(observed.all))
+    expect(observed.unparsable).toBeInstanceOf(InvalidInput)
+    expect((observed.unparsable as InvalidInput).issue).toContain("cursor")
+  })
+
+  it("bounds an omitted limit and walks every cursor to exhaustion without repeating one", async () => {
+    const defaultPageSize = 100
+    const catalog = Array.from({ length: defaultPageSize + 23 }, (_, index): MemoryFlow => ({
+      flowId: `flow/${String(index).padStart(3, "0")}`,
+      description: `Flow ${index}`,
+      deployClass: false,
+      envelope
+    }))
+    const observed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const first = yield* control.list({ _tag: "flows" })
+        const pages: Array<ListResponse> = []
+        const cursors: Array<readonly [string | undefined, string | undefined]> = []
+        let cursor: string | undefined
+        do {
+          const current = cursor
+          const listed = yield* control.list({ _tag: "flows", ...(cursor === undefined ? {} : { cursor }) })
+          pages.push(listed)
+          cursor = listed.nextCursor
+          cursors.push([current, cursor])
+        } while (cursor !== undefined && pages.length < 10)
+        return { first, pages, cursors }
+      }),
+      live({ runtime: memoryRuntime({ flows: catalog }) })
+    )
+
+    expect(observed.first.items).toHaveLength(defaultPageSize)
+    expect(observed.first.nextCursor).toBe(String(defaultPageSize))
+    expect(observed.pages.flatMap(items)).toHaveLength(catalog.length)
+    expect(new Set(observed.pages.flatMap(items)).size).toBe(catalog.length)
+    expect(observed.cursors.every(([current, next]) => next === undefined || next !== current)).toBe(true)
+    expect(observed.cursors.at(-1)?.[1]).toBeUndefined()
   })
 
   it("prefers the registry's descriptors over the runtime's catalog and pages them the same way", async () => {
@@ -144,6 +178,37 @@ describe("ControlLive listings", () => {
     expect(items(observed.paged)).toEqual([observed.firstRunId])
     expect(observed.paged).toMatchObject({ nextCursor: "1" })
   })
+
+  it("uses the direct run lookup for a runId filter, including a missing run", async () => {
+    let listRunsCalls = 0
+    const guardedRuntime = Layer.effect(ControlRuntime)(
+      Effect.map(ControlRuntime, (runtime) =>
+        ControlRuntime.of({
+          ...runtime,
+          listRuns: Effect.sync(() => {
+            listRunsCalls += 1
+            throw new Error("listRuns must not serve an exact run lookup")
+          })
+        }))
+    ).pipe(Layer.provide(memoryRuntime({ flows })))
+
+    const observed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const { runId } = yield* start("system/test", "direct-lookup")
+        return {
+          found: yield* control.list({ _tag: "runs", filters: { runId } }),
+          missing: yield* control.list({ _tag: "runs", filters: { runId: "run-missing" } }),
+          runId
+        }
+      }),
+      live({ runtime: guardedRuntime })
+    )
+
+    expect(items(observed.found)).toEqual([observed.runId])
+    expect(observed.missing).toEqual({ _tag: "runs", items: [] })
+    expect(listRunsCalls).toBe(0)
+  })
 })
 
 describe("ControlLive mutations", () => {
@@ -174,6 +239,52 @@ describe("ControlLive mutations", () => {
     expect(observed.delivered.map((signal) => signal.name)).toEqual(["reviewed"])
   })
 
+  it("replays the same intent when object keys arrive in a different order", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runtime = yield* ControlRuntime
+      const { runId } = yield* start("system/test", "canonical-intent")
+      const first = yield* control.signal({
+        runId,
+        signal: { name: "reviewed", payload: { decision: "ship", score: 1 } },
+        idempotencyKey: "signal:canonical"
+      })
+      const replay = yield* control.signal({
+        runId,
+        signal: { name: "reviewed", payload: { score: 1, decision: "ship" } },
+        idempotencyKey: "signal:canonical"
+      })
+      return { first, replay, delivered: yield* runtime.deliveredSignals(runId) }
+    }))
+
+    expect(observed.first._tag).toBe("Accepted")
+    expect(observed.replay._tag).toBe("AlreadyApplied")
+    expect(observed.delivered).toHaveLength(1)
+  })
+
+  it("treats a nested principal in signal data as caller intent", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runtime = yield* ControlRuntime
+      const { runId } = yield* start("system/test", "nested-principal")
+      const first = yield* control.signal({
+        runId,
+        signal: { name: "reviewed", payload: { principal: "alice" } },
+        idempotencyKey: "signal:nested-principal"
+      })
+      const conflict = yield* control.signal({
+        runId,
+        signal: { name: "reviewed", payload: { principal: "bob" } },
+        idempotencyKey: "signal:nested-principal"
+      })
+      return { first, conflict, delivered: yield* runtime.deliveredSignals(runId) }
+    }))
+
+    expect(observed.first._tag).toBe("Accepted")
+    expect(observed.conflict._tag).toBe("Conflict")
+    expect(observed.delivered.map((signal) => signal.payload)).toEqual([{ principal: "alice" }])
+  })
+
   it("denies a plan without installing a grant and refuses to start it afterwards", async () => {
     const observed = await run(Effect.gen(function*() {
       const control = yield* Control
@@ -199,21 +310,51 @@ describe("ControlLive mutations", () => {
     expect(observed.started).toBeInstanceOf(ClaimLost)
   })
 
-  it("resumes a parked run through the run verb and reports a terminal one as terminal", async () => {
+  it("answers Terminal on every run-verb resume replay after the run settled", async () => {
     const observed = await run(Effect.gen(function*() {
       const control = yield* Control
-      const { runId } = yield* start("system/test", "resume")
-      yield* park(yield* ControlRuntime, runId)
-      const resumed = yield* control.run({ _tag: "Resume", runId, idempotencyKey: "rejoin:resume" })
-      const listed = yield* control.list({ _tag: "runs", filters: { runId } })
+      const { runId } = yield* start("system/test", "terminal-resume")
       yield* control.cancel({ runId, idempotencyKey: "cancel:resume" })
-      const terminal = yield* control.run({ _tag: "Resume", runId, idempotencyKey: "rejoin:resume-again" })
-      return { resumed, listed, terminal, runId }
+      const first = yield* control.run({ _tag: "Resume", runId, idempotencyKey: "rejoin:terminal" })
+      const again = yield* control.run({ _tag: "Resume", runId, idempotencyKey: "rejoin:terminal" })
+      return { first, again, runId }
     }))
 
-    expect(observed.resumed).toEqual({ _tag: "Accepted", receiptId: "rejoin:resume", runId: observed.runId })
-    expect(observed.listed).toMatchObject({ items: [{ status: "accepted" }] })
-    expect(observed.terminal).toEqual({ _tag: "Terminal", runId: observed.runId, status: "cancelled" })
+    expect(observed.first).toEqual({ _tag: "Terminal", runId: observed.runId, status: "cancelled" })
+    expect(observed.again).toEqual(observed.first)
+  })
+
+  it("journals a run-verb resume under the durable resume event kind", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const journal = yield* Journal.Journal
+      const { runId } = yield* start("system/test", "resume-kind")
+      yield* park(yield* ControlRuntime, runId)
+      const receipt = yield* control.run({ _tag: "Resume", runId, idempotencyKey: "rejoin:kind" })
+      yield* journal.flush
+      const events = yield* control.watch({ runId, follow: false }).pipe(Stream.runCollect)
+      return { receipt, runId, kinds: events.map((event) => event.kind) }
+    }))
+
+    expect(observed.receipt).toEqual({ _tag: "Accepted", receiptId: "rejoin:kind", runId: observed.runId })
+    expect(observed.kinds).toContain("control.run.resume")
+    expect(observed.kinds).not.toContain("control.run.resumed")
+  })
+
+  it("journals one creation when a keyed plan is replayed", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const journal = yield* Journal.Journal
+      const input = { flowId: "system/test", input: { suite: "plan-replay" }, idempotencyKey: "plan:replay" }
+      const first = yield* control.plan(input)
+      const again = yield* control.plan(input)
+      yield* journal.flush
+      const events = yield* control.watch({ runId: `plan:${first.planId}`, follow: false }).pipe(Stream.runCollect)
+      return { first, again, created: events.filter((event) => event.kind === "control.plan.created") }
+    }))
+
+    expect(observed.again).toEqual(observed.first)
+    expect(observed.created).toHaveLength(1)
   })
 
   it("leaves a run pending when no executor is composed at all", async () => {
@@ -273,6 +414,46 @@ describe("ControlLive mutations", () => {
 
     expect(error).toBeInstanceOf(PersistenceError)
     expect((error as PersistenceError).operation).toBe("control.steer.notification")
+  })
+
+  it("refuses a steer whose embedded run id disagrees before admitting anything", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const notifications = yield* NotificationQueue.NotificationQueue
+      const { runId } = yield* start("system/test", "steer-run-mismatch")
+      const error = yield* control.steer({
+        runId,
+        message: { messageId: "steer-mismatch", runId: "run-someone-else", body: "stop", principal, createdAt: 1 },
+        idempotencyKey: "steer:mismatch"
+      }).pipe(Effect.flip)
+      return { error, pending: yield* notifications.pending(runId) }
+    }))
+
+    expect(observed.error).toBeInstanceOf(InvalidInput)
+    expect((observed.error as InvalidInput).code).toBe("invalid_input")
+    expect((observed.error as InvalidInput).issue).toContain("message.runId")
+    expect(observed.pending).toEqual([])
+  })
+
+  it("records a steer with a server-side creation time", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const journal = yield* Journal.Journal
+        const { runId } = yield* start("system/test", "steer-created-at")
+        yield* control.steer({
+          runId,
+          message: { messageId: "steer-time", runId, body: "continue", principal, createdAt: 1 },
+          idempotencyKey: "steer:time"
+        })
+        yield* journal.flush
+        const events = yield* control.watch({ runId, follow: false }).pipe(Stream.runCollect)
+        return events.find((event) => event.kind === "control.steer.enqueued")
+      }),
+      live({ runtime: memoryRuntime({ flows, now: () => 99 }) })
+    )
+
+    expect(observed?.payload).toMatchObject({ messageId: "steer-time", createdAt: 99 })
   })
 
   it("admits an empty steering body and keeps a second steer of the same run queued behind it", async () => {

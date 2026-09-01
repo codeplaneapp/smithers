@@ -275,30 +275,31 @@ const settledEngine = (status: "completed" | "failed" | "cancelled") =>
   )
 
 describe("cancelling a run whose engine row has already settled", () => {
-  it("answers the engine's terminal receipt and leaves the control row alone", async () => {
-    const observed = await run(
-      Effect.gen(function*() {
-        const control = yield* Control
-        const runtime = yield* ControlRuntime
-        const runId = yield* start("stale-control-row")
-        const before = yield* runtime.getRun(runId)
+  for (const status of ["completed", "failed", "cancelled"] as const) {
+    it(`reconciles the control row to the engine's ${status} status`, async () => {
+      const observed = await run(
+        Effect.gen(function*() {
+          const control = yield* Control
+          const runtime = yield* ControlRuntime
+          const runId = yield* start(`stale-control-row:${status}`)
+          const before = yield* runtime.getRun(runId)
 
-        const receipt = yield* control.cancel({ runId, idempotencyKey: "cancel:stale" })
-        return { runId, before, receipt, after: yield* runtime.getRun(runId), kinds: yield* kinds(runId) }
-      }),
-      settledEngine("completed")
-    )
+          const receipt = yield* control.cancel({ runId, idempotencyKey: `cancel:stale:${status}` })
+          return { runId, before, receipt, after: yield* runtime.getRun(runId), kinds: yield* kinds(runId) }
+        }),
+        settledEngine(status)
+      )
 
-    // The receipt carries the ENGINE's status, which is the only true one.
-    expect(observed.receipt).toEqual({ _tag: "Terminal", runId: observed.runId, status: "completed" })
-    // The control row is not transitioned and the interrupt never runs: a
-    // control row reading `cancelled` over an engine row reading `completed`
-    // is the terminal disagreement B-11 forbids.
-    expect(observed.after.status).toBe(observed.before.status)
-    expect(observed.after.status).not.toBe("cancelled")
-    // No attribution event either: nobody cancelled anything.
-    expect(observed.kinds).not.toContain(Cancellation.requestedEventType)
-  })
+      // The engine's own terminal status resolves the B-11 disagreement. It
+      // must never be replaced by the cancellation status the caller wanted.
+      expect(observed.receipt).toEqual({ _tag: "Terminal", runId: observed.runId, status })
+      expect(["completed", "failed", "cancelled"]).not.toContain(observed.before.status)
+      expect(observed.after.status).toBe(status)
+      expect(observed.kinds).toContain(`control.run.${status}`)
+      // No attribution event either: nobody cancelled anything.
+      expect(observed.kinds).not.toContain(Cancellation.requestedEventType)
+    })
+  }
 })
 
 describe("a cancel the engine refuses", () => {

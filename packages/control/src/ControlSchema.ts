@@ -622,7 +622,55 @@ export const ControlEvent = Schema.Struct({
 export type ControlEvent = typeof ControlEvent.Type
 
 /**
+ * How many items a listing returns when the caller names no `limit`.
+ *
+ * A listing with no bound returned the whole collection and paid one pending
+ * steer query per run, so `smithers ps` on a busy project grew without bound.
+ * A default is the smallest fix that keeps every caller working: a client that
+ * wants more walks `nextCursor`.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const defaultPageSize = 100
+
+/**
+ * The largest `limit` a listing accepts.
+ *
+ * The cap is the resource bound: a remote bearer holder cannot ask one request
+ * to project an unbounded number of rows.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const maxPageSize = 500
+
+/**
+ * A page size a listing can actually make progress on.
+ *
+ * `0`, a negative size, a fraction, `NaN`, and `Infinity` are all refused. A
+ * zero-sized page used to answer `{ items: [], nextCursor: "0" }`, which is a
+ * cursor a client loops on forever.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const PageLimit = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(1),
+  Schema.isLessThanOrEqualTo(maxPageSize)
+)
+
+/**
  * A typed listing request for discovered flows or durable runs.
+ *
+ * `principalId` stays on the wire and is REFUSED by `Control.list` rather than
+ * removed from it. rc.0 records no launch principal on a run summary, so there
+ * is nothing to evaluate the filter against, and the field used to be accepted
+ * and applied nowhere: a caller using it as a tenant restriction received every
+ * run. Deleting the field would have moved the same overbroad answer one layer
+ * out, because Effect struct decoding strips a property the schema does not
+ * declare and the server would never see it. A refusal is the clear failure the
+ * release contract asks an unsupported feature for.
  *
  * @since 0.1.0
  * @category models
@@ -632,7 +680,7 @@ export const ListRequest = Schema.Union([
   Schema.TaggedStruct("flows", {
     filters: Schema.optional(Schema.Json),
     cursor: Schema.optional(Schema.String),
-    limit: Schema.optional(Schema.Number)
+    limit: Schema.optional(PageLimit)
   }),
   Schema.TaggedStruct("runs", {
     filters: Schema.optional(Schema.Struct({
@@ -644,7 +692,7 @@ export const ListRequest = Schema.Union([
       lineageId: Schema.optional(Schema.String)
     })),
     cursor: Schema.optional(Schema.String),
-    limit: Schema.optional(Schema.Number)
+    limit: Schema.optional(PageLimit)
   })
 ])
 

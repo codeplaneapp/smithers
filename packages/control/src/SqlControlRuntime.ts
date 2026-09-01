@@ -80,7 +80,7 @@ import type {
 } from "./ControlSchema.ts"
 import { accepted, alreadyApplied, canonical, emptyEnvelope, planCard, sameEnvelope } from "./internal/planning.ts"
 import * as Lineage from "./Lineage.ts"
-import { catalog } from "./SystemFlows.ts"
+import { plannable } from "./SystemFlows.ts"
 
 /**
  * A flow the durable runtime can plan.
@@ -261,11 +261,11 @@ export const migrate: Effect.Effect<void, PersistenceError, SqlClient.SqlClient>
 /**
  * Constructs a durable runtime over the ambient database and run store.
  *
- * @category constructors
- * @since 0.1.0
- * @slop
+ * Not exported under this name: `make` below is the single public constructor.
+ * Exporting both put two names for one function on the package's public
+ * surface, and only one of them was documented.
  */
-export const make_ = (
+const makeRuntime = (
   options: Options = {}
 ): Effect.Effect<
   Service,
@@ -284,7 +284,7 @@ export const make_ = (
       pid: 0,
       nonce: randomId()
     }
-    const configuredFlows = options.flows ?? catalog.map((entry): DurableFlow => ({
+    const configuredFlows = options.flows ?? plannable.map((entry): DurableFlow => ({
       flowId: entry.flowId,
       description: `Reserved ${entry.verb} system flow`,
       deployClass: entry.deployClass,
@@ -903,7 +903,7 @@ export const make_ = (
               })
             }
             const stored = yield* readPlan(found.planId)
-            if (Option.isSome(stored)) return storedPlan(stored.value).card
+            if (Option.isSome(stored)) return { card: storedPlan(stored.value).card, created: false }
           }
         }
         const decoded = yield* (flow.decode?.(input.input) ?? Effect.try({
@@ -940,7 +940,7 @@ export const make_ = (
             `
           }
         })).pipe(Effect.mapError(persistence("store a plan")))
-        return card
+        return { card, created: true }
       }),
       getPlan: Effect.fn("SqlControlRuntime.getPlan")((planId: string) => Effect.map(requirePlan(planId), storedPlan)),
       listPlanIds,
@@ -1123,11 +1123,19 @@ export const make_ = (
         Effect.gen(function*() {
           const ancestry = yield* ancestryIndex(undefined)
           const runIds = yield* listRunIds
-          return yield* Effect.forEach(
-            runIds,
-            (runId) => Effect.map(requireRow(runId), (row) => summaryFrom(row, ancestry))
-          )
-        }).pipe(Effect.catchTag("/control/RunNotFound", () => Effect.succeed([] as ReadonlyArray<RunSummary>)))
+          // The id index and the rows are two statements, so retention or
+          // `smithers gc` can delete a row between them. A vanished row is one
+          // row missing from the answer, not a failed listing: catching
+          // `RunNotFound` around the whole `forEach` collapsed the ENTIRE
+          // listing to `[]`, so `smithers ps` on a busy project intermittently
+          // reported no runs at all.
+          const summaries = yield* Effect.forEach(runIds, (runId) =>
+            requireRow(runId).pipe(
+              Effect.map((row) => Option.some(summaryFrom(row, ancestry))),
+              Effect.catchTag("/control/RunNotFound", () => Effect.succeed(Option.none<RunSummary>()))
+            ))
+          return summaries.filter(Option.isSome).map((summary) => summary.value)
+        })
       )(),
       listFlows: Effect.fn("SqlControlRuntime.listFlows")(() =>
         Effect.succeed(
@@ -1373,7 +1381,7 @@ export const layer = (
   ControlRuntime,
   PersistenceError,
   Crypto.Crypto | DurableWriter | SqlClient.SqlClient | RunStore.RunStore
-> => Layer.effect(ControlRuntime)(make_(options))
+> => Layer.effect(ControlRuntime)(makeRuntime(options))
 
 /**
  * Provides a durable runtime and the run store it needs over the ambient
@@ -1392,12 +1400,9 @@ export const layerWithStore = (
 > => layer(options).pipe(Layer.provideMerge(RunStore.layer))
 
 /**
- * @slop
+ * Constructs a durable runtime over the ambient database and run store.
+ *
+ * @category constructors
+ * @since 0.1.0
  */
-export { make_ as make }
-
-/**
- * Re-exported so a composition can name a flow without two imports.
- * @slop
- */
-export type { FlowId }
+export { makeRuntime as make }

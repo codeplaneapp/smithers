@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest"
 import { Control } from "../src/Control.ts"
 import { PersistenceError } from "../src/ControlError.ts"
 import { ControlRuntime } from "../src/ControlRuntime.ts"
-import type { ControlEvent, RunSummary } from "../src/ControlSchema.ts"
+import type { ControlEvent, Receipt, RunSummary } from "../src/ControlSchema.ts"
 import * as Monitor from "../src/Monitor.ts"
 import { durable, type DurableStack } from "./DurableStack.ts"
 import { park } from "./Park.ts"
@@ -346,6 +346,80 @@ describe("Monitor.run over the durable control plane", () => {
       expect((beat.payload as Record<string, unknown>)["healed"]).toBeUndefined()
     }
   })
+
+  const receiptCases: ReadonlyArray<{
+    readonly receipt: Receipt
+    readonly healed: boolean
+    readonly calls: number
+    readonly finalHealth: Monitor.Health
+  }> = [
+    {
+      receipt: { _tag: "Accepted", receiptId: "receipt:accepted", runId: "run-replaced" },
+      healed: true,
+      calls: 1,
+      finalHealth: "healthy"
+    },
+    {
+      receipt: { _tag: "AlreadyApplied", receiptId: "receipt:replayed", runId: "run-replaced" },
+      healed: true,
+      calls: 1,
+      finalHealth: "healthy"
+    },
+    {
+      receipt: { _tag: "Parked", receiptId: "receipt:parked", planId: "plan-parked", status: "waiting-approval" },
+      healed: false,
+      calls: 2,
+      finalHealth: "stalled"
+    },
+    {
+      receipt: { _tag: "Conflict", message: "the key names another mutation" },
+      healed: false,
+      calls: 2,
+      finalHealth: "stalled"
+    },
+    {
+      receipt: { _tag: "Terminal", runId: "run-replaced", status: "completed" },
+      healed: false,
+      calls: 1,
+      finalHealth: "healthy"
+    }
+  ]
+
+  for (const testCase of receiptCases) {
+    it(`interprets a ${testCase.receipt._tag} remedy receipt without overstating the heal`, async () => {
+      let calls = 0
+      const observed = await run(Effect.gen(function*() {
+        const runId = yield* start(`receipt-${testCase.receipt._tag}`)
+        yield* park(yield* ControlRuntime, runId)
+        yield* parkOn(runId, "released")
+        const receipt = testCase.receipt._tag === "Terminal" || testCase.receipt._tag === "Accepted" ||
+            testCase.receipt._tag === "AlreadyApplied"
+          ? { ...testCase.receipt, runId }
+          : testCase.receipt
+        const report = yield* Monitor.run({
+          runId,
+          intervalMs: 0,
+          maxChecks: 4,
+          stallBeats: 2,
+          autoHeal: ["stalled"],
+          heal: () => {
+            calls += 1
+            return Effect.succeed(receipt)
+          }
+        })
+        const entries = yield* entriesOf(runId)
+        return {
+          report,
+          healed: entries.filter((entry) => entry.eventType === Monitor.healedEventType)
+        }
+      }))
+
+      expect(calls).toBe(testCase.calls)
+      expect(observed.report.beats.at(-1)?.health).toBe(testCase.finalHealth)
+      expect(observed.report.beats.some((beat) => beat.healed === "resume")).toBe(testCase.healed)
+      expect(observed.healed).toHaveLength(testCase.healed ? 1 : 0)
+    })
+  }
 
   it("names the monitor on every record it writes, so two of them are tellable apart", async () => {
     const observed = await run(Effect.gen(function*() {

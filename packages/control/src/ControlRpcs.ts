@@ -8,6 +8,7 @@ import { Rpc, RpcGroup, RpcMiddleware } from "effect/unstable/rpc"
 import {
   AlreadyResolved,
   ClaimLost,
+  ControlErrorSchema,
   EnvelopeMismatch,
   FlowNotFound,
   InvalidInput,
@@ -93,17 +94,23 @@ const SignalInput = Schema.Struct({
 const RunMutationInput = Schema.Struct({ runId: RunId, idempotencyKey: IdempotencyKey })
 
 /**
- * A cancel carries the operator's stated reason; a resume does not.
+ * A lifecycle mutation carries the operator's stated reason.
  *
- * The reason is on the wire because attribution is written where the
- * cancellation is decided, and a remote operator decides it here. The
- * principal is deliberately NOT on the wire: the server stamps the identity it
- * authenticated, so a client cannot name someone else.
+ * The reason is on the wire because attribution is written where the decision
+ * is made, and a remote operator decides it here. `Control.resume` records it
+ * on `control.run.resume` exactly as `cancel` records it on
+ * `control.run.cancel-requested`, so a wire payload without the field made a
+ * local `resume({reason})` and a remote one differ silently.
+ *
+ * The principal is deliberately NOT on the wire: the server stamps the identity
+ * it authenticated, so a client cannot name someone else.
  */
-const CancelInput = Schema.Struct({
+const ReasonedMutationInput = Schema.Struct({
   ...RunMutationInput.fields,
   reason: Schema.optional(Schema.String)
 })
+
+const CancelInput = ReasonedMutationInput
 
 const mutationErrors = Schema.Union([RunNotFound, ClaimLost, PersistenceError, Unavailable])
 
@@ -160,7 +167,7 @@ export const ControlRpcs = RpcGroup.make(
   Rpc.make("Steer", {
     payload: SteerInput,
     success: Receipt,
-    error: Schema.Union([RunNotFound, PersistenceError, Unavailable])
+    error: Schema.Union([RunNotFound, InvalidInput, PersistenceError, Unavailable])
   }),
   Rpc.make("Signal", {
     payload: SignalInput,
@@ -168,44 +175,20 @@ export const ControlRpcs = RpcGroup.make(
     error: Schema.Union([RunNotFound, NoMatchingWait, PersistenceError, Unavailable])
   }),
   Rpc.make("Cancel", { payload: CancelInput, success: Receipt, error: mutationErrors }),
-  Rpc.make("Resume", { payload: RunMutationInput, success: Receipt, error: mutationErrors }),
+  Rpc.make("Resume", { payload: ReasonedMutationInput, success: Receipt, error: mutationErrors }),
+  // `list` and `watch` carry the whole `ControlError` union in their contract,
+  // so they name it once rather than restating its members. Two hand-copied
+  // lists is how `CredentialConflict` came to be a control error the union did
+  // not admit.
   Rpc.make("List", {
     payload: ListRequest,
     success: ListResponse,
-    error: Schema.Union([
-      RunNotFound,
-      FlowNotFound,
-      PlanDigestMismatch,
-      EnvelopeMismatch,
-      ClaimLost,
-      AlreadyResolved,
-      InvalidInput,
-      Unauthorized,
-      Unavailable,
-      TransportError,
-      PersistenceError,
-      LaunchFailed,
-      NoMatchingWait
-    ])
+    error: ControlErrorSchema
   }),
   Rpc.make("Watch", {
     payload: WatchFilter,
     success: ControlEvent,
-    error: Schema.Union([
-      RunNotFound,
-      FlowNotFound,
-      PlanDigestMismatch,
-      EnvelopeMismatch,
-      ClaimLost,
-      AlreadyResolved,
-      InvalidInput,
-      Unauthorized,
-      Unavailable,
-      TransportError,
-      PersistenceError,
-      LaunchFailed,
-      NoMatchingWait
-    ]),
+    error: ControlErrorSchema,
     stream: true
   })
 ).middleware(ControlAuth)

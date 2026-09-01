@@ -34,7 +34,7 @@ const withRuntime = <A, E>(
 /** Plans, approves, and launches one run through the port itself. */
 const start = (runtime: Service) =>
   Effect.gen(function*() {
-    const card = yield* runtime.plan({ flowId: "system/test", input: { suite: "memory" } })
+    const { card } = yield* runtime.plan({ flowId: "system/test", input: { suite: "memory" } })
     const token = yield* runtime.lookupApproval(card.approval.target)
     yield* runtime.installBulkGrant(token, card.envelope, "run")
     yield* runtime.resolveApproval(token, "approved", principal)
@@ -78,6 +78,8 @@ describe("ControlRuntime.layerMemory", () => {
       Effect.gen(function*() {
         const first = yield* runtime.plan({ flowId: "system/test", input: { a: 1 }, idempotencyKey: "plan:key" })
         const replay = yield* runtime.plan({ flowId: "system/test", input: { a: 1 }, idempotencyKey: "plan:key" })
+        // The second ask under one key is a replay of the stored card, and it
+        // says so: `Control.plan` journals a creation only when it created one.
         const reused = yield* Effect.flip(
           runtime.plan({ flowId: "system/test", input: { a: 2 }, idempotencyKey: "plan:key" })
         )
@@ -86,11 +88,12 @@ describe("ControlRuntime.layerMemory", () => {
       })
     )
 
-    expect(observed.replay).toEqual(observed.first)
+    expect(observed.first.created).toBe(true)
+    expect(observed.replay).toEqual({ card: observed.first.card, created: false })
     expect(observed.reused).toBeInstanceOf(InvalidInput)
     expect((observed.reused as InvalidInput).issue).toBe("idempotency key plan:key was used for another plan")
     // The refused plan allocated nothing: one key, one stored plan.
-    expect(observed.listed).toEqual([observed.first.planId])
+    expect(observed.listed).toEqual([observed.first.card.planId])
   })
 
   it("reports a missing approval token against the identifier its target names", async () => {
@@ -161,7 +164,7 @@ describe("ControlRuntime.layerMemory", () => {
   it("resolves a token exactly once and refuses one it never issued", async () => {
     const observed = await withRuntime((runtime) =>
       Effect.gen(function*() {
-        const card = yield* runtime.plan({ flowId: "system/test", input: {} })
+        const { card } = yield* runtime.plan({ flowId: "system/test", input: {} })
         const token = { tokenId: card.planId, target: card.approval.target, resolved: false }
         yield* runtime.resolveApproval(token, "denied", principal)
         const again = yield* Effect.flip(runtime.resolveApproval(token, "approved", principal))
@@ -183,7 +186,7 @@ describe("ControlRuntime.layerMemory", () => {
     const observed = await withRuntime((runtime) =>
       Effect.gen(function*() {
         const missing = yield* Effect.flip(runtime.launch("plan-absent", "digest", envelope))
-        const card = yield* runtime.plan({ flowId: "system/test", input: {} })
+        const { card } = yield* runtime.plan({ flowId: "system/test", input: {} })
         const widened = yield* Effect.flip(
           runtime.launch(card.planId, card.digest, { ...envelope, capabilities: ["fs:write"] })
         )

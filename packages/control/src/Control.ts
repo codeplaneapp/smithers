@@ -169,7 +169,9 @@ export interface Service {
     Receipt,
     PlanDigestMismatch | EnvelopeMismatch | AlreadyResolved | RunNotFound | PersistenceError | Unavailable
   >
-  readonly steer: (input: SteerInput) => Effect.Effect<Receipt, RunNotFound | PersistenceError | Unavailable>
+  readonly steer: (
+    input: SteerInput
+  ) => Effect.Effect<Receipt, RunNotFound | InvalidInput | PersistenceError | Unavailable>
   readonly signal: (
     input: SignalInput
   ) => Effect.Effect<Receipt, RunNotFound | NoMatchingWait | PersistenceError | Unavailable>

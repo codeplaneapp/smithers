@@ -7,47 +7,21 @@ import { Effect, Layer, Schema, Stream } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { RpcClient } from "effect/unstable/rpc"
 import { Control, make, type Service } from "./Control.ts"
-import {
-  AlreadyResolved,
-  ClaimLost,
-  type ControlError,
-  EnvelopeMismatch,
-  FlowNotFound,
-  InvalidInput,
-  LaunchFailed,
-  NoMatchingWait,
-  PersistenceError,
-  PlanDigestMismatch,
-  RunNotFound,
-  TransportError,
-  Unauthorized,
-  Unavailable
-} from "./ControlError.ts"
+import { type ControlError, ControlErrorSchema, TransportError } from "./ControlError.ts"
 import { ControlRpcs } from "./ControlRpcs.ts"
 
 /**
  * Whether a value is one of the control plane's declared failures, as opposed
  * to a defect that escaped some other layer.
  *
+ * Derived from `ControlError.ControlErrorSchema` rather than restated, so a new
+ * error class cannot be a member of the union and a stranger to the client.
+ *
  * @category refinements
  * @since 0.1.0
  * @slop
  */
-export const isControlError = Schema.is(Schema.Union([
-  RunNotFound,
-  FlowNotFound,
-  PlanDigestMismatch,
-  EnvelopeMismatch,
-  ClaimLost,
-  AlreadyResolved,
-  InvalidInput,
-  Unauthorized,
-  Unavailable,
-  TransportError,
-  PersistenceError,
-  LaunchFailed,
-  NoMatchingWait
-]))
+export const isControlError = Schema.is(ControlErrorSchema)
 
 const transportError = (error: unknown): TransportError =>
   new TransportError({

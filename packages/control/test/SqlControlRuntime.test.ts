@@ -265,7 +265,8 @@ describe("SqlControlRuntime", () => {
       }).pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie)
     )
 
-    expect(observed.replay.planId).toBe(observed.first.planId)
+    expect(observed.first.created).toBe(true)
+    expect(observed.replay).toEqual({ card: observed.first.card, created: false })
     expect(observed.reused._tag).toBe("/control/InvalidInput")
     expect(observed.principal.id).toBe("local")
     expect(observed.flows.length).toBeGreaterThan(0)

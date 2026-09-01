@@ -124,4 +124,27 @@ describe("ControlSchema", () => {
     roundTrip(ControlSchema.Receipt, { _tag: "Conflict", message: "digest changed" })
     roundTrip(ControlSchema.Receipt, { _tag: "Terminal", runId: "run-1", status: "completed" })
   })
+
+  it("carries the unsupported principalId filter to the server rather than stripping it", () => {
+    // The refusal belongs to `Control.list`, which is where the field can be
+    // reported as unsupported. Struct decoding drops a property the schema does
+    // not declare, so removing it here would have hidden the ask instead of
+    // refusing it. `ControlLiveList.test.ts` pins the refusal itself.
+    expect(
+      Schema.decodeUnknownSync(ControlSchema.ListRequest)({
+        _tag: "runs",
+        filters: { principalId: "tenant-a" }
+      })
+    ).toMatchObject({ filters: { principalId: "tenant-a" } })
+  })
+
+  it("accepts only finite positive integer page sizes up to 500", () => {
+    for (const tag of ["flows", "runs"] as const) {
+      for (const limit of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 501]) {
+        expect(() => Schema.decodeUnknownSync(ControlSchema.ListRequest)({ _tag: tag, limit })).toThrow()
+      }
+      expect(Schema.decodeUnknownSync(ControlSchema.ListRequest)({ _tag: tag, limit: 1 })).toMatchObject({ limit: 1 })
+      expect(Schema.decodeUnknownSync(ControlSchema.ListRequest)({ _tag: tag, limit: 500 })).toMatchObject({ limit: 500 })
+    }
+  })
 })

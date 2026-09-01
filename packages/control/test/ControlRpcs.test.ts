@@ -336,53 +336,21 @@ describe("the identity an authenticated control mutation is journaled under", ()
     expect(observed.again._tag).not.toBe("Conflict")
   })
 
-  it("forwards the authenticated principal to steer, cancel, and resume", async () => {
-    // `resume` carries a principal in its contract and journals none, so a
-    // recording seam is the only place its attribution is observable. The
-    // three are asserted together because they are the three handlers that
-    // forwarded a raw payload.
-    const forwarded: Array<readonly [string, Principal | undefined]> = []
-    const recording = Layer.effect(Control)(
-      Effect.map(Control, (control) =>
-        Control.of({
-          ...control,
-          steer: (input) => {
-            forwarded.push(["steer", input.message.principal])
-            return control.steer(input)
-          },
-          cancel: (input) => {
-            forwarded.push(["cancel", input.principal])
-            return control.cancel(input)
-          },
-          resume: (input) => {
-            forwarded.push(["resume", input.principal])
-            return control.resume(input)
-          }
-        }))
-    )
-    const recorded = Layer.merge(ControlServer.layer, layerNoopAuth(authenticated)).pipe(
-      Layer.provide(recording),
-      Layer.provideMerge(durable())
+  it("journals the authenticated principal and stated reason on a resume", async () => {
+    const observed = await durably((rpc) =>
+      Effect.gen(function*() {
+        const { runId } = yield* start(rpc, "resume-attribution")
+        yield* rpc.Resume({
+          runId,
+          reason: "operator recovery",
+          idempotencyKey: `resume:${runId}`
+        })
+        return yield* entries(rpc, runId, "control.run.resume")
+      })
     )
 
-    await durably(
-      (rpc) =>
-        Effect.gen(function*() {
-          const { runId } = yield* start(rpc, "forward")
-          yield* rpc.Steer({
-            runId,
-            message: { messageId: "steer-forward", runId, principal: spoofed, createdAt: 1, body: "hello" },
-            idempotencyKey: "steer:forward"
-          })
-          yield* rpc.Resume({ runId, idempotencyKey: `resume:${runId}` })
-          yield* rpc.Cancel({ runId, idempotencyKey: `cancel:${runId}` })
-        }),
-      recorded
-    )
-
-    expect(forwarded.map(([operation]) => operation)).toEqual(["steer", "resume", "cancel"])
-    for (const [operation, principal] of forwarded) {
-      expect([operation, principal?.id]).toEqual([operation, "remote-operator"])
-    }
+    expect(observed).toHaveLength(1)
+    expect(principalOf(observed[0]?.payload)).toMatchObject({ id: "remote-operator", kind: "bearer" })
+    expect(observed[0]?.payload).toMatchObject({ reason: "operator recovery" })
   })
 })

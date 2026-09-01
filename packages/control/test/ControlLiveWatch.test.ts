@@ -153,14 +153,15 @@ describe("ControlLive.watch snapshots", () => {
     expect(sequences(observed.beforeMark)).toEqual([observed.highWater])
   })
 
-  it("resolves a finite snapshot when the newest sequence is the largest representable one", async () => {
+  it("resolves a finite snapshot when the newest sequence is the largest representable sequence", async () => {
+    const largestSequence = Number.MAX_SAFE_INTEGER - 1
     const extremeJournal = Layer.succeed(
       Journal.Journal,
       Journal.makeNoop({
         entries: (options) =>
           Effect.succeed({
             entries: [
-              options.after === undefined ? entry(1, "run-extreme") : entry(Number.MAX_SAFE_INTEGER, "run-extreme")
+              options.after === undefined ? entry(1, "run-extreme") : entry(largestSequence, "run-extreme")
             ],
             hasMore: false
           })
@@ -179,8 +180,8 @@ describe("ControlLive.watch snapshots", () => {
       })
     )
 
-    // The probe stops the moment it sees the maximum sequence rather than
-    // stepping past it, and the snapshot still terminates.
+    // The probe stops at the largest sequence the journal can represent and
+    // never asks for the unallocatable MAX_SAFE_INTEGER value.
     expect(events).toEqual([
       { sequence: 1, kind: "control.test", runId: "run-extreme", occurredAt: 1, payload: { seq: 1 } }
     ])

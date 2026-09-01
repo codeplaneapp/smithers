@@ -449,14 +449,27 @@ export const run = (
         beats.push(observed)
       } else {
         const receipt = yield* heal({ runId: options.runId, health, remedy, beat })
-        // Journaled here and not a line earlier: `healed` is a claim about
-        // something that happened, and until the receipt came back it had not.
-        yield* recordHealed(observed, remedy, receipt)
-        // The heal moved the run, so the next beat compares against a run that
-        // has changed. Counting the beats before it as stall evidence again
-        // would heal a second time for the same stall.
-        beatsWithoutProgress = 0
-        beats.push({ ...observed, healed: remedy, receipt })
+        // A remedy that returned is not a remedy that was applied. `Terminal`
+        // says the run had already settled, so nothing was healed; `Conflict`
+        // says the key belonged to another mutation, so this monitor's remedy
+        // never ran. Recording either as `healed` claimed something that did
+        // not happen, and resetting the stall count on either erased the
+        // evidence the next beat needs to notice the run is still stuck.
+        const applied = receipt._tag === "Accepted" || receipt._tag === "AlreadyApplied"
+        if (applied) {
+          // Journaled here and not a line earlier: `healed` is a claim about
+          // something that happened, and until the receipt came back it had not.
+          yield* recordHealed(observed, remedy, receipt)
+          // The heal moved the run, so the next beat compares against a run
+          // that has changed. Counting the beats before it as stall evidence
+          // again would heal a second time for the same stall.
+          beatsWithoutProgress = 0
+        }
+        beats.push(applied ? { ...observed, healed: remedy, receipt } : { ...observed, receipt })
+        // A remedy that answered `Terminal` observed the run settle. The loop
+        // ends on the same evidence a terminal summary ends it on, rather than
+        // beating against a run nothing can move.
+        if (receipt._tag === "Terminal") break
       }
       if (terminal(summary)) break
     }

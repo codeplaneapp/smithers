@@ -218,23 +218,39 @@ export class CredentialConflict extends Schema.TaggedError<CredentialConflict>()
 }) {}
 
 /**
+ * Every stable failure emitted by the control plane, as one schema.
+ *
+ * This is the single membership list. The exported union type is derived from
+ * it and `ControlClient.isControlError` is `Schema.is` of it, so an error class
+ * added here reaches both. Two hand-maintained lists drifted: `ControlError`
+ * omitted `CredentialConflict` while the README documented it as a member, and
+ * `isControlError` repeated the same thirteen names a second time.
+ *
+ * @since 0.1.0
+ * @category errors
+ */
+export const ControlErrorSchema = Schema.Union([
+  RunNotFound,
+  FlowNotFound,
+  PlanDigestMismatch,
+  EnvelopeMismatch,
+  ClaimLost,
+  AlreadyResolved,
+  InvalidInput,
+  Unauthorized,
+  Unavailable,
+  TransportError,
+  PersistenceError,
+  LaunchFailed,
+  NoMatchingWait,
+  CredentialConflict
+])
+
+/**
  * Every stable failure emitted by the control plane.
  *
  * @since 0.1.0
  * @category errors
  * @slop
  */
-export type ControlError =
-  | RunNotFound
-  | FlowNotFound
-  | PlanDigestMismatch
-  | EnvelopeMismatch
-  | ClaimLost
-  | AlreadyResolved
-  | InvalidInput
-  | Unauthorized
-  | Unavailable
-  | TransportError
-  | PersistenceError
-  | LaunchFailed
-  | NoMatchingWait
+export type ControlError = typeof ControlErrorSchema.Type

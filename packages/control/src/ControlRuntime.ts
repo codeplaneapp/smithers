@@ -46,7 +46,7 @@ import {
   planCard,
   sameEnvelope
 } from "./internal/planning.ts"
-import { catalog } from "./SystemFlows.ts"
+import { plannable } from "./SystemFlows.ts"
 
 /**
  * A decoded input and immutable plan stored before execution.
@@ -106,6 +106,24 @@ export type LaunchResult =
     readonly _tag: "Parked"
     readonly receipt: Receipt
   }
+
+/**
+ * A plan card and whether this call is the one that created it.
+ *
+ * A plan under an idempotency key the runtime has already seen answers with the
+ * STORED card, which is what idempotency means. `Control.plan` needs to tell
+ * that apart from a first ask, because it journals `control.plan.created` and
+ * an unconditional entry appended one creation per retry: `Channels.ingest`
+ * passes a key on every webhook redelivery, so a watcher of the plan partition
+ * replayed N creations of one plan.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface PlanOutcome {
+  readonly card: PlanCard
+  readonly created: boolean
+}
 
 /**
  * A stored idempotency-key outcome and the mutation fingerprint that produced
@@ -201,7 +219,7 @@ export interface PendingResume {
  * @slop
  */
 export interface Service {
-  readonly plan: (input: PlanInput) => Effect.Effect<PlanCard, FlowNotFound | InvalidInput | PersistenceError>
+  readonly plan: (input: PlanInput) => Effect.Effect<PlanOutcome, FlowNotFound | InvalidInput | PersistenceError>
   readonly getPlan: (planId: string) => Effect.Effect<StoredPlan, RunNotFound | PersistenceError>
   readonly listPlanIds: Effect.Effect<ReadonlyArray<string>, PersistenceError>
   readonly lookupApproval: (
@@ -393,7 +411,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
     Effect.gen(function*() {
       const crypto = yield* Crypto.Crypto
       const now = options.now ?? Date.now
-      const configuredFlows = options.flows ?? catalog.map((entry): MemoryFlow => ({
+      const configuredFlows = options.flows ?? plannable.map((entry): MemoryFlow => ({
         flowId: entry.flowId,
         description: `Reserved ${entry.verb} system flow`,
         deployClass: entry.deployClass,
@@ -444,7 +462,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
                 })
               }
               const stored = plans.get(prior.planId)
-              if (stored !== undefined) return stored.card
+              if (stored !== undefined) return { card: stored.card, created: false }
             }
           }
           const decoded = yield* (flow.decode?.(input.input) ?? Effect.try({
@@ -473,7 +491,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
               planId
             })
           }
-          return card
+          return { card, created: true }
         }),
         getPlan: Effect.fn("ControlRuntime.getPlan")((planId) =>
           Effect.fromOption(Option.fromNullishOr(plans.get(planId)), () => new RunNotFound({ runId: planId })).pipe(

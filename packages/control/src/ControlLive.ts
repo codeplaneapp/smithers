@@ -22,6 +22,7 @@ import {
   ClaimLost,
   type ControlError,
   type EnvelopeMismatch,
+  InvalidInput,
   LaunchFailed,
   NoMatchingWait,
   PersistenceError,
@@ -42,7 +43,8 @@ import type {
   RunSummary,
   WatchFilter
 } from "./ControlSchema.ts"
-import { steerItem } from "./ControlSchema.ts"
+import { defaultPageSize, maxPageSize, steerItem } from "./ControlSchema.ts"
+import { canonical } from "./internal/planning.ts"
 import * as Lineage from "./Lineage.ts"
 import * as Steering from "./Steering.ts"
 
@@ -86,30 +88,76 @@ const terminalOrAccepted = (
     : accepted(key, run.runId)
 
 /**
+ * The two paths a SERVER stamps a principal onto, and the only two an
+ * idempotency fingerprint may ignore.
+ *
+ * `ControlServer` overwrites `input.principal` and `input.message.principal`
+ * with the identity it authenticated, and the stamp carries a wall clock, so
+ * keeping either made the second `smithers cancel` of one run look like a
+ * different mutation under the same key: a bearer-authenticated retry answered
+ * `Conflict` instead of the cancel's own receipt.
+ *
+ * Nothing else named `principal` is stamped. The previous replacer dropped the
+ * key at EVERY depth, so two signals whose payloads differed only in a nested
+ * `principal` collided under one key and the second payload was never
+ * delivered.
+ */
+const withoutStampedPrincipal = (input: unknown): unknown => {
+  if (input === null || typeof input !== "object") return input
+  const { principal: _principal, ...rest } = input as Record<string, unknown>
+  const message = rest["message"]
+  if (message === null || typeof message !== "object") return rest
+  const { principal: _messagePrincipal, ...messageRest } = message as Record<string, unknown>
+  return { ...rest, message: messageRest }
+}
+
+/**
  * What an idempotency key is bound to: the caller's stated intent, and only
  * that.
  *
- * `principal` is dropped at every depth, because the server stamps it rather
- * than the caller stating it, and it carries a wall clock. Keeping it made the
- * second `smithers cancel` of one run look like a different mutation under the
- * same key, so a bearer-authenticated retry answered `Conflict` instead of the
- * cancel's own receipt. Two callers cannot collide on it either: an
- * idempotency key already names one operation by one asker.
+ * The bytes are canonical, so two retries that state the same intent with their
+ * object keys in a different order are one mutation rather than a `Conflict`.
  */
 const fingerprint = (operation: string, input: unknown): string =>
-  `${operation}:${JSON.stringify(input, (key, value) => key === "principal" ? undefined : value)}`
+  `${operation}:${canonical(withoutStampedPrincipal(input))}`
 
 const json = (value: unknown): ControlEvent["payload"] => JSON.parse(JSON.stringify(value)) as ControlEvent["payload"]
 
-const page = <A>(
-  values: ReadonlyArray<A>,
+const invalid = (issue: string): InvalidInput => new InvalidInput({ issue })
+
+/**
+ * Refuses a page size or cursor that cannot make progress.
+ *
+ * A `limit` of zero, a negative or fractional one, `NaN`, and `Infinity` all
+ * used to answer `{ items: [], nextCursor: String(start) }`, which is a cursor
+ * a client loops on forever; an unparsable cursor silently restarted at the
+ * first page. Both are caller mistakes, and a control plane that answers a
+ * mistake with a plausible-looking page is the partial behaviour rc.0 forbids.
+ * `ControlSchema.PageLimit` refuses the same sizes on the wire; this is the
+ * in-process half, which no schema decodes.
+ */
+const pageBounds = (
   cursor: string | undefined,
   limit: number | undefined
+): Effect.Effect<{ readonly start: number; readonly size: number }, InvalidInput> => {
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > maxPageSize)) {
+    return Effect.fail(
+      invalid(`limit: must be an integer between 1 and ${maxPageSize}, received ${String(limit)}`)
+    )
+  }
+  if (cursor === undefined) return Effect.succeed({ start: 0, size: limit ?? defaultPageSize })
+  const start = Number(cursor)
+  return Number.isSafeInteger(start) && start >= 0
+    ? Effect.succeed({ start, size: limit ?? defaultPageSize })
+    : Effect.fail(invalid(`cursor: must be a cursor this listing returned, received ${JSON.stringify(cursor)}`))
+}
+
+const page = <A>(
+  values: ReadonlyArray<A>,
+  bounds: { readonly start: number; readonly size: number }
 ): { readonly items: ReadonlyArray<A>; readonly nextCursor?: string | undefined } => {
-  const start = cursor === undefined ? 0 : Math.max(0, Number.parseInt(cursor, 10) || 0)
-  const size = limit === undefined ? values.length : Math.max(0, Math.trunc(limit))
-  const items = values.slice(start, start + size)
-  const next = start + items.length
+  const items = values.slice(bounds.start, bounds.start + bounds.size)
+  const next = bounds.start + items.length
   return next < values.length ? { items, nextCursor: String(next) } : { items }
 }
 
@@ -404,10 +452,22 @@ export const layer: Layer.Layer<
                   ? Effect.fail(new ClaimLost({ runId: input.runId }))
                   : Effect.succeed(undefined))
             )
-            yield* emit(input.runId, "control.run.resume", {
-              runId: input.runId,
-              status: (claimed ?? current).status
-            })
+            // The same attribution `cancel` writes, for the same reason: the
+            // contract records `reason` on the journal entry the mutation
+            // writes and `principal` as stamped by the runtime, and a resume
+            // that carried neither left an operator unable to say who restarted
+            // a run or why.
+            const principal = yield* runtime.stampPrincipal(input.principal)
+            yield* emit(
+              input.runId,
+              "control.run.resume",
+              json({
+                runId: input.runId,
+                status: (claimed ?? current).status,
+                principal,
+                ...(input.reason === undefined ? {} : { reason: input.reason })
+              })
+            )
             return claimed === undefined
               ? accepted(input.idempotencyKey, input.runId)
               : terminalOrAccepted(input.idempotencyKey, claimed)
@@ -471,6 +531,33 @@ export const layer: Layer.Layer<
         ? Effect.void
         : executor.value.settleCancelledPark({ runId })
 
+    /**
+     * Moves this plane's row onto the status the engine already reached.
+     *
+     * A reconciliation that cannot be written is logged rather than raised, for
+     * `settleUnlaunched`'s reason: the caller is already receiving the engine's
+     * terminal receipt, which is the true answer, and a live peer holding the
+     * row will settle it itself.
+     */
+    const reconcileTerminal = (
+      runId: RunId,
+      status: RunSummary["status"]
+    ): Effect.Effect<void> =>
+      Effect.gen(function*() {
+        const current = yield* runtime.getRun(runId)
+        if (terminal(current.status)) return
+        const fence = yield* runtime.claimFence(runId)
+        yield* runtime.writeStatus(runId, fence, status)
+        yield* emit(runId, `control.run.${status}`, { runId, status })
+      }).pipe(
+        Effect.catchCause((failure) =>
+          Effect.annotateLogs(
+            Effect.logWarning("A settled engine row could not be reconciled onto the control row"),
+            { runId, status, cause: Cause.pretty(failure) }
+          )
+        )
+      )
+
     const wake = (
       run: RunSummary,
       messageId: string
@@ -522,6 +609,7 @@ export const layer: Layer.Layer<
 
     const list = (request: ListRequest): Effect.Effect<ListResponse, ControlError> =>
       Effect.gen(function*() {
+        const bounds = yield* pageBounds(request.cursor, request.limit)
         if (request._tag === "flows") {
           const registered = yield* registry.list()
           const available = registered.length > 0
@@ -530,16 +618,30 @@ export const layer: Layer.Layer<
               description: descriptor.description
             }))
             : yield* runtime.listFlows
-          const result = page(available, request.cursor, request.limit)
+          const result = page(available, bounds)
           return result.nextCursor === undefined
             ? { _tag: "flows", items: result.items }
             : { _tag: "flows", items: result.items, nextCursor: result.nextCursor }
         }
 
-        let runs = Array.from(yield* runtime.listRuns)
-        if (request.filters?.runId !== undefined) {
-          runs = runs.filter((run) => run.runId === request.filters?.runId)
+        if (request.filters?.principalId !== undefined) {
+          return yield* Effect.fail(
+            invalid(
+              "filters.principalId: rc.0 records no launch principal on a run summary, so the filter cannot be applied"
+            )
+          )
         }
+        // One named run is one read. `listRuns` projects every row in the
+        // database — five index queries plus one store read per run — and
+        // `Monitor` pays it once a beat and every `smithers status <run>` pays
+        // it too, all to keep a single summary.
+        let runs = request.filters?.runId === undefined
+          ? Array.from(yield* runtime.listRuns)
+          : yield* runtime.getRun(request.filters.runId).pipe(
+            Effect.map((run) => [run]),
+            Effect.catchTag("/control/RunNotFound", () => Effect.succeed<ReadonlyArray<RunSummary>>([])),
+            Effect.map((found) => Array.from(found))
+          )
         if (request.filters?.flowId !== undefined) {
           runs = runs.filter((run) => run.flowId === request.filters?.flowId)
         }
@@ -552,7 +654,7 @@ export const layer: Layer.Layer<
         if (request.filters?.lineageId !== undefined) {
           runs = runs.filter((run) => run.lineageId === request.filters?.lineageId)
         }
-        const result = page(runs, request.cursor, request.limit)
+        const result = page(runs, bounds)
         const items = yield* withSteering(result.items)
         return result.nextCursor === undefined
           ? { _tag: "runs", items }
@@ -736,33 +838,39 @@ export const layer: Layer.Layer<
     const service: Service = {
       plan: Effect.fn("Control.plan")((input) =>
         Effect.gen(function*() {
-          const card = yield* runtime.plan(input)
-          yield* emit(`plan:${card.planId}`, "control.plan.created", {
-            planId: card.planId,
-            flowId: card.flowId,
-            digest: card.digest
-          })
+          // Both runtimes answer a key they have seen before with the STORED
+          // card, so journaling unconditionally appended one more creation per
+          // retry. `Channels.ingest` passes a key on every webhook redelivery,
+          // so a watcher of the plan partition replayed N creations of one plan.
+          const { card, created } = yield* runtime.plan(input)
+          if (created) {
+            yield* emit(`plan:${card.planId}`, "control.plan.created", {
+              planId: card.planId,
+              flowId: card.flowId,
+              digest: card.digest
+            })
+          }
           return card
         })
       ),
       run: Effect.fn("Control.run")((input) =>
-        mutate<
-          RunNotFound | PlanDigestMismatch | EnvelopeMismatch | ClaimLost | LaunchFailed | PersistenceError,
-          never
-        >(
-          "run",
-          input.idempotencyKey,
-          fingerprint("run", input),
-          input._tag === "Resume"
-            ? Effect.gen(function*() {
-              const run = yield* runtime.resume(input.runId)
-              yield* emit(input.runId, "control.run.resumed", {
-                runId: input.runId,
-                status: run.status
-              })
-              return terminalOrAccepted(input.idempotencyKey, run)
-            })
-            : Effect.gen(function*() {
+        input._tag === "Resume"
+          // One resume, one implementation. This member used to be a second
+          // path with none of `Control.resume`'s fixes: it claimed without
+          // `scope: "launched"`, so resuming an engine-created child overwrote
+          // the engine's continuation state; it replayed a recorded receipt as
+          // `AlreadyApplied` for a run that had since settled; and it journaled
+          // `control.run.resumed`, which `AgentSession` reads as an approval
+          // DELEGATION rather than as the claim a resume is.
+          ? runMutation(input)
+          : mutate<
+            RunNotFound | PlanDigestMismatch | EnvelopeMismatch | ClaimLost | LaunchFailed | PersistenceError,
+            never
+          >(
+            "run",
+            input.idempotencyKey,
+            fingerprint("run", input),
+            Effect.gen(function*() {
               const launched = yield* runtime.launch(input.planId, input.digest, input.envelope)
               if (launched._tag === "Parked") {
                 return { ...launched.receipt, receiptId: input.idempotencyKey }
@@ -796,11 +904,11 @@ export const layer: Layer.Layer<
                 runId: launched.run.runId
               }
             })
-        ).pipe(
-          Effect.tapError((error) =>
-            error instanceof LaunchFailed ? settleUnlaunched(error.runId, error.message) : Effect.void
+          ).pipe(
+            Effect.tapError((error) =>
+              error instanceof LaunchFailed ? settleUnlaunched(error.runId, error.message) : Effect.void
+            )
           )
-        )
       ),
       approve: Effect.fn("Control.approve")((input) => decide("approved", input)),
       deny: Effect.fn("Control.deny")((input) => decide("denied", input)),
@@ -810,6 +918,20 @@ export const layer: Layer.Layer<
           input.idempotencyKey,
           fingerprint("steer", input),
           Effect.gen(function*() {
+            // Two run ids naming two runs is a caller mistake with a durable
+            // consequence: the notification is admitted to `input.runId` while
+            // the stored `SteerMessage.runId` names another run, so the message
+            // an operator later reads says it belongs somewhere it was never
+            // delivered.
+            if (input.message.runId !== input.runId) {
+              return yield* Effect.fail(
+                invalid(
+                  `message.runId: must be ${JSON.stringify(input.runId)}, received ${
+                    JSON.stringify(input.message.runId)
+                  }`
+                )
+              )
+            }
             const run = yield* runtime.getRun(input.runId)
             // A run that will never take another turn cannot be steered, and
             // storing the steer anyway would leave an operator watching a
@@ -837,10 +959,15 @@ export const layer: Layer.Layer<
                 })
               )
             )
+            // `createdAt` is the caller's own stated time, and the enqueue
+            // entry is the one place it is kept: `steerItem` strips the control
+            // envelope before the message reaches the queue, so a field the
+            // journal did not carry was a field nothing ever read.
             yield* emit(input.runId, Steering.enqueuedEventType, {
               runId: input.runId,
               messageId: input.message.messageId,
-              kind: item.kind
+              kind: item.kind,
+              createdAt: input.message.createdAt
             })
             yield* wake(run, input.message.messageId)
             return accepted(input.idempotencyKey, input.runId)
@@ -927,6 +1054,16 @@ export const layer: Layer.Layer<
             // own status becomes the receipt and nothing else happens.
             const record = yield* executorRequestCancel(input.runId)
             if (typeof record !== "string") {
+              // The engine finished the run before the request arrived. Nobody
+              // cancelled anything, so no attribution is written; but leaving
+              // the control row saying `running` for a run the engine settled
+              // is permanent, because no verb converges it: `cancel` answers
+              // `Terminal` without writing and `resume` refuses a settled run.
+              // `ps` listed it live and `gc` skipped it forever. Writing the
+              // ENGINE's own status is convergence, not the terminal
+              // disagreement B-11 forbids, which is a control row reading
+              // `cancelled` over an engine row reading `completed`.
+              yield* reconcileTerminal(input.runId, record.status)
               return { _tag: "Terminal", runId: input.runId, status: record.status }
             }
             // Attribution is keyed on the request being NEWLY recorded. A
