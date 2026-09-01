@@ -588,5 +588,6 @@ type Expect<T extends true> = T
  */
 export type CompositionRootsAreComplete = [
   Expect<Complete<ReturnType<typeof layerNode>>>,
-  Expect<Complete<ReturnType<typeof layerNodeScanned>>>
+  Expect<Complete<ReturnType<typeof layerNodeScanned>>>,
+  Expect<Complete<ReturnType<typeof layerScripted>>>
 ]
