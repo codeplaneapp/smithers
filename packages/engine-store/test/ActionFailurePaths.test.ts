@@ -163,6 +163,48 @@ describe("action executor failure paths", () => {
       expect(result.events.map((event) => event.eventType)).not.toContain("flows.engine.hard-violation")
     }))
 
+  /**
+   * A defect JSON cannot express reaches the attempt row as `null`, and the
+   * finish still lands.
+   *
+   * `AttemptStore` admits inert JSON only, so the write side reduces a live
+   * failure value before handing it over. Two shapes have no JSON at all: one
+   * `JSON.stringify` answers `undefined` for, and one it throws on. Both must
+   * settle the attempt rather than fail the finish with an attempt-store
+   * refusal, because a refused finish leaves the row `running` and the reclaim
+   * machinery reads that as a crash.
+   */
+  const unserializable: ReadonlyArray<readonly [string, string, () => unknown]> = [
+    ["a symbol", "die-symbol", () => Symbol("no JSON form")],
+    ["a cycle", "die-cycle", () => {
+      const cyclic: Record<string, unknown> = {}
+      cyclic["self"] = cyclic
+      return cyclic
+    }]
+  ]
+
+  for (const [what, runId, defect] of unserializable) {
+    it.effect(`settles the attempt when the defect is ${what} JSON cannot express`, () =>
+      Effect.gen(function*() {
+        const key = `failure/${runId}`
+        const result = yield* run(Effect.gen(function*() {
+          yield* activate(runId, ownerA)
+          const exit = yield* executor({
+            runId,
+            execute: () => Effect.die(defect())
+          })(input(key)).pipe(Effect.exit)
+          const attempts = yield* AttemptStore.AttemptStore
+          const row = yield* attempts.get({ runId, stepKeyDigest: sha256(key), attempt: 1 })
+          return { exit, row }
+        }))
+
+        expect(Exit.isFailure(result.exit)).toBe(true)
+        const row = Option.getOrThrow(result.row)
+        expect(row.state).toBe("failed")
+        expect(row.error).toEqual({ reasons: [{ _tag: "Die", defect: null }] })
+      }))
+  }
+
   it.effect("journals a hard violation and a failed finish when boundary.prepare fails", () =>
     Effect.gen(function*() {
       const key = "failure/prepare"

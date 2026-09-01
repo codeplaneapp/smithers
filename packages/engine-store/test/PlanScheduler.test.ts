@@ -275,10 +275,15 @@ describe("PlanScheduler over a static graph", () => {
         return yield* scheduler({ runId: "run-diamond", executor }).run(plan)
       }).pipe(Effect.provide(harness({ runId: "run-diamond", executor })), Effect.provide(TestStores.layer()))
     )
+    // Pinned literals, not magic constants: they are the drift detector for
+    // the key material `@smthrs/plan` stores on a node. They move only when
+    // that material moves, and such a move invalidates every cached step, so
+    // a diff here has to be explained by a plan-side change rather than
+    // re-pinned on sight.
     expect(Object.fromEntries(report.settlements.map(({ dispatchKey, nodeId }) => [nodeId, dispatchKey]))).toEqual({
-      producer: "key1_2b414866de9eabc533d8d5169b3836ad911d75171df37a5c46b1c0905b132389",
-      left: "key1_968ddf29a2d87d6a08afeb1aa5c49aedafbc0d652bd0d986c1e5f58b6bf0205c",
-      right: "key1_27d2679e13107ac87d6ffb4e9d1809bcf7343221f94e93df2034de9f2c994c51"
+      producer: "key1_ae53befe693bd7c9a8b374885fd89265438bbc892f50fb7c0db65420ef940711",
+      left: "key1_5de052f426ed5a44615f93a3516833e74236b553226d195a5a4f3d07fff6cf13",
+      right: "key1_c303102ae1d10627a6fc031811d0bd4cf7a2e7e869d3c5bc90145af8ba29b704"
     })
   })
 

@@ -514,7 +514,7 @@ describe("RunDriver scheduleResume", () => {
         const base = yield* RunStore.RunStore
         const broken = RunStore.makeNoop({
           ...base,
-          get: () => Effect.fail(storeError("unknown", "get"))
+          get: () => Effect.fail(storeError("persistence_failed", "get"))
         })
         const driver = yield* makeDriver().pipe(Effect.provideService(RunStore.RunStore, broken))
         return yield* Effect.exit(driver.scheduleResume(EdgeFlow._tag, "broken", "operator"))
