@@ -11,7 +11,7 @@
  * @since 0.1.0
  */
 import { Canonical } from "@smthrs/canonical"
-import { digest as sha256, type Digest as Sha256Digest } from "@smthrs/crypto"
+import { type Digest as Sha256Digest, digest as sha256 } from "@smthrs/crypto"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
