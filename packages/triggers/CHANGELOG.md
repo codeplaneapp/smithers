@@ -1,6 +1,6 @@
-# Changelog
+# @smthrs/triggers
 
-## [1.0.0-rc.0]
+## [1.0.0-rc.0] - 2026-09-01
 
 ### Added
 

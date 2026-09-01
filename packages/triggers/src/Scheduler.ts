@@ -463,7 +463,7 @@ export const make = (
     // of its own to record the supersession against.
     const cancelActive = (
       trigger: Registered,
-      prior: Active & { readonly runId: string }
+      prior: Active
     ): Effect.Effect<void, TriggerError> =>
       Effect.gen(function*() {
         if (prior.fiber !== undefined) yield* Fiber.interrupt(prior.fiber)
