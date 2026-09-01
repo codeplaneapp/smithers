@@ -937,14 +937,43 @@ describe("the Node host composition", () => {
     // snapshot: dropping `system` would silently swap in the real platform
     // seam, which reaps live process groups on the machine. None may be
     // re-read after declaration either, because the layer builds later than
-    // the call that declared it. The reaper asks the seam for its process
-    // group and the machine boot time on every sweep, so building the layer is
-    // enough to observe which seam arrived.
+    // the call that declared it. An inherited ledger record drives the reaper
+    // through every callback. Without that record a fresh database observes
+    // only the process group and boot time, so dropping a later callback from
+    // the snapshot would leave this case green.
     mkdirSync(hostRoot, { recursive: true })
+    const containmentFile = join(hostRoot, "containment-runtime.sqlite")
+    const containmentHost = "containment-host"
+    const previousOwnerPid = process.pid + 10_000
+    const orphanPid = previousOwnerPid + 1
+    // `layerHost` gives its ledger `process.pid`; `containment.ownerPid` only
+    // configures the reaper guard. Build the prior incarnation's ledger over
+    // the same production storage so its public `record` API writes an orphan
+    // that the host below can inherit without fabricated journal rows.
+    const recorded = await Effect.runPromise(
+      Effect.gen(function*() {
+        const ledger = yield* Kernel.ProcessLedger.ProcessLedger
+        return yield* ledger.record({ pid: orphanPid, pgid: null, commandDigest: "snapshot seam" })
+      }).pipe(
+        Effect.provide(
+          Kernel.ProcessLedger.layer({ hostId: containmentHost, ownerPid: previousOwnerPid }).pipe(
+            Layer.provide(NodeRuntime.storage(containmentFile)),
+            Layer.provide(Layer.merge(NodeFileSystem.layer, NodeCrypto.layer))
+          )
+        ),
+        Effect.scoped
+      )
+    )
     const asked: Array<string> = []
     const declaredSystem = {
-      isAlive: () => "dead" as const,
-      startedAtMs: () => ({ _tag: "unavailable" }) as const,
+      isAlive: () => {
+        asked.push("isAlive")
+        return "dead" as const
+      },
+      startedAtMs: () => {
+        asked.push("startedAtMs")
+        return { _tag: "started", startedAtMs: recorded.startedAtMs } as const
+      },
       ownGroup: () => {
         asked.push("ownGroup")
         return null
@@ -957,7 +986,10 @@ describe("the Node host composition", () => {
         asked.push("refuseTarget")
         return undefined
       },
-      killTree: () => "already-gone" as const
+      killTree: () => {
+        asked.push("killTree")
+        return "already-gone" as const
+      }
     }
     const replacedSystem = {
       ...declaredSystem,
@@ -975,8 +1007,8 @@ describe("the Node host composition", () => {
     }
     const declared = NodeRuntime.layerHost(
       {
-        filename: join(hostRoot, "containment-runtime.sqlite"),
-        owner: { hostId: "containment-host" },
+        filename: containmentFile,
+        owner: { hostId: containmentHost },
         signals: [],
         containment
       },
@@ -988,7 +1020,7 @@ describe("the Node host composition", () => {
 
     await Effect.runPromise(Effect.provide(Effect.void, declared).pipe(Effect.scoped))
 
-    expect(asked).toEqual(["ownGroup", "bootedAtMs"])
+    expect(asked).toEqual(["ownGroup", "bootedAtMs", "refuseTarget", "isAlive", "startedAtMs", "killTree"])
   }, 60_000)
 
   it("leaves with the signal's default status when the operator signals twice", async () => {

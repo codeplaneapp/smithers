@@ -6,6 +6,7 @@ export const Package = {
     target: "docs/pages/api/flows.md"
   },
   references: [
+    "docs/alpha-notes.md",
     "docs/pages/api-tests.md",
     "docs/pages/contributing.md",
     "docs/pages/external.mdx",

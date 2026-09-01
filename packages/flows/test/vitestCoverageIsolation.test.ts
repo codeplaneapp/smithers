@@ -88,6 +88,8 @@ describe("vitest coverage isolation conformance", () => {
     "$name retains Effect-style source exports and declares built publication exports",
     ({ name }) => {
       const manifest = JSON.parse(readFileSync(join(packagesDir, name, "package.json"), "utf8")) as {
+        readonly private?: boolean
+        readonly smthrs?: { readonly group?: string }
         readonly exports?: Record<string, string>
         readonly publishConfig?: {
           readonly exports?: Record<string, string | Record<string, string>>
@@ -104,8 +106,31 @@ describe("vitest coverage isolation conformance", () => {
         return
       }
       expect(manifest.exports?.["./*"]).toBe("./src/*.ts")
+      // A third carve-out, derived rather than named, and only from the
+      // publication half of this cell. `scripts/pack-release.mjs:43` skips a
+      // manifest that is `private` or outside the `engine` and `agent`
+      // release groups, so the build graph, its CLI, and the target library —
+      // private, `smthrs.group: "tooling"`, packed by no candidate — have no
+      // published surface for a `publishConfig.exports` map to describe.
+      // Commits e7a1c2cf72 and bb59fcba09 deleted the dead blocks two of them
+      // arrived with (rc-contract.md section 3.2 and R-3 rule them private at
+      // rc.0). The exemption is conditioned on the two facts that make it
+      // true, so it expires by itself: a package that drops `private`, or
+      // moves into a release group, falls straight back into the assertion
+      // below. Every other private package here (`chain`, `evals`, `fs`,
+      // `scorers`, `triggers`, `integrations`, `errors`, `create-app`) is in
+      // a release group, kept the map it arrived with, and is still held to
+      // its exact shape, so nothing that could be packed reaches this branch.
+      const publication = manifest.publishConfig?.exports
+      if (publication === undefined && manifest.private === true) {
+        expect(
+          manifest.smthrs?.group,
+          `packages/${name} declares no publishConfig.exports; only the private tooling group may omit one`
+        ).toBe("tooling")
+        return
+      }
       for (const subpath of [".", "./*"] as const) {
-        const target = manifest.publishConfig?.exports?.[subpath]
+        const target = publication?.[subpath]
         expect(target).toEqual({
           types: subpath === "." ? "./dist/esm/index.d.ts" : "./dist/esm/*.d.ts",
           import: subpath === "." ? "./dist/esm/index.js" : "./dist/esm/*.js",
@@ -157,7 +182,6 @@ describe("vitest coverage isolation conformance", () => {
   const coverageFloorDeferred = new Set([
     "cli",
     "control",
-    "evals",
     "fs",
     "memory",
     "model",
@@ -165,7 +189,6 @@ describe("vitest coverage isolation conformance", () => {
     "scorers",
     "std",
     "testing",
-    "triggers",
     "build",
     "build-cli",
     "targets",
@@ -187,6 +210,44 @@ describe("vitest coverage isolation conformance", () => {
     expect(source).not.toMatch(/\bignoreClassMethods\s*:/)
   }
 
+  /**
+   * The aggregate categories inside a `thresholds` block, with any per-file
+   * entries removed.
+   *
+   * A package on the floor list may pin per-file floors beside its aggregate
+   * ones, which is the opposite of the #147 hazard: under a 100% gate a
+   * per-file key REMOVES its file from the global check, but under a measured
+   * floor it adds a second, tighter gate over the modules an aggregate
+   * dominated by well-covered code would otherwise hide. `@smthrs/build-cli`
+   * pins nine such files over the process-spawning and publishing backends.
+   * A `[^{}]*` capture cannot see past the first nested object, so it matched
+   * nothing at all there and the cell read as "no thresholds declared". Brace
+   * matching the block and then dropping the nested objects leaves exactly
+   * the aggregate categories this cell is about. The 100% cell below keeps
+   * its flat-only rule, where nesting really is the defect.
+   */
+  const aggregateThresholds = (source: string): string | null => {
+    const key = source.indexOf("thresholds:")
+    if (key === -1) return null
+    const open = source.indexOf("{", key)
+    if (open === -1) return null
+    let depth = 0
+    for (let index = open; index < source.length; index++) {
+      if (source[index] === "{") depth++
+      else if (source[index] === "}") {
+        depth--
+        if (depth > 0) continue
+        let body = source.slice(open + 1, index)
+        // Innermost-first, repeated until the body stops changing, so a
+        // per-file entry that itself nested would still be removed whole.
+        while (/\{[^{}]*\}/.test(body)) body = body.replace(/\{[^{}]*\}/g, "")
+        return body
+      }
+    }
+    // An unbalanced block is a malformed config, reported as an absent one.
+    return null
+  }
+
   it("pins the coverage-gate deferral set to packages that really exist", () => {
     // Guard the deferral the way every other exclusion here is guarded: a
     // renamed or removed package must fail here, not silently widen the set.
@@ -206,12 +267,11 @@ describe("vitest coverage isolation conformance", () => {
 
   it.each(configs.filter((config) => coverageFloorDeferred.has(config.name)))(
     "$name enforces an honest measured coverage floor over all of src/**",
-    ({ source }) => {
+    ({ name, source }) => {
       assertCoverageDenominator(source)
-      const thresholds = source.match(/thresholds:\s*\{([^{}]*)\}/)
-      expect(thresholds).not.toBeNull()
-      const pinned = thresholds?.[1] ?? ""
-      const values = [...pinned.matchAll(/\b(branches|functions|lines|statements):\s*(\d+)/g)]
+      const pinned = aggregateThresholds(source)
+      expect(pinned, `packages/${name}/vitest.config.ts declares no thresholds block`).not.toBeNull()
+      const values = [...(pinned ?? "").matchAll(/\b(branches|functions|lines|statements):\s*(\d+)/g)]
       expect(values.map((match) => match[1]).sort()).toEqual(["branches", "functions", "lines", "statements"])
       const numbers = values.map((match) => Number(match[2]))
       expect(numbers.every((value) => value > 0 && value <= 100)).toBe(true)
@@ -637,6 +697,12 @@ describe("vitest coverage isolation conformance", () => {
       // `JSON.stringify` throw arm is unreachable; it exists so a future
       // cause shape reports the failure it carries instead of a TypeError.
       "agent/src/AgentAction.ts": 1,
+      // The budget ledger's failure renderer round-trips a cause through
+      // `JSON`. Every cause this module raises is a journal or schema failure
+      // whose fields are JSON-compatible, so the `catch` arm is unreachable;
+      // it keeps a future cyclic or BigInt-bearing cause from replacing the
+      // accounting error with a rendering defect.
+      "agent/src/Budget.ts": 1,
       // `findMissing` accepts at most 1,000 strict 64-byte digests, so its
       // serialized request cannot reach the 256 KiB protocol ceiling. The
       // assertion remains beside serialization to fail closed if either
@@ -678,6 +744,14 @@ describe("vitest coverage isolation conformance", () => {
       // they reach the sandbox.
       "engine-store/src/WorkspaceSandbox.ts": 1,
       "engine-store/src/internal/RunCoordinator.ts": 1,
+      // The inert-JSON reducer that admits an action's persisted value asks
+      // the language for guarantees the language already makes: a non-proxy
+      // array's `length` is a mandatory own data property holding a uint32,
+      // a key returned by `Reflect.ownKeys` has a descriptor on a non-proxy
+      // object, and the `typeof` switch above covers every value category.
+      // Each guard turns a future host-reflection change into a rejected
+      // value rather than a thrown persistence path.
+      "engine-store/src/internal/ActionPersistence.ts": 3,
       // `releaseOwned`'s successful arm is the generator's terminal
       // fallthrough; V8 emits no executable location for that synthetic
       // branch, so the `else` on the owned transition can never be covered.
@@ -721,11 +795,6 @@ describe("vitest coverage isolation conformance", () => {
       // and the host cell's failure path — and left with it when the filing
       // surface was deleted.
       "harness/src/Sandbox.ts": 1,
-      // Both callers pass an `Error` (`JSON.parse` throws `SyntaxError`;
-      // `Schema.decodeUnknownEffect` fails with `SchemaError`, which extends
-      // `Error`), so the `String` arm only discharges the `unknown` a `catch`
-      // binding and a schema failure channel are typed as.
-      "harness/src/StructuredOutput.ts": 1,
       // The first pass already ran the decoder over every entry of the same
       // `events` array and returned on failure, and `decode` is pure, so
       // re-decoding a surviving entry cannot fail; the branch exists because
@@ -770,6 +839,10 @@ describe("vitest coverage isolation conformance", () => {
       // `spawn` is the only source of a `RemoteProcess`, and it records every
       // one it returns, so the scripted provider's kill lookup cannot miss.
       "sandbox/src/RemoteChildProcessSpawner/TestRemote.ts": 1,
+      // Every runtime this package supports carries Web Crypto, so the
+      // `Math.random` fallback the conformance nonce keeps for a host without
+      // it is unreachable from any supported host.
+      "sandbox/src/SandboxConformance/posixCommands.ts": 1,
       // The remote handle answers liveness from a local flag with
       // `Effect.sync`, so supervision's fallback for a failing `isRunning`
       // only discharges the error channel the handle type declares.
@@ -825,7 +898,17 @@ describe("vitest coverage isolation conformance", () => {
         }
       }
     }
-    expect(found).toEqual(allowlist)
+    // The rule this cell exists to enforce, and the one the diff above is
+    // usually reporting: a coverage-ignore hint and the entry that admits it
+    // land in the SAME commit, with a comment paraphrasing why the branch is
+    // unreachable. Re-derive a moved count from the file on disk rather than
+    // from a review note, and read the directive before blessing it: a count
+    // pinned against a working tree nobody has committed moves again the next
+    // time that lane rebases.
+    expect(
+      found,
+      "a coverage-ignore hint and its entry here land in the same commit: read each directive, then pin its count"
+    ).toEqual(allowlist)
   })
 })
 
